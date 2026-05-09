@@ -14,6 +14,8 @@ from fastapi.testclient import TestClient
 
 from rapidtriage.api.app import (
     build_email_conversation_trusted_diff,
+    build_run_validation_diff_inventory,
+    build_run_validation_package,
     build_hex_viewer_trusted_diff,
     build_large_sqlite_fts_trusted_diff,
     build_media_transcript_trusted_diff,
@@ -125,6 +127,18 @@ class RapidTriageApiTests(unittest.TestCase):
         self.assertIn("evtx_commercial_readiness_profile", app_js)
         self.assertIn("renderNtfsDepthArtifactCard", app_js)
         self.assertIn("ntfs_native_depth_readiness_profile", app_js)
+        self.assertIn("ntfsArtifactPreviewText", app_js)
+        self.assertIn("renderNtfsReplayPreviewArtifactCard", app_js)
+        self.assertIn("bounded_mft_replay_preview", app_js)
+        self.assertIn("rename_pair_preview", app_js)
+        self.assertIn("delete_lifecycle_preview", app_js)
+        self.assertIn("Delete lifecycle", app_js)
+        self.assertIn("bounded MFT path correlation", app_js)
+        self.assertIn("renderNtfsSourceLocatorLinks", app_js)
+        self.assertIn("Source locators", app_js)
+        self.assertIn("source-hex-range", app_js)
+        self.assertIn("renderSourceResolutionDiagnostics", app_js)
+        self.assertIn("Source path resolution diagnostics", app_js)
         self.assertIn("renderRegistryDepthArtifactCard", app_js)
         self.assertIn("registryArtifactPreviewText", app_js)
         self.assertIn("registry_native_depth_readiness_profile", app_js)
@@ -149,6 +163,9 @@ class RapidTriageApiTests(unittest.TestCase):
         self.assertIn("bindVirtualWindowButtons()", app_js)
         self.assertIn("WORKBENCH_SMOKE_CHECKPOINTS", app_js)
         self.assertIn("renderWorkbenchSmokePanel(run)", app_js)
+        self.assertIn("renderRunValidationPackageSummary", app_js)
+        self.assertIn("run-validation-diff-panel", app_js)
+        self.assertIn("usn_state_replay_diff_attached", app_js)
         self.assertIn("renderCrashReportsPanel", app_js)
         self.assertIn("crash-dashboard", app_js)
         self.assertIn("data-testid=\"case-hero\"", app_js)
@@ -168,6 +185,8 @@ class RapidTriageApiTests(unittest.TestCase):
         self.assertIn("workbench-smoke-panel", styles)
         self.assertIn("smoke-checkpoint-row", styles)
         self.assertIn("smoke-link-row", styles)
+        self.assertIn("validation-diff-card", styles)
+        self.assertIn("validation-diff-list", styles)
         self.assertIn("case-readiness-dashboard", styles)
         self.assertIn("readiness-grid", styles)
         self.assertIn("case-command-search", styles)
@@ -380,6 +399,106 @@ class RapidTriageApiTests(unittest.TestCase):
             file_response = client.get(f"/api/runs/{run_id}/validation-package/file")
             self.assertEqual(file_response.status_code, 200)
             self.assertIn("run.validation-package", file_response.text)
+
+    def test_run_validation_diff_inventory_summarizes_usn_state_replay_cross_tool_output(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            cross_tool = root / "usn-state-replay-cross-tool.json"
+            cross_tool.write_text(
+                json.dumps(
+                    {
+                        "command": "cross-tool-validate",
+                        "status": "pass",
+                        "comparisons": [
+                            {
+                                "reference_name": "known-answer-state-replay",
+                                "status": "pass",
+                                "usn_state_replay_field_comparison": {
+                                    "mode": "usn-state-replay-field-diff",
+                                    "common_record_count": 1,
+                                    "mismatch_count": 0,
+                                    "missing_common_field_count": 0,
+                                    "field_match_ratio": 1.0,
+                                },
+                            }
+                        ],
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            inventory = build_run_validation_diff_inventory(
+                {"outputs": {"usn_state_replay_cross_tool": str(cross_tool)}}
+            )
+
+            self.assertTrue(inventory["attached"])
+            self.assertEqual(inventory["cross_tool_output_count"], 1)
+            self.assertTrue(inventory["usn_state_replay_diff_attached"])
+            self.assertEqual(inventory["usn_state_replay_diff_pass_count"], 1)
+            summary = inventory["outputs"][0]["diff_summary"]
+            self.assertEqual(summary["command"], "cross-tool-validate")
+            self.assertEqual(summary["usn_state_replay_status"], "pass")
+            self.assertEqual(summary["usn_state_replay_common_record_count"], 1)
+            self.assertIn("usn-state-replay-field-diff", summary["field_diff_modes"])
+
+    def test_run_validation_package_uses_attached_trusted_diff_state(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            run_dir = root / "run"
+            run_dir.mkdir()
+            cross_tool = run_dir / "validation-diffs" / "usn-state-replay-cross-tool.json"
+            cross_tool.parent.mkdir()
+            cross_tool.write_text(
+                json.dumps(
+                    {
+                        "command": "cross-tool-validate",
+                        "status": "pass",
+                        "comparisons": [
+                            {
+                                "reference_name": "known-answer-state-replay",
+                                "status": "pass",
+                                "usn_state_replay_field_comparison": {
+                                    "mode": "usn-state-replay-field-diff",
+                                    "common_record_count": 3,
+                                    "mismatch_count": 0,
+                                    "missing_common_field_count": 0,
+                                },
+                            }
+                        ],
+                    }
+                ),
+                encoding="utf-8",
+            )
+            summary_path = run_dir / "rapidtriage-run-summary.json"
+            summary_path.write_text(
+                json.dumps(
+                    {
+                        "profile_version": "rapidtriage-run-summary-v1",
+                        "mode": "fraud",
+                        "root": str(root / "evidence.E01"),
+                        "output_dir": str(run_dir),
+                        "outputs": {
+                            "summary": str(summary_path),
+                            "validation_diff_usn_state": str(cross_tool),
+                        },
+                    }
+                ),
+                encoding="utf-8",
+            )
+            store = RunJobStore()
+            job = store.import_completed_run(run_dir)
+
+            package = build_run_validation_package(store, job.run_id)
+
+            profile = package["functional_priority_profile"]
+            self.assertIn("trusted-tool-diff-output-attached", profile["passed_validation_check_ids"])
+            self.assertIn("trusted-tool-diff-pass-recorded", profile["passed_validation_check_ids"])
+            self.assertNotIn("trusted-tool-diffs-not-attached", profile["failed_validation_check_ids"])
+            self.assertNotIn("trusted-tool-diffs-not-attached", package["commercial_grade_blockers"])
+            self.assertIn("independent-review-not-attached", package["commercial_grade_blockers"])
+            self.assertTrue(package["implemented_controls"]["trusted_diff_attached"])
+            self.assertTrue(package["implemented_controls"]["trusted_diff_pass_recorded"])
+            self.assertEqual(package["diff_inventory"]["usn_state_replay_diff_pass_count"], 1)
 
     def test_evidence_identify_api_reports_extended_container_support(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -779,6 +898,19 @@ class RapidTriageApiTests(unittest.TestCase):
             self.assertFalse(sqlite_preview["sqlite"]["table_page_profile"]["executes_arbitrary_sql"])
             self.assertIn("source-sqlite-table", sqlite_preview["sqlite"]["table_page_profile"]["table_links"][0]["first_page_url"])
             self.assertEqual(
+                sqlite_preview["sqlite"]["sqlite_preview_manifest"]["manifest_version"],
+                "sqlite-preview-source-manifest-v1",
+            )
+            self.assertEqual(sqlite_preview["sqlite"]["sqlite_preview_manifest_hash"], sqlite_preview["sqlite"]["sqlite_preview_manifest"]["manifest_hash"])
+            self.assertEqual(sqlite_preview["sqlite"]["sqlite_preview_manifest"]["source_viewer_locator"]["viewer"], "source-sqlite")
+            self.assertGreaterEqual(sqlite_preview["sqlite"]["sqlite_preview_manifest"]["table_hash_count"], 1)
+            self.assertGreaterEqual(sqlite_preview["sqlite"]["sqlite_preview_manifest"]["row_hash_count"], 1)
+            self.assertIn(
+                "SQLite preview source manifest",
+                sqlite_preview["sqlite"]["core_accuracy_gates"][0]["satisfied_checks"],
+            )
+            self.assertIn("SQLite row hashes", sqlite_preview["sqlite"]["core_accuracy_gates"][0]["satisfied_checks"])
+            self.assertEqual(
                 sqlite_uplift["reportability_decision"]["allowed_use"],
                 "read-only-sqlite-preview-triage-pivot",
             )
@@ -894,6 +1026,14 @@ class RapidTriageApiTests(unittest.TestCase):
             self.assertEqual(sqlite_page["pagination"]["returned"], 1)
             self.assertEqual(sqlite_page["where"]["mode"], "contains")
             self.assertFalse(sqlite_page["where"]["arbitrary_sql_allowed"])
+            self.assertEqual(
+                sqlite_page["sqlite_table_page_manifest"]["manifest_version"],
+                "sqlite-table-page-proof-manifest-v1",
+            )
+            self.assertEqual(sqlite_page["sqlite_table_page_manifest_hash"], sqlite_page["sqlite_table_page_manifest"]["manifest_hash"])
+            self.assertEqual(sqlite_page["sqlite_table_page_manifest"]["source_viewer_locator"]["viewer"], "source-sqlite-table")
+            self.assertGreaterEqual(sqlite_page["sqlite_table_page_manifest"]["row_hash_count"], 1)
+            self.assertIn("SQLite table page proof manifest", sqlite_page["core_accuracy_gates"][0]["satisfied_checks"])
             self.assertIn("password", sqlite_page["rows"][0]["values"]["body"])
             self.assertIn("sqlite_table=notes", sqlite_page["copy_safe_citation"]["text"])
             json_preview_response = client.get(f"/api/runs/{run_id}/source-preview", params={"path": str(json_path)})
@@ -928,8 +1068,28 @@ class RapidTriageApiTests(unittest.TestCase):
                 "source-email-attachment",
                 eml_preview["email"]["attachment_package_profile"]["links"][0]["package_url"],
             )
+            self.assertEqual(
+                eml_preview["email"]["email_conversation_manifest"]["manifest_version"],
+                "email-conversation-source-manifest-v1",
+            )
+            self.assertEqual(
+                eml_preview["email"]["email_conversation_manifest_hash"],
+                eml_preview["email"]["email_conversation_manifest"]["manifest_hash"],
+            )
+            self.assertEqual(
+                eml_preview["email"]["email_conversation_manifest"]["source_viewer_locator"]["viewer"],
+                "source-email-conversation",
+            )
+            self.assertGreaterEqual(eml_preview["email"]["email_conversation_manifest"]["message_hash_count"], 1)
+            self.assertGreaterEqual(eml_preview["email"]["email_conversation_manifest"]["thread_hash_count"], 1)
             self.assertIn("#55", eml_preview["email"]["email_conversation_viewer_assessment"]["commercial_gap_ids"])
             self.assertEqual(eml_preview["email"]["core_accuracy_gates"][0]["gap_id"], "#55")
+            self.assertIn(
+                "email conversation source manifest",
+                eml_preview["email"]["core_accuracy_gates"][0]["satisfied_checks"],
+            )
+            self.assertIn("email message hashes", eml_preview["email"]["core_accuracy_gates"][0]["satisfied_checks"])
+            self.assertIn("email thread hashes", eml_preview["email"]["core_accuracy_gates"][0]["satisfied_checks"])
             eml_uplift = eml_preview["email"]["commercial_uplift_evidence"]
             self.assertEqual(eml_uplift["item_numbers"], [55])
             self.assertIn("thread grouping", eml_uplift["passed_validation_check_ids"])
@@ -962,7 +1122,20 @@ class RapidTriageApiTests(unittest.TestCase):
             self.assertEqual(attachment_payload["command"], "source-email-attachment")
             self.assertEqual(attachment_payload["filename"], "note.txt")
             self.assertEqual(attachment_payload["content_status"], "included-base64")
+            self.assertEqual(
+                attachment_payload["email_attachment_proof_manifest"]["manifest_version"],
+                "email-attachment-proof-manifest-v1",
+            )
+            self.assertEqual(
+                attachment_payload["email_attachment_proof_manifest_hash"],
+                attachment_payload["email_attachment_proof_manifest"]["manifest_hash"],
+            )
+            self.assertEqual(
+                attachment_payload["email_attachment_proof_manifest"]["source_viewer_locator"]["viewer"],
+                "source-email-attachment",
+            )
             self.assertIn("sha256", attachment_payload["copy_safe_citation"]["text"])
+            self.assertIn("email attachment proof manifest", attachment_payload["core_accuracy_gates"][0]["satisfied_checks"])
             self.assertEqual(attachment_payload["reportability_decision"]["allowed_use"], "bounded-email-conversation-triage-pivot")
             binary_preview_response = client.get(f"/api/runs/{run_id}/source-preview", params={"path": str(binary_path)})
             self.assertEqual(binary_preview_response.status_code, 200, binary_preview_response.text)
@@ -996,6 +1169,17 @@ class RapidTriageApiTests(unittest.TestCase):
             self.assertEqual(binary_preview["hex"]["range_citation_profile"]["profile_version"], "hex-range-citation-v1")
             self.assertEqual(binary_preview["hex"]["range_citation_profile"]["default_offset_hex"], "0x00000000")
             self.assertIn("source-hex-range", binary_preview["hex"]["range_citation_profile"]["default_export_url"])
+            self.assertEqual(
+                binary_preview["hex"]["hex_preview_manifest"]["manifest_version"],
+                "hex-preview-source-locator-manifest-v1",
+            )
+            self.assertEqual(binary_preview["hex"]["hex_preview_manifest"]["source_viewer_locator"]["viewer"], "source-hex")
+            self.assertTrue(binary_preview["hex"]["hex_preview_manifest"]["manifest_hash"])
+            self.assertGreaterEqual(binary_preview["hex"]["hex_preview_manifest"]["row_hash_count"], 1)
+            self.assertIn(
+                "hex preview source locator manifest",
+                binary_preview["hex"]["core_accuracy_gates"][0]["satisfied_checks"],
+            )
             hex_range_response = client.get(
                 f"/api/runs/{run_id}/source-hex-range",
                 params={"path": str(binary_path), "offset": 2, "length": 12, "include_hashes": "true"},
@@ -1008,10 +1192,15 @@ class RapidTriageApiTests(unittest.TestCase):
             self.assertEqual(hex_range["length_returned"], 12)
             self.assertEqual(len(hex_range["range_hashes"]["sha256"]), 64)
             self.assertEqual(hex_range["source_hash_status"], "computed")
+            self.assertEqual(hex_range["hex_range_proof_manifest"]["manifest_version"], "hex-range-proof-manifest-v1")
+            self.assertEqual(hex_range["hex_range_proof_manifest"]["source_viewer_locator"]["viewer"], "source-hex-range")
+            self.assertEqual(hex_range["hex_range_proof_manifest_hash"], hex_range["hex_range_proof_manifest"]["manifest_hash"])
+            self.assertGreaterEqual(hex_range["hex_range_proof_manifest"]["row_hash_count"], 1)
             self.assertIn("RapidTriage", hex_range["rows"][0]["ascii"])
             self.assertIn("range_sha256", hex_range["copy_safe_citation"]["text"])
             self.assertEqual(hex_range["core_accuracy_gates"][0]["gap_id"], "#53")
             self.assertIn("bounded hex rows", hex_range["core_accuracy_gates"][0]["satisfied_checks"])
+            self.assertIn("hex range proof manifest", hex_range["core_accuracy_gates"][0]["satisfied_checks"])
             binary_search_response = client.get(
                 f"/api/runs/{run_id}/source-search",
                 params={"path": str(binary_path), "keyword": "RapidTriage"},
@@ -1030,6 +1219,20 @@ class RapidTriageApiTests(unittest.TestCase):
             self.assertIn("#56", image_preview["image"]["gallery_review"]["commercial_gap_ids"])
             self.assertIn("#56", image_preview["image"]["gallery_review_assessment"]["commercial_gap_ids"])
             self.assertEqual(image_preview["image"]["core_accuracy_gates"][0]["gap_id"], "#56")
+            self.assertEqual(
+                image_preview["image"]["image_gallery_manifest"]["manifest_version"],
+                "image-gallery-source-manifest-v1",
+            )
+            self.assertEqual(
+                image_preview["image"]["image_gallery_manifest_hash"],
+                image_preview["image"]["image_gallery_manifest"]["manifest_hash"],
+            )
+            self.assertEqual(
+                image_preview["image"]["image_gallery_manifest"]["source_viewer_locator"]["viewer"],
+                "source-image-gallery",
+            )
+            self.assertTrue(image_preview["image"]["image_gallery_manifest"]["image_row_hash"])
+            self.assertIn("image gallery source manifest", image_preview["image"]["core_accuracy_gates"][0]["satisfied_checks"])
             image_uplift = image_preview["image"]["commercial_uplift_evidence"]
             self.assertEqual(image_uplift["item_numbers"], [56])
             self.assertIn("perceptual similarity bucket", image_uplift["passed_validation_check_ids"])
@@ -1073,6 +1276,19 @@ class RapidTriageApiTests(unittest.TestCase):
             self.assertGreaterEqual(image_gallery["total"], 2)
             self.assertTrue(any(item["is_anchor"] for item in image_gallery["items"]))
             self.assertTrue(all(len(item["sha256"]) == 64 for item in image_gallery["items"]))
+            self.assertEqual(
+                image_gallery["image_gallery_page_manifest"]["manifest_version"],
+                "image-gallery-page-manifest-v1",
+            )
+            self.assertEqual(
+                image_gallery["image_gallery_page_manifest_hash"],
+                image_gallery["image_gallery_page_manifest"]["manifest_hash"],
+            )
+            self.assertEqual(
+                image_gallery["image_gallery_page_manifest"]["source_viewer_locator"]["viewer"],
+                "source-image-gallery-page",
+            )
+            self.assertGreaterEqual(image_gallery["image_gallery_page_manifest"]["image_row_hash_count"], 1)
             self.assertIn("keyboard_triage", image_gallery)
             self.assertFalse(image_gallery["large_data_controls"]["persistent_tags"])
             self.assertEqual(image_gallery["reportability_decision"]["allowed_use"], "image-gallery-metadata-triage-pivot")
@@ -1089,6 +1305,21 @@ class RapidTriageApiTests(unittest.TestCase):
             self.assertFalse(ocr_queue["viewer_context"]["native_ocr_execution"])
             self.assertGreaterEqual(ocr_queue["summary"]["candidate_count"], 2)
             self.assertIn("#58", ocr_queue["summary"]["commercial_gap_ids"])
+            self.assertEqual(ocr_queue["ocr_queue_manifest"]["manifest_version"], "ocr-queue-source-manifest-v1")
+            self.assertEqual(ocr_queue["ocr_queue_manifest_hash"], ocr_queue["ocr_queue_manifest"]["manifest_hash"])
+            self.assertEqual(
+                ocr_queue["source_ocr_queue_page_manifest"]["manifest_version"],
+                "source-ocr-queue-page-manifest-v1",
+            )
+            self.assertEqual(
+                ocr_queue["source_ocr_queue_page_manifest_hash"],
+                ocr_queue["source_ocr_queue_page_manifest"]["manifest_hash"],
+            )
+            self.assertEqual(
+                ocr_queue["source_ocr_queue_page_manifest"]["source_viewer_locator"]["viewer"],
+                "source-ocr-queue-page",
+            )
+            self.assertGreaterEqual(ocr_queue["source_ocr_queue_page_manifest"]["page_row_hash_count"], 1)
             self.assertIn("sidecar_imported", json.dumps(ocr_queue, ensure_ascii=False).replace("-", "_"))
             self.assertIn("anchor_queue_id", ocr_queue["copy_safe_citation"]["text"])
             translation_response = client.get(
@@ -1108,8 +1339,27 @@ class RapidTriageApiTests(unittest.TestCase):
             self.assertIn("translated OCR", translation_review["side_by_side_review"][1]["text"])
             self.assertEqual(translation_review["core_accuracy_gates"][0]["gap_id"], "#59")
             self.assertIn("translation sidecar import", translation_review["core_accuracy_gates"][0]["satisfied_checks"])
+            self.assertIn("OCR/translation review manifest", translation_review["core_accuracy_gates"][0]["satisfied_checks"])
+            self.assertIn("side-by-side review row hashes", translation_review["core_accuracy_gates"][0]["satisfied_checks"])
+            self.assertEqual(
+                translation_review["source_ocr_translation_review_manifest"]["manifest_version"],
+                "source-ocr-translation-review-manifest-v1",
+            )
+            self.assertEqual(
+                translation_review["source_ocr_translation_review_manifest_hash"],
+                translation_review["source_ocr_translation_review_manifest"]["manifest_hash"],
+            )
+            self.assertEqual(
+                translation_review["source_ocr_translation_review_manifest"]["source_viewer_locator"]["viewer"],
+                "source-ocr-translation-review",
+            )
+            self.assertEqual(translation_review["source_ocr_translation_review_manifest"]["review_side_hash_count"], 2)
             self.assertTrue(translation_review["review_profile"]["supports_side_by_side_review"])
             self.assertFalse(translation_review["review_profile"]["certified_translation"])
+            self.assertEqual(
+                translation_review["reportability_decision"]["control_snapshot"]["review_manifest_hash"],
+                translation_review["source_ocr_translation_review_manifest_hash"],
+            )
             self.assertIn("ocr_sha256", translation_review["copy_safe_citation"]["text"])
             media_preview_response = client.get(f"/api/runs/{run_id}/source-preview", params={"path": str(media_path)})
             self.assertEqual(media_preview_response.status_code, 200, media_preview_response.text)
@@ -1121,10 +1371,34 @@ class RapidTriageApiTests(unittest.TestCase):
             self.assertTrue(media_preview["media"]["review"]["cue_navigation_available"])
             self.assertIn("#57", media_preview["media"]["media_transcript_assessment"]["commercial_gap_ids"])
             self.assertEqual(media_preview["media"]["core_accuracy_gates"][0]["gap_id"], "#57")
+            self.assertIn("media transcript source manifest", media_preview["media"]["core_accuracy_gates"][0]["satisfied_checks"])
+            self.assertIn("transcript cue hashes", media_preview["media"]["core_accuracy_gates"][0]["satisfied_checks"])
+            self.assertEqual(
+                media_preview["media"]["media_transcript_manifest"]["manifest_version"],
+                "media-transcript-source-manifest-v1",
+            )
+            self.assertEqual(
+                media_preview["media"]["media_transcript_manifest_hash"],
+                media_preview["media"]["media_transcript_manifest"]["manifest_hash"],
+            )
+            self.assertEqual(
+                media_preview["media"]["media_transcript_manifest"]["source_viewer_locator"]["viewer"],
+                "source-media-transcript",
+            )
+            self.assertEqual(media_preview["media"]["media_transcript_manifest"]["cue_hash_count"], 1)
+            self.assertEqual(
+                len(media_preview["media"]["media_transcript_manifest"]["sidecars"][0]["sidecar_row_hash"]),
+                64,
+            )
             media_uplift = media_preview["media"]["commercial_uplift_evidence"]
             self.assertEqual(media_uplift["item_numbers"], [57])
             self.assertIn("transcript sidecars imported", media_uplift["passed_validation_check_ids"])
             self.assertFalse(media_uplift["large_data_controls"]["playback_executed_inline"])
+            self.assertEqual(
+                media_uplift["large_data_controls"]["media_transcript_manifest_hash"],
+                media_preview["media"]["media_transcript_manifest_hash"],
+            )
+            self.assertEqual(media_uplift["large_data_controls"]["transcript_cue_hash_count"], 1)
             self.assertEqual(media_preview["media"]["trusted_media_transcript_diff"]["status"], "missing")
             self.assertIn(
                 "media-transcript-trusted-cue-diff-required",
@@ -1140,6 +1414,7 @@ class RapidTriageApiTests(unittest.TestCase):
             self.assertTrue(media_uplift["large_data_controls"]["selected_cue_export"])
             self.assertEqual(media_preview["media"]["media_transcript_assessment"]["cue_count"], 1)
             self.assertEqual(media_preview["media"]["transcript_sidecars"][0]["cues"][0]["start"], "00:00:00,000")
+            self.assertEqual(len(media_preview["media"]["transcript_sidecars"][0]["cues"][0]["cue_hash"]), 64)
             self.assertIn("#57", media_preview["media"]["transcript_sidecars"][0]["commercial_gap_ids"])
             self.assertEqual(media_preview["media"]["transcript_sidecars"][0]["cue_count"], 1)
             self.assertEqual(media_preview["media"]["transcript_sidecars"][0]["validation_status"], "sidecar-review-required")
@@ -1158,6 +1433,14 @@ class RapidTriageApiTests(unittest.TestCase):
             self.assertIn("password spoken", media_cue["text"])
             self.assertEqual(len(media_cue["text_sha256"]), 64)
             self.assertEqual(len(media_cue["source_hashes"]["sha256"]), 64)
+            self.assertEqual(media_cue["media_cue_proof_manifest"]["manifest_version"], "media-cue-proof-manifest-v1")
+            self.assertEqual(
+                media_cue["media_cue_proof_manifest_hash"],
+                media_cue["media_cue_proof_manifest"]["manifest_hash"],
+            )
+            self.assertEqual(media_cue["media_cue_proof_manifest"]["source_viewer_locator"]["viewer"], "source-media-cue")
+            self.assertEqual(media_cue["media_cue_proof_manifest"]["cue"]["cue_index"], 1)
+            self.assertEqual(len(media_cue["media_cue_proof_manifest"]["cue"]["cue_hash"]), 64)
             self.assertIn("text_sha256", media_cue["copy_safe_citation"]["text"])
             filtered_search_response = client.get(
                 f"/api/runs/{run_id}/search",

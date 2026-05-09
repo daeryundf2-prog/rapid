@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import hashlib
+import json
 from datetime import datetime, timezone
 from pathlib import Path, PureWindowsPath
 from typing import Iterable, Mapping, Sequence
@@ -119,9 +121,10 @@ class WindowsPrefetchProvider:
                 artifact_type="prefetch-file",
                 path=str(path.resolve()),
                 supported=True,
-                details={
+                details=with_prefetch_depth_manifest({
                     "parser": "windows-prefetch-inventory",
                     "parser_version": PARSER_VERSION,
+                    "artifact_type": "prefetch-file",
                     "coverage_status": "detected",
                     "reportability": "triage",
                     "parser_confidence": header.get("parser_confidence", "low"),
@@ -178,7 +181,7 @@ class WindowsPrefetchProvider:
                         ],
                     ),
                     "note": "Prefetch triage parser uses version-specific common-header offsets plus bounded native candidates; validate critical findings with a dedicated parser such as PECmd.",
-                },
+                }),
             )
             for index, referenced_path in enumerate(header.get("referenced_paths") or []):
                 yield build_prefetch_reference_record(path, str(referenced_path), index, header, source_hashes)
@@ -351,9 +354,10 @@ def build_prefetch_reference_record(
         artifact_type="prefetch-reference",
         path=str(path.resolve()),
         supported=True,
-        details={
+        details=with_prefetch_depth_manifest({
             "parser": "windows-prefetch-reference",
             "parser_version": PARSER_VERSION,
+            "artifact_type": "prefetch-reference",
             "coverage_status": "native-reference-string",
             "reportability": "triage",
             "parser_confidence": "low",
@@ -408,7 +412,7 @@ def build_prefetch_reference_record(
             ),
             "validation_guidance": "Prefetch reference rows are recovered from bounded native strings; validate complete file metrics and volumes with PECmd before final testimony.",
             "raw_preview": referenced_path,
-        },
+        }),
     )
 
 
@@ -663,6 +667,151 @@ def prefetch_reportability_decision(
             "execution claim correlated with Amcache, BAM, SRUM, EventLog, MFT, or USN",
         ],
     }
+
+
+def with_prefetch_depth_manifest(details: dict[str, object]) -> dict[str, object]:
+    details["prefetch_execution_depth_manifest"] = prefetch_execution_depth_manifest(details)
+    details["prefetch_execution_depth_manifest_hash"] = details["prefetch_execution_depth_manifest"]["manifest_sha256"]
+    return details
+
+
+def prefetch_stable_sha256(value: object) -> str:
+    return hashlib.sha256(
+        json.dumps(value, ensure_ascii=False, sort_keys=True, default=str, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()
+
+
+def prefetch_execution_depth_manifest(details: Mapping[str, object]) -> dict[str, object]:
+    hashes = details.get("source_hashes") if isinstance(details.get("source_hashes"), Mapping) else {}
+    checks = details.get("prefetch_validation_checks") if isinstance(details.get("prefetch_validation_checks"), Mapping) else {}
+    version_metadata = (
+        details.get("prefetch_version_metadata")
+        if isinstance(details.get("prefetch_version_metadata"), Mapping)
+        else {}
+    )
+    compression = (
+        details.get("prefetch_compression")
+        if isinstance(details.get("prefetch_compression"), Mapping)
+        else {}
+    )
+    report_grade = (
+        details.get("prefetch_report_grade_assessment")
+        if isinstance(details.get("prefetch_report_grade_assessment"), Mapping)
+        else {}
+    )
+    reportability = prefetch_reportability_decision(report_grade, details)
+    referenced_paths = [str(item) for item in details.get("referenced_paths") or []]
+    if details.get("referenced_path"):
+        referenced_paths = [str(details.get("referenced_path") or "")]
+    row_identity = {
+        "entry_name": str(details.get("entry_name") or details.get("prefetch_entry_name") or ""),
+        "executable_hint": str(details.get("executable_hint") or ""),
+        "prefetch_hash": str(details.get("prefetch_hash") or ""),
+        "artifact_type": str(details.get("artifact_type") or ""),
+        "source_index": details.get("source_index", ""),
+    }
+    manifest_payload = {
+        "manifest_version": "prefetch-execution-depth-manifest-v1",
+        "parser_version": PARSER_VERSION,
+        "commercial_batch_id": "commercial-uplift-016-020",
+        "item_number": 16,
+        "gap_id": "#16",
+        "artifact_type": str(details.get("artifact_type") or "prefetch-file"),
+        "source": {
+            "source_path": str(details.get("source_path") or ""),
+            "source_sha256": str(hashes.get("sha256") or ""),
+            "source_format": str(details.get("source_format") or ""),
+            "source_index": details.get("source_index", ""),
+            "size": details.get("size", ""),
+        },
+        "row_identity": row_identity,
+        "row_identity_hash": prefetch_stable_sha256(row_identity),
+        "format_validation": {
+            "binary_format_detected": bool(details.get("binary_format_detected")),
+            "scca_signature": bool(checks.get("has_scca_signature")),
+            "prefetch_version": int(details.get("prefetch_version") or 0),
+            "layout_name": str(version_metadata.get("layout_name") or ""),
+            "windows_family": str(version_metadata.get("windows_family") or ""),
+            "supported_common_layout": bool(version_metadata.get("supported_common_layout")),
+            "declared_file_size": int(details.get("declared_file_size") or checks.get("declared_file_size") or 0),
+            "actual_file_size": int(checks.get("actual_file_size") or details.get("size") or 0),
+            "file_size_matches_declared": checks.get("file_size_matches_declared"),
+        },
+        "execution_counters": {
+            "run_count": int(details.get("run_count") or 0),
+            "run_count_present": bool(checks.get("run_count_present")),
+            "run_count_plausible": bool(checks.get("run_count_plausible")),
+            "last_run_at": str(details.get("last_run_at") or ""),
+            "last_run_times": list(details.get("last_run_times") or [])[:16],
+            "last_run_time_count": int(checks.get("last_run_time_count") or len(list(details.get("last_run_times") or []))),
+            "last_run_times_not_future": bool(checks.get("last_run_times_not_future")),
+        },
+        "referenced_file_metrics": {
+            "referenced_path_count": len(referenced_paths) or int(details.get("referenced_path_count") or 0),
+            "referenced_paths_preview": referenced_paths[:25],
+            "volume_candidate_count": int(details.get("volume_candidate_count") or 0),
+            "volume_candidates": [dict(item) for item in details.get("volume_candidates") or [] if isinstance(item, Mapping)][:25],
+            "file_reference_candidate_count": int(details.get("file_reference_candidate_count") or 0),
+            "file_reference_candidates": [
+                dict(item) for item in details.get("file_reference_candidates") or [] if isinstance(item, Mapping)
+            ][:25],
+            "full_file_metrics_decoded": bool(checks.get("full_file_metrics_decoded")),
+            "mft_file_reference_decode_available": bool(PREFETCH_NATIVE_CAPABILITIES["mft_file_reference_decode"]),
+            "authoritative_volume_table_decoded": bool(checks.get("full_volume_table_decoded")),
+        },
+        "compression": {
+            "detected": bool(compression.get("detected")),
+            "format": str(compression.get("format") or ""),
+            "declared_uncompressed_size": int(compression.get("declared_uncompressed_size") or 0),
+            "decompression_status": str(compression.get("decompression_status") or ""),
+            "decompressed_by_rapidforensic": bool(checks.get("compressed_prefetch_decompressed")),
+        },
+        "citation_refs": [
+            {
+                "kind": "prefetch-source-file",
+                "source_path": str(details.get("source_path") or ""),
+                "source_sha256": str(hashes.get("sha256") or ""),
+            },
+            {
+                "kind": "prefetch-header-layout",
+                "prefetch_version": int(details.get("prefetch_version") or 0),
+                "layout_name": str(version_metadata.get("layout_name") or ""),
+            },
+            {
+                "kind": "prefetch-execution-counters",
+                "run_count": int(details.get("run_count") or 0),
+                "last_run_at": str(details.get("last_run_at") or ""),
+            },
+            {
+                "kind": "prefetch-reference-candidates",
+                "referenced_path_count": len(referenced_paths) or int(details.get("referenced_path_count") or 0),
+                "volume_candidate_count": int(details.get("volume_candidate_count") or 0),
+            },
+            {
+                "kind": "prefetch-compression-state",
+                "format": str(compression.get("format") or ""),
+                "decompression_status": str(compression.get("decompression_status") or ""),
+            },
+        ],
+        "reportability": {
+            "allowed_use": reportability["allowed_use"],
+            "decision": reportability["decision"],
+            "ready_for_court_report": bool(report_grade.get("ready_for_court_report")),
+            "commercial_grade_ready": False,
+            "execution_claim_requires_correlation": True,
+            "file_metrics_complete": False,
+            "blockers": reportability["blockers"],
+        },
+        "required_before_commercial_grade": [
+            "decode full file metrics array and MFT file references",
+            "decode authoritative volume table and trace chains",
+            "decompress and validate MAM-compressed Prefetch files when present",
+            "diff run counts, timestamps, paths, and volume data against PECmd or trusted known-answer corpus",
+            "correlate execution claim with Amcache, BAM/DAM, SRUM, EVTX, MFT, or USN evidence",
+        ],
+    }
+    manifest_payload["manifest_sha256"] = prefetch_stable_sha256(manifest_payload)
+    return manifest_payload
 
 
 def prefetch_core_accuracy_gates(details: Mapping[str, object]) -> list[dict[str, object]]:

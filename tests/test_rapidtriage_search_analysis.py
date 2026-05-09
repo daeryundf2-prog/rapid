@@ -82,27 +82,44 @@ class RapidTriageSearchAnalysisTests(unittest.TestCase):
         self.assertIn("representative match links", analysis_gates["#46"]["satisfied_checks"])
         self.assertIn("cluster review profile", analysis_gates["#46"]["satisfied_checks"])
         self.assertIn("representative-first review queue", analysis_gates["#46"]["satisfied_checks"])
+        self.assertIn("cluster citation manifest", analysis_gates["#46"]["satisfied_checks"])
+        self.assertIn("representative source viewer locators", analysis_gates["#46"]["satisfied_checks"])
         self.assertIn("entity extraction across supported types", analysis_gates["#47"]["satisfied_checks"])
         self.assertIn("match reference links", analysis_gates["#47"]["satisfied_checks"])
         self.assertIn("entity review profile", analysis_gates["#47"]["satisfied_checks"])
+        self.assertIn("entity citation manifest", analysis_gates["#47"]["satisfied_checks"])
+        self.assertIn("entity source viewer locators", analysis_gates["#47"]["satisfied_checks"])
+        self.assertIn("hash-only entity citation values", analysis_gates["#47"]["satisfied_checks"])
         self.assertIn("merge/split review queue", analysis_gates["#47"]["satisfied_checks"])
         self.assertIn("relationship edges built", analysis_gates["#48"]["satisfied_checks"])
         self.assertIn("causal-proof limitation warning", analysis_gates["#48"]["satisfied_checks"])
         self.assertIn("edge source citations", analysis_gates["#48"]["satisfied_checks"])
         self.assertIn("graph interaction profile", analysis_gates["#48"]["satisfied_checks"])
         self.assertIn("filter metadata", analysis_gates["#48"]["satisfied_checks"])
+        self.assertIn("graph citation manifest", analysis_gates["#48"]["satisfied_checks"])
+        self.assertIn("edge source viewer locators", analysis_gates["#48"]["satisfied_checks"])
+        self.assertIn("graph source locator coverage", analysis_gates["#48"]["satisfied_checks"])
         self.assertIn("timestamp extraction", analysis_gates["#49"]["satisfied_checks"])
         self.assertIn("UTC normalization", analysis_gates["#49"]["satisfied_checks"])
         self.assertIn("timeline correlation profile", analysis_gates["#49"]["satisfied_checks"])
         self.assertIn("cursor page metadata", analysis_gates["#49"]["satisfied_checks"])
         self.assertIn("timezone distribution", analysis_gates["#49"]["satisfied_checks"])
+        self.assertIn("timeline citation manifest", analysis_gates["#49"]["satisfied_checks"])
+        self.assertIn("timeline event source viewer locators", analysis_gates["#49"]["satisfied_checks"])
+        self.assertIn("clock-skew blocker recorded", analysis_gates["#49"]["satisfied_checks"])
         self.assertIn("draft hypotheses generated", analysis_gates["#50"]["satisfied_checks"])
         self.assertIn("workbook review profile", analysis_gates["#50"]["satisfied_checks"])
         self.assertIn("hypothesis review queue", analysis_gates["#50"]["satisfied_checks"])
+        self.assertIn("workbook citation manifest", analysis_gates["#50"]["satisfied_checks"])
+        self.assertIn("hypothesis citation source locators", analysis_gates["#50"]["satisfied_checks"])
+        self.assertIn("workbook version-history blocker", analysis_gates["#50"]["satisfied_checks"])
         self.assertIn("persistence/versioning limitation warning", analysis_gates["#50"]["satisfied_checks"])
         self.assertIn("duplicate fingerprint generation", analysis_gates["#60"]["satisfied_checks"])
         self.assertIn("duplicate group counts", analysis_gates["#60"]["satisfied_checks"])
         self.assertIn("collapse preview profile", analysis_gates["#60"]["satisfied_checks"])
+        self.assertIn("dedup citation manifest", analysis_gates["#60"]["satisfied_checks"])
+        self.assertIn("duplicate member row hashes", analysis_gates["#60"]["satisfied_checks"])
+        self.assertIn("dedup source viewer locators", analysis_gates["#60"]["satisfied_checks"])
         analysis_uplift = analysis["commercial_uplift_evidence"]
         self.assertEqual(analysis_uplift["batch_id"], "commercial-uplift-046-050")
         self.assertEqual(analysis_uplift["item_numbers"], [46, 47, 48, 49, 50])
@@ -137,22 +154,37 @@ class RapidTriageSearchAnalysisTests(unittest.TestCase):
         self.assertFalse(analysis_uplift["large_data_controls"]["persistent_review_state"])
         self.assertFalse(analysis_uplift["large_data_controls"]["full_case_reindex"])
         self.assertTrue(analysis_uplift["large_data_controls"]["cluster_review_profile_present"])
+        self.assertTrue(analysis_uplift["large_data_controls"]["cluster_citation_manifest_present"])
+        self.assertGreaterEqual(analysis_uplift["large_data_controls"]["cluster_citation_entry_count"], 1)
+        self.assertGreaterEqual(analysis_uplift["large_data_controls"]["cluster_representative_citation_count"], 1)
         self.assertGreaterEqual(analysis_uplift["large_data_controls"]["cluster_review_queue_count"], 1)
         self.assertTrue(analysis_uplift["large_data_controls"]["representative_first_cluster_review"])
         self.assertTrue(analysis_uplift["large_data_controls"]["entity_review_profile_present"])
+        self.assertTrue(analysis_uplift["large_data_controls"]["entity_citation_manifest_present"])
+        self.assertGreaterEqual(analysis_uplift["large_data_controls"]["entity_citation_entry_count"], 1)
+        self.assertGreaterEqual(analysis_uplift["large_data_controls"]["entity_match_citation_count"], 1)
         self.assertGreaterEqual(analysis_uplift["large_data_controls"]["entity_review_queue_count"], 1)
         self.assertGreaterEqual(analysis_uplift["large_data_controls"]["merge_split_candidate_count"], 1)
         self.assertFalse(analysis_uplift["large_data_controls"]["analyst_verified_entity_resolution"])
         self.assertFalse(analysis_uplift["large_data_controls"]["persistent_entity_review_state"])
         self.assertTrue(analysis_uplift["large_data_controls"]["graph_interaction_profile_present"])
+        self.assertTrue(analysis_uplift["large_data_controls"]["graph_citation_manifest_present"])
+        self.assertGreaterEqual(analysis_uplift["large_data_controls"]["graph_citation_edge_count"], 1)
+        self.assertGreaterEqual(analysis_uplift["large_data_controls"]["graph_source_viewer_locator_count"], 1)
         self.assertGreaterEqual(analysis_uplift["large_data_controls"]["graph_filter_count"], 1)
         self.assertGreaterEqual(analysis_uplift["large_data_controls"]["graph_edge_page_count"], 1)
         self.assertFalse(analysis_uplift["large_data_controls"]["graph_saved_layout_supported"])
         self.assertTrue(analysis_uplift["large_data_controls"]["timeline_correlation_profile_present"])
+        self.assertTrue(analysis_uplift["large_data_controls"]["timeline_citation_manifest_present"])
+        self.assertGreaterEqual(analysis_uplift["large_data_controls"]["timeline_event_citation_count"], 1)
+        self.assertGreaterEqual(analysis_uplift["large_data_controls"]["timeline_source_viewer_locator_count"], 1)
         self.assertGreaterEqual(analysis_uplift["large_data_controls"]["timeline_event_page_count"], 1)
         self.assertEqual(analysis_uplift["large_data_controls"]["timeline_missing_timezone_count"], 0)
         self.assertFalse(analysis_uplift["large_data_controls"]["timeline_clock_skew_overlay_supported"])
         self.assertTrue(analysis_uplift["large_data_controls"]["workbook_review_profile_present"])
+        self.assertTrue(analysis_uplift["large_data_controls"]["workbook_citation_manifest_present"])
+        self.assertGreaterEqual(analysis_uplift["large_data_controls"]["workbook_hypothesis_citation_count"], 1)
+        self.assertGreaterEqual(analysis_uplift["large_data_controls"]["workbook_evidence_cluster_ref_count"], 1)
         self.assertGreaterEqual(analysis_uplift["large_data_controls"]["workbook_review_queue_count"], 1)
         self.assertGreaterEqual(analysis_uplift["large_data_controls"]["workbook_evidence_attachment_count"], 1)
         self.assertFalse(analysis_uplift["large_data_controls"]["workbook_version_history_supported"])
@@ -173,6 +205,24 @@ class RapidTriageSearchAnalysisTests(unittest.TestCase):
         self.assertTrue(cluster_review["commercial_release_blocked"])
         self.assertEqual(cluster_review["review_queue"][0]["review_status"], "unreviewed")
         self.assertEqual(cluster_review["review_queue"][0]["review_decision"], "pending")
+        cluster_manifest = analysis["clusters"]["cluster_citation_manifest"]
+        self.assertEqual(cluster_manifest["manifest_version"], "search-cluster-citation-manifest-v1")
+        self.assertEqual(cluster_manifest["item_number"], 46)
+        self.assertEqual(analysis["clusters"]["cluster_citation_manifest_hash"], cluster_manifest["manifest_sha256"])
+        self.assertGreaterEqual(cluster_manifest["cluster_entry_count"], 1)
+        self.assertGreaterEqual(cluster_manifest["representative_citation_count"], 1)
+        self.assertIn(
+            "search-cluster-citation-manifest-emitted",
+            cluster_manifest["passed_validation_check_ids"],
+        )
+        self.assertEqual(
+            cluster_manifest["cluster_entries"][0]["source_viewer_locator"]["viewer"],
+            "search-cluster-review",
+        )
+        self.assertEqual(
+            cluster_manifest["cluster_entries"][0]["representative_citations"][0]["source_viewer_locator"]["viewer"],
+            "search-result-source",
+        )
 
         entities = analysis["entities"]["entities"]
         entity_values = {entity["value"] for entity in entities}
@@ -194,6 +244,25 @@ class RapidTriageSearchAnalysisTests(unittest.TestCase):
         self.assertTrue(entity_review["commercial_release_blocked"])
         self.assertEqual(entity_review["review_queue"][0]["review_status"], "unreviewed")
         self.assertEqual(entity_review["review_queue"][0]["review_decision"], "pending")
+        entity_manifest = analysis["entities"]["entity_citation_manifest"]
+        self.assertEqual(entity_manifest["manifest_version"], "search-entity-citation-manifest-v1")
+        self.assertEqual(entity_manifest["item_number"], 47)
+        self.assertEqual(analysis["entities"]["entity_citation_manifest_hash"], entity_manifest["manifest_sha256"])
+        self.assertGreaterEqual(entity_manifest["entity_entry_count"], 1)
+        self.assertGreaterEqual(entity_manifest["match_citation_count"], 1)
+        self.assertFalse(entity_manifest["raw_entity_values_serialized"])
+        self.assertIn(
+            "search-entity-citation-manifest-emitted",
+            entity_manifest["passed_validation_check_ids"],
+        )
+        self.assertEqual(
+            entity_manifest["entity_entries"][0]["source_viewer_locator"]["viewer"],
+            "search-entity-review",
+        )
+        self.assertEqual(
+            entity_manifest["entity_entries"][0]["match_citations"][0]["source_viewer_locator"]["viewer"],
+            "search-entity-source",
+        )
 
         graph = analysis["graph"]
         self.assertTrue(any(edge["type"] == "mentions" for edge in graph["edges"]))
@@ -209,6 +278,20 @@ class RapidTriageSearchAnalysisTests(unittest.TestCase):
         self.assertFalse(graph_profile["saved_layout_supported"])
         self.assertFalse(graph_profile["server_side_paging_supported"])
         self.assertTrue(graph_profile["commercial_release_blocked"])
+        graph_manifest = graph["graph_citation_manifest"]
+        self.assertEqual(graph_manifest["manifest_version"], "search-graph-citation-manifest-v1")
+        self.assertEqual(graph_manifest["item_number"], 48)
+        self.assertEqual(graph["graph_citation_manifest_hash"], graph_manifest["manifest_sha256"])
+        self.assertGreaterEqual(graph_manifest["edge_citation_count"], 1)
+        self.assertGreaterEqual(graph_manifest["source_viewer_locator_count"], 1)
+        self.assertEqual(
+            graph_manifest["edge_entries"][0]["source_viewer_locator"]["viewer"],
+            "search-graph-edge-source",
+        )
+        self.assertIn(
+            "search-graph-citation-manifest-emitted",
+            graph_manifest["passed_validation_check_ids"],
+        )
         self.assertFalse(graph["report_grade_assessment"]["ready_for_court_report"])
         self.assertIn("#49", analysis["timeline"]["summary"]["commercial_gap_ids"])
         self.assertIn("event_id", analysis["timeline"]["events"][0])
@@ -220,6 +303,21 @@ class RapidTriageSearchAnalysisTests(unittest.TestCase):
         self.assertFalse(timeline_profile["full_case_join_supported"])
         self.assertFalse(timeline_profile["cursor_api_supported"])
         self.assertTrue(timeline_profile["commercial_release_blocked"])
+        timeline_manifest = analysis["timeline"]["timeline_citation_manifest"]
+        self.assertEqual(timeline_manifest["manifest_version"], "search-timeline-citation-manifest-v1")
+        self.assertEqual(timeline_manifest["item_number"], 49)
+        self.assertEqual(analysis["timeline"]["timeline_citation_manifest_hash"], timeline_manifest["manifest_sha256"])
+        self.assertGreaterEqual(timeline_manifest["event_citation_count"], 1)
+        self.assertGreaterEqual(timeline_manifest["source_viewer_locator_count"], 1)
+        self.assertFalse(timeline_manifest["clock_skew_overlay_supported"])
+        self.assertEqual(
+            timeline_manifest["event_entries"][0]["source_viewer_locator"]["viewer"],
+            "search-timeline-event-source",
+        )
+        self.assertIn(
+            "search-timeline-citation-manifest-emitted",
+            timeline_manifest["passed_validation_check_ids"],
+        )
         self.assertEqual(analysis["deduplication"]["groups"][0]["match_count"], 2)
         self.assertEqual(analysis["deduplication"]["groups"][0]["representative_index"], 1)
         self.assertEqual(analysis["deduplication"]["groups"][0]["hidden_duplicate_count"], 1)
@@ -230,6 +328,19 @@ class RapidTriageSearchAnalysisTests(unittest.TestCase):
         self.assertIn("#60", analysis["deduplication"]["summary"]["commercial_gap_ids"])
         self.assertIn("#60", analysis["deduplication"]["deduplication_assessment"]["commercial_gap_ids"])
         self.assertEqual(analysis["deduplication"]["core_accuracy_gates"][0]["gap_id"], "#60")
+        dedup_manifest = analysis["deduplication"]["search_dedup_manifest"]
+        self.assertEqual(dedup_manifest["manifest_version"], "search-dedup-citation-manifest-v1")
+        self.assertEqual(analysis["deduplication"]["search_dedup_manifest_hash"], dedup_manifest["manifest_sha256"])
+        self.assertEqual(dedup_manifest["source_viewer_locator"]["viewer"], "search-dedup-review")
+        self.assertGreaterEqual(dedup_manifest["member_row_hash_count"], 2)
+        self.assertEqual(
+            dedup_manifest["group_entries"][0]["representative_source_viewer_locator"]["viewer"],
+            "search-dedup-representative-source",
+        )
+        self.assertEqual(
+            dedup_manifest["group_entries"][0]["member_entries"][0]["source_viewer_locator"]["viewer"],
+            "search-dedup-member-source",
+        )
         dedup_profile = analysis["deduplication"]["dedup_review_profile"]
         self.assertEqual(dedup_profile["profile_version"], "search-dedup-review-profile-v1")
         self.assertTrue(dedup_profile["representative_first_review"])
@@ -244,6 +355,9 @@ class RapidTriageSearchAnalysisTests(unittest.TestCase):
         self.assertIn("collapse preview profile", dedup_uplift["passed_validation_check_ids"])
         self.assertIn("persistent-dedup-suppression-workflow", dedup_uplift["failed_validation_check_ids"])
         self.assertTrue(dedup_uplift["large_data_controls"]["collapse_preview_supported"])
+        self.assertEqual(dedup_uplift["large_data_controls"]["dedup_manifest_hash"], dedup_manifest["manifest_sha256"])
+        self.assertGreaterEqual(dedup_uplift["large_data_controls"]["dedup_member_row_hash_count"], 2)
+        self.assertTrue(dedup_uplift["large_data_controls"]["dedup_source_viewer_locator"])
         self.assertFalse(dedup_uplift["large_data_controls"]["case_db_suppression_state"])
         self.assertEqual(
             dedup_uplift["reportability_decision"]["decision"],
@@ -276,6 +390,21 @@ class RapidTriageSearchAnalysisTests(unittest.TestCase):
         self.assertFalse(workbook_profile["version_history_supported"])
         self.assertTrue(workbook_profile["commercial_release_blocked"])
         self.assertEqual(workbook_profile["review_queue"][0]["report_decision"], "pending")
+        workbook_manifest = workbook["workbook_citation_manifest"]
+        self.assertEqual(workbook_manifest["manifest_version"], "search-workbook-citation-manifest-v1")
+        self.assertEqual(workbook_manifest["item_number"], 50)
+        self.assertEqual(workbook["workbook_citation_manifest_hash"], workbook_manifest["manifest_sha256"])
+        self.assertGreaterEqual(workbook_manifest["hypothesis_citation_count"], 1)
+        self.assertGreaterEqual(workbook_manifest["evidence_cluster_ref_count"], 1)
+        self.assertFalse(workbook_manifest["version_history_supported"])
+        self.assertEqual(
+            workbook_manifest["hypothesis_entries"][0]["source_viewer_locator"]["viewer"],
+            "search-workbook-hypothesis-review",
+        )
+        self.assertIn(
+            "search-workbook-citation-manifest-emitted",
+            workbook_manifest["passed_validation_check_ids"],
+        )
 
     def test_analysis_trusted_diffs_control_reviewed_finding_gates(self) -> None:
         baseline = build_search_analysis(self.make_matches(), ["password", "powershell"])

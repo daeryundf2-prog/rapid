@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import datetime as dt
 import hashlib
+import json
 import re
 from collections import Counter
 from pathlib import Path
@@ -94,6 +95,7 @@ REGISTRY_TRUSTED_TOOL_HINTS = ("regipper", "regripper", "registryexplorer", "pyt
 
 
 class WindowsRegistryProvider:
+    collector_kind = "windows-registry"
     name = "windows-registry"
     description = "Windows Registry .reg export artifacts"
     target_platform = "windows"
@@ -476,6 +478,25 @@ def build_registry_key_tree_records(
             subkey_offsets,
             root_cell_offset,
         )
+        subkey_list_profile = registry_subkey_list_profile_for_key(
+            blob,
+            key_node,
+            decoded_offsets=subkey_offsets,
+            missing_offsets=missing_subkey_offsets,
+        )
+        value_list_profile = registry_value_list_profile_for_key(
+            blob,
+            key_node,
+            decoded_offsets=value_offsets,
+            missing_offsets=missing_value_offsets,
+        )
+        reconstruction_profile = registry_key_tree_reconstruction_profile(
+            key_node=key_node,
+            path_evidence=path_evidence,
+            relationship_profile=relationship_profile,
+            subkey_list_profile=subkey_list_profile,
+            value_list_profile=value_list_profile,
+        )
         allocation_status = str(key_node.get("allocation_status") or "")
         validation_flags = registry_key_tree_validation_flags(
             key_node,
@@ -542,6 +563,9 @@ def build_registry_key_tree_records(
                 "key_ancestry_cell_offsets": path_evidence["ancestry_cell_offsets"],
                 "key_tree_path_evidence": path_evidence,
                 "registry_key_tree_relationships": relationship_profile,
+                "registry_subkey_list_profile": subkey_list_profile,
+                "registry_value_list_profile": value_list_profile,
+                "registry_key_tree_reconstruction_profile": reconstruction_profile,
                 "registry_transaction_log_evidence": dict(metadata.get("transaction_log_evidence") or {}),
                 "registry_transaction_replay_profile": registry_transaction_replay_profile(
                     metadata.get("transaction_log_evidence") if isinstance(metadata.get("transaction_log_evidence"), Mapping) else {},
@@ -578,6 +602,31 @@ def build_registry_key_tree_records(
                 "validation_flags": validation_flags,
                 "registry_validation_matrix": validation_matrix,
                 "registry_report_grade_assessment": report_grade_assessment,
+                "registry_report_citation_manifest": registry_report_citation_manifest(
+                    artifact_type="registry-key-tree-node",
+                    source_path=str(path.resolve()),
+                    source_hashes=dict(source_hashes),
+                    row_identity={
+                        "hive_name": path.name,
+                        "hive_hint": hive_hint_from_path(path),
+                        "key_path": f"{hive_hint_from_path(path)}\\{key_path}" if key_path else hive_hint_from_path(path),
+                        "name": key_node.get("name", ""),
+                        "cell_offset": key_node.get("cell_offset", 0),
+                        "cell_relative_offset": key_node.get("cell_relative_offset", 0),
+                        "hbin_offset": key_node.get("hbin_offset", 0),
+                        "allocation_status": allocation_status,
+                        "last_written_at": key_node.get("last_written_at", ""),
+                        "parent_cell_offset": key_node.get("parent_cell_offset", 0),
+                        "value_count": key_node.get("value_count", 0),
+                        "subkey_count": key_node.get("subkey_count", 0),
+                    },
+                    validation_matrix=validation_matrix,
+                    report_grade_assessment=report_grade_assessment,
+                    transaction_log_evidence=metadata.get("transaction_log_evidence")
+                    if isinstance(metadata.get("transaction_log_evidence"), Mapping)
+                    else {},
+                    citation_scope="key-tree",
+                ),
                 "registry_native_depth_readiness_profile": registry_native_depth_readiness_profile(
                     family="key-tree",
                     artifact_scope="key-tree-node",
@@ -592,6 +641,9 @@ def build_registry_key_tree_records(
                         "key_path_confidence": path_confidence,
                         "subkey_cell_offsets": subkey_offsets,
                         "value_cell_offsets": value_offsets,
+                        "registry_subkey_list_profile": subkey_list_profile,
+                        "registry_value_list_profile": value_list_profile,
+                        "registry_key_tree_reconstruction_profile": reconstruction_profile,
                         "registry_validation_matrix": validation_matrix,
                         "registry_report_grade_assessment": report_grade_assessment,
                         "registry_transaction_log_evidence": dict(metadata.get("transaction_log_evidence") or {}),
@@ -661,6 +713,7 @@ def build_registry_key_recovery_records(
             "deleted-or-free-key-cell",
             path_confidence=path_confidence,
             recovered_path=f"{hive_hint_from_path(path)}\\{key_path}" if key_path else hive_hint_from_path(path),
+            allocator_neighbor_context=registry_allocator_neighbor_context(candidate, candidates),
         )
         recovery_profile = registry_recovery_validation_profile(
             candidate,
@@ -682,6 +735,7 @@ def build_registry_key_recovery_records(
                 "transaction_log_evidence": transaction_log_evidence,
                 "recovery_evidence": recovery_evidence,
                 "recovery_profile": recovery_profile,
+                "allocator_neighbor_context": recovery_evidence.get("allocator_neighbor_context", {}),
             },
         )
         yield ArtifactRecord(
@@ -712,6 +766,29 @@ def build_registry_key_recovery_records(
                 "validation_required": True,
                 "registry_validation_matrix": validation_matrix,
                 "registry_report_grade_assessment": report_grade_assessment,
+                "registry_report_citation_manifest": registry_report_citation_manifest(
+                    artifact_type="registry-key-recovery-candidate",
+                    source_path=str(path.resolve()),
+                    source_hashes=dict(source_hashes),
+                    row_identity={
+                        "hive_name": path.name,
+                        "hive_hint": hive_hint_from_path(path),
+                        "key_path_candidate": f"{hive_hint_from_path(path)}\\{key_path}" if key_path else hive_hint_from_path(path),
+                        "name": candidate.get("name", ""),
+                        "cell_offset": candidate.get("cell_offset", 0),
+                        "cell_relative_offset": candidate.get("cell_relative_offset", 0),
+                        "hbin_offset": candidate.get("hbin_offset", 0),
+                        "allocation_status": candidate.get("allocation_status", ""),
+                        "candidate_kind": "deleted-or-free-key-cell",
+                        "last_written_at": candidate.get("last_written_at", ""),
+                        "parent_cell_offset": candidate.get("parent_cell_offset", 0),
+                    },
+                    validation_matrix=validation_matrix,
+                    report_grade_assessment=report_grade_assessment,
+                    transaction_log_evidence=transaction_log_evidence,
+                    recovery_profile=recovery_profile,
+                    citation_scope="deleted-key-recovery",
+                ),
                 "registry_native_depth_readiness_profile": registry_native_depth_readiness_profile(
                     family="deleted-cell",
                     artifact_scope="key-recovery-candidate",
@@ -822,6 +899,7 @@ def build_registry_value_recovery_records(
             parent_confidence=parent_confidence,
             parent_path=parent_path,
             decoded_data_present=bool(decoded_data),
+            allocator_neighbor_context=registry_allocator_neighbor_context(candidate, candidates),
         )
         recovery_profile = registry_recovery_validation_profile(
             candidate,
@@ -845,6 +923,7 @@ def build_registry_value_recovery_records(
                 "transaction_log_evidence": transaction_log_evidence,
                 "recovery_evidence": recovery_evidence,
                 "recovery_profile": recovery_profile,
+                "allocator_neighbor_context": recovery_evidence.get("allocator_neighbor_context", {}),
             },
         )
         yield ArtifactRecord(
@@ -875,6 +954,34 @@ def build_registry_value_recovery_records(
                 "validation_required": True,
                 "registry_validation_matrix": validation_matrix,
                 "registry_report_grade_assessment": report_grade_assessment,
+                "registry_report_citation_manifest": registry_report_citation_manifest(
+                    artifact_type="registry-value-recovery-candidate",
+                    source_path=str(path.resolve()),
+                    source_hashes=dict(source_hashes),
+                    row_identity={
+                        "hive_name": path.name,
+                        "hive_hint": hive_hint_from_path(path),
+                        "name": candidate.get("name", ""),
+                        "value_type": candidate.get("value_type", ""),
+                        "value_data_size": candidate.get("value_data_size", 0),
+                        "value_data_offset": candidate.get("value_data_offset", 0),
+                        "value_data_inline": candidate.get("value_data_inline", False),
+                        "decoded_data_preview_sha256": sha256_text(decoded_data),
+                        "parent_key_path_candidate": parent_path,
+                        "parent_key_confidence": parent_confidence,
+                        "parent_key_cell_offset": parent.get("cell_offset", 0) if parent is not None else 0,
+                        "cell_offset": candidate.get("cell_offset", 0),
+                        "cell_relative_offset": candidate.get("cell_relative_offset", 0),
+                        "hbin_offset": candidate.get("hbin_offset", 0),
+                        "allocation_status": candidate.get("allocation_status", ""),
+                        "candidate_kind": "deleted-or-free-value-cell",
+                    },
+                    validation_matrix=validation_matrix,
+                    report_grade_assessment=report_grade_assessment,
+                    transaction_log_evidence=transaction_log_evidence,
+                    recovery_profile=recovery_profile,
+                    citation_scope="deleted-value-recovery",
+                ),
                 "registry_native_depth_readiness_profile": registry_native_depth_readiness_profile(
                     family="deleted-cell",
                     artifact_scope="value-recovery-candidate",
@@ -946,6 +1053,7 @@ def registry_recovery_evidence(
     parent_confidence: str = "",
     parent_path: str = "",
     decoded_data_present: bool = False,
+    allocator_neighbor_context: Mapping[str, object] | None = None,
 ) -> dict[str, object]:
     allocation_status = str(candidate.get("allocation_status") or "")
     cell_size = int(candidate.get("cell_size") or 0)
@@ -977,6 +1085,9 @@ def registry_recovery_evidence(
             "Use only with surrounding hbin context and independent offset validation."
         ),
     }
+    neighbor_context = dict(allocator_neighbor_context or {})
+    if neighbor_context:
+        evidence_reasons.append("allocator:neighbor-context-recorded")
     return {
         "candidate_kind": candidate_kind,
         "cell_kind": str(candidate.get("cell_kind") or ""),
@@ -993,8 +1104,71 @@ def registry_recovery_evidence(
         "parent_path": parent_path,
         "decoded_data_present": decoded_data_present,
         "allocator_context": allocator_context,
+        "allocator_neighbor_context": neighbor_context,
         "validation_required": True,
         "evidence_reasons": sorted(set(evidence_reasons)),
+    }
+
+
+def registry_allocator_neighbor_context(
+    candidate: Mapping[str, object],
+    candidates: Sequence[Mapping[str, object]],
+) -> dict[str, object]:
+    candidate_offset = int(candidate.get("cell_offset") or 0)
+    ordered = sorted(
+        (item for item in candidates if int(item.get("cell_offset") or 0) > 0),
+        key=lambda item: int(item.get("cell_offset") or 0),
+    )
+    index = next(
+        (idx for idx, item in enumerate(ordered) if int(item.get("cell_offset") or 0) == candidate_offset),
+        -1,
+    )
+    previous_cell = ordered[index - 1] if index > 0 else None
+    next_cell = ordered[index + 1] if index >= 0 and index + 1 < len(ordered) else None
+    current_end = candidate_offset + int(candidate.get("cell_size") or 0)
+    next_offset = int(next_cell.get("cell_offset") or 0) if next_cell is not None else 0
+    gap_to_next = next_offset - current_end if next_offset else 0
+    previous_offset = int(previous_cell.get("cell_offset") or 0) if previous_cell is not None else 0
+    return {
+        "profile_version": "registry-allocator-neighbor-context-v1",
+        "candidate_cell_offset": candidate_offset,
+        "candidate_hbin_offset": int(candidate.get("hbin_offset") or 0),
+        "ordered_cell_index": index,
+        "previous_cell": registry_neighbor_cell_summary(previous_cell),
+        "next_cell": registry_neighbor_cell_summary(next_cell),
+        "same_hbin_previous": bool(
+            previous_cell is not None
+            and int(previous_cell.get("hbin_offset") or 0) == int(candidate.get("hbin_offset") or 0)
+        ),
+        "same_hbin_next": bool(
+            next_cell is not None
+            and int(next_cell.get("hbin_offset") or 0) == int(candidate.get("hbin_offset") or 0)
+        ),
+        "gap_to_next_cell": gap_to_next,
+        "previous_gap_to_candidate": candidate_offset
+        - (previous_offset + int(previous_cell.get("cell_size") or 0))
+        if previous_cell is not None
+        else 0,
+        "context_quality": "bounded-neighbor-cells-recorded" if previous_cell or next_cell else "no-neighbor-cells-in-scan-window",
+        "validation_guidance": (
+            "Use neighbor context to detect overwritten/slack false positives; it is not sufficient alone "
+            "to prove deletion without known-answer or second-parser offset validation."
+        ),
+    }
+
+
+def registry_neighbor_cell_summary(cell: Mapping[str, object] | None) -> dict[str, object]:
+    if cell is None:
+        return {}
+    return {
+        "cell_offset": int(cell.get("cell_offset") or 0),
+        "cell_relative_offset": int(cell.get("cell_relative_offset") or 0),
+        "hbin_offset": int(cell.get("hbin_offset") or 0),
+        "cell_size": int(cell.get("cell_size") or 0),
+        "cell_kind": str(cell.get("cell_kind") or ""),
+        "cell_signature": str(cell.get("cell_signature") or ""),
+        "allocation_status": str(cell.get("allocation_status") or ""),
+        "name_sha256": sha256_text(str(cell.get("name") or "")) if cell.get("name") else "",
     }
 
 
@@ -1059,12 +1233,17 @@ def registry_recovery_validation_profile(
         "path_confidence": str(recovery_evidence.get("path_confidence") or ""),
         "parent_confidence": str(recovery_evidence.get("parent_confidence") or ""),
         "decoded_data_present": bool(recovery_evidence.get("decoded_data_present")),
+        "allocator_neighbor_context_present": bool(recovery_evidence.get("allocator_neighbor_context")),
+        "allocator_neighbor_context": dict(recovery_evidence.get("allocator_neighbor_context") or {})
+        if isinstance(recovery_evidence.get("allocator_neighbor_context"), Mapping)
+        else {},
         "failed_validation_checks": failed_checks,
         "independent_validation_status": "required",
         "false_positive_controls": [
             "positive-size-free-cell-confirmation",
             "cell-signature-confirmation",
             "allocator-context-review",
+            "allocator-neighbor-context-review",
             "parent-or-path-link-review",
             "second-parser-offset-diff",
             "known-answer-deleted-cell-corpus",
@@ -1179,6 +1358,8 @@ def registry_core_accuracy_gates(
             item5_checks.append("allocator-state evidence")
         if isinstance(details.get("allocator_context"), Mapping):
             item5_checks.append("allocator reportability context")
+        if isinstance(details.get("allocator_neighbor_context"), Mapping) and details["allocator_neighbor_context"]:
+            item5_checks.append("allocator neighbor context")
         if isinstance(details.get("transaction_log_evidence"), Mapping) and details["transaction_log_evidence"].get("status"):
             item5_checks.append("transaction-log context disclosure")
         if details.get("recovery_profile"):
@@ -1378,6 +1559,15 @@ def registry_native_depth_readiness_profile(
             "key_path": str(details.get("key_path") or details.get("key_path_candidate") or ""),
             "value_name": str(details.get("name") or ""),
         },
+        "registry_subkey_list_profile": dict(details.get("registry_subkey_list_profile") or {})
+        if isinstance(details.get("registry_subkey_list_profile"), Mapping)
+        else {},
+        "registry_value_list_profile": dict(details.get("registry_value_list_profile") or {})
+        if isinstance(details.get("registry_value_list_profile"), Mapping)
+        else {},
+        "registry_key_tree_reconstruction_profile": dict(details.get("registry_key_tree_reconstruction_profile") or {})
+        if isinstance(details.get("registry_key_tree_reconstruction_profile"), Mapping)
+        else {},
         "blockers": blockers,
         "next_internal_actions": [
             "Implement LOG1/LOG2 transaction replay or attach explicit absence proof.",
@@ -1399,6 +1589,16 @@ def registry_depth_components(
     recovery_profile: Mapping[str, object],
 ) -> dict[str, bool]:
     if family == "key-tree":
+        subkey_profile = (
+            details.get("registry_subkey_list_profile")
+            if isinstance(details.get("registry_subkey_list_profile"), Mapping)
+            else {}
+        )
+        value_profile = (
+            details.get("registry_value_list_profile")
+            if isinstance(details.get("registry_value_list_profile"), Mapping)
+            else {}
+        )
         return {
             "regf_header": bool(details.get("registry_native_capabilities", {}).get("regf_header", False))
             if isinstance(details.get("registry_native_capabilities"), Mapping)
@@ -1406,8 +1606,10 @@ def registry_depth_components(
             "hbin_cell_walk": True,
             "nk_key_cell_decode": bool(details.get("name") or details.get("key_path")),
             "parent_chain_path_reconstruction": bool(details.get("key_path_confidence") == "parent-chain"),
-            "subkey_list_linking": bool(details.get("subkey_cell_offsets") is not None),
-            "value_list_linking": bool(details.get("value_cell_offsets") is not None),
+            "subkey_list_linking": subkey_profile.get("list_validation_status") == "resolved"
+            or bool(details.get("subkey_cell_offsets") is not None),
+            "value_list_linking": str(value_profile.get("status") or "") in {"not-declared", "resolved"}
+            or bool(details.get("value_cell_offsets") is not None),
             "transaction_log_context_recorded": bool(transaction_log_evidence.get("status")),
             "transaction_log_replay": bool(transaction_log_evidence.get("transaction_log_replay_applied")),
             "trusted_key_tree_diff": False,
@@ -2710,6 +2912,118 @@ def registry_subkey_offsets_from_list(blob: bytes, list_offset: int, *, depth: i
     return offsets
 
 
+def registry_subkey_list_profile_for_key(
+    blob: bytes,
+    key_node: Mapping[str, object],
+    *,
+    decoded_offsets: Sequence[int],
+    missing_offsets: Sequence[int],
+) -> dict[str, object]:
+    stable = registry_subkey_list_cell_profile(
+        blob,
+        int(key_node.get("stable_subkey_list_offset") or 0),
+        declared_count=int(key_node.get("stable_subkey_count") or 0),
+        list_kind="stable",
+    )
+    volatile = registry_subkey_list_cell_profile(
+        blob,
+        int(key_node.get("volatile_subkey_list_offset") or 0),
+        declared_count=int(key_node.get("volatile_subkey_count") or 0),
+        list_kind="volatile",
+    )
+    observed_lists = [item for item in (stable, volatile) if item["status"] != "not-declared"]
+    decoded = sorted(set(int(offset) for offset in decoded_offsets))
+    missing = sorted(set(int(offset) for offset in missing_offsets))
+    return {
+        "profile_version": "registry-subkey-list-profile-v1",
+        "stable": stable,
+        "volatile": volatile,
+        "observed_list_count": len(observed_lists),
+        "decoded_subkey_cell_offsets": decoded,
+        "decoded_subkey_count": len(decoded),
+        "missing_subkey_cell_offsets": missing,
+        "declared_subkey_count": int(key_node.get("subkey_count") or 0),
+        "list_validation_status": "resolved" if not missing else "missing-linked-subkey-cells",
+    }
+
+
+def registry_subkey_list_cell_profile(
+    blob: bytes,
+    list_offset: int,
+    *,
+    declared_count: int,
+    list_kind: str,
+    depth: int = 0,
+) -> dict[str, object]:
+    if declared_count <= 0 and list_offset <= 0:
+        return {
+            "profile_version": "registry-subkey-list-cell-profile-v1",
+            "list_kind": list_kind,
+            "status": "not-declared",
+            "declared_count": declared_count,
+            "list_offset": 0,
+            "list_relative_offset": 0,
+            "signature": "",
+            "decoded_offsets": [],
+            "nested_list_offsets": [],
+            "blockers": [],
+        }
+    if list_offset <= 0 or list_offset + 8 > len(blob):
+        return {
+            "profile_version": "registry-subkey-list-cell-profile-v1",
+            "list_kind": list_kind,
+            "status": "missing-or-out-of-range",
+            "declared_count": declared_count,
+            "list_offset": list_offset,
+            "list_relative_offset": registry_file_to_relative_offset(list_offset),
+            "signature": "",
+            "decoded_offsets": [],
+            "nested_list_offsets": [],
+            "blockers": ["subkey-list-cell-not-readable"],
+        }
+    cell_size = abs(read_i32(blob, list_offset))
+    signature = blob[list_offset + 4 : list_offset + 6]
+    count = read_u16(blob, list_offset + 6)
+    valid_bounds = cell_size >= 8 and list_offset + cell_size <= len(blob)
+    decoded_offsets = registry_subkey_offsets_from_list(blob, list_offset, depth=depth) if valid_bounds else []
+    nested_offsets: list[int] = []
+    if signature == b"ri" and valid_bounds:
+        cursor = list_offset + 8
+        for _ in range(min(count, 8192)):
+            if cursor + 4 > list_offset + cell_size:
+                break
+            nested = registry_relative_to_file_offset(read_u32(blob, cursor))
+            if nested:
+                nested_offsets.append(nested)
+            cursor += 4
+    blockers: list[str] = []
+    if not valid_bounds:
+        blockers.append("subkey-list-cell-bounds-invalid")
+    if signature not in {b"lf", b"lh", b"li", b"ri"}:
+        blockers.append("subkey-list-signature-unsupported")
+    if count != declared_count and declared_count:
+        blockers.append("subkey-list-count-mismatch")
+    status = "decoded" if not blockers else "decoded-with-warnings" if decoded_offsets else "unresolved"
+    return {
+        "profile_version": "registry-subkey-list-cell-profile-v1",
+        "list_kind": list_kind,
+        "status": status,
+        "declared_count": declared_count,
+        "list_offset": list_offset,
+        "list_relative_offset": registry_file_to_relative_offset(list_offset),
+        "cell_size": cell_size,
+        "signature": signature.decode("ascii", errors="replace"),
+        "entry_count": count,
+        "decoded_offsets": sorted(set(decoded_offsets)),
+        "decoded_offset_count": len(set(decoded_offsets)),
+        "nested_list_offsets": sorted(set(nested_offsets)),
+        "cell_sha256": hashlib.sha256(blob[list_offset : min(len(blob), list_offset + cell_size)]).hexdigest()
+        if valid_bounds
+        else "",
+        "blockers": blockers,
+    }
+
+
 def registry_value_offsets_for_key(blob: bytes, key_node: Mapping[str, object]) -> list[int]:
     value_count = int(key_node.get("value_count") or 0)
     value_list_offset = int(key_node.get("value_list_offset") or 0)
@@ -2725,6 +3039,93 @@ def registry_value_offsets_for_key(blob: bytes, key_node: Mapping[str, object]) 
         if file_offset:
             offsets.append(file_offset)
     return offsets
+
+
+def registry_value_list_profile_for_key(
+    blob: bytes,
+    key_node: Mapping[str, object],
+    *,
+    decoded_offsets: Sequence[int],
+    missing_offsets: Sequence[int],
+) -> dict[str, object]:
+    value_count = int(key_node.get("value_count") or 0)
+    value_list_offset = int(key_node.get("value_list_offset") or 0)
+    decoded = sorted(set(int(offset) for offset in decoded_offsets))
+    missing = sorted(set(int(offset) for offset in missing_offsets))
+    expected_size = value_count * 4
+    valid_bounds = bool(value_count > 0 and value_list_offset > 0 and value_list_offset + expected_size <= len(blob))
+    blockers: list[str] = []
+    if value_count > 4096:
+        blockers.append("value-list-count-too-large")
+    if value_count and not valid_bounds:
+        blockers.append("value-list-cell-not-readable")
+    if missing:
+        blockers.append("value-list-missing-linked-value-cells")
+    if value_count and len(decoded) != value_count:
+        blockers.append("value-list-count-mismatch")
+    if not value_count:
+        status = "not-declared"
+    elif not blockers:
+        status = "resolved"
+    elif decoded:
+        status = "resolved-with-warnings"
+    else:
+        status = "unresolved"
+    return {
+        "profile_version": "registry-value-list-profile-v1",
+        "status": status,
+        "declared_value_count": value_count,
+        "value_list_offset": value_list_offset,
+        "value_list_relative_offset": registry_file_to_relative_offset(value_list_offset),
+        "expected_value_list_bytes": expected_size,
+        "bounds_valid": valid_bounds,
+        "decoded_value_cell_offsets": decoded,
+        "decoded_value_count": len(decoded),
+        "missing_value_cell_offsets": missing,
+        "cell_sha256": hashlib.sha256(blob[value_list_offset : value_list_offset + expected_size]).hexdigest()
+        if valid_bounds
+        else "",
+        "blockers": sorted(set(blockers)),
+    }
+
+
+def registry_key_tree_reconstruction_profile(
+    *,
+    key_node: Mapping[str, object],
+    path_evidence: Mapping[str, object],
+    relationship_profile: Mapping[str, object],
+    subkey_list_profile: Mapping[str, object],
+    value_list_profile: Mapping[str, object],
+) -> dict[str, object]:
+    resolved_subkeys = subkey_list_profile.get("list_validation_status") == "resolved"
+    value_status = str(value_list_profile.get("status") or "")
+    resolved_values = value_status in {"not-declared", "resolved"}
+    blockers: list[str] = []
+    if not path_evidence.get("root_reachable"):
+        blockers.append("root-not-reachable-from-parent-chain")
+    if relationship_profile.get("missing_child_backlink_cell_offsets"):
+        blockers.append("child-parent-backlink-mismatch")
+    blockers.extend(str(item) for item in subkey_list_profile.get("stable", {}).get("blockers", []) or [])
+    blockers.extend(str(item) for item in subkey_list_profile.get("volatile", {}).get("blockers", []) or [])
+    blockers.extend(str(item) for item in value_list_profile.get("blockers", []) or [])
+    return {
+        "profile_version": "registry-key-tree-reconstruction-profile-v1",
+        "cell_offset": key_node.get("cell_offset", 0),
+        "name": key_node.get("name", ""),
+        "path_confidence": path_evidence.get("path_confidence", ""),
+        "root_reachable": bool(path_evidence.get("root_reachable")),
+        "parent_chain_depth": len(path_evidence.get("ancestry_cell_offsets", []) or []),
+        "parent_child_backlinks_consistent": not bool(
+            relationship_profile.get("missing_child_backlink_cell_offsets")
+        ),
+        "subkey_lists_resolved": resolved_subkeys,
+        "value_list_resolved": resolved_values,
+        "decoded_subkey_count": subkey_list_profile.get("decoded_subkey_count", 0),
+        "decoded_value_count": value_list_profile.get("decoded_value_count", 0),
+        "reconstruction_status": "bounded-node-reconstructed" if not blockers else "bounded-node-reconstructed-with-warnings",
+        "validation_required": bool(blockers),
+        "blockers": sorted(set(blockers)),
+    }
 
 
 def registry_value_parent_map(
@@ -3314,6 +3715,160 @@ def registry_report_grade_assessment(
             "and a second parser before treating native rows as report-grade evidence."
         ),
     }
+
+
+def registry_report_citation_manifest(
+    *,
+    artifact_type: str,
+    source_path: str,
+    source_hashes: Mapping[str, str],
+    row_identity: Mapping[str, object],
+    validation_matrix: Sequence[Mapping[str, object]],
+    report_grade_assessment: Mapping[str, object],
+    transaction_log_evidence: Mapping[str, object],
+    recovery_profile: Mapping[str, object] | None = None,
+    citation_scope: str,
+) -> dict[str, object]:
+    cell_offset = int(row_identity.get("cell_offset") or 0)
+    citation_refs: list[dict[str, object]] = [
+        {
+            "kind": "registry-hive-source",
+            "ref_id": "registry-hive-source",
+            "source_path": source_path,
+            "source_sha256": source_hashes.get("sha256", ""),
+            "source_viewer_locator": {
+                "viewer": "registry-hive",
+                "hive_name": row_identity.get("hive_name", ""),
+                "hive_hint": row_identity.get("hive_hint", ""),
+            },
+        },
+        {
+            "kind": "registry-cell-offset",
+            "ref_id": "registry-cell-offset",
+            "cell_offset": cell_offset,
+            "cell_relative_offset": row_identity.get("cell_relative_offset", 0),
+            "hbin_offset": row_identity.get("hbin_offset", 0),
+            "allocation_status": row_identity.get("allocation_status", ""),
+            "source_viewer_locator": {
+                "viewer": "registry-cell-offset",
+                "cell_offset": cell_offset,
+                "cell_relative_offset": row_identity.get("cell_relative_offset", 0),
+            },
+        },
+    ]
+    key_path = row_identity.get("key_path") or row_identity.get("key_path_candidate") or row_identity.get("parent_key_path_candidate")
+    if key_path:
+        citation_refs.append(
+            {
+                "kind": "registry-key-path",
+                "ref_id": "registry-key-path",
+                "key_path": key_path,
+                "key_path_sha256": sha256_text(str(key_path)),
+                "source_viewer_locator": {
+                    "viewer": "registry-key-tree",
+                    "key_path": key_path,
+                    "cell_offset": cell_offset,
+                },
+            }
+        )
+    if row_identity.get("name") or row_identity.get("value_data_offset"):
+        citation_refs.append(
+            {
+                "kind": "registry-value-or-name",
+                "ref_id": "registry-value-or-name",
+                "name": row_identity.get("name", ""),
+                "name_sha256": sha256_text(str(row_identity.get("name") or "")),
+                "value_type": row_identity.get("value_type", ""),
+                "value_data_size": row_identity.get("value_data_size", 0),
+                "value_data_offset": row_identity.get("value_data_offset", 0),
+                "decoded_data_preview_sha256": row_identity.get("decoded_data_preview_sha256", ""),
+                "source_viewer_locator": {
+                    "viewer": "registry-value-cell",
+                    "cell_offset": cell_offset,
+                    "value_data_offset": row_identity.get("value_data_offset", 0),
+                },
+            }
+        )
+    if int(transaction_log_evidence.get("present_count") or 0):
+        citation_refs.append(
+            {
+                "kind": "registry-transaction-log-context",
+                "ref_id": "registry-transaction-log-context",
+                "status": transaction_log_evidence.get("status", ""),
+                "present_count": transaction_log_evidence.get("present_count", 0),
+                "recognized_log_count": transaction_log_evidence.get("recognized_log_count", 0),
+                "transaction_log_replay_applied": bool(transaction_log_evidence.get("transaction_log_replay_applied")),
+                "source_viewer_locator": {
+                    "viewer": "registry-transaction-log-evidence",
+                    "hive_path": source_path,
+                },
+            }
+        )
+    if recovery_profile:
+        citation_refs.append(
+            {
+                "kind": "registry-recovery-validation",
+                "ref_id": "registry-recovery-validation",
+                "candidate_class": recovery_profile.get("candidate_class", ""),
+                "confidence": recovery_profile.get("confidence", 0),
+                "independent_validation_status": recovery_profile.get("independent_validation_status", ""),
+                "reportability_decision": recovery_profile.get("reportability_decision", {}),
+                "source_viewer_locator": {
+                    "viewer": "registry-recovery-context",
+                    "cell_offset": cell_offset,
+                },
+            }
+        )
+    passed = [
+        str(item.get("id"))
+        for item in validation_matrix
+        if isinstance(item, Mapping) and item.get("id") and item.get("passed")
+    ]
+    failed = [
+        str(item.get("id"))
+        for item in validation_matrix
+        if isinstance(item, Mapping) and item.get("id") and not item.get("passed")
+    ]
+    manifest: dict[str, object] = {
+        "manifest_version": "registry-report-citation-manifest-v1",
+        "artifact_type": artifact_type,
+        "parser": PARSER_VERSION,
+        "citation_scope": citation_scope,
+        "source": {
+            "path": source_path,
+            "sha256": source_hashes.get("sha256", ""),
+            "format": "registry-hive",
+        },
+        "row_identity": dict(row_identity),
+        "row_identity_hash": stable_registry_json_sha256(dict(row_identity)),
+        "citation_refs": citation_refs,
+        "citation_ref_count": len(citation_refs),
+        "validation_summary": {
+            "passed_matrix_ids": passed,
+            "failed_matrix_ids": failed,
+            "report_grade_status": report_grade_assessment.get("status", ""),
+            "transaction_log_status": transaction_log_evidence.get("status", "not-evaluated"),
+            "transaction_log_replay_applied": bool(transaction_log_evidence.get("transaction_log_replay_applied")),
+        },
+        "reportability": {
+            "allowed_use": "registry-native-triage-review-pivot",
+            "ready_for_court_report": bool(report_grade_assessment.get("report_grade_ready")),
+            "validation_required": not bool(report_grade_assessment.get("report_grade_ready")),
+            "blockers": list(report_grade_assessment.get("blockers") or []),
+        },
+    }
+    manifest["manifest_sha256"] = stable_registry_json_sha256(
+        {key: value for key, value in manifest.items() if key != "manifest_sha256"}
+    )
+    return manifest
+
+
+def stable_registry_json_sha256(value: Mapping[str, object] | Sequence[object] | str) -> str:
+    return sha256_text(json.dumps(value, ensure_ascii=False, sort_keys=True, default=str, separators=(",", ":")))
+
+
+def sha256_text(value: str) -> str:
+    return hashlib.sha256(value.encode("utf-8", errors="replace")).hexdigest()
 
 
 def registry_key_tree_confidence(key_node: Mapping[str, object], path_confidence: str, hive_valid: bool) -> float:

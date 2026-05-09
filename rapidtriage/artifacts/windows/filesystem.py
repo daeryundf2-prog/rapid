@@ -89,6 +89,7 @@ NTFS_FILESYSTEM_CAPABILITIES = {
     "mft_update_sequence_validation": True,
     "mft_standard_information_decode": True,
     "mft_file_name_attribute_decode": True,
+    "mft_bounded_parent_path_cache": True,
     "mft_resident_data_hash": True,
     "mft_nonresident_runlist_preview": True,
     "usn_export_import": True,
@@ -149,24 +150,63 @@ class WindowsFilesystemProvider:
 
 def collect_native_ntfs_artifacts(root: Path) -> Iterable[ArtifactRecord]:
     seen: set[Path] = set()
-    for path in sorted(root.rglob("*"), key=lambda item: str(item).lower()):
+    candidate_paths = sorted((path for path in root.rglob("*") if path.is_file()), key=lambda item: str(item).lower())
+    mft_records_by_path: dict[Path, list[dict[str, object]]] = {}
+    mft_path_caches_by_volume: dict[Path, dict[int, dict[str, object]]] = {}
+    for path in candidate_paths:
+        if is_native_mft_path(path):
+            resolved = path.resolve()
+            mft_records = parse_mft_record_headers(read_prefix(path, NATIVE_SCAN_LIMIT))
+            mft_records_by_path[resolved] = mft_records
+            mft_path_caches_by_volume[resolved.parent] = build_mft_bounded_path_cache(mft_records)
+    for path in candidate_paths:
         if not path.is_file():
             continue
         name = path.name.lower()
-        parent_blob = str(path.parent).lower()
         resolved = path.resolve()
         if resolved in seen:
             continue
-        if name == "$mft":
+        if is_native_mft_path(path):
             yield build_mft_inventory_record(path)
-            for index, record in enumerate(parse_mft_record_headers(read_prefix(path, NATIVE_SCAN_LIMIT))):
-                yield build_native_mft_record(path, record, index)
+            mft_records = mft_records_by_path.get(resolved) or parse_mft_record_headers(read_prefix(path, NATIVE_SCAN_LIMIT))
+            bounded_path_cache = mft_path_caches_by_volume.get(resolved.parent) or build_mft_bounded_path_cache(mft_records)
+            for index, record in enumerate(mft_records):
+                yield build_native_mft_record(path, record, index, bounded_path_cache)
             seen.add(resolved)
-        elif name in {"$j", "$usnjrnl"} or (name.endswith(".usn") and "usn" in parent_blob):
-            yield build_usn_journal_inventory_record(path)
+        elif is_native_usn_path(path):
+            bounded_path_cache = nearest_mft_path_cache(path, mft_path_caches_by_volume)
+            yield build_usn_journal_inventory_record(path, bounded_path_cache)
             for index, record in enumerate(parse_usn_records(read_prefix(path, NATIVE_SCAN_LIMIT))):
-                yield build_native_usn_record(path, record, index)
+                yield build_native_usn_record(path, record, index, bounded_path_cache)
             seen.add(resolved)
+
+
+def is_native_mft_path(path: Path) -> bool:
+    return path.name.lower() == "$mft"
+
+
+def is_native_usn_path(path: Path) -> bool:
+    name = path.name.lower()
+    parent_blob = str(path.parent).lower()
+    return name in {"$j", "$usnjrnl"} or (name.endswith(".usn") and "usn" in parent_blob)
+
+
+def nearest_mft_path_cache(
+    path: Path,
+    caches_by_volume: Mapping[Path, Mapping[int, Mapping[str, object]]],
+) -> Mapping[int, Mapping[str, object]]:
+    resolved = path.resolve()
+    best_root: Path | None = None
+    best_cache: Mapping[int, Mapping[str, object]] = {}
+    for volume_root, cache in caches_by_volume.items():
+        try:
+            resolved.relative_to(volume_root)
+        except ValueError:
+            continue
+        if best_root is None or len(str(volume_root)) > len(str(best_root)):
+            best_root = volume_root
+            best_cache = cache
+    return best_cache
 
 
 def build_mft_inventory_record(path: Path) -> ArtifactRecord:
@@ -271,12 +311,16 @@ def build_mft_inventory_record(path: Path) -> ArtifactRecord:
     )
 
 
-def build_usn_journal_inventory_record(path: Path) -> ArtifactRecord:
+def build_usn_journal_inventory_record(
+    path: Path,
+    mft_path_cache: Mapping[int, Mapping[str, object]] | None = None,
+) -> ArtifactRecord:
     stat_result = path.stat()
     blob = read_prefix(path, NATIVE_SCAN_LIMIT)
     scan = parse_usn_record_scan(blob)
     records = list(scan["records"])
     scan_metadata = {key: value for key, value in scan.items() if key != "records"}
+    replay_inventory = usn_replay_inventory_profile(records, scan_metadata, mft_path_cache or {})
     strings = extract_utf16_strings(blob)
     validation_checks = {
         "has_native_records": bool(records),
@@ -309,7 +353,7 @@ def build_usn_journal_inventory_record(path: Path) -> ArtifactRecord:
             "modified_at": dt.datetime.fromtimestamp(stat_result.st_mtime, dt.timezone.utc).isoformat(),
             "scan_bytes": len(blob),
             "scan_metadata": scan_metadata,
-            "usn_replay_inventory_profile": usn_replay_inventory_profile(records, scan_metadata),
+            "usn_replay_inventory_profile": replay_inventory,
             "record_limit": USN_RECORD_SCAN_LIMIT,
             "record_limit_reached": scan_metadata["record_limit_reached"],
             "next_cursor_offset": scan_metadata["next_cursor_offset"],
@@ -351,7 +395,7 @@ def build_usn_journal_inventory_record(path: Path) -> ArtifactRecord:
                     "scan_metadata": scan_metadata,
                     "native_record_count": len(records),
                     "reason_flag_counts": count_many(record.get("reason_flags") for record in records),
-                    "usn_replay_inventory_profile": usn_replay_inventory_profile(records, scan_metadata),
+                    "usn_replay_inventory_profile": replay_inventory,
                     "timestamp_range": scan_metadata["timestamp_range"],
                     "record_limit_reached": scan_metadata["record_limit_reached"],
                     "next_cursor_available": scan_metadata["next_cursor_available"],
@@ -379,7 +423,12 @@ def build_usn_journal_inventory_record(path: Path) -> ArtifactRecord:
     )
 
 
-def build_native_mft_record(path: Path, record: Mapping[str, object], index: int) -> ArtifactRecord:
+def build_native_mft_record(
+    path: Path,
+    record: Mapping[str, object],
+    index: int,
+    bounded_path_cache: Mapping[int, Mapping[str, object]] | None = None,
+) -> ArtifactRecord:
     path_candidates = list(record.get("path_candidates") or [])
     file_path = str(path_candidates[0]) if path_candidates else ""
     standard_information = record.get("standard_information") if isinstance(record.get("standard_information"), Mapping) else {}
@@ -390,6 +439,10 @@ def build_native_mft_record(path: Path, record: Mapping[str, object], index: int
     timestamp_source = "$STANDARD_INFORMATION" if timestamp else "not_available_native_mft_attributes"
     parent_reference = primary_file_name.get("parent_reference_raw") if isinstance(primary_file_name, Mapping) else ""
     file_path = file_path or str(primary_file_name.get("file_name") or "")
+    record_number_int = int(record.get("record_number_candidate") or 0)
+    bounded_parent_path = dict((bounded_path_cache or {}).get(record_number_int) or {})
+    if not file_path and bounded_parent_path.get("path"):
+        file_path = str(bounded_parent_path.get("path"))
     details = {
         "parser": "windows-mft-native",
         "parser_version": PARSER_VERSION,
@@ -453,7 +506,8 @@ def build_native_mft_record(path: Path, record: Mapping[str, object], index: int
         ),
         "parser_confidence": record.get("parser_confidence", 0.0),
         "mft_record_evidence": mft_record_evidence(record, file_path),
-        "mft_path_reconstruction_profile": mft_path_reconstruction_profile(record, file_path),
+        "mft_bounded_parent_path": bounded_parent_path,
+        "mft_path_reconstruction_profile": mft_path_reconstruction_profile(record, file_path, bounded_parent_path),
         "mft_attribute_list_profile": mft_attribute_list_profile(record),
         "mft_data_run_summary": mft_data_run_summary(record),
         "evidence_strength": "ntfs-mft-native-attribute-metadata",
@@ -475,8 +529,12 @@ def build_native_mft_record(path: Path, record: Mapping[str, object], index: int
         gap_ids=["#12"],
         blockers=MFT_REPORT_GRADE_BLOCKERS,
     )
+    details["ntfs_report_citation_manifest"] = ntfs_report_citation_manifest("mft", details)
+    details["ntfs_report_citation_manifest_hash"] = details["ntfs_report_citation_manifest"]["manifest_sha256"]
     details["ntfs_native_capabilities"] = NTFS_FILESYSTEM_CAPABILITIES
     details["mft_full_parser_profile"] = mft_full_parser_profile("record", details)
+    details["mft_parser_depth_manifest"] = mft_parser_depth_manifest(details)
+    details["mft_parser_depth_manifest_hash"] = details["mft_parser_depth_manifest"]["manifest_sha256"]
     details["ntfs_native_depth_readiness_profile"] = ntfs_native_depth_readiness_profile("mft", "record", details)
     details["commercial_grade_blockers"] = details["ntfs_report_grade_assessment"]["blockers"]
     details["commercial_uplift_evidence"] = ntfs_commercial_uplift_evidence("mft", details)
@@ -506,7 +564,13 @@ def build_native_mft_record(path: Path, record: Mapping[str, object], index: int
     )
 
 
-def build_native_usn_record(path: Path, record: Mapping[str, object], index: int) -> ArtifactRecord:
+def build_native_usn_record(
+    path: Path,
+    record: Mapping[str, object],
+    index: int,
+    mft_path_cache: Mapping[int, Mapping[str, object]] | None = None,
+) -> ArtifactRecord:
+    bounded_mft_path = usn_bounded_mft_path_correlation(record, mft_path_cache or {})
     details = {
         "parser": "windows-usn-native",
         "parser_version": PARSER_VERSION,
@@ -575,7 +639,8 @@ def build_native_usn_record(path: Path, record: Mapping[str, object], index: int
         ),
         "parser_confidence": record.get("parser_confidence", 0.0),
         "usn_record_evidence": usn_record_evidence(record),
-        "usn_replay_transition_profile": usn_replay_transition_profile(record),
+        "usn_bounded_mft_path": bounded_mft_path,
+        "usn_replay_transition_profile": usn_replay_transition_profile(record, bounded_mft_path),
         "usn_cursor_pagination_profile": usn_cursor_pagination_profile(record),
         "evidence_strength": "ntfs-usn-native-record",
         "validation_required": True,
@@ -596,8 +661,12 @@ def build_native_usn_record(path: Path, record: Mapping[str, object], index: int
         gap_ids=["#13"],
         blockers=USN_REPORT_GRADE_BLOCKERS,
     )
+    details["ntfs_report_citation_manifest"] = ntfs_report_citation_manifest("usn", details)
+    details["ntfs_report_citation_manifest_hash"] = details["ntfs_report_citation_manifest"]["manifest_sha256"]
     details["ntfs_native_capabilities"] = NTFS_FILESYSTEM_CAPABILITIES
     details["usn_journal_replay_profile"] = usn_journal_replay_profile("record", details)
+    details["usn_timeline_depth_manifest"] = usn_timeline_depth_manifest(details)
+    details["usn_timeline_depth_manifest_hash"] = details["usn_timeline_depth_manifest"]["manifest_sha256"]
     details["ntfs_native_depth_readiness_profile"] = ntfs_native_depth_readiness_profile("usn", "record", details)
     details["commercial_grade_blockers"] = details["ntfs_report_grade_assessment"]["blockers"]
     details["commercial_uplift_evidence"] = ntfs_commercial_uplift_evidence("usn", details)
@@ -716,19 +785,194 @@ def mft_record_evidence(record: Mapping[str, object], file_path: str) -> dict[st
     }
 
 
-def mft_path_reconstruction_profile(record: Mapping[str, object], file_path: str) -> dict[str, object]:
+def build_mft_bounded_path_cache(records: Sequence[Mapping[str, object]]) -> dict[int, dict[str, object]]:
+    nodes: dict[int, dict[str, object]] = {}
+    for record in records:
+        record_number = int(record.get("record_number_candidate") or 0)
+        if record_number < 0:
+            continue
+        file_name_entry = mft_preferred_file_name_entry(record)
+        parent_reference = (
+            file_name_entry.get("parent_reference")
+            if isinstance(file_name_entry.get("parent_reference"), Mapping)
+            else {}
+        )
+        name = str(file_name_entry.get("file_name") or "")
+        if not name:
+            path_candidates = [str(item) for item in record.get("path_candidates") or [] if item]
+            name = path_candidates[0].rsplit("\\", 1)[-1].rsplit("/", 1)[-1] if path_candidates else ""
+        nodes[record_number] = {
+            "record_number": record_number,
+            "sequence_number": int(record.get("sequence_number") or 0),
+            "name": name,
+            "parent_record_number": parent_reference.get("record_number", ""),
+            "parent_sequence_number": parent_reference.get("sequence_number", ""),
+            "namespace": str(file_name_entry.get("namespace") or ""),
+            "directory": bool(record.get("directory")),
+            "in_use": bool(record.get("in_use")),
+        }
+
+    cache: dict[int, dict[str, object]] = {}
+    for record_number in sorted(nodes):
+        cache[record_number] = resolve_mft_bounded_path(record_number, nodes)
+    return cache
+
+
+def mft_bounded_path_cache_profile(
+    mft_path_cache: Mapping[int, Mapping[str, object]],
+) -> dict[str, object]:
+    entries = [entry for entry in mft_path_cache.values() if isinstance(entry, Mapping)]
+    complete_entries = [entry for entry in entries if bool(entry.get("complete_within_bounded_scan"))]
+    partial_entries = [entry for entry in entries if not bool(entry.get("complete_within_bounded_scan"))]
+    warning_count = sum(len(entry.get("warnings") or []) for entry in entries)
+    max_depth = max((int(entry.get("depth") or 0) for entry in entries), default=0)
+    return {
+        "profile_version": "mft-bounded-path-cache-profile-v1",
+        "cache_entry_count": len(entries),
+        "complete_path_count": len(complete_entries),
+        "partial_path_count": len(partial_entries),
+        "complete_path_ratio": round(len(complete_entries) / len(entries), 6) if entries else 0,
+        "status_counts": count_values(str(entry.get("status") or "unknown") for entry in entries),
+        "warning_count": warning_count,
+        "max_chain_depth": max_depth,
+        "sample_complete_paths": [
+            str(entry.get("path") or "")
+            for entry in complete_entries[:10]
+            if entry.get("path")
+        ],
+        "sample_partial_paths": [
+            {
+                "record_number": entry.get("record_number", ""),
+                "path": str(entry.get("path") or ""),
+                "status": str(entry.get("status") or ""),
+                "warnings": list(entry.get("warnings") or [])[:3],
+            }
+            for entry in partial_entries[:10]
+        ],
+        "commercial_grade_ready": False,
+        "reportability": "bounded-mft-path-cache-quality-profile",
+        "blockers": [
+            "mft-full-volume-parent-cache-required",
+            "mft-hardlink-namespace-selection-validation-required",
+            "mft-trusted-path-diff-required",
+        ],
+    }
+
+
+def mft_preferred_file_name_entry(record: Mapping[str, object]) -> dict[str, object]:
+    entries = [item for item in record.get("file_name_entries") or [] if isinstance(item, Mapping)]
+    if not entries:
+        return {}
+    namespace_rank = {"WIN32": 0, "WIN32_AND_DOS": 1, "POSIX": 2, "DOS": 3}
+    return dict(
+        sorted(
+            entries,
+            key=lambda item: (
+                namespace_rank.get(str(item.get("namespace") or ""), 9),
+                len(str(item.get("file_name") or "")),
+            ),
+        )[0]
+    )
+
+
+def resolve_mft_bounded_path(record_number: int, nodes: Mapping[int, Mapping[str, object]]) -> dict[str, object]:
+    chain: list[Mapping[str, object]] = []
+    visited: set[int] = set()
+    current = record_number
+    status = "reconstructed-bounded-parent-cache"
+    warnings: list[str] = []
+    max_depth = 128
+    while len(chain) < max_depth:
+        if current in visited:
+            status = "partial-cycle-detected"
+            warnings.append(f"cycle-at-record:{current}")
+            break
+        node = nodes.get(current)
+        if not node:
+            status = "partial-parent-outside-bounded-scan"
+            warnings.append(f"missing-record:{current}")
+            break
+        visited.add(current)
+        chain.append(node)
+        parent_value = node.get("parent_record_number")
+        parent_number = int(parent_value) if isinstance(parent_value, int) or str(parent_value).isdigit() else -1
+        if parent_number < 0:
+            status = "partial-parent-reference-missing"
+            break
+        if parent_number == current:
+            break
+        parent_node = nodes.get(parent_number)
+        if not parent_node:
+            status = "partial-parent-outside-bounded-scan"
+            warnings.append(f"parent-not-in-cache:{parent_number}")
+            break
+        expected_sequence = node.get("parent_sequence_number")
+        actual_sequence = parent_node.get("sequence_number")
+        if expected_sequence not in ("", None) and int(expected_sequence or 0) != int(actual_sequence or 0):
+            status = "partial-parent-sequence-mismatch"
+            warnings.append(f"parent-sequence-mismatch:{parent_number}")
+            break
+        current = parent_number
+    else:
+        status = "partial-depth-limit-reached"
+        warnings.append(f"depth-limit:{max_depth}")
+
+    ordered = list(reversed(chain))
+    parts = [str(item.get("name") or "") for item in ordered if str(item.get("name") or "") not in {"", "."}]
+    path = "\\" + "\\".join(parts) if parts else str(chain[0].get("name") or "") if chain else ""
+    return {
+        "profile_version": "mft-bounded-parent-path-v1",
+        "status": status,
+        "path": path,
+        "record_number": record_number,
+        "depth": len(chain),
+        "complete_within_bounded_scan": status == "reconstructed-bounded-parent-cache",
+        "chain": [
+            {
+                "record_number": item.get("record_number", ""),
+                "sequence_number": item.get("sequence_number", ""),
+                "name": item.get("name", ""),
+                "namespace": item.get("namespace", ""),
+                "parent_record_number": item.get("parent_record_number", ""),
+                "parent_sequence_number": item.get("parent_sequence_number", ""),
+            }
+            for item in chain
+        ],
+        "warnings": warnings,
+        "reportability": "bounded-scan-path-candidate",
+        "commercial_grade_ready": False,
+        "blockers": [
+            "mft-full-volume-parent-cache-required",
+            "mft-hardlink-namespace-selection-validation-required",
+            "mft-trusted-path-diff-required",
+        ],
+    }
+
+
+def mft_path_reconstruction_profile(
+    record: Mapping[str, object],
+    file_path: str,
+    bounded_parent_path: Mapping[str, object] | None = None,
+) -> dict[str, object]:
     file_name_entries = [item for item in record.get("file_name_entries") or [] if isinstance(item, Mapping)]
     primary = file_name_entries[0] if file_name_entries else {}
     parent_reference = primary.get("parent_reference") if isinstance(primary.get("parent_reference"), Mapping) else {}
     path_candidates = [str(item) for item in record.get("path_candidates") or [] if item]
     best_name = str(primary.get("file_name") or file_path or "")
+    bounded_path = bounded_parent_path if isinstance(bounded_parent_path, Mapping) else {}
     has_full_path_string = any(("\\" in item or "/" in item) and best_name and best_name.lower() in item.lower() for item in path_candidates)
-    confidence = "full-path-string-candidate" if has_full_path_string else "filename-plus-parent-reference-only"
+    confidence = (
+        "bounded-scan-parent-cache"
+        if bounded_path.get("complete_within_bounded_scan")
+        else "full-path-string-candidate"
+        if has_full_path_string
+        else "filename-plus-parent-reference-only"
+    )
     return {
         "profile_version": "mft-path-reconstruction-v1",
         "record_number": record.get("record_number_candidate", ""),
         "sequence_number": record.get("sequence_number", 0),
-        "best_available_path": file_path or best_name,
+        "best_available_path": str(bounded_path.get("path") or file_path or best_name),
         "best_file_name": best_name,
         "path_candidates": path_candidates[:10],
         "file_name_entry_count": len(file_name_entries),
@@ -737,6 +981,8 @@ def mft_path_reconstruction_profile(record: Mapping[str, object], file_path: str
         "parent_sequence_number": parent_reference.get("sequence_number", ""),
         "source_mode": confidence,
         "full_volume_path_cache_used": False,
+        "bounded_parent_cache_used": bool(bounded_path),
+        "bounded_parent_path": dict(bounded_path),
         "commercial_grade_ready": False,
         "blockers": [
             "mft-full-volume-parent-cache-required",
@@ -744,6 +990,9 @@ def mft_path_reconstruction_profile(record: Mapping[str, object], file_path: str
             "mft-trusted-path-diff-required",
         ],
         "safe_report_wording": (
+            "Path candidate reconstructed from records available within the bounded native $MFT scan; validate against a full-volume path cache before report-grade use."
+            if bounded_path.get("complete_within_bounded_scan")
+            else
             "Full path candidate recovered from record-local strings; validate with full-volume MFT path cache."
             if has_full_path_string
             else "Filename and parent FRN decoded from $FILE_NAME; full path not reconstructed from a volume-wide cache."
@@ -803,6 +1052,432 @@ def mft_data_run_summary(record: Mapping[str, object]) -> dict[str, object]:
     }
 
 
+def mft_parser_depth_manifest(details: Mapping[str, object]) -> dict[str, object]:
+    hashes = details.get("source_hashes") if isinstance(details.get("source_hashes"), Mapping) else {}
+    validation_checks = details.get("validation_checks") if isinstance(details.get("validation_checks"), Mapping) else {}
+    sequence_validation = (
+        details.get("sequence_validation")
+        if isinstance(details.get("sequence_validation"), Mapping)
+        else {}
+    )
+    report_grade = (
+        details.get("ntfs_report_grade_assessment")
+        if isinstance(details.get("ntfs_report_grade_assessment"), Mapping)
+        else {}
+    )
+    full_profile = (
+        details.get("mft_full_parser_profile")
+        if isinstance(details.get("mft_full_parser_profile"), Mapping)
+        else {}
+    )
+    path_profile = (
+        details.get("mft_path_reconstruction_profile")
+        if isinstance(details.get("mft_path_reconstruction_profile"), Mapping)
+        else {}
+    )
+    attribute_list_profile = (
+        details.get("mft_attribute_list_profile")
+        if isinstance(details.get("mft_attribute_list_profile"), Mapping)
+        else {}
+    )
+    data_run_summary = (
+        details.get("mft_data_run_summary")
+        if isinstance(details.get("mft_data_run_summary"), Mapping)
+        else {}
+    )
+    file_name_entries = [
+        item for item in details.get("file_name_entries") or [] if isinstance(item, Mapping)
+    ]
+    data_attributes = [
+        item for item in details.get("data_attributes") or [] if isinstance(item, Mapping)
+    ]
+    attribute_types = [str(item) for item in details.get("attribute_types") or []]
+    nonresident_data = [item for item in data_attributes if item.get("resident") is False]
+    resident_data = [item for item in data_attributes if item.get("resident") is not False]
+    reportability = ntfs_reportability_decision("mft", report_grade, details)
+    source = {
+        "source_path": str(details.get("source_path") or ""),
+        "source_sha256": str(hashes.get("sha256") or ""),
+        "source_format": str(details.get("source_format") or ""),
+        "source_index": details.get("source_index", ""),
+        "record_offset": details.get("record_offset", ""),
+    }
+    record_identity = {
+        "record_number": str(details.get("record_number") or ""),
+        "sequence_number": details.get("sequence_number", ""),
+        "in_use": bool(details.get("in_use")),
+        "directory": bool(details.get("directory")),
+        "file_path": str(details.get("file_path") or ""),
+        "file_names": [str(item.get("file_name") or "") for item in file_name_entries if item.get("file_name")][:10],
+        "parent_references": [
+            dict(item.get("parent_reference") or {})
+            for item in file_name_entries
+            if isinstance(item.get("parent_reference"), Mapping)
+        ][:10],
+        "path_candidates": list(details.get("path_candidates") or [])[:10],
+    }
+    manifest_payload = {
+        "manifest_version": "mft-parser-depth-manifest-v1",
+        "parser_version": PARSER_VERSION,
+        "commercial_batch_id": "commercial-uplift-011-015",
+        "item_number": 12,
+        "gap_id": "#12",
+        "artifact_type": "mft-record",
+        "source": source,
+        "record_identity": record_identity,
+        "record_identity_hash": ntfs_stable_sha256(record_identity),
+        "usa_validation": {
+            "magic_valid": bool(validation_checks.get("magic_valid")),
+            "sequence_fixup_valid": bool(validation_checks.get("sequence_fixup_valid")),
+            "sequence_validation_status": str(sequence_validation.get("status") or details.get("validation_status") or "unknown"),
+            "update_sequence_offset": sequence_validation.get("update_sequence_offset", ""),
+            "update_sequence_count": sequence_validation.get("update_sequence_count", ""),
+            "repaired_sector_trailer_count": sequence_validation.get("repaired_sector_trailer_count", 0),
+            "warnings": list(sequence_validation.get("warnings") or [])[:25],
+        },
+        "attribute_decoding": {
+            "attribute_count": int(details.get("attribute_count") or 0),
+            "attribute_types": attribute_types,
+            "has_standard_information": "$STANDARD_INFORMATION" in attribute_types
+            or bool(validation_checks.get("has_standard_information_attribute")),
+            "has_file_name": "$FILE_NAME" in attribute_types
+            or bool(validation_checks.get("has_file_name_attribute")),
+            "has_data": "$DATA" in attribute_types
+            or bool(validation_checks.get("has_data_attribute")),
+            "has_attribute_list": bool(attribute_list_profile.get("present")),
+            "attribute_list_entry_count": int(attribute_list_profile.get("entry_count") or 0),
+            "attribute_list_resolution_available": bool(NTFS_FILESYSTEM_CAPABILITIES["mft_attribute_list_resolution"]),
+            "attribute_list_resolution_status": str(attribute_list_profile.get("resolution_status") or ""),
+            "attribute_list_blockers": list(attribute_list_profile.get("blockers") or []),
+        },
+        "data_run_decoding": {
+            "data_attribute_count": int(data_run_summary.get("data_attribute_count") or len(data_attributes)),
+            "resident_data_attribute_count": int(data_run_summary.get("resident_data_attribute_count") or len(resident_data)),
+            "nonresident_data_attribute_count": int(data_run_summary.get("nonresident_data_attribute_count") or len(nonresident_data)),
+            "runlist_preview_count": int(data_run_summary.get("preview_run_count") or 0),
+            "sparse_preview_run_count": int(data_run_summary.get("sparse_preview_run_count") or 0),
+            "preview_cluster_count": int(data_run_summary.get("preview_cluster_count") or 0),
+            "decode_statuses": dict(data_run_summary.get("decode_statuses") or {}),
+            "full_nonresident_runlist_decode_available": bool(NTFS_FILESYSTEM_CAPABILITIES["mft_full_nonresident_runlist_decode"]),
+            "report_grade_blockers": list(data_run_summary.get("blockers") or []),
+        },
+        "path_reconstruction": {
+            "best_available_path": str(path_profile.get("best_available_path") or details.get("file_path") or ""),
+            "parent_record_number": path_profile.get("parent_record_number", ""),
+            "parent_sequence_number": path_profile.get("parent_sequence_number", ""),
+            "source_mode": str(path_profile.get("source_mode") or "unknown"),
+            "bounded_parent_cache_used": bool(path_profile.get("bounded_parent_cache_used")),
+            "full_volume_path_cache_used": bool(path_profile.get("full_volume_path_cache_used")),
+            "full_volume_path_reconstruction_complete": bool(NTFS_FILESYSTEM_CAPABILITIES["full_volume_path_reconstruction"]),
+            "safe_report_wording": str(path_profile.get("safe_report_wording") or ""),
+            "blockers": list(path_profile.get("blockers") or []),
+        },
+        "decoded_components": dict(full_profile.get("decoded_components") or {}),
+        "citation_refs": [
+            {
+                "kind": "mft-record-header",
+                "record_number": str(details.get("record_number") or ""),
+                "record_offset": details.get("record_offset", ""),
+            },
+            {
+                "kind": "mft-usa-validation",
+                "status": str(sequence_validation.get("status") or details.get("validation_status") or "unknown"),
+            },
+            {
+                "kind": "mft-attribute-list",
+                "present": bool(attribute_list_profile.get("present")),
+                "resolution_status": str(attribute_list_profile.get("resolution_status") or ""),
+            },
+            {
+                "kind": "mft-data-run-preview",
+                "runlist_preview_count": int(data_run_summary.get("preview_run_count") or 0),
+                "full_decode_available": bool(NTFS_FILESYSTEM_CAPABILITIES["mft_full_nonresident_runlist_decode"]),
+            },
+            {
+                "kind": "mft-parent-path-reconstruction",
+                "source_mode": str(path_profile.get("source_mode") or "unknown"),
+                "full_volume_path_reconstruction_complete": bool(NTFS_FILESYSTEM_CAPABILITIES["full_volume_path_reconstruction"]),
+            },
+        ],
+        "reportability": {
+            "allowed_use": reportability["allowed_use"],
+            "decision": reportability["decision"],
+            "report_grade_ready": bool(report_grade.get("report_grade_ready")),
+            "commercial_grade_ready": False,
+            "full_path_complete": False,
+            "file_content_complete": False,
+            "blockers": reportability["blockers"],
+        },
+        "required_before_commercial_grade": [
+            "resolve ATTRIBUTE_LIST extension records and merge base/extension attributes",
+            "fully decode and validate nonresident runlists over physical cluster ranges",
+            "reconstruct paths from a full-volume FRN cache with hardlink namespace handling",
+            "diff record identity, timestamps, paths, and data-run facts against trusted tool output",
+        ],
+    }
+    manifest_payload["manifest_sha256"] = ntfs_stable_sha256(manifest_payload)
+    return manifest_payload
+
+
+def usn_timeline_depth_manifest(details: Mapping[str, object]) -> dict[str, object]:
+    hashes = details.get("source_hashes") if isinstance(details.get("source_hashes"), Mapping) else {}
+    validation_checks = details.get("validation_checks") if isinstance(details.get("validation_checks"), Mapping) else {}
+    report_grade = (
+        details.get("ntfs_report_grade_assessment")
+        if isinstance(details.get("ntfs_report_grade_assessment"), Mapping)
+        else {}
+    )
+    replay_profile = (
+        details.get("usn_journal_replay_profile")
+        if isinstance(details.get("usn_journal_replay_profile"), Mapping)
+        else {}
+    )
+    transition_profile = (
+        details.get("usn_replay_transition_profile")
+        if isinstance(details.get("usn_replay_transition_profile"), Mapping)
+        else {}
+    )
+    cursor_profile = (
+        details.get("usn_cursor_pagination_profile")
+        if isinstance(details.get("usn_cursor_pagination_profile"), Mapping)
+        else {}
+    )
+    bounded_path = (
+        details.get("usn_bounded_mft_path")
+        if isinstance(details.get("usn_bounded_mft_path"), Mapping)
+        else {}
+    )
+    reportability = ntfs_reportability_decision("usn", report_grade, details)
+    source = {
+        "source_path": str(details.get("source_path") or ""),
+        "source_sha256": str(hashes.get("sha256") or ""),
+        "source_format": str(details.get("source_format") or ""),
+        "source_index": details.get("source_index", ""),
+        "record_cursor": details.get("record_cursor", ""),
+        "next_record_cursor": details.get("next_record_cursor", ""),
+    }
+    record_identity = {
+        "usn": details.get("usn", ""),
+        "file_reference_number": str(details.get("record_number") or ""),
+        "parent_reference": str(details.get("parent_reference") or ""),
+        "file_name": str(details.get("file_path") or ""),
+        "timestamp": str(details.get("timestamp") or ""),
+        "major_version": details.get("major_version", ""),
+        "minor_version": details.get("minor_version", ""),
+    }
+    manifest_payload = {
+        "manifest_version": "usn-timeline-depth-manifest-v1",
+        "parser_version": PARSER_VERSION,
+        "commercial_batch_id": "commercial-uplift-011-015",
+        "item_number": 13,
+        "gap_id": "#13",
+        "artifact_type": "usn-record",
+        "source": source,
+        "record_identity": record_identity,
+        "record_identity_hash": ntfs_stable_sha256(record_identity),
+        "record_layout_validation": {
+            "validation_status": str(details.get("validation_status") or "unknown"),
+            "record_length": details.get("record_length", ""),
+            "record_payload_bytes": details.get("record_payload_bytes", ""),
+            "record_padding_bytes": details.get("record_padding_bytes", ""),
+            "record_cursor_progresses": bool(validation_checks.get("record_cursor_progresses")),
+            "record_length_aligned": bool(validation_checks.get("record_length_aligned")),
+            "version_supported": bool(validation_checks.get("version_supported")),
+            "filename_utf16_valid": bool(validation_checks.get("filename_utf16_valid")),
+            "large_record": bool(validation_checks.get("large_record")),
+            "warnings": list(details.get("validation_warnings") or [])[:25],
+        },
+        "change_semantics": {
+            "reason_flags": list(details.get("reason_flags") or []),
+            "source_info_flags": list(details.get("source_info_flags") or []),
+            "file_attribute_names": list(details.get("file_attribute_names") or []),
+            "deleted_hint": bool(details.get("deleted_hint")),
+            "rename_hint": str(details.get("rename_hint") or ""),
+            "transition_class": str(transition_profile.get("transition_class") or ""),
+            "requires_previous_state": bool(transition_profile.get("requires_previous_state")),
+            "standalone_timeline_fact": False,
+        },
+        "path_correlation": {
+            "status": str(bounded_path.get("status") or ""),
+            "path_candidate": str(bounded_path.get("path_candidate") or ""),
+            "path_source": str(bounded_path.get("path_source") or ""),
+            "file_reference_cache_hit": bool(bounded_path.get("file_reference_cache_hit")),
+            "parent_reference_cache_hit": bool(bounded_path.get("parent_reference_cache_hit")),
+            "complete_within_bounded_mft_cache": bool(bounded_path.get("complete_within_bounded_mft_cache")),
+            "full_frn_path_cache_replay_done": bool(NTFS_FILESYSTEM_CAPABILITIES["usn_full_journal_replay"]),
+            "blockers": list(bounded_path.get("blockers") or []),
+        },
+        "cursor_pagination": {
+            "record_cursor": details.get("record_cursor", ""),
+            "next_record_cursor": details.get("next_record_cursor", ""),
+            "record_end_offset": details.get("record_end_offset", ""),
+            "safe_for_cursor_api": bool(cursor_profile.get("safe_for_cursor_api")),
+            "cursor_progress_validated": bool(validation_checks.get("record_cursor_progresses")),
+            "large_journal_pagination_validated": False,
+            "record_limit": USN_RECORD_SCAN_LIMIT,
+            "scan_limit_bytes": NATIVE_SCAN_LIMIT,
+            "blockers": list(cursor_profile.get("blockers") or []),
+        },
+        "replay_state": {
+            "decoded_components": dict(replay_profile.get("decoded_components") or {}),
+            "full_journal_replay_available": bool(NTFS_FILESYSTEM_CAPABILITIES["usn_full_journal_replay"]),
+            "complete_journal_ordering_validated": False,
+            "rename_delete_replay_validated": False,
+            "trusted_timeline_diff_status": trusted_ntfs_diff_status("usn", details),
+            "blockers": [
+                "usn-frn-path-cache-replay-required",
+                "usn-complete-journal-ordering-required",
+                "usn-large-journal-pagination-validation-required",
+                "usn-trusted-timeline-diff-required",
+            ],
+        },
+        "citation_refs": [
+            {
+                "kind": "usn-record-cursor",
+                "record_cursor": details.get("record_cursor", ""),
+                "next_record_cursor": details.get("next_record_cursor", ""),
+                "usn": details.get("usn", ""),
+            },
+            {
+                "kind": "usn-reason-flags",
+                "reason_flags": list(details.get("reason_flags") or []),
+                "reason_raw": details.get("reason_raw", 0),
+            },
+            {
+                "kind": "usn-frn-parent-reference",
+                "file_reference_number": str(details.get("record_number") or ""),
+                "parent_reference": str(details.get("parent_reference") or ""),
+            },
+            {
+                "kind": "usn-bounded-path-correlation",
+                "status": str(bounded_path.get("status") or ""),
+                "path_candidate": str(bounded_path.get("path_candidate") or ""),
+            },
+            {
+                "kind": "usn-replay-validation-state",
+                "full_journal_replay_available": bool(NTFS_FILESYSTEM_CAPABILITIES["usn_full_journal_replay"]),
+                "trusted_timeline_diff_status": trusted_ntfs_diff_status("usn", details),
+            },
+        ],
+        "reportability": {
+            "allowed_use": reportability["allowed_use"],
+            "decision": reportability["decision"],
+            "report_grade_ready": bool(report_grade.get("report_grade_ready")),
+            "commercial_grade_ready": False,
+            "full_timeline_replayed": False,
+            "blockers": reportability["blockers"],
+        },
+        "required_before_commercial_grade": [
+            "build a complete FRN path cache from full-volume MFT records",
+            "replay the complete USN journal in cursor/USN order",
+            "validate rename/delete state transitions against known-answer replay rows",
+            "prove cursor pagination determinism on multi-million-record journals",
+            "diff critical timeline facts against MFTECmd/UsnJrnl2Csv/TSK output",
+        ],
+    }
+    manifest_payload["manifest_sha256"] = ntfs_stable_sha256(manifest_payload)
+    return manifest_payload
+
+
+def usn_record_number_from_record(record: Mapping[str, object], decoded_key: str, raw_key: str) -> int | None:
+    decoded = record.get(decoded_key) if isinstance(record.get(decoded_key), Mapping) else {}
+    value = decoded.get("record_number") if isinstance(decoded, Mapping) else None
+    if value not in (None, ""):
+        return int(value)
+    raw_value = record.get(raw_key)
+    if raw_value in (None, ""):
+        return None
+    raw_int = int(raw_value)
+    return raw_int & 0x0000FFFFFFFFFFFF if raw_int > 0x0000FFFFFFFFFFFF else raw_int
+
+
+def usn_bounded_mft_path_correlation(
+    record: Mapping[str, object],
+    mft_path_cache: Mapping[int, Mapping[str, object]],
+) -> dict[str, object]:
+    frn = usn_record_number_from_record(record, "file_reference_number_decoded", "file_reference_number")
+    parent_frn = usn_record_number_from_record(record, "parent_file_reference_number_decoded", "parent_file_reference_number")
+    file_name = str(record.get("file_name") or "")
+    current = mft_path_cache.get(frn) if frn is not None else None
+    parent = mft_path_cache.get(parent_frn) if parent_frn is not None else None
+    path_candidate = ""
+    source = "none"
+    status = "no-mft-path-cache-attached" if not mft_path_cache else "no-matching-frn-in-bounded-mft-cache"
+    if isinstance(current, Mapping) and current.get("path"):
+        path_candidate = str(current.get("path") or "")
+        source = "file-reference-cache"
+        status = "matched-file-reference-cache"
+    elif isinstance(parent, Mapping) and parent.get("path") and file_name:
+        parent_path = str(parent.get("path") or "").rstrip("\\")
+        path_candidate = f"{parent_path}\\{file_name}" if parent_path else file_name
+        source = "parent-reference-cache-plus-usn-name"
+        status = "combined-parent-cache-and-usn-name"
+    elif isinstance(parent, Mapping) and parent.get("path"):
+        path_candidate = str(parent.get("path") or "")
+        source = "parent-reference-cache-only"
+        status = "partial-parent-cache-only"
+    return {
+        "profile_version": "usn-bounded-mft-path-correlation-v1",
+        "status": status,
+        "file_reference_number": frn if frn is not None else "",
+        "parent_file_reference_number": parent_frn if parent_frn is not None else "",
+        "file_name": file_name,
+        "path_candidate": path_candidate,
+        "path_source": source,
+        "file_reference_cache_hit": isinstance(current, Mapping),
+        "parent_reference_cache_hit": isinstance(parent, Mapping),
+        "cache_entry_count": len(mft_path_cache),
+        "complete_within_bounded_mft_cache": status in {
+            "matched-file-reference-cache",
+            "combined-parent-cache-and-usn-name",
+        },
+        "current_mft_path": dict(current or {}),
+        "parent_mft_path": dict(parent or {}),
+        "commercial_grade_ready": False,
+        "reportability": "bounded-mft-cache-usn-path-candidate",
+        "blockers": [
+            "usn-full-frn-path-cache-required",
+            "usn-complete-journal-ordering-required",
+            "usn-trusted-timeline-diff-required",
+        ],
+    }
+
+
+def usn_parent_name_path_candidate(
+    record: Mapping[str, object],
+    mft_path_cache: Mapping[int, Mapping[str, object]],
+) -> dict[str, object]:
+    parent_frn = usn_record_number_from_record(record, "parent_file_reference_number_decoded", "parent_file_reference_number")
+    parent = mft_path_cache.get(parent_frn) if parent_frn is not None else None
+    file_name = str(record.get("file_name") or "")
+    parent_path = str(parent.get("path") or "") if isinstance(parent, Mapping) else ""
+    path_candidate = ""
+    status = "no-parent-frn-path-cache-match"
+    if parent_path and file_name:
+        stripped_parent = parent_path.rstrip("\\")
+        path_candidate = f"{stripped_parent}\\{file_name}" if stripped_parent else file_name
+        status = "parent-cache-plus-usn-name"
+    elif parent_path:
+        path_candidate = parent_path
+        status = "parent-cache-only"
+    return {
+        "profile_version": "usn-parent-name-path-candidate-v1",
+        "status": status,
+        "parent_file_reference_number": parent_frn if parent_frn is not None else "",
+        "file_name": file_name,
+        "path_candidate": path_candidate,
+        "parent_mft_path": dict(parent or {}),
+        "cache_entry_count": len(mft_path_cache),
+        "commercial_grade_ready": False,
+        "reportability": "bounded-parent-cache-usn-name-path-candidate",
+        "blockers": [
+            "usn-full-frn-path-cache-required",
+            "usn-complete-journal-ordering-required",
+            "usn-trusted-timeline-diff-required",
+        ],
+    }
+
+
 def usn_record_evidence(record: Mapping[str, object]) -> dict[str, object]:
     validation_checks = record.get("validation_checks") if isinstance(record.get("validation_checks"), Mapping) else {}
     return {
@@ -858,8 +1533,12 @@ def usn_record_evidence(record: Mapping[str, object]) -> dict[str, object]:
     }
 
 
-def usn_replay_transition_profile(record: Mapping[str, object]) -> dict[str, object]:
+def usn_replay_transition_profile(
+    record: Mapping[str, object],
+    bounded_mft_path: Mapping[str, object] | None = None,
+) -> dict[str, object]:
     reason_flags = set(str(item) for item in record.get("reason_flags") or [])
+    bounded_path = bounded_mft_path if isinstance(bounded_mft_path, Mapping) else {}
     transition = "metadata-change"
     if "RENAME_OLD_NAME" in reason_flags:
         transition = "rename-old-name"
@@ -880,6 +1559,8 @@ def usn_replay_transition_profile(record: Mapping[str, object]) -> dict[str, obj
         "file_reference_number_decoded": dict(record.get("file_reference_number_decoded") or {}),
         "parent_file_reference_number_decoded": dict(record.get("parent_file_reference_number_decoded") or {}),
         "file_name": str(record.get("file_name") or ""),
+        "bounded_mft_path": dict(bounded_path),
+        "path_candidate": str(bounded_path.get("path_candidate") or ""),
         "path_cache_effect": (
             "remove-current-name-after-delete"
             if transition == "delete"
@@ -921,12 +1602,34 @@ def usn_cursor_pagination_profile(record: Mapping[str, object]) -> dict[str, obj
 def usn_replay_inventory_profile(
     records: Sequence[Mapping[str, object]],
     scan_metadata: Mapping[str, object],
+    mft_path_cache: Mapping[int, Mapping[str, object]] | None = None,
+    trusted_diff: Mapping[str, object] | None = None,
 ) -> dict[str, object]:
+    path_cache = mft_path_cache or {}
     transition_counts = count_values(
         usn_replay_transition_profile(record)["transition_class"] for record in records
     )
     rename_old = sum(1 for record in records if "RENAME_OLD_NAME" in set(record.get("reason_flags") or []))
     rename_new = sum(1 for record in records if "RENAME_NEW_NAME" in set(record.get("reason_flags") or []))
+    bounded_replay_preview = usn_bounded_mft_replay_preview(records, path_cache)
+    rename_pair_preview = usn_rename_pair_preview(records, path_cache)
+    delete_lifecycle_preview = usn_delete_lifecycle_preview(records, path_cache)
+    state_replay_preview = usn_bounded_state_replay_preview(records, path_cache)
+    path_cache_profile = mft_bounded_path_cache_profile(path_cache)
+    path_reliability_profile = usn_path_reliability_profile(
+        records=records,
+        bounded_replay_preview=bounded_replay_preview,
+        path_cache_profile=path_cache_profile,
+    )
+    state_validation_profile = usn_state_replay_validation_profile(
+        state_replay_preview=state_replay_preview,
+        trusted_diff=trusted_diff,
+        path_reliability_profile=path_reliability_profile,
+    )
+    timeline_review_candidates = usn_timeline_review_candidates(
+        rename_pair_preview=rename_pair_preview,
+        delete_lifecycle_preview=delete_lifecycle_preview,
+    )
     return {
         "profile_version": "usn-replay-inventory-v1",
         "native_record_count": len(records),
@@ -943,6 +1646,15 @@ def usn_replay_inventory_profile(
             "next_cursor_available": bool(scan_metadata.get("next_cursor_available")),
             "record_limit_reached": bool(scan_metadata.get("record_limit_reached")),
         },
+        "bounded_mft_replay_preview": bounded_replay_preview,
+        "mft_bounded_path_cache_profile": path_cache_profile,
+        "usn_path_reliability_profile": path_reliability_profile,
+        "usn_state_replay_validation_profile": state_validation_profile,
+        "rename_pair_preview": rename_pair_preview,
+        "delete_lifecycle_preview": delete_lifecycle_preview,
+        "bounded_state_replay_preview": state_replay_preview,
+        "timeline_review_candidates": timeline_review_candidates,
+        "timeline_review_candidate_count": len(timeline_review_candidates),
         "full_frn_path_cache_replay_done": False,
         "commercial_grade_ready": False,
         "blockers": [
@@ -950,6 +1662,579 @@ def usn_replay_inventory_profile(
             "usn-complete-journal-ordering-required",
             "usn-large-journal-pagination-proof-required",
         ],
+    }
+
+
+def usn_bounded_state_replay_preview(
+    records: Sequence[Mapping[str, object]],
+    mft_path_cache: Mapping[int, Mapping[str, object]] | None = None,
+) -> dict[str, object]:
+    state: dict[int, str] = {
+        int(record_number): str(entry.get("path") or "")
+        for record_number, entry in (mft_path_cache or {}).items()
+        if isinstance(record_number, int) and isinstance(entry, Mapping) and entry.get("path")
+    }
+    pending_renames: dict[int, dict[str, object]] = {}
+    transitions: list[dict[str, object]] = []
+    sorted_records = sorted(records, key=usn_replay_sort_key)
+
+    for record in sorted_records:
+        frn = usn_record_number_from_record(record, "file_reference_number_decoded", "file_reference_number")
+        if frn is None:
+            continue
+        flags = set(str(item) for item in record.get("reason_flags") or [])
+        parent_name_path = usn_parent_name_path_candidate(record, mft_path_cache or {})
+        event_path = str(parent_name_path.get("path_candidate") or state.get(frn) or "")
+        base = {
+            "file_reference_number": frn,
+            "file_name": str(record.get("file_name") or ""),
+            "timestamp": str(record.get("timestamp") or ""),
+            "usn": record.get("usn", ""),
+            "record_cursor": record.get("record_cursor", record.get("record_offset", "")),
+            "reason_flags": list(record.get("reason_flags") or []),
+            "reportability": "bounded-usn-state-replay-transition",
+            "validation_required": True,
+            "blockers": [
+                "usn-full-frn-path-cache-required",
+                "usn-complete-journal-ordering-required",
+                "usn-trusted-state-replay-diff-required",
+            ],
+        }
+        if "FILE_CREATE" in flags:
+            previous_path = state.get(frn, "")
+            if event_path:
+                state[frn] = event_path
+            transitions.append(
+                {
+                    **base,
+                    "transition": "create",
+                    "previous_path": previous_path,
+                    "new_path": event_path,
+                    "path_candidate": event_path,
+                    "timeline_type": "usn-state-create",
+                    "event_label": "USN state create",
+                    "state_effect": "set-current-path",
+                    "confidence": "high" if event_path else "medium",
+                }
+            )
+        if "RENAME_OLD_NAME" in flags:
+            previous_path = event_path or state.get(frn, "")
+            pending_renames[frn] = {**base, "old_path": previous_path}
+            transitions.append(
+                {
+                    **base,
+                    "transition": "rename-old-name",
+                    "previous_path": previous_path,
+                    "new_path": "",
+                    "path_candidate": previous_path,
+                    "timeline_type": "usn-state-rename-old-name",
+                    "event_label": "USN state rename old name",
+                    "state_effect": "pending-rename-old-name",
+                    "confidence": "high" if previous_path else "medium",
+                }
+            )
+        if "RENAME_NEW_NAME" in flags:
+            pending = pending_renames.pop(frn, {})
+            previous_path = str(pending.get("old_path") or state.get(frn) or "")
+            new_path = event_path
+            if new_path:
+                state[frn] = new_path
+            transitions.append(
+                {
+                    **base,
+                    "transition": "rename-new-name",
+                    "previous_path": previous_path,
+                    "new_path": new_path,
+                    "path_candidate": new_path,
+                    "timeline_type": "usn-state-rename-new-name",
+                    "event_label": "USN state rename new name",
+                    "state_effect": "update-current-path",
+                    "paired_old_record_cursor": pending.get("record_cursor", ""),
+                    "confidence": "high" if previous_path and new_path else "medium",
+                }
+            )
+        if "FILE_DELETE" in flags:
+            previous_path = state.get(frn) or event_path
+            if frn in state:
+                del state[frn]
+            transitions.append(
+                {
+                    **base,
+                    "transition": "delete",
+                    "previous_path": previous_path,
+                    "new_path": "",
+                    "path_candidate": previous_path,
+                    "timeline_type": "usn-state-delete",
+                    "event_label": "USN state delete",
+                    "state_effect": "remove-current-path",
+                    "confidence": "high" if previous_path else "medium",
+                }
+            )
+
+    return {
+        "profile_version": "usn-bounded-state-replay-preview-v1",
+        "input_record_count": len(records),
+        "sorted_record_count": len(sorted_records),
+        "initial_path_state_count": len(mft_path_cache or {}),
+        "final_path_state_count": len(state),
+        "transition_count": len(transitions),
+        "transition_counts": count_values(str(item.get("transition") or "") for item in transitions),
+        "pending_rename_count": len(pending_renames),
+        "transitions": transitions[:50],
+        "sample_limit": 50,
+        "complete_journal_replay": False,
+        "commercial_grade_ready": False,
+        "reportability": "bounded-usn-state-replay-preview",
+        "blockers": [
+            "usn-full-frn-path-cache-required",
+            "usn-complete-journal-ordering-required",
+            "usn-large-journal-pagination-proof-required",
+            "usn-trusted-state-replay-diff-required",
+        ],
+    }
+
+
+def usn_replay_sort_key(record: Mapping[str, object]) -> tuple[int, int, str]:
+    try:
+        usn = int(record.get("usn") or 0)
+    except (TypeError, ValueError):
+        usn = 0
+    try:
+        cursor = int(record.get("record_cursor", record.get("record_offset", 0)) or 0)
+    except (TypeError, ValueError):
+        cursor = 0
+    return (usn, cursor, str(record.get("file_name") or ""))
+
+
+def usn_timeline_review_candidates(
+    *,
+    rename_pair_preview: Mapping[str, object],
+    delete_lifecycle_preview: Mapping[str, object],
+) -> list[dict[str, object]]:
+    candidates: list[dict[str, object]] = []
+    for index, pair in enumerate(rename_pair_preview.get("pairs") or []):
+        if not isinstance(pair, Mapping):
+            continue
+        if pair.get("old_timestamp"):
+            candidates.append(
+                usn_timeline_candidate(
+                    event_type="usn-rename-old-name",
+                    timestamp=str(pair.get("old_timestamp") or ""),
+                    label=f"USN rename old name: {pair.get('old_name') or ''}",
+                    source=pair,
+                    source_index=index,
+                    cursor_key="old_record_cursor",
+                    path_key="old_path_candidate",
+                    name_key="old_name",
+                )
+            )
+        if pair.get("new_timestamp"):
+            candidates.append(
+                usn_timeline_candidate(
+                    event_type="usn-rename-new-name",
+                    timestamp=str(pair.get("new_timestamp") or ""),
+                    label=f"USN rename new name: {pair.get('new_name') or ''}",
+                    source=pair,
+                    source_index=index,
+                    cursor_key="new_record_cursor",
+                    path_key="new_path_candidate",
+                    name_key="new_name",
+                )
+            )
+    for index, item in enumerate(delete_lifecycle_preview.get("candidates") or []):
+        if not isinstance(item, Mapping):
+            continue
+        if item.get("create_timestamp"):
+            candidates.append(
+                usn_timeline_candidate(
+                    event_type="usn-file-create",
+                    timestamp=str(item.get("create_timestamp") or ""),
+                    label=f"USN file create: {item.get('file_name') or ''}",
+                    source=item,
+                    source_index=index,
+                    cursor_key="create_record_cursor",
+                    path_key="create_path_candidate",
+                    name_key="file_name",
+                )
+            )
+        if item.get("delete_timestamp"):
+            candidates.append(
+                usn_timeline_candidate(
+                    event_type="usn-file-delete",
+                    timestamp=str(item.get("delete_timestamp") or ""),
+                    label=f"USN file delete: {item.get('file_name') or ''}",
+                    source=item,
+                    source_index=index,
+                    cursor_key="delete_record_cursor",
+                    path_key="delete_path_candidate",
+                    name_key="file_name",
+                )
+            )
+    return candidates[:50]
+
+
+def usn_timeline_candidate(
+    *,
+    event_type: str,
+    timestamp: str,
+    label: str,
+    source: Mapping[str, object],
+    source_index: int,
+    cursor_key: str,
+    path_key: str,
+    name_key: str,
+) -> dict[str, object]:
+    return {
+        "timestamp": timestamp,
+        "timeline_type": event_type,
+        "event_label": label.strip(),
+        "file_name": str(source.get(name_key) or ""),
+        "path_candidate": str(source.get(path_key) or ""),
+        "record_cursor": source.get(cursor_key, ""),
+        "file_reference_number": source.get("file_reference_number", ""),
+        "confidence": str(source.get("confidence") or ""),
+        "source_index": source_index,
+        "reportability": "bounded-usn-timeline-review-candidate",
+        "validation_required": True,
+        "blockers": [
+            "usn-complete-journal-ordering-required",
+            "usn-trusted-timeline-diff-required",
+        ],
+    }
+
+
+def usn_delete_lifecycle_preview(
+    records: Sequence[Mapping[str, object]],
+    mft_path_cache: Mapping[int, Mapping[str, object]] | None = None,
+) -> dict[str, object]:
+    create_records: list[Mapping[str, object]] = []
+    delete_records: list[Mapping[str, object]] = []
+    for record in records:
+        flags = set(str(item) for item in record.get("reason_flags") or [])
+        if "FILE_CREATE" in flags:
+            create_records.append(record)
+        if "FILE_DELETE" in flags:
+            delete_records.append(record)
+
+    create_by_frn: dict[int, list[Mapping[str, object]]] = {}
+    for record in create_records:
+        frn = usn_record_number_from_record(record, "file_reference_number_decoded", "file_reference_number")
+        if frn is None:
+            continue
+        create_by_frn.setdefault(frn, []).append(record)
+
+    candidates: list[dict[str, object]] = []
+    unmatched_delete_count = 0
+    for delete_record in delete_records:
+        frn = usn_record_number_from_record(delete_record, "file_reference_number_decoded", "file_reference_number")
+        delete_usn = int(delete_record.get("usn") or 0)
+        matching_create: Mapping[str, object] | None = None
+        if frn is not None:
+            for create_record in reversed(create_by_frn.get(frn, [])):
+                create_usn = int(create_record.get("usn") or 0)
+                if not delete_usn or not create_usn or create_usn <= delete_usn:
+                    matching_create = create_record
+                    break
+        if matching_create is None:
+            unmatched_delete_count += 1
+        delete_correlation = usn_bounded_mft_path_correlation(delete_record, mft_path_cache or {})
+        create_correlation = usn_bounded_mft_path_correlation(matching_create, mft_path_cache or {}) if matching_create else {}
+        file_name = str(delete_record.get("file_name") or (matching_create.get("file_name") if matching_create else "") or "")
+        candidates.append(
+            {
+                "lifecycle_status": "create-delete-paired-within-bounded-window" if matching_create else "delete-without-prior-create-in-window",
+                "confidence": "high" if matching_create and frn is not None else "medium" if frn is not None else "low",
+                "file_reference_number": frn if frn is not None else "",
+                "file_name": file_name,
+                "create_usn": matching_create.get("usn", "") if matching_create else "",
+                "delete_usn": delete_record.get("usn", ""),
+                "create_record_cursor": matching_create.get("record_cursor", matching_create.get("record_offset", "")) if matching_create else "",
+                "delete_record_cursor": delete_record.get("record_cursor", delete_record.get("record_offset", "")),
+                "create_timestamp": str(matching_create.get("timestamp") or "") if matching_create else "",
+                "delete_timestamp": str(delete_record.get("timestamp") or ""),
+                "create_path_candidate": str(create_correlation.get("path_candidate") or ""),
+                "delete_path_candidate": str(delete_correlation.get("path_candidate") or ""),
+                "delete_reason_flags": list(delete_record.get("reason_flags") or []),
+                "reportability": "bounded-delete-lifecycle-candidate",
+            }
+        )
+
+    return {
+        "profile_version": "usn-delete-lifecycle-preview-v1",
+        "create_count": len(create_records),
+        "delete_count": len(delete_records),
+        "candidate_lifecycle_count": len(candidates),
+        "paired_create_delete_count": sum(1 for item in candidates if item["lifecycle_status"] == "create-delete-paired-within-bounded-window"),
+        "delete_without_prior_create_count": unmatched_delete_count,
+        "candidates": candidates[:25],
+        "sample_limit": 25,
+        "complete_journal_replay": False,
+        "commercial_grade_ready": False,
+        "blockers": [
+            "usn-complete-journal-ordering-required",
+            "usn-delete-state-machine-validation-required",
+            "usn-trusted-delete-diff-required",
+        ],
+    }
+
+
+def usn_rename_pair_preview(
+    records: Sequence[Mapping[str, object]],
+    mft_path_cache: Mapping[int, Mapping[str, object]] | None = None,
+) -> dict[str, object]:
+    old_records: list[Mapping[str, object]] = []
+    new_records: list[Mapping[str, object]] = []
+    for record in records:
+        flags = set(str(item) for item in record.get("reason_flags") or [])
+        if "RENAME_OLD_NAME" in flags:
+            old_records.append(record)
+        if "RENAME_NEW_NAME" in flags:
+            new_records.append(record)
+
+    pairs: list[dict[str, object]] = []
+    unmatched_old: list[Mapping[str, object]] = []
+    used_new_indexes: set[int] = set()
+    for old_record in old_records:
+        old_frn = usn_record_number_from_record(old_record, "file_reference_number_decoded", "file_reference_number")
+        old_parent = usn_record_number_from_record(old_record, "parent_file_reference_number_decoded", "parent_file_reference_number")
+        old_usn = int(old_record.get("usn") or 0)
+        best_index = -1
+        best_new: Mapping[str, object] | None = None
+        for index, new_record in enumerate(new_records):
+            if index in used_new_indexes:
+                continue
+            new_frn = usn_record_number_from_record(new_record, "file_reference_number_decoded", "file_reference_number")
+            if old_frn is not None and new_frn is not None and old_frn != new_frn:
+                continue
+            new_usn = int(new_record.get("usn") or 0)
+            if old_usn and new_usn and new_usn < old_usn:
+                continue
+            best_index = index
+            best_new = new_record
+            break
+        if best_new is None:
+            unmatched_old.append(old_record)
+            continue
+        used_new_indexes.add(best_index)
+        new_parent = usn_record_number_from_record(best_new, "parent_file_reference_number_decoded", "parent_file_reference_number")
+        old_correlation = usn_bounded_mft_path_correlation(old_record, mft_path_cache or {})
+        new_correlation = usn_bounded_mft_path_correlation(best_new, mft_path_cache or {})
+        old_name_path = usn_parent_name_path_candidate(old_record, mft_path_cache or {})
+        new_name_path = usn_parent_name_path_candidate(best_new, mft_path_cache or {})
+        old_name = str(old_record.get("file_name") or "")
+        new_name = str(best_new.get("file_name") or "")
+        same_parent = old_parent not in (None, "") and new_parent not in (None, "") and old_parent == new_parent
+        confidence = "high" if same_parent and old_frn is not None else "medium" if old_frn is not None else "low"
+        pairs.append(
+            {
+                "pair_status": "candidate-paired-within-bounded-window",
+                "confidence": confidence,
+                "file_reference_number": old_frn if old_frn is not None else "",
+                "old_parent_file_reference_number": old_parent if old_parent is not None else "",
+                "new_parent_file_reference_number": new_parent if new_parent is not None else "",
+                "same_parent_reference": same_parent,
+                "old_name": old_name,
+                "new_name": new_name,
+                "old_path_candidate": str(old_name_path.get("path_candidate") or old_correlation.get("path_candidate") or ""),
+                "new_path_candidate": str(new_name_path.get("path_candidate") or new_correlation.get("path_candidate") or ""),
+                "old_path_candidate_source": str(old_name_path.get("status") or old_correlation.get("status") or ""),
+                "new_path_candidate_source": str(new_name_path.get("status") or new_correlation.get("status") or ""),
+                "old_frn_path_correlation": dict(old_correlation),
+                "new_frn_path_correlation": dict(new_correlation),
+                "old_usn": old_record.get("usn", ""),
+                "new_usn": best_new.get("usn", ""),
+                "old_record_cursor": old_record.get("record_cursor", old_record.get("record_offset", "")),
+                "new_record_cursor": best_new.get("record_cursor", best_new.get("record_offset", "")),
+                "old_timestamp": str(old_record.get("timestamp") or ""),
+                "new_timestamp": str(best_new.get("timestamp") or ""),
+                "reportability": "bounded-rename-pair-candidate",
+            }
+        )
+
+    unmatched_new = [
+        record for index, record in enumerate(new_records) if index not in used_new_indexes
+    ]
+    return {
+        "profile_version": "usn-rename-pair-preview-v1",
+        "rename_old_count": len(old_records),
+        "rename_new_count": len(new_records),
+        "candidate_pair_count": len(pairs),
+        "unmatched_old_count": len(unmatched_old),
+        "unmatched_new_count": len(unmatched_new),
+        "pair_balance": "balanced-in-bounded-window" if len(unmatched_old) == 0 and len(unmatched_new) == 0 else "requires-full-journal-context",
+        "pairs": pairs[:25],
+        "sample_limit": 25,
+        "complete_journal_replay": False,
+        "commercial_grade_ready": False,
+        "blockers": [
+            "usn-complete-journal-ordering-required",
+            "usn-rename-state-machine-validation-required",
+            "usn-trusted-rename-diff-required",
+        ],
+    }
+
+
+def usn_bounded_mft_replay_preview(
+    records: Sequence[Mapping[str, object]],
+    mft_path_cache: Mapping[int, Mapping[str, object]],
+) -> dict[str, object]:
+    correlations = [usn_bounded_mft_path_correlation(record, mft_path_cache) for record in records]
+    matched = [item for item in correlations if item.get("path_candidate")]
+    samples: list[dict[str, object]] = []
+    for record, correlation in zip(records, correlations):
+        if not correlation.get("path_candidate"):
+            continue
+        transition = usn_replay_transition_profile(record, correlation)
+        samples.append(
+            {
+                "usn": record.get("usn", ""),
+                "record_cursor": record.get("record_cursor", record.get("record_offset", "")),
+                "timestamp": str(record.get("timestamp") or ""),
+                "transition_class": transition["transition_class"],
+                "reason_flags": list(record.get("reason_flags") or []),
+                "file_reference_number": correlation.get("file_reference_number", ""),
+                "parent_file_reference_number": correlation.get("parent_file_reference_number", ""),
+                "file_name": str(record.get("file_name") or ""),
+                "path_candidate": str(correlation.get("path_candidate") or ""),
+                "path_source": str(correlation.get("path_source") or ""),
+                "correlation_status": str(correlation.get("status") or ""),
+            }
+        )
+    return {
+        "profile_version": "usn-bounded-mft-replay-preview-v1",
+        "cache_entry_count": len(mft_path_cache),
+        "record_count": len(records),
+        "correlated_record_count": len(matched),
+        "uncorrelated_record_count": max(0, len(records) - len(matched)),
+        "file_reference_cache_hit_count": sum(1 for item in correlations if item.get("file_reference_cache_hit")),
+        "parent_reference_cache_hit_count": sum(1 for item in correlations if item.get("parent_reference_cache_hit")),
+        "correlation_status_counts": count_values(str(item.get("status") or "") for item in correlations),
+        "correlated_transition_counts": count_values(str(item.get("transition_class") or "") for item in samples),
+        "path_samples": samples[:25],
+        "sample_limit": 25,
+        "complete_journal_replay": False,
+        "reportability": "bounded-mft-cache-usn-review-preview",
+        "commercial_grade_ready": False,
+        "blockers": [
+            "usn-full-frn-path-cache-required",
+            "usn-complete-journal-ordering-required",
+            "usn-rename-delete-state-machine-validation-required",
+            "usn-large-journal-pagination-proof-required",
+        ],
+    }
+
+
+def usn_path_reliability_profile(
+    *,
+    records: Sequence[Mapping[str, object]],
+    bounded_replay_preview: Mapping[str, object],
+    path_cache_profile: Mapping[str, object],
+) -> dict[str, object]:
+    record_count = len(records)
+    correlated_count = int(bounded_replay_preview.get("correlated_record_count") or 0)
+    cache_entry_count = int(path_cache_profile.get("cache_entry_count") or 0)
+    cache_complete_ratio = float(path_cache_profile.get("complete_path_ratio") or 0)
+    warning_count = int(path_cache_profile.get("warning_count") or 0)
+    correlation_ratio = round(correlated_count / record_count, 6) if record_count else 0
+    if not record_count:
+        reliability = "no-usn-records"
+    elif correlation_ratio >= 0.8 and cache_complete_ratio >= 0.8 and warning_count == 0:
+        reliability = "high-bounded-review-confidence"
+    elif correlation_ratio >= 0.5 and cache_complete_ratio >= 0.5:
+        reliability = "medium-bounded-review-confidence"
+    elif correlated_count > 0:
+        reliability = "low-bounded-review-confidence"
+    else:
+        reliability = "no-path-correlation"
+    return {
+        "profile_version": "usn-path-reliability-profile-v1",
+        "record_count": record_count,
+        "correlated_record_count": correlated_count,
+        "correlation_ratio": correlation_ratio,
+        "mft_cache_entry_count": cache_entry_count,
+        "mft_cache_complete_path_ratio": cache_complete_ratio,
+        "mft_cache_warning_count": warning_count,
+        "reliability": reliability,
+        "review_priority": (
+            "review-correlated-paths-first"
+            if reliability in {"high-bounded-review-confidence", "medium-bounded-review-confidence"}
+            else "treat-paths-as-low-confidence-pivots"
+            if correlated_count > 0
+            else "review-usn-records-without-path-assumption"
+        ),
+        "safe_report_wording": (
+            "Bounded MFT cache supplied strong review pivots for most scanned USN records; validate with full-volume FRN cache and trusted parser diff before report-grade use."
+            if reliability == "high-bounded-review-confidence"
+            else "Bounded MFT cache supplied partial review pivots; do not report paths as complete without full-volume FRN cache validation."
+            if correlated_count > 0
+            else "No reliable bounded MFT path correlation was available for this USN scan window."
+        ),
+        "commercial_grade_ready": False,
+        "reportability": "bounded-usn-path-reliability-assessment",
+        "blockers": [
+            "usn-full-frn-path-cache-required",
+            "mft-trusted-path-diff-required",
+            "usn-trusted-state-replay-diff-required",
+        ],
+    }
+
+
+def usn_state_replay_validation_profile(
+    *,
+    state_replay_preview: Mapping[str, object],
+    trusted_diff: Mapping[str, object] | None = None,
+    state_replay_diff: Mapping[str, object] | None = None,
+    path_reliability_profile: Mapping[str, object] | None = None,
+) -> dict[str, object]:
+    diff = trusted_diff if isinstance(trusted_diff, Mapping) else {}
+    replay_diff = state_replay_diff if isinstance(state_replay_diff, Mapping) else {}
+    reliability = path_reliability_profile if isinstance(path_reliability_profile, Mapping) else {}
+    transition_count = int(state_replay_preview.get("transition_count") or 0)
+    record_level_passed = diff.get("status") == "pass"
+    has_transitions = transition_count > 0
+    reliability_label = str(reliability.get("reliability") or "")
+    replay_validated = replay_diff.get("status") == "pass"
+    blockers = []
+    if not record_level_passed:
+        blockers.append("usn-trusted-timeline-diff-required")
+    if has_transitions and not replay_validated:
+        blockers.append("usn-trusted-state-replay-diff-required")
+    elif not has_transitions:
+        blockers.append("usn-state-replay-transition-corpus-required")
+    if reliability_label in {"low-bounded-review-confidence", "no-path-correlation", ""}:
+        blockers.append("usn-path-reliability-validation-required")
+    return {
+        "profile_version": "usn-state-replay-validation-profile-v1",
+        "record_level_trusted_diff_passed": record_level_passed,
+        "state_replay_diff_passed": replay_validated,
+        "trusted_tool": str(diff.get("trusted_tool") or ""),
+        "trusted_tool_recognized": bool(diff.get("trusted_tool_recognized")),
+        "trusted_diff_status": str(diff.get("status") or "not-attached"),
+        "trusted_diff_matched_count": int(diff.get("matched_count") or 0),
+        "state_replay_diff_status": str(replay_diff.get("status") or "not-attached"),
+        "state_replay_diff_matched_count": int(replay_diff.get("matched_count") or 0),
+        "state_replay_trusted_tool": str(replay_diff.get("trusted_tool") or ""),
+        "transition_count": transition_count,
+        "path_reliability": reliability_label,
+        "validation_status": (
+            "record-and-state-replay-diffs-passed"
+            if record_level_passed and replay_validated
+            else
+            "record-level-diff-passed-state-replay-validation-required"
+            if record_level_passed and has_transitions
+            else "trusted-diff-and-state-replay-validation-required"
+        ),
+        "commercial_grade_ready": record_level_passed and replay_validated and reliability_label not in {"low-bounded-review-confidence", "no-path-correlation", ""},
+        "reportability": "usn-state-replay-validation-gate",
+        "blockers": blockers,
+        "safe_report_wording": (
+            "USN record-level and state replay diffs passed against trusted validation rows; still preserve source hashes and full-corpus scope limits in reports."
+            if record_level_passed and replay_validated
+            else
+            "USN records matched a trusted parser export, but the derived state replay remains a bounded review aid until a state-machine replay diff is attached."
+            if record_level_passed
+            else "USN state replay has not been validated against a trusted parser export or state-machine replay corpus."
+        ),
     }
 
 
@@ -1035,6 +2320,277 @@ def ntfs_report_grade_assessment(
         "commercial_gap_ids": gap_ids,
         "next_validation_step": "Validate NTFS timelines and paths with a full-volume parser, attribute-list resolution, and known-answer fixtures before report-grade use.",
     }
+
+
+def ntfs_report_citation_manifest(family: str, details: Mapping[str, object]) -> dict[str, object]:
+    matrix = details.get("ntfs_validation_matrix") if isinstance(details.get("ntfs_validation_matrix"), list) else []
+    report_grade = (
+        details.get("ntfs_report_grade_assessment")
+        if isinstance(details.get("ntfs_report_grade_assessment"), Mapping)
+        else {}
+    )
+    hashes = details.get("source_hashes") if isinstance(details.get("source_hashes"), Mapping) else {}
+    artifact_type = "mft-record" if family == "mft" else "usn-record"
+    row_identity = ntfs_row_identity(family, details)
+    citation_refs: list[dict[str, object]] = [
+        {
+            "kind": "ntfs-source-file",
+            "source_path": str(details.get("source_path") or ""),
+            "source_sha256": str(hashes.get("sha256") or ""),
+            "source_format": str(details.get("source_format") or ""),
+            "viewer_locator": {
+                "viewer": "ntfs-source",
+                "artifact_family": family,
+                "source_path": str(details.get("source_path") or ""),
+            },
+        }
+    ]
+    if family == "mft":
+        citation_refs.extend(ntfs_mft_citation_refs(details))
+    else:
+        citation_refs.extend(ntfs_usn_citation_refs(details))
+
+    validation_passed = [
+        str(item.get("id"))
+        for item in matrix
+        if isinstance(item, Mapping) and bool(item.get("passed"))
+    ]
+    validation_failed = [
+        str(item.get("id"))
+        for item in matrix
+        if isinstance(item, Mapping) and not bool(item.get("passed"))
+    ]
+    reportability = ntfs_reportability_decision(family, report_grade, details)
+    manifest_payload = {
+        "manifest_version": "ntfs-report-citation-manifest-v1",
+        "parser_version": PARSER_VERSION,
+        "artifact_family": family,
+        "artifact_type": artifact_type,
+        "source_path": str(details.get("source_path") or ""),
+        "source_sha256": str(hashes.get("sha256") or ""),
+        "source_index": details.get("source_index", ""),
+        "row_identity": row_identity,
+        "row_identity_hash": ntfs_stable_sha256(row_identity),
+        "citation_refs": citation_refs,
+        "citation_ref_count": len(citation_refs),
+        "validation_summary": {
+            "passed_ids": validation_passed,
+            "failed_ids": validation_failed,
+            "validation_required": bool(details.get("validation_required", True)),
+            "validation_status": str(details.get("validation_status") or ""),
+        },
+        "reportability": {
+            "allowed_use": reportability["allowed_use"],
+            "decision": reportability["decision"],
+            "report_grade_ready": bool(report_grade.get("report_grade_ready")),
+            "commercial_grade_ready": False,
+            "blockers": reportability["blockers"],
+        },
+        "viewer_entrypoints": ntfs_viewer_entrypoints(family, details),
+    }
+    manifest_payload["manifest_sha256"] = ntfs_stable_sha256(manifest_payload)
+    return manifest_payload
+
+
+def ntfs_row_identity(family: str, details: Mapping[str, object]) -> dict[str, object]:
+    if family == "mft":
+        return {
+            "record_number": str(details.get("record_number") or ""),
+            "record_offset": details.get("record_offset", ""),
+            "sequence_number": details.get("sequence_number", ""),
+            "parent_reference": str(details.get("parent_reference") or ""),
+            "file_path": str(details.get("file_path") or ""),
+        }
+    return {
+        "usn": details.get("usn", ""),
+        "record_cursor": details.get("record_cursor", ""),
+        "next_record_cursor": details.get("next_record_cursor", ""),
+        "record_length": details.get("record_length", ""),
+        "file_reference_number": str(details.get("record_number") or ""),
+        "parent_reference": str(details.get("parent_reference") or ""),
+        "file_path": str(details.get("file_path") or ""),
+    }
+
+
+def ntfs_mft_citation_refs(details: Mapping[str, object]) -> list[dict[str, object]]:
+    refs: list[dict[str, object]] = [
+        {
+            "kind": "mft-record-offset",
+            "record_number": str(details.get("record_number") or ""),
+            "record_offset": details.get("record_offset", ""),
+            "sequence_number": details.get("sequence_number", ""),
+            "viewer_locator": {
+                "viewer": "mft-record-offset",
+                "record_number": str(details.get("record_number") or ""),
+                "byte_offset": details.get("record_offset", ""),
+            },
+        }
+    ]
+    file_name_entries = [item for item in details.get("file_name_entries") or [] if isinstance(item, Mapping)]
+    if details.get("file_path") or file_name_entries:
+        refs.append(
+            {
+                "kind": "mft-file-name-attribute",
+                "file_path": str(details.get("file_path") or ""),
+                "parent_reference": str(details.get("parent_reference") or ""),
+                "file_name_entry_count": len(file_name_entries),
+                "path_hash": ntfs_stable_sha256(
+                    {
+                        "file_path": str(details.get("file_path") or ""),
+                        "file_name_entries": file_name_entries[:5],
+                    }
+                ),
+                "viewer_locator": {
+                    "viewer": "mft-file-name",
+                    "record_number": str(details.get("record_number") or ""),
+                    "attribute": "$FILE_NAME",
+                },
+            }
+        )
+    data_attributes = [item for item in details.get("data_attributes") or [] if isinstance(item, Mapping)]
+    if data_attributes:
+        first_data = data_attributes[0]
+        refs.append(
+            {
+                "kind": "mft-data-attribute",
+                "data_attribute_count": len(data_attributes),
+                "resident": bool(first_data.get("resident")),
+                "runlist_decode_status": str(first_data.get("runlist_decode_status") or ""),
+                "resident_data_hashes": first_data.get("resident_data_hashes", {}),
+                "viewer_locator": {
+                    "viewer": "mft-data-attribute",
+                    "record_number": str(details.get("record_number") or ""),
+                    "attribute": "$DATA",
+                },
+            }
+        )
+    attribute_list_entries = [item for item in details.get("attribute_list_entries") or [] if isinstance(item, Mapping)]
+    if attribute_list_entries:
+        refs.append(
+            {
+                "kind": "mft-attribute-list",
+                "attribute_list_entry_count": len(attribute_list_entries),
+                "extension_resolution_status": "detected-not-resolved",
+                "viewer_locator": {
+                    "viewer": "mft-attribute-list",
+                    "record_number": str(details.get("record_number") or ""),
+                    "attribute": "$ATTRIBUTE_LIST",
+                },
+            }
+        )
+    return refs
+
+
+def ntfs_usn_citation_refs(details: Mapping[str, object]) -> list[dict[str, object]]:
+    refs: list[dict[str, object]] = [
+        {
+            "kind": "usn-record-cursor",
+            "usn": details.get("usn", ""),
+            "record_cursor": details.get("record_cursor", ""),
+            "next_record_cursor": details.get("next_record_cursor", ""),
+            "record_length": details.get("record_length", ""),
+            "viewer_locator": {
+                "viewer": "usn-record-cursor",
+                "byte_offset": details.get("record_cursor", ""),
+                "usn": details.get("usn", ""),
+            },
+        }
+    ]
+    if details.get("reason_flags"):
+        refs.append(
+            {
+                "kind": "usn-reason-flags",
+                "reason_flags": list(details.get("reason_flags") or []),
+                "reason_raw": details.get("reason_raw", 0),
+                "viewer_locator": {
+                    "viewer": "usn-reason",
+                    "byte_offset": details.get("record_cursor", ""),
+                },
+            }
+        )
+    if details.get("rename_hint") or details.get("deleted_hint"):
+        refs.append(
+            {
+                "kind": "usn-rename-delete-timeline-hint",
+                "rename_hint": str(details.get("rename_hint") or ""),
+                "deleted_hint": bool(details.get("deleted_hint")),
+                "file_reference_number": str(details.get("record_number") or ""),
+                "parent_reference": str(details.get("parent_reference") or ""),
+                "viewer_locator": {
+                    "viewer": "usn-transition",
+                    "byte_offset": details.get("record_cursor", ""),
+                    "timestamp": str(details.get("timestamp") or ""),
+                },
+            }
+        )
+    bounded_path = details.get("usn_bounded_mft_path") if isinstance(details.get("usn_bounded_mft_path"), Mapping) else {}
+    if bounded_path.get("path_candidate"):
+        refs.append(
+            {
+                "kind": "usn-bounded-mft-path-candidate",
+                "path_candidate": str(bounded_path.get("path_candidate") or ""),
+                "path_source": str(bounded_path.get("path_source") or ""),
+                "file_reference_number": bounded_path.get("file_reference_number", ""),
+                "parent_file_reference_number": bounded_path.get("parent_file_reference_number", ""),
+                "viewer_locator": {
+                    "viewer": "usn-mft-path-correlation",
+                    "byte_offset": details.get("record_cursor", ""),
+                    "usn": details.get("usn", ""),
+                },
+            }
+        )
+    raw = details.get("raw") if isinstance(details.get("raw"), Mapping) else {}
+    v4_extents = list(raw.get("v4_extents") or [])
+    if v4_extents:
+        refs.append(
+            {
+                "kind": "usn-v4-extent-preview",
+                "v4_extent_count": len(v4_extents),
+                "v4_extents_preview": v4_extents[:USN_V4_EXTENT_PREVIEW_LIMIT],
+                "viewer_locator": {
+                    "viewer": "usn-v4-extents",
+                    "byte_offset": details.get("record_cursor", ""),
+                },
+            }
+        )
+    return refs
+
+
+def ntfs_viewer_entrypoints(family: str, details: Mapping[str, object]) -> list[dict[str, object]]:
+    if family == "mft":
+        return [
+            {
+                "label": "Open raw MFT record",
+                "viewer": "hex",
+                "source_path": str(details.get("source_path") or ""),
+                "byte_offset": details.get("record_offset", ""),
+            },
+            {
+                "label": "Inspect decoded MFT attributes",
+                "viewer": "mft-attributes",
+                "record_number": str(details.get("record_number") or ""),
+            },
+        ]
+    return [
+        {
+            "label": "Open raw USN record",
+            "viewer": "hex",
+            "source_path": str(details.get("source_path") or ""),
+            "byte_offset": details.get("record_cursor", ""),
+        },
+        {
+            "label": "Inspect USN timeline transition",
+            "viewer": "usn-transition",
+            "usn": details.get("usn", ""),
+            "file_reference_number": str(details.get("record_number") or ""),
+        },
+    ]
+
+
+def ntfs_stable_sha256(value: object) -> str:
+    return hashlib.sha256(
+        json.dumps(value, ensure_ascii=False, sort_keys=True, default=str, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()
 
 
 def ntfs_commercial_uplift_evidence(family: str, details: Mapping[str, object]) -> dict[str, object]:
@@ -1235,6 +2791,7 @@ def mft_depth_components(details: Mapping[str, object], validation_checks: Mappi
         "standard_information": "$STANDARD_INFORMATION" in list(details.get("attribute_types") or []),
         "file_name_attribute": "$FILE_NAME" in list(details.get("attribute_types") or []),
         "parent_reference_decode": bool(path_profile.get("parent_record_number") not in (None, "")),
+        "bounded_parent_path_cache": bool(path_profile.get("bounded_parent_cache_used")),
         "data_attribute": "$DATA" in list(details.get("attribute_types") or []),
         "resident_data_hash": any(item.get("resident_data_hashes") for item in data_attributes),
         "nonresident_runlist_preview": any(item.get("runlist_preview") for item in data_attributes),
@@ -1245,6 +2802,7 @@ def mft_depth_components(details: Mapping[str, object], validation_checks: Mappi
 
 
 def usn_depth_components(details: Mapping[str, object], validation_checks: Mapping[str, object]) -> dict[str, bool]:
+    bounded_path = details.get("usn_bounded_mft_path") if isinstance(details.get("usn_bounded_mft_path"), Mapping) else {}
     return {
         "record_header": bool(validation_checks.get("record_length_aligned") or details.get("record_length")),
         "cursor_progression": bool(validation_checks.get("record_cursor_progresses") or details.get("record_cursor") not in (None, "")),
@@ -1255,6 +2813,7 @@ def usn_depth_components(details: Mapping[str, object], validation_checks: Mappi
         "reason_flags": bool(details.get("reason_flags")),
         "file_attribute_flags": bool(details.get("file_attribute_names")),
         "frn_parent_refs": bool(details.get("file_reference_number_decoded") or details.get("parent_file_reference_number_decoded")),
+        "bounded_mft_path_correlation": bool(bounded_path.get("path_candidate")),
         "rename_delete_hints": bool(details.get("rename_hint") or details.get("deleted_hint")),
         "full_frn_path_cache_replay": bool(NTFS_FILESYSTEM_CAPABILITIES["usn_full_journal_replay"]),
     }
@@ -1297,7 +2856,7 @@ def mft_full_parser_profile(artifact_scope: str, details: Mapping[str, object]) 
     return {
         "profile_version": "mft-full-parser-readiness-v1",
         "commercial_batch_id": "commercial-uplift-011-015",
-        "item_number": 13,
+        "item_number": 12,
         "artifact_scope": artifact_scope,
         "current_decode_level": (
             "native-file-record-attributes-partial"
@@ -1310,6 +2869,7 @@ def mft_full_parser_profile(artifact_scope: str, details: Mapping[str, object]) 
             "standard_information": "$STANDARD_INFORMATION" in attribute_type_names or bool(validation_checks.get("has_standard_information_attribute")),
             "file_name_attributes": "$FILE_NAME" in attribute_type_names or bool(validation_checks.get("has_file_name_attribute")),
             "parent_reference_decode": bool(path_profile.get("parent_record_number") not in (None, "")),
+            "bounded_parent_path_cache": bool(path_profile.get("bounded_parent_cache_used")),
             "resident_data_hashing": any(isinstance(item, Mapping) and item.get("resident") for item in list(details.get("data_attributes") or [])),
             "nonresident_runlist_preview": any(
                 isinstance(item, Mapping) and (item.get("resident") is False or item.get("runlist_preview"))
@@ -1379,6 +2939,7 @@ def usn_journal_replay_profile(artifact_scope: str, details: Mapping[str, object
         if isinstance(details.get("usn_replay_inventory_profile"), Mapping)
         else {}
     )
+    bounded_path = details.get("usn_bounded_mft_path") if isinstance(details.get("usn_bounded_mft_path"), Mapping) else {}
     return {
         "profile_version": "usn-journal-replay-readiness-v1",
         "commercial_batch_id": "commercial-uplift-011-015",
@@ -1393,12 +2954,14 @@ def usn_journal_replay_profile(artifact_scope: str, details: Mapping[str, object
             "v2_v3_records": bool(validation_checks.get("version_supported") or validation_checks.get("has_native_records")),
             "reason_flags": bool(details.get("reason_flags") or details.get("reason_flag_counts")),
             "frn_parent_refs": bool(details.get("file_reference_number_decoded") or details.get("parent_file_reference_number_decoded")),
+            "bounded_mft_path_correlation": bool(bounded_path.get("path_candidate")),
             "rename_delete_hints": bool(details.get("rename_hint") or details.get("deleted_hint") or details.get("reason_flag_counts")),
             "cursor_pagination": bool(details.get("record_cursor") not in (None, "") or validation_checks.get("cursor_progress_validated")),
             "full_frn_path_cache_replay": bool(NTFS_FILESYSTEM_CAPABILITIES["usn_full_journal_replay"]),
         },
         "transition_profile": transition_profile,
         "cursor_pagination_profile": cursor_profile,
+        "bounded_mft_path_correlation": bounded_path,
         "inventory_replay_profile": inventory_profile,
         "source_provenance": {
             "source_path": str(details.get("source_path") or ""),
@@ -1643,6 +3206,23 @@ def build_usn_trusted_diff(
         mode="usn-trusted-timeline-diff-v1",
         blocker="usn-trusted-timeline-diff-required",
         key_label="usn_key",
+    )
+
+
+def build_usn_state_replay_trusted_diff(
+    rapid_rows: Sequence[Mapping[str, object]],
+    trusted_rows: Sequence[Mapping[str, object]],
+    *,
+    trusted_tool: str,
+) -> dict[str, object]:
+    return build_ntfs_trusted_diff(
+        index_usn_state_replay_rows(rapid_rows),
+        index_usn_state_replay_rows(trusted_rows),
+        trusted_tool=trusted_tool,
+        recognized_tools=USN_TRUSTED_TOOLS | {"state-replay-fixture", "known-answer-state-replay"},
+        mode="usn-trusted-state-replay-diff-v1",
+        blocker="usn-trusted-state-replay-diff-required",
+        key_label="state_replay_key",
     )
 
 
@@ -1894,6 +3474,86 @@ def index_usn_rows(rows: Sequence[Mapping[str, object]]) -> dict[str, dict[str, 
             ),
         }
     return indexed
+
+
+def index_usn_state_replay_rows(rows: Sequence[Mapping[str, object]]) -> dict[str, dict[str, str]]:
+    indexed: dict[str, dict[str, str]] = {}
+    for row in rows:
+        for transition in iter_usn_state_replay_rows(row):
+            frn = normalized_int_text(first_value(transition, "file_reference_number", "frn", "file_reference"))
+            cursor = normalized_int_text(first_value(transition, "record_cursor", "record_offset", "offset", "byte_offset"))
+            usn = normalized_int_text(first_value(transition, "usn", "usn_number"))
+            transition_name = normalized_diff_value(first_value(transition, "transition", "transition_type", "state_transition"))
+            timestamp = normalized_diff_value(first_value(transition, "timestamp", "event_time", "time_created"))
+            previous_path = normalized_diff_value(first_value(transition, "previous_path", "old_path", "source_path"))
+            new_path = normalized_diff_value(first_value(transition, "new_path", "path_candidate", "target_path"))
+            file_name = normalized_diff_value(first_value(transition, "file_name", "filename", "name"))
+            key = usn_state_replay_diff_key(
+                usn=usn,
+                cursor=cursor,
+                frn=frn,
+                transition=transition_name,
+                previous_path=previous_path,
+                new_path=new_path,
+                file_name=file_name,
+            )
+            if not key:
+                continue
+            indexed[key] = {
+                "usn": usn,
+                "record_cursor": cursor,
+                "file_reference_number": frn,
+                "transition": transition_name,
+                "timestamp": timestamp,
+                "previous_path": previous_path,
+                "new_path": new_path,
+                "file_name": file_name,
+                "state_effect": normalized_diff_value(first_value(transition, "state_effect", "effect")),
+            }
+    return indexed
+
+
+def iter_usn_state_replay_rows(row: Mapping[str, object]) -> Iterable[Mapping[str, object]]:
+    payload = usn_diff_row_payload(row)
+    replay = (
+        payload.get("usn_replay_inventory_profile")
+        if isinstance(payload.get("usn_replay_inventory_profile"), Mapping)
+        else {}
+    )
+    state_preview = (
+        replay.get("bounded_state_replay_preview")
+        if isinstance(replay.get("bounded_state_replay_preview"), Mapping)
+        else payload.get("bounded_state_replay_preview")
+        if isinstance(payload.get("bounded_state_replay_preview"), Mapping)
+        else {}
+    )
+    transitions = state_preview.get("transitions") if isinstance(state_preview, Mapping) else None
+    if isinstance(transitions, Sequence) and not isinstance(transitions, (str, bytes, bytearray)):
+        for transition in transitions:
+            if isinstance(transition, Mapping):
+                yield transition
+        return
+    if first_value(payload, "transition", "transition_type", "state_transition"):
+        yield payload
+
+
+def usn_state_replay_diff_key(
+    *,
+    usn: str,
+    cursor: str,
+    frn: str,
+    transition: str,
+    previous_path: str,
+    new_path: str,
+    file_name: str,
+) -> str:
+    if usn and frn and transition:
+        return f"{usn}|{frn}|{transition}"
+    if cursor and frn and transition:
+        return f"{cursor}|{frn}|{transition}"
+    if transition and (previous_path or new_path):
+        return "|".join(item for item in (transition, previous_path, new_path) if item)
+    return "|".join(item for item in (frn, transition, file_name, cursor) if item)
 
 
 def usn_diff_row_payload(row: Mapping[str, object]) -> Mapping[str, object]:

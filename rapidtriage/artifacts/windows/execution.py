@@ -235,6 +235,20 @@ def build_execution_registry_record(path: Path, key: str, values: Mapping[str, s
                 executable_path=executable_path,
                 sha1=str(execution_fields.get("sha1") or ""),
             ) if artifact_type == "amcache-entry" else {},
+            "amcache_report_citation_manifest": amcache_report_citation_manifest(
+                source_path=str(path.resolve()),
+                source_hashes=file_hashes(path),
+                source_format="reg",
+                source_key=key,
+                source_index=0,
+                executable_path=executable_path,
+                sha1_candidates=[str(execution_fields.get("sha1") or "")],
+                timestamp=timestamp,
+                timestamp_source=timestamp_source,
+                source_offset=0,
+                row_cluster_evidence={},
+                report_grade=report_grade,
+            ) if artifact_type == "amcache-entry" else {},
             "shimcache_evidence": shimcache_entry_evidence(
                 key=key,
                 executable_path=executable_path,
@@ -247,6 +261,20 @@ def build_execution_registry_record(path: Path, key: str, values: Mapping[str, s
                 report_grade=report_grade,
                 executable_path=executable_path,
                 timestamp=timestamp,
+            ) if artifact_type == "shimcache-entry" else {},
+            "shimcache_report_citation_manifest": shimcache_report_citation_manifest(
+                source_path=str(path.resolve()),
+                source_hashes=file_hashes(path),
+                source_format="reg",
+                source_key=key,
+                source_index=0,
+                executable_path=executable_path,
+                timestamp=timestamp,
+                timestamp_source=timestamp_source,
+                source_offset=0,
+                cache_order=None,
+                row_cluster_evidence={},
+                report_grade=report_grade,
             ) if artifact_type == "shimcache-entry" else {},
             "bam_dam_evidence": bam_dam_entry_evidence(
                 key=key,
@@ -263,6 +291,20 @@ def build_execution_registry_record(path: Path, key: str, values: Mapping[str, s
                 user_sid=user_sid,
                 timestamp=timestamp,
                 timestamp_source=timestamp_source,
+            ) if artifact_type == "bam-entry" else {},
+            "bam_dam_report_citation_manifest": bam_dam_report_citation_manifest(
+                source_path=str(path.resolve()),
+                source_hashes=file_hashes(path),
+                source_format="reg",
+                source_key=key,
+                source_index=0,
+                executable_path=executable_path,
+                user_sid=user_sid,
+                timestamp=timestamp,
+                timestamp_source=timestamp_source,
+                source_offset=0,
+                row_cluster_evidence={},
+                report_grade=report_grade,
             ) if artifact_type == "bam-entry" else {},
             "evidence_strength": evidence_strength,
             "parser_confidence": execution_metadata.get("parser_confidence", 0.76),
@@ -405,6 +447,21 @@ def build_native_shimcache_records(path: Path) -> Iterable[ArtifactRecord]:
                 "validation_checks": row_checks,
             },
         )
+        row_cluster_evidence = shimcache_row_cluster_evidence(cluster)
+        citation_manifest = shimcache_report_citation_manifest(
+            source_path=str(path.resolve()),
+            source_hashes=source_hashes,
+            source_format="system-hive-native-shimcache-scan",
+            source_key="SYSTEM\\ControlSet*\\Control\\Session Manager\\AppCompatCache",
+            source_index=index,
+            executable_path=executable_path,
+            timestamp=timestamp,
+            timestamp_source="native-shimcache-nearby-string-timestamp-candidate" if timestamp else "not_available_native_string_pivot",
+            source_offset=int(cluster.get("source_offset") or 0),
+            cache_order=int(cluster.get("cache_order") or index),
+            row_cluster_evidence=row_cluster_evidence,
+            report_grade=row_report_grade,
+        )
         yield ArtifactRecord(
             provider=WindowsExecutionProvider.name,
             artifact_type="shimcache-entry",
@@ -418,6 +475,7 @@ def build_native_shimcache_records(path: Path) -> Iterable[ArtifactRecord]:
                 "source_path": str(path.resolve()),
                 "source_format": "system-hive-native-shimcache-scan",
                 "source_hashes": source_hashes,
+                "source_key": "SYSTEM\\ControlSet*\\Control\\Session Manager\\AppCompatCache",
                 "source_index": index,
                 "source_offset": cluster.get("source_offset", 0),
                 "source_encoding": cluster.get("source_encoding", ""),
@@ -446,6 +504,8 @@ def build_native_shimcache_records(path: Path) -> Iterable[ArtifactRecord]:
                     timestamp=timestamp,
                     source_format="system-hive-native-shimcache-scan",
                 ),
+                "shimcache_report_citation_manifest": citation_manifest,
+                "shimcache_report_citation_manifest_hash": citation_manifest["manifest_sha256"],
                 "evidence_strength": "program-presence-not-proof-of-execution",
                 "parser_confidence": float(cluster.get("parser_confidence") or 0.52),
                 "validation_required": True,
@@ -548,6 +608,21 @@ def build_native_bam_dam_records(path: Path) -> Iterable[ArtifactRecord]:
                 "validation_checks": row_checks,
             },
         )
+        row_cluster_evidence = bam_dam_row_cluster_evidence(cluster)
+        citation_manifest = bam_dam_report_citation_manifest(
+            source_path=str(path.resolve()),
+            source_hashes=source_hashes,
+            source_format="system-hive-native-bam-dam-scan",
+            source_key=source_key,
+            source_index=index,
+            executable_path=executable_path,
+            user_sid=user_sid,
+            timestamp=timestamp,
+            timestamp_source="native-bam-dam-nearby-string-timestamp-candidate" if timestamp else "not_available_native_string_pivot",
+            source_offset=int(cluster.get("source_offset") or 0),
+            row_cluster_evidence=row_cluster_evidence,
+            report_grade=row_report_grade,
+        )
         yield ArtifactRecord(
             provider=WindowsExecutionProvider.name,
             artifact_type="bam-entry",
@@ -593,6 +668,8 @@ def build_native_bam_dam_records(path: Path) -> Iterable[ArtifactRecord]:
                     timestamp_source="native-bam-dam-nearby-string-timestamp-candidate" if timestamp else "not_available_native_string_pivot",
                     source_format="system-hive-native-bam-dam-scan",
                 ),
+                "bam_dam_report_citation_manifest": citation_manifest,
+                "bam_dam_report_citation_manifest_hash": citation_manifest["manifest_sha256"],
                 "evidence_strength": "recent-execution-indicator-candidate",
                 "parser_confidence": float(cluster.get("parser_confidence") or 0.54),
                 "validation_required": True,
@@ -665,6 +742,20 @@ def build_native_amcache_records(path: Path) -> Iterable[ArtifactRecord]:
             "validation_checks": hive_validation_checks,
         },
     )
+    hive_citation_manifest = amcache_report_citation_manifest(
+        source_path=str(path.resolve()),
+        source_hashes=source_hashes,
+        source_format="amcache-hive",
+        source_key="",
+        source_index=0,
+        executable_path=path_candidates[0] if path_candidates else "",
+        sha1_candidates=sha1_candidates,
+        timestamp="",
+        timestamp_source="not_available_native_string_pivot",
+        source_offset=0,
+        row_cluster_evidence={},
+        report_grade=hive_report_grade,
+    )
     yield ArtifactRecord(
         provider=WindowsExecutionProvider.name,
         artifact_type="amcache-hive",
@@ -685,6 +776,7 @@ def build_native_amcache_records(path: Path) -> Iterable[ArtifactRecord]:
             "amcache_candidate_clusters": amcache_clusters[:100],
             "amcache_candidate_cluster_count": len(amcache_clusters),
             "amcache_hive_evidence": amcache_hive_evidence(path_candidates, sha1_candidates, strings, amcache_clusters),
+            "amcache_report_citation_manifest": hive_citation_manifest,
             "amcache_schema_profile": amcache_schema_profile(
                 source_format="amcache-hive",
                 timestamp_source="not_available_native_string_pivot",
@@ -761,6 +853,21 @@ def build_native_amcache_records(path: Path) -> Iterable[ArtifactRecord]:
                 "validation_checks": entry_validation_checks,
             },
         )
+        row_cluster_evidence = amcache_row_cluster_evidence(cluster)
+        entry_citation_manifest = amcache_report_citation_manifest(
+            source_path=str(path.resolve()),
+            source_hashes=source_hashes,
+            source_format="amcache-hive",
+            source_key="",
+            source_index=index,
+            executable_path=candidate,
+            sha1_candidates=row_sha1_candidates,
+            timestamp=timestamp,
+            timestamp_source=timestamp_source,
+            source_offset=int(cluster.get("source_offset") or 0) if isinstance(cluster, Mapping) else 0,
+            row_cluster_evidence=row_cluster_evidence,
+            report_grade=entry_report_grade,
+        )
         yield ArtifactRecord(
             provider=WindowsExecutionProvider.name,
             artifact_type="amcache-entry",
@@ -778,7 +885,7 @@ def build_native_amcache_records(path: Path) -> Iterable[ArtifactRecord]:
                 "executable_path": candidate,
                 "program_name": display_name_for_execution_key(candidate),
                 "sha1_candidates": row_sha1_candidates,
-                "amcache_row_cluster_evidence": amcache_row_cluster_evidence(cluster),
+                "amcache_row_cluster_evidence": row_cluster_evidence,
                 "amcache_evidence": amcache_entry_evidence(
                     source_format="amcache-hive",
                     source_key="",
@@ -800,6 +907,7 @@ def build_native_amcache_records(path: Path) -> Iterable[ArtifactRecord]:
                     executable_path=candidate,
                     sha1=row_sha1_candidates[0] if row_sha1_candidates else "",
                 ),
+                "amcache_report_citation_manifest": entry_citation_manifest,
                 "timestamp": timestamp,
                 "timestamp_source": timestamp_source,
                 "source_offset": cluster.get("source_offset", 0) if isinstance(cluster, Mapping) else 0,
@@ -990,6 +1098,25 @@ def build_srum_database_inventory_record(path: Path) -> ArtifactRecord:
                     "page_size": ese_header.get("page_size", 0),
                 },
             ),
+            "srum_report_citation_manifest": srum_report_citation_manifest(
+                source_path=str(path.resolve()),
+                source_hashes=file_hashes(path),
+                artifact_type="srum-database-file",
+                artifact_scope="database",
+                source_format="ese-srum",
+                source_index=0,
+                table_family="srudb",
+                app_id="",
+                timestamp="",
+                counters={
+                    "table_candidate_count": len(table_candidates),
+                    "row_candidate_count": len(row_candidates),
+                    "page_size": ese_header.get("page_size", 0),
+                },
+                source_offset=0,
+                row_cluster_evidence={},
+                report_grade=report_grade,
+            ),
             "parser_confidence": 0.65 if ese_header.get("signature_valid") else 0.35,
             "evidence_strength": "application-resource-usage-database-presence",
             "validation_required": True,
@@ -1109,6 +1236,21 @@ def build_srum_database_pivot_records(path: Path, inventory_details: Mapping[str
                         "url": url,
                     },
                 ),
+                "srum_report_citation_manifest": srum_report_citation_manifest(
+                    source_path=str(path.resolve()),
+                    source_hashes=source_hashes,
+                    artifact_type="srum-database-pivot",
+                    artifact_scope="string-pivot",
+                    source_format="ese-srum",
+                    source_index=index,
+                    table_family="unknown",
+                    app_id=display_name_for_execution_key(executable_path) if executable_path else "",
+                    timestamp="",
+                    counters={},
+                    source_offset=0,
+                    row_cluster_evidence={"candidate_kind": candidate_kind, "candidate_value": candidate_value, "url": url},
+                    report_grade=report_grade,
+                ),
                 "timestamp": "",
                 "timestamp_source": "not_available_native_string_pivot",
                 "parser_confidence": 0.4,
@@ -1210,6 +1352,24 @@ def build_srum_database_table_candidate_records(path: Path, inventory_details: M
                         "matched_marker_count": len(matched),
                         "source_offset_count": len(candidate.get("source_offsets") or []),
                     },
+                ),
+                "srum_report_citation_manifest": srum_report_citation_manifest(
+                    source_path=str(path.resolve()),
+                    source_hashes=source_hashes,
+                    artifact_type="srum-table-candidate",
+                    artifact_scope="table-candidate",
+                    source_format="ese-srum",
+                    source_index=index,
+                    table_family=table_family,
+                    app_id="",
+                    timestamp="",
+                    counters={"matched_marker_count": len(matched)},
+                    source_offset=int((candidate.get("source_offsets") or [0])[0] or 0),
+                    row_cluster_evidence={
+                        "matched_markers": matched,
+                        "source_offsets": [int(value) for value in candidate.get("source_offsets") or []],
+                    },
+                    report_grade=report_grade,
                 ),
                 "parser_confidence": float(candidate.get("candidate_confidence") or (0.38 + min(0.24, len(matched) * 0.06))),
                 "evidence_strength": "srum-table-presence-candidate",
@@ -1341,6 +1501,21 @@ def build_srum_database_row_candidate_records(path: Path, inventory_details: Map
                         "counter_candidate_count": len(dict(candidate.get("counter_candidates") or {})),
                     },
                 ),
+                "srum_report_citation_manifest": srum_report_citation_manifest(
+                    source_path=str(path.resolve()),
+                    source_hashes=source_hashes,
+                    artifact_type="srum-row-candidate",
+                    artifact_scope="row-candidate",
+                    source_format="ese-srum",
+                    source_index=index,
+                    table_family=str(candidate.get("table_family") or "unknown"),
+                    app_id=app_id,
+                    timestamp=str(candidate.get("timestamp") or ""),
+                    counters=dict(candidate.get("counter_candidates") or {}),
+                    source_offset=int(candidate.get("source_offset") or 0),
+                    row_cluster_evidence=srum_row_evidence(candidate),
+                    report_grade=report_grade,
+                ),
                 "parser_confidence": float(candidate.get("candidate_confidence") or 0.42),
                 "evidence_strength": "srum-native-row-string-candidate",
                 "validation_required": True,
@@ -1452,6 +1627,27 @@ def build_srum_record(path: Path, row: Mapping[str, object], index: int) -> Arti
             energy=energy,
             interface_luid=interface_luid,
             network_profile=network_profile,
+        ),
+        "srum_report_citation_manifest": srum_report_citation_manifest(
+            source_path=str(path.resolve()),
+            source_hashes=file_hashes(path),
+            artifact_type=artifact_type,
+            artifact_scope="source-tool-export",
+            source_format=path.suffix.lower().lstrip("."),
+            source_index=index,
+            table_family="network-usage" if artifact_type == "srum-network-usage" else "app-resource",
+            app_id=app_id,
+            timestamp=timestamp,
+            counters={
+                "bytes_sent": bytes_sent,
+                "bytes_received": bytes_received,
+                "bytes_total": bytes_total,
+                "cpu_time": cpu_time,
+                "energy_usage": energy,
+            },
+            source_offset=0,
+            row_cluster_evidence={},
+            report_grade=report_grade,
         ),
         "parser_confidence": 0.82,
         "evidence_strength": "application-resource-usage-indicator",
@@ -1587,6 +1783,128 @@ def srum_usage_evidence(
         "source_tool_export_validation_required": True,
         "report_grade_ready": False,
     }
+
+
+def srum_report_citation_manifest(
+    *,
+    source_path: str,
+    source_hashes: Mapping[str, str],
+    artifact_type: str,
+    artifact_scope: str,
+    source_format: str,
+    source_index: int,
+    table_family: str,
+    app_id: str,
+    timestamp: str,
+    counters: Mapping[str, object],
+    source_offset: int,
+    row_cluster_evidence: Mapping[str, object],
+    report_grade: Mapping[str, object],
+) -> dict[str, object]:
+    normalized_app = normalize_execution_path(app_id) if looks_like_executable_path(app_id) else app_id.lower()
+    counter_map = {str(key): value for key, value in counters.items() if value not in ("", None, 0)}
+    row_identity = {
+        "artifact_scope": artifact_scope,
+        "source_format": source_format,
+        "source_index": source_index,
+        "source_offset": source_offset,
+        "table_family": table_family,
+        "app_id": app_id,
+        "normalized_app": normalized_app,
+        "timestamp": timestamp,
+        "timestamp_semantics": "source-tool-export-timestamp" if artifact_scope == "source-tool-export" else "native-string-candidate-not-row-decoded",
+        "counter_names": sorted(counter_map),
+    }
+    citation_refs: list[dict[str, object]] = [
+        {
+            "kind": "srum-source",
+            "ref_id": "srum-source",
+            "source_path": source_path,
+            "source_sha256": source_hashes.get("sha256", ""),
+            "source_format": source_format,
+            "source_viewer_locator": {
+                "viewer": "table-row" if artifact_scope == "source-tool-export" else "source-hex",
+                "source_index": source_index,
+                "source_offset": source_offset,
+            },
+        },
+        {
+            "kind": "srum-table-or-app",
+            "ref_id": "srum-table-or-app",
+            "table_family": table_family,
+            "app_id": app_id,
+            "normalized_app_hash": stable_execution_json_sha256(normalized_app),
+        },
+        {
+            "kind": "srum-counter-semantics",
+            "ref_id": "srum-counter-semantics",
+            "counter_names": sorted(counter_map),
+            "counters": counter_map,
+            "counter_decode_status": "source-tool-normalized" if artifact_scope == "source-tool-export" else "native-row-not-decoded",
+        },
+    ]
+    if timestamp:
+        citation_refs.append(
+            {
+                "kind": "srum-timestamp",
+                "ref_id": "srum-timestamp",
+                "timestamp": timestamp,
+                "timestamp_semantics": row_identity["timestamp_semantics"],
+            }
+        )
+    if row_cluster_evidence:
+        citation_refs.append(
+            {
+                "kind": "srum-row-cluster",
+                "ref_id": "srum-row-cluster",
+                "cluster_status": row_cluster_evidence.get("row_level_decode_status")
+                or row_cluster_evidence.get("cluster_status")
+                or "bounded-native-context",
+                "source_offset": row_cluster_evidence.get("source_offset", source_offset),
+                "nearby_string_count": row_cluster_evidence.get("nearby_string_count", 0),
+                "nearby_offsets": list(row_cluster_evidence.get("nearby_offsets") or row_cluster_evidence.get("source_offsets") or [])[:25],
+                "source_viewer_locator": {
+                    "viewer": "source-hex",
+                    "source_offset": row_cluster_evidence.get("source_offset", source_offset),
+                    "length": row_cluster_evidence.get("cluster_window_bytes", ESE_SCAN_READ_SIZE),
+                },
+            }
+        )
+    manifest: dict[str, object] = {
+        "manifest_version": "srum-report-citation-manifest-v1",
+        "parser_version": PARSER_VERSION,
+        "artifact_type": artifact_type,
+        "source": {
+            "path": source_path,
+            "sha256": source_hashes.get("sha256", ""),
+            "format": source_format,
+        },
+        "row_identity": row_identity,
+        "row_identity_hash": stable_execution_json_sha256(row_identity),
+        "citation_refs": citation_refs,
+        "citation_ref_count": len(citation_refs),
+        "validation_summary": {
+            "report_grade_status": str(report_grade.get("status") or ""),
+            "commercial_gap_ids": list(report_grade.get("commercial_gap_ids") or ["#10"]),
+            "native_ese_catalog_decode_available": bool(EXECUTION_NATIVE_CAPABILITIES["native_ese_catalog_decode"]),
+            "native_srum_page_row_decode_available": bool(EXECUTION_NATIVE_CAPABILITIES["native_srum_page_row_decode"]),
+            "trusted_srum_parser_diff_required": artifact_scope != "source-tool-export",
+        },
+        "reportability": {
+            "allowed_use": "srum-usage-triage-pivot",
+            "standalone_execution_proof": False,
+            "ready_for_court_report": bool(report_grade.get("report_grade_ready")),
+            "validation_required": not bool(report_grade.get("report_grade_ready")),
+            "blockers": sorted(
+                set(str(item) for item in report_grade.get("blockers") or [])
+                | {"native-ese-page-row-decoding-required", "trusted-srum-parser-diff-required"}
+            ),
+        },
+    }
+    manifest["manifest_sha256"] = stable_execution_json_sha256(
+        {key: value for key, value in manifest.items() if key != "manifest_sha256"}
+    )
+    return manifest
 
 
 def srum_candidate_risk_flags(prefix: str, value: str) -> list[str]:
@@ -1931,6 +2249,283 @@ def amcache_row_cluster_evidence(cluster: Mapping[str, object]) -> dict[str, obj
     }
 
 
+def amcache_report_citation_manifest(
+    *,
+    source_path: str,
+    source_hashes: Mapping[str, str],
+    source_format: str,
+    source_key: str,
+    source_index: int,
+    executable_path: str,
+    sha1_candidates: Sequence[str],
+    timestamp: str,
+    timestamp_source: str,
+    source_offset: int,
+    row_cluster_evidence: Mapping[str, object],
+    report_grade: Mapping[str, object],
+) -> dict[str, object]:
+    normalized_path = normalize_execution_path(executable_path)
+    row_identity = {
+        "source_format": source_format,
+        "source_key": source_key,
+        "source_index": source_index,
+        "executable_path": executable_path,
+        "normalized_path": normalized_path,
+        "file_name": execution_file_name(executable_path),
+        "sha1_candidates": sorted({str(value).lower() for value in sha1_candidates if str(value)}),
+        "timestamp": timestamp,
+        "timestamp_source": timestamp_source,
+        "timestamp_semantics": amcache_timestamp_semantics(timestamp_source, source_format),
+        "source_offset": source_offset,
+    }
+    citation_refs: list[dict[str, object]] = [
+        {
+            "kind": "amcache-source",
+            "ref_id": "amcache-source",
+            "source_path": source_path,
+            "source_sha256": source_hashes.get("sha256", ""),
+            "source_format": source_format,
+            "source_viewer_locator": {
+                "viewer": "registry-export" if source_format == "reg" else "source-hex",
+                "source_key": source_key,
+                "source_offset": source_offset,
+            },
+        },
+        {
+            "kind": "amcache-program-identity",
+            "ref_id": "amcache-program-identity",
+            "normalized_path_sha256": stable_execution_json_sha256(normalized_path),
+            "sha1_candidates": row_identity["sha1_candidates"],
+            "file_name": row_identity["file_name"],
+        },
+        {
+            "kind": "amcache-timestamp-semantics",
+            "ref_id": "amcache-timestamp-semantics",
+            "timestamp": timestamp,
+            "timestamp_source": timestamp_source,
+            "timestamp_semantics": row_identity["timestamp_semantics"],
+            "standalone_execution_proof": False,
+        },
+    ]
+    if row_cluster_evidence:
+        citation_refs.append(
+            {
+                "kind": "amcache-row-cluster",
+                "ref_id": "amcache-row-cluster",
+                "cluster_status": row_cluster_evidence.get("cluster_status", ""),
+                "source_offset": row_cluster_evidence.get("source_offset", source_offset),
+                "cluster_window_bytes": row_cluster_evidence.get("cluster_window_bytes", 0),
+                "nearby_string_count": row_cluster_evidence.get("nearby_string_count", 0),
+                "nearby_offsets": list(row_cluster_evidence.get("nearby_offsets") or [])[:25],
+                "source_viewer_locator": {
+                    "viewer": "source-hex",
+                    "source_offset": row_cluster_evidence.get("source_offset", source_offset),
+                    "length": row_cluster_evidence.get("cluster_window_bytes", AMCACHE_ROW_CLUSTER_WINDOW_BYTES),
+                },
+            }
+        )
+    manifest: dict[str, object] = {
+        "manifest_version": "amcache-report-citation-manifest-v1",
+        "parser_version": PARSER_VERSION,
+        "artifact_type": "amcache-entry",
+        "source": {
+            "path": source_path,
+            "sha256": source_hashes.get("sha256", ""),
+            "format": source_format,
+        },
+        "row_identity": row_identity,
+        "row_identity_hash": stable_execution_json_sha256(row_identity),
+        "citation_refs": citation_refs,
+        "citation_ref_count": len(citation_refs),
+        "validation_summary": {
+            "report_grade_status": str(report_grade.get("status") or ""),
+            "commercial_gap_ids": list(report_grade.get("commercial_gap_ids") or ["#7"]),
+            "timestamp_semantics_validated": False,
+            "native_schema_decode_available": bool(EXECUTION_NATIVE_CAPABILITIES["native_amcache_schema_decode"]),
+        },
+        "reportability": {
+            "allowed_use": "program-presence-install-execution-related-pivot",
+            "standalone_execution_proof": False,
+            "ready_for_court_report": bool(report_grade.get("report_grade_ready")),
+            "validation_required": not bool(report_grade.get("report_grade_ready")),
+            "blockers": list(report_grade.get("blockers") or []),
+        },
+    }
+    manifest["manifest_sha256"] = stable_execution_json_sha256(
+        {key: value for key, value in manifest.items() if key != "manifest_sha256"}
+    )
+    return manifest
+
+
+def shimcache_row_cluster_evidence(cluster: Mapping[str, object]) -> dict[str, object]:
+    if not cluster:
+        return {
+            "cluster_status": "not-available",
+            "validation_required": True,
+            "report_grade_ready": False,
+        }
+    return {
+        "cluster_status": "bounded-native-string-cluster",
+        "source_offset": int(cluster.get("source_offset") or 0),
+        "source_encoding": str(cluster.get("source_encoding") or ""),
+        "cluster_window_bytes": SHIMCACHE_ROW_CLUSTER_WINDOW_BYTES,
+        "cache_order": int(cluster.get("cache_order") or 0),
+        "nearby_string_count": int(cluster.get("nearby_string_count") or 0),
+        "nearby_offsets": [int(value) for value in cluster.get("nearby_offsets", []) if str(value).isdigit()][:25]
+        if isinstance(cluster.get("nearby_offsets"), list)
+        else [],
+        "timestamp_candidates": [str(value) for value in cluster.get("timestamp_candidates", [])][:25]
+        if isinstance(cluster.get("timestamp_candidates"), list)
+        else [],
+        "nearby_metadata_candidates": [str(value) for value in cluster.get("nearby_metadata_candidates", [])][:25]
+        if isinstance(cluster.get("nearby_metadata_candidates"), list)
+        else [],
+        "row_layout_decode_status": "not-implemented-cluster-only",
+        "timestamp_semantics": (
+            "nearby-string-timestamp-candidate-not-execution-proof"
+            if cluster.get("timestamp_candidates")
+            else "not-available"
+        ),
+        "validation_required": True,
+        "report_grade_ready": False,
+        "reportability_warning": (
+            "Native ShimCache/AppCompatCache string clusters preserve program path/order pivots only. "
+            "They must not be reported as standalone execution proof without OS-build layout decoding, "
+            "trusted parser diff, and cross-artifact correlation."
+        ),
+    }
+
+
+def shimcache_report_citation_manifest(
+    *,
+    source_path: str,
+    source_hashes: Mapping[str, str],
+    source_format: str,
+    source_key: str,
+    source_index: int,
+    executable_path: str,
+    timestamp: str,
+    timestamp_source: str,
+    source_offset: int,
+    cache_order: int | None,
+    row_cluster_evidence: Mapping[str, object],
+    report_grade: Mapping[str, object],
+) -> dict[str, object]:
+    normalized_path = normalize_execution_path(executable_path)
+    row_identity = {
+        "source_format": source_format,
+        "source_key": source_key,
+        "source_index": source_index,
+        "source_offset": source_offset,
+        "cache_order": cache_order,
+        "executable_path": executable_path,
+        "normalized_path": normalized_path,
+        "file_name": execution_file_name(executable_path),
+        "timestamp": timestamp,
+        "timestamp_source": timestamp_source,
+        "timestamp_semantics": "os-version-dependent-and-not-proof-of-execution" if timestamp else "not-available",
+    }
+    citation_refs: list[dict[str, object]] = [
+        {
+            "kind": "shimcache-source",
+            "ref_id": "shimcache-source",
+            "source_path": source_path,
+            "source_sha256": source_hashes.get("sha256", ""),
+            "source_format": source_format,
+            "source_viewer_locator": {
+                "viewer": "registry-export" if source_format == "reg" else "source-hex",
+                "source_key": source_key,
+                "source_offset": source_offset,
+            },
+        },
+        {
+            "kind": "shimcache-program-identity",
+            "ref_id": "shimcache-program-identity",
+            "normalized_path_sha256": stable_execution_json_sha256(normalized_path),
+            "file_name": row_identity["file_name"],
+            "standalone_execution_proof": False,
+        },
+        {
+            "kind": "shimcache-cache-order-or-timestamp",
+            "ref_id": "shimcache-cache-order-or-timestamp",
+            "cache_order": cache_order,
+            "timestamp": timestamp,
+            "timestamp_source": timestamp_source,
+            "timestamp_semantics": row_identity["timestamp_semantics"],
+            "interpretation": "program-presence-cache-order-pivot",
+            "standalone_execution_proof": False,
+        },
+        {
+            "kind": "shimcache-caveat",
+            "ref_id": "shimcache-caveat",
+            "warning": "Presence in ShimCache/AppCompatCache is not proof the executable ran.",
+            "required_correlation": execution_correlation_targets("shimcache-entry"),
+        },
+    ]
+    if row_cluster_evidence:
+        citation_refs.append(
+            {
+                "kind": "shimcache-row-cluster",
+                "ref_id": "shimcache-row-cluster",
+                "cluster_status": row_cluster_evidence.get("cluster_status", ""),
+                "source_offset": row_cluster_evidence.get("source_offset", source_offset),
+                "cache_order": row_cluster_evidence.get("cache_order", cache_order),
+                "cluster_window_bytes": row_cluster_evidence.get("cluster_window_bytes", 0),
+                "nearby_string_count": row_cluster_evidence.get("nearby_string_count", 0),
+                "nearby_offsets": list(row_cluster_evidence.get("nearby_offsets") or [])[:25],
+                "source_viewer_locator": {
+                    "viewer": "source-hex",
+                    "source_offset": row_cluster_evidence.get("source_offset", source_offset),
+                    "length": row_cluster_evidence.get("cluster_window_bytes", SHIMCACHE_ROW_CLUSTER_WINDOW_BYTES),
+                },
+            }
+        )
+    manifest: dict[str, object] = {
+        "manifest_version": "shimcache-report-citation-manifest-v1",
+        "parser_version": PARSER_VERSION,
+        "artifact_type": "shimcache-entry",
+        "source": {
+            "path": source_path,
+            "sha256": source_hashes.get("sha256", ""),
+            "format": source_format,
+        },
+        "row_identity": row_identity,
+        "row_identity_hash": stable_execution_json_sha256(row_identity),
+        "citation_refs": citation_refs,
+        "citation_ref_count": len(citation_refs),
+        "validation_summary": {
+            "report_grade_status": str(report_grade.get("status") or ""),
+            "commercial_gap_ids": list(report_grade.get("commercial_gap_ids") or ["#8"]),
+            "native_binary_layout_decode_available": bool(EXECUTION_NATIVE_CAPABILITIES["native_shimcache_binary_decode"]),
+            "os_build_layout_validation_required": True,
+            "trusted_parser_diff_required": True,
+        },
+        "reportability": {
+            "allowed_use": "program-presence-cache-order-pivot",
+            "standalone_execution_proof": False,
+            "ready_for_court_report": bool(report_grade.get("report_grade_ready")),
+            "validation_required": not bool(report_grade.get("report_grade_ready")),
+            "blockers": sorted(
+                set(str(item) for item in report_grade.get("blockers") or [])
+                | {"shimcache-not-proof-of-execution", "os-build-layout-validation-required"}
+            ),
+        },
+    }
+    manifest["manifest_sha256"] = stable_execution_json_sha256(
+        {key: value for key, value in manifest.items() if key != "manifest_sha256"}
+    )
+    return manifest
+
+
+def stable_execution_json_sha256(value: object) -> str:
+    return hashlib.sha256(
+        json.dumps(value, ensure_ascii=False, sort_keys=True, default=str, separators=(",", ":")).encode(
+            "utf-8",
+            errors="replace",
+        )
+    ).hexdigest()
+
+
 def execution_file_name(path: str) -> str:
     if not path:
         return ""
@@ -2188,6 +2783,166 @@ def bam_dam_decode_profile(
         "commercial_grade_ready": False,
         "commercial_grade_blockers": list(report_grade.get("blockers") or []),
     }
+
+
+def bam_dam_row_cluster_evidence(cluster: Mapping[str, object]) -> dict[str, object]:
+    if not cluster:
+        return {
+            "cluster_status": "not-available",
+            "validation_required": True,
+            "report_grade_ready": False,
+        }
+    return {
+        "cluster_status": "bounded-native-string-cluster",
+        "source_offset": int(cluster.get("source_offset") or 0),
+        "source_encoding": str(cluster.get("source_encoding") or ""),
+        "cluster_window_bytes": BAM_DAM_ROW_CLUSTER_WINDOW_BYTES,
+        "user_sid": str(cluster.get("user_sid") or ""),
+        "nearby_string_count": int(cluster.get("nearby_string_count") or 0),
+        "nearby_offsets": [int(value) for value in cluster.get("nearby_offsets", []) if str(value).isdigit()][:25]
+        if isinstance(cluster.get("nearby_offsets"), list)
+        else [],
+        "timestamp_candidates": [str(value) for value in cluster.get("timestamp_candidates", [])][:25]
+        if isinstance(cluster.get("timestamp_candidates"), list)
+        else [],
+        "nearby_metadata_candidates": [str(value) for value in cluster.get("nearby_metadata_candidates", [])][:25]
+        if isinstance(cluster.get("nearby_metadata_candidates"), list)
+        else [],
+        "row_layout_decode_status": "not-implemented-cluster-only",
+        "timestamp_semantics": (
+            "nearby-string-timestamp-candidate-requires-filetime-row-validation"
+            if cluster.get("timestamp_candidates")
+            else "not-available"
+        ),
+        "validation_required": True,
+        "report_grade_ready": False,
+        "reportability_warning": (
+            "Native BAM/DAM string clusters preserve SID/path/timestamp pivots only. "
+            "Report-grade recent-execution claims need native SYSTEM hive binary value decoding, "
+            "ControlSet validation, and cross-artifact correlation."
+        ),
+    }
+
+
+def bam_dam_report_citation_manifest(
+    *,
+    source_path: str,
+    source_hashes: Mapping[str, str],
+    source_format: str,
+    source_key: str,
+    source_index: int,
+    executable_path: str,
+    user_sid: str,
+    timestamp: str,
+    timestamp_source: str,
+    source_offset: int,
+    row_cluster_evidence: Mapping[str, object],
+    report_grade: Mapping[str, object],
+) -> dict[str, object]:
+    normalized_path = normalize_execution_path(executable_path)
+    row_identity = {
+        "source_format": source_format,
+        "source_key": source_key,
+        "source_index": source_index,
+        "source_offset": source_offset,
+        "user_sid": user_sid,
+        "executable_path": executable_path,
+        "device_path": executable_path if executable_path.lower().startswith("\\device\\") else "",
+        "normalized_path": normalized_path,
+        "file_name": execution_file_name(executable_path),
+        "timestamp": timestamp,
+        "timestamp_source": timestamp_source,
+        "timestamp_semantics": "bam-dam-last-execution-filetime-candidate"
+        if timestamp_source == "bam_value_filetime"
+        else "timestamp-candidate-validation-required",
+    }
+    citation_refs: list[dict[str, object]] = [
+        {
+            "kind": "bam-dam-source",
+            "ref_id": "bam-dam-source",
+            "source_path": source_path,
+            "source_sha256": source_hashes.get("sha256", ""),
+            "source_format": source_format,
+            "source_viewer_locator": {
+                "viewer": "registry-export" if source_format == "reg" else "source-hex",
+                "source_key": source_key,
+                "source_offset": source_offset,
+            },
+        },
+        {
+            "kind": "bam-dam-user-sid",
+            "ref_id": "bam-dam-user-sid",
+            "user_sid": user_sid,
+            "sid_present": bool(user_sid),
+        },
+        {
+            "kind": "bam-dam-program-identity",
+            "ref_id": "bam-dam-program-identity",
+            "normalized_path_sha256": stable_execution_json_sha256(normalized_path),
+            "file_name": row_identity["file_name"],
+            "device_path": row_identity["device_path"],
+        },
+        {
+            "kind": "bam-dam-timestamp",
+            "ref_id": "bam-dam-timestamp",
+            "timestamp": timestamp,
+            "timestamp_source": timestamp_source,
+            "timestamp_semantics": row_identity["timestamp_semantics"],
+            "required_validation": "native FILETIME row decode and ControlSet attribution",
+        },
+    ]
+    if row_cluster_evidence:
+        citation_refs.append(
+            {
+                "kind": "bam-dam-row-cluster",
+                "ref_id": "bam-dam-row-cluster",
+                "cluster_status": row_cluster_evidence.get("cluster_status", ""),
+                "source_offset": row_cluster_evidence.get("source_offset", source_offset),
+                "cluster_window_bytes": row_cluster_evidence.get("cluster_window_bytes", 0),
+                "nearby_string_count": row_cluster_evidence.get("nearby_string_count", 0),
+                "nearby_offsets": list(row_cluster_evidence.get("nearby_offsets") or [])[:25],
+                "source_viewer_locator": {
+                    "viewer": "source-hex",
+                    "source_offset": row_cluster_evidence.get("source_offset", source_offset),
+                    "length": row_cluster_evidence.get("cluster_window_bytes", BAM_DAM_ROW_CLUSTER_WINDOW_BYTES),
+                },
+            }
+        )
+    manifest: dict[str, object] = {
+        "manifest_version": "bam-dam-report-citation-manifest-v1",
+        "parser_version": PARSER_VERSION,
+        "artifact_type": "bam-entry",
+        "source": {
+            "path": source_path,
+            "sha256": source_hashes.get("sha256", ""),
+            "format": source_format,
+        },
+        "row_identity": row_identity,
+        "row_identity_hash": stable_execution_json_sha256(row_identity),
+        "citation_refs": citation_refs,
+        "citation_ref_count": len(citation_refs),
+        "validation_summary": {
+            "report_grade_status": str(report_grade.get("status") or ""),
+            "commercial_gap_ids": list(report_grade.get("commercial_gap_ids") or ["#9"]),
+            "native_system_hive_binary_decode_available": bool(EXECUTION_NATIVE_CAPABILITIES["native_bam_system_hive_decode"]),
+            "controlset_validation_required": True,
+            "trusted_parser_diff_required": True,
+        },
+        "reportability": {
+            "allowed_use": "recent-execution-pivot-corroborate-before-testimony",
+            "standalone_execution_proof": False,
+            "ready_for_court_report": bool(report_grade.get("report_grade_ready")),
+            "validation_required": not bool(report_grade.get("report_grade_ready")),
+            "blockers": sorted(
+                set(str(item) for item in report_grade.get("blockers") or [])
+                | {"bam-dam-native-system-hive-validation-required", "cross-artifact-correlation-required"}
+            ),
+        },
+    }
+    manifest["manifest_sha256"] = stable_execution_json_sha256(
+        {key: value for key, value in manifest.items() if key != "manifest_sha256"}
+    )
+    return manifest
 
 
 def srum_ese_validation_profile(

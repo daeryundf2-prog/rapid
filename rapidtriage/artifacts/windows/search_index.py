@@ -206,6 +206,33 @@ def build_edb_inventory_record(path: Path) -> ArtifactRecord:
                 "timestamps_decoded_from_native_rows": False,
                 "deleted_state_decoded_from_native_rows": False,
             },
+            "windows_edb_report_citation_manifest": windows_edb_report_citation_manifest(
+                source_path=str(path.resolve()),
+                source_hashes=file_hashes(path),
+                artifact_type="windows-search-edb-file",
+                artifact_scope="database",
+                source_format="ese-edb",
+                source_index=0,
+                item_path="",
+                url="",
+                content_snippet="",
+                table_family="windows-search-edb",
+                timestamp="",
+                deleted_state="not-decoded",
+                page_locator={
+                    "page_count_scanned": int(page_map.get("page_count_scanned") or 0),
+                    "candidate_page_count": int(page_map.get("candidate_page_count") or 0),
+                    "page_size": int(ese_header.get("page_size") or 0),
+                },
+                row_cluster_evidence={
+                    "path_candidate_count": len(pivots.get("path_candidates") or []),
+                    "url_candidate_count": len(pivots.get("url_candidates") or []),
+                    "content_candidate_count": len(content_candidates),
+                    "table_family_candidates": table_families,
+                    "row_candidate_count": len(row_candidates),
+                },
+                report_grade=report_grade,
+            ),
             "validation_required": True,
             "validation_checks": validation_checks,
             "core_accuracy_gates": windows_search_core_accuracy_gates(
@@ -325,6 +352,23 @@ def build_edb_pivot_records(path: Path, inventory_details: Mapping[str, object])
                     "url": url,
                     "title": "",
                     "content_snippet": candidate_value[:1000],
+                    "windows_edb_report_citation_manifest": windows_edb_report_citation_manifest(
+                        source_path=str(path.resolve()),
+                        source_hashes=source_hashes,
+                        artifact_type="windows-search-edb-pivot",
+                        artifact_scope="string-pivot",
+                        source_format="ese-edb",
+                        source_index=index,
+                        item_path=item_path,
+                        url=url,
+                        content_snippet=candidate_value[:1000],
+                        table_family="unknown",
+                        timestamp="",
+                        deleted_state="not-decoded",
+                        page_locator={},
+                        row_cluster_evidence={"candidate_kind": candidate_kind, "candidate_value": candidate_value},
+                        report_grade=report_grade,
+                    ),
                     "parser_confidence": 0.4,
                     "evidence_strength": "search-index-string-pivot",
                     "validation_required": True,
@@ -453,6 +497,33 @@ def build_edb_page_candidate_records(path: Path, inventory_details: Mapping[str,
                         "page_hash_preserved": bool(sample.get("page_sha256")),
                         "page_offset_preserved": True,
                     },
+                    "windows_edb_report_citation_manifest": windows_edb_report_citation_manifest(
+                        source_path=str(path.resolve()),
+                        source_hashes=source_hashes,
+                        artifact_type="windows-search-edb-page-candidate",
+                        artifact_scope="page-candidate",
+                        source_format="ese-edb",
+                        source_index=index,
+                        item_path=path_candidates[0] if path_candidates else "",
+                        url=url_candidates[0] if url_candidates else "",
+                        content_snippet=content_candidates[0] if content_candidates else "",
+                        table_family=",".join(sorted(table_marker_hits)) if table_marker_hits else "unknown",
+                        timestamp="",
+                        deleted_state="candidate-marker-present" if "deleted-state" in table_marker_hits else "not-decoded",
+                        page_locator={
+                            "page_index": int(sample.get("page_index") or 0),
+                            "page_offset": int(sample.get("page_offset") or 0),
+                            "page_size": int(sample.get("page_size") or 0),
+                            "page_sha256": str(sample.get("page_sha256") or ""),
+                        },
+                        row_cluster_evidence={
+                            "path_candidate_count": len(path_candidates),
+                            "url_candidate_count": len(url_candidates),
+                            "content_candidate_count": len(content_candidates),
+                            "table_marker_hits": table_marker_hits,
+                        },
+                        report_grade=report_grade,
+                    ),
                     "parser_confidence": page_candidate_confidence(path_candidates, url_candidates, content_candidates, table_marker_hits),
                     "evidence_strength": "windows-search-page-local-string-correlation",
                     "validation_required": True,
@@ -563,6 +634,23 @@ def build_edb_table_candidate_records(path: Path, inventory_details: Mapping[str
                     "matched_markers": matched,
                     "matched_marker_count": len(matched),
                     "candidate_metadata": native_metadata,
+                    "windows_edb_report_citation_manifest": windows_edb_report_citation_manifest(
+                        source_path=str(path.resolve()),
+                        source_hashes=source_hashes,
+                        artifact_type="windows-search-edb-table-candidate",
+                        artifact_scope="table-candidate",
+                        source_format="ese-edb",
+                        source_index=index,
+                        item_path="",
+                        url="",
+                        content_snippet="",
+                        table_family=table_family,
+                        timestamp="",
+                        deleted_state="candidate-marker-present" if table_family == "deleted-state" else "not-decoded",
+                        page_locator={},
+                        row_cluster_evidence={"matched_markers": matched, "candidate_metadata": native_metadata},
+                        report_grade=report_grade,
+                    ),
                     "parser_confidence": 0.38 + min(0.24, len(matched) * 0.06),
                     "evidence_strength": "windows-search-table-presence-candidate",
                     "validation_required": True,
@@ -688,6 +776,31 @@ def build_edb_row_candidate_records(path: Path, inventory_details: Mapping[str, 
                         "content_source": candidate.get("content_source", ""),
                         "correlation_method": candidate.get("correlation_method", ""),
                     },
+                    "windows_edb_report_citation_manifest": windows_edb_report_citation_manifest(
+                        source_path=str(path.resolve()),
+                        source_hashes=source_hashes,
+                        artifact_type="windows-search-edb-row-candidate",
+                        artifact_scope="row-candidate",
+                        source_format="ese-edb",
+                        source_index=index,
+                        item_path=item_path,
+                        url=url,
+                        content_snippet=content_snippet[:1000],
+                        table_family=",".join(table_families) if table_families else "unknown",
+                        timestamp="",
+                        deleted_state="candidate-marker-present" if has_deleted_markers else "not-decoded",
+                        page_locator={
+                            "page_index": candidate.get("page_index", ""),
+                            "page_offset": candidate.get("page_offset", ""),
+                            "page_sha256": candidate.get("page_sha256", ""),
+                        },
+                        row_cluster_evidence={
+                            "field_presence_profile": dict(candidate.get("field_presence_profile") or {}),
+                            "page_table_marker_hits": dict(candidate.get("page_table_marker_hits") or {}),
+                            "candidate_basis": candidate.get("correlation_method", ""),
+                        },
+                        report_grade=report_grade,
+                    ),
                     "parser_confidence": candidate.get("parser_confidence", 0.45),
                     "evidence_strength": "windows-search-correlated-native-string-candidate",
                     "validation_required": True,
@@ -814,6 +927,29 @@ def build_search_index_entry(
         "accessed_at": normalize_timestamp(first_value(lowered, "System.DateAccessed", "DateAccessed", "Accessed", "LastAccessed")),
         "size": str(first_value(lowered, "System.Size", "Size", "FileSize") or ""),
         "store": str(first_value(lowered, "Store", "Catalog", "Scope") or ""),
+        "windows_edb_report_citation_manifest": windows_edb_report_citation_manifest(
+            source_path=str(path.resolve()),
+            source_hashes=dict(source_hashes),
+            artifact_type="windows-search-index-entry",
+            artifact_scope="source-tool-export",
+            source_format=path.suffix.lower().lstrip("."),
+            source_index=index,
+            item_path=item_path,
+            url=str(first_value(lowered, "URL", "System.ItemUrl", "ItemUrl") or ""),
+            content_snippet=content[:1000],
+            table_family=str(first_value(lowered, "Store", "Catalog", "Scope") or "source-tool-export"),
+            timestamp=normalize_timestamp(
+                first_value(lowered, "System.DateModified", "DateModified", "Modified", "LastModified")
+                or first_value(lowered, "System.DateCreated", "DateCreated", "Created", "CreationTime")
+            ),
+            deleted_state=str(first_value(lowered, "IsDeleted", "Deleted", "DeletedState", "IndexState") or "not-provided"),
+            page_locator={},
+            row_cluster_evidence={
+                "property_fields": list(lowered),
+                "entry_id": str(first_value(lowered, "DocID", "DocumentID", "EntryID", "ID") or ""),
+            },
+            report_grade=report_grade,
+        ),
         "validation_required": False,
         "validation_checks": validation_checks,
         "core_accuracy_gates": windows_search_core_accuracy_gates(
@@ -937,6 +1073,174 @@ def build_search_index_summary(root: Path, records: Sequence[ArtifactRecord]) ->
             "commercial_grade_blockers": WINDOWS_SEARCH_EDB_BLOCKERS if edb_files else [],
         },
     )
+
+
+def windows_edb_report_citation_manifest(
+    *,
+    source_path: str,
+    source_hashes: Mapping[str, str],
+    artifact_type: str,
+    artifact_scope: str,
+    source_format: str,
+    source_index: int,
+    item_path: str,
+    url: str,
+    content_snippet: str,
+    table_family: str,
+    timestamp: str,
+    deleted_state: str,
+    page_locator: Mapping[str, object],
+    row_cluster_evidence: Mapping[str, object],
+    report_grade: Mapping[str, object],
+) -> dict[str, object]:
+    normalized_path = normalize_windows_search_path(item_path)
+    row_identity = {
+        "artifact_scope": artifact_scope,
+        "source_format": source_format,
+        "source_index": source_index,
+        "table_family": table_family,
+        "item_path": item_path,
+        "normalized_path": normalized_path,
+        "file_name": filename_from_path(item_path),
+        "url": url,
+        "content_hash": stable_search_json_sha256(content_snippet) if content_snippet else "",
+        "timestamp": timestamp,
+        "timestamp_semantics": "source-tool-export-timestamp" if artifact_scope == "source-tool-export" else "not-decoded-native-edb",
+        "deleted_state": deleted_state,
+        "deleted_state_semantics": "candidate-marker-not-row-decoded"
+        if deleted_state == "candidate-marker-present"
+        else "not-decoded-or-not-provided",
+        "page_locator": dict(page_locator),
+    }
+    citation_refs: list[dict[str, object]] = [
+        {
+            "kind": "windows-edb-source",
+            "ref_id": "windows-edb-source",
+            "source_path": source_path,
+            "source_sha256": source_hashes.get("sha256", ""),
+            "source_format": source_format,
+            "source_viewer_locator": {
+                "viewer": "table-row" if artifact_scope == "source-tool-export" else "source-hex",
+                "source_index": source_index,
+                "page_offset": page_locator.get("page_offset", ""),
+            },
+        },
+        {
+            "kind": "windows-edb-path-url-content",
+            "ref_id": "windows-edb-path-url-content",
+            "normalized_path_sha256": stable_search_json_sha256(normalized_path),
+            "url": url,
+            "content_hash": row_identity["content_hash"],
+            "field_status": {
+                "path_present": bool(item_path),
+                "url_present": bool(url),
+                "content_present": bool(content_snippet),
+            },
+        },
+        {
+            "kind": "windows-edb-table-state",
+            "ref_id": "windows-edb-table-state",
+            "table_family": table_family,
+            "deleted_state": deleted_state,
+            "deleted_state_semantics": row_identity["deleted_state_semantics"],
+            "native_row_decoded": False,
+        },
+    ]
+    if timestamp:
+        citation_refs.append(
+            {
+                "kind": "windows-edb-timestamp",
+                "ref_id": "windows-edb-timestamp",
+                "timestamp": timestamp,
+                "timestamp_semantics": row_identity["timestamp_semantics"],
+            }
+        )
+    if page_locator:
+        citation_refs.append(
+            {
+                "kind": "windows-edb-page-locator",
+                "ref_id": "windows-edb-page-locator",
+                "page_index": page_locator.get("page_index", ""),
+                "page_offset": page_locator.get("page_offset", ""),
+                "page_size": page_locator.get("page_size", ""),
+                "page_sha256": page_locator.get("page_sha256", ""),
+                "source_viewer_locator": {
+                    "viewer": "source-hex",
+                    "source_offset": page_locator.get("page_offset", 0) or 0,
+                    "length": page_locator.get("page_size", 0) or 0,
+                },
+            }
+        )
+    if row_cluster_evidence:
+        citation_refs.append(
+            {
+                "kind": "windows-edb-row-cluster",
+                "ref_id": "windows-edb-row-cluster",
+                "field_presence_profile": dict(row_cluster_evidence.get("field_presence_profile") or {}),
+                "page_table_marker_hits": dict(row_cluster_evidence.get("page_table_marker_hits") or {}),
+                "candidate_basis": row_cluster_evidence.get("candidate_basis", ""),
+                "summary": {
+                    key: value
+                    for key, value in row_cluster_evidence.items()
+                    if key not in {"field_presence_profile", "page_table_marker_hits"}
+                },
+            }
+        )
+    manifest: dict[str, object] = {
+        "manifest_version": "windows-edb-report-citation-manifest-v1",
+        "parser_version": PARSER_VERSION,
+        "artifact_type": artifact_type,
+        "source": {
+            "path": source_path,
+            "sha256": source_hashes.get("sha256", ""),
+            "format": source_format,
+        },
+        "row_identity": row_identity,
+        "row_identity_hash": stable_search_json_sha256(row_identity),
+        "citation_refs": citation_refs,
+        "citation_ref_count": len(citation_refs),
+        "validation_summary": {
+            "report_grade_status": str(report_grade.get("status") or ""),
+            "commercial_gap_ids": list(report_grade.get("commercial_gap_ids") or ["#11"]),
+            "native_ese_catalog_decode_available": bool(WINDOWS_SEARCH_CAPABILITIES["native_ese_catalog_decode"]),
+            "native_row_level_decode_available": bool(WINDOWS_SEARCH_CAPABILITIES["native_row_level_decode"]),
+            "native_deleted_state_decode_available": bool(WINDOWS_SEARCH_CAPABILITIES["native_deleted_state_decode"]),
+            "trusted_windows_search_parser_diff_required": artifact_scope != "source-tool-export",
+        },
+        "reportability": {
+            "allowed_use": "search-index-triage-pivot",
+            "standalone_decoded_row_fact": False,
+            "ready_for_court_report": bool(report_grade.get("report_grade_ready")),
+            "validation_required": not bool(report_grade.get("report_grade_ready")),
+            "blockers": sorted(
+                set(str(item) for item in report_grade.get("blockers") or [])
+                | {"windows-edb-native-row-decoder-validation-required", "windows-edb-deleted-state-trusted-tool-diff-required"}
+            ),
+        },
+    }
+    manifest["manifest_sha256"] = stable_search_json_sha256(
+        {key: value for key, value in manifest.items() if key != "manifest_sha256"}
+    )
+    return manifest
+
+
+def stable_search_json_sha256(value: object) -> str:
+    return hashlib.sha256(
+        json.dumps(value, ensure_ascii=False, sort_keys=True, default=str, separators=(",", ":")).encode(
+            "utf-8",
+            errors="replace",
+        )
+    ).hexdigest()
+
+
+def normalize_windows_search_path(path: str) -> str:
+    text = str(path or "").strip()
+    if not text:
+        return ""
+    try:
+        return str(PureWindowsPath(text)).lower()
+    except ValueError:
+        return re.sub(r"[\\/]+", "\\\\", text).lower()
 
 
 def build_search_content_candidates(pivots: Mapping[str, object], *, limit: int = 50) -> list[str]:

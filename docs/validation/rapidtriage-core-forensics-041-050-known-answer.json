@@ -16,7 +16,7 @@
       ],
       "expected": {
         "required_assertions": [
-          "Cloud collection preserves token redaction, environment/vault boundary metadata, scope/consent warnings, rotation audit warnings, legal warning, and #41 core_accuracy_gates.",
+          "Cloud collection preserves token redaction, environment/vault boundary metadata, hash-only credential_authority_manifest evidence, scope/consent warnings, rotation audit warnings, legal warning, and #41 core_accuracy_gates.",
           "Cloud credential trusted diff helper requires provider OAuth, vault, native audit, or legal authority row equality before satisfying the #41 trusted credential authority/audit diff pass gate.",
           "Cloud credential reportability decisions block enterprise-vaulted claims until OAuth consent, provider scope inventory, secure token vault, and token rotation audit evidence exists."
         ]
@@ -36,7 +36,7 @@
       ],
       "expected": {
         "required_assertions": [
-          "Browser storage inventory preserves sensitive artifact inventory, secret redaction, strict legal warning, opt-in reveal warning, audit/scope review requirement, and #42 core_accuracy_gates.",
+          "Browser storage inventory preserves sensitive artifact inventory, secret redaction, per-store browser_secret_authority_manifest reveal/audit slots, strict legal warning, opt-in reveal warning, audit/scope review requirement, and #42 core_accuracy_gates.",
           "Browser secret trusted diff helper requires native store, DPAPI/keychain, legal authority, or audit-log row equality before satisfying the #42 trusted browser secret authority diff pass gate.",
           "Browser secret reportability decisions block decrypted or revealed secret claims until lawful reveal authority, DPAPI/keychain/browser-version validation, and audit evidence exists."
         ]
@@ -56,7 +56,7 @@
       ],
       "expected": {
         "required_assertions": [
-          "Mobile correlation summary preserves message-media links, row counts, service attribution, timeline readiness, known-answer warning, and #43 core_accuracy_gates.",
+          "Mobile correlation summary preserves message-media links, row counts, service attribution, timeline readiness, mobile_correlation_citation_manifest source citations, known-answer warning, and #43 core_accuracy_gates.",
           "Mobile correlation trusted diff helper requires vendor/native timeline row equality before satisfying the #43 trusted mobile correlation diff pass gate.",
           "Mobile correlation reportability decisions block device-wide timeline claims until timeline, timezone, attachment recovery, and vendor diff validation exists."
         ]
@@ -76,7 +76,7 @@
       ],
       "expected": {
         "required_assertions": [
-          "Mobile correlation summary preserves contact/call/SMS actor merge, source row links, participant attribution, dedupe/export-scope warnings, and #44 core_accuracy_gates.",
+          "Mobile correlation summary preserves contact/call/SMS actor merge, source row links, participant attribution, hash-only mobile_actor_citation_manifest source viewer locators, dedupe/export-scope warnings, and #44 core_accuracy_gates.",
           "Mobile actor trusted diff helper requires vendor/native actor row equality before satisfying the #44 trusted mobile actor diff pass gate.",
           "Mobile unified view reportability decisions block identity-complete actor claims until analyst merge/split and cross-app actor validation exists."
         ]
@@ -96,7 +96,7 @@
       ],
       "expected": {
         "required_assertions": [
-          "Mobile correlation summary preserves app/service schema registry, source app/version attribution, schema compatibility warnings, migration warnings, release-gate disclosure, and #45 core_accuracy_gates.",
+          "Mobile correlation summary preserves app/service schema registry, source app/version attribution, schema compatibility warnings, mobile_schema_version_manifest source viewer locators, migration warnings, release-gate disclosure, and #45 core_accuracy_gates.",
           "Mobile schema trusted diff helper requires schema migration fixture row equality before satisfying the #45 trusted app schema migration diff pass gate.",
           "Schema reportability decisions block release-safe schema claims until per-app compatibility, migration fixture, and release-gate evidence exists."
         ]
@@ -116,7 +116,7 @@
       ],
       "expected": {
         "required_assertions": [
-          "Search analysis preserves bounded clusters, representative match links, source/keyword grouping, truncation disclosure, review-state warning, and #46 core_accuracy_gates.",
+          "Search analysis preserves bounded clusters, representative match links, source/keyword grouping, cluster_citation_manifest source viewer locators, truncation disclosure, review-state warning, and #46 core_accuracy_gates.",
           "Search analysis trusted diff helper requires hand-labeled cluster review row equality before satisfying the #46 trusted cluster review diff pass gate.",
           "Search analysis reportability decisions block reviewed-cluster claims until persistent review state and near-duplicate text/media validation exists."
         ]
@@ -136,7 +136,7 @@
       ],
       "expected": {
         "required_assertions": [
-          "Search analysis preserves entity extraction, source/path references, match links, risk flags, merge/split warning, and #47 core_accuracy_gates.",
+          "Search analysis preserves entity extraction, source/path references, match links, risk flags, hash-only entity_citation_manifest source viewer locators, merge/split warning, and #47 core_accuracy_gates.",
           "Search analysis trusted diff helper requires analyst entity review row equality before satisfying the #47 trusted entity review diff pass gate.",
           "Search analysis reportability decisions block identity-resolved entity claims until analyst merge/split and false-positive validation exists."
         ]
@@ -156,7 +156,7 @@
       ],
       "expected": {
         "required_assertions": [
-          "Search analysis preserves graph nodes, relationship edges, source citation references, paging/truncation disclosure, causal-proof warning, and #48 core_accuracy_gates.",
+          "Search analysis preserves graph nodes, relationship edges, source citation references, graph_citation_manifest edge source viewer locators, paging/truncation disclosure, causal-proof warning, and #48 core_accuracy_gates.",
           "Search analysis trusted diff helper requires graph source-citation row equality before satisfying the #48 trusted graph source-citation diff pass gate.",
           "Search analysis reportability decisions block causal graph claims until server-side graph paging, saved layouts, and source-row review exists."
         ]
@@ -176,7 +176,7 @@
       ],
       "expected": {
         "required_assertions": [
-          "Search analysis preserves timestamp extraction, UTC normalization, source match anchors, date buckets, timezone/skew warning, and #49 core_accuracy_gates.",
+          "Search analysis preserves timestamp extraction, UTC normalization, source match anchors, date buckets, timeline_citation_manifest event source viewer locators, timezone/skew warning, and #49 core_accuracy_gates.",
           "Search analysis trusted diff helper requires timeline known-answer row equality before satisfying the #49 trusted timeline known-answer diff pass gate.",
           "Search analysis reportability decisions block full timeline claims until full-case joins, timezone/skew validation, and cursor-paged timeline evidence exists."
         ]
@@ -196,7 +196,7 @@
       ],
       "expected": {
         "required_assertions": [
-          "Search analysis preserves draft hypotheses, evidence cluster links, review questions/tasks, report-readiness flags, persistence/versioning warning, and #50 core_accuracy_gates.",
+          "Search analysis preserves draft hypotheses, evidence cluster links, review questions/tasks, report-readiness flags, workbook_citation_manifest hypothesis source locators, persistence/versioning warning, and #50 core_accuracy_gates.",
           "Search analysis trusted diff helper requires workbook rubric row equality before satisfying the #50 trusted workbook rubric diff pass gate.",
           "Search analysis reportability decisions block workbook findings until editable persistence, evidence attachments, reviewer assignment, and version history exists."
         ]

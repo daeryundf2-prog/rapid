@@ -290,6 +290,20 @@ class RapidTriageEvidenceAdapterTests(unittest.TestCase):
                 )
                 self.assertFalse(result["verified_export_manifest_profile"]["manifest_present"])
                 self.assertEqual(result["verified_export_manifest_profile"]["validation_status"], "missing")
+                workflow_manifest = result["forensic_container_workflow_manifest"]
+                self.assertEqual(
+                    workflow_manifest["profile_version"],
+                    "forensic-container-export-workflow-manifest-v1",
+                )
+                self.assertEqual(workflow_manifest["item_number"], 25)
+                self.assertEqual(workflow_manifest["gap_id"], "#25")
+                self.assertEqual(len(workflow_manifest["manifest_sha256"]), 64)
+                workflow_statuses = {stage["id"]: stage["status"] for stage in workflow_manifest["stages"]}
+                self.assertEqual(workflow_statuses["detect-container"], "complete")
+                self.assertEqual(workflow_statuses["export-first-guidance"], "complete")
+                self.assertEqual(workflow_statuses["verified-export-manifest"], "blocked")
+                self.assertEqual(workflow_statuses["scan-derived-export"], "blocked")
+                self.assertFalse(workflow_manifest["commercial_grade_ready"])
 
     def test_forensic_container_reads_verified_export_manifest_sidecar(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -322,6 +336,18 @@ class RapidTriageEvidenceAdapterTests(unittest.TestCase):
             self.assertEqual(profile["file_count"], 1)
             self.assertEqual(profile["hashed_file_count"], 1)
             self.assertEqual(profile["sample_files"][0]["path"], "Users/Alice/evidence.txt")
+            workflow_manifest = result["forensic_container_workflow_manifest"]
+            workflow_statuses = {stage["id"]: stage["status"] for stage in workflow_manifest["stages"]}
+            self.assertEqual(workflow_statuses["verified-export-manifest"], "complete")
+            self.assertEqual(workflow_statuses["scan-derived-export"], "ready-after-export")
+            self.assertEqual(
+                workflow_manifest["large_data_controls"]["export_manifest_file_count"],
+                1,
+            )
+            self.assertEqual(
+                workflow_manifest["verified_export_manifest_profile"]["manifest_sha256"],
+                profile["manifest_sha256"],
+            )
             self.assertEqual(
                 result["commercial_uplift_evidence"]["large_data_controls"]["export_manifest_sha256"],
                 profile["manifest_sha256"],

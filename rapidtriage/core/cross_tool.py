@@ -16,6 +16,7 @@ MAX_RECORD_FIELD_DIFF_ROWS = 5_000
 MAX_REGISTRY_FIELD_DIFF_ROWS = 5_000
 MAX_NTFS_FIELD_DIFF_ROWS = 5_000
 MAX_ESE_FIELD_DIFF_ROWS = 5_000
+MAX_USN_STATE_REPLAY_FIELD_DIFF_ROWS = 5_000
 MAX_FIELD_MISMATCH_SAMPLES = 50
 FUNCTIONAL_VALIDATION_BATCH_ID = "commercial-uplift-036-040"
 KEY_FIELDS = (
@@ -166,6 +167,84 @@ USN_FIELD_ALIASES = {
     "record_cursor": ("record_cursor", "RecordOffset", "record_offset", "Offset", "offset", "ByteOffset"),
     "v4_extent_count": ("v4_extent_count", "ExtentCount", "extent_count", "ExtentCountV4"),
 }
+USN_STATE_REPLAY_FIELD_ALIASES = {
+    "usn": ("usn", "USN", "Usn", "usn_number"),
+    "file_reference_number": ("file_reference_number", "FRN", "frn", "FileReferenceNumber", "file_reference"),
+    "record_cursor": ("record_cursor", "RecordCursor", "RecordOffset", "record_offset", "Offset", "offset", "ByteOffset"),
+    "transition": ("transition", "Transition", "state_transition", "StateTransition"),
+    "timestamp": ("timestamp", "Timestamp", "TimeStamp", "event_time", "TimeCreated"),
+    "previous_path": ("previous_path", "PreviousPath", "old_path", "OldPath", "path_before", "PathBefore"),
+    "new_path": ("new_path", "NewPath", "path_after", "PathAfter", "path_candidate", "PathCandidate"),
+    "file_name": ("file_name", "FileName", "filename", "Name", "name"),
+    "state_effect": ("state_effect", "StateEffect", "effect", "Effect"),
+}
+USN_STATE_REPLAY_TEMPLATE_COLUMNS = [
+    "USN",
+    "FRN",
+    "RecordCursor",
+    "Transition",
+    "Timestamp",
+    "PreviousPath",
+    "NewPath",
+    "FileName",
+    "StateEffect",
+    "ExpectedSource",
+    "ReviewerNote",
+]
+USN_STATE_REPLAY_TEMPLATE_ROWS = [
+    {
+        "USN": "9001",
+        "FRN": "41",
+        "RecordCursor": "128",
+        "Transition": "create",
+        "Timestamp": "2026-01-02T03:04:00Z",
+        "PreviousPath": "",
+        "NewPath": r"C:\Users\alice\Desktop\case.txt",
+        "FileName": "case.txt",
+        "StateEffect": "set-current-path",
+        "ExpectedSource": "known-answer-lab-note",
+        "ReviewerNote": "Replace this example with a confirmed create transition from the validation corpus.",
+    },
+    {
+        "USN": "9002",
+        "FRN": "41",
+        "RecordCursor": "208",
+        "Transition": "rename-old-name",
+        "Timestamp": "2026-01-02T03:04:05Z",
+        "PreviousPath": r"C:\Users\alice\Desktop\case.txt",
+        "NewPath": "",
+        "FileName": "case.txt",
+        "StateEffect": "record-previous-name",
+        "ExpectedSource": "known-answer-lab-note",
+        "ReviewerNote": "Pair with the following rename-new-name row by FRN/order.",
+    },
+    {
+        "USN": "9003",
+        "FRN": "41",
+        "RecordCursor": "308",
+        "Transition": "rename-new-name",
+        "Timestamp": "2026-01-02T03:04:06Z",
+        "PreviousPath": r"C:\Users\alice\Desktop\case.txt",
+        "NewPath": r"C:\Users\alice\Desktop\renamed.txt",
+        "FileName": "renamed.txt",
+        "StateEffect": "replace-current-path",
+        "ExpectedSource": "known-answer-lab-note",
+        "ReviewerNote": "Confirm old/new path with the full FRN path cache or trusted replay export.",
+    },
+    {
+        "USN": "9004",
+        "FRN": "41",
+        "RecordCursor": "408",
+        "Transition": "delete",
+        "Timestamp": "2026-01-02T03:05:00Z",
+        "PreviousPath": r"C:\Users\alice\Desktop\renamed.txt",
+        "NewPath": "",
+        "FileName": "renamed.txt",
+        "StateEffect": "remove-current-path",
+        "ExpectedSource": "known-answer-lab-note",
+        "ReviewerNote": "Confirm delete state using complete journal ordering, not a bounded preview alone.",
+    },
+]
 ESE_FIELD_ALIASES = {
     "ese_family": ("ese_family", "ESEFamily", "source_family", "SourceFamily", "database_family"),
     "table_name": (
@@ -205,6 +284,68 @@ ESE_FIELD_ALIASES = {
 
 class CrossToolValidationError(ValueError):
     """Raised when cross-tool validation inputs are invalid."""
+
+
+def build_usn_state_replay_known_answer_template(*, include_examples: bool = True) -> dict[str, object]:
+    rows = [dict(row) for row in USN_STATE_REPLAY_TEMPLATE_ROWS] if include_examples else []
+    core = {
+        "profile_version": "usn-state-replay-known-answer-template-v1",
+        "purpose": "known-answer CSV template for validating RapidTriage bounded USN state replay transitions",
+        "trusted_tool_name": "known-answer-state-replay",
+        "backlog_items": [13, 14],
+        "csv_columns": list(USN_STATE_REPLAY_TEMPLATE_COLUMNS),
+        "row_count": len(rows),
+        "rows": rows,
+        "cross_tool_command_template": (
+            "rapidtriage cross-tool-validate --rapid-output rapidtriage-filesystem.json "
+            "--reference-output known-answer-state-replay=usn-state-replay-known-answer.csv "
+            "--backlog-item 13 --min-overlap 1.0 --output usn-state-replay-cross-tool.json --json"
+        ),
+        "required_evidence": [
+            "source evidence hash for the NTFS volume or image",
+            "RapidTriage filesystem artifact output containing bounded_state_replay_preview.transitions",
+            "known-answer replay CSV populated from an independent lab note or trusted replay export",
+            "tool versions and command lines for all generated outputs",
+            "independent reviewer signoff before report-grade use",
+        ],
+        "limitations": [
+            "example rows are placeholders and must not be used as validation evidence",
+            "state replay rows validate transition output only; full commercial-grade USN support still requires full FRN path cache, complete journal ordering, and large-journal pagination proof",
+        ],
+    }
+    return {
+        **core,
+        "template_hash": hashlib.sha256(json.dumps(core, ensure_ascii=False, sort_keys=True).encode("utf-8")).hexdigest(),
+    }
+
+
+def write_usn_state_replay_known_answer_template(
+    output: Path,
+    *,
+    include_examples: bool = True,
+) -> dict[str, object]:
+    output = output.expanduser().resolve()
+    output.parent.mkdir(parents=True, exist_ok=True)
+    payload = build_usn_state_replay_known_answer_template(include_examples=include_examples)
+    rows = payload.get("rows") if isinstance(payload.get("rows"), list) else []
+    with output.open("w", encoding="utf-8-sig", newline="") as handle:
+        writer = csv.DictWriter(handle, fieldnames=USN_STATE_REPLAY_TEMPLATE_COLUMNS, extrasaction="ignore")
+        writer.writeheader()
+        for row in rows:
+            if isinstance(row, Mapping):
+                writer.writerow(row)
+    manifest = output.with_suffix(output.suffix + ".manifest.json")
+    manifest_payload = {
+        **payload,
+        "csv_path": str(output),
+        "csv_sha256": file_sha256(output),
+    }
+    manifest.write_text(json.dumps(manifest_payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    return {
+        **manifest_payload,
+        "manifest_path": str(manifest),
+        "manifest_sha256": file_sha256(manifest),
+    }
 
 
 def build_cross_tool_validation_report(
@@ -312,6 +453,7 @@ def load_tool_dataset(name: str, path: Path) -> dict[str, object]:
         "registry_field_index": registry_field_index(rows),
         "mft_field_index": mft_field_index(rows),
         "usn_field_index": usn_field_index(rows),
+        "usn_state_replay_field_index": usn_state_replay_field_index(rows),
         "ese_field_index": ese_field_index(rows),
     }
 
@@ -357,9 +499,59 @@ def rows_from_json(raw: object, *, max_rows: int) -> Iterable[dict[str, object]]
                 break
         if not candidates:
             candidates = [raw]
-    for item in candidates[:max_rows]:
+    emitted = 0
+    for item in candidates:
         if isinstance(item, Mapping):
-            yield flatten_mapping(item)
+            for row in rows_from_mapping(item):
+                if emitted >= max_rows:
+                    return
+                yield row
+                emitted += 1
+
+
+def rows_from_mapping(item: Mapping[str, object]) -> Iterable[dict[str, object]]:
+    flattened = flatten_mapping(item)
+    yield flattened
+    yield from nested_usn_state_replay_rows(item, flattened)
+
+
+def nested_usn_state_replay_rows(
+    item: Mapping[str, object],
+    flattened_parent: Mapping[str, object],
+) -> Iterable[dict[str, object]]:
+    transitions = first_nested_list(
+        item,
+        (
+            ("details", "usn_replay_inventory_profile", "bounded_state_replay_preview", "transitions"),
+            ("usn_replay_inventory_profile", "bounded_state_replay_preview", "transitions"),
+            ("bounded_state_replay_preview", "transitions"),
+        ),
+    )
+    for transition in transitions:
+        if not isinstance(transition, Mapping):
+            continue
+        row = flatten_mapping(transition)
+        row.setdefault("artifact_type", "usn-state-replay-transition")
+        for parent_key in ("source_path", "source_sha256", "parser", "artifact_type"):
+            if parent_key in flattened_parent and parent_key not in row:
+                row[f"parent_{parent_key}"] = flattened_parent[parent_key]
+        yield row
+
+
+def first_nested_list(
+    item: Mapping[str, object],
+    paths: Sequence[Sequence[str]],
+) -> list[object]:
+    for path in paths:
+        value: object = item
+        for part in path:
+            if not isinstance(value, Mapping):
+                value = None
+                break
+            value = value.get(part)
+        if isinstance(value, list):
+            return value
+    return []
 
 
 def flatten_mapping(value: Mapping[str, object], *, prefix: str = "") -> dict[str, object]:
@@ -437,6 +629,7 @@ def composite_candidate_keys(row: Mapping[str, object]) -> list[str]:
         composites.append(normalize_key(f"usn-record:{usn}"))
     if cursor and frn:
         composites.append(normalize_key(f"usn-cursor:{cursor}:{frn}"))
+    composites.extend(usn_state_replay_key_variants(row))
     composites.extend(ese_key_variants(row))
     return composites
 
@@ -472,6 +665,7 @@ def compare_datasets(
     registry_field_comparison = compare_registry_fields(rapid_dataset, reference_dataset)
     mft_field_comparison = compare_mft_fields(rapid_dataset, reference_dataset)
     usn_field_comparison = compare_usn_fields(rapid_dataset, reference_dataset)
+    usn_state_replay_field_comparison = compare_usn_state_replay_fields(rapid_dataset, reference_dataset)
     ese_field_comparison = compare_ese_fields(rapid_dataset, reference_dataset)
     if field_comparison["mismatch_count"] or field_comparison["missing_common_field_count"]:
         status = "failed"
@@ -480,6 +674,8 @@ def compare_datasets(
     if mft_field_comparison["mismatch_count"]:
         status = "failed"
     if usn_field_comparison["mismatch_count"]:
+        status = "failed"
+    if usn_state_replay_field_comparison["mismatch_count"]:
         status = "failed"
     if ese_field_comparison["mismatch_count"]:
         status = "failed"
@@ -499,6 +695,7 @@ def compare_datasets(
         "registry_field_comparison": registry_field_comparison,
         "mft_field_comparison": mft_field_comparison,
         "usn_field_comparison": usn_field_comparison,
+        "usn_state_replay_field_comparison": usn_state_replay_field_comparison,
         "ese_field_comparison": ese_field_comparison,
         "release_gate": "review-required" if status != "pass" else "comparison-passed",
     }
@@ -853,6 +1050,19 @@ def usn_field_index(rows: Sequence[Mapping[str, object]]) -> dict[str, dict[str,
     return index
 
 
+def usn_state_replay_field_index(rows: Sequence[Mapping[str, object]]) -> dict[str, dict[str, str]]:
+    index: dict[str, dict[str, str]] = {}
+    for row in rows[:MAX_USN_STATE_REPLAY_FIELD_DIFF_ROWS]:
+        keys = usn_state_replay_key_variants(row)
+        if not keys:
+            continue
+        fields = usn_state_replay_normalized_fields(row)
+        if fields:
+            for key in keys:
+                index.setdefault(key, fields)
+    return index
+
+
 def mft_key_variants(row: Mapping[str, object]) -> list[str]:
     record_number = ntfs_int_value(row, MFT_FIELD_ALIASES["record_number"])
     file_path = ntfs_path_value(row, MFT_FIELD_ALIASES["file_path"])
@@ -888,6 +1098,25 @@ def usn_key_variants(row: Mapping[str, object]) -> list[str]:
     return list(dict.fromkeys(keys))
 
 
+def usn_state_replay_key_variants(row: Mapping[str, object]) -> list[str]:
+    transition = normalize_field_value(first_value(row, USN_STATE_REPLAY_FIELD_ALIASES["transition"]) or "")
+    usn = ntfs_int_value(row, USN_STATE_REPLAY_FIELD_ALIASES["usn"])
+    frn = ntfs_int_value(row, USN_STATE_REPLAY_FIELD_ALIASES["file_reference_number"])
+    record_cursor = ntfs_int_value(row, USN_STATE_REPLAY_FIELD_ALIASES["record_cursor"])
+    if not transition or (not usn and not record_cursor):
+        return []
+    keys: list[str] = []
+    if usn and frn:
+        keys.append(normalize_key(f"usn-state:{usn}:{frn}"))
+    if record_cursor and frn:
+        keys.append(normalize_key(f"usn-state-cursor:{record_cursor}:{frn}"))
+    if usn:
+        keys.append(normalize_key(f"usn-state:{usn}"))
+    if record_cursor:
+        keys.append(normalize_key(f"usn-state-cursor:{record_cursor}"))
+    return list(dict.fromkeys(keys))
+
+
 def mft_normalized_fields(row: Mapping[str, object]) -> dict[str, str]:
     fields: dict[str, str] = {}
     for canonical, aliases in MFT_FIELD_ALIASES.items():
@@ -918,6 +1147,23 @@ def usn_normalized_fields(row: Mapping[str, object]) -> dict[str, str]:
             value = normalize_ntfs_file_name(first_value(row, aliases))
         elif canonical in {"reason", "source_info", "file_attributes"}:
             value = normalize_ntfs_list(first_value(row, aliases))
+        else:
+            raw = first_value(row, aliases)
+            value = normalize_field_value(raw) if raw is not None and str(raw).strip() else ""
+        if value:
+            fields[canonical] = value
+    return fields
+
+
+def usn_state_replay_normalized_fields(row: Mapping[str, object]) -> dict[str, str]:
+    fields: dict[str, str] = {}
+    for canonical, aliases in USN_STATE_REPLAY_FIELD_ALIASES.items():
+        if canonical in {"usn", "file_reference_number", "record_cursor"}:
+            value = ntfs_int_value(row, aliases)
+        elif canonical in {"previous_path", "new_path"}:
+            value = ntfs_path_value(row, aliases)
+        elif canonical == "file_name":
+            value = normalize_ntfs_file_name(first_value(row, aliases))
         else:
             raw = first_value(row, aliases)
             value = normalize_field_value(raw) if raw is not None and str(raw).strip() else ""
@@ -1108,6 +1354,20 @@ def compare_usn_fields(
         mode="usn-journal-field-diff",
         key_name="usn_key",
         row_limit=MAX_NTFS_FIELD_DIFF_ROWS,
+    )
+
+
+def compare_usn_state_replay_fields(
+    rapid_dataset: Mapping[str, object],
+    reference_dataset: Mapping[str, object],
+) -> dict[str, object]:
+    return compare_ntfs_field_indexes(
+        rapid_dataset,
+        reference_dataset,
+        index_key="usn_state_replay_field_index",
+        mode="usn-state-replay-field-diff",
+        key_name="usn_state_replay_key",
+        row_limit=MAX_USN_STATE_REPLAY_FIELD_DIFF_ROWS,
     )
 
 
@@ -1400,6 +1660,7 @@ def build_trusted_tool_diff_manifest(
             "registry_field_comparison",
             "mft_field_comparison",
             "usn_field_comparison",
+            "usn_state_replay_field_comparison",
             "ese_field_comparison",
         ):
             field_comparison = comparison.get(field_name)
@@ -1535,6 +1796,7 @@ def trusted_tool_diff_functional_profile(
             "mft-record-field-diff-supported",
             "mft-parent-path-attribute-diff-supported",
             "usn-frn-reason-timestamp-field-diff-supported",
+            "usn-state-replay-transition-field-diff-supported",
             "ese-srum-row-field-diff-supported",
             "ese-windows-edb-row-field-diff-supported",
             "ese-page-offset-deleted-state-diff-supported",
@@ -1594,6 +1856,10 @@ def file_integrity(path: Path) -> dict[str, object]:
         "sha256": hasher.hexdigest(),
         "mtime_epoch": stat.st_mtime,
     }
+
+
+def file_sha256(path: Path) -> str:
+    return str(file_integrity(path)["sha256"])
 
 
 def infer_format(path: Path) -> str:

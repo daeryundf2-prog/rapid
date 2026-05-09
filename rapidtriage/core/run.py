@@ -23,11 +23,19 @@ from .artifacts import run_artifact_collection
 from .disk_image import (
     DiskImageExtractionError,
     DiskImageExtractionResult,
+    build_raw_split_integrated_workflow_manifest,
     extract_raw_image_to_directory,
     is_raw_image_path,
 )
 from .docs import build_manifest, run_docs_search, write_result
-from .e01 import E01ExtractionError, E01ExtractionResult, e01_failure_guidance, extract_e01_to_directory, is_e01_path
+from .e01 import (
+    E01ExtractionError,
+    E01ExtractionResult,
+    build_e01_ex01_integrated_workflow_manifest,
+    e01_failure_guidance,
+    extract_e01_to_directory,
+    is_e01_path,
+)
 from .extract import DEFAULT_EXTRACT_MANIFEST_NAME, SUPPORTED_DOC_KINDS, run_extract
 from .files import run_files_scan
 from .forensic_accuracy import build_accuracy_gate
@@ -40,6 +48,7 @@ from .timeline import build_timeline_report, run_timeline
 from .virtual_disk import (
     VirtualDiskExtractionError,
     VirtualDiskExtractionResult,
+    build_virtual_disk_integrated_workflow_manifest,
     extract_virtual_disk_to_directory,
     is_virtual_disk_path,
 )
@@ -47,6 +56,33 @@ from .virtual_disk import (
 SUPPORTED_RUN_MODES: tuple[str, ...] = ("seizure", "fraud", "hacking", "recovery")
 IMPLEMENTED_RUN_MODES = set(SUPPORTED_RUN_MODES)
 RUN_DOC_EXTRACT_KINDS = SUPPORTED_DOC_KINDS
+GENERAL_FORENSIC_ARTIFACT_KINDS = (
+    "browser",
+    "recent-files",
+    "email",
+    "cloud-export",
+    "mobile-export",
+    "kakaotalk-windows",
+    "android-apk",
+    "media-image",
+    "memory-volatility",
+)
+WINDOWS_FORENSIC_ARTIFACT_KINDS = (
+    "windows-os-account",
+    "eventlog",
+    "windows-search-index",
+    "windows-remote-access",
+    "windows-execution",
+    "windows-registry",
+    "windows-shellbags",
+    "windows-prefetch",
+    "windows-filesystem",
+    "windows-system",
+)
+CROSS_PLATFORM_SYSTEM_ARTIFACT_KINDS = (
+    "linux-system",
+    "macos-system",
+)
 PARSER_CRASH_ISOLATION_GAP_ID = "#71"
 MEMORY_CAP_GAP_ID = "#72"
 PREVIEW_SANDBOX_GAP_ID = "#73"
@@ -103,18 +139,9 @@ RUN_PROFILES: Dict[str, RunProfile] = {
         scan_root_parts=("Users",),
         preferred_locations=("downloads", "desktop", "documents"),
         artifacts_kinds=(
-            "browser",
-            "recent-files",
-            "windows-os-account",
-            "eventlog",
-            "windows-search-index",
-            "windows-remote-access",
-            "windows-execution",
-            "windows-prefetch",
-            "windows-filesystem",
-            "windows-system",
-            "linux-system",
-            "macos-system",
+            *GENERAL_FORENSIC_ARTIFACT_KINDS,
+            *WINDOWS_FORENSIC_ARTIFACT_KINDS,
+            *CROSS_PLATFORM_SYSTEM_ARTIFACT_KINDS,
         ),
     ),
     "fraud": RunProfile(
@@ -125,18 +152,9 @@ RUN_PROFILES: Dict[str, RunProfile] = {
         file_extract_categories=("documents", "archives", "databases", "emails", "mobile-images"),
         file_scan_categories=("documents", "archives", "databases", "emails", "mobile-images", "images"),
         artifacts_kinds=(
-            "browser",
-            "recent-files",
-            "windows-os-account",
-            "eventlog",
-            "windows-search-index",
-            "windows-remote-access",
-            "windows-execution",
-            "windows-prefetch",
-            "windows-filesystem",
-            "windows-system",
-            "linux-system",
-            "macos-system",
+            *GENERAL_FORENSIC_ARTIFACT_KINDS,
+            *WINDOWS_FORENSIC_ARTIFACT_KINDS,
+            *CROSS_PLATFORM_SYSTEM_ARTIFACT_KINDS,
         ),
     ),
     "hacking": RunProfile(
@@ -147,18 +165,9 @@ RUN_PROFILES: Dict[str, RunProfile] = {
         file_extract_categories=("executables", "archives", "databases", "documents", "emails", "memory-dumps"),
         file_scan_categories=("executables", "archives", "databases", "documents", "emails", "memory-dumps", "images"),
         artifacts_kinds=(
-            "browser",
-            "recent-files",
-            "windows-os-account",
-            "eventlog",
-            "windows-search-index",
-            "windows-remote-access",
-            "windows-execution",
-            "windows-prefetch",
-            "windows-filesystem",
-            "windows-system",
-            "linux-system",
-            "macos-system",
+            *GENERAL_FORENSIC_ARTIFACT_KINDS,
+            *WINDOWS_FORENSIC_ARTIFACT_KINDS,
+            *CROSS_PLATFORM_SYSTEM_ARTIFACT_KINDS,
         ),
     ),
     "recovery": RunProfile(
@@ -181,14 +190,22 @@ RUN_PROFILES: Dict[str, RunProfile] = {
         preferred_locations=("$recycle.bin", "recycle", "trash", "deleted"),
         artifacts_kinds=(
             "recent-files",
+            "email",
+            "cloud-export",
+            "mobile-export",
+            "kakaotalk-windows",
+            "android-apk",
+            "media-image",
+            "memory-volatility",
             "windows-os-account",
             "eventlog",
             "windows-search-index",
             "windows-remote-access",
+            "windows-registry",
+            "windows-shellbags",
             "windows-prefetch",
             "windows-filesystem",
-            "linux-system",
-            "macos-system",
+            *CROSS_PLATFORM_SYSTEM_ARTIFACT_KINDS,
         ),
     ),
 }
@@ -568,7 +585,7 @@ def run_triage_mode(
             "sqlite_fts_optimization": sqlite_fts_optimization,
         },
         rule_set=rule_set,
-        source=build_run_source_record(input_root, image_result=image_result),
+        source=build_run_source_record(input_root, image_result=image_result, outputs=outputs),
     )
     audit_output = output_dir / "rapidtriage-run-audit.json"
     summary_payload["audit"] = str(audit_output)
@@ -2430,6 +2447,7 @@ def build_run_source_record(
     | ArchiveImageExtractionResult
     | VirtualDiskExtractionResult
     | None,
+    outputs: Mapping[str, Path] | None = None,
 ) -> dict[str, object]:
     if image_result is None:
         return {
@@ -2447,6 +2465,21 @@ def build_run_source_record(
             "recovery_mode": image_result.recovery_mode,
             "image_paths": [str(path) for path in image_result.image_paths],
             "source_integrity": list(image_result.source_integrity),
+            "raw_split_workflow_manifest": build_raw_split_integrated_workflow_manifest(
+                source_path=image_result.source_path,
+                image_paths=image_result.image_paths,
+                source_integrity=image_result.source_integrity,
+                tool_preflight=image_result.tool_preflight,
+                partition_table=image_result.partition_table,
+                split_part_warnings=image_result.split_part_warnings,
+                split_set_profile=image_result.split_set_profile,
+                recovered_root_manifest=image_result.recovered_root_manifest,
+                command_history=image_result.command_history,
+                recovery_mode=image_result.recovery_mode,
+                partition_start_sector=image_result.partition_start_sector,
+                run_outputs={key: str(value) for key, value in (outputs or {}).items()},
+                status_context="run-summary",
+            ),
             "commercial_grade_ready": image_result.commercial_grade_ready,
         }
     if isinstance(image_result, ArchiveImageExtractionResult):
@@ -2471,6 +2504,21 @@ def build_run_source_record(
             "recovery_mode": image_result.raw_result.recovery_mode,
             "source_integrity": image_result.source_integrity,
             "converted_raw_integrity": image_result.converted_raw_integrity,
+            "virtual_disk_workflow_manifest": build_virtual_disk_integrated_workflow_manifest(
+                source_path=image_result.source_path,
+                converted_raw_path=image_result.converted_raw_path,
+                raw_result=image_result.raw_result,
+                conversion_tool=image_result.conversion_tool,
+                source_integrity=image_result.source_integrity,
+                converted_raw_integrity=image_result.converted_raw_integrity,
+                tool_preflight=image_result.tool_preflight,
+                command_history=image_result.command_history,
+                warnings=image_result.warnings,
+                virtual_disk_chain_profile=image_result.virtual_disk_chain_profile,
+                qemu_img_info_profile=image_result.qemu_img_info_profile,
+                run_outputs={key: str(value) for key, value in (outputs or {}).items()},
+                status_context="run-summary",
+            ),
             "commercial_grade_ready": image_result.commercial_grade_ready,
         }
     return {
@@ -2487,6 +2535,24 @@ def build_run_source_record(
         "recovered_root_manifest": image_result.recovered_root_manifest,
         "resume_status": image_result.resume_status,
         "workflow_status": build_completed_e01_workflow_status(image_result),
+        "e01_ex01_workflow_manifest": build_e01_ex01_integrated_workflow_manifest(
+            source_path=image_result.source_path,
+            source_integrity=image_result.source_integrity,
+            segment_set_profile=image_result.segment_set_profile,
+            tool_preflight=image_result.tool_preflight,
+            preflight_summary={
+                "status": "ready" if image_result.tool_preflight else "not-recorded",
+                "available_tools": [str(row.get("tool")) for row in image_result.tool_preflight if row.get("available")],
+                "missing_tools": [str(row.get("tool")) for row in image_result.tool_preflight if not row.get("available")],
+            },
+            partition_selection=image_result.partition_selection,
+            partition_table=image_result.partition_table,
+            command_history=image_result.command_history,
+            recovered_root_manifest=image_result.recovered_root_manifest,
+            resume_status=image_result.resume_status,
+            run_outputs={key: str(value) for key, value in (outputs or {}).items()},
+            status_context="run-summary",
+        ),
         "commercial_grade_ready": image_result.commercial_grade_ready,
     }
 
@@ -2537,7 +2603,7 @@ def build_completed_e01_workflow_status(image_result: E01ExtractionResult) -> di
         "partition_table_count": len(image_result.partition_table),
         "command_history_count": len(image_result.command_history),
         "recovered_manifest_entry_count": recovered_entries,
-        "resume_reused": bool((image_result.resume_status or {}).get("resumed")),
+        "resume_reused": bool((image_result.resume_status or {}).get("resumed_from_checkpoint")),
         "stages": [
             {"id": stage_id, "label": label, "status": status, "evidence": evidence}
             for stage_id, label, status, evidence in stages

@@ -10,6 +10,7 @@ from pathlib import Path
 from .core.audit import audit_path_for, write_audit_record
 from .core.backup import BackupError, build_case_backup, restore_case_backup
 from .core.artifacts import ArtifactCollectionError, SUPPORTED_ARTIFACT_KINDS, run_artifact_collection
+from .core.artifact_taxonomy import build_taxonomy_audit
 from .core.benchmark import (
     DEFAULT_BENCHMARK_FILE_COUNT,
     DEFAULT_BENCHMARK_KEYWORD,
@@ -67,7 +68,11 @@ from .core.confidence import (
     build_parser_explainability,
     build_reproducibility_kit,
 )
-from .core.cross_tool import CrossToolValidationError, build_cross_tool_validation_report
+from .core.cross_tool import (
+    CrossToolValidationError,
+    build_cross_tool_validation_report,
+    write_usn_state_replay_known_answer_template,
+)
 from .core.docs import build_manifest, run_docs_search, write_result
 from .core.doctor import format_doctor_text, run_doctor
 from .core.enterprise import build_enterprise_policy
@@ -98,8 +103,10 @@ from .core.plugins import PluginError, load_plugin_registry, validate_plugin_man
 from .core.rearchitecture import build_rearchitecture_status
 from .core.rules import RuleConfigError, load_rule_set
 from .core.run import RunModeError, SUPPORTED_RUN_MODES, run_triage_mode
+from .core.run_validation import RunValidationAttachmentError, attach_validation_diff_outputs
 from .core.sample_case import DEFAULT_SAMPLE_DIR, DEFAULT_SAMPLE_MODE, SampleCaseError, create_sample_case, run_sample_workflow
 from .core.search import SearchError, run_unified_search
+from .core.source_reader import SourceReadError, render_source_read_text, run_source_read
 from .core.timeline import TimelineError, build_timeline_report, run_timeline
 from .core.timeline_export import TimelineExportError, build_unified_timeline_export
 from .core.validation import ValidationError, build_validation_package
@@ -279,6 +286,27 @@ def build_parser() -> argparse.ArgumentParser:
         help="JSON provider/event message catalog for --kind eventlog rendering",
     )
     add_rules_argument(artifacts)
+
+    taxonomy_audit = sub.add_parser(
+        "taxonomy-audit",
+        help="Audit target forensic artifact coverage against collectors, artifact types, viewers, tests, and docs",
+        description=(
+            "Audit target forensic artifact coverage so Maestro-style missing artifact families are visible "
+            "instead of being hidden behind broad collector counts"
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=textwrap.dedent(
+            """\
+            Examples:
+              rapidtriage taxonomy-audit --json
+              rapidtriage taxonomy-audit --output rapidtriage-taxonomy-audit.json --strict
+            """
+        ),
+    )
+    taxonomy_audit.add_argument("--repo-root", default=".", help="Repository root to audit (default: current directory)")
+    taxonomy_audit.add_argument("--output", default="rapidtriage-taxonomy-audit.json", help="JSON output path")
+    taxonomy_audit.add_argument("--json", action="store_true", help="Print machine-readable JSON")
+    taxonomy_audit.add_argument("--strict", action="store_true", help="Return exit code 1 when any taxonomy target is incomplete")
 
     kakao_decrypt = sub.add_parser(
         "kakaotalk-decrypt",
@@ -754,6 +782,27 @@ def build_parser() -> argparse.ArgumentParser:
     search.add_argument("--proximity-window", type=int, default=0, help="Annotate hits where multiple keywords occur within N word tokens")
     search.add_argument("--keyword-pack", action="append", help="Add a built-in keyword pack such as credentials, execution, network, browser-ai, windows-ir")
     search.add_argument("--keyword-pack-file", action="append", help="JSON keyword pack file containing a keywords list")
+
+    source_read = sub.add_parser(
+        "source-read",
+        help="Read a source file from a completed run with bounded preview, hashes, and forensic caveats",
+        description="Read a source file from a completed run with bounded preview, hashes, and forensic caveats",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=textwrap.dedent(
+            """\
+            Examples:
+              rapidtriage source-read ./rapidtriage-run-hacking --path Users/alice/Documents/note.txt
+              rapidtriage source-read ./rapidtriage-run-hacking --path /cases/mounted/Users/alice/AppData/Local/History --hash --json
+            """
+        ),
+    )
+    source_read.add_argument("run_output", help="Run output directory or rapidtriage-run-summary.json")
+    source_read.add_argument("--path", required=True, help="Source file path, absolute or relative to the run analysis root")
+    source_read.add_argument("--output", default="rapidtriage-source-read.json", help="JSON output path")
+    source_read.add_argument("--max-chars", type=int, default=20_000, help="Maximum text characters to include in preview")
+    source_read.add_argument("--hex-bytes", type=int, default=1024, help="Maximum binary bytes to include in hex preview")
+    source_read.add_argument("--hash", action="store_true", help="Compute MD5/SHA1/SHA256 for the source file")
+    source_read.add_argument("--json", action="store_true", help="Print machine-readable JSON instead of a compact preview")
 
     ocr_queue = sub.add_parser(
         "ocr-queue",
@@ -1272,6 +1321,56 @@ def build_parser() -> argparse.ArgumentParser:
     )
     cross_tool.add_argument("--output", help="Optional JSON report path")
     cross_tool.add_argument("--json", action="store_true", help="Print machine-readable JSON")
+
+    usn_state_template = sub.add_parser(
+        "usn-state-replay-template",
+        help="Write a known-answer CSV template for USN state replay validation",
+        description="Write a USN create/rename/delete state replay known-answer CSV and manifest for cross-tool validation",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=textwrap.dedent(
+            """\
+            Examples:
+              rapidtriage usn-state-replay-template --output ./usn-state-replay-known-answer.csv
+              rapidtriage usn-state-replay-template --output ./usn-state-replay-known-answer.csv --empty --json
+            """
+        ),
+    )
+    usn_state_template.add_argument("--output", required=True, help="CSV template output path")
+    usn_state_template.add_argument("--empty", action="store_true", help="Write headers only, without example rows")
+    usn_state_template.add_argument("--json", action="store_true", help="Print machine-readable manifest JSON")
+
+    run_attach_validation_diff = sub.add_parser(
+        "run-attach-validation-diff",
+        help="Attach trusted-tool validation diff JSON files to a completed run",
+        description=(
+            "Copy trusted-tool/cross-tool validation diff outputs into a completed run directory "
+            "and register them in rapidtriage-run-summary.json for API/UI validation-package review."
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=textwrap.dedent(
+            """\
+            Examples:
+              rapidtriage run-attach-validation-diff ./rapidtriage-run --diff-output usn_state=./usn-state-cross-tool.json
+              rapidtriage run-attach-validation-diff ./rapidtriage-run/rapidtriage-run-summary.json --diff-output evtx=./evtx-cross-tool.json --overwrite --json
+            """
+        ),
+    )
+    run_attach_validation_diff.add_argument(
+        "run_output",
+        help="Completed run output directory or rapidtriage-run-summary.json",
+    )
+    run_attach_validation_diff.add_argument(
+        "--diff-output",
+        action="append",
+        required=True,
+        help="Validation diff output as NAME=PATH; repeat for EVTX, Registry, MFT, USN, etc.",
+    )
+    run_attach_validation_diff.add_argument(
+        "--overwrite",
+        action="store_true",
+        help="Replace an existing attached validation diff with the same NAME",
+    )
+    run_attach_validation_diff.add_argument("--json", action="store_true", help="Print machine-readable JSON")
 
     confidence_dashboard = sub.add_parser(
         "confidence-dashboard",
@@ -2504,6 +2603,51 @@ def main(argv=None) -> int:
                 print(f"Saved report: {payload['output']}")
         return 0
 
+    if args.command == "usn-state-replay-template":
+        try:
+            payload = write_usn_state_replay_known_answer_template(
+                Path(args.output).expanduser().resolve(),
+                include_examples=not args.empty,
+            )
+        except OSError as exc:
+            parser.error(str(exc))
+        if args.json:
+            print(json.dumps(payload, ensure_ascii=False, indent=2))
+        else:
+            print("RapidTriage USN state replay known-answer template")
+            print(f"Saved CSV: {payload['csv_path']}")
+            print(f"Saved manifest: {payload['manifest_path']}")
+            print(f"Rows: {payload['row_count']}")
+            print(f"Trusted tool name: {payload['trusted_tool_name']}")
+        return 0
+
+    if args.command == "run-attach-validation-diff":
+        diff_outputs = {
+            name: Path(path).expanduser().resolve()
+            for name, path in parse_named_cli_values(
+                args.diff_output or [],
+                option_name="--diff-output",
+                parser=parser,
+            ).items()
+        }
+        try:
+            payload = attach_validation_diff_outputs(
+                Path(args.run_output).expanduser().resolve(),
+                diff_outputs,
+                overwrite=args.overwrite,
+            )
+        except (RunValidationAttachmentError, OSError, json.JSONDecodeError, UnicodeDecodeError) as exc:
+            parser.error(str(exc))
+        if args.json:
+            print(json.dumps(payload, ensure_ascii=False, indent=2))
+        else:
+            print("RapidTriage run validation diff attachment")
+            print(f"Summary: {payload['summary_path']}")
+            print(f"Attached outputs: {payload['attached_count']}")
+            print(f"Audit: {payload['audit_path']}")
+            print("Next: open the run in the web workbench or export its validation package.")
+        return 0
+
     if args.command == "confidence-dashboard":
         try:
             payload = build_confidence_dashboard(
@@ -2755,6 +2899,43 @@ def main(argv=None) -> int:
         print(f"Saved search JSON: {output}")
         print(f"Saved audit JSON: {audit_output}")
         print(f"Matches: {payload['summary']['match_count']}")
+        return 0
+
+    if args.command == "source-read":
+        run_output = Path(args.run_output).expanduser().resolve()
+        output = Path(args.output).expanduser().resolve()
+        try:
+            payload = run_source_read(
+                run_output,
+                args.path,
+                include_hashes=args.hash,
+                max_chars=args.max_chars,
+                hex_bytes=args.hex_bytes,
+            )
+        except SourceReadError as exc:
+            parser.error(str(exc))
+        write_result(payload, output)
+        audit_output = audit_path_for(output)
+        input_summary = run_output / "rapidtriage-run-summary.json" if run_output.is_dir() else run_output
+        write_audit_record(
+            audit_output,
+            command="source-read",
+            options={
+                "path": args.path,
+                "output": str(output),
+                "max_chars": args.max_chars,
+                "hex_bytes": args.hex_bytes,
+                "hash": args.hash,
+            },
+            input_files=[("run-summary", input_summary), ("source-file", Path(str(payload["path"])))],
+            output_files=[("source-read-json", output)],
+        )
+        print(f"Saved source-read JSON: {output}")
+        print(f"Saved audit JSON: {audit_output}")
+        if args.json:
+            print(json.dumps(payload, ensure_ascii=False, indent=2))
+        else:
+            print(render_source_read_text(payload))
         return 0
 
     if args.command == "ocr-queue":
@@ -3522,6 +3703,41 @@ def main(argv=None) -> int:
                 f"Matched: {summary['matched']}"
             )
         return 0
+
+    if args.command == "taxonomy-audit":
+        repo_root = Path(args.repo_root).expanduser().resolve()
+        output = Path(args.output).expanduser().resolve()
+        payload = build_taxonomy_audit(repo_root)
+        write_result(payload, output)
+        if args.json:
+            print(json.dumps(payload, ensure_ascii=False, indent=2))
+        else:
+            summary = payload["summary"]
+            print("RapidTriage forensic artifact taxonomy audit")
+            print(f"Saved taxonomy audit JSON: {output}")
+            print(
+                "Targets: "
+                f"{summary['target_count']}  Covered: {summary['covered_count']}  "
+                f"Partial: {summary['partial_count']}  Missing: {summary['missing_count']}"
+            )
+            print(
+                "Implementation evidence: "
+                f"collectors={summary['collector_count']}  "
+                f"artifact_type_literals={summary['artifact_type_literal_count']}"
+            )
+            priority_missing = payload.get("priority_missing")
+            if isinstance(priority_missing, list) and priority_missing:
+                print("Priority missing targets:")
+                for item in priority_missing[:8]:
+                    if isinstance(item, dict):
+                        print(f"- {item.get('id')}: {item.get('title')}")
+            priority_partial = payload.get("priority_partial")
+            if isinstance(priority_partial, list) and priority_partial:
+                print("Priority partial targets:")
+                for item in priority_partial[:8]:
+                    if isinstance(item, dict):
+                        print(f"- {item.get('id')}: {item.get('title')}")
+        return 1 if args.strict and not payload["summary"]["strict_pass"] else 0
 
     root = Path(args.root).expanduser().resolve()
     input_root = resolve_input_root(root, kind=getattr(args, "input_kind", None))

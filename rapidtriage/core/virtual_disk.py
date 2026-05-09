@@ -12,16 +12,19 @@ from .e01 import (
     collect_tool_preflight,
     command_record,
     describe_source_integrity,
-    image_core_accuracy_gates,
     image_commercial_uplift_evidence,
+    image_core_accuracy_gates,
     image_report_grade_assessment,
+    image_reportability_decision,
     image_validation_matrix,
+    stable_manifest_sha256,
 )
 
 
 VIRTUAL_DISK_SUFFIXES = (".vhd", ".vhdx", ".vmdk", ".vdi", ".xva", ".qcow", ".qcow2")
 QEMU_CONVERTIBLE_SUFFIXES = (".vhd", ".vhdx", ".vmdk", ".vdi", ".qcow", ".qcow2")
 VIRTUAL_DISK_REQUIRED_TOOLS = ("qemu-img", "mmls", "tsk_recover")
+VIRTUAL_DISK_WORKFLOW_MANIFEST_VERSION = "virtual-disk-integrated-workflow-manifest-v1"
 VIRTUAL_DISK_NATIVE_CAPABILITIES = {
     "qemu_img_raw_conversion": True,
     "source_integrity_preflight": True,
@@ -86,6 +89,21 @@ class VirtualDiskExtractionResult:
             "warnings": list(self.warnings),
             "virtual_disk_chain_profile": self.virtual_disk_chain_profile,
             "qemu_img_info_profile": self.qemu_img_info_profile,
+            "virtual_disk_workflow_manifest": build_virtual_disk_integrated_workflow_manifest(
+                source_path=self.source_path,
+                converted_raw_path=self.converted_raw_path,
+                raw_result=self.raw_result,
+                conversion_tool=self.conversion_tool,
+                source_integrity=self.source_integrity,
+                converted_raw_integrity=self.converted_raw_integrity,
+                tool_preflight=self.tool_preflight,
+                command_history=self.command_history,
+                warnings=self.warnings,
+                virtual_disk_chain_profile=self.virtual_disk_chain_profile,
+                qemu_img_info_profile=self.qemu_img_info_profile,
+                run_outputs=None,
+                status_context="extraction-result",
+            ),
             "commercial_grade_ready": self.commercial_grade_ready,
             "commercial_gap_ids": ["#24"],
             "validation_matrix": image_validation_matrix(
@@ -144,6 +162,216 @@ class VirtualDiskExtractionResult:
                 "conversion_output": str(self.converted_raw_path),
             },
         }
+
+
+def build_virtual_disk_integrated_workflow_manifest(
+    *,
+    source_path: Path,
+    converted_raw_path: Path,
+    raw_result: DiskImageExtractionResult,
+    conversion_tool: str,
+    source_integrity: dict[str, object] | None,
+    converted_raw_integrity: dict[str, object] | None,
+    tool_preflight: Sequence[dict[str, object]] | None,
+    command_history: Sequence[dict[str, object]] | None,
+    warnings: Sequence[str] | None,
+    virtual_disk_chain_profile: dict[str, object] | None,
+    qemu_img_info_profile: dict[str, object] | None,
+    run_outputs: dict[str, object] | None = None,
+    status_context: str = "extraction-result",
+) -> dict[str, object]:
+    tool_rows = [dict(row) for row in tool_preflight or []]
+    command_rows = [dict(row) for row in command_history or []]
+    chain_profile = dict(virtual_disk_chain_profile or {})
+    info_profile = dict(qemu_img_info_profile or {})
+    raw_payload = raw_result.to_dict()
+    outputs = dict(run_outputs or {})
+    output_status = {
+        key: {
+            "path": str(value),
+            "expected": key
+            in {
+                "virtual_disk",
+                "manifest",
+                "docs",
+                "docs_index",
+                "files",
+                "timeline",
+                "timeline_report",
+                "indicators",
+                "summary",
+                "report",
+            }
+            or key.startswith("artifacts_"),
+        }
+        for key, value in outputs.items()
+    }
+    analysis_outputs = [
+        key
+        for key in output_status
+        if key
+        in {
+            "manifest",
+            "docs",
+            "docs_index",
+            "files",
+            "timeline",
+            "timeline_report",
+            "indicators",
+        }
+        or key.startswith("artifacts_")
+    ]
+    report_outputs = [key for key in output_status if key in {"summary", "report"}]
+    dependency_complete = bool(tool_rows) and all(row.get("available") for row in tool_rows)
+    qemu_info_ok = info_profile.get("command_status") == "ok"
+    conversion_complete = converted_raw_path.is_file() or bool(converted_raw_integrity)
+    raw_extraction_complete = bool((raw_result.recovered_root_manifest or {}).get("visited_file_count")) or bool(raw_result.command_history)
+    blockers = [
+        "snapshot-chain-validation-not-implemented",
+        "differencing-disk-resolution-not-implemented",
+        "hypervisor-metadata-decoding-not-implemented",
+        "virtual-disk-trusted-conversion-diff-required",
+    ]
+    stages = [
+        {
+            "id": "select-virtual-disk",
+            "label": "Virtual disk selection",
+            "status": "complete" if source_path.is_file() else "blocked",
+            "evidence": {
+                "source_path": str(source_path),
+                "detected_format": chain_profile.get("detected_format") or source_path.suffix.lower().lstrip("."),
+                "source_hash_status": (source_integrity or {}).get("hash_status", "not-recorded"),
+            },
+        },
+        {
+            "id": "chain-risk-review",
+            "label": "Snapshot/differencing chain risk review",
+            "status": "review-required" if chain_profile.get("warnings") or chain_profile.get("suspected_snapshot_or_differencing_member") else "complete",
+            "evidence": {
+                "chain_validation_status": chain_profile.get("chain_validation_status"),
+                "suspected_snapshot_or_differencing_member": chain_profile.get("suspected_snapshot_or_differencing_member"),
+                "backing_filename_present": info_profile.get("backing_filename_present"),
+                "warnings": list(chain_profile.get("warnings") or []),
+            },
+        },
+        {
+            "id": "dependency-preflight",
+            "label": "Dependency preflight",
+            "status": "complete" if dependency_complete else "blocked",
+            "evidence": {
+                "required_tools": list(VIRTUAL_DISK_REQUIRED_TOOLS),
+                "available_tools": [str(row.get("tool")) for row in tool_rows if row.get("available")],
+                "missing_tools": [str(row.get("tool")) for row in tool_rows if not row.get("available")],
+            },
+        },
+        {
+            "id": "qemu-img-info",
+            "label": "qemu-img metadata capture",
+            "status": "complete" if qemu_info_ok else "review-required",
+            "evidence": {
+                "format": info_profile.get("format"),
+                "virtual_size": info_profile.get("virtual_size"),
+                "actual_size": info_profile.get("actual_size"),
+                "parse_status": info_profile.get("parse_status"),
+            },
+        },
+        {
+            "id": "raw-conversion",
+            "label": "Read-only raw conversion",
+            "status": "complete" if conversion_complete else "blocked",
+            "evidence": {
+                "conversion_tool": conversion_tool,
+                "converted_raw_path": str(converted_raw_path),
+                "converted_hash_status": (converted_raw_integrity or {}).get("hash_status", "not-recorded"),
+                "command_history_count": len(command_rows),
+            },
+        },
+        {
+            "id": "nested-raw-recovery",
+            "label": "Nested RAW partition/filesystem recovery",
+            "status": "complete" if raw_extraction_complete else "blocked",
+            "evidence": {
+                "raw_recovery_mode": raw_result.recovery_mode,
+                "partition_start_sector": raw_result.partition_start_sector,
+                "raw_command_history_count": len(raw_result.command_history),
+            },
+        },
+        {
+            "id": "artifact-analysis",
+            "label": "Artifact analysis",
+            "status": "complete" if analysis_outputs else ("ready-after-extraction" if raw_extraction_complete else "blocked"),
+            "evidence": {
+                "analysis_output_keys": sorted(analysis_outputs),
+                "artifact_output_count": sum(1 for key in output_status if key.startswith("artifacts_")),
+            },
+        },
+        {
+            "id": "review-report",
+            "label": "Review and report export",
+            "status": "complete" if report_outputs else ("ready-after-review" if analysis_outputs else "blocked"),
+            "evidence": {
+                "report_output_keys": sorted(report_outputs),
+                "source_viewer_required": True,
+                "trusted_conversion_diff_required": True,
+            },
+        },
+    ]
+    payload: dict[str, object] = {
+        "profile_version": VIRTUAL_DISK_WORKFLOW_MANIFEST_VERSION,
+        "item_number": 24,
+        "gap_id": "#24",
+        "status_context": status_context,
+        "workflow_goal": "Virtual disks preserve source/chain risk, qemu-img info, raw conversion provenance, nested RAW recovery, downstream analysis, and report blockers in one contract.",
+        "source_ref": {
+            "path": str(source_path),
+            "sha256": (source_integrity or {}).get("sha256"),
+            "hash_status": (source_integrity or {}).get("hash_status"),
+        },
+        "converted_raw_ref": {
+            "path": str(converted_raw_path),
+            "sha256": (converted_raw_integrity or {}).get("sha256"),
+            "hash_status": (converted_raw_integrity or {}).get("hash_status"),
+        },
+        "virtual_disk_chain_profile": chain_profile,
+        "qemu_img_info_profile": info_profile,
+        "raw_extraction_summary": {
+            "recovery_mode": raw_result.recovery_mode,
+            "partition_start_sector": raw_result.partition_start_sector,
+            "partition_table_count": len(raw_result.partition_table),
+            "recovered_file_count": (raw_result.recovered_root_manifest or {}).get("visited_file_count", 0),
+            "raw_split_workflow_manifest_hash": (raw_payload.get("raw_split_workflow_manifest") or {}).get("manifest_sha256")
+            if isinstance(raw_payload.get("raw_split_workflow_manifest"), dict)
+            else None,
+        },
+        "run_output_status": output_status,
+        "stages": stages,
+        "large_data_controls": {
+            "converted_raw_hash_limit_bytes": 128 * 1024 * 1024,
+            "qemu_info_captured": bool(info_profile),
+            "nested_raw_manifest_linked": bool(raw_payload.get("raw_split_workflow_manifest")),
+            "cursor_table_required_for_gui": True,
+            "virtualized_table_required_for_gui": True,
+        },
+        "reportability_decision": image_reportability_decision(
+            24,
+            blockers=blockers,
+            failed_validation_matrix_ids=["#24-native-commercial-parser"],
+            details={
+                "source_integrity": source_integrity or {},
+                "image_trusted_diff": {"status": "not-attached"},
+            },
+        ),
+        "commercial_grade_ready": False,
+        "commercial_grade_blockers": blockers,
+        "warnings": list(warnings or []),
+        "operator_next_steps": [
+            "Attach qemu-img info/convert transcripts and trusted conversion diff evidence.",
+            "Review backing-file/snapshot/differencing chain risk before reporting.",
+            "Validate nested RAW recovery against a trusted virtual-disk workflow.",
+        ],
+    }
+    payload["manifest_sha256"] = stable_manifest_sha256(payload)
+    return payload
 
 
 def is_virtual_disk_path(path: Path) -> bool:

@@ -1140,6 +1140,10 @@ def collect_native_evtx_events(
                 details["evtx_commercial_readiness_profile"] = native_evtx_commercial_readiness_profile(details)
                 details["core_accuracy_gates"] = native_evtx_core_accuracy_gates(details)
                 details["commercial_uplift_evidence"] = native_evtx_commercial_uplift_evidence(details)
+                details["evtx_report_citation_manifest"] = native_evtx_report_citation_manifest(details)
+                details["evtx_report_citation_manifest_hash"] = details["evtx_report_citation_manifest"][
+                    "manifest_sha256"
+                ]
                 details["commercial_grade_ready"] = details["evtx_report_grade_assessment"]["report_grade_ready"]
                 details["commercial_grade_blockers"] = list(details["evtx_report_grade_assessment"]["blockers"])
                 yield event_record(path, "eventlog-event", details)
@@ -2145,6 +2149,266 @@ def native_evtx_commercial_uplift_evidence(details: Mapping[str, object]) -> dic
     }
 
 
+def native_evtx_report_citation_manifest(details: Mapping[str, object]) -> dict[str, object]:
+    hashes = details.get("source_hashes") if isinstance(details.get("source_hashes"), Mapping) else {}
+    provenance = details.get("evtx_record_provenance") if isinstance(details.get("evtx_record_provenance"), Mapping) else {}
+    rendering = details.get("message_rendering") if isinstance(details.get("message_rendering"), Mapping) else {}
+    report_grade = (
+        details.get("evtx_report_grade_assessment")
+        if isinstance(details.get("evtx_report_grade_assessment"), Mapping)
+        else {}
+    )
+    validation_matrix = details.get("evtx_validation_matrix") if isinstance(details.get("evtx_validation_matrix"), list) else []
+    event_data_sequence = (
+        details.get("binxml_event_data_sequence")
+        if isinstance(details.get("binxml_event_data_sequence"), list)
+        else []
+    )
+    rendering_provenance = rendering.get("provenance") if isinstance(rendering.get("provenance"), Mapping) else {}
+    citation_refs: list[dict[str, object]] = [
+        {
+            "kind": "evtx-record",
+            "ref_id": "evtx-record-source",
+            "source_path": details.get("source_path", ""),
+            "source_sha256": hashes.get("sha256", ""),
+            "record_id": details.get("record_id", ""),
+            "event_id": details.get("event_id", ""),
+            "record_offset": details.get("evtx_record_offset", 0),
+            "record_size": details.get("evtx_record_size", 0),
+            "record_sha256": details.get("evtx_record_sha256", ""),
+            "source_viewer_locator": {
+                "viewer": "evtx-record-offset",
+                "record_offset": details.get("evtx_record_offset", 0),
+                "record_size": details.get("evtx_record_size", 0),
+                "record_id": details.get("record_id", ""),
+            },
+        },
+        {
+            "kind": "evtx-rendered-message",
+            "ref_id": "evtx-rendering",
+            "status": rendering.get("status", ""),
+            "renderer": rendering_provenance.get("renderer", ""),
+            "event_message_sha256": sha256_text(str(details.get("event_message") or "")),
+            "validation_required": bool(rendering.get("validation_required")),
+            "source_viewer_locator": {
+                "viewer": "evtx-message-rendering",
+                "record_id": details.get("record_id", ""),
+                "event_id": details.get("event_id", ""),
+            },
+        },
+    ]
+    for index, row in enumerate(event_data_sequence[:20], start=1):
+        if not isinstance(row, Mapping):
+            continue
+        citation_refs.append(
+            {
+                "kind": "evtx-event-data-field",
+                "ref_id": f"evtx-event-data-{index}",
+                "name": row.get("name", ""),
+                "path": row.get("path", ""),
+                "value_type": row.get("value_type", ""),
+                "value_sha256": sha256_text(str(row.get("value") or "")),
+                "source_viewer_locator": {
+                    "viewer": "evtx-binxml-field",
+                    "record_id": details.get("record_id", ""),
+                    "field_path": row.get("path", ""),
+                    "field_index": row.get("index", index - 1),
+                },
+            }
+        )
+    failed_checks = [
+        str(item.get("id"))
+        for item in validation_matrix
+        if isinstance(item, Mapping) and item.get("id") and not item.get("passed")
+    ]
+    passed_checks = [
+        str(item.get("id"))
+        for item in validation_matrix
+        if isinstance(item, Mapping) and item.get("id") and item.get("passed")
+    ]
+    manifest: dict[str, object] = {
+        "manifest_version": "evtx-record-report-citation-manifest-v1",
+        "artifact_type": "eventlog-event",
+        "parser": PARSER_VERSION,
+        "source": {
+            "path": details.get("source_path", ""),
+            "sha256": hashes.get("sha256", ""),
+            "format": details.get("source_format", ""),
+        },
+        "row_identity": {
+            "record_id": details.get("record_id", ""),
+            "event_id": details.get("event_id", ""),
+            "provider_name": details.get("provider_name", ""),
+            "channel": details.get("channel", ""),
+            "timestamp": details.get("timestamp", ""),
+            "record_offset": details.get("evtx_record_offset", 0),
+            "record_sha256": details.get("evtx_record_sha256", ""),
+            "record_provenance_hash": stable_eventlog_json_sha256(provenance) if provenance else "",
+        },
+        "citation_refs": citation_refs,
+        "citation_ref_count": len(citation_refs),
+        "validation_summary": {
+            "passed_matrix_ids": passed_checks,
+            "failed_matrix_ids": failed_checks,
+            "binxml_status": details.get("evtx_binxml_status", ""),
+            "field_fidelity": details.get("evtx_field_fidelity", ""),
+            "message_rendering_status": rendering.get("status", ""),
+            "report_grade_status": report_grade.get("status", ""),
+        },
+        "reportability": {
+            "allowed_use": "native-evtx-triage-search-timeline-pivot",
+            "ready_for_court_report": bool(report_grade.get("report_grade_ready")),
+            "validation_required": not bool(report_grade.get("report_grade_ready")),
+            "blockers": list(report_grade.get("blockers") or []),
+        },
+    }
+    manifest["manifest_sha256"] = stable_eventlog_json_sha256(
+        {key: value for key, value in manifest.items() if key != "manifest_sha256"}
+    )
+    return manifest
+
+
+def native_evtx_recovery_report_citation_manifest(details: Mapping[str, object]) -> dict[str, object]:
+    hashes = details.get("source_hashes") if isinstance(details.get("source_hashes"), Mapping) else {}
+    recovery_context = (
+        details.get("evtx_recovery_context")
+        if isinstance(details.get("evtx_recovery_context"), Mapping)
+        else {}
+    )
+    recovery_evidence = (
+        details.get("evtx_recovery_evidence")
+        if isinstance(details.get("evtx_recovery_evidence"), Mapping)
+        else {}
+    )
+    validation_profile = (
+        details.get("evtx_recovery_validation_profile")
+        if isinstance(details.get("evtx_recovery_validation_profile"), Mapping)
+        else {}
+    )
+    integrity = (
+        details.get("evtx_record_integrity")
+        if isinstance(details.get("evtx_record_integrity"), Mapping)
+        else {}
+    )
+    chunk_context = (
+        details.get("evtx_chunk_context")
+        if isinstance(details.get("evtx_chunk_context"), Mapping)
+        else {}
+    )
+    validation_matrix = details.get("evtx_validation_matrix") if isinstance(details.get("evtx_validation_matrix"), list) else []
+    passed_checks = [
+        str(item.get("id"))
+        for item in validation_matrix
+        if isinstance(item, Mapping) and item.get("id") and item.get("passed")
+    ]
+    failed_checks = [
+        str(item.get("id"))
+        for item in validation_matrix
+        if isinstance(item, Mapping) and item.get("id") and not item.get("passed")
+    ]
+    citation_refs = [
+        {
+            "kind": "evtx-recovery-candidate-record",
+            "ref_id": "evtx-recovery-record-offset",
+            "source_path": details.get("source_path", ""),
+            "source_sha256": hashes.get("sha256", ""),
+            "record_offset": details.get("evtx_record_offset", 0),
+            "record_size_observed": recovery_evidence.get("record_size_observed", 0),
+            "declared_size": details.get("evtx_declared_size", recovery_evidence.get("declared_size", 0)),
+            "available_size": details.get("evtx_available_size", recovery_evidence.get("available_size", 0)),
+            "record_sha256": details.get("evtx_record_sha256", ""),
+            "source_viewer_locator": {
+                "viewer": "hex",
+                "mode": "evtx-recovery-record-candidate",
+                "offset": details.get("evtx_record_offset", 0),
+                "length": recovery_evidence.get("record_size_observed", 0),
+            },
+        },
+        {
+            "kind": "evtx-recovery-chunk-context",
+            "ref_id": "evtx-recovery-chunk-boundary",
+            "chunk_offset": chunk_context.get("chunk_offset", 0),
+            "record_relative_offset": chunk_context.get("record_relative_offset", 0),
+            "free_space_offset": chunk_context.get("free_space_offset", 0),
+            "last_record_offset": chunk_context.get("last_record_offset", 0),
+            "chunk_boundary_status": chunk_context.get("chunk_boundary_status", ""),
+            "chunk_signature_valid": bool(chunk_context.get("chunk_signature_valid")),
+        },
+        {
+            "kind": "evtx-recovery-validation",
+            "ref_id": "evtx-recovery-validation-profile",
+            "candidate_class": validation_profile.get("candidate_class", ""),
+            "recovery_status": recovery_context.get("status", ""),
+            "allocation_status": recovery_context.get("allocation_status", ""),
+            "confidence": recovery_context.get("confidence", 0),
+            "confidence_band": recovery_context.get("confidence_band", ""),
+            "required_independent_checks": list(validation_profile.get("required_independent_checks") or [])
+            if isinstance(validation_profile.get("required_independent_checks"), list)
+            else [],
+        },
+    ]
+    manifest: dict[str, object] = {
+        "manifest_version": "evtx-recovery-report-citation-manifest-v1",
+        "artifact_type": "eventlog-record-candidate",
+        "parser": PARSER_VERSION,
+        "source": {
+            "path": details.get("source_path", ""),
+            "sha256": hashes.get("sha256", ""),
+            "format": details.get("source_format", ""),
+        },
+        "row_identity": {
+            "record_id": details.get("record_id", ""),
+            "record_offset": details.get("evtx_record_offset", 0),
+            "record_sha256": details.get("evtx_record_sha256", ""),
+            "candidate_reason": recovery_evidence.get("candidate_reason", ""),
+            "recovery_status": recovery_context.get("status", ""),
+            "allocation_status": recovery_context.get("allocation_status", ""),
+        },
+        "citation_refs": citation_refs,
+        "citation_ref_count": len(citation_refs),
+        "validation_summary": {
+            "passed_matrix_ids": passed_checks,
+            "failed_matrix_ids": failed_checks,
+            "record_integrity": {
+                "magic_valid": bool(integrity.get("magic_valid")),
+                "declared_size_valid": bool(integrity.get("declared_size_valid")),
+                "trailing_size_valid": bool(integrity.get("trailing_size_valid")),
+            },
+            "evidence_reasons": list(recovery_evidence.get("evidence_reasons") or [])
+            if isinstance(recovery_evidence.get("evidence_reasons"), list)
+            else [],
+            "caution_labels": list(recovery_context.get("caution_labels") or [])
+            if isinstance(recovery_context.get("caution_labels"), list)
+            else [],
+        },
+        "reportability": {
+            "allowed_use": "evtx-recovery-triage-pivot-only",
+            "ready_for_court_report": False,
+            "validation_required": True,
+            "blockers": list(
+                (
+                    validation_profile.get("reportability_decision")
+                    if isinstance(validation_profile.get("reportability_decision"), Mapping)
+                    else {}
+                ).get("blockers")
+                or ["deleted-corrupt-recovery-corpus-diff-required"]
+            ),
+        },
+    }
+    manifest["manifest_sha256"] = stable_eventlog_json_sha256(
+        {key: value for key, value in manifest.items() if key != "manifest_sha256"}
+    )
+    return manifest
+
+
+def stable_eventlog_json_sha256(value: Mapping[str, object] | Sequence[object] | str) -> str:
+    return sha256_text(json.dumps(value, ensure_ascii=False, sort_keys=True, default=str, separators=(",", ":")))
+
+
+def sha256_text(value: str) -> str:
+    return hashlib.sha256(value.encode("utf-8", errors="replace")).hexdigest()
+
+
 def evtx_commercial_blocker_analysis(blockers: Sequence[object]) -> list[dict[str, object]]:
     rows: list[dict[str, object]] = []
     for raw in blockers:
@@ -2589,6 +2853,10 @@ def native_evtx_record_candidate_record(
     details["evtx_report_grade_assessment"] = native_evtx_report_grade_assessment(details)
     details["core_accuracy_gates"] = native_evtx_core_accuracy_gates(details)
     details["commercial_uplift_evidence"] = native_evtx_commercial_uplift_evidence(details)
+    details["evtx_recovery_report_citation_manifest"] = native_evtx_recovery_report_citation_manifest(details)
+    details["evtx_recovery_report_citation_manifest_hash"] = details["evtx_recovery_report_citation_manifest"][
+        "manifest_sha256"
+    ]
     details["commercial_grade_ready"] = False
     details["commercial_grade_blockers"] = list(details["evtx_report_grade_assessment"]["blockers"])
     return event_record(path, "eventlog-record-candidate", details)
@@ -3165,6 +3433,14 @@ def parse_native_evtx_binxml(payload: bytes) -> dict[str, object]:
             rendered.append(html.escape(text))
             offset = after_value
             continue
+        if token_kind in {0x07, 0x08, 0x09, 0x0A, 0x0B}:
+            current = stack[-1] if stack else {}
+            parsed = parse_binxml_misc_token(payload, offset, current_path=str(current.get("path") or ""))
+            warnings.extend(parsed["warnings"])
+            value_fields.extend(parsed["value_fields"])
+            rendered.append(str(parsed.get("rendered") or ""))
+            offset = int(parsed.get("next_offset") or offset + 1)
+            continue
         if token_kind == 0x0C:
             template = parse_binxml_template_instance(payload, offset)
             template_id = str(template.get("template_id") or "")
@@ -3402,6 +3678,14 @@ def parse_binxml_fragment_tokens(
             rendered.append(html.escape(text))
             offset = after_value
             continue
+        if token_kind in {0x07, 0x08, 0x09, 0x0A, 0x0B}:
+            current = stack[-1] if stack else {}
+            parsed = parse_binxml_misc_token(payload, offset, current_path=str(current.get("path") or ""))
+            warnings.extend(parsed["warnings"])
+            value_fields.extend(parsed["value_fields"])
+            rendered.append(str(parsed.get("rendered") or ""))
+            offset = int(parsed.get("next_offset") or offset + 1)
+            continue
         if token_kind in {0x0D, 0x0E}:
             if offset + 4 > len(payload):
                 warnings.append(f"truncated-substitution:{offset}")
@@ -3490,6 +3774,121 @@ def read_binxml_name(blob: bytes, offset: int) -> tuple[str, int]:
         return "", offset
     name = decode_utf16le_string(blob[start:end])
     return name, terminator_end
+
+
+def read_binxml_counted_utf16(blob: bytes, offset: int, *, include_terminator: bool = False) -> tuple[str, int]:
+    if offset + 2 > len(blob):
+        return "", offset
+    char_count = read_u16(blob, offset)
+    start = offset + 2
+    end = start + char_count * 2
+    terminator_end = end + 2 if include_terminator else end
+    if terminator_end > len(blob):
+        return "", len(blob)
+    return decode_utf16le_string(blob[start:end]), terminator_end
+
+
+def parse_binxml_misc_token(blob: bytes, offset: int, *, current_path: str) -> dict[str, object]:
+    token = blob[offset]
+    token_kind = token & 0xBF
+    token_name = binxml_token_name(token)
+    warnings: list[str] = []
+    field_path = current_path or "BinXmlFragment"
+    field: dict[str, object] = {
+        "element": field_path.rsplit("/", 1)[-1],
+        "element_path": field_path,
+        "offset": offset,
+        "more": bool(token & 0x40),
+    }
+    rendered = ""
+    next_offset = offset + 1
+
+    if token_kind == 0x07:
+        text, next_offset = read_binxml_counted_utf16(blob, offset + 1)
+        if next_offset <= offset + 1:
+            warnings.append(f"truncated-cdata:{offset}")
+        field.update(
+            {
+                "text": text,
+                "value_type": "CDataSection",
+                "confidence": "binxml-cdata-section",
+            }
+        )
+        rendered = f"<![CDATA[{text}]]>"
+    elif token_kind == 0x08:
+        if offset + 3 > len(blob):
+            warnings.append(f"truncated-character-reference:{offset}")
+            text = ""
+            next_offset = len(blob)
+        else:
+            code_point = read_u16(blob, offset + 1)
+            try:
+                text = chr(code_point)
+            except ValueError:
+                text = f"&#x{code_point:x};"
+                warnings.append(f"invalid-character-reference:{offset}")
+            next_offset = offset + 3
+        field.update(
+            {
+                "text": text,
+                "value_type": "CharacterReference",
+                "confidence": "binxml-character-reference",
+            }
+        )
+        rendered = html.escape(text)
+    elif token_kind == 0x09:
+        text, next_offset = read_binxml_name(blob, offset + 1)
+        if not text:
+            warnings.append(f"truncated-entity-reference:{offset}")
+        field.update(
+            {
+                "text": text,
+                "value_type": "EntityReference",
+                "confidence": "binxml-entity-reference",
+            }
+        )
+        rendered = f"&{html.escape(text)};" if text else ""
+    elif token_kind == 0x0A:
+        text, next_offset = read_binxml_name(blob, offset + 1)
+        if not text:
+            warnings.append(f"truncated-pi-target:{offset}")
+        field.update(
+            {
+                "text": text,
+                "value_type": "ProcessingInstructionTarget",
+                "confidence": "binxml-processing-instruction-target",
+            }
+        )
+        rendered = f"<?{html.escape(text)}" if text else ""
+    elif token_kind == 0x0B:
+        text, next_offset = read_binxml_counted_utf16(blob, offset + 1)
+        if next_offset <= offset + 1:
+            warnings.append(f"truncated-pi-data:{offset}")
+        field.update(
+            {
+                "text": text,
+                "value_type": "ProcessingInstructionData",
+                "confidence": "binxml-processing-instruction-data",
+            }
+        )
+        rendered = f" {html.escape(text)}?>" if text else "?>"
+    else:
+        warnings.append(f"unsupported-misc-token:0x{token:02x}@{offset}")
+        field.update(
+            {
+                "text": "",
+                "value_type": token_name,
+                "confidence": "binxml-unsupported-misc-token",
+            }
+        )
+
+    field["token_name"] = token_name
+    return {
+        "next_offset": next_offset,
+        "rendered": rendered,
+        "value_fields": [field] if field.get("text") or field.get("confidence") else [],
+        "warnings": warnings,
+    }
 
 
 def read_inline_binxml_value_text(blob: bytes, offset: int) -> tuple[str, int, str]:
@@ -3774,6 +4173,11 @@ def binxml_token_name(token: int) -> str:
         0x45: "ValueTextTokenMore",
         0x06: "AttributeToken",
         0x46: "AttributeTokenMore",
+        0x07: "CDataSectionToken",
+        0x08: "CharRefToken",
+        0x09: "EntityRefToken",
+        0x0A: "PITargetToken",
+        0x0B: "PIDataToken",
         0x0C: "TemplateInstanceToken",
         0x0D: "NormalSubstitutionToken",
         0x0E: "OptionalSubstitutionToken",
@@ -4185,6 +4589,7 @@ def event_message_field_summary(data: Mapping[str, object]) -> dict[str, object]
 def render_message_template(template: str, data: Mapping[str, object]) -> tuple[str, list[str], list[dict[str, str]]]:
     missing_fields: list[str] = []
     used_fields: list[dict[str, str]] = []
+    positional_values = event_message_positional_values(data)
 
     def replace(match: re.Match[str]) -> str:
         expression = match.group(1)
@@ -4197,8 +4602,43 @@ def render_message_template(template: str, data: Mapping[str, object]) -> tuple[
         missing_fields.append(expression)
         return ""
 
+    def replace_position(match: re.Match[str]) -> str:
+        expression = match.group(0)
+        index = int(match.group(1)) - 1
+        if 0 <= index < len(positional_values) and positional_values[index]:
+            used_fields.append({"expression": expression, "field": f"positional[{index + 1}]"})
+            return positional_values[index]
+        missing_fields.append(expression)
+        return ""
+
     rendered = re.sub(r"\{([^{}]+)\}", replace, template)
+    rendered = re.sub(r"(?<!%)%([1-9]\d*)", replace_position, rendered)
+    rendered = rendered.replace("%%", "%")
     return re.sub(r"\s+", " ", rendered).strip(), missing_fields, used_fields
+
+
+def event_message_positional_values(data: Mapping[str, object]) -> list[str]:
+    values: list[str] = []
+    event_data_sequence = data.get("binxml_event_data_sequence")
+    if isinstance(event_data_sequence, list):
+        for item in event_data_sequence:
+            if not isinstance(item, Mapping):
+                continue
+            text = str(item.get("value") or item.get("text") or "").strip()
+            if text:
+                values.append(text)
+    if values:
+        return values
+
+    binxml = data.get("evtx_binxml") if isinstance(data.get("evtx_binxml"), Mapping) else {}
+    template_values = binxml.get("template_values") if isinstance(binxml.get("template_values"), list) else []
+    for item in template_values:
+        if not isinstance(item, Mapping):
+            continue
+        text = str(item.get("text") or item.get("value") or "").strip()
+        if text:
+            values.append(text)
+    return values
 
 
 def event_message_template(provider_name: str, event_id: str) -> str:

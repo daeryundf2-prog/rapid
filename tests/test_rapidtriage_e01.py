@@ -307,6 +307,20 @@ DOS Partition Table
             self.assertEqual(metadata["recovered_root_manifest"]["hashed_file_count"], 1)
             self.assertEqual(metadata["recovered_root_manifest"]["files"][0]["relative_path"], "evidence.txt")
             self.assertEqual(metadata["recovered_root_manifest"]["files"][0]["hash_status"], "computed")
+            workflow_manifest = metadata["e01_ex01_workflow_manifest"]
+            self.assertEqual(workflow_manifest["profile_version"], "e01-ex01-integrated-workflow-manifest-v1")
+            self.assertEqual(workflow_manifest["item_number"], 22)
+            self.assertEqual(workflow_manifest["gap_id"], "#22")
+            self.assertEqual(len(workflow_manifest["manifest_sha256"]), 64)
+            self.assertEqual(workflow_manifest["status_context"], "extraction-result")
+            workflow_statuses = {stage["id"]: stage["status"] for stage in workflow_manifest["stages"]}
+            self.assertEqual(workflow_statuses["select-e01"], "complete")
+            self.assertEqual(workflow_statuses["dependency-preflight"], "complete")
+            self.assertEqual(workflow_statuses["partition-selection"], "complete")
+            self.assertEqual(workflow_statuses["filesystem-extraction"], "complete")
+            self.assertEqual(workflow_statuses["artifact-analysis"], "ready-after-extraction")
+            self.assertEqual(workflow_statuses["report-export"], "blocked")
+            self.assertTrue(workflow_manifest["large_data_controls"]["bounded_recovered_root_manifest"])
             e01_gate = metadata["core_accuracy_gates"][0]
             self.assertEqual(e01_gate["gap_id"], "#22")
             self.assertIn("partition offset correctness", e01_gate["satisfied_checks"])
@@ -525,6 +539,19 @@ DOS Partition Table
             self.assertEqual(metadata["recovered_root_manifest"]["hashed_file_count"], 1)
             self.assertEqual(metadata["recovered_root_manifest"]["files"][0]["relative_path"], "evidence.txt")
             self.assertEqual(metadata["recovered_root_manifest"]["files"][0]["hash_status"], "computed")
+            workflow_manifest = metadata["raw_split_workflow_manifest"]
+            self.assertEqual(workflow_manifest["profile_version"], "raw-split-integrated-workflow-manifest-v1")
+            self.assertEqual(workflow_manifest["item_number"], 23)
+            self.assertEqual(workflow_manifest["gap_id"], "#23")
+            self.assertEqual(len(workflow_manifest["manifest_sha256"]), 64)
+            self.assertEqual(workflow_manifest["status_context"], "extraction-result")
+            workflow_statuses = {stage["id"]: stage["status"] for stage in workflow_manifest["stages"]}
+            self.assertEqual(workflow_statuses["select-raw-or-split"], "complete")
+            self.assertEqual(workflow_statuses["split-set-validation"], "complete")
+            self.assertEqual(workflow_statuses["dependency-preflight"], "complete")
+            self.assertEqual(workflow_statuses["partition-selection"], "complete")
+            self.assertEqual(workflow_statuses["filesystem-extraction"], "complete")
+            self.assertEqual(workflow_statuses["artifact-analysis"], "ready-after-extraction")
             self.assertIn("split-set provenance profile", raw_gate["satisfied_checks"])
             self.assertEqual(
                 raw_uplift["reportability_decision"]["allowed_use"],
@@ -659,6 +686,21 @@ DOS Partition Table
             self.assertEqual(vm_uplift["large_data_controls"]["virtual_disk_chain_status"], "review-required")
             self.assertIn("#24-command-history", vm_uplift["passed_validation_matrix_ids"])
             self.assertIn("#24-native-commercial-parser", vm_uplift["failed_validation_matrix_ids"])
+            workflow_manifest = metadata["virtual_disk_workflow_manifest"]
+            self.assertEqual(workflow_manifest["profile_version"], "virtual-disk-integrated-workflow-manifest-v1")
+            self.assertEqual(workflow_manifest["item_number"], 24)
+            self.assertEqual(workflow_manifest["gap_id"], "#24")
+            self.assertEqual(len(workflow_manifest["manifest_sha256"]), 64)
+            self.assertEqual(workflow_manifest["status_context"], "extraction-result")
+            workflow_statuses = {stage["id"]: stage["status"] for stage in workflow_manifest["stages"]}
+            self.assertEqual(workflow_statuses["select-virtual-disk"], "complete")
+            self.assertEqual(workflow_statuses["chain-risk-review"], "review-required")
+            self.assertEqual(workflow_statuses["dependency-preflight"], "complete")
+            self.assertEqual(workflow_statuses["qemu-img-info"], "complete")
+            self.assertEqual(workflow_statuses["raw-conversion"], "complete")
+            self.assertEqual(workflow_statuses["nested-raw-recovery"], "complete")
+            self.assertEqual(workflow_statuses["artifact-analysis"], "ready-after-extraction")
+            self.assertTrue(workflow_manifest["large_data_controls"]["nested_raw_manifest_linked"])
             self.assertEqual(
                 vm_uplift["reportability_decision"]["decision"],
                 "do-not-report-virtual-disk-workflow-as-chain-complete",
@@ -1096,11 +1138,26 @@ DOS Partition Table
             self.assertEqual(payload["source"]["workflow_status"]["stages"][0]["id"], "select-e01")
             self.assertEqual(payload["source"]["workflow_status"]["stages"][-1]["id"], "search-review-report")
             self.assertEqual(payload["source"]["workflow_status"]["selected_partition_start_sector"], 4096)
+            workflow_manifest = payload["source"]["e01_ex01_workflow_manifest"]
+            self.assertEqual(workflow_manifest["profile_version"], "e01-ex01-integrated-workflow-manifest-v1")
+            self.assertEqual(workflow_manifest["status_context"], "run-summary")
+            self.assertEqual(len(workflow_manifest["manifest_sha256"]), 64)
+            workflow_statuses = {stage["id"]: stage["status"] for stage in workflow_manifest["stages"]}
+            self.assertEqual(workflow_statuses["artifact-analysis"], "complete")
+            self.assertEqual(workflow_statuses["unified-search-indexing"], "complete")
+            self.assertEqual(workflow_statuses["review-workflow"], "ready")
+            self.assertEqual(workflow_statuses["report-export"], "complete")
+            self.assertIn("summary", workflow_manifest["run_output_status"])
+            self.assertFalse(workflow_manifest["commercial_grade_ready"])
             self.assertEqual(Path(payload["root"]), (output_dir / "_e01" / "filesystem").resolve())
             self.assertIn("e01", payload["outputs"])
             self.assertTrue((output_dir / "rapidtriage-e01.json").is_file())
             metadata = json.loads((output_dir / "rapidtriage-e01.json").read_text(encoding="utf-8"))
             self.assertEqual(metadata["partition_start_sector"], 4096)
+            self.assertEqual(
+                metadata["e01_ex01_workflow_manifest"]["profile_version"],
+                "e01-ex01-integrated-workflow-manifest-v1",
+            )
             self.assertGreaterEqual(payload["summary"]["document_match_count"], 1)
 
     def test_run_triage_accepts_raw_image_and_analyzes_extracted_filesystem(self) -> None:
@@ -1128,6 +1185,16 @@ DOS Partition Table
 
             self.assertEqual(payload["source"]["type"], "raw-image")
             self.assertEqual(Path(payload["source"]["source_path"]), image_path.resolve())
+            raw_manifest = payload["source"]["raw_split_workflow_manifest"]
+            self.assertEqual(raw_manifest["profile_version"], "raw-split-integrated-workflow-manifest-v1")
+            self.assertEqual(raw_manifest["status_context"], "run-summary")
+            self.assertEqual(len(raw_manifest["manifest_sha256"]), 64)
+            raw_statuses = {stage["id"]: stage["status"] for stage in raw_manifest["stages"]}
+            self.assertEqual(raw_statuses["artifact-analysis"], "complete")
+            self.assertEqual(raw_statuses["unified-search-indexing"], "complete")
+            self.assertEqual(raw_statuses["review-report"], "complete")
+            self.assertIn("summary", raw_manifest["run_output_status"])
+            self.assertFalse(raw_manifest["commercial_grade_ready"])
             self.assertEqual(Path(payload["root"]), (output_dir / "_disk_image" / "filesystem").resolve())
             self.assertIn("disk_image", payload["outputs"])
             self.assertTrue((output_dir / "rapidtriage-disk-image.json").is_file())
@@ -1200,10 +1267,23 @@ DOS Partition Table
 
             self.assertEqual(payload["source"]["type"], "virtual-disk")
             self.assertEqual(Path(payload["source"]["source_path"]), image_path.resolve())
+            vm_manifest = payload["source"]["virtual_disk_workflow_manifest"]
+            self.assertEqual(vm_manifest["profile_version"], "virtual-disk-integrated-workflow-manifest-v1")
+            self.assertEqual(vm_manifest["status_context"], "run-summary")
+            self.assertEqual(len(vm_manifest["manifest_sha256"]), 64)
+            vm_statuses = {stage["id"]: stage["status"] for stage in vm_manifest["stages"]}
+            self.assertEqual(vm_statuses["artifact-analysis"], "complete")
+            self.assertEqual(vm_statuses["review-report"], "complete")
+            self.assertIn("summary", vm_manifest["run_output_status"])
+            self.assertFalse(vm_manifest["commercial_grade_ready"])
             self.assertIn("virtual_disk", payload["outputs"])
             self.assertTrue((output_dir / "rapidtriage-virtual-disk.json").is_file())
             metadata = json.loads((output_dir / "rapidtriage-virtual-disk.json").read_text(encoding="utf-8"))
             self.assertEqual(metadata["conversion_tool"], "qemu-img")
+            self.assertEqual(
+                metadata["virtual_disk_workflow_manifest"]["profile_version"],
+                "virtual-disk-integrated-workflow-manifest-v1",
+            )
             self.assertGreaterEqual(payload["summary"]["document_match_count"], 1)
 
 

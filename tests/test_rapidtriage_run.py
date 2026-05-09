@@ -8,9 +8,11 @@ from pathlib import Path
 from typing import Any
 
 from rapidtriage.cli import build_parser, main
+from rapidtriage.core.artifacts import SUPPORTED_ARTIFACT_KINDS
 from rapidtriage.core.input_root import InputRoot
 from rapidtriage.core.reporting import build_run_report_context, render_run_markdown_report
 from rapidtriage.core.run import (
+    RUN_PROFILES,
     build_checkpoint_resume_trusted_diff,
     build_incremental_indexing_trusted_diff,
     build_memory_cap_trusted_diff,
@@ -122,6 +124,7 @@ class RapidTriageRunTests(unittest.TestCase):
         self.assertIn("hacking", run_help)
         self.assertIn("--memory-cap-bytes", run_help)
         self.assertIn("--resume", run_help)
+        self.assertIn("source-read", commands)
 
     def test_run_fraud_mode_writes_component_outputs_summary_and_report(self) -> None:
         self.assert_run_mode_outputs("fraud")
@@ -134,6 +137,18 @@ class RapidTriageRunTests(unittest.TestCase):
 
     def test_run_recovery_mode_writes_component_outputs_summary_and_report(self) -> None:
         self.assert_run_mode_outputs("recovery")
+
+    def test_investigative_run_profiles_cover_all_supported_artifact_collectors(self) -> None:
+        supported = set(SUPPORTED_ARTIFACT_KINDS)
+
+        for mode in ("seizure", "fraud", "hacking"):
+            with self.subTest(mode=mode):
+                self.assertEqual(set(RUN_PROFILES[mode].artifacts_kinds), supported)
+
+        self.assertEqual(
+            supported - set(RUN_PROFILES["recovery"].artifacts_kinds),
+            {"browser", "windows-execution", "windows-system"},
+        )
 
     def test_parser_crash_isolation_payload_and_memory_cap_assessment_are_machine_readable(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -642,6 +657,63 @@ class RapidTriageRunTests(unittest.TestCase):
             self.assertIn("documents", sources)
             self.assertIn("password", payload["summary"]["keyword_counts"])
 
+    def test_source_read_command_previews_and_hashes_analyzed_file(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir) / "case-root"
+            output_dir = Path(tmp_dir) / "run-out"
+            source_output = Path(tmp_dir) / "source-read.json"
+            root.mkdir(parents=True, exist_ok=True)
+            build_run_fixture(root)
+
+            self.assertEqual(main(["run", str(root), "--mode", "fraud", "--output-dir", str(output_dir)]), 0)
+            self.assertEqual(
+                main(
+                    [
+                        "source-read",
+                        str(output_dir),
+                        "--path",
+                        "Users/alice/Documents/wire-transfer-notes.txt",
+                        "--hash",
+                        "--output",
+                        str(source_output),
+                    ]
+                ),
+                0,
+            )
+
+            payload = json.loads(source_output.read_text(encoding="utf-8"))
+            self.assertEqual(payload["command"], "source-read")
+            self.assertEqual(payload["profile_version"], "source-read-v1")
+            self.assertEqual(payload["relative_path"], "Users/alice/Documents/wire-transfer-notes.txt")
+            self.assertEqual(payload["preview"]["preview_type"], "text")
+            self.assertIn("wire transfer", payload["preview"]["text"])
+            self.assertEqual(set(payload["hashes"]), {"md5", "sha1", "sha256"})
+            self.assertTrue(payload["forensic_read_profile"]["path_inside_analysis_root"])
+            self.assertFalse(payload["reportability_decision"]["decision"].startswith("ready"))
+
+    def test_source_read_command_rejects_paths_outside_analysis_root(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir) / "case-root"
+            output_dir = Path(tmp_dir) / "run-out"
+            source_output = Path(tmp_dir) / "source-read.json"
+            outside = Path(tmp_dir) / "outside.txt"
+            root.mkdir(parents=True, exist_ok=True)
+            outside.write_text("outside evidence root", encoding="utf-8")
+            build_run_fixture(root)
+
+            self.assertEqual(main(["run", str(root), "--mode", "fraud", "--output-dir", str(output_dir)]), 0)
+            with self.assertRaises(SystemExit):
+                main(
+                    [
+                        "source-read",
+                        str(output_dir),
+                        "--path",
+                        str(outside),
+                        "--output",
+                        str(source_output),
+                    ]
+                )
+
     def test_hacking_run_surfaces_windows_forensic_artifacts_in_search_and_timeline(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             root = Path(tmp_dir) / "case-root"
@@ -656,9 +728,18 @@ class RapidTriageRunTests(unittest.TestCase):
                 (output_dir / "rapidtriage-run-summary.json").read_text(encoding="utf-8")
             )
             for kind in (
+                "email",
+                "cloud-export",
+                "mobile-export",
+                "kakaotalk-windows",
+                "android-apk",
+                "media-image",
+                "memory-volatility",
                 "eventlog",
                 "windows-os-account",
                 "windows-execution",
+                "windows-registry",
+                "windows-shellbags",
                 "windows-prefetch",
                 "windows-filesystem",
             ):
@@ -691,6 +772,7 @@ class RapidTriageRunTests(unittest.TestCase):
             self.assertIn("powershell-history-command", timeline_text)
             self.assertIn("prefetch-file", timeline_text)
             self.assertIn("mft-record", timeline_text)
+            self.assertIn("artifact-shellbag-native-candidate", timeline_text)
 
             self.assertEqual(
                 main(["search", str(output_dir), "-k", "powershell", "--no-ocr", "--output", str(search_output)]),
@@ -701,6 +783,97 @@ class RapidTriageRunTests(unittest.TestCase):
             self.assertIn("artifacts", sources)
             self.assertIn("timeline", sources)
             self.assertIn("powershell", search_payload["summary"]["keyword_counts"])
+
+    def test_hacking_run_includes_broad_forensic_artifact_collectors(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir) / "case-root"
+            output_dir = Path(tmp_dir) / "run-out"
+            search_output = Path(tmp_dir) / "search.json"
+            root.mkdir(parents=True, exist_ok=True)
+            build_run_fixture(root)
+            self.add_broad_artifact_fixture(root)
+
+            self.assertEqual(main(["run", str(root), "--mode", "hacking", "--output-dir", str(output_dir)]), 0)
+
+            summary_payload: dict[str, Any] = json.loads(
+                (output_dir / "rapidtriage-run-summary.json").read_text(encoding="utf-8")
+            )
+            expected = {
+                "email": 1,
+                "cloud-export": 1,
+                "mobile-export": 1,
+                "media-image": 1,
+                "memory-volatility": 1,
+            }
+            for kind, minimum_count in expected.items():
+                with self.subTest(kind=kind):
+                    self.assertIn(kind, summary_payload["summary"]["artifacts"])
+                    self.assertIn(f"artifacts_{kind}", summary_payload["outputs"])
+                    self.assertTrue(Path(summary_payload["outputs"][f"artifacts_{kind}"]).is_file())
+                    self.assertGreaterEqual(
+                        summary_payload["summary"]["artifacts"][kind]["artifact_count"],
+                        minimum_count,
+                    )
+            self.assertIn("kakaotalk-windows", summary_payload["summary"]["artifacts"])
+            self.assertIn("android-apk", summary_payload["summary"]["artifacts"])
+
+            self.assertEqual(
+                main(
+                    [
+                        "search",
+                        str(output_dir),
+                        "-k",
+                        "ChatGPT",
+                        "-k",
+                        "mobile",
+                        "-k",
+                        "token",
+                        "--no-ocr",
+                        "--output",
+                        str(search_output),
+                    ]
+                ),
+                0,
+            )
+            search_payload = json.loads(search_output.read_text(encoding="utf-8"))
+            self.assertIn("artifacts", {match["source"] for match in search_payload["matches"]})
+            self.assertGreaterEqual(search_payload["summary"]["keyword_counts"]["chatgpt"], 1)
+            self.assertGreaterEqual(search_payload["summary"]["keyword_counts"]["mobile"], 1)
+            self.assertGreaterEqual(search_payload["summary"]["keyword_counts"]["token"], 1)
+
+    def add_broad_artifact_fixture(self, root: Path) -> None:
+        mail_dir = root / "Users" / "alice" / "Mail"
+        mail_dir.mkdir(parents=True, exist_ok=True)
+        (mail_dir / "case-message.eml").write_text(
+            "From: alice@example.com\n"
+            "To: bob@example.com\n"
+            "Subject: cloud invoice\n\n"
+            "Please review the invoice and password reset.",
+            encoding="utf-8",
+        )
+
+        cloud_dir = root / "Users" / "alice" / "Cloud"
+        cloud_dir.mkdir(parents=True, exist_ok=True)
+        (cloud_dir / "google-activity.json").write_text(
+            '[{"title":"Visited ChatGPT","time":"2024-05-01T10:00:00Z","products":["Search"]}]',
+            encoding="utf-8",
+        )
+
+        mobile_dir = root / "Users" / "alice" / "Mobile"
+        mobile_dir.mkdir(parents=True, exist_ok=True)
+        (mobile_dir / "messages.csv").write_text(
+            "service,chat_id,sender,text,timestamp\n"
+            "WhatsApp,room1,Alice,hello from mobile chat,2024-05-01T11:00:00Z\n",
+            encoding="utf-8",
+        )
+
+        pictures_dir = root / "Users" / "alice" / "Pictures"
+        pictures_dir.mkdir(parents=True, exist_ok=True)
+        (pictures_dir / "photo.jpg").write_bytes(b"\xff\xd8\xff" + b"\x00" * 128)
+
+        memory_dir = root / "Memory"
+        memory_dir.mkdir(parents=True, exist_ok=True)
+        (memory_dir / "sample.dmp").write_bytes(b"MEMORY powershell cmd.exe 192.168.1.5 password token")
 
     def assert_run_mode_outputs(self, mode: str) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -816,15 +989,26 @@ class RapidTriageRunTests(unittest.TestCase):
                 self.assertIn("recent-files", summary_payload["summary"]["artifacts"])
                 self.assertIn("windows-os-account", summary_payload["summary"]["artifacts"])
                 self.assertIn("eventlog", summary_payload["summary"]["artifacts"])
+                self.assertIn("windows-registry", summary_payload["summary"]["artifacts"])
+                self.assertIn("windows-shellbags", summary_payload["summary"]["artifacts"])
                 self.assertIn("windows-prefetch", summary_payload["summary"]["artifacts"])
                 self.assertIn("windows-filesystem", summary_payload["summary"]["artifacts"])
                 self.assertIn("images", files_payload["summary"]["category_counts"])
             else:
                 self.assertIn("browser", summary_payload["summary"]["artifacts"])
                 self.assertIn("recent-files", summary_payload["summary"]["artifacts"])
+                self.assertIn("email", summary_payload["summary"]["artifacts"])
+                self.assertIn("cloud-export", summary_payload["summary"]["artifacts"])
+                self.assertIn("mobile-export", summary_payload["summary"]["artifacts"])
+                self.assertIn("kakaotalk-windows", summary_payload["summary"]["artifacts"])
+                self.assertIn("android-apk", summary_payload["summary"]["artifacts"])
+                self.assertIn("media-image", summary_payload["summary"]["artifacts"])
+                self.assertIn("memory-volatility", summary_payload["summary"]["artifacts"])
                 self.assertIn("windows-os-account", summary_payload["summary"]["artifacts"])
                 self.assertIn("eventlog", summary_payload["summary"]["artifacts"])
                 self.assertIn("windows-execution", summary_payload["summary"]["artifacts"])
+                self.assertIn("windows-registry", summary_payload["summary"]["artifacts"])
+                self.assertIn("windows-shellbags", summary_payload["summary"]["artifacts"])
                 self.assertIn("windows-prefetch", summary_payload["summary"]["artifacts"])
                 self.assertIn("windows-filesystem", summary_payload["summary"]["artifacts"])
             for artifact_path in artifact_paths.values():

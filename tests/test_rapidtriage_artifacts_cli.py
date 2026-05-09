@@ -20,6 +20,8 @@ class RapidTriageArtifactsCliTests(unittest.TestCase):
         self.assertIn("--kind", help_text)
         self.assertIn("rapidtriage artifacts . --kind browser", help_text)
         self.assertIn("recent-files", help_text)
+        self.assertIn("windows-registry", help_text)
+        self.assertIn("windows-shellbags", help_text)
 
     def test_browser_artifacts_command_writes_expected_payload(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -51,6 +53,33 @@ class RapidTriageArtifactsCliTests(unittest.TestCase):
                 set(payload["summary"]["artifact_type_counts"]),
                 {"recent-shortcut", "jumplist-automatic", "jumplist-custom"},
             )
+
+    def test_registry_artifacts_command_is_exposed_and_writes_user_activity_rows(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            output = Path(tmp_dir) / "registry.json"
+
+            exit_code = main(["artifacts", str(FIXTURE_ROOT), "--kind", "windows-registry", "--output", str(output)])
+
+            self.assertEqual(exit_code, 0)
+            payload = json.loads(output.read_text(encoding="utf-8"))
+            self.assertEqual(payload["kind"], "windows-registry")
+            self.assertEqual(payload["provider"]["name"], "windows-registry")
+            self.assertIn("registry-summary", payload["summary"]["artifact_type_counts"])
+            self.assertGreater(payload["summary"]["artifact_type_counts"].get("registry-run-key", 0), 0)
+            self.assertGreater(payload["summary"]["artifact_type_counts"].get("registry-user-activity", 0), 0)
+
+    def test_shellbags_artifacts_command_is_exposed_and_writes_review_rows(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            output = Path(tmp_dir) / "shellbags.json"
+
+            exit_code = main(["artifacts", str(FIXTURE_ROOT), "--kind", "windows-shellbags", "--output", str(output)])
+
+            self.assertEqual(exit_code, 0)
+            payload = json.loads(output.read_text(encoding="utf-8"))
+            self.assertEqual(payload["kind"], "windows-shellbags")
+            self.assertEqual(payload["provider"]["name"], "windows-shellbags")
+            self.assertGreater(payload["summary"]["artifact_count"], 0)
+            self.assertIn("shellbag", json.dumps(payload["artifacts"], ensure_ascii=False).lower())
 
 
 if __name__ == "__main__":

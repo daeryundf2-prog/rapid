@@ -3,6 +3,7 @@ from __future__ import annotations
 import base64
 import io
 import hashlib
+import json
 import re
 from pathlib import Path
 from typing import Iterable, Mapping, Sequence
@@ -23,10 +24,13 @@ from ..core.submission import compute_hashes
 
 PARSER_VERSION = "media-image-v4"
 IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".bmp", ".tif", ".tiff", ".webp"}
+VIDEO_EXTENSIONS = {".mp4", ".mov", ".avi", ".mkv", ".wmv", ".m4v", ".webm", ".3gp"}
+AUDIO_EXTENSIONS = {".wav", ".mp3", ".m4a", ".aac", ".flac", ".ogg", ".wma", ".amr"}
 THUMBNAIL_MAX_DIMENSION = 128
 THUMBNAIL_MAX_BYTES = 64 * 1024
 OCR_SIDECAR_MAX_CHARS = 20_000
 TRANSLATION_SIDECAR_MAX_CHARS = 20_000
+CODEC_METADATA_SIDECAR_MAX_BYTES = 2 * 1024 * 1024
 HANGUL_RE = re.compile(r"[\uac00-\ud7a3\u1100-\u11ff\u3130-\u318f]")
 MEDIA_NATIVE_CAPABILITIES = {
     "image_gallery_review_metadata": True,
@@ -39,6 +43,11 @@ MEDIA_NATIVE_CAPABILITIES = {
     "ml_visual_similarity_clustering": False,
     "native_ocr_execution": False,
     "machine_translation_execution": False,
+    "video_audio_inventory": True,
+    "transcript_sidecar_import": True,
+    "codec_metadata_sidecar_import": True,
+    "safe_media_playback": False,
+    "waveform_generation": False,
 }
 MEDIA_REPORT_GRADE_BLOCKERS = [
     "image-similarity-is-perceptual-hash-bucket-not-ml-validated-clustering",
@@ -64,6 +73,11 @@ MEDIA_TRUSTED_TOOLS = {
     "korean-ocr-review",
     "certified-translation-review",
 }
+
+
+def stable_payload_sha256(value: object) -> str:
+    encoded = json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"), default=str).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
 
 
 class PillowEncodedBytes:
@@ -159,6 +173,475 @@ class MediaImageProvider:
         for path in sorted(root.rglob("*"), key=lambda item: str(item).lower()):
             if path.is_file() and path.suffix.lower() in IMAGE_EXTENSIONS:
                 yield build_image_record(path)
+            elif path.is_file() and path.suffix.lower() in VIDEO_EXTENSIONS:
+                yield build_media_av_record(path, media_kind="video")
+            elif path.is_file() and path.suffix.lower() in AUDIO_EXTENSIONS:
+                yield build_media_av_record(path, media_kind="audio")
+
+
+def build_media_av_record(path: Path, *, media_kind: str) -> ArtifactRecord:
+    resolved = path.resolve()
+    stat_result = resolved.stat()
+    transcript_sidecars = find_transcript_sidecars(resolved)
+    transcript_cues = [cue for sidecar in transcript_sidecars for cue in sidecar.get("cue_samples", [])]
+    container_profile = media_container_profile(resolved, media_kind=media_kind)
+    preview_sidecars = find_media_preview_sidecars(resolved)
+    codec_metadata_sidecars = find_codec_metadata_sidecars(resolved)
+    waveform_preview = build_waveform_preview(resolved, container_profile) if media_kind == "audio" else {"status": "not-applicable"}
+    details: dict[str, object] = {
+        "parser": "media-image",
+        "parser_version": PARSER_VERSION,
+        "source_path": str(resolved),
+        "source_format": resolved.suffix.lower().lstrip("."),
+        "source_size": stat_result.st_size,
+        "entry_name": resolved.name,
+        "media_kind": media_kind,
+        "hashes": compute_hashes(resolved),
+        "modified_at": stat_result.st_mtime,
+        "parser_confidence": 0.62,
+        "parser_confidence_basis": "extension and bounded transcript sidecar inventory",
+        "coverage_status": "media-file-inventory",
+        "container_profile": container_profile,
+        "container_parse_status": container_profile.get("parse_status", "unknown"),
+        "reportability": "triage",
+        "commercial_grade_ready": False,
+        "commercial_gap_ids": ["#57"],
+        "media_native_capabilities": dict(MEDIA_NATIVE_CAPABILITIES),
+        "transcript_sidecars": transcript_sidecars,
+        "transcript_sidecar_count": len(transcript_sidecars),
+        "transcript_cue_sample_count": len(transcript_cues),
+        "transcript_cue_samples": transcript_cues[:25],
+        "preview_sidecars": preview_sidecars,
+        "preview_sidecar_count": len(preview_sidecars),
+        "codec_metadata_sidecars": codec_metadata_sidecars,
+        "codec_metadata_sidecar_count": len(codec_metadata_sidecars),
+        "codec_metadata_summary": codec_metadata_summary(codec_metadata_sidecars),
+        "waveform_preview": waveform_preview,
+        "preview_workflow": {
+            "safe_playback_status": "not-implemented",
+            "waveform_status": waveform_preview.get("status", "not-applicable") if media_kind == "audio" else "not-applicable",
+            "thumbnail_status": "sidecar-linked" if preview_sidecars else "not-generated",
+            "transcript_cue_review_status": "sidecar-only" if transcript_sidecars else "not-available",
+            "codec_metadata_status": "sidecar-linked" if codec_metadata_sidecars else "not-available",
+        },
+        "validation_required": True,
+        "validation_guidance": (
+            "Video/audio file is inventoried and transcript/codec metadata sidecars are linked when present. Safe playback, waveform/"
+            "thumbnail extraction, codec sandboxing, and transcript cue validation are required before report-grade media claims."
+        ),
+        "commercial_grade_blockers": [
+            "safe-media-playback-sandbox-not-implemented",
+            "waveform-thumbnail-generation-not-implemented",
+            "transcript-cue-known-answer-validation-required",
+            "codec-metadata-sidecar-must-be-provenanced-or-regenerated-by-trusted-tool",
+        ],
+    }
+    return ArtifactRecord(
+        provider=MediaImageProvider.name,
+        artifact_type=f"media-{media_kind}",
+        path=str(resolved),
+        supported=True,
+        details=details,
+    )
+
+
+def media_container_profile(path: Path, *, media_kind: str) -> dict[str, object]:
+    blob = read_prefix(path, 4096)
+    suffix = path.suffix.lower()
+    if media_kind == "audio" and blob.startswith(b"RIFF") and blob[8:12] == b"WAVE":
+        return wav_container_profile(blob)
+    if media_kind == "video" and len(blob) >= 12 and blob[4:8] == b"ftyp":
+        return mp4_container_profile(blob, suffix=suffix)
+    return {
+        "profile_version": "media-container-profile-v1",
+        "media_kind": media_kind,
+        "container_hint": suffix.lstrip("."),
+        "parse_status": "signature-not-recognized",
+        "scan_bytes": len(blob),
+    }
+
+
+def mp4_container_profile(blob: bytes, *, suffix: str) -> dict[str, object]:
+    major_brand = blob[8:12].decode("ascii", errors="replace") if len(blob) >= 12 else ""
+    compatible_brands: list[str] = []
+    for offset in range(16, min(len(blob), 64), 4):
+        brand = blob[offset : offset + 4]
+        if len(brand) == 4 and all(32 <= byte <= 126 for byte in brand):
+            compatible_brands.append(brand.decode("ascii", errors="replace"))
+    box_inventory = mp4_box_inventory(blob)
+    mvhd_profile = mp4_mvhd_duration_profile(blob)
+    return {
+        "profile_version": "media-container-profile-v1",
+        "media_kind": "video",
+        "container_hint": "mp4-family" if suffix in {".mp4", ".m4v", ".mov"} else suffix.lstrip("."),
+        "parse_status": "ftyp-header-parsed",
+        "major_brand": major_brand,
+        "compatible_brands": compatible_brands[:12],
+        "box_inventory": box_inventory,
+        "box_count": len(box_inventory),
+        "mvhd_profile": mvhd_profile,
+        "scan_bytes": len(blob),
+    }
+
+
+def mp4_box_inventory(blob: bytes, *, limit: int = 40) -> list[dict[str, object]]:
+    boxes: list[dict[str, object]] = []
+    offset = 0
+    while offset + 8 <= len(blob) and len(boxes) < limit:
+        size = int.from_bytes(blob[offset : offset + 4], "big", signed=False)
+        box_type = blob[offset + 4 : offset + 8].decode("ascii", errors="replace")
+        header_size = 8
+        if size == 1 and offset + 16 <= len(blob):
+            size = int.from_bytes(blob[offset + 8 : offset + 16], "big", signed=False)
+            header_size = 16
+        elif size == 0:
+            size = len(blob) - offset
+        if size < header_size or offset + size > len(blob):
+            boxes.append(
+                {
+                    "offset": offset,
+                    "type": box_type,
+                    "size": size,
+                    "header_size": header_size,
+                    "parse_status": "truncated-or-invalid",
+                }
+            )
+            break
+        boxes.append(
+            {
+                "offset": offset,
+                "type": box_type,
+                "size": size,
+                "header_size": header_size,
+                "payload_offset": offset + header_size,
+                "payload_size": size - header_size,
+                "parse_status": "bounded",
+            }
+        )
+        offset += size
+    return boxes
+
+
+def mp4_mvhd_duration_profile(blob: bytes) -> dict[str, object]:
+    offset = blob.find(b"mvhd")
+    if offset < 4:
+        return {"status": "not-found"}
+    box_start = offset - 4
+    box_size = int.from_bytes(blob[box_start:offset], "big", signed=False)
+    if box_size < 24 or box_start + box_size > len(blob):
+        return {"status": "truncated-or-invalid", "box_offset": box_start, "box_size": box_size}
+    version = blob[offset + 4]
+    body = offset + 8
+    if version == 0 and body + 16 <= len(blob):
+        timescale = int.from_bytes(blob[body + 8 : body + 12], "big", signed=False)
+        duration = int.from_bytes(blob[body + 12 : body + 16], "big", signed=False)
+    elif version == 1 and body + 28 <= len(blob):
+        timescale = int.from_bytes(blob[body + 16 : body + 20], "big", signed=False)
+        duration = int.from_bytes(blob[body + 20 : body + 28], "big", signed=False)
+    else:
+        return {"status": "unsupported-version", "version": version, "box_offset": box_start}
+    seconds = round(duration / timescale, 6) if timescale else None
+    return {
+        "status": "parsed" if seconds is not None else "timescale-zero",
+        "box_offset": box_start,
+        "box_size": box_size,
+        "version": version,
+        "timescale": timescale,
+        "duration_units": duration,
+        "estimated_duration_seconds": seconds,
+        "validation_status": "triage-container-metadata",
+    }
+
+
+def wav_container_profile(blob: bytes) -> dict[str, object]:
+    profile: dict[str, object] = {
+        "profile_version": "media-container-profile-v1",
+        "media_kind": "audio",
+        "container_hint": "wav",
+        "parse_status": "riff-wave-header-parsed",
+        "scan_bytes": len(blob),
+    }
+    fmt_offset = blob.find(b"fmt ")
+    data_offset = blob.find(b"data")
+    if fmt_offset >= 0 and fmt_offset + 24 <= len(blob):
+        audio_format = int.from_bytes(blob[fmt_offset + 8 : fmt_offset + 10], "little", signed=False)
+        channels = int.from_bytes(blob[fmt_offset + 10 : fmt_offset + 12], "little", signed=False)
+        sample_rate = int.from_bytes(blob[fmt_offset + 12 : fmt_offset + 16], "little", signed=False)
+        byte_rate = int.from_bytes(blob[fmt_offset + 16 : fmt_offset + 20], "little", signed=False)
+        bits_per_sample = int.from_bytes(blob[fmt_offset + 22 : fmt_offset + 24], "little", signed=False)
+        profile.update(
+            {
+                "audio_format": audio_format,
+                "channels": channels,
+                "sample_rate": sample_rate,
+                "byte_rate": byte_rate,
+                "bits_per_sample": bits_per_sample,
+            }
+        )
+    if data_offset >= 0 and data_offset + 8 <= len(blob):
+        data_size = int.from_bytes(blob[data_offset + 4 : data_offset + 8], "little", signed=False)
+        profile["data_size"] = data_size
+        byte_rate = profile.get("byte_rate")
+        if isinstance(byte_rate, int) and byte_rate > 0:
+            profile["estimated_duration_seconds"] = round(data_size / byte_rate, 3)
+    return profile
+
+
+def read_prefix(path: Path, limit: int) -> bytes:
+    try:
+        with path.open("rb") as handle:
+            return handle.read(limit)
+    except OSError:
+        return b""
+
+
+def find_media_preview_sidecars(path: Path) -> list[dict[str, object]]:
+    candidates: list[Path] = []
+    for suffix in (".jpg", ".jpeg", ".png", ".webp"):
+        candidates.append(path.with_suffix(path.suffix + suffix))
+        candidates.append(path.with_suffix(suffix))
+        candidates.append(path.parent / f"{path.stem}.thumbnail{suffix}")
+        candidates.append(path.parent / f"{path.stem}.poster{suffix}")
+    sidecars: list[dict[str, object]] = []
+    seen: set[Path] = set()
+    for candidate in candidates:
+        if candidate in seen or not candidate.is_file():
+            continue
+        seen.add(candidate)
+        image_profile = preview_image_profile(candidate)
+        sidecars.append(
+            {
+                "path": str(candidate.resolve()),
+                "source_sha256": compute_hashes(path).get("sha256", ""),
+                "sidecar_hashes": compute_hashes(candidate),
+                "format": candidate.suffix.lower().lstrip("."),
+                "size": candidate.stat().st_size,
+                "image_profile": image_profile,
+                "validation_status": "sidecar-linked-unvalidated",
+            }
+        )
+    return sidecars
+
+
+def preview_image_profile(path: Path) -> dict[str, object]:
+    profile: dict[str, object] = {
+        "decoded": False,
+        "width": None,
+        "height": None,
+        "parse_status": "not-decoded",
+    }
+    if Image is None:
+        profile["parse_status"] = "pillow-unavailable"
+        return profile
+    try:
+        with Image.open(path) as image:
+            profile.update(
+                {
+                    "decoded": True,
+                    "width": int(image.width),
+                    "height": int(image.height),
+                    "mode": image.mode,
+                    "parse_status": "decoded",
+                }
+            )
+    except OSError as exc:
+        profile["parse_status"] = "decode-failed"
+        profile["error"] = str(exc)[:120]
+    return profile
+
+
+def find_codec_metadata_sidecars(path: Path) -> list[dict[str, object]]:
+    candidates: list[Path] = []
+    for suffix in (".ffprobe.json", ".mediainfo.json", ".media.json", ".codec.json"):
+        candidates.append(path.with_suffix(path.suffix + suffix))
+        candidates.append(path.with_suffix(suffix))
+    sidecars: list[dict[str, object]] = []
+    seen: set[Path] = set()
+    for candidate in candidates:
+        if candidate in seen or not candidate.is_file():
+            continue
+        seen.add(candidate)
+        payload, parse_status, error = read_codec_metadata_payload(candidate)
+        sidecar: dict[str, object] = {
+            "path": str(candidate.resolve()),
+            "source_sha256": compute_hashes(path).get("sha256", ""),
+            "sidecar_hashes": compute_hashes(candidate),
+            "format": candidate.suffix.lower().lstrip("."),
+            "size": candidate.stat().st_size,
+            "parse_status": parse_status,
+            "validation_status": "sidecar-linked-unvalidated",
+            "tool_hint": codec_tool_hint(candidate),
+        }
+        if error:
+            sidecar["error"] = error
+        if isinstance(payload, Mapping):
+            sidecar["format_profile"] = codec_format_profile(payload)
+            sidecar["stream_profiles"] = codec_stream_profiles(payload)
+            sidecar["stream_count"] = len(sidecar["stream_profiles"]) if isinstance(sidecar["stream_profiles"], list) else 0
+        sidecars.append(sidecar)
+    return sidecars
+
+
+def read_codec_metadata_payload(path: Path) -> tuple[object | None, str, str]:
+    try:
+        size = path.stat().st_size
+    except OSError as exc:
+        return None, "stat-failed", str(exc)[:120]
+    if size > CODEC_METADATA_SIDECAR_MAX_BYTES:
+        return None, "too-large", f"metadata sidecar exceeds {CODEC_METADATA_SIDECAR_MAX_BYTES} bytes"
+    try:
+        with path.open("rb") as handle:
+            payload = json.loads(handle.read().decode("utf-8", errors="replace"))
+    except (OSError, json.JSONDecodeError, UnicodeDecodeError) as exc:
+        return None, "parse-failed", str(exc)[:120]
+    return payload, "parsed" if isinstance(payload, Mapping) else "unsupported-json-root", ""
+
+
+def codec_tool_hint(path: Path) -> str:
+    name = path.name.lower()
+    if "ffprobe" in name:
+        return "ffprobe-json"
+    if "mediainfo" in name:
+        return "mediainfo-json"
+    return "generic-codec-json"
+
+
+def codec_format_profile(payload: Mapping[str, object]) -> dict[str, object]:
+    format_row = payload.get("format") if isinstance(payload.get("format"), Mapping) else {}
+    duration = parse_float(format_row.get("duration")) if isinstance(format_row, Mapping) else None
+    size = parse_int(format_row.get("size")) if isinstance(format_row, Mapping) else None
+    bit_rate = parse_int(format_row.get("bit_rate")) if isinstance(format_row, Mapping) else None
+    return {
+        "filename": str(format_row.get("filename", ""))[:500] if isinstance(format_row, Mapping) else "",
+        "format_name": str(format_row.get("format_name", ""))[:120] if isinstance(format_row, Mapping) else "",
+        "format_long_name": str(format_row.get("format_long_name", ""))[:180] if isinstance(format_row, Mapping) else "",
+        "duration_seconds": duration,
+        "size": size,
+        "bit_rate": bit_rate,
+    }
+
+
+def codec_stream_profiles(payload: Mapping[str, object], *, limit: int = 20) -> list[dict[str, object]]:
+    streams = payload.get("streams")
+    if not isinstance(streams, Sequence) or isinstance(streams, (str, bytes, bytearray)):
+        return []
+    profiles: list[dict[str, object]] = []
+    for stream in streams[:limit]:
+        if not isinstance(stream, Mapping):
+            continue
+        profiles.append(
+            {
+                "index": parse_int(stream.get("index")),
+                "codec_type": str(stream.get("codec_type", ""))[:60],
+                "codec_name": str(stream.get("codec_name", ""))[:120],
+                "codec_long_name": str(stream.get("codec_long_name", ""))[:180],
+                "width": parse_int(stream.get("width")),
+                "height": parse_int(stream.get("height")),
+                "sample_rate": parse_int(stream.get("sample_rate")),
+                "channels": parse_int(stream.get("channels")),
+                "duration_seconds": parse_float(stream.get("duration")),
+                "bit_rate": parse_int(stream.get("bit_rate")),
+            }
+        )
+    return profiles
+
+
+def codec_metadata_summary(sidecars: Sequence[Mapping[str, object]]) -> dict[str, object]:
+    streams: list[Mapping[str, object]] = []
+    duration_candidates: list[float] = []
+    tool_hints: list[str] = []
+    for sidecar in sidecars:
+        tool_hint = sidecar.get("tool_hint")
+        if isinstance(tool_hint, str) and tool_hint:
+            tool_hints.append(tool_hint)
+        format_profile = sidecar.get("format_profile") if isinstance(sidecar.get("format_profile"), Mapping) else {}
+        duration = format_profile.get("duration_seconds") if isinstance(format_profile, Mapping) else None
+        if isinstance(duration, (int, float)):
+            duration_candidates.append(float(duration))
+        stream_profiles = sidecar.get("stream_profiles")
+        if isinstance(stream_profiles, Sequence) and not isinstance(stream_profiles, (str, bytes, bytearray)):
+            streams.extend(stream for stream in stream_profiles if isinstance(stream, Mapping))
+    video_streams = [stream for stream in streams if stream.get("codec_type") == "video"]
+    audio_streams = [stream for stream in streams if stream.get("codec_type") == "audio"]
+    return {
+        "status": "sidecar-linked" if sidecars else "not-available",
+        "sidecar_count": len(sidecars),
+        "tool_hints": sorted(set(tool_hints)),
+        "duration_seconds": duration_candidates[0] if duration_candidates else None,
+        "stream_count": len(streams),
+        "video_stream_count": len(video_streams),
+        "audio_stream_count": len(audio_streams),
+        "primary_video": dict(video_streams[0]) if video_streams else {},
+        "primary_audio": dict(audio_streams[0]) if audio_streams else {},
+        "validation_status": "sidecar-linked-unvalidated" if sidecars else "not-available",
+    }
+
+
+def parse_int(value: object) -> int | None:
+    if isinstance(value, bool) or value is None:
+        return None
+    if isinstance(value, int):
+        return value
+    if isinstance(value, float):
+        return int(value)
+    try:
+        return int(str(value).strip())
+    except (TypeError, ValueError):
+        return None
+
+
+def parse_float(value: object) -> float | None:
+    if isinstance(value, bool) or value is None:
+        return None
+    if isinstance(value, (int, float)):
+        return round(float(value), 6)
+    try:
+        return round(float(str(value).strip()), 6)
+    except (TypeError, ValueError):
+        return None
+
+
+def build_waveform_preview(path: Path, container_profile: Mapping[str, object], *, bucket_count: int = 32) -> dict[str, object]:
+    if container_profile.get("parse_status") != "riff-wave-header-parsed":
+        return {"status": "unsupported-container", "bucket_count": 0, "peaks": []}
+    if container_profile.get("audio_format") != 1 or container_profile.get("bits_per_sample") != 16:
+        return {"status": "unsupported-pcm-format", "bucket_count": 0, "peaks": []}
+    blob = read_prefix(path, 256 * 1024)
+    data_offset = blob.find(b"data")
+    if data_offset < 0 or data_offset + 8 > len(blob):
+        return {"status": "data-chunk-not-found", "bucket_count": 0, "peaks": []}
+    data_size = int.from_bytes(blob[data_offset + 4 : data_offset + 8], "little", signed=False)
+    pcm = blob[data_offset + 8 : min(len(blob), data_offset + 8 + data_size)]
+    sample_count = len(pcm) // 2
+    if sample_count == 0:
+        return {"status": "empty-pcm-sample", "bucket_count": 0, "peaks": []}
+    samples = [int.from_bytes(pcm[index : index + 2], "little", signed=True) for index in range(0, len(pcm) - 1, 2)]
+    bucket_size = max(1, len(samples) // bucket_count)
+    peaks: list[dict[str, object]] = []
+    for bucket_index, start in enumerate(range(0, len(samples), bucket_size)):
+        if len(peaks) >= bucket_count:
+            break
+        bucket = samples[start : start + bucket_size]
+        if not bucket:
+            continue
+        peak = max(abs(value) for value in bucket)
+        peaks.append(
+            {
+                "bucket": bucket_index,
+                "sample_start": start,
+                "sample_end": start + len(bucket) - 1,
+                "peak": peak,
+                "normalized_peak": round(peak / 32768, 6),
+            }
+        )
+    return {
+        "status": "pcm16-peak-preview",
+        "bucket_count": len(peaks),
+        "sample_count_scanned": len(samples),
+        "data_bytes_scanned": len(pcm),
+        "peaks": peaks,
+        "validation_status": "triage-preview-unvalidated",
+    }
 
 
 def build_image_record(path: Path) -> ArtifactRecord:
@@ -218,6 +701,8 @@ def build_image_record(path: Path) -> ArtifactRecord:
             }
         )
         artifact_type = "media-image"
+    details["image_gallery_manifest"] = build_image_gallery_manifest(details=details, source_path=resolved)
+    details["image_gallery_manifest_hash"] = details["image_gallery_manifest"]["manifest_hash"]
     details["core_accuracy_gates"] = media_core_accuracy_gates(details=details, source_path=resolved)
     details["commercial_uplift_evidence"] = media_image_commercial_uplift_evidence(details=details, source_path=resolved)
     return ArtifactRecord(
@@ -227,6 +712,68 @@ def build_image_record(path: Path) -> ArtifactRecord:
         supported=True,
         details=details,
     )
+
+
+def find_transcript_sidecars(path: Path) -> list[dict[str, object]]:
+    candidates: list[Path] = []
+    for suffix in (".srt", ".vtt", ".txt", ".transcript.txt"):
+        candidates.append(path.with_suffix(path.suffix + suffix))
+        candidates.append(path.with_suffix(suffix))
+    sidecars: list[dict[str, object]] = []
+    seen: set[Path] = set()
+    for candidate in candidates:
+        if candidate in seen or not candidate.is_file():
+            continue
+        seen.add(candidate)
+        try:
+            text = candidate.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            text = ""
+        sidecars.append(
+            {
+                "path": str(candidate.resolve()),
+                "source_sha256": compute_hashes(path).get("sha256", ""),
+                "sidecar_hashes": compute_hashes(candidate),
+                "format": candidate.suffix.lower().lstrip("."),
+                "size": candidate.stat().st_size,
+                "contains_hangul": contains_hangul(text),
+                "preview": text[:500],
+                "cue_count": len(parse_transcript_cues(text)),
+                "cue_samples": parse_transcript_cues(text)[:10],
+                "text_sha256": hashlib.sha256(text.encode("utf-8", errors="replace")).hexdigest(),
+                "validation_status": "sidecar-linked-unvalidated",
+            }
+        )
+    return sidecars
+
+
+TRANSCRIPT_TIME_RE = re.compile(
+    r"(?P<start>\d{1,2}:\d{2}(?::\d{2})?[\.,]\d{3})\s*-->\s*(?P<end>\d{1,2}:\d{2}(?::\d{2})?[\.,]\d{3})"
+)
+
+
+def parse_transcript_cues(text: str) -> list[dict[str, str]]:
+    cues: list[dict[str, str]] = []
+    lines = text.splitlines()
+    for index, line in enumerate(lines):
+        match = TRANSCRIPT_TIME_RE.search(line)
+        if not match:
+            continue
+        cue_lines: list[str] = []
+        for candidate in lines[index + 1 : index + 5]:
+            if not candidate.strip():
+                break
+            if TRANSCRIPT_TIME_RE.search(candidate):
+                break
+            cue_lines.append(candidate.strip())
+        cues.append(
+            {
+                "start": match.group("start").replace(",", "."),
+                "end": match.group("end").replace(",", "."),
+                "text": " ".join(cue_lines)[:500],
+            }
+        )
+    return cues
 
 
 def build_ocr_and_classifier_validation(path: Path) -> dict[str, object]:
@@ -330,6 +877,66 @@ def korean_ocr_translation_workflow(
     }
 
 
+def build_image_gallery_manifest(*, details: Mapping[str, object], source_path: Path) -> dict[str, object]:
+    hashes = details.get("hashes") if isinstance(details.get("hashes"), Mapping) else {}
+    thumbnail = details.get("thumbnail_preview") if isinstance(details.get("thumbnail_preview"), Mapping) else {}
+    classification = details.get("visual_classification") if isinstance(details.get("visual_classification"), Mapping) else {}
+    row_core = {
+        "source_path": str(source_path),
+        "entry_name": str(details.get("entry_name") or source_path.name),
+        "source_format": str(details.get("source_format") or source_path.suffix.lower().lstrip(".")),
+        "source_size": details.get("source_size"),
+        "decoded": bool(details.get("decoded")),
+        "width": details.get("width"),
+        "height": details.get("height"),
+        "channel_count": details.get("channel_count"),
+        "sha256": str(hashes.get("sha256") or ""),
+        "perceptual_hash": str(details.get("perceptual_hash") or ""),
+        "similarity_bucket": str(details.get("similarity_bucket") or ""),
+        "thumbnail_sha256": str(thumbnail.get("sha256") or ""),
+        "classification_label": str(classification.get("label") or ""),
+        "classification_status": str(classification.get("validation_status") or ""),
+    }
+    manifest_core: dict[str, object] = {
+        "manifest_version": "image-gallery-source-manifest-v1",
+        "item_number": 56,
+        "commercial_gap_ids": ["#56"],
+        "path": str(source_path),
+        "source_viewer_locator": {
+            "viewer": "source-image-gallery",
+            "path": str(source_path),
+            "similarity_bucket": row_core["similarity_bucket"],
+            "open_action": "open-image-gallery-at-anchor",
+        },
+        "image_row": row_core,
+        "image_row_hash": stable_payload_sha256(row_core),
+        "tag_suggestions": image_tag_suggestions(details),
+        "report_selection_hint": "Verify source hash, thumbnail consistency, and context before report inclusion.",
+        "blockers": [
+            "trusted-image-gallery-manifest-diff-required-before-court-use",
+            "persistent-gallery-tags-not-implemented",
+            "ml-similarity-and-sensitive-media-classifier-not-validated",
+        ],
+        "commercial_claim_allowed": False,
+    }
+    return {**manifest_core, "manifest_hash": stable_payload_sha256(manifest_core)}
+
+
+def image_tag_suggestions(details: Mapping[str, object]) -> list[str]:
+    tags = ["image"]
+    classification = details.get("visual_classification") if isinstance(details.get("visual_classification"), Mapping) else {}
+    label = str(classification.get("label") or "")
+    if label:
+        tags.append(label)
+    if details.get("ocr_sidecar"):
+        tags.append("ocr-sidecar")
+    if details.get("similarity_bucket"):
+        tags.append("similarity-bucketed")
+    if not details.get("decoded"):
+        tags.append("decode-warning")
+    return tags
+
+
 def media_report_grade_assessment() -> dict[str, object]:
     return {
         "status": "triage-only-validation-required",
@@ -366,6 +973,11 @@ def media_core_accuracy_gates(*, details: dict[str, object], source_path: Path) 
         item56.append("perceptual similarity bucket")
     if details.get("gallery_review_mode"):
         item56.append("tag/report selection hints")
+    gallery_manifest = details.get("image_gallery_manifest") if isinstance(details.get("image_gallery_manifest"), Mapping) else {}
+    if gallery_manifest.get("manifest_hash"):
+        item56.append("image gallery source manifest")
+    if gallery_manifest.get("image_row_hash"):
+        item56.append("image gallery row hash")
     if not MEDIA_NATIVE_CAPABILITIES["deepfake_detection"]:
         item56.append("visual-classifier limitation warning")
     if trusted_media_diff_passed(trusted_diffs, 56):
@@ -418,6 +1030,7 @@ def media_image_commercial_uplift_evidence(*, details: Mapping[str, object], sou
     ocr_sidecar = details.get("ocr_sidecar") if isinstance(details.get("ocr_sidecar"), Mapping) else {}
     translation_sidecar = details.get("translation_sidecar") if isinstance(details.get("translation_sidecar"), Mapping) else {}
     trusted_diffs = details.get("media_trusted_diffs") if isinstance(details.get("media_trusted_diffs"), Mapping) else {}
+    gallery_manifest = details.get("image_gallery_manifest") if isinstance(details.get("image_gallery_manifest"), Mapping) else {}
     return {
         "batch_id": "commercial-uplift-056-060",
         "item_numbers": [56, 58, 59],
@@ -425,6 +1038,7 @@ def media_image_commercial_uplift_evidence(*, details: Mapping[str, object], sou
         "source_refs": [
             f"source_path:{source_path}",
             f"source_sha256:{details.get('hashes', {}).get('sha256', '') if isinstance(details.get('hashes'), Mapping) else ''}",
+            f"image_gallery_manifest_hash:{gallery_manifest.get('manifest_hash', '')}",
             f"ocr_sidecar:{ocr_sidecar.get('source_path', '')}",
             f"translation_sidecar:{translation_sidecar.get('source_path', '')}",
         ],
@@ -484,6 +1098,9 @@ def media_image_commercial_uplift_evidence(*, details: Mapping[str, object], sou
             ),
             "perceptual_hash_present": bool(details.get("perceptual_hash")),
             "similarity_bucket_present": bool(details.get("similarity_bucket")),
+            "image_gallery_manifest_present": bool(gallery_manifest.get("manifest_hash")),
+            "image_gallery_manifest_hash": str(gallery_manifest.get("manifest_hash") or ""),
+            "image_gallery_row_hash": str(gallery_manifest.get("image_row_hash") or ""),
             "ocr_sidecar_imported": bool(ocr_sidecar),
             "translation_sidecar_imported": bool(translation_sidecar),
             "native_ocr_execution": False,

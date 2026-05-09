@@ -77,6 +77,8 @@ class RapidTriageCompareTests(unittest.TestCase):
             self.assertIn("comparison review queue", compare_gate["satisfied_checks"])
             self.assertIn("selection rationale captured", compare_gate["satisfied_checks"])
             self.assertIn("bounded compare notes captured", compare_gate["satisfied_checks"])
+            self.assertIn("compare citation manifest hash", compare_gate["satisfied_checks"])
+            self.assertIn("compare source viewer locators", compare_gate["satisfied_checks"])
             self.assertIn("specialized diff limitation warning", compare_gate["satisfied_checks"])
             uplift = payload["commercial_uplift_evidence"]
             self.assertEqual(uplift["batch_id"], "commercial-uplift-051-055")
@@ -89,6 +91,13 @@ class RapidTriageCompareTests(unittest.TestCase):
             )
             self.assertIn("check:sqlite-table-aware-diff", uplift["reportability_decision"]["blockers"])
             self.assertTrue(uplift["large_data_controls"]["bounded_text_diff"])
+            self.assertTrue(uplift["large_data_controls"]["compare_citation_manifest_present"])
+            self.assertEqual(
+                uplift["large_data_controls"]["compare_citation_manifest_hash"],
+                payload["compare_citation_manifest"]["manifest_hash"],
+            )
+            self.assertEqual(uplift["large_data_controls"]["source_viewer_locator_count"], 2)
+            self.assertEqual(uplift["large_data_controls"]["diff_locator_count"], 1)
             self.assertTrue(uplift["large_data_controls"]["compare_review_profile_present"])
             self.assertEqual(uplift["large_data_controls"]["review_queue_count"], 1)
             self.assertTrue(uplift["large_data_controls"]["selection_rationale_present"])
@@ -102,6 +111,15 @@ class RapidTriageCompareTests(unittest.TestCase):
             self.assertFalse(review_profile["persistent_compare_notes"])
             self.assertTrue(review_profile["commercial_release_blocked"])
             self.assertEqual(review_profile["review_queue"][0]["report_decision"], "pending")
+            citation_manifest = payload["compare_citation_manifest"]
+            self.assertEqual(citation_manifest["manifest_version"], "multi-evidence-compare-citation-manifest-v1")
+            self.assertEqual(citation_manifest["comparison_count"], 1)
+            self.assertEqual(citation_manifest["source_viewer_locator_count"], 2)
+            self.assertEqual(citation_manifest["diff_locator_count"], 1)
+            self.assertEqual(citation_manifest["entries"][0]["baseline_locator"]["viewer"], "compare-source")
+            self.assertEqual(citation_manifest["entries"][0]["comparison_locator"]["viewer"], "compare-source")
+            self.assertEqual(citation_manifest["entries"][0]["diff_locator"]["viewer"], "compare-diff")
+            self.assertTrue(citation_manifest["entries"][0]["entry_hash"])
             result = payload["results"][0]
             self.assertEqual(result["status"], "different")
             self.assertEqual(result["left"]["hashes"].keys(), {"md5", "sha1", "sha256"})
@@ -195,7 +213,11 @@ class RapidTriageCompareTests(unittest.TestCase):
             self.assertIn("compare review profile", payload["core_accuracy_gates"][0]["satisfied_checks"])
             self.assertIn("selection rationale captured", payload["core_accuracy_gates"][0]["satisfied_checks"])
             self.assertTrue(payload["commercial_uplift_evidence"]["large_data_controls"]["a_b_c_baseline_compare"])
+            self.assertTrue(payload["commercial_uplift_evidence"]["large_data_controls"]["compare_citation_manifest_present"])
             self.assertEqual(payload["commercial_uplift_evidence"]["large_data_controls"]["review_queue_count"], 2)
+            self.assertEqual(payload["compare_citation_manifest"]["comparison_count"], 2)
+            self.assertEqual(payload["compare_citation_manifest"]["source_viewer_locator_count"], 4)
+            self.assertEqual(payload["summary"]["compare_citation_manifest_hash"], payload["compare_citation_manifest"]["manifest_hash"])
             self.assertEqual(payload["summary"]["review_queue_count"], 2)
             self.assertTrue(payload["summary"]["selection_rationale_present"])
             self.assertEqual(payload["compare_review_profile"]["review_note_count"], 2)

@@ -113,6 +113,21 @@ def main(argv: list[str] | None = None) -> int:
         add_if_exists(archive, repo / "scripts" / "crash-redaction-review.py", "scripts/crash-redaction-review.py")
         add_if_exists(archive, repo / "scripts" / "parser-sandbox-smoke.py", "scripts/parser-sandbox-smoke.py")
         add_if_exists(archive, repo / "scripts" / "security-hardening-review.py", "scripts/security-hardening-review.py")
+        add_if_exists(
+            archive,
+            repo / "scripts" / "external-release-evidence-template.py",
+            "scripts/external-release-evidence-template.py",
+        )
+        add_if_exists(
+            archive,
+            repo / "scripts" / "hostile-evidence-containment-template.py",
+            "scripts/hostile-evidence-containment-template.py",
+        )
+        add_if_exists(
+            archive,
+            repo / "scripts" / "independent-operations-evidence-template.py",
+            "scripts/independent-operations-evidence-template.py",
+        )
         add_tree(archive, repo / "scripts" / "windows", "scripts/windows")
         archive.writestr("data/.gitkeep", "")
         archive.writestr("cases/.gitkeep", "")
@@ -402,6 +417,9 @@ def build_windows_portable_mode_manifest(output_dir: Path) -> dict[str, object]:
         "scripts/crash-redaction-review.py",
         "scripts/parser-sandbox-smoke.py",
         "scripts/security-hardening-review.py",
+        "scripts/external-release-evidence-template.py",
+        "scripts/hostile-evidence-containment-template.py",
+        "scripts/independent-operations-evidence-template.py",
         "docs/rapidtriage-windows-quickstart.md",
         "docs/rapidtriage-fresh-machine-smoke-test.md",
     ]
@@ -432,6 +450,9 @@ def build_windows_portable_mode_manifest(output_dir: Path) -> dict[str, object]:
             "python scripts/crash-redaction-review.py logs/crash-export-smoke/crash-export-smoke.json --json",
             "python scripts/parser-sandbox-smoke.py --output logs/parser-sandbox-smoke.json --json",
             "python scripts/security-hardening-review.py --output logs/security-hardening-review.json --json",
+            "python scripts/external-release-evidence-template.py --output logs/external-commercial-evidence.json --json",
+            "python scripts/hostile-evidence-containment-template.py --output logs/hostile-evidence-containment.json --json",
+            "python scripts/independent-operations-evidence-template.py --output logs/independent-operations-evidence.json --json",
             "python scripts/build-release.py --verify",
             "powershell -ExecutionPolicy Bypass -File scripts/windows/smoke-test-rapidtriage.ps1",
         ],

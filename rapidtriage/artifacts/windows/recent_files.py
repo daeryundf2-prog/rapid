@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import re
 import struct
 import uuid
@@ -168,23 +169,34 @@ def parse_lnk_metadata(path: Path) -> dict[str, object]:
         data = path.read_bytes()
     except OSError:
         return {"lnk_parse_status": "read-error"}
+    source_hashes = file_hashes(path)
+    source_path = str(path.resolve())
     metadata = parse_lnk_metadata_from_bytes(data)
+    metadata.update(
+        {
+            "source_path": source_path,
+            "source_hashes": source_hashes,
+            "artifact_type": "recent-shortcut",
+        }
+    )
     metadata["core_accuracy_gates"] = lnk_core_accuracy_gates(
         {
             **metadata,
-            "source_path": str(path.resolve()),
-            "source_hashes": file_hashes(path),
+            "source_path": source_path,
+            "source_hashes": source_hashes,
         }
     )
     if metadata.get("lnk_parse_status") == "parsed":
         metadata["commercial_uplift_evidence"] = lnk_commercial_uplift_evidence(
             {
                 **metadata,
-                "source_path": str(path.resolve()),
-                "source_hashes": file_hashes(path),
+                "source_path": source_path,
+                "source_hashes": source_hashes,
                 "artifact_type": "recent-shortcut",
             }
         )
+        metadata["lnk_metadata_depth_manifest"] = lnk_metadata_depth_manifest(metadata)
+        metadata["lnk_metadata_depth_manifest_hash"] = metadata["lnk_metadata_depth_manifest"]["manifest_sha256"]
     return metadata
 
 
@@ -579,13 +591,16 @@ def jump_list_metadata(path: Path, artifact_type: str) -> dict[str, object]:
             "validation_checks": validation_checks,
         }
     )
-    return {
+    details = {
         "jump_list_parse_status": "parsed-ole-stream-lnk" if ole_streams and destinations else "parsed-embedded-lnk" if destinations else "inventory",
         "coverage_status": "native-destlist-candidate" if destlist_metadata.get("destlist_parse_status") == "parsed-candidate" else "mapped",
         "reportability": "triage",
         "parser_confidence": jumplist_parser_confidence(destinations, destlist_metadata),
         "evidence_strength": "jumplist-destination-candidate" if destinations else "jumplist-container-presence",
         "commercial_grade_ready": False,
+        "source_path": str(path.resolve()),
+        "source_hashes": file_hashes(path),
+        "artifact_type": artifact_type,
         "container_hint": "ole-compound-file" if data.startswith(b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1") else "custom-binary",
         "jumplist_kind": "automatic" if artifact_type == "jumplist-automatic" else "custom",
         "application_id_hash": path.stem.split(".", 1)[0],
@@ -640,6 +655,9 @@ def jump_list_metadata(path: Path, artifact_type: str) -> dict[str, object]:
         **destlist_metadata,
         "note": "OLE Jump List streams are traversed when recoverable; DestList rows are exposed as metadata candidates and embedded Shell Link/path extraction is provided for triage search.",
     }
+    details["jumplist_destlist_depth_manifest"] = jumplist_destlist_depth_manifest(details)
+    details["jumplist_destlist_depth_manifest_hash"] = details["jumplist_destlist_depth_manifest"]["manifest_sha256"]
+    return details
 
 
 def jumplist_evidence(
@@ -688,6 +706,280 @@ def jumplist_evidence(
             "treat deleted DestList entries as unsupported until slack recovery is validated",
         ],
     }
+
+
+def recent_stable_sha256(value: object) -> str:
+    return hashlib.sha256(
+        json.dumps(value, ensure_ascii=False, sort_keys=True, default=str, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()
+
+
+def lnk_metadata_depth_manifest(details: Mapping[str, object]) -> dict[str, object]:
+    hashes = details.get("source_hashes") if isinstance(details.get("source_hashes"), Mapping) else {}
+    report_grade = (
+        details.get("recent_report_grade_assessment")
+        if isinstance(details.get("recent_report_grade_assessment"), Mapping)
+        else {}
+    )
+    reportability = lnk_reportability_decision(report_grade, details)
+    link_info = details.get("link_info") if isinstance(details.get("link_info"), Mapping) else {}
+    shell_items = details.get("shell_item_metadata") if isinstance(details.get("shell_item_metadata"), Mapping) else {}
+    tracker = details.get("tracker_data") if isinstance(details.get("tracker_data"), Mapping) else {}
+    validation_checks = (
+        details.get("validation_checks") if isinstance(details.get("validation_checks"), Mapping) else {}
+    )
+    extra_blocks = [item for item in details.get("extra_data_blocks") or [] if isinstance(item, Mapping)]
+    property_blocks = [item for item in details.get("property_store_blocks") or [] if isinstance(item, Mapping)]
+    manifest_payload = {
+        "manifest_version": "lnk-metadata-depth-manifest-v1",
+        "parser_version": PARSER_VERSION,
+        "commercial_batch_id": "commercial-uplift-016-020",
+        "item_number": 17,
+        "gap_id": "#17",
+        "artifact_type": str(details.get("artifact_type") or "recent-shortcut"),
+        "source": {
+            "source_path": str(details.get("source_path") or ""),
+            "source_sha256": str(hashes.get("sha256") or ""),
+            "entry_name": str(details.get("entry_name") or ""),
+            "source_format": "lnk-shell-link",
+        },
+        "row_identity": {
+            "target_path": str(details.get("target_path") or ""),
+            "working_dir": str(details.get("working_dir") or ""),
+            "relative_path": str(details.get("relative_path") or ""),
+            "command_line_arguments": str(details.get("command_line_arguments") or ""),
+            "icon_location": str(details.get("icon_location") or ""),
+            "tracker_machine_id": str(tracker.get("machine_id") or ""),
+            "identity_hash": recent_stable_sha256(
+                {
+                    "target_path": str(details.get("target_path") or ""),
+                    "working_dir": str(details.get("working_dir") or ""),
+                    "arguments": str(details.get("command_line_arguments") or ""),
+                    "tracker_machine_id": str(tracker.get("machine_id") or ""),
+                }
+            ),
+        },
+        "header_validation": {
+            "parse_status": str(details.get("lnk_parse_status") or ""),
+            "header_size": int(details.get("lnk_header_size") or 0),
+            "clsid_validated": str(details.get("lnk_parse_status") or "") == "parsed",
+            "link_flags_raw": int(details.get("link_flags") or 0),
+            "link_flag_names": list(details.get("link_flag_names") or []),
+            "file_attributes_raw": int(details.get("file_attributes") or 0),
+            "file_attribute_names": list(details.get("file_attribute_names") or []),
+        },
+        "target_and_string_data": {
+            "target_path": str(details.get("target_path") or ""),
+            "embedded_paths": list(details.get("embedded_paths") or [])[:50],
+            "description": str(details.get("description") or ""),
+            "relative_path": str(details.get("relative_path") or ""),
+            "working_dir": str(details.get("working_dir") or ""),
+            "command_line_arguments": str(details.get("command_line_arguments") or ""),
+            "icon_location": str(details.get("icon_location") or ""),
+            "target_created_at": str(details.get("target_created_at") or ""),
+            "target_accessed_at": str(details.get("target_accessed_at") or ""),
+            "target_modified_at": str(details.get("target_modified_at") or ""),
+            "target_file_size": int(details.get("target_file_size") or 0),
+            "string_data_offset": int(details.get("string_data_offset") or 0),
+        },
+        "linkinfo_and_shell_items": {
+            "link_info_parse_status": str(link_info.get("parse_status") or "not-present"),
+            "local_base_path": str(link_info.get("local_base_path") or ""),
+            "common_path_suffix": str(link_info.get("common_path_suffix") or ""),
+            "shell_item_parse_status": str(shell_items.get("parse_status") or ""),
+            "shell_item_count": len(shell_items.get("items") or []),
+            "full_shell_item_semantics_validated": False,
+        },
+        "extra_data": {
+            "extra_data_block_count": len(extra_blocks),
+            "extra_data_block_types": [str(item.get("type") or "") for item in extra_blocks],
+            "has_tracker_data": bool(tracker),
+            "tracker_parse_status": str(tracker.get("parse_status") or ""),
+            "tracker_machine_id": str(tracker.get("machine_id") or ""),
+            "tracker_guid_validation_status": str(tracker.get("validation_status") or ""),
+            "property_store_block_count": len(property_blocks),
+            "full_property_store_decode_available": bool(
+                validation_checks.get("full_property_store_decode_available")
+            ),
+        },
+        "citation_refs": [
+            {
+                "kind": "lnk-source-file",
+                "source_path": str(details.get("source_path") or ""),
+                "source_sha256": str(hashes.get("sha256") or ""),
+            },
+            {
+                "kind": "lnk-header",
+                "header_size": int(details.get("lnk_header_size") or 0),
+                "link_flags_raw": int(details.get("link_flags") or 0),
+            },
+            {
+                "kind": "lnk-string-data",
+                "string_data_offset": int(details.get("string_data_offset") or 0),
+                "target_path": str(details.get("target_path") or ""),
+            },
+            {
+                "kind": "lnk-link-info",
+                "parse_status": str(link_info.get("parse_status") or "not-present"),
+                "local_base_path": str(link_info.get("local_base_path") or ""),
+            },
+            {
+                "kind": "lnk-extra-data",
+                "extra_data_block_count": len(extra_blocks),
+                "extra_data_block_types": [str(item.get("type") or "") for item in extra_blocks],
+            },
+            {
+                "kind": "lnk-tracker",
+                "machine_id": str(tracker.get("machine_id") or ""),
+                "validation_status": str(tracker.get("validation_status") or ""),
+            },
+        ],
+        "reportability": {
+            "allowed_use": reportability["allowed_use"],
+            "decision": reportability["decision"],
+            "report_grade_ready": bool(report_grade.get("report_grade_ready")),
+            "commercial_grade_ready": False,
+            "target_context_complete": False,
+            "blockers": reportability["blockers"],
+        },
+        "required_before_commercial_grade": [
+            "decode and validate full Shell Item and property-store semantics",
+            "decode LinkInfo drive, volume, and network provider fields with trusted diff evidence",
+            "validate TrackerDataBlock GUID and machine-id semantics against known-answer shortcuts",
+            "attach LECmd or equivalent trusted parser record-level diff for critical shortcuts",
+        ],
+    }
+    manifest_payload["manifest_sha256"] = recent_stable_sha256(manifest_payload)
+    return manifest_payload
+
+
+def jumplist_destlist_depth_manifest(details: Mapping[str, object]) -> dict[str, object]:
+    hashes = details.get("source_hashes") if isinstance(details.get("source_hashes"), Mapping) else {}
+    report_grade = (
+        details.get("recent_report_grade_assessment")
+        if isinstance(details.get("recent_report_grade_assessment"), Mapping)
+        else {}
+    )
+    evidence = details.get("jumplist_evidence") if isinstance(details.get("jumplist_evidence"), Mapping) else {}
+    container = evidence.get("container") if isinstance(evidence.get("container"), Mapping) else {}
+    destlist = evidence.get("destlist") if isinstance(evidence.get("destlist"), Mapping) else {}
+    destinations = [item for item in details.get("destinations") or [] if isinstance(item, Mapping)]
+    destlist_checks = (
+        details.get("destlist_validation_checks")
+        if isinstance(details.get("destlist_validation_checks"), Mapping)
+        else {}
+    )
+    reportability = jumplist_reportability_decision(report_grade, details)
+    source = {
+        "source_path": str(details.get("source_path") or ""),
+        "source_sha256": str(hashes.get("sha256") or ""),
+        "artifact_type": str(details.get("artifact_type") or ""),
+        "application_id_hash": str(details.get("application_id_hash") or ""),
+        "jumplist_kind": str(details.get("jumplist_kind") or ""),
+    }
+    container_identity = {
+        "container_hint": str(details.get("container_hint") or ""),
+        "ole_parse_status": str(details.get("ole_parse_status") or ""),
+        "ole_stream_count": int(details.get("ole_stream_count") or 0),
+        "stream_names": list(container.get("stream_names") or [])[:50],
+        "destination_count": int(details.get("destination_count") or 0),
+        "destination_stream_count": int(details.get("destination_stream_count") or 0),
+    }
+    manifest_payload = {
+        "manifest_version": "jumplist-destlist-depth-manifest-v1",
+        "parser_version": PARSER_VERSION,
+        "commercial_batch_id": "commercial-uplift-011-015",
+        "item_number": 14,
+        "gap_id": "#14",
+        "artifact_type": str(details.get("artifact_type") or ""),
+        "source": source,
+        "container_identity": container_identity,
+        "container_identity_hash": recent_stable_sha256(container_identity),
+        "destlist_decoding": {
+            "parse_status": str(details.get("destlist_parse_status") or ""),
+            "stream_count": int(details.get("destlist_stream_count") or 0),
+            "declared_entry_count_candidates": list(details.get("destlist_declared_entry_count_candidates") or [])[:10],
+            "entry_candidate_count": int(details.get("destlist_entry_candidate_count") or 0),
+            "unlinked_entry_candidate_count": int(details.get("destlist_unlinked_entry_candidate_count") or 0),
+            "deleted_or_unlinked_entry_review_status": str(
+                details.get("destlist_deleted_or_unlinked_entry_review_status") or ""
+            ),
+            "has_destlist_stream": bool(destlist_checks.get("has_destlist_stream")),
+            "declared_count_matches_candidates": bool(destlist_checks.get("declared_count_matches_candidates")),
+            "report_grade": bool(destlist_checks.get("report_grade")),
+            "os_version_semantics_validated": False,
+            "deleted_entry_recovery_validated": bool(JUMPLIST_CAPABILITIES["destlist_deleted_entry_recovery"]),
+            "account_metadata_decoded": bool(JUMPLIST_CAPABILITIES["destlist_account_metadata_decode"]),
+        },
+        "destination_linkage": {
+            "destination_count": len(destinations),
+            "linked_lnk_stream_count": sum(1 for item in destinations if item.get("stream_path")),
+            "target_paths": [str(item.get("target_path") or "") for item in destinations if item.get("target_path")][:50],
+            "linked_destlist_candidate_count": sum(
+                1 for item in destinations if str(item.get("destlist_validation_status") or "") == "candidate-linked-lnk-stream"
+            ),
+            "destination_preview": [
+                {
+                    "target_path": str(item.get("target_path") or ""),
+                    "stream_path": str(item.get("stream_path") or ""),
+                    "destlist_entry_index_candidate": item.get("destlist_entry_index_candidate", ""),
+                    "destlist_entry_offset_candidate": item.get("destlist_entry_offset_candidate", ""),
+                    "destlist_validation_status": str(item.get("destlist_validation_status") or ""),
+                    "has_tracker_data": bool(item.get("has_tracker_data")),
+                }
+                for item in destinations[:25]
+            ],
+        },
+        "appid_mapping": {
+            "application_id_hash": str(details.get("application_id_hash") or ""),
+            "application_name_mapping_available": bool(JUMPLIST_CAPABILITIES["appid_hash_mapping"]),
+            "blocker": "application-id-hash-to-application-name-map-not-bundled",
+        },
+        "citation_refs": [
+            {
+                "kind": "jumplist-source-container",
+                "source_path": str(details.get("source_path") or ""),
+                "source_sha256": str(hashes.get("sha256") or ""),
+            },
+            {
+                "kind": "jumplist-cfb-stream-inventory",
+                "ole_stream_count": int(details.get("ole_stream_count") or 0),
+                "stream_names": list(container.get("stream_names") or [])[:50],
+            },
+            {
+                "kind": "jumplist-destlist-candidates",
+                "parse_status": str(destlist.get("parse_status") or details.get("destlist_parse_status") or ""),
+                "candidate_count": int(destlist.get("candidate_count") or details.get("destlist_entry_candidate_count") or 0),
+                "unlinked_entry_candidate_count": int(destlist.get("unlinked_entry_candidate_count") or 0),
+            },
+            {
+                "kind": "jumplist-embedded-lnk-destinations",
+                "destination_count": len(destinations),
+            },
+            {
+                "kind": "jumplist-appid-hash",
+                "application_id_hash": str(details.get("application_id_hash") or ""),
+                "mapping_available": bool(JUMPLIST_CAPABILITIES["appid_hash_mapping"]),
+            },
+        ],
+        "reportability": {
+            "allowed_use": reportability["allowed_use"],
+            "decision": reportability["decision"],
+            "report_grade_ready": bool(report_grade.get("report_grade_ready")),
+            "commercial_grade_ready": False,
+            "destlist_semantics_final": False,
+            "deleted_entries_recovered": False,
+            "blockers": reportability["blockers"],
+        },
+        "required_before_commercial_grade": [
+            "validate OS-version-specific DestList header and entry field semantics",
+            "attach AppID hash to application-name mapping provenance",
+            "validate deleted/unlinked entry recovery against slack/known-answer corpus",
+            "diff embedded LNK and DestList entries against JLECmd/LECmd output",
+        ],
+    }
+    manifest_payload["manifest_sha256"] = recent_stable_sha256(manifest_payload)
+    return manifest_payload
 
 
 def jumplist_core_accuracy_gates(details: dict[str, object]) -> list[dict[str, object]]:

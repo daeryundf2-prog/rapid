@@ -12,18 +12,21 @@ from .e01 import (
     collect_tool_preflight,
     command_record,
     describe_source_integrity,
-    image_report_grade_assessment,
-    image_core_accuracy_gates,
     image_commercial_uplift_evidence,
+    image_core_accuracy_gates,
+    image_report_grade_assessment,
+    image_reportability_decision,
     image_validation_matrix,
     mark_selected_partition,
     mmls_first_filesystem,
     parse_mmls_partitions,
+    stable_manifest_sha256,
 )
 
 
 RAW_IMAGE_SUFFIXES = (".dd", ".raw", ".img", ".001", ".000", ".0000", ".0001", ".00001", ".ima")
 RAW_IMAGE_REQUIRED_TOOLS = ("mmls", "tsk_recover")
+RAW_SPLIT_WORKFLOW_MANIFEST_VERSION = "raw-split-integrated-workflow-manifest-v1"
 RAW_IMAGE_NATIVE_CAPABILITIES = {
     "split_segment_discovery": True,
     "split_gap_warning": True,
@@ -84,6 +87,21 @@ class DiskImageExtractionResult:
             "partition_table": list(self.partition_table),
             "split_part_warnings": list(self.split_part_warnings),
             "split_set_profile": self.split_set_profile,
+            "raw_split_workflow_manifest": build_raw_split_integrated_workflow_manifest(
+                source_path=self.source_path,
+                image_paths=self.image_paths,
+                source_integrity=self.source_integrity,
+                tool_preflight=self.tool_preflight,
+                partition_table=self.partition_table,
+                split_part_warnings=self.split_part_warnings,
+                split_set_profile=self.split_set_profile,
+                recovered_root_manifest=self.recovered_root_manifest,
+                command_history=self.command_history,
+                recovery_mode=self.recovery_mode,
+                partition_start_sector=self.partition_start_sector,
+                run_outputs=None,
+                status_context="extraction-result",
+            ),
             "recovered_root_manifest": self.recovered_root_manifest,
             "command_history": list(self.command_history),
             "warnings": list(self.warnings),
@@ -145,6 +163,220 @@ class DiskImageExtractionResult:
                 "fallback": "Mount/recover the image read-only with a trusted forensic suite, preserve logs, then scan that folder.",
             },
         }
+
+
+def build_raw_split_integrated_workflow_manifest(
+    *,
+    source_path: Path,
+    image_paths: Sequence[Path],
+    source_integrity: Sequence[dict[str, object]] | None,
+    tool_preflight: Sequence[dict[str, object]] | None,
+    partition_table: Sequence[dict[str, object]] | None,
+    split_part_warnings: Sequence[str] | None,
+    split_set_profile: dict[str, object] | None,
+    recovered_root_manifest: dict[str, object] | None,
+    command_history: Sequence[dict[str, object]] | None,
+    recovery_mode: str,
+    partition_start_sector: int | None,
+    run_outputs: dict[str, object] | None = None,
+    status_context: str = "extraction-result",
+) -> dict[str, object]:
+    source_rows = [dict(row) for row in source_integrity or []]
+    tool_rows = [dict(row) for row in tool_preflight or []]
+    partition_rows = [dict(row) for row in partition_table or []]
+    command_rows = [dict(row) for row in command_history or []]
+    split_profile = dict(split_set_profile or {})
+    recovered_manifest = dict(recovered_root_manifest or {})
+    outputs = dict(run_outputs or {})
+    output_status = {
+        key: {
+            "path": str(value),
+            "expected": key
+            in {
+                "disk_image",
+                "manifest",
+                "docs",
+                "docs_index",
+                "files",
+                "timeline",
+                "timeline_report",
+                "indicators",
+                "summary",
+                "report",
+            }
+            or key.startswith("artifacts_"),
+        }
+        for key, value in outputs.items()
+    }
+    analysis_outputs = [
+        key
+        for key in output_status
+        if key
+        in {
+            "manifest",
+            "docs",
+            "docs_index",
+            "files",
+            "timeline",
+            "timeline_report",
+            "indicators",
+        }
+        or key.startswith("artifacts_")
+    ]
+    report_outputs = [key for key in output_status if key in {"summary", "report"}]
+    recovered_count = int(
+        recovered_manifest.get("visited_file_count")
+        or recovered_manifest.get("hashed_file_count")
+        or recovered_manifest.get("file_count")
+        or 0
+    )
+    extraction_complete = bool(
+        recovered_count
+        or any(row.get("purpose") == "read-only-filesystem-recovery" and row.get("returncode") == 0 for row in command_rows)
+    )
+    source_hash_statuses = [str(row.get("hash_status") or "not-recorded") for row in source_rows]
+    dependency_complete = bool(tool_rows) and all(row.get("available") for row in tool_rows)
+    blockers = [
+        "native-partition-filesystem-parser-not-implemented",
+        "raw-split-trusted-recovery-diff-required",
+        "damaged-gapped-split-set-known-answer-corpus-required",
+        "encrypted-volume-unlock-workflow-not-implemented",
+    ]
+    stages = [
+        {
+            "id": "select-raw-or-split",
+            "label": "RAW/split image selection",
+            "status": "complete" if source_path.is_file() and image_paths else "blocked",
+            "evidence": {
+                "source_path": str(source_path),
+                "part_count": len(image_paths),
+                "hash_statuses": source_hash_statuses,
+            },
+        },
+        {
+            "id": "split-set-validation",
+            "label": "Split-set order and gap validation",
+            "status": "review-required" if split_part_warnings else "complete",
+            "evidence": {
+                "segment_numbers": list(split_profile.get("segment_numbers") or []),
+                "missing_segment_numbers": list(split_profile.get("missing_segment_numbers") or []),
+                "contiguous": split_profile.get("contiguous"),
+                "warnings": list(split_part_warnings or []),
+            },
+        },
+        {
+            "id": "dependency-preflight",
+            "label": "Dependency preflight",
+            "status": "complete" if dependency_complete else "blocked",
+            "evidence": {
+                "required_tools": list(RAW_IMAGE_REQUIRED_TOOLS),
+                "available_tools": [str(row.get("tool")) for row in tool_rows if row.get("available")],
+                "missing_tools": [str(row.get("tool")) for row in tool_rows if not row.get("available")],
+            },
+        },
+        {
+            "id": "partition-selection",
+            "label": "Partition or whole-image recovery decision",
+            "status": "complete" if partition_rows or recovery_mode == "whole-image" else "blocked",
+            "evidence": {
+                "recovery_mode": recovery_mode,
+                "selected_start_sector": partition_start_sector,
+                "partition_count": len(partition_rows),
+                "whole_image_fallback": recovery_mode == "whole-image",
+            },
+        },
+        {
+            "id": "filesystem-extraction",
+            "label": "Read-only filesystem extraction",
+            "status": "complete" if extraction_complete else "blocked",
+            "evidence": {
+                "command_history_count": len(command_rows),
+                "recovered_file_count": recovered_count,
+                "deleted_file_flag": any("-e" in row.get("command", []) for row in command_rows),
+            },
+        },
+        {
+            "id": "artifact-analysis",
+            "label": "Artifact analysis",
+            "status": "complete" if analysis_outputs else ("ready-after-extraction" if extraction_complete else "blocked"),
+            "evidence": {
+                "analysis_output_keys": sorted(analysis_outputs),
+                "artifact_output_count": sum(1 for key in output_status if key.startswith("artifacts_")),
+            },
+        },
+        {
+            "id": "unified-search-indexing",
+            "label": "Unified search and indexing",
+            "status": "complete" if {"docs", "docs_index", "files"}.issubset(output_status) else ("ready-after-analysis" if analysis_outputs else "blocked"),
+            "evidence": {
+                "docs_output": "docs" in output_status,
+                "docs_index_output": "docs_index" in output_status,
+                "files_output": "files" in output_status,
+            },
+        },
+        {
+            "id": "review-report",
+            "label": "Review and report export",
+            "status": "complete" if report_outputs else ("ready-after-review" if analysis_outputs else "blocked"),
+            "evidence": {
+                "report_output_keys": sorted(report_outputs),
+                "source_viewer_required": True,
+                "trusted_tool_diff_required": True,
+            },
+        },
+    ]
+    payload: dict[str, object] = {
+        "profile_version": RAW_SPLIT_WORKFLOW_MANIFEST_VERSION,
+        "item_number": 23,
+        "gap_id": "#23",
+        "status_context": status_context,
+        "workflow_goal": "RAW and split images keep part-order evidence, partition/whole-image recovery decisions, read-only extraction provenance, downstream analysis outputs, and report blockers in one contract.",
+        "source_ref": {
+            "path": str(source_path),
+            "image_paths": [str(path) for path in image_paths],
+            "hash_statuses": source_hash_statuses,
+            "source_sha256s": [row.get("sha256") for row in source_rows if row.get("sha256")],
+        },
+        "split_set_profile": split_profile,
+        "partition_table_row_count": len(partition_rows),
+        "recovery_mode": recovery_mode,
+        "partition_start_sector": partition_start_sector,
+        "command_history_count": len(command_rows),
+        "recovered_root_summary": {
+            "profile_version": recovered_manifest.get("profile_version"),
+            "visited_file_count": recovered_manifest.get("visited_file_count", 0),
+            "hashed_file_count": recovered_manifest.get("hashed_file_count", 0),
+            "skipped_large_file_count": recovered_manifest.get("skipped_large_file_count", 0),
+            "truncated": bool(recovered_manifest.get("truncated", False)),
+        },
+        "run_output_status": output_status,
+        "stages": stages,
+        "large_data_controls": {
+            "direct_image_hash_limit_bytes": 128 * 1024 * 1024,
+            "bounded_recovered_root_manifest": True,
+            "split_part_count": len(image_paths),
+            "cursor_table_required_for_gui": True,
+            "virtualized_table_required_for_gui": True,
+        },
+        "reportability_decision": image_reportability_decision(
+            23,
+            blockers=blockers,
+            failed_validation_matrix_ids=["#23-native-commercial-parser"],
+            details={
+                "source_integrity": source_rows,
+                "image_trusted_diff": {"status": "not-attached"},
+            },
+        ),
+        "commercial_grade_ready": False,
+        "commercial_grade_blockers": blockers,
+        "operator_next_steps": [
+            "Validate split order/gaps against acquisition notes and a trusted image tool.",
+            "Attach mmls/tsk_recover or vendor recovery transcripts with source hashes.",
+            "Use source-viewer citations before reporting recovered filesystem artifacts.",
+        ],
+    }
+    payload["manifest_sha256"] = stable_manifest_sha256(payload)
+    return payload
 
 
 def is_raw_image_path(path: Path) -> bool:

@@ -16,6 +16,7 @@ E01_REQUIRED_TOOLS = ("ewfmount", "mmls", "tsk_recover")
 E01_SUFFIXES = (".e01", ".ex01")
 DIRECT_IMAGE_HASH_LIMIT_BYTES = 128 * 1024 * 1024
 E01_STAGE_CHECKPOINT_NAME = "rapidtriage-e01-stage-status.json"
+E01_INTEGRATED_WORKFLOW_MANIFEST_VERSION = "e01-ex01-integrated-workflow-manifest-v1"
 TOOL_PREFLIGHT_PROFILES: dict[str, dict[str, object]] = {
     "ewfmount": {
         "purpose": "Expose E01/Ex01 evidence as a read-only raw image through libewf.",
@@ -177,6 +178,20 @@ class E01ExtractionResult:
             "resume_status": self.resume_status,
             "recovered_root_manifest": self.recovered_root_manifest,
             "segment_set_profile": self.segment_set_profile,
+            "e01_ex01_workflow_manifest": build_e01_ex01_integrated_workflow_manifest(
+                source_path=self.source_path,
+                source_integrity=self.source_integrity,
+                segment_set_profile=self.segment_set_profile,
+                tool_preflight=self.tool_preflight,
+                preflight_summary=e01_preflight_summary(self.tool_preflight, missing_tools=[]),
+                partition_selection=self.partition_selection,
+                partition_table=self.partition_table,
+                command_history=self.command_history,
+                recovered_root_manifest=self.recovered_root_manifest,
+                resume_status=self.resume_status,
+                run_outputs=None,
+                status_context="extraction-result",
+            ),
             "commercial_grade_ready": self.commercial_grade_ready,
             "commercial_gap_ids": ["#22"],
             "validation_matrix": image_validation_matrix(
@@ -227,7 +242,7 @@ class E01ExtractionResult:
                 "writes_to_stage_dir_only": True,
                 "recommended_fallback": "Mount/export with a trusted forensic workflow, preserve that log, then scan the exported folder.",
             },
-        }
+}
 
 
 def is_e01_path(path: Path) -> bool:
@@ -475,6 +490,224 @@ def build_e01_ingest_workflow_profile(
         "commercial_gap_ids": ["#22", "#23", "#78", "#79"],
         "commercial_note": "This workflow is usable for triage, but commercial-grade E01 claims still require external corpus validation and trusted tool logs.",
     }
+
+
+def build_e01_ex01_integrated_workflow_manifest(
+    *,
+    source_path: Path,
+    source_integrity: Mapping[str, object] | None,
+    segment_set_profile: Mapping[str, object] | None,
+    tool_preflight: Sequence[Mapping[str, object]] | None,
+    preflight_summary: Mapping[str, object] | None,
+    partition_selection: Mapping[str, object] | None,
+    partition_table: Sequence[Mapping[str, object]] | None,
+    command_history: Sequence[Mapping[str, object]] | None,
+    recovered_root_manifest: Mapping[str, object] | None,
+    resume_status: Mapping[str, object] | None,
+    run_outputs: Mapping[str, object] | None = None,
+    status_context: str = "extraction-result",
+) -> dict[str, object]:
+    """Build the #22 E01/Ex01 single-case workflow contract.
+
+    This is intentionally workflow-level evidence, not a claim that RapidForensic
+    has a complete native EWF parser. It gives GUI/API/report code one stable
+    object that connects source selection through report export readiness.
+    """
+
+    tool_rows = [dict(row) for row in tool_preflight or []]
+    partition_rows = [dict(row) for row in partition_table or []]
+    command_rows = [dict(row) for row in command_history or []]
+    recovered_manifest = dict(recovered_root_manifest or {})
+    outputs = dict(run_outputs or {})
+    output_status = {
+        key: {
+            "path": str(value),
+            "expected": key
+            in {
+                "e01",
+                "manifest",
+                "docs",
+                "docs_index",
+                "files",
+                "timeline",
+                "timeline_report",
+                "indicators",
+                "summary",
+                "report",
+            }
+            or key.startswith("artifacts_"),
+        }
+        for key, value in outputs.items()
+    }
+    analysis_outputs = [
+        key
+        for key in output_status
+        if key
+        in {
+            "manifest",
+            "docs",
+            "docs_index",
+            "files",
+            "timeline",
+            "timeline_report",
+            "indicators",
+        }
+        or key.startswith("artifacts_")
+    ]
+    report_outputs = [key for key in output_status if key in {"summary", "report"}]
+    source_hash_status = str((source_integrity or {}).get("hash_status") or "not-recorded")
+    dependency_status = str((preflight_summary or {}).get("status") or "not-recorded")
+    selected_sector = (partition_selection or {}).get("selected_start_sector")
+    recovered_count = int(
+        recovered_manifest.get("visited_file_count")
+        or recovered_manifest.get("hashed_file_count")
+        or recovered_manifest.get("file_count")
+        or 0
+    )
+    extraction_complete = bool(recovered_count or any(row.get("purpose") == "read-only-filesystem-recovery" and row.get("returncode") == 0 for row in command_rows))
+    stages = [
+        {
+            "id": "select-e01",
+            "label": "E01/Ex01 selection",
+            "status": "complete" if source_path.is_file() else "blocked",
+            "evidence": {
+                "source_path": str(source_path),
+                "hash_status": source_hash_status,
+                "segment_count": int((segment_set_profile or {}).get("segment_count") or 0),
+                "selected_is_first_segment": bool((segment_set_profile or {}).get("selected_is_first_segment", True)),
+            },
+        },
+        {
+            "id": "dependency-preflight",
+            "label": "Dependency preflight",
+            "status": "complete" if dependency_status.startswith("ready") else "blocked",
+            "evidence": {
+                "status": dependency_status,
+                "available_tools": list((preflight_summary or {}).get("available_tools") or []),
+                "missing_tools": list((preflight_summary or {}).get("missing_tools") or []),
+                "tool_count": len(tool_rows),
+            },
+        },
+        {
+            "id": "partition-selection",
+            "label": "Partition selection",
+            "status": "complete" if selected_sector is not None else "blocked",
+            "evidence": {
+                "selected_start_sector": selected_sector,
+                "requested_start_sector": (partition_selection or {}).get("requested_start_sector"),
+                "recommended_start_sector": (partition_selection or {}).get("recommended_start_sector"),
+                "partition_count": len(partition_rows),
+                "supported_partition_count": (partition_selection or {}).get("supported_partition_count"),
+            },
+        },
+        {
+            "id": "filesystem-extraction",
+            "label": "Read-only filesystem extraction",
+            "status": "complete" if extraction_complete else "blocked",
+            "evidence": {
+                "command_history_count": len(command_rows),
+                "recovered_file_count": recovered_count,
+                "resume_ready": bool((resume_status or {}).get("resume_ready")),
+                "resumed_from_checkpoint": bool((resume_status or {}).get("resumed_from_checkpoint")),
+            },
+        },
+        {
+            "id": "artifact-analysis",
+            "label": "Artifact analysis",
+            "status": "complete" if analysis_outputs else ("ready-after-extraction" if extraction_complete else "blocked"),
+            "evidence": {
+                "analysis_output_keys": sorted(analysis_outputs),
+                "artifact_output_count": sum(1 for key in output_status if key.startswith("artifacts_")),
+            },
+        },
+        {
+            "id": "unified-search-indexing",
+            "label": "Unified search and indexing",
+            "status": "complete" if {"docs", "docs_index", "files"}.issubset(output_status) else ("ready-after-analysis" if analysis_outputs else "blocked"),
+            "evidence": {
+                "docs_output": "docs" in output_status,
+                "docs_index_output": "docs_index" in output_status,
+                "files_output": "files" in output_status,
+            },
+        },
+        {
+            "id": "review-workflow",
+            "label": "Review and source verification",
+            "status": "ready" if analysis_outputs else "blocked",
+            "evidence": {
+                "source_viewer_required": True,
+                "case_db_review_required": True,
+                "report_only_reviewed_items": True,
+            },
+        },
+        {
+            "id": "report-export",
+            "label": "Report/export package",
+            "status": "complete" if report_outputs else ("ready-after-review" if analysis_outputs else "blocked"),
+            "evidence": {
+                "report_output_keys": sorted(report_outputs),
+                "source_hash_required": True,
+                "trusted_tool_diff_required": True,
+            },
+        },
+    ]
+    blockers = [
+        "native-e01-ex01-segment-metadata-decoding-not-implemented",
+        "trusted-e01-ex01-known-answer-diff-required",
+        "real-windows11-e01-run-log-required",
+        "encrypted-corrupt-image-corpus-required",
+    ]
+    payload: dict[str, object] = {
+        "profile_version": E01_INTEGRATED_WORKFLOW_MANIFEST_VERSION,
+        "item_number": 22,
+        "gap_id": "#22",
+        "status_context": status_context,
+        "workflow_goal": "One Windows 11 E01/Ex01 case flows from selection, dependency preflight, partition selection, read-only extraction, artifact analysis, unified search, review, and report export.",
+        "source_ref": {
+            "path": str(source_path),
+            "hash_status": source_hash_status,
+            "sha256": (source_integrity or {}).get("sha256"),
+        },
+        "segment_set_profile": dict(segment_set_profile or {}),
+        "dependency_preflight": dict(preflight_summary or {}),
+        "partition_selection": dict(partition_selection or {}),
+        "partition_table_row_count": len(partition_rows),
+        "command_history_count": len(command_rows),
+        "recovered_root_summary": {
+            "profile_version": recovered_manifest.get("profile_version"),
+            "visited_file_count": recovered_manifest.get("visited_file_count", 0),
+            "hashed_file_count": recovered_manifest.get("hashed_file_count", 0),
+            "skipped_large_file_count": recovered_manifest.get("skipped_large_file_count", 0),
+            "truncated": bool(recovered_manifest.get("truncated", False)),
+        },
+        "run_output_status": output_status,
+        "stages": stages,
+        "large_data_controls": {
+            "direct_image_hash_limit_bytes": DIRECT_IMAGE_HASH_LIMIT_BYTES,
+            "bounded_recovered_root_manifest": True,
+            "cursor_table_required_for_gui": True,
+            "virtualized_table_required_for_gui": True,
+            "checkpoint_resume_profile": (resume_status or {}).get("profile_version"),
+        },
+        "reportability_decision": image_reportability_decision(
+            22,
+            blockers=blockers,
+            failed_validation_matrix_ids=["#22-native-commercial-parser"],
+            details={
+                "source_integrity": source_integrity or {},
+                "image_trusted_diff": {"status": "not-attached"},
+            },
+        ),
+        "commercial_grade_ready": False,
+        "commercial_grade_blockers": blockers,
+        "operator_next_steps": [
+            "Run against a real Windows 11 E01 with libewf/Sleuth Kit or a trusted export.",
+            "Attach ewfverify/mmls/tsk_recover or vendor transcripts and trusted-tool diff output.",
+            "Use review/source viewer citations before report export.",
+        ],
+    }
+    payload["manifest_sha256"] = stable_manifest_sha256(payload)
+    return payload
 
 
 def default_runner(command: Sequence[str]) -> subprocess.CompletedProcess[str]:

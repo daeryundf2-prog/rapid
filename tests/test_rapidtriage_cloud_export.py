@@ -72,6 +72,9 @@ class RapidTriageCloudExportTests(unittest.TestCase):
             self.assertIn("provider schema/timezone warning", google_gate["satisfied_checks"])
             self.assertIn("cloud export import manifest", google_gate["satisfied_checks"])
             self.assertIn("cloud export source locator", google_gate["satisfied_checks"])
+            self.assertIn("Google Takeout parser manifest", google_gate["satisfied_checks"])
+            self.assertIn("Google Takeout source row citation", google_gate["satisfied_checks"])
+            self.assertIn("Google Takeout review viewer controls", google_gate["satisfied_checks"])
             google_review = mail["details"]["google_takeout_review_profile"]
             self.assertEqual(google_review["profile_version"], "google-takeout-review-v1")
             self.assertEqual(google_review["product_family"], "gmail")
@@ -90,6 +93,27 @@ class RapidTriageCloudExportTests(unittest.TestCase):
             self.assertIn("message_id", cloud_manifest["row_pivots"])
             self.assertEqual(len(cloud_manifest["manifest_sha256"]), 64)
             self.assertEqual(mail["details"]["cloud_export_import_manifest_hash"], cloud_manifest["manifest_sha256"])
+            google_manifest = mail["details"]["google_takeout_parser_manifest"]
+            self.assertEqual(google_manifest["manifest_version"], "google-takeout-parser-manifest-v1")
+            self.assertEqual(google_manifest["item_number"], 37)
+            self.assertEqual(google_manifest["gap_id"], "#37")
+            self.assertEqual(google_manifest["service"], "gmail-takeout")
+            self.assertEqual(google_manifest["product_family"], "gmail")
+            self.assertEqual(google_manifest["row_citation"]["source_viewer_locator"]["viewer"], "google-takeout-product-row")
+            self.assertEqual(len(google_manifest["row_citation"]["row_hash"]), 64)
+            self.assertIn("message_id", google_manifest["row_citation"]["row_pivots"])
+            self.assertTrue(google_manifest["product_review"]["primary_pivot_present"])
+            self.assertEqual(google_manifest["product_review"]["sidecar_merge_status"], "not-performed")
+            self.assertTrue(google_manifest["large_data_controls"]["metadata_collapsed_by_default"])
+            self.assertEqual(
+                google_manifest["large_data_controls"]["viewer_default"],
+                "google-product-matrix-virtualized-row-review",
+            )
+            self.assertFalse(google_manifest["validation"]["commercial_grade"])
+            self.assertEqual(
+                mail["details"]["google_takeout_parser_manifest_hash"],
+                google_manifest["manifest_sha256"],
+            )
             self.assertEqual(mail_uplift["batch_id"], "commercial-uplift-036-040")
             self.assertEqual(mail_uplift["item_numbers"], [37])
             mail_profile = mail_uplift["functional_priority_profile"]
@@ -102,6 +126,13 @@ class RapidTriageCloudExportTests(unittest.TestCase):
             )
             self.assertIn("cloud-export-import-manifest-emitted", mail_profile["passed_validation_check_ids"])
             self.assertIn("cloud-export-source-locator-emitted", mail_profile["passed_validation_check_ids"])
+            self.assertIn("google-takeout-parser-manifest-emitted", mail_profile["passed_validation_check_ids"])
+            self.assertIn("google-takeout-source-locator-emitted", mail_profile["passed_validation_check_ids"])
+            self.assertEqual(
+                mail_profile["implemented_controls"]["google_takeout_parser_manifest_hash"],
+                google_manifest["manifest_sha256"],
+            )
+            self.assertTrue(mail_profile["implemented_controls"]["google_takeout_source_row_citation_present"])
             self.assertEqual(
                 mail["details"]["cloud_provider_strategy_profile"]["selected_track"],
                 "google-takeout-product-matrix-validation",
@@ -116,6 +147,12 @@ class RapidTriageCloudExportTests(unittest.TestCase):
                 cloud_manifest["manifest_sha256"],
             )
             self.assertTrue(mail_uplift["large_data_controls"]["cloud_export_source_locator_present"])
+            self.assertEqual(
+                mail_uplift["large_data_controls"]["google_takeout_parser_manifest_hash"],
+                google_manifest["manifest_sha256"],
+            )
+            self.assertTrue(mail_uplift["large_data_controls"]["google_takeout_source_row_citation_present"])
+            self.assertTrue(mail_uplift["large_data_controls"]["google_takeout_viewer_controls_present"])
             self.assertIn("provider-export-scope-not-verified", mail_profile["failed_validation_check_ids"])
             self.assertIn("source-hash-present", mail_uplift["passed_validation_matrix_ids"])
             self.assertIn("provider-scope-verified", mail_uplift["failed_validation_matrix_ids"])
@@ -147,6 +184,9 @@ class RapidTriageCloudExportTests(unittest.TestCase):
             self.assertIn("ADP/shared-album limitation warning", apple_gate["satisfied_checks"])
             self.assertIn("cloud export import manifest", apple_gate["satisfied_checks"])
             self.assertIn("cloud export source locator", apple_gate["satisfied_checks"])
+            self.assertIn("iCloud export parser manifest", apple_gate["satisfied_checks"])
+            self.assertIn("iCloud export source row citation", apple_gate["satisfied_checks"])
+            self.assertIn("iCloud export review viewer controls", apple_gate["satisfied_checks"])
             icloud_account_profile = account["details"]["icloud_export_review_profile"]
             self.assertEqual(icloud_account_profile["profile_version"], "icloud-export-review-v1")
             self.assertEqual(icloud_account_profile["product_family"], "account")
@@ -159,12 +199,48 @@ class RapidTriageCloudExportTests(unittest.TestCase):
             account_manifest = account["details"]["cloud_export_import_manifest"]
             self.assertEqual(account_manifest["provider_review"]["product_or_workload_family"], "account")
             self.assertEqual(account_manifest["source_viewer_locator"]["viewer"], "cloud-provider-export-row")
+            icloud_manifest = account["details"]["icloud_export_parser_manifest"]
+            self.assertEqual(icloud_manifest["manifest_version"], "icloud-export-parser-manifest-v1")
+            self.assertEqual(icloud_manifest["item_number"], 38)
+            self.assertEqual(icloud_manifest["gap_id"], "#38")
+            self.assertEqual(icloud_manifest["service"], "apple-export")
+            self.assertEqual(icloud_manifest["product_family"], "account")
+            self.assertEqual(icloud_manifest["row_citation"]["source_viewer_locator"]["viewer"], "icloud-export-product-row")
+            self.assertEqual(len(icloud_manifest["row_citation"]["row_hash"]), 64)
+            self.assertIn("account_email", icloud_manifest["row_citation"]["row_pivots"])
+            self.assertTrue(icloud_manifest["product_review"]["primary_pivot_present"])
+            self.assertEqual(icloud_manifest["product_review"]["advanced_data_protection_status"], "not-validated")
+            self.assertEqual(icloud_manifest["product_review"]["shared_album_semantics_status"], "not-validated")
+            self.assertTrue(icloud_manifest["large_data_controls"]["metadata_collapsed_by_default"])
+            self.assertEqual(
+                icloud_manifest["large_data_controls"]["viewer_default"],
+                "icloud-product-matrix-virtualized-row-review",
+            )
+            self.assertFalse(icloud_manifest["validation"]["commercial_grade"])
+            self.assertEqual(
+                account["details"]["icloud_export_parser_manifest_hash"],
+                icloud_manifest["manifest_sha256"],
+            )
             self.assertEqual(
                 account["details"]["cloud_provider_strategy_profile"]["selected_track"],
                 "icloud-export-account-photo-file-scope-validation",
             )
             self.assertIn("icloud-copy-limitations", account_uplift["failed_issue_matrix_ids"])
             self.assertTrue(account_uplift["large_data_controls"]["icloud_export_review_profile_present"])
+            account_profile = account_uplift["functional_priority_profile"]
+            self.assertIn("icloud-export-parser-manifest-emitted", account_profile["passed_validation_check_ids"])
+            self.assertIn("icloud-export-source-locator-emitted", account_profile["passed_validation_check_ids"])
+            self.assertEqual(
+                account_profile["implemented_controls"]["icloud_export_parser_manifest_hash"],
+                icloud_manifest["manifest_sha256"],
+            )
+            self.assertTrue(account_profile["implemented_controls"]["icloud_export_source_row_citation_present"])
+            self.assertEqual(
+                account_uplift["large_data_controls"]["icloud_export_parser_manifest_hash"],
+                icloud_manifest["manifest_sha256"],
+            )
+            self.assertTrue(account_uplift["large_data_controls"]["icloud_export_source_row_citation_present"])
+            self.assertTrue(account_uplift["large_data_controls"]["icloud_export_viewer_controls_present"])
             self.assertEqual(
                 account_uplift["reportability_decision"]["allowed_use"],
                 "icloud-export-triage-pivot",
@@ -178,6 +254,10 @@ class RapidTriageCloudExportTests(unittest.TestCase):
             self.assertEqual(icloud_photo["details"]["file_name"], "IMG_0001.JPG")
             self.assertEqual(icloud_photo["details"]["icloud_export_review_profile"]["product_family"], "icloud-photos")
             self.assertIn("file_name", icloud_photo["details"]["icloud_export_review_profile"]["present_primary_pivots"])
+            photo_manifest = icloud_photo["details"]["icloud_export_parser_manifest"]
+            self.assertEqual(photo_manifest["product_family"], "icloud-photos")
+            self.assertIn("file_name", photo_manifest["row_citation"]["row_pivots"])
+            self.assertEqual(photo_manifest["manifest_sha256"], icloud_photo["details"]["icloud_export_parser_manifest_hash"])
             self.assertIn("#38", icloud_photo["details"]["commercial_gap_ids"])
 
             cloud_file = next(
@@ -200,6 +280,9 @@ class RapidTriageCloudExportTests(unittest.TestCase):
             self.assertIn("source hash and eDiscovery/export warning", microsoft_file_gate["satisfied_checks"])
             self.assertIn("cloud export import manifest", microsoft_file_gate["satisfied_checks"])
             self.assertIn("cloud export source locator", microsoft_file_gate["satisfied_checks"])
+            self.assertIn("M365 export parser manifest", microsoft_file_gate["satisfied_checks"])
+            self.assertIn("M365 export source row citation", microsoft_file_gate["satisfied_checks"])
+            self.assertIn("M365 export review viewer controls", microsoft_file_gate["satisfied_checks"])
             m365_file_profile = cloud_file["details"]["m365_export_review_profile"]
             self.assertEqual(m365_file_profile["profile_version"], "m365-export-review-v1")
             self.assertEqual(m365_file_profile["workload_family"], "onedrive-sharepoint")
@@ -216,6 +299,28 @@ class RapidTriageCloudExportTests(unittest.TestCase):
                 "onedrive-sharepoint",
             )
             self.assertEqual(cloud_file_manifest["source_viewer_locator"]["viewer"], "cloud-provider-export-row")
+            m365_manifest = cloud_file["details"]["m365_export_parser_manifest"]
+            self.assertEqual(m365_manifest["manifest_version"], "m365-export-parser-manifest-v1")
+            self.assertEqual(m365_manifest["item_number"], 39)
+            self.assertEqual(m365_manifest["gap_id"], "#39")
+            self.assertEqual(m365_manifest["service"], "microsoft-onedrive")
+            self.assertEqual(m365_manifest["workload_family"], "onedrive-sharepoint")
+            self.assertEqual(m365_manifest["row_citation"]["source_viewer_locator"]["viewer"], "m365-export-workload-row")
+            self.assertEqual(len(m365_manifest["row_citation"]["row_hash"]), 64)
+            self.assertIn("file_id", m365_manifest["row_citation"]["row_pivots"])
+            self.assertTrue(m365_manifest["workload_review"]["primary_pivot_present"])
+            self.assertEqual(m365_manifest["workload_review"]["sharepoint_permission_graph_status"], "not-built")
+            self.assertEqual(m365_manifest["workload_review"]["retention_hold_policy_status"], "not-validated")
+            self.assertTrue(m365_manifest["large_data_controls"]["metadata_collapsed_by_default"])
+            self.assertEqual(
+                m365_manifest["large_data_controls"]["viewer_default"],
+                "m365-workload-virtualized-row-review",
+            )
+            self.assertFalse(m365_manifest["validation"]["commercial_grade"])
+            self.assertEqual(
+                cloud_file["details"]["m365_export_parser_manifest_hash"],
+                m365_manifest["manifest_sha256"],
+            )
             self.assertEqual(
                 cloud_file["details"]["cloud_provider_strategy_profile"]["selected_track"],
                 "m365-purview-graph-ediscovery-validation",
@@ -227,6 +332,20 @@ class RapidTriageCloudExportTests(unittest.TestCase):
             )
             self.assertIn("retention-hold-and-deleted-state", file_uplift["failed_issue_matrix_ids"])
             self.assertTrue(file_uplift["large_data_controls"]["m365_export_review_profile_present"])
+            file_profile = file_uplift["functional_priority_profile"]
+            self.assertIn("m365-export-parser-manifest-emitted", file_profile["passed_validation_check_ids"])
+            self.assertIn("m365-export-source-locator-emitted", file_profile["passed_validation_check_ids"])
+            self.assertEqual(
+                file_profile["implemented_controls"]["m365_export_parser_manifest_hash"],
+                m365_manifest["manifest_sha256"],
+            )
+            self.assertTrue(file_profile["implemented_controls"]["m365_export_source_row_citation_present"])
+            self.assertEqual(
+                file_uplift["large_data_controls"]["m365_export_parser_manifest_hash"],
+                m365_manifest["manifest_sha256"],
+            )
+            self.assertTrue(file_uplift["large_data_controls"]["m365_export_source_row_citation_present"])
+            self.assertTrue(file_uplift["large_data_controls"]["m365_export_viewer_controls_present"])
             self.assertEqual(
                 file_uplift["reportability_decision"]["decision"],
                 "do-not-report-m365-export-as-tenant-or-permission-complete",
@@ -244,6 +363,11 @@ class RapidTriageCloudExportTests(unittest.TestCase):
             self.assertEqual(message["details"]["forensic_review"]["gap_id"], "#39")
             self.assertEqual(message["details"]["m365_export_review_profile"]["workload_family"], "teams")
             self.assertIn("message_id", message["details"]["m365_export_review_profile"]["present_primary_pivots"])
+            teams_manifest = message["details"]["m365_export_parser_manifest"]
+            self.assertEqual(teams_manifest["workload_family"], "teams")
+            self.assertIn("message_id", teams_manifest["row_citation"]["row_pivots"])
+            self.assertEqual(teams_manifest["workload_review"]["teams_compliance_record_status"], "not-validated")
+            self.assertEqual(teams_manifest["manifest_sha256"], message["details"]["m365_export_parser_manifest_hash"])
             self.assertIn("teams-cosmosdb-vs-exchange-compliance-records", message["details"]["cloud_provider_profile"]["known_gaps"])
 
             slack = next(
@@ -260,6 +384,9 @@ class RapidTriageCloudExportTests(unittest.TestCase):
             self.assertIn("#39", audit["details"]["commercial_gap_ids"])
             self.assertEqual(audit["details"]["forensic_review"]["gap_id"], "#39")
             self.assertEqual(audit["details"]["m365_export_review_profile"]["workload_family"], "audit")
+            audit_manifest = audit["details"]["m365_export_parser_manifest"]
+            self.assertEqual(audit_manifest["workload_family"], "audit")
+            self.assertIn("operation", audit_manifest["row_citation"]["row_pivots"])
 
     def test_cloud_trusted_diff_controls_provider_accuracy_gates(self) -> None:
         google_row = {

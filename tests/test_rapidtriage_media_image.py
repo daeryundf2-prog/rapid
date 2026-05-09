@@ -8,7 +8,7 @@ from unittest.mock import patch
 
 from PIL import Image
 
-from rapidtriage.artifacts.media import build_media_trusted_diff, average_hash, media_core_accuracy_gates
+from rapidtriage.artifacts.media import build_image_gallery_manifest, build_media_trusted_diff, average_hash, media_core_accuracy_gates
 from rapidtriage.cli import build_parser, main
 
 
@@ -58,10 +58,17 @@ class RapidTriageMediaImageTests(unittest.TestCase):
             self.assertGreaterEqual(details["parser_confidence"], 0.8)
             self.assertTrue(details["ocr_candidate"])
             self.assertIn("#56", details["gallery_review_mode"]["commercial_gap_ids"])
+            self.assertEqual(details["image_gallery_manifest"]["manifest_version"], "image-gallery-source-manifest-v1")
+            self.assertEqual(details["image_gallery_manifest_hash"], details["image_gallery_manifest"]["manifest_hash"])
+            self.assertEqual(details["image_gallery_manifest"]["source_viewer_locator"]["viewer"], "source-image-gallery")
+            self.assertTrue(details["image_gallery_manifest"]["image_row_hash"])
             media_uplift = details["commercial_uplift_evidence"]
             self.assertEqual(media_uplift["batch_id"], "commercial-uplift-056-060")
             self.assertEqual(media_uplift["item_numbers"], [56, 58, 59])
             self.assertIn("image metadata and source hashes", media_uplift["passed_validation_check_ids_by_item"]["#56"])
+            self.assertIn("image gallery source manifest", media_uplift["passed_validation_check_ids_by_item"]["#56"])
+            self.assertTrue(media_uplift["large_data_controls"]["image_gallery_manifest_present"])
+            self.assertEqual(media_uplift["large_data_controls"]["image_gallery_manifest_hash"], details["image_gallery_manifest_hash"])
             self.assertIn("sidecar import and hashes", media_uplift["passed_validation_check_ids_by_item"]["#58"])
             self.assertIn("Korean language hinting", media_uplift["passed_validation_check_ids_by_item"]["#59"])
             self.assertFalse(media_uplift["large_data_controls"]["native_ocr_execution"])
@@ -105,6 +112,120 @@ class RapidTriageMediaImageTests(unittest.TestCase):
             self.assertEqual(thumbnail["height"], 16)
             self.assertIn("sha256", thumbnail)
             self.assertTrue(thumbnail["data_uri"].startswith("data:image/png;base64,"))
+
+    def test_media_collector_inventories_video_audio_and_transcript_sidecars(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            media_dir = root / "Media"
+            media_dir.mkdir()
+            video = media_dir / "interview.mp4"
+            audio = media_dir / "call.wav"
+            ftyp_box = b"\x00\x00\x00\x18ftypmp42" + b"\x00\x00\x00\x00" + b"mp42isom"
+            mvhd_payload = b"\x00\x00\x00\x00" + (0).to_bytes(4, "big") + (0).to_bytes(4, "big") + (1000).to_bytes(4, "big") + (2500).to_bytes(4, "big")
+            mvhd_box = (8 + len(mvhd_payload)).to_bytes(4, "big") + b"mvhd" + mvhd_payload
+            moov_box = (8 + len(mvhd_box)).to_bytes(4, "big") + b"moov" + mvhd_box
+            video.write_bytes(ftyp_box + moov_box)
+            write_image_fixture(media_dir / "interview.mp4.jpg")
+            (media_dir / "interview.mp4.ffprobe.json").write_text(
+                json.dumps(
+                    {
+                        "format": {
+                            "filename": "interview.mp4",
+                            "format_name": "mov,mp4,m4a,3gp,3g2,mj2",
+                            "duration": "2.500000",
+                            "size": "128",
+                            "bit_rate": "4096",
+                        },
+                        "streams": [
+                            {
+                                "index": 0,
+                                "codec_type": "video",
+                                "codec_name": "h264",
+                                "width": 1920,
+                                "height": 1080,
+                                "duration": "2.500000",
+                                "bit_rate": "2048",
+                            }
+                        ],
+                    }
+                ),
+                encoding="utf-8",
+            )
+            pcm_samples = b"".join(int(sample).to_bytes(2, "little", signed=True) for sample in (0, 12000, -12000, 24000, -24000, 8000, -8000, 0) * 128)
+            audio.write_bytes(
+                b"RIFF"
+                + (36 + len(pcm_samples)).to_bytes(4, "little")
+                + b"WAVEfmt "
+                + (16).to_bytes(4, "little")
+                + (1).to_bytes(2, "little")
+                + (1).to_bytes(2, "little")
+                + (8000).to_bytes(4, "little")
+                + (16000).to_bytes(4, "little")
+                + (2).to_bytes(2, "little")
+                + (16).to_bytes(2, "little")
+                + b"data"
+                + len(pcm_samples).to_bytes(4, "little")
+                + pcm_samples
+            )
+            (media_dir / "call.wav.ffprobe.json").write_text(
+                json.dumps(
+                    {
+                        "format": {"filename": "call.wav", "format_name": "wav", "duration": str(len(pcm_samples) / 16000)},
+                        "streams": [
+                            {
+                                "index": 0,
+                                "codec_type": "audio",
+                                "codec_name": "pcm_s16le",
+                                "sample_rate": "8000",
+                                "channels": 1,
+                                "duration": str(len(pcm_samples) / 16000),
+                            }
+                        ],
+                    }
+                ),
+                encoding="utf-8",
+            )
+            (media_dir / "interview.mp4.vtt").write_text("WEBVTT\n\n00:00.000 --> 00:01.000\n안녕하세요", encoding="utf-8")
+            output = root / "media-artifacts.json"
+
+            exit_code = main(["artifacts", str(root), "--kind", "media-image", "--output", str(output)])
+
+            self.assertEqual(exit_code, 0)
+            payload = json.loads(output.read_text(encoding="utf-8"))
+            type_counts = payload["summary"]["artifact_type_counts"]
+            self.assertEqual(type_counts["media-video"], 1)
+            self.assertEqual(type_counts["media-audio"], 1)
+            video_row = next(artifact for artifact in payload["artifacts"] if artifact["artifact_type"] == "media-video")
+            audio_row = next(artifact for artifact in payload["artifacts"] if artifact["artifact_type"] == "media-audio")
+            self.assertEqual(video_row["details"]["media_kind"], "video")
+            self.assertEqual(video_row["details"]["container_profile"]["parse_status"], "ftyp-header-parsed")
+            self.assertEqual(video_row["details"]["container_profile"]["major_brand"], "mp42")
+            self.assertEqual(video_row["details"]["container_profile"]["box_inventory"][0]["type"], "ftyp")
+            self.assertEqual(video_row["details"]["container_profile"]["box_inventory"][1]["type"], "moov")
+            self.assertEqual(video_row["details"]["container_profile"]["mvhd_profile"]["status"], "parsed")
+            self.assertEqual(video_row["details"]["container_profile"]["mvhd_profile"]["estimated_duration_seconds"], 2.5)
+            self.assertEqual(video_row["details"]["transcript_sidecar_count"], 1)
+            self.assertEqual(video_row["details"]["transcript_cue_sample_count"], 1)
+            self.assertEqual(video_row["details"]["transcript_cue_samples"][0]["text"], "안녕하세요")
+            self.assertTrue(video_row["details"]["transcript_sidecars"][0]["contains_hangul"])
+            self.assertEqual(video_row["details"]["preview_sidecar_count"], 1)
+            self.assertEqual(video_row["details"]["preview_workflow"]["thumbnail_status"], "sidecar-linked")
+            self.assertTrue(video_row["details"]["preview_sidecars"][0]["image_profile"]["decoded"])
+            self.assertEqual(video_row["details"]["codec_metadata_sidecar_count"], 1)
+            self.assertEqual(video_row["details"]["preview_workflow"]["codec_metadata_status"], "sidecar-linked")
+            self.assertEqual(video_row["details"]["codec_metadata_sidecars"][0]["tool_hint"], "ffprobe-json")
+            self.assertEqual(video_row["details"]["codec_metadata_summary"]["duration_seconds"], 2.5)
+            self.assertEqual(video_row["details"]["codec_metadata_summary"]["primary_video"]["codec_name"], "h264")
+            self.assertEqual(video_row["details"]["codec_metadata_summary"]["primary_video"]["width"], 1920)
+            self.assertFalse(video_row["details"]["commercial_grade_ready"])
+            self.assertEqual(audio_row["details"]["preview_workflow"]["waveform_status"], "pcm16-peak-preview")
+            self.assertEqual(audio_row["details"]["codec_metadata_summary"]["primary_audio"]["codec_name"], "pcm_s16le")
+            self.assertEqual(audio_row["details"]["codec_metadata_summary"]["primary_audio"]["sample_rate"], 8000)
+            self.assertEqual(audio_row["details"]["waveform_preview"]["bucket_count"], 32)
+            self.assertGreater(audio_row["details"]["waveform_preview"]["peaks"][0]["peak"], 0)
+            self.assertEqual(audio_row["details"]["container_profile"]["parse_status"], "riff-wave-header-parsed")
+            self.assertEqual(audio_row["details"]["container_profile"]["sample_rate"], 8000)
+            self.assertEqual(audio_row["details"]["container_profile"]["estimated_duration_seconds"], len(pcm_samples) / 16000)
 
     def test_average_hash_does_not_require_numpy_mean_or_flatten(self) -> None:
         image = FakeMatrix()
@@ -167,6 +288,30 @@ class RapidTriageMediaImageTests(unittest.TestCase):
         mismatch = build_media_trusted_diff(56, [image_row], [{**image_row, "width": 32}], trusted_tool="image-gallery-ground-truth")
         self.assertEqual(mismatch["status"], "diffs-present")
         self.assertIn("image-gallery-trusted-manifest-diff-required", mismatch["reportability_decision"]["blockers"])
+
+    def test_image_gallery_manifest_hashes_source_row_for_review(self) -> None:
+        details = {
+            "entry_name": "screen.png",
+            "source_format": "png",
+            "source_size": 128,
+            "decoded": True,
+            "width": 16,
+            "height": 16,
+            "channel_count": 3,
+            "hashes": {"sha256": "image-hash"},
+            "perceptual_hash": "f0f0f0f0f0f0f0f0",
+            "similarity_bucket": "f0f0f0f0",
+            "thumbnail_preview": {"sha256": "thumb-hash"},
+            "visual_classification": {"label": "image", "validation_status": "triage-hint"},
+        }
+        manifest = build_image_gallery_manifest(details=details, source_path=Path("/case/screen.png"))
+
+        self.assertEqual(manifest["manifest_version"], "image-gallery-source-manifest-v1")
+        self.assertEqual(manifest["source_viewer_locator"]["viewer"], "source-image-gallery")
+        self.assertEqual(manifest["image_row"]["sha256"], "image-hash")
+        self.assertEqual(manifest["image_row"]["similarity_bucket"], "f0f0f0f0")
+        self.assertRegex(manifest["image_row_hash"], r"^[0-9a-f]{64}$")
+        self.assertRegex(manifest["manifest_hash"], r"^[0-9a-f]{64}$")
 
 
 def write_image_fixture(path: Path) -> None:

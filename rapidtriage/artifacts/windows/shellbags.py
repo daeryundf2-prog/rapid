@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import hashlib
+import json
 import re
 from pathlib import Path
 from typing import Iterable, Mapping, Sequence
@@ -49,6 +51,7 @@ MAX_NATIVE_SHELLBAG_CANDIDATES = 200
 
 
 class WindowsShellbagsProvider:
+    collector_kind = "windows-shellbags"
     name = "windows-shellbags"
     description = "Windows ShellBags from Registry exports and native user-hive candidates"
     target_platform = "windows"
@@ -313,6 +316,8 @@ def build_native_shellbag_record(
         "risk_score": 45 if candidate_source == "native-key-tree" else 30,
         "raw_preview": source_key_path[:2000],
     }
+    details["shellbag_depth_manifest"] = shellbag_depth_manifest(details)
+    details["shellbag_depth_manifest_hash"] = details["shellbag_depth_manifest"]["manifest_sha256"]
     if string_index is not None:
         details["string_index"] = string_index
     return ArtifactRecord(
@@ -368,6 +373,144 @@ def shellbag_evidence(
             "transaction logs and deleted shellbag slack are not replayed",
         ],
     }
+
+
+def shellbag_stable_sha256(value: object) -> str:
+    return hashlib.sha256(
+        json.dumps(value, ensure_ascii=False, sort_keys=True, default=str, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()
+
+
+def shellbag_depth_manifest(details: Mapping[str, object]) -> dict[str, object]:
+    hashes = details.get("source_hashes") if isinstance(details.get("source_hashes"), Mapping) else {}
+    checks = details.get("validation_checks") if isinstance(details.get("validation_checks"), Mapping) else {}
+    evidence = details.get("shellbag_evidence") if isinstance(details.get("shellbag_evidence"), Mapping) else {}
+    relationship = (
+        evidence.get("relationship_evidence")
+        if isinstance(evidence.get("relationship_evidence"), Mapping)
+        else {}
+    )
+    activity = evidence.get("activity_evidence") if isinstance(evidence.get("activity_evidence"), Mapping) else {}
+    report_grade = (
+        details.get("shellbag_report_grade_assessment")
+        if isinstance(details.get("shellbag_report_grade_assessment"), Mapping)
+        else {}
+    )
+    transaction = (
+        details.get("registry_transaction_replay_profile")
+        if isinstance(details.get("registry_transaction_replay_profile"), Mapping)
+        else {}
+    )
+    reportability = shellbag_reportability_decision(report_grade, details)
+    source = {
+        "source_path": str(details.get("source_path") or ""),
+        "source_sha256": str(hashes.get("sha256") or ""),
+        "source_format": str(details.get("source_format") or ""),
+        "hive_name": str(details.get("hive_name") or ""),
+        "user_hive_scope": str(details.get("user_hive_scope") or ""),
+        "cell_offset": details.get("cell_offset", ""),
+        "hbin_offset": details.get("hbin_offset", ""),
+    }
+    row_identity = {
+        "candidate_source": str(details.get("candidate_source") or ""),
+        "source_key_path": str(details.get("source_key_path") or ""),
+        "shellbag_section": str(details.get("shellbag_section") or ""),
+        "bag_id_candidates": list(details.get("bag_id_candidates") or []),
+        "node_id_candidates": list(details.get("node_id_candidates") or []),
+        "allocation_status": str(details.get("allocation_status") or ""),
+    }
+    manifest_payload = {
+        "manifest_version": "shellbag-depth-manifest-v1",
+        "parser_version": PARSER_VERSION,
+        "commercial_batch_id": "commercial-uplift-011-015",
+        "item_number": 15,
+        "gap_id": "#15",
+        "artifact_type": "shellbag-native-candidate",
+        "source": source,
+        "row_identity": row_identity,
+        "row_identity_hash": shellbag_stable_sha256(row_identity),
+        "key_tree_decoding": {
+            "regf_header_valid": bool(checks.get("regf_header_valid")),
+            "key_path_contains_shellbags_root": bool(checks.get("key_path_contains_shellbags_root")),
+            "candidate_source": str(details.get("candidate_source") or ""),
+            "key_path_confidence": str(details.get("key_path_confidence") or ""),
+            "value_names": list(details.get("value_names") or [])[:50],
+            "path_candidates": list(details.get("shellbag_path_candidates") or [])[:50],
+        },
+        "bag_relationship": {
+            "shellbag_section": str(details.get("shellbag_section") or ""),
+            "bag_id_candidates": list(relationship.get("bag_id_candidates") or details.get("bag_id_candidates") or []),
+            "node_id_candidates": list(relationship.get("node_id_candidates") or details.get("node_id_candidates") or []),
+            "relationship_status": str(relationship.get("bag_node_relationship_status") or ""),
+            "bag_node_relationship_validated": bool(SHELLBAG_CAPABILITIES["bag_node_relationship_validation"]),
+        },
+        "activity_timestamps": {
+            "timestamp_candidates": [dict(item) for item in details.get("timestamp_candidates") or [] if isinstance(item, Mapping)][:25],
+            "primary_timestamp": str(activity.get("primary_timestamp") or ""),
+            "primary_timestamp_source": str(activity.get("primary_timestamp_source") or ""),
+            "timestamp_source_labeling_available": bool(checks.get("has_timestamp_candidate")),
+        },
+        "binary_payload": {
+            "binary_shell_item_decoding_available": bool(checks.get("binary_shell_item_decoding_available")),
+            "binary_shell_item_decode_capability": bool(SHELLBAG_CAPABILITIES["binary_shell_item_decode"]),
+            "safe_indexing_mode": "key-path-value-preview-only",
+            "blocker": "shellbag-binary-shell-item-decode-required",
+        },
+        "transaction_and_deleted_state": {
+            "transaction_log_status": str(transaction.get("transaction_log_status") or ""),
+            "transaction_log_replay_applied": bool(transaction.get("transaction_log_replay_applied")),
+            "transaction_log_replay_capability": bool(SHELLBAG_CAPABILITIES["transaction_log_replay"]),
+            "deleted_slack_validation_available": bool(SHELLBAG_CAPABILITIES["deleted_slack_shellbag_validation"]),
+            "allocation_status": str(details.get("allocation_status") or ""),
+            "blockers": [
+                "shellbag-transaction-log-replay-required",
+                "shellbag-deleted-slack-validation-required",
+            ],
+        },
+        "citation_refs": [
+            {
+                "kind": "shellbag-source-hive",
+                "source_path": str(details.get("source_path") or ""),
+                "source_sha256": str(hashes.get("sha256") or ""),
+            },
+            {
+                "kind": "shellbag-key-path",
+                "source_key_path": str(details.get("source_key_path") or ""),
+                "cell_offset": details.get("cell_offset", ""),
+                "hbin_offset": details.get("hbin_offset", ""),
+            },
+            {
+                "kind": "shellbag-bag-node-candidates",
+                "bag_id_candidates": list(details.get("bag_id_candidates") or []),
+                "node_id_candidates": list(details.get("node_id_candidates") or []),
+            },
+            {
+                "kind": "shellbag-timestamp-candidates",
+                "timestamp_candidates": [dict(item) for item in details.get("timestamp_candidates") or [] if isinstance(item, Mapping)][:10],
+            },
+            {
+                "kind": "shellbag-transaction-log-state",
+                "transaction_log_status": str(transaction.get("transaction_log_status") or ""),
+                "transaction_log_replay_applied": bool(transaction.get("transaction_log_replay_applied")),
+            },
+        ],
+        "reportability": {
+            "allowed_use": reportability["allowed_use"],
+            "decision": reportability["decision"],
+            "report_grade_ready": bool(report_grade.get("report_grade_ready")),
+            "commercial_grade_ready": False,
+            "folder_access_final": False,
+            "blockers": reportability["blockers"],
+        },
+        "required_before_commercial_grade": [
+            "decode and validate binary shell-item payloads",
+            "validate BagMRU/Bags relationships against ShellBagsExplorer/SBECmd output",
+            "replay LOG1/LOG2 transaction logs or document absence",
+            "validate deleted/slack ShellBag candidates before testimony",
+        ],
+    }
+    manifest_payload["manifest_sha256"] = shellbag_stable_sha256(manifest_payload)
+    return manifest_payload
 
 
 def is_shellbag_source(value: str) -> bool:

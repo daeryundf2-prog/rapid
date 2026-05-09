@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import datetime as dt
 import hashlib
+import json
 import math
 import re
+from collections import Counter
 from pathlib import Path
 from typing import Iterable, Mapping, Sequence
 
@@ -869,6 +871,15 @@ def build_account_lifecycle_records(path: Path, hints: dict[str, object], source
                 "security_context_row_count": len(security_context_rows),
             },
         )
+        security_context_manifest = sam_security_context_manifest(
+            source_path=str(path.resolve()),
+            source_hashes=dict(source_hashes),
+            account=account,
+            security_context=security_context,
+            security_context_rows=security_context_rows,
+            validation_checks=validation_checks,
+            report_grade=report_grade,
+        )
         yield ArtifactRecord(
             provider=WindowsOsAccountProvider.name,
             artifact_type="windows-account-lifecycle",
@@ -899,6 +910,8 @@ def build_account_lifecycle_records(path: Path, hints: dict[str, object], source
                 "account_security_context": security_context,
                 "normalized_security_context_rows": security_context_rows,
                 "normalized_security_context_row_count": len(security_context_rows),
+                "sam_security_context_manifest": security_context_manifest,
+                "sam_security_context_manifest_hash": security_context_manifest["manifest_sha256"],
                 "parser_confidence": account_lifecycle_confidence(account, group_rows),
                 "evidence_strength": "account-lifecycle-registry-export",
                 "validation_required": True,
@@ -1246,6 +1259,8 @@ def sam_security_system_deep_parser_profile(
             "secret_value_policy": "metadata-only-redacted",
             "safe_for_case_db_indexing": True,
         },
+        "security_context_manifest_expected": True,
+        "security_context_manifest_version": "sam-security-context-manifest-v1",
         "reportability_decision": os_account_reportability_decision(
             artifact_scope=artifact_scope,
             report_grade=report_grade,
@@ -1971,6 +1986,118 @@ def normalized_account_security_context_rows(
             }
         )
     return rows
+
+
+def sam_security_context_manifest(
+    *,
+    source_path: str,
+    source_hashes: Mapping[str, str],
+    account: Mapping[str, object],
+    security_context: Mapping[str, object],
+    security_context_rows: Sequence[Mapping[str, object]],
+    validation_checks: Mapping[str, object],
+    report_grade: Mapping[str, object],
+) -> dict[str, object]:
+    row_hashes = [stable_os_account_json_sha256(dict(row)) for row in security_context_rows]
+    context_counts = Counter(str(row.get("context_type") or "") for row in security_context_rows if row.get("context_type"))
+    high_risk_privileges = sorted(
+        {
+            str(row.get("privilege") or "")
+            for row in security_context_rows
+            if "high-risk-privilege" in list(row.get("risk_flags") or [])
+        }
+    )
+    manifest: dict[str, object] = {
+        "manifest_version": "sam-security-context-manifest-v1",
+        "parser_version": PARSER_VERSION,
+        "source": {
+            "path": source_path,
+            "sha256": source_hashes.get("sha256", ""),
+            "format": "registry-export-or-sam-security-system-hints",
+        },
+        "account_identity": {
+            "user_name": str(account.get("user_name") or ""),
+            "rid": str(account.get("rid") or ""),
+            "rid_decimal": rid_decimal(str(account.get("rid") or "")),
+            "profile_path": str(account.get("profile_path") or ""),
+            "account_disabled_hint": bool(account.get("account_disabled_hint")),
+            "admin_hint": bool(account.get("admin_hint")),
+            "uac_flags": list(account.get("uac_flags") or []),
+        },
+        "context_summary": {
+            "row_count": len(security_context_rows),
+            "row_hashes": row_hashes,
+            "row_hash_manifest_sha256": stable_os_account_json_sha256(row_hashes),
+            "context_type_counts": dict(sorted(context_counts.items())),
+            "privileged_group_count": int(security_context.get("privileged_group_count") or 0),
+            "inherited_privilege_count": int(security_context.get("inherited_privilege_count") or 0),
+            "service_account_match_count": int(security_context.get("service_account_match_count") or 0),
+            "lsa_sensitive_location_count": int(security_context.get("lsa_sensitive_location_count") or 0),
+            "high_risk_privileges": high_risk_privileges,
+        },
+        "citation_refs": [
+            {
+                "kind": "account-source",
+                "ref_id": "account-source",
+                "source_path": source_path,
+                "source_sha256": source_hashes.get("sha256", ""),
+                "source_viewer_locator": {
+                    "viewer": "registry-or-os-account-source",
+                    "user_name": str(account.get("user_name") or ""),
+                    "rid": str(account.get("rid") or ""),
+                },
+            },
+            {
+                "kind": "normalized-security-context-rows",
+                "ref_id": "normalized-security-context-rows",
+                "row_count": len(security_context_rows),
+                "row_hashes": row_hashes[:100],
+                "source_viewer_locator": {
+                    "viewer": "account-security-context",
+                    "row_types": sorted(context_counts),
+                },
+            },
+        ],
+        "validation_summary": {
+            "passed_check_ids": [
+                key.replace("_", "-")
+                for key, value in validation_checks.items()
+                if bool(value) and not key.startswith("requires_")
+            ],
+            "required_validation_ids": [
+                key.replace("_", "-")
+                for key, value in validation_checks.items()
+                if bool(value) and key.startswith("requires_")
+            ],
+            "report_grade_status": str(report_grade.get("status") or ""),
+            "commercial_gap_ids": list(report_grade.get("commercial_gap_ids") or []),
+        },
+        "reportability": {
+            "allowed_use": "account-security-triage-pivot",
+            "ready_for_court_report": bool(report_grade.get("report_grade_ready")),
+            "validation_required": not bool(report_grade.get("report_grade_ready")),
+            "secret_values_redacted": True,
+            "blockers": list(report_grade.get("blockers") or []),
+        },
+        "large_data_controls": {
+            "row_hashes_are_bounded": True,
+            "secret_values_are_not_indexed": True,
+            "safe_for_case_db_indexing": True,
+        },
+    }
+    manifest["manifest_sha256"] = stable_os_account_json_sha256(
+        {key: value for key, value in manifest.items() if key != "manifest_sha256"}
+    )
+    return manifest
+
+
+def stable_os_account_json_sha256(value: Mapping[str, object] | Sequence[object]) -> str:
+    return hashlib.sha256(
+        json.dumps(value, ensure_ascii=False, sort_keys=True, default=str, separators=(",", ":")).encode(
+            "utf-8",
+            errors="replace",
+        )
+    ).hexdigest()
 
 
 def account_lifecycle_confidence(account: dict[str, object], group_rows: list[dict[str, object]]) -> float:

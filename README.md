@@ -193,6 +193,7 @@ rapidtriage docs --help
 rapidtriage files --help
 rapidtriage extract --help
 rapidtriage artifacts --help
+rapidtriage taxonomy-audit --help
 rapidtriage collect-plan --help
 rapidtriage collect-export --help
 rapidtriage run --help
@@ -217,11 +218,13 @@ rapidtriage extract rapidtriage-files.json ./extract-out --category documents --
 rapidtriage extract rapidtriage-docs.json ./docs-out --kind pdf --manifest ./docs-out/rapidtriage-extract-manifest.json
 rapidtriage artifacts . --kind browser --output ./rapidtriage-artifacts-browser.json
 rapidtriage artifacts . --kind recent-files --output ./rapidtriage-artifacts-recent-files.json
+rapidtriage taxonomy-audit --output ./rapidtriage-taxonomy-audit.json
 rapidtriage run . --mode seizure --output-dir ./rapidtriage-run-seizure
 rapidtriage run . --mode fraud --output-dir ./rapidtriage-run-fraud
 rapidtriage run ./case.E01 --mode fraud --output-dir ./rapidtriage-run-e01
 rapidtriage run . --mode hacking --output-dir ./rapidtriage-run-hacking
 rapidtriage run . --mode recovery --output-dir ./rapidtriage-run-recovery
+rapidtriage source-read ./rapidtriage-run-hacking --path Users/alice/Documents/note.txt --hash
 rapidtriage timeline . --output ./rapidtriage-timeline.json --report ./rapidtriage-timeline-report.md
 rapidtriage case ./incident-case.json --source ./rapidtriage-timeline.json --pointer /events/0 --tag suspicious --note "Review this event"
 rapidtriage case ./incident-case.json --source ./rapidtriage-files.json --pointer /candidates/0 --bookmark-id file-001 --tag executable
@@ -303,10 +306,12 @@ Implemented:
 - `carve` performs capped signature carving for JPEG, PNG, PDF, and ZIP candidates, preserving source path, byte offsets, SHA256, status, and optional extracted bytes under `OUTPUT_DIR/carved`.
 - `extract` copies selected `files` or `docs` results into an output directory with overwrite guards, size/count limits, hashes, and manifest/audit output.
 - `artifacts` exposes dedicated collectors for `browser`, `recent-files`, `eventlog`, `windows-os-account`, `windows-execution`, `windows-prefetch`, `windows-filesystem`, `windows-system`, `linux-system`, `macos-system`, `android-apk`, `mobile-export`, `media-image`, `memory-volatility`, and `cloud-export`. Browser artifacts include web usage pivots, source hashes, AI-service visit detections, and review-only AI question/answer transcript candidates with completeness scoring recovered from browser storage for common tools such as ChatGPT, Claude, Gemini, Perplexity, and Copilot; mobile exports normalize Cellebrite/XRY/GrayKey/AXIOM-style CSV/JSON rows into message, contact, call, app, file, and source-summary pivots; media rows include thumbnails, perceptual hashes, OCR sidecar/Korean language/translation validation metadata, and rule-based visual classification hints; Linux artifacts include shell history, SSH, auth log, auditd, dpkg package, Docker container, cron, and systemd pivots; macOS artifacts include TCC privacy permissions plus bounded Unified Log, Spotlight, FSEvents, and APFS snapshot-hint pivots; memory artifacts include Volatility imports plus bounded direct dump scans for redacted and checksum-validated BitLocker key candidates, process string candidates, suspicious strings, URLs, and IPs.
+- `taxonomy-audit` compares the target forensic artifact taxonomy against actual collectors, `artifact_type` rows, viewer markers, tests, and documentation so missing Maestro/WISDOM-style capabilities are explicit. Use `--strict` in CI when incomplete taxonomy targets should fail a build.
 - `indicators` summarizes URL, domain, IP, and hash indicators from completed run outputs, keeps source pointers, and can apply local `--rules` IOC matches without calling external threat-intelligence APIs.
 - `run` orchestrates `manifest`, `docs`, `files`, `extract`, `artifacts`, and `timeline` for `seizure`, `fraud`, `hacking`, and `recovery`; Windows-focused modes automatically include account, event log, execution, filesystem, recent-file, browser, and system-artifact collectors where relevant. `--resume` reuses valid existing stage JSON outputs in the same output directory and reruns missing or invalid stages.
 - Direct `.E01` input is supported for `run` when `ewfmount`, `mmls`, and `tsk_recover` are available; `rapidtriage-e01.json` records the extracted filesystem root and selected partition offset.
 - `search` searches a completed run across document/log text, file metadata, browser/web/AI-usage artifacts, indicator pivots, timeline rows, and optional OCR over image candidates.
+- `source-read` reads a file from a completed run's analysis root with bounded text or hex preview, optional MD5/SHA1/SHA256, audit sidecar, and explicit reportability caveats so analysts can verify a search/artifact hit against the underlying source file.
 - `timeline` merges `files`, `docs`, and `artifacts` JSON into chronological events and writes JSON plus markdown.
 - `case` stores bookmarks from implemented `files`, `docs`, `artifacts`, `timeline`, `indicators`, and `compare` outputs, validates source schemas, and persists stable `reference`, minimal `snapshot`, analyst `review` status, tags, notes, and report-candidate markers.
 - `submission-manifest` hashes report-candidate case evidence with MD5, SHA1, and SHA256, preserves review/bookmark context, skips unavailable or out-of-scope paths, and writes an audit sidecar.

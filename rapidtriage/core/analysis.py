@@ -212,10 +212,20 @@ def analysis_commercial_uplift_evidence(
         if isinstance(clusters.get("cluster_review_profile"), Mapping)
         else {}
     )
+    cluster_citation_manifest = (
+        clusters.get("cluster_citation_manifest")
+        if isinstance(clusters.get("cluster_citation_manifest"), Mapping)
+        else {}
+    )
     entity_summary = entities.get("summary") if isinstance(entities.get("summary"), Mapping) else {}
     entity_review_profile = (
         entities.get("entity_review_profile")
         if isinstance(entities.get("entity_review_profile"), Mapping)
+        else {}
+    )
+    entity_citation_manifest = (
+        entities.get("entity_citation_manifest")
+        if isinstance(entities.get("entity_citation_manifest"), Mapping)
         else {}
     )
     graph_summary = graph.get("summary") if isinstance(graph.get("summary"), Mapping) else {}
@@ -224,16 +234,31 @@ def analysis_commercial_uplift_evidence(
         if isinstance(graph.get("graph_interaction_profile"), Mapping)
         else {}
     )
+    graph_citation_manifest = (
+        graph.get("graph_citation_manifest")
+        if isinstance(graph.get("graph_citation_manifest"), Mapping)
+        else {}
+    )
     timeline_summary = timeline.get("summary") if isinstance(timeline.get("summary"), Mapping) else {}
     timeline_correlation_profile = (
         timeline.get("timeline_correlation_profile")
         if isinstance(timeline.get("timeline_correlation_profile"), Mapping)
         else {}
     )
+    timeline_citation_manifest = (
+        timeline.get("timeline_citation_manifest")
+        if isinstance(timeline.get("timeline_citation_manifest"), Mapping)
+        else {}
+    )
     workbook_summary = workbook.get("summary") if isinstance(workbook.get("summary"), Mapping) else {}
     workbook_review_profile = (
         workbook.get("workbook_review_profile")
         if isinstance(workbook.get("workbook_review_profile"), Mapping)
+        else {}
+    )
+    workbook_citation_manifest = (
+        workbook.get("workbook_citation_manifest")
+        if isinstance(workbook.get("workbook_citation_manifest"), Mapping)
         else {}
     )
     trusted_diffs = trusted_diffs or {}
@@ -249,10 +274,15 @@ def analysis_commercial_uplift_evidence(
         "source_refs": [
             f"matches:{len(matches)}",
             f"clusters:{cluster_summary.get('cluster_count', 0)}",
+            f"cluster_citation_manifest_sha256:{cluster_citation_manifest.get('manifest_sha256', '')}",
             f"entities:{entity_summary.get('entity_count', 0)}",
+            f"entity_citation_manifest_sha256:{entity_citation_manifest.get('manifest_sha256', '')}",
             f"graph_edges:{graph_summary.get('edge_count', 0)}",
+            f"graph_citation_manifest_sha256:{graph_citation_manifest.get('manifest_sha256', '')}",
             f"timeline_events:{timeline_summary.get('event_count', 0)}",
+            f"timeline_citation_manifest_sha256:{timeline_citation_manifest.get('manifest_sha256', '')}",
             f"hypotheses:{workbook_summary.get('hypothesis_count', 0)}",
+            f"workbook_citation_manifest_sha256:{workbook_citation_manifest.get('manifest_sha256', '')}",
         ],
         "reportability_decision": analysis_reportability_decision(
             report_grade=report_grade,
@@ -288,11 +318,21 @@ def analysis_commercial_uplift_evidence(
             "max_entity_match_references": MAX_ENTITY_MATCH_REFERENCES,
             "cluster_truncated": bool(cluster_summary.get("truncated")),
             "cluster_review_profile_present": bool(cluster_review_profile),
+            "cluster_citation_manifest_present": bool(cluster_citation_manifest),
+            "cluster_citation_manifest_hash": str(cluster_citation_manifest.get("manifest_sha256") or ""),
+            "cluster_citation_entry_count": int(cluster_citation_manifest.get("cluster_entry_count") or 0),
+            "cluster_representative_citation_count": int(
+                cluster_citation_manifest.get("representative_citation_count") or 0
+            ),
             "cluster_review_queue_count": int(cluster_review_profile.get("review_queue_count") or 0),
             "high_volume_cluster_count": int(cluster_review_profile.get("high_volume_cluster_count") or 0),
             "representative_first_cluster_review": bool(cluster_review_profile.get("representative_first_review")),
             "entity_truncated": bool(entity_summary.get("truncated")),
             "entity_review_profile_present": bool(entity_review_profile),
+            "entity_citation_manifest_present": bool(entity_citation_manifest),
+            "entity_citation_manifest_hash": str(entity_citation_manifest.get("manifest_sha256") or ""),
+            "entity_citation_entry_count": int(entity_citation_manifest.get("entity_entry_count") or 0),
+            "entity_match_citation_count": int(entity_citation_manifest.get("match_citation_count") or 0),
             "entity_review_queue_count": int(entity_review_profile.get("review_queue_count") or 0),
             "merge_split_candidate_count": int(entity_review_profile.get("merge_split_candidate_count") or 0),
             "analyst_verified_entity_resolution": bool(
@@ -301,17 +341,33 @@ def analysis_commercial_uplift_evidence(
             "persistent_entity_review_state": bool(entity_review_profile.get("persistent_entity_review_state")),
             "graph_truncated": bool(graph_summary.get("truncated")),
             "graph_interaction_profile_present": bool(graph_interaction_profile),
+            "graph_citation_manifest_present": bool(graph_citation_manifest),
+            "graph_citation_manifest_hash": str(graph_citation_manifest.get("manifest_sha256") or ""),
+            "graph_citation_edge_count": int(graph_citation_manifest.get("edge_citation_count") or 0),
+            "graph_source_viewer_locator_count": int(graph_citation_manifest.get("source_viewer_locator_count") or 0),
             "graph_filter_count": len(graph_interaction_profile.get("available_filters") or []),
             "graph_edge_page_count": int(graph_interaction_profile.get("edge_page_count") or 0),
             "graph_saved_layout_supported": bool(graph_interaction_profile.get("saved_layout_supported")),
             "timeline_truncated": bool(timeline_summary.get("truncated")),
             "timeline_correlation_profile_present": bool(timeline_correlation_profile),
+            "timeline_citation_manifest_present": bool(timeline_citation_manifest),
+            "timeline_citation_manifest_hash": str(timeline_citation_manifest.get("manifest_sha256") or ""),
+            "timeline_event_citation_count": int(timeline_citation_manifest.get("event_citation_count") or 0),
+            "timeline_source_viewer_locator_count": int(
+                timeline_citation_manifest.get("source_viewer_locator_count") or 0
+            ),
             "timeline_event_page_count": int(timeline_correlation_profile.get("event_page_count") or 0),
             "timeline_missing_timezone_count": int(timeline_correlation_profile.get("missing_timezone_count") or 0),
             "timeline_clock_skew_overlay_supported": bool(
                 timeline_correlation_profile.get("clock_skew_overlay_supported")
             ),
             "workbook_review_profile_present": bool(workbook_review_profile),
+            "workbook_citation_manifest_present": bool(workbook_citation_manifest),
+            "workbook_citation_manifest_hash": str(workbook_citation_manifest.get("manifest_sha256") or ""),
+            "workbook_hypothesis_citation_count": int(
+                workbook_citation_manifest.get("hypothesis_citation_count") or 0
+            ),
+            "workbook_evidence_cluster_ref_count": int(workbook_citation_manifest.get("evidence_cluster_ref_count") or 0),
             "workbook_review_queue_count": int(workbook_review_profile.get("review_queue_count") or 0),
             "workbook_evidence_attachment_count": int(
                 workbook_review_profile.get("evidence_attachment_count") or 0
@@ -395,10 +451,20 @@ def analysis_core_accuracy_gates(
         if isinstance(clusters.get("cluster_review_profile"), Mapping)
         else {}
     )
+    cluster_citation_manifest = (
+        clusters.get("cluster_citation_manifest")
+        if isinstance(clusters.get("cluster_citation_manifest"), Mapping)
+        else {}
+    )
     entity_summary = entities.get("summary") if isinstance(entities.get("summary"), Mapping) else {}
     entity_review_profile = (
         entities.get("entity_review_profile")
         if isinstance(entities.get("entity_review_profile"), Mapping)
+        else {}
+    )
+    entity_citation_manifest = (
+        entities.get("entity_citation_manifest")
+        if isinstance(entities.get("entity_citation_manifest"), Mapping)
         else {}
     )
     graph_summary = graph.get("summary") if isinstance(graph.get("summary"), Mapping) else {}
@@ -407,16 +473,31 @@ def analysis_core_accuracy_gates(
         if isinstance(graph.get("graph_interaction_profile"), Mapping)
         else {}
     )
+    graph_citation_manifest = (
+        graph.get("graph_citation_manifest")
+        if isinstance(graph.get("graph_citation_manifest"), Mapping)
+        else {}
+    )
     timeline_summary = timeline.get("summary") if isinstance(timeline.get("summary"), Mapping) else {}
     timeline_correlation_profile = (
         timeline.get("timeline_correlation_profile")
         if isinstance(timeline.get("timeline_correlation_profile"), Mapping)
         else {}
     )
+    timeline_citation_manifest = (
+        timeline.get("timeline_citation_manifest")
+        if isinstance(timeline.get("timeline_citation_manifest"), Mapping)
+        else {}
+    )
     workbook_summary = workbook.get("summary") if isinstance(workbook.get("summary"), Mapping) else {}
     workbook_review_profile = (
         workbook.get("workbook_review_profile")
         if isinstance(workbook.get("workbook_review_profile"), Mapping)
+        else {}
+    )
+    workbook_citation_manifest = (
+        workbook.get("workbook_citation_manifest")
+        if isinstance(workbook.get("workbook_citation_manifest"), Mapping)
         else {}
     )
     cluster_rows = clusters.get("clusters") if isinstance(clusters.get("clusters"), list) else []
@@ -430,6 +511,11 @@ def analysis_core_accuracy_gates(
     dedup_review_profile = (
         deduplication.get("dedup_review_profile")
         if isinstance(deduplication.get("dedup_review_profile"), Mapping)
+        else {}
+    )
+    dedup_manifest = (
+        deduplication.get("search_dedup_manifest")
+        if isinstance(deduplication.get("search_dedup_manifest"), Mapping)
         else {}
     )
     trusted_diffs = trusted_diffs or {}
@@ -451,6 +537,11 @@ def analysis_core_accuracy_gates(
         evidence_refs.append(f"high_volume_cluster_count:{cluster_review_profile.get('high_volume_cluster_count', 0)}")
     if cluster_review_profile.get("representative_first_review"):
         item46.append("representative-first review queue")
+    if cluster_citation_manifest:
+        item46.append("cluster citation manifest")
+        evidence_refs.append(f"cluster_citation_manifest_sha256:{cluster_citation_manifest.get('manifest_sha256', '')}")
+        if int(cluster_citation_manifest.get("representative_citation_count") or 0) > 0:
+            item46.append("representative source viewer locators")
     if "truncated" in cluster_summary:
         item46.append("truncation disclosure")
     if not ANALYSIS_NATIVE_CAPABILITIES["ml_semantic_clustering"]:
@@ -471,6 +562,13 @@ def analysis_core_accuracy_gates(
         item47.append("entity review profile")
         evidence_refs.append(f"entity_review_queue_count:{entity_review_profile.get('review_queue_count', 0)}")
         evidence_refs.append(f"merge_split_candidate_count:{entity_review_profile.get('merge_split_candidate_count', 0)}")
+    if entity_citation_manifest:
+        item47.append("entity citation manifest")
+        evidence_refs.append(f"entity_citation_manifest_sha256:{entity_citation_manifest.get('manifest_sha256', '')}")
+        if int(entity_citation_manifest.get("match_citation_count") or 0) > 0:
+            item47.append("entity source viewer locators")
+        if entity_citation_manifest.get("raw_entity_values_serialized") is False:
+            item47.append("hash-only entity citation values")
     if int(entity_review_profile.get("merge_split_candidate_count") or 0) > 0:
         item47.append("merge/split review queue")
     if not ANALYSIS_NATIVE_CAPABILITIES["analyst_verified_entity_resolution"]:
@@ -494,6 +592,13 @@ def analysis_core_accuracy_gates(
         evidence_refs.append(f"graph_edge_page_count:{graph_interaction_profile.get('edge_page_count', 0)}")
     if graph_interaction_profile.get("available_filters"):
         item48.append("filter metadata")
+    if graph_citation_manifest:
+        item48.append("graph citation manifest")
+        evidence_refs.append(f"graph_citation_manifest_sha256:{graph_citation_manifest.get('manifest_sha256', '')}")
+        if int(graph_citation_manifest.get("edge_citation_count") or 0) > 0:
+            item48.append("edge source viewer locators")
+        if int(graph_citation_manifest.get("source_viewer_locator_count") or 0) > 0:
+            item48.append("graph source locator coverage")
     if "truncated" in graph_summary:
         item48.append("graph paging/truncation disclosure")
     if not ANALYSIS_NATIVE_CAPABILITIES["court_ready_graph_layout"]:
@@ -520,6 +625,15 @@ def analysis_core_accuracy_gates(
         item49.append("cursor page metadata")
     if timeline_correlation_profile.get("timezone_counts") is not None:
         item49.append("timezone distribution")
+    if timeline_citation_manifest:
+        item49.append("timeline citation manifest")
+        evidence_refs.append(
+            f"timeline_citation_manifest_sha256:{timeline_citation_manifest.get('manifest_sha256', '')}"
+        )
+        if int(timeline_citation_manifest.get("event_citation_count") or 0) > 0:
+            item49.append("timeline event source viewer locators")
+        if timeline_citation_manifest.get("clock_skew_overlay_supported") is False:
+            item49.append("clock-skew blocker recorded")
     item49.append("timezone/skew limitation warning")
     if trusted_diffs.get(49, {}).get("status") == "pass":
         item49.append("trusted timeline known-answer diff pass")
@@ -541,6 +655,15 @@ def analysis_core_accuracy_gates(
         )
     if int(workbook_review_profile.get("review_queue_count") or 0) > 0:
         item50.append("hypothesis review queue")
+    if workbook_citation_manifest:
+        item50.append("workbook citation manifest")
+        evidence_refs.append(
+            f"workbook_citation_manifest_sha256:{workbook_citation_manifest.get('manifest_sha256', '')}"
+        )
+        if int(workbook_citation_manifest.get("hypothesis_citation_count") or 0) > 0:
+            item50.append("hypothesis citation source locators")
+        if workbook_citation_manifest.get("version_history_supported") is False:
+            item50.append("workbook version-history blocker")
     if not ANALYSIS_NATIVE_CAPABILITIES["full_case_reindex"]:
         item50.append("persistence/versioning limitation warning")
     if trusted_diffs.get(50, {}).get("status") == "pass":
@@ -558,6 +681,13 @@ def analysis_core_accuracy_gates(
     if dedup_review_profile.get("collapse_preview_supported"):
         item60.append("collapse preview profile")
         evidence_refs.append(f"dedup_review_group_count:{dedup_review_profile.get('duplicate_group_count', 0)}")
+    if dedup_manifest.get("manifest_sha256"):
+        item60.append("dedup citation manifest")
+        evidence_refs.append(f"dedup_manifest_sha256:{dedup_manifest.get('manifest_sha256', '')}")
+    if int(dedup_manifest.get("member_row_hash_count") or 0) > 0:
+        item60.append("duplicate member row hashes")
+    if isinstance(dedup_manifest.get("source_viewer_locator"), Mapping):
+        item60.append("dedup source viewer locators")
     item60.append("near-duplicate limitation warning")
 
     return [
@@ -610,6 +740,7 @@ def build_result_clusters(
         if len(clusters) >= max_clusters:
             break
     review_profile = build_cluster_review_profile(clusters, candidate_bucket_count=len(buckets), max_clusters=max_clusters)
+    citation_manifest = build_cluster_citation_manifest(clusters, matches)
     return {
         "summary": {
             "cluster_count": len(clusters),
@@ -618,10 +749,14 @@ def build_result_clusters(
             "truncated": len(clusters) >= max_clusters and len(buckets) > max_clusters,
             "review_queue_count": int(review_profile.get("review_queue_count") or 0),
             "high_volume_cluster_count": int(review_profile.get("high_volume_cluster_count") or 0),
+            "cluster_citation_entry_count": int(citation_manifest.get("cluster_entry_count") or 0),
+            "representative_citation_count": int(citation_manifest.get("representative_citation_count") or 0),
             "commercial_gap_ids": ["#46"],
             "commercial_grade_ready": False,
         },
         "cluster_review_profile": review_profile,
+        "cluster_citation_manifest": citation_manifest,
+        "cluster_citation_manifest_hash": citation_manifest["manifest_sha256"],
         "clusters": clusters,
         "report_grade_assessment": component_report_grade_assessment("#46", "large-result-clustering"),
     }
@@ -688,6 +823,115 @@ def build_cluster_review_profile(
             "add near-duplicate text/media clustering validation before claiming semantic clustering coverage",
         ],
     }
+
+
+def build_cluster_citation_manifest(
+    clusters: Sequence[Mapping[str, object]],
+    matches: Sequence[Mapping[str, object]],
+    *,
+    cluster_limit: int = 200,
+    representative_limit: int = MAX_CLUSTER_REPRESENTATIVES,
+) -> dict[str, object]:
+    entries: list[dict[str, object]] = []
+    representative_citation_count = 0
+    for index, cluster in enumerate(clusters[:cluster_limit], start=1):
+        representative_indices = [
+            int(item)
+            for item in list(cluster.get("match_indices") or [])[:representative_limit]
+            if isinstance(item, int) and 0 <= item < len(matches)
+        ]
+        representative_citations = []
+        for match_index in representative_indices:
+            match = matches[match_index]
+            source = str(match.get("source") or "unknown")
+            path = str(match.get("path") or "")
+            title = str(match.get("title") or path or f"match-{match_index}")
+            representative_citations.append(
+                {
+                    "match_index": match_index,
+                    "source": source,
+                    "path": path,
+                    "title": title,
+                    "kind": str(match.get("kind") or ""),
+                    "keyword_refs": [str(item) for item in list(match.get("matched_keywords") or [])[:10]],
+                    "source_viewer_locator": {
+                        "viewer": "search-result-source",
+                        "match_index": match_index,
+                        "source": source,
+                        "path": path,
+                    },
+                    "match_sha256": stable_analysis_sha256(
+                        {
+                            "match_index": match_index,
+                            "source": source,
+                            "path": path,
+                            "title": title,
+                            "kind": str(match.get("kind") or ""),
+                        }
+                    ),
+                }
+            )
+        representative_citation_count += len(representative_citations)
+        entry_payload = {
+            "entry_index": index,
+            "cluster_id": str(cluster.get("cluster_id") or ""),
+            "family": str(cluster.get("family") or ""),
+            "value": str(cluster.get("value") or ""),
+            "label": str(cluster.get("label") or ""),
+            "match_count": int(cluster.get("match_count") or 0),
+            "representative_citation_count": len(representative_citations),
+            "review_hint": str(cluster.get("review_hint") or ""),
+        }
+        entries.append(
+            {
+                **entry_payload,
+                "entry_hash": stable_analysis_sha256(entry_payload),
+                "representative_citations": representative_citations,
+                "representative_citations_truncated": bool(cluster.get("truncated_match_indices")),
+                "source_viewer_locator": {
+                    "viewer": "search-cluster-review",
+                    "cluster_id": entry_payload["cluster_id"],
+                    "family": entry_payload["family"],
+                    "value": entry_payload["value"],
+                    "open_representative_first": True,
+                },
+                "validation_status": "candidate-cluster-citation",
+            }
+        )
+    manifest: dict[str, object] = {
+        "manifest_version": "search-cluster-citation-manifest-v1",
+        "item_number": 46,
+        "batch_id": "commercial-uplift-046-050",
+        "selected_track": "bounded-cluster-representative-source-citations",
+        "cluster_entry_count": len(entries),
+        "cluster_entry_cap": cluster_limit,
+        "cluster_entries_truncated": len(clusters) > cluster_limit,
+        "representative_citation_count": representative_citation_count,
+        "representative_citation_cap_per_cluster": representative_limit,
+        "cluster_entries": entries,
+        "persistent_review_state": False,
+        "near_duplicate_text_media_clustering": False,
+        "passed_validation_check_ids": [
+            "search-cluster-citation-manifest-emitted",
+            "cluster-source-viewer-locators-built",
+            "representative-source-citations-built",
+        ],
+        "failed_validation_check_ids": [
+            "persistent-cluster-review-state",
+            "near-duplicate-text-media-clustering",
+            ANALYSIS_TRUSTED_DIFF_BLOCKERS[46],
+        ],
+        "commercial_blockers": [
+            "persistent-cluster-review-state",
+            "near-duplicate-text-media-clustering",
+            ANALYSIS_TRUSTED_DIFF_BLOCKERS[46],
+        ],
+        "ready_for_court_report": False,
+    }
+    manifest["manifest_sha256"] = stable_analysis_sha256(
+        {key: value for key, value in manifest.items() if key != "manifest_sha256"}
+    )
+    return manifest
 
 
 def build_analysis_trusted_diff(
@@ -868,6 +1112,11 @@ def stable_diff_key(*parts: object) -> str:
     return hashlib.sha256(text.encode("utf-8", errors="replace")).hexdigest()
 
 
+def stable_analysis_sha256(value: object) -> str:
+    serialized = json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"), default=str)
+    return hashlib.sha256(serialized.encode("utf-8", errors="replace")).hexdigest()
+
+
 def diff_value(value: object) -> str:
     if isinstance(value, (list, tuple, set)):
         return ",".join(sorted(diff_value(item) for item in value if diff_value(item)))
@@ -917,7 +1166,13 @@ def build_search_hit_deduplication(
         "unique_fingerprint_count": len(buckets),
         "max_groups": max_groups,
     }
-    core_accuracy_gates = search_deduplication_core_accuracy_gates(groups=groups, summary=summary, trusted_diff=trusted_diff)
+    dedup_manifest = build_search_dedup_manifest(matches=matches, groups=groups, summary=summary)
+    core_accuracy_gates = search_deduplication_core_accuracy_gates(
+        groups=groups,
+        summary=summary,
+        dedup_manifest=dedup_manifest,
+        trusted_diff=trusted_diff,
+    )
     return {
         "summary": {
             "duplicate_group_count": len(groups),
@@ -929,6 +1184,8 @@ def build_search_hit_deduplication(
             "commercial_grade_ready": False,
         },
         "groups": groups,
+        "search_dedup_manifest": dedup_manifest,
+        "search_dedup_manifest_hash": dedup_manifest["manifest_sha256"],
         "dedup_review_profile": build_dedup_review_profile(groups=groups, summary=summary),
         "deduplication_assessment": search_deduplication_assessment(),
         "trusted_duplicate_manifest_diff": dict(trusted_diff) if isinstance(trusted_diff, Mapping) else {
@@ -940,16 +1197,119 @@ def build_search_hit_deduplication(
         "commercial_uplift_evidence": search_deduplication_commercial_uplift_evidence(
             groups=groups,
             summary=summary,
+            dedup_manifest=dedup_manifest,
             core_accuracy_gates=core_accuracy_gates,
             trusted_diff=trusted_diff,
         ),
     }
 
 
+def build_search_dedup_manifest(
+    *,
+    matches: Sequence[Mapping[str, object]],
+    groups: Sequence[Mapping[str, object]],
+    summary: Mapping[str, object],
+) -> dict[str, object]:
+    group_entries = []
+    member_hash_count = 0
+    for group_index, group in enumerate(groups, start=1):
+        member_entries = []
+        for member_index in list(group.get("match_indices") or [])[:20]:
+            if not isinstance(member_index, int) or member_index < 0 or member_index >= len(matches):
+                continue
+            match = matches[member_index]
+            member_core = {
+                "match_index": member_index,
+                "source": str(match.get("source") or ""),
+                "kind": str(match.get("kind") or ""),
+                "path": str(match.get("path") or ""),
+                "title": str(match.get("title") or ""),
+                "pointer": str(match.get("pointer") or ""),
+                "preview_sha256": stable_analysis_sha256(str(match.get("preview") or "")),
+                "matched_keywords": [str(item) for item in list(match.get("matched_keywords") or [])[:10]],
+            }
+            member_entries.append(
+                {
+                    **member_core,
+                    "member_row_hash": stable_analysis_sha256(member_core),
+                    "source_viewer_locator": {
+                        "viewer": "search-dedup-member-source",
+                        "match_index": member_index,
+                        "path": member_core["path"],
+                        "source": member_core["source"],
+                    },
+                }
+            )
+            member_hash_count += 1
+        representative_index = int(group.get("representative_index") or -1)
+        group_core = {
+            "group_index": group_index,
+            "group_id": str(group.get("group_id") or ""),
+            "fingerprint": str(group.get("fingerprint") or ""),
+            "match_count": int(group.get("match_count") or 0),
+            "representative_index": representative_index,
+            "hidden_duplicate_count": int(group.get("hidden_duplicate_count") or 0),
+            "report_suppression_status": str(group.get("report_suppression_status") or ""),
+            "duplicate_resolution_status": str(group.get("duplicate_resolution_status") or ""),
+            "member_row_count": len(member_entries),
+        }
+        group_entries.append(
+            {
+                **group_core,
+                "group_row_hash": stable_analysis_sha256(group_core),
+                "representative_source_viewer_locator": {
+                    "viewer": "search-dedup-representative-source",
+                    "match_index": representative_index,
+                    "open_action": "open-representative-hit-first",
+                },
+                "member_entries": member_entries,
+                "member_entries_truncated": bool(group.get("truncated_match_indices")),
+                "review_status": "unreviewed",
+                "suppression_decision": "not-suppressed",
+            }
+        )
+    manifest: dict[str, object] = {
+        "manifest_version": "search-dedup-citation-manifest-v1",
+        "item_number": 60,
+        "batch_id": "commercial-uplift-056-060",
+        "selected_track": "bounded-search-hit-duplicate-review",
+        "duplicate_group_count": int(summary.get("duplicate_group_count") or 0),
+        "duplicate_match_count": int(summary.get("duplicate_match_count") or 0),
+        "unique_fingerprint_count": int(summary.get("unique_fingerprint_count") or 0),
+        "group_entry_count": len(group_entries),
+        "member_row_hash_count": member_hash_count,
+        "group_entries": group_entries,
+        "source_viewer_locator": {
+            "viewer": "search-dedup-review",
+            "open_action": "open-dedup-review-board",
+            "representative_first": True,
+        },
+        "case_db_suppression_state": False,
+        "commercial_gap_ids": [SEARCH_DEDUP_GAP_ID],
+        "passed_validation_check_ids": [
+            "search-dedup-citation-manifest-emitted",
+            "dedup-member-row-hashes",
+            "dedup-source-viewer-locators",
+        ],
+        "failed_validation_check_ids": [
+            "persistent-dedup-suppression-workflow",
+            "fuzzy-near-duplicate-text-grouping",
+            "perceptual-media-duplicate-grouping",
+            ANALYSIS_TRUSTED_DIFF_BLOCKERS[60],
+        ],
+        "ready_for_court_report": False,
+    }
+    manifest["manifest_sha256"] = stable_analysis_sha256(
+        {key: value for key, value in manifest.items() if key != "manifest_sha256"}
+    )
+    return manifest
+
+
 def search_deduplication_core_accuracy_gates(
     *,
     groups: Sequence[Mapping[str, object]],
     summary: Mapping[str, object],
+    dedup_manifest: Mapping[str, object] | None = None,
     trusted_diff: Mapping[str, object] | None = None,
 ) -> list[dict[str, object]]:
     satisfied = []
@@ -963,6 +1323,13 @@ def search_deduplication_core_accuracy_gates(
         satisfied.append("source/path references")
     if any(group.get("collapse_hint") for group in groups):
         satisfied.append("collapse preview profile")
+    dedup_manifest = dedup_manifest if isinstance(dedup_manifest, Mapping) else {}
+    if dedup_manifest.get("manifest_sha256"):
+        satisfied.append("dedup citation manifest")
+    if dedup_manifest.get("member_row_hash_count"):
+        satisfied.append("duplicate member row hashes")
+    if isinstance(dedup_manifest.get("source_viewer_locator"), Mapping):
+        satisfied.append("dedup source viewer locators")
     satisfied.append("near-duplicate limitation warning")
     trusted_diff = trusted_diff if isinstance(trusted_diff, Mapping) else {}
     if trusted_diff.get("status") == "pass":
@@ -975,6 +1342,7 @@ def search_deduplication_core_accuracy_gates(
                 f"duplicate_group_count:{summary.get('duplicate_group_count', 0)}",
                 f"duplicate_match_count:{summary.get('duplicate_match_count', 0)}",
                 f"unique_fingerprint_count:{summary.get('unique_fingerprint_count', 0)}",
+                f"dedup_manifest_hash:{dedup_manifest.get('manifest_sha256', '')}",
                 f"trusted_diff_status:{trusted_diff.get('status', 'missing')}",
             ],
         )
@@ -985,6 +1353,7 @@ def search_deduplication_commercial_uplift_evidence(
     *,
     groups: Sequence[Mapping[str, object]],
     summary: Mapping[str, object],
+    dedup_manifest: Mapping[str, object] | None = None,
     core_accuracy_gates: Sequence[Mapping[str, object]],
     trusted_diff: Mapping[str, object] | None = None,
 ) -> dict[str, object]:
@@ -993,6 +1362,7 @@ def search_deduplication_commercial_uplift_evidence(
         if gate.get("gap_id") == SEARCH_DEDUP_GAP_ID:
             passed.extend(str(item) for item in gate.get("satisfied_checks") or [])
     assessment = search_deduplication_assessment()
+    dedup_manifest = dedup_manifest if isinstance(dedup_manifest, Mapping) else {}
     return {
         "batch_id": "commercial-uplift-056-060",
         "item_numbers": [60],
@@ -1034,6 +1404,9 @@ def search_deduplication_commercial_uplift_evidence(
             "representative_first_review": True,
             "hash_or_preview_fingerprint": True,
             "collapse_preview_supported": True,
+            "dedup_manifest_hash": str(dedup_manifest.get("manifest_sha256") or ""),
+            "dedup_member_row_hash_count": int(dedup_manifest.get("member_row_hash_count") or 0),
+            "dedup_source_viewer_locator": bool(dedup_manifest.get("source_viewer_locator")),
             "media_perceptual_duplicate_grouping": False,
             "case_db_suppression_state": False,
         },
@@ -1243,6 +1616,7 @@ def build_entity_view(
 
     type_counts = Counter(str(item["type"]) for item in entities)
     review_profile = build_entity_review_profile(entities, total_candidate_count=len(buckets), max_entities=max_entities)
+    citation_manifest = build_entity_citation_manifest(entities, matches)
     return {
         "summary": {
             "entity_count": len(entities),
@@ -1251,10 +1625,14 @@ def build_entity_view(
             "truncated": len(buckets) > len(entities),
             "review_queue_count": int(review_profile.get("review_queue_count") or 0),
             "merge_split_candidate_count": int(review_profile.get("merge_split_candidate_count") or 0),
+            "entity_citation_entry_count": int(citation_manifest.get("entity_entry_count") or 0),
+            "match_citation_count": int(citation_manifest.get("match_citation_count") or 0),
             "commercial_gap_ids": ["#47"],
             "commercial_grade_ready": False,
         },
         "entity_review_profile": review_profile,
+        "entity_citation_manifest": citation_manifest,
+        "entity_citation_manifest_hash": citation_manifest["manifest_sha256"],
         "entities": entities,
         "report_grade_assessment": component_report_grade_assessment("#47", "entity-view"),
     }
@@ -1325,6 +1703,133 @@ def build_entity_review_profile(
             "attach source-row citations and confidence notes before promoting entity pivots to report findings",
         ],
     }
+
+
+def build_entity_citation_manifest(
+    entities: Sequence[Mapping[str, object]],
+    matches: Sequence[Mapping[str, object]],
+    *,
+    entity_limit: int = 200,
+    match_limit: int = MAX_ENTITY_MATCH_REFERENCES,
+) -> dict[str, object]:
+    entries: list[dict[str, object]] = []
+    match_citation_count = 0
+    for index, entity in enumerate(entities[:entity_limit], start=1):
+        match_indices = [
+            int(item)
+            for item in list(entity.get("match_indices") or [])[:match_limit]
+            if isinstance(item, int) and 0 <= item < len(matches)
+        ]
+        match_citations = []
+        for match_index in match_indices:
+            match = matches[match_index]
+            source = str(match.get("source") or "unknown")
+            path = str(match.get("path") or "")
+            title = str(match.get("title") or path or f"match-{match_index}")
+            match_citations.append(
+                {
+                    "match_index": match_index,
+                    "source": source,
+                    "path": path,
+                    "title": title,
+                    "kind": str(match.get("kind") or ""),
+                    "source_viewer_locator": {
+                        "viewer": "search-entity-source",
+                        "entity_id": str(entity.get("entity_id") or ""),
+                        "match_index": match_index,
+                        "source": source,
+                        "path": path,
+                    },
+                    "match_sha256": stable_analysis_sha256(
+                        {
+                            "entity_id": str(entity.get("entity_id") or ""),
+                            "match_index": match_index,
+                            "source": source,
+                            "path": path,
+                            "title": title,
+                        }
+                    ),
+                }
+            )
+        match_citation_count += len(match_citations)
+        value = str(entity.get("value") or "")
+        entry_payload = {
+            "entry_index": index,
+            "entity_id": str(entity.get("entity_id") or ""),
+            "type": str(entity.get("type") or ""),
+            "value_sha256": stable_analysis_sha256(value),
+            "value_shape": entity_value_shape(str(entity.get("type") or ""), value),
+            "count": int(entity.get("count") or 0),
+            "source_count": len(entity.get("sources") or []),
+            "path_count": len(entity.get("paths") or []),
+            "risk_flags": [str(item) for item in list(entity.get("risk_flags") or [])[:10]],
+            "match_citation_count": len(match_citations),
+            "merge_split_review_required": str(entity.get("type") or "") in {"person", "account", "phone", "email"}
+            or len(entity.get("sources") or []) > 1,
+        }
+        entries.append(
+            {
+                **entry_payload,
+                "entry_hash": stable_analysis_sha256(entry_payload),
+                "match_citations": match_citations,
+                "match_citations_truncated": bool(entity.get("truncated_match_indices")),
+                "source_viewer_locator": {
+                    "viewer": "search-entity-review",
+                    "entity_id": entry_payload["entity_id"],
+                    "type": entry_payload["type"],
+                    "open_requires_merge_split_review": entry_payload["merge_split_review_required"],
+                },
+                "validation_status": "candidate-entity-citation",
+            }
+        )
+    manifest: dict[str, object] = {
+        "manifest_version": "search-entity-citation-manifest-v1",
+        "item_number": 47,
+        "batch_id": "commercial-uplift-046-050",
+        "selected_track": "bounded-entity-source-citations",
+        "entity_entry_count": len(entries),
+        "entity_entry_cap": entity_limit,
+        "entity_entries_truncated": len(entities) > entity_limit,
+        "match_citation_count": match_citation_count,
+        "match_citation_cap_per_entity": match_limit,
+        "entity_entries": entries,
+        "raw_entity_values_serialized": False,
+        "persistent_entity_review_state": False,
+        "analyst_verified_entity_resolution": False,
+        "passed_validation_check_ids": [
+            "search-entity-citation-manifest-emitted",
+            "entity-source-viewer-locators-built",
+            "entity-values-hashed-in-manifest",
+        ],
+        "failed_validation_check_ids": [
+            "analyst-verified-entity-resolution",
+            "entity-merge-split-workflow",
+            ANALYSIS_TRUSTED_DIFF_BLOCKERS[47],
+        ],
+        "commercial_blockers": [
+            "analyst-verified-entity-resolution",
+            "entity-merge-split-workflow",
+            ANALYSIS_TRUSTED_DIFF_BLOCKERS[47],
+        ],
+        "ready_for_court_report": False,
+    }
+    manifest["manifest_sha256"] = stable_analysis_sha256(
+        {key: value for key, value in manifest.items() if key != "manifest_sha256"}
+    )
+    return manifest
+
+
+def entity_value_shape(entity_type: str, value: str) -> str:
+    if not value:
+        return "empty"
+    if entity_type == "email" and "@" in value:
+        local, domain = value.split("@", 1)
+        return f"email:{len(local)}@{domain}"
+    if entity_type in {"phone", "hash"}:
+        return f"{entity_type}:len-{len(value)}"
+    if entity_type in {"url", "domain", "ipv4"}:
+        return f"{entity_type}:{value[:32]}"
+    return f"{entity_type}:len-{len(value)}"
 
 
 def entity_review_priority(entity_type: str, count: int, risk_flags: Sequence[object], source_count: int) -> str:
@@ -1515,6 +2020,7 @@ def build_relationship_graph(
         match_count=len(matches),
         max_edges=max_edges,
     )
+    citation_manifest = build_graph_citation_manifest(nodes=list(nodes.values()), edges=edges)
     return {
         "summary": {
             "node_count": len(nodes),
@@ -1523,6 +2029,8 @@ def build_relationship_graph(
             "max_edges": max_edges,
             "truncated": len(matches) > MAX_GRAPH_MATCH_NODES or len(edges) >= max_edges,
             "source_citation_edge_count": int(interaction_profile.get("source_citation_edge_count") or 0),
+            "graph_citation_edge_count": int(citation_manifest.get("edge_citation_count") or 0),
+            "source_viewer_locator_count": int(citation_manifest.get("source_viewer_locator_count") or 0),
             "available_filter_count": len(interaction_profile.get("available_filters") or []),
             "edge_page_count": int(interaction_profile.get("edge_page_count") or 0),
             "commercial_gap_ids": ["#48"],
@@ -1531,6 +2039,8 @@ def build_relationship_graph(
         "nodes": list(nodes.values()),
         "edges": edges,
         "graph_interaction_profile": interaction_profile,
+        "graph_citation_manifest": citation_manifest,
+        "graph_citation_manifest_hash": citation_manifest["manifest_sha256"],
         "report_grade_assessment": component_report_grade_assessment("#48", "relationship-graph"),
     }
 
@@ -1618,6 +2128,95 @@ def build_graph_interaction_profile(
     }
 
 
+def build_graph_citation_manifest(
+    *,
+    nodes: Sequence[Mapping[str, object]],
+    edges: Sequence[Mapping[str, object]],
+    edge_limit: int = 500,
+) -> dict[str, object]:
+    node_index = {str(node.get("id") or ""): node for node in nodes if node.get("id")}
+    edge_entries: list[dict[str, object]] = []
+    source_viewer_locator_count = 0
+    for index, edge in enumerate(edges[:edge_limit], start=1):
+        citation = edge.get("source_citation") if isinstance(edge.get("source_citation"), Mapping) else {}
+        source_id = str(edge.get("source") or "")
+        target_id = str(edge.get("target") or "")
+        source_node = node_index.get(source_id, {})
+        target_node = node_index.get(target_id, {})
+        source_locator = {
+            "viewer": "search-graph-edge-source",
+            "edge_id": str(edge.get("edge_id") or ""),
+            "match_index": citation.get("match_index"),
+            "source": str(citation.get("source") or "unknown"),
+            "path": str(citation.get("path") or ""),
+            "pointer": str(citation.get("pointer") or ""),
+        }
+        if citation:
+            source_viewer_locator_count += 1
+        entry_payload = {
+            "entry_index": index,
+            "edge_id": str(edge.get("edge_id") or ""),
+            "source_node_id": source_id,
+            "target_node_id": target_id,
+            "edge_type": str(edge.get("type") or ""),
+            "source_node_type": str(source_node.get("type") or ""),
+            "target_node_type": str(target_node.get("type") or ""),
+            "citation_count": int(edge.get("citation_count") or 0),
+            "causal_proof": bool(edge.get("causal_proof")),
+        }
+        edge_entries.append(
+            {
+                **entry_payload,
+                "entry_hash": stable_analysis_sha256(entry_payload),
+                "source_citation": {
+                    "match_index": citation.get("match_index"),
+                    "source": str(citation.get("source") or "unknown"),
+                    "kind": str(citation.get("kind") or ""),
+                    "path": str(citation.get("path") or ""),
+                    "pointer": str(citation.get("pointer") or ""),
+                    "title": str(citation.get("title") or ""),
+                },
+                "source_viewer_locator": source_locator,
+                "validation_status": "candidate-graph-edge-citation",
+            }
+        )
+    manifest: dict[str, object] = {
+        "manifest_version": "search-graph-citation-manifest-v1",
+        "item_number": 48,
+        "batch_id": "commercial-uplift-046-050",
+        "selected_track": "bounded-graph-edge-source-citations",
+        "node_count": len(nodes),
+        "edge_citation_count": len(edge_entries),
+        "edge_citation_cap": edge_limit,
+        "edge_citations_truncated": len(edges) > edge_limit,
+        "source_viewer_locator_count": source_viewer_locator_count,
+        "edge_entries": edge_entries,
+        "server_side_paging_supported": False,
+        "saved_layout_supported": False,
+        "causal_proof_supported": False,
+        "passed_validation_check_ids": [
+            "search-graph-citation-manifest-emitted",
+            "graph-edge-source-viewer-locators-built",
+            "graph-edge-source-citations-built",
+        ],
+        "failed_validation_check_ids": [
+            "server-side-graph-paging",
+            "saved-graph-layouts",
+            ANALYSIS_TRUSTED_DIFF_BLOCKERS[48],
+        ],
+        "commercial_blockers": [
+            "server-side-graph-paging",
+            "saved-graph-layouts",
+            ANALYSIS_TRUSTED_DIFF_BLOCKERS[48],
+        ],
+        "ready_for_court_report": False,
+    }
+    manifest["manifest_sha256"] = stable_analysis_sha256(
+        {key: value for key, value in manifest.items() if key != "manifest_sha256"}
+    )
+    return manifest
+
+
 def build_correlated_timeline(
     matches: Sequence[Mapping[str, object]],
     *,
@@ -1650,6 +2249,7 @@ def build_correlated_timeline(
         max_events=max_events,
         truncated=truncated,
     )
+    citation_manifest = build_timeline_citation_manifest(events=events, original_event_count=original_event_count)
     return {
         "summary": {
             "event_count": len(events),
@@ -1659,12 +2259,16 @@ def build_correlated_timeline(
             "truncated": truncated,
             "event_page_count": int(correlation_profile.get("event_page_count") or 0),
             "missing_timezone_count": int(correlation_profile.get("missing_timezone_count") or 0),
+            "event_citation_count": int(citation_manifest.get("event_citation_count") or 0),
+            "source_viewer_locator_count": int(citation_manifest.get("source_viewer_locator_count") or 0),
             "commercial_gap_ids": ["#49"],
             "commercial_grade_ready": False,
         },
         "date_buckets": [{"date": date, "count": count} for date, count in sorted(buckets.items())],
         "events": events,
         "timeline_correlation_profile": correlation_profile,
+        "timeline_citation_manifest": citation_manifest,
+        "timeline_citation_manifest_hash": citation_manifest["manifest_sha256"],
         "report_grade_assessment": component_report_grade_assessment("#49", "correlated-timeline"),
     }
 
@@ -1710,6 +2314,89 @@ def build_timeline_correlation_profile(
             "persist analyst annotations and cursor state before using the timeline as reviewed case chronology",
         ],
     }
+
+
+def build_timeline_citation_manifest(
+    *,
+    events: Sequence[Mapping[str, object]],
+    original_event_count: int,
+    event_limit: int = 500,
+) -> dict[str, object]:
+    event_entries: list[dict[str, object]] = []
+    source_viewer_locator_count = 0
+    missing_timezone_count = 0
+    for index, event in enumerate(events[:event_limit], start=1):
+        timestamp = str(event.get("timestamp") or "")
+        timezone_label = timestamp_timezone_label(timestamp)
+        if timezone_label == "missing":
+            missing_timezone_count += 1
+        locator = {
+            "viewer": "search-timeline-event-source",
+            "event_id": str(event.get("event_id") or ""),
+            "match_index": event.get("match_index"),
+            "source": str(event.get("source") or "unknown"),
+            "path": str(event.get("path") or ""),
+            "timestamp_key": str(event.get("timestamp_key") or ""),
+        }
+        source_viewer_locator_count += 1
+        entry_payload = {
+            "entry_index": index,
+            "event_id": str(event.get("event_id") or ""),
+            "timestamp": timestamp,
+            "timestamp_key": str(event.get("timestamp_key") or ""),
+            "timezone_label": timezone_label,
+            "match_index": int(event.get("match_index") or 0),
+            "source": str(event.get("source") or "unknown"),
+            "kind": str(event.get("kind") or ""),
+            "path_sha256": stable_analysis_sha256(str(event.get("path") or "")),
+        }
+        event_entries.append(
+            {
+                **entry_payload,
+                "entry_hash": stable_analysis_sha256(entry_payload),
+                "source_viewer_locator": locator,
+                "validation_status": "candidate-timeline-event-citation",
+            }
+        )
+    manifest: dict[str, object] = {
+        "manifest_version": "search-timeline-citation-manifest-v1",
+        "item_number": 49,
+        "batch_id": "commercial-uplift-046-050",
+        "selected_track": "bounded-timeline-event-source-citations",
+        "original_event_count": original_event_count,
+        "event_citation_count": len(event_entries),
+        "event_citation_cap": event_limit,
+        "event_citations_truncated": len(events) > event_limit,
+        "source_viewer_locator_count": source_viewer_locator_count,
+        "missing_timezone_count": missing_timezone_count,
+        "event_entries": event_entries,
+        "full_case_join_supported": False,
+        "cursor_api_supported": False,
+        "clock_skew_overlay_supported": False,
+        "review_annotation_overlay_supported": False,
+        "passed_validation_check_ids": [
+            "search-timeline-citation-manifest-emitted",
+            "timeline-event-source-viewer-locators-built",
+            "timeline-event-source-citations-built",
+        ],
+        "failed_validation_check_ids": [
+            "full-case-timeline-join",
+            "timezone-skew-validation",
+            "cursor-paged-timeline",
+            ANALYSIS_TRUSTED_DIFF_BLOCKERS[49],
+        ],
+        "commercial_blockers": [
+            "full-case-timeline-join",
+            "timezone-skew-validation",
+            "cursor-paged-timeline",
+            ANALYSIS_TRUSTED_DIFF_BLOCKERS[49],
+        ],
+        "ready_for_court_report": False,
+    }
+    manifest["manifest_sha256"] = stable_analysis_sha256(
+        {key: value for key, value in manifest.items() if key != "manifest_sha256"}
+    )
+    return manifest
 
 
 def timestamp_timezone_label(timestamp: str) -> str:
@@ -1824,6 +2511,7 @@ def build_hypothesis_workbook(
             "Have source hashes and parser limitations been verified before report inclusion?",
         ],
     )
+    citation_manifest = build_workbook_citation_manifest(hypotheses=hypotheses, clusters=clusters)
     return {
         "summary": {
             "hypothesis_count": len(hypotheses),
@@ -1831,11 +2519,15 @@ def build_hypothesis_workbook(
             "source_counts": dict(sorted(source_counts.items())),
             "review_queue_count": int(review_profile.get("review_queue_count") or 0),
             "evidence_attachment_count": int(review_profile.get("evidence_attachment_count") or 0),
+            "hypothesis_citation_count": int(citation_manifest.get("hypothesis_citation_count") or 0),
+            "evidence_cluster_ref_count": int(citation_manifest.get("evidence_cluster_ref_count") or 0),
             "commercial_gap_ids": ["#50"],
             "commercial_grade_ready": False,
         },
         "hypotheses": hypotheses,
         "workbook_review_profile": review_profile,
+        "workbook_citation_manifest": citation_manifest,
+        "workbook_citation_manifest_hash": citation_manifest["manifest_sha256"],
         "report_grade_assessment": component_report_grade_assessment("#50", "hypothesis-workbook"),
         "review_questions": list(review_profile["review_questions"]),
         "next_actions": [
@@ -1892,6 +2584,95 @@ def build_workbook_review_profile(
             "preserve workbook version history and reviewer decisions for reproducibility",
         ],
     }
+
+
+def build_workbook_citation_manifest(
+    *,
+    hypotheses: Sequence[Mapping[str, object]],
+    clusters: Sequence[Mapping[str, object]],
+    hypothesis_limit: int = 100,
+) -> dict[str, object]:
+    cluster_index = {str(cluster.get("cluster_id") or ""): cluster for cluster in clusters}
+    hypothesis_entries: list[dict[str, object]] = []
+    evidence_cluster_ref_count = 0
+    for index, hypothesis in enumerate(hypotheses[:hypothesis_limit], start=1):
+        cluster_refs = []
+        for cluster_id in list(hypothesis.get("evidence_cluster_ids") or [])[:8]:
+            cluster = cluster_index.get(str(cluster_id), {})
+            cluster_refs.append(
+                {
+                    "cluster_id": str(cluster_id),
+                    "family": str(cluster.get("family") or ""),
+                    "value": str(cluster.get("value") or ""),
+                    "match_count": int(cluster.get("match_count") or 0),
+                    "source_viewer_locator": {
+                        "viewer": "search-workbook-cluster-evidence",
+                        "hypothesis_id": str(hypothesis.get("hypothesis_id") or ""),
+                        "cluster_id": str(cluster_id),
+                    },
+                }
+            )
+        evidence_cluster_ref_count += len(cluster_refs)
+        entry_payload = {
+            "entry_index": index,
+            "hypothesis_id": str(hypothesis.get("hypothesis_id") or ""),
+            "key": str(hypothesis.get("key") or ""),
+            "title": str(hypothesis.get("title") or ""),
+            "status": str(hypothesis.get("status") or "draft"),
+            "ready_for_report": bool(hypothesis.get("ready_for_report")),
+            "evidence_cluster_ref_count": len(cluster_refs),
+        }
+        hypothesis_entries.append(
+            {
+                **entry_payload,
+                "entry_hash": stable_analysis_sha256(entry_payload),
+                "evidence_cluster_refs": cluster_refs,
+                "source_viewer_locator": {
+                    "viewer": "search-workbook-hypothesis-review",
+                    "hypothesis_id": entry_payload["hypothesis_id"],
+                    "open_requires_source_verification": True,
+                },
+                "required_report_actions": list(hypothesis.get("tasks") or [])[:8],
+                "validation_status": "draft-hypothesis-validation-required",
+            }
+        )
+    manifest: dict[str, object] = {
+        "manifest_version": "search-workbook-citation-manifest-v1",
+        "item_number": 50,
+        "batch_id": "commercial-uplift-046-050",
+        "selected_track": "bounded-hypothesis-evidence-citations",
+        "hypothesis_citation_count": len(hypothesis_entries),
+        "hypothesis_citation_cap": hypothesis_limit,
+        "hypothesis_citations_truncated": len(hypotheses) > hypothesis_limit,
+        "evidence_cluster_ref_count": evidence_cluster_ref_count,
+        "hypothesis_entries": hypothesis_entries,
+        "editable_workbook_supported": False,
+        "persistent_workbook_supported": False,
+        "version_history_supported": False,
+        "report_section_export_supported": False,
+        "passed_validation_check_ids": [
+            "search-workbook-citation-manifest-emitted",
+            "hypothesis-source-viewer-locators-built",
+            "hypothesis-evidence-cluster-refs-built",
+        ],
+        "failed_validation_check_ids": [
+            "editable-persistent-workbook",
+            "evidence-attachment-workflow",
+            "workbook-version-history",
+            ANALYSIS_TRUSTED_DIFF_BLOCKERS[50],
+        ],
+        "commercial_blockers": [
+            "editable-persistent-workbook",
+            "evidence-attachment-workflow",
+            "workbook-version-history",
+            ANALYSIS_TRUSTED_DIFF_BLOCKERS[50],
+        ],
+        "ready_for_court_report": False,
+    }
+    manifest["manifest_sha256"] = stable_analysis_sha256(
+        {key: value for key, value in manifest.items() if key != "manifest_sha256"}
+    )
+    return manifest
 
 
 def add_hypothesis(

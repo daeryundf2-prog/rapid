@@ -12,9 +12,13 @@ from rapidtriage.artifacts.windows.eventlog import (
     build_evtx_message_rendering_diff,
     build_evtx_recovery_corpus_diff,
     build_evtx_trusted_tool_record_diff,
+    NativeEvtxRecordCandidate,
     native_evtx_commercial_uplift_evidence,
     native_evtx_core_accuracy_gates,
     native_evtx_promoted_fields,
+    native_evtx_record_candidate_record,
+    parse_native_evtx_binxml,
+    render_event_message,
 )
 from rapidtriage.artifacts.windows.execution import (
     build_execution_artifact_trusted_diff,
@@ -30,13 +34,26 @@ from rapidtriage.artifacts.windows.registry import (
     collect_registry_hive,
 )
 from rapidtriage.artifacts.windows.filesystem import (
+    build_mft_bounded_path_cache,
+    build_native_mft_record,
+    build_native_usn_record,
+    mft_bounded_path_cache_profile,
     build_mft_trusted_diff,
+    build_usn_state_replay_trusted_diff,
     build_usn_trusted_diff,
     decode_mft_runlist,
     ntfs_core_accuracy_gates,
     parse_mft_attribute,
     parse_usn_record_at,
     parse_usn_record_scan,
+    usn_bounded_mft_replay_preview,
+    usn_bounded_state_replay_preview,
+    usn_delete_lifecycle_preview,
+    usn_path_reliability_profile,
+    usn_rename_pair_preview,
+    usn_replay_inventory_profile,
+    usn_state_replay_validation_profile,
+    usn_timeline_review_candidates,
 )
 from rapidtriage.artifacts.windows.browser import (
     ai_transcript_core_accuracy_gates,
@@ -80,6 +97,105 @@ FIXTURE_ROOT = Path(__file__).resolve().parent / "fixtures" / "rapidtriage" / "w
 
 
 class RapidTriageWindowsArtifactsCollectorTests(unittest.TestCase):
+    def test_native_evtx_binxml_decodes_misc_text_tokens(self) -> None:
+        def counted_utf16(text: str) -> bytes:
+            return len(text).to_bytes(2, "little") + text.encode("utf-16le")
+
+        payload = (
+            b"\x0f\x01\x01\x00"
+            + b"\x07"
+            + counted_utf16("literal")
+            + b"\x08"
+            + ord("&").to_bytes(2, "little")
+            + b"\x0b"
+            + counted_utf16("pi-data")
+            + b"\x00"
+        )
+
+        parsed = parse_native_evtx_binxml(payload)
+
+        self.assertEqual(parsed["status"], "basic-rendered")
+        values = {item["value_type"]: item for item in parsed["value_fields"]}
+        self.assertEqual(values["CDataSection"]["text"], "literal")
+        self.assertEqual(values["CharacterReference"]["text"], "&")
+        self.assertEqual(values["ProcessingInstructionData"]["text"], "pi-data")
+        self.assertIn("CDataSectionToken", {item["value"] for item in parsed["token_counts"]})
+        self.assertEqual(parsed["unsupported_token_count"], 0)
+
+    def test_evtx_message_catalog_renders_positional_manifest_placeholders(self) -> None:
+        rendering = render_event_message(
+            provider_name="Microsoft-Windows-Security-Auditing",
+            event_id="4624",
+            category="logon-success",
+            data={
+                "binxml_event_data_sequence": [
+                    {"name": "TargetUserName", "value": "alice"},
+                    {"name": "IpAddress", "value": "10.0.0.5"},
+                ]
+            },
+            raw_preview="",
+            is_native_evtx=True,
+            message_catalog={
+                "microsoftwindowssecurityauditing": {
+                    "4624": {
+                        "message": "User %1 logged on from %2.",
+                        "source_type": "windows-event-manifest",
+                    }
+                }
+            },
+        )
+
+        self.assertEqual(rendering["message"], "User alice logged on from 10.0.0.5.")
+        self.assertEqual(rendering["status"], "rendered-provider-catalog-template")
+        self.assertEqual(rendering["missing_fields"], [])
+        self.assertEqual(
+            [item["field"] for item in rendering["used_fields"]],
+            ["positional[1]", "positional[2]"],
+        )
+        self.assertTrue(rendering["provenance"]["provider_message_resource_resolved"])
+
+    def test_native_evtx_recovery_candidate_emits_report_citation_manifest(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            path = Path(tmp_dir) / "Security.evtx"
+            path.write_bytes(b"fixture")
+            record_blob = (
+                b"**\x00\x00"
+                + (80).to_bytes(4, "little")
+                + (42).to_bytes(8, "little")
+                + (0).to_bytes(8, "little")
+                + b"A" * 20
+                + (64).to_bytes(4, "little")
+            )
+            candidate = NativeEvtxRecordCandidate(
+                offset=0x2000,
+                declared_size=80,
+                record_blob=record_blob,
+                parseable=False,
+                reason="record-size-exceeds-available",
+                available_size=len(record_blob),
+            )
+
+            artifact = native_evtx_record_candidate_record(
+                path,
+                0,
+                {"sha256": "a" * 64},
+                b"\x00" * 0x3000,
+                candidate,
+            )
+
+        manifest = artifact.details["evtx_recovery_report_citation_manifest"]
+        self.assertEqual(manifest["manifest_version"], "evtx-recovery-report-citation-manifest-v1")
+        self.assertEqual(manifest["artifact_type"], "eventlog-record-candidate")
+        self.assertEqual(manifest["row_identity"]["record_offset"], 0x2000)
+        self.assertEqual(manifest["row_identity"]["candidate_reason"], "record-size-exceeds-available")
+        self.assertEqual(manifest["reportability"]["allowed_use"], "evtx-recovery-triage-pivot-only")
+        self.assertFalse(manifest["reportability"]["ready_for_court_report"])
+        self.assertIn("known-answer-corpus-validation-required", manifest["reportability"]["blockers"])
+        self.assertEqual(artifact.details["evtx_recovery_report_citation_manifest_hash"], manifest["manifest_sha256"])
+        locator = manifest["citation_refs"][0]["source_viewer_locator"]
+        self.assertEqual(locator["mode"], "evtx-recovery-record-candidate")
+        self.assertEqual(locator["offset"], 0x2000)
+
     def test_mft_nonresident_runlist_preview_decodes_runs_and_sparse_segments(self) -> None:
         runlist = bytes([0x11, 0x03, 0x05, 0x21, 0x02, 0x01, 0x00, 0x01, 0x04, 0x00])
 
@@ -169,6 +285,847 @@ class RapidTriageWindowsArtifactsCollectorTests(unittest.TestCase):
         self.assertEqual(scan["first_record_offset"], 2)
         self.assertEqual(scan["records"][0]["major_version"], 4)
         self.assertFalse(scan["next_cursor_available"])
+
+    def test_ntfs_native_records_emit_report_citation_manifests(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            mft_path = root / "$MFT"
+            usn_path = root / "$J"
+            mft_path.write_bytes(b"FILE" + b"\x00" * 4092)
+            usn_path.write_bytes(b"\x50\x00\x00\x00" + b"\x00" * 76)
+            mft_record = build_native_mft_record(
+                mft_path,
+                {
+                    "record_number_candidate": 42,
+                    "record_offset": 4096,
+                    "sequence_number": 7,
+                    "in_use": True,
+                    "attribute_count": 3,
+                    "attribute_types": ["$STANDARD_INFORMATION", "$FILE_NAME", "$DATA", "$ATTRIBUTE_LIST"],
+                    "standard_information": {"timestamps": {"modified_at": "2026-01-02T03:04:05+00:00"}},
+                    "file_name_entries": [
+                        {
+                            "file_name": "case.txt",
+                            "parent_reference_raw": 5,
+                            "parent_reference": {"record_number": 5, "sequence_number": 1},
+                        }
+                    ],
+                    "data_attributes": [
+                        {
+                            "resident": True,
+                            "resident_data_hashes": {"sha256": "a" * 64},
+                        }
+                    ],
+                    "attribute_list_entries": [{"attribute_type_name": "$DATA"}],
+                    "validation_checks": {
+                        "magic_valid": True,
+                        "sequence_fixup_valid": True,
+                        "has_file_name_attribute": True,
+                        "attribute_list_resolution_available": False,
+                    },
+                },
+                0,
+            )
+            usn_record = build_native_usn_record(
+                usn_path,
+                {
+                    "file_reference_number": 42,
+                    "parent_file_reference_number": 5,
+                    "file_name": "case.txt",
+                    "timestamp": "2026-01-02T03:04:05+00:00",
+                    "deleted_hint": True,
+                    "rename_hint": "delete",
+                    "reason": "FILE_DELETE|CLOSE",
+                    "reason_raw": 0x80000200,
+                    "reason_flags": ["FILE_DELETE", "CLOSE"],
+                    "usn": 9001,
+                    "record_cursor": 128,
+                    "next_record_cursor": 208,
+                    "record_length": 80,
+                    "record_offset": 128,
+                    "major_version": 4,
+                    "v4_extents": [{"file_offset": 4096, "byte_length": 8192}],
+                    "validation_checks": {
+                        "record_length_aligned": True,
+                        "record_cursor_progresses": True,
+                        "version_supported": True,
+                        "v4_extent_bounds_valid": True,
+                    },
+                },
+                1,
+            )
+
+        mft_manifest = mft_record.details["ntfs_report_citation_manifest"]
+        usn_manifest = usn_record.details["ntfs_report_citation_manifest"]
+        mft_kinds = {item["kind"] for item in mft_manifest["citation_refs"]}
+        usn_kinds = {item["kind"] for item in usn_manifest["citation_refs"]}
+        self.assertEqual(mft_manifest["manifest_version"], "ntfs-report-citation-manifest-v1")
+        self.assertEqual(usn_manifest["manifest_version"], "ntfs-report-citation-manifest-v1")
+        self.assertEqual(len(mft_manifest["manifest_sha256"]), 64)
+        self.assertEqual(len(usn_manifest["manifest_sha256"]), 64)
+        self.assertIn("mft-record-offset", mft_kinds)
+        self.assertIn("mft-file-name-attribute", mft_kinds)
+        self.assertIn("mft-data-attribute", mft_kinds)
+        self.assertIn("mft-attribute-list", mft_kinds)
+        self.assertIn("usn-record-cursor", usn_kinds)
+        self.assertIn("usn-reason-flags", usn_kinds)
+        self.assertIn("usn-rename-delete-timeline-hint", usn_kinds)
+        self.assertIn("usn-v4-extent-preview", usn_kinds)
+        self.assertEqual(mft_record.details["ntfs_report_citation_manifest_hash"], mft_manifest["manifest_sha256"])
+        self.assertEqual(usn_record.details["ntfs_report_citation_manifest_hash"], usn_manifest["manifest_sha256"])
+        self.assertFalse(mft_manifest["reportability"]["commercial_grade_ready"])
+        self.assertFalse(usn_manifest["reportability"]["commercial_grade_ready"])
+        mft_depth = mft_record.details["mft_parser_depth_manifest"]
+        self.assertEqual(mft_depth["manifest_version"], "mft-parser-depth-manifest-v1")
+        self.assertEqual(mft_depth["gap_id"], "#12")
+        self.assertEqual(mft_depth["record_identity"]["record_number"], "42")
+        self.assertTrue(mft_depth["usa_validation"]["magic_valid"])
+        self.assertTrue(mft_depth["usa_validation"]["sequence_fixup_valid"])
+        self.assertTrue(mft_depth["attribute_decoding"]["has_attribute_list"])
+        self.assertFalse(mft_depth["attribute_decoding"]["attribute_list_resolution_available"])
+        self.assertEqual(
+            mft_depth["attribute_decoding"]["attribute_list_resolution_status"],
+            "extension-record-resolution-not-implemented",
+        )
+        self.assertEqual(mft_depth["data_run_decoding"]["resident_data_attribute_count"], 1)
+        self.assertFalse(mft_depth["data_run_decoding"]["full_nonresident_runlist_decode_available"])
+        self.assertEqual(mft_depth["path_reconstruction"]["parent_record_number"], 5)
+        self.assertFalse(mft_depth["path_reconstruction"]["full_volume_path_reconstruction_complete"])
+        self.assertEqual(
+            mft_depth["reportability"]["allowed_use"],
+            "mft-record-structure-and-timestamp-pivot",
+        )
+        self.assertFalse(mft_depth["reportability"]["commercial_grade_ready"])
+        self.assertEqual(
+            mft_record.details["mft_parser_depth_manifest_hash"],
+            mft_depth["manifest_sha256"],
+        )
+        usn_depth = usn_record.details["usn_timeline_depth_manifest"]
+        self.assertEqual(usn_depth["manifest_version"], "usn-timeline-depth-manifest-v1")
+        self.assertEqual(usn_depth["gap_id"], "#13")
+        self.assertEqual(usn_depth["record_identity"]["usn"], 9001)
+        self.assertTrue(usn_depth["record_layout_validation"]["record_cursor_progresses"])
+        self.assertTrue(usn_depth["record_layout_validation"]["version_supported"])
+        self.assertIn("FILE_DELETE", usn_depth["change_semantics"]["reason_flags"])
+        self.assertEqual(usn_depth["change_semantics"]["transition_class"], "delete")
+        self.assertFalse(usn_depth["change_semantics"]["standalone_timeline_fact"])
+        self.assertFalse(usn_depth["path_correlation"]["full_frn_path_cache_replay_done"])
+        self.assertTrue(usn_depth["cursor_pagination"]["safe_for_cursor_api"])
+        self.assertFalse(usn_depth["cursor_pagination"]["large_journal_pagination_validated"])
+        self.assertFalse(usn_depth["replay_state"]["full_journal_replay_available"])
+        self.assertEqual(
+            usn_depth["reportability"]["allowed_use"],
+            "usn-change-record-triage-pivot",
+        )
+        self.assertFalse(usn_depth["reportability"]["commercial_grade_ready"])
+        self.assertEqual(
+            usn_record.details["usn_timeline_depth_manifest_hash"],
+            usn_depth["manifest_sha256"],
+        )
+
+    def test_mft_bounded_parent_path_cache_reconstructs_scanned_chain(self) -> None:
+        records = [
+            {
+                "record_number_candidate": 5,
+                "sequence_number": 1,
+                "directory": True,
+                "in_use": True,
+                "file_name_entries": [
+                    {
+                        "file_name": ".",
+                        "namespace": "WIN32",
+                        "parent_reference": {"record_number": 5, "sequence_number": 1},
+                    }
+                ],
+            },
+            {
+                "record_number_candidate": 40,
+                "sequence_number": 3,
+                "directory": True,
+                "in_use": True,
+                "file_name_entries": [
+                    {
+                        "file_name": "Users",
+                        "namespace": "WIN32",
+                        "parent_reference": {"record_number": 5, "sequence_number": 1},
+                    }
+                ],
+            },
+            {
+                "record_number_candidate": 41,
+                "sequence_number": 9,
+                "directory": False,
+                "in_use": True,
+                "file_name_entries": [
+                    {
+                        "file_name": "case.txt",
+                        "namespace": "WIN32",
+                        "parent_reference": {"record_number": 40, "sequence_number": 3},
+                    }
+                ],
+            },
+            {
+                "record_number_candidate": 42,
+                "sequence_number": 4,
+                "directory": False,
+                "in_use": True,
+                "file_name_entries": [
+                    {
+                        "file_name": "outside.txt",
+                        "namespace": "WIN32",
+                        "parent_reference": {"record_number": 999, "sequence_number": 1},
+                    }
+                ],
+            },
+        ]
+
+        cache = build_mft_bounded_path_cache(records)
+
+        self.assertEqual(cache[41]["status"], "reconstructed-bounded-parent-cache")
+        self.assertEqual(cache[41]["path"], "\\Users\\case.txt")
+        self.assertTrue(cache[41]["complete_within_bounded_scan"])
+        self.assertEqual(cache[42]["status"], "partial-parent-outside-bounded-scan")
+        self.assertIn("parent-not-in-cache:999", cache[42]["warnings"])
+        profile = mft_bounded_path_cache_profile(cache)
+        self.assertEqual(profile["profile_version"], "mft-bounded-path-cache-profile-v1")
+        self.assertEqual(profile["cache_entry_count"], 4)
+        self.assertEqual(profile["complete_path_count"], 3)
+        self.assertEqual(profile["partial_path_count"], 1)
+        self.assertIn("\\Users\\case.txt", profile["sample_complete_paths"])
+        self.assertEqual(profile["sample_partial_paths"][0]["record_number"], 42)
+        self.assertEqual(profile["reportability"], "bounded-mft-path-cache-quality-profile")
+        self.assertIn("mft-trusted-path-diff-required", profile["blockers"])
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            mft_path = Path(tmp_dir) / "$MFT"
+            mft_path.write_bytes(b"FILE" + b"\x00" * 4092)
+            artifact = build_native_mft_record(mft_path, records[2], 2, cache)
+
+        path_profile = artifact.details["mft_path_reconstruction_profile"]
+        self.assertEqual(path_profile["source_mode"], "bounded-scan-parent-cache")
+        self.assertEqual(path_profile["best_available_path"], "\\Users\\case.txt")
+        self.assertTrue(path_profile["bounded_parent_path"]["complete_within_bounded_scan"])
+        self.assertTrue(artifact.details["mft_full_parser_profile"]["decoded_components"]["bounded_parent_path_cache"])
+        self.assertEqual(artifact.details["mft_full_parser_profile"]["item_number"], 12)
+        self.assertFalse(path_profile["commercial_grade_ready"])
+
+    def test_mft_bounded_path_cache_profile_surfaces_partial_chain_quality(self) -> None:
+        cache = {
+            10: {
+                "record_number": 10,
+                "path": "\\Users",
+                "status": "reconstructed-bounded-parent-cache",
+                "depth": 2,
+                "complete_within_bounded_scan": True,
+                "warnings": [],
+            },
+            99: {
+                "record_number": 99,
+                "path": "\\outside.txt",
+                "status": "partial-parent-outside-bounded-scan",
+                "depth": 1,
+                "complete_within_bounded_scan": False,
+                "warnings": ["parent-not-in-cache:9999"],
+            },
+        }
+
+        profile = mft_bounded_path_cache_profile(cache)
+
+        self.assertEqual(profile["cache_entry_count"], 2)
+        self.assertEqual(profile["complete_path_count"], 1)
+        self.assertEqual(profile["partial_path_count"], 1)
+        self.assertEqual(profile["complete_path_ratio"], 0.5)
+        self.assertEqual(profile["warning_count"], 1)
+        self.assertEqual(profile["max_chain_depth"], 2)
+        self.assertEqual(profile["sample_partial_paths"][0]["record_number"], 99)
+        self.assertEqual(profile["sample_partial_paths"][0]["warnings"], ["parent-not-in-cache:9999"])
+
+    def test_usn_record_correlates_bounded_mft_path_cache(self) -> None:
+        mft_cache = {
+            40: {
+                "profile_version": "mft-bounded-parent-path-v1",
+                "status": "reconstructed-bounded-parent-cache",
+                "path": "\\Users",
+                "record_number": 40,
+                "complete_within_bounded_scan": True,
+            },
+            41: {
+                "profile_version": "mft-bounded-parent-path-v1",
+                "status": "reconstructed-bounded-parent-cache",
+                "path": "\\Users\\case.txt",
+                "record_number": 41,
+                "complete_within_bounded_scan": True,
+            },
+        }
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            usn_path = Path(tmp_dir) / "$J"
+            usn_path.write_bytes(b"\x50\x00\x00\x00" + b"\x00" * 76)
+            artifact = build_native_usn_record(
+                usn_path,
+                {
+                    "file_reference_number": 41,
+                    "parent_file_reference_number": 40,
+                    "file_reference_number_decoded": {"record_number": 41, "sequence_number": 7},
+                    "parent_file_reference_number_decoded": {"record_number": 40, "sequence_number": 3},
+                    "file_name": "case.txt",
+                    "timestamp": "2026-01-02T03:04:05+00:00",
+                    "reason": "FILE_DELETE|CLOSE",
+                    "reason_raw": 0x80000200,
+                    "reason_flags": ["FILE_DELETE", "CLOSE"],
+                    "deleted_hint": True,
+                    "usn": 9001,
+                    "record_cursor": 128,
+                    "next_record_cursor": 208,
+                    "record_length": 80,
+                    "major_version": 3,
+                    "validation_checks": {
+                        "record_length_aligned": True,
+                        "record_cursor_progresses": True,
+                        "filename_utf16_valid": True,
+                        "version_supported": True,
+                    },
+                },
+                0,
+                mft_cache,
+            )
+
+        bounded = artifact.details["usn_bounded_mft_path"]
+        self.assertEqual(bounded["status"], "matched-file-reference-cache")
+        self.assertEqual(bounded["path_candidate"], "\\Users\\case.txt")
+        self.assertTrue(bounded["complete_within_bounded_mft_cache"])
+        self.assertEqual(
+            artifact.details["usn_replay_transition_profile"]["path_candidate"],
+            "\\Users\\case.txt",
+        )
+        self.assertTrue(
+            artifact.details["usn_journal_replay_profile"]["decoded_components"]["bounded_mft_path_correlation"]
+        )
+        self.assertTrue(
+            artifact.details["ntfs_native_depth_readiness_profile"]["decoded_components"]["bounded_mft_path_correlation"]
+        )
+        citation_kinds = {
+            item["kind"]
+            for item in artifact.details["ntfs_report_citation_manifest"]["citation_refs"]
+        }
+        self.assertIn("usn-bounded-mft-path-candidate", citation_kinds)
+
+    def test_usn_bounded_mft_replay_preview_summarizes_correlated_journal_paths(self) -> None:
+        records = [
+            {
+                "file_reference_number": 41,
+                "parent_file_reference_number": 40,
+                "file_reference_number_decoded": {"record_number": 41, "sequence_number": 7},
+                "parent_file_reference_number_decoded": {"record_number": 40, "sequence_number": 3},
+                "file_name": "case.txt",
+                "timestamp": "2026-01-02T03:04:05+00:00",
+                "reason_flags": ["FILE_DELETE", "CLOSE"],
+                "deleted_hint": True,
+                "usn": 9001,
+                "record_cursor": 128,
+            },
+            {
+                "file_reference_number": 99,
+                "parent_file_reference_number": 40,
+                "file_reference_number_decoded": {"record_number": 99, "sequence_number": 1},
+                "parent_file_reference_number_decoded": {"record_number": 40, "sequence_number": 3},
+                "file_name": "new.txt",
+                "timestamp": "2026-01-02T03:05:05+00:00",
+                "reason_flags": ["FILE_CREATE"],
+                "usn": 9002,
+                "record_cursor": 208,
+            },
+            {
+                "file_reference_number": 1234,
+                "parent_file_reference_number": 9999,
+                "file_name": "outside.txt",
+                "reason_flags": ["DATA_EXTEND"],
+                "usn": 9003,
+                "record_cursor": 288,
+            },
+        ]
+        mft_cache = {
+            40: {"path": "\\Users", "status": "reconstructed-bounded-parent-cache"},
+            41: {"path": "\\Users\\case.txt", "status": "reconstructed-bounded-parent-cache"},
+        }
+
+        preview = usn_bounded_mft_replay_preview(records, mft_cache)
+
+        self.assertEqual(preview["profile_version"], "usn-bounded-mft-replay-preview-v1")
+        self.assertEqual(preview["cache_entry_count"], 2)
+        self.assertEqual(preview["record_count"], 3)
+        self.assertEqual(preview["correlated_record_count"], 2)
+        self.assertEqual(preview["uncorrelated_record_count"], 1)
+        self.assertEqual(preview["file_reference_cache_hit_count"], 1)
+        self.assertEqual(preview["parent_reference_cache_hit_count"], 2)
+        self.assertIn(
+            {"value": "matched-file-reference-cache", "count": 1},
+            preview["correlation_status_counts"],
+        )
+        self.assertIn(
+            {"value": "combined-parent-cache-and-usn-name", "count": 1},
+            preview["correlation_status_counts"],
+        )
+        self.assertEqual(preview["path_samples"][0]["path_candidate"], "\\Users\\case.txt")
+        self.assertEqual(preview["path_samples"][1]["path_candidate"], "\\Users\\new.txt")
+        self.assertFalse(preview["complete_journal_replay"])
+        self.assertFalse(preview["commercial_grade_ready"])
+
+        reliability = usn_path_reliability_profile(
+            records=records,
+            bounded_replay_preview=preview,
+            path_cache_profile={
+                "cache_entry_count": 2,
+                "complete_path_ratio": 1.0,
+                "warning_count": 0,
+            },
+        )
+        self.assertEqual(reliability["profile_version"], "usn-path-reliability-profile-v1")
+        self.assertEqual(reliability["correlated_record_count"], 2)
+        self.assertEqual(reliability["correlation_ratio"], 0.666667)
+        self.assertEqual(reliability["reliability"], "medium-bounded-review-confidence")
+        self.assertEqual(reliability["review_priority"], "review-correlated-paths-first")
+        self.assertFalse(reliability["commercial_grade_ready"])
+        self.assertIn("usn-full-frn-path-cache-required", reliability["blockers"])
+
+    def test_usn_path_reliability_profile_marks_uncorrelated_scan_low_value(self) -> None:
+        reliability = usn_path_reliability_profile(
+            records=[{"file_name": "a.txt"}, {"file_name": "b.txt"}],
+            bounded_replay_preview={
+                "record_count": 2,
+                "correlated_record_count": 0,
+            },
+            path_cache_profile={
+                "cache_entry_count": 0,
+                "complete_path_ratio": 0,
+                "warning_count": 0,
+            },
+        )
+
+        self.assertEqual(reliability["reliability"], "no-path-correlation")
+        self.assertEqual(reliability["review_priority"], "review-usn-records-without-path-assumption")
+        self.assertIn("No reliable bounded MFT path correlation", reliability["safe_report_wording"])
+
+    def test_usn_state_replay_validation_profile_separates_record_diff_from_state_diff(self) -> None:
+        trusted_diff = {
+            "status": "pass",
+            "trusted_tool": "UsnJrnl2Csv",
+            "trusted_tool_recognized": True,
+            "matched_count": 4,
+        }
+        profile = usn_state_replay_validation_profile(
+            state_replay_preview={
+                "transition_count": 4,
+                "transitions": [{"transition": "create"}, {"transition": "delete"}],
+            },
+            trusted_diff=trusted_diff,
+            path_reliability_profile={"reliability": "medium-bounded-review-confidence"},
+        )
+
+        self.assertEqual(profile["profile_version"], "usn-state-replay-validation-profile-v1")
+        self.assertTrue(profile["record_level_trusted_diff_passed"])
+        self.assertFalse(profile["state_replay_diff_passed"])
+        self.assertEqual(profile["validation_status"], "record-level-diff-passed-state-replay-validation-required")
+        self.assertEqual(profile["trusted_tool"], "UsnJrnl2Csv")
+        self.assertEqual(profile["trusted_diff_matched_count"], 4)
+        self.assertIn("usn-trusted-state-replay-diff-required", profile["blockers"])
+        self.assertNotIn("usn-trusted-timeline-diff-required", profile["blockers"])
+        self.assertIn("bounded review aid", profile["safe_report_wording"])
+
+    def test_usn_state_replay_validation_profile_blocks_missing_record_diff(self) -> None:
+        profile = usn_state_replay_validation_profile(
+            state_replay_preview={"transition_count": 0},
+            trusted_diff={},
+            path_reliability_profile={"reliability": "no-path-correlation"},
+        )
+
+        self.assertFalse(profile["record_level_trusted_diff_passed"])
+        self.assertEqual(profile["validation_status"], "trusted-diff-and-state-replay-validation-required")
+        self.assertIn("usn-trusted-timeline-diff-required", profile["blockers"])
+        self.assertIn("usn-state-replay-transition-corpus-required", profile["blockers"])
+        self.assertIn("usn-path-reliability-validation-required", profile["blockers"])
+
+    def test_usn_state_replay_trusted_diff_accepts_nested_transition_rows(self) -> None:
+        rapid_rows = [
+            {
+                "artifact_type": "usn-journal-inventory",
+                "details": {
+                    "usn_replay_inventory_profile": {
+                        "bounded_state_replay_preview": {
+                            "transitions": [
+                                {
+                                    "usn": 9004,
+                                    "file_reference_number": 41,
+                                    "record_cursor": 408,
+                                    "transition": "delete",
+                                    "timestamp": "2026-01-02T03:05:00Z",
+                                    "previous_path": r"C:\Users\new.txt",
+                                    "new_path": "",
+                                    "file_name": "new.txt",
+                                    "state_effect": "remove-current-path",
+                                }
+                            ]
+                        }
+                    }
+                },
+            }
+        ]
+        trusted_rows = [
+            {
+                "USN": "9004",
+                "FRN": "41",
+                "RecordCursor": "408",
+                "Transition": "delete",
+                "Timestamp": "2026-01-02T03:05:00Z",
+                "PreviousPath": r"C:\Users\new.txt",
+                "NewPath": "",
+                "FileName": "new.txt",
+                "StateEffect": "remove-current-path",
+            }
+        ]
+
+        diff = build_usn_state_replay_trusted_diff(
+            rapid_rows,
+            trusted_rows,
+            trusted_tool="known-answer-state-replay",
+        )
+
+        self.assertEqual(diff["mode"], "usn-trusted-state-replay-diff-v1")
+        self.assertEqual(diff["status"], "pass")
+        self.assertTrue(diff["commercial_grade_evidence"])
+        self.assertEqual(diff["matched_count"], 1)
+
+    def test_usn_state_replay_trusted_diff_reports_transition_mismatch(self) -> None:
+        rapid_rows = [
+            {
+                "usn": 9004,
+                "file_reference_number": 41,
+                "transition": "delete",
+                "previous_path": r"C:\Users\new.txt",
+            }
+        ]
+        trusted_rows = [
+            {
+                "USN": "9004",
+                "FRN": "41",
+                "Transition": "rename-new-name",
+                "PreviousPath": r"C:\Users\new.txt",
+            }
+        ]
+
+        diff = build_usn_state_replay_trusted_diff(
+            rapid_rows,
+            trusted_rows,
+            trusted_tool="known-answer-state-replay",
+        )
+
+        self.assertEqual(diff["status"], "diffs-present")
+        self.assertFalse(diff["commercial_grade_evidence"])
+        self.assertEqual(diff["missing_in_trusted_count"], 1)
+        self.assertEqual(diff["extra_in_trusted_count"], 1)
+
+    def test_usn_state_replay_validation_profile_accepts_state_replay_diff_pass(self) -> None:
+        profile = usn_state_replay_validation_profile(
+            state_replay_preview={"transition_count": 1},
+            trusted_diff={"status": "pass", "trusted_tool": "UsnJrnl2Csv", "trusted_tool_recognized": True, "matched_count": 1},
+            state_replay_diff={
+                "status": "pass",
+                "trusted_tool": "known-answer-state-replay",
+                "trusted_tool_recognized": True,
+                "matched_count": 1,
+            },
+            path_reliability_profile={"reliability": "medium-bounded-review-confidence"},
+        )
+
+        self.assertEqual(profile["validation_status"], "record-and-state-replay-diffs-passed")
+        self.assertTrue(profile["state_replay_diff_passed"])
+        self.assertTrue(profile["commercial_grade_ready"])
+        self.assertEqual(profile["blockers"], [])
+
+    def test_usn_replay_inventory_embeds_state_replay_validation_gate(self) -> None:
+        records = [
+            {
+                "file_reference_number": 41,
+                "parent_file_reference_number": 40,
+                "file_reference_number_decoded": {"record_number": 41, "sequence_number": 7},
+                "parent_file_reference_number_decoded": {"record_number": 40, "sequence_number": 3},
+                "file_name": "case.txt",
+                "timestamp": "2026-01-02T03:04:00+00:00",
+                "reason_flags": ["FILE_CREATE"],
+                "usn": 9001,
+                "record_cursor": 128,
+            }
+        ]
+        mft_cache = {
+            40: {"path": "\\Users", "status": "reconstructed-bounded-parent-cache", "complete_within_bounded_scan": True},
+            41: {"path": "\\Users\\case.txt", "status": "reconstructed-bounded-parent-cache", "complete_within_bounded_scan": True},
+        }
+
+        inventory = usn_replay_inventory_profile(
+            records,
+            {"record_limit_reached": False},
+            mft_cache,
+            trusted_diff={
+                "status": "pass",
+                "trusted_tool": "UsnJrnl2Csv",
+                "trusted_tool_recognized": True,
+                "matched_count": 1,
+            },
+        )
+
+        validation = inventory["usn_state_replay_validation_profile"]
+        self.assertEqual(validation["trusted_diff_status"], "pass")
+        self.assertTrue(validation["record_level_trusted_diff_passed"])
+        self.assertFalse(validation["state_replay_diff_passed"])
+        self.assertIn("usn-trusted-state-replay-diff-required", validation["blockers"])
+        self.assertIn("usn_path_reliability_profile", inventory)
+        self.assertIn("bounded_state_replay_preview", inventory)
+
+    def test_usn_rename_pair_preview_pairs_old_and_new_names_with_caveats(self) -> None:
+        records = [
+            {
+                "file_reference_number": 41,
+                "parent_file_reference_number": 40,
+                "file_reference_number_decoded": {"record_number": 41, "sequence_number": 7},
+                "parent_file_reference_number_decoded": {"record_number": 40, "sequence_number": 3},
+                "file_name": "old.txt",
+                "timestamp": "2026-01-02T03:04:05+00:00",
+                "reason_flags": ["RENAME_OLD_NAME"],
+                "usn": 9001,
+                "record_cursor": 128,
+            },
+            {
+                "file_reference_number": 41,
+                "parent_file_reference_number": 40,
+                "file_reference_number_decoded": {"record_number": 41, "sequence_number": 7},
+                "parent_file_reference_number_decoded": {"record_number": 40, "sequence_number": 3},
+                "file_name": "new.txt",
+                "timestamp": "2026-01-02T03:04:06+00:00",
+                "reason_flags": ["RENAME_NEW_NAME"],
+                "usn": 9002,
+                "record_cursor": 208,
+            },
+            {
+                "file_reference_number": 99,
+                "parent_file_reference_number": 40,
+                "file_name": "orphan-old.txt",
+                "reason_flags": ["RENAME_OLD_NAME"],
+                "usn": 9003,
+                "record_cursor": 288,
+            },
+        ]
+        mft_cache = {
+            40: {"path": "\\Users", "status": "reconstructed-bounded-parent-cache"},
+            41: {"path": "\\Users\\new.txt", "status": "reconstructed-bounded-parent-cache"},
+        }
+
+        preview = usn_rename_pair_preview(records, mft_cache)
+
+        self.assertEqual(preview["profile_version"], "usn-rename-pair-preview-v1")
+        self.assertEqual(preview["rename_old_count"], 2)
+        self.assertEqual(preview["rename_new_count"], 1)
+        self.assertEqual(preview["candidate_pair_count"], 1)
+        self.assertEqual(preview["unmatched_old_count"], 1)
+        self.assertEqual(preview["pair_balance"], "requires-full-journal-context")
+        pair = preview["pairs"][0]
+        self.assertEqual(pair["confidence"], "high")
+        self.assertEqual(pair["old_name"], "old.txt")
+        self.assertEqual(pair["new_name"], "new.txt")
+        self.assertEqual(pair["file_reference_number"], 41)
+        self.assertTrue(pair["same_parent_reference"])
+        self.assertEqual(pair["old_path_candidate"], "\\Users\\old.txt")
+        self.assertEqual(pair["new_path_candidate"], "\\Users\\new.txt")
+        self.assertEqual(pair["old_path_candidate_source"], "parent-cache-plus-usn-name")
+        self.assertEqual(pair["new_path_candidate_source"], "parent-cache-plus-usn-name")
+        self.assertEqual(pair["old_frn_path_correlation"]["path_candidate"], "\\Users\\new.txt")
+        self.assertFalse(preview["complete_journal_replay"])
+        self.assertFalse(preview["commercial_grade_ready"])
+
+    def test_usn_delete_lifecycle_preview_pairs_create_and_delete_with_caveats(self) -> None:
+        records = [
+            {
+                "file_reference_number": 41,
+                "parent_file_reference_number": 40,
+                "file_reference_number_decoded": {"record_number": 41, "sequence_number": 7},
+                "parent_file_reference_number_decoded": {"record_number": 40, "sequence_number": 3},
+                "file_name": "case.txt",
+                "timestamp": "2026-01-02T03:04:05+00:00",
+                "reason_flags": ["FILE_CREATE"],
+                "usn": 9001,
+                "record_cursor": 128,
+            },
+            {
+                "file_reference_number": 41,
+                "parent_file_reference_number": 40,
+                "file_reference_number_decoded": {"record_number": 41, "sequence_number": 7},
+                "parent_file_reference_number_decoded": {"record_number": 40, "sequence_number": 3},
+                "file_name": "case.txt",
+                "timestamp": "2026-01-02T03:04:06+00:00",
+                "reason_flags": ["FILE_DELETE", "CLOSE"],
+                "deleted_hint": True,
+                "usn": 9002,
+                "record_cursor": 208,
+            },
+            {
+                "file_reference_number": 99,
+                "parent_file_reference_number": 40,
+                "file_name": "orphan-delete.txt",
+                "reason_flags": ["FILE_DELETE"],
+                "usn": 9003,
+                "record_cursor": 288,
+            },
+        ]
+        mft_cache = {
+            40: {"path": "\\Users", "status": "reconstructed-bounded-parent-cache"},
+            41: {"path": "\\Users\\case.txt", "status": "reconstructed-bounded-parent-cache"},
+        }
+
+        preview = usn_delete_lifecycle_preview(records, mft_cache)
+
+        self.assertEqual(preview["profile_version"], "usn-delete-lifecycle-preview-v1")
+        self.assertEqual(preview["create_count"], 1)
+        self.assertEqual(preview["delete_count"], 2)
+        self.assertEqual(preview["candidate_lifecycle_count"], 2)
+        self.assertEqual(preview["paired_create_delete_count"], 1)
+        self.assertEqual(preview["delete_without_prior_create_count"], 1)
+        paired = preview["candidates"][0]
+        self.assertEqual(paired["lifecycle_status"], "create-delete-paired-within-bounded-window")
+        self.assertEqual(paired["confidence"], "high")
+        self.assertEqual(paired["file_reference_number"], 41)
+        self.assertEqual(paired["create_record_cursor"], 128)
+        self.assertEqual(paired["delete_record_cursor"], 208)
+        self.assertEqual(paired["delete_path_candidate"], "\\Users\\case.txt")
+        self.assertFalse(preview["complete_journal_replay"])
+        self.assertFalse(preview["commercial_grade_ready"])
+
+    def test_usn_timeline_review_candidates_promote_rename_and_delete_pivots(self) -> None:
+        rename_preview = {
+            "pairs": [
+                {
+                    "old_name": "old.txt",
+                    "new_name": "new.txt",
+                    "old_timestamp": "2026-01-02T03:04:05+00:00",
+                    "new_timestamp": "2026-01-02T03:04:06+00:00",
+                    "old_record_cursor": 128,
+                    "new_record_cursor": 208,
+                    "old_path_candidate": "\\Users\\old.txt",
+                    "new_path_candidate": "\\Users\\new.txt",
+                    "file_reference_number": 41,
+                    "confidence": "high",
+                }
+            ]
+        }
+        delete_preview = {
+            "candidates": [
+                {
+                    "file_name": "gone.txt",
+                    "create_timestamp": "2026-01-02T03:05:00+00:00",
+                    "delete_timestamp": "2026-01-02T03:05:30+00:00",
+                    "create_record_cursor": 308,
+                    "delete_record_cursor": 408,
+                    "create_path_candidate": "\\Users\\gone.txt",
+                    "delete_path_candidate": "\\Users\\gone.txt",
+                    "file_reference_number": 42,
+                    "confidence": "high",
+                }
+            ]
+        }
+
+        candidates = usn_timeline_review_candidates(
+            rename_pair_preview=rename_preview,
+            delete_lifecycle_preview=delete_preview,
+        )
+
+        self.assertEqual(len(candidates), 4)
+        self.assertEqual(candidates[0]["timeline_type"], "usn-rename-old-name")
+        self.assertEqual(candidates[1]["timeline_type"], "usn-rename-new-name")
+        self.assertEqual(candidates[2]["timeline_type"], "usn-file-create")
+        self.assertEqual(candidates[3]["timeline_type"], "usn-file-delete")
+        self.assertEqual(candidates[3]["record_cursor"], 408)
+        self.assertEqual(candidates[3]["reportability"], "bounded-usn-timeline-review-candidate")
+        self.assertTrue(candidates[3]["validation_required"])
+        self.assertIn("usn-trusted-timeline-diff-required", candidates[3]["blockers"])
+
+    def test_usn_bounded_state_replay_preview_applies_create_rename_delete_in_order(self) -> None:
+        records = [
+            {
+                "file_reference_number": 41,
+                "parent_file_reference_number": 40,
+                "file_reference_number_decoded": {"record_number": 41, "sequence_number": 7},
+                "parent_file_reference_number_decoded": {"record_number": 40, "sequence_number": 3},
+                "file_name": "old.txt",
+                "timestamp": "2026-01-02T03:04:05+00:00",
+                "reason_flags": ["RENAME_OLD_NAME"],
+                "usn": 9002,
+                "record_cursor": 208,
+            },
+            {
+                "file_reference_number": 41,
+                "parent_file_reference_number": 40,
+                "file_reference_number_decoded": {"record_number": 41, "sequence_number": 7},
+                "parent_file_reference_number_decoded": {"record_number": 40, "sequence_number": 3},
+                "file_name": "case.txt",
+                "timestamp": "2026-01-02T03:04:00+00:00",
+                "reason_flags": ["FILE_CREATE"],
+                "usn": 9001,
+                "record_cursor": 128,
+            },
+            {
+                "file_reference_number": 41,
+                "parent_file_reference_number": 40,
+                "file_reference_number_decoded": {"record_number": 41, "sequence_number": 7},
+                "parent_file_reference_number_decoded": {"record_number": 40, "sequence_number": 3},
+                "file_name": "new.txt",
+                "timestamp": "2026-01-02T03:04:06+00:00",
+                "reason_flags": ["RENAME_NEW_NAME"],
+                "usn": 9003,
+                "record_cursor": 308,
+            },
+            {
+                "file_reference_number": 41,
+                "parent_file_reference_number": 40,
+                "file_reference_number_decoded": {"record_number": 41, "sequence_number": 7},
+                "parent_file_reference_number_decoded": {"record_number": 40, "sequence_number": 3},
+                "file_name": "new.txt",
+                "timestamp": "2026-01-02T03:05:00+00:00",
+                "reason_flags": ["FILE_DELETE"],
+                "usn": 9004,
+                "record_cursor": 408,
+            },
+        ]
+        mft_cache = {
+            40: {"path": "\\Users", "status": "reconstructed-bounded-parent-cache"},
+            41: {"path": "\\Users\\new.txt", "status": "reconstructed-bounded-parent-cache"},
+        }
+
+        preview = usn_bounded_state_replay_preview(records, mft_cache)
+
+        self.assertEqual(preview["profile_version"], "usn-bounded-state-replay-preview-v1")
+        self.assertEqual(preview["transition_count"], 4)
+        transition_counts = {
+            item["value"]: item["count"]
+            for item in preview["transition_counts"]
+        }
+        self.assertEqual(transition_counts["create"], 1)
+        self.assertEqual(transition_counts["rename-old-name"], 1)
+        self.assertEqual(transition_counts["rename-new-name"], 1)
+        self.assertEqual(transition_counts["delete"], 1)
+        transitions = preview["transitions"]
+        self.assertEqual([item["transition"] for item in transitions], ["create", "rename-old-name", "rename-new-name", "delete"])
+        self.assertEqual(transitions[0]["new_path"], "\\Users\\case.txt")
+        self.assertEqual(transitions[1]["previous_path"], "\\Users\\old.txt")
+        self.assertEqual(transitions[2]["previous_path"], "\\Users\\old.txt")
+        self.assertEqual(transitions[2]["new_path"], "\\Users\\new.txt")
+        self.assertEqual(transitions[3]["previous_path"], "\\Users\\new.txt")
+        self.assertEqual(transitions[3]["timeline_type"], "usn-state-delete")
+        self.assertEqual(transitions[3]["event_label"], "USN state delete")
+        self.assertEqual(transitions[3]["path_candidate"], "\\Users\\new.txt")
+        self.assertEqual(transitions[3]["reportability"], "bounded-usn-state-replay-transition")
+        self.assertTrue(transitions[3]["validation_required"])
+        self.assertIn("usn-trusted-state-replay-diff-required", transitions[3]["blockers"])
+        self.assertEqual(preview["final_path_state_count"], 1)
+        self.assertFalse(preview["complete_journal_replay"])
+        self.assertFalse(preview["commercial_grade_ready"])
+        self.assertIn("usn-trusted-state-replay-diff-required", preview["blockers"])
 
     def test_jumplist_destlist_marks_unlinked_entries_as_review_only_candidates(self) -> None:
         path = r"C:\Users\alice\Documents\missing.docx"
@@ -2544,6 +3501,34 @@ class RapidTriageWindowsArtifactsCollectorTests(unittest.TestCase):
             self.assertTrue(
                 shellbag_uplift["large_data_controls"]["transaction_log_replay_required_for_commercial_claims"]
             )
+            shellbag_manifest = key_tree.details["shellbag_depth_manifest"]
+            self.assertEqual(shellbag_manifest["manifest_version"], "shellbag-depth-manifest-v1")
+            self.assertEqual(shellbag_manifest["gap_id"], "#15")
+            self.assertEqual(shellbag_manifest["source"]["user_hive_scope"], "usrclass")
+            self.assertEqual(shellbag_manifest["row_identity"]["shellbag_section"], "bagmru")
+            self.assertIn("42", shellbag_manifest["bag_relationship"]["bag_id_candidates"])
+            self.assertFalse(shellbag_manifest["bag_relationship"]["bag_node_relationship_validated"])
+            self.assertEqual(
+                shellbag_manifest["activity_timestamps"]["primary_timestamp"],
+                "2024-04-02T03:04:05+00:00",
+            )
+            self.assertFalse(shellbag_manifest["binary_payload"]["binary_shell_item_decode_capability"])
+            self.assertEqual(
+                shellbag_manifest["transaction_and_deleted_state"]["transaction_log_status"],
+                "present-not-replayed",
+            )
+            self.assertFalse(
+                shellbag_manifest["transaction_and_deleted_state"]["deleted_slack_validation_available"],
+            )
+            self.assertEqual(
+                shellbag_manifest["reportability"]["allowed_use"],
+                "folder-view-history-triage-pivot",
+            )
+            self.assertFalse(shellbag_manifest["reportability"]["folder_access_final"])
+            self.assertEqual(
+                key_tree.details["shellbag_depth_manifest_hash"],
+                shellbag_manifest["manifest_sha256"],
+            )
 
     def test_registry_hive_reconstructs_native_key_and_value_links(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -2589,6 +3574,27 @@ class RapidTriageWindowsArtifactsCollectorTests(unittest.TestCase):
             self.assertEqual(run_key.details["value_names"], ["SecurityUpdater"])
             self.assertEqual(run_key.details["linked_value_count"], 1)
             self.assertEqual(run_key.details["missing_value_cell_offsets"], [])
+            self.assertEqual(
+                run_key.details["registry_subkey_list_profile"]["profile_version"],
+                "registry-subkey-list-profile-v1",
+            )
+            self.assertEqual(run_key.details["registry_subkey_list_profile"]["list_validation_status"], "resolved")
+            self.assertEqual(run_key.details["registry_subkey_list_profile"]["stable"]["status"], "not-declared")
+            self.assertEqual(run_key.details["registry_value_list_profile"]["status"], "resolved")
+            self.assertEqual(run_key.details["registry_value_list_profile"]["declared_value_count"], 1)
+            self.assertEqual(run_key.details["registry_value_list_profile"]["decoded_value_count"], 1)
+            self.assertEqual(len(run_key.details["registry_value_list_profile"]["cell_sha256"]), 64)
+            reconstruction = run_key.details["registry_key_tree_reconstruction_profile"]
+            self.assertEqual(
+                reconstruction["profile_version"],
+                "registry-key-tree-reconstruction-profile-v1",
+            )
+            self.assertEqual(reconstruction["reconstruction_status"], "bounded-node-reconstructed")
+            self.assertTrue(reconstruction["root_reachable"])
+            self.assertTrue(reconstruction["parent_child_backlinks_consistent"])
+            self.assertTrue(reconstruction["subkey_lists_resolved"])
+            self.assertTrue(reconstruction["value_list_resolved"])
+            self.assertFalse(reconstruction["validation_required"])
             self.assertFalse(run_key.details["validation_required"])
             self.assertFalse(run_key.details["commercial_grade_ready"])
             self.assertEqual(
@@ -2712,7 +3718,27 @@ class RapidTriageWindowsArtifactsCollectorTests(unittest.TestCase):
             self.assertTrue(key_depth["decoded_components"]["value_list_linking"])
             self.assertFalse(key_depth["decoded_components"]["transaction_log_replay"])
             self.assertEqual(key_depth["validation_summary"]["transaction_log_status"], "present-not-replayed")
+            self.assertEqual(
+                key_depth["registry_key_tree_reconstruction_profile"]["reconstruction_status"],
+                "bounded-node-reconstructed",
+            )
             self.assertIn("source_sha256", key_depth["source_citation_requirements"])
+            key_manifest = run_key.details["registry_report_citation_manifest"]
+            self.assertEqual(key_manifest["manifest_version"], "registry-report-citation-manifest-v1")
+            self.assertEqual(key_manifest["artifact_type"], "registry-key-tree-node")
+            self.assertEqual(key_manifest["row_identity"]["key_path"], "HKEY_CURRENT_USER\\Software\\Run")
+            self.assertEqual(key_manifest["validation_summary"]["transaction_log_status"], "present-not-replayed")
+            self.assertEqual(
+                key_manifest["reportability"]["allowed_use"],
+                "registry-native-triage-review-pivot",
+            )
+            self.assertFalse(key_manifest["reportability"]["ready_for_court_report"])
+            self.assertEqual(len(key_manifest["manifest_sha256"]), 64)
+            key_citation_kinds = {item["kind"] for item in key_manifest["citation_refs"]}
+            self.assertIn("registry-hive-source", key_citation_kinds)
+            self.assertIn("registry-cell-offset", key_citation_kinds)
+            self.assertIn("registry-key-path", key_citation_kinds)
+            self.assertIn("registry-transaction-log-context", key_citation_kinds)
 
             value_recovery = next(
                 record
@@ -2736,6 +3762,22 @@ class RapidTriageWindowsArtifactsCollectorTests(unittest.TestCase):
             self.assertEqual(
                 value_recovery.details["registry_recovery_evidence"]["allocator_context"]["validation_status"],
                 "free-cell-candidate-validation-required",
+            )
+            self.assertEqual(
+                value_recovery.details["registry_recovery_evidence"]["allocator_neighbor_context"][
+                    "profile_version"
+                ],
+                "registry-allocator-neighbor-context-v1",
+            )
+            self.assertGreaterEqual(
+                value_recovery.details["registry_recovery_evidence"]["allocator_neighbor_context"][
+                    "ordered_cell_index"
+                ],
+                0,
+            )
+            self.assertIn(
+                "allocator:neighbor-context-recorded",
+                value_recovery.details["registry_recovery_evidence"]["evidence_reasons"],
             )
             self.assertEqual(value_recovery.details["registry_recovery_evidence"]["parent_confidence"], "key-value-list")
             self.assertIn(
@@ -2761,6 +3803,15 @@ class RapidTriageWindowsArtifactsCollectorTests(unittest.TestCase):
             )
             self.assertIn(
                 "known-answer-deleted-cell-corpus",
+                value_recovery.details["registry_recovery_validation_profile"]["false_positive_controls"],
+            )
+            self.assertTrue(
+                value_recovery.details["registry_recovery_validation_profile"][
+                    "allocator_neighbor_context_present"
+                ]
+            )
+            self.assertIn(
+                "allocator-neighbor-context-review",
                 value_recovery.details["registry_recovery_validation_profile"]["false_positive_controls"],
             )
             self.assertIn(
@@ -2790,6 +3841,7 @@ class RapidTriageWindowsArtifactsCollectorTests(unittest.TestCase):
             self.assertIn("positive-size free-cell validation", value_gate["satisfied_checks"])
             self.assertIn("parent-key confirmation", value_gate["satisfied_checks"])
             self.assertIn("allocator reportability context", value_gate["satisfied_checks"])
+            self.assertIn("allocator neighbor context", value_gate["satisfied_checks"])
             self.assertIn("transaction-log context disclosure", value_gate["satisfied_checks"])
             self.assertIn("reportability blocked until independent confirmation", value_gate["satisfied_checks"])
             self.assertEqual(value_gate["missing_required_checks"], ["trusted deleted-cell offset diff pass"])
@@ -2820,6 +3872,19 @@ class RapidTriageWindowsArtifactsCollectorTests(unittest.TestCase):
             self.assertFalse(value_depth["decoded_components"]["trusted_deleted_cell_diff"])
             self.assertEqual(value_depth["validation_summary"]["recovery_validation_status"], "required")
             self.assertIn("cell_offset", value_depth["source_citation_requirements"])
+            value_manifest = value_recovery.details["registry_report_citation_manifest"]
+            self.assertEqual(value_manifest["artifact_type"], "registry-value-recovery-candidate")
+            self.assertEqual(value_manifest["citation_scope"], "deleted-value-recovery")
+            self.assertEqual(value_manifest["row_identity"]["name"], "SecurityUpdater")
+            self.assertEqual(
+                value_manifest["row_identity"]["parent_key_path_candidate"],
+                "HKEY_CURRENT_USER\\Software\\Run",
+            )
+            value_citation_kinds = {item["kind"] for item in value_manifest["citation_refs"]}
+            self.assertIn("registry-value-or-name", value_citation_kinds)
+            self.assertIn("registry-recovery-validation", value_citation_kinds)
+            self.assertIn("deleted-value-cell", value_manifest["validation_summary"]["passed_matrix_ids"])
+            self.assertIn("registry-deleted-cell-cross-tool-diff-required", value_manifest["reportability"]["blockers"])
             key_recovery = next(
                 record
                 for record in records
@@ -2843,6 +3908,14 @@ class RapidTriageWindowsArtifactsCollectorTests(unittest.TestCase):
                 key_recovery.details["registry_recovery_reportability_decision"]["blockers"],
             )
             self.assertEqual(key_recovery.details["commercial_uplift_evidence"]["item_numbers"], [5])
+            key_recovery_manifest = key_recovery.details["registry_report_citation_manifest"]
+            self.assertEqual(key_recovery_manifest["artifact_type"], "registry-key-recovery-candidate")
+            self.assertEqual(key_recovery_manifest["citation_scope"], "deleted-key-recovery")
+            self.assertEqual(key_recovery_manifest["row_identity"]["candidate_kind"], "deleted-or-free-key-cell")
+            self.assertIn(
+                "registry-recovery-validation",
+                {item["kind"] for item in key_recovery_manifest["citation_refs"]},
+            )
 
     def test_registry_key_tree_diff_compares_trusted_key_paths_and_values(self) -> None:
         rapid = [
@@ -3477,7 +4550,14 @@ class RapidTriageWindowsArtifactsCollectorTests(unittest.TestCase):
             system_types = {artifact["artifact_type"] for artifact in system_provider["artifacts"]}
             self.assertEqual(
                 system_types,
-                {"task-scheduler-task", "defender-support-log", "firewall-log", "wer-report", "zone-identifier"},
+                {
+                    "task-scheduler-task",
+                    "defender-support-log",
+                    "firewall-log",
+                    "wer-report",
+                    "zone-identifier",
+                    "web-server-log",
+                },
             )
             task = next(artifact for artifact in system_provider["artifacts"] if artifact["artifact_type"] == "task-scheduler-task")
             self.assertEqual(task["details"]["command"], "powershell.exe")
@@ -3487,11 +4567,21 @@ class RapidTriageWindowsArtifactsCollectorTests(unittest.TestCase):
             self.assertIn("#18", defender["details"]["system_report_grade_assessment"]["commercial_gap_ids"])
             self.assertEqual(defender["details"]["forensic_review"]["gap_id"], "#18")
             self.assertFalse(defender["details"]["system_native_capabilities"]["defender_event_mpcmdrun_correlation"])
+            self.assertEqual(defender["details"]["system_deep_parser_manifest"]["artifact_family"], "defender")
+            self.assertIn(
+                "defender-report-grade-correlation",
+                defender["details"]["system_deep_parser_manifest"]["validation"]["failed_validation_matrix_ids"],
+            )
             firewall = next(artifact for artifact in system_provider["artifacts"] if artifact["artifact_type"] == "firewall-log")
             self.assertEqual(firewall["details"]["blocked_count"], 1)
             self.assertIn("#18", firewall["details"]["system_report_grade_assessment"]["commercial_gap_ids"])
             self.assertEqual(firewall["details"]["forensic_review"]["gap_id"], "#18")
             self.assertFalse(firewall["details"]["system_native_capabilities"]["firewall_rule_store_correlation"])
+            self.assertEqual(firewall["details"]["system_deep_parser_manifest"]["artifact_family"], "firewall")
+            self.assertIn(
+                "firewall-report-grade-correlation",
+                firewall["details"]["system_deep_parser_manifest"]["validation"]["failed_validation_matrix_ids"],
+            )
             wer = next(artifact for artifact in system_provider["artifacts"] if artifact["artifact_type"] == "wer-report")
             self.assertEqual(wer["details"]["application"], "powershell.exe")
             self.assertEqual(wer["details"]["coverage_status"], "wer-key-value-normalized")
@@ -3503,6 +4593,11 @@ class RapidTriageWindowsArtifactsCollectorTests(unittest.TestCase):
             self.assertTrue(wer["details"]["validation_checks"]["has_exception_code"])
             self.assertFalse(wer["details"]["commercial_grade_ready"])
             self.assertIn("#18", wer["details"]["system_report_grade_assessment"]["commercial_gap_ids"])
+            self.assertEqual(wer["details"]["system_deep_parser_manifest"]["artifact_family"], "wer")
+            self.assertIn(
+                "wer-report-grade-correlation",
+                wer["details"]["system_deep_parser_manifest"]["validation"]["failed_validation_matrix_ids"],
+            )
             self.assertEqual(wer["details"]["forensic_review"]["gap_id"], "#18")
             self.assertIn("wer-dump-file-correlation-not-implemented", wer["details"]["commercial_grade_blockers"])
             self.assertEqual(len(wer["details"]["source_hashes"]["sha256"]), 64)

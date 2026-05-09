@@ -286,6 +286,42 @@ def build_record(
         details=detail_payload,
     )
     detail_payload["cloud_export_import_manifest_hash"] = detail_payload["cloud_export_import_manifest"]["manifest_sha256"]
+    if family == "google":
+        detail_payload["google_takeout_parser_manifest"] = build_google_takeout_parser_manifest(
+            artifact_type=artifact_type,
+            service=service,
+            source_index=source_index,
+            source_hashes=source_hashes,
+            source_path=str(path.resolve()),
+            details=detail_payload,
+        )
+        detail_payload["google_takeout_parser_manifest_hash"] = detail_payload["google_takeout_parser_manifest"][
+            "manifest_sha256"
+        ]
+    if family == "apple-icloud":
+        detail_payload["icloud_export_parser_manifest"] = build_icloud_export_parser_manifest(
+            artifact_type=artifact_type,
+            service=service,
+            source_index=source_index,
+            source_hashes=source_hashes,
+            source_path=str(path.resolve()),
+            details=detail_payload,
+        )
+        detail_payload["icloud_export_parser_manifest_hash"] = detail_payload["icloud_export_parser_manifest"][
+            "manifest_sha256"
+        ]
+    if family == "microsoft-365":
+        detail_payload["m365_export_parser_manifest"] = build_m365_export_parser_manifest(
+            artifact_type=artifact_type,
+            service=service,
+            source_index=source_index,
+            source_hashes=source_hashes,
+            source_path=str(path.resolve()),
+            details=detail_payload,
+        )
+        detail_payload["m365_export_parser_manifest_hash"] = detail_payload["m365_export_parser_manifest"][
+            "manifest_sha256"
+        ]
     validation_checks = detail_payload.get("validation_checks")
     if not isinstance(validation_checks, Mapping):
         validation_checks = {}
@@ -696,6 +732,21 @@ def cloud_export_import_functional_profile(
         if isinstance(details.get("cloud_export_import_manifest"), Mapping)
         else {}
     )
+    google_manifest = (
+        details.get("google_takeout_parser_manifest")
+        if isinstance(details.get("google_takeout_parser_manifest"), Mapping)
+        else {}
+    )
+    icloud_manifest = (
+        details.get("icloud_export_parser_manifest")
+        if isinstance(details.get("icloud_export_parser_manifest"), Mapping)
+        else {}
+    )
+    m365_manifest = (
+        details.get("m365_export_parser_manifest")
+        if isinstance(details.get("m365_export_parser_manifest"), Mapping)
+        else {}
+    )
     failed_checks = [
         check
         for check, failed in {
@@ -703,6 +754,9 @@ def cloud_export_import_functional_profile(
             "original-cloud-export-hash-not-verified": not validation_checks.get("original_export_hash_verified"),
             "provider-known-answer-corpus-required": not validation_checks.get("provider_known_answer_validated"),
             "cloud-export-import-manifest-not-emitted": not export_manifest,
+            "google-takeout-parser-manifest-not-emitted": family == "google" and not google_manifest,
+            "icloud-export-parser-manifest-not-emitted": family == "apple-icloud" and not icloud_manifest,
+            "m365-export-parser-manifest-not-emitted": family == "microsoft-365" and not m365_manifest,
             "trusted-provider-export-diff-required": trusted_diff.get("status") != "pass",
         }.items()
         if failed
@@ -734,6 +788,21 @@ def cloud_export_import_functional_profile(
             "cloud_export_import_manifest_hash": optional_text(export_manifest.get("manifest_sha256")),
             "cloud_export_import_manifest_emitted": bool(export_manifest),
             "source_viewer_locator_emitted": isinstance(export_manifest.get("source_viewer_locator"), Mapping),
+            "google_takeout_parser_manifest_hash": optional_text(google_manifest.get("manifest_sha256")),
+            "google_takeout_source_row_citation_present": bool(
+                isinstance(google_manifest.get("row_citation"), Mapping)
+                and google_manifest.get("row_citation", {}).get("row_hash")
+            ),
+            "icloud_export_parser_manifest_hash": optional_text(icloud_manifest.get("manifest_sha256")),
+            "icloud_export_source_row_citation_present": bool(
+                isinstance(icloud_manifest.get("row_citation"), Mapping)
+                and icloud_manifest.get("row_citation", {}).get("row_hash")
+            ),
+            "m365_export_parser_manifest_hash": optional_text(m365_manifest.get("manifest_sha256")),
+            "m365_export_source_row_citation_present": bool(
+                isinstance(m365_manifest.get("row_citation"), Mapping)
+                and m365_manifest.get("row_citation", {}).get("row_hash")
+            ),
         },
         "source_subject_or_object": optional_text(
             details.get("subject") or details.get("file_name") or details.get("chat_id") or details.get("account_email")
@@ -744,6 +813,18 @@ def cloud_export_import_functional_profile(
             for check, passed in {
                 "cloud-export-import-manifest-emitted": bool(export_manifest),
                 "cloud-export-source-locator-emitted": isinstance(export_manifest.get("source_viewer_locator"), Mapping),
+                "google-takeout-parser-manifest-emitted": family == "google" and bool(google_manifest),
+                "google-takeout-source-locator-emitted": family == "google"
+                and isinstance(google_manifest.get("row_citation"), Mapping)
+                and isinstance(google_manifest.get("row_citation", {}).get("source_viewer_locator"), Mapping),
+                "icloud-export-parser-manifest-emitted": family == "apple-icloud" and bool(icloud_manifest),
+                "icloud-export-source-locator-emitted": family == "apple-icloud"
+                and isinstance(icloud_manifest.get("row_citation"), Mapping)
+                and isinstance(icloud_manifest.get("row_citation", {}).get("source_viewer_locator"), Mapping),
+                "m365-export-parser-manifest-emitted": family == "microsoft-365" and bool(m365_manifest),
+                "m365-export-source-locator-emitted": family == "microsoft-365"
+                and isinstance(m365_manifest.get("row_citation"), Mapping)
+                and isinstance(m365_manifest.get("row_citation", {}).get("source_viewer_locator"), Mapping),
                 "cloud-source-hash-preserved": bool(source_hashes.get("sha256")),
             }.items()
             if passed
@@ -795,6 +876,27 @@ def cloud_commercial_uplift_evidence(
     )
     if export_manifest.get("manifest_sha256"):
         source_refs.append(f"cloud_export_manifest_sha256:{export_manifest['manifest_sha256']}")
+    google_manifest = (
+        details.get("google_takeout_parser_manifest")
+        if isinstance(details.get("google_takeout_parser_manifest"), Mapping)
+        else {}
+    )
+    if google_manifest.get("manifest_sha256"):
+        source_refs.append(f"google_takeout_parser_manifest_sha256:{google_manifest['manifest_sha256']}")
+    icloud_manifest = (
+        details.get("icloud_export_parser_manifest")
+        if isinstance(details.get("icloud_export_parser_manifest"), Mapping)
+        else {}
+    )
+    if icloud_manifest.get("manifest_sha256"):
+        source_refs.append(f"icloud_export_parser_manifest_sha256:{icloud_manifest['manifest_sha256']}")
+    m365_manifest = (
+        details.get("m365_export_parser_manifest")
+        if isinstance(details.get("m365_export_parser_manifest"), Mapping)
+        else {}
+    )
+    if m365_manifest.get("manifest_sha256"):
+        source_refs.append(f"m365_export_parser_manifest_sha256:{m365_manifest['manifest_sha256']}")
     for key in ("subject", "file_name", "chat_id", "operation", "account_email", "message_id", "file_id"):
         value = optional_text(details.get(key))
         if value:
@@ -862,6 +964,33 @@ def cloud_commercial_uplift_evidence(
             "m365_export_review_profile_present": bool(details.get("m365_export_review_profile")),
             "cloud_export_import_manifest_hash": optional_text(export_manifest.get("manifest_sha256")),
             "cloud_export_source_locator_present": isinstance(export_manifest.get("source_viewer_locator"), Mapping),
+            "google_takeout_parser_manifest_hash": optional_text(google_manifest.get("manifest_sha256")),
+            "google_takeout_source_row_citation_present": bool(
+                isinstance(google_manifest.get("row_citation"), Mapping)
+                and google_manifest.get("row_citation", {}).get("row_hash")
+            ),
+            "google_takeout_viewer_controls_present": bool(
+                isinstance(google_manifest.get("large_data_controls"), Mapping)
+                and google_manifest.get("large_data_controls", {}).get("viewer_default")
+            ),
+            "icloud_export_parser_manifest_hash": optional_text(icloud_manifest.get("manifest_sha256")),
+            "icloud_export_source_row_citation_present": bool(
+                isinstance(icloud_manifest.get("row_citation"), Mapping)
+                and icloud_manifest.get("row_citation", {}).get("row_hash")
+            ),
+            "icloud_export_viewer_controls_present": bool(
+                isinstance(icloud_manifest.get("large_data_controls"), Mapping)
+                and icloud_manifest.get("large_data_controls", {}).get("viewer_default")
+            ),
+            "m365_export_parser_manifest_hash": optional_text(m365_manifest.get("manifest_sha256")),
+            "m365_export_source_row_citation_present": bool(
+                isinstance(m365_manifest.get("row_citation"), Mapping)
+                and m365_manifest.get("row_citation", {}).get("row_hash")
+            ),
+            "m365_export_viewer_controls_present": bool(
+                isinstance(m365_manifest.get("large_data_controls"), Mapping)
+                and m365_manifest.get("large_data_controls", {}).get("viewer_default")
+            ),
             "deleted_cloud_object_recovery": False,
             "tenant_permission_graph_complete": False,
             "known_answer_cloud_corpus_required": True,
@@ -962,6 +1091,444 @@ def build_cloud_export_import_manifest(
     return manifest
 
 
+def build_google_takeout_parser_manifest(
+    *,
+    artifact_type: str,
+    service: str,
+    source_index: int,
+    source_hashes: Mapping[str, str],
+    source_path: str,
+    details: Mapping[str, object],
+) -> dict[str, object]:
+    """#37 Google Takeout/Gmail/Drive/Activity source manifest."""
+    review_profile = (
+        details.get("google_takeout_review_profile")
+        if isinstance(details.get("google_takeout_review_profile"), Mapping)
+        else {}
+    )
+    import_manifest = (
+        details.get("cloud_export_import_manifest")
+        if isinstance(details.get("cloud_export_import_manifest"), Mapping)
+        else {}
+    )
+    product_family = optional_text(review_profile.get("product_family")) or google_takeout_product_family(
+        service=service,
+        artifact_type=artifact_type,
+        source_path=source_path,
+    )
+    row_pivots = {
+        key: optional_text(details.get(key))
+        for key in (
+            "message_id",
+            "subject",
+            "file_id",
+            "file_name",
+            "timestamp",
+            "latitude",
+            "longitude",
+            "title",
+            "account_email",
+        )
+        if optional_text(details.get(key))
+    }
+    row_payload = {
+        "artifact_type": artifact_type,
+        "service": service,
+        "product_family": product_family,
+        "source_index": source_index,
+        "source_path": source_path,
+        "source_sha256": source_hashes.get("sha256", ""),
+        "row_pivots": row_pivots,
+        "body_sha256": optional_text(details.get("body_sha256")),
+        "url_sha256": optional_text(details.get("url_sha256")),
+    }
+    manifest: dict[str, object] = {
+        "manifest_version": "google-takeout-parser-manifest-v1",
+        "item_number": 37,
+        "batch_id": "commercial-uplift-036-040",
+        "gap_id": "#37",
+        "artifact_type": artifact_type,
+        "service": service or "unknown",
+        "product_family": product_family,
+        "source_path": source_path,
+        "source_index": source_index,
+        "source_sha256": source_hashes.get("sha256", ""),
+        "row_citation": {
+            **row_payload,
+            "row_hash": stable_cloud_json_sha256(row_payload),
+            "source_viewer_locator": {
+                "viewer": "google-takeout-product-row",
+                "source_path": source_path,
+                "source_index": source_index,
+                "product_family": product_family,
+                "row_pivots": row_pivots,
+            },
+        },
+        "parser_tracks": [
+            {
+                "track": "gmail-drive-photos-activity-location-json-import",
+                "status": "implemented",
+                "reportable_as": "google-export-triage-pivot",
+            },
+            {
+                "track": "takeout-archive-selected-products-scope-proof",
+                "status": "operator-supplied-evidence-required",
+                "reportable_as": "not-product-matrix-complete",
+            },
+            {
+                "track": "sidecar-exif-sharing-retention-provider-diff",
+                "status": "known-answer-and-provider-diff-required",
+                "reportable_as": "not-provider-complete",
+            },
+        ],
+        "product_review": {
+            "profile_version": optional_text(review_profile.get("profile_version")),
+            "expected_primary_pivots": list(review_profile.get("expected_primary_pivots") or []),
+            "present_primary_pivots": list(review_profile.get("present_primary_pivots") or []),
+            "primary_pivot_present": bool(review_profile.get("primary_pivot_present")),
+            "source_path_hints": dict(review_profile.get("source_path_hints") or {}),
+            "sidecar_merge_status": optional_text(review_profile.get("sidecar_merge_status")),
+            "timezone_semantics_status": optional_text(review_profile.get("timezone_semantics_status")),
+            "provider_native_diff_status": optional_text(review_profile.get("provider_native_diff_status")),
+        },
+        "import_manifest_ref": {
+            "manifest_sha256": optional_text(import_manifest.get("manifest_sha256")),
+            "source_viewer_locator_present": isinstance(import_manifest.get("source_viewer_locator"), Mapping),
+        },
+        "validation": {
+            "source_hash_present": bool(source_hashes.get("sha256")),
+            "primary_pivot_present": bool(review_profile.get("primary_pivot_present")),
+            "selected_products_manifest_attached": False,
+            "original_takeout_archive_hash_verified": False,
+            "provider_native_diff_attached": False,
+            "sidecar_merge_validated": False,
+            "commercial_grade": False,
+        },
+        "large_data_controls": {
+            "metadata_collapsed_by_default": True,
+            "viewer_default": "google-product-matrix-virtualized-row-review",
+            "raw_values_redacted_by_default": True,
+            "row_pivot_count": len(row_pivots),
+        },
+        "commercial_blockers": [
+            "google-takeout-selected-products-manifest-required",
+            "original-takeout-archive-hash-required",
+            "gmail-drive-photos-sidecar-timezone-validation-required",
+            "google-provider-native-diff-required",
+        ],
+        "required_before_report": [
+            "attach selected Takeout products, account owner, export timestamp, and original archive hash",
+            "merge and validate Gmail/Drive/Photos sidecars and timezone semantics for the product family",
+            "diff selected rows against Google native export/admin/API or known-answer provider output",
+            "document deleted, retention, sharing, and export-scope limitations",
+        ],
+        "reporting_status": "google-takeout-review-ready-not-commercial-grade",
+    }
+    manifest["manifest_sha256"] = stable_cloud_json_sha256(
+        {key: value for key, value in manifest.items() if key != "manifest_sha256"}
+    )
+    return manifest
+
+
+def build_icloud_export_parser_manifest(
+    *,
+    artifact_type: str,
+    service: str,
+    source_index: int,
+    source_hashes: Mapping[str, str],
+    source_path: str,
+    details: Mapping[str, object],
+) -> dict[str, object]:
+    """#38 Apple/iCloud export source manifest."""
+    review_profile = (
+        details.get("icloud_export_review_profile")
+        if isinstance(details.get("icloud_export_review_profile"), Mapping)
+        else {}
+    )
+    import_manifest = (
+        details.get("cloud_export_import_manifest")
+        if isinstance(details.get("cloud_export_import_manifest"), Mapping)
+        else {}
+    )
+    product_family = optional_text(review_profile.get("product_family")) or icloud_product_family(
+        service=service,
+        artifact_type=artifact_type,
+        source_path=source_path,
+    )
+    row_pivots = {
+        key: optional_text(details.get(key))
+        for key in (
+            "account_email",
+            "account_name",
+            "file_id",
+            "file_name",
+            "message_id",
+            "subject",
+            "timestamp",
+            "mime_type",
+            "owner",
+            "url_sha256",
+        )
+        if optional_text(details.get(key))
+    }
+    row_payload = {
+        "artifact_type": artifact_type,
+        "service": service,
+        "product_family": product_family,
+        "source_index": source_index,
+        "source_path": source_path,
+        "source_sha256": source_hashes.get("sha256", ""),
+        "row_pivots": row_pivots,
+        "body_sha256": optional_text(details.get("body_sha256")),
+        "url_sha256": optional_text(details.get("url_sha256")),
+    }
+    manifest: dict[str, object] = {
+        "manifest_version": "icloud-export-parser-manifest-v1",
+        "item_number": 38,
+        "batch_id": "commercial-uplift-036-040",
+        "gap_id": "#38",
+        "artifact_type": artifact_type,
+        "service": service or "unknown",
+        "product_family": product_family,
+        "source_path": source_path,
+        "source_index": source_index,
+        "source_sha256": source_hashes.get("sha256", ""),
+        "row_citation": {
+            **row_payload,
+            "row_hash": stable_cloud_json_sha256(row_payload),
+            "source_viewer_locator": {
+                "viewer": "icloud-export-product-row",
+                "source_path": source_path,
+                "source_index": source_index,
+                "product_family": product_family,
+                "row_pivots": row_pivots,
+            },
+        },
+        "parser_tracks": [
+            {
+                "track": "apple-privacy-icloud-account-drive-photos-mail-json-import",
+                "status": "implemented",
+                "reportable_as": "icloud-export-triage-pivot",
+            },
+            {
+                "track": "adp-shared-album-third-party-container-scope-proof",
+                "status": "operator-supplied-evidence-required",
+                "reportable_as": "not-icloud-scope-complete",
+            },
+            {
+                "track": "photo-sidecar-exif-native-provider-diff",
+                "status": "known-answer-and-provider-diff-required",
+                "reportable_as": "not-provider-complete",
+            },
+        ],
+        "product_review": {
+            "profile_version": optional_text(review_profile.get("profile_version")),
+            "expected_primary_pivots": list(review_profile.get("expected_primary_pivots") or []),
+            "present_primary_pivots": list(review_profile.get("present_primary_pivots") or []),
+            "primary_pivot_present": bool(review_profile.get("primary_pivot_present")),
+            "source_path_hints": dict(review_profile.get("source_path_hints") or {}),
+            "advanced_data_protection_status": optional_text(review_profile.get("advanced_data_protection_status")),
+            "shared_album_semantics_status": optional_text(review_profile.get("shared_album_semantics_status")),
+            "photo_sidecar_exif_merge_status": optional_text(review_profile.get("photo_sidecar_exif_merge_status")),
+            "third_party_container_visibility_status": optional_text(
+                review_profile.get("third_party_container_visibility_status")
+            ),
+            "provider_native_diff_status": optional_text(review_profile.get("provider_native_diff_status")),
+        },
+        "import_manifest_ref": {
+            "manifest_sha256": optional_text(import_manifest.get("manifest_sha256")),
+            "source_viewer_locator_present": isinstance(import_manifest.get("source_viewer_locator"), Mapping),
+        },
+        "validation": {
+            "source_hash_present": bool(source_hashes.get("sha256")),
+            "primary_pivot_present": bool(review_profile.get("primary_pivot_present")),
+            "apple_export_scope_attached": False,
+            "original_apple_export_hash_verified": False,
+            "adp_shared_album_scope_validated": False,
+            "photo_sidecar_exif_merge_validated": False,
+            "provider_native_diff_attached": False,
+            "commercial_grade": False,
+        },
+        "large_data_controls": {
+            "metadata_collapsed_by_default": True,
+            "viewer_default": "icloud-product-matrix-virtualized-row-review",
+            "raw_values_redacted_by_default": True,
+            "row_pivot_count": len(row_pivots),
+        },
+        "commercial_blockers": [
+            "apple-export-scope-and-account-proof-required",
+            "original-apple-export-hash-required",
+            "adp-shared-album-third-party-container-validation-required",
+            "icloud-photo-sidecar-exif-merge-required",
+            "icloud-provider-native-diff-required",
+        ],
+        "required_before_report": [
+            "attach Apple privacy/iCloud export scope, account owner, export timestamp, and original archive hash",
+            "validate Advanced Data Protection, shared albums, and third-party container visibility for the acquisition context",
+            "merge and validate iCloud Photos sidecars/EXIF/album/share metadata where applicable",
+            "diff selected rows against Apple/iCloud native export, iCloud web export, or provider known-answer output",
+        ],
+        "reporting_status": "icloud-export-review-ready-not-commercial-grade",
+    }
+    manifest["manifest_sha256"] = stable_cloud_json_sha256(
+        {key: value for key, value in manifest.items() if key != "manifest_sha256"}
+    )
+    return manifest
+
+
+def build_m365_export_parser_manifest(
+    *,
+    artifact_type: str,
+    service: str,
+    source_index: int,
+    source_hashes: Mapping[str, str],
+    source_path: str,
+    details: Mapping[str, object],
+) -> dict[str, object]:
+    """#39 Microsoft 365/Teams/OneDrive/SharePoint export source manifest."""
+    review_profile = (
+        details.get("m365_export_review_profile")
+        if isinstance(details.get("m365_export_review_profile"), Mapping)
+        else {}
+    )
+    import_manifest = (
+        details.get("cloud_export_import_manifest")
+        if isinstance(details.get("cloud_export_import_manifest"), Mapping)
+        else {}
+    )
+    workload_family = optional_text(review_profile.get("workload_family")) or m365_workload_family(
+        service=service,
+        artifact_type=artifact_type,
+        source_path=source_path,
+    )
+    row_pivots = {
+        key: optional_text(details.get(key))
+        for key in (
+            "message_id",
+            "chat_id",
+            "channel_id",
+            "team_id",
+            "sender",
+            "file_id",
+            "file_name",
+            "owner",
+            "operation",
+            "actor",
+            "ip_address",
+            "object_id",
+            "timestamp",
+            "url_sha256",
+            "message_text_sha256",
+        )
+        if optional_text(details.get(key))
+    }
+    row_payload = {
+        "artifact_type": artifact_type,
+        "service": service,
+        "workload_family": workload_family,
+        "source_index": source_index,
+        "source_path": source_path,
+        "source_sha256": source_hashes.get("sha256", ""),
+        "row_pivots": row_pivots,
+        "message_text_sha256": optional_text(details.get("message_text_sha256")),
+        "url_sha256": optional_text(details.get("url_sha256")),
+    }
+    manifest: dict[str, object] = {
+        "manifest_version": "m365-export-parser-manifest-v1",
+        "item_number": 39,
+        "batch_id": "commercial-uplift-036-040",
+        "gap_id": "#39",
+        "artifact_type": artifact_type,
+        "service": service or "unknown",
+        "workload_family": workload_family,
+        "source_path": source_path,
+        "source_index": source_index,
+        "source_sha256": source_hashes.get("sha256", ""),
+        "row_citation": {
+            **row_payload,
+            "row_hash": stable_cloud_json_sha256(row_payload),
+            "source_viewer_locator": {
+                "viewer": "m365-export-workload-row",
+                "source_path": source_path,
+                "source_index": source_index,
+                "workload_family": workload_family,
+                "row_pivots": row_pivots,
+            },
+        },
+        "parser_tracks": [
+            {
+                "track": "purview-graph-exchange-teams-onedrive-audit-json-import",
+                "status": "implemented",
+                "reportable_as": "m365-export-triage-pivot",
+            },
+            {
+                "track": "tenant-custodian-query-scope-retention-proof",
+                "status": "operator-supplied-evidence-required",
+                "reportable_as": "not-tenant-or-scope-complete",
+            },
+            {
+                "track": "teams-compliance-sharepoint-permission-provider-diff",
+                "status": "known-answer-and-provider-diff-required",
+                "reportable_as": "not-provider-complete",
+            },
+        ],
+        "workload_review": {
+            "profile_version": optional_text(review_profile.get("profile_version")),
+            "expected_primary_pivots": list(review_profile.get("expected_primary_pivots") or []),
+            "present_primary_pivots": list(review_profile.get("present_primary_pivots") or []),
+            "primary_pivot_present": bool(review_profile.get("primary_pivot_present")),
+            "source_path_hints": dict(review_profile.get("source_path_hints") or {}),
+            "graph_api_scope_status": optional_text(review_profile.get("graph_api_scope_status")),
+            "teams_compliance_record_status": optional_text(review_profile.get("teams_compliance_record_status")),
+            "sharepoint_permission_graph_status": optional_text(review_profile.get("sharepoint_permission_graph_status")),
+            "retention_hold_policy_status": optional_text(review_profile.get("retention_hold_policy_status")),
+            "deleted_or_version_history_status": optional_text(review_profile.get("deleted_or_version_history_status")),
+            "provider_native_diff_status": optional_text(review_profile.get("provider_native_diff_status")),
+        },
+        "import_manifest_ref": {
+            "manifest_sha256": optional_text(import_manifest.get("manifest_sha256")),
+            "source_viewer_locator_present": isinstance(import_manifest.get("source_viewer_locator"), Mapping),
+        },
+        "validation": {
+            "source_hash_present": bool(source_hashes.get("sha256")),
+            "primary_pivot_present": bool(review_profile.get("primary_pivot_present")),
+            "purview_export_manifest_attached": False,
+            "tenant_scope_verified": False,
+            "teams_compliance_record_reconciled": False,
+            "sharepoint_permission_graph_built": False,
+            "retention_deleted_version_state_validated": False,
+            "provider_native_diff_attached": False,
+            "commercial_grade": False,
+        },
+        "large_data_controls": {
+            "metadata_collapsed_by_default": True,
+            "viewer_default": "m365-workload-virtualized-row-review",
+            "raw_values_redacted_by_default": True,
+            "row_pivot_count": len(row_pivots),
+        },
+        "commercial_blockers": [
+            "m365-purview-ediscovery-export-scope-required",
+            "m365-tenant-custodian-query-original-package-hash-required",
+            "teams-compliance-record-reconciliation-required",
+            "sharepoint-onedrive-permission-graph-required",
+            "retention-hold-deleted-version-history-validation-required",
+            "m365-provider-native-diff-required",
+        ],
+        "required_before_report": [
+            "attach Purview/eDiscovery export manifest, tenant/custodian scope, query, export timestamp, and original package hash",
+            "validate Graph API scopes, pagination, throttling, and workload coverage when Graph/API collection is used",
+            "reconcile Teams messages with Exchange compliance records, attachments, reactions, edits, and deletes",
+            "validate OneDrive/SharePoint permissions, file versions, retention holds, deleted state, and audit retention",
+            "diff selected rows against Purview, Graph, Exchange eDiscovery, Teams admin, or provider known-answer output",
+        ],
+        "reporting_status": "m365-export-review-ready-not-commercial-grade",
+    }
+    manifest["manifest_sha256"] = stable_cloud_json_sha256(
+        {key: value for key, value in manifest.items() if key != "manifest_sha256"}
+    )
+    return manifest
+
+
 def stable_cloud_json_sha256(value: Mapping[str, object] | list[object] | str) -> str:
     if isinstance(value, str):
         payload = value
@@ -1054,6 +1621,27 @@ def cloud_core_accuracy_gates(
     )
     if export_manifest.get("manifest_sha256"):
         evidence_refs.append(f"cloud_export_manifest_sha256:{export_manifest['manifest_sha256']}")
+    google_manifest = (
+        details.get("google_takeout_parser_manifest")
+        if isinstance(details.get("google_takeout_parser_manifest"), Mapping)
+        else {}
+    )
+    if google_manifest.get("manifest_sha256"):
+        evidence_refs.append(f"google_takeout_parser_manifest_sha256:{google_manifest['manifest_sha256']}")
+    icloud_manifest = (
+        details.get("icloud_export_parser_manifest")
+        if isinstance(details.get("icloud_export_parser_manifest"), Mapping)
+        else {}
+    )
+    if icloud_manifest.get("manifest_sha256"):
+        evidence_refs.append(f"icloud_export_parser_manifest_sha256:{icloud_manifest['manifest_sha256']}")
+    m365_manifest = (
+        details.get("m365_export_parser_manifest")
+        if isinstance(details.get("m365_export_parser_manifest"), Mapping)
+        else {}
+    )
+    if m365_manifest.get("manifest_sha256"):
+        evidence_refs.append(f"m365_export_parser_manifest_sha256:{m365_manifest['manifest_sha256']}")
     trusted_diff = details.get("cloud_trusted_diff") if isinstance(details.get("cloud_trusted_diff"), Mapping) else {}
     if trusted_diff:
         evidence_refs.append(f"trusted_diff_status:{trusted_diff.get('status', '')}")
@@ -1082,6 +1670,12 @@ def cloud_core_accuracy_gates(
                 satisfied.append("cloud export import manifest")
                 if isinstance(export_manifest.get("source_viewer_locator"), Mapping):
                     satisfied.append("cloud export source locator")
+            if google_manifest:
+                satisfied.append("Google Takeout parser manifest")
+                if isinstance(google_manifest.get("row_citation"), Mapping) and google_manifest.get("row_citation", {}).get("row_hash"):
+                    satisfied.append("Google Takeout source row citation")
+                if isinstance(google_manifest.get("large_data_controls"), Mapping) and google_manifest.get("large_data_controls", {}).get("viewer_default"):
+                    satisfied.append("Google Takeout review viewer controls")
             if trusted_diff.get("status") == "pass" and int(trusted_diff.get("gap_number") or 0) == 37:
                 satisfied.append("trusted Google Takeout/provider diff pass")
         elif number == 38:
@@ -1104,6 +1698,12 @@ def cloud_core_accuracy_gates(
                 satisfied.append("cloud export import manifest")
                 if isinstance(export_manifest.get("source_viewer_locator"), Mapping):
                     satisfied.append("cloud export source locator")
+            if icloud_manifest:
+                satisfied.append("iCloud export parser manifest")
+                if isinstance(icloud_manifest.get("row_citation"), Mapping) and icloud_manifest.get("row_citation", {}).get("row_hash"):
+                    satisfied.append("iCloud export source row citation")
+                if isinstance(icloud_manifest.get("large_data_controls"), Mapping) and icloud_manifest.get("large_data_controls", {}).get("viewer_default"):
+                    satisfied.append("iCloud export review viewer controls")
             if trusted_diff.get("status") == "pass" and int(trusted_diff.get("gap_number") or 0) == 38:
                 satisfied.append("trusted iCloud/provider export diff pass")
         elif number == 39:
@@ -1126,6 +1726,12 @@ def cloud_core_accuracy_gates(
                 satisfied.append("cloud export import manifest")
                 if isinstance(export_manifest.get("source_viewer_locator"), Mapping):
                     satisfied.append("cloud export source locator")
+            if m365_manifest:
+                satisfied.append("M365 export parser manifest")
+                if isinstance(m365_manifest.get("row_citation"), Mapping) and m365_manifest.get("row_citation", {}).get("row_hash"):
+                    satisfied.append("M365 export source row citation")
+                if isinstance(m365_manifest.get("large_data_controls"), Mapping) and m365_manifest.get("large_data_controls", {}).get("viewer_default"):
+                    satisfied.append("M365 export review viewer controls")
             if trusted_diff.get("status") == "pass" and int(trusted_diff.get("gap_number") or 0) == 39:
                 satisfied.append("trusted M365/eDiscovery export diff pass")
         gates.append(build_accuracy_gate(number, satisfied_checks=satisfied, evidence_refs=evidence_refs))

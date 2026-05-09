@@ -42,10 +42,10 @@ const PROCESSING_PROFILES = {
   },
 };
 const RUN_MODE_COLLECTORS = {
-  seizure: ["browser", "recent files", "OS/account", "event logs", "remote access", "execution", "prefetch", "MFT/USN", "Windows system", "macOS"],
-  fraud: ["browser", "recent files", "OS/account", "event logs", "remote access", "execution", "prefetch", "MFT/USN", "Windows system", "macOS"],
-  hacking: ["browser", "recent files", "OS/account", "event logs", "remote access", "execution", "prefetch", "MFT/USN", "Windows system", "macOS"],
-  recovery: ["recent files", "OS/account", "event logs", "remote access", "prefetch", "MFT/USN", "macOS"],
+  seizure: ["browser", "recent files", "email", "cloud", "mobile/chat", "KakaoTalk", "APK", "media", "memory", "OS/account", "event logs", "registry", "shellbags", "remote access", "execution", "prefetch", "MFT/USN", "Windows system", "macOS"],
+  fraud: ["browser", "recent files", "email", "cloud", "mobile/chat", "KakaoTalk", "APK", "media", "memory", "OS/account", "event logs", "registry", "shellbags", "remote access", "execution", "prefetch", "MFT/USN", "Windows system", "macOS"],
+  hacking: ["browser", "recent files", "email", "cloud", "mobile/chat", "KakaoTalk", "APK", "media", "memory", "OS/account", "event logs", "registry", "shellbags", "remote access", "execution", "prefetch", "MFT/USN", "Windows system", "macOS"],
+  recovery: ["recent files", "email", "cloud", "mobile/chat", "KakaoTalk", "APK", "media", "memory", "OS/account", "event logs", "registry", "shellbags", "remote access", "prefetch", "MFT/USN", "macOS"],
 };
 const E01_PRE_RUN_STEPS = [
   { label: "Input", text: "첫 E01/Ex01 세그먼트를 선택하고 segment order/integrity를 확인합니다." },
@@ -239,10 +239,22 @@ async function api(path, options = {}) {
   });
   if (!response.ok) {
     const detail = await response.json().catch(() => ({ detail: response.statusText }));
-    throw new Error(detail.detail || response.statusText);
+    const error = new Error(errorMessageFromDetail(detail.detail || detail || response.statusText));
+    error.detail = detail.detail || detail;
+    throw error;
   }
   const contentType = response.headers.get("content-type") || "";
   return contentType.includes("application/json") ? response.json() : response.text();
+}
+
+function errorMessageFromDetail(detail) {
+  if (typeof detail === "string") return detail;
+  if (detail?.message) return detail.message;
+  if (detail?.source_path_resolution) {
+    const resolution = detail.source_path_resolution;
+    return `Source path unresolved after ${resolution.candidate_count || 0} candidate(s).`;
+  }
+  return String(detail || "Request failed");
 }
 
 function authToken() {
@@ -323,6 +335,7 @@ async function loadRunDetail(runId, tab = "summary") {
   }
   detailPanel.innerHTML = renderDetailShell(selectedRun, activeTab);
   bindTabButtons();
+  loadRunValidationPackageSummary(runId);
   await renderActiveTab();
 }
 
@@ -412,7 +425,64 @@ function renderWorkbenchSmokePanel(run) {
         <a class="mini-link" href="/api/workbench/large-result-evidence?record_count=100000" target="_blank" rel="noreferrer">Open 100k UI evidence JSON</a>
         ${validationHref ? `<a class="mini-link" href="${validationHref}" target="_blank" rel="noreferrer">Open run validation package</a>` : ""}
       </div>
+      <div id="runValidationDiffPanel" class="run-validation-diff-panel" data-testid="run-validation-diff-panel">
+        <p class="empty-state">Run validation diff inventory will appear here after the validation package loads.</p>
+      </div>
     </section>
+  `;
+}
+
+async function loadRunValidationPackageSummary(runId) {
+  const panel = detailPanel.querySelector("#runValidationDiffPanel");
+  if (!panel) return;
+  panel.innerHTML = '<p class="empty-state">Loading run validation diff inventory...</p>';
+  try {
+    const payload = await api(`/api/runs/${encodeURIComponent(runId)}/validation-package`);
+    panel.innerHTML = renderRunValidationPackageSummary(payload);
+  } catch (error) {
+    panel.innerHTML = `<p class="empty-state">${escapeHtml(error.message)}</p>`;
+  }
+}
+
+function renderRunValidationPackageSummary(payload) {
+  const diff = payload?.diff_inventory || {};
+  const outputs = Array.isArray(diff.outputs) ? diff.outputs : [];
+  const stateStatus = diff.usn_state_replay_diff_attached
+    ? `${diff.usn_state_replay_diff_pass_count || 0} passed`
+    : "not attached";
+  const modeSet = new Set();
+  for (const output of outputs) {
+    const summary = output?.diff_summary || {};
+    const modes = Array.isArray(summary.field_diff_modes) ? summary.field_diff_modes : [];
+    modes.forEach((mode) => modeSet.add(mode));
+  }
+  const modes = Array.from(modeSet).sort();
+  return `
+    <div class="validation-diff-card">
+      <div>
+        <strong>Run validation diff inventory</strong>
+        <span>${escapeHtml(outputs.length)} diff output(s) · ${escapeHtml(diff.cross_tool_output_count || 0)} cross-tool output(s)</span>
+      </div>
+      <dl class="compact-dl">
+        <dt>USN state replay diff</dt>
+        <dd>${escapeHtml(stateStatus)}</dd>
+        <dt>Compared modes</dt>
+        <dd>${escapeHtml(modes.join(" · ") || "No field diff modes attached")}</dd>
+        <dt>Package hash</dt>
+        <dd>${escapeHtml(payload?.package_manifest_hash || "pending")}</dd>
+      </dl>
+      ${outputs.length ? `
+        <ul class="validation-diff-list">
+          ${outputs.slice(0, 5).map((output) => {
+            const summary = output.diff_summary || {};
+            return `<li>
+              <strong>${escapeHtml(output.name || "diff")}</strong>
+              <span>${escapeHtml(summary.command || "unknown")} · ${escapeHtml(summary.status || "unknown")} · state replay ${escapeHtml(summary.usn_state_replay_status || "not-attached")}</span>
+            </li>`;
+          }).join("")}
+        </ul>
+      ` : `<p class="help-text">${escapeHtml((diff.limitations || []).join(" · ") || "No trusted diff output is attached to this run yet.")}</p>`}
+    </div>
   `;
 }
 
@@ -1457,12 +1527,49 @@ function artifactPreviewText(artifact) {
     const firstConversation = Array.isArray(details.conversation_candidates) ? details.conversation_candidates[0] : null;
     return ["AI conversation", firstConversation?.text || `${details.ai_conversation_candidate_count} candidate(s)`].filter(Boolean).join(" · ");
   }
+  const ntfsPreview = ntfsArtifactPreviewText(artifact);
+  if (ntfsPreview) return ntfsPreview;
   const registryPreview = registryArtifactPreviewText(artifact);
   if (registryPreview) return registryPreview;
   for (const key of ["command_line", "script_block_text", "file_path", "executable_path", "ai_service", "domain", "source_url", "target_path", "entry_name", "service_name", "process_name"]) {
     if (details[key]) return String(details[key]);
   }
   return artifact.artifact_type || "artifact";
+}
+
+function ntfsArtifactPreviewText(artifact) {
+  const details = artifact.details || {};
+  if (artifact.artifact_type === "usn-journal-file" && details.usn_replay_inventory_profile) {
+    const replay = details.usn_replay_inventory_profile || {};
+    const bounded = replay.bounded_mft_replay_preview || {};
+    const rename = replay.rename_pair_preview || {};
+    return [
+      "USN journal",
+      details.native_record_count !== undefined ? `${details.native_record_count} record(s)` : "",
+      bounded.correlated_record_count !== undefined ? `${bounded.correlated_record_count} path candidate(s)` : "",
+      rename.candidate_pair_count !== undefined ? `${rename.candidate_pair_count} rename pair(s)` : "",
+      replay.bounded_state_replay_preview?.transition_count !== undefined ? `${replay.bounded_state_replay_preview.transition_count} state transition(s)` : "",
+    ].filter(Boolean).join(" · ");
+  }
+  if (artifact.artifact_type === "usn-record") {
+    const bounded = details.usn_bounded_mft_path || {};
+    return [
+      "USN record",
+      bounded.path_candidate || details.file_name || details.file_path,
+      Array.isArray(details.reason_flags) ? details.reason_flags.join("|") : "",
+      details.record_cursor !== undefined ? `cursor=${details.record_cursor}` : "",
+    ].filter(Boolean).join(" · ");
+  }
+  if (artifact.artifact_type === "mft-record") {
+    const bounded = details.mft_bounded_parent_path || {};
+    return [
+      "MFT record",
+      bounded.path || details.file_path || details.file_name,
+      details.record_number !== undefined ? `record=${details.record_number}` : "",
+      details.record_offset !== undefined ? `offset=${details.record_offset}` : "",
+    ].filter(Boolean).join(" · ");
+  }
+  return "";
 }
 
 function registryArtifactPreviewText(artifact) {
@@ -1484,6 +1591,7 @@ function renderArtifactDetails(artifact) {
   const eventLogCard = renderEventLogArtifactCard(artifact);
   const evtxReadinessCard = renderEvtxReadinessArtifactCard(artifact);
   const ntfsDepthCard = renderNtfsDepthArtifactCard(artifact);
+  const ntfsReplayCard = renderNtfsReplayPreviewArtifactCard(artifact);
   const registryDepthCard = renderRegistryDepthArtifactCard(artifact);
   const windowsCoreReadinessCard = renderWindowsCoreReadinessArtifactCard(artifact);
   const accuracyGateCard = renderCoreAccuracyGateCard(artifact);
@@ -1493,6 +1601,7 @@ function renderArtifactDetails(artifact) {
     ${eventLogCard}
     ${evtxReadinessCard}
     ${ntfsDepthCard}
+    ${ntfsReplayCard}
     ${registryDepthCard}
     ${windowsCoreReadinessCard}
     ${accuracyGateCard}
@@ -1745,6 +1854,154 @@ function renderNtfsDepthArtifactCard(artifact) {
       </dl>
     </section>
   `;
+}
+
+function renderNtfsReplayPreviewArtifactCard(artifact) {
+  const details = artifact.details || {};
+  const replay = details.usn_replay_inventory_profile || {};
+  const boundedReplay = replay.bounded_mft_replay_preview || null;
+  const pathCacheProfile = replay.mft_bounded_path_cache_profile || null;
+  const pathReliability = replay.usn_path_reliability_profile || null;
+  const stateValidation = replay.usn_state_replay_validation_profile || null;
+  const renamePreview = replay.rename_pair_preview || null;
+  const deletePreview = replay.delete_lifecycle_preview || null;
+  const statePreview = replay.bounded_state_replay_preview || null;
+  const rowPath = details.usn_bounded_mft_path || null;
+  if (!boundedReplay && !renamePreview && !deletePreview && !statePreview && !rowPath) return "";
+
+  const pathSamples = Array.isArray(boundedReplay?.path_samples) ? boundedReplay.path_samples.slice(0, 5) : [];
+  const renamePairs = Array.isArray(renamePreview?.pairs) ? renamePreview.pairs.slice(0, 5) : [];
+  const deleteCandidates = Array.isArray(deletePreview?.candidates) ? deletePreview.candidates.slice(0, 5) : [];
+  const stateTransitions = Array.isArray(statePreview?.transitions) ? statePreview.transitions.slice(0, 8) : [];
+  const locatorLinks = renderNtfsSourceLocatorLinks(details, renamePairs, deleteCandidates, stateTransitions);
+  const chips = [
+    boundedReplay ? `${boundedReplay.correlated_record_count || 0}/${boundedReplay.record_count || 0} path-correlated` : "",
+    pathCacheProfile ? `${pathCacheProfile.complete_path_count || 0}/${pathCacheProfile.cache_entry_count || 0} complete MFT paths` : boundedReplay ? `${boundedReplay.cache_entry_count || 0} MFT cache entries` : "",
+    renamePreview ? `${renamePreview.candidate_pair_count || 0} rename pair(s)` : "",
+    deletePreview ? `${deletePreview.paired_create_delete_count || 0}/${deletePreview.delete_count || 0} delete lifecycle(s)` : "",
+    statePreview ? `${statePreview.transition_count || 0} state transition(s)` : "",
+    stateValidation?.validation_status ? stateValidation.validation_status : "",
+    pathReliability?.reliability ? pathReliability.reliability : "",
+    renamePreview ? renamePreview.pair_balance : "",
+    rowPath?.path_candidate ? "row path candidate" : "",
+  ].filter(Boolean);
+  const rows = [
+    ["USN path correlation", boundedReplay ? `${boundedReplay.correlated_record_count || 0} correlated · ${boundedReplay.uncorrelated_record_count || 0} uncorrelated` : rowPath?.path_candidate],
+    ["MFT cache quality", pathCacheProfile ? `${pathCacheProfile.complete_path_count || 0} complete · ${pathCacheProfile.partial_path_count || 0} partial · warnings=${pathCacheProfile.warning_count || 0}` : ""],
+    ["Path reliability", pathReliability ? `${pathReliability.reliability || "unknown"} · ${pathReliability.correlated_record_count || 0}/${pathReliability.record_count || 0} correlated · ${pathReliability.review_priority || ""}` : ""],
+    ["Cache hits", boundedReplay ? `file=${boundedReplay.file_reference_cache_hit_count || 0} · parent=${boundedReplay.parent_reference_cache_hit_count || 0}` : rowPath?.path_source],
+    ["Correlation status", boundedReplay?.correlation_status_counts ? Object.entries(boundedReplay.correlation_status_counts).map(([key, value]) => `${key}:${value}`).join(" · ") : rowPath?.status],
+    ["Rename pairing", renamePreview ? `${renamePreview.candidate_pair_count || 0} paired · old unmatched=${renamePreview.unmatched_old_count || 0} · new unmatched=${renamePreview.unmatched_new_count || 0}` : ""],
+    ["Delete lifecycle", deletePreview ? `${deletePreview.paired_create_delete_count || 0} paired · delete-only=${deletePreview.delete_without_prior_create_count || 0}` : ""],
+    ["Bounded state replay", statePreview ? `${statePreview.transition_count || 0} transitions · pending rename=${statePreview.pending_rename_count || 0} · final paths=${statePreview.final_path_state_count || 0}` : ""],
+    ["State replay validation", stateValidation ? `${stateValidation.validation_status || "unknown"} · record diff=${stateValidation.trusted_diff_status || "not-attached"} · state diff=${stateValidation.state_replay_diff_passed ? "passed" : "required"}` : ""],
+  ].filter(([, value]) => value !== undefined && value !== null && String(value).trim());
+  return `
+    <section class="ntfs-depth-card">
+      <div class="eventlog-card-header">
+        <strong>USN replay preview</strong>
+        <span>${escapeHtml("bounded MFT path correlation · rename candidate review")}</span>
+      </div>
+      <div class="eventlog-chip-row">${chips.map((chip) => `<span>${escapeHtml(chip)}</span>`).join("")}</div>
+      <dl class="eventlog-fields">
+        ${rows.map(([label, value]) => `<dt>${escapeHtml(label)}</dt><dd>${escapeHtml(String(value))}</dd>`).join("")}
+        ${pathSamples.length ? `<dt>Path samples</dt><dd>${pathSamples.map((sample) => escapeHtml([
+          sample.path_candidate || sample.file_name,
+          sample.transition_class,
+          Array.isArray(sample.reason_flags) ? sample.reason_flags.join("|") : "",
+          sample.record_cursor !== undefined ? `cursor=${sample.record_cursor}` : "",
+        ].filter(Boolean).join(" · "))).join("<br>")}</dd>` : ""}
+        ${Array.isArray(pathCacheProfile?.sample_partial_paths) && pathCacheProfile.sample_partial_paths.length ? `<dt>MFT partial path warnings</dt><dd>${pathCacheProfile.sample_partial_paths.slice(0, 5).map((sample) => escapeHtml([
+          sample.path || `record=${sample.record_number || ""}`,
+          sample.status,
+          Array.isArray(sample.warnings) ? sample.warnings.join("|") : "",
+        ].filter(Boolean).join(" · "))).join("<br>")}</dd>` : ""}
+        ${pathReliability?.safe_report_wording ? `<dt>Reliability wording</dt><dd>${escapeHtml(pathReliability.safe_report_wording)}</dd>` : ""}
+        ${renamePairs.length ? `<dt>Rename pairs</dt><dd>${renamePairs.map((pair) => escapeHtml([
+          `${pair.old_name || "(old)"} -> ${pair.new_name || "(new)"}`,
+          pair.old_path_candidate && pair.new_path_candidate ? `${pair.old_path_candidate} -> ${pair.new_path_candidate}` : "",
+          pair.confidence ? `confidence=${pair.confidence}` : "",
+          pair.old_record_cursor !== undefined || pair.new_record_cursor !== undefined ? `cursor=${pair.old_record_cursor || "?"}->${pair.new_record_cursor || "?"}` : "",
+        ].filter(Boolean).join(" · "))).join("<br>")}</dd>` : ""}
+        ${deleteCandidates.length ? `<dt>Delete lifecycle</dt><dd>${deleteCandidates.map((candidate) => escapeHtml([
+          candidate.file_name || "(file)",
+          candidate.lifecycle_status,
+          candidate.delete_path_candidate || candidate.create_path_candidate,
+          candidate.confidence ? `confidence=${candidate.confidence}` : "",
+          candidate.create_record_cursor || candidate.delete_record_cursor ? `cursor=${candidate.create_record_cursor || "?"}->${candidate.delete_record_cursor || "?"}` : "",
+        ].filter(Boolean).join(" · "))).join("<br>")}</dd>` : ""}
+        ${stateTransitions.length ? `<dt>State transitions</dt><dd>${stateTransitions.map((transition) => escapeHtml([
+          transition.transition || "(transition)",
+          transition.previous_path && transition.new_path ? `${transition.previous_path} -> ${transition.new_path}` : transition.previous_path || transition.new_path || transition.file_name,
+          transition.state_effect,
+          transition.confidence ? `confidence=${transition.confidence}` : "",
+          transition.record_cursor !== undefined ? `cursor=${transition.record_cursor}` : "",
+        ].filter(Boolean).join(" · "))).join("<br>")}</dd>` : ""}
+        ${stateValidation?.safe_report_wording ? `<dt>State validation wording</dt><dd>${escapeHtml(stateValidation.safe_report_wording)}</dd>` : ""}
+        ${locatorLinks ? `<dt>Source locators</dt><dd>${locatorLinks}</dd>` : ""}
+        ${rowPath?.path_candidate ? `<dt>Current row path</dt><dd>${escapeHtml([rowPath.path_candidate, rowPath.path_source, rowPath.status].filter(Boolean).join(" · "))}</dd>` : ""}
+        <dt>Report warning</dt>
+        <dd>${escapeHtml("This is a bounded review aid. Court-grade rename/delete replay still requires full-journal ordering, full FRN cache, and trusted-tool diff validation.")}</dd>
+      </dl>
+    </section>
+  `;
+}
+
+function renderNtfsSourceLocatorLinks(details, renamePairs = [], deleteCandidates = [], stateTransitions = []) {
+  const manifest = details.ntfs_report_citation_manifest || {};
+  const sourcePath = details.source_path || manifest.source_path || "";
+  const locators = [];
+  for (const entry of manifest.viewer_entrypoints || []) {
+    if (entry?.viewer === "hex" && entry.byte_offset !== undefined && entry.byte_offset !== "") {
+      locators.push({ label: entry.label || "Open raw record", path: entry.source_path || sourcePath, offset: entry.byte_offset, length: details.record_length || 4096 });
+    }
+  }
+  for (const ref of manifest.citation_refs || []) {
+    const locator = ref?.viewer_locator || {};
+    if (locator.byte_offset !== undefined && locator.byte_offset !== "") {
+      locators.push({ label: ref.kind || locator.viewer || "citation locator", path: locator.source_path || sourcePath, offset: locator.byte_offset, length: details.record_length || 4096 });
+    }
+  }
+  for (const pair of renamePairs) {
+    if (pair.old_record_cursor !== undefined && pair.old_record_cursor !== "") {
+      locators.push({ label: `OLD ${pair.old_name || "rename"}`, path: sourcePath, offset: pair.old_record_cursor, length: 512 });
+    }
+    if (pair.new_record_cursor !== undefined && pair.new_record_cursor !== "") {
+      locators.push({ label: `NEW ${pair.new_name || "rename"}`, path: sourcePath, offset: pair.new_record_cursor, length: 512 });
+    }
+  }
+  for (const candidate of deleteCandidates) {
+    if (candidate.create_record_cursor !== undefined && candidate.create_record_cursor !== "") {
+      locators.push({ label: `CREATE ${candidate.file_name || "USN"}`, path: sourcePath, offset: candidate.create_record_cursor, length: 512 });
+    }
+    if (candidate.delete_record_cursor !== undefined && candidate.delete_record_cursor !== "") {
+      locators.push({ label: `DELETE ${candidate.file_name || "USN"}`, path: sourcePath, offset: candidate.delete_record_cursor, length: 512 });
+    }
+  }
+  for (const transition of stateTransitions) {
+    if (transition.record_cursor !== undefined && transition.record_cursor !== "") {
+      locators.push({ label: `STATE ${transition.transition || "USN"}`, path: sourcePath, offset: transition.record_cursor, length: 512 });
+    }
+    if (transition.paired_old_record_cursor !== undefined && transition.paired_old_record_cursor !== "") {
+      locators.push({ label: `STATE paired OLD ${transition.file_name || "USN"}`, path: sourcePath, offset: transition.paired_old_record_cursor, length: 512 });
+    }
+  }
+  const unique = [];
+  const seen = new Set();
+  for (const locator of locators) {
+    if (!locator.path || locator.offset === undefined || locator.offset === "") continue;
+    const key = `${locator.path}|${locator.offset}|${locator.label}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    unique.push(locator);
+  }
+  if (!unique.length || !selectedRunId) return "";
+  return unique.slice(0, 8).map((locator) => {
+    const offset = Number(locator.offset) || 0;
+    const length = Math.max(1, Math.min(Number(locator.length) || 512, 4096));
+    const url = `/api/runs/${encodeURIComponent(selectedRunId)}/source-hex-range?path=${encodeURIComponent(locator.path)}&offset=${encodeURIComponent(offset)}&length=${encodeURIComponent(length)}&include_hashes=true`;
+    return `<a class="mini-link" href="${escapeHtml(url)}" target="_blank" rel="noreferrer">${escapeHtml(locator.label)} @ ${escapeHtml(offset)}</a>`;
+  }).join("<br>");
 }
 
 function renderEventLogArtifactCard(artifact) {
@@ -2374,8 +2631,37 @@ async function loadEvidencePreview(path, reviewContext = null, searchResultIndex
     }
     bindViewerButtons();
   } catch (error) {
-    viewer.innerHTML = `<p class="empty-state">${escapeHtml(error.message)}</p>`;
+    viewer.innerHTML = `
+      <p class="empty-state">${escapeHtml(error.message)}</p>
+      ${renderSourceResolutionDiagnostics(error.detail)}
+    `;
   }
+}
+
+function renderSourceResolutionDiagnostics(detail) {
+  const resolution = detail?.source_path_resolution || detail?.detail?.source_path_resolution;
+  if (!resolution?.profile_version) return "";
+  const roots = Array.isArray(resolution.allowed_roots) ? resolution.allowed_roots : [];
+  const candidates = Array.isArray(resolution.candidates) ? resolution.candidates : [];
+  return `
+    <details class="source-verification" open>
+      <summary>Source path resolution diagnostics · ${escapeHtml(resolution.status || "unresolved")}</summary>
+      <dl class="eventlog-fields">
+        <dt>Requested path</dt>
+        <dd>${escapeHtml(resolution.raw_path || "")}</dd>
+        <dt>Allowed roots</dt>
+        <dd>${roots.map((root) => escapeHtml(root)).join("<br>") || "none"}</dd>
+        <dt>Candidates tried</dt>
+        <dd>${candidates.slice(0, 8).map((candidate) => escapeHtml([
+          candidate.path,
+          candidate.inside_allowed_roots ? "inside-root" : "outside-root",
+          candidate.exists ? "exists" : "missing",
+          candidate.is_file ? "file" : "",
+        ].filter(Boolean).join(" · "))).join("<br>") || "none"}</dd>
+      </dl>
+      <p class="help-text">If this came from an E01/Ex01 case, check whether the extracted analysis root contains the same relative path as the original Windows path.</p>
+    </details>
+  `;
 }
 
 function renderEvidenceViewer(payload, reviewContext = null) {

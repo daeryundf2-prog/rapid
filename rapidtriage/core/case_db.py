@@ -8512,31 +8512,44 @@ def build_case_search_review_workflow_summary(
             unassigned_count += 1
         if include_in_report:
             report_candidate_count += 1
-        review_queue.append(
-            {
-                "queue_position": index + 1,
-                "target_type": str(match.get("target_type") or ""),
-                "target_id": str(match.get("target_id") or ""),
-                "citation_id": str(match.get("citation_id") or review.get("citation_id") or ""),
-                "title": str(match.get("title") or match.get("path") or ""),
-                "source": str(match.get("source") or "unknown"),
-                "status": status,
-                "verification_status": verification,
-                "assignee": assignee,
-                "priority": priority,
-                "due_at": str(review.get("due_at") or ""),
-                "include_in_report": include_in_report,
-                "review_action": review_queue_action(status=status, verification_status=verification, assignee=assignee),
-            }
-        )
+        queue_row_core = {
+            "queue_position": index + 1,
+            "target_type": str(match.get("target_type") or ""),
+            "target_id": str(match.get("target_id") or ""),
+            "citation_id": str(match.get("citation_id") or review.get("citation_id") or ""),
+            "title": str(match.get("title") or match.get("path") or ""),
+            "source": str(match.get("source") or "unknown"),
+            "status": status,
+            "verification_status": verification,
+            "assignee": assignee,
+            "priority": priority,
+            "due_at": str(review.get("due_at") or ""),
+            "include_in_report": include_in_report,
+            "review_action": review_queue_action(status=status, verification_status=verification, assignee=assignee),
+            "source_viewer_locator": build_review_queue_source_viewer_locator(match, review),
+        }
+        review_queue.append({**queue_row_core, "queue_row_hash": stable_payload_sha256(queue_row_core)})
+    review_assignment_manifest = build_review_assignment_manifest(
+        review_queue,
+        status_counts=status_counts,
+        verification_counts=verification_counts,
+        assignee_counts=assignee_counts,
+        priority_counts=priority_counts,
+        report_candidate_count=report_candidate_count,
+        review_status_filter=review_status_filter,
+        verification_status_filter=verification_status_filter,
+    )
     satisfied = [
         "search result review state attached",
         "review status summary emitted",
         "verification status summary emitted",
         "assignment queue metadata emitted",
         "report inclusion queue emitted",
+        "review assignment manifest hash emitted",
         "history/audit limitation warning",
     ]
+    if review_assignment_manifest["source_viewer_locator_count"]:
+        satisfied.append("review source viewer locators emitted")
     if review_status_filter:
         satisfied.append("review status filter applied")
     if verification_status_filter:
@@ -8551,6 +8564,7 @@ def build_case_search_review_workflow_summary(
                 f"report_candidate_count:{report_candidate_count}",
                 f"review_status_filter:{review_status_filter or ''}",
                 f"verification_status_filter:{verification_status_filter or ''}",
+                f"review_assignment_manifest_hash:{review_assignment_manifest['manifest_hash']}",
                 "case_db:review_mark",
                 "case_db:review_mark_history",
             ],
@@ -8571,6 +8585,9 @@ def build_case_search_review_workflow_summary(
         "review_queue": review_queue[:100],
         "review_queue_count": len(review_queue),
         "review_queue_truncated": len(review_queue) > 100,
+        "review_assignment_manifest": review_assignment_manifest,
+        "review_assignment_manifest_hash": review_assignment_manifest["manifest_hash"],
+        "source_viewer_locator_count": review_assignment_manifest["source_viewer_locator_count"],
         "filters": {
             "review_status": review_status_filter or "",
             "verification_status": verification_status_filter or "",
@@ -8599,6 +8616,9 @@ def build_case_search_review_workflow_summary(
                 "review_queue_limit": 100,
                 "assigned_count": assigned_count,
                 "report_candidate_count": report_candidate_count,
+                "review_assignment_manifest_present": True,
+                "review_assignment_manifest_hash": review_assignment_manifest["manifest_hash"],
+                "source_viewer_locator_count": review_assignment_manifest["source_viewer_locator_count"],
                 "role_based_case_server": False,
                 "notification_sla_enabled": False,
             },
@@ -8624,6 +8644,96 @@ def build_case_search_review_workflow_summary(
             REVIEW_WORKFLOW_TRUSTED_DIFF_BLOCKER,
         ],
     }
+
+
+def build_review_queue_source_viewer_locator(match: Mapping[str, object], review: Mapping[str, object]) -> dict[str, object]:
+    metadata = match.get("metadata") if isinstance(match.get("metadata"), Mapping) else {}
+    return {
+        "viewer": "case-review-source",
+        "source": str(match.get("source") or "unknown"),
+        "target_type": str(match.get("target_type") or ""),
+        "target_id": str(match.get("target_id") or ""),
+        "citation_id": str(match.get("citation_id") or ""),
+        "review_citation_id": str(review.get("citation_id") or ""),
+        "path": str(match.get("path") or metadata.get("source_path") or ""),
+        "kind": str(match.get("kind") or metadata.get("kind") or ""),
+        "title": str(match.get("title") or match.get("path") or ""),
+        "source_record": {
+            "row_id": metadata.get("row_id") if metadata.get("row_id") is not None else match.get("target_id"),
+            "line": metadata.get("line") if metadata.get("line") is not None else "",
+            "table": str(metadata.get("table") or ""),
+            "record_offset": metadata.get("record_offset") if metadata.get("record_offset") is not None else "",
+            "source_index": metadata.get("source_index") if metadata.get("source_index") is not None else "",
+        },
+        "open_action": "open-source-and-verify-before-report",
+    }
+
+
+def build_review_assignment_manifest(
+    review_queue: Sequence[Mapping[str, object]],
+    *,
+    status_counts: Mapping[str, int],
+    verification_counts: Mapping[str, int],
+    assignee_counts: Mapping[str, int],
+    priority_counts: Mapping[str, int],
+    report_candidate_count: int,
+    review_status_filter: str | None,
+    verification_status_filter: str | None,
+) -> dict[str, object]:
+    entries: list[dict[str, object]] = []
+    source_viewer_locator_count = 0
+    for row in review_queue[:100]:
+        locator = row.get("source_viewer_locator") if isinstance(row.get("source_viewer_locator"), Mapping) else {}
+        if locator.get("target_type") and locator.get("target_id"):
+            source_viewer_locator_count += 1
+        entries.append(
+            {
+                "queue_position": int(row.get("queue_position") or 0),
+                "target_type": str(row.get("target_type") or ""),
+                "target_id": str(row.get("target_id") or ""),
+                "citation_id": str(row.get("citation_id") or ""),
+                "status": str(row.get("status") or "unreviewed"),
+                "verification_status": str(row.get("verification_status") or "unverified"),
+                "assignee": str(row.get("assignee") or ""),
+                "priority": str(row.get("priority") or "normal"),
+                "due_at": str(row.get("due_at") or ""),
+                "include_in_report": bool(row.get("include_in_report")),
+                "review_action": str(row.get("review_action") or ""),
+                "source_viewer_locator": dict(locator),
+                "queue_row_hash": str(row.get("queue_row_hash") or ""),
+            }
+        )
+    manifest_core: dict[str, object] = {
+        "manifest_version": "case-review-assignment-manifest-v1",
+        "item_number": 51,
+        "commercial_gap_ids": ["#51"],
+        "queue_entry_count": len(review_queue),
+        "bounded_entry_count": len(entries),
+        "queue_truncated": len(review_queue) > len(entries),
+        "status_counts": dict(sorted(status_counts.items())),
+        "verification_status_counts": dict(sorted(verification_counts.items())),
+        "assignee_counts": dict(sorted(assignee_counts.items())),
+        "priority_counts": dict(sorted(priority_counts.items())),
+        "report_candidate_count": report_candidate_count,
+        "source_viewer_locator_count": source_viewer_locator_count,
+        "filters": {
+            "review_status": review_status_filter or "",
+            "verification_status": verification_status_filter or "",
+        },
+        "entries": entries,
+        "blockers": [
+            "role-based-assignment-queue",
+            "notification-workflow",
+            "multi-user-conflict-resolution",
+            REVIEW_WORKFLOW_TRUSTED_DIFF_BLOCKER,
+        ],
+        "commercial_claim_allowed": False,
+        "operator_warning": (
+            "This manifest supports single-case reviewer triage and source opening only; "
+            "it is not a multi-user RBAC/SLA workflow until the listed blockers are resolved."
+        ),
+    }
+    return {**manifest_core, "manifest_hash": stable_payload_sha256(manifest_core)}
 
 
 def review_queue_action(*, status: str, verification_status: str, assignee: str) -> str:

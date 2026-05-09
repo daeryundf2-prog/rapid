@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any
 
 from rapidtriage.cli import build_parser, main
+from rapidtriage.core.timeline import build_timeline_report, extract_artifact_events
 from tests.test_rapidtriage_run import write_minimal_docx, write_minimal_pdf
 from tests.windows_artifact_fixtures import build_windows_artifact_fixture
 
@@ -115,6 +116,137 @@ class RapidTriageTimelineTests(unittest.TestCase):
             self.assertIn("timeline", report_text)
             self.assertIn("incident-notes.txt", report_text)
             self.assertIn("browser", report_text)
+
+    def test_usn_timeline_review_candidates_become_artifact_events(self) -> None:
+        payload = {
+            "command": "artifacts",
+            "kind": "windows-filesystem",
+            "artifacts": [
+                {
+                    "artifact_type": "usn-journal-inventory",
+                    "provider": "rapidtriage.windows.filesystem",
+                    "path": "C:\\Evidence\\$Extend\\$UsnJrnl:$J",
+                    "details": {
+                        "timeline_review_candidates": [
+                            {
+                                "timestamp": "2026-01-02T03:04:05+00:00",
+                                "timeline_type": "usn-rename-old-name",
+                                "event_label": "USN rename old name",
+                                "file_name": "old.txt",
+                                "path_candidate": "\\Users\\old.txt",
+                                "record_cursor": 128,
+                                "reportability": "bounded-usn-timeline-review-candidate",
+                                "validation_required": True,
+                            },
+                            {
+                                "timestamp": "2026-01-02T03:04:06+00:00",
+                                "timeline_type": "usn-rename-new-name",
+                                "event_label": "USN rename new name",
+                                "file_name": "new.txt",
+                                "path_candidate": "\\Users\\new.txt",
+                                "record_cursor": 208,
+                                "reportability": "bounded-usn-timeline-review-candidate",
+                                "validation_required": True,
+                            },
+                        ]
+                    },
+                }
+            ],
+        }
+
+        events = extract_artifact_events(payload, Path("windows-filesystem.json"))
+
+        self.assertEqual(len(events), 2)
+        self.assertEqual(events[0]["event_type"], "artifact-usn-journal-inventory-timeline-review-candidate-observed")
+        self.assertEqual(events[0]["summary"], "USN rename old name \\Users\\old.txt")
+        self.assertEqual(events[0]["details"]["timeline_type"], "usn-rename-old-name")
+        self.assertEqual(events[0]["details"]["record_cursor"], 128)
+        self.assertTrue(events[0]["details"]["validation_required"])
+        self.assertEqual(events[1]["summary"], "USN rename new name \\Users\\new.txt")
+
+        report = build_timeline_report(
+            {
+                "generated_at": "2026-01-02T03:05:00+00:00",
+                "inputs": {"files": [], "docs": [], "artifacts": ["windows-filesystem.json"]},
+                "summary": {
+                    "event_count": len(events),
+                    "earliest_event_at": events[0]["timestamp"],
+                    "latest_event_at": events[1]["timestamp"],
+                    "event_type_counts": {events[0]["event_type"]: 1, events[1]["event_type"]: 1},
+                },
+                "events": [
+                    {
+                        **events[0],
+                        "details": {
+                            **events[0]["details"],
+                            "blockers": ["usn-trusted-timeline-diff-required"],
+                        },
+                    }
+                ],
+            }
+        )
+        self.assertIn("Caveat: validation required", report)
+        self.assertIn("reportability=bounded-usn-timeline-review-candidate", report)
+        self.assertIn("usn-trusted-timeline-diff-required", report)
+
+    def test_usn_state_replay_transitions_become_validation_gated_timeline_events(self) -> None:
+        payload = {
+            "command": "artifacts",
+            "kind": "windows-filesystem",
+            "artifacts": [
+                {
+                    "artifact_type": "usn-journal-inventory",
+                    "provider": "rapidtriage.windows.filesystem",
+                    "path": "C:\\Evidence\\$Extend\\$UsnJrnl:$J",
+                    "details": {
+                        "usn_replay_inventory_profile": {
+                            "bounded_state_replay_preview": {
+                                "transitions": [
+                                    {
+                                        "timestamp": "2026-01-02T03:05:00+00:00",
+                                        "transition": "delete",
+                                        "timeline_type": "usn-state-delete",
+                                        "event_label": "USN state delete",
+                                        "file_name": "new.txt",
+                                        "previous_path": "\\Users\\new.txt",
+                                        "path_candidate": "\\Users\\new.txt",
+                                        "record_cursor": 408,
+                                        "reportability": "bounded-usn-state-replay-transition",
+                                        "validation_required": True,
+                                        "blockers": ["usn-trusted-state-replay-diff-required"],
+                                    }
+                                ]
+                            }
+                        }
+                    },
+                }
+            ],
+        }
+
+        events = extract_artifact_events(payload, Path("windows-filesystem.json"))
+
+        self.assertEqual(len(events), 1)
+        self.assertEqual(events[0]["event_type"], "artifact-usn-journal-inventory-usn-state-transition-observed")
+        self.assertEqual(events[0]["summary"], "USN state delete \\Users\\new.txt")
+        self.assertEqual(events[0]["details"]["timeline_type"], "usn-state-delete")
+        self.assertTrue(events[0]["details"]["validation_required"])
+
+        report = build_timeline_report(
+            {
+                "generated_at": "2026-01-02T03:06:00+00:00",
+                "inputs": {"files": [], "docs": [], "artifacts": ["windows-filesystem.json"]},
+                "summary": {
+                    "event_count": 1,
+                    "earliest_event_at": events[0]["timestamp"],
+                    "latest_event_at": events[0]["timestamp"],
+                    "event_type_counts": {events[0]["event_type"]: 1},
+                },
+                "events": events,
+            }
+        )
+        self.assertIn("USN state delete", report)
+        self.assertIn("Caveat: validation required", report)
+        self.assertIn("bounded-usn-state-replay-transition", report)
 
     def _event_timestamp(self, event: dict[str, Any]) -> datetime:
         raw = self._event_field(event, TIMESTAMP_KEYS, label="timestamp")

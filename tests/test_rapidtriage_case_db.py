@@ -665,8 +665,26 @@ class RapidTriageCaseDatabaseTests(unittest.TestCase):
                 "case-search-review-workflow-summary-v1",
             )
             self.assertGreaterEqual(unfiltered["review_workflow_summary"]["review_queue_count"], 1)
+            self.assertEqual(
+                unfiltered["review_workflow_summary"]["review_assignment_manifest"]["manifest_version"],
+                "case-review-assignment-manifest-v1",
+            )
+            self.assertEqual(
+                unfiltered["review_workflow_summary"]["review_assignment_manifest_hash"],
+                unfiltered["review_workflow_summary"]["review_assignment_manifest"]["manifest_hash"],
+            )
+            self.assertGreaterEqual(unfiltered["review_workflow_summary"]["source_viewer_locator_count"], 1)
+            self.assertEqual(
+                unfiltered["review_workflow_summary"]["review_queue"][0]["source_viewer_locator"]["viewer"],
+                "case-review-source",
+            )
+            self.assertTrue(unfiltered["review_workflow_summary"]["review_queue"][0]["queue_row_hash"])
             self.assertIn(
                 "assignment queue metadata emitted",
+                unfiltered["review_workflow_summary"]["core_accuracy_gates"][0]["satisfied_checks"],
+            )
+            self.assertIn(
+                "review source viewer locators emitted",
                 unfiltered["review_workflow_summary"]["core_accuracy_gates"][0]["satisfied_checks"],
             )
             document_match = unfiltered["matches"][0]
@@ -722,6 +740,11 @@ class RapidTriageCaseDatabaseTests(unittest.TestCase):
             self.assertEqual(filtered["review_workflow_summary"]["filters"]["verification_status"], "source_opened")
             self.assertEqual(filtered["review_workflow_summary"]["assigned_count"], 0)
             self.assertGreaterEqual(filtered["review_workflow_summary"]["report_candidate_count"], 1)
+            self.assertTrue(
+                filtered["review_workflow_summary"]["commercial_uplift_evidence"]["large_data_controls"][
+                    "review_assignment_manifest_present"
+                ]
+            )
             self.assertIn(
                 "verification status filter applied",
                 filtered["review_workflow_summary"]["core_accuracy_gates"][0]["satisfied_checks"],

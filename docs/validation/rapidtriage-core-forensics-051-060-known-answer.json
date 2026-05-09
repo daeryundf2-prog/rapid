@@ -11,7 +11,7 @@
       "status": "pass",
       "backlog_items": [51],
       "evidence_paths": ["docs/validation/core-forensics-051-060-fixture-evidence.json", "tests/test_rapidtriage_case_db.py", "tests/test_rapidtriage_api.py"],
-      "expected": {"required_assertions": ["Review marks preserve status, verification, assignment, priority, report inclusion, history/audit warnings, trusted reviewer workflow audit diff gates, and #51 core_accuracy_gates.", "Reviewer workflow reportability decisions block role-based case-management claims until multi-user RBAC, conflict handling, notifications, signed reviewer SOP, and trusted audit diff evidence exists."]},
+      "expected": {"required_assertions": ["Review marks preserve status, verification, assignment, priority, report inclusion, history/audit warnings, source-viewer locators, queue row hashes, assignment manifest hashes, trusted reviewer workflow audit diff gates, and #51 core_accuracy_gates.", "Reviewer workflow reportability decisions block role-based case-management claims until multi-user RBAC, conflict handling, notifications, signed reviewer SOP, and trusted audit diff evidence exists."]},
       "notes": "Internal fixture pass; role-based multi-user review remains commercial blocker."
     },
     {
@@ -22,7 +22,7 @@
       "status": "pass",
       "backlog_items": [52],
       "evidence_paths": ["docs/validation/core-forensics-051-060-fixture-evidence.json", "tests/test_rapidtriage_compare.py", "tests/test_rapidtriage_api.py"],
-      "expected": {"required_assertions": ["Compare preserves A/B/C baseline review, hashes, bounded text diff, status counts, specialized-diff warning, trusted expected-diff gates, and #52 core_accuracy_gates.", "Compare reportability decisions block semantic-diff-complete claims until binary/image/SQLite/mailbox diff viewers, compare notes, selection rationale, reviewed citations, and trusted expected diff evidence exist."]},
+      "expected": {"required_assertions": ["Compare preserves A/B/C baseline review, hashes, bounded text diff, status counts, source-viewer locators, diff locators, comparison entry hashes, citation manifest hashes, specialized-diff warning, trusted expected-diff gates, and #52 core_accuracy_gates.", "Compare reportability decisions block semantic-diff-complete claims until binary/image/SQLite/mailbox diff viewers, persistent Case DB compare notes, selection rationale, reviewed citations, and trusted expected diff evidence exist."]},
       "notes": "Internal fixture pass; semantic binary/image/table diff viewers remain future work."
     },
     {
@@ -33,7 +33,7 @@
       "status": "pass",
       "backlog_items": [53],
       "evidence_paths": ["docs/validation/core-forensics-051-060-fixture-evidence.json", "tests/test_rapidtriage_api.py"],
-      "expected": {"required_assertions": ["Source preview preserves bounded hex rows, byte offsets, preview hash, byte-search citation support, source validation warning, bounded range citation package metadata, trusted offset manifest gates, and #53 core_accuracy_gates.", "Hex viewer reportability decisions block full-source byte-citation claims until interactive jump-to-offset, byte selection hashing, trusted offset manifest diff, and external citation package validation exists."]},
+      "expected": {"required_assertions": ["Source preview preserves bounded hex rows, byte offsets, preview hash, byte-search citation support, source validation warning, preview source-locator manifest, row hashes, bounded range citation package metadata, range proof manifest, trusted offset manifest gates, and #53 core_accuracy_gates.", "Hex viewer reportability decisions block full-source byte-citation claims until interactive jump-to-offset, byte selection hashing, trusted offset manifest diff, and external citation package validation exists."]},
       "notes": "Internal fixture pass; full range export and source-byte citation package remain validation-gated."
     },
     {
@@ -44,7 +44,7 @@
       "status": "pass",
       "backlog_items": [54],
       "evidence_paths": ["docs/validation/core-forensics-051-060-fixture-evidence.json", "tests/test_rapidtriage_api.py"],
-      "expected": {"required_assertions": ["SQLite preview preserves read-only open, table/schema inventory, column/index metadata, bounded row preview, API-backed table pagination, restricted contains filters, deleted/WAL warning, trusted query/schema diff gates, and #54 core_accuracy_gates.", "SQLite viewer reportability decisions block deleted-row/WAL-complete claims until browser E2E pagination validation, WAL/journal replay, deleted-row validation, trusted sqlite3 query/schema diff, and large database corpus evidence exists."]},
+      "expected": {"required_assertions": ["SQLite preview preserves read-only open, table/schema inventory, column/index metadata, bounded row preview, preview source manifest hashes, API-backed table pagination, table page proof manifest hashes, restricted contains filters, deleted/WAL warning, trusted query/schema diff gates, and #54 core_accuracy_gates.", "SQLite viewer reportability decisions block deleted-row/WAL-complete claims until browser E2E pagination validation, WAL/journal replay, deleted-row validation, trusted sqlite3 query/schema diff, and large database corpus evidence exists."]},
       "notes": "Internal fixture pass; deleted-row/WAL and large database corpus validation remain blockers."
     },
     {
@@ -55,7 +55,7 @@
       "status": "pass",
       "backlog_items": [55],
       "evidence_paths": ["docs/validation/core-forensics-051-060-fixture-evidence.json", "tests/test_rapidtriage_api.py"],
-      "expected": {"required_assertions": ["Email preview preserves thread grouping, message order, participant/header fields, attachment hash inventory, bounded attachment citation packages, mailbox limitations, trusted thread/export diff gates, and #55 core_accuracy_gates.", "Email viewer reportability decisions block native-mailbox-thread-complete claims until PST/OST/MSG decoding, deleted item recovery, native mailbox attachment extraction, trusted mail client thread export diff, and mailbox corpus validation exists."]},
+      "expected": {"required_assertions": ["Email preview preserves thread grouping, message order, participant/header fields, conversation source manifest hashes, attachment hash inventory, bounded attachment citation packages, attachment proof manifest hashes, mailbox limitations, trusted thread/export diff gates, and #55 core_accuracy_gates.", "Email viewer reportability decisions block native-mailbox-thread-complete claims until PST/OST/MSG decoding, deleted item recovery, native mailbox attachment extraction, trusted mail client thread export diff, and mailbox corpus validation exists."]},
       "notes": "Internal fixture pass; native PST/OST/MSG conversation validation remains required."
     },
     {
@@ -66,7 +66,7 @@
       "status": "pass",
       "backlog_items": [56],
       "evidence_paths": ["docs/validation/core-forensics-051-060-fixture-evidence.json", "tests/test_rapidtriage_media_image.py", "tests/test_rapidtriage_api.py"],
-      "expected": {"required_assertions": ["Image rows/previews preserve metadata, hashes, thumbnail metadata, perceptual similarity bucket, bounded folder gallery pages, bucket filters, tag/report hints, classifier limitation, trusted image gallery manifest diff gates, and #56 core_accuracy_gates.", "Image gallery reportability decisions block ML/sensitive-media-complete claims until virtualized gallery, persistent tags, ML similarity, sensitive/deepfake classifier validation, and trusted image manifest evidence exists."]},
+      "expected": {"required_assertions": ["Image rows/previews preserve metadata, hashes, thumbnail metadata, perceptual similarity bucket, source manifest row hashes, bounded folder gallery pages, page manifest row hashes, bucket filters, tag/report hints, classifier limitation, trusted image gallery manifest diff gates, and #56 core_accuracy_gates.", "Image gallery reportability decisions block ML/sensitive-media-complete claims until virtualized gallery, persistent tags, ML similarity, sensitive/deepfake classifier validation, and trusted image manifest evidence exists."]},
       "notes": "Internal fixture pass; dedicated gallery UI and ML similarity validation remain blockers."
     },
     {
@@ -77,7 +77,7 @@
       "status": "pass",
       "backlog_items": [57],
       "evidence_paths": ["docs/validation/core-forensics-051-060-fixture-evidence.json", "tests/test_rapidtriage_api.py"],
-      "expected": {"required_assertions": ["Media preview preserves media metadata, source hashes, transcript sidecars, cue timestamps, bounded cue citation packages, verification warning, trusted transcript cue/alignment diff gates, and #57 core_accuracy_gates.", "Media transcript reportability decisions block playback/ASR-validated claims until safe playback, ASR execution, waveform/thumb generation, trusted cue/alignment diff, and transcript alignment corpus evidence exists."]},
+      "expected": {"required_assertions": ["Media preview preserves media metadata, source hashes, transcript sidecars, cue timestamps, media-transcript-source-manifest-v1 sidecar/cue hashes, bounded cue citation packages, media-cue-proof-manifest-v1, verification warning, trusted transcript cue/alignment diff gates, and #57 core_accuracy_gates.", "Media transcript reportability decisions block playback/ASR-validated claims until safe playback, ASR execution, waveform/thumb generation, trusted cue/alignment diff, and transcript alignment corpus evidence exists."]},
       "notes": "Internal fixture pass; playback sandbox and ASR/transcript validation remain future work."
     },
     {
@@ -88,7 +88,7 @@
       "status": "pass",
       "backlog_items": [58],
       "evidence_paths": ["docs/validation/core-forensics-051-060-fixture-evidence.json", "tests/test_rapidtriage_ocr_queue.py", "tests/test_rapidtriage_media_image.py"],
-      "expected": {"required_assertions": ["OCR queue preserves queue items, sidecar hashes, retry state, engine metadata, native OCR warning, trusted OCR engine/sidecar diff gates, and #58 core_accuracy_gates.", "OCR queue reportability decisions block engine-validated claims until OCR engine logs, retries, version capture, confidence calibration, Case DB queue persistence, and trusted engine/sidecar diff evidence exists."]},
+      "expected": {"required_assertions": ["OCR queue preserves queue items, sidecar hashes, retry state, engine metadata, ocr-queue-source-manifest-v1, ocr-queue-item-manifest-v1, source-ocr-queue-page-manifest-v1, source-viewer locators, native OCR warning, trusted OCR engine/sidecar diff gates, and #58 core_accuracy_gates.", "OCR queue reportability decisions block engine-validated claims until OCR engine logs, retries, version capture, confidence calibration, Case DB queue persistence, and trusted engine/sidecar diff evidence exists."]},
       "notes": "Internal fixture pass; actual OCR worker execution and engine logs remain blockers."
     },
     {
@@ -99,7 +99,7 @@
       "status": "pass",
       "backlog_items": [59],
       "evidence_paths": ["docs/validation/core-forensics-051-060-fixture-evidence.json", "tests/test_rapidtriage_ocr_queue.py", "tests/test_rapidtriage_media_image.py", "tests/test_rapidtriage_api.py"],
-      "expected": {"required_assertions": ["OCR/media flows preserve Korean hints, quality metrics, translation sidecars, confidence/engine metadata, source-viewer side-by-side OCR/translation review packages, human-review warning, trusted Korean OCR/translation review diff gates, and #59 core_accuracy_gates.", "Korean OCR/translation reportability decisions block certified-translation claims until OCR calibration, trusted Korean OCR review diff, and human-certified translation review evidence exists."]},
+      "expected": {"required_assertions": ["OCR/media flows preserve Korean hints, quality metrics, translation sidecars, confidence/engine metadata, source-viewer side-by-side OCR/translation review packages, source-ocr-translation-review-manifest-v1 row hashes/source locator, human-review warning, trusted Korean OCR/translation review diff gates, and #59 core_accuracy_gates.", "Korean OCR/translation reportability decisions block certified-translation claims until OCR calibration, trusted Korean OCR review diff, and human-certified translation review evidence exists."]},
       "notes": "Internal fixture pass; human-certified translation and OCR calibration remain blockers."
     },
     {
@@ -110,7 +110,7 @@
       "status": "pass",
       "backlog_items": [60],
       "evidence_paths": ["docs/validation/core-forensics-051-060-fixture-evidence.json", "tests/test_rapidtriage_search_analysis.py"],
-      "expected": {"required_assertions": ["Search analysis preserves duplicate fingerprints, group counts, representative hit links, hidden duplicate counts, source/path references, collapse review profiles, web dedupe cards, near-duplicate warning, trusted duplicate manifest diff gates, and #60 core_accuracy_gates.", "Search deduplication reportability decisions block suppression-ready or content-complete duplicate claims until exact/fuzzy/perceptual/OCR duplicate corpora, trusted duplicate manifest diff, and analyst suppression persistence exist."]},
+      "expected": {"required_assertions": ["Search analysis preserves duplicate fingerprints, group counts, representative hit links, hidden duplicate counts, source/path references, collapse review profiles, search-dedup-citation-manifest-v1 member row hashes/source locators, web dedupe cards, near-duplicate warning, trusted duplicate manifest diff gates, and #60 core_accuracy_gates.", "Search deduplication reportability decisions block suppression-ready or content-complete duplicate claims until exact/fuzzy/perceptual/OCR duplicate corpora, trusted duplicate manifest diff, and analyst suppression persistence exist."]},
       "notes": "Internal fixture pass; persistent Case DB suppression and fuzzy/media duplicate validation remain blockers."
     }
   ]

@@ -17,6 +17,7 @@
       "expected": {
         "required_assertions": [
           "KakaoTalk rows preserve service/profile, message/media pivots, BigBang compatibility, limitation warnings, source hashes, and #31 core_accuracy_gates",
+          "KakaoTalk rows emit kakaotalk_parser_manifest with parser track, row citation, source viewer locator, hash-only text policy, and review blocker evidence",
           "KakaoTalk trusted diff helper requires authorized export or validated native DB equality before satisfying the #31 trusted KakaoTalk export/native DB diff pass gate",
           "KakaoTalk reportability decisions block decrypted-complete message claims until post-BigBang/schema/encrypted/deleted validation exists"
         ]
@@ -37,6 +38,7 @@
       "expected": {
         "required_assertions": [
           "WhatsApp rows preserve service/profile, chat/contact/media pivots, crypt/deleted warnings, source provenance, and #32 core_accuracy_gates",
+          "WhatsApp rows emit whatsapp_parser_manifest with export/msgstore track, row citation, source viewer locator, JID/media review state, and crypt/deleted blocker evidence",
           "WhatsApp trusted diff helper requires export/msgstore row equality before satisfying the #32 trusted WhatsApp export/native DB diff pass gate",
           "WhatsApp reportability decisions block crypt/deleted-complete claims until backup key, database, and deleted-row validation exists"
         ]
@@ -57,6 +59,7 @@
       "expected": {
         "required_assertions": [
           "Telegram rows preserve service/profile, chat/user/media attribution, cache/account provenance, limitations, and #33 core_accuracy_gates",
+          "Telegram rows emit telegram_parser_manifest with export/cache track, row citation, source viewer locator, account/dialog/media-cache review state, and local-store/deleted blocker evidence",
           "Telegram trusted diff helper requires native export/cache row equality before satisfying the #33 trusted Telegram export/native DB diff pass gate",
           "Telegram reportability decisions block local-store-complete claims until encrypted store, cache/media, and account attribution validation exists"
         ]
@@ -77,6 +80,7 @@
       "expected": {
         "required_assertions": [
           "Signal rows preserve service/profile, thread/message inventory, SQLCipher authority gates, attachment/deleted warnings, and #34 core_accuracy_gates",
+          "Signal rows emit signal_parser_manifest with export/SQLCipher track, row citation, source viewer locator, thread/recipient/attachment review state, and key/deleted/disappearing blocker evidence",
           "Signal trusted diff helper requires authorized export or validated SQLCipher row equality before satisfying the #34 trusted Signal export/native DB diff pass gate",
           "Signal reportability decisions block SQLCipher-complete claims until key handling, encrypted backup, attachment, and deleted-row validation exists"
         ]
@@ -97,6 +101,7 @@
       "expected": {
         "required_assertions": [
           "Extended messenger rows preserve service/profile, message/media/reaction normalization, schema registry, limitations, and #35 core_accuracy_gates",
+          "Extended messenger rows emit extended_messenger_parser_manifest with stable manifest hash, row citation, source viewer locator, metadata-collapsed viewer controls, and blocker evidence",
           "Extended messenger trusted diff helper requires service export/native DB row equality before satisfying the #35 trusted extended messenger export/native DB diff pass gate",
           "Extended messenger reportability decisions block service-complete claims until service schemas, read-state/reactions, media, and ephemeral/deleted behavior are validated"
         ]
@@ -117,6 +122,7 @@
       "expected": {
         "required_assertions": [
           "Email rows preserve mailbox/message profile, header/body/attachment inventory, PST/OST limitations, threading warnings, legal boundary, and #36 core_accuracy_gates",
+          "Email rows emit email_mailbox_parser_manifest with stable manifest hash, row citation, source viewer locator, thread/participant profile, bounded MAPI inventory state, and viewer controls",
           "Email trusted diff helper requires libpff/readpst/Outlook/native mailbox row equality before satisfying the #36 trusted email mailbox export diff pass gate",
           "Email reportability decisions block native/deleted-complete mailbox claims until PST/OST/MSG, deleted item, threading, and privilege validation exists"
         ]
@@ -137,6 +143,7 @@
       "expected": {
         "required_assertions": [
           "Google cloud rows preserve profile detection, Gmail/Drive/Activity/Location normalization, export warnings, schema/timezone warnings, and #37 core_accuracy_gates",
+          "Google cloud rows emit google_takeout_parser_manifest with stable manifest hash, product family, row citation, source viewer locator, primary pivots, sidecar/timezone/provider-diff state, and viewer controls",
           "Google trusted diff helper requires Takeout/provider/API row equality before satisfying the #37 trusted Google Takeout/provider diff pass gate",
           "Google export reportability decisions block product-matrix-complete claims until Takeout scope, sidecars, timezone, and provider-native validation exists"
         ]
@@ -157,6 +164,7 @@
       "expected": {
         "required_assertions": [
           "Apple/iCloud rows preserve profile detection, account/file/photo normalization, ADP/shared-album limitations, retention/schema warnings, and #38 core_accuracy_gates",
+          "Apple/iCloud rows emit icloud_export_parser_manifest with stable manifest hash, product family, row citation, source viewer locator, account/file/photo pivots, ADP/shared-album/third-party-container state, sidecar/EXIF status, and viewer controls",
           "iCloud trusted diff helper requires Apple privacy export/iCloud web/native export row equality before satisfying the #38 trusted iCloud/provider export diff pass gate",
           "iCloud reportability decisions block account/photo-complete claims until ADP/shared-album, retention, and schema validation exists"
         ]
@@ -177,6 +185,7 @@
       "expected": {
         "required_assertions": [
           "Microsoft cloud rows preserve profile detection, file/message/audit normalization, eDiscovery warnings, permission/retention limitations, and #39 core_accuracy_gates",
+          "Microsoft cloud rows emit m365_export_parser_manifest with stable manifest hash, workload family, row citation, source viewer locator, Teams/OneDrive/SharePoint/Audit pivots, Graph scope, Teams compliance, SharePoint permission, retention/deleted/version state, and viewer controls",
           "Microsoft 365 trusted diff helper requires Purview/eDiscovery/Graph/API row equality before satisfying the #39 trusted M365/eDiscovery export diff pass gate",
           "Microsoft 365 reportability decisions block tenant/permission-complete claims until eDiscovery, permission graph, retention, and Teams/SharePoint validation exists"
         ]
@@ -196,7 +205,7 @@
       ],
       "expected": {
         "required_assertions": [
-          "Cloud API collection preserves manifest validation, credential redaction, response hash/provenance, API limitation warnings, and #40 core_accuracy_gates",
+          "Cloud API collection preserves manifest validation, credential redaction, response hash/provenance, response-sidecar boundary, cloud_api_response_parser_manifest row citation/source viewer controls, API limitation warnings, and #40 core_accuracy_gates",
           "Cloud API trusted diff helper requires provider native/admin/API row equality before satisfying the #40 trusted cloud API/provider response diff pass gate",
           "Cloud API reportability decisions block provider-complete acquisition claims until OAuth scope/consent, pagination/delta, legal hold, and provider schema validation exists"
         ]

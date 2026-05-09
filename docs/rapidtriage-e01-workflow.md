@@ -13,6 +13,11 @@ When you select an E01/Ex01 directly:
    Analysts can override this with an explicit start sector when a case requires a different partition.
 4. It uses `tsk_recover` to recover files into the run output staging directory.
 5. It runs the normal folder triage workflow on the recovered filesystem.
+   The Windows-focused run now includes browser history/downloads/AI-use hints, recent files and JumpLists,
+   EVTX/event-log exports, Windows Search/`Windows.edb` pivots, remote-access traces, execution artifacts,
+   Registry/NTUSER/UsrClass activity, ShellBags review rows, Prefetch, NTFS MFT/USN pivots, SRUM, tasks,
+   Defender/firewall/WMI/WER-style system artifacts, document text search, file categorization, timeline,
+   indicator summary, extraction manifests, and the run report.
 
 For split EWF sets, the output records `segment_set_profile`: selected segment, discovered segment count,
 segment numbers, contiguous/missing-segment warnings, selected-is-first status, total segment bytes, and a
@@ -66,6 +71,20 @@ Direct extraction also writes a durable stage checkpoint at:
 The checkpoint records dependency preflight, mount, partition enumeration, filesystem recovery, command history, source signature, selected partition, recovered-root hash manifest, and resume readiness. If filesystem recovery already completed and the source signature plus requested partition still match, a later run can reuse the recovered filesystem instead of running the external tools again.
 
 The recovered-root manifest is intentionally bounded for large cases. It records relative path, size, mtime, SHA-256 for files under the configured hash limit, skipped-large-file counters, truncation state, and per-file errors. Use it as triage provenance, then preserve full acquisition hashes and trusted-tool logs for report-grade evidence.
+
+Both the extraction metadata (`rapidtriage-e01.json`) and direct E01 run summary now include `e01_ex01_workflow_manifest`.
+This is the stable #22 single-case contract that the GUI, API, and reports can read:
+
+- `select-e01`: source path, hash status, segment count, selected-first-segment status.
+- `dependency-preflight`: available/missing `ewfmount`, `mmls`, and `tsk_recover` details.
+- `partition-selection`: selected, requested, and recommended start sector plus partition counts.
+- `filesystem-extraction`: command-history count, recovered-file count, checkpoint/resume state.
+- `artifact-analysis`: run output keys and artifact output count once the full run completes.
+- `unified-search-indexing`: docs, docs-index, and files search outputs.
+- `review-workflow`: source-viewer and Case DB review requirements.
+- `report-export`: summary/report output keys, source-hash requirement, and trusted-tool diff requirement.
+
+The manifest carries `profile_version=e01-ex01-integrated-workflow-manifest-v1`, `gap_id=#22`, `item_number=22`, large-data controls, a reportability decision, explicit commercial blockers, and a stable `manifest_sha256`. It should be treated as workflow evidence and UI state, not proof that RapidTriage has a complete native EWF parser.
 
 Failure guidance is normalized so the operator sees the likely class of problem instead of a raw command failure only:
 

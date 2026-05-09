@@ -3,6 +3,7 @@ from __future__ import annotations
 import datetime as dt
 import difflib
 import hashlib
+import json
 from pathlib import Path
 from typing import Mapping, Sequence
 
@@ -11,6 +12,11 @@ from .forensic_accuracy import build_accuracy_gate
 
 class CompareError(ValueError):
     """Raised when a compare request cannot be completed."""
+
+
+def stable_payload_sha256(payload: Mapping[str, object] | Sequence[Mapping[str, object]]) -> str:
+    encoded = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"), default=str).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
 
 
 HASH_ALGORITHMS = ("md5", "sha1", "sha256")
@@ -107,8 +113,19 @@ def compare_paths(
         selection_rationale=selection_rationale,
         review_notes=review_notes,
     )
+    citation_manifest = build_compare_citation_manifest(
+        results=[result],
+        mode="pair",
+        input_records=[left_record, right_record],
+        review_profile=review_profile,
+    )
     report_grade = compare_report_grade_assessment(mode="pair")
-    core_accuracy_gates = compare_core_accuracy_gates(results=[result], mode="pair", review_profile=review_profile)
+    core_accuracy_gates = compare_core_accuracy_gates(
+        results=[result],
+        mode="pair",
+        review_profile=review_profile,
+        citation_manifest=citation_manifest,
+    )
     return {
         "command": "compare",
         "generated_at": dt.datetime.now(dt.timezone.utc).isoformat(),
@@ -134,11 +151,14 @@ def compare_paths(
             "review_queue_count": int(review_profile.get("review_queue_count") or 0),
             "selection_rationale_present": bool(review_profile.get("selection_rationale")),
             "review_note_count": int(review_profile.get("review_note_count") or 0),
+            "compare_citation_manifest_hash": citation_manifest["manifest_hash"],
+            "source_viewer_locator_count": citation_manifest["source_viewer_locator_count"],
             "commercial_gap_ids": [COMPARE_GAP_ID],
             "commercial_grade_ready": False,
         },
         "compare_native_capabilities": dict(COMPARE_NATIVE_CAPABILITIES),
         "compare_review_profile": review_profile,
+        "compare_citation_manifest": citation_manifest,
         "compare_report_grade_assessment": report_grade,
         "core_accuracy_gates": core_accuracy_gates,
         "commercial_uplift_evidence": compare_commercial_uplift_evidence(
@@ -149,6 +169,7 @@ def compare_paths(
             max_text_bytes=max_text_bytes,
             diff_context=diff_context,
             review_profile=review_profile,
+            citation_manifest=citation_manifest,
         ),
         "results": [result],
     }
@@ -210,8 +231,19 @@ def compare_many_paths(
         selection_rationale=selection_rationale,
         review_notes=review_notes,
     )
+    citation_manifest = build_compare_citation_manifest(
+        results=comparisons,
+        mode="multi",
+        input_records=input_records,
+        review_profile=review_profile,
+    )
     report_grade = compare_report_grade_assessment(mode="multi")
-    core_accuracy_gates = compare_core_accuracy_gates(results=comparisons, mode="multi", review_profile=review_profile)
+    core_accuracy_gates = compare_core_accuracy_gates(
+        results=comparisons,
+        mode="multi",
+        review_profile=review_profile,
+        citation_manifest=citation_manifest,
+    )
     return {
         "command": "compare",
         "generated_at": dt.datetime.now(dt.timezone.utc).isoformat(),
@@ -240,11 +272,14 @@ def compare_many_paths(
             "review_queue_count": int(review_profile.get("review_queue_count") or 0),
             "selection_rationale_present": bool(review_profile.get("selection_rationale")),
             "review_note_count": int(review_profile.get("review_note_count") or 0),
+            "compare_citation_manifest_hash": citation_manifest["manifest_hash"],
+            "source_viewer_locator_count": citation_manifest["source_viewer_locator_count"],
             "commercial_gap_ids": [COMPARE_GAP_ID],
             "commercial_grade_ready": False,
         },
         "compare_native_capabilities": dict(COMPARE_NATIVE_CAPABILITIES),
         "compare_review_profile": review_profile,
+        "compare_citation_manifest": citation_manifest,
         "compare_report_grade_assessment": report_grade,
         "core_accuracy_gates": core_accuracy_gates,
         "commercial_uplift_evidence": compare_commercial_uplift_evidence(
@@ -255,6 +290,7 @@ def compare_many_paths(
             max_text_bytes=max_text_bytes,
             diff_context=diff_context,
             review_profile=review_profile,
+            citation_manifest=citation_manifest,
         ),
         "results": comparisons,
     }
@@ -266,6 +302,7 @@ def compare_core_accuracy_gates(
     mode: str,
     trusted_diff: Mapping[str, object] | None = None,
     review_profile: Mapping[str, object] | None = None,
+    citation_manifest: Mapping[str, object] | None = None,
 ) -> list[dict[str, object]]:
     satisfied = []
     if mode == "multi" or len(results) >= 1:
@@ -285,6 +322,11 @@ def compare_core_accuracy_gates(
         satisfied.append("selection rationale captured")
     if int(review_profile.get("review_note_count") or 0) > 0:
         satisfied.append("bounded compare notes captured")
+    citation_manifest = citation_manifest if isinstance(citation_manifest, Mapping) else {}
+    if citation_manifest.get("manifest_hash"):
+        satisfied.append("compare citation manifest hash")
+    if int(citation_manifest.get("source_viewer_locator_count") or 0) > 0:
+        satisfied.append("compare source viewer locators")
     if not COMPARE_NATIVE_CAPABILITIES["binary_structure_aware_diff"]:
         satisfied.append("specialized diff limitation warning")
     trusted_diff = trusted_diff if isinstance(trusted_diff, Mapping) else {}
@@ -295,6 +337,7 @@ def compare_core_accuracy_gates(
         f"result_count:{len(results)}",
         f"review_queue_count:{review_profile.get('review_queue_count', 0)}",
         f"review_note_count:{review_profile.get('review_note_count', 0)}",
+        f"compare_citation_manifest_hash:{citation_manifest.get('manifest_hash', '')}",
         f"trusted_diff_status:{trusted_diff.get('status', 'missing')}",
     ]
     for result in results[:3]:
@@ -385,6 +428,93 @@ def build_compare_review_profile(
             "run specialized semantic diff viewers for non-text evidence before making report-grade claims",
             "attach a trusted expected-diff manifest before claiming compare output is validated",
         ],
+    }
+
+
+def build_compare_citation_manifest(
+    *,
+    results: Sequence[Mapping[str, object]],
+    mode: str,
+    input_records: Sequence[Mapping[str, object]],
+    review_profile: Mapping[str, object],
+) -> dict[str, object]:
+    review_queue = review_profile.get("review_queue") if isinstance(review_profile.get("review_queue"), Sequence) else []
+    entries: list[dict[str, object]] = []
+    source_viewer_locator_count = 0
+    diff_locator_count = 0
+    for index, result in enumerate(results[:100]):
+        left = result.get("left") if isinstance(result.get("left"), Mapping) else {}
+        right = result.get("right") if isinstance(result.get("right"), Mapping) else {}
+        diff = result.get("diff") if isinstance(result.get("diff"), Mapping) else {}
+        review_row = review_queue[index] if index < len(review_queue) and isinstance(review_queue[index], Mapping) else {}
+        left_locator = compare_source_locator(left, side="baseline")
+        right_locator = compare_source_locator(right, side="comparison")
+        if left_locator.get("path"):
+            source_viewer_locator_count += 1
+        if right_locator.get("path"):
+            source_viewer_locator_count += 1
+        diff_locator = {
+            "viewer": "compare-diff",
+            "comparison_id": str(result.get("comparison_id") or f"compare-{index + 1:04d}"),
+            "format": str(diff.get("format") or ""),
+            "line_count": int(diff.get("line_count") or 0),
+            "included": bool(diff.get("included")),
+            "preview_line_limit": len(diff.get("preview") or []) if isinstance(diff.get("preview"), Sequence) else 0,
+        }
+        if diff_locator["included"]:
+            diff_locator_count += 1
+        entry_core = {
+            "comparison_id": str(result.get("comparison_id") or f"compare-{index + 1:04d}"),
+            "status": str(result.get("status") or ""),
+            "baseline_locator": left_locator,
+            "comparison_locator": right_locator,
+            "diff_locator": diff_locator,
+            "review_status": str(review_row.get("review_status") or "unreviewed"),
+            "report_decision": str(review_row.get("report_decision") or "pending"),
+            "selection_rationale": str(review_row.get("selection_rationale") or review_profile.get("selection_rationale") or ""),
+            "review_note": str(review_row.get("review_note") or ""),
+        }
+        entries.append({**entry_core, "entry_hash": stable_payload_sha256(entry_core)})
+    manifest_core: dict[str, object] = {
+        "manifest_version": "multi-evidence-compare-citation-manifest-v1",
+        "item_number": 52,
+        "commercial_gap_ids": [COMPARE_GAP_ID],
+        "mode": mode,
+        "input_count": len(input_records),
+        "comparison_count": len(results),
+        "bounded_entry_count": len(entries),
+        "queue_truncated": len(results) > len(entries),
+        "source_viewer_locator_count": source_viewer_locator_count,
+        "diff_locator_count": diff_locator_count,
+        "selection_rationale_present": bool(review_profile.get("selection_rationale")),
+        "review_note_count": int(review_profile.get("review_note_count") or 0),
+        "entries": entries,
+        "blockers": [
+            "persistent-compare-notes-not-yet-implemented",
+            "semantic-binary-image-sqlite-mailbox-diff-not-complete",
+            COMPARE_TRUSTED_DIFF_BLOCKER,
+        ],
+        "commercial_claim_allowed": False,
+        "operator_warning": (
+            "Use this manifest to reopen compared sources and bounded text diffs; semantic artifact-specific "
+            "comparison still requires specialized viewers and trusted expected-diff validation."
+        ),
+    }
+    return {**manifest_core, "manifest_hash": stable_payload_sha256(manifest_core)}
+
+
+def compare_source_locator(record: Mapping[str, object], *, side: str) -> dict[str, object]:
+    hashes = record.get("hashes") if isinstance(record.get("hashes"), Mapping) else {}
+    return {
+        "viewer": "compare-source",
+        "side": side,
+        "label": str(record.get("label") or ""),
+        "path": str(record.get("path") or ""),
+        "name": str(record.get("name") or ""),
+        "extension": str(record.get("extension") or ""),
+        "size": record.get("size"),
+        "sha256": str(hashes.get("sha256") or ""),
+        "open_action": "open-source-for-compare-verification",
     }
 
 
@@ -480,6 +610,7 @@ def compare_commercial_uplift_evidence(
     max_text_bytes: int,
     diff_context: int,
     review_profile: Mapping[str, object] | None = None,
+    citation_manifest: Mapping[str, object] | None = None,
 ) -> dict[str, object]:
     passed = []
     for gate in core_accuracy_gates:
@@ -493,6 +624,7 @@ def compare_commercial_uplift_evidence(
         COMPARE_TRUSTED_DIFF_BLOCKER,
     ]
     review_profile = review_profile if isinstance(review_profile, Mapping) else {}
+    citation_manifest = citation_manifest if isinstance(citation_manifest, Mapping) else {}
     return {
         "batch_id": "commercial-uplift-051-055",
         "item_numbers": [52],
@@ -517,6 +649,10 @@ def compare_commercial_uplift_evidence(
             "result_count": len(results),
             "a_b_c_baseline_compare": mode == "multi",
             "bounded_text_diff": True,
+            "compare_citation_manifest_present": bool(citation_manifest.get("manifest_hash")),
+            "compare_citation_manifest_hash": str(citation_manifest.get("manifest_hash") or ""),
+            "source_viewer_locator_count": int(citation_manifest.get("source_viewer_locator_count") or 0),
+            "diff_locator_count": int(citation_manifest.get("diff_locator_count") or 0),
             "compare_review_profile_present": bool(review_profile),
             "review_queue_count": int(review_profile.get("review_queue_count") or 0),
             "selection_rationale_present": bool(review_profile.get("selection_rationale")),

@@ -92,6 +92,11 @@ def build_ocr_queue(
     if max_items > 0:
         image_paths = image_paths[:max_items]
 
+    options = {
+        "previous_queue": str(previous_queue.expanduser().resolve()) if previous_queue else "",
+        "retry_failures": retry_failures,
+        "max_items": max_items,
+    }
     items = [
         build_ocr_queue_item(path, previous_by_path=previous_by_path, retry_failures=retry_failures)
         for path in image_paths
@@ -104,17 +109,25 @@ def build_ocr_queue(
         language = str(item.get("language_hint") or "unknown")
         language_counts[language] = language_counts.get(language, 0) + 1
     trusted_diffs = missing_ocr_queue_trusted_diffs()
-    core_accuracy_gates = ocr_queue_core_accuracy_gates(items=items, root=resolved_root, trusted_diffs=trusted_diffs)
+    queue_manifest = build_ocr_queue_manifest(
+        root=resolved_root,
+        items=items,
+        options=options,
+        status_counts=status_counts,
+        language_counts=language_counts,
+    )
+    core_accuracy_gates = ocr_queue_core_accuracy_gates(
+        items=items,
+        root=resolved_root,
+        queue_manifest=queue_manifest,
+        trusted_diffs=trusted_diffs,
+    )
     return {
         "command": "ocr-queue",
         "schema_version": OCR_QUEUE_SCHEMA_VERSION,
         "generated_at": dt.datetime.now(dt.timezone.utc).isoformat(),
         "root": str(resolved_root),
-        "options": {
-            "previous_queue": str(previous_queue.expanduser().resolve()) if previous_queue else "",
-            "retry_failures": retry_failures,
-            "max_items": max_items,
-        },
+        "options": options,
         "summary": {
             "candidate_count": len(items),
             "status_counts": status_counts,
@@ -128,10 +141,13 @@ def build_ocr_queue(
         "ocr_queue_native_capabilities": dict(OCR_QUEUE_NATIVE_CAPABILITIES),
         "ocr_queue_report_grade_assessment": ocr_queue_report_grade_assessment(),
         "trusted_ocr_queue_diffs": trusted_diffs,
+        "ocr_queue_manifest": queue_manifest,
+        "ocr_queue_manifest_hash": queue_manifest["manifest_hash"],
         "core_accuracy_gates": core_accuracy_gates,
         "commercial_uplift_evidence": ocr_queue_commercial_uplift_evidence(
             items=items,
             root=resolved_root,
+            queue_manifest=queue_manifest,
             core_accuracy_gates=core_accuracy_gates,
         ),
         "items": items,
@@ -175,7 +191,7 @@ def build_ocr_queue_item(
         "quality_metrics": ocr_quality_metrics(text) if text else {},
     }
     item_gates = ocr_queue_item_core_accuracy_gates(item_context=item_context)
-    return {
+    item = {
         "queue_id": stable_queue_id(resolved),
         "source_path": str(resolved),
         "source_name": resolved.name,
@@ -209,15 +225,120 @@ def build_ocr_queue_item(
         },
         "report_grade_assessment": ocr_queue_item_assessment(status=status, language_hint=language_hint),
     }
+    item_manifest = build_ocr_queue_item_manifest(item)
+    item["ocr_queue_item_manifest"] = item_manifest
+    item["ocr_queue_item_manifest_hash"] = item_manifest["manifest_hash"]
+    item["commercial_uplift_evidence"]["large_data_controls"]["item_manifest_hash"] = item_manifest["manifest_hash"]
+    return item
+
+
+def build_ocr_queue_manifest(
+    *,
+    root: Path,
+    items: Sequence[Mapping[str, object]],
+    options: Mapping[str, object],
+    status_counts: Mapping[str, int],
+    language_counts: Mapping[str, int],
+) -> dict[str, object]:
+    item_rows = []
+    for index, item in enumerate(items, start=1):
+        sidecar = item.get("sidecar") if isinstance(item.get("sidecar"), Mapping) else {}
+        translation = item.get("translation_sidecar") if isinstance(item.get("translation_sidecar"), Mapping) else {}
+        row_core = {
+            "index": index,
+            "queue_id": str(item.get("queue_id") or ""),
+            "source_path": str(item.get("source_path") or ""),
+            "source_name": str(item.get("source_name") or ""),
+            "source_sha256": str(item.get("source_sha256") or ""),
+            "status": str(item.get("status") or ""),
+            "language_hint": str(item.get("language_hint") or ""),
+            "sidecar_sha256": str(sidecar.get("sha256") or ""),
+            "sidecar_text_sha256": str(sidecar.get("text_sha256") or ""),
+            "translation_sha256": str(translation.get("sha256") or ""),
+            "translation_text_sha256": str(translation.get("text_sha256") or ""),
+            "attempt_count": int(item.get("attempt_count") or 0),
+        }
+        item_rows.append({**row_core, "queue_item_row_hash": stable_payload_sha256(row_core)})
+    manifest_core: dict[str, object] = {
+        "manifest_version": "ocr-queue-source-manifest-v1",
+        "item_numbers": [58, 59],
+        "commercial_gap_ids": ["#58", "#59"],
+        "root": str(root),
+        "options": dict(options),
+        "candidate_count": len(item_rows),
+        "status_counts": dict(sorted(status_counts.items())),
+        "language_counts": dict(sorted(language_counts.items())),
+        "queue_item_row_hash_count": sum(1 for item in item_rows if item.get("queue_item_row_hash")),
+        "source_viewer_locator": {
+            "viewer": "source-ocr-queue",
+            "root": str(root),
+            "open_action": "open-ocr-queue-review",
+        },
+        "items": item_rows,
+        "blockers": [
+            "native-ocr-engine-execution-not-implemented",
+            "engine-specific-retry-logs-not-attached",
+            "case-db-ocr-job-persistence-not-implemented",
+            OCR_QUEUE_TRUSTED_DIFF_BLOCKERS[58],
+            OCR_QUEUE_TRUSTED_DIFF_BLOCKERS[59],
+        ],
+        "commercial_claim_allowed": False,
+    }
+    return {**manifest_core, "manifest_hash": stable_payload_sha256(manifest_core)}
+
+
+def build_ocr_queue_item_manifest(item: Mapping[str, object]) -> dict[str, object]:
+    sidecar = item.get("sidecar") if isinstance(item.get("sidecar"), Mapping) else {}
+    translation = item.get("translation_sidecar") if isinstance(item.get("translation_sidecar"), Mapping) else {}
+    manifest_core: dict[str, object] = {
+        "manifest_version": "ocr-queue-item-manifest-v1",
+        "item_numbers": [58, 59],
+        "commercial_gap_ids": ["#58", "#59"],
+        "queue_id": str(item.get("queue_id") or ""),
+        "source_path": str(item.get("source_path") or ""),
+        "source_name": str(item.get("source_name") or ""),
+        "source_sha256": str(item.get("source_sha256") or ""),
+        "status": str(item.get("status") or ""),
+        "previous_status": str(item.get("previous_status") or ""),
+        "attempt_count": int(item.get("attempt_count") or 0),
+        "language_hint": str(item.get("language_hint") or ""),
+        "confidence": item.get("confidence"),
+        "sidecar": {
+            "path": str(sidecar.get("path") or ""),
+            "name": str(sidecar.get("name") or ""),
+            "sha256": str(sidecar.get("sha256") or ""),
+            "text_sha256": str(sidecar.get("text_sha256") or ""),
+            "metadata": sidecar.get("metadata") if isinstance(sidecar.get("metadata"), Mapping) else {},
+        },
+        "translation_sidecar": {
+            "path": str(translation.get("path") or ""),
+            "name": str(translation.get("name") or ""),
+            "sha256": str(translation.get("sha256") or ""),
+            "text_sha256": str(translation.get("text_sha256") or ""),
+            "target_language": str(translation.get("target_language") or ""),
+        },
+        "source_viewer_locator": {
+            "viewer": "source-ocr-queue-item",
+            "path": str(item.get("source_path") or ""),
+            "queue_id": str(item.get("queue_id") or ""),
+            "open_action": "open-ocr-queue-item-review",
+        },
+        "commercial_claim_allowed": False,
+    }
+    return {**manifest_core, "manifest_hash": stable_payload_sha256(manifest_core)}
 
 
 def ocr_queue_core_accuracy_gates(
     *,
     items: list[dict[str, object]],
     root: Path,
+    queue_manifest: Mapping[str, object] | None = None,
     trusted_diffs: Mapping[str, object] | None = None,
 ) -> list[dict[str, object]]:
     evidence_refs = [f"root:{root}", f"candidate_count:{len(items)}"]
+    queue_manifest = queue_manifest if isinstance(queue_manifest, Mapping) else {}
+    if queue_manifest.get("manifest_hash"):
+        evidence_refs.append(f"ocr_queue_manifest_hash:{queue_manifest.get('manifest_hash')}")
     trusted_diffs = trusted_diffs if isinstance(trusted_diffs, Mapping) else {}
     for number in (58, 59):
         diff = trusted_diffs.get(str(number)) if isinstance(trusted_diffs.get(str(number)), Mapping) else {}
@@ -236,6 +357,12 @@ def ocr_queue_core_accuracy_gates(
         item58.append("retry state handling")
     if any(isinstance(item.get("sidecar"), Mapping) and item["sidecar"].get("metadata") for item in items):
         item58.append("engine/metadata preservation")
+    if queue_manifest.get("manifest_hash"):
+        item58.append("queue manifest hash emitted")
+    if queue_manifest.get("queue_item_row_hash_count"):
+        item58.append("queue item row hashes")
+    if isinstance(queue_manifest.get("source_viewer_locator"), Mapping):
+        item58.append("source viewer locator emitted")
     if not OCR_QUEUE_NATIVE_CAPABILITIES["native_ocr_engine_execution"]:
         item58.append("native OCR limitation warning")
     if trusted_ocr_queue_diff_passed(trusted_diffs, 58):
@@ -265,6 +392,7 @@ def ocr_queue_commercial_uplift_evidence(
     *,
     items: list[dict[str, object]],
     root: Path,
+    queue_manifest: Mapping[str, object] | None = None,
     core_accuracy_gates: list[dict[str, object]],
 ) -> dict[str, object]:
     passed_by_item = {
@@ -272,6 +400,7 @@ def ocr_queue_commercial_uplift_evidence(
         for gate in core_accuracy_gates
         if str(gate.get("gap_id")) in {"#58", "#59"}
     }
+    queue_manifest = queue_manifest if isinstance(queue_manifest, Mapping) else {}
     return {
         "batch_id": "commercial-uplift-056-060",
         "item_numbers": [58, 59],
@@ -317,6 +446,8 @@ def ocr_queue_commercial_uplift_evidence(
             "sidecar_imported_count": sum(1 for item in items if str(item.get("status")) == "sidecar-imported"),
             "queued_count": sum(1 for item in items if str(item.get("status")) == "queued"),
             "failed_retry_queued_count": sum(1 for item in items if str(item.get("status")) == "failed-retry-queued"),
+            "ocr_queue_manifest_hash": str(queue_manifest.get("manifest_hash") or ""),
+            "queue_item_row_hash_count": int(queue_manifest.get("queue_item_row_hash_count") or 0),
             "native_ocr_engine_execution": False,
             "case_db_job_persistence": False,
         },
@@ -424,6 +555,11 @@ def ocr_queue_item_core_accuracy_gates(*, item_context: Mapping[str, object]) ->
         root=Path(str(item_context.get("source_path") or ".")).parent,
         trusted_diffs=missing_ocr_queue_trusted_diffs(),
     )
+
+
+def stable_payload_sha256(value: object) -> str:
+    encoded = json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"), default=str).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
 
 
 def missing_ocr_queue_trusted_diffs() -> dict[str, dict[str, object]]:

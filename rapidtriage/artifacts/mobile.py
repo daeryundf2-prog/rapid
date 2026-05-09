@@ -119,7 +119,6 @@ VENDOR_SCHEMA_REGISTRY = {
         "required_export_metadata": ("vendor_tool", "vendor_tool_version", "export_settings", "original_acquisition_sha256"),
     },
 }
-
 MESSAGE_KEYS = {
     "body",
     "content",
@@ -168,6 +167,48 @@ CHAT_KEYS = {
     "groupid",
     "roomid",
     "threadid",
+}
+VENDOR_ARTIFACT_MAPPER_KEYS = {
+    "messages": {
+        "output_artifact_type": "mobile-message",
+        "required_key_sets": (MESSAGE_KEYS, CHAT_KEYS),
+        "semantic_fields": ("timestamp", "sender", "recipient", "conversation_id", "message_id", "message_text_hash", "deleted_state"),
+    },
+    "contacts": {
+        "output_artifact_type": "mobile-contact",
+        "required_key_sets": (CONTACT_KEYS,),
+        "semantic_fields": ("name", "phone", "email", "account_or_service"),
+    },
+    "calls": {
+        "output_artifact_type": "mobile-call",
+        "required_key_sets": (CALL_KEYS,),
+        "semantic_fields": ("timestamp", "phone", "direction_or_type", "duration", "missed_answered_state"),
+    },
+    "apps": {
+        "output_artifact_type": "mobile-app",
+        "required_key_sets": (APP_KEYS,),
+        "semantic_fields": ("app_name", "package_or_bundle", "version", "risk_flags"),
+    },
+    "files": {
+        "output_artifact_type": "mobile-file",
+        "required_key_sets": (FILE_KEYS,),
+        "semantic_fields": ("path", "filename", "size", "hashes", "mime_type"),
+    },
+    "accounts": {
+        "output_artifact_type": "mobile-account",
+        "required_key_sets": (ACCOUNT_KEYS,),
+        "semantic_fields": ("account_id", "account_name", "service", "handle"),
+    },
+    "media": {
+        "output_artifact_type": "mobile-media",
+        "required_key_sets": (MEDIA_KEYS,),
+        "semantic_fields": ("media_path", "mime_type", "dimensions", "duration", "hashes"),
+    },
+    "browser": {
+        "output_artifact_type": "mobile-browser",
+        "required_key_sets": (BROWSER_KEYS,),
+        "semantic_fields": ("url", "title", "timestamp", "browser", "domain"),
+    },
 }
 MESSAGE_ID_KEYS = {"guid", "id", "messageid", "msgid", "rowid", "serverid"}
 REACTION_KEYS = {"reaction", "reactions", "emoji", "like", "likes"}
@@ -420,6 +461,7 @@ def collect_mobile_export(path: Path) -> Iterable[ArtifactRecord]:
     )
     emitted = 0
     detected_types: set[str] = set()
+    detected_type_counts: dict[str, int] = {}
     normalized_details: list[Mapping[str, object]] = []
     for index, row in enumerate(rows):
         if emitted >= MAX_ROWS_PER_SOURCE:
@@ -429,9 +471,17 @@ def collect_mobile_export(path: Path) -> Iterable[ArtifactRecord]:
         if not artifact_type:
             continue
         detected_types.add(artifact_type)
+        detected_type_counts[artifact_type] = detected_type_counts.get(artifact_type, 0) + 1
         emitted += 1
         details = normalize_mobile_row(artifact_type, normalized, path)
-        normalized_details.append({"artifact_type": artifact_type, **details})
+        normalized_details.append(
+            {
+                "artifact_type": artifact_type,
+                "source_index": index,
+                "source_record_id": source_record_id(details, index),
+                **details,
+            }
+        )
         yield build_record(
             path,
             artifact_type=artifact_type,
@@ -442,6 +492,25 @@ def collect_mobile_export(path: Path) -> Iterable[ArtifactRecord]:
             details=details,
         )
     if emitted:
+        source_profile = build_mobile_export_source_profile(
+            path=path,
+            source_format=source_format,
+            source_tool=source_tool,
+            rows=rows,
+            emitted=emitted,
+            detected_types=detected_types,
+            vendor_manifest_profile=vendor_manifest_profile,
+        )
+        mapper_manifest = build_mobile_vendor_schema_mapper_manifest(
+            path=path,
+            source_format=source_format,
+            source_tool=source_tool,
+            source_hashes=source_hashes,
+            rows=rows,
+            detected_type_counts=detected_type_counts,
+            source_profile=source_profile,
+            vendor_manifest_profile=vendor_manifest_profile,
+        )
         yield build_record(
             path,
             artifact_type="mobile-export-source",
@@ -457,15 +526,9 @@ def collect_mobile_export(path: Path) -> Iterable[ArtifactRecord]:
                 "artifact_types": sorted(detected_types),
                 "coverage_status": "vendor-export-import",
                 "commercial_grade_ready": False,
-                "mobile_export_source_profile": build_mobile_export_source_profile(
-                    path=path,
-                    source_format=source_format,
-                    source_tool=source_tool,
-                    rows=rows,
-                    emitted=emitted,
-                    detected_types=detected_types,
-                    vendor_manifest_profile=vendor_manifest_profile,
-                ),
+                "mobile_export_source_profile": source_profile,
+                "mobile_vendor_schema_mapper_manifest": mapper_manifest,
+                "mobile_vendor_schema_mapper_manifest_hash": mapper_manifest["manifest_sha256"],
                 "validation_checks": source_validation_checks(
                     source_format,
                     source_tool,
@@ -718,6 +781,146 @@ def build_vendor_schema_registry_profile(
     }
 
 
+def build_mobile_vendor_schema_mapper_manifest(
+    *,
+    path: Path,
+    source_format: str,
+    source_tool: str,
+    source_hashes: Mapping[str, str],
+    rows: Sequence[Mapping[str, object]],
+    detected_type_counts: Mapping[str, int],
+    source_profile: Mapping[str, object],
+    vendor_manifest_profile: Mapping[str, object],
+) -> dict[str, object]:
+    registry = VENDOR_SCHEMA_REGISTRY.get(source_tool, {})
+    normalized_rows = [normalize_keys(row) for row in rows[:500]]
+    sampled_keys = sorted({key for row in normalized_rows for key in row})
+    output_to_family = {
+        str(definition["output_artifact_type"]): family
+        for family, definition in VENDOR_ARTIFACT_MAPPER_KEYS.items()
+    }
+    mapper_statuses: list[dict[str, object]] = []
+    for family, definition in VENDOR_ARTIFACT_MAPPER_KEYS.items():
+        output_type = str(definition["output_artifact_type"])
+        key_sets = definition.get("required_key_sets", ())
+        recognized_keys = sorted(
+            {
+                key
+                for key_set in key_sets
+                for key in key_set
+                if key in sampled_keys
+            }
+        )
+        mapper_statuses.append(
+            {
+                "family": family,
+                "output_artifact_type": output_type,
+                "observed": int(detected_type_counts.get(output_type, 0)) > 0,
+                "normalized_row_count": int(detected_type_counts.get(output_type, 0)),
+                "recognized_key_count": len(recognized_keys),
+                "recognized_key_sample": recognized_keys[:40],
+                "semantic_fields": list(definition.get("semantic_fields", ())),
+                "mapper_status": "active" if detected_type_counts.get(output_type, 0) else "available-not-observed",
+            }
+        )
+    observed_families = sorted(
+        {
+            output_to_family.get(artifact_type, artifact_type.removeprefix("mobile-"))
+            for artifact_type in detected_type_counts
+        }
+    )
+    expected_families = sorted(str(item) for item in registry.get("expected_artifacts", ()))
+    missing_expected = sorted(set(expected_families) - set(observed_families))
+    source_hash_matches = bool(vendor_manifest_profile.get("source_hash_matches_manifest"))
+    original_hash_present = bool(vendor_manifest_profile.get("original_acquisition_hash_present"))
+    settings_present = bool(vendor_manifest_profile.get("export_settings_present"))
+    vendor_version_present = bool(vendor_manifest_profile.get("vendor_tool_version"))
+    manifest: dict[str, object] = {
+        "manifest_version": "mobile-vendor-schema-mapper-manifest-v1",
+        "item_number": 26,
+        "gap_id": "#26",
+        "artifact_goal": "Cellebrite/XRY/GrayKey/AXIOM export deep import schema registry and mapper evidence",
+        "parser_version": PARSER_VERSION,
+        "source_path": str(path.resolve()),
+        "source_tool": source_tool,
+        "vendor_family": registry.get("family", source_tool),
+        "known_vendor_profile": bool(registry),
+        "supported_vendor_families": [
+            {
+                "source_tool": vendor,
+                "vendor_family": str(profile.get("family", vendor)),
+                "expected_artifacts": list(profile.get("expected_artifacts", ())),
+            }
+            for vendor, profile in sorted(VENDOR_SCHEMA_REGISTRY.items())
+        ],
+        "source": {
+            "source_format": source_format,
+            "source_sha256": source_hashes.get("sha256", ""),
+            "input_row_count": int(source_profile.get("input_row_count") or len(rows)),
+            "emitted_row_count": int(source_profile.get("emitted_row_count") or sum(detected_type_counts.values())),
+            "unclassified_or_skipped_row_count": int(source_profile.get("unclassified_or_skipped_row_count") or 0),
+            "truncated_by_row_cap": bool(source_profile.get("truncated_by_row_cap")),
+            "max_rows_per_source": MAX_ROWS_PER_SOURCE,
+        },
+        "schema_registry": {
+            "profile_version": "mobile-vendor-schema-registry-v1",
+            "schema_versions": list(
+                (source_profile.get("vendor_schema_registry_profile") or {}).get("schema_versions", [])
+            )
+            if isinstance(source_profile.get("vendor_schema_registry_profile"), Mapping)
+            else [],
+            "expected_artifact_families": expected_families,
+            "observed_artifact_families": observed_families,
+            "missing_expected_artifact_families": missing_expected,
+            "sampled_normalized_key_count": len(sampled_keys),
+            "sampled_normalized_keys": sampled_keys[:100],
+        },
+        "artifact_mappers": mapper_statuses,
+        "source_manifest_linkage": {
+            "manifest_present": bool(vendor_manifest_profile.get("manifest_present")),
+            "manifest_path": optional_text(vendor_manifest_profile.get("manifest_path")),
+            "manifest_sha256": optional_text(vendor_manifest_profile.get("manifest_sha256")),
+            "vendor_tool_version": optional_text(vendor_manifest_profile.get("vendor_tool_version")),
+            "vendor_parser_version": optional_text(vendor_manifest_profile.get("parser_version")),
+            "schema_version": optional_text(vendor_manifest_profile.get("schema_version")),
+            "source_hash_matches_manifest": source_hash_matches,
+            "original_acquisition_hash_present": original_hash_present,
+            "export_settings_present": settings_present,
+            "validation_status": optional_text(vendor_manifest_profile.get("validation_status")),
+        },
+        "source_viewer_locator": {
+            "viewer": "mobile-vendor-export-source",
+            "source_path": str(path.resolve()),
+            "artifact_type": "mobile-export-source",
+            "source_tool": source_tool,
+        },
+        "validation": {
+            "implemented": True,
+            "usable": True,
+            "internal_fixture_validated": True,
+            "vendor_version_schema_matrix_present": bool(registry),
+            "source_hash_linked_to_sidecar": source_hash_matches,
+            "original_acquisition_hash_recorded": original_hash_present,
+            "export_settings_recorded": settings_present,
+            "vendor_tool_version_recorded": vendor_version_present,
+            "trusted_vendor_diff_attached": False,
+            "known_answer_deleted_semantics_attached": False,
+            "commercial_grade": False,
+        },
+        "commercial_blockers": [
+            "trusted-vendor-mobile-export-diff-required",
+            "per-vendor-version-schema-fixtures-required",
+            "deleted-record-semantics-known-answer-required",
+            "original-acquisition-hash-and-export-settings-independent-review-required",
+        ],
+        "reporting_status": "schema-mapper-ready-for-review-not-commercial-grade",
+    }
+    manifest["manifest_sha256"] = stable_mobile_sha256(
+        {key: value for key, value in manifest.items() if key != "manifest_sha256"}
+    )
+    return manifest
+
+
 def build_record(
     path: Path,
     *,
@@ -740,6 +943,92 @@ def build_record(
                 details=detail_payload,
             ),
         )
+        if service == "KakaoTalk":
+            detail_payload.setdefault(
+                "kakaotalk_parser_manifest",
+                build_kakaotalk_parser_manifest(
+                    artifact_type=artifact_type,
+                    source_tool=source_tool,
+                    source_format=source_format,
+                    source_index=source_index,
+                    source_hashes=source_hashes,
+                    source_path=path,
+                    details=detail_payload,
+                ),
+            )
+            detail_payload.setdefault(
+                "kakaotalk_parser_manifest_hash",
+                detail_payload["kakaotalk_parser_manifest"]["manifest_sha256"],
+            )
+        if service == "WhatsApp":
+            detail_payload.setdefault(
+                "whatsapp_parser_manifest",
+                build_whatsapp_parser_manifest(
+                    artifact_type=artifact_type,
+                    source_tool=source_tool,
+                    source_format=source_format,
+                    source_index=source_index,
+                    source_hashes=source_hashes,
+                    source_path=path,
+                    details=detail_payload,
+                ),
+            )
+            detail_payload.setdefault(
+                "whatsapp_parser_manifest_hash",
+                detail_payload["whatsapp_parser_manifest"]["manifest_sha256"],
+            )
+        if service == "Telegram":
+            detail_payload.setdefault(
+                "telegram_parser_manifest",
+                build_telegram_parser_manifest(
+                    artifact_type=artifact_type,
+                    source_tool=source_tool,
+                    source_format=source_format,
+                    source_index=source_index,
+                    source_hashes=source_hashes,
+                    source_path=path,
+                    details=detail_payload,
+                ),
+            )
+            detail_payload.setdefault(
+                "telegram_parser_manifest_hash",
+                detail_payload["telegram_parser_manifest"]["manifest_sha256"],
+            )
+        if service == "Signal":
+            detail_payload.setdefault(
+                "signal_parser_manifest",
+                build_signal_parser_manifest(
+                    artifact_type=artifact_type,
+                    source_tool=source_tool,
+                    source_format=source_format,
+                    source_index=source_index,
+                    source_hashes=source_hashes,
+                    source_path=path,
+                    details=detail_payload,
+                ),
+            )
+            detail_payload.setdefault(
+                "signal_parser_manifest_hash",
+                detail_payload["signal_parser_manifest"]["manifest_sha256"],
+            )
+        if chat_app_gap_ids(service) == ["#35"]:
+            detail_payload.setdefault(
+                "extended_messenger_parser_manifest",
+                build_extended_messenger_parser_manifest(
+                    artifact_type=artifact_type,
+                    service=service,
+                    source_tool=source_tool,
+                    source_format=source_format,
+                    source_index=source_index,
+                    source_hashes=source_hashes,
+                    source_path=path,
+                    details=detail_payload,
+                ),
+            )
+            detail_payload.setdefault(
+                "extended_messenger_parser_manifest_hash",
+                detail_payload["extended_messenger_parser_manifest"]["manifest_sha256"],
+            )
         detail_payload.setdefault(
             "messenger_export_framework_manifest",
             build_messenger_export_framework_manifest(
@@ -1547,6 +1836,191 @@ def kakaotalk_database_review_payload(service: str, table_summaries: Sequence[Ma
     }
 
 
+def build_kakaotalk_parser_manifest(
+    *,
+    artifact_type: str,
+    source_tool: str,
+    source_format: str,
+    source_index: int,
+    source_hashes: Mapping[str, str],
+    source_path: Path,
+    details: Mapping[str, object],
+) -> dict[str, object]:
+    """KakaoTalk-specific review manifest for export rows and DB inventories."""
+    compatibility = (
+        details.get("kakaotalk_compatibility_assessment")
+        if isinstance(details.get("kakaotalk_compatibility_assessment"), Mapping)
+        else kakaotalk_compatibility_assessment(optional_text(details.get("app_version")))
+    )
+    message_profile = (
+        details.get("kakaotalk_message_review_profile")
+        if isinstance(details.get("kakaotalk_message_review_profile"), Mapping)
+        else {}
+    )
+    database_profile = (
+        details.get("kakaotalk_database_review_profile")
+        if isinstance(details.get("kakaotalk_database_review_profile"), Mapping)
+        else {}
+    )
+    validation = details.get("validation_checks") if isinstance(details.get("validation_checks"), Mapping) else {}
+    table_summaries = details.get("table_summaries") if isinstance(details.get("table_summaries"), list) else []
+    row_payload = {
+        "artifact_type": artifact_type,
+        "source_tool": source_tool,
+        "source_format": source_format,
+        "source_index": source_index,
+        "source_sha256": source_hashes.get("sha256", ""),
+        "service": "KakaoTalk",
+        "timestamp": optional_text(details.get("timestamp")),
+        "conversation_id": optional_text(details.get("conversation_id")),
+        "conversation_title": optional_text(details.get("conversation_title")),
+        "message_id": optional_text(details.get("message_id")),
+        "message_text_sha256": optional_text(details.get("message_text_sha256")),
+        "media_reference_sha256": optional_text(details.get("media_reference_sha256")),
+        "schema_version": optional_text(details.get("schema_version")),
+        "app_version": optional_text(details.get("app_version")),
+        "database_name": optional_text(details.get("database_name")),
+    }
+    selected_track = optional_text(
+        compatibility.get("strategy_profile", {}).get("selected_track")
+        if isinstance(compatibility.get("strategy_profile"), Mapping)
+        else ""
+    )
+    table_inventory = [
+        {
+            "table": optional_text(table.get("table")) if isinstance(table, Mapping) else "",
+            "row_count": table.get("row_count") if isinstance(table, Mapping) else None,
+            "message_table_candidate": bool(table.get("message_table_candidate")) if isinstance(table, Mapping) else False,
+            "timestamp_column_candidates": list(table.get("timestamp_column_candidates") or [])[:10]
+            if isinstance(table, Mapping)
+            else [],
+            "participant_column_candidates": list(table.get("participant_column_candidates") or [])[:10]
+            if isinstance(table, Mapping)
+            else [],
+            "media_column_candidates": list(table.get("media_column_candidates") or [])[:10]
+            if isinstance(table, Mapping)
+            else [],
+        }
+        for table in table_summaries[:MAX_SQLITE_TABLES]
+    ]
+    parser_tracks = [
+        {
+            "track": "authorized-export-row-normalization",
+            "status": "implemented" if artifact_type == "mobile-message" else "not-applicable",
+            "reportable_as": "message-row-triage-pivot",
+        },
+        {
+            "track": "sqlite-database-inventory",
+            "status": "implemented" if artifact_type == "mobile-chat-database" else "not-applicable",
+            "reportable_as": "schema-and-row-count-inventory",
+        },
+        {
+            "track": "legacy-deviceinfo-userdir-edb-decrypt",
+            "status": "separate-authority-gated-pc-workflow",
+            "reportable_as": "validated-decrypt-only-after-known-answer-and-trusted-diff",
+        },
+        {
+            "track": "post-bigbang-memory-key-store-correlation",
+            "status": "validation-required",
+            "reportable_as": "not-message-content-complete",
+        },
+    ]
+    manifest: dict[str, object] = {
+        "manifest_version": "kakaotalk-parser-manifest-v1",
+        "item_number": 31,
+        "batch_id": "commercial-uplift-031-035",
+        "gap_id": "#31",
+        "artifact_type": artifact_type,
+        "service": "KakaoTalk",
+        "source_tool": source_tool,
+        "source_format": source_format,
+        "source_index": source_index,
+        "source_path": str(source_path.resolve()),
+        "source_sha256": source_hashes.get("sha256", ""),
+        "source_record_id": source_record_id(details, source_index),
+        "row_citation": {
+            **row_payload,
+            "row_hash": stable_mobile_sha256(row_payload),
+            "source_viewer_locator": {
+                "viewer": "kakaotalk-message-row" if artifact_type == "mobile-message" else "kakaotalk-database-inventory",
+                "source_path": str(source_path.resolve()),
+                "source_index": source_index,
+                "source_record_id": source_record_id(details, source_index),
+                "database_name": optional_text(details.get("database_name")),
+            },
+        },
+        "compatibility": {
+            "status": optional_text(compatibility.get("status")),
+            "app_version": optional_text(compatibility.get("app_version")),
+            "selected_track": selected_track,
+            "legacy_method_applicable": compatibility.get("legacy_method_applicable"),
+            "report_grade_ready": bool(compatibility.get("report_grade_ready")),
+            "bigbang_minimum_version": optional_text(compatibility.get("bigbang_minimum_version")),
+            "bigbang_release_date": optional_text(compatibility.get("bigbang_release_date")),
+        },
+        "parser_tracks": parser_tracks,
+        "message_review": {
+            "present": bool(message_profile),
+            "message_text_sha256_present": bool(message_profile.get("message_text_sha256_present")),
+            "attachment_metadata_present": bool(message_profile.get("attachment_metadata_present")),
+            "attachment_class": optional_text(message_profile.get("attachment_class")),
+            "read_state_present": bool(message_profile.get("read_state_present")),
+            "deleted_state_present": bool(message_profile.get("deleted_state_present")),
+            "message_type_present": bool(message_profile.get("message_type_present")),
+            "content_source_status": optional_text(message_profile.get("content_source_status")),
+        },
+        "database_review": {
+            "present": bool(database_profile),
+            "table_count": database_profile.get("table_count", len(table_inventory)) if isinstance(database_profile, Mapping) else len(table_inventory),
+            "message_table_candidates": list(database_profile.get("message_table_candidates") or [])[:25]
+            if isinstance(database_profile, Mapping)
+            else [],
+            "media_table_candidates": list(database_profile.get("media_table_candidates") or [])[:25]
+            if isinstance(database_profile, Mapping)
+            else [],
+            "participant_table_candidates": list(database_profile.get("participant_table_candidates") or [])[:25]
+            if isinstance(database_profile, Mapping)
+            else [],
+            "table_inventory": table_inventory,
+            "native_decode_status": optional_text(database_profile.get("native_decode_status"))
+            if isinstance(database_profile, Mapping)
+            else "not-applicable",
+        },
+        "validation": {
+            "source_hash_present": bool(source_hashes.get("sha256")),
+            "service_detected": bool(validation.get("service_detected", True)),
+            "message_id_present": bool(details.get("message_id")),
+            "conversation_id_present": bool(details.get("conversation_id")),
+            "app_version_present": bool(details.get("app_version")),
+            "schema_version_present": bool(details.get("schema_version")),
+            "attachment_bytes_verified": False,
+            "trusted_export_or_native_db_diff_attached": False,
+            "known_answer_corpus_attached": False,
+            "commercial_grade": False,
+        },
+        "large_data_controls": {
+            "raw_text_hash_only_by_default": True,
+            "metadata_collapsed_by_default": True,
+            "max_sqlite_tables": MAX_SQLITE_TABLES,
+            "table_inventory_count": len(table_inventory),
+            "table_inventory_capped": len(table_summaries) >= MAX_SQLITE_TABLES,
+            "viewer_default": "conversation-grouped-virtualized-chat-review",
+        },
+        "commercial_blockers": [
+            "post-bigbang-kakaotalk-known-answer-corpus-required",
+            "trusted-kakaotalk-export-or-native-db-diff-required",
+            "schema-version-specific-parser-map-required",
+            "attachment-bytes-and-deleted-record-validation-required",
+            "encrypted-store-authority-workflow-required",
+        ],
+        "reporting_status": "kakaotalk-review-ready-not-commercial-grade",
+    }
+    manifest["manifest_sha256"] = stable_mobile_sha256(
+        {key: value for key, value in manifest.items() if key != "manifest_sha256"}
+    )
+    return manifest
+
+
 def classify_kakaotalk_export_attachment(media_reference: str, attachment_name: str, message_type: str) -> str:
     lowered = f"{media_reference} {attachment_name} {message_type}".lower()
     if any(token in lowered for token in (".jpg", ".jpeg", ".png", ".gif", "image", "photo", "thumbnail")):
@@ -1652,6 +2126,172 @@ def whatsapp_database_review_payload(service: str, table_summaries: Sequence[Map
             ],
         }
     }
+
+
+def build_whatsapp_parser_manifest(
+    *,
+    artifact_type: str,
+    source_tool: str,
+    source_format: str,
+    source_index: int,
+    source_hashes: Mapping[str, str],
+    source_path: Path,
+    details: Mapping[str, object],
+) -> dict[str, object]:
+    """WhatsApp-specific review manifest for exports and msgstore inventory."""
+    message_profile = (
+        details.get("whatsapp_message_review_profile")
+        if isinstance(details.get("whatsapp_message_review_profile"), Mapping)
+        else {}
+    )
+    database_profile = (
+        details.get("whatsapp_database_review_profile")
+        if isinstance(details.get("whatsapp_database_review_profile"), Mapping)
+        else {}
+    )
+    table_summaries = details.get("table_summaries") if isinstance(details.get("table_summaries"), list) else []
+    validation = details.get("validation_checks") if isinstance(details.get("validation_checks"), Mapping) else {}
+    row_payload = {
+        "artifact_type": artifact_type,
+        "source_tool": source_tool,
+        "source_format": source_format,
+        "source_index": source_index,
+        "source_sha256": source_hashes.get("sha256", ""),
+        "service": "WhatsApp",
+        "timestamp": optional_text(details.get("timestamp")),
+        "conversation_id": optional_text(details.get("conversation_id")),
+        "message_id": optional_text(details.get("message_id")),
+        "message_text_sha256": optional_text(details.get("message_text_sha256")),
+        "media_reference_sha256": optional_text(details.get("media_reference_sha256")),
+        "schema_version": optional_text(details.get("schema_version")),
+        "app_version": optional_text(details.get("app_version")),
+        "database_name": optional_text(details.get("database_name")),
+    }
+    table_inventory = [
+        {
+            "table": optional_text(table.get("table")) if isinstance(table, Mapping) else "",
+            "row_count": table.get("row_count") if isinstance(table, Mapping) else None,
+            "message_table_candidate": bool(table.get("message_table_candidate")) if isinstance(table, Mapping) else False,
+            "jid_column_candidates": [
+                str(column)
+                for column in (table.get("columns") or [])
+                if isinstance(table, Mapping) and "jid" in str(column).lower()
+            ][:10],
+            "media_column_candidates": list(table.get("media_column_candidates") or [])[:10]
+            if isinstance(table, Mapping)
+            else [],
+        }
+        for table in table_summaries[:MAX_SQLITE_TABLES]
+    ]
+    manifest: dict[str, object] = {
+        "manifest_version": "whatsapp-parser-manifest-v1",
+        "item_number": 32,
+        "batch_id": "commercial-uplift-031-035",
+        "gap_id": "#32",
+        "artifact_type": artifact_type,
+        "service": "WhatsApp",
+        "source_tool": source_tool,
+        "source_format": source_format,
+        "source_index": source_index,
+        "source_path": str(source_path.resolve()),
+        "source_sha256": source_hashes.get("sha256", ""),
+        "source_record_id": source_record_id(details, source_index),
+        "row_citation": {
+            **row_payload,
+            "row_hash": stable_mobile_sha256(row_payload),
+            "source_viewer_locator": {
+                "viewer": "whatsapp-message-row" if artifact_type == "mobile-message" else "whatsapp-msgstore-inventory",
+                "source_path": str(source_path.resolve()),
+                "source_index": source_index,
+                "source_record_id": source_record_id(details, source_index),
+                "database_name": optional_text(details.get("database_name")),
+            },
+        },
+        "parser_tracks": [
+            {
+                "track": "authorized-export-row-normalization",
+                "status": "implemented" if artifact_type == "mobile-message" else "not-applicable",
+                "reportable_as": "message-row-triage-pivot",
+            },
+            {
+                "track": "msgstore-wa-db-inventory",
+                "status": "implemented" if artifact_type == "mobile-chat-database" else "not-applicable",
+                "reportable_as": "schema-and-row-count-inventory",
+            },
+            {
+                "track": "crypt-backup-key-workflow",
+                "status": "authority-gated-validation-required",
+                "reportable_as": "not-crypt-complete-without-key-evidence",
+            },
+            {
+                "track": "deleted-row-and-media-locality-validation",
+                "status": "known-answer-required",
+                "reportable_as": "not-deleted-or-media-complete",
+            },
+        ],
+        "message_review": {
+            "present": bool(message_profile),
+            "message_text_sha256_present": bool(message_profile.get("message_text_sha256_present")),
+            "jid_attribution_present": bool(message_profile.get("jid_attribution_present")),
+            "sender_shape": optional_text(message_profile.get("sender_shape")),
+            "recipient_shape": optional_text(message_profile.get("recipient_shape")),
+            "media_metadata_present": bool(message_profile.get("media_metadata_present")),
+            "media_class": optional_text(message_profile.get("media_class")),
+            "quoted_message_present": bool(message_profile.get("quoted_message_present")),
+            "read_state_present": bool(message_profile.get("read_state_present")),
+            "deleted_state_present": bool(message_profile.get("deleted_state_present")),
+            "crypt_key_authority_status": optional_text(message_profile.get("crypt_key_authority_status")),
+        },
+        "database_review": {
+            "present": bool(database_profile),
+            "table_count": database_profile.get("table_count", len(table_inventory)) if isinstance(database_profile, Mapping) else len(table_inventory),
+            "message_table_candidates": list(database_profile.get("message_table_candidates") or [])[:25]
+            if isinstance(database_profile, Mapping)
+            else [],
+            "jid_table_candidates": list(database_profile.get("jid_table_candidates") or [])[:25]
+            if isinstance(database_profile, Mapping)
+            else [],
+            "media_table_candidates": list(database_profile.get("media_table_candidates") or [])[:25]
+            if isinstance(database_profile, Mapping)
+            else [],
+            "msgstore_shape_present": bool(database_profile.get("msgstore_shape_present")) if isinstance(database_profile, Mapping) else False,
+            "wa_contacts_shape_present": bool(database_profile.get("wa_contacts_shape_present")) if isinstance(database_profile, Mapping) else False,
+            "native_decode_status": optional_text(database_profile.get("native_decode_status"))
+            if isinstance(database_profile, Mapping)
+            else "not-applicable",
+            "table_inventory": table_inventory,
+        },
+        "validation": {
+            "source_hash_present": bool(source_hashes.get("sha256")),
+            "service_detected": bool(validation.get("service_detected", True)),
+            "jid_attribution_present": bool(message_profile.get("jid_attribution_present") or database_profile.get("jid_table_candidates")),
+            "crypt_key_authority_attached": False,
+            "trusted_export_or_native_db_diff_attached": False,
+            "deleted_row_known_answer_attached": False,
+            "media_bytes_verified": False,
+            "commercial_grade": False,
+        },
+        "large_data_controls": {
+            "raw_text_hash_only_by_default": True,
+            "metadata_collapsed_by_default": True,
+            "max_sqlite_tables": MAX_SQLITE_TABLES,
+            "table_inventory_count": len(table_inventory),
+            "table_inventory_capped": len(table_summaries) >= MAX_SQLITE_TABLES,
+            "viewer_default": "conversation-grouped-virtualized-chat-review",
+        },
+        "commercial_blockers": [
+            "whatsapp-crypt-key-authority-workflow-required",
+            "trusted-whatsapp-export-or-native-db-diff-required",
+            "msgstore-wa-db-schema-version-known-answer-required",
+            "deleted-row-and-media-locality-validation-required",
+            "timezone-ack-read-state-semantics-validation-required",
+        ],
+        "reporting_status": "whatsapp-review-ready-not-commercial-grade",
+    }
+    manifest["manifest_sha256"] = stable_mobile_sha256(
+        {key: value for key, value in manifest.items() if key != "manifest_sha256"}
+    )
+    return manifest
 
 
 def is_whatsapp_jid(value: str) -> bool:
@@ -1784,6 +2424,178 @@ def telegram_database_review_payload(service: str, table_summaries: Sequence[Map
     }
 
 
+def build_telegram_parser_manifest(
+    *,
+    artifact_type: str,
+    source_tool: str,
+    source_format: str,
+    source_index: int,
+    source_hashes: Mapping[str, str],
+    source_path: Path,
+    details: Mapping[str, object],
+) -> dict[str, object]:
+    """Telegram-specific review manifest for export, cache, and DB inventory."""
+    message_profile = (
+        details.get("telegram_message_review_profile")
+        if isinstance(details.get("telegram_message_review_profile"), Mapping)
+        else {}
+    )
+    database_profile = (
+        details.get("telegram_database_review_profile")
+        if isinstance(details.get("telegram_database_review_profile"), Mapping)
+        else {}
+    )
+    table_summaries = details.get("table_summaries") if isinstance(details.get("table_summaries"), list) else []
+    validation = details.get("validation_checks") if isinstance(details.get("validation_checks"), Mapping) else {}
+    row_payload = {
+        "artifact_type": artifact_type,
+        "source_tool": source_tool,
+        "source_format": source_format,
+        "source_index": source_index,
+        "source_sha256": source_hashes.get("sha256", ""),
+        "service": "Telegram",
+        "timestamp": optional_text(details.get("timestamp")),
+        "conversation_id": optional_text(details.get("conversation_id")),
+        "conversation_title": optional_text(details.get("conversation_title")),
+        "message_id": optional_text(details.get("message_id")),
+        "message_text_sha256": optional_text(details.get("message_text_sha256")),
+        "media_reference_sha256": optional_text(details.get("media_reference_sha256")),
+        "schema_version": optional_text(details.get("schema_version")),
+        "app_version": optional_text(details.get("app_version")),
+        "database_name": optional_text(details.get("database_name")),
+    }
+    table_inventory = [
+        {
+            "table": optional_text(table.get("table")) if isinstance(table, Mapping) else "",
+            "row_count": table.get("row_count") if isinstance(table, Mapping) else None,
+            "message_table_candidate": bool(table.get("message_table_candidate")) if isinstance(table, Mapping) else False,
+            "account_or_peer_column_candidates": [
+                str(column)
+                for column in (table.get("columns") or [])
+                if isinstance(table, Mapping)
+                and any(token in str(column).lower() for token in ("user", "peer", "account", "dialog"))
+            ][:10],
+            "media_column_candidates": list(table.get("media_column_candidates") or [])[:10]
+            if isinstance(table, Mapping)
+            else [],
+        }
+        for table in table_summaries[:MAX_SQLITE_TABLES]
+    ]
+    manifest: dict[str, object] = {
+        "manifest_version": "telegram-parser-manifest-v1",
+        "item_number": 33,
+        "batch_id": "commercial-uplift-031-035",
+        "gap_id": "#33",
+        "artifact_type": artifact_type,
+        "service": "Telegram",
+        "source_tool": source_tool,
+        "source_format": source_format,
+        "source_index": source_index,
+        "source_path": str(source_path.resolve()),
+        "source_sha256": source_hashes.get("sha256", ""),
+        "source_record_id": source_record_id(details, source_index),
+        "row_citation": {
+            **row_payload,
+            "row_hash": stable_mobile_sha256(row_payload),
+            "source_viewer_locator": {
+                "viewer": "telegram-message-row" if artifact_type == "mobile-message" else "telegram-database-cache-inventory",
+                "source_path": str(source_path.resolve()),
+                "source_index": source_index,
+                "source_record_id": source_record_id(details, source_index),
+                "database_name": optional_text(details.get("database_name")),
+            },
+        },
+        "parser_tracks": [
+            {
+                "track": "official-export-json-normalization",
+                "status": "implemented" if artifact_type == "mobile-message" else "not-applicable",
+                "reportable_as": "message-row-triage-pivot",
+            },
+            {
+                "track": "cache-or-database-inventory",
+                "status": "implemented" if artifact_type == "mobile-chat-database" else "not-applicable",
+                "reportable_as": "schema-and-row-count-inventory",
+            },
+            {
+                "track": "desktop-tdata-local-store-decode",
+                "status": "encrypted-local-store-validation-required",
+                "reportable_as": "not-local-store-complete",
+            },
+            {
+                "track": "secret-chat-deleted-cache-recovery",
+                "status": "known-answer-required",
+                "reportable_as": "not-secret-chat-or-deleted-complete",
+            },
+        ],
+        "message_review": {
+            "present": bool(message_profile),
+            "message_text_sha256_present": bool(message_profile.get("message_text_sha256_present")),
+            "account_or_dialog_attribution_present": bool(message_profile.get("account_or_dialog_attribution_present")),
+            "account_id_present": bool(message_profile.get("account_id_present")),
+            "dialog_id_present": bool(message_profile.get("dialog_id_present")),
+            "author_present": bool(message_profile.get("author_present")),
+            "media_cache_metadata_present": bool(message_profile.get("media_cache_metadata_present")),
+            "media_class": optional_text(message_profile.get("media_class")),
+            "edited_state_present": bool(message_profile.get("edited_state_present")),
+            "deleted_state_present": bool(message_profile.get("deleted_state_present")),
+            "secret_or_ephemeral_hint_present": bool(message_profile.get("secret_or_ephemeral_hint_present")),
+            "local_store_decryption_status": optional_text(message_profile.get("local_store_decryption_status")),
+        },
+        "database_review": {
+            "present": bool(database_profile),
+            "table_count": database_profile.get("table_count", len(table_inventory)) if isinstance(database_profile, Mapping) else len(table_inventory),
+            "message_table_candidates": list(database_profile.get("message_table_candidates") or [])[:25]
+            if isinstance(database_profile, Mapping)
+            else [],
+            "account_or_peer_table_candidates": list(database_profile.get("account_or_peer_table_candidates") or [])[:25]
+            if isinstance(database_profile, Mapping)
+            else [],
+            "media_cache_table_candidates": list(database_profile.get("media_cache_table_candidates") or [])[:25]
+            if isinstance(database_profile, Mapping)
+            else [],
+            "dialog_shape_present": bool(database_profile.get("dialog_shape_present")) if isinstance(database_profile, Mapping) else False,
+            "media_cache_shape_present": bool(database_profile.get("media_cache_shape_present")) if isinstance(database_profile, Mapping) else False,
+            "native_decode_status": optional_text(database_profile.get("native_decode_status"))
+            if isinstance(database_profile, Mapping)
+            else "not-applicable",
+            "table_inventory": table_inventory,
+        },
+        "validation": {
+            "source_hash_present": bool(source_hashes.get("sha256")),
+            "service_detected": bool(validation.get("service_detected", True)),
+            "account_or_dialog_attribution_present": bool(
+                message_profile.get("account_or_dialog_attribution_present")
+                or database_profile.get("account_or_peer_table_candidates")
+            ),
+            "local_store_decryption_complete": False,
+            "trusted_export_or_native_db_diff_attached": False,
+            "secret_chat_deleted_known_answer_attached": False,
+            "cache_media_bytes_verified": False,
+            "commercial_grade": False,
+        },
+        "large_data_controls": {
+            "raw_text_hash_only_by_default": True,
+            "metadata_collapsed_by_default": True,
+            "max_sqlite_tables": MAX_SQLITE_TABLES,
+            "table_inventory_count": len(table_inventory),
+            "table_inventory_capped": len(table_summaries) >= MAX_SQLITE_TABLES,
+            "viewer_default": "conversation-grouped-virtualized-chat-review",
+        },
+        "commercial_blockers": [
+            "telegram-local-store-decryption-validation-required",
+            "trusted-telegram-export-or-native-db-diff-required",
+            "account-dialog-peer-attribution-known-answer-required",
+            "secret-chat-edited-deleted-semantics-validation-required",
+            "cache-media-locality-validation-required",
+        ],
+        "reporting_status": "telegram-review-ready-not-commercial-grade",
+    }
+    manifest["manifest_sha256"] = stable_mobile_sha256(
+        {key: value for key, value in manifest.items() if key != "manifest_sha256"}
+    )
+    return manifest
+
+
 def classify_telegram_media(media_reference: str, attachment_name: str) -> str:
     lowered = f"{media_reference} {attachment_name}".lower()
     if any(token in lowered for token in (".jpg", ".jpeg", ".png", ".webp", ".gif", "image", "photo")):
@@ -1894,6 +2706,178 @@ def signal_database_review_payload(service: str, table_summaries: Sequence[Mappi
             ],
         }
     }
+
+
+def build_signal_parser_manifest(
+    *,
+    artifact_type: str,
+    source_tool: str,
+    source_format: str,
+    source_index: int,
+    source_hashes: Mapping[str, str],
+    source_path: Path,
+    details: Mapping[str, object],
+) -> dict[str, object]:
+    """Signal-specific review manifest for export rows and SQLCipher inventories."""
+    message_profile = (
+        details.get("signal_message_review_profile")
+        if isinstance(details.get("signal_message_review_profile"), Mapping)
+        else {}
+    )
+    database_profile = (
+        details.get("signal_database_review_profile")
+        if isinstance(details.get("signal_database_review_profile"), Mapping)
+        else {}
+    )
+    table_summaries = details.get("table_summaries") if isinstance(details.get("table_summaries"), list) else []
+    validation = details.get("validation_checks") if isinstance(details.get("validation_checks"), Mapping) else {}
+    row_payload = {
+        "artifact_type": artifact_type,
+        "source_tool": source_tool,
+        "source_format": source_format,
+        "source_index": source_index,
+        "source_sha256": source_hashes.get("sha256", ""),
+        "service": "Signal",
+        "timestamp": optional_text(details.get("timestamp")),
+        "conversation_id": optional_text(details.get("conversation_id")),
+        "message_id": optional_text(details.get("message_id")),
+        "message_text_sha256": optional_text(details.get("message_text_sha256")),
+        "media_reference_sha256": optional_text(details.get("media_reference_sha256")),
+        "schema_version": optional_text(details.get("schema_version")),
+        "app_version": optional_text(details.get("app_version")),
+        "database_name": optional_text(details.get("database_name")),
+    }
+    table_inventory = [
+        {
+            "table": optional_text(table.get("table")) if isinstance(table, Mapping) else "",
+            "row_count": table.get("row_count") if isinstance(table, Mapping) else None,
+            "message_table_candidate": bool(table.get("message_table_candidate")) if isinstance(table, Mapping) else False,
+            "recipient_thread_column_candidates": [
+                str(column)
+                for column in (table.get("columns") or [])
+                if isinstance(table, Mapping)
+                and any(token in str(column).lower() for token in ("recipient", "thread", "address", "uuid"))
+            ][:10],
+            "media_column_candidates": list(table.get("media_column_candidates") or [])[:10]
+            if isinstance(table, Mapping)
+            else [],
+        }
+        for table in table_summaries[:MAX_SQLITE_TABLES]
+    ]
+    manifest: dict[str, object] = {
+        "manifest_version": "signal-parser-manifest-v1",
+        "item_number": 34,
+        "batch_id": "commercial-uplift-031-035",
+        "gap_id": "#34",
+        "artifact_type": artifact_type,
+        "service": "Signal",
+        "source_tool": source_tool,
+        "source_format": source_format,
+        "source_index": source_index,
+        "source_path": str(source_path.resolve()),
+        "source_sha256": source_hashes.get("sha256", ""),
+        "source_record_id": source_record_id(details, source_index),
+        "row_citation": {
+            **row_payload,
+            "row_hash": stable_mobile_sha256(row_payload),
+            "source_viewer_locator": {
+                "viewer": "signal-message-row" if artifact_type == "mobile-message" else "signal-sqlcipher-inventory",
+                "source_path": str(source_path.resolve()),
+                "source_index": source_index,
+                "source_record_id": source_record_id(details, source_index),
+                "database_name": optional_text(details.get("database_name")),
+            },
+        },
+        "parser_tracks": [
+            {
+                "track": "authorized-export-row-normalization",
+                "status": "implemented" if artifact_type == "mobile-message" else "not-applicable",
+                "reportable_as": "message-row-triage-pivot",
+            },
+            {
+                "track": "signal-sqlcipher-database-inventory",
+                "status": "implemented" if artifact_type == "mobile-chat-database" else "not-applicable",
+                "reportable_as": "schema-and-row-count-inventory",
+            },
+            {
+                "track": "sqlcipher-key-authority-workflow",
+                "status": "authority-gated-validation-required",
+                "reportable_as": "not-sqlcipher-complete-without-key-evidence",
+            },
+            {
+                "track": "attachment-disappearing-deleted-validation",
+                "status": "known-answer-required",
+                "reportable_as": "not-attachment-or-deleted-complete",
+            },
+        ],
+        "message_review": {
+            "present": bool(message_profile),
+            "message_text_sha256_present": bool(message_profile.get("message_text_sha256_present")),
+            "thread_or_recipient_attribution_present": bool(message_profile.get("thread_or_recipient_attribution_present")),
+            "thread_id_present": bool(message_profile.get("thread_id_present")),
+            "recipient_id_present": bool(message_profile.get("recipient_id_present")),
+            "sender_present": bool(message_profile.get("sender_present")),
+            "attachment_metadata_present": bool(message_profile.get("attachment_metadata_present")),
+            "attachment_class": optional_text(message_profile.get("attachment_class")),
+            "read_or_delivery_state_present": bool(message_profile.get("read_or_delivery_state_present")),
+            "deleted_state_present": bool(message_profile.get("deleted_state_present")),
+            "disappearing_timer_present": bool(message_profile.get("disappearing_timer_present")),
+            "sqlcipher_key_authority_status": optional_text(message_profile.get("sqlcipher_key_authority_status")),
+            "sqlcipher_decode_status": optional_text(message_profile.get("sqlcipher_decode_status")),
+        },
+        "database_review": {
+            "present": bool(database_profile),
+            "table_count": database_profile.get("table_count", len(table_inventory)) if isinstance(database_profile, Mapping) else len(table_inventory),
+            "message_table_candidates": list(database_profile.get("message_table_candidates") or [])[:25]
+            if isinstance(database_profile, Mapping)
+            else [],
+            "recipient_thread_table_candidates": list(database_profile.get("recipient_thread_table_candidates") or [])[:25]
+            if isinstance(database_profile, Mapping)
+            else [],
+            "attachment_table_candidates": list(database_profile.get("attachment_table_candidates") or [])[:25]
+            if isinstance(database_profile, Mapping)
+            else [],
+            "signal_schema_shape_present": bool(database_profile.get("signal_schema_shape_present")) if isinstance(database_profile, Mapping) else False,
+            "native_decode_status": optional_text(database_profile.get("native_decode_status"))
+            if isinstance(database_profile, Mapping)
+            else "not-applicable",
+            "table_inventory": table_inventory,
+        },
+        "validation": {
+            "source_hash_present": bool(source_hashes.get("sha256")),
+            "service_detected": bool(validation.get("service_detected", True)),
+            "thread_or_recipient_attribution_present": bool(
+                message_profile.get("thread_or_recipient_attribution_present")
+                or database_profile.get("recipient_thread_table_candidates")
+            ),
+            "sqlcipher_key_authority_attached": False,
+            "sqlcipher_decode_complete": False,
+            "trusted_export_or_native_db_diff_attached": False,
+            "attachment_bytes_verified": False,
+            "deleted_disappearing_known_answer_attached": False,
+            "commercial_grade": False,
+        },
+        "large_data_controls": {
+            "raw_text_hash_only_by_default": True,
+            "metadata_collapsed_by_default": True,
+            "max_sqlite_tables": MAX_SQLITE_TABLES,
+            "table_inventory_count": len(table_inventory),
+            "table_inventory_capped": len(table_summaries) >= MAX_SQLITE_TABLES,
+            "viewer_default": "conversation-grouped-virtualized-chat-review",
+        },
+        "commercial_blockers": [
+            "signal-sqlcipher-key-authority-workflow-required",
+            "trusted-signal-export-or-native-db-diff-required",
+            "recipient-thread-schema-known-answer-required",
+            "attachment-locality-validation-required",
+            "deleted-and-disappearing-message-validation-required",
+        ],
+        "reporting_status": "signal-review-ready-not-commercial-grade",
+    }
+    manifest["manifest_sha256"] = stable_mobile_sha256(
+        {key: value for key, value in manifest.items() if key != "manifest_sha256"}
+    )
+    return manifest
 
 
 def classify_signal_attachment(media_reference: str, attachment_name: str) -> str:
@@ -2038,6 +3022,180 @@ def extended_messenger_database_review_payload(service: str, table_summaries: Se
             ],
         }
     }
+
+
+def build_extended_messenger_parser_manifest(
+    *,
+    artifact_type: str,
+    service: str,
+    source_tool: str,
+    source_format: str,
+    source_index: int,
+    source_hashes: Mapping[str, str],
+    source_path: Path,
+    details: Mapping[str, object],
+) -> dict[str, object]:
+    """Extended messenger review manifest for service-specific export/schema triage."""
+    message_profile = (
+        details.get("extended_messenger_message_review_profile")
+        if isinstance(details.get("extended_messenger_message_review_profile"), Mapping)
+        else {}
+    )
+    database_profile = (
+        details.get("extended_messenger_database_review_profile")
+        if isinstance(details.get("extended_messenger_database_review_profile"), Mapping)
+        else {}
+    )
+    table_summaries = details.get("table_summaries") if isinstance(details.get("table_summaries"), list) else []
+    validation = details.get("validation_checks") if isinstance(details.get("validation_checks"), Mapping) else {}
+    row_payload = {
+        "artifact_type": artifact_type,
+        "source_tool": source_tool,
+        "source_format": source_format,
+        "source_index": source_index,
+        "source_sha256": source_hashes.get("sha256", ""),
+        "service": service,
+        "timestamp": optional_text(details.get("timestamp")),
+        "conversation_id": optional_text(details.get("conversation_id")),
+        "message_id": optional_text(details.get("message_id")),
+        "message_text_sha256": optional_text(details.get("message_text_sha256")),
+        "media_reference_sha256": optional_text(details.get("media_reference_sha256")),
+        "schema_version": optional_text(details.get("schema_version")),
+        "app_version": optional_text(details.get("app_version")),
+        "database_name": optional_text(details.get("database_name")),
+    }
+    table_inventory = [
+        {
+            "table": optional_text(table.get("table")) if isinstance(table, Mapping) else "",
+            "row_count": table.get("row_count") if isinstance(table, Mapping) else None,
+            "message_table_candidate": bool(table.get("message_table_candidate")) if isinstance(table, Mapping) else False,
+            "actor_or_thread_column_candidates": [
+                str(column)
+                for column in (table.get("columns") or [])
+                if isinstance(table, Mapping)
+                and any(
+                    token in str(column).lower()
+                    for token in ("user", "member", "contact", "author", "sender", "recipient", "channel", "thread", "room")
+                )
+            ][:10],
+            "media_column_candidates": list(table.get("media_column_candidates") or [])[:10]
+            if isinstance(table, Mapping)
+            else [],
+        }
+        for table in table_summaries[:MAX_SQLITE_TABLES]
+    ]
+    manifest: dict[str, object] = {
+        "manifest_version": "extended-messenger-parser-manifest-v1",
+        "item_number": 35,
+        "batch_id": "commercial-uplift-031-035",
+        "gap_id": "#35",
+        "artifact_type": artifact_type,
+        "service": service or "unknown",
+        "service_family": service_family(service),
+        "source_tool": source_tool,
+        "source_format": source_format,
+        "source_index": source_index,
+        "source_path": str(source_path.resolve()),
+        "source_sha256": source_hashes.get("sha256", ""),
+        "source_record_id": source_record_id(details, source_index),
+        "row_citation": {
+            **row_payload,
+            "row_hash": stable_mobile_sha256(row_payload),
+            "source_viewer_locator": {
+                "viewer": "extended-messenger-message-row"
+                if artifact_type == "mobile-message"
+                else "extended-messenger-database-inventory",
+                "source_path": str(source_path.resolve()),
+                "source_index": source_index,
+                "source_record_id": source_record_id(details, source_index),
+                "service": service,
+                "database_name": optional_text(details.get("database_name")),
+            },
+        },
+        "parser_tracks": [
+            {
+                "track": extended_messenger_source_track(service),
+                "status": "implemented" if artifact_type == "mobile-message" else "inventory-only",
+                "reportable_as": "service-export-or-schema-inventory-triage-pivot",
+            },
+            {
+                "track": "service-specific-native-store-decode",
+                "status": "schema-and-authority-validation-required",
+                "reportable_as": "not-native-store-complete",
+            },
+            {
+                "track": "media-reaction-read-deleted-ephemeral-validation",
+                "status": "known-answer-required",
+                "reportable_as": "not-state-or-media-complete",
+            },
+        ],
+        "message_review": {
+            "present": bool(message_profile),
+            "message_text_sha256_present": bool(message_profile.get("message_text_sha256_present")),
+            "service_attribution_present": bool(message_profile.get("service_attribution_present", service)),
+            "thread_or_channel_attribution_present": bool(message_profile.get("thread_or_channel_attribution_present")),
+            "account_or_actor_attribution_present": bool(message_profile.get("account_or_actor_attribution_present")),
+            "recipient_or_peer_attribution_present": bool(message_profile.get("recipient_or_peer_attribution_present")),
+            "attachment_metadata_present": bool(message_profile.get("attachment_metadata_present")),
+            "attachment_class": optional_text(message_profile.get("attachment_class")),
+            "reaction_present": bool(message_profile.get("reaction_present")),
+            "read_state_present": bool(message_profile.get("read_state_present")),
+            "edited_state_present": bool(message_profile.get("edited_state_present")),
+            "deleted_state_present": bool(message_profile.get("deleted_state_present")),
+            "ephemeral_or_vanish_hint_present": bool(message_profile.get("ephemeral_or_vanish_hint_present")),
+            "native_decode_status": optional_text(message_profile.get("native_decode_status")),
+        },
+        "database_review": {
+            "present": bool(database_profile),
+            "table_count": database_profile.get("table_count", len(table_inventory)) if isinstance(database_profile, Mapping) else len(table_inventory),
+            "message_table_candidates": list(database_profile.get("message_table_candidates") or [])[:25]
+            if isinstance(database_profile, Mapping)
+            else [],
+            "actor_or_thread_table_candidates": list(database_profile.get("actor_or_thread_table_candidates") or [])[:25]
+            if isinstance(database_profile, Mapping)
+            else [],
+            "attachment_table_candidates": list(database_profile.get("attachment_table_candidates") or [])[:25]
+            if isinstance(database_profile, Mapping)
+            else [],
+            "state_semantics_table_candidates": list(database_profile.get("state_semantics_table_candidates") or [])[:25]
+            if isinstance(database_profile, Mapping)
+            else [],
+            "native_decode_status": optional_text(database_profile.get("native_decode_status"))
+            if isinstance(database_profile, Mapping)
+            else "not-applicable",
+            "table_inventory": table_inventory,
+        },
+        "validation": {
+            "source_hash_present": bool(source_hashes.get("sha256")),
+            "service_detected": bool(validation.get("service_detected", True)),
+            "schema_version_present": bool(details.get("schema_version")),
+            "thread_or_channel_present": bool(message_profile.get("thread_or_channel_attribution_present")),
+            "trusted_export_or_native_db_diff_attached": False,
+            "media_bytes_verified": False,
+            "deleted_or_ephemeral_known_answer_attached": False,
+            "commercial_grade": False,
+        },
+        "large_data_controls": {
+            "raw_text_hash_only_by_default": True,
+            "metadata_collapsed_by_default": True,
+            "max_sqlite_tables": MAX_SQLITE_TABLES,
+            "table_inventory_count": len(table_inventory),
+            "table_inventory_capped": len(table_summaries) >= MAX_SQLITE_TABLES,
+            "viewer_default": "service-grouped-virtualized-chat-review",
+        },
+        "commercial_blockers": [
+            "extended-messenger-service-schema-known-answer-required",
+            "trusted-extended-messenger-export-or-native-db-diff-required",
+            "media-locality-validation-required",
+            "reaction-read-edited-deleted-state-validation-required",
+            "ephemeral-or-encrypted-store-boundary-validation-required",
+        ],
+        "reporting_status": "extended-messenger-review-ready-not-commercial-grade",
+    }
+    manifest["manifest_sha256"] = stable_mobile_sha256(
+        {key: value for key, value in manifest.items() if key != "manifest_sha256"}
+    )
+    return manifest
 
 
 def extended_messenger_source_track(service: str) -> str:
@@ -2227,8 +3385,26 @@ def build_mobile_correlation_summary(rows: list[Mapping[str, object]]) -> dict[s
         call_rows=call_rows,
         message_media_links=message_media_links,
     )
+    correlation_citation_manifest = build_mobile_correlation_citation_manifest(
+        message_rows=message_rows,
+        media_rows=media_rows,
+        contact_rows=contact_rows,
+        call_rows=call_rows,
+        message_media_links=message_media_links,
+        timeline_profile=timeline_profile,
+    )
     actor_review_profile = build_mobile_actor_review_profile(unified_actor_view)
+    actor_citation_manifest = build_mobile_actor_citation_manifest(
+        actor_rows=unified_actor_view,
+        message_rows=message_rows,
+        contact_rows=contact_rows,
+        call_rows=call_rows,
+    )
     schema_compatibility_profile = build_mobile_schema_compatibility_profile(schema_version_registry)
+    schema_version_manifest = build_mobile_schema_version_manifest(
+        registry=schema_version_registry,
+        source_rows=[*message_rows, *app_rows],
+    )
     validation_checks = {
         "message_media_correlation_available": bool(message_rows and media_rows),
         "media_message_links_built": bool(message_media_links),
@@ -2240,6 +3416,7 @@ def build_mobile_correlation_summary(rows: list[Mapping[str, object]]) -> dict[s
         "app_specific_schema_versions_tracked": bool(schema_versions),
         "schema_version_registry_built": bool(schema_version_registry),
         "schema_compatibility_profile_built": bool(schema_compatibility_profile.get("entry_count")),
+        "schema_version_manifest_built": bool(schema_version_manifest.get("schema_entry_count")),
         "schema_version_registry_known_answer_validated": False,
         "correlation_validated_against_known_answer": False,
     }
@@ -2258,12 +3435,18 @@ def build_mobile_correlation_summary(rows: list[Mapping[str, object]]) -> dict[s
         "schema_version_registry": schema_version_registry,
         "schema_version_registry_count": len(schema_version_registry),
         "mobile_schema_compatibility_profile": schema_compatibility_profile,
+        "mobile_schema_version_manifest": schema_version_manifest,
+        "mobile_schema_version_manifest_hash": schema_version_manifest["manifest_sha256"],
         "message_media_links": message_media_links,
         "media_message_link_count": len(message_media_links),
         "mobile_timeline_correlation_profile": timeline_profile,
+        "mobile_correlation_citation_manifest": correlation_citation_manifest,
+        "mobile_correlation_citation_manifest_hash": correlation_citation_manifest["manifest_sha256"],
         "unified_contact_call_sms_view": unified_actor_view,
         "unified_contact_call_sms_view_count": len(unified_actor_view),
         "mobile_actor_review_profile": actor_review_profile,
+        "mobile_actor_citation_manifest": actor_citation_manifest,
+        "mobile_actor_citation_manifest_hash": actor_citation_manifest["manifest_sha256"],
         "timeline_correlation_ready": bool(message_rows or media_rows or call_rows),
         "validation_checks": validation_checks,
         "commercial_gap_ids": ["#43", "#44", "#45"],
@@ -2280,8 +3463,11 @@ def build_mobile_correlation_summary(rows: list[Mapping[str, object]]) -> dict[s
             schema_version_count=len(schema_version_registry),
             validation_checks=validation_checks,
             timeline_profile=timeline_profile,
+            citation_manifest=correlation_citation_manifest,
             actor_review_profile=actor_review_profile,
+            actor_citation_manifest=actor_citation_manifest,
             schema_compatibility_profile=schema_compatibility_profile,
+            schema_version_manifest=schema_version_manifest,
         ),
         "forensic_review": mobile_correlation_forensic_review(
             message_count=len(message_rows),
@@ -2454,6 +3640,163 @@ def build_mobile_timeline_correlation_profile(
     }
 
 
+def build_mobile_correlation_citation_manifest(
+    *,
+    message_rows: list[Mapping[str, object]],
+    media_rows: list[Mapping[str, object]],
+    contact_rows: list[Mapping[str, object]],
+    call_rows: list[Mapping[str, object]],
+    message_media_links: list[Mapping[str, object]],
+    timeline_profile: Mapping[str, object],
+    limit: int = MAX_MOBILE_CORRELATION_TIMELINE_ROWS,
+) -> dict[str, object]:
+    source_rows = [*message_rows, *media_rows, *contact_rows, *call_rows]
+    row_citations: list[dict[str, object]] = []
+    for index, row in enumerate(source_rows[:limit], start=1):
+        row_type = optional_text(row.get("artifact_type") or row.get("event_type") or "mobile-row")
+        citation_payload = {
+            "citation_index": index,
+            "row_type": row_type,
+            "source_index": int(row.get("source_index") or 0),
+            "source_record_id": optional_text(row.get("source_record_id") or row.get("message_id")),
+            "timestamp": optional_text(row.get("timestamp")),
+            "service": optional_text(row.get("service")),
+            "message_id": optional_text(row.get("message_id")),
+            "media_reference_sha256": optional_text(row.get("media_reference_sha256")),
+            "media_sha256": optional_text(row.get("sha256")),
+            "actor_hash": sha256_text(
+                optional_text(
+                    row.get("sender")
+                    or row.get("recipient")
+                    or row.get("phone_number")
+                    or row.get("contact_name")
+                    or row.get("account_identifier")
+                )
+            )
+            if optional_text(
+                row.get("sender")
+                or row.get("recipient")
+                or row.get("phone_number")
+                or row.get("contact_name")
+                or row.get("account_identifier")
+            )
+            else "",
+        }
+        row_citations.append(
+            {
+                **citation_payload,
+                "row_hash": stable_mobile_sha256(citation_payload),
+                "source_viewer_locator": {
+                    "viewer": "mobile-export-row",
+                    "source_index": citation_payload["source_index"],
+                    "source_record_id": citation_payload["source_record_id"],
+                    "row_type": row_type,
+                    "open_requires_authority": False,
+                },
+            }
+        )
+
+    link_citations: list[dict[str, object]] = []
+    for index, link in enumerate(message_media_links[:limit], start=1):
+        link_payload = {
+            "link_index": index,
+            "message_id": optional_text(link.get("message_id")),
+            "message_timestamp": optional_text(link.get("message_timestamp")),
+            "service": optional_text(link.get("service")),
+            "media_reference_sha256": sha256_text(optional_text(link.get("media_reference")))
+            if optional_text(link.get("media_reference"))
+            else "",
+            "media_sha256": optional_text(link.get("media_sha256")),
+            "validation_status": optional_text(link.get("validation_status")),
+            "matched_by": list(link.get("matched_by") or []),
+        }
+        link_citations.append(
+            {
+                **link_payload,
+                "link_hash": stable_mobile_sha256(link_payload),
+                "source_viewer_locator": {
+                    "viewer": "mobile-message-media-link",
+                    "message_id": link_payload["message_id"],
+                    "validation_status": link_payload["validation_status"],
+                    "open_requires_attachment_validation": link_payload["validation_status"] != "candidate",
+                },
+            }
+        )
+
+    timeline_events = [
+        event for event in timeline_profile.get("events", []) if isinstance(event, Mapping)
+    ]
+    timeline_citations: list[dict[str, object]] = []
+    for index, event in enumerate(timeline_events[:limit], start=1):
+        event_payload = {
+            "event_index": index,
+            "timestamp": optional_text(event.get("timestamp")),
+            "event_type": optional_text(event.get("event_type")),
+            "service": optional_text(event.get("service")),
+            "source_record_id": optional_text(event.get("source_record_id")),
+            "message_id": optional_text(event.get("message_id")),
+            "media_link_status": optional_text(event.get("media_link_status")),
+            "validation_status": optional_text(event.get("validation_status")),
+        }
+        timeline_citations.append(
+            {
+                **event_payload,
+                "event_hash": stable_mobile_sha256(event_payload),
+                "source_viewer_locator": {
+                    "viewer": "mobile-correlation-timeline-event",
+                    "event_index": index,
+                    "source_record_id": event_payload["source_record_id"],
+                    "message_id": event_payload["message_id"],
+                },
+            }
+        )
+
+    manifest: dict[str, object] = {
+        "manifest_version": "mobile-correlation-citation-manifest-v1",
+        "item_number": 43,
+        "batch_id": "commercial-uplift-041-045",
+        "selected_track": "bounded-message-media-call-timeline-citations",
+        "row_citation_count": len(row_citations),
+        "row_citation_cap": limit,
+        "row_citations_truncated": len(source_rows) > limit,
+        "row_citations": row_citations,
+        "message_media_link_citation_count": len(link_citations),
+        "message_media_link_citations": link_citations,
+        "timeline_event_citation_count": len(timeline_citations),
+        "timeline_event_citations": timeline_citations,
+        "event_count": int(timeline_profile.get("event_count") or 0),
+        "event_cap": int(timeline_profile.get("event_cap") or limit),
+        "timeline_event_truncated": bool(timeline_profile.get("event_truncated")),
+        "resolved_media_link_count": int(timeline_profile.get("resolved_media_link_count") or 0),
+        "unresolved_media_link_count": int(timeline_profile.get("unresolved_media_link_count") or 0),
+        "device_wide_timeline_ready": False,
+        "timezone_validation_required": True,
+        "known_answer_correlation_required": True,
+        "passed_validation_check_ids": [
+            "mobile-correlation-citation-manifest-emitted",
+            "mobile-source-row-citations-built",
+            "mobile-timeline-event-citations-built",
+        ],
+        "failed_validation_check_ids": [
+            "device-wide-timeline-not-validated",
+            "timezone-clock-skew-not-validated",
+            "attachment-byte-recovery-not-validated",
+            MOBILE_CORRELATION_TRUSTED_DIFF_BLOCKERS[43],
+        ],
+        "commercial_blockers": [
+            "device-wide-timeline-not-validated",
+            "timezone-clock-skew-not-validated",
+            "attachment-byte-recovery-not-validated",
+            MOBILE_CORRELATION_TRUSTED_DIFF_BLOCKERS[43],
+        ],
+        "ready_for_court_report": False,
+    }
+    manifest["manifest_sha256"] = stable_mobile_sha256(
+        {key: value for key, value in manifest.items() if key != "manifest_sha256"}
+    )
+    return manifest
+
+
 def mobile_media_link_status(
     message: Mapping[str, object],
     media_link_by_message: Mapping[str, Mapping[str, object]],
@@ -2624,6 +3967,114 @@ def build_mobile_actor_review_profile(actor_rows: list[Mapping[str, object]], *,
     }
 
 
+def build_mobile_actor_citation_manifest(
+    *,
+    actor_rows: list[Mapping[str, object]],
+    message_rows: list[Mapping[str, object]],
+    contact_rows: list[Mapping[str, object]],
+    call_rows: list[Mapping[str, object]],
+    limit: int = 200,
+) -> dict[str, object]:
+    actor_entries: list[dict[str, object]] = []
+    for index, actor in enumerate(actor_rows[:limit], start=1):
+        actor_value = optional_text(actor.get("actor"))
+        actor_hash = sha256_text(actor_value) if actor_value else ""
+        linked_message_count = sum(
+            1
+            for row in message_rows
+            if actor_value
+            and actor_value in [participant for participant in row.get("participants", []) if isinstance(participant, str)]
+        )
+        linked_contact_count = sum(
+            1
+            for row in contact_rows
+            if actor_value
+            and actor_value
+            in {
+                optional_text(row.get("phone_number")),
+                optional_text(row.get("email")),
+                optional_text(row.get("contact_name")),
+            }
+        )
+        linked_call_count = sum(
+            1
+            for row in call_rows
+            if actor_value
+            and actor_value
+            in {
+                optional_text(row.get("phone_number")),
+                optional_text(row.get("contact_name")),
+            }
+        )
+        entry_payload = {
+            "entry_index": index,
+            "actor_sha256": actor_hash,
+            "message_count": int(actor.get("message_count") or 0),
+            "call_count": int(actor.get("call_count") or 0),
+            "contact_record_count": int(actor.get("contact_record_count") or 0),
+            "linked_message_count": linked_message_count,
+            "linked_contact_count": linked_contact_count,
+            "linked_call_count": linked_call_count,
+            "first_seen_at": optional_text(actor.get("first_seen_at")),
+            "last_seen_at": optional_text(actor.get("last_seen_at")),
+            "service_count": len(actor.get("services") or []),
+            "phone_count": len(actor.get("phones") or []),
+            "email_count": len(actor.get("emails") or []),
+            "contact_name_count": len(actor.get("contact_names") or []),
+            "merge_split_review_required": len(actor.get("phones") or []) + len(actor.get("emails") or []) > 1
+            or len(actor.get("contact_names") or []) > 1,
+        }
+        actor_entries.append(
+            {
+                **entry_payload,
+                "entry_hash": stable_mobile_sha256(entry_payload),
+                "source_viewer_locator": {
+                    "viewer": "mobile-actor-review",
+                    "actor_sha256": actor_hash,
+                    "open_requires_merge_split_review": entry_payload["merge_split_review_required"],
+                },
+                "validation_status": "candidate-actor-citation",
+            }
+        )
+    manifest: dict[str, object] = {
+        "manifest_version": "mobile-actor-citation-manifest-v1",
+        "item_number": 44,
+        "batch_id": "commercial-uplift-041-045",
+        "selected_track": "bounded-contact-call-sms-actor-citations",
+        "actor_entry_count": len(actor_entries),
+        "actor_entry_cap": limit,
+        "actor_entries_truncated": len(actor_rows) > limit,
+        "actor_entries": actor_entries,
+        "message_count": len(message_rows),
+        "contact_count": len(contact_rows),
+        "call_count": len(call_rows),
+        "raw_actor_values_serialized": False,
+        "device_wide_identity_resolution_ready": False,
+        "merge_split_review_required": bool(actor_rows),
+        "known_answer_actor_diff_required": True,
+        "passed_validation_check_ids": [
+            "mobile-actor-citation-manifest-emitted",
+            "actor-source-viewer-locators-built",
+            "actor-values-hashed-in-manifest",
+        ],
+        "failed_validation_check_ids": [
+            "device-wide-identity-resolution-not-validated",
+            "actor-merge-split-review-not-persisted",
+            MOBILE_CORRELATION_TRUSTED_DIFF_BLOCKERS[44],
+        ],
+        "commercial_blockers": [
+            "device-wide-identity-resolution-not-validated",
+            "actor-merge-split-review-not-persisted",
+            MOBILE_CORRELATION_TRUSTED_DIFF_BLOCKERS[44],
+        ],
+        "ready_for_court_report": False,
+    }
+    manifest["manifest_sha256"] = stable_mobile_sha256(
+        {key: value for key, value in manifest.items() if key != "manifest_sha256"}
+    )
+    return manifest
+
+
 def build_schema_version_registry(rows: list[Mapping[str, object]], *, limit: int = 200) -> list[dict[str, object]]:
     registry: dict[tuple[str, str, str], dict[str, object]] = {}
     for row in rows:
@@ -2687,6 +4138,113 @@ def build_mobile_schema_compatibility_profile(registry: list[Mapping[str, object
             "block commercial parser claims for unvalidated app/schema combinations",
         ],
     }
+
+
+def build_mobile_schema_version_manifest(
+    *,
+    registry: list[Mapping[str, object]],
+    source_rows: list[Mapping[str, object]],
+    limit: int = 200,
+) -> dict[str, object]:
+    schema_entries: list[dict[str, object]] = []
+    for index, row in enumerate(registry[:limit], start=1):
+        app_identifier = optional_text(row.get("app_identifier") or "unknown")
+        version = optional_text(row.get("schema_or_app_version") or "unknown")
+        event_type = optional_text(row.get("event_type") or "unknown")
+        linked_sources: list[dict[str, object]] = []
+        for source in source_rows:
+            source_app = optional_text(source.get("package") or source.get("service") or source.get("app_name") or "unknown")
+            source_version = optional_text(
+                source.get("schema_version")
+                or source.get("version")
+                or source.get("app_version")
+                or source.get("appversion")
+                or "unknown"
+            )
+            source_event_type = optional_text(source.get("event_type") or source.get("artifact_type") or "unknown")
+            if (source_app, source_version, source_event_type) != (app_identifier, version, event_type):
+                continue
+            linked_sources.append(
+                {
+                    "source_index": int(source.get("source_index") or len(linked_sources) + 1),
+                    "source_record_id": optional_text(source.get("source_record_id") or source_record_id(source, len(linked_sources))),
+                    "source_path_sha256": sha256_text(optional_text(source.get("source_path"))),
+                    "source_hash_sha256": optional_text(
+                        (source.get("source_hashes") or {}).get("sha256")
+                        if isinstance(source.get("source_hashes"), Mapping)
+                        else ""
+                    ),
+                }
+            )
+        entry_payload = {
+            "entry_index": index,
+            "app_identifier": app_identifier,
+            "schema_or_app_version": version,
+            "event_type": event_type,
+            "row_count": int(row.get("row_count") or 0),
+            "known_schema_validated": bool(row.get("known_schema_validated")),
+            "validation_status": optional_text(row.get("validation_status") or "candidate"),
+            "linked_source_count": len(linked_sources),
+            "release_gate_status": "validated-fixture-attached"
+            if row.get("known_schema_validated")
+            else "blocked-pending-known-answer-fixture",
+        }
+        schema_entries.append(
+            {
+                **entry_payload,
+                "entry_hash": stable_mobile_sha256(entry_payload),
+                "linked_source_refs": linked_sources[:25],
+                "linked_source_refs_truncated": len(linked_sources) > 25,
+                "source_viewer_locator": {
+                    "viewer": "mobile-schema-version-review",
+                    "app_identifier": app_identifier,
+                    "schema_or_app_version": version,
+                    "event_type": event_type,
+                    "open_requires_known_answer_fixture": not row.get("known_schema_validated"),
+                },
+                "required_fixture_id": stable_mobile_sha256(
+                    {
+                        "app_identifier": app_identifier,
+                        "schema_or_app_version": version,
+                        "event_type": event_type,
+                    }
+                )[:16],
+            }
+        )
+    manifest: dict[str, object] = {
+        "manifest_version": "mobile-schema-version-manifest-v1",
+        "item_number": 45,
+        "batch_id": "commercial-uplift-041-045",
+        "selected_track": "app-schema-version-registry-release-gates",
+        "schema_entry_count": len(schema_entries),
+        "schema_entry_cap": limit,
+        "schema_entries_truncated": len(registry) > limit,
+        "schema_entries": schema_entries,
+        "source_row_count": len(source_rows),
+        "known_answer_fixture_required": any(not row.get("known_schema_validated") for row in registry),
+        "schema_migration_matrix_required": True,
+        "release_gate_blocked": any(not row.get("known_schema_validated") for row in registry),
+        "passed_validation_check_ids": [
+            "mobile-schema-version-manifest-emitted",
+            "schema-source-viewer-locators-built",
+            "schema-release-gates-recorded",
+        ],
+        "failed_validation_check_ids": [
+            "schema-version-registry-known-answer-not-attached",
+            "schema-migration-matrix-not-attached",
+            MOBILE_CORRELATION_TRUSTED_DIFF_BLOCKERS[45],
+        ],
+        "commercial_blockers": [
+            "schema-version-registry-known-answer-not-attached",
+            "schema-migration-matrix-not-attached",
+            MOBILE_CORRELATION_TRUSTED_DIFF_BLOCKERS[45],
+        ],
+        "ready_for_court_report": False,
+    }
+    manifest["manifest_sha256"] = stable_mobile_sha256(
+        {key: value for key, value in manifest.items() if key != "manifest_sha256"}
+    )
+    return manifest
 
 
 def build_mobile_correlation_trusted_diff(
@@ -2831,14 +4389,20 @@ def mobile_correlation_commercial_uplift_evidence(
     schema_version_count: int,
     validation_checks: Mapping[str, object],
     timeline_profile: Mapping[str, object] | None = None,
+    citation_manifest: Mapping[str, object] | None = None,
     actor_review_profile: Mapping[str, object] | None = None,
+    actor_citation_manifest: Mapping[str, object] | None = None,
     schema_compatibility_profile: Mapping[str, object] | None = None,
+    schema_version_manifest: Mapping[str, object] | None = None,
     trusted_diff: Mapping[str, object] | None = None,
 ) -> dict[str, object]:
     report_grade = mobile_correlation_report_grade_assessment()
     timeline_profile = timeline_profile or {}
+    citation_manifest = citation_manifest or {}
     actor_review_profile = actor_review_profile or {}
+    actor_citation_manifest = actor_citation_manifest or {}
     schema_compatibility_profile = schema_compatibility_profile or {}
+    schema_version_manifest = schema_version_manifest or {}
     trusted_diff = trusted_diff or {}
     passed_validation_check_ids = [
         str(check_id)
@@ -2866,7 +4430,15 @@ def mobile_correlation_commercial_uplift_evidence(
             schema_version_count=schema_version_count,
             trusted_diff=trusted_diff,
         ),
-        "source_refs": [f"service:{service}" for service in services[:20]],
+        "source_refs": [
+            f"service:{service}" for service in services[:20]
+        ] + [
+            f"mobile_correlation_citation_manifest_sha256:{citation_manifest.get('manifest_sha256', '')}"
+        ] + [
+            f"mobile_actor_citation_manifest_sha256:{actor_citation_manifest.get('manifest_sha256', '')}"
+        ] + [
+            f"mobile_schema_version_manifest_sha256:{schema_version_manifest.get('manifest_sha256', '')}"
+        ],
         "passed_validation_check_ids": sorted(set(passed_validation_check_ids)),
         "failed_validation_check_ids": sorted(set(failed_validation_check_ids)),
         "trusted_diff": dict(trusted_diff) if trusted_diff else {
@@ -2889,9 +4461,19 @@ def mobile_correlation_commercial_uplift_evidence(
             "timeline_event_count": int(timeline_profile.get("event_count") or 0),
             "timeline_event_truncated": bool(timeline_profile.get("event_truncated")),
             "timeline_profile_present": bool(timeline_profile),
+            "citation_manifest_present": bool(citation_manifest),
+            "citation_manifest_hash": str(citation_manifest.get("manifest_sha256") or ""),
+            "timeline_event_citation_count": int(citation_manifest.get("timeline_event_citation_count") or 0),
+            "message_media_link_citation_count": int(
+                citation_manifest.get("message_media_link_citation_count") or 0
+            ),
             "timeline_missing_timestamp_count": int(timeline_profile.get("missing_timestamp_count") or 0),
             "unresolved_media_link_count": int(timeline_profile.get("unresolved_media_link_count") or 0),
             "actor_review_profile_present": bool(actor_review_profile),
+            "actor_citation_manifest_present": bool(actor_citation_manifest),
+            "actor_citation_manifest_hash": str(actor_citation_manifest.get("manifest_sha256") or ""),
+            "actor_citation_entry_count": int(actor_citation_manifest.get("actor_entry_count") or 0),
+            "raw_actor_values_serialized": bool(actor_citation_manifest.get("raw_actor_values_serialized")),
             "actor_review_queue_count": int(actor_review_profile.get("review_queue_count") or 0),
             "multi_identifier_actor_count": int(actor_review_profile.get("multi_identifier_actor_count") or 0),
             "device_wide_identity_resolution_ready": False,
@@ -2899,6 +4481,10 @@ def mobile_correlation_commercial_uplift_evidence(
             "schema_compatibility_entry_count": int(schema_compatibility_profile.get("entry_count") or 0),
             "schema_unvalidated_entry_count": int(schema_compatibility_profile.get("unvalidated_entry_count") or 0),
             "schema_release_gate_blocked": bool(schema_compatibility_profile.get("commercial_release_blocked")),
+            "schema_version_manifest_present": bool(schema_version_manifest),
+            "schema_version_manifest_hash": str(schema_version_manifest.get("manifest_sha256") or ""),
+            "schema_version_manifest_entry_count": int(schema_version_manifest.get("schema_entry_count") or 0),
+            "schema_version_manifest_release_gate_blocked": bool(schema_version_manifest.get("release_gate_blocked")),
             "device_wide_timeline_ready": False,
             "known_answer_correlation_required": True,
         },
@@ -2990,10 +4576,20 @@ def collect_ios_manifest_db(path: Path) -> Iterable[ArtifactRecord]:
     except sqlite3.Error as error:
         validation["sqlite_error"] = str(error)[:240]
     root_profile = build_ios_backup_root_profile(path, manifest_rows, validation)
+    scope_profile = build_ios_backup_scope_profile(manifest_rows, validation)
+    deep_parser_manifest = build_ios_backup_deep_parser_manifest(
+        manifest_path=path,
+        source_hashes=source_hashes,
+        manifest_rows=manifest_rows,
+        validation=validation,
+        scope_profile=scope_profile,
+        root_profile=root_profile,
+    )
     validation["backup_root_profile_emitted"] = True
     validation["info_plist_present"] = bool(root_profile["required_files"].get("Info.plist", {}).get("present"))
     validation["status_plist_present"] = bool(root_profile["required_files"].get("Status.plist", {}).get("present"))
     validation["required_backup_files_present"] = bool(root_profile.get("required_files_present"))
+    validation["ios_backup_deep_parser_manifest_emitted"] = True
     yield build_record(
         path,
         artifact_type="ios-backup-source",
@@ -3005,8 +4601,10 @@ def collect_ios_manifest_db(path: Path) -> Iterable[ArtifactRecord]:
             "event_type": "ios-backup-source",
             "timestamp": "",
             "row_count": emitted,
-            "ios_backup_scope_profile": build_ios_backup_scope_profile(manifest_rows, validation),
+            "ios_backup_scope_profile": scope_profile,
             "ios_backup_root_profile": root_profile,
+            "ios_backup_deep_parser_manifest": deep_parser_manifest,
+            "ios_backup_deep_parser_manifest_hash": deep_parser_manifest["manifest_sha256"],
             "validation_checks": validation,
             "commercial_grade_blockers": [
                 "Requires known-answer validation across encrypted/unencrypted backup variants.",
@@ -3082,6 +4680,16 @@ def collect_ios_keychain_inventory(path: Path) -> ArtifactRecord:
                 )
     except sqlite3.Error as error:
         validation["sqlite_error"] = str(error)[:240]
+    keychain_scope_profile = build_ios_keychain_scope_profile(table_summaries, validation)
+    keychain_authority_gate = build_ios_keychain_authority_gate(table_summaries, validation)
+    keychain_deep_manifest = build_ios_keychain_deep_inventory_manifest(
+        source_path=path,
+        source_hashes=source_hashes,
+        table_summaries=table_summaries,
+        validation=validation,
+        scope_profile=keychain_scope_profile,
+        authority_gate=keychain_authority_gate,
+    )
     return build_record(
         path,
         artifact_type="ios-keychain-inventory",
@@ -3093,8 +4701,10 @@ def collect_ios_keychain_inventory(path: Path) -> ArtifactRecord:
             "event_type": "ios-keychain-inventory",
             "timestamp": "",
             "table_summaries": table_summaries,
-            "ios_keychain_scope_profile": build_ios_keychain_scope_profile(table_summaries, validation),
-            "ios_keychain_authority_gate": build_ios_keychain_authority_gate(table_summaries, validation),
+            "ios_keychain_scope_profile": keychain_scope_profile,
+            "ios_keychain_authority_gate": keychain_authority_gate,
+            "ios_keychain_deep_inventory_manifest": keychain_deep_manifest,
+            "ios_keychain_deep_inventory_manifest_hash": keychain_deep_manifest["manifest_sha256"],
             "protected_data_class_handling": {
                 "status": "redacted-inventory-only",
                 "default_label": "protected-data-redacted",
@@ -3226,6 +4836,130 @@ def build_ios_backup_root_profile(
         "validation_status": "inventory-ready" if not missing_required and validation.get("opened_readonly") else "review-required",
         "reporting_status": "backup-root-inventory-not-content-decode",
     }
+
+
+def build_ios_backup_deep_parser_manifest(
+    *,
+    manifest_path: Path,
+    source_hashes: Mapping[str, str],
+    manifest_rows: Sequence[Mapping[str, object]],
+    validation: Mapping[str, object],
+    scope_profile: Mapping[str, object],
+    root_profile: Mapping[str, object],
+) -> dict[str, object]:
+    backup_root = manifest_path.parent
+    candidate_rows: list[dict[str, object]] = []
+    category_counts: dict[str, int] = {}
+    app_domain_count = 0
+    for index, row in enumerate(manifest_rows[:MAX_IOS_BACKUP_FILES]):
+        domain = optional_text(row.get("domain"))
+        relative_path = optional_text(row.get("relativePath"))
+        file_id = optional_text(row.get("fileID"))
+        file_profile = build_ios_backup_file_profile(domain, relative_path, file_id, row.get("flags"))
+        category = optional_text(file_profile.get("category")) or "other"
+        category_counts[category] = category_counts.get(category, 0) + 1
+        if domain.startswith("AppDomain-"):
+            app_domain_count += 1
+        lowered_path = relative_path.lower()
+        suffix = Path(relative_path).suffix.lower()
+        is_app_db_candidate = (
+            suffix in {".db", ".sqlite", ".sqlite3"}
+            or category in {"message-or-chat-store", "credential-or-account-candidate"}
+            or any(token in lowered_path for token in ("sms", "chat", "message", "browser", "history", "contacts"))
+        )
+        if is_app_db_candidate:
+            candidate_rows.append(
+                {
+                    "source_index": index,
+                    "file_id_sha256": sha256_text(file_id) if file_id else "",
+                    "domain": domain,
+                    "relative_path": relative_path,
+                    "logical_path": f"{domain}/{relative_path}".strip("/"),
+                    "category": category,
+                    "payload_decode_status": "not-decoded",
+                    "schema_validation_status": "candidate-needs-app-version-fixture",
+                }
+            )
+    manifest: dict[str, object] = {
+        "manifest_version": "ios-backup-deep-parser-manifest-v1",
+        "item_number": 27,
+        "gap_id": "#27",
+        "artifact_goal": "iOS backup Manifest.db, plist metadata, app database candidates, and encrypted/protected-data gates",
+        "parser_version": PARSER_VERSION,
+        "source_path": str(manifest_path.resolve()),
+        "source_sha256": source_hashes.get("sha256", ""),
+        "backup_root": str(backup_root.resolve()),
+        "source_viewer_locator": {
+            "viewer": "ios-backup-deep-parser-source",
+            "source_path": str(manifest_path.resolve()),
+            "artifact_type": "ios-backup-source",
+        },
+        "manifest_db": {
+            "opened_readonly": bool(validation.get("opened_readonly")),
+            "files_table_present": bool(validation.get("files_table_present")),
+            "manifest_row_count": len(manifest_rows),
+            "row_limit": MAX_IOS_BACKUP_FILES,
+            "truncated_by_row_limit": len(manifest_rows) >= int(validation.get("row_limit", MAX_IOS_BACKUP_FILES) or 0),
+        },
+        "root_integrity": {
+            "required_files_present": bool(root_profile.get("required_files_present")),
+            "missing_required_files": list(root_profile.get("missing_required_files") or []),
+            "required_files": root_profile.get("required_files", {}),
+            "keychain_file": root_profile.get("keychain_file", {}),
+        },
+        "device_metadata": {
+            "device_name": optional_text(root_profile.get("device_name")),
+            "product_version": optional_text(root_profile.get("product_version")),
+            "last_backup_date": optional_text(root_profile.get("last_backup_date")),
+            "snapshot_state": optional_text(root_profile.get("snapshot_state")),
+            "is_full_backup": bool(root_profile.get("is_full_backup")),
+            "encrypted_backup_state": optional_text(root_profile.get("encrypted_backup_state")),
+        },
+        "domain_and_category_summary": {
+            "domain_count": scope_profile.get("domain_count"),
+            "top_domains": scope_profile.get("top_domains", []),
+            "category_counts": dict(sorted(category_counts.items())),
+            "risk_counts": scope_profile.get("risk_counts", {}),
+            "app_domain_count": app_domain_count,
+        },
+        "app_database_candidates": {
+            "candidate_count": len(candidate_rows),
+            "candidate_sample": candidate_rows[:50],
+            "message_store_candidate_count": category_counts.get("message-or-chat-store", 0),
+            "credential_or_account_candidate_count": category_counts.get("credential-or-account-candidate", 0),
+        },
+        "capability_statement": {
+            "manifest_db_domain_file_mapping": True,
+            "info_status_plist_inventory": True,
+            "app_database_candidate_detection": True,
+            "file_payload_decode": False,
+            "encrypted_backup_unlock": False,
+            "deleted_record_recovery": False,
+            "protected_data_class_decode": False,
+        },
+        "validation": {
+            "implemented": True,
+            "usable": True,
+            "internal_fixture_validated": True,
+            "manifest_opened_readonly": bool(validation.get("opened_readonly")),
+            "required_backup_files_present": bool(root_profile.get("required_files_present")),
+            "encrypted_backup_authority_attached": False,
+            "trusted_ios_backup_diff_attached": False,
+            "app_db_schema_known_answer_attached": False,
+            "commercial_grade": False,
+        },
+        "commercial_blockers": [
+            "encrypted-backup-unlock-workflow-evidence-required",
+            "application-database-schema-known-answer-required",
+            "deleted-record-semantics-known-answer-required",
+            "trusted-ios-backup-parser-diff-required",
+        ],
+        "reporting_status": "ios-backup-deep-parser-inventory-not-content-decode",
+    }
+    manifest["manifest_sha256"] = stable_mobile_sha256(
+        {key: value for key, value in manifest.items() if key != "manifest_sha256"}
+    )
+    return manifest
 
 
 def ios_backup_root_file_profile(path: Path) -> dict[str, object]:
@@ -3429,6 +5163,105 @@ def build_ios_keychain_scope_profile(
             "preserve controlled-reveal audit event if any secret value is exposed outside RapidTriage",
         ],
     }
+
+
+def build_ios_keychain_deep_inventory_manifest(
+    *,
+    source_path: Path,
+    source_hashes: Mapping[str, str],
+    table_summaries: Sequence[Mapping[str, object]],
+    validation: Mapping[str, object],
+    scope_profile: Mapping[str, object],
+    authority_gate: Mapping[str, object],
+) -> dict[str, object]:
+    table_class_counts = dict(scope_profile.get("table_class_counts") or {})
+    table_inventory = []
+    for summary in table_summaries[:MAX_SQLITE_TABLES]:
+        table_inventory.append(
+            {
+                "table": optional_text(summary.get("table")),
+                "table_class": optional_text(summary.get("table_class")),
+                "row_count": int(summary.get("row_count") or 0),
+                "column_count": len(summary.get("columns") or []) if isinstance(summary.get("columns"), list) else 0,
+                "sensitive_columns": list(summary.get("sensitive_columns") or [])[:25],
+                "protected_value_column_count": int(summary.get("protected_value_column_count") or 0),
+                "row_values_read": False,
+                "row_sample_policy": optional_text(summary.get("row_sample_policy")) or "redacted-schema-only-no-values-read",
+            }
+        )
+    manifest: dict[str, object] = {
+        "manifest_version": "ios-keychain-deep-inventory-manifest-v1",
+        "item_number": 28,
+        "gap_id": "#28",
+        "artifact_goal": "iOS keychain redacted inventory, table class mapping, protected-value boundary, and authority workflow",
+        "parser_version": PARSER_VERSION,
+        "source_path": str(source_path.resolve()),
+        "source_sha256": source_hashes.get("sha256", ""),
+        "source_viewer_locator": {
+            "viewer": "ios-keychain-deep-inventory",
+            "source_path": str(source_path.resolve()),
+            "artifact_type": "ios-keychain-inventory",
+        },
+        "scope": {
+            "opened_readonly": bool(validation.get("opened_readonly")),
+            "table_count": int(scope_profile.get("table_count") or len(table_summaries)),
+            "total_row_count": int(scope_profile.get("total_row_count") or 0),
+            "table_class_counts": table_class_counts,
+            "sensitive_table_names": list(scope_profile.get("sensitive_table_names") or []),
+            "sensitive_column_names": list(scope_profile.get("sensitive_column_names") or [])[:50],
+            "protected_value_column_count": int(scope_profile.get("protected_value_column_count") or 0),
+            "table_inventory": table_inventory,
+        },
+        "redaction_policy": {
+            "values_redacted": bool(validation.get("values_redacted", True)),
+            "secrets_extracted": bool(validation.get("secrets_extracted")),
+            "row_values_read": False,
+            "schema_only": True,
+            "controlled_reveal_required": True,
+            "controlled_reveal_performed": False,
+        },
+        "authority_gate": {
+            "secret_reveal_allowed": bool(authority_gate.get("secret_reveal_allowed")),
+            "lawful_authority_required": bool(authority_gate.get("lawful_authority_required", True)),
+            "audit_required_before_reveal": bool(authority_gate.get("audit_required_before_reveal", True)),
+            "specialized_keybag_validation_required": bool(
+                authority_gate.get("specialized_keybag_validation_required", True)
+            ),
+            "blocked_table_classes": list(authority_gate.get("blocked_table_classes") or []),
+            "blocked_sensitive_columns": list(authority_gate.get("blocked_sensitive_columns") or [])[:50],
+        },
+        "capability_statement": {
+            "table_inventory": True,
+            "sensitive_column_detection": True,
+            "table_class_mapping": True,
+            "secret_value_decryption": False,
+            "access_group_semantics": False,
+            "protected_data_class_decode": False,
+            "known_answer_keychain_corpus": False,
+        },
+        "validation": {
+            "implemented": True,
+            "usable": True,
+            "internal_fixture_validated": True,
+            "opened_readonly": bool(validation.get("opened_readonly")),
+            "values_redacted": bool(validation.get("values_redacted", True)),
+            "secrets_not_extracted": not bool(validation.get("secrets_extracted")),
+            "controlled_reveal_authority_attached": False,
+            "trusted_keychain_diff_attached": False,
+            "commercial_grade": False,
+        },
+        "commercial_blockers": [
+            "lawful-authority-and-controlled-reveal-audit-required",
+            "keybag-protected-data-class-validation-required",
+            "access-group-semantics-known-answer-required",
+            "trusted-keychain-inventory-diff-required",
+        ],
+        "reporting_status": "ios-keychain-redacted-inventory-not-secret-decode",
+    }
+    manifest["manifest_sha256"] = stable_mobile_sha256(
+        {key: value for key, value in manifest.items() if key != "manifest_sha256"}
+    )
+    return manifest
 
 
 def sanitize_ios_plist(payload: Mapping[str, object]) -> dict[str, object]:
@@ -3762,12 +5595,33 @@ def mobile_functional_expansion_profiles(
         if isinstance(details.get("mobile_vendor_import_manifest"), Mapping)
         else {}
     )
+    vendor_schema_mapper_manifest = (
+        details.get("mobile_vendor_schema_mapper_manifest")
+        if isinstance(details.get("mobile_vendor_schema_mapper_manifest"), Mapping)
+        else {}
+    )
+    vendor_schema_mapper_manifest = (
+        details.get("mobile_vendor_schema_mapper_manifest")
+        if isinstance(details.get("mobile_vendor_schema_mapper_manifest"), Mapping)
+        else {}
+    )
     ios_parser_manifest = (
         details.get("ios_backup_parser_manifest")
         if isinstance(details.get("ios_backup_parser_manifest"), Mapping)
         else {}
     )
+    ios_deep_parser_manifest = (
+        details.get("ios_backup_deep_parser_manifest")
+        if isinstance(details.get("ios_backup_deep_parser_manifest"), Mapping)
+        else {}
+    )
+    ios_keychain_deep_manifest = (
+        details.get("ios_keychain_deep_inventory_manifest")
+        if isinstance(details.get("ios_keychain_deep_inventory_manifest"), Mapping)
+        else {}
+    )
     vendor_manifest_hash = optional_text(vendor_import_manifest.get("manifest_sha256"))
+    vendor_schema_mapper_hash = optional_text(vendor_schema_mapper_manifest.get("manifest_sha256"))
     profiles: list[dict[str, object]] = [
         {
             "batch_id": FUNCTIONAL_EXPANSION_BATCH_ID,
@@ -3790,6 +5644,8 @@ def mobile_functional_expansion_profiles(
                     vendor_import_manifest.get("source_viewer_locator"), Mapping
                 ),
                 "vendor_schema_registry_profile_present": bool(vendor_import_manifest.get("schema_registry")),
+                "vendor_schema_mapper_manifest_hash": vendor_schema_mapper_hash,
+                "vendor_schema_mapper_manifest_emitted": bool(vendor_schema_mapper_manifest),
             },
             "trusted_diff_status": str(trusted_diff.get("status") or "not-attached"),
             "failed_validation_check_ids": [
@@ -3798,6 +5654,7 @@ def mobile_functional_expansion_profiles(
                     "vendor-export-settings-not-verified": not validation_checks.get("vendor_export_settings_verified"),
                     "vendor-schema-not-validated": not validation_checks.get("vendor_schema_validated"),
                     "mobile-vendor-import-manifest-not-emitted": not vendor_import_manifest,
+                    "mobile-vendor-schema-mapper-manifest-not-emitted": not vendor_schema_mapper_manifest,
                     "trusted-vendor-export-diff-required": trusted_diff.get("status") != "pass",
                 }.items()
                 if failed
@@ -3809,6 +5666,7 @@ def mobile_functional_expansion_profiles(
                     "mobile-vendor-source-row-locator-emitted": isinstance(
                         vendor_import_manifest.get("source_viewer_locator"), Mapping
                     ),
+                    "mobile-vendor-schema-mapper-manifest-emitted": bool(vendor_schema_mapper_manifest),
                     "mobile-vendor-source-hash-preserved": bool(source_hashes.get("sha256")),
                 }.items()
                 if passed
@@ -3820,6 +5678,16 @@ def mobile_functional_expansion_profiles(
         ios_parser_manifest = (
             details.get("ios_backup_parser_manifest")
             if isinstance(details.get("ios_backup_parser_manifest"), Mapping)
+            else {}
+        )
+        ios_deep_parser_manifest = (
+            details.get("ios_backup_deep_parser_manifest")
+            if isinstance(details.get("ios_backup_deep_parser_manifest"), Mapping)
+            else {}
+        )
+        ios_keychain_deep_manifest = (
+            details.get("ios_keychain_deep_inventory_manifest")
+            if isinstance(details.get("ios_keychain_deep_inventory_manifest"), Mapping)
             else {}
         )
         profiles.append(
@@ -3837,6 +5705,14 @@ def mobile_functional_expansion_profiles(
                     "secret_values_exported": bool(validation_checks.get("secrets_extracted")),
                     "ios_backup_parser_manifest_hash": optional_text(ios_parser_manifest.get("manifest_sha256")),
                     "ios_backup_parser_manifest_emitted": bool(ios_parser_manifest),
+                    "ios_backup_deep_parser_manifest_hash": optional_text(
+                        ios_deep_parser_manifest.get("manifest_sha256")
+                    ),
+                    "ios_backup_deep_parser_manifest_emitted": bool(ios_deep_parser_manifest),
+                    "ios_keychain_deep_inventory_manifest_hash": optional_text(
+                        ios_keychain_deep_manifest.get("manifest_sha256")
+                    ),
+                    "ios_keychain_deep_inventory_manifest_emitted": bool(ios_keychain_deep_manifest),
                     "source_viewer_locator_emitted": isinstance(
                         ios_parser_manifest.get("source_viewer_locator"), Mapping
                     ),
@@ -3847,6 +5723,10 @@ def mobile_functional_expansion_profiles(
                         "encrypted-ios-backup-not-unlocked": not validation_checks.get("encrypted_backup_unlocked", True),
                         "known-answer-ios-backup-corpus-required": not validation_checks.get("known_answer_validated"),
                         "ios-backup-parser-manifest-not-emitted": not ios_parser_manifest,
+                        "ios-backup-deep-parser-manifest-not-emitted": artifact_type == "ios-backup-source"
+                        and not ios_deep_parser_manifest,
+                        "ios-keychain-deep-inventory-manifest-not-emitted": artifact_type == "ios-keychain-inventory"
+                        and not ios_keychain_deep_manifest,
                         "keychain-secret-reveal-authority-not-attached": artifact_type == "ios-keychain-inventory"
                         and not validation_checks.get("controlled_reveal_authorized"),
                     }.items()
@@ -3859,6 +5739,8 @@ def mobile_functional_expansion_profiles(
                         "ios-backup-source-locator-emitted": isinstance(
                             ios_parser_manifest.get("source_viewer_locator"), Mapping
                         ),
+                        "ios-backup-deep-parser-manifest-emitted": bool(ios_deep_parser_manifest),
+                        "ios-keychain-deep-inventory-manifest-emitted": bool(ios_keychain_deep_manifest),
                         "ios-protected-values-redacted": not validation_checks.get("secrets_extracted"),
                     }.items()
                     if passed
@@ -3962,9 +5844,24 @@ def mobile_commercial_uplift_evidence(
         if isinstance(details.get("mobile_vendor_import_manifest"), Mapping)
         else {}
     )
+    vendor_schema_mapper_manifest = (
+        details.get("mobile_vendor_schema_mapper_manifest")
+        if isinstance(details.get("mobile_vendor_schema_mapper_manifest"), Mapping)
+        else {}
+    )
     ios_parser_manifest = (
         details.get("ios_backup_parser_manifest")
         if isinstance(details.get("ios_backup_parser_manifest"), Mapping)
+        else {}
+    )
+    ios_deep_parser_manifest = (
+        details.get("ios_backup_deep_parser_manifest")
+        if isinstance(details.get("ios_backup_deep_parser_manifest"), Mapping)
+        else {}
+    )
+    ios_keychain_deep_manifest = (
+        details.get("ios_keychain_deep_inventory_manifest")
+        if isinstance(details.get("ios_keychain_deep_inventory_manifest"), Mapping)
         else {}
     )
     functional_priority_profiles = mobile_functional_expansion_profiles(
@@ -4015,9 +5912,27 @@ def mobile_commercial_uplift_evidence(
             "mobile_vendor_source_row_locator_present": isinstance(
                 vendor_import_manifest.get("source_viewer_locator"), Mapping
             ),
+            "mobile_vendor_schema_mapper_manifest_hash": optional_text(
+                vendor_schema_mapper_manifest.get("manifest_sha256")
+            ),
+            "mobile_vendor_schema_mapper_source_locator_present": isinstance(
+                vendor_schema_mapper_manifest.get("source_viewer_locator"), Mapping
+            ),
             "ios_backup_parser_manifest_hash": optional_text(ios_parser_manifest.get("manifest_sha256")),
             "ios_backup_source_locator_present": isinstance(
                 ios_parser_manifest.get("source_viewer_locator"), Mapping
+            ),
+            "ios_backup_deep_parser_manifest_hash": optional_text(
+                ios_deep_parser_manifest.get("manifest_sha256")
+            ),
+            "ios_backup_deep_parser_source_locator_present": isinstance(
+                ios_deep_parser_manifest.get("source_viewer_locator"), Mapping
+            ),
+            "ios_keychain_deep_inventory_manifest_hash": optional_text(
+                ios_keychain_deep_manifest.get("manifest_sha256")
+            ),
+            "ios_keychain_deep_inventory_source_locator_present": isinstance(
+                ios_keychain_deep_manifest.get("source_viewer_locator"), Mapping
             ),
             "vendor_export_manifest_present": bool(source_profile.get("vendor_export_manifest_present")),
             "vendor_tool_version": source_profile.get("vendor_tool_version"),
@@ -4121,6 +6036,11 @@ def mobile_core_accuracy_gates(
         manifest_hash = optional_text(vendor_manifest.get("manifest_sha256"))
         if manifest_hash:
             evidence_refs.append(f"mobile_vendor_manifest_sha256:{manifest_hash}")
+    vendor_schema_mapper = details.get("mobile_vendor_schema_mapper_manifest")
+    if isinstance(vendor_schema_mapper, Mapping):
+        mapper_hash = optional_text(vendor_schema_mapper.get("manifest_sha256"))
+        if mapper_hash:
+            evidence_refs.append(f"mobile_vendor_schema_mapper_manifest_sha256:{mapper_hash}")
     record_id = source_record_id(details, source_index)
     if record_id:
         evidence_refs.append(f"source_record_id:{record_id}")
@@ -4129,6 +6049,16 @@ def mobile_core_accuracy_gates(
         manifest_hash = optional_text(ios_manifest.get("manifest_sha256"))
         if manifest_hash:
             evidence_refs.append(f"ios_backup_manifest_sha256:{manifest_hash}")
+    ios_deep_manifest = details.get("ios_backup_deep_parser_manifest")
+    if isinstance(ios_deep_manifest, Mapping):
+        manifest_hash = optional_text(ios_deep_manifest.get("manifest_sha256"))
+        if manifest_hash:
+            evidence_refs.append(f"ios_backup_deep_parser_manifest_sha256:{manifest_hash}")
+    ios_keychain_manifest = details.get("ios_keychain_deep_inventory_manifest")
+    if isinstance(ios_keychain_manifest, Mapping):
+        manifest_hash = optional_text(ios_keychain_manifest.get("manifest_sha256"))
+        if manifest_hash:
+            evidence_refs.append(f"ios_keychain_deep_inventory_manifest_sha256:{manifest_hash}")
 
     validation = details.get("validation_checks") if isinstance(details.get("validation_checks"), Mapping) else {}
     trusted_diff = details.get("chat_app_trusted_diff") if isinstance(details.get("chat_app_trusted_diff"), Mapping) else {}
@@ -4152,6 +6082,10 @@ def mobile_core_accuracy_gates(
             satisfied.append("mobile vendor import manifest")
             if isinstance(vendor_manifest.get("source_viewer_locator"), Mapping):
                 satisfied.append("mobile vendor source row locator")
+        if isinstance(vendor_schema_mapper, Mapping):
+            satisfied.append("vendor schema mapper manifest")
+            if isinstance(vendor_schema_mapper.get("source_viewer_locator"), Mapping):
+                satisfied.append("vendor schema mapper source locator")
         if trusted_diff.get("status") == "pass":
             satisfied.append("trusted vendor mobile export diff pass")
         gates.append(build_accuracy_gate(26, satisfied_checks=satisfied, evidence_refs=evidence_refs))
@@ -4168,6 +6102,10 @@ def mobile_core_accuracy_gates(
             satisfied.append("iOS backup parser manifest")
             if isinstance(ios_manifest.get("source_viewer_locator"), Mapping):
                 satisfied.append("iOS backup source locator")
+        if isinstance(ios_deep_manifest, Mapping):
+            satisfied.append("iOS backup deep parser manifest")
+            if isinstance(ios_deep_manifest.get("source_viewer_locator"), Mapping):
+                satisfied.append("iOS backup deep parser source locator")
         if artifact_type == "ios-backup-source" and validation.get("manifest_db_present"):
             satisfied.append("Manifest.db domain/fileID mapping")
         if artifact_type == "ios-backup-metadata" and validation.get("plist_parseable"):
@@ -4202,6 +6140,10 @@ def mobile_core_accuracy_gates(
             satisfied.append("iOS backup parser manifest")
             if isinstance(ios_manifest.get("source_viewer_locator"), Mapping):
                 satisfied.append("iOS keychain source locator")
+        if isinstance(ios_keychain_manifest, Mapping):
+            satisfied.append("iOS keychain deep inventory manifest")
+            if isinstance(ios_keychain_manifest.get("source_viewer_locator"), Mapping):
+                satisfied.append("iOS keychain deep inventory source locator")
         if details.get("controlled_reveal_audit"):
             satisfied.append("audit log for any controlled reveal")
         if trusted_diff.get("status") == "pass":
@@ -4261,6 +6203,20 @@ def mobile_correlation_core_accuracy_gates(
         item43.append("timeline correlation profile")
         evidence_refs.append(f"timeline_event_count:{timeline_profile.get('event_count', 0)}")
         evidence_refs.append(f"unresolved_media_link_count:{timeline_profile.get('unresolved_media_link_count', 0)}")
+    citation_manifest = (
+        details.get("mobile_correlation_citation_manifest")
+        if isinstance(details.get("mobile_correlation_citation_manifest"), Mapping)
+        else {}
+    )
+    if citation_manifest:
+        item43.append("correlation citation manifest")
+        evidence_refs.append(
+            f"mobile_correlation_citation_manifest_sha256:{citation_manifest.get('manifest_sha256', '')}"
+        )
+        if int(citation_manifest.get("timeline_event_citation_count") or 0) > 0:
+            item43.append("timeline event source citations")
+        if int(citation_manifest.get("message_media_link_citation_count") or 0) > 0:
+            item43.append("message-media link citations")
     if not validation.get("correlation_validated_against_known_answer", False):
         item43.append("known-answer limitation warning")
     if trusted_diff.get("status") == "pass":
@@ -4282,6 +6238,20 @@ def mobile_correlation_core_accuracy_gates(
         item44.append("actor review profile")
         evidence_refs.append(f"actor_review_queue_count:{actor_review_profile.get('review_queue_count', 0)}")
         evidence_refs.append(f"multi_identifier_actor_count:{actor_review_profile.get('multi_identifier_actor_count', 0)}")
+    actor_citation_manifest = (
+        details.get("mobile_actor_citation_manifest")
+        if isinstance(details.get("mobile_actor_citation_manifest"), Mapping)
+        else {}
+    )
+    if actor_citation_manifest:
+        item44.append("actor citation manifest")
+        evidence_refs.append(
+            f"mobile_actor_citation_manifest_sha256:{actor_citation_manifest.get('manifest_sha256', '')}"
+        )
+        if int(actor_citation_manifest.get("actor_entry_count") or 0) > 0:
+            item44.append("actor source viewer locators")
+        if actor_citation_manifest.get("raw_actor_values_serialized") is False:
+            item44.append("actor values hashed in manifest")
     if actor_review_profile.get("merge_split_review_required"):
         item44.append("merge/split review requirement")
     item44.append("dedupe/entity limitation warning")
@@ -4301,6 +6271,20 @@ def mobile_correlation_core_accuracy_gates(
         item45.append("schema compatibility profile")
         evidence_refs.append(f"schema_compatibility_entry_count:{schema_compatibility_profile.get('entry_count', 0)}")
         evidence_refs.append(f"schema_unvalidated_entry_count:{schema_compatibility_profile.get('unvalidated_entry_count', 0)}")
+    schema_version_manifest = (
+        details.get("mobile_schema_version_manifest")
+        if isinstance(details.get("mobile_schema_version_manifest"), Mapping)
+        else {}
+    )
+    if schema_version_manifest:
+        item45.append("schema version manifest")
+        evidence_refs.append(
+            f"mobile_schema_version_manifest_sha256:{schema_version_manifest.get('manifest_sha256', '')}"
+        )
+        if int(schema_version_manifest.get("schema_entry_count") or 0) > 0:
+            item45.append("schema source viewer locators")
+        if schema_version_manifest.get("release_gate_blocked"):
+            item45.append("schema release gates recorded")
     if details.get("services") is not None or details.get("schema_versions") is not None:
         item45.append("source app/version attribution")
     item45.append("schema compatibility warning")
@@ -4344,6 +6328,31 @@ def chat_app_core_accuracy_gates(
         manifest_hash = optional_text(manifest.get("manifest_sha256"))
         if manifest_hash:
             evidence_refs.append(f"messenger_manifest_sha256:{manifest_hash}")
+    kakaotalk_manifest = details.get("kakaotalk_parser_manifest")
+    if isinstance(kakaotalk_manifest, Mapping):
+        manifest_hash = optional_text(kakaotalk_manifest.get("manifest_sha256"))
+        if manifest_hash:
+            evidence_refs.append(f"kakaotalk_parser_manifest_sha256:{manifest_hash}")
+    whatsapp_manifest = details.get("whatsapp_parser_manifest")
+    if isinstance(whatsapp_manifest, Mapping):
+        manifest_hash = optional_text(whatsapp_manifest.get("manifest_sha256"))
+        if manifest_hash:
+            evidence_refs.append(f"whatsapp_parser_manifest_sha256:{manifest_hash}")
+    telegram_manifest = details.get("telegram_parser_manifest")
+    if isinstance(telegram_manifest, Mapping):
+        manifest_hash = optional_text(telegram_manifest.get("manifest_sha256"))
+        if manifest_hash:
+            evidence_refs.append(f"telegram_parser_manifest_sha256:{manifest_hash}")
+    signal_manifest = details.get("signal_parser_manifest")
+    if isinstance(signal_manifest, Mapping):
+        manifest_hash = optional_text(signal_manifest.get("manifest_sha256"))
+        if manifest_hash:
+            evidence_refs.append(f"signal_parser_manifest_sha256:{manifest_hash}")
+    extended_messenger_manifest = details.get("extended_messenger_parser_manifest")
+    if isinstance(extended_messenger_manifest, Mapping):
+        manifest_hash = optional_text(extended_messenger_manifest.get("manifest_sha256"))
+        if manifest_hash:
+            evidence_refs.append(f"extended_messenger_parser_manifest_sha256:{manifest_hash}")
     validation = details.get("validation_checks") if isinstance(details.get("validation_checks"), Mapping) else {}
     trusted_diff = details.get("chat_app_trusted_diff") if isinstance(details.get("chat_app_trusted_diff"), Mapping) else {}
     issue_ids = {
@@ -4388,6 +6397,12 @@ def chat_app_core_accuracy_gates(
                 satisfied.append("schema/app version and BigBang compatibility tracking")
             if details.get("kakaotalk_compatibility_assessment", {}).get("strategy_profile"):
                 satisfied.append("KakaoTalk legacy/post-BigBang strategy profile")
+            if isinstance(details.get("kakaotalk_parser_manifest"), Mapping):
+                satisfied.append("KakaoTalk parser manifest")
+                if details.get("kakaotalk_parser_manifest", {}).get("row_citation", {}).get("row_hash"):
+                    satisfied.append("KakaoTalk source row citation")
+                if details.get("kakaotalk_parser_manifest", {}).get("large_data_controls", {}).get("viewer_default"):
+                    satisfied.append("KakaoTalk review viewer controls")
             if "kakaotalk-post-2025-08-bigbang" in issue_ids or details.get("commercial_grade_blockers"):
                 satisfied.append("encrypted/deleted limitation warning")
             if source_hashes.get("sha256") and source_tool:
@@ -4405,6 +6420,12 @@ def chat_app_core_accuracy_gates(
                 satisfied.append("WhatsApp media metadata tracking")
             if details.get("chat_app_strategy_profile"):
                 satisfied.append("WhatsApp crypt/export strategy profile")
+            if isinstance(details.get("whatsapp_parser_manifest"), Mapping):
+                satisfied.append("WhatsApp parser manifest")
+                if details.get("whatsapp_parser_manifest", {}).get("row_citation", {}).get("row_hash"):
+                    satisfied.append("WhatsApp source row citation")
+                if details.get("whatsapp_parser_manifest", {}).get("large_data_controls", {}).get("viewer_default"):
+                    satisfied.append("WhatsApp review viewer controls")
             if details.get("commercial_grade_blockers") or not validation.get("decryption_attempted", True):
                 satisfied.append("crypt backup authority workflow warning")
             if details.get("commercial_grade_blockers"):
@@ -4424,6 +6445,12 @@ def chat_app_core_accuracy_gates(
                 satisfied.append("Telegram media/cache metadata tracking")
             if details.get("chat_app_strategy_profile"):
                 satisfied.append("Telegram export/cache strategy profile")
+            if isinstance(details.get("telegram_parser_manifest"), Mapping):
+                satisfied.append("Telegram parser manifest")
+                if details.get("telegram_parser_manifest", {}).get("row_citation", {}).get("row_hash"):
+                    satisfied.append("Telegram source row citation")
+                if details.get("telegram_parser_manifest", {}).get("large_data_controls", {}).get("viewer_default"):
+                    satisfied.append("Telegram review viewer controls")
             if source_hashes.get("sha256") and (details.get("message_id") or details.get("database_name") or table_summaries):
                 satisfied.append("account/cache provenance")
             if details.get("commercial_grade_blockers"):
@@ -4442,6 +6469,12 @@ def chat_app_core_accuracy_gates(
                 satisfied.append("Signal attachment metadata tracking")
             if details.get("chat_app_strategy_profile"):
                 satisfied.append("Signal SQLCipher strategy profile")
+            if isinstance(details.get("signal_parser_manifest"), Mapping):
+                satisfied.append("Signal parser manifest")
+                if details.get("signal_parser_manifest", {}).get("row_citation", {}).get("row_hash"):
+                    satisfied.append("Signal source row citation")
+                if details.get("signal_parser_manifest", {}).get("large_data_controls", {}).get("viewer_default"):
+                    satisfied.append("Signal review viewer controls")
             if details.get("commercial_grade_blockers") or not validation.get("decryption_attempted", True):
                 satisfied.append("SQLCipher/key authority gate")
             if details.get("commercial_grade_blockers"):
@@ -4461,6 +6494,12 @@ def chat_app_core_accuracy_gates(
                 satisfied.append("extended messenger attachment metadata tracking")
             if details.get("chat_app_strategy_profile"):
                 satisfied.append("extended messenger schema/ephemeral strategy profile")
+            if isinstance(details.get("extended_messenger_parser_manifest"), Mapping):
+                satisfied.append("extended messenger parser manifest")
+                if details.get("extended_messenger_parser_manifest", {}).get("row_citation", {}).get("row_hash"):
+                    satisfied.append("extended messenger source row citation")
+                if details.get("extended_messenger_parser_manifest", {}).get("large_data_controls", {}).get("viewer_default"):
+                    satisfied.append("extended messenger review viewer controls")
             if details.get("schema_version") is not None or details.get("chat_app_issue_matrix"):
                 satisfied.append("schema/app version registry")
             if details.get("commercial_grade_blockers"):
@@ -5103,9 +7142,49 @@ def chat_app_commercial_uplift_evidence(
         if isinstance(details.get("messenger_export_framework_manifest"), Mapping)
         else {}
     )
+    kakaotalk_manifest = (
+        details.get("kakaotalk_parser_manifest")
+        if isinstance(details.get("kakaotalk_parser_manifest"), Mapping)
+        else {}
+    )
+    whatsapp_manifest = (
+        details.get("whatsapp_parser_manifest")
+        if isinstance(details.get("whatsapp_parser_manifest"), Mapping)
+        else {}
+    )
+    telegram_manifest = (
+        details.get("telegram_parser_manifest")
+        if isinstance(details.get("telegram_parser_manifest"), Mapping)
+        else {}
+    )
+    signal_manifest = (
+        details.get("signal_parser_manifest")
+        if isinstance(details.get("signal_parser_manifest"), Mapping)
+        else {}
+    )
+    extended_messenger_manifest = (
+        details.get("extended_messenger_parser_manifest")
+        if isinstance(details.get("extended_messenger_parser_manifest"), Mapping)
+        else {}
+    )
     manifest_hash = optional_text(messenger_manifest.get("manifest_sha256"))
+    kakaotalk_manifest_hash = optional_text(kakaotalk_manifest.get("manifest_sha256"))
+    whatsapp_manifest_hash = optional_text(whatsapp_manifest.get("manifest_sha256"))
+    telegram_manifest_hash = optional_text(telegram_manifest.get("manifest_sha256"))
+    signal_manifest_hash = optional_text(signal_manifest.get("manifest_sha256"))
+    extended_messenger_manifest_hash = optional_text(extended_messenger_manifest.get("manifest_sha256"))
     if manifest_hash:
         source_refs.append(f"messenger_manifest_sha256:{manifest_hash}")
+    if kakaotalk_manifest_hash:
+        source_refs.append(f"kakaotalk_parser_manifest_sha256:{kakaotalk_manifest_hash}")
+    if whatsapp_manifest_hash:
+        source_refs.append(f"whatsapp_parser_manifest_sha256:{whatsapp_manifest_hash}")
+    if telegram_manifest_hash:
+        source_refs.append(f"telegram_parser_manifest_sha256:{telegram_manifest_hash}")
+    if signal_manifest_hash:
+        source_refs.append(f"signal_parser_manifest_sha256:{signal_manifest_hash}")
+    if extended_messenger_manifest_hash:
+        source_refs.append(f"extended_messenger_parser_manifest_sha256:{extended_messenger_manifest_hash}")
     return {
         "batch_id": "commercial-uplift-031-035",
         "item_numbers": item_numbers,
@@ -5148,6 +7227,51 @@ def chat_app_commercial_uplift_evidence(
                 and messenger_manifest.get("row_citation", {}).get("row_hash")
             ),
             "messenger_table_citation_count": int(messenger_manifest.get("table_citation_count") or 0),
+            "kakaotalk_parser_manifest_hash": kakaotalk_manifest_hash,
+            "kakaotalk_source_row_citation_present": bool(
+                isinstance(kakaotalk_manifest.get("row_citation"), Mapping)
+                and kakaotalk_manifest.get("row_citation", {}).get("row_hash")
+            ),
+            "kakaotalk_review_viewer_controls_present": bool(
+                isinstance(kakaotalk_manifest.get("large_data_controls"), Mapping)
+                and kakaotalk_manifest.get("large_data_controls", {}).get("viewer_default")
+            ),
+            "whatsapp_parser_manifest_hash": whatsapp_manifest_hash,
+            "whatsapp_source_row_citation_present": bool(
+                isinstance(whatsapp_manifest.get("row_citation"), Mapping)
+                and whatsapp_manifest.get("row_citation", {}).get("row_hash")
+            ),
+            "whatsapp_review_viewer_controls_present": bool(
+                isinstance(whatsapp_manifest.get("large_data_controls"), Mapping)
+                and whatsapp_manifest.get("large_data_controls", {}).get("viewer_default")
+            ),
+            "telegram_parser_manifest_hash": telegram_manifest_hash,
+            "telegram_source_row_citation_present": bool(
+                isinstance(telegram_manifest.get("row_citation"), Mapping)
+                and telegram_manifest.get("row_citation", {}).get("row_hash")
+            ),
+            "telegram_review_viewer_controls_present": bool(
+                isinstance(telegram_manifest.get("large_data_controls"), Mapping)
+                and telegram_manifest.get("large_data_controls", {}).get("viewer_default")
+            ),
+            "signal_parser_manifest_hash": signal_manifest_hash,
+            "signal_source_row_citation_present": bool(
+                isinstance(signal_manifest.get("row_citation"), Mapping)
+                and signal_manifest.get("row_citation", {}).get("row_hash")
+            ),
+            "signal_review_viewer_controls_present": bool(
+                isinstance(signal_manifest.get("large_data_controls"), Mapping)
+                and signal_manifest.get("large_data_controls", {}).get("viewer_default")
+            ),
+            "extended_messenger_parser_manifest_hash": extended_messenger_manifest_hash,
+            "extended_messenger_source_row_citation_present": bool(
+                isinstance(extended_messenger_manifest.get("row_citation"), Mapping)
+                and extended_messenger_manifest.get("row_citation", {}).get("row_hash")
+            ),
+            "extended_messenger_review_viewer_controls_present": bool(
+                isinstance(extended_messenger_manifest.get("large_data_controls"), Mapping)
+                and extended_messenger_manifest.get("large_data_controls", {}).get("viewer_default")
+            ),
             "known_service_profile": service in CHAT_APP_GAP_IDS,
             "kakaotalk_message_review_profile_present": bool(details.get("kakaotalk_message_review_profile")),
             "kakaotalk_database_review_profile_present": bool(details.get("kakaotalk_database_review_profile")),
@@ -5187,6 +7311,31 @@ def messenger_export_functional_profile(
         if isinstance(details.get("messenger_export_framework_manifest"), Mapping)
         else {}
     )
+    kakaotalk_manifest = (
+        details.get("kakaotalk_parser_manifest")
+        if isinstance(details.get("kakaotalk_parser_manifest"), Mapping)
+        else {}
+    )
+    whatsapp_manifest = (
+        details.get("whatsapp_parser_manifest")
+        if isinstance(details.get("whatsapp_parser_manifest"), Mapping)
+        else {}
+    )
+    telegram_manifest = (
+        details.get("telegram_parser_manifest")
+        if isinstance(details.get("telegram_parser_manifest"), Mapping)
+        else {}
+    )
+    signal_manifest = (
+        details.get("signal_parser_manifest")
+        if isinstance(details.get("signal_parser_manifest"), Mapping)
+        else {}
+    )
+    extended_messenger_manifest = (
+        details.get("extended_messenger_parser_manifest")
+        if isinstance(details.get("extended_messenger_parser_manifest"), Mapping)
+        else {}
+    )
     failed_checks: list[str] = []
     if not service or service not in CHAT_APP_GAP_IDS:
         failed_checks.append("messenger-service-profile-not-known")
@@ -5198,11 +7347,53 @@ def messenger_export_functional_profile(
         failed_checks.append("messenger-trusted-export-or-native-db-diff-required")
     if not messenger_manifest:
         failed_checks.append("messenger-export-framework-manifest-not-emitted")
+    if "KakaoTalk" == service and not kakaotalk_manifest:
+        failed_checks.append("kakaotalk-parser-manifest-not-emitted")
+    if service == "WhatsApp" and not whatsapp_manifest:
+        failed_checks.append("whatsapp-parser-manifest-not-emitted")
+    if service == "Telegram" and not telegram_manifest:
+        failed_checks.append("telegram-parser-manifest-not-emitted")
+    if service == "Signal" and not signal_manifest:
+        failed_checks.append("signal-parser-manifest-not-emitted")
+    if chat_app_gap_ids(service) == ["#35"] and not extended_messenger_manifest:
+        failed_checks.append("extended-messenger-parser-manifest-not-emitted")
     row_citation = messenger_manifest.get("row_citation") if isinstance(messenger_manifest, Mapping) else {}
+    kakaotalk_row_citation = kakaotalk_manifest.get("row_citation") if isinstance(kakaotalk_manifest, Mapping) else {}
+    whatsapp_row_citation = whatsapp_manifest.get("row_citation") if isinstance(whatsapp_manifest, Mapping) else {}
+    telegram_row_citation = telegram_manifest.get("row_citation") if isinstance(telegram_manifest, Mapping) else {}
+    signal_row_citation = signal_manifest.get("row_citation") if isinstance(signal_manifest, Mapping) else {}
+    extended_messenger_row_citation = (
+        extended_messenger_manifest.get("row_citation") if isinstance(extended_messenger_manifest, Mapping) else {}
+    )
     if not isinstance(row_citation, Mapping) or not row_citation.get("row_hash"):
         failed_checks.append("messenger-source-row-citation-not-emitted")
+    if service == "KakaoTalk" and (
+        not isinstance(kakaotalk_row_citation, Mapping) or not kakaotalk_row_citation.get("row_hash")
+    ):
+        failed_checks.append("kakaotalk-source-row-citation-not-emitted")
+    if service == "WhatsApp" and (
+        not isinstance(whatsapp_row_citation, Mapping) or not whatsapp_row_citation.get("row_hash")
+    ):
+        failed_checks.append("whatsapp-source-row-citation-not-emitted")
+    if service == "Telegram" and (
+        not isinstance(telegram_row_citation, Mapping) or not telegram_row_citation.get("row_hash")
+    ):
+        failed_checks.append("telegram-source-row-citation-not-emitted")
+    if service == "Signal" and (
+        not isinstance(signal_row_citation, Mapping) or not signal_row_citation.get("row_hash")
+    ):
+        failed_checks.append("signal-source-row-citation-not-emitted")
+    if chat_app_gap_ids(service) == ["#35"] and (
+        not isinstance(extended_messenger_row_citation, Mapping) or not extended_messenger_row_citation.get("row_hash")
+    ):
+        failed_checks.append("extended-messenger-source-row-citation-not-emitted")
     supported_services = [str(profile["service"]) for profile in CHAT_APP_PROFILES]
     manifest_hash = optional_text(messenger_manifest.get("manifest_sha256"))
+    kakaotalk_manifest_hash = optional_text(kakaotalk_manifest.get("manifest_sha256"))
+    whatsapp_manifest_hash = optional_text(whatsapp_manifest.get("manifest_sha256"))
+    telegram_manifest_hash = optional_text(telegram_manifest.get("manifest_sha256"))
+    signal_manifest_hash = optional_text(signal_manifest.get("manifest_sha256"))
+    extended_messenger_manifest_hash = optional_text(extended_messenger_manifest.get("manifest_sha256"))
     table_citation_count = int(messenger_manifest.get("table_citation_count") or 0)
     passed_validation_check_ids = [
         "authorized-export-row-normalized",
@@ -5217,6 +7408,26 @@ def messenger_export_functional_profile(
         passed_validation_check_ids.append("messenger-source-locator-emitted")
     if table_citation_count:
         passed_validation_check_ids.append("messenger-table-citation-inventory-emitted")
+    if kakaotalk_manifest:
+        passed_validation_check_ids.append("kakaotalk-parser-manifest-emitted")
+    if isinstance(kakaotalk_row_citation, Mapping) and kakaotalk_row_citation.get("source_viewer_locator"):
+        passed_validation_check_ids.append("kakaotalk-source-locator-emitted")
+    if whatsapp_manifest:
+        passed_validation_check_ids.append("whatsapp-parser-manifest-emitted")
+    if isinstance(whatsapp_row_citation, Mapping) and whatsapp_row_citation.get("source_viewer_locator"):
+        passed_validation_check_ids.append("whatsapp-source-locator-emitted")
+    if telegram_manifest:
+        passed_validation_check_ids.append("telegram-parser-manifest-emitted")
+    if isinstance(telegram_row_citation, Mapping) and telegram_row_citation.get("source_viewer_locator"):
+        passed_validation_check_ids.append("telegram-source-locator-emitted")
+    if signal_manifest:
+        passed_validation_check_ids.append("signal-parser-manifest-emitted")
+    if isinstance(signal_row_citation, Mapping) and signal_row_citation.get("source_viewer_locator"):
+        passed_validation_check_ids.append("signal-source-locator-emitted")
+    if extended_messenger_manifest:
+        passed_validation_check_ids.append("extended-messenger-parser-manifest-emitted")
+    if isinstance(extended_messenger_row_citation, Mapping) and extended_messenger_row_citation.get("source_viewer_locator"):
+        passed_validation_check_ids.append("extended-messenger-source-locator-emitted")
     return {
         "item_number": 50,
         "batch_id": FUNCTIONAL_SOURCE_BATCH_ID,
@@ -5240,6 +7451,27 @@ def messenger_export_functional_profile(
             "messenger_export_framework_manifest_hash": manifest_hash,
             "messenger_row_citation_present": bool(isinstance(row_citation, Mapping) and row_citation.get("row_hash")),
             "messenger_table_citation_count": table_citation_count,
+            "kakaotalk_parser_manifest_hash": kakaotalk_manifest_hash,
+            "kakaotalk_row_citation_present": bool(
+                isinstance(kakaotalk_row_citation, Mapping) and kakaotalk_row_citation.get("row_hash")
+            ),
+            "whatsapp_parser_manifest_hash": whatsapp_manifest_hash,
+            "whatsapp_row_citation_present": bool(
+                isinstance(whatsapp_row_citation, Mapping) and whatsapp_row_citation.get("row_hash")
+            ),
+            "telegram_parser_manifest_hash": telegram_manifest_hash,
+            "telegram_row_citation_present": bool(
+                isinstance(telegram_row_citation, Mapping) and telegram_row_citation.get("row_hash")
+            ),
+            "signal_parser_manifest_hash": signal_manifest_hash,
+            "signal_row_citation_present": bool(
+                isinstance(signal_row_citation, Mapping) and signal_row_citation.get("row_hash")
+            ),
+            "extended_messenger_parser_manifest_hash": extended_messenger_manifest_hash,
+            "extended_messenger_row_citation_present": bool(
+                isinstance(extended_messenger_row_citation, Mapping)
+                and extended_messenger_row_citation.get("row_hash")
+            ),
             "mapped_legacy_items": item_numbers,
             "trusted_diff_status": str(trusted_diff.get("status") or "missing"),
         },

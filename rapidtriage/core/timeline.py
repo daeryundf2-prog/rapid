@@ -386,6 +386,8 @@ def build_artifact_event_type(artifact_type: str, path_parts: Sequence[str], tim
             continue
         section = singularize(part)
         break
+    if "bounded_state_replay_preview" in path_parts and section == "transitions":
+        section = "usn-state-transition"
     parts = ["artifact", artifact_type]
     if section and section not in {"artifact", artifact_type}:
         parts.append(section)
@@ -394,7 +396,12 @@ def build_artifact_event_type(artifact_type: str, path_parts: Sequence[str], tim
 
 
 def singularize(value: str) -> str:
-    overrides = {"ai_usage": "ai-usage", "downloads": "download", "internet_usage": "internet-usage"}
+    overrides = {
+        "ai_usage": "ai-usage",
+        "downloads": "download",
+        "internet_usage": "internet-usage",
+        "timeline_review_candidates": "timeline-review-candidate",
+    }
     return overrides.get(value, value)
 
 
@@ -432,6 +439,10 @@ def build_artifact_summary(artifact_type: str, artifact_path: str, context: Mapp
         return f"Artifact event: {artifact_type} {context['target_path']}"
     if "entry_name" in context:
         return f"Artifact event: {artifact_type} {context['entry_name']}"
+    if "timeline_type" in context and str(context.get("timeline_type") or "").startswith("usn-"):
+        label = str(context.get("event_label") or context.get("timeline_type") or "USN timeline candidate")
+        path = str(context.get("path_candidate") or context.get("file_name") or "")
+        return f"{label} {path}".strip()
     label = Path(artifact_path).name or artifact_path or artifact_type
     return f"Artifact event: {artifact_type} {label}"
 
@@ -518,11 +529,33 @@ def build_timeline_report(payload: Mapping[str, object]) -> str:
         for event in events:
             if not isinstance(event, dict):
                 continue
+            caveat = timeline_report_caveat(event)
+            suffix = f" — {caveat}" if caveat else ""
             lines.append(
                 f"- `{event.get('timestamp')}` `{event.get('source')}` `{event.get('event_type')}` "
-                f"`{event.get('path')}` — {event.get('summary')}"
+                f"`{event.get('path')}` — {event.get('summary')}{suffix}"
             )
     else:
         lines.append("- none")
 
     return "\n".join(lines) + "\n"
+
+
+def timeline_report_caveat(event: Mapping[str, object]) -> str:
+    details = event.get("details")
+    if not isinstance(details, Mapping):
+        return ""
+    bits: List[str] = []
+    if details.get("validation_required") is True:
+        bits.append("validation required")
+    reportability = details.get("reportability")
+    if isinstance(reportability, str) and reportability:
+        bits.append(f"reportability={reportability}")
+    blockers = details.get("blockers")
+    if isinstance(blockers, list):
+        visible = [str(item) for item in blockers[:3] if item]
+        if visible:
+            bits.append(f"blockers={', '.join(visible)}")
+    if not bits:
+        return ""
+    return "Caveat: " + "; ".join(bits)

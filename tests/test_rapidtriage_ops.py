@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import contextlib
+import hashlib
 import importlib.util
 import io
 import json
@@ -2665,6 +2666,9 @@ class RapidTriageOpsTests(unittest.TestCase):
             self.assertIn("scripts/crash-redaction-review.py", names)
             self.assertIn("scripts/parser-sandbox-smoke.py", names)
             self.assertIn("scripts/security-hardening-review.py", names)
+            self.assertIn("scripts/external-release-evidence-template.py", names)
+            self.assertIn("scripts/hostile-evidence-containment-template.py", names)
+            self.assertIn("scripts/independent-operations-evidence-template.py", names)
             self.assertIn("scripts/windows/start-rapidtriage.ps1", names)
             self.assertIn("scripts/windows/smoke-test-rapidtriage.ps1", names)
             self.assertIn("scripts/windows/smoke-test-rapidtriage.bat", names)
@@ -3355,6 +3359,84 @@ class RapidTriageOpsTests(unittest.TestCase):
             self.assertTrue(payload["checks"]["os_sandbox_limitation_preserved"])
             self.assertFalse(payload["commercial_claim_allowed"])
 
+    def test_external_release_evidence_template_script_writes_required_items(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            output_path = Path(tmp_dir) / "external-commercial-evidence.template.json"
+            result = subprocess.run(
+                [
+                    "python",
+                    "scripts/external-release-evidence-template.py",
+                    "--output",
+                    str(output_path),
+                    "--json",
+                ],
+                cwd=Path(__file__).resolve().parent.parent,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            payload = json.loads(output_path.read_text(encoding="utf-8"))
+            self.assertEqual(payload["profile_version"], "external-commercial-evidence-v1")
+            self.assertEqual(payload["scope"], "release-artifact-evidence-1-8")
+            self.assertEqual([item["number"] for item in payload["items"]], list(range(1, 9)))
+            self.assertEqual(len(payload["evidence_package_hash"]), 64)
+            self.assertTrue(all(item["status"] == "external-evidence-required" for item in payload["items"]))
+            self.assertTrue(payload["items"][7]["checks"]["verifier_schema_updated"])
+
+    def test_hostile_evidence_containment_template_script_writes_required_items(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            output_path = Path(tmp_dir) / "hostile-evidence-containment.template.json"
+            result = subprocess.run(
+                [
+                    "python",
+                    "scripts/hostile-evidence-containment-template.py",
+                    "--output",
+                    str(output_path),
+                    "--json",
+                ],
+                cwd=Path(__file__).resolve().parent.parent,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            payload = json.loads(output_path.read_text(encoding="utf-8"))
+            self.assertEqual(payload["profile_version"], "hostile-evidence-containment-v1")
+            self.assertEqual(payload["scope"], "hostile-evidence-containment-9-13")
+            self.assertEqual([item["number"] for item in payload["items"]], list(range(9, 14)))
+            self.assertEqual(len(payload["evidence_package_hash"]), 64)
+            self.assertTrue(all(item["status"] == "external-evidence-required" for item in payload["items"]))
+            self.assertFalse(payload["items"][1]["checks"]["os_level_sandbox_enabled"])
+
+    def test_independent_operations_evidence_template_script_writes_required_items(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            output_path = Path(tmp_dir) / "independent-operations-evidence.template.json"
+            result = subprocess.run(
+                [
+                    "python",
+                    "scripts/independent-operations-evidence-template.py",
+                    "--output",
+                    str(output_path),
+                    "--json",
+                ],
+                cwd=Path(__file__).resolve().parent.parent,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            payload = json.loads(output_path.read_text(encoding="utf-8"))
+            self.assertEqual(payload["profile_version"], "independent-operations-evidence-v1")
+            self.assertEqual(payload["scope"], "independent-validation-operations-14-18")
+            self.assertEqual([item["number"] for item in payload["items"]], list(range(14, 19)))
+            self.assertEqual(len(payload["evidence_package_hash"]), 64)
+            self.assertTrue(all(item["status"] == "external-evidence-required" for item in payload["items"]))
+            self.assertFalse(payload["items"][1]["checks"]["signed_report_attached"])
+
     def test_case_backup_and_restore_commands_copy_database_with_hashes(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             root = Path(tmp_dir)
@@ -3693,6 +3775,12 @@ class RapidTriageOpsTests(unittest.TestCase):
             parser_sandbox_path = root / "parser-sandbox-smoke.json"
             dependency_monitoring_path = root / "dependency-monitoring.json"
             security_hardening_path = root / "security-hardening-review.json"
+            external_evidence_path = root / "external-commercial-evidence.json"
+            external_files_dir = root / "external-files"
+            hostile_evidence_path = root / "hostile-evidence-containment.json"
+            hostile_files_dir = root / "hostile-files"
+            independent_evidence_path = root / "independent-operations-evidence.json"
+            independent_files_dir = root / "independent-files"
             evidence_dir = root / "release-evidence"
 
             release = subprocess.run(
@@ -3807,6 +3895,195 @@ class RapidTriageOpsTests(unittest.TestCase):
                 check=False,
             )
             self.assertEqual(security_hardening.returncode, 0, security_hardening.stderr)
+            external_files_dir.mkdir()
+            external_items = []
+            external_checks = [
+                {"ci_artifact_attached": True},
+                {"sbom_hash_matches_release": True},
+                {"authenticode_valid": True},
+                {"windows_11_smoke_passed": True},
+                {"codesign_verified": True, "notarization_accepted": True, "gatekeeper_accepted": True},
+                {"gatekeeper_smoke_passed": True},
+                {"install_smoke_passed": True, "uninstall_smoke_passed": True},
+                {"verifier_schema_updated": True, "missing_evidence_fails": True, "attached_hashes_checked": True},
+            ]
+            for number, checks in enumerate(external_checks, start=1):
+                evidence_file = external_files_dir / f"evidence-{number}.txt"
+                evidence_file.write_text(f"external evidence {number}\n", encoding="utf-8")
+                item = {
+                    "number": number,
+                    "status": "pass",
+                    "checks": checks,
+                    "required_files": [
+                        {
+                            "path": str(evidence_file),
+                            "sha256": hashlib.sha256(evidence_file.read_bytes()).hexdigest(),
+                        }
+                    ],
+                }
+                if number == 1:
+                    item["ci_run_url"] = "https://github.example/actions/runs/1"
+                if number == 2:
+                    item["sbom_path"] = str(evidence_file)
+                if number == 3:
+                    item["certificate_subject"] = "CN=RapidTriage Test Signing"
+                if number == 4:
+                    item["platform"] = "Windows 11"
+                if number == 6:
+                    item["platform"] = "macOS"
+                external_items.append(item)
+            external_payload = {
+                "profile_version": "external-commercial-evidence-v1",
+                "scope": "release-artifact-evidence-1-8",
+                "items": external_items,
+            }
+            external_payload["evidence_package_hash"] = hashlib.sha256(
+                json.dumps(external_payload, ensure_ascii=False, sort_keys=True).encode("utf-8")
+            ).hexdigest()
+            external_evidence_path.write_text(
+                json.dumps(external_payload, ensure_ascii=False, indent=2) + "\n",
+                encoding="utf-8",
+            )
+            hostile_files_dir.mkdir()
+            hostile_items = []
+            hostile_checks = [
+                {
+                    "threat_model_attached": True,
+                    "allowed_paths_defined": True,
+                    "network_policy_defined": True,
+                    "resource_limits_defined": True,
+                    "os_matrix_defined": True,
+                },
+                {
+                    "os_level_sandbox_enabled": True,
+                    "write_escape_blocked": True,
+                    "network_blocked": True,
+                    "kill_timeout_supported": True,
+                },
+                {
+                    "path_escape_test_passed": True,
+                    "network_probe_blocked": True,
+                    "timeout_test_passed": True,
+                    "memory_pressure_test_passed": True,
+                    "active_content_test_passed": True,
+                },
+                {
+                    "corpus_manifest_attached": True,
+                    "license_notes_attached": True,
+                    "expected_behavior_recorded": True,
+                    "quarantine_expectations_recorded": True,
+                    "artifact_families_covered": True,
+                },
+                {
+                    "fuzz_command_recorded": True,
+                    "seed_corpus_hash_recorded": True,
+                    "crash_quarantine_recorded": True,
+                    "timeout_count_recorded": True,
+                    "no_silent_corruption": True,
+                },
+            ]
+            for number, checks in enumerate(hostile_checks, start=9):
+                evidence_file = hostile_files_dir / f"hostile-evidence-{number}.txt"
+                evidence_file.write_text(f"hostile evidence {number}\n", encoding="utf-8")
+                hostile_items.append(
+                    {
+                        "number": number,
+                        "status": "pass",
+                        "checks": checks,
+                        "required_files": [
+                            {
+                                "path": str(evidence_file),
+                                "sha256": hashlib.sha256(evidence_file.read_bytes()).hexdigest(),
+                            }
+                        ],
+                    }
+                )
+            hostile_payload = {
+                "profile_version": "hostile-evidence-containment-v1",
+                "scope": "hostile-evidence-containment-9-13",
+                "items": hostile_items,
+            }
+            hostile_payload["evidence_package_hash"] = hashlib.sha256(
+                json.dumps(hostile_payload, ensure_ascii=False, sort_keys=True).encode("utf-8")
+            ).hexdigest()
+            hostile_evidence_path.write_text(
+                json.dumps(hostile_payload, ensure_ascii=False, indent=2) + "\n",
+                encoding="utf-8",
+            )
+            independent_files_dir.mkdir()
+            independent_items = []
+            independent_checks = [
+                {
+                    "architecture_overview_attached": True,
+                    "threat_model_attached": True,
+                    "auth_network_boundary_attached": True,
+                    "export_rendering_policy_attached": True,
+                    "sandbox_design_attached": True,
+                    "dependency_report_attached": True,
+                },
+                {
+                    "signed_report_attached": True,
+                    "scope_recorded": True,
+                    "findings_recorded": True,
+                    "exceptions_recorded": True,
+                    "residual_risk_recorded": True,
+                },
+                {
+                    "support_contact_defined": True,
+                    "severity_matrix_defined": True,
+                    "staffed_schedule_defined": True,
+                    "escalation_owner_defined": True,
+                    "secure_intake_defined": True,
+                },
+                {
+                    "simulated_issue_recorded": True,
+                    "patch_branch_recorded": True,
+                    "validation_run_attached": True,
+                    "signed_build_attached": True,
+                    "rollback_note_attached": True,
+                },
+                {
+                    "release_package_attached": True,
+                    "platform_smoke_outputs_attached": True,
+                    "signing_notarization_logs_attached": True,
+                    "dependency_sbom_attached": True,
+                    "sandbox_corpus_results_attached": True,
+                    "appsec_signoff_attached": True,
+                    "support_evidence_attached": True,
+                    "remaining_blockers_owner_assigned": True,
+                },
+            ]
+            for number, checks in enumerate(independent_checks, start=14):
+                evidence_file = independent_files_dir / f"independent-evidence-{number}.txt"
+                evidence_file.write_text(f"independent evidence {number}\n", encoding="utf-8")
+                item = {
+                    "number": number,
+                    "status": "pass",
+                    "checks": checks,
+                    "required_files": [
+                        {
+                            "path": str(evidence_file),
+                            "sha256": hashlib.sha256(evidence_file.read_bytes()).hexdigest(),
+                        }
+                    ],
+                }
+                if number == 15:
+                    item["reviewer_identity"] = "Independent AppSec Reviewer"
+                if number == 16:
+                    item["support_contact"] = "support@example.invalid"
+                independent_items.append(item)
+            independent_payload = {
+                "profile_version": "independent-operations-evidence-v1",
+                "scope": "independent-validation-operations-14-18",
+                "items": independent_items,
+            }
+            independent_payload["evidence_package_hash"] = hashlib.sha256(
+                json.dumps(independent_payload, ensure_ascii=False, sort_keys=True).encode("utf-8")
+            ).hexdigest()
+            independent_evidence_path.write_text(
+                json.dumps(independent_payload, ensure_ascii=False, indent=2) + "\n",
+                encoding="utf-8",
+            )
 
             result = subprocess.run(
                 [
@@ -3834,6 +4111,12 @@ class RapidTriageOpsTests(unittest.TestCase):
                     str(dependency_monitoring_path),
                     "--security-hardening-review-json",
                     str(security_hardening_path),
+                    "--external-release-evidence-json",
+                    str(external_evidence_path),
+                    "--hostile-evidence-containment-json",
+                    str(hostile_evidence_path),
+                    "--independent-operations-evidence-json",
+                    str(independent_evidence_path),
                     "--output-dir",
                     str(evidence_dir),
                 ],
@@ -3860,6 +4143,15 @@ class RapidTriageOpsTests(unittest.TestCase):
             self.assertIn("dependency-monitoring-limitation-preserved", check_ids)
             self.assertIn("security-hardening-review-boundaries", check_ids)
             self.assertIn("security-hardening-review-hashes", check_ids)
+            self.assertIn("external-release-evidence-item-01", check_ids)
+            self.assertIn("external-release-evidence-item-08", check_ids)
+            self.assertIn("external-release-evidence-package-hash", check_ids)
+            self.assertIn("hostile-evidence-containment-item-09", check_ids)
+            self.assertIn("hostile-evidence-containment-item-13", check_ids)
+            self.assertIn("hostile-evidence-containment-package-hash", check_ids)
+            self.assertIn("independent-operations-evidence-item-14", check_ids)
+            self.assertIn("independent-operations-evidence-item-18", check_ids)
+            self.assertIn("independent-operations-evidence-package-hash", check_ids)
             self.assertEqual(report["inputs"]["crash_smoke_json"], str((crash_smoke_dir / "crash-export-smoke.json").resolve()))
             self.assertEqual(
                 report["inputs"]["crash_redaction_review_json"],
@@ -3868,6 +4160,12 @@ class RapidTriageOpsTests(unittest.TestCase):
             self.assertEqual(report["inputs"]["parser_sandbox_smoke_json"], str(parser_sandbox_path.resolve()))
             self.assertEqual(report["inputs"]["dependency_monitoring_json"], str(dependency_monitoring_path.resolve()))
             self.assertEqual(report["inputs"]["security_hardening_review_json"], str(security_hardening_path.resolve()))
+            self.assertEqual(report["inputs"]["external_release_evidence_json"], str(external_evidence_path.resolve()))
+            self.assertEqual(report["inputs"]["hostile_evidence_containment_json"], str(hostile_evidence_path.resolve()))
+            self.assertEqual(
+                report["inputs"]["independent_operations_evidence_json"],
+                str(independent_evidence_path.resolve()),
+            )
             self.assertTrue((evidence_dir / "release-evidence-report.md").is_file())
 
     def test_release_evidence_script_reports_missing_required_smoke_platform(self) -> None:
@@ -3946,6 +4244,264 @@ class RapidTriageOpsTests(unittest.TestCase):
             failed = {item["id"]: item for item in report["checks"] if item["status"] == "fail"}
             self.assertIn("smoke-platform-macos-linux", failed)
             self.assertTrue(any("macos-linux" in action for action in report["next_actions"]))
+
+    def test_release_evidence_script_fails_incomplete_external_evidence_package(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            repo = Path(__file__).resolve().parent.parent
+            release_dir = root / "release"
+            validation_dir = root / "validation"
+            benchmark_dir = root / "benchmark"
+            smoke_dir = root / "smoke-windows"
+            evidence_dir = root / "release-evidence"
+            external_evidence_path = root / "external-commercial-evidence.json"
+
+            release = subprocess.run(
+                ["python", "scripts/build-release.py", "--output-dir", str(release_dir), "--skip-build"],
+                cwd=repo,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+            self.assertEqual(release.returncode, 0, release.stderr)
+            with contextlib.redirect_stdout(io.StringIO()):
+                validation_exit = main(["validation", "--output-dir", str(validation_dir), "--json"])
+                benchmark_exit = main(
+                    [
+                        "benchmark",
+                        "--output-dir",
+                        str(benchmark_dir),
+                        "--file-count",
+                        "3",
+                        "--search-iterations",
+                        "1",
+                        "--overwrite",
+                        "--json",
+                    ]
+                )
+            self.assertEqual(validation_exit, 0)
+            self.assertEqual(benchmark_exit, 0)
+            smoke_dir.mkdir()
+            (smoke_dir / "smoke-summary.json").write_text(
+                json.dumps({"passed": True, "platform": "windows", "checks": []}),
+                encoding="utf-8",
+            )
+            (smoke_dir / "smoke-summary.md").write_text("# PASS\n", encoding="utf-8")
+            external_evidence_path.write_text(
+                json.dumps(
+                    {
+                        "profile_version": "external-commercial-evidence-v1",
+                        "scope": "release-artifact-evidence-1-8",
+                        "items": [{"number": 1, "status": "pass", "checks": {}, "required_files": []}],
+                        "evidence_package_hash": "a" * 64,
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            result = subprocess.run(
+                [
+                    "python",
+                    "scripts/verify-release-evidence.py",
+                    "--release-dir",
+                    str(release_dir),
+                    "--validation-dir",
+                    str(validation_dir),
+                    "--benchmark-dir",
+                    str(benchmark_dir),
+                    "--smoke-dir",
+                    str(smoke_dir),
+                    "--require-smoke-platform",
+                    "windows",
+                    "--external-release-evidence-json",
+                    str(external_evidence_path),
+                    "--output-dir",
+                    str(evidence_dir),
+                ],
+                cwd=repo,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+
+            self.assertEqual(result.returncode, 1)
+            report = json.loads((evidence_dir / "release-evidence-report.json").read_text(encoding="utf-8"))
+            failed = {item["id"]: item for item in report["checks"] if item["status"] == "fail"}
+            self.assertIn("external-release-evidence-item-coverage", failed)
+            self.assertIn("external-release-evidence-item-01", failed)
+            self.assertTrue(any("external-commercial-evidence-v1" in action for action in report["next_actions"]))
+
+    def test_release_evidence_script_fails_incomplete_hostile_evidence_package(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            repo = Path(__file__).resolve().parent.parent
+            release_dir = root / "release"
+            validation_dir = root / "validation"
+            benchmark_dir = root / "benchmark"
+            smoke_dir = root / "smoke-windows"
+            evidence_dir = root / "release-evidence"
+            hostile_evidence_path = root / "hostile-evidence-containment.json"
+
+            release = subprocess.run(
+                ["python", "scripts/build-release.py", "--output-dir", str(release_dir), "--skip-build"],
+                cwd=repo,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+            self.assertEqual(release.returncode, 0, release.stderr)
+            with contextlib.redirect_stdout(io.StringIO()):
+                validation_exit = main(["validation", "--output-dir", str(validation_dir), "--json"])
+                benchmark_exit = main(
+                    [
+                        "benchmark",
+                        "--output-dir",
+                        str(benchmark_dir),
+                        "--file-count",
+                        "3",
+                        "--search-iterations",
+                        "1",
+                        "--overwrite",
+                        "--json",
+                    ]
+                )
+            self.assertEqual(validation_exit, 0)
+            self.assertEqual(benchmark_exit, 0)
+            smoke_dir.mkdir()
+            (smoke_dir / "smoke-summary.json").write_text(
+                json.dumps({"passed": True, "platform": "windows", "checks": []}),
+                encoding="utf-8",
+            )
+            (smoke_dir / "smoke-summary.md").write_text("# PASS\n", encoding="utf-8")
+            hostile_evidence_path.write_text(
+                json.dumps(
+                    {
+                        "profile_version": "hostile-evidence-containment-v1",
+                        "scope": "hostile-evidence-containment-9-13",
+                        "items": [{"number": 9, "status": "pass", "checks": {}, "required_files": []}],
+                        "evidence_package_hash": "b" * 64,
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            result = subprocess.run(
+                [
+                    "python",
+                    "scripts/verify-release-evidence.py",
+                    "--release-dir",
+                    str(release_dir),
+                    "--validation-dir",
+                    str(validation_dir),
+                    "--benchmark-dir",
+                    str(benchmark_dir),
+                    "--smoke-dir",
+                    str(smoke_dir),
+                    "--require-smoke-platform",
+                    "windows",
+                    "--hostile-evidence-containment-json",
+                    str(hostile_evidence_path),
+                    "--output-dir",
+                    str(evidence_dir),
+                ],
+                cwd=repo,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+
+            self.assertEqual(result.returncode, 1)
+            report = json.loads((evidence_dir / "release-evidence-report.json").read_text(encoding="utf-8"))
+            failed = {item["id"]: item for item in report["checks"] if item["status"] == "fail"}
+            self.assertIn("hostile-evidence-containment-item-coverage", failed)
+            self.assertIn("hostile-evidence-containment-item-09", failed)
+            self.assertTrue(any("hostile-evidence-containment-v1" in action for action in report["next_actions"]))
+
+    def test_release_evidence_script_fails_incomplete_independent_operations_package(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            repo = Path(__file__).resolve().parent.parent
+            release_dir = root / "release"
+            validation_dir = root / "validation"
+            benchmark_dir = root / "benchmark"
+            smoke_dir = root / "smoke-windows"
+            evidence_dir = root / "release-evidence"
+            independent_evidence_path = root / "independent-operations-evidence.json"
+
+            release = subprocess.run(
+                ["python", "scripts/build-release.py", "--output-dir", str(release_dir), "--skip-build"],
+                cwd=repo,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+            self.assertEqual(release.returncode, 0, release.stderr)
+            with contextlib.redirect_stdout(io.StringIO()):
+                validation_exit = main(["validation", "--output-dir", str(validation_dir), "--json"])
+                benchmark_exit = main(
+                    [
+                        "benchmark",
+                        "--output-dir",
+                        str(benchmark_dir),
+                        "--file-count",
+                        "3",
+                        "--search-iterations",
+                        "1",
+                        "--overwrite",
+                        "--json",
+                    ]
+                )
+            self.assertEqual(validation_exit, 0)
+            self.assertEqual(benchmark_exit, 0)
+            smoke_dir.mkdir()
+            (smoke_dir / "smoke-summary.json").write_text(
+                json.dumps({"passed": True, "platform": "windows", "checks": []}),
+                encoding="utf-8",
+            )
+            (smoke_dir / "smoke-summary.md").write_text("# PASS\n", encoding="utf-8")
+            independent_evidence_path.write_text(
+                json.dumps(
+                    {
+                        "profile_version": "independent-operations-evidence-v1",
+                        "scope": "independent-validation-operations-14-18",
+                        "items": [{"number": 14, "status": "pass", "checks": {}, "required_files": []}],
+                        "evidence_package_hash": "c" * 64,
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            result = subprocess.run(
+                [
+                    "python",
+                    "scripts/verify-release-evidence.py",
+                    "--release-dir",
+                    str(release_dir),
+                    "--validation-dir",
+                    str(validation_dir),
+                    "--benchmark-dir",
+                    str(benchmark_dir),
+                    "--smoke-dir",
+                    str(smoke_dir),
+                    "--require-smoke-platform",
+                    "windows",
+                    "--independent-operations-evidence-json",
+                    str(independent_evidence_path),
+                    "--output-dir",
+                    str(evidence_dir),
+                ],
+                cwd=repo,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+
+            self.assertEqual(result.returncode, 1)
+            report = json.loads((evidence_dir / "release-evidence-report.json").read_text(encoding="utf-8"))
+            failed = {item["id"]: item for item in report["checks"] if item["status"] == "fail"}
+            self.assertIn("independent-operations-evidence-item-coverage", failed)
+            self.assertIn("independent-operations-evidence-item-14", failed)
+            self.assertTrue(any("independent-operations-evidence-v1" in action for action in report["next_actions"]))
 
 
 if __name__ == "__main__":

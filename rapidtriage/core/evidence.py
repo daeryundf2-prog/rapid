@@ -23,7 +23,9 @@ from .e01 import (
     image_core_accuracy_gates,
     image_commercial_uplift_evidence,
     image_report_grade_assessment,
+    image_reportability_decision,
     missing_e01_tools,
+    stable_manifest_sha256,
 )
 from .virtual_disk import VIRTUAL_DISK_REQUIRED_TOOLS, VIRTUAL_DISK_SUFFIXES, build_virtual_disk_chain_profile, missing_virtual_disk_tools
 
@@ -71,6 +73,7 @@ class EvidenceAdapterResult:
     virtual_disk_chain_profile: dict[str, object] | None = None
     container_export_profile: dict[str, object] | None = None
     verified_export_manifest_profile: dict[str, object] | None = None
+    forensic_container_workflow_manifest: dict[str, object] | None = None
     ingest_workflow: dict[str, object] | None = None
 
     def to_dict(self) -> dict[str, object]:
@@ -672,6 +675,130 @@ def build_forensic_container_export_profile(source: Path) -> dict[str, object]:
     }
 
 
+def build_forensic_container_workflow_manifest(
+    *,
+    source: Path,
+    detected_format: str,
+    source_integrity: dict[str, object] | None,
+    container_export_profile: dict[str, object] | None,
+    verified_export_manifest_profile: dict[str, object] | None,
+) -> dict[str, object]:
+    export_profile = dict(container_export_profile or {})
+    manifest_profile = dict(verified_export_manifest_profile or {})
+    manifest_present = bool(manifest_profile.get("manifest_present"))
+    manifest_linked = manifest_profile.get("validation_status") == "manifest-linked"
+    blockers = [
+        "proprietary-container-direct-parser-not-implemented",
+        "embedded-metadata-compression-deleted-entry-validation-required",
+        "vendor-export-log-required",
+        "forensic-container-verified-export-manifest-required",
+    ]
+    stages = [
+        {
+            "id": "detect-container",
+            "label": "Detect proprietary forensic container",
+            "status": "complete" if source.is_file() else "blocked",
+            "evidence": {
+                "source_path": str(source),
+                "detected_format": detected_format,
+                "hash_status": (source_integrity or {}).get("hash_status", "not-recorded"),
+            },
+        },
+        {
+            "id": "source-integrity",
+            "label": "Source integrity preflight",
+            "status": "complete" if source_integrity else "blocked",
+            "evidence": {
+                "sha256": (source_integrity or {}).get("sha256"),
+                "hash_status": (source_integrity or {}).get("hash_status", "not-recorded"),
+            },
+        },
+        {
+            "id": "export-first-guidance",
+            "label": "Vendor export-first workflow guidance",
+            "status": "complete" if export_profile else "blocked",
+            "evidence": {
+                "workflow": export_profile.get("workflow"),
+                "required_export_artifacts": list(export_profile.get("required_export_artifacts") or []),
+                "derived_evidence_policy": export_profile.get("derived_evidence_policy"),
+            },
+        },
+        {
+            "id": "verified-export-manifest",
+            "label": "Verified vendor export manifest sidecar",
+            "status": "complete" if manifest_linked else ("review-required" if manifest_present else "blocked"),
+            "evidence": {
+                "manifest_present": manifest_present,
+                "validation_status": manifest_profile.get("validation_status"),
+                "manifest_sha256": manifest_profile.get("manifest_sha256"),
+                "vendor_tool": manifest_profile.get("vendor_tool"),
+                "source_hash_matches_manifest": manifest_profile.get("source_hash_matches_manifest"),
+                "file_count": manifest_profile.get("file_count", 0),
+                "hashed_file_count": manifest_profile.get("hashed_file_count", 0),
+            },
+        },
+        {
+            "id": "scan-derived-export",
+            "label": "Scan mounted/exported derived evidence",
+            "status": "ready-after-export" if manifest_linked else "blocked",
+            "evidence": {
+                "next_action": "Run RapidTriage against the verified vendor export folder and keep this manifest with the case.",
+                "requires_original_container_retention": True,
+            },
+        },
+        {
+            "id": "report-limitations",
+            "label": "Report limitation disclosure",
+            "status": "complete",
+            "evidence": {
+                "allowed_use": "vendor-export-container-triage-pivot",
+                "native_parser_complete": False,
+                "direct_parser_available": bool(export_profile.get("direct_parser_available")),
+            },
+        },
+    ]
+    payload: dict[str, object] = {
+        "profile_version": "forensic-container-export-workflow-manifest-v1",
+        "item_number": 25,
+        "gap_id": "#25",
+        "workflow_goal": "Detect proprietary AD1/L01/Lx01/AFF/AFF4 containers, preserve source integrity, require vendor export evidence, link a verified export manifest when present, and block native-parser overclaims.",
+        "source_ref": {
+            "path": str(source),
+            "detected_format": detected_format,
+            "sha256": (source_integrity or {}).get("sha256"),
+            "hash_status": (source_integrity or {}).get("hash_status"),
+        },
+        "container_export_profile": export_profile,
+        "verified_export_manifest_profile": manifest_profile,
+        "stages": stages,
+        "large_data_controls": {
+            "bounded_file_samples": len(manifest_profile.get("sample_files") or []),
+            "export_manifest_file_count": manifest_profile.get("file_count", 0),
+            "export_manifest_hashed_file_count": manifest_profile.get("hashed_file_count", 0),
+            "scan_derived_export_with_cursor_tables": True,
+            "retain_original_container": True,
+        },
+        "reportability_decision": image_reportability_decision(
+            25,
+            blockers=blockers,
+            failed_validation_matrix_ids=["#25-native-commercial-parser"],
+            details={
+                "source_integrity": source_integrity or {},
+                "image_trusted_diff": {"status": "not-attached"},
+            },
+        ),
+        "commercial_grade_ready": False,
+        "commercial_grade_blockers": blockers,
+        "operator_next_steps": [
+            "Export or mount the container with the vendor/acquisition tool and preserve logs.",
+            "Place a JSON export manifest sidecar next to the container with source/export hashes and file samples.",
+            "Scan the exported folder and cite both original container and derived export provenance.",
+        ],
+    }
+    payload["manifest_sha256"] = stable_manifest_sha256(payload)
+    return payload
+
+
 def discover_forensic_container_export_manifest(source: Path) -> Path | None:
     candidates = [
         source.with_suffix(source.suffix + ".export-manifest.json"),
@@ -787,6 +914,17 @@ class ForensicContainerAdapter:
             if source.is_file() and supported
             else None
         )
+        forensic_container_workflow_manifest = (
+            build_forensic_container_workflow_manifest(
+                source=source,
+                detected_format=suffix or "forensic-container",
+                source_integrity=source_integrity,
+                container_export_profile=container_export_profile,
+                verified_export_manifest_profile=verified_export_manifest_profile,
+            )
+            if source.is_file() and supported
+            else None
+        )
         return EvidenceAdapterResult(
             adapter=self.name,
             source_path=str(source),
@@ -885,6 +1023,7 @@ class ForensicContainerAdapter:
             ),
             container_export_profile=container_export_profile,
             verified_export_manifest_profile=verified_export_manifest_profile,
+            forensic_container_workflow_manifest=forensic_container_workflow_manifest,
         )
 
 

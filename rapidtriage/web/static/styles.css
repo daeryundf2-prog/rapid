@@ -3398,6 +3398,63 @@ body::before {
   gap: 8px;
 }
 
+.run-validation-diff-panel {
+  grid-column: 1 / -1;
+}
+
+.validation-diff-card {
+  display: grid;
+  gap: 10px;
+  border: 1px solid rgba(15, 116, 107, 0.16);
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.72);
+  padding: 12px;
+}
+
+.validation-diff-card strong {
+  display: block;
+  color: var(--ink);
+}
+
+.validation-diff-card span,
+.validation-diff-card .help-text {
+  color: var(--muted);
+  font-size: 0.78rem;
+}
+
+.compact-dl {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: 4px 10px;
+  margin: 0;
+  font-size: 0.78rem;
+}
+
+.compact-dl dt {
+  color: var(--muted);
+  font-weight: 850;
+}
+
+.compact-dl dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.validation-diff-list {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.validation-diff-list li {
+  display: grid;
+  gap: 2px;
+  border-top: 1px solid rgba(15, 116, 107, 0.1);
+  padding-top: 6px;
+}
+
 .case-command-bar {
   top: 10px;
   border-radius: 20px;
