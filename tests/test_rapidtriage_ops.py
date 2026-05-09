@@ -2567,6 +2567,7 @@ class RapidTriageOpsTests(unittest.TestCase):
             self.assertIn("step progress recorded", canceled.to_dict()["job_queue_assessment"]["core_accuracy_gates"][0]["satisfied_checks"])
             self.assertIn("transition log recorded", canceled.to_dict()["job_queue_assessment"]["core_accuracy_gates"][0]["satisfied_checks"])
             self.assertIn("job persistence manifest hash emitted", canceled.to_dict()["job_queue_assessment"]["core_accuracy_gates"][0]["satisfied_checks"])
+            self.assertIn("job execution manifest hash emitted", canceled.to_dict()["job_queue_assessment"]["core_accuracy_gates"][0]["satisfied_checks"])
             self.assertEqual(canceled.to_dict()["transition_log_profile"]["profile_version"], "job-transition-log-profile-v1")
             self.assertGreater(canceled.to_dict()["transition_log_profile"]["transition_count"], 0)
             self.assertEqual(canceled.to_dict()["job_persistence_manifest"]["profile_version"], "job-persistence-manifest-v1")
@@ -2574,9 +2575,21 @@ class RapidTriageOpsTests(unittest.TestCase):
             self.assertEqual(len(canceled.to_dict()["job_persistence_manifest"]["manifest_hash"]), 64)
             self.assertTrue(canceled.to_dict()["job_persistence_manifest"]["state_file_persisted"])
             self.assertGreaterEqual(canceled.to_dict()["job_persistence_manifest"]["progress_percent"], 0)
+            self.assertEqual(canceled.to_dict()["job_queue_execution_manifest"]["profile_version"], "job-queue-execution-manifest-v1")
+            self.assertEqual(canceled.to_dict()["job_queue_execution_manifest"]["item_number"], 69)
+            self.assertEqual(canceled.to_dict()["job_queue_execution_manifest"]["gap_id"], "#69")
+            self.assertEqual(len(canceled.to_dict()["job_queue_execution_manifest"]["manifest_hash"]), 64)
+            self.assertGreater(canceled.to_dict()["job_queue_execution_manifest"]["transition_row_count"], 0)
+            self.assertGreater(canceled.to_dict()["job_queue_execution_manifest"]["step_row_count"], 0)
+            self.assertRegex(canceled.to_dict()["job_queue_execution_manifest"]["transition_head_hash"], r"^[0-9a-f]{64}$")
+            self.assertRegex(canceled.to_dict()["job_queue_execution_manifest"]["step_head_hash"], r"^[0-9a-f]{64}$")
             self.assertEqual(
                 canceled.to_dict()["job_queue_assessment"]["persistence_manifest"]["manifest_hash"],
                 canceled.to_dict()["job_persistence_manifest"]["manifest_hash"],
+            )
+            self.assertEqual(
+                canceled.to_dict()["job_queue_assessment"]["execution_manifest_hash"],
+                canceled.to_dict()["job_queue_execution_manifest"]["manifest_hash"],
             )
             self.assertEqual(
                 canceled.to_dict()["job_queue_assessment"]["transition_log_profile"]["head_hash"],
@@ -2641,8 +2654,10 @@ class RapidTriageOpsTests(unittest.TestCase):
             self.assertEqual(queue_uplift["batch_id"], "commercial-uplift-066-070")
             self.assertEqual(queue_uplift["item_numbers"], [69])
             self.assertIn("transition log recorded", queue_uplift["passed_validation_check_ids"])
+            self.assertIn("job execution manifest emitted", queue_uplift["passed_validation_check_ids"])
             self.assertIn("local-threadpool limitation", " ".join(queue_uplift["large_data_controls"]))
             self.assertIn("progress percent", " ".join(queue_uplift["large_data_controls"]))
+            self.assertIn("execution manifest hashes", " ".join(queue_uplift["large_data_controls"]))
             self.assertIn("trusted-job-transition-log-diff-missing", queue_uplift["remaining_external_validation"])
             self.assertEqual(
                 queue_uplift["reportability_decision"]["decision"],
@@ -2656,6 +2671,7 @@ class RapidTriageOpsTests(unittest.TestCase):
                 state_persisted=True,
                 cancellation_requested=job_payload["cancellation_requested"],
                 persistence_manifest=job_payload["job_persistence_manifest"],
+                execution_manifest=job_payload["job_queue_execution_manifest"],
                 trusted_diff=job_diff,
             )
             self.assertEqual(job_diff["status"], "pass")

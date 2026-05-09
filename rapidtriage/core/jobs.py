@@ -136,6 +136,7 @@ class RunJob:
             "retry_lineage_profile": job_retry_lineage_profile(self),
             "partial_output_policy": job_partial_output_policy(self),
             "job_persistence_manifest": job_persistence_manifest(self),
+            "job_queue_execution_manifest": job_queue_execution_manifest(self),
             "job_queue_assessment": job_queue_assessment(self),
             "cancellation_retry_assessment": cancellation_retry_assessment(self),
         }
@@ -723,6 +724,73 @@ def job_persistence_manifest(job: RunJob) -> Dict[str, object]:
     return {**manifest_core, "manifest_hash": manifest_hash}
 
 
+def job_queue_execution_manifest(job: RunJob) -> Dict[str, object]:
+    transition_rows: list[dict[str, object]] = []
+    for transition in job.transition_log:
+        if not isinstance(transition, Mapping):
+            continue
+        row_core = {
+            "sequence": int(transition.get("sequence") or len(transition_rows) + 1),
+            "event_type": str(transition.get("event_type") or ""),
+            "status": str(transition.get("status") or ""),
+            "step": str(transition.get("step") or ""),
+            "step_status": str(transition.get("step_status") or ""),
+        }
+        transition_rows.append(
+            {
+                **row_core,
+                "row_hash": hashlib.sha256(json.dumps(row_core, sort_keys=True).encode("utf-8")).hexdigest(),
+            }
+        )
+    step_rows: list[dict[str, object]] = []
+    for index, step in enumerate(job.steps):
+        row_core = job_step_persistence_row(step, index=index)
+        step_rows.append(
+            {
+                **row_core,
+                "row_hash": hashlib.sha256(json.dumps(row_core, sort_keys=True).encode("utf-8")).hexdigest(),
+            }
+        )
+    transition_head_hash = hashlib.sha256(
+        "\n".join(str(row["row_hash"]) for row in transition_rows).encode("ascii")
+    ).hexdigest()
+    step_head_hash = hashlib.sha256(
+        "\n".join(str(row["row_hash"]) for row in step_rows).encode("ascii")
+    ).hexdigest()
+    manifest_core = {
+        "profile_version": "job-queue-execution-manifest-v1",
+        "item_number": 69,
+        "gap_id": BACKGROUND_JOB_GAP_ID,
+        "run_id": job.run_id,
+        "status": job.status,
+        "origin": job.origin,
+        "state_model": "local-threadpool-state-file",
+        "distributed_queue": False,
+        "transition_row_count": len(transition_rows),
+        "transition_head_hash": transition_head_hash,
+        "step_row_count": len(step_rows),
+        "step_head_hash": step_head_hash,
+        "cancellation_requested": job.cancellation_requested,
+        "cancel_supported": True,
+        "retry_supported_for": ["canceled", "failed"],
+        "retry_of_run_id": job.retry_of_run_id,
+        "retry_attempt": job.retry_attempt,
+        "summary_persisted": bool(job.summary),
+        "transition_rows": transition_rows[:200],
+        "step_rows": step_rows,
+        "commercial_gap_ids": [BACKGROUND_JOB_GAP_ID],
+        "commercial_claim_allowed": False,
+        "blockers": [
+            "distributed-worker-queue-not-implemented",
+            "parser-level-progress-percent-and-resource-telemetry-remain-limited",
+            "cooperative-cancellation-validation-under-load-not-attached",
+            JOB_QUEUE_TRUSTED_DIFF_BLOCKER_69,
+        ],
+    }
+    manifest_hash = hashlib.sha256(json.dumps(manifest_core, sort_keys=True).encode("utf-8")).hexdigest()
+    return {**manifest_core, "manifest_hash": manifest_hash}
+
+
 def job_step_persistence_row(step: Mapping[str, object], *, index: int) -> Dict[str, object]:
     status = str(step.get("status") or "pending")
     terminal = status in {"completed", "failed", "skipped", "canceled"}
@@ -742,6 +810,7 @@ def job_step_persistence_row(step: Mapping[str, object], *, index: int) -> Dict[
 def job_queue_assessment(job: RunJob) -> Dict[str, object]:
     transition_profile = job_transition_log_profile(job.transition_log)
     persistence_manifest = job_persistence_manifest(job)
+    execution_manifest = job_queue_execution_manifest(job)
     return {
         "component": "background-job-queue",
         "status": "implemented-baseline-validation-required",
@@ -751,6 +820,8 @@ def job_queue_assessment(job: RunJob) -> Dict[str, object]:
         "step_count": len(job.steps),
         "transition_log_profile": transition_profile,
         "persistence_manifest": persistence_manifest,
+        "execution_manifest": execution_manifest,
+        "execution_manifest_hash": execution_manifest["manifest_hash"],
         "ready_for_court_report": False,
         "supports": [
             "queued-running-completed-failed-canceled-status",
@@ -774,12 +845,14 @@ def job_queue_assessment(job: RunJob) -> Dict[str, object]:
                 "transition log recorded",
                 "cancel/retry state recorded",
                 "job persistence manifest emitted",
+                "job execution manifest emitted",
             ],
             large_data_controls=[
                 "queued/running/completed/failed/canceled state is persisted per job",
                 "prepare/triage/persist/finalize steps expose progress and messages",
                 "job transition log records status, step, cancel, retry, and restart-recovery events",
                 "job persistence manifest records progress percent, terminal steps, output keys, and transition head hash",
+                "job execution manifest hashes transition rows and step rows for replay review",
                 "queued cancel and failed/canceled retry are visible in the job payload",
                 "local-threadpool limitation is explicit to prevent distributed-scale overclaims",
             ],
@@ -792,12 +865,14 @@ def job_queue_assessment(job: RunJob) -> Dict[str, object]:
             cancellation_requested=job.cancellation_requested,
             transition_count=int(transition_profile.get("transition_count") or 0),
             persistence_manifest=persistence_manifest,
+            execution_manifest=execution_manifest,
         ),
     }
 
 
 def job_queue_functional_priority_profile(job: RunJob) -> dict[str, object]:
     persistence_manifest = job_persistence_manifest(job)
+    execution_manifest = job_queue_execution_manifest(job)
     return {
         "batch_id": FUNCTIONAL_JOB_BATCH_ID,
         "item_number": 27,
@@ -817,6 +892,9 @@ def job_queue_functional_priority_profile(job: RunJob) -> dict[str, object]:
             "retry_supported_for_failed_or_canceled": True,
             "run_summary_persisted": bool(job.summary),
             "persistence_manifest_hash": persistence_manifest["manifest_hash"],
+            "execution_manifest_hash": execution_manifest["manifest_hash"],
+            "execution_transition_head_hash": execution_manifest["transition_head_hash"],
+            "execution_step_head_hash": execution_manifest["step_head_hash"],
             "progress_percent": persistence_manifest["progress_percent"],
             "completed_step_count": persistence_manifest["completed_step_count"],
             "output_key_count": len(persistence_manifest["output_keys"]),
@@ -864,11 +942,21 @@ def job_queue_diff_value(job: Mapping[str, object]) -> dict[str, object]:
     steps = job.get("steps") if isinstance(job.get("steps"), Sequence) else []
     transition_profile = job.get("transition_log_profile")
     profile = transition_profile if isinstance(transition_profile, Mapping) else {}
+    execution_manifest = job.get("job_queue_execution_manifest")
+    if not isinstance(execution_manifest, Mapping):
+        assessment = job.get("job_queue_assessment")
+        execution_manifest = (
+            assessment.get("execution_manifest")
+            if isinstance(assessment, Mapping) and isinstance(assessment.get("execution_manifest"), Mapping)
+            else {}
+        )
     return {
         "status": str(job.get("status") or ""),
         "cancellation_requested": bool(job.get("cancellation_requested")),
         "transition_count": int(profile.get("transition_count") or 0),
         "transition_head_hash": str(profile.get("head_hash") or ""),
+        "execution_manifest_hash": str(execution_manifest.get("manifest_hash") or ""),
+        "execution_step_head_hash": str(execution_manifest.get("step_head_hash") or ""),
         "steps": [
             {
                 "name": str(step.get("name") or ""),
@@ -889,6 +977,7 @@ def job_queue_core_accuracy_gates(
     cancellation_requested: bool,
     transition_count: int = 0,
     persistence_manifest: Mapping[str, object] | None = None,
+    execution_manifest: Mapping[str, object] | None = None,
     trusted_diff: Mapping[str, object] | None = None,
 ) -> list[dict[str, object]]:
     satisfied = ["local-threadpool limitation warning"]
@@ -904,12 +993,15 @@ def job_queue_core_accuracy_gates(
         satisfied.append("transition log recorded")
     if persistence_manifest and persistence_manifest.get("manifest_hash"):
         satisfied.append("job persistence manifest hash emitted")
+    if execution_manifest and execution_manifest.get("manifest_hash"):
+        satisfied.append("job execution manifest hash emitted")
     evidence_refs = [
         f"job_status:{status}",
         f"step_count:{len(steps)}",
         f"cancellation_requested:{cancellation_requested}",
         f"transition_count:{transition_count}",
         f"persistence_manifest_hash:{(persistence_manifest or {}).get('manifest_hash', '')}",
+        f"execution_manifest_hash:{(execution_manifest or {}).get('manifest_hash', '')}",
     ]
     if trusted_diff and trusted_diff.get("status") == "pass":
         satisfied.append("trusted job transition-log diff pass")

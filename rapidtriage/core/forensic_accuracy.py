@@ -1053,6 +1053,7 @@ CORE_FORENSIC_ACCURACY_ITEMS: tuple[dict[str, object], ...] = (
             "step progress recorded",
             "state-file persistence",
             "cancel/retry state recorded",
+            "job execution manifest hash emitted",
             "local-threadpool limitation warning",
             "trusted job transition-log diff pass",
         ),

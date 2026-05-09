@@ -321,7 +321,7 @@ The sample JSON uses a few placeholders so the examples stay stable across machi
 
 - `benchmark` outputs include #66 scale matrix rows, ingest/search metrics, memory/output sizes, run-summary links, `benchmark-scale-proof-manifest-v1` with covered/missing 100k/1M/10M targets, metric/environment/threshold hashes, report-grade assessment, #66 `core_accuracy_gates`, and #66 `commercial_uplift_evidence` with hardware-matrix/release-threshold blockers.
 - `stress-plan` outputs include #67 TB-scale scenarios, resource caps, failure thresholds, required evidence bundles, per-scenario `stress-run-log-template-v1`, `stress-evidence-capture-profile-v1` telemetry/artifact requirements, `stress-execution-proof-manifest-v1` with run-log template hashes and unattached execution status, real-hardware validation warnings, #67 `core_accuracy_gates`, and #67 `commercial_uplift_evidence` on the plan and each scenario.
-- Background run-job payloads expose #69 `commercial_uplift_evidence` on the queue assessment and each job step, preserving status/progress/state-file/cancel/retry controls plus `job-transition-log-profile-v1` transition counts/head hashes while explicitly blocking distributed-worker and parser-level telemetry claims.
+- Background run-job payloads expose #69 `commercial_uplift_evidence` on the queue assessment and each job step, preserving status/progress/state-file/cancel/retry controls plus `job-transition-log-profile-v1` transition counts/head hashes and `job-queue-execution-manifest-v1` transition/step row hashes while explicitly blocking distributed-worker and parser-level telemetry claims.
 
 ### `columnar-convert`
 
