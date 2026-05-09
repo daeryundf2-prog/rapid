@@ -539,6 +539,11 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
             self.assertEqual(ai_usage["details"]["ai_usage"][0]["url"], fixture.ai_visit.url)
             self.assertEqual(ai_usage["details"]["ai_usage"][0]["prompt_hint"], "timeline analysis for evtx")
             self.assertEqual(len(ai_usage["details"]["source_hashes"]["sha256"]), 64)
+            ai_usage_review = ai_usage["details"]["ai_transcript_analyst_review_profile"]
+            self.assertEqual(ai_usage_review["profile_version"], "ai-transcript-analyst-review-profile-v1")
+            self.assertEqual(ai_usage_review["gap_id"], "#21")
+            self.assertIn("browser history", ai_usage_review["correlation_targets"])
+            self.assertIn("service-export-validation-missing", ai_usage_review["risk_tags"])
             self.assertEqual(ai_conversation["details"]["coverage_status"], "candidate")
             self.assertFalse(ai_conversation["details"]["commercial_grade_ready"])
             self.assertGreaterEqual(ai_conversation["details"]["question_count"], 2)
@@ -552,6 +557,12 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
             self.assertIn("#21", ai_conversation["details"]["browser_report_grade_assessment"]["commercial_gap_ids"])
             self.assertEqual(ai_conversation["details"]["forensic_review"]["gap_id"], "#21")
             self.assertFalse(ai_conversation["details"]["browser_native_capabilities"]["service_side_transcript_export_validation"])
+            ai_review = ai_conversation["details"]["ai_transcript_analyst_review_profile"]
+            self.assertEqual(ai_review["profile_version"], "ai-transcript-analyst-review-profile-v1")
+            self.assertEqual(ai_review["artifact_type"], "ai-transcript-candidate")
+            self.assertGreaterEqual(ai_review["source_field_values"]["complete_pair_count"], 2)
+            self.assertIn("complete service-side transcript", ai_review["not_proof_of"])
+            self.assertIn("service export", ai_review["correlation_targets"])
             ai_uplift = ai_conversation["details"]["commercial_uplift_evidence"]
             self.assertEqual(ai_uplift["batch_id"], "commercial-uplift-021-025")
             self.assertEqual(ai_uplift["item_numbers"], [21])

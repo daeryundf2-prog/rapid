@@ -2144,6 +2144,166 @@ def image_core_accuracy_gates(number: int, details: dict[str, object]) -> list[d
     return [build_accuracy_gate(number, satisfied_checks=satisfied, evidence_refs=evidence_refs)]
 
 
+def image_workflow_analyst_review_profile(number: int, details: Mapping[str, object]) -> dict[str, object]:
+    """Compact review card for image/container workflows.
+
+    The full workflow manifests are intentionally verbose. This profile gives the UI/report
+    layer a stable, low-noise summary of the same evidence and caveats without making a
+    commercial-grade parser claim.
+    """
+
+    gap_id = f"#{number}"
+    detected_format = str(details.get("detected_format") or details.get("container_type") or "image")
+    source_path = str(details.get("source_path") or "")
+    support_level = str(details.get("support_level") or "")
+    scan_strategy = str(details.get("scan_strategy") or "")
+    report_grade = (
+        details.get("image_report_grade_assessment")
+        if isinstance(details.get("image_report_grade_assessment"), Mapping)
+        else image_report_grade_assessment(gap_id, [str(item) for item in details.get("limitations") or []])
+    )
+    native_capabilities = (
+        details.get("native_capabilities") if isinstance(details.get("native_capabilities"), Mapping) else {}
+    )
+    workflow_manifest = (
+        details.get("workflow_manifest") if isinstance(details.get("workflow_manifest"), Mapping) else {}
+    )
+    source_integrity = details.get("source_integrity")
+    source_hash = ""
+    hash_status = "not-recorded"
+    if isinstance(source_integrity, Mapping):
+        if isinstance(source_integrity.get("parts"), list):
+            parts = [part for part in source_integrity.get("parts") or [] if isinstance(part, Mapping)]
+            source_hash = str((parts[0] or {}).get("sha256") or "") if parts else ""
+            hash_status = "split-parts-recorded" if parts else str(source_integrity.get("hash_status") or "not-recorded")
+        else:
+            source_hash = str(source_integrity.get("sha256") or "")
+            hash_status = str(source_integrity.get("hash_status") or "not-recorded")
+    tool_preflight = [row for row in details.get("tool_preflight") or [] if isinstance(row, Mapping)]
+    missing_tools = [str(item) for item in details.get("missing_tools") or [] if str(item)]
+    if not missing_tools:
+        missing_tools = [str(row.get("tool") or "") for row in tool_preflight if not row.get("available")]
+    blockers = [str(item) for item in report_grade.get("blockers") or [] if str(item)]
+    stages = workflow_manifest.get("stages") if isinstance(workflow_manifest.get("stages"), list) else []
+    blocked_stages = [
+        str(stage.get("id") or stage.get("label") or "")
+        for stage in stages
+        if isinstance(stage, Mapping) and str(stage.get("status") or "").startswith("blocked")
+    ]
+    review_required_stages = [
+        str(stage.get("id") or stage.get("label") or "")
+        for stage in stages
+        if isinstance(stage, Mapping) and "review" in str(stage.get("status") or "")
+    ]
+
+    type_guidance = {
+        22: {
+            "artifact_type": "e01-ex01-workflow",
+            "interpretation": "E01/Ex01 source can be identified, integrity-checked, and routed through preflight/extraction/review workflow evidence.",
+            "not_proof_of": [
+                "native EWF parser completeness",
+                "encrypted or corrupt image support",
+                "all deleted files recovered",
+            ],
+            "correlations": ["partition table", "filesystem extraction log", "case run outputs", "trusted EWF/TSK diff"],
+        },
+        23: {
+            "artifact_type": "raw-split-workflow",
+            "interpretation": "RAW/split image parts, split continuity, and Sleuth Kit recovery readiness are preserved as review pivots.",
+            "not_proof_of": [
+                "native filesystem parser completeness",
+                "gapped split set correctness",
+                "encrypted volume access",
+            ],
+            "correlations": ["acquisition segment log", "mmls output", "tsk_recover output", "known-answer file hashes"],
+        },
+        24: {
+            "artifact_type": "virtual-disk-workflow",
+            "interpretation": "Virtual disk conversion and nested RAW recovery are tracked with qemu-img/Sleuth Kit provenance.",
+            "not_proof_of": [
+                "snapshot or differencing chain completeness",
+                "hypervisor metadata reconstruction",
+                "XVA direct parsing",
+            ],
+            "correlations": ["qemu-img info", "converted raw hash", "parent disk inventory", "nested RAW manifest"],
+        },
+        25: {
+            "artifact_type": "forensic-container-workflow",
+            "interpretation": "Proprietary forensic containers are detected and routed to a verified vendor-export workflow.",
+            "not_proof_of": [
+                "native AD1/L01/Lx01/AFF/AFF4 parsing",
+                "deleted-entry recovery",
+                "embedded metadata or compression validation",
+            ],
+            "correlations": ["vendor export manifest", "source container hash", "export log", "derived folder scan"],
+        },
+    }.get(number, {})
+
+    return {
+        "profile_version": "image-workflow-analyst-review-profile-v1",
+        "gap_id": gap_id,
+        "artifact_type": type_guidance.get("artifact_type", "image-workflow"),
+        "detected_format": detected_format,
+        "severity": "high" if blockers or missing_tools or blocked_stages else "medium",
+        "summary": f"{detected_format} workflow is usable as a triage/review path, not a native commercial parser claim.",
+        "evidence_interpretation": type_guidance.get("interpretation", "Image workflow evidence is a triage pivot."),
+        "not_proof_of": type_guidance.get("not_proof_of", []),
+        "analyst_questions": [
+            "Is the source hash recorded and matched to the acquisition record?",
+            "Which external tool versions/commands produced the derived evidence?",
+            "Was the selected partition or vendor export validated against a trusted baseline?",
+            "Are blocked/review-required stages disclosed in the report?",
+        ],
+        "primary_pivots": [
+            "source_path",
+            "detected_format",
+            "source_sha256",
+            "support_level",
+            "scan_strategy",
+            "workflow_manifest_hash",
+            "partition_start_sector",
+            "converted_raw_sha256",
+            "export_manifest_sha256",
+        ],
+        "source_field_values": {
+            "source_path": source_path,
+            "detected_format": detected_format,
+            "source_sha256": source_hash,
+            "hash_status": hash_status,
+            "support_level": support_level,
+            "scan_strategy": scan_strategy,
+            "workflow_manifest_hash": str(workflow_manifest.get("manifest_sha256") or ""),
+            "partition_start_sector": details.get("partition_start_sector"),
+            "converted_raw_sha256": (
+                (details.get("converted_raw_integrity") or {}).get("sha256")
+                if isinstance(details.get("converted_raw_integrity"), Mapping)
+                else ""
+            ),
+            "export_manifest_sha256": str(details.get("export_manifest_sha256") or ""),
+            "missing_tools": missing_tools,
+            "blocked_stages": blocked_stages,
+            "review_required_stages": review_required_stages,
+        },
+        "correlation_targets": type_guidance.get("correlations", []),
+        "risk_tags": [
+            tag
+            for tag, enabled in {
+                "external-tool-dependency": bool(tool_preflight or missing_tools),
+                "native-parser-incomplete": not bool(native_capabilities.get("native_e01_ex01_parser"))
+                and not bool(native_capabilities.get("native_partition_filesystem_parser"))
+                and not bool(native_capabilities.get("direct_ad1_l01_lx01_aff_aff4_parser")),
+                "encrypted-or-corrupt-corpus-required": any("encrypted" in item or "corrupt" in item for item in blockers),
+                "vendor-export-required": number == 25 or scan_strategy == "vendor-export-first",
+            }.items()
+            if enabled
+        ],
+        "validation_required": True,
+        "report_grade_ready": bool(report_grade.get("ready_for_court_report")),
+        "commercial_blockers": blockers,
+        "report_guidance": "Cite this as workflow/provenance evidence only. Attach trusted-tool diff, known-answer results, and source hashes before report-grade image/container claims.",
+    }
+
+
 def collect_tool_preflight(
     tools: Sequence[str],
     *,

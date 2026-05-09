@@ -539,6 +539,18 @@ def build_browser_artifacts(
                     "ai_transcript_validation_status": (
                         ai_transcript["validation_status"] if conversation_rows else "none"
                     ),
+                    "ai_transcript_analyst_review_profile": ai_transcript_analyst_review_profile(
+                        {
+                            "source_path": str(source_path.resolve()),
+                            "browser": browser,
+                            "profile": profile,
+                            "ai_usage_count": len(ai_rows),
+                            "conversation_rows": conversation_rows,
+                            "transcript": ai_transcript,
+                            "source_summary": ai_source_summary,
+                            "ai_transcript_candidate_manifest": ai_candidate_manifest,
+                        }
+                    ),
                     "privacy_legal_warning": BROWSER_PRIVACY_WARNING,
                     "commercial_uplift_evidence": ai_transcript_commercial_uplift_evidence(
                         {
@@ -680,6 +692,18 @@ def build_ai_conversation_record(
             "ai_transcript_candidate_manifest_hash": candidate_manifest["manifest_sha256"],
             "ai_transcript_schema_validation_manifest": schema_manifest,
             "ai_transcript_schema_validation_manifest_hash": schema_manifest["manifest_sha256"],
+            "ai_transcript_analyst_review_profile": ai_transcript_analyst_review_profile(
+                {
+                    "source_path": str(profile_dir.resolve()),
+                    "browser": browser,
+                    "profile": profile,
+                    "conversation_rows": conversation_rows,
+                    "transcript": transcript,
+                    "source_summary": source_summary,
+                    "ai_transcript_candidate_manifest": candidate_manifest,
+                    "ai_transcript_schema_validation_manifest": schema_manifest,
+                }
+            ),
             "transcript_validation_checks": {
                 "has_service_label": bool(count_field(conversation_rows, "ai_service")),
                 "has_question_answer_pair": bool(transcript["complete_pair_count"]),
@@ -1845,6 +1869,103 @@ def browser_storage_inventory_functional_profile(
             "commercial_claim_allowed": not failed_checks,
             "operator_warning": "Storage inventory is not cache/cookie/session semantic decoding; keep secrets hidden unless authority and audit are attached.",
         },
+    }
+
+
+def ai_transcript_analyst_review_profile(details: Mapping[str, object]) -> Dict[str, object]:
+    transcript = details.get("transcript") if isinstance(details.get("transcript"), Mapping) else {}
+    source_summary = details.get("source_summary") if isinstance(details.get("source_summary"), Mapping) else {}
+    conversation_rows = [row for row in details.get("conversation_rows") or [] if isinstance(row, Mapping)]
+    candidate_manifest = (
+        details.get("ai_transcript_candidate_manifest")
+        if isinstance(details.get("ai_transcript_candidate_manifest"), Mapping)
+        else {}
+    )
+    schema_manifest = (
+        details.get("ai_transcript_schema_validation_manifest")
+        if isinstance(details.get("ai_transcript_schema_validation_manifest"), Mapping)
+        else {}
+    )
+    service_counts = source_summary.get("service_counts") if isinstance(source_summary.get("service_counts"), Mapping) else {}
+    source_field_values = {
+        "source_path": str(details.get("source_path") or ""),
+        "browser": str(details.get("browser") or ""),
+        "profile": str(details.get("profile") or ""),
+        "ai_usage_count": int(details.get("ai_usage_count") or 0),
+        "conversation_candidate_count": len(conversation_rows),
+        "question_count": int(transcript.get("question_count") or sum(1 for row in conversation_rows if row.get("direction") == "question")),
+        "answer_count": int(transcript.get("answer_count") or sum(1 for row in conversation_rows if row.get("direction") == "answer")),
+        "complete_pair_count": int(transcript.get("complete_pair_count") or 0),
+        "orphan_question_count": int(transcript.get("orphan_question_count") or 0),
+        "orphan_answer_count": int(transcript.get("orphan_answer_count") or 0),
+        "completeness_score": transcript.get("completeness_score"),
+        "candidate_manifest_hash": str(candidate_manifest.get("manifest_sha256") or ""),
+        "schema_validation_manifest_hash": str(schema_manifest.get("manifest_sha256") or ""),
+        "service_schema_validation_status": str(schema_manifest.get("service_schema_validation_status") or ""),
+        "source_file_count": int(source_summary.get("source_file_count") or 0),
+        "service_counts": dict(service_counts),
+    }
+    has_pairs = int(source_field_values["complete_pair_count"] or 0) > 0
+    has_manifest = bool(candidate_manifest.get("manifest_sha256"))
+    return {
+        "profile_version": "ai-transcript-analyst-review-profile-v1",
+        "gap_id": "#21",
+        "artifact_type": "ai-transcript-candidate",
+        "severity": "high" if conversation_rows and has_pairs else "medium",
+        "summary": "AI transcript rows are candidate Q/A pairings from browser storage and must be verified against raw source or service exports.",
+        "evidence_interpretation": "Shows possible AI service prompts/responses with source storage provenance, hashes, offsets, and pairing confidence where available.",
+        "not_proof_of": [
+            "complete service-side transcript",
+            "deleted conversation recovery",
+            "authoritative answer attribution",
+            "service schema/version completeness",
+        ],
+        "analyst_questions": [
+            "Can the Q/A pair be opened in the raw browser storage source locator?",
+            "Does a service-side export or trusted parser output confirm the same question and answer?",
+            "Are orphan questions/answers or low-confidence pairs excluded from the report?",
+            "Does the case authority allow review of browser storage and synchronized AI content?",
+        ],
+        "primary_pivots": [
+            "browser",
+            "profile",
+            "service_counts",
+            "question_count",
+            "answer_count",
+            "complete_pair_count",
+            "candidate_manifest_hash",
+            "schema_validation_manifest_hash",
+        ],
+        "source_field_values": source_field_values,
+        "correlation_targets": [
+            "browser history",
+            "browser cache/storage source viewer",
+            "service export",
+            "downloads",
+            "documents",
+            "cloud exports",
+        ],
+        "risk_tags": [
+            tag
+            for tag, enabled in {
+                "ai-service-usage": bool(details.get("ai_usage_count") or service_counts),
+                "candidate-transcript-content": bool(conversation_rows),
+                "qa-pairing-present": has_pairs,
+                "service-export-validation-missing": True,
+                "candidate-manifest-present": has_manifest,
+            }.items()
+            if enabled
+        ],
+        "validation_required": True,
+        "failed_validation_checks": [
+            "service-side-ai-export-not-validated",
+            "ai-service-schema-version-not-validated",
+            *([] if has_manifest else ["ai-transcript-candidate-manifest-not-emitted"]),
+            *([] if has_pairs else ["ai-question-answer-pair-not-present"]),
+        ],
+        "report_grade_ready": False,
+        "commercial_blockers": list(AI_TRANSCRIPT_BLOCKERS),
+        "report_guidance": "Use only as an AI transcript review pivot until service export/trusted diff and raw source locators confirm the content.",
     }
 
 

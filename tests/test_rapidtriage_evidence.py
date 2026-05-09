@@ -76,6 +76,13 @@ class RapidTriageEvidenceAdapterTests(unittest.TestCase):
             )
             self.assertTrue(result["limitations"])
             self.assertTrue(result["fallback_guidance"])
+            e01_review = result["image_analyst_review_profile"]
+            self.assertEqual(e01_review["profile_version"], "image-workflow-analyst-review-profile-v1")
+            self.assertEqual(e01_review["gap_id"], "#22")
+            self.assertEqual(e01_review["artifact_type"], "e01-ex01-workflow")
+            self.assertEqual(e01_review["source_field_values"]["detected_format"], "e01")
+            self.assertIn("trusted EWF/TSK diff", e01_review["correlation_targets"])
+            self.assertIn("native-parser-incomplete", e01_review["risk_tags"])
             e01_uplift = result["commercial_uplift_evidence"]
             self.assertEqual(e01_uplift["batch_id"], "commercial-uplift-021-025")
             self.assertEqual(e01_uplift["item_numbers"], [22])
@@ -136,6 +143,11 @@ class RapidTriageEvidenceAdapterTests(unittest.TestCase):
             self.assertIn("split-set provenance profile", raw_gate["satisfied_checks"])
             self.assertIn("encrypted volume limitation warning", raw_gate["satisfied_checks"])
             self.assertEqual(result["split_set_profile"]["part_count"], 1)
+            raw_review = result["image_analyst_review_profile"]
+            self.assertEqual(raw_review["gap_id"], "#23")
+            self.assertEqual(raw_review["artifact_type"], "raw-split-workflow")
+            self.assertEqual(raw_review["source_field_values"]["detected_format"], "raw")
+            self.assertIn("known-answer file hashes", raw_review["correlation_targets"])
             raw_uplift = result["commercial_uplift_evidence"]
             self.assertEqual(raw_uplift["item_numbers"], [23])
             self.assertIn("#23-source-integrity", raw_uplift["passed_validation_matrix_ids"])
@@ -192,6 +204,11 @@ class RapidTriageEvidenceAdapterTests(unittest.TestCase):
             self.assertIn("virtual disk chain risk profile", vm_gate["satisfied_checks"])
             self.assertIn("unsupported/encrypted VM warning", vm_gate["satisfied_checks"])
             self.assertEqual(result["virtual_disk_chain_profile"]["detected_format"], "vmdk")
+            vm_review = result["image_analyst_review_profile"]
+            self.assertEqual(vm_review["gap_id"], "#24")
+            self.assertEqual(vm_review["artifact_type"], "virtual-disk-workflow")
+            self.assertEqual(vm_review["source_field_values"]["detected_format"], "vmdk")
+            self.assertIn("qemu-img info", vm_review["correlation_targets"])
             vm_uplift = result["commercial_uplift_evidence"]
             self.assertEqual(vm_uplift["item_numbers"], [24])
             self.assertIn("#24-source-integrity", vm_uplift["passed_validation_matrix_ids"])
@@ -230,6 +247,9 @@ class RapidTriageEvidenceAdapterTests(unittest.TestCase):
             self.assertIn("unsupported/encrypted VM warning", xva_gate["satisfied_checks"])
             self.assertEqual(result["virtual_disk_chain_profile"]["detected_format"], "xva")
             self.assertTrue(result["fallback_guidance"])
+            xva_review = result["image_analyst_review_profile"]
+            self.assertEqual(xva_review["source_field_values"]["detected_format"], "xva")
+            self.assertIn("XVA direct parsing", xva_review["not_proof_of"])
             xva_uplift = result["commercial_uplift_evidence"]
             self.assertEqual(xva_uplift["item_numbers"], [24])
             self.assertIn("#24-partition-or-container-metadata", xva_uplift["passed_validation_matrix_ids"])
@@ -280,6 +300,12 @@ class RapidTriageEvidenceAdapterTests(unittest.TestCase):
                 self.assertIn("encrypted/compressed limitation warning", container_gate["satisfied_checks"])
                 self.assertEqual(result["container_export_profile"]["workflow"], "vendor-export-first")
                 self.assertTrue(result["limitations"])
+                container_review = result["image_analyst_review_profile"]
+                self.assertEqual(container_review["gap_id"], "#25")
+                self.assertEqual(container_review["artifact_type"], "forensic-container-workflow")
+                self.assertEqual(container_review["source_field_values"]["detected_format"], detected_format)
+                self.assertIn("vendor export manifest", container_review["correlation_targets"])
+                self.assertIn("vendor-export-required", container_review["risk_tags"])
                 container_uplift = result["commercial_uplift_evidence"]
                 self.assertEqual(container_uplift["item_numbers"], [25])
                 self.assertTrue(container_uplift["implemented"])

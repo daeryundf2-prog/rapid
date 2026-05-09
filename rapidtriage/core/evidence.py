@@ -24,6 +24,7 @@ from .e01 import (
     image_commercial_uplift_evidence,
     image_report_grade_assessment,
     image_reportability_decision,
+    image_workflow_analyst_review_profile,
     missing_e01_tools,
     stable_manifest_sha256,
 )
@@ -75,6 +76,7 @@ class EvidenceAdapterResult:
     verified_export_manifest_profile: dict[str, object] | None = None
     forensic_container_workflow_manifest: dict[str, object] | None = None
     ingest_workflow: dict[str, object] | None = None
+    image_analyst_review_profile: dict[str, object] | None = None
 
     def to_dict(self) -> dict[str, object]:
         return asdict(self)
@@ -258,6 +260,27 @@ class EwfAdapter:
             failure_guidance=failure_guidance,
             segment_set_profile=segment_set_profile,
             ingest_workflow=ingest_workflow,
+            image_analyst_review_profile=image_workflow_analyst_review_profile(
+                22,
+                {
+                    "source_path": str(source),
+                    "detected_format": "e01" if source.suffix.lower() == ".e01" else "ex01",
+                    "support_level": "direct-extract" if supported and not missing else "tooling-required",
+                    "scan_strategy": "auto-extract-then-scan" if supported and not missing else "mount-or-export-first",
+                    "source_integrity": source_integrity,
+                    "tool_preflight": tool_preflight or [],
+                    "missing_tools": missing,
+                    "workflow_manifest": ingest_workflow or {},
+                    "native_capabilities": {
+                        "ewf_libewf_mount_orchestration": True,
+                        "auto_extract_then_scan": ready,
+                        "native_e01_ex01_parser": False,
+                        "encrypted_volume_unlock_workflow": False,
+                    },
+                    "limitations": E01_REPORT_GRADE_BLOCKERS,
+                    "image_report_grade_assessment": report_grade,
+                },
+            ),
         )
 
 
@@ -385,6 +408,31 @@ class RawImageAdapter:
                 },
             ),
             split_set_profile=split_set_profile,
+            image_analyst_review_profile=image_workflow_analyst_review_profile(
+                23,
+                {
+                    "source_path": str(source),
+                    "detected_format": "raw",
+                    "support_level": "direct-extract" if ready else "tooling-required",
+                    "scan_strategy": "auto-extract-then-scan" if ready else "mount-or-recover-first",
+                    "source_integrity": source_integrity,
+                    "tool_preflight": tool_preflight or [],
+                    "missing_tools": missing,
+                    "split_set_profile": split_set_profile or {},
+                    "native_capabilities": {
+                        "split_segment_discovery": True,
+                        "auto_extract_then_scan": ready,
+                        "native_partition_filesystem_parser": False,
+                        "encrypted_volume_unlock_workflow": False,
+                    },
+                    "limitations": [
+                        "native-partition-filesystem-parser-not-implemented",
+                        "split-image-gap-and-damaged-set-known-answer-validation-required",
+                        "encrypted-volume-unlock-workflow-not-implemented",
+                    ],
+                    "image_report_grade_assessment": report_grade,
+                },
+            ),
         )
 
 
@@ -534,6 +582,30 @@ class VirtualDiskAdapter:
                     },
                 ),
                 virtual_disk_chain_profile=chain_profile,
+                image_analyst_review_profile=image_workflow_analyst_review_profile(
+                    24,
+                    {
+                        "source_path": str(source),
+                        "detected_format": "xva",
+                        "support_level": "detected-only",
+                        "scan_strategy": "xva-export-or-convert-first",
+                        "source_integrity": describe_source_integrity(source) if source.is_file() else None,
+                        "virtual_disk_chain_profile": chain_profile or {},
+                        "native_capabilities": {
+                            "xva_detection": True,
+                            "xva_direct_extraction": False,
+                            "vendor_export_guidance": True,
+                            "snapshot_chain_validation": False,
+                            "differencing_disk_resolution": False,
+                        },
+                        "limitations": [
+                            "xva-direct-extraction-not-implemented",
+                            "hypervisor-metadata-decoding-not-implemented",
+                            "vendor-export-validation-required",
+                        ],
+                        "image_report_grade_assessment": report_grade,
+                    },
+                ),
             )
         missing = missing_virtual_disk_tools(source.suffix.lower())
         ready = supported and not missing
@@ -645,6 +717,33 @@ class VirtualDiskAdapter:
                 },
             ),
             virtual_disk_chain_profile=chain_profile,
+            image_analyst_review_profile=image_workflow_analyst_review_profile(
+                24,
+                {
+                    "source_path": str(source),
+                    "detected_format": source.suffix.lower().lstrip(".") or "virtual-disk",
+                    "support_level": "direct-extract" if ready else "tooling-required",
+                    "scan_strategy": "auto-convert-extract-then-scan" if ready else "mount-virtual-disk-first",
+                    "source_integrity": source_integrity,
+                    "tool_preflight": tool_preflight or [],
+                    "missing_tools": missing,
+                    "virtual_disk_chain_profile": chain_profile or {},
+                    "native_capabilities": {
+                        "qemu_img_raw_conversion": True,
+                        "auto_convert_extract_then_scan": ready,
+                        "snapshot_chain_validation": False,
+                        "differencing_disk_resolution": False,
+                        "xva_direct_extraction": False,
+                    },
+                    "limitations": [
+                        "snapshot-chain-validation-not-implemented",
+                        "differencing-disk-resolution-not-implemented",
+                        "hypervisor-metadata-decoding-not-implemented",
+                        "large-virtual-disk-known-answer-corpus-required",
+                    ],
+                    "image_report_grade_assessment": report_grade,
+                },
+            ),
         )
 
 
@@ -1024,6 +1123,33 @@ class ForensicContainerAdapter:
             container_export_profile=container_export_profile,
             verified_export_manifest_profile=verified_export_manifest_profile,
             forensic_container_workflow_manifest=forensic_container_workflow_manifest,
+            image_analyst_review_profile=image_workflow_analyst_review_profile(
+                25,
+                {
+                    "source_path": str(source),
+                    "detected_format": suffix or "forensic-container",
+                    "support_level": "detected-only",
+                    "scan_strategy": "vendor-export-first",
+                    "source_integrity": source_integrity,
+                    "workflow_manifest": forensic_container_workflow_manifest or {},
+                    "native_vs_export_workflow": container_export_profile or {},
+                    "verified_export_manifest_profile": verified_export_manifest_profile or {},
+                    "native_capabilities": {
+                        "container_format_detection": True,
+                        "source_integrity_preflight": bool(source.is_file()),
+                        "vendor_export_guidance": True,
+                        "direct_ad1_l01_lx01_aff_aff4_parser": False,
+                        "deleted_entry_recovery": False,
+                    },
+                    "limitations": [
+                        "proprietary-container-direct-parser-not-implemented",
+                        "embedded-metadata-compression-deleted-entry-validation-required",
+                        "vendor-export-log-required",
+                    ],
+                    "image_report_grade_assessment": report_grade,
+                    "export_manifest_sha256": (verified_export_manifest_profile or {}).get("manifest_sha256", ""),
+                },
+            ),
         )
 
 

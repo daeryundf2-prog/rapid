@@ -2,7 +2,7 @@
 
 ## What Happens When You Add Evidence
 
-RapidTriage is currently strongest when you give it a mounted folder, exported folder, or ordinary filesystem path. It can also run direct extraction for E01/Ex01, raw/split images, ISO/DMG/WIM/SWM, and common qemu-convertible virtual disks when the required external tools are installed. On Windows, the most reliable image workflow is still WSL2 extraction or mounting/exporting the image first, then scanning the mounted folder.
+RapidTriage is currently strongest when you give it a mounted folder, exported folder, or ordinary filesystem path. It can also run direct extraction for E01/Ex01, raw/split images, ISO/DMG/WIM/SWM, and common qemu-convertible virtual disks when the required external tools are installed. E01/RAW/virtual-disk/container support checks now emit `image_analyst_review_profile`, which gives the UI a concise source hash, workflow status, blocked-stage, "not proof of", and trusted-diff blocker card. On Windows, the most reliable image workflow is still WSL2 extraction or mounting/exporting the image first, then scanning the mounted folder.
 
 For AD1, AFF/AFF4, XVA, proprietary mobile packages, and memory dumps, use `Check evidence support` or `rapidtriage evidence` first. If RapidTriage says the source must be mounted/exported, do that with your trusted forensic workflow and select the resulting folder. For raw/split, archive, and virtual-disk inputs, the same support check shows whether Sleuth Kit, 7-Zip/bsdtar, or qemu-img are available for direct extraction. For mobile cases, RapidTriage can now import already-exported Cellebrite/XRY/GrayKey/AXIOM-style CSV/JSON folders.
 
@@ -178,7 +178,7 @@ Browser and AI usage workflow:
 
 - Browser rows normalize Chrome/Edge/Brave/Firefox history and downloads into profile-scoped history/download lists, internet usage pivots, AI service visit rows, bounded unified timeline rows, #20 `forensic_review`, and `browser_analyst_review_profile`. Chromium and Firefox are supported on Windows and macOS through local profile databases; Safari is currently macOS history-only and should not be treated as full browser-cache/session parity.
 - Chromium-family cache, session, extension, sync, cookie, credential, Local Storage, and IndexedDB paths are inventoried as review candidates with file counts, total bytes, bounded sample hashes, sensitivity flags, #19 `forensic_review`, `browser_analyst_review_profile`, and strict legal/privacy warnings. RapidTriage does not decrypt cookies, passwords, tokens, or raw session secrets.
-- AI conversation candidates are recovered from browser storage as review-only snippets. Rows include service labels, question/answer direction, source storage kind, profile-relative path, source hashes, offset candidates, transcript pairing confidence, completeness score, orphan counts, validation checks, and #21 `forensic_review`. Validate against raw source files or service exports before reporting prompt/answer content.
+- AI conversation candidates are recovered from browser storage as review-only snippets. Rows include service labels, question/answer direction, source storage kind, profile-relative path, source hashes, offset candidates, transcript pairing confidence, completeness score, orphan counts, validation checks, #21 `forensic_review`, and `ai_transcript_analyst_review_profile`. Validate against raw source files or service exports before reporting prompt/answer content; the review profile explicitly warns that these rows are not complete service-side transcripts.
 
 Use:
 
