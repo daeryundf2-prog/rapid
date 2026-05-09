@@ -2834,22 +2834,28 @@ def source_analyst_workbench_profile(
 ) -> dict[str, object]:
     quoted_path = quote(str(source_path))
     viewer_family = source_viewer_family(source_path, suffix=suffix, mime_type=mime_type)
+    stage10_matrix = source_stage10_capability_matrix(
+        run_id=run_id,
+        source_path=source_path,
+        quoted_path=quoted_path,
+        viewer_family=viewer_family,
+    )
     return {
         "profile_version": "analyst-workbench-source-review-v1",
-        "commercial_batch_id": "commercial-uplift-016-020",
-        "item_numbers": [17, 18, 19, 20],
+        "commercial_batch_id": "commercial-uplift-051-060",
+        "item_numbers": list(range(51, 61)),
         "source_path": str(source_path),
         "viewer_family": viewer_family,
         "workflow_contract": {
             "current_file_search": {
                 "implemented": True,
-                "item_number": 17,
+                "supporting_capability": "current-file-verification-search",
                 "url": f"/api/runs/{run_id}/source-search?path={quoted_path}",
                 "bounded": True,
             },
             "specialized_viewer": {
                 "implemented": True,
-                "item_number": 18,
+                "item_number": stage10_viewer_item_number(viewer_family),
                 "viewer_family": viewer_family,
                 "metadata_hidden_by_default": True,
                 "max_inline_text_chars": max_chars,
@@ -2857,21 +2863,65 @@ def source_analyst_workbench_profile(
             },
             "review_board": {
                 "implemented": True,
-                "item_number": 19,
+                "item_number": 51,
                 "fields": ["status", "verification_status", "tags", "note", "assignee", "priority", "include_in_report"],
             },
             "compare_workflow": {
                 "implemented": True,
-                "item_number": 20,
+                "item_number": 52,
                 "max_pinned_items": 3,
                 "supports": ["A/B/C pinned evidence", "bounded text diff", "hash comparison"],
             },
+            "hex_viewer": {
+                "implemented": True,
+                "item_number": 53,
+                "available_when": "binary-or-large-text-fallback",
+            },
+            "sqlite_viewer": {
+                "implemented": viewer_family == "sqlite-table-preview",
+                "item_number": 54,
+                "endpoint": "/api/runs/{run_id}/source-sqlite-table",
+            },
+            "email_viewer": {
+                "implemented": viewer_family == "email-thread-preview",
+                "item_number": 55,
+                "endpoint": "/api/runs/{run_id}/source-email-attachment",
+            },
+            "image_gallery": {
+                "implemented": viewer_family == "image-gallery-preview",
+                "item_number": 56,
+                "endpoint": "/api/runs/{run_id}/source-image-gallery",
+            },
+            "media_transcript": {
+                "implemented": viewer_family == "media-preview",
+                "item_number": 57,
+                "endpoint": "/api/runs/{run_id}/source-media-cue",
+            },
+            "ocr_queue": {
+                "implemented": True,
+                "item_number": 58,
+                "endpoint": "/api/runs/{run_id}/source-ocr-queue",
+            },
+            "korean_ocr_translation": {
+                "implemented": True,
+                "item_number": 59,
+                "endpoint": "/api/runs/{run_id}/source-ocr-translation",
+            },
+            "dedup_review": {
+                "implemented": True,
+                "item_number": 60,
+                "source": "analysis_analyst_review_profile.dedup_review",
+            },
         },
+        "stage10_capability_matrix": stage10_matrix,
+        "stage10_capability_matrix_hash": stable_payload_sha256(stage10_matrix),
         "large_data_controls": {
             "inline_preview_bounded": True,
             "structured_preview_max_bytes": STRUCTURED_PREVIEW_MAX_BYTES,
             "hex_preview_max_bytes": HEX_PREVIEW_MAX_BYTES,
             "full_file_download_is_explicit_action": True,
+            "large_result_navigation": "cursor-or-bounded-preview-required",
+            "dedup_collapse_expected": True,
         },
         "reportability_decision": {
             "decision": "review-workbench-output-requires-source-citation-before-report",
@@ -2887,7 +2937,168 @@ def source_analyst_workbench_profile(
             "browser-e2e-workbench-validation-required",
             "persistent-compare-notes-not-yet-implemented",
             "role-based-review-server-not-yet-implemented",
+            "trusted-viewer-and-dedup-corpus-required",
         ],
+    }
+
+
+def stage10_viewer_item_number(viewer_family: str) -> int:
+    if viewer_family == "sqlite-table-preview":
+        return 54
+    if viewer_family == "email-thread-preview":
+        return 55
+    if viewer_family == "image-gallery-preview":
+        return 56
+    if viewer_family == "media-preview":
+        return 57
+    return 53
+
+
+def source_stage10_capability_matrix(
+    *,
+    run_id: str,
+    source_path: Path,
+    quoted_path: str,
+    viewer_family: str,
+) -> dict[str, object]:
+    """Expose the #51-#60 review/viewer workbench as one UI contract."""
+    entries = [
+        stage10_capability_entry(
+            51,
+            "reviewer workflow",
+            implemented=True,
+            primary=viewer_family == "document-text-preview",
+            route=None,
+            evidence_refs=["review_workflow", "case-db:review_mark", "case-db:review_mark_history"],
+            blockers=["role-based-review-queue-not-enabled", "trusted-review-audit-diff-required"],
+        ),
+        stage10_capability_entry(
+            52,
+            "A/B/C compare",
+            implemented=True,
+            primary=False,
+            route=None,
+            evidence_refs=["compare_workflow", "command:compare"],
+            blockers=["semantic-binary-table-visual-diff-required", "trusted-expected-diff-required"],
+        ),
+        stage10_capability_entry(
+            53,
+            "raw/hex viewer",
+            implemented=True,
+            primary=viewer_family == "text-or-hex-preview",
+            route=f"/api/runs/{run_id}/source-preview?path={quoted_path}",
+            evidence_refs=["hex.hex_preview_manifest", "hex.range_citation_profile"],
+            blockers=["trusted-offset-manifest-required"],
+        ),
+        stage10_capability_entry(
+            54,
+            "SQLite/table viewer",
+            implemented=True,
+            primary=viewer_family == "sqlite-table-preview",
+            route=f"/api/runs/{run_id}/source-sqlite-table?path={quoted_path}",
+            evidence_refs=["sqlite.sqlite_preview_manifest", "sqlite.table_page_profile"],
+            blockers=["deleted-row-wal-validation-required", "trusted-sqlite-query-schema-diff-required"],
+        ),
+        stage10_capability_entry(
+            55,
+            "email conversation viewer",
+            implemented=True,
+            primary=viewer_family == "email-thread-preview",
+            route=f"/api/runs/{run_id}/source-email-attachment?path={quoted_path}",
+            evidence_refs=["email.email_conversation_manifest", "email.attachment_package_profile"],
+            blockers=["native-pst-ost-msg-validation-required", "trusted-mail-thread-export-required"],
+        ),
+        stage10_capability_entry(
+            56,
+            "image gallery review",
+            implemented=True,
+            primary=viewer_family == "image-gallery-preview",
+            route=f"/api/runs/{run_id}/source-image-gallery?path={quoted_path}",
+            evidence_refs=["image.gallery_page_profile", "image.image_gallery_manifest"],
+            blockers=["large-gallery-browser-e2e-required", "trusted-image-manifest-required"],
+        ),
+        stage10_capability_entry(
+            57,
+            "video/audio transcript viewer",
+            implemented=True,
+            primary=viewer_family == "media-preview",
+            route=f"/api/runs/{run_id}/source-media-cue?path={quoted_path}",
+            evidence_refs=["media.transcript_sidecars", "media.cue_package_profile"],
+            blockers=["safe-playback-asr-alignment-corpus-required", "trusted-transcript-cue-diff-required"],
+        ),
+        stage10_capability_entry(
+            58,
+            "OCR queue",
+            implemented=True,
+            primary=viewer_family == "image-gallery-preview",
+            route=f"/api/runs/{run_id}/source-ocr-queue?path={quoted_path}",
+            evidence_refs=["image.ocr_queue_profile", "ocr_queue.core_accuracy_gates"],
+            blockers=["native-ocr-engine-log-required", "trusted-ocr-sidecar-diff-required"],
+        ),
+        stage10_capability_entry(
+            59,
+            "Korean OCR/translation review",
+            implemented=True,
+            primary=viewer_family == "image-gallery-preview",
+            route=f"/api/runs/{run_id}/source-ocr-translation?path={quoted_path}",
+            evidence_refs=["image.ocr_translation_profile", "source-ocr-translation-review-manifest"],
+            blockers=["korean-ocr-calibration-corpus-required", "certified-translation-review-required"],
+        ),
+        stage10_capability_entry(
+            60,
+            "search hit dedup review",
+            implemented=True,
+            primary=False,
+            route=None,
+            evidence_refs=["analysis_analyst_review_profile.dedup_review", "search-analysis.duplicate_groups"],
+            blockers=["persistent-suppression-workflow-required", "trusted-duplicate-manifest-required"],
+        ),
+    ]
+    implemented_count = sum(1 for entry in entries if entry["implemented"])
+    primary_count = sum(1 for entry in entries if entry["primary_for_current_source"])
+    return {
+        "profile_version": "stage10-review-viewer-capability-matrix-v1",
+        "commercial_batch_id": "commercial-uplift-051-060",
+        "source_path": str(source_path),
+        "source_name": source_path.name,
+        "viewer_family": viewer_family,
+        "implemented_count": implemented_count,
+        "primary_for_current_source_count": primary_count,
+        "capability_count": len(entries),
+        "entries": entries,
+        "reportability_decision": {
+            "decision": "do-not-claim-stage10-commercial-grade-without-trusted-viewer-corpora",
+            "allowed_use": "single-case-review-viewer-navigation-contract",
+            "required_before_report": [
+                "save review mark and source locator",
+                "compute source hash or record why not",
+                "attach viewer-specific citation manifest",
+                "disclose unsupported native recovery or corpus gaps",
+            ],
+        },
+    }
+
+
+def stage10_capability_entry(
+    item_number: int,
+    label: str,
+    *,
+    implemented: bool,
+    primary: bool,
+    route: str | None,
+    evidence_refs: Sequence[str],
+    blockers: Sequence[str],
+) -> dict[str, object]:
+    return {
+        "item_number": item_number,
+        "gap_id": f"#{item_number}",
+        "label": label,
+        "implemented": implemented,
+        "primary_for_current_source": primary,
+        "route": route,
+        "evidence_refs": list(evidence_refs),
+        "commercial_grade_ready": False,
+        "commercial_blockers": list(blockers),
     }
 
 

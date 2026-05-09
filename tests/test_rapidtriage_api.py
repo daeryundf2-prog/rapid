@@ -869,7 +869,8 @@ class RapidTriageApiTests(unittest.TestCase):
             self.assertIn("trusted preview sandbox/no-exec diff pass", sandbox_gates[0]["satisfied_checks"])
             self.assertIn("#51", preview_payload["review_workflow"]["commercial_gap_ids"])
             self.assertIn("#52", preview_payload["compare_workflow"]["commercial_gap_ids"])
-            self.assertEqual(preview_payload["analyst_workbench_profile"]["item_numbers"], [17, 18, 19, 20])
+            self.assertEqual(preview_payload["analyst_workbench_profile"]["commercial_batch_id"], "commercial-uplift-051-060")
+            self.assertEqual(preview_payload["analyst_workbench_profile"]["item_numbers"], list(range(51, 61)))
             self.assertTrue(
                 preview_payload["analyst_workbench_profile"]["workflow_contract"]["current_file_search"]["implemented"]
             )
@@ -882,6 +883,27 @@ class RapidTriageApiTests(unittest.TestCase):
                     "specialization_profile"
                 ],
                 "source-viewer-specialization-v1",
+            )
+            stage10_matrix = preview_payload["analyst_workbench_profile"]["stage10_capability_matrix"]
+            self.assertEqual(stage10_matrix["profile_version"], "stage10-review-viewer-capability-matrix-v1")
+            self.assertEqual(stage10_matrix["implemented_count"], 10)
+            self.assertEqual(stage10_matrix["capability_count"], 10)
+            self.assertEqual(len(preview_payload["analyst_workbench_profile"]["stage10_capability_matrix_hash"]), 64)
+            by_item = {entry["item_number"]: entry for entry in stage10_matrix["entries"]}
+            self.assertTrue(by_item[51]["implemented"])
+            self.assertTrue(by_item[52]["implemented"])
+            self.assertTrue(by_item[53]["implemented"])
+            self.assertTrue(by_item[54]["implemented"])
+            self.assertTrue(by_item[55]["implemented"])
+            self.assertTrue(by_item[56]["implemented"])
+            self.assertTrue(by_item[57]["implemented"])
+            self.assertTrue(by_item[58]["implemented"])
+            self.assertTrue(by_item[59]["implemented"])
+            self.assertTrue(by_item[60]["implemented"])
+            self.assertIn("trusted-duplicate-manifest-required", by_item[60]["commercial_blockers"])
+            self.assertEqual(
+                stage10_matrix["reportability_decision"]["decision"],
+                "do-not-claim-stage10-commercial-grade-without-trusted-viewer-corpora",
             )
             self.assertEqual(preview_payload["review_workflow"]["core_accuracy_gates"][0]["gap_id"], "#51")
             self.assertEqual(preview_payload["compare_workflow"]["core_accuracy_gates"][0]["gap_id"], "#52")
