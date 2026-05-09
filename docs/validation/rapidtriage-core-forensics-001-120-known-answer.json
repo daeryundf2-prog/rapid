@@ -1506,7 +1506,7 @@
       ],
       "expected": {
         "required_assertions": [
-          "Indicator output preserves source links, local rule matches, offline feed provenance with feed hash/size, API/web local enrichment review package fields, match mode, local-only warning, and #63 core_accuracy_gates."
+          "Indicator output preserves source links, local rule matches, offline feed provenance with feed hash/size, feed/indicator/enrichment manifests, feed row hashes, indicator row hashes, API/web local enrichment review package fields, match mode, local-only warning, trusted IOC/TI diff status, and #63 core_accuracy_gates."
         ]
       },
       "notes": "Internal fixture pass; signed/STIX/TAXII feed validation remains blocker.",

@@ -148,6 +148,13 @@
           },
           "validation_status": {
             "type": "string"
+          },
+          "ti_feed_manifest": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "ti_feed_manifest_hash": {
+            "type": "string"
           }
         }
       }
@@ -157,6 +164,13 @@
       "additionalProperties": {
         "type": "boolean"
       }
+    },
+    "ioc_ti_enrichment_manifest": {
+      "type": "object",
+      "additionalProperties": true
+    },
+    "ioc_ti_enrichment_manifest_hash": {
+      "type": "string"
     },
     "ti_enrichment_assessment": {
       "type": "object",
@@ -236,6 +250,16 @@
               "type": "string"
             }
           },
+          "ioc_ti_indicator_manifest": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "ioc_ti_indicator_manifest_hash": {
+            "type": "string"
+          },
+          "indicator_row_hash": {
+            "type": "string"
+          },
           "ti_enrichment": {
             "type": "object",
             "additionalProperties": false,
@@ -262,6 +286,9 @@
                 "type": "string"
               },
               "feed_path": {
+                "type": "string"
+              },
+              "feed_row_hash": {
                 "type": "string"
               },
               "matched_on": {

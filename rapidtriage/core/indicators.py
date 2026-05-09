@@ -41,6 +41,10 @@ class IndicatorSummaryError(ValueError):
     """Raised when indicator summary input cannot be loaded."""
 
 
+def stable_ioc_ti_sha256(payload: object) -> str:
+    return hashlib.sha256(json.dumps(payload, ensure_ascii=False, sort_keys=True).encode("utf-8")).hexdigest()
+
+
 def build_indicator_summary(
     run_output: Path | Mapping[str, object],
     *,
@@ -82,11 +86,22 @@ def build_indicator_summary(
     indicators.sort(key=lambda item: (-int(item["count"]), str(item["type"]), str(item["value"])))
     if max_indicators:
         indicators = indicators[:max_indicators]
+    indicators = attach_ioc_ti_indicator_manifests(indicators)
+    enrichment_manifest = build_ioc_ti_enrichment_manifest(
+        indicators=indicators,
+        ti_feed_sources=ti_feed_sources,
+        max_indicators=max_indicators,
+        max_sources_per_indicator=max_sources_per_indicator,
+    )
 
     type_counts = Counter(str(item["type"]) for item in indicators)
     rule_counts = Counter(rule for item in indicators for rule in item.get("matched_rules", []))
-    core_accuracy_gates = ioc_ti_core_accuracy_gates(indicators=indicators, ti_feed_sources=ti_feed_sources)
-    assessment = ti_enrichment_assessment(ti_feed_sources=ti_feed_sources)
+    core_accuracy_gates = ioc_ti_core_accuracy_gates(
+        indicators=indicators,
+        ti_feed_sources=ti_feed_sources,
+        enrichment_manifest=enrichment_manifest,
+    )
+    assessment = ti_enrichment_assessment(ti_feed_sources=ti_feed_sources, enrichment_manifest=enrichment_manifest)
     return {
         "command": "indicators",
         "generated_at": dt.datetime.now().isoformat(),
@@ -110,6 +125,8 @@ def build_indicator_summary(
         },
         "ti_feed_sources": ti_feed_sources,
         "indicator_native_capabilities": dict(INDICATOR_NATIVE_CAPABILITIES),
+        "ioc_ti_enrichment_manifest": enrichment_manifest,
+        "ioc_ti_enrichment_manifest_hash": enrichment_manifest["manifest_hash"],
         "ti_enrichment_assessment": assessment,
         "core_accuracy_gates": core_accuracy_gates,
         "commercial_uplift_evidence": ioc_ti_commercial_uplift_evidence(
@@ -119,6 +136,7 @@ def build_indicator_summary(
             assessment=assessment,
             max_indicators=max_indicators,
             max_sources_per_indicator=max_sources_per_indicator,
+            enrichment_manifest=enrichment_manifest,
         ),
         "indicators": indicators,
     }
@@ -293,6 +311,7 @@ def load_ti_feeds(paths: Sequence[Path]) -> tuple[dict[tuple[str, str], dict[str
             "commercial_gap_ids": [IOC_TI_GAP_ID],
             "validation_status": "analyst-feed-provenance-review-required",
         }
+        feed_rows = []
         for row in rows:
             raw_value = str(row.get("value") or "")
             indicator_type = normalize_feed_type(str(row.get("type") or raw_value))
@@ -300,6 +319,13 @@ def load_ti_feeds(paths: Sequence[Path]) -> tuple[dict[tuple[str, str], dict[str
             if not value:
                 continue
             feed_source["indicator_count"] = int(feed_source["indicator_count"]) + 1
+            feed_row = build_ti_feed_row(
+                row,
+                indicator_type=indicator_type,
+                value=value,
+                feed_name=str(feed_source["name"]),
+            )
+            feed_rows.append(feed_row)
             feeds[(indicator_type, value)] = {
                 "type": indicator_type,
                 "value": value,
@@ -312,7 +338,11 @@ def load_ti_feeds(paths: Sequence[Path]) -> tuple[dict[tuple[str, str], dict[str
                 "note": str(row.get("note") or row.get("description") or "").strip(),
                 "commercial_gap_ids": [IOC_TI_GAP_ID],
                 "validation_status": "analyst-feed-provenance-review-required",
+                "feed_row_hash": feed_row["feed_row_hash"],
             }
+        feed_manifest = build_ti_feed_manifest(feed_source=feed_source, feed_rows=feed_rows)
+        feed_source["ti_feed_manifest"] = feed_manifest
+        feed_source["ti_feed_manifest_hash"] = feed_manifest["manifest_hash"]
         sources.append(feed_source)
     return feeds, sources
 
@@ -359,15 +389,28 @@ def build_indicator_ti_enrichment_package(
         reviewed.append(indicator)
 
     returned = reviewed[: max(limit, 0)] if limit else reviewed
-    core_accuracy_gates = ioc_ti_core_accuracy_gates(indicators=reviewed, ti_feed_sources=ti_feed_sources)
-    assessment = ti_enrichment_assessment(ti_feed_sources=ti_feed_sources)
+    returned = attach_ioc_ti_indicator_manifests(returned)
+    reviewed_for_manifest = attach_ioc_ti_indicator_manifests(reviewed)
+    enrichment_manifest = build_ioc_ti_enrichment_manifest(
+        indicators=reviewed_for_manifest,
+        ti_feed_sources=ti_feed_sources,
+        max_indicators=limit,
+        max_sources_per_indicator=DEFAULT_MAX_SOURCES_PER_INDICATOR,
+    )
+    core_accuracy_gates = ioc_ti_core_accuracy_gates(
+        indicators=reviewed_for_manifest,
+        ti_feed_sources=ti_feed_sources,
+        enrichment_manifest=enrichment_manifest,
+    )
+    assessment = ti_enrichment_assessment(ti_feed_sources=ti_feed_sources, enrichment_manifest=enrichment_manifest)
     uplift = ioc_ti_commercial_uplift_evidence(
-        indicators=reviewed,
+        indicators=reviewed_for_manifest,
         ti_feed_sources=ti_feed_sources,
         core_accuracy_gates=core_accuracy_gates,
         assessment=assessment,
         max_indicators=limit,
         max_sources_per_indicator=DEFAULT_MAX_SOURCES_PER_INDICATOR,
+        enrichment_manifest=enrichment_manifest,
     )
     return {
         "command": "indicator-ti-enrichment",
@@ -391,6 +434,8 @@ def build_indicator_ti_enrichment_package(
             "commercial_grade_ready": False,
         },
         "ti_feed_sources": ti_feed_sources,
+        "ioc_ti_enrichment_manifest": enrichment_manifest,
+        "ioc_ti_enrichment_manifest_hash": enrichment_manifest["manifest_hash"],
         "ti_enrichment_assessment": assessment,
         "core_accuracy_gates": core_accuracy_gates,
         "commercial_uplift_evidence": uplift,
@@ -468,20 +513,202 @@ def lookup_ti_enrichment(
     return None
 
 
-def ti_enrichment_assessment(*, ti_feed_sources: Sequence[Mapping[str, object]]) -> dict[str, object]:
+def ti_enrichment_assessment(
+    *,
+    ti_feed_sources: Sequence[Mapping[str, object]],
+    enrichment_manifest: Mapping[str, object] | None = None,
+) -> dict[str, object]:
     return {
         "component": "ioc-ti-enrichment-plugin",
         "status": "offline-feed-enabled" if ti_feed_sources else "available-no-feed-loaded",
         "commercial_gap_ids": [IOC_TI_GAP_ID],
         "feed_count": len(ti_feed_sources),
+        "ioc_ti_enrichment_manifest_hash": str(enrichment_manifest.get("manifest_hash") or "") if enrichment_manifest else "",
+        "indicator_row_hash_count": int(enrichment_manifest.get("indicator_row_hash_count") or 0) if enrichment_manifest else 0,
         "ready_for_court_report": False,
         "blockers": list(IOC_TI_REPORT_GRADE_BLOCKERS),
         "recommended_validation": [
             "Preserve local TI feed files with name/version/path and explain why they were trusted.",
             "Treat enrichment as a triage label until corroborated by source evidence, timestamps, and network context.",
         ],
-        "core_accuracy_gates": ioc_ti_core_accuracy_gates(indicators=[], ti_feed_sources=ti_feed_sources),
+        "core_accuracy_gates": ioc_ti_core_accuracy_gates(
+            indicators=[],
+            ti_feed_sources=ti_feed_sources,
+            enrichment_manifest=enrichment_manifest,
+        ),
     }
+
+
+def build_ti_feed_row(
+    row: Mapping[str, object],
+    *,
+    indicator_type: str,
+    value: str,
+    feed_name: str,
+) -> dict[str, object]:
+    row_core = {
+        "type": indicator_type,
+        "value": value,
+        "severity": str(row.get("severity") or row.get("risk") or "").strip(),
+        "classification": str(row.get("classification") or row.get("label") or "").strip(),
+        "source": str(row.get("source") or feed_name).strip(),
+        "note_hash": stable_ioc_ti_sha256({"note": str(row.get("note") or row.get("description") or "").strip()}),
+    }
+    return {**row_core, "feed_row_hash": stable_ioc_ti_sha256(row_core)}
+
+
+def build_ti_feed_manifest(*, feed_source: Mapping[str, object], feed_rows: Sequence[Mapping[str, object]]) -> dict[str, object]:
+    feed_row_hashes = [str(row.get("feed_row_hash") or "") for row in feed_rows if row.get("feed_row_hash")]
+    manifest_core: dict[str, object] = {
+        "manifest_version": "ioc-ti-feed-manifest-v1",
+        "item_number": 63,
+        "commercial_gap_ids": [IOC_TI_GAP_ID],
+        "feed_name": str(feed_source.get("name") or ""),
+        "feed_version": str(feed_source.get("version") or ""),
+        "feed_path": str(feed_source.get("path") or ""),
+        "feed_sha256": str(feed_source.get("sha256") or ""),
+        "feed_size_bytes": int(feed_source.get("size_bytes") or 0),
+        "indicator_count": int(feed_source.get("indicator_count") or 0),
+        "feed_row_hash_count": len(feed_row_hashes),
+        "feed_row_hashes": feed_row_hashes,
+        "feed_rows_head_hash": stable_ioc_ti_sha256(feed_row_hashes),
+        "local_only": True,
+        "no_external_calls": True,
+        "validation_status": "analyst-feed-provenance-review-required",
+        "blockers": [
+            "signed-feed-package-validation",
+            "stix-taxii-import",
+            "confidence-decay-workflow",
+            IOC_TI_TRUSTED_DIFF_BLOCKER_63,
+        ],
+        "commercial_claim_allowed": False,
+    }
+    return {**manifest_core, "manifest_hash": stable_ioc_ti_sha256(manifest_core)}
+
+
+def attach_ioc_ti_indicator_manifests(indicators: Sequence[Mapping[str, object]]) -> list[dict[str, object]]:
+    output = []
+    for index, indicator in enumerate(indicators):
+        item = dict(indicator)
+        manifest = build_ioc_ti_indicator_manifest(item, index=index)
+        item["ioc_ti_indicator_manifest"] = manifest
+        item["ioc_ti_indicator_manifest_hash"] = manifest["manifest_hash"]
+        item["indicator_row_hash"] = manifest["indicator_row_hash"]
+        output.append(item)
+    return output
+
+
+def build_ioc_ti_indicator_manifest(indicator: Mapping[str, object], *, index: int) -> dict[str, object]:
+    enrichment = indicator.get("ti_enrichment") if isinstance(indicator.get("ti_enrichment"), Mapping) else {}
+    source_rows = []
+    for source_index, source in enumerate(indicator.get("sources") or []):
+        if not isinstance(source, Mapping):
+            continue
+        source_core = {
+            "index": source_index,
+            "output": str(source.get("output") or ""),
+            "output_path": str(source.get("output_path") or ""),
+            "pointer": str(source.get("pointer") or ""),
+            "path": str(source.get("path") or source.get("source_path") or ""),
+        }
+        source_rows.append({**source_core, "source_row_hash": stable_ioc_ti_sha256(source_core)})
+    indicator_row_core = {
+        "index": index,
+        "type": str(indicator.get("type") or ""),
+        "value": str(indicator.get("value") or ""),
+        "count": int(indicator.get("count") or 0),
+        "matched_rules": sorted(str(rule) for rule in indicator.get("matched_rules") or []),
+        "matched_on": str(enrichment.get("matched_on") or ""),
+        "feed_name": str(enrichment.get("feed_name") or ""),
+        "feed_version": str(enrichment.get("feed_version") or ""),
+        "feed_row_hash": str(enrichment.get("feed_row_hash") or ""),
+    }
+    manifest_core: dict[str, object] = {
+        "manifest_version": "ioc-ti-indicator-manifest-v1",
+        "item_number": 63,
+        "commercial_gap_ids": [IOC_TI_GAP_ID],
+        **indicator_row_core,
+        "indicator_value_hash": stable_ioc_ti_sha256(
+            {"type": indicator_row_core["type"], "value": indicator_row_core["value"]}
+        ),
+        "source_row_hashes": [str(row.get("source_row_hash") or "") for row in source_rows],
+        "source_row_count": len(source_rows),
+        "source_rows_head_hash": stable_ioc_ti_sha256(source_rows),
+        "source_viewer_locator": {
+            "viewer": "indicator-source-review",
+            "open_action": "open-indicator-source",
+            "type": indicator_row_core["type"],
+            "value_hash": stable_ioc_ti_sha256(
+                {"type": indicator_row_core["type"], "value": indicator_row_core["value"]}
+            ),
+        },
+        "report_use_boundary": "indicator and local TI enrichment are pivots, not standalone maliciousness proof",
+        "commercial_claim_allowed": False,
+    }
+    manifest_core["indicator_row_hash"] = stable_ioc_ti_sha256(indicator_row_core)
+    return {**manifest_core, "manifest_hash": stable_ioc_ti_sha256(manifest_core)}
+
+
+def build_ioc_ti_enrichment_manifest(
+    *,
+    indicators: Sequence[Mapping[str, object]],
+    ti_feed_sources: Sequence[Mapping[str, object]],
+    max_indicators: int,
+    max_sources_per_indicator: int,
+) -> dict[str, object]:
+    indicator_rows = []
+    for indicator in indicators:
+        manifest = indicator.get("ioc_ti_indicator_manifest") if isinstance(indicator.get("ioc_ti_indicator_manifest"), Mapping) else {}
+        indicator_rows.append(
+            {
+                "type": str(indicator.get("type") or ""),
+                "value_hash": str(manifest.get("indicator_value_hash") or ""),
+                "matched_rules": sorted(str(rule) for rule in indicator.get("matched_rules") or []),
+                "matched_on": str((indicator.get("ti_enrichment") or {}).get("matched_on") if isinstance(indicator.get("ti_enrichment"), Mapping) else ""),
+                "indicator_row_hash": str(manifest.get("indicator_row_hash") or ""),
+                "indicator_manifest_hash": str(manifest.get("manifest_hash") or ""),
+                "source_row_count": int(manifest.get("source_row_count") or 0),
+            }
+        )
+    feed_rows = []
+    for source in ti_feed_sources:
+        manifest = source.get("ti_feed_manifest") if isinstance(source.get("ti_feed_manifest"), Mapping) else {}
+        feed_rows.append(
+            {
+                "feed_name": str(source.get("name") or ""),
+                "feed_version": str(source.get("version") or ""),
+                "feed_sha256": str(source.get("sha256") or ""),
+                "feed_manifest_hash": str(manifest.get("manifest_hash") or ""),
+                "feed_row_hash_count": int(manifest.get("feed_row_hash_count") or 0),
+            }
+        )
+    manifest_core: dict[str, object] = {
+        "manifest_version": "ioc-ti-enrichment-manifest-v1",
+        "item_number": 63,
+        "commercial_gap_ids": [IOC_TI_GAP_ID],
+        "indicator_count": len(indicators),
+        "enriched_indicator_count": sum(1 for indicator in indicators if indicator.get("ti_enrichment")),
+        "ti_feed_count": len(ti_feed_sources),
+        "indicator_row_hash_count": sum(1 for row in indicator_rows if row.get("indicator_row_hash")),
+        "feed_manifest_hash_count": sum(1 for row in feed_rows if row.get("feed_manifest_hash")),
+        "indicator_rows": indicator_rows,
+        "feed_rows": feed_rows,
+        "indicator_rows_head_hash": stable_ioc_ti_sha256(indicator_rows),
+        "feed_rows_head_hash": stable_ioc_ti_sha256(feed_rows),
+        "max_indicators": max_indicators,
+        "max_sources_per_indicator": max_sources_per_indicator,
+        "local_only": True,
+        "no_external_calls": True,
+        "blockers": [
+            "signed-feed-package-validation",
+            "stix-taxii-import",
+            "confidence-decay-workflow",
+            "external-ti-api-governance",
+            IOC_TI_TRUSTED_DIFF_BLOCKER_63,
+        ],
+        "commercial_claim_allowed": False,
+    }
+    return {**manifest_core, "manifest_hash": stable_ioc_ti_sha256(manifest_core)}
 
 
 def build_ioc_ti_trusted_diff(
@@ -535,6 +762,7 @@ def ioc_ti_core_accuracy_gates(
     indicators: Sequence[Mapping[str, object]],
     ti_feed_sources: Sequence[Mapping[str, object]],
     trusted_diff: Mapping[str, object] | None = None,
+    enrichment_manifest: Mapping[str, object] | None = None,
 ) -> list[dict[str, object]]:
     satisfied = ["local-only/no-external-call warning"]
     if any(item.get("sources") for item in indicators):
@@ -545,11 +773,19 @@ def ioc_ti_core_accuracy_gates(
         satisfied.append("offline feed provenance")
     if any(isinstance(item.get("ti_enrichment"), Mapping) and item["ti_enrichment"].get("matched_on") for item in indicators):
         satisfied.append("match mode recorded")
+    if enrichment_manifest and enrichment_manifest.get("manifest_hash"):
+        satisfied.append("ioc-ti enrichment manifest")
+    if any(item.get("indicator_row_hash") for item in indicators):
+        satisfied.append("indicator row hashes")
+    if any(isinstance(item.get("ti_feed_manifest"), Mapping) or item.get("ti_feed_manifest_hash") for item in ti_feed_sources):
+        satisfied.append("feed manifest hashes")
     evidence_refs = [
         f"indicator_count:{len(indicators)}",
         f"ti_feed_count:{len(ti_feed_sources)}",
         f"matched_rule_count:{sum(1 for item in indicators if item.get('matched_rules'))}",
     ]
+    if enrichment_manifest and enrichment_manifest.get("manifest_hash"):
+        evidence_refs.append(f"ioc_ti_enrichment_manifest_hash:{enrichment_manifest.get('manifest_hash', '')}")
     if trusted_diff and trusted_diff.get("status") == "pass":
         satisfied.append("trusted IOC/TI enrichment diff pass")
         evidence_refs.append(f"trusted_tool:{trusted_diff.get('trusted_tool', '')}")
@@ -570,6 +806,7 @@ def ioc_ti_commercial_uplift_evidence(
     assessment: Mapping[str, object],
     max_indicators: int,
     max_sources_per_indicator: int,
+    enrichment_manifest: Mapping[str, object] | None = None,
 ) -> dict[str, object]:
     passed = []
     for gate in core_accuracy_gates:
@@ -583,6 +820,7 @@ def ioc_ti_commercial_uplift_evidence(
             f"indicator_count:{len(indicators)}",
             f"ti_feed_count:{len(ti_feed_sources)}",
             *[f"ti_feed:{item.get('name', '')}:{item.get('version', '')}" for item in ti_feed_sources[:5]],
+            f"ioc_ti_enrichment_manifest_hash:{enrichment_manifest.get('manifest_hash', '') if enrichment_manifest else ''}",
         ],
         "reportability_decision": ioc_ti_reportability_decision(
             failed_validation_check_ids=[
@@ -612,6 +850,9 @@ def ioc_ti_commercial_uplift_evidence(
             "ti_feed_count": len(ti_feed_sources),
             "external_ti_api_calls": False,
             "local_only_enrichment": True,
+            "ioc_ti_enrichment_manifest_hash": str(enrichment_manifest.get("manifest_hash") or "") if enrichment_manifest else "",
+            "indicator_row_hash_count": int(enrichment_manifest.get("indicator_row_hash_count") or 0) if enrichment_manifest else 0,
+            "feed_manifest_hash_count": int(enrichment_manifest.get("feed_manifest_hash_count") or 0) if enrichment_manifest else 0,
             "signed_feed_packages": False,
             "trusted_enrichment_diff": False,
         },

@@ -83,12 +83,25 @@ class RapidTriageIndicatorsTests(unittest.TestCase):
             self.assertEqual(manual_payload["core_accuracy_gates"][0]["gap_id"], "#63")
             self.assertIn("offline feed provenance", manual_payload["core_accuracy_gates"][0]["satisfied_checks"])
             self.assertIn("local-only/no-external-call warning", manual_payload["core_accuracy_gates"][0]["satisfied_checks"])
+            self.assertIn("ioc-ti enrichment manifest", manual_payload["core_accuracy_gates"][0]["satisfied_checks"])
+            self.assertIn("indicator row hashes", manual_payload["core_accuracy_gates"][0]["satisfied_checks"])
+            self.assertIn("feed manifest hashes", manual_payload["core_accuracy_gates"][0]["satisfied_checks"])
+            enrichment_manifest = manual_payload["ioc_ti_enrichment_manifest"]
+            self.assertEqual(enrichment_manifest["manifest_version"], "ioc-ti-enrichment-manifest-v1")
+            self.assertEqual(manual_payload["ioc_ti_enrichment_manifest_hash"], enrichment_manifest["manifest_hash"])
+            self.assertGreaterEqual(enrichment_manifest["indicator_row_hash_count"], 1)
+            self.assertEqual(enrichment_manifest["feed_manifest_hash_count"], 1)
             ioc_uplift = manual_payload["commercial_uplift_evidence"]
             self.assertEqual(ioc_uplift["batch_id"], "commercial-uplift-061-065")
             self.assertEqual(ioc_uplift["item_numbers"], [63])
             self.assertIn("offline feed provenance", ioc_uplift["passed_validation_check_ids"])
             self.assertIn("trusted-ioc-ti-enrichment-diff-missing", ioc_uplift["failed_validation_check_ids"])
             self.assertFalse(ioc_uplift["large_data_controls"]["external_ti_api_calls"])
+            self.assertEqual(
+                ioc_uplift["large_data_controls"]["ioc_ti_enrichment_manifest_hash"],
+                enrichment_manifest["manifest_hash"],
+            )
+            self.assertGreaterEqual(ioc_uplift["large_data_controls"]["indicator_row_hash_count"], 1)
             self.assertEqual(
                 ioc_uplift["reportability_decision"]["decision"],
                 "do-not-report-ioc-enrichment-as-live-ti-verdict",
@@ -100,8 +113,24 @@ class RapidTriageIndicatorsTests(unittest.TestCase):
             self.assertEqual(manual_payload["ti_feed_sources"][0]["size_bytes"], ti_feed.stat().st_size)
             self.assertEqual(len(manual_payload["ti_feed_sources"][0]["sha256"]), 64)
             self.assertIn("#63", manual_payload["ti_feed_sources"][0]["commercial_gap_ids"])
+            self.assertEqual(
+                manual_payload["ti_feed_sources"][0]["ti_feed_manifest"]["manifest_version"],
+                "ioc-ti-feed-manifest-v1",
+            )
+            self.assertEqual(
+                manual_payload["ti_feed_sources"][0]["ti_feed_manifest_hash"],
+                manual_payload["ti_feed_sources"][0]["ti_feed_manifest"]["manifest_hash"],
+            )
+            self.assertGreaterEqual(manual_payload["ti_feed_sources"][0]["ti_feed_manifest"]["feed_row_hash_count"], 1)
             self.assertGreaterEqual(manual_payload["summary"]["indicator_count"], 3)
             self.assertGreaterEqual(manual_payload["summary"]["enriched_indicator_count"], 1)
+            enriched_indicator = next(item for item in manual_payload["indicators"] if item.get("ti_enrichment"))
+            self.assertEqual(enriched_indicator["ioc_ti_indicator_manifest"]["manifest_version"], "ioc-ti-indicator-manifest-v1")
+            self.assertEqual(
+                enriched_indicator["ioc_ti_indicator_manifest_hash"],
+                enriched_indicator["ioc_ti_indicator_manifest"]["manifest_hash"],
+            )
+            self.assertEqual(enriched_indicator["indicator_row_hash"], enriched_indicator["ioc_ti_indicator_manifest"]["indicator_row_hash"])
             enrichment_package = build_indicator_ti_enrichment_package(
                 manual_payload,
                 ti_feeds=[ti_feed],
@@ -116,6 +145,11 @@ class RapidTriageIndicatorsTests(unittest.TestCase):
             self.assertGreaterEqual(enrichment_package["summary"]["matched_indicator_count"], 1)
             self.assertEqual(enrichment_package["core_accuracy_gates"][0]["gap_id"], "#63")
             self.assertIn("offline feed provenance", enrichment_package["core_accuracy_gates"][0]["satisfied_checks"])
+            self.assertIn("ioc-ti enrichment manifest", enrichment_package["core_accuracy_gates"][0]["satisfied_checks"])
+            self.assertEqual(
+                enrichment_package["ioc_ti_enrichment_manifest_hash"],
+                enrichment_package["ioc_ti_enrichment_manifest"]["manifest_hash"],
+            )
             self.assertEqual(
                 enrichment_package["reportability_decision"]["allowed_use"],
                 "offline-ioc-ti-triage-pivot",

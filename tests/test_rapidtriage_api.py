@@ -695,6 +695,16 @@ class RapidTriageApiTests(unittest.TestCase):
             self.assertEqual(len(ti_payload["ti_feed_sources"][0]["sha256"]), 64)
             self.assertEqual(ti_payload["core_accuracy_gates"][0]["gap_id"], "#63")
             self.assertIn("offline feed provenance", ti_payload["core_accuracy_gates"][0]["satisfied_checks"])
+            self.assertIn("ioc-ti enrichment manifest", ti_payload["core_accuracy_gates"][0]["satisfied_checks"])
+            self.assertEqual(
+                ti_payload["ioc_ti_enrichment_manifest_hash"],
+                ti_payload["ioc_ti_enrichment_manifest"]["manifest_hash"],
+            )
+            self.assertGreaterEqual(ti_payload["ioc_ti_enrichment_manifest"]["indicator_row_hash_count"], 1)
+            self.assertEqual(
+                ti_payload["ti_feed_sources"][0]["ti_feed_manifest_hash"],
+                ti_payload["ti_feed_sources"][0]["ti_feed_manifest"]["manifest_hash"],
+            )
             self.assertEqual(
                 ti_payload["reportability_decision"]["allowed_use"],
                 "offline-ioc-ti-triage-pivot",
