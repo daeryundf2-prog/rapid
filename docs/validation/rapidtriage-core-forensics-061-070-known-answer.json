@@ -77,7 +77,7 @@
       "status": "pass",
       "backlog_items": [67],
       "evidence_paths": ["docs/validation/core-forensics-061-070-fixture-evidence.json", "tests/test_rapidtriage_ops.py"],
-      "expected": {"required_assertions": ["Stress-plan output preserves TB scenarios, resource caps, failure thresholds, evidence bundle requirements, per-scenario run-log templates, telemetry/evidence capture profile, real-hardware warning, trusted run-log diff status, #67 core_accuracy_gates, and #67 commercial_uplift_evidence.", "Stress-plan reportability decisions block executed TB-validation claims until actual 1TB-10TB hardware runs, trusted run-log manifests, bottleneck traces, and independent reproduction logs exist."]},
+      "expected": {"required_assertions": ["Stress-plan output preserves TB scenarios, resource caps, failure thresholds, evidence bundle requirements, per-scenario run-log templates, telemetry/evidence capture profile, stress-execution-proof-manifest with run-log template hashes and unattached execution status, real-hardware warning, trusted run-log diff status, #67 core_accuracy_gates, and #67 commercial_uplift_evidence.", "Stress-plan reportability decisions block executed TB-validation claims until actual 1TB-10TB hardware runs, trusted run-log manifests, bottleneck traces, and independent reproduction logs exist."]},
       "notes": "Internal fixture pass; actual 1TB-10TB hardware runs and trusted run-log manifests remain required."
     },
     {

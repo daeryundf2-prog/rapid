@@ -1590,7 +1590,7 @@
       ],
       "expected": {
         "required_assertions": [
-          "Stress-plan output preserves TB scenarios, resource caps, failure thresholds, evidence bundle requirements, per-scenario run-log templates, telemetry/evidence capture profile, real-hardware warning, #67 core_accuracy_gates, and #67 commercial_uplift_evidence."
+          "Stress-plan output preserves TB scenarios, resource caps, failure thresholds, evidence bundle requirements, per-scenario run-log templates, telemetry/evidence capture profile, stress-execution-proof-manifest with run-log template hashes and unattached execution status, real-hardware warning, #67 core_accuracy_gates, and #67 commercial_uplift_evidence."
         ]
       },
       "notes": "Internal fixture pass; actual 1TB-10TB hardware runs remain required.",

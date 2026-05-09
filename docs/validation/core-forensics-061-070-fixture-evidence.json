@@ -63,7 +63,7 @@
       "title": "1TB-10TB evidence stress test",
       "test_files": ["tests/test_rapidtriage_ops.py"],
       "assertions": [
-        "Stress-plan output preserves TB scenarios, resource caps, failure thresholds, evidence bundle requirements, per-scenario run-log templates, telemetry/evidence capture profile, trusted run-log diff helper/gate, #67 core_accuracy_gates, #67 commercial_uplift_evidence, and reportability blockers for missing actual 1TB-10TB hardware runs, bottleneck traces, and independent reproduction logs."
+        "Stress-plan output preserves TB scenarios, resource caps, failure thresholds, evidence bundle requirements, per-scenario run-log templates, telemetry/evidence capture profile, stress-execution-proof-manifest with run-log template hashes and unattached execution status, trusted run-log diff helper/gate, #67 core_accuracy_gates, #67 commercial_uplift_evidence, and reportability blockers for missing actual 1TB-10TB hardware runs, bottleneck traces, and independent reproduction logs."
       ],
       "remaining_external_validation": ["Actual 1TB-10TB hardware runs, trusted run-log manifests, bottleneck logs, and independent reproduction."]
     },

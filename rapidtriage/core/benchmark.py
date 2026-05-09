@@ -273,6 +273,14 @@ def build_stress_test_plan(
         failure_thresholds=failure_thresholds,
         evidence_capture_profile=evidence_capture_profile,
     )
+    stress_execution_manifest = build_stress_execution_proof_manifest(
+        scenarios=scenarios,
+        failure_thresholds=failure_thresholds,
+        evidence_capture_profile=evidence_capture_profile,
+        hardware_scale_manifest=hardware_scale_manifest,
+        stress_json_path=json_path,
+        stress_markdown_path=markdown_path,
+    )
     payload: dict[str, object] = {
         "command": "stress-plan",
         "generated_at": now_iso(),
@@ -291,9 +299,12 @@ def build_stress_test_plan(
         "stress_native_capabilities": dict(STRESS_NATIVE_CAPABILITIES),
         "hardware_scale_evidence_manifest": hardware_scale_manifest,
         "hardware_scale_evidence_manifest_hash": hardware_scale_manifest["manifest_hash"],
+        "stress_execution_proof_manifest": stress_execution_manifest,
+        "stress_execution_proof_manifest_hash": stress_execution_manifest["manifest_hash"],
         "functional_priority_profile": stress_functional_profile(
             scenarios=scenarios,
             hardware_scale_manifest=hardware_scale_manifest,
+            stress_execution_manifest=stress_execution_manifest,
         ),
         "stress_test_assessment": stress_test_assessment(scenarios=scenarios),
         "evidence_capture_profile": evidence_capture_profile,
@@ -310,6 +321,7 @@ def build_stress_test_plan(
                 "memory, preview, SQLite, and inline-search caps are written per scenario",
                 "stop thresholds require parser crash, disk free, memory, and stall tracking",
                 "required evidence bundle lists hashes, checkpoints, warnings, and known-answer samples",
+                "stress execution proof manifest records required run-log artifacts and unattached execution status",
             ],
             external_validation=[
                 "actual 1TB-10TB hardware stress runs",
@@ -320,6 +332,7 @@ def build_stress_test_plan(
         "core_accuracy_gates": stress_core_accuracy_gates(
             scenarios=scenarios,
             hardware_scale_manifest=hardware_scale_manifest,
+            stress_execution_manifest=stress_execution_manifest,
         ),
         "scenarios": scenarios,
         "runbook": [
@@ -509,6 +522,68 @@ def build_hardware_scale_evidence_manifest(
         "independent_reproduction_logs_attached": False,
         "trusted_run_log_manifest_attached": False,
         "commercial_claim_allowed": False,
+    }
+    return {
+        **manifest_core,
+        "manifest_hash": hashlib.sha256(json.dumps(manifest_core, sort_keys=True).encode("utf-8")).hexdigest(),
+    }
+
+
+def build_stress_execution_proof_manifest(
+    *,
+    scenarios: Sequence[Mapping[str, object]],
+    failure_thresholds: Mapping[str, object],
+    evidence_capture_profile: Mapping[str, object],
+    hardware_scale_manifest: Mapping[str, object],
+    stress_json_path: Path,
+    stress_markdown_path: Path,
+) -> dict[str, object]:
+    run_log_rows = []
+    for scenario in scenarios:
+        template = scenario.get("run_log_template") if isinstance(scenario.get("run_log_template"), Mapping) else {}
+        run_log_rows.append(
+            {
+                "size_tb": int(scenario.get("size_tb") or 0),
+                "size_bytes": int(scenario.get("size_bytes") or 0),
+                "run_log_template_hash": hashlib.sha256(
+                    json.dumps(dict(template), sort_keys=True).encode("utf-8")
+                ).hexdigest(),
+                "required_field_count": len(template.get("required_fields", [])) if isinstance(template.get("required_fields"), list) else 0,
+                "required_artifact_count": len(template.get("required_artifacts", [])) if isinstance(template.get("required_artifacts"), list) else 0,
+                "telemetry_field_count": len(template.get("telemetry_samples", [])) if isinstance(template.get("telemetry_samples"), list) else 0,
+                "execution_status": "real-run-not-attached",
+                "commercial_gap_ids": [STRESS_TEST_GAP_ID],
+            }
+        )
+    manifest_core: dict[str, object] = {
+        "profile_version": "stress-execution-proof-manifest-v1",
+        "item_number": 67,
+        "commercial_gap_ids": [STRESS_TEST_GAP_ID],
+        "scenario_count": len(run_log_rows),
+        "largest_size_tb": max((row["size_tb"] for row in run_log_rows), default=0),
+        "run_log_rows": run_log_rows,
+        "run_log_rows_hash": hashlib.sha256(json.dumps(run_log_rows, sort_keys=True).encode("utf-8")).hexdigest(),
+        "failure_thresholds_hash": hashlib.sha256(
+            json.dumps(dict(failure_thresholds), sort_keys=True).encode("utf-8")
+        ).hexdigest(),
+        "evidence_capture_profile_hash": hashlib.sha256(
+            json.dumps(dict(evidence_capture_profile), sort_keys=True).encode("utf-8")
+        ).hexdigest(),
+        "hardware_scale_manifest_hash": str(hardware_scale_manifest.get("manifest_hash") or ""),
+        "evidence_paths": {
+            "stress_plan_json": str(stress_json_path),
+            "stress_plan_markdown": str(stress_markdown_path),
+        },
+        "actual_hardware_run_attached": False,
+        "trusted_run_log_manifest_attached": False,
+        "independent_reproduction_logs_attached": False,
+        "blockers": [
+            "actual-1tb-10tb-hardware-runs-and-bottleneck-logs-remain-required",
+            "trusted-run-log-manifest-required",
+            STRESS_TRUSTED_DIFF_BLOCKER_67,
+        ],
+        "commercial_claim_allowed": False,
+        "report_use_warning": "This manifest proves the stress runbook and required evidence contract only; it is not proof that TB-scale evidence was processed.",
     }
     return {
         **manifest_core,
@@ -800,6 +875,7 @@ def stress_functional_profile(
     *,
     scenarios: Sequence[Mapping[str, object]],
     hardware_scale_manifest: Mapping[str, object],
+    stress_execution_manifest: Mapping[str, object],
 ) -> dict[str, object]:
     return {
         "batch_id": FUNCTIONAL_SCALE_BATCH_ID,
@@ -819,6 +895,8 @@ def stress_functional_profile(
             "required_evidence_defined": all(bool(scenario.get("required_evidence")) for scenario in scenarios),
             "hardware_scale_manifest_hash": str(hardware_scale_manifest.get("manifest_hash") or ""),
             "evidence_capture_profile_hash": str(hardware_scale_manifest.get("evidence_capture_profile_hash") or ""),
+            "stress_execution_proof_manifest_hash": str(stress_execution_manifest.get("manifest_hash") or ""),
+            "stress_run_log_row_count": int(stress_execution_manifest.get("scenario_count") or 0),
             "actual_hardware_run_attached": False,
         },
         "blockers": [
@@ -1039,6 +1117,7 @@ def stress_core_accuracy_gates(
     *,
     scenarios: Sequence[Mapping[str, object]],
     hardware_scale_manifest: Mapping[str, object] | None = None,
+    stress_execution_manifest: Mapping[str, object] | None = None,
     trusted_diff: Mapping[str, object] | None = None,
 ) -> list[dict[str, object]]:
     satisfied = ["real-hardware validation warning"]
@@ -1052,10 +1131,14 @@ def stress_core_accuracy_gates(
         satisfied.append("run-log template emitted")
     if hardware_scale_manifest:
         satisfied.append("hardware-scale evidence manifest hash emitted")
+    if stress_execution_manifest:
+        satisfied.append("stress execution proof manifest emitted")
     satisfied.append("failure thresholds specified")
     evidence_refs = [f"scenario_count:{len(scenarios)}"]
     if hardware_scale_manifest:
         evidence_refs.append(f"hardware_scale_manifest_hash:{hardware_scale_manifest.get('manifest_hash', '')}")
+    if stress_execution_manifest:
+        evidence_refs.append(f"stress_execution_proof_manifest_hash:{stress_execution_manifest.get('manifest_hash', '')}")
     if trusted_diff and trusted_diff.get("status") == "pass":
         satisfied.append("trusted stress run-log diff pass")
         evidence_refs.append(f"trusted_tool:{trusted_diff.get('trusted_tool', '')}")

@@ -601,6 +601,7 @@ class RapidTriageOpsTests(unittest.TestCase):
             self.assertEqual(payload["core_accuracy_gates"][0]["gap_id"], "#67")
             self.assertIn("TB-scale scenarios emitted", payload["core_accuracy_gates"][0]["satisfied_checks"])
             self.assertIn("hardware-scale evidence manifest hash emitted", payload["core_accuracy_gates"][0]["satisfied_checks"])
+            self.assertIn("stress execution proof manifest emitted", payload["core_accuracy_gates"][0]["satisfied_checks"])
             self.assertEqual(
                 payload["hardware_scale_evidence_manifest"]["profile_version"],
                 "hardware-scale-evidence-manifest-v1",
@@ -613,6 +614,20 @@ class RapidTriageOpsTests(unittest.TestCase):
                 payload["hardware_scale_evidence_manifest_hash"],
                 payload["hardware_scale_evidence_manifest"]["manifest_hash"],
             )
+            self.assertEqual(
+                payload["stress_execution_proof_manifest"]["profile_version"],
+                "stress-execution-proof-manifest-v1",
+            )
+            self.assertEqual(payload["stress_execution_proof_manifest"]["item_number"], 67)
+            self.assertEqual(payload["stress_execution_proof_manifest"]["scenario_count"], 2)
+            self.assertEqual(payload["stress_execution_proof_manifest"]["largest_size_tb"], 10)
+            self.assertEqual(len(payload["stress_execution_proof_manifest"]["manifest_hash"]), 64)
+            self.assertEqual(
+                payload["stress_execution_proof_manifest_hash"],
+                payload["stress_execution_proof_manifest"]["manifest_hash"],
+            )
+            self.assertFalse(payload["stress_execution_proof_manifest"]["actual_hardware_run_attached"])
+            self.assertEqual(payload["stress_execution_proof_manifest"]["run_log_rows"][0]["execution_status"], "real-run-not-attached")
             self.assertEqual(payload["functional_priority_profile"]["item_number"], 35)
             self.assertEqual(payload["functional_priority_profile"]["batch_id"], "commercial-uplift-031-035")
             self.assertEqual(payload["functional_priority_profile"]["controls"]["largest_size_tb"], 10)
@@ -620,6 +635,11 @@ class RapidTriageOpsTests(unittest.TestCase):
                 payload["functional_priority_profile"]["controls"]["hardware_scale_manifest_hash"],
                 payload["hardware_scale_evidence_manifest"]["manifest_hash"],
             )
+            self.assertEqual(
+                payload["functional_priority_profile"]["controls"]["stress_execution_proof_manifest_hash"],
+                payload["stress_execution_proof_manifest"]["manifest_hash"],
+            )
+            self.assertEqual(payload["functional_priority_profile"]["controls"]["stress_run_log_row_count"], 2)
             self.assertFalse(payload["functional_priority_profile"]["controls"]["actual_hardware_run_attached"])
             self.assertEqual(
                 payload["evidence_capture_profile"]["profile_version"],
