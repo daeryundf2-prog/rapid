@@ -18,7 +18,7 @@
       "title": "Saved keyword pack library",
       "test_files": ["tests/test_rapidtriage_api.py", "tests/test_rapidtriage_search_analysis.py"],
       "assertions": [
-        "Keyword-pack API and resolver preserve built-in inventory, deduplicated expansion, pack provenance, custom JSON support, API search keyword_pack_selection_profile, web built-in pack selection controls, trusted expansion diff helper/gate, #62 core_accuracy_gates, and reportability blockers for missing signed/versioned packs, case edits, and language/domain corpus validation."
+        "Keyword-pack API and resolver preserve built-in inventory, deduplicated expansion, pack provenance, custom JSON support, per-pack keyword-pack-manifest, library keyword-pack-library-manifest, selection keyword-pack-selection-manifest, keyword row hashes, expansion head hashes, manifest hashes, API search keyword_pack_selection_profile, web built-in pack selection controls, trusted expansion diff helper/gate, #62 core_accuracy_gates, and reportability blockers for missing signed/versioned packs, case edits, and language/domain corpus validation."
       ],
       "remaining_external_validation": ["Signed pack library, trusted expansion manifest, per-case editing UI, language/domain pack corpus, and release-reviewed pack versions."]
     },

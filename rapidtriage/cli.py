@@ -83,7 +83,13 @@ from .core.extract import DEFAULT_EXTRACT_MANIFEST_NAME, ExtractError, SUPPORTED
 from .core.files import ALL_FILE_CATEGORIES, FileScanError, run_files_scan
 from .core.indicators import IndicatorSummaryError, build_indicator_summary
 from .core.input_root import SUPPORTED_INPUT_ROOT_KINDS, resolve_input_root
-from .core.keyword_packs import KeywordPackError, keyword_pack_library_assessment, list_keyword_packs, resolve_keyword_packs
+from .core.keyword_packs import (
+    KeywordPackError,
+    keyword_pack_library_assessment,
+    keyword_pack_selection_profile,
+    list_keyword_packs,
+    resolve_keyword_packs,
+)
 from .core.kakaotalk import (
     DEFAULT_MEMORY_SQLITE_MAX_CARVE_BYTES,
     DEFAULT_MEMORY_SQLITE_MAX_HITS,
@@ -2873,6 +2879,13 @@ def main(argv=None) -> int:
                 fuzzy_distance=args.fuzzy_distance,
                 proximity_window=args.proximity_window,
             )
+            if args.keyword_pack or args.keyword_pack_file:
+                payload["keyword_pack_selection_profile"] = keyword_pack_selection_profile(
+                    pack_names=args.keyword_pack or [],
+                    keyword_count=len(resolved_keywords),
+                    custom_file_count=len(args.keyword_pack_file or []),
+                    expanded_keywords=resolved_keywords,
+                )
         except SearchError as exc:
             parser.error(str(exc))
         write_result(payload, output)

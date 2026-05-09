@@ -985,6 +985,7 @@ def create_app(job_store: RunJobStore | None = None, auth_token: str | None = No
             payload["keyword_pack_selection_profile"] = keyword_pack_selection_profile(
                 pack_names=selected_pack_names,
                 keyword_count=len(keywords),
+                expanded_keywords=keywords,
             )
             return payload
         except (SearchError, KeywordPackError) as exc:

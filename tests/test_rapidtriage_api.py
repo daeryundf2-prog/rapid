@@ -71,7 +71,26 @@ class RapidTriageApiTests(unittest.TestCase):
         keyword_packs = client.get("/api/keyword-packs").json()
         self.assertIn("#62", keyword_packs["keyword_pack_library_assessment"]["commercial_gap_ids"])
         self.assertEqual(keyword_packs["keyword_pack_library_assessment"]["core_accuracy_gates"][0]["gap_id"], "#62")
+        library_manifest = keyword_packs["keyword_pack_library_assessment"]["keyword_pack_library_manifest"]
+        self.assertEqual(library_manifest["manifest_version"], "keyword-pack-library-manifest-v1")
+        self.assertEqual(
+            keyword_packs["keyword_pack_library_assessment"]["keyword_pack_library_manifest_hash"],
+            library_manifest["manifest_hash"],
+        )
+        self.assertGreaterEqual(library_manifest["keyword_row_hash_count"], 1)
+        self.assertIn(
+            "keyword-pack manifest hash",
+            keyword_packs["keyword_pack_library_assessment"]["core_accuracy_gates"][0]["satisfied_checks"],
+        )
+        self.assertIn(
+            "keyword row hashes",
+            keyword_packs["keyword_pack_library_assessment"]["core_accuracy_gates"][0]["satisfied_checks"],
+        )
         self.assertEqual(keyword_packs["keyword_pack_library_assessment"]["commercial_uplift_evidence"]["item_numbers"], [62])
+        self.assertEqual(
+            keyword_packs["keyword_pack_library_assessment"]["commercial_uplift_evidence"]["large_data_controls"]["keyword_pack_manifest_hash"],
+            library_manifest["manifest_hash"],
+        )
         self.assertEqual(
             keyword_packs["keyword_pack_library_assessment"]["commercial_uplift_evidence"]["reportability_decision"]["allowed_use"],
             "keyword-pack-expansion-triage-pivot",
@@ -82,6 +101,15 @@ class RapidTriageApiTests(unittest.TestCase):
         )
         self.assertIn("#62", keyword_packs["packs"][0]["commercial_gap_ids"])
         self.assertEqual(keyword_packs["packs"][0]["core_accuracy_gates"][0]["gap_id"], "#62")
+        self.assertEqual(
+            keyword_packs["packs"][0]["keyword_pack_manifest"]["manifest_version"],
+            "keyword-pack-manifest-v1",
+        )
+        self.assertEqual(
+            keyword_packs["packs"][0]["keyword_pack_manifest_hash"],
+            keyword_packs["packs"][0]["keyword_pack_manifest"]["manifest_hash"],
+        )
+        self.assertGreaterEqual(keyword_packs["packs"][0]["keyword_pack_manifest"]["keyword_row_hash_count"], 1)
         self.assertEqual(keyword_packs["packs"][0]["commercial_uplift_evidence"]["batch_id"], "commercial-uplift-061-065")
         trusted_pack = build_keyword_pack_trusted_diff(["Password", "token"], ["password", "TOKEN"])
         pack_gates = keyword_pack_core_accuracy_gates(
@@ -694,9 +722,25 @@ class RapidTriageApiTests(unittest.TestCase):
             )
             self.assertIn("credentials", search_response.json()["keyword_pack_selection_profile"]["selected_pack_names"])
             self.assertIn("#62", search_response.json()["keyword_pack_selection_profile"]["commercial_gap_ids"])
+            selection_manifest = search_response.json()["keyword_pack_selection_profile"]["keyword_pack_selection_manifest"]
+            self.assertEqual(selection_manifest["manifest_version"], "keyword-pack-selection-manifest-v1")
+            self.assertEqual(
+                search_response.json()["keyword_pack_selection_profile"]["keyword_pack_selection_manifest_hash"],
+                selection_manifest["manifest_hash"],
+            )
+            self.assertGreaterEqual(selection_manifest["keyword_row_hash_count"], 1)
+            self.assertGreaterEqual(len(selection_manifest["keyword_rows"]), 1)
+            self.assertIn(
+                "keyword row hashes",
+                search_response.json()["keyword_pack_selection_profile"]["core_accuracy_gates"][0]["satisfied_checks"],
+            )
             self.assertEqual(
                 search_response.json()["keyword_pack_selection_profile"]["commercial_uplift_evidence"]["item_numbers"],
                 [62],
+            )
+            self.assertEqual(
+                search_response.json()["keyword_pack_selection_profile"]["commercial_uplift_evidence"]["large_data_controls"]["keyword_pack_manifest_hash"],
+                selection_manifest["manifest_hash"],
             )
             self.assertEqual(search_response.json()["workbench_search_profile"]["item_number"], 16)
             self.assertIn("documents", search_response.json()["workbench_search_profile"]["target_sources"])
