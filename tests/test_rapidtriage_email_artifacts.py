@@ -41,6 +41,13 @@ class RapidTriageEmailArtifactsTests(unittest.TestCase):
             self.assertFalse(eml["details"]["commercial_grade_ready"])
             self.assertIn("#36", eml["details"]["email_report_grade_assessment"]["commercial_gap_ids"])
             self.assertEqual(eml["details"]["forensic_review"]["gap_id"], "#36")
+            eml_review = eml["details"]["email_analyst_review_profile"]
+            self.assertEqual(eml_review["profile_version"], "email-analyst-review-profile-v1")
+            self.assertEqual(eml_review["gap_ids"], ["#36"])
+            self.assertEqual(eml_review["artifact_type"], "email-message")
+            self.assertIn("libpff/readpst/Outlook/native mailbox diff", eml_review["correlation_targets"])
+            self.assertIn("complete mailbox object decoding", eml_review["not_proof_of"])
+            self.assertFalse(eml_review["report_grade_ready"])
             self.assertFalse(eml["details"]["email_native_capabilities"]["native_pst_ost_msg_object_decode"])
             self.assertEqual(eml["details"]["email_format_profile"]["family"], "internet-message")
             self.assertIn("auth-signature-crypto", {item["id"] for item in eml["details"]["email_issue_matrix"]})

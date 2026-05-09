@@ -75,6 +75,13 @@ class RapidTriageCloudCollectTests(unittest.TestCase):
                 self.assertTrue(payload["summary"]["provider_scope_inventory_captured"])
                 self.assertIn("#40", payload["cloud_api_report_grade_assessment"]["commercial_gap_ids"])
                 self.assertEqual(payload["forensic_review"]["gap_id"], "#40")
+                api_review = payload["cloud_api_analyst_review_profile"]
+                self.assertEqual(api_review["profile_version"], "cloud-api-analyst-review-profile-v1")
+                self.assertEqual(api_review["gap_ids"], ["#40"])
+                self.assertEqual(api_review["artifact_type"], "cloud-api-collection")
+                self.assertIn("provider-native API/export diff", api_review["correlation_targets"])
+                self.assertIn("complete provider account acquisition", api_review["not_proof_of"])
+                self.assertFalse(api_review["report_grade_ready"])
                 scope_profile = payload["cloud_api_provider_scope_profile"]
                 self.assertEqual(scope_profile["profile_version"], "cloud-api-provider-scope-v1")
                 self.assertEqual(scope_profile["provider"], "google")

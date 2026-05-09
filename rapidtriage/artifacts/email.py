@@ -380,6 +380,25 @@ def build_message_record(
                 f"attachments={len(attachments)}",
             ],
         ),
+        "email_analyst_review_profile": email_analyst_review_profile(
+            artifact_type="email-message",
+            source_format=source_format,
+            source_hashes=source_hashes,
+            source_path=str(path.resolve()),
+            details={
+                "source_index": source_index,
+                "message_id": header_value(message, "Message-ID"),
+                "subject": header_value(message, "Subject"),
+                "from": header_value(message, "From"),
+                "to": header_value(message, "To"),
+                "attachment_count": len(attachments),
+                "risk_flags": email_risk_flags(header_value(message, "Subject"), body_preview, attachments),
+                "email_expansion_citation_manifest": citation_manifest,
+                "email_mailbox_parser_manifest": mailbox_manifest,
+                "validation_checks": validation_checks,
+                "email_thread_profile": thread_profile,
+            },
+        ),
         "commercial_gap_ids": ["#36"],
         "commercial_grade_ready": False,
         "commercial_grade_blockers": email_blockers(source_format),
@@ -489,6 +508,21 @@ def build_mailbox_record(
                 f"message_count={message_count}",
                 f"source_format={source_format}",
             ],
+        ),
+        "email_analyst_review_profile": email_analyst_review_profile(
+            artifact_type="email-mailbox",
+            source_format=source_format,
+            source_hashes=source_hashes,
+            source_path=str(path.resolve()),
+            details={
+                "mailbox_name": path.name,
+                "message_count": message_count,
+                "email_expansion_citation_manifest": citation_manifest,
+                "email_mailbox_parser_manifest": mailbox_manifest,
+                "validation_checks": validation_checks,
+                "email_mailbox_strategy_profile": strategy_profile,
+                **(extra_details or {}),
+            },
         ),
         "commercial_gap_ids": ["#36"],
         "commercial_grade_ready": False,
@@ -1590,6 +1624,94 @@ def email_forensic_review(*, source_format: str, primary_evidence: list[str]) ->
             "PST/OST/MSG rows are bounded candidate inventory until native mailbox object decoding is implemented.",
         ],
     )
+
+
+def email_analyst_review_profile(
+    *,
+    artifact_type: str,
+    source_format: str,
+    source_hashes: Mapping[str, str],
+    source_path: str,
+    details: Mapping[str, object],
+) -> dict[str, object]:
+    parser_manifest = (
+        details.get("email_mailbox_parser_manifest")
+        if isinstance(details.get("email_mailbox_parser_manifest"), Mapping)
+        else {}
+    )
+    citation_manifest = (
+        details.get("email_expansion_citation_manifest")
+        if isinstance(details.get("email_expansion_citation_manifest"), Mapping)
+        else {}
+    )
+    row_citation = parser_manifest.get("row_citation") if isinstance(parser_manifest.get("row_citation"), Mapping) else {}
+    viewer_locator = (
+        row_citation.get("source_viewer_locator")
+        if isinstance(row_citation.get("source_viewer_locator"), Mapping)
+        else {}
+    )
+    validation_checks = details.get("validation_checks") if isinstance(details.get("validation_checks"), Mapping) else {}
+    risk_flags = details.get("risk_flags") if isinstance(details.get("risk_flags"), list) else []
+    return {
+        "profile_version": "email-analyst-review-profile-v1",
+        "gap_ids": ["#36"],
+        "artifact_type": artifact_type,
+        "source_format": source_format,
+        "severity": "high" if risk_flags or source_format in {"pst", "ost", "msg"} else "medium",
+        "summary": f"{artifact_type} / {source_format} / {details.get('subject') or details.get('mailbox_name') or 'mailbox row'}",
+        "evidence_interpretation": "Mailbox/message metadata, attachment inventory, and review citation pivot",
+        "not_proof_of": [
+            "complete mailbox object decoding",
+            "deleted item recovery",
+            "privilege/scope review completion",
+            "DKIM/ARC/SPF/S-MIME/OpenPGP validation",
+            "thread/dedup correctness",
+        ],
+        "analyst_questions": [
+            "Does this row match a trusted mailbox parser or native mail client export?",
+            "Are timezone, message threading, duplicate suppression, and attachment hashes verified?",
+            "Is any privileged or personal content in scope for review/export?",
+            "Should this row be correlated with cloud, browser, file, or entity evidence?",
+        ],
+        "primary_pivots": [
+            value
+            for value in (
+                str(details.get("message_id") or ""),
+                str(details.get("subject") or ""),
+                str(details.get("from") or ""),
+                str(details.get("to") or ""),
+                str(details.get("mailbox_name") or ""),
+            )
+            if value
+        ][:8],
+        "source_field_values": {
+            "source_path": source_path,
+            "source_sha256": source_hashes.get("sha256", ""),
+            "source_format": source_format,
+            "source_index": int(details.get("source_index") or 0),
+            "message_id": str(details.get("message_id") or ""),
+            "subject": str(details.get("subject") or ""),
+            "mailbox_name": str(details.get("mailbox_name") or ""),
+            "message_count": int(details.get("message_count") or 0),
+            "attachment_count": int(details.get("attachment_count") or 0),
+            "citation_manifest_sha256": str(citation_manifest.get("manifest_sha256") or ""),
+            "parser_manifest_sha256": str(parser_manifest.get("manifest_sha256") or ""),
+            "viewer": str(viewer_locator.get("viewer") or ""),
+        },
+        "correlation_targets": [
+            "libpff/readpst/Outlook/native mailbox diff",
+            "cloud provider mail export",
+            "attachment hash/file viewer",
+            "timeline and entity view",
+            "privilege/scope review",
+        ],
+        "risk_tags": sorted(set(map(str, risk_flags)) | {"email-validation-required"}),
+        "validation_required": True,
+        "report_grade_ready": False,
+        "validation_snapshot": dict(validation_checks),
+        "commercial_blockers": email_blockers(source_format),
+        "report_guidance": "Use as a mailbox review pivot until native/trusted-parser diff, attachment validation, and privilege-scope review are attached.",
+    }
 
 
 def email_blockers(source_format: str) -> list[str]:

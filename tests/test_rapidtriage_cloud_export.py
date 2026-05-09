@@ -81,6 +81,13 @@ class RapidTriageCloudExportTests(unittest.TestCase):
             self.assertTrue(google_review["primary_pivot_present"])
             self.assertIn("message_id", google_review["present_primary_pivots"])
             self.assertEqual(google_review["sidecar_merge_status"], "not-performed")
+            cloud_review = mail["details"]["cloud_analyst_review_profile"]
+            self.assertEqual(cloud_review["profile_version"], "cloud-analyst-review-profile-v1")
+            self.assertEqual(cloud_review["gap_ids"], ["#37"])
+            self.assertEqual(cloud_review["cloud_family"], "google")
+            self.assertIn("provider-native export/API diff", cloud_review["correlation_targets"])
+            self.assertIn("complete provider account export", cloud_review["not_proof_of"])
+            self.assertFalse(cloud_review["report_grade_ready"])
             self.assertTrue(mail["details"]["validation_checks"]["google_takeout_review_profile_emitted"])
             self.assertTrue(mail["details"]["validation_checks"]["google_takeout_row_pivot_present"])
             mail_uplift = mail["details"]["commercial_uplift_evidence"]

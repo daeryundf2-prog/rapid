@@ -280,6 +280,17 @@ def run_cloud_api_collection(
                 "Validate collected JSON against provider-native export views before report conclusions.",
             ],
         ),
+        "cloud_api_analyst_review_profile": cloud_api_analyst_review_profile(
+            manifest_path=manifest_path,
+            output_dir=output_dir,
+            responses_dir=responses_dir,
+            summary=summary,
+            credential_handling=credential_handling,
+            requests=collected,
+            provider_scope_profile=provider_scope_profile,
+            acquisition_manifest=acquisition_manifest,
+            report_grade=api_report_grade,
+        ),
         "import_guidance": "Run `rapidtriage artifacts OUTPUT_DIR/responses --kind cloud-export` to normalize supported JSON responses.",
     }
     output_path = output_dir / "rapidtriage-cloud-collect.json"
@@ -292,6 +303,96 @@ def run_cloud_api_collection(
         )
     payload["output"] = str((output_dir / ("rapidtriage-cloud-collect.dry-run.json" if dry_run else "rapidtriage-cloud-collect.json")).resolve())
     return payload
+
+
+def cloud_api_analyst_review_profile(
+    *,
+    manifest_path: Path,
+    output_dir: Path,
+    responses_dir: Path,
+    summary: Mapping[str, object],
+    credential_handling: Mapping[str, object],
+    requests: list[Mapping[str, object]],
+    provider_scope_profile: Mapping[str, object],
+    acquisition_manifest: Mapping[str, object],
+    report_grade: Mapping[str, object],
+) -> dict[str, object]:
+    response_hashes = [str(row.get("response_sha256")) for row in requests if row.get("response_sha256")][:25]
+    services = sorted({str(row.get("service") or "") for row in requests if row.get("service")})
+    return {
+        "profile_version": "cloud-api-analyst-review-profile-v1",
+        "gap_ids": ["#40"],
+        "artifact_type": "cloud-api-collection",
+        "provider": str(provider_scope_profile.get("provider") or ""),
+        "services": services,
+        "severity": "high" if int(summary.get("error_count") or 0) else "medium",
+        "summary": (
+            f"cloud-api requests={summary.get('request_count', 0)} "
+            f"collected={summary.get('collected_count', 0)} dry_run={summary.get('dry_run', False)}"
+        ),
+        "evidence_interpretation": "Manifest-driven cloud API collection with redacted credential handling and response hash provenance",
+        "not_proof_of": [
+            "complete provider account acquisition",
+            "provider OAuth/device-flow correctness",
+            "pagination/delta completeness",
+            "deleted or retained object completeness",
+            "legal hold/eDiscovery equivalence",
+        ],
+        "analyst_questions": [
+            "Does the manifest scope match written legal authority and provider consent records?",
+            "Do response hashes match provider-native export/API replay evidence?",
+            "Were pagination, throttling, retry, and delta tokens fully exercised?",
+            "Should collected JSON be normalized through cloud-export and correlated with email/mobile/browser timelines?",
+        ],
+        "primary_pivots": [
+            value
+            for value in (
+                str(provider_scope_profile.get("provider") or ""),
+                str(provider_scope_profile.get("account") or ""),
+                str(summary.get("cloud_api_acquisition_manifest_hash") or ""),
+                *response_hashes[:3],
+            )
+            if value
+        ],
+        "source_field_values": {
+            "manifest_path": str(manifest_path.resolve()),
+            "manifest_sha256": compute_sha256(manifest_path),
+            "output_dir": str(output_dir.resolve()),
+            "responses_dir": str(responses_dir.resolve()),
+            "request_count": int(summary.get("request_count") or 0),
+            "collected_count": int(summary.get("collected_count") or 0),
+            "error_count": int(summary.get("error_count") or 0),
+            "dry_run": bool(summary.get("dry_run")),
+            "acquisition_manifest_sha256": str(acquisition_manifest.get("manifest_sha256") or ""),
+            "response_sha256_samples": response_hashes,
+            "credential_storage": str(credential_handling.get("credential_storage") or ""),
+            "tokens_written_to_output": bool(credential_handling.get("tokens_written_to_output")),
+        },
+        "correlation_targets": [
+            "provider-native API/export diff",
+            "legal authority and consent record",
+            "credential authority/audit manifest",
+            "cloud-export normalized rows",
+            "email/mobile/browser/timeline correlation",
+        ],
+        "risk_tags": sorted(
+            {
+                "cloud-api-validation-required",
+                *list(report_grade.get("failed_check_ids") or []),
+                *([] if not credential_handling.get("tokens_written_to_output") else ["token-output-risk"]),
+            }
+        ),
+        "validation_required": True,
+        "report_grade_ready": False,
+        "credential_boundary": {
+            "headers_redacted": bool(credential_handling.get("headers_redacted")),
+            "tokens_written_to_output": bool(credential_handling.get("tokens_written_to_output")),
+            "secure_token_vault_integrated": bool(credential_handling.get("secure_token_vault_integrated")),
+            "controlled_reveal_policy": str(credential_handling.get("controlled_reveal_policy") or ""),
+        },
+        "commercial_blockers": list(report_grade.get("blockers", CLOUD_API_REPORT_GRADE_BLOCKERS)),
+        "report_guidance": "Use as a cloud acquisition review pivot until provider-native diff, pagination evidence, legal authority, and credential audit evidence are attached.",
+    }
 
 
 def load_manifest(path: Path) -> Mapping[str, object]:

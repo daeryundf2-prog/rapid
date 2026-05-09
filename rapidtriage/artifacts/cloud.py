@@ -377,6 +377,17 @@ def build_record(
                 report_grade=report_grade,
                 details=detail_payload,
             ),
+            "cloud_analyst_review_profile": cloud_analyst_review_profile(
+                gap_ids=gap_ids,
+                family=family,
+                service=service,
+                artifact_type=artifact_type,
+                source_index=source_index,
+                source_hashes=source_hashes,
+                source_path=str(path.resolve()),
+                report_grade=report_grade,
+                details=detail_payload,
+            ),
             **detail_payload,
         },
     )
@@ -2238,6 +2249,94 @@ def cloud_forensic_review(
             "Deleted state, retention/eDiscovery semantics, sharing graph, and provider-native completeness remain validation-gated.",
         ],
     )
+
+
+def cloud_analyst_review_profile(
+    *,
+    gap_ids: list[str],
+    family: str,
+    service: str,
+    artifact_type: str,
+    source_index: int,
+    source_hashes: Mapping[str, str],
+    source_path: str,
+    report_grade: Mapping[str, object],
+    details: Mapping[str, object],
+) -> dict[str, object]:
+    manifest = details.get("cloud_export_import_manifest") if isinstance(details.get("cloud_export_import_manifest"), Mapping) else {}
+    viewer_locator = manifest.get("source_viewer_locator") if isinstance(manifest.get("source_viewer_locator"), Mapping) else {}
+    validation_checks = details.get("validation_checks") if isinstance(details.get("validation_checks"), Mapping) else {}
+    risk_flags = details.get("risk_flags") if isinstance(details.get("risk_flags"), list) else []
+    row_pivots = manifest.get("row_pivots") if isinstance(manifest.get("row_pivots"), list) else []
+    profile_names = [
+        key
+        for key in ("google_takeout_review_profile", "icloud_export_review_profile", "m365_export_review_profile")
+        if isinstance(details.get(key), Mapping)
+    ]
+    return {
+        "profile_version": "cloud-analyst-review-profile-v1",
+        "gap_ids": list(gap_ids),
+        "artifact_type": artifact_type,
+        "cloud_family": family,
+        "service": service or optional_text(details.get("service")),
+        "source_index": source_index,
+        "severity": "high" if risk_flags else "medium",
+        "summary": f"{artifact_type} / {family} / {service or optional_text(details.get('service')) or 'unknown-service'}",
+        "evidence_interpretation": "Provider export/API row normalization and source-scoped cloud review pivot",
+        "not_proof_of": [
+            "complete provider account export",
+            "deleted object recovery",
+            "tenant-wide permission graph",
+            "provider-native API equivalence",
+            "retention/eDiscovery completeness",
+        ],
+        "analyst_questions": [
+            "Does this row match the provider-native export or admin/eDiscovery view?",
+            "Are export scope, account ownership, timezone, retention, and source hash preserved?",
+            "Do attachments, shared permissions, reactions, or deleted/version history need a provider-specific diff?",
+            "Should this row be correlated with email, browser, mobile, timeline, or entity views?",
+        ],
+        "primary_pivots": [
+            value
+            for value in (
+                optional_text(details.get("message_id")),
+                optional_text(details.get("file_id")),
+                optional_text(details.get("file_name")),
+                optional_text(details.get("chat_id")),
+                optional_text(details.get("operation")),
+                optional_text(details.get("account_email")),
+                optional_text(details.get("url")),
+            )
+            if value
+        ][:8],
+        "source_field_values": {
+            "source_path": source_path,
+            "source_sha256": source_hashes.get("sha256", ""),
+            "source_index": source_index,
+            "event_type": optional_text(details.get("event_type")),
+            "timestamp": optional_text(details.get("timestamp")),
+            "subject": optional_text(details.get("subject")),
+            "file_name": optional_text(details.get("file_name")),
+            "operation": optional_text(details.get("operation")),
+            "manifest_sha256": optional_text(manifest.get("manifest_sha256")),
+            "viewer": optional_text(viewer_locator.get("viewer")),
+        },
+        "provider_profiles_present": profile_names,
+        "row_pivots": list(row_pivots),
+        "correlation_targets": [
+            "provider-native export/API diff",
+            "account ownership and legal scope",
+            "email/mobile/browser/timeline correlation",
+            "sharing and permission review",
+            "retention/deleted-state validation",
+        ],
+        "risk_tags": sorted(set(map(str, risk_flags)) | {"cloud-validation-required"}),
+        "validation_required": True,
+        "report_grade_ready": False,
+        "validation_snapshot": dict(validation_checks),
+        "commercial_blockers": list(report_grade.get("blockers", CLOUD_REPORT_GRADE_BLOCKERS)),
+        "report_guidance": "Use as a provider-export review pivot until source scope, native provider diff, and known-answer corpus evidence are attached.",
+    }
 
 
 def cloud_validation_checks(row: Mapping[str, object], *, required: Iterable[str]) -> dict[str, object]:
