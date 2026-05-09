@@ -122,6 +122,16 @@ def run_benchmark(
         release_threshold_profile=release_threshold_profile,
         scale_matrix=scale_matrix,
     )
+    scale_proof_manifest = build_benchmark_scale_proof_manifest(
+        file_count=file_count,
+        metrics=metric_values,
+        environment_profile=environment_profile,
+        release_threshold_profile=release_threshold_profile,
+        scale_matrix=scale_matrix,
+        run_summary_path=run_output_dir / "rapidtriage-run-summary.json",
+        benchmark_json_path=json_path,
+        benchmark_markdown_path=markdown_path,
+    )
     payload: dict[str, object] = {
         "command": "benchmark",
         "generated_at": now_iso(),
@@ -163,6 +173,8 @@ def run_benchmark(
         },
         "benchmark_native_capabilities": dict(BENCHMARK_NATIVE_CAPABILITIES),
         "benchmark_scale_matrix": scale_matrix,
+        "benchmark_scale_proof_manifest": scale_proof_manifest,
+        "benchmark_scale_proof_manifest_hash": scale_proof_manifest["manifest_hash"],
         "benchmark_command_manifest": benchmark_manifest,
         "benchmark_command_manifest_hash": benchmark_manifest["manifest_hash"],
         "functional_priority_profile": benchmark_functional_profile(
@@ -172,6 +184,7 @@ def run_benchmark(
                 "release_threshold_status": release_threshold_profile["status"],
             },
             benchmark_manifest=benchmark_manifest,
+            scale_proof_manifest=scale_proof_manifest,
         ),
         "release_threshold_profile": release_threshold_profile,
         "benchmark_report_grade_assessment": benchmark_report_grade_assessment(file_count=file_count),
@@ -189,6 +202,7 @@ def run_benchmark(
                 "p50/p95 search latency and records/sec are recorded for the executed run",
                 "peak Python memory and output byte totals are captured for release comparison",
                 "run summary, benchmark JSON, and Markdown paths are preserved as evidence",
+                "benchmark scale proof manifest records covered/missing 100k/1M/10M targets",
             ],
             external_validation=[
                 "published 100k/1M/10M hardware and OS benchmark matrix",
@@ -202,6 +216,7 @@ def run_benchmark(
                 **metric_values,
                 "release_threshold_status": release_threshold_profile["status"],
                 "benchmark_manifest_hash": benchmark_manifest["manifest_hash"],
+                "benchmark_scale_proof_manifest_hash": scale_proof_manifest["manifest_hash"],
             },
             run_summary_path=run_output_dir / "rapidtriage-run-summary.json",
         ),
@@ -630,6 +645,79 @@ def build_benchmark_command_manifest(
     }
 
 
+def build_benchmark_scale_proof_manifest(
+    *,
+    file_count: int,
+    metrics: Mapping[str, object],
+    environment_profile: Mapping[str, object],
+    release_threshold_profile: Mapping[str, object],
+    scale_matrix: Sequence[Mapping[str, object]],
+    run_summary_path: Path,
+    benchmark_json_path: Path,
+    benchmark_markdown_path: Path,
+) -> dict[str, object]:
+    environment_hash = hashlib.sha256(json.dumps(dict(environment_profile), sort_keys=True).encode("utf-8")).hexdigest()
+    threshold_hash = hashlib.sha256(json.dumps(dict(release_threshold_profile), sort_keys=True).encode("utf-8")).hexdigest()
+    metric_snapshot = {
+        "file_count": file_count,
+        "ingest_seconds": round(float(metrics.get("ingest_seconds") or 0), 6),
+        "memory_peak_bytes": int(metrics.get("memory_peak_bytes") or 0),
+        "search_p50_seconds": round(float(metrics.get("search_p50_seconds") or 0), 6),
+        "search_p95_seconds": round(float(metrics.get("search_p95_seconds") or 0), 6),
+        "records_per_second": round(float(metrics.get("records_per_second") or 0), 3),
+        "run_output_size_bytes": int(metrics.get("run_output_size_bytes") or 0),
+    }
+    scale_rows = []
+    for row in scale_matrix:
+        target = int(row.get("target_records") or 0)
+        covered = bool(row.get("covered_by_this_run"))
+        scale_rows.append(
+            {
+                "target_records": target,
+                "label": str(row.get("label") or scale_label(target)),
+                "coverage_status": "covered-by-this-run" if covered else "external-run-required",
+                "covered_by_this_run": covered,
+                "observed_record_count": file_count if covered else 0,
+                "missing_record_count": max(target - file_count, 0),
+                "required_evidence": list(row.get("required_evidence") or []),
+                "commercial_gap_ids": [BENCHMARK_GAP_ID],
+            }
+        )
+    manifest_core: dict[str, object] = {
+        "profile_version": "benchmark-scale-proof-manifest-v1",
+        "item_number": 66,
+        "commercial_gap_ids": [BENCHMARK_GAP_ID],
+        "target_record_counts": list(BENCHMARK_SCALE_TARGETS),
+        "executed_record_count": file_count,
+        "covered_target_count": sum(1 for row in scale_rows if row["covered_by_this_run"]),
+        "required_target_count": len(BENCHMARK_SCALE_TARGETS),
+        "all_scale_targets_covered": all(bool(row["covered_by_this_run"]) for row in scale_rows),
+        "scale_rows": scale_rows,
+        "scale_rows_hash": hashlib.sha256(json.dumps(scale_rows, sort_keys=True).encode("utf-8")).hexdigest(),
+        "metric_snapshot": metric_snapshot,
+        "metric_snapshot_hash": hashlib.sha256(json.dumps(metric_snapshot, sort_keys=True).encode("utf-8")).hexdigest(),
+        "environment_hash": environment_hash,
+        "release_threshold_profile_hash": threshold_hash,
+        "release_threshold_status": str(release_threshold_profile.get("status") or ""),
+        "evidence_paths": {
+            "benchmark_json": str(benchmark_json_path),
+            "benchmark_markdown": str(benchmark_markdown_path),
+            "run_summary": str(run_summary_path),
+        },
+        "blockers": [
+            "published-100k-1m-10m-hardware-and-os-matrix-required",
+            "trusted-benchmark-threshold-manifest-required",
+            BENCHMARK_TRUSTED_DIFF_BLOCKER_66,
+        ],
+        "commercial_claim_allowed": False,
+        "report_use_warning": "This manifest records the current benchmark run and missing scale targets; it is not proof of 100k/1M/10M commercial readiness unless every target is covered on representative hardware.",
+    }
+    return {
+        **manifest_core,
+        "manifest_hash": hashlib.sha256(json.dumps(manifest_core, sort_keys=True).encode("utf-8")).hexdigest(),
+    }
+
+
 def scale_label(target: int) -> str:
     if target >= 1_000_000:
         return f"{target // 1_000_000}M"
@@ -667,6 +755,7 @@ def benchmark_functional_profile(
     file_count: int,
     metrics: Mapping[str, object],
     benchmark_manifest: Mapping[str, object],
+    scale_proof_manifest: Mapping[str, object],
 ) -> dict[str, object]:
     return {
         "batch_id": FUNCTIONAL_SCALE_BATCH_ID,
@@ -689,6 +778,9 @@ def benchmark_functional_profile(
             "run_output_size_bytes": metrics.get("run_output_size_bytes"),
             "release_threshold_status": metrics.get("release_threshold_status"),
             "benchmark_manifest_hash": str(benchmark_manifest.get("manifest_hash") or ""),
+            "benchmark_scale_proof_manifest_hash": str(scale_proof_manifest.get("manifest_hash") or ""),
+            "covered_target_count": int(scale_proof_manifest.get("covered_target_count") or 0),
+            "all_scale_targets_covered": bool(scale_proof_manifest.get("all_scale_targets_covered")),
             "release_threshold_profile_hash": str(benchmark_manifest.get("release_threshold_profile_hash") or ""),
             "synthetic_or_existing_root_supported": True,
         },
@@ -866,6 +958,8 @@ def benchmark_core_accuracy_gates(
         satisfied.append("release threshold profile emitted")
     if metrics.get("benchmark_manifest_hash"):
         satisfied.append("benchmark command manifest hash emitted")
+    if metrics.get("benchmark_scale_proof_manifest_hash"):
+        satisfied.append("benchmark scale proof manifest emitted")
     evidence_refs = [
         f"file_count:{file_count}",
         f"run_summary:{run_summary_path or ''}",
@@ -873,6 +967,8 @@ def benchmark_core_accuracy_gates(
     ]
     if metrics.get("benchmark_manifest_hash"):
         evidence_refs.append(f"benchmark_manifest_hash:{metrics.get('benchmark_manifest_hash')}")
+    if metrics.get("benchmark_scale_proof_manifest_hash"):
+        evidence_refs.append(f"benchmark_scale_proof_manifest_hash:{metrics.get('benchmark_scale_proof_manifest_hash')}")
     if trusted_diff and trusted_diff.get("status") == "pass":
         satisfied.append("trusted benchmark threshold diff pass")
         evidence_refs.append(f"trusted_tool:{trusted_diff.get('trusted_tool', '')}")

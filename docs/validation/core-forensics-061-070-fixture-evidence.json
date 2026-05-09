@@ -54,7 +54,7 @@
       "title": "100k/1M/10M record benchmark",
       "test_files": ["tests/test_rapidtriage_ops.py"],
       "assertions": [
-        "Benchmark output preserves scale matrix, ingest/search metrics, raw latency samples, environment profile, release-threshold guardrail profile, memory/output size, run-summary link, trusted threshold diff helper/gate, #66 core_accuracy_gates, #66 commercial_uplift_evidence, and reportability blockers for missing hardware/OS/dependency/evidence-size/wall-time/memory/p95 independent reproduction evidence."
+        "Benchmark output preserves scale matrix, benchmark-scale-proof-manifest with covered/missing 100k/1M/10M targets, ingest/search metrics, raw latency samples, environment profile, release-threshold guardrail profile, metric/environment/threshold hashes, memory/output size, run-summary link, trusted threshold diff helper/gate, #66 core_accuracy_gates, #66 commercial_uplift_evidence, and reportability blockers for missing hardware/OS/dependency/evidence-size/wall-time/memory/p95 independent reproduction evidence."
       ],
       "remaining_external_validation": ["Published 100k/1M/10M hardware runs, trusted threshold manifests, and release thresholds."]
     },

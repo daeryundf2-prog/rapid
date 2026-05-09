@@ -500,6 +500,7 @@ class RapidTriageOpsTests(unittest.TestCase):
             self.assertIn("ingest/search metrics captured", payload["core_accuracy_gates"][0]["satisfied_checks"])
             self.assertIn("release threshold profile emitted", payload["core_accuracy_gates"][0]["satisfied_checks"])
             self.assertIn("benchmark command manifest hash emitted", payload["core_accuracy_gates"][0]["satisfied_checks"])
+            self.assertIn("benchmark scale proof manifest emitted", payload["core_accuracy_gates"][0]["satisfied_checks"])
             self.assertEqual(payload["functional_priority_profile"]["item_number"], 34)
             self.assertEqual(payload["functional_priority_profile"]["batch_id"], "commercial-uplift-031-035")
             self.assertTrue(payload["functional_priority_profile"]["controls"]["synthetic_or_existing_root_supported"])
@@ -507,6 +508,12 @@ class RapidTriageOpsTests(unittest.TestCase):
                 payload["functional_priority_profile"]["controls"]["benchmark_manifest_hash"],
                 payload["benchmark_command_manifest"]["manifest_hash"],
             )
+            self.assertEqual(
+                payload["functional_priority_profile"]["controls"]["benchmark_scale_proof_manifest_hash"],
+                payload["benchmark_scale_proof_manifest"]["manifest_hash"],
+            )
+            self.assertEqual(payload["functional_priority_profile"]["controls"]["covered_target_count"], 0)
+            self.assertFalse(payload["functional_priority_profile"]["controls"]["all_scale_targets_covered"])
             self.assertIn(
                 payload["functional_priority_profile"]["controls"]["release_threshold_status"],
                 {"pass", "needs-review"},
@@ -517,6 +524,20 @@ class RapidTriageOpsTests(unittest.TestCase):
             )
             self.assertFalse(payload["benchmark_native_capabilities"]["continuous_10m_record_gate"])
             self.assertEqual([row["label"] for row in payload["benchmark_scale_matrix"]], ["100k", "1M", "10M"])
+            self.assertEqual(payload["benchmark_scale_proof_manifest"]["profile_version"], "benchmark-scale-proof-manifest-v1")
+            self.assertEqual(payload["benchmark_scale_proof_manifest"]["item_number"], 66)
+            self.assertEqual(payload["benchmark_scale_proof_manifest"]["executed_record_count"], 12)
+            self.assertEqual(payload["benchmark_scale_proof_manifest"]["covered_target_count"], 0)
+            self.assertFalse(payload["benchmark_scale_proof_manifest"]["all_scale_targets_covered"])
+            self.assertEqual(len(payload["benchmark_scale_proof_manifest"]["manifest_hash"]), 64)
+            self.assertEqual(
+                payload["benchmark_scale_proof_manifest_hash"],
+                payload["benchmark_scale_proof_manifest"]["manifest_hash"],
+            )
+            self.assertEqual(
+                payload["benchmark_scale_proof_manifest"]["evidence_paths"]["run_summary"],
+                payload["outputs"]["run_summary"],
+            )
             uplift = payload["commercial_uplift_evidence"]
             self.assertEqual(uplift["batch_id"], "commercial-uplift-066-070")
             self.assertEqual(uplift["item_numbers"], [66])
@@ -534,11 +555,15 @@ class RapidTriageOpsTests(unittest.TestCase):
             trusted_diff = build_benchmark_trusted_diff(payload["metrics"], payload["metrics"])
             trusted_gates = benchmark_core_accuracy_gates(
                 file_count=payload["options"]["file_count"],
-                metrics=payload["metrics"],
+                metrics={
+                    **payload["metrics"],
+                    "benchmark_scale_proof_manifest_hash": payload["benchmark_scale_proof_manifest_hash"],
+                },
                 run_summary_path=Path(payload["outputs"]["run_summary"]),
                 trusted_diff=trusted_diff,
             )
             self.assertEqual(trusted_diff["status"], "pass")
+            self.assertIn("benchmark scale proof manifest emitted", trusted_gates[0]["satisfied_checks"])
             self.assertIn("trusted benchmark threshold diff pass", trusted_gates[0]["satisfied_checks"])
 
     def test_stress_plan_command_writes_large_case_runbook(self) -> None:
