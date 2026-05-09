@@ -1374,6 +1374,11 @@ def build_parser_crash_isolation_ledger(
         if isinstance(event, Mapping)
     ]
     error_hashes = sorted({str(error.get("error_hash") or "") for error in errors if error.get("error_hash")})
+    continuation_manifest = parser_crash_continuation_manifest(
+        errors=errors,
+        parser_statuses=parser_statuses,
+        scheduler_manifest=scheduler_manifest,
+    )
     ledger_core: Dict[str, object] = {
         "profile_version": "parser-crash-isolation-ledger-v1",
         "item_number": 71,
@@ -1384,6 +1389,8 @@ def build_parser_crash_isolation_ledger(
         "error_hashes": error_hashes,
         "parser_statuses": parser_statuses,
         "isolated_errors": errors,
+        "parser_crash_continuation_manifest": continuation_manifest,
+        "parser_crash_continuation_manifest_hash": continuation_manifest["manifest_hash"],
         "run_continuation_verified": True,
         "isolation_policy": {
             "one_parser_error_does_not_abort_case_run": True,
@@ -1407,6 +1414,7 @@ def build_parser_crash_isolation_ledger(
             {
                 "error_hashes": error_hashes,
                 "parser_statuses": parser_statuses,
+                "continuation_manifest_hash": continuation_manifest["manifest_hash"],
                 "scheduler_manifest_hash": scheduler_manifest.get("manifest_hash"),
             },
             sort_keys=True,
@@ -1414,6 +1422,67 @@ def build_parser_crash_isolation_ledger(
     ).hexdigest()
     ledger_core["manifest_hash"] = hashlib.sha256(json.dumps(ledger_core, sort_keys=True).encode("utf-8")).hexdigest()
     return ledger_core
+
+
+def parser_crash_continuation_manifest(
+    *,
+    errors: Sequence[Mapping[str, object]],
+    parser_statuses: Sequence[Mapping[str, object]],
+    scheduler_manifest: Mapping[str, object],
+) -> dict[str, object]:
+    isolated_error_count = len([error for error in errors if isinstance(error, Mapping)])
+    rows: list[dict[str, object]] = []
+    for index, status in enumerate(parser_statuses):
+        row_core = {
+            "index": index,
+            "kind": str(status.get("kind") or ""),
+            "status": str(status.get("status") or ""),
+            "parser_error_count": int(status.get("parser_error_count") or 0),
+            "output_path_hash": hashlib.sha256(
+                str(status.get("output_path") or "").encode("utf-8", errors="replace")
+            ).hexdigest(),
+            "continued_case_run": True,
+            "reportable_without_trusted_validation": False,
+        }
+        rows.append(
+            {
+                **row_core,
+                "row_hash": hashlib.sha256(json.dumps(row_core, sort_keys=True).encode("utf-8")).hexdigest(),
+            }
+        )
+    row_head_hash = hashlib.sha256("\n".join(str(row["row_hash"]) for row in rows).encode("ascii")).hexdigest()
+    completed_or_reused = sum(1 for row in rows if row["status"] in {"completed", "reused"})
+    failed_isolated = sum(1 for row in rows if row["status"] == "error" or row["parser_error_count"] > 0)
+    manifest_core = {
+        "profile_version": "parser-crash-continuation-manifest-v1",
+        "item_number": 71,
+        "gap_id": PARSER_CRASH_ISOLATION_GAP_ID,
+        "commercial_gap_ids": [PARSER_CRASH_ISOLATION_GAP_ID],
+        "scheduled_parser_count": int(scheduler_manifest.get("scheduled_count") or len(rows)),
+        "parser_status_row_count": len(rows),
+        "isolated_error_count": isolated_error_count,
+        "completed_or_reused_after_scheduler_count": completed_or_reused,
+        "failed_isolated_count": failed_isolated,
+        "row_head_hash": row_head_hash,
+        "parser_rows": rows,
+        "continuation_policy": {
+            "one_parser_error_does_not_abort_case_run": True,
+            "failed_parser_json_is_preserved": True,
+            "later_parser_outputs_require_warning_review": True,
+            "native_process_sandbox": False,
+            "trusted_crash_corpus_required": True,
+        },
+        "commercial_claim_allowed": False,
+        "blockers": [
+            PARSER_CRASH_TRUSTED_DIFF_BLOCKER_71,
+            "native-process-sandboxing-is-not-yet-used-for-every-parser",
+            "corrupt-input-fuzzing-and-crash-corpus-validation-remain-required",
+        ],
+    }
+    return {
+        **manifest_core,
+        "manifest_hash": hashlib.sha256(json.dumps(manifest_core, sort_keys=True).encode("utf-8")).hexdigest(),
+    }
 
 
 def parser_error_inventory_profile(errors: Sequence[Mapping[str, object]]) -> Dict[str, object]:
@@ -1558,10 +1627,16 @@ def parser_crash_isolation_assessment(
         satisfied.append("parser error hash emitted")
     if crash_manifest and crash_manifest.get("manifest_hash"):
         satisfied.append("parser crash isolation manifest hash emitted")
+    if crash_manifest and crash_manifest.get("parser_crash_continuation_manifest_hash"):
+        satisfied.append("parser crash continuation manifest hash emitted")
     evidence_refs = [f"parser_error_count:{error_count}", "run-summary:processing.parser_crash_isolation"]
     evidence_refs.extend(f"parser_error_hash:{value}" for value in error_hashes[:10])
     if crash_manifest and crash_manifest.get("manifest_hash"):
         evidence_refs.append(f"parser_crash_manifest_hash:{crash_manifest.get('manifest_hash')}")
+    if crash_manifest and crash_manifest.get("parser_crash_continuation_manifest_hash"):
+        evidence_refs.append(
+            f"parser_crash_continuation_manifest_hash:{crash_manifest.get('parser_crash_continuation_manifest_hash')}"
+        )
     if trusted_diff and trusted_diff.get("status") == "pass":
         satisfied.append("trusted parser crash-corpus diff pass")
         evidence_refs.append(f"trusted_tool:{trusted_diff.get('trusted_tool', '')}")
@@ -1572,6 +1647,9 @@ def parser_crash_isolation_assessment(
         "parser_error_count": error_count,
         "parser_crash_isolation_manifest": dict(crash_manifest) if crash_manifest else {},
         "parser_crash_manifest_hash": str((crash_manifest or {}).get("manifest_hash") or ""),
+        "parser_crash_continuation_manifest_hash": str(
+            (crash_manifest or {}).get("parser_crash_continuation_manifest_hash") or ""
+        ),
         "ready_for_court_report": error_count == 0,
         "core_accuracy_gates": [
             build_accuracy_gate(
@@ -3337,6 +3415,7 @@ def build_processing_summary(
         ),
         "runtime_defensibility_profiles": build_runtime_defensibility_profiles(
             parser_error_count=parser_error_count,
+            parser_crash_ledger=parser_crash_ledger,
             memory_cap_bytes=memory_cap_bytes,
             scheduled_count=int(artifact_scheduler.get("scheduled_count") or 0),
             scheduler_max_workers=int(artifact_scheduler.get("max_workers") or 0),
@@ -3363,6 +3442,7 @@ def build_processing_summary(
 def build_runtime_defensibility_profiles(
     *,
     parser_error_count: int,
+    parser_crash_ledger: Mapping[str, object],
     memory_cap_bytes: int,
     scheduled_count: int,
     scheduler_max_workers: int,
@@ -3383,6 +3463,17 @@ def build_runtime_defensibility_profiles(
                 "run_continuation_after_parser_exception": True,
                 "summary_warning_propagation": True,
                 "warning_count": warning_count,
+                "parser_crash_continuation_manifest_hash": str(
+                    parser_crash_ledger.get("parser_crash_continuation_manifest_hash") or ""
+                ),
+                "parser_crash_continuation_row_count": int(
+                    (
+                        parser_crash_ledger.get("parser_crash_continuation_manifest")
+                        if isinstance(parser_crash_ledger.get("parser_crash_continuation_manifest"), Mapping)
+                        else {}
+                    ).get("parser_status_row_count")
+                    or 0
+                ),
             },
             blockers=[
                 PARSER_CRASH_TRUSTED_DIFF_BLOCKER_71,

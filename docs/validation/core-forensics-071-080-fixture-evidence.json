@@ -9,7 +9,7 @@
       "title": "Parser crash isolation",
       "test_files": ["tests/test_rapidtriage_run.py"],
       "assertions": [
-        "Synthetic parser failures are isolated into parser_errors with error hashes, crash context, parser-error inventory head hash, failed parser JSON output remains machine-readable, summaries preserve parser error counts, trusted crash-corpus diff helpers/gates, and #71 core_accuracy_gates are attached."
+        "Synthetic parser failures are isolated into parser_errors with error hashes, crash context, parser-error inventory head hash, failed parser JSON output remains machine-readable, summaries preserve parser error counts, parser crash continuation manifest row hashes, trusted crash-corpus diff helpers/gates, and #71 core_accuracy_gates are attached."
       ],
       "remaining_external_validation": ["Native process sandboxing for all parsers, trusted crash-corpus manifests, and corrupt-input fuzz/crash corpus validation."]
     },

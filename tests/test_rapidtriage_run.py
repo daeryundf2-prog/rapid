@@ -360,6 +360,30 @@ class RapidTriageRunTests(unittest.TestCase):
             self.assertEqual(parser_crash_ledger["profile_version"], "parser-crash-isolation-ledger-v1")
             self.assertEqual(parser_crash_ledger["item_number"], 71)
             self.assertEqual(len(parser_crash_ledger["manifest_hash"]), 64)
+            continuation_manifest = parser_crash_ledger["parser_crash_continuation_manifest"]
+            self.assertEqual(
+                continuation_manifest["profile_version"],
+                "parser-crash-continuation-manifest-v1",
+            )
+            self.assertEqual(continuation_manifest["item_number"], 71)
+            self.assertEqual(len(continuation_manifest["manifest_hash"]), 64)
+            self.assertRegex(continuation_manifest["row_head_hash"], r"^[0-9a-f]{64}$")
+            self.assertEqual(
+                parser_crash_ledger["parser_crash_continuation_manifest_hash"],
+                continuation_manifest["manifest_hash"],
+            )
+            self.assertEqual(
+                summary_payload["processing"]["parser_crash_isolation"][
+                    "parser_crash_continuation_manifest_hash"
+                ],
+                continuation_manifest["manifest_hash"],
+            )
+            self.assertIn(
+                "parser crash continuation manifest hash emitted",
+                summary_payload["processing"]["parser_crash_isolation"]["core_accuracy_gates"][0][
+                    "satisfied_checks"
+                ],
+            )
             self.assertTrue(parser_crash_ledger["run_continuation_verified"])
             self.assertTrue(
                 parser_crash_ledger["isolation_policy"]["one_parser_error_does_not_abort_case_run"]
@@ -422,6 +446,11 @@ class RapidTriageRunTests(unittest.TestCase):
             runtime_by_number = {profile["item_number"]: profile for profile in runtime_profiles["profiles"]}
             self.assertEqual(runtime_by_number[71]["component"], "parser-crash-isolation")
             self.assertTrue(runtime_by_number[71]["controls"]["isolated_error_payloads"])
+            self.assertRegex(
+                runtime_by_number[71]["controls"]["parser_crash_continuation_manifest_hash"],
+                r"^[0-9a-f]{64}$",
+            )
+            self.assertGreater(runtime_by_number[71]["controls"]["parser_crash_continuation_row_count"], 0)
             self.assertEqual(runtime_by_number[72]["component"], "memory-cap-enforcement")
             self.assertTrue(runtime_by_number[72]["controls"]["stage_boundary_checks"])
             self.assertEqual(runtime_by_number[73]["component"], "preview-sandboxing")

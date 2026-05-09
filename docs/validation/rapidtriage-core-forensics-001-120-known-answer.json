@@ -1674,7 +1674,7 @@
       ],
       "expected": {
         "required_assertions": [
-          "Parser failures preserve isolated parser_errors, error hashes, crash context, parser-error inventory head hash, failed parser JSON output, run continuation warnings, summary counts, and #71 core_accuracy_gates."
+          "Parser failures preserve isolated parser_errors, error hashes, crash context, parser-error inventory head hash, failed parser JSON output, run continuation warnings, summary counts, parser crash continuation manifest row hashes, and #71 core_accuracy_gates."
         ]
       },
       "notes": "Internal fixture pass; native process sandboxing and corrupt-input fuzz corpus remain blockers.",
