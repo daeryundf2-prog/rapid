@@ -45,7 +45,7 @@
       "title": "Parallel parser scheduler",
       "test_files": ["tests/test_rapidtriage_run.py"],
       "assertions": [
-        "Run summaries preserve bounded worker count, deterministic output paths, per-parser capture, resume-aware scheduling, scheduler run manifest hash, per-parser duration telemetry, trusted scheduler diff helpers/gates, and #75 core_accuracy_gates."
+        "Run summaries preserve bounded worker count, deterministic output paths, per-parser capture, resume-aware scheduling, scheduler run manifest hash, scheduler event row hashes, per-parser duration telemetry, trusted scheduler diff helpers/gates, and #75 core_accuracy_gates."
       ],
       "remaining_external_validation": ["Trusted scheduler manifests, distributed priority queue, live per-worker telemetry UI/stream, and TB-scale fairness/backpressure validation."]
     },

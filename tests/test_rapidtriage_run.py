@@ -260,6 +260,8 @@ class RapidTriageRunTests(unittest.TestCase):
         self.assertIn("per-worker duration telemetry emitted", scheduler["core_accuracy_gates"][0]["satisfied_checks"])
         self.assertEqual(scheduler["scheduler_manifest"]["profile"], "parser-scheduler-run-manifest-v1")
         self.assertIn("events_head_hash", scheduler["scheduler_manifest"])
+        self.assertIn("scheduler_event_row_head_hash", scheduler["scheduler_manifest"])
+        self.assertRegex(scheduler["scheduler_manifest"]["resource_policy_hash"], r"^[0-9a-f]{64}$")
         self.assertTrue(scheduler["scheduler_manifest"]["deterministic_order_verified"])
         scheduler_diff = build_scheduler_trusted_diff(scheduler, scheduler)
         scheduler_trusted = parallel_parser_scheduler_assessment(["browser", "windows"], trusted_diff=scheduler_diff)
@@ -489,6 +491,10 @@ class RapidTriageRunTests(unittest.TestCase):
             self.assertEqual(scheduler_manifest["deterministic_output_order"], list(summary_payload["safety"]["artifact_scheduler"]["manifest"]["deterministic_output_order"]))
             self.assertTrue(scheduler_manifest["resource_policy"]["cpu_worker_limit"] <= 4)
             self.assertTrue(scheduler_manifest["events"])
+            self.assertEqual(scheduler_manifest["event_row_count"], len(scheduler_manifest["events"]))
+            self.assertRegex(scheduler_manifest["scheduler_event_row_head_hash"], r"^[0-9a-f]{64}$")
+            self.assertRegex(scheduler_manifest["events"][0]["row_hash"], r"^[0-9a-f]{64}$")
+            self.assertRegex(scheduler_manifest["resource_policy_hash"], r"^[0-9a-f]{64}$")
             runtime_profiles = summary_payload["processing"]["runtime_defensibility_profiles"]
             self.assertEqual(runtime_profiles["batch_id"], "commercial-uplift-071-075")
             self.assertEqual(runtime_profiles["item_numbers"], [71, 72, 73, 74, 75])
@@ -548,6 +554,18 @@ class RapidTriageRunTests(unittest.TestCase):
             self.assertEqual(
                 runtime_by_number[75]["controls"]["scheduler_events_head_hash"],
                 scheduler_manifest["events_head_hash"],
+            )
+            self.assertEqual(
+                runtime_by_number[75]["controls"]["scheduler_event_row_head_hash"],
+                scheduler_manifest["scheduler_event_row_head_hash"],
+            )
+            self.assertEqual(
+                runtime_by_number[75]["controls"]["scheduler_event_row_count"],
+                scheduler_manifest["event_row_count"],
+            )
+            self.assertEqual(
+                runtime_by_number[75]["controls"]["resource_policy_hash"],
+                scheduler_manifest["resource_policy_hash"],
             )
             self.assertTrue(runtime_by_number[75]["controls"]["deterministic_order_verified"])
             large_data_profiles = summary_payload["processing"]["functional_large_data_profiles"]

@@ -732,11 +732,15 @@ def parallel_parser_scheduler_assessment(
                 "CPU/I/O quota policy emitted",
                 "deterministic output order manifest emitted",
                 "local backpressure policy emitted",
+                "scheduler event row hashes emitted",
             ]
         )
         manifest_hash = scheduler_manifest.get("manifest_hash")
         if manifest_hash:
             evidence_refs.append(f"scheduler_manifest_hash:{manifest_hash}")
+        event_head_hash = scheduler_manifest.get("scheduler_event_row_head_hash")
+        if event_head_hash:
+            evidence_refs.append(f"scheduler_event_row_head_hash:{event_head_hash}")
     if trusted_diff and trusted_diff.get("status") == "pass":
         satisfied.append("trusted scheduler manifest diff pass")
         evidence_refs.append(f"trusted_tool:{trusted_diff.get('trusted_tool', '')}")
@@ -1337,14 +1341,31 @@ def build_parser_scheduler_manifest(
     events: Sequence[Mapping[str, object]],
     pending_count: int,
 ) -> dict[str, object]:
-    sorted_events = sorted(events, key=lambda item: (int(item.get("deterministic_output_order") or 0), str(item.get("kind") or "")))
+    sorted_events = [
+        scheduler_event_with_row_hash(event)
+        for event in sorted(
+            events,
+            key=lambda item: (int(item.get("deterministic_output_order") or 0), str(item.get("kind") or "")),
+        )
+    ]
     completed_count = sum(1 for event in sorted_events if event.get("status") == "completed")
     reused_count = sum(1 for event in sorted_events if event.get("reused"))
     error_count = sum(int(event.get("parser_error_count") or 0) for event in sorted_events)
+    event_row_hashes = [str(event["row_hash"]) for event in sorted_events if event.get("row_hash")]
     events_head_hash = hashlib.sha256(json.dumps(sorted_events, sort_keys=True).encode("utf-8")).hexdigest()
     deterministic_order_verified = [
         str(event.get("kind") or "") for event in sorted_events
     ] == list(kinds)[: len(sorted_events)]
+    resource_policy = {
+        "cpu_worker_limit": max_workers,
+        "worker_limit_source": "min(4, scheduled parser kinds)",
+        "io_policy": "each parser writes one deterministic JSON output after collection",
+        "backpressure_policy": "bounded local futures equal to scheduled parser kinds and max_workers",
+        "backpressure_window": max_workers,
+        "distributed_priority_queue": False,
+        "live_worker_stream": False,
+    }
+    resource_policy_hash = hashlib.sha256(json.dumps(resource_policy, sort_keys=True).encode("utf-8")).hexdigest()
     manifest_core = {
         "profile": "parser-scheduler-run-manifest-v1",
         "item_number": 75,
@@ -1359,15 +1380,10 @@ def build_parser_scheduler_manifest(
         "deterministic_output_order": list(kinds),
         "deterministic_order_verified": deterministic_order_verified,
         "events_head_hash": events_head_hash,
-        "resource_policy": {
-            "cpu_worker_limit": max_workers,
-            "worker_limit_source": "min(4, scheduled parser kinds)",
-            "io_policy": "each parser writes one deterministic JSON output after collection",
-            "backpressure_policy": "bounded local futures equal to scheduled parser kinds and max_workers",
-            "backpressure_window": max_workers,
-            "distributed_priority_queue": False,
-            "live_worker_stream": False,
-        },
+        "event_row_count": len(sorted_events),
+        "scheduler_event_row_head_hash": hashlib.sha256("\n".join(event_row_hashes).encode("utf-8")).hexdigest(),
+        "resource_policy": resource_policy,
+        "resource_policy_hash": resource_policy_hash,
         "operator_review_requirements": [
             "Archive this scheduler manifest with run outputs for large-case performance review.",
             "Check error_count and parser error hashes before treating a run as complete.",
@@ -1379,6 +1395,14 @@ def build_parser_scheduler_manifest(
     }
     manifest_hash = hashlib.sha256(json.dumps(manifest_core, sort_keys=True).encode("utf-8")).hexdigest()
     return {**manifest_core, "manifest_hash": manifest_hash}
+
+
+def scheduler_event_with_row_hash(event: Mapping[str, object]) -> dict[str, object]:
+    event_core = {key: value for key, value in dict(event).items() if key != "row_hash"}
+    return {
+        **event_core,
+        "row_hash": hashlib.sha256(json.dumps(event_core, sort_keys=True).encode("utf-8")).hexdigest(),
+    }
 
 
 def isolated_parser_error_payload(kind: str, *, input_root: InputRoot, exc: Exception) -> Dict[str, object]:
@@ -3733,6 +3757,13 @@ def build_runtime_defensibility_profiles(
                 "scheduler_manifest_profile": scheduler_manifest.get("profile") if scheduler_manifest else "",
                 "scheduler_manifest_hash": scheduler_manifest.get("manifest_hash") if scheduler_manifest else "",
                 "scheduler_events_head_hash": scheduler_manifest.get("events_head_hash") if scheduler_manifest else "",
+                "scheduler_event_row_head_hash": scheduler_manifest.get("scheduler_event_row_head_hash")
+                if scheduler_manifest
+                else "",
+                "scheduler_event_row_count": int(scheduler_manifest.get("event_row_count") or 0)
+                if scheduler_manifest
+                else 0,
+                "resource_policy_hash": scheduler_manifest.get("resource_policy_hash") if scheduler_manifest else "",
                 "deterministic_order_verified": bool(scheduler_manifest.get("deterministic_order_verified"))
                 if scheduler_manifest
                 else False,
