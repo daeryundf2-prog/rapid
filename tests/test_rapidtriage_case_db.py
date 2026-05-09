@@ -1094,23 +1094,42 @@ class RapidTriageCaseDatabaseTests(unittest.TestCase):
             self.assertTrue(export["citation_index"])
             self.assertIn("#64", export["citation_index"][0]["commercial_gap_ids"])
             self.assertTrue(all(item.get("copy_safe_citation") for item in export["citation_index"]))
+            self.assertTrue(all(len(item.get("citation_row_hash", "")) == 64 for item in export["citation_index"]))
+            self.assertTrue(all(item.get("source_viewer_locator", {}).get("viewer") == "report-citation-source" for item in export["citation_index"]))
             source_citations = [item for item in export["citation_index"] if item["role"] == "source-record"]
             self.assertTrue(source_citations)
             self.assertTrue(all(item["source_hash_status"] in {"present", "missing"} for item in source_citations))
             self.assertTrue(all(item["parser_version_status"] in {"present", "missing"} for item in source_citations))
             self.assertIn("#64", export["report_citation_manager"]["commercial_gap_ids"])
+            citation_manifest = export["report_citation_manager"]["citation_index_manifest"]
+            self.assertEqual(citation_manifest["manifest_version"], "report-citation-index-manifest-v1")
+            self.assertEqual(export["report_citation_manager"]["citation_index_manifest_hash"], citation_manifest["manifest_hash"])
+            self.assertEqual(citation_manifest["citation_count"], len(export["citation_index"]))
+            self.assertEqual(citation_manifest["citation_row_hash_count"], len(export["citation_index"]))
+            self.assertGreaterEqual(citation_manifest["source_viewer_locator_count"], len(export["citation_index"]))
             coverage = export["report_citation_manager"]["coverage_profile"]
             self.assertEqual(coverage["profile_version"], "report-citation-coverage-profile-v1")
             self.assertEqual(coverage["citation_count"], len(export["citation_index"]))
             self.assertGreaterEqual(coverage["copy_safe_citation_count"], len(export["citation_index"]))
+            self.assertEqual(coverage["citation_row_hash_count"], len(export["citation_index"]))
+            self.assertGreaterEqual(coverage["source_viewer_locator_count"], len(export["citation_index"]))
             self.assertEqual(coverage["source_record_count"], len(source_citations))
             self.assertIn("#64", coverage["commercial_gap_ids"])
             self.assertEqual(export["report_citation_manager"]["core_accuracy_gates"][0]["gap_id"], "#64")
             self.assertIn("citation count summary", export["report_citation_manager"]["core_accuracy_gates"][0]["satisfied_checks"])
+            self.assertIn("citation index manifest", export["report_citation_manager"]["core_accuracy_gates"][0]["satisfied_checks"])
+            self.assertIn("citation row hashes", export["report_citation_manager"]["core_accuracy_gates"][0]["satisfied_checks"])
+            self.assertIn("citation source viewer locators", export["report_citation_manager"]["core_accuracy_gates"][0]["satisfied_checks"])
             citation_uplift = export["report_citation_manager"]["commercial_uplift_evidence"]
             self.assertEqual(citation_uplift["batch_id"], "commercial-uplift-061-065")
             self.assertEqual(citation_uplift["item_numbers"], [64])
             self.assertIn("citation count summary", citation_uplift["passed_validation_check_ids"])
+            self.assertEqual(
+                citation_uplift["large_data_controls"]["citation_index_manifest_hash"],
+                citation_manifest["manifest_hash"],
+            )
+            self.assertEqual(citation_uplift["large_data_controls"]["citation_row_hash_count"], len(export["citation_index"]))
+            self.assertEqual(citation_uplift["large_data_controls"]["source_viewer_locator_count"], len(export["citation_index"]))
             self.assertIn("trusted-citation-index-diff-is-required-before-commercial-claim", citation_uplift["failed_validation_check_ids"])
             self.assertFalse(citation_uplift["large_data_controls"]["exhibit_numbering_ui"])
             self.assertEqual(
@@ -1122,8 +1141,10 @@ class RapidTriageCaseDatabaseTests(unittest.TestCase):
                 citation_count=len(export["citation_index"]),
                 has_source_reference=True,
                 trusted_diff=citation_diff,
+                citation_index_manifest=citation_manifest,
             )
             self.assertEqual(citation_diff["status"], "pass")
+            self.assertIn("citation index manifest", citation_gates[0]["satisfied_checks"])
             self.assertIn("trusted citation index diff pass", citation_gates[0]["satisfied_checks"])
             self.assertGreaterEqual(len(export["items"][0]["review_history"]), 1)
             self.assertIn("#65", export["items"][0]["review_history"][0]["commercial_gap_ids"])

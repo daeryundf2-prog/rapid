@@ -3704,6 +3704,11 @@ def build_report_citation_index(items: Sequence[Mapping[str, object]]) -> list[d
                     role="review-decision",
                     item=item,
                 ),
+                "source_viewer_locator": report_citation_source_viewer_locator(
+                    citation_id=review_id,
+                    role="review-decision",
+                    item=item,
+                ),
                 "commercial_gap_ids": ["#64"],
                 "report_use": "cite-review-decision-with-source-record",
             }
@@ -3724,18 +3729,25 @@ def build_report_citation_index(items: Sequence[Mapping[str, object]]) -> list[d
                     role="source-record",
                     item=item,
                 ),
+                "source_viewer_locator": report_citation_source_viewer_locator(
+                    citation_id=target_id,
+                    role="source-record",
+                    item=item,
+                ),
                 "commercial_gap_ids": ["#64"],
                 "report_use": "cite-source-record-with-review-decision",
                 "core_accuracy_gates": citation_manager_core_accuracy_gates(citation_count=1, has_source_reference=bool(item.get("source_reference"))),
             }
-    return [citations[key] for key in sorted(citations)]
+    return [attach_citation_row_hash(citations[key]) for key in sorted(citations)]
 
 
 def build_report_citation_manager(citation_index: Sequence[Mapping[str, object]]) -> dict[str, object]:
     coverage_profile = build_report_citation_coverage_profile(citation_index)
+    citation_index_manifest = build_report_citation_index_manifest(citation_index)
     gates = citation_manager_core_accuracy_gates(
         citation_count=len(citation_index),
         has_source_reference=any(bool(item.get("source_reference")) for item in citation_index),
+        citation_index_manifest=citation_index_manifest,
     )
     blockers = [
         "citation-index-depends-on-imported-source-reference-completeness",
@@ -3748,6 +3760,8 @@ def build_report_citation_manager(citation_index: Sequence[Mapping[str, object]]
         "commercial_gap_ids": ["#64"],
         "citation_count": len(citation_index),
         "coverage_profile": coverage_profile,
+        "citation_index_manifest": citation_index_manifest,
+        "citation_index_manifest_hash": citation_index_manifest["manifest_hash"],
         "ready_for_court_report": False,
         "blockers": blockers,
         "recommended_validation": [
@@ -3760,9 +3774,15 @@ def build_report_citation_manager(citation_index: Sequence[Mapping[str, object]]
             component="report-citation-manager",
             core_accuracy_gates=gates,
             blockers=blockers,
-            source_refs=[f"citation_count:{len(citation_index)}"],
+            source_refs=[
+                f"citation_count:{len(citation_index)}",
+                f"citation_index_manifest_hash:{citation_index_manifest['manifest_hash']}",
+            ],
             controls={
                 "citation_count": len(citation_index),
+                "citation_index_manifest_hash": citation_index_manifest["manifest_hash"],
+                "citation_row_hash_count": citation_index_manifest["citation_row_hash_count"],
+                "source_viewer_locator_count": citation_index_manifest["source_viewer_locator_count"],
                 "source_reference_present": any(bool(item.get("source_reference")) for item in citation_index),
                 "copy_safe_citation_count": coverage_profile["copy_safe_citation_count"],
                 "source_hash_present_count": coverage_profile["source_hash_present_count"],
@@ -3809,12 +3829,88 @@ def build_report_citation_coverage_profile(citation_index: Sequence[Mapping[str,
         "source_hash_present_count": source_hash_count,
         "parser_version_present_count": parser_version_count,
         "copy_safe_citation_count": copy_safe_count,
+        "citation_row_hash_count": sum(1 for item in citation_index if item.get("citation_row_hash")),
+        "source_viewer_locator_count": sum(1 for item in citation_index if item.get("source_viewer_locator")),
         "incomplete_source_record_citation_ids": incomplete[:50],
         "source_reference_complete": source_reference_count == len(source_records) if source_records else True,
         "source_hash_complete": source_hash_count == len(source_records) if source_records else True,
         "parser_version_complete": parser_version_count == len(source_records) if source_records else True,
         "report_use_warning": "Incomplete source hashes or parser versions must be resolved before final report/court exhibit use.",
     }
+
+
+def attach_citation_row_hash(citation: Mapping[str, object]) -> dict[str, object]:
+    row = dict(citation)
+    row_core = {
+        "citation_id": str(row.get("citation_id") or ""),
+        "role": str(row.get("role") or ""),
+        "target_type": str(row.get("target_type") or ""),
+        "target_id": str(row.get("target_id") or ""),
+        "path": str(row.get("path") or ""),
+        "source_hash_status": str(row.get("source_hash_status") or ""),
+        "parser_version_status": str(row.get("parser_version_status") or ""),
+        "copy_safe_citation": str(row.get("copy_safe_citation") or ""),
+    }
+    row["citation_row_hash"] = stable_payload_sha256(row_core)
+    return row
+
+
+def report_citation_source_viewer_locator(*, citation_id: str, role: str, item: Mapping[str, object]) -> dict[str, object]:
+    source_reference = item.get("source_reference") if isinstance(item.get("source_reference"), Mapping) else {}
+    return {
+        "viewer": "report-citation-source",
+        "open_action": "open-report-citation",
+        "citation_id": citation_id,
+        "role": role,
+        "target_type": str(item.get("target_type") or ""),
+        "target_id": str(item.get("target_id") or ""),
+        "path": str(source_reference.get("path") or item.get("path") or ""),
+        "parser": str(source_reference.get("parser") or ""),
+        "parser_version": str(source_reference.get("parser_version") or ""),
+    }
+
+
+def build_report_citation_index_manifest(citation_index: Sequence[Mapping[str, object]]) -> dict[str, object]:
+    citation_rows = []
+    for citation in citation_index:
+        source_reference = citation.get("source_reference") if isinstance(citation.get("source_reference"), Mapping) else {}
+        locator = citation.get("source_viewer_locator") if isinstance(citation.get("source_viewer_locator"), Mapping) else {}
+        citation_rows.append(
+            {
+                "citation_id": str(citation.get("citation_id") or ""),
+                "role": str(citation.get("role") or ""),
+                "target_type": str(citation.get("target_type") or ""),
+                "target_id": str(citation.get("target_id") or ""),
+                "citation_row_hash": str(citation.get("citation_row_hash") or ""),
+                "source_hash_status": str(citation.get("source_hash_status") or ""),
+                "parser_version_status": str(citation.get("parser_version_status") or ""),
+                "source_hash_present": citation_source_reference_has_hash(source_reference),
+                "parser_version_present": bool(source_reference.get("parser_version")),
+                "source_viewer_locator": dict(locator),
+            }
+        )
+    manifest_core: dict[str, object] = {
+        "manifest_version": "report-citation-index-manifest-v1",
+        "item_number": 64,
+        "commercial_gap_ids": ["#64"],
+        "citation_count": len(citation_index),
+        "review_decision_count": sum(1 for item in citation_index if item.get("role") == "review-decision"),
+        "source_record_count": sum(1 for item in citation_index if item.get("role") == "source-record"),
+        "citation_row_hash_count": sum(1 for item in citation_rows if item.get("citation_row_hash")),
+        "source_viewer_locator_count": sum(1 for item in citation_rows if item.get("source_viewer_locator")),
+        "source_hash_present_count": sum(1 for item in citation_rows if item.get("source_hash_present")),
+        "parser_version_present_count": sum(1 for item in citation_rows if item.get("parser_version_present")),
+        "citation_rows": citation_rows,
+        "citation_rows_head_hash": stable_payload_sha256(citation_rows),
+        "report_use_boundary": "citation index is a report navigation and source-reference manifest, not a court exhibit package by itself",
+        "blockers": [
+            "citation-index-depends-on-imported-source-reference-completeness",
+            "analyst-must-verify-source-hashes-parser-confidence-and-review-history-before-report-use",
+            "trusted-citation-index-diff-is-required-before-commercial-claim",
+        ],
+        "commercial_claim_allowed": False,
+    }
+    return {**manifest_core, "manifest_hash": stable_payload_sha256(manifest_core)}
 
 
 def citation_source_reference_has_hash(source_reference: Mapping[str, object]) -> bool:
@@ -4116,13 +4212,22 @@ def citation_manager_core_accuracy_gates(
     citation_count: int,
     has_source_reference: bool,
     trusted_diff: Mapping[str, object] | None = None,
+    citation_index_manifest: Mapping[str, object] | None = None,
 ) -> list[dict[str, object]]:
     satisfied = ["citation count summary", "report-use verification warning"]
     if citation_count:
         satisfied.extend(["review citation IDs", "source-record citation IDs"])
     if has_source_reference:
         satisfied.append("source reference preserved")
+    if citation_index_manifest and citation_index_manifest.get("manifest_hash"):
+        satisfied.append("citation index manifest")
+    if citation_index_manifest and int(citation_index_manifest.get("citation_row_hash_count") or 0) > 0:
+        satisfied.append("citation row hashes")
+    if citation_index_manifest and int(citation_index_manifest.get("source_viewer_locator_count") or 0) > 0:
+        satisfied.append("citation source viewer locators")
     evidence_refs = [f"citation_count:{citation_count}", f"has_source_reference:{has_source_reference}"]
+    if citation_index_manifest and citation_index_manifest.get("manifest_hash"):
+        evidence_refs.append(f"citation_index_manifest_hash:{citation_index_manifest.get('manifest_hash', '')}")
     if trusted_diff and trusted_diff.get("status") == "pass":
         satisfied.append("trusted citation index diff pass")
         evidence_refs.append(f"trusted_tool:{trusted_diff.get('trusted_tool', '')}")
