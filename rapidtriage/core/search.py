@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import datetime as dt
+import hashlib
 import json
 import re
 from pathlib import Path
@@ -34,6 +35,10 @@ SEARCH_TRUSTED_DIFF_BLOCKER_61 = "trusted-advanced-search-query-hit-diff-missing
 
 class SearchError(ValueError):
     """Raised when unified search cannot load a completed run."""
+
+
+def stable_search_sha256(payload: object) -> str:
+    return hashlib.sha256(json.dumps(payload, ensure_ascii=False, sort_keys=True).encode("utf-8")).hexdigest()
 
 
 def run_unified_search(
@@ -89,7 +94,13 @@ def run_unified_search(
 
     if limit:
         matches = matches[:limit]
-    matches = enrich_unified_search_matches(matches)
+    matches = enrich_unified_search_matches(matches, search_options=search_options)
+    query_hit_manifest = build_advanced_search_query_hit_manifest(
+        matches=matches,
+        keywords=normalized,
+        options=search_options,
+        limit=limit,
+    )
     source_counts: dict[str, int] = {}
     keyword_counts: dict[str, int] = {keyword: 0 for keyword in normalized}
     for match in matches:
@@ -98,7 +109,11 @@ def run_unified_search(
         for keyword in match.get("matched_keywords", []):
             keyword_counts[str(keyword)] = keyword_counts.get(str(keyword), 0) + 1
 
-    core_accuracy_gates = search_core_accuracy_gates(matches=matches, options=search_options)
+    core_accuracy_gates = search_core_accuracy_gates(
+        matches=matches,
+        options=search_options,
+        query_hit_manifest=query_hit_manifest,
+    )
     report_grade = search_report_grade_assessment()
     advanced_profile = advanced_search_profile(
         keywords=normalized,
@@ -107,6 +122,7 @@ def run_unified_search(
         include_ocr=include_ocr,
         include_analysis=include_analysis,
         limit=limit,
+        query_hit_manifest=query_hit_manifest,
     )
     payload: Dict[str, object] = {
         "command": "search",
@@ -135,6 +151,8 @@ def run_unified_search(
             "errors": ocr_errors,
         },
         "advanced_search_profile": advanced_profile,
+        "advanced_search_query_hit_manifest": query_hit_manifest,
+        "advanced_search_query_hit_manifest_hash": query_hit_manifest["manifest_hash"],
         "search_native_capabilities": dict(SEARCH_NATIVE_CAPABILITIES),
         "workbench_search_profile": workbench_search_profile(
             matches=matches,
@@ -152,6 +170,7 @@ def run_unified_search(
             core_accuracy_gates=core_accuracy_gates,
             report_grade=report_grade,
             limit=limit,
+            query_hit_manifest=query_hit_manifest,
         ),
     }
     if include_analysis:
@@ -222,14 +241,158 @@ def workbench_search_profile(
     }
 
 
-def enrich_unified_search_matches(matches: Sequence[Mapping[str, object]]) -> list[dict[str, object]]:
+def enrich_unified_search_matches(
+    matches: Sequence[Mapping[str, object]],
+    *,
+    search_options: Mapping[str, object],
+) -> list[dict[str, object]]:
     enriched: list[dict[str, object]] = []
     for index, match in enumerate(matches):
         item = dict(match)
         item["search_result_id"] = f"search-hit-{index + 1:06d}"
         item["source_verification_profile"] = search_match_source_verification_profile(item)
+        hit_manifest = build_advanced_search_hit_manifest(item, search_options=search_options)
+        item["advanced_search_hit_manifest"] = hit_manifest
+        item["advanced_search_hit_manifest_hash"] = hit_manifest["manifest_hash"]
         enriched.append(item)
     return enriched
+
+
+def build_advanced_search_hit_manifest(
+    match: Mapping[str, object],
+    *,
+    search_options: Mapping[str, object],
+) -> dict[str, object]:
+    metadata = match.get("metadata") if isinstance(match.get("metadata"), Mapping) else {}
+    source_hashes = metadata.get("source_hashes") if isinstance(metadata.get("source_hashes"), Mapping) else {}
+    source_sha256 = str(source_hashes.get("sha256") or metadata.get("sha256") or metadata.get("hash_sha256") or "")
+    search_match = match.get("search_match") if isinstance(match.get("search_match"), Mapping) else {}
+    proximity = search_match.get("proximity") if isinstance(search_match.get("proximity"), Mapping) else {}
+    manifest_core: dict[str, object] = {
+        "manifest_version": "advanced-search-hit-manifest-v1",
+        "item_number": 61,
+        "commercial_gap_ids": [SEARCH_FEATURE_GAP_ID],
+        "search_result_id": str(match.get("search_result_id") or ""),
+        "source": str(match.get("source") or ""),
+        "kind": str(match.get("kind") or ""),
+        "path": str(match.get("path") or ""),
+        "title": str(match.get("title") or ""),
+        "pointer": str(match.get("pointer") or ""),
+        "matched_keywords": [str(item) for item in match.get("matched_keywords") or []],
+        "matched_keyword_hashes": [
+            stable_search_sha256({"keyword": str(item)}) for item in match.get("matched_keywords") or []
+        ],
+        "search_mode": str(search_options.get("search_mode") or ""),
+        "fuzzy_distance": int(search_options.get("fuzzy_distance") or 0),
+        "proximity_window": int(search_options.get("proximity_window") or 0),
+        "matched_by": str(search_match.get("matched_by") or search_match.get("mode") or ""),
+        "proximity_matched": bool(proximity.get("matched")) if proximity else False,
+        "source_sha256": source_sha256,
+        "source_viewer_locator": {
+            "viewer": "advanced-search-hit-source",
+            "open_action": "open-source-viewer",
+            "source": str(match.get("source") or ""),
+            "path": str(match.get("path") or ""),
+            "pointer": str(match.get("pointer") or ""),
+        },
+        "report_use_boundary": "triage-hit-only-until-source-row-is-opened-and-reviewed",
+        "blockers": advanced_search_hit_report_blockers(match, source_sha256=source_sha256),
+        "commercial_claim_allowed": False,
+    }
+    row_hash = stable_search_sha256(
+        {
+            "search_result_id": manifest_core["search_result_id"],
+            "source": manifest_core["source"],
+            "path": manifest_core["path"],
+            "pointer": manifest_core["pointer"],
+            "matched_keywords": manifest_core["matched_keywords"],
+            "search_mode": manifest_core["search_mode"],
+            "matched_by": manifest_core["matched_by"],
+        }
+    )
+    manifest_core["hit_row_hash"] = row_hash
+    return {**manifest_core, "manifest_hash": stable_search_sha256(manifest_core)}
+
+
+def advanced_search_hit_report_blockers(match: Mapping[str, object], *, source_sha256: str) -> list[str]:
+    blockers = ["source-row-review-required", SEARCH_TRUSTED_DIFF_BLOCKER_61]
+    if not str(match.get("pointer") or ""):
+        blockers.append("source-pointer-required")
+    if not source_sha256:
+        blockers.append("source-hash-recommended-before-report")
+    search_match = match.get("search_match") if isinstance(match.get("search_match"), Mapping) else {}
+    mode = str(search_match.get("mode") or "")
+    if mode == "regex":
+        blockers.append("regex-false-positive-review-required")
+    if mode == "fuzzy":
+        blockers.append("fuzzy-hit-manual-confirmation-required")
+    proximity = search_match.get("proximity") if isinstance(search_match.get("proximity"), Mapping) else {}
+    if proximity.get("matched"):
+        blockers.append("proximity-causal-interpretation-review-required")
+    return sorted(set(blockers))
+
+
+def build_advanced_search_query_hit_manifest(
+    *,
+    matches: Sequence[Mapping[str, object]],
+    keywords: Sequence[str],
+    options: Mapping[str, object],
+    limit: int,
+) -> dict[str, object]:
+    hit_rows = []
+    for match in matches:
+        hit_manifest = match.get("advanced_search_hit_manifest") if isinstance(match.get("advanced_search_hit_manifest"), Mapping) else {}
+        source_locator = hit_manifest.get("source_viewer_locator") if isinstance(hit_manifest.get("source_viewer_locator"), Mapping) else {}
+        search_match = match.get("search_match") if isinstance(match.get("search_match"), Mapping) else {}
+        proximity = search_match.get("proximity") if isinstance(search_match.get("proximity"), Mapping) else {}
+        hit_rows.append(
+            {
+                "search_result_id": str(match.get("search_result_id") or ""),
+                "source": str(match.get("source") or ""),
+                "kind": str(match.get("kind") or ""),
+                "path": str(match.get("path") or ""),
+                "pointer": str(match.get("pointer") or ""),
+                "matched_keywords": [str(item) for item in match.get("matched_keywords") or []],
+                "matched_by": str(search_match.get("matched_by") or search_match.get("mode") or ""),
+                "proximity_matched": bool(proximity.get("matched")) if proximity else False,
+                "hit_row_hash": str(hit_manifest.get("hit_row_hash") or ""),
+                "hit_manifest_hash": str(hit_manifest.get("manifest_hash") or ""),
+                "source_viewer_locator": dict(source_locator),
+            }
+        )
+    manifest_core: dict[str, object] = {
+        "manifest_version": "advanced-search-query-hit-manifest-v1",
+        "item_number": 61,
+        "commercial_gap_ids": [SEARCH_FEATURE_GAP_ID],
+        "query_hash": stable_search_sha256(
+            {
+                "keywords": list(keywords),
+                "search_mode": str(options.get("search_mode") or ""),
+                "fuzzy_distance": int(options.get("fuzzy_distance") or 0),
+                "proximity_window": int(options.get("proximity_window") or 0),
+            }
+        ),
+        "keywords": list(keywords),
+        "search_mode": str(options.get("search_mode") or ""),
+        "fuzzy_distance": int(options.get("fuzzy_distance") or 0),
+        "proximity_window": int(options.get("proximity_window") or 0),
+        "result_limit": limit,
+        "match_count": len(matches),
+        "hit_row_hash_count": sum(1 for row in hit_rows if row.get("hit_row_hash")),
+        "source_locator_count": sum(1 for row in hit_rows if row.get("source_viewer_locator")),
+        "proximity_matched_count": sum(1 for row in hit_rows if row.get("proximity_matched")),
+        "hits": hit_rows,
+        "query_result_head_hash": stable_search_sha256(hit_rows),
+        "report_use_boundary": "advanced search output is a triage manifest; report candidates still require source viewer verification and trusted diff evidence",
+        "blockers": [
+            "multilingual-relevance-corpus",
+            "query-builder-ux-validation",
+            "tuned-false-positive-false-negative-metrics",
+            SEARCH_TRUSTED_DIFF_BLOCKER_61,
+        ],
+        "commercial_claim_allowed": False,
+    }
+    return {**manifest_core, "manifest_hash": stable_search_sha256(manifest_core)}
 
 
 def search_match_source_verification_profile(match: Mapping[str, object]) -> dict[str, object]:
@@ -317,6 +480,7 @@ def search_commercial_uplift_evidence(
     core_accuracy_gates: Sequence[Mapping[str, object]],
     report_grade: Mapping[str, object],
     limit: int,
+    query_hit_manifest: Mapping[str, object] | None = None,
 ) -> dict[str, object]:
     passed = []
     for gate in core_accuracy_gates:
@@ -330,6 +494,7 @@ def search_commercial_uplift_evidence(
             f"match_count:{len(matches)}",
             f"search_mode:{options.get('search_mode', '')}",
             f"proximity_window:{options.get('proximity_window', 0)}",
+            f"advanced_search_manifest_hash:{query_hit_manifest.get('manifest_hash', '') if query_hit_manifest else ''}",
         ],
         "reportability_decision": search_reportability_decision(
             failed_validation_check_ids=[
@@ -358,6 +523,9 @@ def search_commercial_uplift_evidence(
             "proximity_window": int(options.get("proximity_window") or 0),
             "full_linguistic_stemming": False,
             "semantic_near_duplicate_search": False,
+            "advanced_search_manifest_hash": str(query_hit_manifest.get("manifest_hash") or "") if query_hit_manifest else "",
+            "hit_row_hash_count": int(query_hit_manifest.get("hit_row_hash_count") or 0) if query_hit_manifest else 0,
+            "source_locator_count": int(query_hit_manifest.get("source_locator_count") or 0) if query_hit_manifest else 0,
         },
         "reporting_status": "implemented-baseline-validation-required",
     }
@@ -371,6 +539,7 @@ def advanced_search_profile(
     include_ocr: bool,
     include_analysis: bool,
     limit: int,
+    query_hit_manifest: Mapping[str, object] | None = None,
 ) -> dict[str, object]:
     mode = normalize_search_mode(str(options.get("search_mode") or "exact"))
     query_validation = validate_search_queries(keywords, search_mode=mode)
@@ -391,6 +560,9 @@ def advanced_search_profile(
         "query_validation": query_validation,
         "match_mode_counts": mode_counts,
         "proximity_matched_count": proximity_matched_count,
+        "query_hit_manifest_hash": str(query_hit_manifest.get("manifest_hash") or "") if query_hit_manifest else "",
+        "hit_row_hash_count": int(query_hit_manifest.get("hit_row_hash_count") or 0) if query_hit_manifest else 0,
+        "source_locator_count": int(query_hit_manifest.get("source_locator_count") or 0) if query_hit_manifest else 0,
         "controls": {
             "exact_search": True,
             "regex_search": True,
@@ -982,20 +1154,36 @@ def search_core_accuracy_gates(
     matches: Sequence[Mapping[str, object]],
     options: Mapping[str, object],
     trusted_diff: Mapping[str, object] | None = None,
+    query_hit_manifest: Mapping[str, object] | None = None,
 ) -> list[dict[str, object]]:
     satisfied = ["query mode and options recorded", "source verification limitation warning"]
     mode = normalize_search_mode(str(options.get("search_mode") or "exact"))
+    evidence_refs = [
+        f"search_mode:{mode}",
+        f"match_count:{len(matches)}",
+        f"proximity_window:{int(options.get('proximity_window') or 0)}",
+    ]
     if mode in {"exact", "fuzzy", "regex"} and SEARCH_NATIVE_CAPABILITIES["fuzzy_levenshtein_search"]:
         satisfied.append("fuzzy/stemming/regex matching available")
     if int(options.get("proximity_window") or 0) > 0:
         satisfied.append("proximity metadata preserved")
     if any(match.get("pointer") for match in matches):
         satisfied.append("matched hit source pointers")
-    evidence_refs = [
-        f"search_mode:{mode}",
-        f"match_count:{len(matches)}",
-        f"proximity_window:{int(options.get('proximity_window') or 0)}",
-    ]
+    if query_hit_manifest and query_hit_manifest.get("manifest_hash"):
+        satisfied.append("advanced search query-hit manifest")
+        evidence_refs.append(f"advanced_search_manifest_hash:{query_hit_manifest.get('manifest_hash', '')}")
+    if any(
+        isinstance(match.get("advanced_search_hit_manifest"), Mapping)
+        and match.get("advanced_search_hit_manifest", {}).get("hit_row_hash")
+        for match in matches
+    ):
+        satisfied.append("search hit row hashes")
+    if any(
+        isinstance(match.get("advanced_search_hit_manifest"), Mapping)
+        and isinstance(match.get("advanced_search_hit_manifest", {}).get("source_viewer_locator"), Mapping)
+        for match in matches
+    ):
+        satisfied.append("advanced search source locators")
     if trusted_diff and trusted_diff.get("status") == "pass":
         satisfied.append("trusted advanced-search query-hit diff pass")
         evidence_refs.append(f"trusted_tool:{trusted_diff.get('trusted_tool', '')}")

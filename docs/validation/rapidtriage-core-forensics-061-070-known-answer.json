@@ -11,7 +11,7 @@
       "status": "pass",
       "backlog_items": [61],
       "evidence_paths": ["docs/validation/core-forensics-061-070-fixture-evidence.json", "tests/test_rapidtriage_search_analysis.py"],
-      "expected": {"required_assertions": ["Search output preserves query mode/options, fuzzy/stem/regex support, proximity metadata, hit pointers, advanced_search_profile query validation, regex validity warnings, web mode/fuzzy/proximity controls, verification warnings, trusted query-hit diff status, and #61 core_accuracy_gates.", "Advanced search reportability decisions block source-proof claims until source rows are hash verified, regex/fuzzy/proximity false-positive review is documented, and a trusted query-hit manifest diff passes."]},
+      "expected": {"required_assertions": ["Search output preserves query mode/options, fuzzy/stem/regex support, proximity metadata, hit pointers, per-hit advanced_search_hit_manifest rows, top-level advanced_search_query_hit_manifest, query/hash/head hashes, source locators, advanced_search_profile query validation, regex validity warnings, web mode/fuzzy/proximity controls, verification warnings, trusted query-hit diff status, and #61 core_accuracy_gates.", "Advanced search reportability decisions block source-proof claims until source rows are hash verified, regex/fuzzy/proximity false-positive review is documented, and a trusted query-hit manifest diff passes."]},
       "notes": "Internal fixture pass; broad relevance/false-positive corpus, full browser query-builder validation, and external trusted query-hit manifest remain commercial blockers."
     },
     {

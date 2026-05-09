@@ -636,17 +636,44 @@ class RapidTriageSearchAnalysisTests(unittest.TestCase):
             self.assertEqual(fuzzy["advanced_search_profile"]["controls"]["fuzzy_distance"], 2)
             self.assertEqual(fuzzy["advanced_search_profile"]["controls"]["proximity_window"], 5)
             self.assertEqual(fuzzy["advanced_search_profile"]["proximity_matched_count"], 1)
+            self.assertEqual(fuzzy["advanced_search_profile"]["hit_row_hash_count"], 1)
+            self.assertEqual(fuzzy["advanced_search_profile"]["source_locator_count"], 1)
+            self.assertEqual(
+                fuzzy["advanced_search_profile"]["query_hit_manifest_hash"],
+                fuzzy["advanced_search_query_hit_manifest_hash"],
+            )
             self.assertTrue(fuzzy["advanced_search_profile"]["source_verification_required"])
             self.assertIn("fuzzy-results-are-typo-tolerant-triage-not-exact-proof", fuzzy["advanced_search_profile"]["review_warnings"])
             self.assertEqual(fuzzy["advanced_search_profile"]["query_validation"][0]["query"], "password")
             self.assertEqual(fuzzy["core_accuracy_gates"][0]["gap_id"], "#61")
             self.assertIn("query mode and options recorded", fuzzy["core_accuracy_gates"][0]["satisfied_checks"])
             self.assertIn("proximity metadata preserved", fuzzy["core_accuracy_gates"][0]["satisfied_checks"])
+            self.assertIn("advanced search query-hit manifest", fuzzy["core_accuracy_gates"][0]["satisfied_checks"])
+            self.assertIn("search hit row hashes", fuzzy["core_accuracy_gates"][0]["satisfied_checks"])
+            self.assertIn("advanced search source locators", fuzzy["core_accuracy_gates"][0]["satisfied_checks"])
+            query_manifest = fuzzy["advanced_search_query_hit_manifest"]
+            self.assertEqual(query_manifest["manifest_version"], "advanced-search-query-hit-manifest-v1")
+            self.assertEqual(query_manifest["manifest_hash"], fuzzy["advanced_search_query_hit_manifest_hash"])
+            self.assertEqual(query_manifest["match_count"], 1)
+            self.assertEqual(query_manifest["hit_row_hash_count"], 1)
+            self.assertEqual(query_manifest["source_locator_count"], 1)
+            self.assertEqual(query_manifest["hits"][0]["search_result_id"], "search-hit-000001")
+            self.assertTrue(query_manifest["hits"][0]["hit_row_hash"])
+            self.assertEqual(
+                query_manifest["hits"][0]["source_viewer_locator"]["viewer"],
+                "advanced-search-hit-source",
+            )
             search_uplift = fuzzy["commercial_uplift_evidence"]
             self.assertEqual(search_uplift["batch_id"], "commercial-uplift-061-065")
             self.assertEqual(search_uplift["item_numbers"], [61])
             self.assertIn("query mode and options recorded", search_uplift["passed_validation_check_ids"])
             self.assertFalse(search_uplift["large_data_controls"]["full_linguistic_stemming"])
+            self.assertEqual(
+                search_uplift["large_data_controls"]["advanced_search_manifest_hash"],
+                fuzzy["advanced_search_query_hit_manifest_hash"],
+            )
+            self.assertEqual(search_uplift["large_data_controls"]["hit_row_hash_count"], 1)
+            self.assertEqual(search_uplift["large_data_controls"]["source_locator_count"], 1)
             self.assertEqual(
                 search_uplift["reportability_decision"]["decision"],
                 "do-not-report-advanced-search-hit-as-source-proof",
@@ -662,6 +689,19 @@ class RapidTriageSearchAnalysisTests(unittest.TestCase):
             self.assertEqual(
                 fuzzy["matches"][0]["source_verification_profile"]["profile_version"],
                 "unified-search-source-verification-v1",
+            )
+            self.assertEqual(
+                fuzzy["matches"][0]["advanced_search_hit_manifest"]["manifest_version"],
+                "advanced-search-hit-manifest-v1",
+            )
+            self.assertEqual(
+                fuzzy["matches"][0]["advanced_search_hit_manifest_hash"],
+                fuzzy["matches"][0]["advanced_search_hit_manifest"]["manifest_hash"],
+            )
+            self.assertTrue(fuzzy["matches"][0]["advanced_search_hit_manifest"]["hit_row_hash"])
+            self.assertEqual(
+                fuzzy["matches"][0]["advanced_search_hit_manifest"]["source_viewer_locator"]["viewer"],
+                "advanced-search-hit-source",
             )
             self.assertTrue(fuzzy["matches"][0]["source_verification_profile"]["viewer_supported"])
             self.assertFalse(fuzzy["matches"][0]["source_verification_profile"]["source_pointer_available"])

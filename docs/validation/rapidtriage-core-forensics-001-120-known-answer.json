@@ -1462,7 +1462,7 @@
       ],
       "expected": {
         "required_assertions": [
-          "Search output preserves query mode/options, fuzzy/stem/regex support, proximity metadata, hit pointers, advanced_search_profile query validation, regex validity warnings, web mode/fuzzy/proximity controls, verification warnings, and #61 core_accuracy_gates."
+          "Search output preserves query mode/options, fuzzy/stem/regex support, proximity metadata, hit pointers, per-hit advanced_search_hit_manifest rows, top-level advanced_search_query_hit_manifest, query/hash/head hashes, source locators, advanced_search_profile query validation, regex validity warnings, web mode/fuzzy/proximity controls, verification warnings, trusted query-hit diff status, and #61 core_accuracy_gates."
         ]
       },
       "notes": "Internal fixture pass; broad relevance/false-positive corpus, full browser query-builder validation, and external trusted query-hit manifest remain commercial blockers.",
