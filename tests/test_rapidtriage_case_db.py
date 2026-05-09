@@ -1148,6 +1148,12 @@ class RapidTriageCaseDatabaseTests(unittest.TestCase):
             self.assertIn("trusted citation index diff pass", citation_gates[0]["satisfied_checks"])
             self.assertGreaterEqual(len(export["items"][0]["review_history"]), 1)
             self.assertIn("#65", export["items"][0]["review_history"][0]["commercial_gap_ids"])
+            self.assertEqual(export["items"][0]["review_history"][0]["target_type"], targets[0]["target_type"])
+            self.assertEqual(export["items"][0]["review_history"][0]["target_id"], targets[0]["target_id"])
+            self.assertEqual(
+                export["items"][0]["review_history"][0]["history_viewer_locator"]["viewer"],
+                "evidence-selection-history",
+            )
             self.assertEqual(len(export["items"][0]["review_history"][0]["row_hash"]), 64)
             self.assertEqual(export["items"][0]["review_history"][0]["core_accuracy_gates"][0]["gap_id"], "#65")
             self.assertIn("#65", export["evidence_selection_version_history"]["commercial_gap_ids"])
@@ -1159,12 +1165,34 @@ class RapidTriageCaseDatabaseTests(unittest.TestCase):
             self.assertEqual(len(integrity["head_hash"]), 64)
             self.assertGreaterEqual(integrity["include_in_report_change_count"], 1)
             self.assertTrue(integrity["tamper_evident_export_only"])
-            self.assertFalse(integrity["database_enforced_append_only"])
+            self.assertTrue(integrity["database_enforced_append_only"])
+            self.assertEqual(integrity["append_only_triggers"], ["review_mark_history_no_update", "review_mark_history_no_delete"])
+            history_manifest = export["evidence_selection_version_history"]["history_manifest"]
+            self.assertEqual(history_manifest["manifest_version"], "evidence-selection-history-manifest-v1")
+            self.assertEqual(export["evidence_selection_version_history"]["history_manifest_hash"], history_manifest["manifest_hash"])
+            self.assertEqual(history_manifest["history_row_count"], integrity["history_row_count"])
+            self.assertEqual(history_manifest["row_hash_count"], integrity["row_hash_count"])
+            self.assertEqual(history_manifest["history_head_hash"], integrity["head_hash"])
+            self.assertGreaterEqual(history_manifest["history_viewer_locator_count"], len(targets))
+            self.assertTrue(history_manifest["append_only_enforcement"]["database_enforced_append_only"])
+            self.assertFalse(history_manifest["append_only_enforcement"]["multi_user_signed_history"])
+            self.assertIn(
+                "evidence history manifest",
+                export["evidence_selection_version_history"]["core_accuracy_gates"][0]["satisfied_checks"],
+            )
+            self.assertIn(
+                "database append-only guardrails",
+                export["evidence_selection_version_history"]["core_accuracy_gates"][0]["satisfied_checks"],
+            )
             history_uplift = export["evidence_selection_version_history"]["commercial_uplift_evidence"]
             self.assertEqual(history_uplift["item_numbers"], [65])
             self.assertIn("versioned review history rows", history_uplift["passed_validation_check_ids"])
             self.assertGreaterEqual(history_uplift["large_data_controls"]["row_hash_count"], len(targets))
             self.assertEqual(history_uplift["large_data_controls"]["history_head_hash"], integrity["head_hash"])
+            self.assertEqual(history_uplift["large_data_controls"]["history_manifest_hash"], history_manifest["manifest_hash"])
+            self.assertGreaterEqual(history_uplift["large_data_controls"]["history_viewer_locator_count"], len(targets))
+            self.assertTrue(history_uplift["large_data_controls"]["database_enforced_append_only"])
+            self.assertEqual(history_uplift["large_data_controls"]["append_only_trigger_count"], 2)
             self.assertIn("trusted-evidence-history-diff-is-required-before-commercial-claim", history_uplift["failed_validation_check_ids"])
             self.assertFalse(history_uplift["large_data_controls"]["multi_user_signed_history"])
             self.assertEqual(
@@ -1177,9 +1205,23 @@ class RapidTriageCaseDatabaseTests(unittest.TestCase):
                 for row in item.get("review_history", [])
             ]
             history_diff = build_evidence_history_trusted_diff(history_rows, history_rows)
-            history_gates = evidence_selection_core_accuracy_gates(history_rows=history_rows, trusted_diff=history_diff)
+            history_gates = evidence_selection_core_accuracy_gates(
+                history_rows=history_rows,
+                trusted_diff=history_diff,
+                history_manifest=history_manifest,
+            )
             self.assertEqual(history_diff["status"], "pass")
+            self.assertIn("evidence history manifest", history_gates[0]["satisfied_checks"])
             self.assertIn("trusted evidence history diff pass", history_gates[0]["satisfied_checks"])
+            with database.connect() as connection:
+                with self.assertRaises(sqlite3.DatabaseError):
+                    connection.execute(
+                        "UPDATE review_mark_history SET actor = actor WHERE id = (SELECT id FROM review_mark_history LIMIT 1)"
+                    )
+                with self.assertRaises(sqlite3.DatabaseError):
+                    connection.execute(
+                        "DELETE FROM review_mark_history WHERE id = (SELECT id FROM review_mark_history LIMIT 1)"
+                    )
             self.assertIn("#65", export["items"][0]["commercial_gap_ids"])
             self.assertIn("custody_workflow", export)
             self.assertGreaterEqual(export["custody_workflow"]["summary"]["evidence_source_count"], 1)

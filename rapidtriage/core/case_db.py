@@ -2929,6 +2929,8 @@ def load_review_history(
         history_row = {
             "version": int(row["version"]),
             "review_citation_id": str(row["review_citation_id"]),
+            "target_type": str(row["target_type"] or ""),
+            "target_id": str(row["target_id"] or ""),
             "changed_at": str(row["changed_at"]),
             "actor": str(row["actor"] or ""),
             "changed_fields": parse_json_list(row["changed_fields_json"]),
@@ -2937,6 +2939,7 @@ def load_review_history(
             "commercial_gap_ids": ["#65"],
             "history_status": "immutable-version-row",
         }
+        history_row["history_viewer_locator"] = evidence_history_viewer_locator(history_row)
         history_row["row_hash"] = evidence_history_row_hash(history_row)
         history_row["core_accuracy_gates"] = evidence_selection_core_accuracy_gates(history_rows=[history_row])
         history.append(history_row)
@@ -3949,13 +3952,14 @@ def build_evidence_selection_version_history(items: Sequence[Mapping[str, object
         for history in item.get("review_history", [])
         if isinstance(history, Mapping)
     ]
-    gates = evidence_selection_core_accuracy_gates(history_rows=history_rows)
     integrity_profile = build_evidence_history_integrity_profile(history_rows)
+    history_manifest = build_evidence_selection_history_manifest(history_rows, integrity_profile)
     blockers = [
-        "selection-history-is-local-sqlite-not-multi-user-signed-collaboration",
+        "selection-history-is-database-append-only-but-not-multi-user-signed-collaboration",
         "review-inclusion-changes-still-require-source-verification-before-reporting",
         "trusted-evidence-history-diff-is-required-before-commercial-claim",
     ]
+    gates = evidence_selection_core_accuracy_gates(history_rows=history_rows, history_manifest=history_manifest)
     return {
         "component": "evidence-selection-version-history",
         "status": "implemented-baseline-validation-required",
@@ -3963,6 +3967,8 @@ def build_evidence_selection_version_history(items: Sequence[Mapping[str, object
         "selected_item_count": len(items),
         "review_history_count": history_count,
         "integrity_profile": integrity_profile,
+        "history_manifest": history_manifest,
+        "history_manifest_hash": history_manifest["manifest_hash"],
         "ready_for_court_report": False,
         "blockers": blockers,
         "recommended_validation": [
@@ -3975,14 +3981,22 @@ def build_evidence_selection_version_history(items: Sequence[Mapping[str, object
             component="evidence-selection-version-history",
             core_accuracy_gates=gates,
             blockers=blockers,
-            source_refs=[f"selected_item_count:{len(items)}", f"review_history_count:{history_count}"],
+            source_refs=[
+                f"selected_item_count:{len(items)}",
+                f"review_history_count:{history_count}",
+                f"history_manifest_hash:{history_manifest['manifest_hash']}",
+            ],
             controls={
                 "selected_item_count": len(items),
                 "review_history_count": history_count,
                 "history_head_hash": integrity_profile["head_hash"],
+                "history_manifest_hash": history_manifest["manifest_hash"],
+                "history_viewer_locator_count": history_manifest["history_viewer_locator_count"],
                 "include_in_report_change_count": integrity_profile["include_in_report_change_count"],
                 "row_hash_count": integrity_profile["row_hash_count"],
                 "local_sqlite_history": True,
+                "database_enforced_append_only": True,
+                "append_only_trigger_count": 2,
                 "multi_user_signed_history": False,
                 "conflict_resolution": False,
             },
@@ -4023,8 +4037,68 @@ def build_evidence_history_integrity_profile(history_rows: Sequence[Mapping[str,
         "chain_rows": chained_rows[:200],
         "chain_truncated": len(chained_rows) > 200,
         "tamper_evident_export_only": True,
-        "database_enforced_append_only": False,
+        "database_enforced_append_only": True,
+        "append_only_triggers": ["review_mark_history_no_update", "review_mark_history_no_delete"],
         "report_use_warning": "This hash chain is generated at export time; preserve the Case DB and export JSON, and attach a trusted history manifest before court-grade use.",
+    }
+
+
+def build_evidence_selection_history_manifest(
+    history_rows: Sequence[Mapping[str, object]],
+    integrity_profile: Mapping[str, object],
+) -> dict[str, object]:
+    manifest_rows = []
+    for row in history_rows:
+        locator = row.get("history_viewer_locator") if isinstance(row.get("history_viewer_locator"), Mapping) else {}
+        manifest_rows.append(
+            {
+                "review_citation_id": str(row.get("review_citation_id") or ""),
+                "target_type": str(row.get("target_type") or ""),
+                "target_id": str(row.get("target_id") or ""),
+                "version": row.get("version"),
+                "changed_at": str(row.get("changed_at") or ""),
+                "actor_present": bool(str(row.get("actor") or "")),
+                "changed_fields": [str(field) for field in row.get("changed_fields") or []],
+                "row_hash": str(row.get("row_hash") or evidence_history_row_hash(row)),
+                "history_viewer_locator": dict(locator),
+            }
+        )
+    manifest_core: dict[str, object] = {
+        "manifest_version": "evidence-selection-history-manifest-v1",
+        "item_number": 65,
+        "commercial_gap_ids": ["#65"],
+        "history_row_count": len(history_rows),
+        "row_hash_count": sum(1 for row in manifest_rows if row.get("row_hash")),
+        "history_viewer_locator_count": sum(1 for row in manifest_rows if row.get("history_viewer_locator")),
+        "include_in_report_change_count": int(integrity_profile.get("include_in_report_change_count") or 0),
+        "history_head_hash": str(integrity_profile.get("head_hash") or ""),
+        "changed_field_counts": dict(integrity_profile.get("changed_field_counts") or {}),
+        "history_rows": manifest_rows[:500],
+        "history_rows_truncated": len(manifest_rows) > 500,
+        "history_rows_head_hash": stable_payload_sha256(manifest_rows),
+        "append_only_enforcement": {
+            "database_triggers": [
+                "review_mark_history_no_update",
+                "review_mark_history_no_delete",
+            ],
+            "database_enforced_append_only": True,
+            "multi_user_signed_history": False,
+            "conflict_resolution": False,
+        },
+        "report_use_boundary": "history manifest proves exported review-version rows only; attach signed multi-user history and trusted diff before court-grade claims",
+        "commercial_claim_allowed": False,
+    }
+    return {**manifest_core, "manifest_hash": stable_payload_sha256(manifest_core)}
+
+
+def evidence_history_viewer_locator(history_row: Mapping[str, object]) -> dict[str, object]:
+    return {
+        "viewer": "evidence-selection-history",
+        "open_action": "open-review-history-row",
+        "review_citation_id": str(history_row.get("review_citation_id") or ""),
+        "target_type": str(history_row.get("target_type") or ""),
+        "target_id": str(history_row.get("target_id") or ""),
+        "version": history_row.get("version"),
     }
 
 
@@ -4032,6 +4106,8 @@ def evidence_history_row_hash(history_row: Mapping[str, object]) -> str:
     payload = {
         "version": history_row.get("version"),
         "review_citation_id": str(history_row.get("review_citation_id") or ""),
+        "target_type": str(history_row.get("target_type") or ""),
+        "target_id": str(history_row.get("target_id") or ""),
         "changed_at": str(history_row.get("changed_at") or ""),
         "actor": str(history_row.get("actor") or ""),
         "changed_fields": list(history_row.get("changed_fields") or []),
@@ -4244,6 +4320,7 @@ def evidence_selection_core_accuracy_gates(
     *,
     history_rows: Sequence[Mapping[str, object]],
     trusted_diff: Mapping[str, object] | None = None,
+    history_manifest: Mapping[str, object] | None = None,
 ) -> list[dict[str, object]]:
     satisfied = ["multi-user/signing limitation warning"]
     if history_rows:
@@ -4257,7 +4334,18 @@ def evidence_selection_core_accuracy_gates(
         for item in history_rows
     ):
         satisfied.append("report inclusion history")
+    if history_manifest and history_manifest.get("manifest_hash"):
+        satisfied.append("evidence history manifest")
+    if history_manifest and int(history_manifest.get("row_hash_count") or 0) > 0:
+        satisfied.append("history row hashes")
+    if history_manifest and int(history_manifest.get("history_viewer_locator_count") or 0) > 0:
+        satisfied.append("history source viewer locators")
+    append_only = history_manifest.get("append_only_enforcement") if isinstance(history_manifest, Mapping) else None
+    if isinstance(append_only, Mapping) and append_only.get("database_enforced_append_only"):
+        satisfied.append("database append-only guardrails")
     evidence_refs = [f"review_history_count:{len(history_rows)}"]
+    if history_manifest and history_manifest.get("manifest_hash"):
+        evidence_refs.append(f"history_manifest_hash:{history_manifest.get('manifest_hash', '')}")
     if trusted_diff and trusted_diff.get("status") == "pass":
         satisfied.append("trusted evidence history diff pass")
         evidence_refs.append(f"trusted_tool:{trusted_diff.get('trusted_tool', '')}")
@@ -9180,6 +9268,18 @@ CREATE TABLE IF NOT EXISTS review_mark_history (
     current_json TEXT NOT NULL DEFAULT '{}',
     FOREIGN KEY (case_id) REFERENCES case_record(case_id) ON DELETE CASCADE
 );
+
+CREATE TRIGGER IF NOT EXISTS review_mark_history_no_update
+BEFORE UPDATE ON review_mark_history
+BEGIN
+    SELECT RAISE(ABORT, 'review_mark_history is append-only');
+END;
+
+CREATE TRIGGER IF NOT EXISTS review_mark_history_no_delete
+BEFORE DELETE ON review_mark_history
+BEGIN
+    SELECT RAISE(ABORT, 'review_mark_history is append-only');
+END;
 
 CREATE TABLE IF NOT EXISTS saved_search (
     id INTEGER PRIMARY KEY AUTOINCREMENT,

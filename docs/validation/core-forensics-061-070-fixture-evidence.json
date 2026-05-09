@@ -45,9 +45,9 @@
       "title": "Evidence selection/version history",
       "test_files": ["tests/test_rapidtriage_case_db.py"],
       "assertions": [
-        "Review history preserves version rows, changed fields, previous/current state, include-in-report changes, per-row hashes, export-time history hash chain/head hash, trusted evidence-history diff helper/gate, #65 core_accuracy_gates, and reportability blockers for missing immutable signed multi-user history and conflict handling."
+        "Review history preserves version rows, target IDs, changed fields, previous/current state, include-in-report changes, history-viewer locators, per-row hashes, export-time history hash chain/head hash, evidence-selection-history-manifest hashes, SQLite append-only update/delete guards, trusted evidence-history diff helper/gate, #65 core_accuracy_gates, and reportability blockers for missing signed multi-user history and conflict handling."
       ],
-      "remaining_external_validation": ["Multi-user signed history, trusted history manifest, conflict handling, and database-level append-only enforcement."]
+      "remaining_external_validation": ["Multi-user signed history, trusted history manifest corpus/diff, and conflict handling."]
     },
     {
       "item": 66,
