@@ -3,6 +3,7 @@ from __future__ import annotations
 import datetime as dt
 import hashlib
 import json
+import mimetypes
 import os
 import sys
 import time
@@ -1022,8 +1023,11 @@ def memory_cap_policy_profile(*, memory_cap_bytes: int, current_rss_bytes: int) 
 
 
 def build_preview_sandbox_run_policy_manifest(*, outputs: Mapping[str, Path]) -> Dict[str, object]:
-    previewable_outputs = sorted(
-        str(path.name)
+    previewable_output_items = sorted(
+        (
+            str(name),
+            path,
+        )
         for name, path in outputs.items()
         if name
         in {
@@ -1038,6 +1042,13 @@ def build_preview_sandbox_run_policy_manifest(*, outputs: Mapping[str, Path]) ->
             "report",
         }
     )
+    previewable_outputs = [str(path.name) for _, path in previewable_output_items]
+    policy_rows = [
+        preview_sandbox_run_output_policy_row(name, path, sequence=index)
+        for index, (name, path) in enumerate(previewable_output_items, start=1)
+    ]
+    row_hashes = [str(row["row_hash"]) for row in policy_rows]
+    row_head_hash = hashlib.sha256("\n".join(row_hashes).encode("utf-8")).hexdigest()
     manifest_core: Dict[str, object] = {
         "profile_version": "preview-sandbox-run-policy-manifest-v1",
         "item_number": 73,
@@ -1056,6 +1067,10 @@ def build_preview_sandbox_run_policy_manifest(*, outputs: Mapping[str, Path]) ->
             "os_sandbox_enabled_for_risky_codecs": False,
         },
         "previewable_run_outputs": previewable_outputs,
+        "preview_policy_rows": policy_rows,
+        "preview_policy_row_count": len(policy_rows),
+        "preview_policy_row_head_hash": row_head_hash,
+        "active_content_blocked_count": sum(1 for row in policy_rows if row["active_content_blocked"]),
         "operator_review_requirements": [
             "Treat preview output as a bounded rendering, not as source extraction.",
             "Use citations/hashes from report or source rows before selecting evidence.",
@@ -1074,6 +1089,35 @@ def build_preview_sandbox_run_policy_manifest(*, outputs: Mapping[str, Path]) ->
         json.dumps(manifest_core, sort_keys=True).encode("utf-8")
     ).hexdigest()
     return manifest_core
+
+
+def preview_sandbox_run_output_policy_row(name: str, path: Path, *, sequence: int) -> dict[str, object]:
+    suffix = path.suffix.lower()
+    mime_type = mimetypes.guess_type(path.name)[0] or "application/octet-stream"
+    active_content = suffix in {".html", ".htm", ".svg", ".js", ".vbs", ".hta"} or mime_type in {
+        "text/html",
+        "image/svg+xml",
+        "application/javascript",
+    }
+    row_core = {
+        "sequence": sequence,
+        "output_name": name,
+        "source_name": path.name,
+        "source_path_sha256": hashlib.sha256(str(path).encode("utf-8", errors="replace")).hexdigest(),
+        "suffix": suffix,
+        "mime_type": mime_type,
+        "read_only_preview": True,
+        "executes_content": False,
+        "external_network_access": False,
+        "active_content_blocked": active_content,
+        "renderer_strategy": "escaped-bounded-data-rendering",
+        "original_file_opening": "download-only-user-controlled-action",
+        "os_sandbox_enabled_for_risky_codecs": False,
+    }
+    return {
+        **row_core,
+        "row_hash": hashlib.sha256(json.dumps(row_core, sort_keys=True).encode("utf-8")).hexdigest(),
+    }
 
 
 def build_sqlite_fts_run_optimization_manifest(*, outputs: Mapping[str, Path]) -> Dict[str, object]:
@@ -3446,6 +3490,7 @@ def build_processing_summary(
                         "no content execution policy emitted",
                         "external network access disabled",
                         "active content blocking policy emitted",
+                        "preview policy row hashes emitted",
                         "OS sandbox limitation warning",
                     ],
                     evidence_refs=[
@@ -3620,6 +3665,9 @@ def build_runtime_defensibility_profiles(
                 "active_content_blocking_declared": True,
                 "external_network_prohibited": True,
                 "run_preview_sandbox_policy_manifest_hash": str((preview_sandbox_policy or {}).get("manifest_hash", "")),
+                "preview_policy_row_count": int((preview_sandbox_policy or {}).get("preview_policy_row_count") or 0),
+                "preview_policy_row_head_hash": str((preview_sandbox_policy or {}).get("preview_policy_row_head_hash") or ""),
+                "active_content_blocked_count": int((preview_sandbox_policy or {}).get("active_content_blocked_count") or 0),
                 "risky_codec_or_macro_os_sandbox": False,
             },
             blockers=[

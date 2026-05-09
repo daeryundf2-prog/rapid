@@ -3444,12 +3444,15 @@ def source_viewer_sandbox(source_path: Path, *, suffix: str, mime_type: str, max
         max_chars=max_chars,
         active_content_blocked=active_content,
     )
+    source_manifest = source_preview_sandbox_manifest(policy_profile=policy_profile)
     return {
         "mode": "read-only-bounded-preview",
         "commercial_gap_ids": [VIEWER_WORKFLOW_GAP_IDS["preview_sandbox"]],
         "executes_content": False,
         "active_content_blocked": active_content,
         "preview_sandbox_policy_profile": policy_profile,
+        "source_preview_sandbox_manifest": source_manifest,
+        "source_preview_sandbox_manifest_hash": source_manifest["manifest_hash"],
         "path_redaction": "display-basename-in-summary-use-full-path-only-for-authorized-source-actions",
         "max_inline_text_chars": max_chars,
         "max_structured_preview_bytes": STRUCTURED_PREVIEW_MAX_BYTES,
@@ -3512,6 +3515,51 @@ def preview_sandbox_policy_profile(
     }
 
 
+def source_preview_sandbox_manifest(*, policy_profile: Mapping[str, object]) -> dict[str, object]:
+    policy = dict(policy_profile)
+    row_core = {
+        "source_name": str(policy.get("source_name") or ""),
+        "source_path_sha256": str(policy.get("source_path_sha256") or ""),
+        "suffix": str(policy.get("suffix") or ""),
+        "mime_type": str(policy.get("mime_type") or ""),
+        "dangerous_extension_detected": bool(policy.get("dangerous_extension_detected")),
+        "active_content_blocked": bool(policy.get("active_content_blocked")),
+        "executes_content": bool(policy.get("executes_content")),
+        "external_network_access": bool(policy.get("external_network_access")),
+        "renderer_strategy": str(policy.get("renderer_strategy") or ""),
+        "original_file_opening": str(policy.get("original_file_opening") or ""),
+        "os_sandbox_enabled": bool(policy.get("os_sandbox_enabled")),
+    }
+    row_hash = hashlib.sha256(json.dumps(row_core, sort_keys=True).encode("utf-8")).hexdigest()
+    manifest_core = {
+        "profile_version": "source-preview-sandbox-manifest-v1",
+        "item_number": 73,
+        "gap_id": VIEWER_WORKFLOW_GAP_IDS["preview_sandbox"],
+        "policy_profile_hash": hashlib.sha256(json.dumps(policy, sort_keys=True).encode("utf-8")).hexdigest(),
+        "source_policy_row": {**row_core, "row_hash": row_hash},
+        "row_head_hash": hashlib.sha256(row_hash.encode("utf-8")).hexdigest(),
+        "active_content_blocking_required": bool(policy.get("dangerous_extension_detected"))
+        or bool(policy.get("active_content_blocked")),
+        "no_exec_no_network_contract": {
+            "executes_content": False,
+            "external_network_access": False,
+            "renderer_strategy": "escaped-bounded-data-rendering",
+            "original_file_opening": "download-only-user-controlled-action",
+        },
+        "commercial_gap_ids": [VIEWER_WORKFLOW_GAP_IDS["preview_sandbox"]],
+        "commercial_claim_allowed": False,
+        "blockers": [
+            PREVIEW_SANDBOX_TRUSTED_DIFF_BLOCKER,
+            "separate-os-sandbox-for-risky-codecs-macros-not-enabled",
+            "browser-renderer-exploit-corpus-not-attached",
+        ],
+    }
+    return {
+        **manifest_core,
+        "manifest_hash": hashlib.sha256(json.dumps(manifest_core, sort_keys=True).encode("utf-8")).hexdigest(),
+    }
+
+
 def build_preview_sandbox_trusted_diff(
     rapid_sandbox: Mapping[str, object],
     trusted_sandbox: Mapping[str, object],
@@ -3570,6 +3618,8 @@ def preview_sandbox_core_accuracy_gates(
     ]
     if policy_profile and policy_profile.get("renderer_strategy"):
         satisfied.append("escaped bounded renderer strategy recorded")
+    if policy_profile and policy_profile.get("source_path_sha256"):
+        satisfied.append("preview policy row hashes emitted")
     evidence_refs = [
         f"source_path:{source_path}",
         f"active_content_blocked:{active_content_blocked}",

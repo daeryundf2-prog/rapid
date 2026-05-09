@@ -22,6 +22,7 @@ from rapidtriage.api.app import (
     build_pagination_cursor_manifest,
     build_pagination_trusted_diff,
     build_preview_sandbox_trusted_diff,
+    build_source_preview,
     build_sqlite_viewer_trusted_diff,
     build_ui_virtualization_trusted_diff,
     build_ui_virtualization_manifest,
@@ -822,11 +823,35 @@ class RapidTriageApiTests(unittest.TestCase):
                 "escaped-bounded-data-rendering",
             )
             self.assertFalse(preview_payload["viewer_sandbox"]["preview_sandbox_policy_profile"]["external_network_access"])
+            source_sandbox_manifest = preview_payload["viewer_sandbox"]["source_preview_sandbox_manifest"]
+            self.assertEqual(source_sandbox_manifest["profile_version"], "source-preview-sandbox-manifest-v1")
+            self.assertEqual(source_sandbox_manifest["item_number"], 73)
+            self.assertRegex(source_sandbox_manifest["source_policy_row"]["row_hash"], r"^[0-9a-f]{64}$")
+            self.assertRegex(source_sandbox_manifest["row_head_hash"], r"^[0-9a-f]{64}$")
+            self.assertEqual(
+                preview_payload["viewer_sandbox"]["source_preview_sandbox_manifest_hash"],
+                source_sandbox_manifest["manifest_hash"],
+            )
             self.assertEqual(preview_payload["viewer_sandbox"]["core_accuracy_gates"][0]["gap_id"], "#73")
             self.assertIn("read-only bounded preview", preview_payload["viewer_sandbox"]["core_accuracy_gates"][0]["satisfied_checks"])
             self.assertIn(
                 "preview sandbox policy profile emitted",
                 preview_payload["viewer_sandbox"]["core_accuracy_gates"][0]["satisfied_checks"],
+            )
+            self.assertIn(
+                "preview policy row hashes emitted",
+                preview_payload["viewer_sandbox"]["core_accuracy_gates"][0]["satisfied_checks"],
+            )
+            active_html = root / "Users" / "alice" / "Desktop" / "active.html"
+            active_html.write_text("<script>fetch('https://example.invalid')</script>", encoding="utf-8")
+            html_preview = build_source_preview("run-1", active_html)
+            self.assertTrue(html_preview["viewer_sandbox"]["active_content_blocked"])
+            self.assertFalse(html_preview["viewer_sandbox"]["executes_content"])
+            self.assertFalse(html_preview["viewer_sandbox"]["external_network_access"])
+            self.assertTrue(
+                html_preview["viewer_sandbox"]["source_preview_sandbox_manifest"][
+                    "active_content_blocking_required"
+                ]
             )
             self.assertEqual(preview_payload["viewer_sandbox"]["trusted_preview_sandbox_diff"]["status"], "missing")
             sandbox_diff = build_preview_sandbox_trusted_diff(

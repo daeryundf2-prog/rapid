@@ -1716,7 +1716,7 @@
       ],
       "expected": {
         "required_assertions": [
-          "Source previews preserve read-only bounded preview metadata, active-content blocking, no network execution, cap metadata, preview-sandbox policy profiles, escaped bounded renderer strategy, OS sandbox warning, and #73 core_accuracy_gates."
+          "Source previews preserve read-only bounded preview metadata, active-content blocking, no network execution, cap metadata, preview-sandbox policy profiles, source policy row hashes, escaped bounded renderer strategy, OS sandbox warning, and #73 core_accuracy_gates."
         ]
       },
       "notes": "Internal fixture pass; renderer/codecs/macros still require external sandbox validation.",

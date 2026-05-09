@@ -447,9 +447,22 @@ class RapidTriageRunTests(unittest.TestCase):
             self.assertFalse(preview_policy["policy"]["executes_content"])
             self.assertFalse(preview_policy["policy"]["external_network_access"])
             self.assertTrue(preview_policy["policy"]["active_content_blocking"])
+            self.assertGreater(preview_policy["preview_policy_row_count"], 0)
+            self.assertRegex(preview_policy["preview_policy_row_head_hash"], r"^[0-9a-f]{64}$")
+            self.assertEqual(
+                preview_policy["preview_policy_row_count"],
+                len(preview_policy["preview_policy_rows"]),
+            )
+            self.assertRegex(preview_policy["preview_policy_rows"][0]["row_hash"], r"^[0-9a-f]{64}$")
             self.assertEqual(
                 summary_payload["processing"]["preview_sandboxing"]["preview_sandbox_policy_manifest_hash"],
                 preview_policy["manifest_hash"],
+            )
+            self.assertIn(
+                "preview policy row hashes emitted",
+                summary_payload["processing"]["preview_sandboxing"]["core_accuracy_gates"][0][
+                    "satisfied_checks"
+                ],
             )
             sqlite_fts_path = Path(summary_payload["outputs"]["sqlite_fts_optimization"])
             self.assertTrue(sqlite_fts_path.is_file())
@@ -502,6 +515,14 @@ class RapidTriageRunTests(unittest.TestCase):
             self.assertEqual(
                 runtime_by_number[73]["controls"]["run_preview_sandbox_policy_manifest_hash"],
                 preview_policy["manifest_hash"],
+            )
+            self.assertEqual(
+                runtime_by_number[73]["controls"]["preview_policy_row_count"],
+                preview_policy["preview_policy_row_count"],
+            )
+            self.assertEqual(
+                runtime_by_number[73]["controls"]["preview_policy_row_head_hash"],
+                preview_policy["preview_policy_row_head_hash"],
             )
             self.assertEqual(runtime_by_number[74]["component"], "large-sqlite-fts-optimization")
             self.assertTrue(runtime_by_number[74]["controls"]["bounded_sqlite_preview_contract"])

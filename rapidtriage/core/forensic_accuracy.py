@@ -1118,6 +1118,7 @@ CORE_FORENSIC_ACCURACY_ITEMS: tuple[dict[str, object], ...] = (
             "external network access disabled",
             "preview caps recorded",
             "OS sandbox limitation warning",
+            "preview policy row hashes emitted",
             "trusted preview sandbox/no-exec diff pass",
         ),
     },

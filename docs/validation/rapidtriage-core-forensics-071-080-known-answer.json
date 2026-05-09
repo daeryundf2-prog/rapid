@@ -33,7 +33,7 @@
       "status": "pass",
       "backlog_items": [73],
       "evidence_paths": ["docs/validation/core-forensics-071-080-fixture-evidence.json", "tests/test_rapidtriage_api.py"],
-      "expected": {"required_assertions": ["Source previews preserve read-only bounded preview metadata, active-content blocking, no network execution, cap metadata, preview-sandbox policy profiles, escaped bounded renderer strategy, OS sandbox warning, trusted no-exec diff status, and #73 core_accuracy_gates."]},
+      "expected": {"required_assertions": ["Source previews preserve read-only bounded preview metadata, active-content blocking, no network execution, cap metadata, preview-sandbox policy profiles, source policy row hashes, escaped bounded renderer strategy, OS sandbox warning, trusted no-exec diff status, and #73 core_accuracy_gates."]},
       "notes": "Internal fixture pass; renderer/codecs/macros and trusted no-exec preview manifests still require external sandbox validation."
     },
     {
