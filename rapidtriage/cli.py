@@ -1076,6 +1076,7 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     evidence.add_argument("source", help="Evidence source path to identify")
+    evidence.add_argument("--output", help="Optional JSON output path for the evidence preflight/runbook")
     evidence.add_argument("--json", action="store_true", help="Print machine-readable JSON")
 
     e01_known_answer = sub.add_parser(
@@ -2250,6 +2251,8 @@ def main(argv=None) -> int:
 
     if args.command == "evidence":
         payload = identify_evidence(Path(args.source)).to_dict()
+        if args.output:
+            write_result(payload, Path(args.output).expanduser().resolve())
         if args.json:
             print(json.dumps(payload, ensure_ascii=False, indent=2))
         else:
@@ -2271,6 +2274,15 @@ def main(argv=None) -> int:
                 print("Warnings:")
                 for warning in warnings:
                     print(f"- {warning}")
+            if args.output:
+                print(f"Saved: {Path(args.output).expanduser().resolve()}")
+            runbook = payload.get("ingest_workflow", {}).get("operator_runbook") if isinstance(payload.get("ingest_workflow"), dict) else None
+            if isinstance(runbook, dict):
+                commands = runbook.get("recommended_commands") if isinstance(runbook.get("recommended_commands"), dict) else {}
+                if commands:
+                    print("Recommended commands:")
+                    for name, command in commands.items():
+                        print(f"- {name}: {command}")
         return 0
 
     if args.command == "e01-known-answer":

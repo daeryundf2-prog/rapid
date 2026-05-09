@@ -68,6 +68,12 @@ class RapidTriageEvidenceAdapterTests(unittest.TestCase):
             self.assertEqual(result["ingest_workflow"]["stages"][-1]["id"], "search-review-report")
             self.assertIn("#22", result["ingest_workflow"]["commercial_gap_ids"])
             self.assertIn(result["ingest_workflow"]["recommended_input_kind"], {"e01-derived", "mounted-or-exported-folder"})
+            self.assertIn("operator_runbook", result["ingest_workflow"])
+            self.assertIn("run", result["ingest_workflow"]["recommended_commands"])
+            self.assertEqual(
+                result["ingest_workflow"]["operator_runbook"]["profile_version"],
+                "windows11-e01-operator-runbook-v1",
+            )
             self.assertTrue(result["limitations"])
             self.assertTrue(result["fallback_guidance"])
             e01_uplift = result["commercial_uplift_evidence"]
@@ -101,6 +107,8 @@ class RapidTriageEvidenceAdapterTests(unittest.TestCase):
             self.assertTrue(result["ingest_workflow"]["blocked"])
             self.assertEqual(result["ingest_workflow"]["failure_category"], "missing-tool")
             self.assertEqual(result["ingest_workflow"]["stages"][1]["status"], "blocked")
+            self.assertIn("operator_runbook", result["ingest_workflow"])
+            self.assertFalse(result["ingest_workflow"]["operator_runbook"]["direct_extract_ready"])
             self.assertIn("WSL2", " ".join(result["failure_guidance"]["next_actions"]))
 
     def test_identifies_raw_image_as_direct_extract_when_sleuthkit_exists(self) -> None:

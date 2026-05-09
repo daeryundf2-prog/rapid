@@ -33,6 +33,7 @@ from .e01 import (
     E01ExtractionError,
     E01ExtractionResult,
     build_e01_ex01_integrated_workflow_manifest,
+    build_e01_operator_runbook,
     e01_failure_guidance,
     extract_e01_to_directory,
     is_e01_path,
@@ -3022,6 +3023,12 @@ def build_run_source_record(
 def build_completed_e01_workflow_status(image_result: E01ExtractionResult) -> dict[str, object]:
     recovered_manifest = image_result.recovered_root_manifest or {}
     recovered_entries = int(recovered_manifest.get("file_count") or recovered_manifest.get("hashed_file_count") or 0)
+    runbook = build_e01_operator_runbook(
+        image_result.source_path,
+        direct_extract_ready=True,
+        partition_start_sector=image_result.partition_start_sector,
+        output_dir_hint=str(image_result.stage_dir.parent),
+    )
     stages = [
         ("select-e01", "Select E01/Ex01", "complete", f"source={image_result.source_path.name}"),
         (
@@ -3070,6 +3077,8 @@ def build_completed_e01_workflow_status(image_result: E01ExtractionResult) -> di
             {"id": stage_id, "label": label, "status": status, "evidence": evidence}
             for stage_id, label, status, evidence in stages
         ],
+        "operator_runbook": runbook,
+        "recommended_commands": runbook["recommended_commands"],
         "analyst_next_actions": [
             "Search all evidence from the command bar.",
             "Open hits in the source viewer before marking them relevant.",

@@ -397,6 +397,93 @@ def e01_failure_guidance(message: str) -> dict[str, object]:
     }
 
 
+def build_e01_operator_runbook(
+    source_path: Path,
+    *,
+    direct_extract_ready: bool,
+    blocked_reason: str = "",
+    partition_start_sector: int | None = None,
+    output_dir_hint: str = "./rapidtriage-run-e01",
+    mode: str = "hacking",
+) -> dict[str, object]:
+    source_text = str(source_path)
+    partition_arg = (
+        f" --e01-partition-start-sector {partition_start_sector}"
+        if partition_start_sector is not None
+        else ""
+    )
+    run_command = (
+        f"rapidtriage run {json.dumps(source_text)} --mode {mode} "
+        f"--output-dir {output_dir_hint}{partition_arg} --resume"
+    )
+    return {
+        "profile_version": "windows11-e01-operator-runbook-v1",
+        "goal": "Move one Windows 11 E01/Ex01 case from input selection through extraction, analysis, search, review, and report export.",
+        "direct_extract_ready": direct_extract_ready,
+        "blocked_reason": blocked_reason,
+        "recommended_commands": {
+            "preflight": f"rapidtriage evidence {json.dumps(source_text)} --json --output {output_dir_hint}/rapidtriage-evidence-preflight.json",
+            "plan_or_smoke": f"rapidtriage e01-smoke {json.dumps(source_text)} --output-dir {output_dir_hint}/e01-smoke --plan-only --json",
+            "run": run_command,
+            "review": f"rapidtriage web --root {output_dir_hint}",
+        },
+        "gui_flow": [
+            {
+                "step": 1,
+                "label": "Select E01/Ex01",
+                "user_action": "Select the first EWF segment; keep all E01/E02/... or Ex01/Ex02/... segments in the same folder.",
+                "success_evidence": "segment_set_profile shows selected_is_first_segment=true and no missing segment warnings.",
+            },
+            {
+                "step": 2,
+                "label": "Dependency check",
+                "user_action": "Confirm ewfmount, mmls, and tsk_recover are available, or switch to trusted export folder input.",
+                "success_evidence": "preflight_summary.status is ready or ready-version-unverified.",
+            },
+            {
+                "step": 3,
+                "label": "Partition selection",
+                "user_action": "Use automatic largest supported Windows filesystem first, or enter a verified mmls start sector.",
+                "success_evidence": "partition_selection.selected_start_sector is recorded with requested/recommended sector provenance.",
+            },
+            {
+                "step": 4,
+                "label": "Read-only extraction",
+                "user_action": "Recover to the run output stage; never write into the source image folder.",
+                "success_evidence": "rapidtriage-e01.json records command_history and recovered_root_manifest hashes.",
+            },
+            {
+                "step": 5,
+                "label": "Artifact analysis",
+                "user_action": "Run Windows artifact collectors, file/document indexing, timeline, and indicators from the extracted root.",
+                "success_evidence": "run summary contains manifest/docs/files/artifacts/timeline/indicators outputs.",
+            },
+            {
+                "step": 6,
+                "label": "Search, review, report",
+                "user_action": "Search globally, open source viewers, tag evidence, then export reviewed report candidates.",
+                "success_evidence": "report/export items preserve source hashes, parser versions, offsets or source locators, and review status.",
+            },
+        ],
+        "expected_outputs": [
+            "rapidtriage-evidence-preflight.json",
+            "rapidtriage-e01.json",
+            "rapidtriage-run-summary.json",
+            "rapidtriage-run-report.md",
+            "rapidtriage-case.db when web/review workflow is used",
+        ],
+        "large_case_controls": [
+            "Use --resume so extraction and analysis can continue after interruption.",
+            "Use --max-file-count and --max-extract-size-bytes for first-pass triage on very large evidence.",
+            "Use the web result table cursor/virtualized views instead of opening full raw JSON for review.",
+        ],
+        "report_limitations": [
+            "Direct E01 support orchestrates libewf and Sleuth Kit; it is not a native commercial-grade EWF parser.",
+            "Encrypted, malformed, corrupt, or deleted filesystem claims require trusted-tool comparison and known-answer validation.",
+        ],
+    }
+
+
 def build_e01_ingest_workflow_profile(
     source_path: Path,
     *,
@@ -470,6 +557,11 @@ def build_e01_ingest_workflow_profile(
             "evidence": ["Case DB review marks and report bundles keep source citations."],
         },
     ]
+    runbook = build_e01_operator_runbook(
+        source_path,
+        direct_extract_ready=direct_extract_ready,
+        blocked_reason=blocked_reason,
+    )
     return {
         "profile_version": "windows11-e01-single-case-workflow-v1",
         "workflow_goal": "Select an E01, verify dependencies, choose a partition, extract read-only, analyze artifacts, search/review, and export report evidence from one flow.",
@@ -487,6 +579,8 @@ def build_e01_ingest_workflow_profile(
             "Use cursor pages and virtualized tables for high-volume result sets.",
         ],
         "stages": stages,
+        "operator_runbook": runbook,
+        "recommended_commands": runbook["recommended_commands"],
         "commercial_gap_ids": ["#22", "#23", "#78", "#79"],
         "commercial_note": "This workflow is usable for triage, but commercial-grade E01 claims still require external corpus validation and trusted tool logs.",
     }

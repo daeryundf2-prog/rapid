@@ -32,6 +32,7 @@ The GUI `Check evidence support` action now shows a compact E01 readiness card:
 - operator-facing remediation steps
 - per-tool details such as purpose, path/version, and install hint
 - fallback strategy: direct extraction when ready, mount/export-first when blocked
+- operator runbook commands for preflight, smoke/plan, run, and review
 
 ## Recommended Windows Workflow
 
@@ -45,6 +46,20 @@ Recommended steps:
 4. Use `Check evidence support` on the folder or source image.
 5. Run `Fast first pass` against the mounted/exported folder.
 
+You can also save the same preflight/runbook JSON before running the case:
+
+```powershell
+rapidtriage evidence .\case.E01 --output .\case-run\rapidtriage-evidence-preflight.json
+```
+
+The saved JSON includes `ingest_workflow.operator_runbook` with:
+
+- exact command templates for `evidence`, `e01-smoke`, `run`, and web review
+- GUI-oriented steps from E01 selection through report export
+- expected output files such as `rapidtriage-e01.json` and `rapidtriage-run-summary.json`
+- large-case controls for `--resume`, extraction caps, cursor tables, and virtualized review
+- explicit limitations so direct E01 orchestration is not overstated as native commercial EWF parsing
+
 ## Recommended macOS/Linux Workflow
 
 If `libewf` and Sleuth Kit tools are installed:
@@ -52,6 +67,12 @@ If `libewf` and Sleuth Kit tools are installed:
 ```bash
 rapidtriage evidence ./case.E01 --json
 rapidtriage run ./case.E01 --mode fraud --output-dir ./case-run
+```
+
+To preserve the readiness/runbook artifact:
+
+```bash
+rapidtriage evidence ./case.E01 --output ./case-run/rapidtriage-evidence-preflight.json
 ```
 
 If the automatic partition choice is wrong, pass the start sector shown by `mmls` or a trusted tool:

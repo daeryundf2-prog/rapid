@@ -230,6 +230,37 @@ DOS Partition Table
         self.assertEqual(permission["category"], "permission")
         self.assertTrue(missing["next_actions"])
 
+    def test_e01_evidence_preflight_writes_operator_runbook(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            e01_path = root / "case.E01"
+            output = root / "evidence-preflight.json"
+            e01_path.write_bytes(b"EVF-preflight")
+            tool_rows = [
+                {"tool": "ewfmount", "available": True, "path": "/usr/bin/ewfmount", "version": "ewfmount 1.0"},
+                {"tool": "mmls", "available": True, "path": "/usr/bin/mmls", "version": "mmls 1.0"},
+                {"tool": "tsk_recover", "available": True, "path": "/usr/bin/tsk_recover", "version": "tsk_recover 1.0"},
+            ]
+
+            with (
+                patch("rapidtriage.core.evidence.missing_e01_tools", return_value=[]),
+                patch("rapidtriage.core.evidence.collect_tool_preflight", return_value=tool_rows),
+            ):
+                exit_code = main(["evidence", str(e01_path), "--output", str(output)])
+
+            self.assertEqual(exit_code, 0)
+            payload = json.loads(output.read_text(encoding="utf-8"))
+            self.assertEqual(payload["adapter"], "ewf")
+            self.assertEqual(payload["preflight_summary"]["status"], "ready")
+            workflow = payload["ingest_workflow"]
+            self.assertEqual(workflow["profile_version"], "windows11-e01-single-case-workflow-v1")
+            self.assertTrue(workflow["direct_extract_ready"])
+            runbook = workflow["operator_runbook"]
+            self.assertEqual(runbook["profile_version"], "windows11-e01-operator-runbook-v1")
+            self.assertIn("rapidtriage run", runbook["recommended_commands"]["run"])
+            self.assertEqual(runbook["gui_flow"][0]["label"], "Select E01/Ex01")
+            self.assertIn("rapidtriage-e01.json", runbook["expected_outputs"])
+
     def test_e01_tool_preflight_records_roles_versions_and_remediation(self) -> None:
         calls: list[list[str]] = []
 
@@ -1138,6 +1169,8 @@ DOS Partition Table
             self.assertEqual(payload["source"]["workflow_status"]["stages"][0]["id"], "select-e01")
             self.assertEqual(payload["source"]["workflow_status"]["stages"][-1]["id"], "search-review-report")
             self.assertEqual(payload["source"]["workflow_status"]["selected_partition_start_sector"], 4096)
+            self.assertIn("operator_runbook", payload["source"]["workflow_status"])
+            self.assertIn("--e01-partition-start-sector 4096", payload["source"]["workflow_status"]["recommended_commands"]["run"])
             workflow_manifest = payload["source"]["e01_ex01_workflow_manifest"]
             self.assertEqual(workflow_manifest["profile_version"], "e01-ex01-integrated-workflow-manifest-v1")
             self.assertEqual(workflow_manifest["status_context"], "run-summary")
