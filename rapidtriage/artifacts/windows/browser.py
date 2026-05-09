@@ -465,6 +465,23 @@ def build_browser_artifacts(
         "commercial_grade_ready": False,
         "commercial_grade_blockers": BROWSER_REPORT_GRADE_BLOCKERS,
     }
+    base_details["browser_analyst_review_profile"] = browser_analyst_review_profile(
+        artifact_type=artifact_type,
+        browser=browser,
+        profile=profile,
+        report_grade=report_grade,
+        validation_checks=validation_checks,
+        storage_review_profile=storage_review_profile,
+        timeline_integrity_profile=timeline_integrity_profile,
+        evidence_fields={
+            "history_count": len(history_rows),
+            "download_count": len(download_rows),
+            "unified_timeline_count": len(unified_timeline),
+            "browser_storage_inventory_count": len(storage_inventory),
+            "browser_sensitive_inventory_count": sum(1 for row in storage_inventory if row.get("sensitive")),
+            "top_domains": count_field(usage_rows, "domain", limit=10),
+        },
+    )
     records = [
         ArtifactRecord(
             provider=provider,
@@ -937,6 +954,19 @@ def build_browser_storage_inventory_record(
             ),
             "commercial_grade_ready": False,
             "commercial_grade_blockers": BROWSER_REPORT_GRADE_BLOCKERS,
+            "browser_analyst_review_profile": browser_analyst_review_profile(
+                artifact_type=artifact_type,
+                browser=browser,
+                profile=profile,
+                report_grade=report_grade,
+                validation_checks=validation_context,
+                storage_review_profile=storage_review_profile,
+                evidence_fields={
+                    "inventory_count": len(storage_inventory),
+                    "sensitive_inventory_count": sensitive_count,
+                    "storage_type_counts": count_field(storage_inventory, "storage_type"),
+                },
+            ),
             "triage_recommendation": (
                 "Use this row to decide which browser stores require scoped manual review. "
                 "The parser inventories cache/session/extension/sync/cookie/credential stores but does not decrypt secrets."
@@ -1437,6 +1467,66 @@ def browser_storage_review_profile(storage_inventory: Sequence[Mapping[str, obje
         "review_priority": priority,
         "recommended_view": "group-by-storage-type-then-open-sample-hashes",
         "secret_values_redacted_by_default": True,
+    }
+
+
+def browser_analyst_review_profile(
+    *,
+    artifact_type: str,
+    browser: str,
+    profile: str,
+    report_grade: Mapping[str, object],
+    validation_checks: Mapping[str, object],
+    storage_review_profile: Mapping[str, object] | None = None,
+    timeline_integrity_profile: Mapping[str, object] | None = None,
+    evidence_fields: Mapping[str, object] | None = None,
+) -> Dict[str, object]:
+    storage_profile = storage_review_profile or {}
+    timeline_profile = timeline_integrity_profile or {}
+    failed_checks = sorted(str(key) for key, value in validation_checks.items() if value is False)
+    blockers = sorted(set(str(item) for item in report_grade.get("blockers", []) if str(item)) | set(BROWSER_REPORT_GRADE_BLOCKERS))
+    evidence = dict(evidence_fields or {})
+    if storage_profile:
+        evidence.setdefault("storage_review_priority", str(storage_profile.get("review_priority") or ""))
+        evidence.setdefault("sensitive_inventory_count", int(storage_profile.get("sensitive_inventory_count") or 0))
+    if timeline_profile:
+        evidence.setdefault("timeline_sorted_descending", bool(timeline_profile.get("sorted_descending")))
+        evidence.setdefault("timeline_source_index_complete", bool(timeline_profile.get("source_index_complete")))
+    return {
+        "profile_version": "browser-analyst-review-profile-v1",
+        "artifact_type": artifact_type,
+        "browser": browser,
+        "profile": profile,
+        "severity": "high" if int(evidence.get("sensitive_inventory_count") or 0) else "medium",
+        "summary": "Browser history, download, storage, and unified timeline review profile.",
+        "evidence_interpretation": "browser activity/storage triage row with normalized timestamps and sensitive-store warnings",
+        "not_proof_of": ["complete deleted browsing history", "decrypted cookies/passwords/session tokens", "browser-version-perfect transition semantics"],
+        "analyst_questions": [
+            "Does a trusted browser parser or native SQLite query confirm the same URL/download/storage rows?",
+            "Which storage stores require legal-scope review before opening raw files?",
+            "Do MFT/USN, Windows Search, cloud sync, or app artifacts corroborate the browser timeline?",
+        ],
+        "primary_pivots": [
+            "browser",
+            "profile",
+            "history_count",
+            "download_count",
+            "unified_timeline_count",
+            "browser_storage_inventory_count",
+            "sensitive_inventory_count",
+            "top_domains",
+        ],
+        "source_field_values": {key: value for key, value in evidence.items() if value not in ("", None, [], {})},
+        "correlation_targets": ["MFT", "USN", "Windows Search", "Cloud sync", "Email", "AI transcript candidates"],
+        "risk_tags": ["browser-review", "secret-scope-warning"] if int(evidence.get("sensitive_inventory_count") or 0) else ["browser-review"],
+        "validation_required": True,
+        "failed_validation_checks": failed_checks,
+        "report_grade_ready": bool(report_grade.get("report_grade_ready")),
+        "commercial_blockers": blockers,
+        "report_guidance": (
+            "Use browser rows as activity and storage review pivots. Final URL/download/storage conclusions require "
+            "source citation, trusted parser diff, and scope-controlled handling for sensitive stores."
+        ),
     }
 
 

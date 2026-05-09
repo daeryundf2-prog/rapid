@@ -466,6 +466,13 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
             )
             self.assertIn("unified-timeline", browser_uplift["passed_validation_matrix_ids"])
             self.assertTrue(browser_uplift["large_data_controls"]["secret_values_redacted_by_default"])
+            browser_review_profile = chrome["details"]["browser_analyst_review_profile"]
+            self.assertEqual(browser_review_profile["profile_version"], "browser-analyst-review-profile-v1")
+            self.assertEqual(browser_review_profile["browser"], "chrome")
+            self.assertEqual(browser_review_profile["source_field_values"]["history_count"], 2)
+            self.assertEqual(browser_review_profile["source_field_values"]["unified_timeline_count"], 2)
+            self.assertIn("Windows Search", browser_review_profile["correlation_targets"])
+            self.assertIn("decrypted cookies/passwords/session tokens", browser_review_profile["not_proof_of"])
             self.assertEqual(chrome["details"]["unified_timeline_count"], 2)
             self.assertEqual(chrome["details"]["unified_timeline"][0]["timeline_type"], "visit")
             self.assertEqual(chrome["details"]["unified_timeline"][0]["browser"], "chrome")
@@ -516,6 +523,11 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
                 chrome["details"]["browser_storage_depth_manifest_hash"],
                 chrome_storage_depth["manifest_sha256"],
             )
+            storage_review = storage_inventory["details"]["browser_analyst_review_profile"]
+            self.assertEqual(storage_review["profile_version"], "browser-analyst-review-profile-v1")
+            self.assertEqual(storage_review["artifact_type"], "browser-storage-inventory")
+            self.assertGreaterEqual(storage_review["source_field_values"]["sensitive_inventory_count"], 3)
+            self.assertIn("secret-scope-warning", storage_review["risk_tags"])
             self.assertIn({"value": "ai", "count": 1}, chrome["details"]["internet_category_counts"])
             self.assertEqual(ai_usage["details"]["browser"], "chrome")
             self.assertEqual(ai_usage["details"]["ai_usage_count"], 1)
@@ -857,6 +869,15 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
             )
             self.assertIn("has-valid-header", lnk_uplift["passed_validation_matrix_ids"])
             self.assertTrue(lnk_uplift["large_data_controls"]["property_store_decode_required_for_commercial_claims"])
+            lnk_review_profile = details["lnk_analyst_review_profile"]
+            self.assertEqual(lnk_review_profile["profile_version"], "lnk-analyst-review-profile-v1")
+            self.assertEqual(
+                lnk_review_profile["source_field_values"]["target_path"],
+                r"C:\Users\alice\Documents\Incident Notes.docx",
+            )
+            self.assertEqual(lnk_review_profile["source_field_values"]["tracker_machine_id"], "ALICE-PC")
+            self.assertIn("MFT", lnk_review_profile["correlation_targets"])
+            self.assertIn("complete Shell Item semantics", lnk_review_profile["not_proof_of"])
             lnk_manifest = details["lnk_metadata_depth_manifest"]
             self.assertEqual(lnk_manifest["manifest_version"], "lnk-metadata-depth-manifest-v1")
             self.assertEqual(lnk_manifest["gap_id"], "#17")
@@ -2676,6 +2697,12 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
             self.assertTrue(
                 prefetch_uplift["large_data_controls"]["full_file_metrics_decode_required_for_commercial_claims"]
             )
+            prefetch_review_profile = details["prefetch_analyst_review_profile"]
+            self.assertEqual(prefetch_review_profile["profile_version"], "prefetch-analyst-review-profile-v1")
+            self.assertEqual(prefetch_review_profile["source_field_values"]["executable_hint"], "POWERSHELL.EXE")
+            self.assertEqual(prefetch_review_profile["source_field_values"]["run_count"], 3)
+            self.assertIn("Amcache", prefetch_review_profile["correlation_targets"])
+            self.assertIn("standalone execution attribution", prefetch_review_profile["not_proof_of"])
             prefetch_manifest = details["prefetch_execution_depth_manifest"]
             self.assertEqual(prefetch_manifest["manifest_version"], "prefetch-execution-depth-manifest-v1")
             self.assertEqual(prefetch_manifest["gap_id"], "#16")

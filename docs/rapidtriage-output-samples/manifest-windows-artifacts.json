@@ -941,7 +941,89 @@
               "cross-browser-timeline-known-answer-corpus-required",
               "browser-storage-trusted-diff-required",
               "browser-timeline-trusted-diff-required"
-            ]
+            ],
+            "browser_analyst_review_profile": {
+              "profile_version": "browser-analyst-review-profile-v1",
+              "artifact_type": "browser-history",
+              "browser": "firefox",
+              "profile": "default-release",
+              "severity": "medium",
+              "summary": "Browser history, download, storage, and unified timeline review profile.",
+              "evidence_interpretation": "browser activity/storage triage row with normalized timestamps and sensitive-store warnings",
+              "not_proof_of": [
+                "complete deleted browsing history",
+                "decrypted cookies/passwords/session tokens",
+                "browser-version-perfect transition semantics"
+              ],
+              "analyst_questions": [
+                "Does a trusted browser parser or native SQLite query confirm the same URL/download/storage rows?",
+                "Which storage stores require legal-scope review before opening raw files?",
+                "Do MFT/USN, Windows Search, cloud sync, or app artifacts corroborate the browser timeline?"
+              ],
+              "primary_pivots": [
+                "browser",
+                "profile",
+                "history_count",
+                "download_count",
+                "unified_timeline_count",
+                "browser_storage_inventory_count",
+                "sensitive_inventory_count",
+                "top_domains"
+              ],
+              "source_field_values": {
+                "history_count": 1,
+                "download_count": 0,
+                "unified_timeline_count": 1,
+                "browser_storage_inventory_count": 0,
+                "browser_sensitive_inventory_count": 0,
+                "top_domains": [
+                  {
+                    "value": "support.mozilla.org",
+                    "count": 1
+                  }
+                ],
+                "storage_review_priority": "normal",
+                "sensitive_inventory_count": 0,
+                "timeline_sorted_descending": true,
+                "timeline_source_index_complete": true
+              },
+              "correlation_targets": [
+                "MFT",
+                "USN",
+                "Windows Search",
+                "Cloud sync",
+                "Email",
+                "AI transcript candidates"
+              ],
+              "risk_tags": [
+                "browser-review"
+              ],
+              "validation_required": true,
+              "failed_validation_checks": [
+                "ai_conversation_candidates_present",
+                "cookie_values_decrypted",
+                "download_rows_present",
+                "extension_schema_validated",
+                "full_cache_entry_decode",
+                "sensitive_storage_inventory_present",
+                "storage_inventory_present",
+                "storage_review_profile_present",
+                "sync_state_validated",
+                "timeline_has_download_rows"
+              ],
+              "report_grade_ready": false,
+              "commercial_blockers": [
+                "browser-storage-trusted-diff-required",
+                "browser-timeline-trusted-diff-required",
+                "cookie-value-decryption-and-legal-opt-in-not-implemented",
+                "cross-browser-session-restore-decoding-incomplete",
+                "cross-browser-timeline-known-answer-corpus-required",
+                "extension-schema-and-sync-engine-validation-required",
+                "full-browser-cache-entry-decoding-not-implemented",
+                "sync-engine-state-validation-required"
+              ],
+              "report_guidance": "Use browser rows as activity and storage review pivots. Final URL/download/storage conclusions require source citation, trusted parser diff, and scope-controlled handling for sensitive stores."
+            }
           }
         },
         {
@@ -1920,7 +2002,91 @@
               "cross-browser-timeline-known-answer-corpus-required",
               "browser-storage-trusted-diff-required",
               "browser-timeline-trusted-diff-required"
-            ]
+            ],
+            "browser_analyst_review_profile": {
+              "profile_version": "browser-analyst-review-profile-v1",
+              "artifact_type": "browser-history-downloads",
+              "browser": "chrome",
+              "profile": "Default",
+              "severity": "medium",
+              "summary": "Browser history, download, storage, and unified timeline review profile.",
+              "evidence_interpretation": "browser activity/storage triage row with normalized timestamps and sensitive-store warnings",
+              "not_proof_of": [
+                "complete deleted browsing history",
+                "decrypted cookies/passwords/session tokens",
+                "browser-version-perfect transition semantics"
+              ],
+              "analyst_questions": [
+                "Does a trusted browser parser or native SQLite query confirm the same URL/download/storage rows?",
+                "Which storage stores require legal-scope review before opening raw files?",
+                "Do MFT/USN, Windows Search, cloud sync, or app artifacts corroborate the browser timeline?"
+              ],
+              "primary_pivots": [
+                "browser",
+                "profile",
+                "history_count",
+                "download_count",
+                "unified_timeline_count",
+                "browser_storage_inventory_count",
+                "sensitive_inventory_count",
+                "top_domains"
+              ],
+              "source_field_values": {
+                "history_count": 2,
+                "download_count": 1,
+                "unified_timeline_count": 3,
+                "browser_storage_inventory_count": 0,
+                "browser_sensitive_inventory_count": 0,
+                "top_domains": [
+                  {
+                    "value": "download.example.com",
+                    "count": 1
+                  },
+                  {
+                    "value": "example.com",
+                    "count": 1
+                  }
+                ],
+                "storage_review_priority": "normal",
+                "sensitive_inventory_count": 0,
+                "timeline_sorted_descending": true,
+                "timeline_source_index_complete": true
+              },
+              "correlation_targets": [
+                "MFT",
+                "USN",
+                "Windows Search",
+                "Cloud sync",
+                "Email",
+                "AI transcript candidates"
+              ],
+              "risk_tags": [
+                "browser-review"
+              ],
+              "validation_required": true,
+              "failed_validation_checks": [
+                "ai_conversation_candidates_present",
+                "cookie_values_decrypted",
+                "extension_schema_validated",
+                "full_cache_entry_decode",
+                "sensitive_storage_inventory_present",
+                "storage_inventory_present",
+                "storage_review_profile_present",
+                "sync_state_validated"
+              ],
+              "report_grade_ready": false,
+              "commercial_blockers": [
+                "browser-storage-trusted-diff-required",
+                "browser-timeline-trusted-diff-required",
+                "cookie-value-decryption-and-legal-opt-in-not-implemented",
+                "cross-browser-session-restore-decoding-incomplete",
+                "cross-browser-timeline-known-answer-corpus-required",
+                "extension-schema-and-sync-engine-validation-required",
+                "full-browser-cache-entry-decoding-not-implemented",
+                "sync-engine-state-validation-required"
+              ],
+              "report_guidance": "Use browser rows as activity and storage review pivots. Final URL/download/storage conclusions require source citation, trusted parser diff, and scope-controlled handling for sensitive stores."
+            }
           }
         },
         {
@@ -2821,7 +2987,87 @@
               "cross-browser-timeline-known-answer-corpus-required",
               "browser-storage-trusted-diff-required",
               "browser-timeline-trusted-diff-required"
-            ]
+            ],
+            "browser_analyst_review_profile": {
+              "profile_version": "browser-analyst-review-profile-v1",
+              "artifact_type": "browser-history-downloads",
+              "browser": "edge",
+              "profile": "Profile 1",
+              "severity": "medium",
+              "summary": "Browser history, download, storage, and unified timeline review profile.",
+              "evidence_interpretation": "browser activity/storage triage row with normalized timestamps and sensitive-store warnings",
+              "not_proof_of": [
+                "complete deleted browsing history",
+                "decrypted cookies/passwords/session tokens",
+                "browser-version-perfect transition semantics"
+              ],
+              "analyst_questions": [
+                "Does a trusted browser parser or native SQLite query confirm the same URL/download/storage rows?",
+                "Which storage stores require legal-scope review before opening raw files?",
+                "Do MFT/USN, Windows Search, cloud sync, or app artifacts corroborate the browser timeline?"
+              ],
+              "primary_pivots": [
+                "browser",
+                "profile",
+                "history_count",
+                "download_count",
+                "unified_timeline_count",
+                "browser_storage_inventory_count",
+                "sensitive_inventory_count",
+                "top_domains"
+              ],
+              "source_field_values": {
+                "history_count": 1,
+                "download_count": 1,
+                "unified_timeline_count": 2,
+                "browser_storage_inventory_count": 0,
+                "browser_sensitive_inventory_count": 0,
+                "top_domains": [
+                  {
+                    "value": "contoso.example",
+                    "count": 1
+                  }
+                ],
+                "storage_review_priority": "normal",
+                "sensitive_inventory_count": 0,
+                "timeline_sorted_descending": true,
+                "timeline_source_index_complete": true
+              },
+              "correlation_targets": [
+                "MFT",
+                "USN",
+                "Windows Search",
+                "Cloud sync",
+                "Email",
+                "AI transcript candidates"
+              ],
+              "risk_tags": [
+                "browser-review"
+              ],
+              "validation_required": true,
+              "failed_validation_checks": [
+                "ai_conversation_candidates_present",
+                "cookie_values_decrypted",
+                "extension_schema_validated",
+                "full_cache_entry_decode",
+                "sensitive_storage_inventory_present",
+                "storage_inventory_present",
+                "storage_review_profile_present",
+                "sync_state_validated"
+              ],
+              "report_grade_ready": false,
+              "commercial_blockers": [
+                "browser-storage-trusted-diff-required",
+                "browser-timeline-trusted-diff-required",
+                "cookie-value-decryption-and-legal-opt-in-not-implemented",
+                "cross-browser-session-restore-decoding-incomplete",
+                "cross-browser-timeline-known-answer-corpus-required",
+                "extension-schema-and-sync-engine-validation-required",
+                "full-browser-cache-entry-decoding-not-implemented",
+                "sync-engine-state-validation-required"
+              ],
+              "report_guidance": "Use browser rows as activity and storage review pivots. Final URL/download/storage conclusions require source citation, trusted parser diff, and scope-controlled handling for sensitive stores."
+            }
           }
         }
       ]
@@ -4355,6 +4601,70 @@
               },
               "next_internal_step": "Finish Shell Item property store semantics and tracker/LinkInfo known-answer corpus validation.",
               "external_evidence_required": true
+            },
+            "lnk_analyst_review_profile": {
+              "profile_version": "lnk-analyst-review-profile-v1",
+              "artifact_type": "recent-shortcut",
+              "severity": "medium",
+              "summary": "Shell Link shortcut pivot with target path, LinkInfo/StringData, timestamps, and tracker context.",
+              "evidence_interpretation": "shortcut target/context metadata; account, shell-item, and property-store semantics still need validation",
+              "not_proof_of": [
+                "file opened by a specific user without correlation",
+                "complete Shell Item semantics",
+                "complete PropertyStore metadata"
+              ],
+              "analyst_questions": [
+                "Does LECmd confirm the same target, working directory, arguments, timestamps, and tracker fields?",
+                "Do MFT/USN/JumpList/ShellBags corroborate the target path and access timeline?",
+                "Is the shortcut target local, removable, network, or cloud-backed, and is that provider context validated?"
+              ],
+              "primary_pivots": [
+                "target_path",
+                "working_dir",
+                "command_line_arguments",
+                "tracker_machine_id",
+                "target_created_at",
+                "target_modified_at",
+                "target_accessed_at"
+              ],
+              "source_field_values": {
+                "target_path": "C:\\Users\\alice\\Documents\\Case Notes.docx",
+                "working_dir": "C:\\Users\\alice\\Documents",
+                "tracker_machine_id": "ALICE-PC",
+                "target_created_at": "2024-03-05T06:07:08+00:00",
+                "target_modified_at": "2024-03-05T06:07:08+00:00",
+                "target_accessed_at": "2024-03-05T06:07:08+00:00"
+              },
+              "correlation_targets": [
+                "MFT",
+                "USN",
+                "JumpList",
+                "ShellBags",
+                "Windows Search",
+                "LECmd"
+              ],
+              "risk_tags": [
+                "shortcut-context",
+                "lnk-validation-required"
+              ],
+              "validation_required": true,
+              "failed_validation_checks": [
+                "full_property_store_decode_available",
+                "has_link_info",
+                "has_property_store_data_block",
+                "has_shell_item_idlist"
+              ],
+              "report_grade_ready": false,
+              "commercial_blockers": [
+                "full-shell-item-property-store-decoding-required",
+                "recent-files-validation-required",
+                "tracker-data-known-answer-corpus-validation-required",
+                "validation-check-failed:full-property-store-decode-available",
+                "validation-check-failed:has-link-info",
+                "validation-check-failed:has-property-store-data-block",
+                "validation-check-failed:has-shell-item-idlist"
+              ],
+              "report_guidance": "Use LNK rows as shortcut-context pivots. Final target-use or user-attribution claims require trusted parser diff and filesystem/recent-artifact correlation."
             },
             "lnk_metadata_depth_manifest": {
               "manifest_version": "lnk-metadata-depth-manifest-v1",
@@ -18855,6 +19165,73 @@
               "next_validation_step": ""
             },
             "note": "Prefetch triage parser uses version-specific common-header offsets plus bounded native candidates; validate critical findings with a dedicated parser such as PECmd.",
+            "prefetch_analyst_review_profile": {
+              "profile_version": "prefetch-analyst-review-profile-v1",
+              "artifact_type": "prefetch-file",
+              "severity": "high",
+              "summary": "Prefetch execution pivot with run count, last-run time, version layout, and referenced-file context.",
+              "evidence_interpretation": "application execution indicator that needs correlation before final execution testimony",
+              "not_proof_of": [
+                "user intent",
+                "complete file metrics table",
+                "authoritative volume mapping",
+                "standalone execution attribution"
+              ],
+              "analyst_questions": [
+                "Does PECmd or another trusted parser confirm the executable, hash, run count, and last-run timestamp?",
+                "Do Amcache, ShimCache, BAM/DAM, SRUM, EVTX, MFT, or USN corroborate the execution?",
+                "Is the PF compressed or version-specific in a way that requires external validation?"
+              ],
+              "primary_pivots": [
+                "entry_name",
+                "executable_hint",
+                "prefetch_hash",
+                "prefetch_version",
+                "run_count",
+                "last_run_at",
+                "referenced_path",
+                "referenced_path_count"
+              ],
+              "source_field_values": {
+                "entry_name": "POWERSHELL.EXE-12345678.pf",
+                "executable_hint": "POWERSHELL.EXE",
+                "prefetch_hash": "12345678",
+                "prefetch_version": 30,
+                "run_count": 3,
+                "last_run_at": "2024-04-01T09:10:11+00:00",
+                "referenced_path_count": 1
+              },
+              "correlation_targets": [
+                "Amcache",
+                "ShimCache",
+                "BAM/DAM",
+                "SRUM",
+                "EVTX",
+                "MFT",
+                "USN"
+              ],
+              "risk_tags": [
+                "execution-indicator",
+                "prefetch-validation-required"
+              ],
+              "validation_required": true,
+              "failed_validation_checks": [
+                "compressed_prefetch_decompressed",
+                "compressed_prefetch_detected",
+                "full_file_metrics_decoded",
+                "full_volume_table_decoded"
+              ],
+              "report_grade_ready": false,
+              "commercial_blockers": [
+                "authoritative-volume-table-decoding-not-implemented",
+                "full-file-metrics-array-decoding-not-implemented",
+                "known-answer-prefetch-corpus-required",
+                "mft-file-reference-decoding-not-implemented",
+                "prefetch-trusted-parser-diff-required",
+                "trace-chain-directory-section-validation-required"
+              ],
+              "report_guidance": "Use Prefetch as an execution-review pivot. Do not report final execution conclusions without trusted Prefetch diff evidence and cross-artifact correlation."
+            },
             "prefetch_execution_depth_manifest": {
               "manifest_version": "prefetch-execution-depth-manifest-v1",
               "parser_version": "prefetch-inventory-v8",
@@ -19262,6 +19639,69 @@
             },
             "validation_guidance": "Prefetch reference rows are recovered from bounded native strings; validate complete file metrics and volumes with PECmd before final testimony.",
             "raw_preview": "\\DEVICE\\HARDDISKVOLUME3\\WINDOWS\\SYSTEM32\\WINDOWSPOWERSHELL\\V1.0\\POWERSHELL.EXE",
+            "prefetch_analyst_review_profile": {
+              "profile_version": "prefetch-analyst-review-profile-v1",
+              "artifact_type": "prefetch-reference",
+              "severity": "high",
+              "summary": "Prefetch execution pivot with run count, last-run time, version layout, and referenced-file context.",
+              "evidence_interpretation": "application execution indicator that needs correlation before final execution testimony",
+              "not_proof_of": [
+                "user intent",
+                "complete file metrics table",
+                "authoritative volume mapping",
+                "standalone execution attribution"
+              ],
+              "analyst_questions": [
+                "Does PECmd or another trusted parser confirm the executable, hash, run count, and last-run timestamp?",
+                "Do Amcache, ShimCache, BAM/DAM, SRUM, EVTX, MFT, or USN corroborate the execution?",
+                "Is the PF compressed or version-specific in a way that requires external validation?"
+              ],
+              "primary_pivots": [
+                "entry_name",
+                "executable_hint",
+                "prefetch_hash",
+                "prefetch_version",
+                "run_count",
+                "last_run_at",
+                "referenced_path",
+                "referenced_path_count"
+              ],
+              "source_field_values": {
+                "entry_name": "POWERSHELL.EXE-12345678.pf",
+                "executable_hint": "POWERSHELL.EXE",
+                "prefetch_hash": "12345678",
+                "prefetch_version": 0,
+                "run_count": 3,
+                "last_run_at": "2024-04-01T09:10:11+00:00",
+                "referenced_path": "\\DEVICE\\HARDDISKVOLUME3\\WINDOWS\\SYSTEM32\\WINDOWSPOWERSHELL\\V1.0\\POWERSHELL.EXE",
+                "referenced_path_count": 0
+              },
+              "correlation_targets": [
+                "Amcache",
+                "ShimCache",
+                "BAM/DAM",
+                "SRUM",
+                "EVTX",
+                "MFT",
+                "USN"
+              ],
+              "risk_tags": [
+                "execution-indicator",
+                "prefetch-validation-required"
+              ],
+              "validation_required": true,
+              "failed_validation_checks": [],
+              "report_grade_ready": false,
+              "commercial_blockers": [
+                "authoritative-volume-table-decoding-not-implemented",
+                "full-file-metrics-array-decoding-not-implemented",
+                "known-answer-prefetch-corpus-required",
+                "mft-file-reference-decoding-not-implemented",
+                "prefetch-trusted-parser-diff-required",
+                "trace-chain-directory-section-validation-required"
+              ],
+              "report_guidance": "Use Prefetch as an execution-review pivot. Do not report final execution conclusions without trusted Prefetch diff evidence and cross-artifact correlation."
+            },
             "prefetch_execution_depth_manifest": {
               "manifest_version": "prefetch-execution-depth-manifest-v1",
               "parser_version": "prefetch-inventory-v8",
@@ -19624,6 +20064,66 @@
               "sha256": "122bb5f0a02d6904c5818a5d7f2da3553f01bdb37d85500fb4c69afe770ad731"
             },
             "raw_preview": "2026-04-26T01:02:03.000Z Threat Name: Trojan:Win32/TestLoader\n2026-04-26T01:02:04.000Z Remediation action: Quarantine\n2026-04-26T01:02:05.000Z Exclusion path observed: C:\\Users\\alice\\AppData\\Roaming",
+            "system_analyst_review_profile": {
+              "profile_version": "windows-system-analyst-review-profile-v1",
+              "artifact_family": "defender",
+              "artifact_type": "",
+              "severity": "high",
+              "summary": "Windows defender artifact pivot with normalized semantics and correlation blockers.",
+              "evidence_interpretation": "system artifact triage row requiring registry/event/filesystem correlation before final testimony",
+              "not_proof_of": [
+                "final malware verdict",
+                "quarantine state without Defender event/policy correlation"
+              ],
+              "analyst_questions": [
+                "Do Defender operational events confirm the same detection/action?",
+                "Is quarantine, exclusion, or signature state available?",
+                "Does filesystem timeline support the detection time?"
+              ],
+              "primary_pivots": [
+                "entry_count",
+                "interesting_entry_count",
+                "interesting_entries"
+              ],
+              "source_field_values": {
+                "entry_count": 3,
+                "interesting_entry_count": 3,
+                "interesting_entries": [
+                  "2026-04-26T01:02:03.000Z Threat Name: Trojan:Win32/TestLoader",
+                  "2026-04-26T01:02:04.000Z Remediation action: Quarantine",
+                  "2026-04-26T01:02:05.000Z Exclusion path observed: C:\\Users\\alice\\AppData\\Roaming"
+                ]
+              },
+              "correlation_targets": [
+                "Defender EVTX",
+                "MpCmdRun logs",
+                "Quarantine",
+                "Firewall",
+                "MFT/USN"
+              ],
+              "risk_tags": [
+                "windows-system-review"
+              ],
+              "validation_required": true,
+              "failed_validation_checks": [
+                "defender_eventlog_correlated",
+                "mpcmdrun_history_correlated",
+                "signature_version_validated"
+              ],
+              "report_grade_ready": false,
+              "commercial_blockers": [
+                "defender-event-and-mpcmdrun-correlation-not-implemented",
+                "firewall-rule-store-correlation-not-implemented",
+                "known-answer-system-artifact-corpus-required",
+                "native-wmi-repository-decoding-not-implemented",
+                "task-cache-registry-correlation-not-implemented",
+                "task-history-event-correlation-not-implemented",
+                "task-security-descriptor-validation-not-implemented",
+                "wer-dump-cab-reportqueue-correlation-not-implemented",
+                "windows-system-trusted-artifact-diff-required"
+              ],
+              "report_guidance": "Use this system row as a triage/correlation pivot. Do not report full semantics until artifact-specific trusted diff and cross-source correlation are attached."
+            },
             "system_deep_parser_manifest": {
               "manifest_version": "windows-system-deep-parser-manifest-v1",
               "parser_version": "windows-system-v7",
@@ -19977,6 +20477,84 @@
               "sha256": "a96274791ced73ab67dd0987a4e08f5f813c1c5b543fda3cc501d163bd462f3e"
             },
             "raw_preview": "#Version: 1.5\n#Fields: date time action protocol src-ip dst-ip src-port dst-port size\n2026-04-26 01:03:00 DROP TCP 10.0.0.5 203.0.113.9 51512 4444 60\n2026-04-26 01:03:05 ALLOW TCP 10.0.0.5 198.51.100.7 51513 443 120\n",
+            "system_analyst_review_profile": {
+              "profile_version": "windows-system-analyst-review-profile-v1",
+              "artifact_family": "firewall",
+              "artifact_type": "",
+              "severity": "medium",
+              "summary": "Windows firewall artifact pivot with normalized semantics and correlation blockers.",
+              "evidence_interpretation": "system artifact triage row requiring registry/event/filesystem correlation before final testimony",
+              "not_proof_of": [
+                "policy rule intent",
+                "complete network session attribution"
+              ],
+              "analyst_questions": [
+                "Does the policy/rule store explain this log row?",
+                "Are source/destination IPs correlated with process, SRUM, or browser evidence?",
+                "Is log rotation or dropped-field behavior documented?"
+              ],
+              "primary_pivots": [
+                "entry_count",
+                "blocked_count",
+                "sample_entries"
+              ],
+              "source_field_values": {
+                "entry_count": 2,
+                "blocked_count": 1,
+                "sample_entries": [
+                  {
+                    "date": "2026-04-26",
+                    "time": "01:03:00",
+                    "action": "DROP",
+                    "protocol": "TCP",
+                    "src-ip": "10.0.0.5",
+                    "dst-ip": "203.0.113.9",
+                    "src-port": "51512",
+                    "dst-port": "4444",
+                    "size": "60"
+                  },
+                  {
+                    "date": "2026-04-26",
+                    "time": "01:03:05",
+                    "action": "ALLOW",
+                    "protocol": "TCP",
+                    "src-ip": "10.0.0.5",
+                    "dst-ip": "198.51.100.7",
+                    "src-port": "51513",
+                    "dst-port": "443",
+                    "size": "120"
+                  }
+                ]
+              },
+              "correlation_targets": [
+                "Firewall policy store",
+                "Security EVTX",
+                "SRUM",
+                "Browser",
+                "MFT/USN"
+              ],
+              "risk_tags": [
+                "windows-system-review"
+              ],
+              "validation_required": true,
+              "failed_validation_checks": [
+                "firewall_policy_export_validated",
+                "firewall_rule_store_correlated"
+              ],
+              "report_grade_ready": false,
+              "commercial_blockers": [
+                "defender-event-and-mpcmdrun-correlation-not-implemented",
+                "firewall-rule-store-correlation-not-implemented",
+                "known-answer-system-artifact-corpus-required",
+                "native-wmi-repository-decoding-not-implemented",
+                "task-cache-registry-correlation-not-implemented",
+                "task-history-event-correlation-not-implemented",
+                "task-security-descriptor-validation-not-implemented",
+                "wer-dump-cab-reportqueue-correlation-not-implemented",
+                "windows-system-trusted-artifact-diff-required"
+              ],
+              "report_guidance": "Use this system row as a triage/correlation pivot. Do not report full semantics until artifact-specific trusted diff and cross-source correlation are attached."
+            },
             "system_deep_parser_manifest": {
               "manifest_version": "windows-system-deep-parser-manifest-v1",
               "parser_version": "windows-system-v7",
@@ -20424,6 +21002,77 @@
               "sha256": "67f0d7c2747654b49140ab0a51f30fcf2ff41d4792b2b60bc77725f32b897f79"
             },
             "raw_preview": "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n<Task version=\"1.4\" xmlns=\"http://schemas.microsoft.com/windows/2004/02/mit/task\">\n  <RegistrationInfo>\n    <Author>alice</Author>\n    <URI>\\Microsoft\\Windows\\UpdateOrchestrator\\SecurityUpdater</URI>\n  </RegistrationInfo>\n  <Triggers>\n    <LogonTrigger>\n      <Enabled>true</Enabled>\n    </LogonTrigger>\n  </Triggers>\n  <Principals>\n    <Principal id=\"Author\">\n      <UserId>S-1-5-21-1000</UserId>\n    </Principal>\n  </Principals>\n  <Actions Context=\"Author\">\n    <Exec>\n      <Command>powershell.exe</Command>\n      <Arguments>-ExecutionPolicy Bypass -File C:\\",
+            "system_analyst_review_profile": {
+              "profile_version": "windows-system-analyst-review-profile-v1",
+              "artifact_family": "task-scheduler",
+              "artifact_type": "",
+              "severity": "high",
+              "summary": "Windows task-scheduler artifact pivot with normalized semantics and correlation blockers.",
+              "evidence_interpretation": "system artifact triage row requiring registry/event/filesystem correlation before final testimony",
+              "not_proof_of": [
+                "TaskCache registry state",
+                "task execution without event-log correlation",
+                "user intent"
+              ],
+              "analyst_questions": [
+                "Does TaskCache registry confirm the same task URI and action?",
+                "Do TaskScheduler operational events show creation, update, or execution?",
+                "Do execution artifacts corroborate the command line?"
+              ],
+              "primary_pivots": [
+                "task_uri",
+                "command_line",
+                "executable_name",
+                "action_count",
+                "trigger_count",
+                "principal_count",
+                "hidden"
+              ],
+              "source_field_values": {
+                "task_uri": "\\Microsoft\\Windows\\UpdateOrchestrator\\SecurityUpdater",
+                "command_line": "powershell.exe -ExecutionPolicy Bypass -File C:\\Users\\alice\\AppData\\Roaming\\updater.ps1",
+                "executable_name": "powershell.exe",
+                "action_count": 1,
+                "trigger_count": 1,
+                "principal_count": 1,
+                "hidden": false
+              },
+              "correlation_targets": [
+                "TaskCache Registry",
+                "Security EVTX",
+                "TaskScheduler EVTX",
+                "Prefetch",
+                "Amcache",
+                "MFT/USN"
+              ],
+              "risk_tags": [
+                "task-lolbin:powershell.exe",
+                "task-microsoft-path-user-payload",
+                "task-string:executionpolicy bypass",
+                "task-string:powershell",
+                "task-user-writable-path",
+                "windows-system-review"
+              ],
+              "validation_required": true,
+              "failed_validation_checks": [
+                "security_descriptor_validated",
+                "task_history_events_correlated",
+                "taskcache_registry_validated"
+              ],
+              "report_grade_ready": false,
+              "commercial_blockers": [
+                "defender-event-and-mpcmdrun-correlation-not-implemented",
+                "firewall-rule-store-correlation-not-implemented",
+                "known-answer-system-artifact-corpus-required",
+                "native-wmi-repository-decoding-not-implemented",
+                "task-cache-registry-correlation-not-implemented",
+                "task-history-event-correlation-not-implemented",
+                "task-security-descriptor-validation-not-implemented",
+                "wer-dump-cab-reportqueue-correlation-not-implemented",
+                "windows-system-trusted-artifact-diff-required"
+              ],
+              "report_guidance": "Use this system row as a triage/correlation pivot. Do not report full semantics until artifact-specific trusted diff and cross-source correlation are attached."
+            },
             "system_deep_parser_manifest": {
               "manifest_version": "windows-system-deep-parser-manifest-v1",
               "parser_version": "windows-system-v7",
@@ -20942,6 +21591,73 @@
               "sha256": "83260608bb0ab69fd0500bc550a6d55a26881c92c36dd12f3b35cd13f2c01b36"
             },
             "raw_preview": "Version=1\nEventType=APPCRASH\nAppName=powershell.exe\nApplicationPath=C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe\nFaultModuleName=evil.dll\nFaultModulePath=C:\\Users\\alice\\AppData\\Roaming\\evil.dll\nExceptionCode=c0000005\nEventTime=134216390450000000\nReportIdentifier=11111111-2222-3333-4444-555555555555\nBucket=123456789\nSig[0].Name=Application Name\nSig[0].Value=powershell.exe\nSig[3].Name=Fault Module Name\nSig[3].Value=evil.dll\nSig[6].Name=Exception Code\nSig[6].Value=c0000005\n",
+            "system_analyst_review_profile": {
+              "profile_version": "windows-system-analyst-review-profile-v1",
+              "artifact_family": "wer",
+              "artifact_type": "",
+              "severity": "medium",
+              "summary": "Windows wer artifact pivot with normalized semantics and correlation blockers.",
+              "evidence_interpretation": "system artifact triage row requiring registry/event/filesystem correlation before final testimony",
+              "not_proof_of": [
+                "malware attribution",
+                "dump/CAB contents without linkage validation"
+              ],
+              "analyst_questions": [
+                "Does a dump or CAB exist for this report ID?",
+                "Do Application/System events confirm the same crash?",
+                "Is the faulting module path present in filesystem evidence?"
+              ],
+              "primary_pivots": [
+                "report_id",
+                "report_store",
+                "application_name",
+                "fault_module_name",
+                "exception_code",
+                "event_time",
+                "bucket_id"
+              ],
+              "source_field_values": {
+                "report_id": "11111111-2222-3333-4444-555555555555",
+                "report_store": "reportarchive",
+                "application_name": "powershell.exe",
+                "fault_module_name": "evil.dll",
+                "exception_code": "c0000005",
+                "event_time": "2026-04-26T01:04:05+00:00",
+                "bucket_id": "123456789"
+              },
+              "correlation_targets": [
+                "WER dump/CAB",
+                "Application EVTX",
+                "Prefetch",
+                "Amcache",
+                "MFT/USN"
+              ],
+              "risk_tags": [
+                "windows-system-review"
+              ],
+              "validation_required": true,
+              "failed_validation_checks": [
+                "cab_metadata_validated",
+                "dump_file_correlated",
+                "reportqueue_state_validated"
+              ],
+              "report_grade_ready": false,
+              "commercial_blockers": [
+                "defender-event-and-mpcmdrun-correlation-not-implemented",
+                "firewall-rule-store-correlation-not-implemented",
+                "known-answer-system-artifact-corpus-required",
+                "native-wmi-repository-decoding-not-implemented",
+                "task-cache-registry-correlation-not-implemented",
+                "task-history-event-correlation-not-implemented",
+                "task-security-descriptor-validation-not-implemented",
+                "wer-cab-metadata-validation-not-implemented",
+                "wer-dump-cab-reportqueue-correlation-not-implemented",
+                "wer-dump-file-correlation-not-implemented",
+                "wer-reportqueue-state-validation-not-implemented",
+                "windows-system-trusted-artifact-diff-required"
+              ],
+              "report_guidance": "Use this system row as a triage/correlation pivot. Do not report full semantics until artifact-specific trusted diff and cross-source correlation are attached."
+            },
             "system_deep_parser_manifest": {
               "manifest_version": "windows-system-deep-parser-manifest-v1",
               "parser_version": "windows-system-v7",
@@ -21294,6 +22010,69 @@
               "Velociraptor WMI artifacts"
             ],
             "note": "WMI repository file inventoried with bounded string pivots for persistence review; validate findings with a dedicated WMI repository parser.",
+            "system_analyst_review_profile": {
+              "profile_version": "windows-system-analyst-review-profile-v1",
+              "artifact_family": "wmi",
+              "artifact_type": "",
+              "severity": "medium",
+              "summary": "Windows wmi artifact pivot with normalized semantics and correlation blockers.",
+              "evidence_interpretation": "system artifact triage row requiring registry/event/filesystem correlation before final testimony",
+              "not_proof_of": [
+                "complete WMI repository binding",
+                "persistent consumer/filter relationship"
+              ],
+              "analyst_questions": [
+                "Can a WMI parser decode the namespace, class, consumer, filter, and binding?",
+                "Do strings indicate persistence or only repository residue?",
+                "Do event logs or Autoruns corroborate the same WMI object?"
+              ],
+              "primary_pivots": [
+                "entry_name",
+                "scan_bytes",
+                "extracted_string_count",
+                "interesting_string_count",
+                "path_candidate_count",
+                "url_candidate_count"
+              ],
+              "source_field_values": {
+                "entry_name": "OBJECTS.DATA",
+                "scan_bytes": 29,
+                "extracted_string_count": 1,
+                "interesting_string_count": 0,
+                "path_candidate_count": 0,
+                "url_candidate_count": 0
+              },
+              "correlation_targets": [
+                "WMI repository decoder",
+                "Autoruns",
+                "EVTX",
+                "Registry",
+                "MFT/USN"
+              ],
+              "risk_tags": [
+                "windows-system-review"
+              ],
+              "validation_required": true,
+              "failed_validation_checks": [
+                "consumer_filter_binding_reconstructed",
+                "native_wmi_repository_decoded",
+                "path_or_url_pivots_present",
+                "persistence_terms_present"
+              ],
+              "report_grade_ready": false,
+              "commercial_blockers": [
+                "defender-event-and-mpcmdrun-correlation-not-implemented",
+                "firewall-rule-store-correlation-not-implemented",
+                "known-answer-system-artifact-corpus-required",
+                "native-wmi-repository-decoding-not-implemented",
+                "task-cache-registry-correlation-not-implemented",
+                "task-history-event-correlation-not-implemented",
+                "task-security-descriptor-validation-not-implemented",
+                "wer-dump-cab-reportqueue-correlation-not-implemented",
+                "windows-system-trusted-artifact-diff-required"
+              ],
+              "report_guidance": "Use this system row as a triage/correlation pivot. Do not report full semantics until artifact-specific trusted diff and cross-source correlation are attached."
+            },
             "system_deep_parser_manifest": {
               "manifest_version": "windows-system-deep-parser-manifest-v1",
               "parser_version": "windows-system-v7",

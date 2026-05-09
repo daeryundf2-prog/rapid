@@ -2994,10 +2994,107 @@ def system_commercial_uplift_evidence(artifact_family: str, details: Mapping[str
 
 def with_system_deep_parser_manifest(artifact_family: str, details: dict[str, object]) -> dict[str, object]:
     enriched = dict(details)
+    enriched["system_analyst_review_profile"] = system_analyst_review_profile(artifact_family, enriched)
     manifest = system_deep_parser_manifest(artifact_family, enriched)
     enriched["system_deep_parser_manifest"] = manifest
     enriched["system_deep_parser_manifest_hash"] = manifest["manifest_sha256"]
     return enriched
+
+
+def system_analyst_review_profile(artifact_family: str, details: Mapping[str, object]) -> dict[str, object]:
+    report_grade = (
+        details.get("system_report_grade_assessment")
+        if isinstance(details.get("system_report_grade_assessment"), Mapping)
+        else {}
+    )
+    checks = details.get("validation_checks") if isinstance(details.get("validation_checks"), Mapping) else {}
+    semantics = system_manifest_semantics(artifact_family, details)
+    family_guidance = {
+        "task-scheduler": {
+            "severity": "high" if details.get("risk_flags") else "medium",
+            "not_proof_of": ["TaskCache registry state", "task execution without event-log correlation", "user intent"],
+            "correlation_targets": ["TaskCache Registry", "Security EVTX", "TaskScheduler EVTX", "Prefetch", "Amcache", "MFT/USN"],
+            "questions": [
+                "Does TaskCache registry confirm the same task URI and action?",
+                "Do TaskScheduler operational events show creation, update, or execution?",
+                "Do execution artifacts corroborate the command line?",
+            ],
+        },
+        "defender": {
+            "severity": "high",
+            "not_proof_of": ["final malware verdict", "quarantine state without Defender event/policy correlation"],
+            "correlation_targets": ["Defender EVTX", "MpCmdRun logs", "Quarantine", "Firewall", "MFT/USN"],
+            "questions": [
+                "Do Defender operational events confirm the same detection/action?",
+                "Is quarantine, exclusion, or signature state available?",
+                "Does filesystem timeline support the detection time?",
+            ],
+        },
+        "firewall": {
+            "severity": "medium",
+            "not_proof_of": ["policy rule intent", "complete network session attribution"],
+            "correlation_targets": ["Firewall policy store", "Security EVTX", "SRUM", "Browser", "MFT/USN"],
+            "questions": [
+                "Does the policy/rule store explain this log row?",
+                "Are source/destination IPs correlated with process, SRUM, or browser evidence?",
+                "Is log rotation or dropped-field behavior documented?",
+            ],
+        },
+        "wer": {
+            "severity": "medium",
+            "not_proof_of": ["malware attribution", "dump/CAB contents without linkage validation"],
+            "correlation_targets": ["WER dump/CAB", "Application EVTX", "Prefetch", "Amcache", "MFT/USN"],
+            "questions": [
+                "Does a dump or CAB exist for this report ID?",
+                "Do Application/System events confirm the same crash?",
+                "Is the faulting module path present in filesystem evidence?",
+            ],
+        },
+        "wmi": {
+            "severity": "high" if details.get("interesting_strings") else "medium",
+            "not_proof_of": ["complete WMI repository binding", "persistent consumer/filter relationship"],
+            "correlation_targets": ["WMI repository decoder", "Autoruns", "EVTX", "Registry", "MFT/USN"],
+            "questions": [
+                "Can a WMI parser decode the namespace, class, consumer, filter, and binding?",
+                "Do strings indicate persistence or only repository residue?",
+                "Do event logs or Autoruns corroborate the same WMI object?",
+            ],
+        },
+    }
+    guidance = family_guidance.get(
+        artifact_family,
+        {
+            "severity": "medium",
+            "not_proof_of": ["fully correlated Windows system event"],
+            "correlation_targets": ["EVTX", "Registry", "MFT/USN"],
+            "questions": ["Which trusted parser validates this row?"],
+        },
+    )
+    source_values = {key: value for key, value in semantics.items() if value not in ("", None, [], {})}
+    failed_checks = sorted(str(key) for key, value in checks.items() if value is False)
+    blockers = sorted(set(str(item) for item in report_grade.get("blockers", []) if str(item)) | set(SYSTEM_REPORT_GRADE_BLOCKERS))
+    return {
+        "profile_version": "windows-system-analyst-review-profile-v1",
+        "artifact_family": artifact_family,
+        "artifact_type": str(details.get("artifact_type") or ""),
+        "severity": guidance["severity"],
+        "summary": f"Windows {artifact_family} artifact pivot with normalized semantics and correlation blockers.",
+        "evidence_interpretation": "system artifact triage row requiring registry/event/filesystem correlation before final testimony",
+        "not_proof_of": guidance["not_proof_of"],
+        "analyst_questions": guidance["questions"],
+        "primary_pivots": list(source_values.keys())[:12],
+        "source_field_values": source_values,
+        "correlation_targets": guidance["correlation_targets"],
+        "risk_tags": sorted(set(str(item) for item in details.get("risk_flags") or []) | {"windows-system-review"}),
+        "validation_required": True,
+        "failed_validation_checks": failed_checks,
+        "report_grade_ready": bool(report_grade.get("report_grade_ready")),
+        "commercial_blockers": blockers,
+        "report_guidance": (
+            "Use this system row as a triage/correlation pivot. Do not report full semantics until artifact-specific "
+            "trusted diff and cross-source correlation are attached."
+        ),
+    }
 
 
 def system_deep_parser_manifest(artifact_family: str, details: Mapping[str, object]) -> dict[str, object]:

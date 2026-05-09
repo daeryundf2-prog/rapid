@@ -4642,6 +4642,11 @@ class RapidTriageWindowsArtifactsCollectorTests(unittest.TestCase):
             self.assertIn("#18", defender["details"]["system_report_grade_assessment"]["commercial_gap_ids"])
             self.assertEqual(defender["details"]["forensic_review"]["gap_id"], "#18")
             self.assertFalse(defender["details"]["system_native_capabilities"]["defender_event_mpcmdrun_correlation"])
+            defender_review_profile = defender["details"]["system_analyst_review_profile"]
+            self.assertEqual(defender_review_profile["profile_version"], "windows-system-analyst-review-profile-v1")
+            self.assertEqual(defender_review_profile["artifact_family"], "defender")
+            self.assertIn("Defender EVTX", defender_review_profile["correlation_targets"])
+            self.assertIn("final malware verdict", defender_review_profile["not_proof_of"])
             self.assertEqual(defender["details"]["system_deep_parser_manifest"]["artifact_family"], "defender")
             self.assertIn(
                 "defender-report-grade-correlation",
@@ -4652,6 +4657,9 @@ class RapidTriageWindowsArtifactsCollectorTests(unittest.TestCase):
             self.assertIn("#18", firewall["details"]["system_report_grade_assessment"]["commercial_gap_ids"])
             self.assertEqual(firewall["details"]["forensic_review"]["gap_id"], "#18")
             self.assertFalse(firewall["details"]["system_native_capabilities"]["firewall_rule_store_correlation"])
+            firewall_review_profile = firewall["details"]["system_analyst_review_profile"]
+            self.assertEqual(firewall_review_profile["artifact_family"], "firewall")
+            self.assertIn("Firewall policy store", firewall_review_profile["correlation_targets"])
             self.assertEqual(firewall["details"]["system_deep_parser_manifest"]["artifact_family"], "firewall")
             self.assertIn(
                 "firewall-report-grade-correlation",
@@ -4669,6 +4677,10 @@ class RapidTriageWindowsArtifactsCollectorTests(unittest.TestCase):
             self.assertFalse(wer["details"]["commercial_grade_ready"])
             self.assertIn("#18", wer["details"]["system_report_grade_assessment"]["commercial_gap_ids"])
             self.assertEqual(wer["details"]["system_deep_parser_manifest"]["artifact_family"], "wer")
+            wer_review_profile = wer["details"]["system_analyst_review_profile"]
+            self.assertEqual(wer_review_profile["artifact_family"], "wer")
+            self.assertIn("WER dump/CAB", wer_review_profile["correlation_targets"])
+            self.assertIn("dump/CAB contents without linkage validation", wer_review_profile["not_proof_of"])
             self.assertIn(
                 "wer-report-grade-correlation",
                 wer["details"]["system_deep_parser_manifest"]["validation"]["failed_validation_matrix_ids"],

@@ -195,6 +195,7 @@ def parse_lnk_metadata(path: Path) -> dict[str, object]:
                 "artifact_type": "recent-shortcut",
             }
         )
+        metadata["lnk_analyst_review_profile"] = lnk_analyst_review_profile(metadata)
         metadata["lnk_metadata_depth_manifest"] = lnk_metadata_depth_manifest(metadata)
         metadata["lnk_metadata_depth_manifest_hash"] = metadata["lnk_metadata_depth_manifest"]["manifest_sha256"]
     return metadata
@@ -852,6 +853,60 @@ def lnk_metadata_depth_manifest(details: Mapping[str, object]) -> dict[str, obje
     }
     manifest_payload["manifest_sha256"] = recent_stable_sha256(manifest_payload)
     return manifest_payload
+
+
+def lnk_analyst_review_profile(details: Mapping[str, object]) -> dict[str, object]:
+    report_grade = (
+        details.get("recent_report_grade_assessment")
+        if isinstance(details.get("recent_report_grade_assessment"), Mapping)
+        else {}
+    )
+    checks = details.get("validation_checks") if isinstance(details.get("validation_checks"), Mapping) else {}
+    tracker = details.get("tracker_data") if isinstance(details.get("tracker_data"), Mapping) else {}
+    source_values = {
+        "target_path": str(details.get("target_path") or ""),
+        "working_dir": str(details.get("working_dir") or ""),
+        "command_line_arguments": str(details.get("command_line_arguments") or ""),
+        "tracker_machine_id": str(tracker.get("machine_id") or ""),
+        "target_created_at": str(details.get("target_created_at") or ""),
+        "target_modified_at": str(details.get("target_modified_at") or ""),
+        "target_accessed_at": str(details.get("target_accessed_at") or ""),
+    }
+    failed_checks = sorted(str(key) for key, value in checks.items() if value is False)
+    blockers = sorted(set(str(item) for item in report_grade.get("blockers", []) if str(item)))
+    return {
+        "profile_version": "lnk-analyst-review-profile-v1",
+        "artifact_type": str(details.get("artifact_type") or "recent-shortcut"),
+        "severity": "medium",
+        "summary": "Shell Link shortcut pivot with target path, LinkInfo/StringData, timestamps, and tracker context.",
+        "evidence_interpretation": "shortcut target/context metadata; account, shell-item, and property-store semantics still need validation",
+        "not_proof_of": ["file opened by a specific user without correlation", "complete Shell Item semantics", "complete PropertyStore metadata"],
+        "analyst_questions": [
+            "Does LECmd confirm the same target, working directory, arguments, timestamps, and tracker fields?",
+            "Do MFT/USN/JumpList/ShellBags corroborate the target path and access timeline?",
+            "Is the shortcut target local, removable, network, or cloud-backed, and is that provider context validated?",
+        ],
+        "primary_pivots": [
+            "target_path",
+            "working_dir",
+            "command_line_arguments",
+            "tracker_machine_id",
+            "target_created_at",
+            "target_modified_at",
+            "target_accessed_at",
+        ],
+        "source_field_values": {key: value for key, value in source_values.items() if value not in ("", None, [], {})},
+        "correlation_targets": ["MFT", "USN", "JumpList", "ShellBags", "Windows Search", "LECmd"],
+        "risk_tags": ["shortcut-context", "lnk-validation-required"],
+        "validation_required": True,
+        "failed_validation_checks": failed_checks,
+        "report_grade_ready": bool(report_grade.get("report_grade_ready")),
+        "commercial_blockers": blockers,
+        "report_guidance": (
+            "Use LNK rows as shortcut-context pivots. Final target-use or user-attribution claims require "
+            "trusted parser diff and filesystem/recent-artifact correlation."
+        ),
+    }
 
 
 def jumplist_destlist_depth_manifest(details: Mapping[str, object]) -> dict[str, object]:
