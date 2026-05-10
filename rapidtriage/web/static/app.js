@@ -4863,6 +4863,16 @@ function bindPanelActions() {
       await switchTab(button.dataset.openTab);
     });
   }
+  for (const button of detailPanel.querySelectorAll("[data-start-configured-e01-run]")) {
+    if (button.dataset.e01StartBound) continue;
+    button.dataset.e01StartBound = "1";
+    button.addEventListener("click", () => {
+      const inputKindInput = document.querySelector("#inputKindInput");
+      if (inputKindInput) inputKindInput.value = "e01-derived";
+      updateRunSubmissionCta(document.querySelector("#rootInput")?.value || "", document.querySelector("#processingProfileInput")?.value || "fast");
+      runForm?.requestSubmit();
+    });
+  }
   for (const button of detailPanel.querySelectorAll("[data-focus-case-db]")) {
     button.addEventListener("click", () => {
       detailPanel.querySelector(".case-db-panel")?.scrollIntoView({ behavior: "smooth", block: "start" });
@@ -6402,11 +6412,33 @@ async function checkEvidenceSupport() {
     const result = payload.result || {};
     applyEvidenceCheckRecommendation(result);
     evidenceCheckStatus.innerHTML = renderEvidenceCheckStatus(result);
+    bindEvidenceCheckActions();
   } catch (error) {
     evidenceCheckStatus.textContent = error.message;
   } finally {
     evidenceCheckButton.disabled = false;
     evidenceCheckButton.textContent = "Check evidence support";
+  }
+}
+
+function bindEvidenceCheckActions() {
+  if (!evidenceCheckStatus) return;
+  for (const button of evidenceCheckStatus.querySelectorAll("[data-open-tab]")) {
+    if (button.dataset.evidenceOpenTabBound) continue;
+    button.dataset.evidenceOpenTabBound = "1";
+    button.addEventListener("click", async () => {
+      await switchTab(button.dataset.openTab);
+    });
+  }
+  for (const button of evidenceCheckStatus.querySelectorAll("[data-start-configured-e01-run]")) {
+    if (button.dataset.e01StartBound) continue;
+    button.dataset.e01StartBound = "1";
+    button.addEventListener("click", () => {
+      const inputKindInput = document.querySelector("#inputKindInput");
+      if (inputKindInput) inputKindInput.value = "e01-derived";
+      updateRunSubmissionCta(document.querySelector("#rootInput")?.value || "", document.querySelector("#processingProfileInput")?.value || "fast");
+      runForm?.requestSubmit();
+    });
   }
 }
 
@@ -6454,6 +6486,7 @@ function renderE01IngestWorkflow(workflow) {
       </div>
       <p>${escapeHtml(workflow.workflow_goal || "")}</p>
       ${workflow.blocked_reason ? `<p class="help-text">${escapeHtml(workflow.blocked_reason)}</p>` : ""}
+      ${renderE01HandoffContract(workflow.handoff_contract || null)}
       <div class="e01-stage-grid">
         ${stages.map((stage, index) => `
           <article class="e01-stage-card ${escapeHtml(stage.status || "pending")}">
@@ -6471,6 +6504,36 @@ function renderE01IngestWorkflow(workflow) {
           <ul>${(workflow.large_case_controls || []).map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ul>
         </details>
       ` : ""}
+    </section>
+  `;
+}
+
+function renderE01HandoffContract(contract) {
+  if (!contract?.profile_version) return "";
+  const entrypoints = contract.gui_entrypoints || [];
+  return `
+    <section class="e01-handoff-card" data-testid="e01-end-to-end-handoff" data-qc-prep-item="${escapeHtml(contract.qc_prep_item || 1)}">
+      <div>
+        <p class="eyebrow">QC-prep #1 handoff</p>
+        <strong>Evidence → run → search → review → report</strong>
+        <span>${escapeHtml(contract.goal || "")}</span>
+      </div>
+      <div class="e01-handoff-actions">
+        <button class="secondary-button" type="button" data-start-configured-e01-run ${entrypoints.some((item) => item.id === "start-configured-run" && item.status === "ready") ? "" : "disabled"}>Start configured run</button>
+        <button class="secondary-button" type="button" data-open-tab="search">Search</button>
+        <button class="secondary-button" type="button" data-open-tab="review">Review</button>
+        <button class="secondary-button" type="button" data-open-tab="report">Report</button>
+      </div>
+      <div class="e01-handoff-chain">
+        ${entrypoints.map((item) => `
+          <span title="${escapeHtml(item.required_before || "")}">${escapeHtml(item.label || item.id)} · ${escapeHtml(item.status || "pending")}</span>
+        `).join("")}
+      </div>
+      <details class="match-details">
+        <summary>Expected output chain</summary>
+        <ul>${(contract.required_output_chain || []).map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ul>
+        <code>${escapeHtml(contract.run_command || "")}</code>
+      </details>
     </section>
   `;
 }

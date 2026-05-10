@@ -79,12 +79,19 @@ class RapidTriageEvidenceAdapterTests(unittest.TestCase):
             self.assertEqual(intake["reportability_decision"]["allowed_use"], "source-selection-and-preflight-context")
             self.assertEqual(len(intake["manifest_sha256"]), 64)
             self.assertEqual(result["ingest_workflow"]["profile_version"], "windows11-e01-single-case-workflow-v1")
+            self.assertEqual(result["ingest_workflow"]["qc_prep_item"], 1)
             self.assertEqual(result["ingest_workflow"]["stages"][0]["id"], "select-e01")
             self.assertEqual(result["ingest_workflow"]["stages"][-1]["id"], "search-review-report")
             self.assertIn("#22", result["ingest_workflow"]["commercial_gap_ids"])
             self.assertIn(result["ingest_workflow"]["recommended_input_kind"], {"e01-derived", "mounted-or-exported-folder"})
             self.assertIn("operator_runbook", result["ingest_workflow"])
             self.assertIn("run", result["ingest_workflow"]["recommended_commands"])
+            handoff = result["ingest_workflow"]["handoff_contract"]
+            self.assertEqual(handoff["profile_version"], "qc-prep-e01-end-to-end-handoff-v1")
+            self.assertEqual(handoff["qc_prep_item"], 1)
+            self.assertIn("rapidtriage-run-summary.json", handoff["required_output_chain"])
+            self.assertIn("source viewer citations", handoff["required_output_chain"])
+            self.assertTrue(any(row["id"] == "start-configured-run" for row in handoff["gui_entrypoints"]))
             self.assertEqual(
                 result["ingest_workflow"]["operator_runbook"]["profile_version"],
                 "windows11-e01-operator-runbook-v1",

@@ -429,6 +429,32 @@ h2 {
   margin: 0;
 }
 
+.e01-handoff-card {
+  display: grid;
+  gap: 10px;
+  border: 1px solid rgba(15, 116, 107, 0.18);
+  border-radius: 16px;
+  background: rgba(15, 116, 107, 0.06);
+  padding: 12px;
+}
+
+.e01-handoff-actions,
+.e01-handoff-chain {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.e01-handoff-chain span {
+  border-radius: 999px;
+  background: #fff;
+  color: var(--muted);
+  padding: 5px 8px;
+  font-size: 0.74rem;
+  font-weight: 800;
+}
+
 .e01-stage-grid {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));

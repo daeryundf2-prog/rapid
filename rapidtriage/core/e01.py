@@ -703,8 +703,46 @@ def build_e01_ingest_workflow_profile(
         direct_extract_ready=direct_extract_ready,
         blocked_reason=blocked_reason,
     )
+    handoff_contract = {
+        "profile_version": "qc-prep-e01-end-to-end-handoff-v1",
+        "qc_prep_item": 1,
+        "goal": "Keep E01 preflight, partition selection, extraction, artifact run, search, review, and report actions connected as one analyst workflow.",
+        "gui_entrypoints": [
+            {
+                "id": "e01-evidence-check",
+                "label": "Check evidence support",
+                "required_before": "start-run",
+                "status": "complete" if selection_ready else "blocked",
+            },
+            {
+                "id": "start-configured-run",
+                "label": "Start configured E01 analysis",
+                "required_before": "search",
+                "status": "ready" if direct_extract_ready else "blocked",
+            },
+            {
+                "id": "search-review-report",
+                "label": "Search, review, report after run completion",
+                "required_before": "qc-signoff",
+                "status": "pending-after-run" if direct_extract_ready else "blocked",
+            },
+        ],
+        "required_output_chain": [
+            "rapidtriage-evidence-preflight.json",
+            "rapidtriage-e01.json",
+            "rapidtriage-run-summary.json",
+            "source viewer citations",
+            "review decisions",
+            "rapidtriage-run-report.md or reviewer bundle",
+        ],
+        "blocked_reason": blocked_reason,
+        "run_command": runbook["recommended_commands"]["run"],
+        "review_url_hint": runbook["recommended_commands"]["review"],
+        "commercial_note": "This is an end-to-end usability/QC-prep handoff, not proof of native commercial EWF parser completeness.",
+    }
     return {
         "profile_version": "windows11-e01-single-case-workflow-v1",
+        "qc_prep_item": 1,
         "workflow_goal": "Select an E01, verify dependencies, choose a partition, extract read-only, analyze artifacts, search/review, and export report evidence from one flow.",
         "source_path": str(source_path),
         "direct_extract_ready": direct_extract_ready,
@@ -722,6 +760,7 @@ def build_e01_ingest_workflow_profile(
         "stages": stages,
         "operator_runbook": runbook,
         "recommended_commands": runbook["recommended_commands"],
+        "handoff_contract": handoff_contract,
         "commercial_gap_ids": ["#22", "#23", "#78", "#79"],
         "commercial_note": "This workflow is usable for triage, but commercial-grade E01 claims still require external corpus validation and trusted tool logs.",
     }
