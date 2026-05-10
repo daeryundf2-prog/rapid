@@ -864,6 +864,20 @@ button:disabled {
   overflow-wrap: anywhere;
 }
 
+.current-file-search-profile {
+  display: grid;
+  gap: 8px;
+  border: 1px solid rgba(15, 116, 107, 0.16);
+  border-radius: 14px;
+  background: rgba(15, 116, 107, 0.05);
+  padding: 10px;
+}
+
+.current-file-search-profile.warning {
+  border-color: rgba(180, 83, 9, 0.32);
+  background: #fff7ed;
+}
+
 .empty-state {
   color: var(--muted);
 }

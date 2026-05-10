@@ -320,6 +320,11 @@ const SEARCH_SOURCE_VERIFICATION_CONTRACT = {
   required_row_controls: ["view-review", "open-source", "pin-compare", "mark-review"],
   report_rule: "search-hit-is-a-lead-until-source-viewer-citation-and-hash-are-checked",
 };
+const CURRENT_FILE_SEARCH_CONTRACT = {
+  profile_version: "current-file-search-ui-contract-v1",
+  checklist_item: 17,
+  required_fields: ["match-count", "result-limit", "truncation-state", "sqlite-scan-state", "reportability-warning"],
+};
 
 let selectedRunId = null;
 let selectedRun = null;
@@ -3658,6 +3663,7 @@ function renderFileSearchResults(payload) {
       ${metric("File matches", payload.summary?.match_count)}
       ${metric("Keywords", (payload.keywords || []).length)}
     </div>
+    ${renderCurrentFileSearchProfile(payload)}
     <div class="dense-list">
       ${rows.map((match) => `
         <article class="dense-row">
@@ -3674,6 +3680,28 @@ function renderFileSearchResults(payload) {
       `).join("")}
     </div>
     ${payload.truncated ? '<p class="help-text">Results were capped for performance. Narrow the keyword if needed.</p>' : ""}
+  `;
+}
+
+function renderCurrentFileSearchProfile(payload) {
+  const profile = payload.source_search_profile || {};
+  const controls = profile.large_data_controls || {};
+  if (!profile.profile_version) return "";
+  return `
+    <section class="current-file-search-profile ${controls.truncated ? "warning" : ""}" data-testid="current-file-search-profile" data-current-file-search-contract="${escapeHtml(CURRENT_FILE_SEARCH_CONTRACT.profile_version)}">
+      <div>
+        <p class="eyebrow">current-file search</p>
+        <strong>${escapeHtml(profile.searchable ? "Searchable source" : "Search limited or blocked")}</strong>
+        <span>${escapeHtml(profile.reportability_decision?.allowed_use || "verification pivot")}</span>
+      </div>
+      <div class="mini-stat-row">
+        <span>limit ${escapeHtml(controls.result_limit ?? payload.summary?.limit ?? "n/a")}</span>
+        <span>${controls.truncated ? "truncated" : "not truncated"}</span>
+        <span>SQLite rows ${escapeHtml(controls.sqlite_scanned_row_count ?? "n/a")}</span>
+        <span>${controls.sqlite_scan_truncated ? "SQLite scan capped" : "SQLite scan not capped"}</span>
+      </div>
+      <p class="help-text">${escapeHtml((profile.reportability_decision?.required_before_report || []).join(" · ") || "Copy locator/citation and verify hashes before report use.")}</p>
+    </section>
   `;
 }
 
