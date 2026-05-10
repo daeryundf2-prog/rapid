@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Callable, Optional, Sequence
 
 from .e01 import (
+    build_image_stage_control_contract,
     build_recovered_root_manifest,
     collect_tool_preflight,
     command_record,
@@ -108,6 +109,19 @@ class DiskImageExtractionResult:
                 source_kind="raw-split-image",
                 source_path=self.source_path,
                 stage_dir=self.stage_dir,
+            ),
+            "stage_control_contract": build_image_stage_control_contract(
+                source_kind="raw-split-image",
+                stage_dir=self.stage_dir,
+                checkpoint_path=None,
+                resume_status=None,
+                stages=[
+                    {"id": "dependency-preflight", "status": "completed" if self.tool_preflight else "not-recorded"},
+                    {"id": "partition-selection", "status": "completed" if self.partition_start_sector is not None else self.recovery_mode},
+                    {"id": "filesystem-extraction", "status": "completed"},
+                ],
+                checkpoint_supported=False,
+                resume_supported=False,
             ),
             "recovered_root_manifest": self.recovered_root_manifest,
             "command_history": list(self.command_history),
@@ -354,6 +368,15 @@ def build_raw_split_integrated_workflow_manifest(
             },
         },
     ]
+    stage_control = build_image_stage_control_contract(
+        source_kind="raw-split-image",
+        stage_dir=stage_hint,
+        checkpoint_path=None,
+        resume_status=None,
+        stages=stages,
+        checkpoint_supported=False,
+        resume_supported=False,
+    )
     payload: dict[str, object] = {
         "profile_version": RAW_SPLIT_WORKFLOW_MANIFEST_VERSION,
         "item_number": 23,
@@ -380,6 +403,7 @@ def build_raw_split_integrated_workflow_manifest(
         },
         "run_output_status": output_status,
         "vsc_workflow_handoff": vsc_handoff,
+        "stage_control_contract": stage_control,
         "stages": stages,
         "large_data_controls": {
             "direct_image_hash_limit_bytes": 128 * 1024 * 1024,

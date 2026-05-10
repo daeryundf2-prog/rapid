@@ -34,6 +34,7 @@ from .e01 import (
     E01ExtractionResult,
     build_e01_ex01_integrated_workflow_manifest,
     build_e01_operator_runbook,
+    build_image_stage_control_contract,
     e01_failure_guidance,
     extract_e01_to_directory,
     is_e01_path,
@@ -2935,6 +2936,19 @@ def build_run_source_record(
                 source_path=image_result.source_path,
                 stage_dir=image_result.stage_dir,
             ),
+            "stage_control_contract": build_image_stage_control_contract(
+                source_kind="raw-split-image",
+                stage_dir=image_result.stage_dir,
+                checkpoint_path=None,
+                resume_status=None,
+                stages=[
+                    {"id": "dependency-preflight", "status": "completed" if image_result.tool_preflight else "not-recorded"},
+                    {"id": "partition-selection", "status": "completed" if image_result.partition_start_sector is not None else image_result.recovery_mode},
+                    {"id": "filesystem-extraction", "status": "completed"},
+                ],
+                checkpoint_supported=False,
+                resume_supported=False,
+            ),
             "raw_split_workflow_manifest": build_raw_split_integrated_workflow_manifest(
                 source_path=image_result.source_path,
                 image_paths=image_result.image_paths,
@@ -3009,6 +3023,19 @@ def build_run_source_record(
             source_kind="e01-ex01",
             source_path=image_result.source_path,
             stage_dir=image_result.stage_dir,
+        ),
+        "stage_control_contract": build_image_stage_control_contract(
+            source_kind="e01-ex01",
+            stage_dir=image_result.stage_dir,
+            checkpoint_path=image_result.stage_dir / "rapidtriage-e01-stage-status.json",
+            resume_status=image_result.resume_status,
+            stages=[
+                {"id": "dependency-preflight", "status": "completed" if image_result.tool_preflight else "not-recorded"},
+                {"id": "partition-selection", "status": "completed"},
+                {"id": "filesystem-extraction", "status": "completed"},
+            ],
+            checkpoint_supported=True,
+            resume_supported=True,
         ),
         "workflow_status": build_completed_e01_workflow_status(image_result),
         "e01_ex01_workflow_manifest": build_e01_ex01_integrated_workflow_manifest(
@@ -3087,6 +3114,10 @@ def build_completed_e01_workflow_status(image_result: E01ExtractionResult) -> di
             "use Case DB search, source viewer, review board, and report export",
         ),
     ]
+    stage_rows = [
+        {"id": stage_id, "label": label, "status": status, "evidence": evidence}
+        for stage_id, label, status, evidence in stages
+    ]
     return {
         "profile_version": "windows11-e01-run-workflow-v1",
         "status": "analysis-ready",
@@ -3098,13 +3129,19 @@ def build_completed_e01_workflow_status(image_result: E01ExtractionResult) -> di
         "command_history_count": len(image_result.command_history),
         "recovered_manifest_entry_count": recovered_entries,
         "resume_reused": bool((image_result.resume_status or {}).get("resumed_from_checkpoint")),
-        "stages": [
-            {"id": stage_id, "label": label, "status": status, "evidence": evidence}
-            for stage_id, label, status, evidence in stages
-        ],
+        "stages": stage_rows,
         "operator_runbook": runbook,
         "recommended_commands": runbook["recommended_commands"],
         "vsc_workflow_handoff": vsc_handoff,
+        "stage_control_contract": build_image_stage_control_contract(
+            source_kind="e01-ex01",
+            stage_dir=image_result.stage_dir,
+            checkpoint_path=image_result.stage_dir / "rapidtriage-e01-stage-status.json",
+            resume_status=image_result.resume_status,
+            stages=stage_rows,
+            checkpoint_supported=True,
+            resume_supported=True,
+        ),
         "analyst_next_actions": [
             "Search all evidence from the command bar.",
             "If VSC snapshots are available, run the VSC handoff commands before final deleted-file conclusions.",

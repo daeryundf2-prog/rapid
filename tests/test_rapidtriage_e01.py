@@ -403,6 +403,11 @@ DOS Partition Table
             self.assertEqual(workflow_manifest["vsc_workflow_handoff"]["profile_version"], "vsc-image-workflow-handoff-v1")
             self.assertEqual(workflow_manifest["vsc_workflow_handoff"]["qc_prep_item"], 3)
             self.assertIn("vsc-discover", workflow_manifest["vsc_workflow_handoff"]["commands"]["discover"])
+            stage_control = workflow_manifest["stage_control_contract"]
+            self.assertEqual(stage_control["profile_version"], "image-stage-control-contract-v1")
+            self.assertEqual(stage_control["qc_prep_item"], 4)
+            self.assertTrue(stage_control["checkpoint"]["supported"])
+            self.assertEqual(stage_control["cancel_retry"]["retry_route"], "/api/runs/<run-id>/retry")
             self.assertTrue(workflow_manifest["large_data_controls"]["bounded_recovered_root_manifest"])
             e01_gate = metadata["core_accuracy_gates"][0]
             self.assertEqual(e01_gate["gap_id"], "#22")
@@ -651,6 +656,8 @@ DOS Partition Table
             self.assertEqual(workflow_statuses["artifact-analysis"], "ready-after-extraction")
             self.assertEqual(workflow_manifest["vsc_workflow_handoff"]["source_kind"], "raw-split-image")
             self.assertIn("vsc-extract", workflow_manifest["vsc_workflow_handoff"]["commands"]["extract"])
+            self.assertEqual(workflow_manifest["stage_control_contract"]["profile_version"], "image-stage-control-contract-v1")
+            self.assertFalse(workflow_manifest["stage_control_contract"]["checkpoint"]["supported"])
             self.assertIn("split-set provenance profile", raw_gate["satisfied_checks"])
             self.assertEqual(
                 raw_uplift["reportability_decision"]["allowed_use"],
@@ -1241,6 +1248,8 @@ DOS Partition Table
             self.assertIn("--e01-partition-start-sector 4096", payload["source"]["workflow_status"]["recommended_commands"]["run"])
             self.assertEqual(payload["source"]["vsc_workflow_handoff"]["profile_version"], "vsc-image-workflow-handoff-v1")
             self.assertIn("vsc-compare", payload["source"]["workflow_status"]["vsc_workflow_handoff"]["commands"]["compare"])
+            self.assertEqual(payload["source"]["stage_control_contract"]["qc_prep_item"], 4)
+            self.assertTrue(payload["source"]["workflow_status"]["stage_control_contract"]["resume"]["supported"])
             workflow_manifest = payload["source"]["e01_ex01_workflow_manifest"]
             self.assertEqual(workflow_manifest["profile_version"], "e01-ex01-integrated-workflow-manifest-v1")
             self.assertEqual(workflow_manifest["status_context"], "run-summary")
@@ -1294,7 +1303,9 @@ DOS Partition Table
             self.assertEqual(raw_manifest["status_context"], "run-summary")
             self.assertEqual(len(raw_manifest["manifest_sha256"]), 64)
             self.assertEqual(payload["source"]["vsc_workflow_handoff"]["source_kind"], "raw-split-image")
+            self.assertEqual(payload["source"]["stage_control_contract"]["profile_version"], "image-stage-control-contract-v1")
             self.assertEqual(raw_manifest["vsc_workflow_handoff"]["qc_prep_item"], 3)
+            self.assertEqual(raw_manifest["stage_control_contract"]["qc_prep_item"], 4)
             raw_statuses = {stage["id"]: stage["status"] for stage in raw_manifest["stages"]}
             self.assertEqual(raw_statuses["artifact-analysis"], "complete")
             self.assertEqual(raw_statuses["vsc-discovery-extraction"], "ready-after-extraction")

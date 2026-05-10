@@ -107,6 +107,13 @@ class RapidTriageEvidenceAdapterTests(unittest.TestCase):
             self.assertIn("recommendation", partition_browser["columns"])
             self.assertTrue(partition_browser["manual_override"]["enabled"])
             self.assertEqual(partition_browser["manual_override"]["input_id"], "e01PartitionStartSectorInput")
+            stage_control = result["ingest_workflow"]["stage_control_contract"]
+            self.assertEqual(stage_control["profile_version"], "image-stage-control-contract-v1")
+            self.assertEqual(stage_control["qc_prep_item"], 4)
+            self.assertTrue(stage_control["checkpoint"]["supported"])
+            self.assertTrue(stage_control["resume"]["supported"])
+            self.assertEqual(stage_control["cancel_retry"]["cancel_route"], "/api/runs/<run-id>/cancel")
+            self.assertIn("missing-tool", stage_control["failure_classification"]["known_categories"])
             self.assertEqual(
                 result["ingest_workflow"]["operator_runbook"]["profile_version"],
                 "windows11-e01-operator-runbook-v1",

@@ -204,6 +204,22 @@ class E01ExtractionResult:
                 source_path=self.source_path,
                 stage_dir=self.stage_dir,
             ),
+            "stage_control_contract": build_image_stage_control_contract(
+                source_kind="e01-ex01",
+                stage_dir=self.stage_dir,
+                checkpoint_path=self.stage_dir / E01_STAGE_CHECKPOINT_NAME,
+                resume_status=self.resume_status,
+                stages=list(
+                    (self.resume_status or {}).get("stage_rows")
+                    or [
+                        {"id": "dependency-preflight", "status": "completed"},
+                        {"id": "partition-selection", "status": "completed"},
+                        {"id": "filesystem-extraction", "status": "completed"},
+                    ]
+                ),
+                checkpoint_supported=True,
+                resume_supported=True,
+            ),
             "resume_status": self.resume_status,
             "recovered_root_manifest": self.recovered_root_manifest,
             "segment_set_profile": self.segment_set_profile,
@@ -726,6 +742,106 @@ def _optional_int(value: object) -> int | None:
         return None
 
 
+def build_image_stage_control_contract(
+    *,
+    source_kind: str,
+    stage_dir: Path | str | None,
+    checkpoint_path: Path | str | None = None,
+    resume_status: Mapping[str, object] | None = None,
+    stages: Sequence[Mapping[str, object]] | None = None,
+    failure_category: str | None = None,
+    failure_guidance: Mapping[str, object] | None = None,
+    checkpoint_supported: bool = True,
+    resume_supported: bool = True,
+    run_id_token: str = "<run-id>",
+) -> dict[str, object]:
+    stage_rows = []
+    for index, stage in enumerate(stages or [], start=1):
+        if not isinstance(stage, Mapping):
+            continue
+        evidence = stage.get("evidence")
+        stage_rows.append(
+            {
+                "index": index,
+                "id": str(stage.get("id") or stage.get("label") or f"stage-{index}"),
+                "label": str(stage.get("label") or stage.get("id") or f"Stage {index}"),
+                "status": str(stage.get("status") or "pending"),
+                "evidence_present": bool(evidence),
+            }
+        )
+    resume = dict(resume_status or {})
+    checkpoint_text = str(checkpoint_path) if checkpoint_path else str(resume.get("checkpoint_path") or "")
+    failed_stages = [
+        str(row["id"])
+        for row in stage_rows
+        if row["status"] in {"failed", "blocked", "canceled"}
+    ]
+    if resume.get("failed_stages"):
+        failed_stages = sorted(set(failed_stages + [str(item) for item in resume.get("failed_stages") or []]))
+    completed_stages = [
+        str(row["id"])
+        for row in stage_rows
+        if row["status"] in {"complete", "completed", "ready", "ready-after-extraction", "ready-after-analysis"}
+    ]
+    if resume.get("completed_stages"):
+        completed_stages = sorted(set(completed_stages + [str(item) for item in resume.get("completed_stages") or []]))
+    category = str(failure_category or (failure_guidance or {}).get("category") or "")
+    control_status = "failed-stage-present" if failed_stages else ("resume-ready" if resume.get("resume_ready") else "controls-ready")
+    payload: dict[str, object] = {
+        "profile_version": "image-stage-control-contract-v1",
+        "qc_prep_item": 4,
+        "source_kind": source_kind,
+        "stage_dir": str(stage_dir or ""),
+        "status": control_status,
+        "stage_count": len(stage_rows),
+        "stage_rows": stage_rows,
+        "checkpoint": {
+            "supported": checkpoint_supported,
+            "path": checkpoint_text,
+            "exists": bool(resume.get("checkpoint_exists")),
+            "resume_ready": bool(resume.get("resume_ready")),
+            "completed": bool(resume.get("completed")),
+            "resumed_from_checkpoint": bool(resume.get("resumed_from_checkpoint")),
+            "sidecar_required_for_report": checkpoint_supported,
+        },
+        "resume": {
+            "supported": resume_supported,
+            "cli_flag": "--resume",
+            "completed_stages": completed_stages,
+            "failed_stages": failed_stages,
+            "reuse_reasons": list(resume.get("reuse_reasons") or []),
+            "warning": str(resume.get("resume_warning") or ""),
+        },
+        "cancel_retry": {
+            "cancel_supported": True,
+            "retry_supported_for": ["failed", "canceled"],
+            "cancel_route": f"/api/runs/{run_id_token}/cancel",
+            "retry_route": f"/api/runs/{run_id_token}/retry",
+            "running_cancel_policy": "cooperative-stage-boundary",
+            "partial_output_policy": "preserve-stage-output-and-record-warning",
+        },
+        "failure_classification": {
+            "category": category or "none",
+            "known_categories": sorted(E01_FAILURE_GUIDANCE),
+            "guidance_title": str((failure_guidance or {}).get("title") or ""),
+            "retry_after_fix": bool(category),
+        },
+        "validation_evidence_required": [
+            "stage checkpoint or explicit no-checkpoint limitation",
+            "resume decision with completed/failed stage list",
+            "cancel/retry transition log from web job API when used",
+            "failure category and operator guidance for blocked stages",
+        ],
+        "commercial_blockers": [
+            "long-running-cancel-under-load-validation-required",
+            "trusted-checkpoint-resume-diff-required",
+            "partial-output-cleanup-validation-required",
+        ],
+    }
+    payload["manifest_sha256"] = stable_manifest_sha256(payload)
+    return payload
+
+
 def build_e01_ingest_workflow_profile(
     source_path: Path,
     *,
@@ -877,6 +993,17 @@ def build_e01_ingest_workflow_profile(
         "handoff_contract": handoff_contract,
         "partition_browser": partition_browser,
         "vsc_workflow_handoff": vsc_handoff,
+        "stage_control_contract": build_image_stage_control_contract(
+            source_kind="e01-ex01",
+            stage_dir="./rapidtriage-run-e01/_e01",
+            checkpoint_path="./rapidtriage-run-e01/_e01/rapidtriage-e01-stage-status.json",
+            resume_status=None,
+            stages=stages,
+            failure_category=str((failure_guidance or {}).get("category") or ""),
+            failure_guidance=failure_guidance,
+            checkpoint_supported=True,
+            resume_supported=True,
+        ),
         "commercial_gap_ids": ["#22", "#23", "#78", "#79"],
         "commercial_note": "This workflow is usable for triage, but commercial-grade E01 claims still require external corpus validation and trusted tool logs.",
     }
@@ -1081,6 +1208,15 @@ def build_e01_ex01_integrated_workflow_manifest(
         "real-windows11-e01-run-log-required",
         "encrypted-corrupt-image-corpus-required",
     ]
+    stage_control = build_image_stage_control_contract(
+        source_kind="e01-ex01",
+        stage_dir=stage_hint,
+        checkpoint_path=Path(str(stage_hint)) / E01_STAGE_CHECKPOINT_NAME,
+        resume_status=resume_status,
+        stages=stages,
+        checkpoint_supported=True,
+        resume_supported=True,
+    )
     payload: dict[str, object] = {
         "profile_version": E01_INTEGRATED_WORKFLOW_MANIFEST_VERSION,
         "item_number": 22,
@@ -1107,6 +1243,7 @@ def build_e01_ex01_integrated_workflow_manifest(
         "run_output_status": output_status,
         "provenance_profile": provenance_profile,
         "vsc_workflow_handoff": vsc_handoff,
+        "stage_control_contract": stage_control,
         "stages": stages,
         "large_data_controls": {
             "direct_image_hash_limit_bytes": DIRECT_IMAGE_HASH_LIMIT_BYTES,

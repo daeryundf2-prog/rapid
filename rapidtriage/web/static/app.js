@@ -1026,6 +1026,7 @@ function renderSummary(payload) {
     ${renderUserWorkflowMap()}
     ${renderCaseReadinessDashboard(payload)}
     ${renderE01RunWorkflowStatus(payload)}
+    ${renderImageStageControlStatus(payload)}
     ${renderForensicArtifactNavigator(payload)}
     ${renderRunActionStrip(payload)}
     ${renderProcessingSummary(payload)}
@@ -1056,6 +1057,54 @@ function renderSummary(payload) {
         </ul>
       </section>
     </div>
+  `;
+}
+
+function renderImageStageControlStatus(payload) {
+  const source = payload.source || {};
+  const contract = source.stage_control_contract
+    || source.workflow_status?.stage_control_contract
+    || source.e01_ex01_workflow_manifest?.stage_control_contract
+    || source.raw_split_workflow_manifest?.stage_control_contract
+    || null;
+  if (!contract?.profile_version) return "";
+  const checkpoint = contract.checkpoint || {};
+  const resume = contract.resume || {};
+  const cancelRetry = contract.cancel_retry || {};
+  const failure = contract.failure_classification || {};
+  const stages = contract.stage_rows || [];
+  return `
+    <section class="image-stage-control-card" data-testid="image-stage-control-contract" data-qc-prep-item="${escapeHtml(contract.qc_prep_item || 4)}">
+      <div class="review-group-header">
+        <div>
+          <p class="eyebrow">QC-prep #4 stage controls</p>
+          <h3>Checkpoint, resume, cancel, retry</h3>
+          <p>이미지 처리 단계가 어디까지 갔는지, 재개/취소/재시도 근거가 남았는지 확인합니다.</p>
+        </div>
+        <span class="status-pill ${contract.status === "failed-stage-present" ? "warning" : "ok"}">${escapeHtml(contract.status || "ready")}</span>
+      </div>
+      <div class="processing-caps">
+        <span>Checkpoint: ${checkpoint.supported ? (checkpoint.exists ? "exists" : "expected") : "not supported"}</span>
+        <span>Resume: ${resume.supported ? (checkpoint.resume_ready ? "ready" : "available") : "not supported"}</span>
+        <span>Cancel: ${cancelRetry.cancel_supported ? "API" : "n/a"}</span>
+        <span>Retry: ${(cancelRetry.retry_supported_for || []).join("/") || "n/a"}</span>
+        <span>Failure: ${escapeHtml(failure.category || "none")}</span>
+      </div>
+      <div class="stage-control-grid">
+        ${stages.slice(0, 8).map((stage) => `
+          <article>
+            <strong>${escapeHtml(stage.label || stage.id || "stage")}</strong>
+            <span>${escapeHtml(stage.status || "pending")}</span>
+          </article>
+        `).join("")}
+      </div>
+      <details class="match-details">
+        <summary>Control routes and evidence</summary>
+        <code>${escapeHtml(cancelRetry.cancel_route || "")}</code>
+        <code>${escapeHtml(cancelRetry.retry_route || "")}</code>
+        <ul>${(contract.validation_evidence_required || []).map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ul>
+      </details>
+    </section>
   `;
 }
 
