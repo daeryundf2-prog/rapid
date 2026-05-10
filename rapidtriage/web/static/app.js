@@ -13,6 +13,7 @@ const collectPlanButton = document.querySelector("#collectPlanButton");
 const runList = document.querySelector("#runList");
 const detailPanel = document.querySelector("#detailPanel");
 const RUN_FORM_STORAGE_KEY = "rapidtriage.runForm.v1";
+const WORKBENCH_SESSION_STORAGE_KEY = "rapidtriage.workbenchSession.v1";
 const SEARCH_STORAGE_PREFIX = "rapidtriage.search.";
 const SEARCH_HISTORY_PREFIX = "rapidtriage.searchHistory.";
 const COMPARE_STORAGE_PREFIX = "rapidtriage.compare.";
@@ -308,6 +309,11 @@ const VIEWER_NAVIGATION_CONTRACT = {
   storage_scope: "per-run-local-browser",
   controls: ["back", "forward", "current-position", "history-preserves-review-context", "compare-pin-compatible"],
 };
+const WORKBENCH_SESSION_CONTRACT = {
+  profile_version: "workbench-session-restore-contract-v1",
+  checklist_item: 15,
+  persisted_fields: ["selectedRunId", "activeTab", "activeViewGroup", "tableControls", "virtualWindowOffsets", "compareTray"],
+};
 
 let selectedRunId = null;
 let selectedRun = null;
@@ -423,10 +429,13 @@ async function loadRunDetail(runId, tab = "summary") {
   selectedRun = await api(`/api/runs/${runId}`);
   if (selectedRun.status !== "completed" || !selectedRun.summary) {
     detailPanel.innerHTML = renderPendingRun(selectedRun);
+    persistWorkbenchSession();
     return;
   }
   detailPanel.innerHTML = renderDetailShell(selectedRun, activeTab);
   bindTabButtons();
+  restoreWorkbenchControls();
+  persistWorkbenchSession();
   loadRunValidationPackageSummary(runId);
   await renderActiveTab();
 }
@@ -899,6 +908,8 @@ function bindTabButtons() {
       activeTab = tabs.includes(activeTab) ? activeTab : tabs[0];
       detailPanel.innerHTML = renderDetailShell(selectedRun, activeTab);
       bindTabButtons();
+      restoreWorkbenchControls();
+      persistWorkbenchSession();
       await renderActiveTab();
     });
   }
@@ -909,6 +920,7 @@ function bindTabButtons() {
       for (const item of detailPanel.querySelectorAll(".tab-button")) {
         item.classList.toggle("active", item === button);
       }
+      persistWorkbenchSession();
       await renderActiveTab();
     });
   }
@@ -921,18 +933,23 @@ function bindTabButtons() {
     if (preset) preset.value = "analyst";
     applyColumnPreset("analyst");
     applyWorkbenchFilters();
+    persistWorkbenchSession();
   });
   detailPanel.querySelector("#tableFilter")?.addEventListener("input", (event) => {
     applyWorkbenchFilters();
+    persistWorkbenchSession();
   });
   detailPanel.querySelector("#sourceFilterInput")?.addEventListener("input", () => {
     applyWorkbenchFilters();
+    persistWorkbenchSession();
   });
   detailPanel.querySelector("#timeFilterInput")?.addEventListener("input", () => {
     applyWorkbenchFilters();
+    persistWorkbenchSession();
   });
   detailPanel.querySelector("#columnPresetInput")?.addEventListener("change", (event) => {
     applyColumnPreset(event.target.value || "analyst");
+    persistWorkbenchSession();
   });
   detailPanel.querySelector("#removeRunButton")?.addEventListener("click", removeSelectedRun);
   bindCompareActions();
@@ -970,8 +987,6 @@ function renderShortcutHelp() {
 
 async function renderActiveTab() {
   const body = detailPanel.querySelector("#tabBody");
-  const filter = detailPanel.querySelector("#tableFilter");
-  if (filter) filter.value = "";
   body.innerHTML = '<p class="empty-state">Loading...</p>';
   try {
     if (activeTab === "summary") body.innerHTML = renderSummary(selectedRun.summary);
@@ -989,6 +1004,7 @@ async function renderActiveTab() {
   bindPanelActions();
   bindBookmarkButtons();
   bindSearchForm();
+  restoreWorkbenchControls();
 }
 
 function renderSummary(payload) {
@@ -4302,6 +4318,66 @@ function applyColumnPreset(preset) {
   if (preset === "source") detailPanel.classList.add("table-columns-source");
 }
 
+function currentWorkbenchControls() {
+  return {
+    visible_filter: detailPanel.querySelector("#tableFilter")?.value || "",
+    source_filter: detailPanel.querySelector("#sourceFilterInput")?.value || "",
+    time_filter: detailPanel.querySelector("#timeFilterInput")?.value || "",
+    column_preset: detailPanel.querySelector("#columnPresetInput")?.value || "analyst",
+  };
+}
+
+function getWorkbenchSession() {
+  if (!storageAvailable()) return {};
+  try {
+    const payload = JSON.parse(window.localStorage.getItem(WORKBENCH_SESSION_STORAGE_KEY) || "{}");
+    return payload && typeof payload === "object" ? payload : {};
+  } catch {
+    return {};
+  }
+}
+
+function persistWorkbenchSession(extra = {}) {
+  if (!storageAvailable()) return;
+  const payload = {
+    profile_version: WORKBENCH_SESSION_CONTRACT.profile_version,
+    selectedRunId,
+    activeTab,
+    activeViewGroup,
+    tableControls: currentWorkbenchControls(),
+    virtualWindowOffsets,
+    updated_at: new Date().toISOString(),
+    ...extra,
+  };
+  window.localStorage.setItem(WORKBENCH_SESSION_STORAGE_KEY, JSON.stringify(payload));
+}
+
+function restoreWorkbenchSession() {
+  const payload = getWorkbenchSession();
+  if (!payload?.selectedRunId) return;
+  selectedRunId = payload.selectedRunId;
+  activeTab = payload.activeTab || "summary";
+  activeViewGroup = payload.activeViewGroup || groupForTab(activeTab);
+}
+
+function restoreWorkbenchControls() {
+  const controls = getWorkbenchSession().tableControls || {};
+  const mapping = [
+    ["#tableFilter", controls.visible_filter],
+    ["#sourceFilterInput", controls.source_filter],
+    ["#timeFilterInput", controls.time_filter],
+  ];
+  for (const [selector, value] of mapping) {
+    const input = detailPanel.querySelector(selector);
+    if (input && value !== undefined) input.value = value || "";
+  }
+  const preset = controls.column_preset || "analyst";
+  const presetInput = detailPanel.querySelector("#columnPresetInput");
+  if (presetInput) presetInput.value = preset;
+  applyColumnPreset(preset);
+  applyWorkbenchFilters();
+}
+
 function metric(label, value) {
   return `<div class="metric"><b>${value ?? 0}</b><span>${escapeHtml(label)}</span></div>`;
 }
@@ -5427,6 +5503,8 @@ async function switchTab(tab) {
     activeViewGroup = nextGroup;
     detailPanel.innerHTML = renderDetailShell(selectedRun, activeTab);
     bindTabButtons();
+    restoreWorkbenchControls();
+    persistWorkbenchSession();
     await renderActiveTab();
     return;
   }
@@ -5434,6 +5512,7 @@ async function switchTab(tab) {
     item.classList.toggle("active", item.dataset.tab === tab);
   }
   await renderActiveTab();
+  persistWorkbenchSession();
 }
 
 function viewGroupById(groupId) {
@@ -6057,6 +6136,8 @@ runForm.addEventListener("submit", async (event) => {
     const run = await api("/api/runs", { method: "POST", body: JSON.stringify(request) });
     selectedRunId = run.run_id;
     activeTab = "summary";
+    activeViewGroup = groupForTab(activeTab);
+    persistWorkbenchSession({ tableControls: { visible_filter: "", source_filter: "", time_filter: "", column_preset: "analyst" } });
     await loadRuns();
     await loadRunDetail(run.run_id, activeTab);
   } catch (error) {
@@ -6082,6 +6163,8 @@ importForm.addEventListener("submit", async (event) => {
     });
     selectedRunId = run.run_id;
     activeTab = "summary";
+    activeViewGroup = groupForTab(activeTab);
+    persistWorkbenchSession({ tableControls: { visible_filter: "", source_filter: "", time_filter: "", column_preset: "analyst" } });
     await loadRuns();
     await loadRunDetail(run.run_id, activeTab);
   } catch (error) {
@@ -6109,6 +6192,8 @@ sampleRunButton?.addEventListener("click", async () => {
     });
     selectedRunId = payload.run.run_id;
     activeTab = "summary";
+    activeViewGroup = groupForTab(activeTab);
+    persistWorkbenchSession({ tableControls: { visible_filter: "", source_filter: "", time_filter: "", column_preset: "analyst" } });
     await loadRuns();
     await loadRunDetail(payload.run.run_id, activeTab);
   } catch (error) {
@@ -6411,6 +6496,7 @@ async function removeSelectedRun() {
     await api(`/api/runs/${runId}`, { method: "DELETE" });
     selectedRunId = null;
     selectedRun = null;
+    persistWorkbenchSession({ selectedRunId: null, activeTab: "summary", activeViewGroup: "triage" });
     detailPanel.innerHTML = '<p class="empty-state">Run removed from the local catalog. Output files were not deleted.</p>';
     await loadRuns();
   } catch (error) {
@@ -6419,6 +6505,7 @@ async function removeSelectedRun() {
 }
 
 hydrateRunForm();
+restoreWorkbenchSession();
 bindRunFormPersistence();
 refreshRunPlanPreview();
 bindKeyboardShortcuts();
