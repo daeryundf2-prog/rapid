@@ -120,7 +120,10 @@ from .core.vsc import VscCompareError, compare_vsc_snapshots, extract_vsc_change
 from .core.worker import RustWorkerClient, WorkerError
 from .core.forensic_validation_plan import (
     DEFAULT_FORENSIC_VALIDATION_ITEMS,
+    DEFAULT_FORENSIC_VALIDATION_PACK_ITEMS,
+    build_forensic_validation_pack,
     build_forensic_validation_plan,
+    write_forensic_validation_pack,
     write_forensic_validation_plan,
 )
 
@@ -1299,6 +1302,27 @@ def build_parser() -> argparse.ArgumentParser:
     )
     forensic_validation_plan.add_argument("--output-dir", help="Optional directory for JSON and Markdown plan outputs")
     forensic_validation_plan.add_argument("--json", action="store_true", help="Print machine-readable JSON")
+
+    forensic_validation_pack = sub.add_parser(
+        "forensic-validation-pack",
+        help="Create an executable evidence pack for a focused forensic validation batch",
+        description="Create dataset templates, trusted-reference commands, and row-level diff contracts for a small validation batch",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=textwrap.dedent(
+            """\
+            Examples:
+              rapidtriage forensic-validation-pack --items 1-5 --output-dir ./evtx-registry-pack --json
+              rapidtriage forensic-validation-pack --items 12-13 --output-dir ./ntfs-pack
+            """
+        ),
+    )
+    forensic_validation_pack.add_argument(
+        "--items",
+        default=DEFAULT_FORENSIC_VALIDATION_PACK_ITEMS,
+        help=f"Item range/list to include (default: {DEFAULT_FORENSIC_VALIDATION_PACK_ITEMS})",
+    )
+    forensic_validation_pack.add_argument("--output-dir", required=True, help="Directory for pack JSON, Markdown, dataset template, and command checklist")
+    forensic_validation_pack.add_argument("--json", action="store_true", help="Print machine-readable JSON")
 
     cross_tool = sub.add_parser(
         "cross-tool-validate",
@@ -2634,6 +2658,33 @@ def main(argv=None) -> int:
                 outputs = payload["outputs"]
                 print(f"Saved JSON: {outputs['json']}")
                 print(f"Saved Markdown: {outputs['markdown']}")
+        return 0
+
+    if args.command == "forensic-validation-pack":
+        try:
+            payload = build_forensic_validation_pack(
+                item_range=args.items,
+                output_dir=Path(args.output_dir).expanduser().resolve(),
+            )
+        except ValueError as exc:
+            parser.error(str(exc))
+        payload["outputs"] = write_forensic_validation_pack(payload, Path(args.output_dir).expanduser().resolve())
+        if args.json:
+            print(json.dumps(payload, ensure_ascii=False, indent=2))
+        else:
+            summary = payload["summary"]
+            print("RapidTriage forensic validation pack")
+            print(f"Items: {payload['item_range']} ({payload['item_count']})")
+            print(f"Required datasets: {summary['required_dataset_count']}")
+            print(f"Required checks: {summary['required_check_count']}")
+            print("Required tool families:")
+            for tool in summary["required_tool_families"]:
+                print(f"- {tool}")
+            outputs = payload["outputs"]
+            print(f"Saved JSON: {outputs['json']}")
+            print(f"Saved Markdown: {outputs['markdown']}")
+            print(f"Saved dataset template: {outputs['dataset_template']}")
+            print(f"Saved command checklist: {outputs['reference_commands']}")
         return 0
 
     if args.command == "cross-tool-validate":
