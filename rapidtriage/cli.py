@@ -2786,8 +2786,10 @@ def main(argv=None) -> int:
             print("RapidTriage forensic validation batch assessment")
             print(f"Batches: {payload['batch_count']}")
             print(f"Datasets: {payload['ready_dataset_count']}/{payload['dataset_count']} validation-ready")
+            print(f"External datasets: {payload['external_ready_dataset_count']}/{payload['dataset_count']} external-validation-ready")
             print(f"Commercial-ready datasets: {payload['commercial_ready_dataset_count']}/{payload['dataset_count']}")
             print(f"Ready for validated gate: {payload['ready_for_validated_gate']}")
+            print(f"Ready for external validated gate: {payload['ready_for_external_validated_gate']}")
         return 0
 
     if args.command == "forensic-validation-smoke-populate":
@@ -2806,6 +2808,7 @@ def main(argv=None) -> int:
             print(f"Populated datasets: {payload['populated_dataset_count']}")
             print(f"Batches: {assessment['batch_count']}")
             print(f"Datasets: {assessment['ready_dataset_count']}/{assessment['dataset_count']} validation-ready")
+            print(f"External datasets: {assessment['external_ready_dataset_count']}/{assessment['dataset_count']} external-validation-ready")
             print("Commercial-ready: false (internal smoke fixtures only)")
         return 0
 

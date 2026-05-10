@@ -94,6 +94,7 @@ def assess_forensic_validation_pack(pack_path: Path, *, output: Path | None = No
     results = [assess_validation_dataset(item) for item in datasets]
     ready_for_validated_gate = bool(results) and all(bool(item.get("ready_for_validated_gate")) for item in results)
     ready_for_commercial_grade = bool(results) and all(bool(item.get("ready_for_commercial_grade")) for item in results)
+    external_ready_count = sum(1 for item in results if item.get("ready_for_external_validated_gate"))
     assessment_core: dict[str, object] = {
         "command": "forensic-validation-pack-assess",
         "profile_version": "forensic-validation-pack-assessment-v1",
@@ -103,8 +104,10 @@ def assess_forensic_validation_pack(pack_path: Path, *, output: Path | None = No
         "item_numbers": [int(item.get("item_number") or 0) for item in datasets],
         "dataset_count": len(results),
         "ready_dataset_count": sum(1 for item in results if item.get("ready_for_validated_gate")),
+        "external_ready_dataset_count": external_ready_count,
         "commercial_ready_dataset_count": sum(1 for item in results if item.get("ready_for_commercial_grade")),
         "ready_for_validated_gate": ready_for_validated_gate,
+        "ready_for_external_validated_gate": bool(results) and external_ready_count == len(results),
         "ready_for_commercial_grade": ready_for_commercial_grade,
         "dataset_results": results,
         "remaining_blockers": sorted(
@@ -189,6 +192,7 @@ def assess_forensic_validation_batches(root_dir: Path, *, output: Path | None = 
     ]
     dataset_count = sum(int(item.get("dataset_count") or 0) for item in assessments)
     ready_dataset_count = sum(int(item.get("ready_dataset_count") or 0) for item in assessments)
+    external_ready_dataset_count = sum(int(item.get("external_ready_dataset_count") or 0) for item in assessments)
     commercial_ready_dataset_count = sum(int(item.get("commercial_ready_dataset_count") or 0) for item in assessments)
     assessment_core: dict[str, object] = {
         "command": "forensic-validation-batches-assess",
@@ -197,8 +201,10 @@ def assess_forensic_validation_batches(root_dir: Path, *, output: Path | None = 
         "batch_count": len(assessments),
         "dataset_count": dataset_count,
         "ready_dataset_count": ready_dataset_count,
+        "external_ready_dataset_count": external_ready_dataset_count,
         "commercial_ready_dataset_count": commercial_ready_dataset_count,
         "ready_for_validated_gate": bool(assessments) and ready_dataset_count == dataset_count,
+        "ready_for_external_validated_gate": bool(assessments) and external_ready_dataset_count == dataset_count,
         "ready_for_commercial_grade": bool(assessments) and commercial_ready_dataset_count == dataset_count,
         "batch_assessments": [
             {
@@ -206,6 +212,7 @@ def assess_forensic_validation_batches(root_dir: Path, *, output: Path | None = 
                 "item_numbers": item.get("item_numbers", []),
                 "dataset_count": item.get("dataset_count", 0),
                 "ready_dataset_count": item.get("ready_dataset_count", 0),
+                "external_ready_dataset_count": item.get("external_ready_dataset_count", 0),
                 "commercial_ready_dataset_count": item.get("commercial_ready_dataset_count", 0),
                 "remaining_blockers": item.get("remaining_blockers", []),
                 "assessment_hash": item.get("assessment_hash", ""),
@@ -360,20 +367,34 @@ def assess_validation_dataset(dataset: Mapping[str, object]) -> dict[str, object
     if not diff_result.get("ready_for_commercial_grade"):
         blockers.append("commercial-grade-diff-evidence-incomplete")
     ready_for_validated_gate = not missing_required and not hash_mismatches and bool(diff_result.get("ready_for_validated_gate"))
+    internal_smoke_fixture = bool(is_internal_smoke_dataset(dataset) or diff_result.get("internal_smoke_fixture"))
+    ready_for_external_validated_gate = ready_for_validated_gate and not internal_smoke_fixture
     ready_for_commercial_grade = ready_for_validated_gate and bool(diff_result.get("ready_for_commercial_grade"))
     result_core = {
         "dataset_id": str(dataset.get("dataset_id") or ""),
         "item_number": int(dataset.get("item_number") or 0),
         "title": str(dataset.get("title") or ""),
+        "internal_smoke_fixture": internal_smoke_fixture,
         "evidence_results": evidence_results,
         "missing_required_evidence": missing_required,
         "hash_mismatches": hash_mismatches,
         "row_level_diff_assessment": diff_result,
         "ready_for_validated_gate": ready_for_validated_gate,
+        "ready_for_external_validated_gate": ready_for_external_validated_gate,
         "ready_for_commercial_grade": ready_for_commercial_grade,
         "blockers": blockers,
+        "external_validation_blockers": ["internal-smoke-fixture-not-external-validation"] if internal_smoke_fixture else [],
     }
     return {**result_core, "dataset_assessment_hash": stable_plan_hash(result_core)}
+
+
+def is_internal_smoke_dataset(dataset: Mapping[str, object]) -> bool:
+    notice = dataset.get("smoke_fixture_notice")
+    if isinstance(notice, Mapping) and str(notice.get("kind") or "") == "internal-smoke-fixture":
+        return True
+    if str(dataset.get("status") or "") == "internal-smoke-populated":
+        return True
+    return False
 
 
 def expected_hash_for_evidence(name: str, hash_requirements: Mapping[str, object]) -> str:
@@ -442,6 +463,8 @@ def assess_row_level_diff_output(path_text: str) -> dict[str, object]:
         "path": str(path),
         "present": True,
         "status": str(payload.get("status") or ""),
+        "fixture_kind": str(payload.get("fixture_kind") or ""),
+        "internal_smoke_fixture": str(payload.get("fixture_kind") or "") == "internal-smoke",
         "ready_for_validated_gate": validated_ready,
         "ready_for_commercial_grade": commercial_ready,
         "comparison_health": comparison_health,

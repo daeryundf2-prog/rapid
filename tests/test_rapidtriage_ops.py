@@ -1633,6 +1633,8 @@ class RapidTriageOpsTests(unittest.TestCase):
             self.assertEqual(payload["dataset_count"], 1)
             self.assertEqual(payload["ready_dataset_count"], 1)
             self.assertTrue(payload["ready_for_validated_gate"])
+            self.assertEqual(payload["external_ready_dataset_count"], 1)
+            self.assertTrue(payload["ready_for_external_validated_gate"])
             self.assertFalse(payload["ready_for_commercial_grade"])
             self.assertIn("commercial-grade-diff-evidence-incomplete", payload["remaining_blockers"])
 
@@ -1768,6 +1770,8 @@ class RapidTriageOpsTests(unittest.TestCase):
             self.assertEqual(assessment["dataset_count"], 65)
             self.assertEqual(assessment["ready_dataset_count"], 65)
             self.assertTrue(assessment["ready_for_validated_gate"])
+            self.assertEqual(assessment["external_ready_dataset_count"], 0)
+            self.assertFalse(assessment["ready_for_external_validated_gate"])
             self.assertEqual(assessment["commercial_ready_dataset_count"], 0)
             self.assertFalse(assessment["ready_for_commercial_grade"])
             first_pack = json.loads(
