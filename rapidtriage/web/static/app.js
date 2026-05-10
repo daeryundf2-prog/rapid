@@ -1079,6 +1079,7 @@ function renderE01RunWorkflowStatus(payload) {
         ${metric("Partitions", workflow.partition_table_count ?? 0)}
         ${metric("Recovered entries", workflow.recovered_manifest_entry_count ?? 0)}
       </div>
+      ${renderVscWorkflowHandoff(workflow.vsc_workflow_handoff || null)}
       <div class="e01-stage-grid">
         ${stages.map((stage, index) => `
           <article class="e01-stage-card ${escapeHtml(stage.status || "pending")}">
@@ -6515,6 +6516,7 @@ function renderE01IngestWorkflow(workflow) {
       <p>${escapeHtml(workflow.workflow_goal || "")}</p>
       ${workflow.blocked_reason ? `<p class="help-text">${escapeHtml(workflow.blocked_reason)}</p>` : ""}
       ${renderE01PartitionBrowser(workflow.partition_browser || workflow.partition_selection || null)}
+      ${renderVscWorkflowHandoff(workflow.vsc_workflow_handoff || workflow.vsc_handoff || null)}
       ${renderE01HandoffContract(workflow.handoff_contract || null)}
       <div class="e01-stage-grid">
         ${stages.map((stage, index) => `
@@ -6533,6 +6535,46 @@ function renderE01IngestWorkflow(workflow) {
           <ul>${(workflow.large_case_controls || []).map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ul>
         </details>
       ` : ""}
+    </section>
+  `;
+}
+
+function renderVscWorkflowHandoff(handoff) {
+  if (!handoff?.profile_version) return "";
+  const commands = handoff.commands || {};
+  const steps = handoff.workflow_steps || [];
+  return `
+    <section class="vsc-handoff-card" data-testid="vsc-workflow-handoff" data-qc-prep-item="${escapeHtml(handoff.qc_prep_item || 3)}">
+      <div class="review-group-header">
+        <div>
+          <p class="eyebrow">QC-prep #3 VSC handoff</p>
+          <strong>Shadow copy discovery → compare → extract</strong>
+          <span>${escapeHtml(handoff.goal || "")}</span>
+        </div>
+        <span class="status-pill ${handoff.status === "blocked" ? "warning" : "ok"}">${escapeHtml(handoff.status || "pending")}</span>
+      </div>
+      <div class="processing-caps">
+        <span>Source: ${escapeHtml(handoff.source_kind || "image")}</span>
+        <span>Snapshots: ${formatNumber(handoff.snapshot_count || 0)}</span>
+        <span>Direct image VSC mount: ${handoff.direct_image_level_mount_supported ? "yes" : "external"}</span>
+      </div>
+      <p class="help-text">${escapeHtml(handoff.operator_warning || "")}</p>
+      <div class="vsc-step-grid">
+        ${steps.map((step, index) => `
+          <article>
+            <span>${index + 1}</span>
+            <strong>${escapeHtml(step.label || step.id || "step")}</strong>
+            <em>${escapeHtml(step.status || "pending")}</em>
+          </article>
+        `).join("")}
+      </div>
+      <details class="match-details">
+        <summary>VSC commands</summary>
+        <code>${escapeHtml(commands.discover || "")}</code>
+        <code>${escapeHtml(commands.compare || "")}</code>
+        <code>${escapeHtml(commands.extract || "")}</code>
+        <code>${escapeHtml(commands.case_db_import || "")}</code>
+      </details>
     </section>
   `;
 }

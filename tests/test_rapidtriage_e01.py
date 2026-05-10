@@ -397,8 +397,12 @@ DOS Partition Table
             self.assertEqual(workflow_statuses["dependency-preflight"], "complete")
             self.assertEqual(workflow_statuses["partition-selection"], "complete")
             self.assertEqual(workflow_statuses["filesystem-extraction"], "complete")
+            self.assertEqual(workflow_statuses["vsc-discovery-extraction"], "ready-after-extraction")
             self.assertEqual(workflow_statuses["artifact-analysis"], "ready-after-extraction")
             self.assertEqual(workflow_statuses["report-export"], "blocked")
+            self.assertEqual(workflow_manifest["vsc_workflow_handoff"]["profile_version"], "vsc-image-workflow-handoff-v1")
+            self.assertEqual(workflow_manifest["vsc_workflow_handoff"]["qc_prep_item"], 3)
+            self.assertIn("vsc-discover", workflow_manifest["vsc_workflow_handoff"]["commands"]["discover"])
             self.assertTrue(workflow_manifest["large_data_controls"]["bounded_recovered_root_manifest"])
             e01_gate = metadata["core_accuracy_gates"][0]
             self.assertEqual(e01_gate["gap_id"], "#22")
@@ -643,7 +647,10 @@ DOS Partition Table
             self.assertEqual(workflow_statuses["dependency-preflight"], "complete")
             self.assertEqual(workflow_statuses["partition-selection"], "complete")
             self.assertEqual(workflow_statuses["filesystem-extraction"], "complete")
+            self.assertEqual(workflow_statuses["vsc-discovery-extraction"], "ready-after-extraction")
             self.assertEqual(workflow_statuses["artifact-analysis"], "ready-after-extraction")
+            self.assertEqual(workflow_manifest["vsc_workflow_handoff"]["source_kind"], "raw-split-image")
+            self.assertIn("vsc-extract", workflow_manifest["vsc_workflow_handoff"]["commands"]["extract"])
             self.assertIn("split-set provenance profile", raw_gate["satisfied_checks"])
             self.assertEqual(
                 raw_uplift["reportability_decision"]["allowed_use"],
@@ -1232,12 +1239,15 @@ DOS Partition Table
             self.assertEqual(payload["source"]["workflow_status"]["selected_partition_start_sector"], 4096)
             self.assertIn("operator_runbook", payload["source"]["workflow_status"])
             self.assertIn("--e01-partition-start-sector 4096", payload["source"]["workflow_status"]["recommended_commands"]["run"])
+            self.assertEqual(payload["source"]["vsc_workflow_handoff"]["profile_version"], "vsc-image-workflow-handoff-v1")
+            self.assertIn("vsc-compare", payload["source"]["workflow_status"]["vsc_workflow_handoff"]["commands"]["compare"])
             workflow_manifest = payload["source"]["e01_ex01_workflow_manifest"]
             self.assertEqual(workflow_manifest["profile_version"], "e01-ex01-integrated-workflow-manifest-v1")
             self.assertEqual(workflow_manifest["status_context"], "run-summary")
             self.assertEqual(len(workflow_manifest["manifest_sha256"]), 64)
             workflow_statuses = {stage["id"]: stage["status"] for stage in workflow_manifest["stages"]}
             self.assertEqual(workflow_statuses["artifact-analysis"], "complete")
+            self.assertEqual(workflow_statuses["vsc-discovery-extraction"], "ready-after-extraction")
             self.assertEqual(workflow_statuses["unified-search-indexing"], "complete")
             self.assertEqual(workflow_statuses["review-workflow"], "ready")
             self.assertEqual(workflow_statuses["report-export"], "complete")
@@ -1283,8 +1293,11 @@ DOS Partition Table
             self.assertEqual(raw_manifest["profile_version"], "raw-split-integrated-workflow-manifest-v1")
             self.assertEqual(raw_manifest["status_context"], "run-summary")
             self.assertEqual(len(raw_manifest["manifest_sha256"]), 64)
+            self.assertEqual(payload["source"]["vsc_workflow_handoff"]["source_kind"], "raw-split-image")
+            self.assertEqual(raw_manifest["vsc_workflow_handoff"]["qc_prep_item"], 3)
             raw_statuses = {stage["id"]: stage["status"] for stage in raw_manifest["stages"]}
             self.assertEqual(raw_statuses["artifact-analysis"], "complete")
+            self.assertEqual(raw_statuses["vsc-discovery-extraction"], "ready-after-extraction")
             self.assertEqual(raw_statuses["unified-search-indexing"], "complete")
             self.assertEqual(raw_statuses["review-report"], "complete")
             self.assertIn("summary", raw_manifest["run_output_status"])

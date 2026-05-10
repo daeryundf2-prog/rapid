@@ -30,6 +30,13 @@ class RapidTriageVscCompareTests(unittest.TestCase):
             paths = {row["path"] for row in payload["snapshots"]}
             self.assertIn(str(snapshot.resolve()), paths)
             self.assertFalse(payload["direct_image_level_mount_supported"])
+            handoff = payload["image_workflow_handoff"]
+            self.assertEqual(handoff["profile_version"], "vsc-image-workflow-handoff-v1")
+            self.assertEqual(handoff["qc_prep_item"], 3)
+            self.assertEqual(handoff["snapshot_count"], payload["snapshot_count"])
+            self.assertIn("vsc-compare", handoff["commands"]["compare"])
+            self.assertIn("vsc-extract", handoff["commands"]["extract"])
+            self.assertFalse(handoff["direct_image_level_mount_supported"])
             self.assertEqual(len(payload["manifest_sha256"]), 64)
             self.assertTrue(output.with_name("vsc-discovery.audit.json").is_file())
 
@@ -58,6 +65,8 @@ class RapidTriageVscCompareTests(unittest.TestCase):
 
             self.assertEqual(payload["summary"]["snapshot_count"], 1)
             self.assertEqual(payload["snapshot_discovery"]["schema"], "rapidforensic-vsc-discovery-v1")
+            self.assertEqual(payload["image_workflow_handoff"]["status"], "compare-complete")
+            self.assertIn("case-db", payload["image_workflow_handoff"]["commands"]["case_db_import"])
             self.assertFalse(payload["snapshot_discovery"]["direct_image_level_mount_supported"])
             self.assertEqual(payload["summary"]["deleted"], 1)
             self.assertEqual(payload["summary"]["added"], 1)
@@ -92,6 +101,8 @@ class RapidTriageVscCompareTests(unittest.TestCase):
             self.assertEqual(payload["tool"], "rapidtriage-vsc-extract")
             self.assertEqual(payload["summary"]["selected_count"], 2)
             self.assertEqual(payload["summary"]["copied_count"], 2)
+            self.assertEqual(payload["image_workflow_handoff"]["status"], "extract-complete")
+            self.assertIn("vsc-discover", payload["image_workflow_handoff"]["commands"]["discover"])
             self.assertEqual(copied["deleted.txt"]["status"], "deleted")
             self.assertEqual(copied["modified.txt"]["status"], "modified")
             self.assertEqual(len(copied["deleted.txt"]["source_sha256"]), 64)

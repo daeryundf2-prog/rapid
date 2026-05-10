@@ -4,9 +4,9 @@ import datetime as dt
 import hashlib
 import json
 import shutil
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Iterable
 
 
 class VscCompareError(ValueError):
@@ -21,6 +21,82 @@ class FileEntry:
     modified_at: str
     modified_ns: int
     sha256: str = ""
+
+
+def build_vsc_image_workflow_handoff(
+    *,
+    current_root: Path | str | None,
+    source_kind: str,
+    source_path: Path | str | None = None,
+    stage_dir: Path | str | None = None,
+    discovery: Mapping[str, object] | None = None,
+    status: str | None = None,
+) -> dict[str, object]:
+    current_text = str(current_root) if current_root else "<analysis-root>"
+    stage_text = str(stage_dir) if stage_dir else "./rapidtriage-run"
+    source_text = str(source_path) if source_path else ""
+    snapshot_rows = list(discovery.get("snapshots") or []) if isinstance(discovery, Mapping) else []
+    snapshot_placeholders = " ".join(json.dumps(str(row.get("path"))) for row in snapshot_rows[:3] if isinstance(row, Mapping))
+    snapshot_arg = snapshot_placeholders or "<snapshot-root> [<snapshot-root>...]"
+    handoff_status = status or ("ready-after-extraction" if current_root else "pending-after-extraction")
+    payload: dict[str, object] = {
+        "profile_version": "vsc-image-workflow-handoff-v1",
+        "qc_prep_item": 3,
+        "goal": "Discover mounted/exported Volume Shadow Copy roots, compare them with the recovered current volume, and preserve deleted/modified candidates with hashes.",
+        "source_kind": source_kind,
+        "source_path": source_text,
+        "current_root": current_text,
+        "stage_dir": stage_text,
+        "status": handoff_status,
+        "snapshot_count": len(snapshot_rows),
+        "direct_image_level_mount_supported": False,
+        "operator_warning": "RapidForensic does not mount VSC directly from E01/RAW yet; mount/export VSC snapshots read-only with a trusted tool, then use these commands.",
+        "commands": {
+            "discover": f"rapidtriage vsc-discover {json.dumps(current_text)} --output {json.dumps(str(Path(stage_text) / 'vsc-discovery.json'))}",
+            "compare": f"rapidtriage vsc-compare {json.dumps(current_text)} {snapshot_arg} --hash --output {json.dumps(str(Path(stage_text) / 'vsc-compare.json'))}",
+            "extract": f"rapidtriage vsc-extract {json.dumps(current_text)} {snapshot_arg} --output-dir {json.dumps(str(Path(stage_text) / 'vsc-evidence'))} --status deleted --status modified",
+            "case_db_import": f"rapidtriage case-db --import-vsc-compare {json.dumps(str(Path(stage_text) / 'vsc-compare.json'))} --case-id <case-id>",
+        },
+        "workflow_steps": [
+            {
+                "id": "discover-mounted-snapshots",
+                "label": "Discover mounted/exported snapshots",
+                "status": "complete" if snapshot_rows else handoff_status,
+                "evidence": "vsc-discovery JSON lists candidate snapshot roots and reason scores.",
+            },
+            {
+                "id": "compare-current-vs-snapshot",
+                "label": "Compare current volume against snapshots",
+                "status": "ready-after-discovery" if snapshot_rows else "pending-snapshot-root",
+                "evidence": "vsc-compare JSON records deleted/added/modified rows with optional SHA256.",
+            },
+            {
+                "id": "extract-vsc-candidates",
+                "label": "Extract deleted/modified candidates",
+                "status": "ready-after-compare",
+                "evidence": "vsc-extract copies selected files and records source/destination SHA256.",
+            },
+            {
+                "id": "review-and-report",
+                "label": "Review VSC deltas in Case DB",
+                "status": "ready-after-import",
+                "evidence": "Case DB imports VSC status, snapshot path, hashes, and review state.",
+            },
+        ],
+        "validation_evidence_required": [
+            "trusted tool or OS transcript showing mounted/exported VSC snapshot roots",
+            "vsc-discovery JSON with snapshot path/reason scores",
+            "vsc-compare JSON with deleted/modified/added summary",
+            "vsc-extract manifest with copied file hashes for preserved candidates",
+        ],
+        "commercial_blockers": [
+            "direct-image-level-vsc-mount-not-implemented",
+            "trusted-vsc-snapshot-export-transcript-required",
+            "known-answer-vsc-deleted-file-corpus-required",
+        ],
+    }
+    payload["manifest_sha256"] = stable_json_hash(payload)
+    return payload
 
 
 def discover_vsc_snapshot_roots(current_root: Path, *, max_depth: int = 3) -> dict[str, object]:
@@ -67,6 +143,13 @@ def discover_vsc_snapshot_roots(current_root: Path, *, max_depth: int = 3) -> di
         "direct_image_level_mount_supported": False,
         "operator_note": "Discovery is for mounted/exported VSC folders. Direct VSC mounting from E01/RAW remains an external workflow.",
     }
+    payload["image_workflow_handoff"] = build_vsc_image_workflow_handoff(
+        current_root=current,
+        source_kind="mounted-or-exported-windows-root",
+        stage_dir=current.parent,
+        discovery=payload,
+        status="ready-after-discovery" if rows else "pending-snapshot-root",
+    )
     payload["manifest_sha256"] = stable_json_hash(payload)
     return payload
 
@@ -169,12 +252,20 @@ def compare_vsc_snapshots(
             }
         )
 
+    discovery = discover_vsc_snapshot_roots(current)
     return {
         "generated_at": dt.datetime.now().isoformat(),
         "tool": "rapidtriage-vsc-compare",
         "current_root": str(current),
         "snapshot_roots": [str(snapshot) for snapshot in snapshots],
-        "snapshot_discovery": discover_vsc_snapshot_roots(current),
+        "snapshot_discovery": discovery,
+        "image_workflow_handoff": build_vsc_image_workflow_handoff(
+            current_root=current,
+            source_kind="mounted-or-exported-windows-root",
+            stage_dir=current.parent,
+            discovery=discovery,
+            status="compare-complete",
+        ),
         "options": {
             "compute_hashes": compute_hashes,
             "case_sensitive": case_sensitive,
@@ -302,6 +393,13 @@ def extract_vsc_changes(
             "copied_bytes": copied_bytes,
         },
         "comparison_summary": comparison["summary"],
+        "image_workflow_handoff": build_vsc_image_workflow_handoff(
+            current_root=current_root.expanduser().resolve(),
+            source_kind="mounted-or-exported-windows-root",
+            stage_dir=destination_root,
+            discovery=comparison.get("snapshot_discovery") if isinstance(comparison.get("snapshot_discovery"), Mapping) else None,
+            status="extract-complete",
+        ),
         "copied": copied,
         "skipped": skipped,
         "notes": [

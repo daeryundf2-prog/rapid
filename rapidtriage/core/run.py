@@ -47,6 +47,7 @@ from .reporting import build_run_report_context, render_run_markdown_report
 from .rules import RuleSet, summarize_payload_annotations
 from .silent_failure import build_silent_failure_report
 from .timeline import build_timeline_report, run_timeline
+from .vsc import build_vsc_image_workflow_handoff
 from .virtual_disk import (
     VirtualDiskExtractionError,
     VirtualDiskExtractionResult,
@@ -2928,6 +2929,12 @@ def build_run_source_record(
             "recovery_mode": image_result.recovery_mode,
             "image_paths": [str(path) for path in image_result.image_paths],
             "source_integrity": list(image_result.source_integrity),
+            "vsc_workflow_handoff": build_vsc_image_workflow_handoff(
+                current_root=image_result.extract_dir,
+                source_kind="raw-split-image",
+                source_path=image_result.source_path,
+                stage_dir=image_result.stage_dir,
+            ),
             "raw_split_workflow_manifest": build_raw_split_integrated_workflow_manifest(
                 source_path=image_result.source_path,
                 image_paths=image_result.image_paths,
@@ -2997,6 +3004,12 @@ def build_run_source_record(
         "source_integrity": image_result.source_integrity,
         "recovered_root_manifest": image_result.recovered_root_manifest,
         "resume_status": image_result.resume_status,
+        "vsc_workflow_handoff": build_vsc_image_workflow_handoff(
+            current_root=image_result.extract_dir,
+            source_kind="e01-ex01",
+            source_path=image_result.source_path,
+            stage_dir=image_result.stage_dir,
+        ),
         "workflow_status": build_completed_e01_workflow_status(image_result),
         "e01_ex01_workflow_manifest": build_e01_ex01_integrated_workflow_manifest(
             source_path=image_result.source_path,
@@ -3029,6 +3042,12 @@ def build_completed_e01_workflow_status(image_result: E01ExtractionResult) -> di
         partition_start_sector=image_result.partition_start_sector,
         output_dir_hint=str(image_result.stage_dir.parent),
     )
+    vsc_handoff = build_vsc_image_workflow_handoff(
+        current_root=image_result.extract_dir,
+        source_kind="e01-ex01",
+        source_path=image_result.source_path,
+        stage_dir=image_result.stage_dir,
+    )
     stages = [
         ("select-e01", "Select E01/Ex01", "complete", f"source={image_result.source_path.name}"),
         (
@@ -3048,6 +3067,12 @@ def build_completed_e01_workflow_status(image_result: E01ExtractionResult) -> di
             "Read-only extraction",
             "complete",
             f"commands={len(image_result.command_history)}",
+        ),
+        (
+            "vsc-discovery-extraction",
+            "VSC discovery/extraction handoff",
+            "ready",
+            "run vsc-discover, vsc-compare, and vsc-extract after mounting/exporting snapshots",
         ),
         (
             "artifact-analysis",
@@ -3079,8 +3104,10 @@ def build_completed_e01_workflow_status(image_result: E01ExtractionResult) -> di
         ],
         "operator_runbook": runbook,
         "recommended_commands": runbook["recommended_commands"],
+        "vsc_workflow_handoff": vsc_handoff,
         "analyst_next_actions": [
             "Search all evidence from the command bar.",
+            "If VSC snapshots are available, run the VSC handoff commands before final deleted-file conclusions.",
             "Open hits in the source viewer before marking them relevant.",
             "Export only reviewed report candidates with hashes and provenance.",
         ],

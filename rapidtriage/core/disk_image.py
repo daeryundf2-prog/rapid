@@ -22,6 +22,7 @@ from .e01 import (
     parse_mmls_partitions,
     stable_manifest_sha256,
 )
+from .vsc import build_vsc_image_workflow_handoff
 
 
 RAW_IMAGE_SUFFIXES = (".dd", ".raw", ".img", ".001", ".000", ".0000", ".0001", ".00001", ".ima")
@@ -101,6 +102,12 @@ class DiskImageExtractionResult:
                 partition_start_sector=self.partition_start_sector,
                 run_outputs=None,
                 status_context="extraction-result",
+            ),
+            "vsc_workflow_handoff": build_vsc_image_workflow_handoff(
+                current_root=self.extract_dir,
+                source_kind="raw-split-image",
+                source_path=self.source_path,
+                stage_dir=self.stage_dir,
             ),
             "recovered_root_manifest": self.recovered_root_manifest,
             "command_history": list(self.command_history),
@@ -234,6 +241,17 @@ def build_raw_split_integrated_workflow_manifest(
         recovered_count
         or any(row.get("purpose") == "read-only-filesystem-recovery" and row.get("returncode") == 0 for row in command_rows)
     )
+    vsc_ready = extraction_complete or bool(analysis_outputs) or (status_context == "run-summary" and bool(outputs))
+    stage_hint = Path(str(outputs.get("disk_image") or source_path.parent))
+    if stage_hint.suffix:
+        stage_hint = stage_hint.parent
+    vsc_handoff = build_vsc_image_workflow_handoff(
+        current_root=str((recovered_manifest or {}).get("root") or "<analysis-root>") if vsc_ready else None,
+        source_kind="raw-split-image",
+        source_path=source_path,
+        stage_dir=stage_hint,
+        status="ready-after-extraction" if vsc_ready else "blocked",
+    )
     source_hash_statuses = [str(row.get("hash_status") or "not-recorded") for row in source_rows]
     dependency_complete = bool(tool_rows) and all(row.get("available") for row in tool_rows)
     blockers = [
@@ -296,6 +314,17 @@ def build_raw_split_integrated_workflow_manifest(
             },
         },
         {
+            "id": "vsc-discovery-extraction",
+            "label": "Volume Shadow Copy discovery/extraction handoff",
+            "status": "ready-after-extraction" if vsc_ready else "blocked",
+            "evidence": {
+                "handoff_profile": vsc_handoff["profile_version"],
+                "direct_image_level_mount_supported": vsc_handoff["direct_image_level_mount_supported"],
+                "discover_command_available": bool(vsc_handoff["commands"].get("discover")),
+                "extract_command_available": bool(vsc_handoff["commands"].get("extract")),
+            },
+        },
+        {
             "id": "artifact-analysis",
             "label": "Artifact analysis",
             "status": "complete" if analysis_outputs else ("ready-after-extraction" if extraction_complete else "blocked"),
@@ -350,6 +379,7 @@ def build_raw_split_integrated_workflow_manifest(
             "truncated": bool(recovered_manifest.get("truncated", False)),
         },
         "run_output_status": output_status,
+        "vsc_workflow_handoff": vsc_handoff,
         "stages": stages,
         "large_data_controls": {
             "direct_image_hash_limit_bytes": 128 * 1024 * 1024,
@@ -372,6 +402,7 @@ def build_raw_split_integrated_workflow_manifest(
         "operator_next_steps": [
             "Validate split order/gaps against acquisition notes and a trusted image tool.",
             "Attach mmls/tsk_recover or vendor recovery transcripts with source hashes.",
+            "Mount/export any VSC snapshots read-only, then run vsc-discover, vsc-compare, and vsc-extract against the recovered current root.",
             "Use source-viewer citations before reporting recovered filesystem artifacts.",
         ],
     }

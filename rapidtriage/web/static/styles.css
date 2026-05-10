@@ -484,6 +484,47 @@ h2 {
   gap: 8px;
 }
 
+.vsc-handoff-card {
+  display: grid;
+  gap: 10px;
+  border: 1px solid rgba(31, 41, 55, 0.14);
+  border-radius: 16px;
+  background:
+    linear-gradient(135deg, rgba(30, 64, 175, 0.08), rgba(15, 116, 107, 0.08)),
+    rgba(255, 255, 255, 0.78);
+  padding: 12px;
+}
+
+.vsc-step-grid {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.vsc-step-grid article {
+  border: 1px solid rgba(31, 41, 55, 0.08);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.76);
+  padding: 9px;
+}
+
+.vsc-step-grid span,
+.vsc-step-grid strong,
+.vsc-step-grid em {
+  display: block;
+}
+
+.vsc-step-grid span {
+  color: var(--accent);
+  font-weight: 900;
+}
+
+.vsc-step-grid em {
+  color: var(--muted);
+  font-size: 0.72rem;
+  font-style: normal;
+}
+
 .e01-stage-grid {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));

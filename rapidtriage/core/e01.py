@@ -11,6 +11,7 @@ from typing import Callable, Mapping, Optional, Sequence
 
 from .audit import compute_sha256
 from .forensic_accuracy import build_accuracy_gate
+from .vsc import build_vsc_image_workflow_handoff
 
 E01_REQUIRED_TOOLS = ("ewfmount", "mmls", "tsk_recover")
 E01_SUFFIXES = (".e01", ".ex01")
@@ -196,6 +197,12 @@ class E01ExtractionResult:
                 partition_table=self.partition_table,
                 direct_extract_ready=True,
                 blocked_reason="",
+            ),
+            "vsc_workflow_handoff": build_vsc_image_workflow_handoff(
+                current_root=self.extract_dir,
+                source_kind="e01-ex01",
+                source_path=self.source_path,
+                stage_dir=self.stage_dir,
             ),
             "resume_status": self.resume_status,
             "recovered_root_manifest": self.recovered_root_manifest,
@@ -803,6 +810,13 @@ def build_e01_ingest_workflow_profile(
         direct_extract_ready=direct_extract_ready,
         blocked_reason=blocked_reason,
     )
+    vsc_handoff = build_vsc_image_workflow_handoff(
+        current_root=None,
+        source_kind="e01-ex01",
+        source_path=source_path,
+        stage_dir="./rapidtriage-run-e01",
+        status="pending-after-extraction" if direct_extract_ready else "blocked",
+    )
     handoff_contract = {
         "profile_version": "qc-prep-e01-end-to-end-handoff-v1",
         "qc_prep_item": 1,
@@ -862,6 +876,7 @@ def build_e01_ingest_workflow_profile(
         "recommended_commands": runbook["recommended_commands"],
         "handoff_contract": handoff_contract,
         "partition_browser": partition_browser,
+        "vsc_workflow_handoff": vsc_handoff,
         "commercial_gap_ids": ["#22", "#23", "#78", "#79"],
         "commercial_note": "This workflow is usable for triage, but commercial-grade E01 claims still require external corpus validation and trusted tool logs.",
     }
@@ -952,6 +967,17 @@ def build_e01_ex01_integrated_workflow_manifest(
         or 0
     )
     extraction_complete = bool(recovered_count or any(row.get("purpose") == "read-only-filesystem-recovery" and row.get("returncode") == 0 for row in command_rows))
+    vsc_ready = extraction_complete or bool(analysis_outputs) or (status_context == "run-summary" and bool(outputs))
+    stage_hint = Path(str(outputs.get("e01") or source_path.parent))
+    if stage_hint.suffix:
+        stage_hint = stage_hint.parent
+    vsc_handoff = build_vsc_image_workflow_handoff(
+        current_root=str((recovered_manifest or {}).get("root") or "<analysis-root>") if vsc_ready else None,
+        source_kind="e01-ex01",
+        source_path=source_path,
+        stage_dir=stage_hint,
+        status="ready-after-extraction" if vsc_ready else "blocked",
+    )
     stages = [
         {
             "id": "select-e01",
@@ -996,6 +1022,17 @@ def build_e01_ex01_integrated_workflow_manifest(
                 "recovered_file_count": recovered_count,
                 "resume_ready": bool((resume_status or {}).get("resume_ready")),
                 "resumed_from_checkpoint": bool((resume_status or {}).get("resumed_from_checkpoint")),
+            },
+        },
+        {
+            "id": "vsc-discovery-extraction",
+            "label": "Volume Shadow Copy discovery/extraction handoff",
+            "status": "ready-after-extraction" if vsc_ready else "blocked",
+            "evidence": {
+                "handoff_profile": vsc_handoff["profile_version"],
+                "direct_image_level_mount_supported": vsc_handoff["direct_image_level_mount_supported"],
+                "discover_command_available": bool(vsc_handoff["commands"].get("discover")),
+                "extract_command_available": bool(vsc_handoff["commands"].get("extract")),
             },
         },
         {
@@ -1069,6 +1106,7 @@ def build_e01_ex01_integrated_workflow_manifest(
         },
         "run_output_status": output_status,
         "provenance_profile": provenance_profile,
+        "vsc_workflow_handoff": vsc_handoff,
         "stages": stages,
         "large_data_controls": {
             "direct_image_hash_limit_bytes": DIRECT_IMAGE_HASH_LIMIT_BYTES,
@@ -1091,6 +1129,7 @@ def build_e01_ex01_integrated_workflow_manifest(
         "operator_next_steps": [
             "Run against a real Windows 11 E01 with libewf/Sleuth Kit or a trusted export.",
             "Attach ewfverify/mmls/tsk_recover or vendor transcripts and trusted-tool diff output.",
+            "Mount/export any VSC snapshots read-only, then run vsc-discover, vsc-compare, and vsc-extract against the recovered current root.",
             "Use review/source viewer citations before report export.",
         ],
     }
