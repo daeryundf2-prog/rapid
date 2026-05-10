@@ -380,6 +380,17 @@ DOS Partition Table
             self.assertEqual(workflow_manifest["item_number"], 22)
             self.assertEqual(workflow_manifest["gap_id"], "#22")
             self.assertEqual(len(workflow_manifest["manifest_sha256"]), 64)
+            provenance = metadata["e01_provenance_profile"]
+            self.assertEqual(provenance["profile_version"], "e01-provenance-profile-v1")
+            self.assertEqual(provenance["checklist_item"], 7)
+            self.assertEqual(provenance["qc_gap_id"], "#7")
+            self.assertEqual(provenance["source_image"]["name"], "case.E01")
+            self.assertEqual(provenance["selected_partition"]["selected_start_sector"], 2048)
+            self.assertEqual(len(provenance["tool_versions"]), 3)
+            self.assertEqual(len(provenance["command_history"]), 3)
+            self.assertFalse(provenance["read_only_posture"]["source_mutation_allowed"])
+            self.assertEqual(len(provenance["manifest_sha256"]), 64)
+            self.assertEqual(workflow_manifest["provenance_profile"]["manifest_sha256"], provenance["manifest_sha256"])
             self.assertEqual(workflow_manifest["status_context"], "extraction-result")
             workflow_statuses = {stage["id"]: stage["status"] for stage in workflow_manifest["stages"]}
             self.assertEqual(workflow_statuses["select-e01"], "complete")

@@ -116,7 +116,7 @@ from .core.source_reader import SourceReadError, render_source_read_text, run_so
 from .core.timeline import TimelineError, build_timeline_report, run_timeline
 from .core.timeline_export import TimelineExportError, build_unified_timeline_export
 from .core.validation import ValidationError, build_validation_package
-from .core.vsc import VscCompareError, compare_vsc_snapshots, extract_vsc_changes
+from .core.vsc import VscCompareError, compare_vsc_snapshots, discover_vsc_snapshot_roots, extract_vsc_changes
 from .core.worker import RustWorkerClient, WorkerError
 from .core.forensic_validation_plan import (
     DEFAULT_FORENSIC_VALIDATION_ITEMS,
@@ -634,6 +634,16 @@ def build_parser() -> argparse.ArgumentParser:
     vsc_compare.add_argument("--case-sensitive", action="store_true", help="Compare paths case-sensitively")
     vsc_compare.add_argument("--max-records", type=int, default=10000, help="Maximum change records per snapshot (0 means unlimited)")
     vsc_compare.add_argument("--json", action="store_true", help="Print the full JSON comparison after saving it")
+
+    vsc_discover = sub.add_parser(
+        "vsc-discover",
+        help="Discover likely mounted/exported Volume Shadow Copy snapshot folders",
+        description="Discover likely VSC snapshot folders near a mounted/exported current volume root",
+    )
+    vsc_discover.add_argument("current_root", help="Current mounted/exported file tree")
+    vsc_discover.add_argument("--output", default="rapidtriage-vsc-discovery.json", help="JSON output path")
+    vsc_discover.add_argument("--max-depth", type=int, default=3, help="Maximum directory depth to inspect around the current root")
+    vsc_discover.add_argument("--json", action="store_true", help="Print the full JSON discovery report after saving it")
 
     vsc_extract = sub.add_parser(
         "vsc-extract",
@@ -3439,6 +3449,38 @@ def main(argv=None) -> int:
                 f"Snapshots: {summary['snapshot_count']}  "
                 f"Deleted: {summary['deleted']}  Added: {summary['added']}  Modified: {summary['modified']}"
             )
+        return 0
+
+    if args.command == "vsc-discover":
+        current_root = Path(args.current_root).expanduser().resolve()
+        output = Path(args.output).expanduser().resolve()
+        try:
+            payload = discover_vsc_snapshot_roots(current_root, max_depth=args.max_depth)
+        except VscCompareError as exc:
+            parser.error(str(exc))
+        write_result(payload, output)
+        audit_output = audit_path_for(output)
+        write_audit_record(
+            audit_output,
+            command="vsc-discover",
+            options={
+                "current_root": str(current_root),
+                "output": str(output),
+                "max_depth": args.max_depth,
+            },
+            input_root=current_root,
+            output_files=[("vsc-discovery-json", output)],
+            notes=[
+                "Discovery searches for mounted/exported snapshot folders by name; it does not mount VSC from an E01/RAW image.",
+                "Use vsc-compare and vsc-extract after confirming the discovered snapshot roots.",
+            ],
+        )
+        if args.json:
+            print(json.dumps(payload, ensure_ascii=False, indent=2))
+        else:
+            print(f"Saved VSC discovery JSON: {output}")
+            print(f"Saved audit JSON: {audit_output}")
+            print(f"Snapshots: {payload['snapshot_count']}")
         return 0
 
     if args.command == "vsc-extract":

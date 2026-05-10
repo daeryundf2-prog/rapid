@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import datetime as dt
 import hashlib
+import json
 import shutil
 from dataclasses import dataclass
 from pathlib import Path
@@ -20,6 +21,104 @@ class FileEntry:
     modified_at: str
     modified_ns: int
     sha256: str = ""
+
+
+def discover_vsc_snapshot_roots(current_root: Path, *, max_depth: int = 3) -> dict[str, object]:
+    current = current_root.expanduser().resolve()
+    if not current.is_dir():
+        raise VscCompareError(f"Current root is not a directory: {current}")
+    search_roots = [current.parent, current / "System Volume Information", current / "VSS", current / "vss"]
+    seen: set[Path] = set()
+    candidates: list[dict[str, object]] = []
+    for search_root in search_roots:
+        if not search_root.is_dir() or search_root in seen:
+            continue
+        seen.add(search_root)
+        for path in iter_candidate_snapshot_dirs(search_root, max_depth=max_depth):
+            if path == current or current in path.parents:
+                continue
+            label = path.name
+            score = vsc_snapshot_name_score(path)
+            if score <= 0:
+                continue
+            candidates.append(
+                {
+                    "path": str(path.resolve()),
+                    "label": label,
+                    "score": score,
+                    "exists": path.is_dir(),
+                    "file_count_sample": count_files_bounded(path, limit=250),
+                    "reason": vsc_snapshot_reason(path),
+                }
+            )
+    unique: dict[str, dict[str, object]] = {}
+    for candidate in candidates:
+        unique[str(candidate["path"])] = candidate
+    rows = sorted(unique.values(), key=lambda row: (-int(row["score"]), str(row["path"])))
+    payload: dict[str, object] = {
+        "schema": "rapidforensic-vsc-discovery-v1",
+        "profile_version": "vsc-snapshot-discovery-v1",
+        "checklist_item": 8,
+        "qc_gap_id": "#8",
+        "current_root": str(current),
+        "search_roots": [str(path) for path in search_roots if path.is_dir()],
+        "snapshot_count": len(rows),
+        "snapshots": rows,
+        "direct_image_level_mount_supported": False,
+        "operator_note": "Discovery is for mounted/exported VSC folders. Direct VSC mounting from E01/RAW remains an external workflow.",
+    }
+    payload["manifest_sha256"] = stable_json_hash(payload)
+    return payload
+
+
+def iter_candidate_snapshot_dirs(root: Path, *, max_depth: int) -> Iterable[Path]:
+    pending: list[tuple[Path, int]] = [(root, 0)]
+    while pending:
+        current, depth = pending.pop()
+        if depth > max_depth:
+            continue
+        try:
+            children = list(current.iterdir())
+        except (OSError, PermissionError):
+            continue
+        for child in children:
+            if not child.is_dir():
+                continue
+            yield child
+            pending.append((child, depth + 1))
+
+
+def vsc_snapshot_name_score(path: Path) -> int:
+    text = "/".join(part.lower() for part in path.parts[-4:])
+    score = 0
+    for token in ("vss", "vsc", "shadow", "snapshot", "volume shadow", "restorepoint"):
+        if token in text:
+            score += 3
+    if "system volume information" in text:
+        score += 2
+    if any(char.isdigit() for char in path.name):
+        score += 1
+    return score
+
+
+def vsc_snapshot_reason(path: Path) -> str:
+    text = "/".join(part.lower() for part in path.parts[-4:])
+    if "system volume information" in text:
+        return "system-volume-information-shadow-copy-candidate"
+    if "shadow" in text:
+        return "shadow-copy-name-candidate"
+    if "vss" in text or "vsc" in text:
+        return "vss-vsc-name-candidate"
+    return "snapshot-name-candidate"
+
+
+def count_files_bounded(root: Path, *, limit: int) -> int:
+    count = 0
+    for path in iter_regular_files(root):
+        count += 1
+        if count >= limit:
+            break
+    return count
 
 
 def compare_vsc_snapshots(
@@ -75,6 +174,7 @@ def compare_vsc_snapshots(
         "tool": "rapidtriage-vsc-compare",
         "current_root": str(current),
         "snapshot_roots": [str(snapshot) for snapshot in snapshots],
+        "snapshot_discovery": discover_vsc_snapshot_roots(current),
         "options": {
             "compute_hashes": compute_hashes,
             "case_sensitive": case_sensitive,
@@ -89,6 +189,7 @@ def compare_vsc_snapshots(
         "notes": [
             "deleted means present in the snapshot but absent from the current root.",
             "modified is based on size/mtime by default; use --hash when byte-level confirmation is required.",
+            "Direct VSC mounting from E01/RAW is not implemented; use mounted/exported snapshot folders.",
         ],
     }
 
@@ -360,3 +461,8 @@ def file_sha256(path: Path) -> str:
     except OSError:
         return ""
     return digest.hexdigest()
+
+
+def stable_json_hash(payload: dict[str, object]) -> str:
+    redacted = {key: value for key, value in payload.items() if key != "manifest_sha256"}
+    return hashlib.sha256(json.dumps(redacted, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode("utf-8")).hexdigest()

@@ -194,6 +194,18 @@ class E01ExtractionResult:
             "resume_status": self.resume_status,
             "recovered_root_manifest": self.recovered_root_manifest,
             "segment_set_profile": self.segment_set_profile,
+            "e01_provenance_profile": build_e01_provenance_profile(
+                source_path=self.source_path,
+                source_integrity=self.source_integrity,
+                segment_set_profile=self.segment_set_profile,
+                tool_preflight=self.tool_preflight,
+                partition_selection=self.partition_selection,
+                partition_table=self.partition_table,
+                command_history=self.command_history,
+                recovered_root_manifest=self.recovered_root_manifest,
+                resume_status=self.resume_status,
+                run_outputs=None,
+            ),
             "e01_ex01_workflow_manifest": build_e01_ex01_integrated_workflow_manifest(
                 source_path=self.source_path,
                 source_integrity=self.source_integrity,
@@ -778,6 +790,18 @@ def build_e01_ex01_integrated_workflow_manifest(
         or key.startswith("artifacts_")
     ]
     report_outputs = [key for key in output_status if key in {"summary", "report"}]
+    provenance_profile = build_e01_provenance_profile(
+        source_path=source_path,
+        source_integrity=source_integrity,
+        segment_set_profile=segment_set_profile,
+        tool_preflight=tool_preflight,
+        partition_selection=partition_selection,
+        partition_table=partition_table,
+        command_history=command_history,
+        recovered_root_manifest=recovered_root_manifest,
+        resume_status=resume_status,
+        run_outputs=run_outputs,
+    )
     source_hash_status = str((source_integrity or {}).get("hash_status") or "not-recorded")
     dependency_status = str((preflight_summary or {}).get("status") or "not-recorded")
     selected_sector = (partition_selection or {}).get("selected_start_sector")
@@ -904,6 +928,7 @@ def build_e01_ex01_integrated_workflow_manifest(
             "truncated": bool(recovered_manifest.get("truncated", False)),
         },
         "run_output_status": output_status,
+        "provenance_profile": provenance_profile,
         "stages": stages,
         "large_data_controls": {
             "direct_image_hash_limit_bytes": DIRECT_IMAGE_HASH_LIMIT_BYTES,
@@ -931,6 +956,99 @@ def build_e01_ex01_integrated_workflow_manifest(
     }
     payload["manifest_sha256"] = stable_manifest_sha256(payload)
     return payload
+
+
+def build_e01_provenance_profile(
+    *,
+    source_path: Path,
+    source_integrity: Mapping[str, object] | None,
+    segment_set_profile: Mapping[str, object] | None,
+    tool_preflight: Sequence[Mapping[str, object]] | None,
+    partition_selection: Mapping[str, object] | None,
+    partition_table: Sequence[Mapping[str, object]] | None,
+    command_history: Sequence[Mapping[str, object]] | None,
+    recovered_root_manifest: Mapping[str, object] | None,
+    resume_status: Mapping[str, object] | None,
+    run_outputs: Mapping[str, object] | None = None,
+) -> dict[str, object]:
+    output_rows: list[dict[str, object]] = []
+    for key, value in dict(run_outputs or {}).items():
+        path = Path(str(value))
+        row: dict[str, object] = {"key": str(key), "path": str(path), "exists": path.is_file()}
+        if path.is_file():
+            try:
+                stat_result = path.stat()
+                row.update({"size_bytes": stat_result.st_size, "sha256": compute_sha256(path)})
+            except OSError as exc:
+                row.update({"hash_status": "unavailable", "error": str(exc)})
+        output_rows.append(row)
+    command_rows = [
+        {
+            "purpose": str(row.get("purpose") or ""),
+            "command": list(row.get("command") or []),
+            "returncode": row.get("returncode"),
+            "stdout_sha256": hashlib.sha256(str(row.get("stdout_preview") or "").encode("utf-8")).hexdigest()
+            if row.get("stdout_preview")
+            else "",
+            "stderr_sha256": hashlib.sha256(str(row.get("stderr_preview") or "").encode("utf-8")).hexdigest()
+            if row.get("stderr_preview")
+            else "",
+        }
+        for row in command_history or []
+        if isinstance(row, Mapping)
+    ]
+    profile: dict[str, object] = {
+        "profile_version": "e01-provenance-profile-v1",
+        "checklist_item": 7,
+        "qc_gap_id": "#7",
+        "source_image": {
+            "path": str(source_path),
+            "name": source_path.name,
+            "sha256": (source_integrity or {}).get("sha256"),
+            "hash_status": (source_integrity or {}).get("hash_status", "not-recorded"),
+            "size_bytes": (source_integrity or {}).get("size"),
+        },
+        "segment_set": {
+            "profile_version": (segment_set_profile or {}).get("profile_version"),
+            "segment_count": (segment_set_profile or {}).get("segment_count", 0),
+            "selected_is_first_segment": (segment_set_profile or {}).get("selected_is_first_segment"),
+            "warnings": list((segment_set_profile or {}).get("warnings") or []),
+        },
+        "selected_partition": {
+            "selected_start_sector": (partition_selection or {}).get("selected_start_sector"),
+            "selected_byte_offset": (partition_selection or {}).get("selected_byte_offset"),
+            "selected_filesystem_guess": (partition_selection or {}).get("selected_filesystem_guess"),
+            "partition_table_row_count": len(list(partition_table or [])),
+        },
+        "tool_versions": [
+            {
+                "tool": str(row.get("tool") or ""),
+                "path": row.get("path"),
+                "available": bool(row.get("available")),
+                "version": row.get("version"),
+                "version_attempts": list(row.get("version_attempts") or []),
+            }
+            for row in tool_preflight or []
+            if isinstance(row, Mapping)
+        ],
+        "command_history": command_rows,
+        "recovered_root": {
+            "profile_version": (recovered_root_manifest or {}).get("profile_version"),
+            "root": (recovered_root_manifest or {}).get("root"),
+            "visited_file_count": (recovered_root_manifest or {}).get("visited_file_count", 0),
+            "hashed_file_count": (recovered_root_manifest or {}).get("hashed_file_count", 0),
+            "truncated": bool((recovered_root_manifest or {}).get("truncated", False)),
+        },
+        "run_outputs": output_rows,
+        "resume_status": dict(resume_status or {}),
+        "read_only_posture": {
+            "source_mutation_allowed": False,
+            "writes_to_stage_or_output_only": True,
+            "provenance_required_before_report": True,
+        },
+    }
+    profile["manifest_sha256"] = stable_manifest_sha256(profile)
+    return profile
 
 
 def default_runner(command: Sequence[str]) -> subprocess.CompletedProcess[str]:

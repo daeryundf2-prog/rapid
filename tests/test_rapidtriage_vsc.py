@@ -9,6 +9,30 @@ from rapidtriage.cli import main
 
 
 class RapidTriageVscCompareTests(unittest.TestCase):
+    def test_vsc_discover_lists_likely_snapshot_roots(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            current = root / "current"
+            snapshot = root / "vss" / "snapshot-2024-04-01"
+            output = root / "vsc-discovery.json"
+            current.mkdir()
+            snapshot.mkdir(parents=True)
+            (snapshot / "deleted.txt").write_text("snapshot only", encoding="utf-8")
+
+            exit_code = main(["vsc-discover", str(current), "--output", str(output)])
+
+            self.assertEqual(exit_code, 0)
+            payload = json.loads(output.read_text(encoding="utf-8"))
+            self.assertEqual(payload["schema"], "rapidforensic-vsc-discovery-v1")
+            self.assertEqual(payload["checklist_item"], 8)
+            self.assertEqual(payload["qc_gap_id"], "#8")
+            self.assertGreaterEqual(payload["snapshot_count"], 1)
+            paths = {row["path"] for row in payload["snapshots"]}
+            self.assertIn(str(snapshot.resolve()), paths)
+            self.assertFalse(payload["direct_image_level_mount_supported"])
+            self.assertEqual(len(payload["manifest_sha256"]), 64)
+            self.assertTrue(output.with_name("vsc-discovery.audit.json").is_file())
+
     def test_vsc_compare_reports_deleted_added_and_modified_files(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             root = Path(tmp_dir)
@@ -33,6 +57,8 @@ class RapidTriageVscCompareTests(unittest.TestCase):
             by_path = {record["relative_path"]: record for record in records}
 
             self.assertEqual(payload["summary"]["snapshot_count"], 1)
+            self.assertEqual(payload["snapshot_discovery"]["schema"], "rapidforensic-vsc-discovery-v1")
+            self.assertFalse(payload["snapshot_discovery"]["direct_image_level_mount_supported"])
             self.assertEqual(payload["summary"]["deleted"], 1)
             self.assertEqual(payload["summary"]["added"], 1)
             self.assertEqual(payload["summary"]["modified"], 1)
