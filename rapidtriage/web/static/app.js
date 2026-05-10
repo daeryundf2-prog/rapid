@@ -314,6 +314,12 @@ const WORKBENCH_SESSION_CONTRACT = {
   checklist_item: 15,
   persisted_fields: ["selectedRunId", "activeTab", "activeViewGroup", "tableControls", "virtualWindowOffsets", "compareTray"],
 };
+const SEARCH_SOURCE_VERIFICATION_CONTRACT = {
+  profile_version: "search-source-verification-contract-v1",
+  checklist_item: 16,
+  required_row_controls: ["view-review", "open-source", "pin-compare", "mark-review"],
+  report_rule: "search-hit-is-a-lead-until-source-viewer-citation-and-hash-are-checked",
+};
 
 let selectedRunId = null;
 let selectedRun = null;
@@ -2571,6 +2577,7 @@ function renderSearchResults(payload, rows) {
       ${metric("OCR errors", summary.ocr_error_count)}
       ${metric("Keywords", (payload.keywords || []).length)}
     </div>
+    ${renderSearchSourceVerification(payload)}
     ${renderAdvancedSearchProfile(advancedProfile)}
     ${renderKeywordPackSelectionProfile(keywordPackProfile)}
     ${renderSearchAnalysis(payload.analysis)}
@@ -2581,7 +2588,7 @@ function renderSearchResults(payload, rows) {
         ${visibleRows.map((match, index) => `
           <tr data-filter="${rowText(match)}">
             <td>${escapeHtml(match.source)}<span>${escapeHtml(match.kind || "")}</span></td>
-            <td><strong>${escapeHtml(match.title || fileName(match.path))}</strong><span>${escapeHtml(match.path || "")}</span></td>
+            <td><strong>${escapeHtml(match.title || fileName(match.path))}</strong><span>${escapeHtml(match.path || "")}</span>${renderSearchResultLocator(match)}</td>
             <td>${escapeHtml((match.matched_keywords || []).join(", "))}</td>
             <td>
               ${escapeHtml(match.preview || "")}
@@ -2596,6 +2603,37 @@ function renderSearchResults(payload, rows) {
     </table>
     ${renderOcrErrors(payload.ocr?.errors || [])}
   `;
+}
+
+function renderSearchSourceVerification(payload) {
+  const rows = payload.matches || [];
+  const pathReady = rows.filter((match) => Boolean(match.path)).length;
+  const reviewReady = rows.filter((match) => Boolean(bookmarkContextForMatch(match))).length;
+  const truncated = Boolean(payload.truncated);
+  return `
+    <section class="search-verification-card ${truncated ? "warning" : ""}" data-testid="search-source-verification" data-search-source-contract="${escapeHtml(SEARCH_SOURCE_VERIFICATION_CONTRACT.profile_version)}">
+      <div>
+        <p class="eyebrow">source verification</p>
+        <h3>${formatNumber(pathReady)}/${formatNumber(rows.length)} hit(s) can open a source viewer</h3>
+        <p>검색 hit는 단서입니다. 보고서 후보로 올리기 전 View / review로 원본을 열고, 현재 파일 검색 citation과 source hash를 확인하세요.</p>
+      </div>
+      <div class="mini-stat-row">
+        <span>${formatNumber(reviewReady)} review-linked</span>
+        <span>${truncated ? "bounded/truncated result set" : "not truncated"}</span>
+        <span>rule: source viewer before report</span>
+      </div>
+    </section>
+  `;
+}
+
+function renderSearchResultLocator(match) {
+  const locator = [
+    match.pointer ? `pointer ${match.pointer}` : "",
+    match.path ? "source-open-ready" : "missing source path",
+    match.source_reference?.parser ? `parser ${match.source_reference.parser}` : "",
+  ].filter(Boolean).join(" · ");
+  if (!locator) return "";
+  return `<span class="search-result-locator" data-testid="search-result-locator">${escapeHtml(locator)}</span>`;
 }
 
 function renderKeywordPackSelectionProfile(profile) {

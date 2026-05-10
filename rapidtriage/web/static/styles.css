@@ -842,6 +842,28 @@ button:disabled {
   white-space: nowrap;
 }
 
+.search-verification-card {
+  display: grid;
+  gap: 8px;
+  border: 1px solid rgba(15, 116, 107, 0.16);
+  border-radius: 16px;
+  background: rgba(15, 116, 107, 0.06);
+  padding: 12px;
+}
+
+.search-verification-card.warning {
+  border-color: rgba(180, 83, 9, 0.32);
+  background: #fff7ed;
+}
+
+.search-result-locator {
+  display: block;
+  margin-top: 4px;
+  color: var(--muted);
+  font-size: 0.74rem;
+  overflow-wrap: anywhere;
+}
+
 .empty-state {
   color: var(--muted);
 }
