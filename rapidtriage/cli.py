@@ -125,6 +125,7 @@ from .core.forensic_validation_plan import (
     assess_forensic_validation_pack,
     build_forensic_validation_pack,
     build_forensic_validation_plan,
+    populate_forensic_validation_smoke_fixtures,
     write_forensic_validation_batches,
     write_forensic_validation_pack,
     write_forensic_validation_plan,
@@ -1357,6 +1358,15 @@ def build_parser() -> argparse.ArgumentParser:
     forensic_validation_batches_assess.add_argument("--root-dir", required=True, help="Directory created by forensic-validation-batches")
     forensic_validation_batches_assess.add_argument("--output", help="Optional JSON assessment output path")
     forensic_validation_batches_assess.add_argument("--json", action="store_true", help="Print machine-readable JSON")
+
+    forensic_validation_smoke_populate = sub.add_parser(
+        "forensic-validation-smoke-populate",
+        help="Populate validation batches with deterministic internal smoke evidence",
+        description="Fill every generated validation pack dataset with synthetic evidence and clean internal diff output for plumbing verification",
+    )
+    forensic_validation_smoke_populate.add_argument("--root-dir", required=True, help="Directory created by forensic-validation-batches")
+    forensic_validation_smoke_populate.add_argument("--output", help="Optional JSON smoke manifest output path")
+    forensic_validation_smoke_populate.add_argument("--json", action="store_true", help="Print machine-readable JSON")
 
     cross_tool = sub.add_parser(
         "cross-tool-validate",
@@ -2778,6 +2788,25 @@ def main(argv=None) -> int:
             print(f"Datasets: {payload['ready_dataset_count']}/{payload['dataset_count']} validation-ready")
             print(f"Commercial-ready datasets: {payload['commercial_ready_dataset_count']}/{payload['dataset_count']}")
             print(f"Ready for validated gate: {payload['ready_for_validated_gate']}")
+        return 0
+
+    if args.command == "forensic-validation-smoke-populate":
+        try:
+            payload = populate_forensic_validation_smoke_fixtures(
+                Path(args.root_dir).expanduser().resolve(),
+                output=Path(args.output).expanduser().resolve() if args.output else None,
+            )
+        except (OSError, json.JSONDecodeError, ValueError) as exc:
+            parser.error(str(exc))
+        if args.json:
+            print(json.dumps(payload, ensure_ascii=False, indent=2))
+        else:
+            assessment = payload["assessment"]
+            print("RapidTriage forensic validation smoke population")
+            print(f"Populated datasets: {payload['populated_dataset_count']}")
+            print(f"Batches: {assessment['batch_count']}")
+            print(f"Datasets: {assessment['ready_dataset_count']}/{assessment['dataset_count']} validation-ready")
+            print("Commercial-ready: false (internal smoke fixtures only)")
         return 0
 
     if args.command == "cross-tool-validate":

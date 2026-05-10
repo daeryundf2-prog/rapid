@@ -112,6 +112,8 @@ class RapidTriageOpsTests(unittest.TestCase):
         self.assertIn("--items", commands["forensic-validation-batches"].format_help())
         self.assertIn("forensic-validation-batches-assess", commands)
         self.assertIn("--root-dir", commands["forensic-validation-batches-assess"].format_help())
+        self.assertIn("forensic-validation-smoke-populate", commands)
+        self.assertIn("--root-dir", commands["forensic-validation-smoke-populate"].format_help())
         self.assertIn("cross-tool-validate", commands)
         self.assertIn("--reference-output", commands["cross-tool-validate"].format_help())
         self.assertIn("confidence-dashboard", commands)
@@ -1735,6 +1737,46 @@ class RapidTriageOpsTests(unittest.TestCase):
             self.assertEqual(assessment["dataset_count"], 65)
             self.assertEqual(assessment["ready_dataset_count"], 0)
             self.assertFalse(assessment["ready_for_validated_gate"])
+
+    def test_forensic_validation_smoke_populate_completes_internal_loop_for_items_1_to_65(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir) / "batches"
+            with contextlib.redirect_stdout(io.StringIO()):
+                self.assertEqual(main(["forensic-validation-batches", "--items", "1-65", "--output-dir", str(root), "--json"]), 0)
+
+            stdout = io.StringIO()
+            smoke_output = root / "smoke-manifest.json"
+            with contextlib.redirect_stdout(stdout):
+                exit_code = main(
+                    [
+                        "forensic-validation-smoke-populate",
+                        "--root-dir",
+                        str(root),
+                        "--output",
+                        str(smoke_output),
+                        "--json",
+                    ]
+                )
+
+            self.assertEqual(exit_code, 0)
+            payload = json.loads(stdout.getvalue())
+            self.assertTrue(smoke_output.is_file())
+            self.assertEqual(payload["command"], "forensic-validation-smoke-populate")
+            self.assertEqual(payload["populated_dataset_count"], 65)
+            assessment = payload["assessment"]
+            self.assertEqual(assessment["batch_count"], 13)
+            self.assertEqual(assessment["dataset_count"], 65)
+            self.assertEqual(assessment["ready_dataset_count"], 65)
+            self.assertTrue(assessment["ready_for_validated_gate"])
+            self.assertEqual(assessment["commercial_ready_dataset_count"], 0)
+            self.assertFalse(assessment["ready_for_commercial_grade"])
+            first_pack = json.loads(
+                (root / "batch-001-items-001-005" / "rapidtriage-forensic-validation-pack.json").read_text(
+                    encoding="utf-8"
+                )
+            )
+            self.assertEqual(first_pack["datasets"][0]["status"], "internal-smoke-populated")
+            self.assertTrue(Path(first_pack["datasets"][0]["evidence_paths"]["row_level_diff_output"]).is_file())
 
     def test_cross_tool_validate_compares_rapid_and_reference_outputs(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:

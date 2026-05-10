@@ -228,11 +228,114 @@ def assess_forensic_validation_batches(root_dir: Path, *, output: Path | None = 
     return assessment
 
 
+def populate_forensic_validation_smoke_fixtures(root_dir: Path, *, output: Path | None = None) -> dict[str, object]:
+    """Populate validation packs with deterministic internal smoke evidence.
+
+    This proves that all generated #1~#65 pack contracts can be populated and
+    assessed end-to-end. It intentionally does not create commercial-grade
+    evidence because the source/reference rows are synthetic fixtures.
+    """
+
+    root_dir = root_dir.expanduser().resolve()
+    pack_paths = sorted(root_dir.glob("batch-*/rapidtriage-forensic-validation-pack.json"))
+    populated: list[dict[str, object]] = []
+    for pack_path in pack_paths:
+        pack = json.loads(pack_path.read_text(encoding="utf-8"))
+        datasets = [item for item in pack.get("datasets", []) if isinstance(item, Mapping)]
+        updated_datasets: list[dict[str, object]] = []
+        for dataset in datasets:
+            updated = dict(dataset)
+            fixture_info = write_smoke_fixture_for_dataset(pack_path.parent, updated)
+            updated["status"] = "internal-smoke-populated"
+            updated["evidence_paths"] = fixture_info["evidence_paths"]
+            updated["hash_requirements"] = fixture_info["hash_requirements"]
+            updated["smoke_fixture_notice"] = {
+                "kind": "internal-smoke-fixture",
+                "commercial_claim_allowed": False,
+                "warning": "Synthetic fixture evidence proves validation plumbing only, not parser correctness on external corpora.",
+            }
+            updated_datasets.append(updated)
+            populated.append(
+                {
+                    "dataset_id": updated.get("dataset_id"),
+                    "item_number": updated.get("item_number"),
+                    "fixture_dir": fixture_info["fixture_dir"],
+                    "diff_output": fixture_info["evidence_paths"]["row_level_diff_output"],
+                }
+            )
+        pack["datasets"] = updated_datasets
+        pack["commercial_claim_allowed"] = False
+        pack["smoke_fixture_populated"] = True
+        pack["pack_hash"] = stable_plan_hash({key: value for key, value in pack.items() if key != "pack_hash"})
+        write_result(pack, pack_path)
+    assessment = assess_forensic_validation_batches(root_dir, output=root_dir / "smoke-assessment.json")
+    result_core = {
+        "command": "forensic-validation-smoke-populate",
+        "profile_version": "forensic-validation-smoke-populate-v1",
+        "root_dir": str(root_dir),
+        "pack_count": len(pack_paths),
+        "populated_dataset_count": len(populated),
+        "populated_datasets": populated,
+        "assessment": assessment,
+        "commercial_claim_allowed": False,
+        "rule": "Internal smoke fixtures complete plumbing validation only; attach real corpora and trusted tools for report-grade validation.",
+    }
+    result = {**result_core, "smoke_manifest_hash": stable_plan_hash(result_core)}
+    if output is not None:
+        write_result(result, output.expanduser().resolve())
+    return result
+
+
+def write_smoke_fixture_for_dataset(batch_dir: Path, dataset: Mapping[str, object]) -> dict[str, object]:
+    dataset_id = str(dataset.get("dataset_id") or "dataset")
+    item_number = int(dataset.get("item_number") or 0)
+    fixture_dir = batch_dir / "smoke-fixtures" / dataset_id
+    fixture_dir.mkdir(parents=True, exist_ok=True)
+    source_path = fixture_dir / "source-evidence.bin"
+    rapid_path = fixture_dir / "rapid-output.json"
+    reference_path = fixture_dir / "trusted-reference.csv"
+    diff_path = fixture_dir / "row-level-diff.json"
+    signoff_path = fixture_dir / "reviewer-signoff.md"
+    source_path.write_bytes(f"RapidTriage smoke source for item {item_number}: {dataset.get('title')}\n".encode("utf-8"))
+    rapid_path.write_text(
+        json.dumps(build_smoke_rapid_output(dataset), ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+    reference_path.write_text(build_smoke_reference_csv(dataset), encoding="utf-8")
+    diff_path.write_text(
+        json.dumps(build_smoke_diff_output(dataset), ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+    signoff_path.write_text(
+        (
+            f"# Internal smoke sign-off for {dataset_id}\n\n"
+            "This synthetic fixture verifies validation-pack plumbing only. "
+            "It must not be cited as external forensic parser validation.\n"
+        ),
+        encoding="utf-8",
+    )
+    evidence_paths = {
+        "source_evidence": str(source_path),
+        "rapid_output": str(rapid_path),
+        "trusted_reference_output": str(reference_path),
+        "row_level_diff_output": str(diff_path),
+        "reviewer_signoff": str(signoff_path),
+    }
+    return {
+        "fixture_dir": str(fixture_dir),
+        "evidence_paths": evidence_paths,
+        "hash_requirements": {
+            f"{name}_sha256": file_sha256(Path(path))
+            for name, path in evidence_paths.items()
+        },
+    }
+
+
 def assess_validation_dataset(dataset: Mapping[str, object]) -> dict[str, object]:
     evidence_paths = dataset.get("evidence_paths") if isinstance(dataset.get("evidence_paths"), Mapping) else {}
     hash_requirements = dataset.get("hash_requirements") if isinstance(dataset.get("hash_requirements"), Mapping) else {}
     evidence_results = {
-        name: assess_evidence_path(str(path or ""), str(hash_requirements.get(f"{name}_sha256") or ""))
+        name: assess_evidence_path(str(path or ""), expected_hash_for_evidence(name, hash_requirements))
         for name, path in evidence_paths.items()
     }
     diff_result = assess_row_level_diff_output(str(evidence_paths.get("row_level_diff_output") or ""))
@@ -271,6 +374,20 @@ def assess_validation_dataset(dataset: Mapping[str, object]) -> dict[str, object
         "blockers": blockers,
     }
     return {**result_core, "dataset_assessment_hash": stable_plan_hash(result_core)}
+
+
+def expected_hash_for_evidence(name: str, hash_requirements: Mapping[str, object]) -> str:
+    direct = str(hash_requirements.get(f"{name}_sha256") or "")
+    if direct:
+        return direct
+    legacy_aliases = {
+        "source_evidence": "source_sha256",
+        "rapid_output": "rapid_output_sha256",
+        "trusted_reference_output": "trusted_reference_sha256",
+        "row_level_diff_output": "diff_output_sha256",
+        "reviewer_signoff": "reviewer_signoff_sha256",
+    }
+    return str(hash_requirements.get(legacy_aliases.get(name, "")) or "")
 
 
 def assess_evidence_path(path_text: str, expected_sha256: str = "") -> dict[str, object]:
@@ -454,9 +571,13 @@ def build_validation_dataset_template(row: Mapping[str, object]) -> dict[str, ob
         },
         "hash_requirements": {
             "source_sha256": "",
+            "source_evidence_sha256": "",
             "rapid_output_sha256": "",
             "trusted_reference_sha256": "",
+            "trusted_reference_output_sha256": "",
             "diff_output_sha256": "",
+            "row_level_diff_output_sha256": "",
+            "reviewer_signoff_sha256": "",
         },
         "pass_fail_contract": [
             "source_evidence path exists and hash matches manifest",
@@ -545,6 +666,96 @@ def summarize_diff_comparison_health(comparisons: object) -> dict[str, object]:
         "truncated": truncated,
         "clean": not failed_references and mismatch_count == 0 and missing_common_field_count == 0,
     }
+
+
+def build_smoke_rapid_output(dataset: Mapping[str, object]) -> dict[str, object]:
+    item_number = int(dataset.get("item_number") or 0)
+    artifact = {
+        "artifact_type": "forensic-validation-smoke",
+        "path": f"smoke://item-{item_number:03d}",
+        "details": {
+            "item_number": item_number,
+            "dataset_id": dataset.get("dataset_id"),
+            "title": dataset.get("title"),
+            "record_id": 1000 + item_number,
+            "event_id": 4000 + item_number,
+            "provider": "RapidTriageSmoke",
+            "key_path": r"HKEY_CURRENT_USER\Software\RapidTriageSmoke",
+            "value_name": f"Item{item_number:03d}",
+            "normalized_identity": f"item-{item_number:03d}",
+            "source_offset": item_number * 16,
+            "parser_confidence": "internal-smoke",
+        },
+    }
+    return {"artifacts": [artifact], "commercial_claim_allowed": False, "fixture_kind": "internal-smoke"}
+
+
+def build_smoke_reference_csv(dataset: Mapping[str, object]) -> str:
+    item_number = int(dataset.get("item_number") or 0)
+    if item_number in {1, 2, 3}:
+        return (
+            "EventRecordID,EventID,Provider,Channel,Timestamp\n"
+            f"{1000 + item_number},{4000 + item_number},RapidTriageSmoke,Smoke,2026-01-01T00:00:00+00:00\n"
+        )
+    if item_number in {4, 5}:
+        return (
+            "KeyPath,ValueName,ValueType,ValueData,CellOffset,TransactionReplayStatus\n"
+            rf"HKCU\Software\RapidTriageSmoke,Item{item_number:03d},REG_SZ,smoke,{item_number * 16},not-replayed"
+            "\n"
+        )
+    return (
+        "SourcePath,ArtifactType,NormalizedIdentity,Timestamp,SourceOffset,ParserConfidence\n"
+        f"smoke://item-{item_number:03d},forensic-validation-smoke,item-{item_number:03d},"
+        f"2026-01-01T00:00:00+00:00,{item_number * 16},internal-smoke\n"
+    )
+
+
+def build_smoke_diff_output(dataset: Mapping[str, object]) -> dict[str, object]:
+    item_number = int(dataset.get("item_number") or 0)
+    comparison_block_name = smoke_comparison_block_name(item_number)
+    comparison = {
+        "reference_name": "internal-smoke-reference",
+        "status": "pass",
+        "rapid_row_count": 1,
+        "reference_row_count": 1,
+        "overlap_ratio": 1.0,
+        "overlap_count": 1,
+        comparison_block_name: {
+            "mode": f"{comparison_block_name}-smoke",
+            "mismatch_count": 0,
+            "missing_common_field_count": 0,
+            "field_match_ratio": 1.0,
+            "truncated": False,
+        },
+    }
+    return {
+        "command": "cross-tool-validate",
+        "status": "pass",
+        "fixture_kind": "internal-smoke",
+        "commercial_claim_allowed": False,
+        "comparisons": [comparison],
+        "cross_tool_validation_assessment": {
+            "status": "pass",
+            "backlog_items": [item_number],
+            "ready_for_validated_gate": True,
+            "ready_for_commercial_grade": False,
+            "commercial_grade_blockers": ["internal-smoke-fixture-not-external-validation"],
+        },
+    }
+
+
+def smoke_comparison_block_name(item_number: int) -> str:
+    if item_number in {1, 2, 3}:
+        return "record_field_comparison"
+    if item_number in {4, 5}:
+        return "registry_field_comparison"
+    if item_number == 12:
+        return "mft_field_comparison"
+    if item_number == 13:
+        return "usn_field_comparison"
+    if item_number in {10, 11}:
+        return "ese_field_comparison"
+    return "record_field_comparison"
 
 
 def forensic_lane_for_number(number: int) -> str:
