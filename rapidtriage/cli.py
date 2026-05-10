@@ -820,6 +820,11 @@ def build_parser() -> argparse.ArgumentParser:
     source_read.add_argument("--output", default="rapidtriage-source-read.json", help="JSON output path")
     source_read.add_argument("--max-chars", type=int, default=20_000, help="Maximum text characters to include in preview")
     source_read.add_argument("--hex-bytes", type=int, default=1024, help="Maximum binary bytes to include in hex preview")
+    source_read.add_argument("--sqlite-table", help="Read a bounded page from a SQLite table instead of a generic file preview")
+    source_read.add_argument("--sqlite-offset", type=int, default=0, help="SQLite table row offset for --sqlite-table")
+    source_read.add_argument("--sqlite-limit", type=int, default=50, help="SQLite table row limit for --sqlite-table")
+    source_read.add_argument("--sqlite-where-column", help="SQLite table column to filter with a contains match")
+    source_read.add_argument("--sqlite-where-contains", help="SQLite table contains filter value for --sqlite-where-column")
     source_read.add_argument("--hash", action="store_true", help="Compute MD5/SHA1/SHA256 for the source file")
     source_read.add_argument("--json", action="store_true", help="Print machine-readable JSON instead of a compact preview")
 
@@ -3212,6 +3217,11 @@ def main(argv=None) -> int:
                 include_hashes=args.hash,
                 max_chars=args.max_chars,
                 hex_bytes=args.hex_bytes,
+                sqlite_table=args.sqlite_table,
+                sqlite_offset=args.sqlite_offset,
+                sqlite_limit=args.sqlite_limit,
+                sqlite_where_column=args.sqlite_where_column,
+                sqlite_where_contains=args.sqlite_where_contains,
             )
         except SourceReadError as exc:
             parser.error(str(exc))
@@ -3226,6 +3236,11 @@ def main(argv=None) -> int:
                 "output": str(output),
                 "max_chars": args.max_chars,
                 "hex_bytes": args.hex_bytes,
+                "sqlite_table": args.sqlite_table,
+                "sqlite_offset": args.sqlite_offset,
+                "sqlite_limit": args.sqlite_limit,
+                "sqlite_where_column": args.sqlite_where_column,
+                "sqlite_where_contains": bool(args.sqlite_where_contains),
                 "hash": args.hash,
             },
             input_files=[("run-summary", input_summary), ("source-file", Path(str(payload["path"])))],

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import sqlite3
 import tempfile
 import unittest
 import zipfile
@@ -126,6 +127,7 @@ class RapidTriageRunTests(unittest.TestCase):
         self.assertIn("--memory-cap-bytes", run_help)
         self.assertIn("--resume", run_help)
         self.assertIn("source-read", commands)
+        self.assertIn("--sqlite-table", commands["source-read"].format_help())
 
     def test_run_fraud_mode_writes_component_outputs_summary_and_report(self) -> None:
         self.assert_run_mode_outputs("fraud")
@@ -876,6 +878,63 @@ class RapidTriageRunTests(unittest.TestCase):
             self.assertEqual(set(payload["hashes"]), {"md5", "sha1", "sha256"})
             self.assertTrue(payload["forensic_read_profile"]["path_inside_analysis_root"])
             self.assertFalse(payload["reportability_decision"]["decision"].startswith("ready"))
+
+    def test_source_read_command_opens_bounded_sqlite_table_locator(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir) / "case-root"
+            output_dir = Path(tmp_dir) / "run-out"
+            source_output = Path(tmp_dir) / "source-read-sqlite.json"
+            root.mkdir(parents=True, exist_ok=True)
+            build_run_fixture(root)
+            db_path = root / "Users" / "alice" / "Databases" / "chat.sqlite"
+            with sqlite3.connect(db_path) as connection:
+                connection.execute("CREATE TABLE messages(id INTEGER PRIMARY KEY, sender TEXT, body TEXT)")
+                connection.executemany(
+                    "INSERT INTO messages(sender, body) VALUES (?, ?)",
+                    [
+                        ("alice", "normal hello"),
+                        ("bob", "wire transfer password appears here"),
+                        ("carol", "later message"),
+                    ],
+                )
+
+            self.assertEqual(main(["run", str(root), "--mode", "fraud", "--output-dir", str(output_dir)]), 0)
+            self.assertEqual(
+                main(
+                    [
+                        "source-read",
+                        str(output_dir),
+                        "--path",
+                        "Users/alice/Databases/chat.sqlite",
+                        "--sqlite-table",
+                        "messages",
+                        "--sqlite-where-column",
+                        "body",
+                        "--sqlite-where-contains",
+                        "password",
+                        "--sqlite-limit",
+                        "5",
+                        "--hash",
+                        "--output",
+                        str(source_output),
+                        "--json",
+                    ]
+                ),
+                0,
+            )
+
+            payload = json.loads(source_output.read_text(encoding="utf-8"))
+            preview = payload["preview"]
+            self.assertEqual(preview["preview_type"], "sqlite-table")
+            self.assertEqual(preview["table"], "messages")
+            self.assertEqual(preview["row_count"], 1)
+            self.assertEqual(preview["total_matching_rows"], 1)
+            self.assertEqual(preview["rows"][0]["values"]["sender"], "bob")
+            self.assertIn("password", preview["rows"][0]["values"]["body"])
+            self.assertEqual(payload["source_locator"]["locator_type"], "sqlite-table-page")
+            self.assertEqual(len(preview["sqlite_table_locator_manifest_hash"]), 64)
+            self.assertIn("sha256", payload["hashes"])
+            self.assertEqual(payload["forensic_read_profile"]["source_locator_type"], "sqlite-table-page")
 
     def test_source_read_command_rejects_paths_outside_analysis_root(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
