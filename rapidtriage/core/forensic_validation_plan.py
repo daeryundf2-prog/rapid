@@ -86,6 +86,140 @@ def build_forensic_validation_pack(
     return {**pack_core, "pack_hash": stable_plan_hash(pack_core)}
 
 
+def assess_forensic_validation_pack(pack_path: Path, *, output: Path | None = None) -> dict[str, object]:
+    pack_path = pack_path.expanduser().resolve()
+    pack = json.loads(pack_path.read_text(encoding="utf-8"))
+    datasets = [item for item in pack.get("datasets", []) if isinstance(item, Mapping)]
+    results = [assess_validation_dataset(item) for item in datasets]
+    ready_for_validated_gate = bool(results) and all(bool(item.get("ready_for_validated_gate")) for item in results)
+    ready_for_commercial_grade = bool(results) and all(bool(item.get("ready_for_commercial_grade")) for item in results)
+    assessment_core: dict[str, object] = {
+        "command": "forensic-validation-pack-assess",
+        "profile_version": "forensic-validation-pack-assessment-v1",
+        "pack_path": str(pack_path),
+        "pack_hash": file_sha256(pack_path),
+        "source_pack_hash": str(pack.get("pack_hash") or ""),
+        "item_numbers": [int(item.get("item_number") or 0) for item in datasets],
+        "dataset_count": len(results),
+        "ready_dataset_count": sum(1 for item in results if item.get("ready_for_validated_gate")),
+        "commercial_ready_dataset_count": sum(1 for item in results if item.get("ready_for_commercial_grade")),
+        "ready_for_validated_gate": ready_for_validated_gate,
+        "ready_for_commercial_grade": ready_for_commercial_grade,
+        "dataset_results": results,
+        "remaining_blockers": sorted(
+            {
+                blocker
+                for item in results
+                for blocker in item.get("blockers", [])
+                if str(blocker)
+            }
+        ),
+        "commercial_claim_allowed": ready_for_commercial_grade,
+    }
+    assessment = {**assessment_core, "assessment_hash": stable_plan_hash(assessment_core)}
+    if output is not None:
+        write_result(assessment, output.expanduser().resolve())
+    return assessment
+
+
+def assess_validation_dataset(dataset: Mapping[str, object]) -> dict[str, object]:
+    evidence_paths = dataset.get("evidence_paths") if isinstance(dataset.get("evidence_paths"), Mapping) else {}
+    hash_requirements = dataset.get("hash_requirements") if isinstance(dataset.get("hash_requirements"), Mapping) else {}
+    evidence_results = {
+        name: assess_evidence_path(str(path or ""), str(hash_requirements.get(f"{name}_sha256") or ""))
+        for name, path in evidence_paths.items()
+    }
+    diff_result = assess_row_level_diff_output(str(evidence_paths.get("row_level_diff_output") or ""))
+    required_names = ("source_evidence", "rapid_output", "trusted_reference_output", "row_level_diff_output", "reviewer_signoff")
+    missing_required = [
+        name
+        for name in required_names
+        if not evidence_results.get(name, {}).get("present")
+    ]
+    hash_mismatches = [
+        name
+        for name, result in evidence_results.items()
+        if result.get("expected_sha256") and not result.get("sha256_matches")
+    ]
+    blockers = []
+    if missing_required:
+        blockers.append("required-evidence-path-missing")
+    if hash_mismatches:
+        blockers.append("evidence-hash-mismatch")
+    if not diff_result.get("ready_for_validated_gate"):
+        blockers.append("row-level-diff-not-ready")
+    if not diff_result.get("ready_for_commercial_grade"):
+        blockers.append("commercial-grade-diff-evidence-incomplete")
+    ready_for_validated_gate = not missing_required and not hash_mismatches and bool(diff_result.get("ready_for_validated_gate"))
+    ready_for_commercial_grade = ready_for_validated_gate and bool(diff_result.get("ready_for_commercial_grade"))
+    result_core = {
+        "dataset_id": str(dataset.get("dataset_id") or ""),
+        "item_number": int(dataset.get("item_number") or 0),
+        "title": str(dataset.get("title") or ""),
+        "evidence_results": evidence_results,
+        "missing_required_evidence": missing_required,
+        "hash_mismatches": hash_mismatches,
+        "row_level_diff_assessment": diff_result,
+        "ready_for_validated_gate": ready_for_validated_gate,
+        "ready_for_commercial_grade": ready_for_commercial_grade,
+        "blockers": blockers,
+    }
+    return {**result_core, "dataset_assessment_hash": stable_plan_hash(result_core)}
+
+
+def assess_evidence_path(path_text: str, expected_sha256: str = "") -> dict[str, object]:
+    if not path_text.strip():
+        return {"path": "", "present": False, "sha256": "", "expected_sha256": expected_sha256, "sha256_matches": False}
+    path = Path(path_text).expanduser().resolve()
+    present = path.is_file()
+    actual = file_sha256(path) if present else ""
+    return {
+        "path": str(path),
+        "present": present,
+        "size_bytes": path.stat().st_size if present else 0,
+        "sha256": actual,
+        "expected_sha256": expected_sha256,
+        "sha256_matches": bool(actual and expected_sha256 and actual.lower() == expected_sha256.lower())
+        if expected_sha256
+        else True,
+    }
+
+
+def assess_row_level_diff_output(path_text: str) -> dict[str, object]:
+    if not path_text.strip():
+        return {"path": "", "present": False, "status": "missing", "ready_for_validated_gate": False, "ready_for_commercial_grade": False}
+    path = Path(path_text).expanduser().resolve()
+    if not path.is_file():
+        return {
+            "path": str(path),
+            "present": False,
+            "status": "missing",
+            "ready_for_validated_gate": False,
+            "ready_for_commercial_grade": False,
+        }
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        return {
+            "path": str(path),
+            "present": True,
+            "status": "invalid-json",
+            "error": str(exc),
+            "ready_for_validated_gate": False,
+            "ready_for_commercial_grade": False,
+        }
+    assessment = payload.get("cross_tool_validation_assessment") if isinstance(payload.get("cross_tool_validation_assessment"), Mapping) else {}
+    comparison_health = summarize_diff_comparison_health(payload.get("comparisons", []))
+    return {
+        "path": str(path),
+        "present": True,
+        "status": str(payload.get("status") or ""),
+        "ready_for_validated_gate": bool(assessment.get("ready_for_validated_gate")) and comparison_health["mismatch_count"] == 0,
+        "ready_for_commercial_grade": bool(assessment.get("ready_for_commercial_grade")) and comparison_health["mismatch_count"] == 0,
+        "comparison_health": comparison_health,
+    }
+
+
 def build_forensic_validation_plan_row(number: int, readiness_item: Mapping[str, object]) -> dict[str, object]:
     profile = accuracy_profile_for_item(number)
     gates = readiness_item.get("maturity_gates") if isinstance(readiness_item.get("maturity_gates"), Mapping) else {}
@@ -266,6 +400,40 @@ def build_diff_contract(rows: Iterable[Mapping[str, object]]) -> dict[str, objec
         ),
     }
     return {**contract_core, "contract_hash": stable_plan_hash(contract_core)}
+
+
+def summarize_diff_comparison_health(comparisons: object) -> dict[str, object]:
+    comparison_rows = [item for item in comparisons if isinstance(item, Mapping)] if isinstance(comparisons, list) else []
+    field_blocks = (
+        "record_field_comparison",
+        "registry_field_comparison",
+        "mft_field_comparison",
+        "usn_field_comparison",
+        "usn_state_replay_field_comparison",
+        "ese_field_comparison",
+    )
+    mismatch_count = 0
+    missing_common_field_count = 0
+    truncated = False
+    failed_references: list[str] = []
+    for comparison in comparison_rows:
+        if str(comparison.get("status") or "") != "pass":
+            failed_references.append(str(comparison.get("reference_name") or "reference"))
+        for block_name in field_blocks:
+            block = comparison.get(block_name)
+            if not isinstance(block, Mapping):
+                continue
+            mismatch_count += int(block.get("mismatch_count") or 0)
+            missing_common_field_count += int(block.get("missing_common_field_count") or 0)
+            truncated = truncated or bool(block.get("truncated"))
+    return {
+        "comparison_count": len(comparison_rows),
+        "failed_references": failed_references,
+        "mismatch_count": mismatch_count,
+        "missing_common_field_count": missing_common_field_count,
+        "truncated": truncated,
+        "clean": not failed_references and mismatch_count == 0 and missing_common_field_count == 0,
+    }
 
 
 def forensic_lane_for_number(number: int) -> str:
@@ -549,3 +717,11 @@ def render_reference_commands_markdown(pack: Mapping[str, object]) -> str:
 
 def stable_plan_hash(payload: object) -> str:
     return hashlib.sha256(json.dumps(payload, ensure_ascii=False, sort_keys=True, default=str).encode("utf-8")).hexdigest()
+
+
+def file_sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()

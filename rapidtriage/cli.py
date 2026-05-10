@@ -121,6 +121,7 @@ from .core.worker import RustWorkerClient, WorkerError
 from .core.forensic_validation_plan import (
     DEFAULT_FORENSIC_VALIDATION_ITEMS,
     DEFAULT_FORENSIC_VALIDATION_PACK_ITEMS,
+    assess_forensic_validation_pack,
     build_forensic_validation_pack,
     build_forensic_validation_plan,
     write_forensic_validation_pack,
@@ -1323,6 +1324,15 @@ def build_parser() -> argparse.ArgumentParser:
     )
     forensic_validation_pack.add_argument("--output-dir", required=True, help="Directory for pack JSON, Markdown, dataset template, and command checklist")
     forensic_validation_pack.add_argument("--json", action="store_true", help="Print machine-readable JSON")
+
+    forensic_validation_pack_assess = sub.add_parser(
+        "forensic-validation-pack-assess",
+        help="Assess whether a populated forensic validation pack is ready for validation gates",
+        description="Check evidence path presence, SHA256 expectations, reviewer signoff, and row-level diff readiness for a validation pack",
+    )
+    forensic_validation_pack_assess.add_argument("--pack", required=True, help="Path to rapidtriage-forensic-validation-pack.json")
+    forensic_validation_pack_assess.add_argument("--output", help="Optional JSON assessment output path")
+    forensic_validation_pack_assess.add_argument("--json", action="store_true", help="Print machine-readable JSON")
 
     cross_tool = sub.add_parser(
         "cross-tool-validate",
@@ -2685,6 +2695,28 @@ def main(argv=None) -> int:
             print(f"Saved Markdown: {outputs['markdown']}")
             print(f"Saved dataset template: {outputs['dataset_template']}")
             print(f"Saved command checklist: {outputs['reference_commands']}")
+        return 0
+
+    if args.command == "forensic-validation-pack-assess":
+        try:
+            payload = assess_forensic_validation_pack(
+                Path(args.pack).expanduser().resolve(),
+                output=Path(args.output).expanduser().resolve() if args.output else None,
+            )
+        except (OSError, json.JSONDecodeError, ValueError) as exc:
+            parser.error(str(exc))
+        if args.json:
+            print(json.dumps(payload, ensure_ascii=False, indent=2))
+        else:
+            print("RapidTriage forensic validation pack assessment")
+            print(f"Datasets: {payload['ready_dataset_count']}/{payload['dataset_count']} validation-ready")
+            print(f"Commercial-ready datasets: {payload['commercial_ready_dataset_count']}/{payload['dataset_count']}")
+            print(f"Ready for validated gate: {payload['ready_for_validated_gate']}")
+            print(f"Ready for commercial grade: {payload['ready_for_commercial_grade']}")
+            if payload.get("remaining_blockers"):
+                print("Remaining blockers:")
+                for blocker in payload["remaining_blockers"]:
+                    print(f"- {blocker}")
         return 0
 
     if args.command == "cross-tool-validate":
