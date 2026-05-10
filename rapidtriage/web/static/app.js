@@ -186,6 +186,68 @@ const FORENSIC_ARTIFACT_TAXONOMY = [
     terms: ["indicator", "ioc", "powershell", "script", "execution", "malware", "webshell", "lol", "fileless"],
   },
 ];
+const WORKBENCH_ARTIFACT_TREE_GROUPS = [
+  {
+    label: "Windows",
+    hint: "EVTX, Registry, Prefetch, MFT/USN, ShellBags, execution",
+    tab: "artifacts",
+    terms: ["windows", "eventlog", "evtx", "registry", "prefetch", "mft", "usn", "shellbag", "lnk", "amcache", "shimcache", "bam"],
+  },
+  {
+    label: "Browser / AI",
+    hint: "History, downloads, cache, ChatGPT, Claude, Gemini, Perplexity",
+    tab: "artifacts",
+    terms: ["browser", "download", "history", "cookie", "cache", "ai", "chatgpt", "claude", "gemini", "perplexity", "copilot"],
+  },
+  {
+    label: "Mail",
+    hint: "EML, MBOX, PST/OST-style exports, attachments",
+    tab: "docs",
+    terms: ["email", "mail", "eml", "mbox", "pst", "ost", "attachment"],
+  },
+  {
+    label: "Messenger",
+    hint: "KakaoTalk, WhatsApp, Telegram, Signal, LINE, Discord",
+    tab: "artifacts",
+    terms: ["chat", "sns", "kakao", "whatsapp", "telegram", "signal", "line", "discord", "message"],
+  },
+  {
+    label: "Mobile",
+    hint: "iOS/Android backups, APKs, contacts, calls, SMS",
+    tab: "artifacts",
+    terms: ["mobile", "ios", "android", "apk", "sms", "call", "contact"],
+  },
+  {
+    label: "Media / OCR",
+    hint: "Images, video, audio, OCR, translation, thumbnails",
+    tab: "files",
+    terms: ["image", "photo", "video", "audio", "ocr", "translation", "thumbnail", "jpg", "png", "mp4"],
+  },
+  {
+    label: "Timeline",
+    hint: "Unified time view, filesystem, event, web, app activity",
+    tab: "timeline",
+    terms: ["timeline", "event", "time", "created", "modified", "accessed"],
+  },
+  {
+    label: "Search",
+    hint: "Case-wide keyword, current-file search, source hits",
+    tab: "search",
+    terms: ["search", "keyword", "hit", "docs", "index", "fts"],
+  },
+  {
+    label: "Reports",
+    hint: "Review candidates, citations, export bundle",
+    tab: "report",
+    terms: ["report", "citation", "export", "bundle", "custody"],
+  },
+  {
+    label: "Validation",
+    hint: "QC, trusted diffs, parser blockers, readiness",
+    tab: "summary",
+    terms: ["validation", "qc", "readiness", "diff", "blocker", "commercial"],
+  },
+];
 const USER_WORKFLOW_STEPS = [
   {
     label: "Input",
@@ -220,6 +282,12 @@ const START_CHOICE_CONTRACT = {
   profile_version: "start-screen-choice-contract-v1",
   checklist_item: 9,
   required_choices: ["e01", "folder", "recent", "sample", "qc"],
+};
+const WORKBENCH_LAYOUT_CONTRACT = {
+  profile_version: "single-case-workbench-layout-v1",
+  checklist_item: 10,
+  required_regions: ["artifact-tree", "result-table", "preview-detail", "evidence-tray", "report-tray"],
+  large_case_policy: "paged-results-plus-virtual-dom-window",
 };
 
 let selectedRunId = null;
@@ -407,7 +475,61 @@ function renderDetailShell(run, tab) {
       <input id="tableFilter" placeholder="Filter visible rows" />
       <button id="clearFilter" type="button">Clear</button>
     </div>
-    <div id="tabBody" class="tab-body" data-testid="tab-body"></div>
+    ${renderWorkbenchLayoutFrame(run, tab)}
+  `;
+}
+
+function renderWorkbenchLayoutFrame(run, tab) {
+  const summary = run.summary?.summary || {};
+  const reportCandidates = Number(summary.report_item_count || 0);
+  return `
+    <section class="case-workbench-layout" aria-label="Single case analysis workbench" data-testid="case-workbench-layout">
+      <aside class="workbench-artifact-tree" aria-label="Artifact tree" data-testid="workbench-artifact-tree">
+        <div class="workbench-region-header">
+          <p class="eyebrow">artifact tree</p>
+          <strong>Forensic artifacts</strong>
+        </div>
+        ${WORKBENCH_ARTIFACT_TREE_GROUPS.map((group) => {
+          const count = artifactGroupCount(run, group.terms);
+          return `
+            <button class="artifact-tree-row ${tab === group.tab ? "active" : ""}" type="button" data-open-tab="${escapeHtml(group.tab)}">
+              <span>
+                <strong>${escapeHtml(group.label)}</strong>
+                <small>${escapeHtml(group.hint)}</small>
+              </span>
+              <em>${formatNumber(count)}</em>
+            </button>
+          `;
+        }).join("")}
+      </aside>
+      <main class="workbench-result-zone" aria-label="Virtualized result table region" data-testid="workbench-result-table">
+        <div class="workbench-region-header">
+          <p class="eyebrow">results</p>
+          <strong>${escapeHtml(tabLabel(tab))}</strong>
+          <span>cursor pages · DOM window ≤ ${VIRTUAL_TABLE_ROW_LIMIT}</span>
+        </div>
+        <div id="tabBody" class="tab-body" data-testid="tab-body"></div>
+      </main>
+      <aside class="workbench-preview-rail" aria-label="Preview, evidence tray, and report tray" data-testid="workbench-preview-detail">
+        <section class="preview-detail-card" data-testid="preview-detail-card">
+          <p class="eyebrow">preview / detail</p>
+          <strong>Open a row or search hit</strong>
+          <span>원본 뷰어, source locator, hash, limitation을 여기 흐름에서 확인합니다.</span>
+        </section>
+        <section class="evidence-tray-card" data-testid="evidence-tray">
+          <p class="eyebrow">evidence tray</p>
+          <strong>${formatNumber(reportCandidates)} report candidate(s)</strong>
+          <span>relevant, needs-review, excluded, include-in-report 상태를 누적합니다.</span>
+          <button class="secondary-button" type="button" data-open-tab="review">Open review</button>
+        </section>
+        <section class="report-tray-card" data-testid="report-tray">
+          <p class="eyebrow">report tray</p>
+          <strong>Submission package</strong>
+          <span>검토된 항목만 hash manifest와 case report로 내보냅니다.</span>
+          <button class="secondary-button" type="button" data-open-tab="report">Open report</button>
+        </section>
+      </aside>
+    </section>
   `;
 }
 

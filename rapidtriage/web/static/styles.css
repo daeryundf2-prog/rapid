@@ -661,6 +661,108 @@ button:disabled {
   padding-top: 18px;
 }
 
+.case-workbench-layout {
+  display: grid;
+  grid-template-columns: minmax(210px, 260px) minmax(0, 1fr) minmax(230px, 300px);
+  gap: 14px;
+  align-items: start;
+}
+
+.workbench-artifact-tree,
+.workbench-result-zone,
+.workbench-preview-rail {
+  border: 1px solid rgba(15, 116, 107, 0.16);
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.7);
+  box-shadow: var(--shadow-soft);
+}
+
+.workbench-artifact-tree,
+.workbench-preview-rail {
+  position: sticky;
+  top: 16px;
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+}
+
+.workbench-result-zone {
+  min-width: 0;
+  padding: 12px;
+}
+
+.workbench-region-header {
+  display: grid;
+  gap: 3px;
+}
+
+.workbench-region-header strong {
+  font-size: 0.96rem;
+}
+
+.workbench-region-header span {
+  color: var(--muted);
+  font-size: 0.78rem;
+}
+
+.artifact-tree-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: center;
+  border: 1px solid rgba(15, 116, 107, 0.12);
+  border-radius: 14px;
+  background: rgba(255, 253, 248, 0.84);
+  color: var(--ink);
+  padding: 10px;
+  text-align: left;
+}
+
+.artifact-tree-row.active,
+.artifact-tree-row:hover,
+.artifact-tree-row:focus-visible {
+  border-color: rgba(15, 116, 107, 0.42);
+  background: var(--accent-soft);
+}
+
+.artifact-tree-row span {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.artifact-tree-row small,
+.preview-detail-card span,
+.evidence-tray-card span,
+.report-tray-card span {
+  color: var(--muted);
+  font-size: 0.76rem;
+  line-height: 1.35;
+}
+
+.artifact-tree-row em {
+  min-width: 34px;
+  border-radius: 999px;
+  background: var(--command);
+  color: #fff;
+  padding: 3px 8px;
+  text-align: center;
+  font-style: normal;
+  font-size: 0.75rem;
+  font-weight: 800;
+}
+
+.preview-detail-card,
+.evidence-tray-card,
+.report-tray-card {
+  display: grid;
+  gap: 7px;
+  border: 1px solid rgba(15, 116, 107, 0.13);
+  border-radius: 16px;
+  background: #fffdf8;
+  padding: 12px;
+}
+
 .empty-state {
   color: var(--muted);
 }
@@ -3621,6 +3723,7 @@ body::before {
   .field-grid,
   .review-grid,
   .report-grid,
+  .case-workbench-layout,
   .search-form,
   .file-search-form,
   .file-search-summary,
@@ -3668,7 +3771,9 @@ body::before {
   }
 
   .case-command-bar,
-  .viewer-dock {
+  .viewer-dock,
+  .workbench-artifact-tree,
+  .workbench-preview-rail {
     position: static;
     max-height: none;
   }
