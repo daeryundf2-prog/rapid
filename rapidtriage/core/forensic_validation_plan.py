@@ -293,6 +293,119 @@ def populate_forensic_validation_smoke_fixtures(root_dir: Path, *, output: Path 
     return result
 
 
+def import_forensic_validation_evidence_manifest(
+    root_dir: Path,
+    manifest_path: Path,
+    *,
+    output: Path | None = None,
+) -> dict[str, object]:
+    """Apply real external evidence paths to generated validation packs."""
+
+    root_dir = root_dir.expanduser().resolve()
+    manifest_path = manifest_path.expanduser().resolve()
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest_datasets = manifest.get("datasets") if isinstance(manifest.get("datasets"), list) else []
+    by_dataset_id: dict[str, Mapping[str, object]] = {}
+    by_item_number: dict[int, Mapping[str, object]] = {}
+    for record in manifest_datasets:
+        if not isinstance(record, Mapping):
+            continue
+        dataset_id = str(record.get("dataset_id") or "")
+        if dataset_id:
+            by_dataset_id[dataset_id] = record
+        item_number = int(record.get("item_number") or 0)
+        if item_number:
+            by_item_number[item_number] = record
+
+    imported: list[dict[str, object]] = []
+    missing: list[dict[str, object]] = []
+    for pack_path in sorted(root_dir.glob("batch-*/rapidtriage-forensic-validation-pack.json")):
+        pack = json.loads(pack_path.read_text(encoding="utf-8"))
+        updated_datasets: list[dict[str, object]] = []
+        for dataset in [item for item in pack.get("datasets", []) if isinstance(item, Mapping)]:
+            updated = dict(dataset)
+            dataset_id = str(updated.get("dataset_id") or "")
+            item_number = int(updated.get("item_number") or 0)
+            record = by_dataset_id.get(dataset_id) or by_item_number.get(item_number)
+            if record is None:
+                missing.append({"dataset_id": dataset_id, "item_number": item_number})
+                updated_datasets.append(updated)
+                continue
+            evidence_paths = normalized_manifest_evidence_paths(record, base_dir=manifest_path.parent)
+            updated["status"] = "external-evidence-populated"
+            updated["evidence_paths"] = evidence_paths
+            updated["hash_requirements"] = normalized_manifest_hash_requirements(record, evidence_paths)
+            updated.pop("smoke_fixture_notice", None)
+            updated["external_evidence_notice"] = {
+                "kind": "external-validation-evidence",
+                "manifest_path": str(manifest_path),
+                "commercial_claim_allowed": False,
+                "warning": "External evidence can satisfy external validation only when row-level diff and sign-off are present; commercial-grade still requires commercial readiness gates.",
+            }
+            updated_datasets.append(updated)
+            imported.append({"dataset_id": dataset_id, "item_number": item_number})
+        pack["datasets"] = updated_datasets
+        pack["smoke_fixture_populated"] = False
+        pack["commercial_claim_allowed"] = False
+        pack["pack_hash"] = stable_plan_hash({key: value for key, value in pack.items() if key != "pack_hash"})
+        write_result(pack, pack_path)
+
+    assessment = assess_forensic_validation_batches(root_dir, output=root_dir / "external-evidence-assessment.json")
+    result_core = {
+        "command": "forensic-validation-evidence-import",
+        "profile_version": "forensic-validation-evidence-import-v1",
+        "root_dir": str(root_dir),
+        "manifest_path": str(manifest_path),
+        "manifest_sha256": file_sha256(manifest_path),
+        "imported_dataset_count": len(imported),
+        "missing_dataset_count": len(missing),
+        "imported_datasets": imported,
+        "missing_datasets": missing,
+        "assessment": assessment,
+        "commercial_claim_allowed": bool(assessment.get("ready_for_commercial_grade")),
+    }
+    result = {**result_core, "import_manifest_hash": stable_plan_hash(result_core)}
+    if output is not None:
+        write_result(result, output.expanduser().resolve())
+    return result
+
+
+def normalized_manifest_evidence_paths(record: Mapping[str, object], *, base_dir: Path | None = None) -> dict[str, str]:
+    source = record.get("evidence_paths") if isinstance(record.get("evidence_paths"), Mapping) else record
+    return {
+        "source_evidence": normalize_manifest_evidence_path(source.get("source_evidence"), base_dir=base_dir),
+        "rapid_output": normalize_manifest_evidence_path(source.get("rapid_output"), base_dir=base_dir),
+        "trusted_reference_output": normalize_manifest_evidence_path(source.get("trusted_reference_output"), base_dir=base_dir),
+        "row_level_diff_output": normalize_manifest_evidence_path(source.get("row_level_diff_output"), base_dir=base_dir),
+        "reviewer_signoff": normalize_manifest_evidence_path(source.get("reviewer_signoff"), base_dir=base_dir),
+    }
+
+
+def normalize_manifest_evidence_path(value: object, *, base_dir: Path | None = None) -> str:
+    path_text = str(value or "").strip()
+    if not path_text:
+        return ""
+    path = Path(path_text).expanduser()
+    if not path.is_absolute() and base_dir is not None:
+        path = base_dir / path
+    return str(path.resolve())
+
+
+def normalized_manifest_hash_requirements(
+    record: Mapping[str, object],
+    evidence_paths: Mapping[str, str],
+) -> dict[str, str]:
+    raw = record.get("hash_requirements") if isinstance(record.get("hash_requirements"), Mapping) else {}
+    requirements = {str(key): str(value) for key, value in raw.items() if str(value)}
+    for name, path_text in evidence_paths.items():
+        key = f"{name}_sha256"
+        if key in requirements:
+            continue
+        path = Path(path_text).expanduser()
+        requirements[key] = file_sha256(path) if path.is_file() else ""
+    return requirements
+
+
 def write_smoke_fixture_for_dataset(batch_dir: Path, dataset: Mapping[str, object]) -> dict[str, object]:
     dataset_id = str(dataset.get("dataset_id") or "dataset")
     item_number = int(dataset.get("item_number") or 0)

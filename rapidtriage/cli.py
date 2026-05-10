@@ -125,6 +125,7 @@ from .core.forensic_validation_plan import (
     assess_forensic_validation_pack,
     build_forensic_validation_pack,
     build_forensic_validation_plan,
+    import_forensic_validation_evidence_manifest,
     populate_forensic_validation_smoke_fixtures,
     write_forensic_validation_batches,
     write_forensic_validation_pack,
@@ -1377,6 +1378,16 @@ def build_parser() -> argparse.ArgumentParser:
     forensic_validation_smoke_populate.add_argument("--root-dir", required=True, help="Directory created by forensic-validation-batches")
     forensic_validation_smoke_populate.add_argument("--output", help="Optional JSON smoke manifest output path")
     forensic_validation_smoke_populate.add_argument("--json", action="store_true", help="Print machine-readable JSON")
+
+    forensic_validation_evidence_import = sub.add_parser(
+        "forensic-validation-evidence-import",
+        help="Import external validation evidence paths into generated validation batches",
+        description="Apply a manifest of source/RapidTriage/reference/diff/signoff paths to validation packs and rerun aggregate assessment",
+    )
+    forensic_validation_evidence_import.add_argument("--root-dir", required=True, help="Directory created by forensic-validation-batches")
+    forensic_validation_evidence_import.add_argument("--manifest", required=True, help="JSON manifest with datasets and evidence paths")
+    forensic_validation_evidence_import.add_argument("--output", help="Optional JSON import manifest output path")
+    forensic_validation_evidence_import.add_argument("--json", action="store_true", help="Print machine-readable JSON")
 
     cross_tool = sub.add_parser(
         "cross-tool-validate",
@@ -2824,6 +2835,26 @@ def main(argv=None) -> int:
             print(f"Datasets: {assessment['ready_dataset_count']}/{assessment['dataset_count']} validation-ready")
             print(f"External datasets: {assessment['external_ready_dataset_count']}/{assessment['dataset_count']} external-validation-ready")
             print("Commercial-ready: false (internal smoke fixtures only)")
+        return 0
+
+    if args.command == "forensic-validation-evidence-import":
+        try:
+            payload = import_forensic_validation_evidence_manifest(
+                Path(args.root_dir).expanduser().resolve(),
+                Path(args.manifest).expanduser().resolve(),
+                output=Path(args.output).expanduser().resolve() if args.output else None,
+            )
+        except (OSError, json.JSONDecodeError, ValueError) as exc:
+            parser.error(str(exc))
+        if args.json:
+            print(json.dumps(payload, ensure_ascii=False, indent=2))
+        else:
+            assessment = payload["assessment"]
+            print("RapidTriage forensic validation evidence import")
+            print(f"Imported datasets: {payload['imported_dataset_count']}")
+            print(f"Missing datasets: {payload['missing_dataset_count']}")
+            print(f"External datasets: {assessment['external_ready_dataset_count']}/{assessment['dataset_count']} external-validation-ready")
+            print(f"Ready for external validated gate: {assessment['ready_for_external_validated_gate']}")
         return 0
 
     if args.command == "cross-tool-validate":

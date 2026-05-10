@@ -115,6 +115,8 @@ class RapidTriageOpsTests(unittest.TestCase):
         self.assertIn("--strict-external", commands["forensic-validation-batches-assess"].format_help())
         self.assertIn("forensic-validation-smoke-populate", commands)
         self.assertIn("--root-dir", commands["forensic-validation-smoke-populate"].format_help())
+        self.assertIn("forensic-validation-evidence-import", commands)
+        self.assertIn("--manifest", commands["forensic-validation-evidence-import"].format_help())
         self.assertIn("cross-tool-validate", commands)
         self.assertIn("--reference-output", commands["cross-tool-validate"].format_help())
         self.assertIn("confidence-dashboard", commands)
@@ -1807,6 +1809,106 @@ class RapidTriageOpsTests(unittest.TestCase):
             self.assertEqual(payload["ready_dataset_count"], 65)
             self.assertEqual(payload["external_ready_dataset_count"], 0)
             self.assertFalse(payload["ready_for_external_validated_gate"])
+
+    def test_forensic_validation_evidence_import_can_complete_external_gate_for_items_1_to_65(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir) / "batches"
+            evidence_root = Path(tmp_dir) / "external-evidence"
+            evidence_root.mkdir()
+            with contextlib.redirect_stdout(io.StringIO()):
+                self.assertEqual(main(["forensic-validation-batches", "--items", "1-65", "--output-dir", str(root), "--json"]), 0)
+
+            manifest_rows = []
+            for pack_path in sorted(root.glob("batch-*/rapidtriage-forensic-validation-pack.json")):
+                pack = json.loads(pack_path.read_text(encoding="utf-8"))
+                for dataset in pack["datasets"]:
+                    dataset_id = dataset["dataset_id"]
+                    item_dir = evidence_root / dataset_id
+                    item_dir.mkdir()
+                    source = item_dir / "source.bin"
+                    rapid = item_dir / "rapid.json"
+                    reference = item_dir / "reference.csv"
+                    diff = item_dir / "diff.json"
+                    signoff = item_dir / "signoff.md"
+                    source.write_bytes(f"external source {dataset_id}".encode("utf-8"))
+                    rapid.write_text('{"artifacts":[]}', encoding="utf-8")
+                    reference.write_text("id,status\n1,ok\n", encoding="utf-8")
+                    diff.write_text(
+                        json.dumps(
+                            {
+                                "status": "pass",
+                                "cross_tool_validation_assessment": {
+                                    "ready_for_validated_gate": True,
+                                    "ready_for_commercial_grade": False,
+                                },
+                                "comparisons": [
+                                    {
+                                        "reference_name": "external-fixture",
+                                        "status": "pass",
+                                        "record_field_comparison": {
+                                            "mismatch_count": 0,
+                                            "missing_common_field_count": 0,
+                                            "field_match_ratio": 1.0,
+                                            "truncated": False,
+                                        },
+                                    }
+                                ],
+                            }
+                        ),
+                        encoding="utf-8",
+                    )
+                    signoff.write_text("External reviewer signoff placeholder.\n", encoding="utf-8")
+                    manifest_rows.append(
+                        {
+                            "dataset_id": dataset_id,
+                            "item_number": dataset["item_number"],
+                            "evidence_paths": {
+                                "source_evidence": str(Path(dataset_id) / source.name),
+                                "rapid_output": str(Path(dataset_id) / rapid.name),
+                                "trusted_reference_output": str(Path(dataset_id) / reference.name),
+                                "row_level_diff_output": str(Path(dataset_id) / diff.name),
+                                "reviewer_signoff": str(Path(dataset_id) / signoff.name),
+                            },
+                        }
+                    )
+
+            manifest_path = evidence_root / "external-manifest.json"
+            manifest_path.write_text(json.dumps({"datasets": manifest_rows}, ensure_ascii=False, indent=2), encoding="utf-8")
+
+            stdout = io.StringIO()
+            with contextlib.redirect_stdout(stdout):
+                exit_code = main(
+                    [
+                        "forensic-validation-evidence-import",
+                        "--root-dir",
+                        str(root),
+                        "--manifest",
+                        str(manifest_path),
+                        "--json",
+                    ]
+                )
+
+            self.assertEqual(exit_code, 0)
+            payload = json.loads(stdout.getvalue())
+            self.assertEqual(payload["imported_dataset_count"], 65)
+            self.assertEqual(payload["missing_dataset_count"], 0)
+            assessment = payload["assessment"]
+            self.assertEqual(assessment["ready_dataset_count"], 65)
+            self.assertEqual(assessment["external_ready_dataset_count"], 65)
+            self.assertTrue(assessment["ready_for_external_validated_gate"])
+            self.assertEqual(assessment["commercial_ready_dataset_count"], 0)
+            first_pack = json.loads(
+                (root / "batch-001-items-001-005" / "rapidtriage-forensic-validation-pack.json").read_text(
+                    encoding="utf-8"
+                )
+            )
+            first_source_path = Path(first_pack["datasets"][0]["evidence_paths"]["source_evidence"])
+            self.assertTrue(first_source_path.is_absolute())
+            self.assertTrue(first_source_path.is_file())
+
+            with contextlib.redirect_stdout(io.StringIO()):
+                strict_exit = main(["forensic-validation-batches-assess", "--root-dir", str(root), "--strict-external", "--json"])
+            self.assertEqual(strict_exit, 0)
 
     def test_cross_tool_validate_compares_rapid_and_reference_outputs(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
