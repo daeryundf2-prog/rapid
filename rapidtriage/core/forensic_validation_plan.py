@@ -316,12 +316,17 @@ def assess_row_level_diff_output(path_text: str) -> dict[str, object]:
         }
     assessment = payload.get("cross_tool_validation_assessment") if isinstance(payload.get("cross_tool_validation_assessment"), Mapping) else {}
     comparison_health = summarize_diff_comparison_health(payload.get("comparisons", []))
+    diff_status_passed = str(payload.get("status") or "") == "pass"
+    diff_has_comparisons = int(comparison_health.get("comparison_count") or 0) > 0
+    diff_health_clean = bool(comparison_health.get("clean")) and diff_has_comparisons
+    validated_ready = bool(assessment.get("ready_for_validated_gate")) and diff_status_passed and diff_health_clean
+    commercial_ready = bool(assessment.get("ready_for_commercial_grade")) and diff_status_passed and diff_health_clean
     return {
         "path": str(path),
         "present": True,
         "status": str(payload.get("status") or ""),
-        "ready_for_validated_gate": bool(assessment.get("ready_for_validated_gate")) and comparison_health["mismatch_count"] == 0,
-        "ready_for_commercial_grade": bool(assessment.get("ready_for_commercial_grade")) and comparison_health["mismatch_count"] == 0,
+        "ready_for_validated_gate": validated_ready,
+        "ready_for_commercial_grade": commercial_ready,
         "comparison_health": comparison_health,
     }
 

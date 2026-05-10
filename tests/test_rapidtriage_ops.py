@@ -1634,6 +1634,68 @@ class RapidTriageOpsTests(unittest.TestCase):
             self.assertFalse(payload["ready_for_commercial_grade"])
             self.assertIn("commercial-grade-diff-evidence-incomplete", payload["remaining_blockers"])
 
+    def test_forensic_validation_pack_assess_rejects_incomplete_field_diffs(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            pack_dir = root / "pack"
+            with contextlib.redirect_stdout(io.StringIO()):
+                self.assertEqual(main(["forensic-validation-pack", "--items", "1", "--output-dir", str(pack_dir), "--json"]), 0)
+            pack_path = pack_dir / "rapidtriage-forensic-validation-pack.json"
+            source = root / "Security.evtx"
+            rapid = root / "rapid.json"
+            reference = root / "evtxecmd.csv"
+            diff = root / "diff.json"
+            signoff = root / "review.md"
+            source.write_bytes(b"evtx fixture")
+            rapid.write_text('{"artifacts":[]}', encoding="utf-8")
+            reference.write_text("EventRecordID,EventID\n1001,4624\n", encoding="utf-8")
+            signoff.write_text("Reviewer signoff for fixture diff.\n", encoding="utf-8")
+            diff.write_text(
+                json.dumps(
+                    {
+                        "status": "pass",
+                        "cross_tool_validation_assessment": {
+                            "ready_for_validated_gate": True,
+                            "ready_for_commercial_grade": True,
+                        },
+                        "comparisons": [
+                            {
+                                "reference_name": "evtxecmd",
+                                "status": "pass",
+                                "record_field_comparison": {
+                                    "mismatch_count": 0,
+                                    "missing_common_field_count": 1,
+                                    "field_match_ratio": 0.9,
+                                    "truncated": False,
+                                },
+                            }
+                        ],
+                    }
+                ),
+                encoding="utf-8",
+            )
+            pack_payload = json.loads(pack_path.read_text(encoding="utf-8"))
+            pack_payload["datasets"][0]["evidence_paths"] = {
+                "source_evidence": str(source),
+                "rapid_output": str(rapid),
+                "trusted_reference_output": str(reference),
+                "row_level_diff_output": str(diff),
+                "reviewer_signoff": str(signoff),
+            }
+            pack_path.write_text(json.dumps(pack_payload, ensure_ascii=False, indent=2), encoding="utf-8")
+
+            stdout = io.StringIO()
+            with contextlib.redirect_stdout(stdout):
+                exit_code = main(["forensic-validation-pack-assess", "--pack", str(pack_path), "--json"])
+
+            self.assertEqual(exit_code, 0)
+            payload = json.loads(stdout.getvalue())
+            self.assertEqual(payload["ready_dataset_count"], 0)
+            self.assertFalse(payload["ready_for_validated_gate"])
+            diff_assessment = payload["dataset_results"][0]["row_level_diff_assessment"]
+            self.assertEqual(diff_assessment["comparison_health"]["missing_common_field_count"], 1)
+            self.assertFalse(diff_assessment["comparison_health"]["clean"])
+
     def test_forensic_validation_batches_write_and_assess_items_1_to_65(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             root = Path(tmp_dir) / "batches"
