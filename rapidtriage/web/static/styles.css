@@ -816,6 +816,32 @@ button:disabled {
   background: #fff7ed;
 }
 
+.viewer-navigation-bar {
+  display: grid;
+  grid-template-columns: auto auto auto minmax(0, 1fr);
+  gap: 8px;
+  align-items: center;
+  border: 1px solid rgba(15, 116, 107, 0.14);
+  border-radius: 14px;
+  background: rgba(15, 116, 107, 0.06);
+  padding: 8px;
+}
+
+.viewer-navigation-bar span {
+  color: var(--ink);
+  font-size: 0.78rem;
+  font-weight: 800;
+}
+
+.viewer-navigation-bar small {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 0.76rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .empty-state {
   color: var(--muted);
 }

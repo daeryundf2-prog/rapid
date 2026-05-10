@@ -18,6 +18,7 @@ const SEARCH_HISTORY_PREFIX = "rapidtriage.searchHistory.";
 const COMPARE_STORAGE_PREFIX = "rapidtriage.compare.";
 const REVIEW_SELECTION_STORAGE_PREFIX = "rapidtriage.reviewSelection.";
 const VIRTUAL_WINDOW_STORAGE_PREFIX = "rapidtriage.virtualWindow.";
+const VIEWER_NAVIGATION_STORAGE_PREFIX = "rapidtriage.viewerNavigation.";
 const SEARCH_PRESETS = [
   { label: "Credentials", keywords: ["password", "secret", "token", "credential"] },
   { label: "Web activity", keywords: ["download", "login", "history", "browser"] },
@@ -62,6 +63,7 @@ const VIRTUALIZATION_ASSESSMENT = {
   row_limit: VIRTUAL_TABLE_ROW_LIMIT,
 };
 const COMPARE_LIMIT = 6;
+const VIEWER_NAVIGATION_LIMIT = 30;
 const VIEW_GROUPS = [
   {
     id: "triage",
@@ -299,6 +301,12 @@ const PREVIEW_DETAIL_CONTRACT = {
   checklist_item: 13,
   default_metadata_state: "collapsed",
   required_cards: ["analyst-summary", "source-locator", "hash-verification", "limitation-warning", "review-actions"],
+};
+const VIEWER_NAVIGATION_CONTRACT = {
+  profile_version: "viewer-navigation-history-contract-v1",
+  checklist_item: 14,
+  storage_scope: "per-run-local-browser",
+  controls: ["back", "forward", "current-position", "history-preserves-review-context", "compare-pin-compatible"],
 };
 
 let selectedRunId = null;
@@ -2863,7 +2871,7 @@ function bindSearchPresetButtons(form) {
   }
 }
 
-async function loadEvidencePreview(path, reviewContext = null, searchResultIndex = null) {
+async function loadEvidencePreview(path, reviewContext = null, searchResultIndex = null, options = {}) {
   const viewer = detailPanel.querySelector("#evidenceViewer");
   if (!viewer || !path) return;
   if (searchResultIndex !== null && searchResultIndex !== undefined && searchResultIndex !== "") {
@@ -2872,6 +2880,7 @@ async function loadEvidencePreview(path, reviewContext = null, searchResultIndex
   viewer.innerHTML = '<p class="empty-state">Loading preview...</p>';
   try {
     const payload = await api(`/api/runs/${selectedRunId}/source-preview?path=${encodeURIComponent(path)}`);
+    recordViewerNavigation(payload, reviewContext, searchResultIndex, options);
     viewer.innerHTML = renderEvidenceViewer(payload, reviewContext);
     if (searchResultIndex !== null && searchResultIndex !== undefined && searchResultIndex !== "") {
       viewer.dataset.currentSearchResultIndex = String(searchResultIndex);
@@ -2952,6 +2961,7 @@ function renderEvidenceViewer(payload, reviewContext = null) {
       </div>
       <div class="detail-actions">${openLink}${copyButton}${pinButton}${hashButton}</div>
     </div>
+    ${renderViewerNavigationControls(payload)}
     <div class="viewer-meta viewer-meta-compact">
       <span>${escapeHtml(payload.mime_type)}</span>
       <span>${formatBytes(payload.size)}</span>
@@ -3471,6 +3481,14 @@ function renderReviewCapture(reviewContext, payload) {
 function bindViewerButtons() {
   bindCopyButtons();
   bindCompareActions();
+  for (const button of detailPanel.querySelectorAll("[data-viewer-history-delta]")) {
+    if (button.dataset.viewerHistoryBound) continue;
+    button.dataset.viewerHistoryBound = "1";
+    button.addEventListener("click", async () => {
+      button.disabled = true;
+      await goViewerNavigation(Number(button.dataset.viewerHistoryDelta || 0));
+    });
+  }
   for (const button of detailPanel.querySelectorAll("[data-source-hash-path]")) {
     if (button.dataset.hashBound) continue;
     button.dataset.hashBound = "1";
@@ -4355,6 +4373,82 @@ function formatBytes(value) {
 
 function compareStorageKey() {
   return `${COMPARE_STORAGE_PREFIX}${selectedRunId || "default"}`;
+}
+
+function viewerNavigationStorageKey() {
+  return `${VIEWER_NAVIGATION_STORAGE_PREFIX}${selectedRunId || "default"}`;
+}
+
+function getViewerNavigation() {
+  if (!storageAvailable()) return { items: [], index: -1 };
+  try {
+    const payload = JSON.parse(window.localStorage.getItem(viewerNavigationStorageKey()) || "{}");
+    const items = Array.isArray(payload.items)
+      ? payload.items.filter((item) => item?.path).slice(-VIEWER_NAVIGATION_LIMIT)
+      : [];
+    const index = Math.max(-1, Math.min(items.length - 1, Number(payload.index ?? items.length - 1)));
+    return { items, index };
+  } catch {
+    return { items: [], index: -1 };
+  }
+}
+
+function setViewerNavigation(state) {
+  if (!storageAvailable()) return;
+  const items = Array.isArray(state.items)
+    ? state.items.filter((item) => item?.path).slice(-VIEWER_NAVIGATION_LIMIT)
+    : [];
+  const index = Math.max(-1, Math.min(items.length - 1, Number(state.index ?? items.length - 1)));
+  window.localStorage.setItem(viewerNavigationStorageKey(), JSON.stringify({ items, index }));
+}
+
+function recordViewerNavigation(payload, reviewContext = null, searchResultIndex = null, options = {}) {
+  if (options.fromHistory || !payload?.path) return getViewerNavigation();
+  const state = getViewerNavigation();
+  const current = state.items[state.index] || null;
+  const pointer = reviewContext?.pointer || "";
+  if (current?.path === payload.path && (current.reviewContext?.pointer || "") === pointer) {
+    return state;
+  }
+  const nextItem = {
+    path: payload.path,
+    title: payload.name || fileName(payload.path),
+    preview_type: payload.preview_type || "source",
+    reviewContext: reviewContext || null,
+    searchResultIndex: searchResultIndex === null || searchResultIndex === undefined ? null : String(searchResultIndex),
+    opened_at: new Date().toISOString(),
+  };
+  const prefix = state.index >= 0 ? state.items.slice(0, state.index + 1) : state.items;
+  const items = [...prefix, nextItem].slice(-VIEWER_NAVIGATION_LIMIT);
+  const nextState = { items, index: items.length - 1 };
+  setViewerNavigation(nextState);
+  return nextState;
+}
+
+function renderViewerNavigationControls(payload) {
+  const state = getViewerNavigation();
+  const canBack = state.index > 0;
+  const canForward = state.index >= 0 && state.index < state.items.length - 1;
+  const current = state.index >= 0 ? `${state.index + 1}/${state.items.length}` : "0/0";
+  return `
+    <nav class="viewer-navigation-bar" aria-label="Opened source navigation" data-testid="viewer-navigation-bar" data-navigation-contract="${escapeHtml(VIEWER_NAVIGATION_CONTRACT.profile_version)}">
+      <button class="secondary-button" type="button" data-viewer-history-delta="-1" ${canBack ? "" : "disabled"}>Back</button>
+      <button class="secondary-button" type="button" data-viewer-history-delta="1" ${canForward ? "" : "disabled"}>Forward</button>
+      <span>${escapeHtml(current)} opened source(s)</span>
+      <small>${escapeHtml(payload.path || "")}</small>
+    </nav>
+  `;
+}
+
+async function goViewerNavigation(delta) {
+  const state = getViewerNavigation();
+  const nextIndex = state.index + Number(delta || 0);
+  if (nextIndex < 0 || nextIndex >= state.items.length) return false;
+  const nextState = { items: state.items, index: nextIndex };
+  setViewerNavigation(nextState);
+  const item = nextState.items[nextIndex];
+  await loadEvidencePreview(item.path, item.reviewContext || null, item.searchResultIndex, { fromHistory: true });
+  return true;
 }
 
 function getCompareItems() {
