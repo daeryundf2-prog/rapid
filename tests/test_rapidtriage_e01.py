@@ -26,6 +26,7 @@ from rapidtriage.core.e01 import (
     extract_e01_to_directory,
     image_core_accuracy_gates,
     mmls_first_filesystem,
+    parse_mmls_partitions,
     select_mmls_filesystem,
 )
 from rapidtriage.core.e01_smoke import run_windows11_e01_smoke
@@ -118,10 +119,15 @@ class RapidTriageE01Tests(unittest.TestCase):
             self.assertTrue((output_dir / "windows11-e01-known-answer.json").is_file())
             self.assertTrue((output_dir / "rapidtriage-evidence-preflight.json").is_file())
             self.assertTrue((output_dir / "rapidforensic-e01-smoke.json").is_file())
+            self.assertTrue((output_dir / "rapidforensic-e01-workflow-stage-status.json").is_file())
             stage_status = {stage["id"]: stage["status"] for stage in payload["stages"]}
             self.assertEqual(stage_status["known-answer-manifest"], "complete")
             self.assertEqual(stage_status["evidence-preflight"], "complete")
             self.assertEqual(stage_status["triage-run"], "blocked")
+            self.assertEqual(payload["stage_status"]["schema"], "rapidforensic-e01-workflow-stage-status-v1")
+            self.assertEqual(payload["stage_status"]["stage_counts"]["blocked"], 1)
+            self.assertEqual(payload["stage_status"]["blocked_stage_ids"], ["triage-run"])
+            self.assertEqual(payload["outputs"]["stage_status"]["exists"], True)
             self.assertEqual(payload["known_answer_manifest"]["expected"]["partitions"][0]["start_sector"], 2048)
             self.assertIn("failure_guidance", payload["run_error"])
             self.assertIsNone(payload["outputs"]["smoke_report"]["sha256"])
@@ -153,6 +159,7 @@ class RapidTriageE01Tests(unittest.TestCase):
             self.assertEqual(payload["status"], "blocked")
             self.assertEqual(payload["outputs"]["known_answer_manifest"]["exists"], True)
             self.assertEqual(payload["outputs"]["evidence_preflight"]["exists"], True)
+            self.assertEqual(payload["outputs"]["stage_status"]["exists"], True)
             self.assertEqual(payload["outputs"]["smoke_report"]["exists"], True)
 
     def test_mmls_partition_selection_prefers_largest_supported_filesystem(self) -> None:
@@ -165,6 +172,28 @@ DOS Partition Table
 """
 
         self.assertEqual(mmls_first_filesystem(text), 13048)
+
+    def test_mmls_partition_rows_include_browser_metadata(self) -> None:
+        text = """
+DOS Partition Table
+Units are in 512-byte sectors
+000: 0000000000 0000002047 Unallocated
+001: 0000002048 0000010000 NTFS / exFAT (0x07)
+002: 0000012048 0000001000 Linux swap
+003: 0000013048 0000090000 Basic data partition
+"""
+
+        rows = parse_mmls_partitions(text)
+
+        self.assertEqual(rows[1]["partition_number"], 1)
+        self.assertEqual(rows[1]["start_sector"], 2048)
+        self.assertEqual(rows[1]["byte_offset"], 2048 * 512)
+        self.assertEqual(rows[1]["size_bytes"], 10000 * 512)
+        self.assertEqual(rows[1]["filesystem_guess"], "ntfs")
+        self.assertTrue(rows[1]["supported_filesystem_hint"])
+        self.assertFalse(rows[2]["supported_filesystem_hint"])
+        self.assertEqual(rows[2]["filesystem_guess"], "swap")
+        self.assertTrue(rows[1]["manual_override_allowed"])
 
     def test_mmls_partition_selection_accepts_linux_xfs_and_ext(self) -> None:
         text = """
@@ -221,14 +250,22 @@ DOS Partition Table
     def test_e01_failure_guidance_classifies_operator_next_steps(self) -> None:
         missing = e01_failure_guidance("E01 direct input requires external tools: ewfmount")
         encrypted = e01_failure_guidance("tsk_recover failed: BitLocker encrypted volume")
+        corrupt = e01_failure_guidance("ewfmount failed: corrupt segment checksum read error")
+        unsupported_fs = e01_failure_guidance("requested partition does not look like a supported filesystem")
         partition = e01_failure_guidance("requested partition start sector 999 was not found")
         permission = e01_failure_guidance("ewfmount failed: operation not permitted")
+        external = e01_failure_guidance("tsk_recover failed: unknown Sleuth Kit error")
 
         self.assertEqual(missing["category"], "missing-tool")
         self.assertEqual(encrypted["category"], "encrypted-volume")
+        self.assertEqual(corrupt["category"], "corrupt-image")
+        self.assertEqual(unsupported_fs["category"], "unsupported-filesystem")
         self.assertEqual(partition["category"], "partition-ambiguity")
         self.assertEqual(permission["category"], "permission")
+        self.assertEqual(external["category"], "external-tool-failure")
         self.assertTrue(missing["next_actions"])
+        self.assertIn("ewfverify", " ".join(corrupt["next_actions"]))
+        self.assertIn("export", " ".join(unsupported_fs["next_actions"]).lower())
 
     def test_e01_evidence_preflight_writes_operator_runbook(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -412,12 +449,22 @@ DOS Partition Table
             metadata = result.to_dict()
             self.assertEqual(metadata["partition_start_sector"], 2048)
             self.assertEqual(metadata["partition_selection"]["selected_start_sector"], 2048)
+            self.assertEqual(metadata["partition_selection"]["selected_byte_offset"], 2048 * 512)
+            self.assertEqual(metadata["partition_selection"]["selected_filesystem_guess"], "ntfs")
             self.assertEqual(metadata["partition_selection"]["recommended_start_sector"], 13048)
             self.assertEqual(metadata["partition_selection"]["requested_start_sector"], 2048)
             self.assertEqual(metadata["partition_selection"]["selection_source"], "user-request")
+            self.assertEqual(metadata["partition_selection"]["manual_override"]["requested_start_sector"], 2048)
+            self.assertTrue(metadata["partition_selection"]["manual_override"]["warning_required_when_differs_from_recommendation"])
+            self.assertIn("byte_offset", metadata["partition_selection"]["partition_browser_columns"])
+            self.assertTrue(metadata["partition_selection"]["partition_browser_rows"][0]["selected_for_recovery"])
+            self.assertFalse(metadata["partition_selection"]["partition_browser_rows"][0]["recommended_for_recovery"])
+            self.assertTrue(metadata["partition_selection"]["partition_browser_rows"][1]["recommended_for_recovery"])
             self.assertIn("differs", metadata["partition_selection"]["selection_warning"])
             self.assertTrue(metadata["partition_table"][0]["selected_for_recovery"])
+            self.assertFalse(metadata["partition_table"][0]["recommended_for_recovery"])
             self.assertFalse(metadata["partition_table"][1]["selected_for_recovery"])
+            self.assertTrue(metadata["partition_table"][1]["recommended_for_recovery"])
 
     def test_extract_e01_resumes_completed_filesystem_recovery_checkpoint(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -451,6 +498,7 @@ DOS Partition Table
             checkpoint_path = stage_dir / "rapidtriage-e01-stage-status.json"
             self.assertTrue(checkpoint_path.is_file())
             self.assertFalse(first_result.resume_status["resumed_from_checkpoint"])
+            self.assertEqual(first_result.resume_status["reuse_reasons"], [])
             self.assertIn("read-only-filesystem-recovery", first_result.resume_status["completed_stages"])
 
             def forbidden_runner(command):
@@ -466,6 +514,8 @@ DOS Partition Table
             self.assertEqual(resumed_result.partition_start_sector, 2048)
             self.assertTrue(resumed_result.resume_status["resumed_from_checkpoint"])
             self.assertTrue(resumed_result.resume_status["resume_ready"])
+            self.assertIn("source signature matched", " ".join(resumed_result.resume_status["reuse_reasons"]))
+            self.assertIn("verify source signature", resumed_result.resume_status["resume_warning"])
             self.assertIn("read-only-filesystem-recovery", resumed_result.resume_status["completed_stages"])
             self.assertEqual(resumed_result.recovered_root_manifest["hashed_file_count"], 1)
             self.assertEqual((resumed_result.extract_dir / "evidence.txt").read_text(encoding="utf-8"), "recovered once")

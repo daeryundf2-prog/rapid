@@ -83,6 +83,22 @@ E01_FAILURE_GUIDANCE: dict[str, dict[str, object]] = {
             "Unlock or export the decrypted filesystem with an authorized forensic workflow, then scan that folder.",
         ],
     },
+    "corrupt-image": {
+        "title": "Corrupt or damaged image suspected",
+        "analyst_message": "The image or exposed raw stream appears damaged, truncated, or unreadable.",
+        "next_actions": [
+            "Run ewfverify or the acquisition tool's validation workflow and preserve the transcript.",
+            "Try a trusted forensic suite export and attach the export log if direct recovery fails.",
+        ],
+    },
+    "unsupported-filesystem": {
+        "title": "Unsupported filesystem or volume layout",
+        "analyst_message": "RapidForensic did not find a supported filesystem partition for direct recovery.",
+        "next_actions": [
+            "Review the partition table manually and confirm the correct start sector.",
+            "If the filesystem is unsupported, export the filesystem with a trusted tool and scan the exported folder.",
+        ],
+    },
     "partition-ambiguity": {
         "title": "Partition selection needs analyst review",
         "analyst_message": "RapidForensic could not confidently select a supported filesystem partition.",
@@ -319,6 +335,115 @@ def build_e01_segment_set_profile(source_path: Path) -> dict[str, object]:
     }
 
 
+def build_e01_intake_profile(
+    source_path: Path,
+    *,
+    source_integrity: Mapping[str, object] | None = None,
+    segment_set_profile: Mapping[str, object] | None = None,
+    max_hash_bytes: int = DIRECT_IMAGE_HASH_LIMIT_BYTES,
+) -> dict[str, object]:
+    """Describe what the analyst selected before any E01 processing starts.
+
+    This is the GUI/API contract for checklist item #1. It intentionally avoids
+    claiming native EWF parsing; it records the selected source, split-set
+    inventory, bounded hash feasibility, and read-only posture so a user can
+    decide whether to proceed or switch to a trusted export workflow.
+    """
+
+    resolved = source_path.expanduser().resolve()
+    exists = resolved.is_file()
+    supported_extension = is_e01_path(resolved)
+    stat_payload: dict[str, object] = {}
+    if exists:
+        stat_result = resolved.stat()
+        stat_payload = {
+            "size_bytes": stat_result.st_size,
+            "mtime_ns": stat_result.st_mtime_ns,
+        }
+    integrity = dict(source_integrity or (describe_source_integrity(resolved) if exists else {}))
+    segment_profile = dict(
+        segment_set_profile
+        or (
+            build_e01_segment_set_profile(resolved)
+            if exists and supported_extension
+            else {
+                "profile_version": "ewf-segment-set-v1",
+                "selected_segment": str(resolved),
+                "segment_count": 0,
+                "segment_numbers": [],
+                "segments": [],
+                "warnings": ["source image is missing or is not a supported E01/Ex01 path"],
+                "validation_status": "missing-or-unsupported",
+            }
+        )
+    )
+    source_size = int(stat_payload.get("size_bytes") or integrity.get("size") or 0)
+    profile: dict[str, object] = {
+        "profile_version": "e01-intake-profile-v1",
+        "checklist_item": 1,
+        "qc_gap_id": "#1",
+        "source": {
+            "path": str(resolved),
+            "filename": resolved.name,
+            "extension": resolved.suffix.lower(),
+            "exists": exists,
+            "supported_extension": supported_extension,
+            **stat_payload,
+        },
+        "source_signature": {
+            "path": str(resolved),
+            "filename": resolved.name,
+            "size_bytes": source_size,
+            "mtime_ns": stat_payload.get("mtime_ns"),
+            "segment_count": int(segment_profile.get("segment_count") or 0),
+            "selected_segment": segment_profile.get("selected_segment") or str(resolved),
+        },
+        "segment_set_profile": segment_profile,
+        "hash_feasibility": {
+            "preflight_hash_algorithm": integrity.get("hash_algorithm", "sha256"),
+            "preflight_hash_status": integrity.get("hash_status", "not-run"),
+            "preflight_sha256": integrity.get("sha256"),
+            "max_preflight_hash_bytes": max_hash_bytes,
+            "source_size_bytes": source_size,
+            "full_hash_feasible_in_preflight": bool(exists and source_size <= max_hash_bytes),
+            "full_image_hash_required_before_report": True,
+            "acquisition_hash_warning": (
+                "Full source hash was computed in preflight."
+                if integrity.get("hash_status") == "computed"
+                else "Attach an acquisition/full-image hash before report-grade use."
+            ),
+        },
+        "read_only_posture": {
+            "source_open_mode": "read-only",
+            "writes_to_source": False,
+            "writes_to_source_folder": False,
+            "writes_to_stage_or_output_only": True,
+            "operator_warning": "Do not write outputs next to the original evidence image unless the location is a separate working copy.",
+        },
+        "processing_decision": {
+            "can_continue_to_dependency_preflight": bool(exists and supported_extension),
+            "blocked_reason": ""
+            if exists and supported_extension
+            else "Select a readable .E01/.Ex01 first segment before processing.",
+            "next_stage": "dependency-preflight" if exists and supported_extension else "select-supported-e01",
+        },
+        "reportability_decision": {
+            "decision": "intake-ready-for-triage" if exists and supported_extension else "intake-blocked",
+            "allowed_use": "source-selection-and-preflight-context",
+            "not_allowed_use": "native-EWF-parser-completeness-claim",
+            "required_before_report": [
+                "full source/acquisition hash",
+                "segment set inventory",
+                "dependency preflight",
+                "partition selection",
+                "trusted-tool or known-answer validation when making report-grade claims",
+            ],
+        },
+    }
+    profile["manifest_sha256"] = stable_manifest_sha256(profile)
+    return profile
+
+
 def missing_e01_tools(tool_resolver: ToolResolver = shutil.which) -> list[str]:
     return [tool for tool in E01_REQUIRED_TOOLS if tool_resolver(tool) is None]
 
@@ -378,6 +503,10 @@ def e01_failure_guidance(message: str) -> dict[str, object]:
         category = "missing-tool"
     elif any(token in lowered for token in ("bitlocker", "encrypted", "locked volume", "decrypt")):
         category = "encrypted-volume"
+    elif any(token in lowered for token in ("corrupt", "damaged", "truncated", "checksum", "bad sector", "read error")):
+        category = "corrupt-image"
+    elif any(token in lowered for token in ("unsupported filesystem", "supported filesystem", "unsupported fs", "unsupported volume")):
+        category = "unsupported-filesystem"
     elif any(token in lowered for token in ("could not find", "requested partition", "partition start sector")):
         category = "partition-ambiguity"
     elif "not found" in lowered or "unsupported e01 image extension" in lowered:
@@ -946,7 +1075,11 @@ def extract_e01_to_directory(
             recommended_start_sector=recommended_sector,
             requested_start_sector=partition_start_sector,
         )
-        checkpoint_payload["partition_table"] = mark_selected_partition(partition_table, start_sector)
+        checkpoint_payload["partition_table"] = mark_selected_partition(
+            partition_table,
+            start_sector,
+            recommended_start_sector=recommended_sector,
+        )
         checkpoint_payload["partition_selection"] = partition_selection
         write_e01_stage_checkpoint(checkpoint_path, checkpoint_payload)
 
@@ -977,7 +1110,13 @@ def extract_e01_to_directory(
             partition_start_sector=start_sector,
             source_integrity=describe_source_integrity(source_path),
             tool_preflight=tuple(tool_preflight),
-            partition_table=tuple(mark_selected_partition(partition_table, start_sector)),
+            partition_table=tuple(
+                mark_selected_partition(
+                    partition_table,
+                    start_sector,
+                    recommended_start_sector=recommended_sector,
+                )
+            ),
             partition_selection=partition_selection,
             command_history=tuple(command_history),
             warnings=(
@@ -1064,6 +1203,19 @@ def build_e01_resume_status(
             for name, stage in dict(stages).items()
             if isinstance(stage, Mapping) and stage.get("status") == "failed"
         ],
+        "reuse_reasons": [
+            "completed checkpoint was present",
+            "source signature matched current image",
+            "requested partition start sector matched",
+            "recovered filesystem output directory still contains files",
+        ]
+        if resumed
+        else [],
+        "resume_warning": (
+            "Completed extraction stages were reused; preserve checkpoint JSON and verify source signature before report use."
+            if resumed
+            else ""
+        ),
     }
 
 
@@ -1172,28 +1324,49 @@ def select_mmls_filesystem(text: str, *, preferred_start_sector: int | None = No
 
 def parse_mmls_partitions(text: str) -> list[dict[str, object]]:
     partitions: list[dict[str, object]] = []
+    sector_size = mmls_sector_size_bytes(text)
     for line in text.splitlines():
         match = re.search(r"^\s*(\d+):\s+(\d+)\s+(\d+)\s+(.+)$", line)
         if not match:
             continue
         description = match.group(4).strip()
+        start_sector = int(match.group(2))
+        sector_count = int(match.group(3))
+        filesystem_guess = guess_partition_filesystem(description)
         partitions.append(
             {
                 "slot": int(match.group(1)),
-                "start_sector": int(match.group(2)),
-                "sector_count": int(match.group(3)),
+                "partition_number": int(match.group(1)),
+                "start_sector": start_sector,
+                "sector_count": sector_count,
+                "sector_size_bytes": sector_size,
+                "byte_offset": start_sector * sector_size,
+                "size_bytes": sector_count * sector_size,
                 "description": description,
+                "filesystem_guess": filesystem_guess,
+                "boot_flag": bool(re.search(r"\bboot\b|\*", description, re.IGNORECASE)),
                 "supported_filesystem_hint": is_supported_mmls_description(description),
+                "recommended_for_recovery": False,
+                "selected_for_recovery": False,
+                "manual_override_allowed": True,
             }
         )
     return partitions
 
 
-def mark_selected_partition(partitions: Sequence[dict[str, object]], start_sector: int | None) -> list[dict[str, object]]:
+def mark_selected_partition(
+    partitions: Sequence[dict[str, object]],
+    start_sector: int | None,
+    *,
+    recommended_start_sector: int | None = None,
+) -> list[dict[str, object]]:
     marked: list[dict[str, object]] = []
     for partition in partitions:
         row = dict(partition)
         row["selected_for_recovery"] = start_sector is not None and row.get("start_sector") == start_sector
+        row["recommended_for_recovery"] = (
+            recommended_start_sector is not None and row.get("start_sector") == recommended_start_sector
+        )
         marked.append(row)
     return marked
 
@@ -1209,9 +1382,17 @@ def build_partition_selection_metadata(
         (partition for partition in partitions if int(partition.get("start_sector") or -1) == selected_start_sector),
         {},
     )
+    marked_partitions = mark_selected_partition(
+        partitions,
+        selected_start_sector,
+        recommended_start_sector=recommended_start_sector,
+    )
     return {
         "profile_version": "e01-partition-selection-v1",
         "selected_start_sector": selected_start_sector,
+        "selected_byte_offset": selected.get("byte_offset"),
+        "selected_size_bytes": selected.get("size_bytes"),
+        "selected_filesystem_guess": selected.get("filesystem_guess", ""),
         "recommended_start_sector": recommended_start_sector,
         "requested_start_sector": requested_start_sector,
         "selection_source": "user-request" if requested_start_sector is not None else "largest-supported-filesystem",
@@ -1219,12 +1400,68 @@ def build_partition_selection_metadata(
         "selected_description": selected.get("description", ""),
         "partition_count": len(partitions),
         "supported_partition_count": sum(1 for item in partitions if item.get("supported_filesystem_hint")),
+        "partition_browser_columns": [
+            "partition_number",
+            "start_sector",
+            "byte_offset",
+            "filesystem_guess",
+            "size_bytes",
+            "boot_flag",
+            "recommended_for_recovery",
+            "selected_for_recovery",
+        ],
+        "partition_browser_rows": marked_partitions,
+        "manual_override": {
+            "allowed": True,
+            "field": "start_sector",
+            "requested_start_sector": requested_start_sector,
+            "warning_required_when_differs_from_recommendation": bool(
+                requested_start_sector is not None and requested_start_sector != recommended_start_sector
+            ),
+        },
         "selection_warning": (
             ""
             if requested_start_sector is None or requested_start_sector == recommended_start_sector
             else "User-selected partition differs from the automatic recommendation; preserve the reason in case notes."
         ),
     }
+
+
+def mmls_sector_size_bytes(text: str) -> int:
+    match = re.search(r"Units are in\s+(\d+)[-\s]*byte sectors", text, re.IGNORECASE)
+    if not match:
+        return 512
+    try:
+        return int(match.group(1))
+    except ValueError:
+        return 512
+
+
+def guess_partition_filesystem(description: str) -> str:
+    lowered = description.lower()
+    if "ntfs" in lowered:
+        return "ntfs"
+    if "exfat" in lowered:
+        return "exfat"
+    if "fat" in lowered:
+        return "fat"
+    if "xfs" in lowered:
+        return "xfs"
+    if "ext4" in lowered:
+        return "ext4"
+    if "ext3" in lowered:
+        return "ext3"
+    if "ext2" in lowered:
+        return "ext2"
+    if "swap" in lowered:
+        return "swap"
+    if "linux" in lowered:
+        return "linux"
+    if "basic data" in lowered:
+        return "windows-basic-data"
+    if "unallocated" in lowered:
+        return "unallocated"
+    return "unknown"
 
 
 def is_supported_mmls_description(description: str) -> bool:
@@ -1276,6 +1513,11 @@ def build_windows11_e01_known_answer_manifest(
         "warnings": ["source image is missing or is not a supported E01/Ex01 path"],
         "validation_status": "missing-or-unsupported",
     }
+    intake_profile = build_e01_intake_profile(
+        source,
+        source_integrity=source_integrity,
+        segment_set_profile=segment_profile,
+    )
     expected_artifact_rows = [
         {
             "id": f"artifact-{index + 1:03d}",
@@ -1342,6 +1584,7 @@ def build_windows11_e01_known_answer_manifest(
             "is_supported_e01": is_e01_path(source),
             "integrity": source_integrity,
             "segment_set_profile": segment_profile,
+            "intake_profile": intake_profile,
         },
         "expected": {
             "partitions": partition_rows,

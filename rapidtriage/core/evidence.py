@@ -14,6 +14,7 @@ from .e01 import (
     E01_REPORT_GRADE_BLOCKERS,
     E01_SUFFIXES,
     E01_REQUIRED_TOOLS,
+    build_e01_intake_profile,
     collect_tool_preflight,
     build_e01_segment_set_profile,
     build_e01_ingest_workflow_profile,
@@ -77,6 +78,7 @@ class EvidenceAdapterResult:
     forensic_container_workflow_manifest: dict[str, object] | None = None
     ingest_workflow: dict[str, object] | None = None
     image_analyst_review_profile: dict[str, object] | None = None
+    e01_intake_profile: dict[str, object] | None = None
 
     def to_dict(self) -> dict[str, object]:
         return asdict(self)
@@ -145,6 +147,11 @@ class EwfAdapter:
         report_grade = image_report_grade_assessment("#22", E01_REPORT_GRADE_BLOCKERS)
         source_integrity = describe_source_integrity(source) if source.is_file() else None
         segment_set_profile = build_e01_segment_set_profile(source) if source.is_file() and supported else None
+        e01_intake_profile = build_e01_intake_profile(
+            source,
+            source_integrity=source_integrity,
+            segment_set_profile=segment_set_profile,
+        )
         tool_preflight = collect_tool_preflight(E01_REQUIRED_TOOLS) if supported else None
         preflight_summary = e01_preflight_summary(tool_preflight or [], missing_tools=missing) if supported else None
         failure_guidance = (
@@ -260,6 +267,7 @@ class EwfAdapter:
             failure_guidance=failure_guidance,
             segment_set_profile=segment_set_profile,
             ingest_workflow=ingest_workflow,
+            e01_intake_profile=e01_intake_profile,
             image_analyst_review_profile=image_workflow_analyst_review_profile(
                 22,
                 {

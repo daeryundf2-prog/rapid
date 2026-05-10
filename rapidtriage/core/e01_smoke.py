@@ -15,6 +15,7 @@ E01_SMOKE_PROFILE_VERSION = "windows11-e01-end-to-end-smoke-v1"
 E01_SMOKE_OUTPUT_NAME = "rapidforensic-e01-smoke.json"
 E01_KNOWN_ANSWER_OUTPUT_NAME = "windows11-e01-known-answer.json"
 E01_EVIDENCE_PREFLIGHT_OUTPUT_NAME = "rapidtriage-evidence-preflight.json"
+E01_STAGE_STATUS_OUTPUT_NAME = "rapidforensic-e01-workflow-stage-status.json"
 
 
 def _output_status(path: Path) -> dict[str, object]:
@@ -92,6 +93,7 @@ def run_windows11_e01_smoke(
     known_answer_path = output_dir / E01_KNOWN_ANSWER_OUTPUT_NAME
     evidence_path = output_dir / E01_EVIDENCE_PREFLIGHT_OUTPUT_NAME
     smoke_path = output_dir / E01_SMOKE_OUTPUT_NAME
+    stage_status_path = output_dir / E01_STAGE_STATUS_OUTPUT_NAME
     run_dir = output_dir / "run"
 
     expected_artifacts = list(expected_artifacts or [])
@@ -192,9 +194,41 @@ def run_windows11_e01_smoke(
     completed = run_payload is not None
     blocked = any(stage.get("status") == "blocked" for stage in stages)
     status = "complete" if completed else "blocked" if blocked else "planned"
+    stage_status_payload: dict[str, object] = {
+        "schema": "rapidforensic-e01-workflow-stage-status-v1",
+        "profile_version": "windows11-e01-stage-status-v1",
+        "generated_at": dt.datetime.now(dt.timezone.utc).isoformat(),
+        "case_id": case_id,
+        "source_path": str(source),
+        "status": status,
+        "read_only": read_only,
+        "resume_requested": resume,
+        "run_dir": str(run_dir),
+        "stage_counts": {
+            "total": len(stages),
+            "complete": sum(1 for stage in stages if stage.get("status") == "complete"),
+            "blocked": sum(1 for stage in stages if stage.get("status") == "blocked"),
+            "skipped": sum(1 for stage in stages if stage.get("status") == "skipped"),
+        },
+        "blocked_stage_ids": [str(stage.get("id")) for stage in stages if stage.get("status") == "blocked"],
+        "stages": stages,
+        "checkpoint_resume_policy": {
+            "resume_supported": True,
+            "resume_requested": resume,
+            "reuse_completed_extraction_stages_when_source_fingerprint_matches": True,
+            "stage_status_sidecar": stage_status_path.name,
+        },
+        "qc_links": {
+            "known_answer_manifest": str(known_answer_path),
+            "evidence_preflight": str(evidence_path),
+            "smoke_report": str(smoke_path),
+        },
+    }
+    write_result(stage_status_payload, stage_status_path)
     outputs: dict[str, object] = {
         "known_answer_manifest": _output_status(known_answer_path),
         "evidence_preflight": _output_status(evidence_path),
+        "stage_status": _output_status(stage_status_path),
     }
     if run_payload and isinstance(run_payload.get("outputs"), Mapping):
         outputs["run"] = _run_output_statuses(run_payload["outputs"])
@@ -209,6 +243,7 @@ def run_windows11_e01_smoke(
         "input_kind": input_kind,
         "status": status,
         "stages": stages,
+        "stage_status": stage_status_payload,
         "known_answer_manifest": known_answer,
         "evidence_preflight": evidence,
         "run_summary": run_payload.get("summary", {}) if run_payload else {},
