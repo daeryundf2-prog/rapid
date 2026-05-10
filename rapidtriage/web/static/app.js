@@ -294,6 +294,12 @@ const TABLE_CONTROL_CONTRACT = {
   checklist_item: 12,
   controls: ["pagination", "virtual-window", "visible-row-filter", "column-preset", "source-filter", "time-filter", "keyboard-navigation"],
 };
+const PREVIEW_DETAIL_CONTRACT = {
+  profile_version: "analyst-preview-detail-contract-v1",
+  checklist_item: 13,
+  default_metadata_state: "collapsed",
+  required_cards: ["analyst-summary", "source-locator", "hash-verification", "limitation-warning", "review-actions"],
+};
 
 let selectedRunId = null;
 let selectedRun = null;
@@ -541,25 +547,94 @@ function renderWorkbenchLayoutFrame(run, tab) {
         </div>
         <div id="tabBody" class="tab-body" data-testid="tab-body"></div>
       </main>
-      <aside class="workbench-preview-rail" aria-label="Preview, evidence tray, and report tray" data-testid="workbench-preview-detail">
-        <section class="preview-detail-card" data-testid="preview-detail-card">
-          <p class="eyebrow">preview / detail</p>
-          <strong>Open a row or search hit</strong>
-          <span>원본 뷰어, source locator, hash, limitation을 여기 흐름에서 확인합니다.</span>
-        </section>
-        <section class="evidence-tray-card" data-testid="evidence-tray">
-          <p class="eyebrow">evidence tray</p>
-          <strong>${formatNumber(reportCandidates)} report candidate(s)</strong>
-          <span>relevant, needs-review, excluded, include-in-report 상태를 누적합니다.</span>
+      ${renderPreviewRail(run, tab, reportCandidates)}
+    </section>
+  `;
+}
+
+function renderPreviewRail(run, tab, reportCandidates) {
+  return `
+    <aside class="workbench-preview-rail" aria-label="Preview, evidence tray, and report tray" data-testid="workbench-preview-detail" data-preview-contract="${escapeHtml(PREVIEW_DETAIL_CONTRACT.profile_version)}">
+      ${renderPreviewDetailCard(run, tab)}
+      ${renderSourceLocatorCard(run)}
+      ${renderHashVerificationCard(run)}
+      ${renderLimitationWarningCard(run)}
+      <section class="evidence-tray-card" data-testid="evidence-tray">
+        <p class="eyebrow">evidence tray</p>
+        <strong>${formatNumber(reportCandidates)} report candidate(s)</strong>
+        <span>relevant, needs-review, excluded, include-in-report 상태를 누적합니다.</span>
+        <div class="preview-action-row" data-testid="preview-review-actions">
           <button class="secondary-button" type="button" data-open-tab="review">Open review</button>
-        </section>
-        <section class="report-tray-card" data-testid="report-tray">
-          <p class="eyebrow">report tray</p>
-          <strong>Submission package</strong>
-          <span>검토된 항목만 hash manifest와 case report로 내보냅니다.</span>
-          <button class="secondary-button" type="button" data-open-tab="report">Open report</button>
-        </section>
-      </aside>
+          <button class="secondary-button" type="button" data-open-tab="search">Find related</button>
+        </div>
+      </section>
+      <section class="report-tray-card" data-testid="report-tray">
+        <p class="eyebrow">report tray</p>
+        <strong>Submission package</strong>
+        <span>검토된 항목만 hash manifest와 case report로 내보냅니다.</span>
+        <button class="secondary-button" type="button" data-open-tab="report">Open report</button>
+      </section>
+    </aside>
+  `;
+}
+
+function renderPreviewDetailCard(run, tab) {
+  const tabSignals = artifactGroupCount(run, WORKBENCH_ARTIFACT_TREE_GROUPS.find((group) => group.tab === tab)?.terms || [tab]);
+  return `
+    <section class="preview-detail-card analyst-preview-card" data-testid="preview-detail-card">
+      <p class="eyebrow">preview / detail</p>
+      <strong>Open a row or search hit</strong>
+      <span>현재 ${escapeHtml(tabLabel(tab))} 영역에는 ${formatNumber(tabSignals)} signal(s)이 잡혀 있습니다. 결과를 열면 원본 뷰어, source locator, citation, review action이 이 흐름으로 이어집니다.</span>
+      <div class="preview-priority-strip" data-testid="preview-analyst-summary">
+        <span>1. Verify source</span>
+        <span>2. Hash/cite</span>
+        <span>3. Review state</span>
+      </div>
+    </section>
+  `;
+}
+
+function renderSourceLocatorCard(run) {
+  const root = run.request?.root || run.summary?.output_dir || "not recorded";
+  const outputDir = run.summary?.output_dir || "not recorded";
+  return `
+    <section class="preview-detail-card source-locator-card" data-testid="preview-source-locator">
+      <p class="eyebrow">source locator</p>
+      <strong>원본 위치 먼저 확인</strong>
+      <span>행을 열면 absolute path, run-root relative path, Windows-style path를 source viewer가 해석합니다.</span>
+      <details class="metadata-disclosure preview-metadata-disclosure" data-testid="preview-metadata-disclosure">
+        <summary>Technical metadata hidden by default</summary>
+        <dl class="preview-metadata-list">
+          <dt>Run ID</dt><dd>${escapeHtml(run.run_id || "unknown")}</dd>
+          <dt>Input root</dt><dd><code>${escapeHtml(root)}</code></dd>
+          <dt>Output dir</dt><dd><code>${escapeHtml(outputDir)}</code></dd>
+        </dl>
+      </details>
+    </section>
+  `;
+}
+
+function renderHashVerificationCard(run) {
+  const outputs = Object.keys(run.summary?.outputs || {});
+  return `
+    <section class="preview-detail-card hash-verification-card" data-testid="preview-hash-card">
+      <p class="eyebrow">hash / citation</p>
+      <strong>${formatNumber(outputs.length)} output pointer(s)</strong>
+      <span>보고서 후보는 source hash, parser version, offset/index, review state가 붙은 뒤에만 제출 묶음으로 올립니다.</span>
+      <button class="secondary-button" type="button" data-open-tab="report">Open hash manifest</button>
+    </section>
+  `;
+}
+
+function renderLimitationWarningCard(run) {
+  const processing = run.summary?.processing || {};
+  const warningCount = Number(processing.warning_count || 0);
+  const label = warningCount ? `${formatNumber(warningCount)} warning(s)` : "No processing warning recorded";
+  return `
+    <section class="preview-detail-card limitation-warning-card ${warningCount ? "warning" : ""}" data-testid="preview-limitation-warning">
+      <p class="eyebrow">limitation</p>
+      <strong>${escapeHtml(label)}</strong>
+      <span>상용급/법정 제출 판단은 validation diff, source hash, parser limitation을 같이 확인해야 합니다. 요약 카드만 보고 결론 내리지 않습니다.</span>
     </section>
   `;
 }

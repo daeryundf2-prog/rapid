@@ -763,6 +763,59 @@ button:disabled {
   padding: 12px;
 }
 
+.analyst-preview-card {
+  border-color: rgba(15, 116, 107, 0.24);
+  background:
+    linear-gradient(135deg, rgba(15, 116, 107, 0.08), rgba(255, 253, 248, 0.96)),
+    #fffdf8;
+}
+
+.preview-priority-strip,
+.preview-action-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+}
+
+.preview-priority-strip span {
+  border-radius: 999px;
+  background: rgba(15, 116, 107, 0.1);
+  color: var(--accent-strong);
+  padding: 4px 8px;
+  font-size: 0.72rem;
+  font-weight: 800;
+}
+
+.source-locator-card code {
+  overflow-wrap: anywhere;
+}
+
+.preview-metadata-list {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 5px 8px;
+  margin: 8px 0 0;
+}
+
+.preview-metadata-list dt {
+  color: var(--muted);
+  font-size: 0.74rem;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.preview-metadata-list dd {
+  min-width: 0;
+  margin: 0;
+  font-size: 0.78rem;
+}
+
+.limitation-warning-card.warning {
+  border-color: rgba(180, 83, 9, 0.36);
+  background: #fff7ed;
+}
+
 .empty-state {
   color: var(--muted);
 }
