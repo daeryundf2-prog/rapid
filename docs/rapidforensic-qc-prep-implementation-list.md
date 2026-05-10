@@ -27,7 +27,7 @@ Before formal QC, a Windows 11 E01 single-case workflow should let an analyst:
 ## Phase 1: Single-Case E01 Workflow
 
 1. Wire E01 selection to one end-to-end command and GUI flow: preflight, partition selection, extraction, run, search, review, report. Current implementation emits `qc-prep-e01-end-to-end-handoff-v1` in E01 evidence preflight and shows an `e01-end-to-end-handoff` GUI card with Start/Search/Review/Report handoff actions; remaining QC still requires a real Windows 11 E01 smoke run and trusted extraction logs.
-2. Add GUI partition browser with partition number, start sector, size, filesystem guess, recommendation, and manual override.
+2. Add GUI partition browser with partition number, start sector, size, filesystem guess, recommendation, and manual override. Current implementation emits `e01-partition-browser-v1` in the E01 workflow and renders an `e01-partition-browser` GUI table with manual start-sector handoff into the run form; remaining QC still requires a real E01/mmls partition transcript and trusted-tool comparison evidence.
 3. Add VSC discovery and extraction handoff for E01/RAW workflows, not only already-mounted folder comparison.
 4. Surface stage checkpoint, resume, cancel, retry, and failure classification in GUI and JSON outputs.
 5. Add fresh Windows/macOS GUI launch smoke evidence for the single-case workflow.

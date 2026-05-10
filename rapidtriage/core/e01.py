@@ -191,6 +191,12 @@ class E01ExtractionResult:
             "command_history": list(self.command_history),
             "warnings": list(self.warnings),
             "partition_selection": self.partition_selection,
+            "partition_browser": build_e01_partition_browser_contract(
+                partition_selection=self.partition_selection,
+                partition_table=self.partition_table,
+                direct_extract_ready=True,
+                blocked_reason="",
+            ),
             "resume_status": self.resume_status,
             "recovered_root_manifest": self.recovered_root_manifest,
             "segment_set_profile": self.segment_set_profile,
@@ -625,6 +631,94 @@ def build_e01_operator_runbook(
     }
 
 
+def build_e01_partition_browser_contract(
+    *,
+    partition_selection: Mapping[str, object] | None,
+    partition_table: Sequence[Mapping[str, object]] | None,
+    direct_extract_ready: bool,
+    blocked_reason: str = "",
+) -> dict[str, object]:
+    selection = dict(partition_selection or {})
+    rows = []
+    selected_sector = _optional_int(selection.get("selected_start_sector"))
+    recommended_sector = _optional_int(selection.get("recommended_start_sector"))
+    requested_sector = _optional_int(selection.get("requested_start_sector"))
+    for index, partition in enumerate(partition_table or [], start=1):
+        start_sector = _optional_int(partition.get("start_sector"))
+        row = {
+            "partition_number": partition.get("partition_number", partition.get("slot", index)),
+            "start_sector": start_sector,
+            "byte_offset": partition.get("byte_offset"),
+            "size_bytes": partition.get("size_bytes"),
+            "sector_count": partition.get("sector_count"),
+            "filesystem_guess": partition.get("filesystem_guess") or "unknown",
+            "description": partition.get("description") or "",
+            "supported_filesystem_hint": bool(partition.get("supported_filesystem_hint")),
+            "recommended_for_recovery": bool(partition.get("recommended_for_recovery"))
+            or (recommended_sector is not None and start_sector == recommended_sector),
+            "selected_for_recovery": bool(partition.get("selected_for_recovery"))
+            or (selected_sector is not None and start_sector == selected_sector),
+            "manual_override_allowed": True,
+        }
+        if row["recommended_for_recovery"]:
+            row["recommendation"] = "recommended"
+        elif row["supported_filesystem_hint"]:
+            row["recommendation"] = "supported-alternative"
+        else:
+            row["recommendation"] = "review-before-use"
+        rows.append(row)
+    if selected_sector is None and rows:
+        selected = next((row for row in rows if row["selected_for_recovery"]), None)
+        selected_sector = _optional_int((selected or {}).get("start_sector"))
+    status = "ready" if rows else ("pending-mmls" if direct_extract_ready else "blocked")
+    return {
+        "profile_version": "e01-partition-browser-v1",
+        "qc_prep_item": 2,
+        "goal": "Let analysts inspect the mmls partition table, accept the recommendation, or manually override the start sector before extraction.",
+        "status": status,
+        "blocked_reason": blocked_reason if status == "blocked" else "",
+        "columns": [
+            "partition_number",
+            "start_sector",
+            "size_bytes",
+            "filesystem_guess",
+            "recommendation",
+            "manual_override",
+        ],
+        "partition_count": len(rows),
+        "supported_partition_count": sum(1 for row in rows if row["supported_filesystem_hint"]),
+        "partitions": rows,
+        "selected_start_sector": selected_sector,
+        "recommended_start_sector": recommended_sector,
+        "requested_start_sector": requested_sector,
+        "manual_override": {
+            "enabled": True,
+            "input_id": "e01PartitionStartSectorInput",
+            "field": "start_sector",
+            "warning": "Only override the sector after reviewing mmls or trusted-tool partition evidence.",
+        },
+        "empty_state": (
+            "Run E01 extraction/smoke or attach trusted mmls output to populate the partition table."
+            if direct_extract_ready
+            else "Resolve E01 preflight blockers before partition enumeration."
+        ),
+        "validation_evidence_required": [
+            "mmls partition table transcript",
+            "selected/recommended start-sector provenance",
+            "manual override reason when the selected sector differs from the recommendation",
+        ],
+    }
+
+
+def _optional_int(value: object) -> int | None:
+    if value in (None, ""):
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
 def build_e01_ingest_workflow_profile(
     source_path: Path,
     *,
@@ -703,6 +797,12 @@ def build_e01_ingest_workflow_profile(
         direct_extract_ready=direct_extract_ready,
         blocked_reason=blocked_reason,
     )
+    partition_browser = build_e01_partition_browser_contract(
+        partition_selection=None,
+        partition_table=None,
+        direct_extract_ready=direct_extract_ready,
+        blocked_reason=blocked_reason,
+    )
     handoff_contract = {
         "profile_version": "qc-prep-e01-end-to-end-handoff-v1",
         "qc_prep_item": 1,
@@ -761,6 +861,7 @@ def build_e01_ingest_workflow_profile(
         "operator_runbook": runbook,
         "recommended_commands": runbook["recommended_commands"],
         "handoff_contract": handoff_contract,
+        "partition_browser": partition_browser,
         "commercial_gap_ids": ["#22", "#23", "#78", "#79"],
         "commercial_note": "This workflow is usable for triage, but commercial-grade E01 claims still require external corpus validation and trusted tool logs.",
     }

@@ -4873,6 +4873,7 @@ function bindPanelActions() {
       runForm?.requestSubmit();
     });
   }
+  bindE01PartitionControls(detailPanel);
   for (const button of detailPanel.querySelectorAll("[data-focus-case-db]")) {
     button.addEventListener("click", () => {
       detailPanel.querySelector(".case-db-panel")?.scrollIntoView({ behavior: "smooth", block: "start" });
@@ -6440,6 +6441,33 @@ function bindEvidenceCheckActions() {
       runForm?.requestSubmit();
     });
   }
+  bindE01PartitionControls(evidenceCheckStatus);
+}
+
+function bindE01PartitionControls(rootElement) {
+  if (!rootElement) return;
+  for (const button of rootElement.querySelectorAll("[data-e01-partition-sector]")) {
+    if (button.dataset.e01PartitionBound) continue;
+    button.dataset.e01PartitionBound = "1";
+    button.addEventListener("click", () => {
+      const sectorInput = document.querySelector("#e01PartitionStartSectorInput");
+      if (sectorInput) {
+        sectorInput.value = button.dataset.e01PartitionSector || "";
+        sectorInput.focus();
+      }
+      persistRunForm();
+      refreshRunPlanPreview();
+    });
+  }
+  for (const button of rootElement.querySelectorAll("[data-e01-partition-focus]")) {
+    if (button.dataset.e01PartitionFocusBound) continue;
+    button.dataset.e01PartitionFocusBound = "1";
+    button.addEventListener("click", () => {
+      const sectorInput = document.querySelector("#e01PartitionStartSectorInput");
+      sectorInput?.scrollIntoView({ behavior: "smooth", block: "center" });
+      sectorInput?.focus();
+    });
+  }
 }
 
 function applyEvidenceCheckRecommendation(result) {
@@ -6486,6 +6514,7 @@ function renderE01IngestWorkflow(workflow) {
       </div>
       <p>${escapeHtml(workflow.workflow_goal || "")}</p>
       ${workflow.blocked_reason ? `<p class="help-text">${escapeHtml(workflow.blocked_reason)}</p>` : ""}
+      ${renderE01PartitionBrowser(workflow.partition_browser || workflow.partition_selection || null)}
       ${renderE01HandoffContract(workflow.handoff_contract || null)}
       <div class="e01-stage-grid">
         ${stages.map((stage, index) => `
@@ -6504,6 +6533,70 @@ function renderE01IngestWorkflow(workflow) {
           <ul>${(workflow.large_case_controls || []).map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ul>
         </details>
       ` : ""}
+    </section>
+  `;
+}
+
+function renderE01PartitionBrowser(browser) {
+  if (!browser?.profile_version) return "";
+  const rows = browser.partitions || browser.partition_browser_rows || [];
+  const recommendedSector = browser.recommended_start_sector ?? "";
+  const selectedSector = browser.selected_start_sector ?? "";
+  return `
+    <section class="e01-partition-browser" data-testid="e01-partition-browser" data-qc-prep-item="${escapeHtml(browser.qc_prep_item || 2)}">
+      <div class="review-group-header">
+        <div>
+          <p class="eyebrow">QC-prep #2 partition browser</p>
+          <strong>E01 partition choice</strong>
+          <span>${escapeHtml(browser.goal || "Review mmls partitions before extraction.")}</span>
+        </div>
+        <span class="status-pill ${rows.length ? "ok" : "warning"}">${escapeHtml(browser.status || "pending")}</span>
+      </div>
+      <div class="processing-caps">
+        <span>Partitions: ${formatNumber(browser.partition_count ?? rows.length)}</span>
+        <span>Supported: ${formatNumber(browser.supported_partition_count ?? rows.filter((row) => row.supported_filesystem_hint).length)}</span>
+        <span>Recommended: ${recommendedSector === "" ? "pending" : formatNumber(recommendedSector)}</span>
+        <span>Selected: ${selectedSector === "" ? "auto" : formatNumber(selectedSector)}</span>
+      </div>
+      ${rows.length ? `
+        <div class="table-scroll">
+          <table class="data-table e01-partition-table">
+            <thead>
+              <tr>
+                <th>#</th>
+                <th>Start sector</th>
+                <th>Size</th>
+                <th>Filesystem</th>
+                <th>Recommendation</th>
+                <th>Manual override</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${rows.map((row) => `
+                <tr class="${row.selected_for_recovery ? "selected-row" : ""}">
+                  <td>${escapeHtml(row.partition_number ?? row.slot ?? "")}</td>
+                  <td>${row.start_sector === null || row.start_sector === undefined ? "n/a" : formatNumber(row.start_sector)}</td>
+                  <td>${row.size_bytes ? formatBytes(row.size_bytes) : "n/a"}</td>
+                  <td><strong>${escapeHtml(row.filesystem_guess || "unknown")}</strong><span>${escapeHtml(row.description || "")}</span></td>
+                  <td>${escapeHtml(row.recommendation || (row.recommended_for_recovery ? "recommended" : "review"))}</td>
+                  <td>
+                    <button class="mini-inline-button" type="button" data-e01-partition-sector="${escapeHtml(row.start_sector ?? "")}" ${row.start_sector === null || row.start_sector === undefined ? "disabled" : ""}>
+                      Use sector
+                    </button>
+                  </td>
+                </tr>
+              `).join("")}
+            </tbody>
+          </table>
+        </div>
+      ` : `
+        <p class="empty-state">${escapeHtml(browser.empty_state || "Partition table is not available yet.")}</p>
+      `}
+      <div class="e01-partition-actions">
+        <button class="secondary-button" type="button" data-e01-partition-focus>Manual start-sector override</button>
+        ${recommendedSector === "" ? "" : `<button class="secondary-button" type="button" data-e01-partition-sector="${escapeHtml(recommendedSector)}">Use recommended sector</button>`}
+      </div>
+      <p class="help-text">${escapeHtml(browser.manual_override?.warning || "Preserve the mmls/trusted-tool evidence for any manual partition choice.")}</p>
     </section>
   `;
 }

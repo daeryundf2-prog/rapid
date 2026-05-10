@@ -10,6 +10,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from rapidtriage.cli import main
+from rapidtriage.core.e01 import build_e01_partition_browser_contract
 from rapidtriage.core.evidence import identify_evidence
 
 
@@ -92,10 +93,25 @@ class RapidTriageEvidenceAdapterTests(unittest.TestCase):
             self.assertIn("rapidtriage-run-summary.json", handoff["required_output_chain"])
             self.assertIn("source viewer citations", handoff["required_output_chain"])
             self.assertTrue(any(row["id"] == "start-configured-run" for row in handoff["gui_entrypoints"]))
+            partition_browser = result["ingest_workflow"]["partition_browser"]
+            self.assertEqual(partition_browser["profile_version"], "e01-partition-browser-v1")
+            self.assertEqual(partition_browser["qc_prep_item"], 2)
+            self.assertEqual(
+                partition_browser["status"],
+                "pending-mmls" if result["ingest_workflow"]["direct_extract_ready"] else "blocked",
+            )
+            self.assertIn("partition_number", partition_browser["columns"])
+            self.assertIn("start_sector", partition_browser["columns"])
+            self.assertIn("size_bytes", partition_browser["columns"])
+            self.assertIn("filesystem_guess", partition_browser["columns"])
+            self.assertIn("recommendation", partition_browser["columns"])
+            self.assertTrue(partition_browser["manual_override"]["enabled"])
+            self.assertEqual(partition_browser["manual_override"]["input_id"], "e01PartitionStartSectorInput")
             self.assertEqual(
                 result["ingest_workflow"]["operator_runbook"]["profile_version"],
                 "windows11-e01-operator-runbook-v1",
             )
+
             self.assertTrue(result["limitations"])
             self.assertTrue(result["fallback_guidance"])
             e01_review = result["image_analyst_review_profile"]
@@ -122,6 +138,45 @@ class RapidTriageEvidenceAdapterTests(unittest.TestCase):
                 "#22-native-commercial-parser",
                 e01_uplift["reportability_decision"]["failed_validation_matrix_ids"],
             )
+
+    def test_e01_partition_browser_marks_recommendation_and_manual_override(self) -> None:
+        browser = build_e01_partition_browser_contract(
+            partition_selection={
+                "selected_start_sector": 4096,
+                "recommended_start_sector": 4096,
+                "requested_start_sector": None,
+            },
+            partition_table=[
+                {
+                    "partition_number": 1,
+                    "start_sector": 2048,
+                    "size_bytes": 104857600,
+                    "filesystem_guess": "fat",
+                    "description": "EFI System",
+                    "supported_filesystem_hint": False,
+                },
+                {
+                    "partition_number": 2,
+                    "start_sector": 4096,
+                    "size_bytes": 53687091200,
+                    "filesystem_guess": "ntfs",
+                    "description": "NTFS / exFAT (0x07)",
+                    "supported_filesystem_hint": True,
+                },
+            ],
+            direct_extract_ready=True,
+        )
+
+        self.assertEqual(browser["profile_version"], "e01-partition-browser-v1")
+        self.assertEqual(browser["status"], "ready")
+        self.assertEqual(browser["partition_count"], 2)
+        self.assertEqual(browser["supported_partition_count"], 1)
+        recommended = browser["partitions"][1]
+        self.assertEqual(recommended["start_sector"], 4096)
+        self.assertEqual(recommended["recommendation"], "recommended")
+        self.assertTrue(recommended["selected_for_recovery"])
+        self.assertTrue(recommended["manual_override_allowed"])
+        self.assertEqual(browser["manual_override"]["input_id"], "e01PartitionStartSectorInput")
 
     def test_e01_identify_exposes_failure_guidance_when_tools_missing(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
