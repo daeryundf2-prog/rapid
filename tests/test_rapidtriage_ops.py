@@ -108,6 +108,10 @@ class RapidTriageOpsTests(unittest.TestCase):
         self.assertIn("--output-dir", commands["forensic-validation-pack"].format_help())
         self.assertIn("forensic-validation-pack-assess", commands)
         self.assertIn("--pack", commands["forensic-validation-pack-assess"].format_help())
+        self.assertIn("forensic-validation-batches", commands)
+        self.assertIn("--items", commands["forensic-validation-batches"].format_help())
+        self.assertIn("forensic-validation-batches-assess", commands)
+        self.assertIn("--root-dir", commands["forensic-validation-batches-assess"].format_help())
         self.assertIn("cross-tool-validate", commands)
         self.assertIn("--reference-output", commands["cross-tool-validate"].format_help())
         self.assertIn("confidence-dashboard", commands)
@@ -1629,6 +1633,46 @@ class RapidTriageOpsTests(unittest.TestCase):
             self.assertTrue(payload["ready_for_validated_gate"])
             self.assertFalse(payload["ready_for_commercial_grade"])
             self.assertIn("commercial-grade-diff-evidence-incomplete", payload["remaining_blockers"])
+
+    def test_forensic_validation_batches_write_and_assess_items_1_to_65(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir) / "batches"
+            stdout = io.StringIO()
+            with contextlib.redirect_stdout(stdout):
+                exit_code = main(["forensic-validation-batches", "--items", "1-65", "--output-dir", str(root), "--json"])
+
+            self.assertEqual(exit_code, 0)
+            payload = json.loads(stdout.getvalue())
+            self.assertEqual(payload["command"], "forensic-validation-batches")
+            self.assertEqual(payload["profile_version"], "forensic-validation-batches-v1")
+            self.assertEqual(payload["item_count"], 65)
+            self.assertEqual(payload["batch_count"], 13)
+            self.assertTrue((root / "rapidtriage-forensic-validation-batches.json").is_file())
+            self.assertTrue((root / "plan" / "rapidtriage-forensic-validation-plan.json").is_file())
+            self.assertTrue((root / "batch-001-items-001-005" / "rapidtriage-forensic-validation-pack.json").is_file())
+            self.assertEqual(len(list(root.glob("batch-*/rapidtriage-forensic-validation-pack.json"))), 13)
+
+            assessment_output = root / "batches-assessment.json"
+            stdout = io.StringIO()
+            with contextlib.redirect_stdout(stdout):
+                exit_code = main(
+                    [
+                        "forensic-validation-batches-assess",
+                        "--root-dir",
+                        str(root),
+                        "--output",
+                        str(assessment_output),
+                        "--json",
+                    ]
+                )
+
+            self.assertEqual(exit_code, 0)
+            assessment = json.loads(stdout.getvalue())
+            self.assertTrue(assessment_output.is_file())
+            self.assertEqual(assessment["batch_count"], 13)
+            self.assertEqual(assessment["dataset_count"], 65)
+            self.assertEqual(assessment["ready_dataset_count"], 0)
+            self.assertFalse(assessment["ready_for_validated_gate"])
 
     def test_cross_tool_validate_compares_rapid_and_reference_outputs(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:

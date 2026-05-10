@@ -121,9 +121,11 @@ from .core.worker import RustWorkerClient, WorkerError
 from .core.forensic_validation_plan import (
     DEFAULT_FORENSIC_VALIDATION_ITEMS,
     DEFAULT_FORENSIC_VALIDATION_PACK_ITEMS,
+    assess_forensic_validation_batches,
     assess_forensic_validation_pack,
     build_forensic_validation_pack,
     build_forensic_validation_plan,
+    write_forensic_validation_batches,
     write_forensic_validation_pack,
     write_forensic_validation_plan,
 )
@@ -1333,6 +1335,28 @@ def build_parser() -> argparse.ArgumentParser:
     forensic_validation_pack_assess.add_argument("--pack", required=True, help="Path to rapidtriage-forensic-validation-pack.json")
     forensic_validation_pack_assess.add_argument("--output", help="Optional JSON assessment output path")
     forensic_validation_pack_assess.add_argument("--json", action="store_true", help="Print machine-readable JSON")
+
+    forensic_validation_batches = sub.add_parser(
+        "forensic-validation-batches",
+        help="Write five-item validation packs for a full forensic item range",
+        description="Create plan output plus one executable validation pack per five-item batch, defaulting to #1-#65",
+    )
+    forensic_validation_batches.add_argument(
+        "--items",
+        default=DEFAULT_FORENSIC_VALIDATION_ITEMS,
+        help=f"Item range/list to include (default: {DEFAULT_FORENSIC_VALIDATION_ITEMS})",
+    )
+    forensic_validation_batches.add_argument("--output-dir", required=True, help="Directory for the plan and batch pack folders")
+    forensic_validation_batches.add_argument("--json", action="store_true", help="Print machine-readable JSON")
+
+    forensic_validation_batches_assess = sub.add_parser(
+        "forensic-validation-batches-assess",
+        help="Assess all validation packs under a batch root directory",
+        description="Assess every batch-*/rapidtriage-forensic-validation-pack.json under a validation batch root",
+    )
+    forensic_validation_batches_assess.add_argument("--root-dir", required=True, help="Directory created by forensic-validation-batches")
+    forensic_validation_batches_assess.add_argument("--output", help="Optional JSON assessment output path")
+    forensic_validation_batches_assess.add_argument("--json", action="store_true", help="Print machine-readable JSON")
 
     cross_tool = sub.add_parser(
         "cross-tool-validate",
@@ -2717,6 +2741,43 @@ def main(argv=None) -> int:
                 print("Remaining blockers:")
                 for blocker in payload["remaining_blockers"]:
                     print(f"- {blocker}")
+        return 0
+
+    if args.command == "forensic-validation-batches":
+        try:
+            payload = write_forensic_validation_batches(
+                item_range=args.items,
+                output_dir=Path(args.output_dir).expanduser().resolve(),
+            )
+        except ValueError as exc:
+            parser.error(str(exc))
+        if args.json:
+            print(json.dumps(payload, ensure_ascii=False, indent=2))
+        else:
+            print("RapidTriage forensic validation batches")
+            print(f"Items: {payload['item_range']} ({payload['item_count']})")
+            print(f"Batches: {payload['batch_count']}")
+            if payload.get("outputs"):
+                print(f"Saved JSON: {payload['outputs']['json']}")
+                print(f"Saved Markdown: {payload['outputs']['markdown']}")
+        return 0
+
+    if args.command == "forensic-validation-batches-assess":
+        try:
+            payload = assess_forensic_validation_batches(
+                Path(args.root_dir).expanduser().resolve(),
+                output=Path(args.output).expanduser().resolve() if args.output else None,
+            )
+        except (OSError, json.JSONDecodeError, ValueError) as exc:
+            parser.error(str(exc))
+        if args.json:
+            print(json.dumps(payload, ensure_ascii=False, indent=2))
+        else:
+            print("RapidTriage forensic validation batch assessment")
+            print(f"Batches: {payload['batch_count']}")
+            print(f"Datasets: {payload['ready_dataset_count']}/{payload['dataset_count']} validation-ready")
+            print(f"Commercial-ready datasets: {payload['commercial_ready_dataset_count']}/{payload['dataset_count']}")
+            print(f"Ready for validated gate: {payload['ready_for_validated_gate']}")
         return 0
 
     if args.command == "cross-tool-validate":

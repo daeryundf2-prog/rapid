@@ -13,6 +13,7 @@ from .forensic_accuracy import CORE_FORENSIC_ACCURACY_ITEMS, accuracy_profile_fo
 
 FORENSIC_VALIDATION_PLAN_VERSION = "forensic-validation-plan-v1"
 FORENSIC_VALIDATION_PACK_VERSION = "forensic-validation-pack-v1"
+FORENSIC_VALIDATION_BATCHES_VERSION = "forensic-validation-batches-v1"
 DEFAULT_FORENSIC_VALIDATION_ITEMS = "1-65"
 DEFAULT_FORENSIC_VALIDATION_PACK_ITEMS = "1-5"
 
@@ -115,6 +116,111 @@ def assess_forensic_validation_pack(pack_path: Path, *, output: Path | None = No
             }
         ),
         "commercial_claim_allowed": ready_for_commercial_grade,
+    }
+    assessment = {**assessment_core, "assessment_hash": stable_plan_hash(assessment_core)}
+    if output is not None:
+        write_result(assessment, output.expanduser().resolve())
+    return assessment
+
+
+def write_forensic_validation_batches(
+    *,
+    item_range: str = DEFAULT_FORENSIC_VALIDATION_ITEMS,
+    output_dir: Path,
+) -> dict[str, object]:
+    output_dir = output_dir.expanduser().resolve()
+    output_dir.mkdir(parents=True, exist_ok=True)
+    plan = build_forensic_validation_plan(item_range=item_range, output_dir=output_dir)
+    plan_outputs = write_forensic_validation_plan(plan, output_dir / "plan")
+    batch_outputs: list[dict[str, object]] = []
+    for batch in plan.get("sequencing", []) if isinstance(plan.get("sequencing"), list) else []:
+        if not isinstance(batch, Mapping):
+            continue
+        item_numbers = [int(number) for number in batch.get("item_numbers", []) if int(number)]
+        if not item_numbers:
+            continue
+        batch_dir_name = f"batch-{int(batch.get('batch_number') or len(batch_outputs) + 1):03d}-items-{item_numbers[0]:03d}-{item_numbers[-1]:03d}"
+        batch_dir = output_dir / batch_dir_name
+        pack = build_forensic_validation_pack(item_range=",".join(str(number) for number in item_numbers), output_dir=batch_dir)
+        pack_outputs = write_forensic_validation_pack(pack, batch_dir)
+        batch_outputs.append(
+            {
+                "batch_number": int(batch.get("batch_number") or len(batch_outputs) + 1),
+                "item_numbers": item_numbers,
+                "batch_dir": str(batch_dir),
+                "pack_hash": pack.get("pack_hash"),
+                "outputs": pack_outputs,
+                "goal": str(batch.get("goal") or ""),
+            }
+        )
+    index_core: dict[str, object] = {
+        "command": "forensic-validation-batches",
+        "profile_version": FORENSIC_VALIDATION_BATCHES_VERSION,
+        "generated_at": dt.datetime.now(dt.timezone.utc).isoformat(),
+        "item_range": item_range,
+        "item_numbers": plan.get("item_numbers", []),
+        "item_count": plan.get("item_count", 0),
+        "batch_count": len(batch_outputs),
+        "plan_hash": plan.get("plan_hash"),
+        "plan_outputs": plan_outputs,
+        "batch_outputs": batch_outputs,
+        "commercial_claim_allowed": False,
+        "rule": "Batch generation is not validation; populate each pack and run forensic-validation-batches-assess.",
+    }
+    index = {**index_core, "batch_index_hash": stable_plan_hash(index_core)}
+    write_result(index, output_dir / "rapidtriage-forensic-validation-batches.json")
+    (output_dir / "rapidtriage-forensic-validation-batches.md").write_text(
+        render_forensic_validation_batches_markdown(index),
+        encoding="utf-8",
+    )
+    index["outputs"] = {
+        "json": str(output_dir / "rapidtriage-forensic-validation-batches.json"),
+        "markdown": str(output_dir / "rapidtriage-forensic-validation-batches.md"),
+    }
+    return index
+
+
+def assess_forensic_validation_batches(root_dir: Path, *, output: Path | None = None) -> dict[str, object]:
+    root_dir = root_dir.expanduser().resolve()
+    pack_paths = sorted(root_dir.glob("batch-*/rapidtriage-forensic-validation-pack.json"))
+    assessments = [
+        assess_forensic_validation_pack(path, output=path.parent / "assessment.json")
+        for path in pack_paths
+    ]
+    dataset_count = sum(int(item.get("dataset_count") or 0) for item in assessments)
+    ready_dataset_count = sum(int(item.get("ready_dataset_count") or 0) for item in assessments)
+    commercial_ready_dataset_count = sum(int(item.get("commercial_ready_dataset_count") or 0) for item in assessments)
+    assessment_core: dict[str, object] = {
+        "command": "forensic-validation-batches-assess",
+        "profile_version": "forensic-validation-batches-assessment-v1",
+        "root_dir": str(root_dir),
+        "batch_count": len(assessments),
+        "dataset_count": dataset_count,
+        "ready_dataset_count": ready_dataset_count,
+        "commercial_ready_dataset_count": commercial_ready_dataset_count,
+        "ready_for_validated_gate": bool(assessments) and ready_dataset_count == dataset_count,
+        "ready_for_commercial_grade": bool(assessments) and commercial_ready_dataset_count == dataset_count,
+        "batch_assessments": [
+            {
+                "pack_path": item.get("pack_path"),
+                "item_numbers": item.get("item_numbers", []),
+                "dataset_count": item.get("dataset_count", 0),
+                "ready_dataset_count": item.get("ready_dataset_count", 0),
+                "commercial_ready_dataset_count": item.get("commercial_ready_dataset_count", 0),
+                "remaining_blockers": item.get("remaining_blockers", []),
+                "assessment_hash": item.get("assessment_hash", ""),
+            }
+            for item in assessments
+        ],
+        "remaining_blockers": sorted(
+            {
+                blocker
+                for item in assessments
+                for blocker in item.get("remaining_blockers", [])
+                if str(blocker)
+            }
+        ),
+        "commercial_claim_allowed": bool(assessments) and commercial_ready_dataset_count == dataset_count,
     }
     assessment = {**assessment_core, "assessment_hash": stable_plan_hash(assessment_core)}
     if output is not None:
@@ -689,6 +795,37 @@ def render_forensic_validation_pack_markdown(pack: Mapping[str, object]) -> str:
     lines.extend(["## Diff Contract", ""])
     diff = pack.get("diff_contract") if isinstance(pack.get("diff_contract"), Mapping) else {}
     lines.append(f"- Failure policy: {diff.get('failure_policy', '')}")
+    return "\n".join(lines).rstrip() + "\n"
+
+
+def render_forensic_validation_batches_markdown(index: Mapping[str, object]) -> str:
+    lines = [
+        "# RapidTriage Forensic Validation Batches",
+        "",
+        f"- Profile: `{index.get('profile_version')}`",
+        f"- Items: `{index.get('item_range')}`",
+        f"- Item count: {index.get('item_count', 0)}",
+        f"- Batch count: {index.get('batch_count', 0)}",
+        f"- Plan hash: `{index.get('plan_hash', '')}`",
+        f"- Batch index hash: `{index.get('batch_index_hash', '')}`",
+        "",
+        "## Batches",
+        "",
+    ]
+    for batch in index.get("batch_outputs", []) if isinstance(index.get("batch_outputs"), list) else []:
+        if not isinstance(batch, Mapping):
+            continue
+        item_numbers = ", ".join(f"#{number}" for number in batch.get("item_numbers", []))
+        lines.extend(
+            [
+                f"### Batch {batch.get('batch_number')} - {item_numbers}",
+                "",
+                f"- Directory: `{batch.get('batch_dir')}`",
+                f"- Pack hash: `{batch.get('pack_hash')}`",
+                f"- Goal: {batch.get('goal')}",
+                "",
+            ]
+        )
     return "\n".join(lines).rstrip() + "\n"
 
 
