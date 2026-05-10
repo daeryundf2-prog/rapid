@@ -181,6 +181,50 @@ h2 {
   list-style: none;
 }
 
+.intake-choice-grid {
+  display: grid;
+  gap: 10px;
+  margin-top: 18px;
+}
+
+.intake-choice-card {
+  display: grid;
+  gap: 4px;
+  width: 100%;
+  border: 1px solid rgba(15, 116, 107, 0.2);
+  border-radius: 16px;
+  background:
+    linear-gradient(135deg, rgba(255, 255, 255, 0.95), rgba(15, 116, 107, 0.06)),
+    #fff;
+  color: var(--ink);
+  padding: 13px 14px;
+  text-align: left;
+  box-shadow: var(--shadow-soft);
+}
+
+.intake-choice-card.primary {
+  border-color: rgba(15, 116, 107, 0.44);
+  background:
+    linear-gradient(135deg, rgba(15, 116, 107, 0.15), rgba(240, 184, 75, 0.14)),
+    #fffdf8;
+}
+
+.intake-choice-card strong {
+  font-size: 0.95rem;
+}
+
+.intake-choice-card span {
+  color: var(--muted);
+  font-size: 0.8rem;
+  line-height: 1.35;
+}
+
+.intake-choice-card:hover,
+.intake-choice-card:focus-visible {
+  border-color: var(--accent);
+  transform: translateY(-1px);
+}
+
 .quick-start li {
   display: grid;
   gap: 2px;

@@ -26,6 +26,28 @@
           <span>Mass data aware</span>
           <span>Review-ready</span>
         </div>
+        <section class="intake-choice-grid" aria-label="Start workflow choices" data-testid="start-choice-grid">
+          <button type="button" class="intake-choice-card primary" data-intake-action="e01" data-testid="start-choice-e01">
+            <strong>E01 / Ex01</strong>
+            <span>이미지 선택 → 의존성 검사 → 파티션 → 분석</span>
+          </button>
+          <button type="button" class="intake-choice-card" data-intake-action="folder" data-testid="start-choice-folder">
+            <strong>Folder / Export</strong>
+            <span>마운트/벤더 export 폴더를 바로 스캔</span>
+          </button>
+          <button type="button" class="intake-choice-card" data-intake-action="recent" data-testid="start-choice-recent">
+            <strong>Recent case</strong>
+            <span>기존 run output을 import해서 이어보기</span>
+          </button>
+          <button type="button" class="intake-choice-card" data-intake-action="sample" data-testid="start-choice-sample">
+            <strong>Sample case</strong>
+            <span>안전한 연습 케이스로 흐름 확인</span>
+          </button>
+          <button type="button" class="intake-choice-card" data-intake-action="qc" data-testid="start-choice-qc">
+            <strong>Validation / QC</strong>
+            <span>runtime, evidence support, validation package 확인</span>
+          </button>
+        </section>
         <ol class="quick-start" aria-label="Recommended workflow">
           <li><strong>1. 증거 선택</strong><span>폴더, 마운트 이미지, E01/파생 경로를 넣습니다.</span></li>
           <li><strong>2. 빠른 분석</strong><span>대용량은 Fast first pass로 먼저 범위를 좁힙니다.</span></li>

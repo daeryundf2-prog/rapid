@@ -216,6 +216,11 @@ const WORKBENCH_SMOKE_CHECKPOINTS = [
   { id: "review-mark", selector: "[data-testid='viewer-review-form']", label: "Mark evidence" },
   { id: "report-export", selector: "[data-testid='tab-report']", label: "Export report" },
 ];
+const START_CHOICE_CONTRACT = {
+  profile_version: "start-screen-choice-contract-v1",
+  checklist_item: 9,
+  required_choices: ["e01", "folder", "recent", "sample", "qc"],
+};
 
 let selectedRunId = null;
 let selectedRun = null;
@@ -5319,6 +5324,41 @@ function bindRunFormPersistence() {
   }
   document.querySelector("#processingProfileInput")?.addEventListener("change", applyProcessingProfile);
   collectPlanButton?.addEventListener("click", previewCollectPlan);
+  bindStartChoiceCards();
+}
+
+function bindStartChoiceCards() {
+  for (const button of document.querySelectorAll("[data-intake-action]")) {
+    button.addEventListener("click", () => applyStartChoice(button.dataset.intakeAction || ""));
+  }
+}
+
+function applyStartChoice(action) {
+  const rootInput = document.querySelector("#rootInput");
+  const inputKindInput = document.querySelector("#inputKindInput");
+  const processingProfileInput = document.querySelector("#processingProfileInput");
+  const modeInput = document.querySelector("#modeInput");
+  if (action === "e01") {
+    if (inputKindInput) inputKindInput.value = "e01-derived";
+    if (processingProfileInput) processingProfileInput.value = "fast";
+    if (modeInput) modeInput.value = "hacking";
+    rootInput?.focus();
+    evidenceCheckStatus.textContent = "E01 선택 후 Check evidence support로 intake/preflight를 먼저 확인하세요.";
+  } else if (action === "folder") {
+    if (inputKindInput) inputKindInput.value = "folder";
+    if (processingProfileInput) processingProfileInput.value = "fast";
+    if (modeInput) modeInput.value = "fraud";
+    rootInput?.focus();
+    evidenceCheckStatus.textContent = "마운트/Export 폴더 경로를 넣고 Start run을 누르면 됩니다.";
+  } else if (action === "recent") {
+    document.querySelector("#importOutputInput")?.focus();
+  } else if (action === "sample") {
+    sampleRunButton?.click();
+  } else if (action === "qc") {
+    doctorButton?.click();
+  }
+  persistRunForm();
+  refreshRunPlanPreview();
 }
 
 function applyProcessingProfile() {
