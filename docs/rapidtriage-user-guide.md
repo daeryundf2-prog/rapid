@@ -565,6 +565,8 @@ In the browser console, set:
 localStorage.setItem("rapidtriage.authToken", "change-me")
 ```
 
+RapidTriage only accepts the token through the `X-RapidTriage-Token` header. Do not place tokens in URLs or query strings.
+
 Do not expose RapidTriage directly to the internet. Treat source-file download endpoints as sensitive because they may reveal evidence contents.
 
 ## Limitations Compared With AXIOM

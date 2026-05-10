@@ -23,6 +23,7 @@ from rapidtriage.api.app import (
     build_pagination_trusted_diff,
     build_preview_sandbox_trusted_diff,
     build_source_preview,
+    build_source_search,
     build_sqlite_viewer_trusted_diff,
     build_ui_virtualization_trusted_diff,
     build_ui_virtualization_manifest,
@@ -56,6 +57,39 @@ def hash_file(path: Path, algorithm: str) -> str:
 
 
 class RapidTriageApiTests(unittest.TestCase):
+    def test_source_search_finds_sqlite_hits_after_legacy_5000_row_boundary(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            db_path = Path(temp) / "large.db"
+            connection = sqlite3.connect(db_path)
+            try:
+                connection.execute("CREATE TABLE notes(id INTEGER PRIMARY KEY, body TEXT)")
+                connection.executemany(
+                    "INSERT INTO notes(body) VALUES (?)",
+                    [(f"ordinary row {index}",) for index in range(6000)] + [("needle after legacy boundary",)],
+                )
+                connection.commit()
+            finally:
+                connection.close()
+
+            payload = build_source_search(db_path, ["needle"], limit=10, context=40)
+
+        self.assertEqual(payload["summary"]["match_count"], 1)
+        self.assertEqual(payload["matches"][0]["row_number"], 6001)
+        self.assertEqual(payload["summary"]["sqlite_scanned_row_count"], 6001)
+        self.assertFalse(payload["summary"]["sqlite_scan_truncated"])
+
+    def test_source_search_rejects_oversized_docx_member_before_expanding(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            docx_path = Path(temp) / "oversized.docx"
+            with zipfile.ZipFile(docx_path, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+                archive.writestr("word/document.xml", "<w:t>" + ("A" * 2048) + "</w:t>")
+
+            payload = build_source_search(docx_path, ["needle"], max_plain_text_bytes=1024)
+
+        self.assertFalse(payload["searchable"])
+        self.assertEqual(payload["summary"]["match_count"], 0)
+        self.assertIn("size limit", payload["message"])
+
     def test_web_entrypoint_parser_supports_direct_launch_options(self) -> None:
         args = build_web_parser().parse_args(["--host", "0.0.0.0", "--port", "9000"])
 

@@ -12,6 +12,8 @@ If you bind to `0.0.0.0` or another non-localhost interface, configure an auth t
 rapidtriage web --host 0.0.0.0 --auth-token "replace-me"
 ```
 
+Authentication tokens are header-only. Clients must send `X-RapidTriage-Token`; URL query-string tokens are rejected to avoid token leakage through logs, browser history, or referrers.
+
 Do not expose the service directly to the public internet.
 
 ## Sensitive Data

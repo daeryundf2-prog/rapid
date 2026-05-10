@@ -71,6 +71,13 @@ OFFICE_OPEN_XML_EXTS = {"docx", "pptx", "xlsx"}
 OPEN_DOCUMENT_EXTS = {"odp", "ods", "odt"}
 DOCS_INDEX_TOKEN_PATTERN = re.compile(r"[\w@./:-]{2,}", flags=re.UNICODE)
 DOCS_INDEX_VERSION = 1
+MAX_EXTRACT_TEXT_BYTES = 50_000_000
+MAX_ZIP_TEXT_MEMBER_BYTES = 10_000_000
+MAX_ZIP_TEXT_TOTAL_BYTES = 50_000_000
+
+
+class TextExtractionTooLarge(ValueError):
+    pass
 BOUNDED_MAIL_CONTAINER_SCAN_LIMIT = 2 * 1024 * 1024
 
 
@@ -241,7 +248,16 @@ def write_result(payload: Dict[str, object], output: Path) -> None:
     output.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
 
-def extract_text(path: Path, kind: str) -> str:
+def extract_text(
+    path: Path,
+    kind: str,
+    *,
+    max_input_bytes: int = MAX_EXTRACT_TEXT_BYTES,
+    max_archive_member_bytes: int = MAX_ZIP_TEXT_MEMBER_BYTES,
+    max_archive_total_bytes: int = MAX_ZIP_TEXT_TOTAL_BYTES,
+) -> str:
+    if max_input_bytes > 0 and path.stat().st_size > max_input_bytes:
+        raise TextExtractionTooLarge(f"{kind} file exceeds text extraction size limit")
     if kind in TEXT_EXTS:
         return path.read_text(encoding="utf-8", errors="ignore")
     if kind == "eml":
@@ -255,9 +271,18 @@ def extract_text(path: Path, kind: str) -> str:
     if kind in HTML_EXTS:
         return _strip_markup(path.read_text(encoding="utf-8", errors="ignore"))
     if kind in OFFICE_OPEN_XML_EXTS:
-        return _extract_office_open_xml_text(path, kind)
+        return _extract_office_open_xml_text(
+            path,
+            kind,
+            max_member_bytes=max_archive_member_bytes,
+            max_total_bytes=max_archive_total_bytes,
+        )
     if kind in OPEN_DOCUMENT_EXTS:
-        return _extract_open_document_text(path)
+        return _extract_open_document_text(
+            path,
+            max_member_bytes=max_archive_member_bytes,
+            max_total_bytes=max_archive_total_bytes,
+        )
     if kind == "pdf":
         return _extract_pdf_text(path)
     if kind == "rtf":
@@ -265,7 +290,30 @@ def extract_text(path: Path, kind: str) -> str:
     return ""
 
 
-def _extract_office_open_xml_text(path: Path, kind: str) -> str:
+def _check_zip_member_limits(
+    archive: zipfile.ZipFile,
+    names: list[str],
+    *,
+    max_member_bytes: int,
+    max_total_bytes: int,
+) -> None:
+    total = 0
+    for name in names:
+        info = archive.getinfo(name)
+        if max_member_bytes > 0 and info.file_size > max_member_bytes:
+            raise TextExtractionTooLarge(f"archive member exceeds text extraction size limit: {name}")
+        total += info.file_size
+        if max_total_bytes > 0 and total > max_total_bytes:
+            raise TextExtractionTooLarge("archive expands beyond text extraction size limit")
+
+
+def _extract_office_open_xml_text(
+    path: Path,
+    kind: str,
+    *,
+    max_member_bytes: int = MAX_ZIP_TEXT_MEMBER_BYTES,
+    max_total_bytes: int = MAX_ZIP_TEXT_TOTAL_BYTES,
+) -> str:
     prefixes = {
         "docx": ("word/document.xml",),
         "pptx": ("ppt/slides/slide",),
@@ -273,18 +321,38 @@ def _extract_office_open_xml_text(path: Path, kind: str) -> str:
     }[kind]
     with zipfile.ZipFile(path) as archive:
         texts = []
-        for name in archive.namelist():
-            if not name.endswith(".xml") or not any(name.startswith(prefix) for prefix in prefixes):
-                continue
+        names = [
+            name
+            for name in archive.namelist()
+            if name.endswith(".xml") and any(name.startswith(prefix) for prefix in prefixes)
+        ]
+        _check_zip_member_limits(
+            archive,
+            names,
+            max_member_bytes=max_member_bytes,
+            max_total_bytes=max_total_bytes,
+        )
+        for name in names:
             with archive.open(name) as handle:
                 texts.extend(_extract_xml_text(handle.read()))
     return " ".join(texts)
 
 
-def _extract_open_document_text(path: Path) -> str:
+def _extract_open_document_text(
+    path: Path,
+    *,
+    max_member_bytes: int = MAX_ZIP_TEXT_MEMBER_BYTES,
+    max_total_bytes: int = MAX_ZIP_TEXT_TOTAL_BYTES,
+) -> str:
     with zipfile.ZipFile(path) as archive:
         if "content.xml" not in archive.namelist():
             return ""
+        _check_zip_member_limits(
+            archive,
+            ["content.xml"],
+            max_member_bytes=max_member_bytes,
+            max_total_bytes=max_total_bytes,
+        )
         with archive.open("content.xml") as handle:
             return " ".join(_extract_xml_text(handle.read()))
 

@@ -2512,6 +2512,9 @@ class RapidTriageOpsTests(unittest.TestCase):
 
         self.assertEqual(client.get("/api/health").status_code, 401)
         self.assertEqual(client.get("/api/health", headers={"X-RapidTriage-Token": "secret"}).status_code, 200)
+        query_token_response = client.get("/api/health", params={"token": "secret"})
+        self.assertEqual(query_token_response.status_code, 401)
+        self.assertIn("query token authentication is disabled", query_token_response.json()["detail"])
         self.assertEqual(client.get("/").status_code, 200)
 
     def test_non_localhost_web_binding_requires_auth_or_explicit_override(self) -> None:

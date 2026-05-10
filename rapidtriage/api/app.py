@@ -59,6 +59,7 @@ SQLITE_PREVIEW_TABLE_LIMIT = 8
 SQLITE_PREVIEW_ROW_LIMIT = 10
 SQLITE_PREVIEW_COLUMN_LIMIT = 12
 SQLITE_TABLE_PAGE_MAX_ROWS = 500
+SQLITE_SOURCE_SEARCH_ROW_SCAN_LIMIT = 100_000
 STRUCTURED_PREVIEW_MAX_BYTES = 5 * 1024 * 1024
 JSON_PREVIEW_ITEM_LIMIT = 50
 XML_PREVIEW_NODE_LIMIT = 80
@@ -400,7 +401,12 @@ def create_app(job_store: RunJobStore | None = None, auth_token: str | None = No
     async def require_auth_token(request: Request, call_next):
         try:
             if expected_token and request.url.path.startswith("/api"):
-                supplied = request.headers.get("X-RapidTriage-Token") or request.query_params.get("token")
+                if "token" in request.query_params:
+                    return JSONResponse(
+                        status_code=401,
+                        content={"detail": "query token authentication is disabled; use X-RapidTriage-Token header"},
+                    )
+                supplied = request.headers.get("X-RapidTriage-Token")
                 if supplied != expected_token:
                     return JSONResponse(status_code=401, content={"detail": "missing or invalid RapidTriage auth token"})
             return await call_next(request)
@@ -7548,6 +7554,7 @@ def build_source_search(
     mime_type = mimetypes.guess_type(source_path.name)[0] or "application/octet-stream"
     matches: list[dict[str, object]] = []
     truncated = False
+    search_diagnostics: dict[str, object] = {}
     searchable = True
     message = "File search completed."
 
@@ -7556,15 +7563,26 @@ def build_source_search(
         message = "Image files are not text-searchable in the file viewer. Use OCR from the full evidence search."
     elif is_sqlite_candidate(source_path, suffix):
         try:
-            matches = search_sqlite_file(source_path, normalized, limit=limit, context=context)
-            truncated = len(matches) >= limit
+            matches, sqlite_truncated, search_diagnostics = search_sqlite_file(
+                source_path,
+                normalized,
+                limit=limit,
+                context=context,
+            )
+            truncated = sqlite_truncated or len(matches) >= limit
             message = "SQLite text search completed."
         except sqlite3.DatabaseError as exc:
             searchable = False
             message = f"SQLite search failed: {exc}"
     elif suffix in SUPPORTED_DOC_EXTS:
         try:
-            text = extract_text(source_path, suffix.lstrip("."))
+            text = extract_text(
+                source_path,
+                suffix.lstrip("."),
+                max_input_bytes=max_plain_text_bytes,
+                max_archive_member_bytes=max_plain_text_bytes,
+                max_archive_total_bytes=max_plain_text_bytes,
+            )
             matches = search_text_content(text, normalized, limit=limit, context=context)
         except Exception as exc:
             searchable = False
@@ -7600,6 +7618,7 @@ def build_source_search(
         "summary": {
             "match_count": len(matches),
             "limit": limit,
+            **search_diagnostics,
         },
         "source_search_profile": source_search_profile(
             source_path=source_path,
@@ -7608,6 +7627,7 @@ def build_source_search(
             match_count=len(matches),
             limit=limit,
             context=context,
+            diagnostics=search_diagnostics,
         ),
         "matches": enrich_source_search_matches(source_path, matches),
     }
@@ -7621,7 +7641,9 @@ def source_search_profile(
     match_count: int,
     limit: int,
     context: int,
+    diagnostics: Mapping[str, object] | None = None,
 ) -> dict[str, object]:
+    diagnostics = diagnostics or {}
     return {
         "profile_version": "current-file-search-v1",
         "commercial_batch_id": "commercial-uplift-016-020",
@@ -7633,6 +7655,9 @@ def source_search_profile(
         "large_data_controls": {
             "result_limit": limit,
             "truncated": truncated,
+            "sqlite_row_scan_limit": diagnostics.get("sqlite_row_scan_limit"),
+            "sqlite_scanned_row_count": diagnostics.get("sqlite_scanned_row_count"),
+            "sqlite_scan_truncated": diagnostics.get("sqlite_scan_truncated"),
             "full_case_reindex_not_required": True,
             "sqlite_table_search_uses_limit": True,
             "binary_search_is_bounded": True,
@@ -7743,8 +7768,18 @@ def source_search_citation_profile(
     }
 
 
-def search_sqlite_file(source_path: Path, keywords: Sequence[str], *, limit: int, context: int) -> list[dict[str, object]]:
+def search_sqlite_file(
+    source_path: Path,
+    keywords: Sequence[str],
+    *,
+    limit: int,
+    context: int,
+    row_scan_limit: int = SQLITE_SOURCE_SEARCH_ROW_SCAN_LIMIT,
+) -> tuple[list[dict[str, object]], bool, dict[str, object]]:
     matches: list[dict[str, object]] = []
+    scanned_rows = 0
+    scanned_tables = 0
+    truncated_tables: list[str] = []
     with contextlib.closing(sqlite3.connect(f"{source_path.as_uri()}?mode=ro", uri=True)) as connection:
         connection.row_factory = sqlite3.Row
         for table in list_sqlite_tables(connection):
@@ -7758,8 +7793,16 @@ def search_sqlite_file(source_path: Path, keywords: Sequence[str], *, limit: int
             ][:SQLITE_PREVIEW_COLUMN_LIMIT]
             if not text_columns:
                 continue
+            scanned_tables += 1
             select_clause = ", ".join(quote_sqlite_identifier(column) for column in text_columns)
-            for row_index, row in enumerate(connection.execute(f"SELECT {select_clause} FROM {quoted} LIMIT 5000"), start=1):
+            for row_index, row in enumerate(
+                connection.execute(f"SELECT {select_clause} FROM {quoted} LIMIT ?", (row_scan_limit + 1,)),
+                start=1,
+            ):
+                if row_index > row_scan_limit:
+                    truncated_tables.append(table)
+                    break
+                scanned_rows += 1
                 for column in text_columns:
                     value = row[column]
                     if value is None:
@@ -7781,9 +7824,22 @@ def search_sqlite_file(source_path: Path, keywords: Sequence[str], *, limit: int
                                 }
                             )
                             if len(matches) >= limit:
-                                return matches
+                                return matches, True, {
+                                    "sqlite_scanned_table_count": scanned_tables,
+                                    "sqlite_scanned_row_count": scanned_rows,
+                                    "sqlite_row_scan_limit": row_scan_limit,
+                                    "sqlite_scan_truncated": True,
+                                    "sqlite_truncated_tables": truncated_tables[:10],
+                                }
                             break
-    return matches
+    truncated = bool(truncated_tables)
+    return matches, truncated, {
+        "sqlite_scanned_table_count": scanned_tables,
+        "sqlite_scanned_row_count": scanned_rows,
+        "sqlite_row_scan_limit": row_scan_limit,
+        "sqlite_scan_truncated": truncated,
+        "sqlite_truncated_tables": truncated_tables[:10],
+    }
 
 
 def search_text_content(text: str, keywords: Sequence[str], *, limit: int, context: int) -> list[dict[str, object]]:

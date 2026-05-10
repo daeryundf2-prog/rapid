@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -22,6 +23,21 @@ from rapidtriage.core.kakaotalk_algorithms import (  # noqa: E402
     derive_postpatch_v2_database_key,
     derive_postpatch_v2_profile_material,
 )
+
+
+RAW_KEY_DISCLOSURE_ENV = "RAPIDTRIAGE_KAKAO_ALLOW_RAW_KEYS"
+RAW_KEY_DISCLOSURE_VALUE = "I_UNDERSTAND_RAW_KEY_DISCLOSURE"
+
+
+def require_raw_key_disclosure_gate(include_raw: bool) -> None:
+    if not include_raw:
+        return
+    if os.environ.get(RAW_KEY_DISCLOSURE_ENV) == RAW_KEY_DISCLOSURE_VALUE:
+        return
+    raise SystemExit(
+        "--include-raw can expose KakaoTalk database keys. "
+        f"Set {RAW_KEY_DISCLOSURE_ENV}={RAW_KEY_DISCLOSURE_VALUE} in a controlled lab to continue."
+    )
 
 
 def main() -> int:
@@ -52,6 +68,7 @@ def main() -> int:
     primitive.add_argument("--include-raw", action="store_true", help="Include raw key hex. Use only in a controlled lab.")
 
     args = parser.parse_args()
+    require_raw_key_disclosure_gate(bool(getattr(args, "include_raw", False)))
     if args.command == "legacy":
         edb = Path(args.edb).expanduser().resolve()
         output = Path(args.output).expanduser().resolve() if args.output else None

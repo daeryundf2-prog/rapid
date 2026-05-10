@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import importlib.util
+import os
 import tempfile
 import unittest
 import zipfile
 from pathlib import Path
+from unittest.mock import patch
 
 from rapidtriage.core.kakaotalk import KakaoTalkDecryptError, extract_zip_archive_safely
 
@@ -15,8 +17,28 @@ assert SPEC is not None and SPEC.loader is not None
 kakao_report = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(kakao_report)
 
+ALGORITHM_SCRIPT_PATH = Path(__file__).resolve().parents[1] / "scripts" / "kakaotalk_algorithm_reference.py"
+ALGORITHM_SPEC = importlib.util.spec_from_file_location("kakaotalk_algorithm_reference", ALGORITHM_SCRIPT_PATH)
+assert ALGORITHM_SPEC is not None and ALGORITHM_SPEC.loader is not None
+kakao_algorithm = importlib.util.module_from_spec(ALGORITHM_SPEC)
+ALGORITHM_SPEC.loader.exec_module(kakao_algorithm)
+
 
 class KakaoTalkReportScriptTests(unittest.TestCase):
+    def test_raw_key_output_requires_lab_disclosure_gate(self) -> None:
+        with patch.dict(os.environ, {}, clear=True):
+            with self.assertRaises(SystemExit):
+                kakao_algorithm.require_raw_key_disclosure_gate(True)
+
+        with patch.dict(
+            os.environ,
+            {
+                kakao_algorithm.RAW_KEY_DISCLOSURE_ENV: kakao_algorithm.RAW_KEY_DISCLOSURE_VALUE,
+            },
+            clear=True,
+        ):
+            kakao_algorithm.require_raw_key_disclosure_gate(True)
+
     def test_detect_source_kind_and_operator_notes_cover_common_inputs(self) -> None:
         self.assertEqual(kakao_report.detect_source_kind(Path("case.zip")), "zip")
         self.assertEqual(kakao_report.detect_source_kind(Path("NTUSER.DAT")), "ntuser-dat")
