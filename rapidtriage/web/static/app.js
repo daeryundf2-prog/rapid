@@ -289,6 +289,11 @@ const WORKBENCH_LAYOUT_CONTRACT = {
   required_regions: ["artifact-tree", "result-table", "preview-detail", "evidence-tray", "report-tray"],
   large_case_policy: "paged-results-plus-virtual-dom-window",
 };
+const TABLE_CONTROL_CONTRACT = {
+  profile_version: "large-result-table-control-contract-v1",
+  checklist_item: 12,
+  controls: ["pagination", "virtual-window", "visible-row-filter", "column-preset", "source-filter", "time-filter", "keyboard-navigation"],
+};
 
 let selectedRunId = null;
 let selectedRun = null;
@@ -471,11 +476,37 @@ function renderDetailShell(run, tab) {
     <div class="tab-row">
       ${tabs.map((item) => `<button class="tab-button ${item === tab ? "active" : ""}" data-tab="${item}" data-testid="tab-${escapeHtml(item)}" type="button">${escapeHtml(tabLabel(item))}</button>`).join("")}
     </div>
-    <div class="filter-row">
-      <input id="tableFilter" placeholder="Filter visible rows" />
-      <button id="clearFilter" type="button">Clear</button>
-    </div>
+    ${renderTableControlBar(tab)}
     ${renderWorkbenchLayoutFrame(run, tab)}
+  `;
+}
+
+function renderTableControlBar(tab) {
+  return `
+    <section class="table-control-bar" aria-label="Large result table controls" data-testid="table-control-bar" data-control-contract="${escapeHtml(TABLE_CONTROL_CONTRACT.profile_version)}">
+      <label>
+        Visible filter
+        <input id="tableFilter" placeholder="Filter visible rows" />
+      </label>
+      <label>
+        Column preset
+        <select id="columnPresetInput" aria-label="Column display preset">
+          <option value="analyst">Analyst default</option>
+          <option value="compact">Compact</option>
+          <option value="source">Source/citation focus</option>
+        </select>
+      </label>
+      <label>
+        Source filter
+        <input id="sourceFilterInput" placeholder="path, provider, hive, DB..." />
+      </label>
+      <label>
+        Time filter
+        <input id="timeFilterInput" placeholder="YYYY-MM-DD or time text" />
+      </label>
+      <button id="clearFilter" type="button">Clear</button>
+      <span class="table-control-hint">${escapeHtml(tabLabel(tab))} · ${kbd("[")} ${kbd("]")} page/window · DOM window ${VIRTUAL_TABLE_ROW_LIMIT}</span>
+    </section>
   `;
 }
 
@@ -799,12 +830,26 @@ function bindTabButtons() {
     });
   }
   detailPanel.querySelector("#clearFilter")?.addEventListener("click", () => {
-    const input = detailPanel.querySelector("#tableFilter");
-    input.value = "";
-    applyFilter("");
+    for (const selector of ["#tableFilter", "#sourceFilterInput", "#timeFilterInput"]) {
+      const input = detailPanel.querySelector(selector);
+      if (input) input.value = "";
+    }
+    const preset = detailPanel.querySelector("#columnPresetInput");
+    if (preset) preset.value = "analyst";
+    applyColumnPreset("analyst");
+    applyWorkbenchFilters();
   });
   detailPanel.querySelector("#tableFilter")?.addEventListener("input", (event) => {
-    applyFilter(event.target.value);
+    applyWorkbenchFilters();
+  });
+  detailPanel.querySelector("#sourceFilterInput")?.addEventListener("input", () => {
+    applyWorkbenchFilters();
+  });
+  detailPanel.querySelector("#timeFilterInput")?.addEventListener("input", () => {
+    applyWorkbenchFilters();
+  });
+  detailPanel.querySelector("#columnPresetInput")?.addEventListener("change", (event) => {
+    applyColumnPreset(event.target.value || "analyst");
   });
   detailPanel.querySelector("#removeRunButton")?.addEventListener("click", removeSelectedRun);
   bindCompareActions();
@@ -4142,6 +4187,26 @@ function applyFilter(value) {
   for (const row of detailPanel.querySelectorAll("[data-filter]")) {
     row.hidden = needle && !row.dataset.filter.includes(needle);
   }
+}
+
+function applyWorkbenchFilters() {
+  const visibleNeedle = detailPanel.querySelector("#tableFilter")?.value.trim().toLowerCase() || "";
+  const sourceNeedle = detailPanel.querySelector("#sourceFilterInput")?.value.trim().toLowerCase() || "";
+  const timeNeedle = detailPanel.querySelector("#timeFilterInput")?.value.trim().toLowerCase() || "";
+  for (const row of detailPanel.querySelectorAll("[data-filter]")) {
+    const haystack = row.dataset.filter || "";
+    row.hidden = Boolean(
+      (visibleNeedle && !haystack.includes(visibleNeedle)) ||
+      (sourceNeedle && !haystack.includes(sourceNeedle)) ||
+      (timeNeedle && !haystack.includes(timeNeedle))
+    );
+  }
+}
+
+function applyColumnPreset(preset) {
+  detailPanel.classList.remove("table-columns-compact", "table-columns-source");
+  if (preset === "compact") detailPanel.classList.add("table-columns-compact");
+  if (preset === "source") detailPanel.classList.add("table-columns-source");
 }
 
 function metric(label, value) {

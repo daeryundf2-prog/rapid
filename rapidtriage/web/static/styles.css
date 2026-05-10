@@ -1354,11 +1354,43 @@ button:disabled {
   color: #fff;
 }
 
-.filter-row {
+.filter-row,
+.table-control-bar {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
   gap: 8px;
   margin: 14px 0;
+}
+
+.table-control-bar {
+  grid-template-columns: minmax(150px, 1fr) minmax(130px, 0.7fr) minmax(130px, 0.8fr) minmax(120px, 0.7fr) auto minmax(170px, auto);
+  align-items: end;
+}
+
+.table-control-bar label {
+  display: grid;
+  gap: 4px;
+  color: var(--muted);
+  font-size: 0.74rem;
+  font-weight: 800;
+}
+
+.table-control-hint {
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-weight: 800;
+}
+
+.table-columns-compact .data-table th:nth-child(n+6),
+.table-columns-compact .data-table td:nth-child(n+6) {
+  display: none;
+}
+
+.table-columns-source .data-table th:nth-child(2),
+.table-columns-source .data-table td:nth-child(2),
+.table-columns-source .data-table th:nth-child(4),
+.table-columns-source .data-table td:nth-child(4) {
+  background: rgba(15, 116, 107, 0.06);
 }
 
 .search-form {
@@ -1412,6 +1444,7 @@ mark {
 }
 
 .filter-row button,
+.table-control-bar button,
 .icon-action,
 .mini-inline-button {
   min-height: 34px;
@@ -3671,7 +3704,8 @@ body::before {
   border-radius: 13px;
 }
 
-.filter-row {
+.filter-row,
+.table-control-bar {
   position: sticky;
   top: 136px;
   z-index: 6;
@@ -3724,6 +3758,7 @@ body::before {
   .review-grid,
   .report-grid,
   .case-workbench-layout,
+  .table-control-bar,
   .search-form,
   .file-search-form,
   .file-search-summary,
