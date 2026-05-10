@@ -1357,6 +1357,16 @@ def build_parser() -> argparse.ArgumentParser:
     )
     forensic_validation_batches_assess.add_argument("--root-dir", required=True, help="Directory created by forensic-validation-batches")
     forensic_validation_batches_assess.add_argument("--output", help="Optional JSON assessment output path")
+    forensic_validation_batches_assess.add_argument(
+        "--strict-external",
+        action="store_true",
+        help="Exit non-zero unless every dataset is backed by non-smoke external validation evidence",
+    )
+    forensic_validation_batches_assess.add_argument(
+        "--strict-commercial",
+        action="store_true",
+        help="Exit non-zero unless every dataset is commercial-grade ready",
+    )
     forensic_validation_batches_assess.add_argument("--json", action="store_true", help="Print machine-readable JSON")
 
     forensic_validation_smoke_populate = sub.add_parser(
@@ -2790,6 +2800,10 @@ def main(argv=None) -> int:
             print(f"Commercial-ready datasets: {payload['commercial_ready_dataset_count']}/{payload['dataset_count']}")
             print(f"Ready for validated gate: {payload['ready_for_validated_gate']}")
             print(f"Ready for external validated gate: {payload['ready_for_external_validated_gate']}")
+        if args.strict_commercial and not payload["ready_for_commercial_grade"]:
+            return 2
+        if args.strict_external and not payload["ready_for_external_validated_gate"]:
+            return 2
         return 0
 
     if args.command == "forensic-validation-smoke-populate":

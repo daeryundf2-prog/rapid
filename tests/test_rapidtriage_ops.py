@@ -112,6 +112,7 @@ class RapidTriageOpsTests(unittest.TestCase):
         self.assertIn("--items", commands["forensic-validation-batches"].format_help())
         self.assertIn("forensic-validation-batches-assess", commands)
         self.assertIn("--root-dir", commands["forensic-validation-batches-assess"].format_help())
+        self.assertIn("--strict-external", commands["forensic-validation-batches-assess"].format_help())
         self.assertIn("forensic-validation-smoke-populate", commands)
         self.assertIn("--root-dir", commands["forensic-validation-smoke-populate"].format_help())
         self.assertIn("cross-tool-validate", commands)
@@ -1781,6 +1782,31 @@ class RapidTriageOpsTests(unittest.TestCase):
             )
             self.assertEqual(first_pack["datasets"][0]["status"], "internal-smoke-populated")
             self.assertTrue(Path(first_pack["datasets"][0]["evidence_paths"]["row_level_diff_output"]).is_file())
+
+    def test_forensic_validation_batches_strict_external_rejects_smoke_only_completion(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir) / "batches"
+            with contextlib.redirect_stdout(io.StringIO()):
+                self.assertEqual(main(["forensic-validation-batches", "--items", "1-65", "--output-dir", str(root), "--json"]), 0)
+                self.assertEqual(main(["forensic-validation-smoke-populate", "--root-dir", str(root), "--json"]), 0)
+
+            stdout = io.StringIO()
+            with contextlib.redirect_stdout(stdout):
+                exit_code = main(
+                    [
+                        "forensic-validation-batches-assess",
+                        "--root-dir",
+                        str(root),
+                        "--strict-external",
+                        "--json",
+                    ]
+                )
+
+            self.assertEqual(exit_code, 2)
+            payload = json.loads(stdout.getvalue())
+            self.assertEqual(payload["ready_dataset_count"], 65)
+            self.assertEqual(payload["external_ready_dataset_count"], 0)
+            self.assertFalse(payload["ready_for_external_validated_gate"])
 
     def test_cross_tool_validate_compares_rapid_and_reference_outputs(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
