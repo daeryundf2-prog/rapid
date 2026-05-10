@@ -102,6 +102,8 @@ class RapidTriageOpsTests(unittest.TestCase):
         self.assertIn("--write-known-answer-template-dir", commands["commercial-readiness"].format_help())
         self.assertIn("--uplift-targets", commands["commercial-readiness"].format_help())
         self.assertIn("--uplift-batch-size", commands["commercial-readiness"].format_help())
+        self.assertIn("forensic-validation-plan", commands)
+        self.assertIn("--items", commands["forensic-validation-plan"].format_help())
         self.assertIn("cross-tool-validate", commands)
         self.assertIn("--reference-output", commands["cross-tool-validate"].format_help())
         self.assertIn("confidence-dashboard", commands)
@@ -1513,6 +1515,26 @@ class RapidTriageOpsTests(unittest.TestCase):
             self.assertEqual(first_batch["item_numbers"], [1, 2, 3, 4, 5])
             self.assertEqual(last_batch["item_numbers"], [116, 117, 118, 119, 120])
             self.assertTrue(all(dataset["status"] == "not-run" for dataset in first_batch["datasets"]))
+
+    def test_forensic_validation_plan_defaults_to_items_1_through_65(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            output_dir = Path(tmp_dir) / "forensic-plan"
+            stdout = io.StringIO()
+            with contextlib.redirect_stdout(stdout):
+                exit_code = main(["forensic-validation-plan", "--output-dir", str(output_dir), "--json"])
+
+            self.assertEqual(exit_code, 0)
+            payload = json.loads(stdout.getvalue())
+            self.assertEqual(payload["command"], "forensic-validation-plan")
+            self.assertEqual(payload["profile_version"], "forensic-validation-plan-v1")
+            self.assertEqual(payload["item_count"], 65)
+            self.assertEqual(payload["item_numbers"][0], 1)
+            self.assertEqual(payload["item_numbers"][-1], 65)
+            self.assertEqual(payload["summary"]["commercial_grade_ready_count"], 0)
+            self.assertIn(1, payload["summary"]["highest_priority_open_items"])
+            self.assertTrue(any(batch["item_numbers"] for batch in payload["sequencing"]))
+            self.assertTrue((output_dir / "rapidtriage-forensic-validation-plan.json").is_file())
+            self.assertTrue((output_dir / "rapidtriage-forensic-validation-plan.md").is_file())
 
     def test_cross_tool_validate_compares_rapid_and_reference_outputs(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:

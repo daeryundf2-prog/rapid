@@ -118,6 +118,11 @@ from .core.timeline_export import TimelineExportError, build_unified_timeline_ex
 from .core.validation import ValidationError, build_validation_package
 from .core.vsc import VscCompareError, compare_vsc_snapshots, extract_vsc_changes
 from .core.worker import RustWorkerClient, WorkerError
+from .core.forensic_validation_plan import (
+    DEFAULT_FORENSIC_VALIDATION_ITEMS,
+    build_forensic_validation_plan,
+    write_forensic_validation_plan,
+)
 
 HELP_FORMATTER = argparse.RawDescriptionHelpFormatter
 TOP_LEVEL_EPILOG = """Examples:
@@ -1273,6 +1278,27 @@ def build_parser() -> argparse.ArgumentParser:
     )
     commercial_readiness.add_argument("--strict", action="store_true", help="Exit non-zero when commercial gaps remain")
     commercial_readiness.add_argument("--json", action="store_true", help="Print machine-readable JSON")
+
+    forensic_validation_plan = sub.add_parser(
+        "forensic-validation-plan",
+        help="Build a focused validation execution plan for forensic items",
+        description="Build a machine-readable execution plan for forensic validation items, defaulting to #1-#65",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=textwrap.dedent(
+            """\
+            Examples:
+              rapidtriage forensic-validation-plan --json
+              rapidtriage forensic-validation-plan --items 1-65 --output-dir ./forensic-validation-plan
+            """
+        ),
+    )
+    forensic_validation_plan.add_argument(
+        "--items",
+        default=DEFAULT_FORENSIC_VALIDATION_ITEMS,
+        help=f"Item range/list to include (default: {DEFAULT_FORENSIC_VALIDATION_ITEMS})",
+    )
+    forensic_validation_plan.add_argument("--output-dir", help="Optional directory for JSON and Markdown plan outputs")
+    forensic_validation_plan.add_argument("--json", action="store_true", help="Print machine-readable JSON")
 
     cross_tool = sub.add_parser(
         "cross-tool-validate",
@@ -2580,6 +2606,35 @@ def main(argv=None) -> int:
                     print(f"Saved known-answer batch index Markdown: {outputs['index_markdown']}")
                     print(f"Known-answer batches: {outputs['batch_count']}")
         return 1 if args.strict and not payload["commercial_claim_allowed"] else 0
+
+    if args.command == "forensic-validation-plan":
+        try:
+            payload = build_forensic_validation_plan(
+                item_range=args.items,
+                output_dir=Path(args.output_dir).expanduser().resolve() if args.output_dir else None,
+            )
+        except ValueError as exc:
+            parser.error(str(exc))
+        if args.output_dir:
+            payload["outputs"] = write_forensic_validation_plan(payload, Path(args.output_dir).expanduser().resolve())
+        if args.json:
+            print(json.dumps(payload, ensure_ascii=False, indent=2))
+        else:
+            summary = payload["summary"]
+            print("RapidTriage forensic validation plan")
+            print(f"Items: {payload['item_range']} ({payload['item_count']})")
+            print(f"Validated: {summary['validated_count']}/{summary['item_count']}")
+            print(f"Commercial-ready: {summary['commercial_grade_ready_count']}/{summary['item_count']}")
+            print("Highest-priority open items:")
+            for number in summary["highest_priority_open_items"]:
+                row = next((item for item in payload["rows"] if item["number"] == number), None)
+                if row:
+                    print(f"- #{number} {row['title']} [{row['lane']}]: {row['next_internal_work']}")
+            if payload.get("outputs"):
+                outputs = payload["outputs"]
+                print(f"Saved JSON: {outputs['json']}")
+                print(f"Saved Markdown: {outputs['markdown']}")
+        return 0
 
     if args.command == "cross-tool-validate":
         references: dict[str, Path] = {}
