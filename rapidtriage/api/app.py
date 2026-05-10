@@ -95,6 +95,94 @@ VIEWER_WORKFLOW_GAP_IDS = {
     "pagination": "#78",
     "ui_virtualization": "#79",
 }
+STAGE10_VIEWER_ITEM_BY_FAMILY = {
+    "sqlite-table-preview": 54,
+    "email-thread-preview": 55,
+    "image-gallery-preview": 56,
+    "media-preview": 57,
+}
+STAGE10_CAPABILITY_SPECS: tuple[dict[str, object], ...] = (
+    {
+        "item_number": 51,
+        "label": "reviewer workflow",
+        "primary_families": ("document-text-preview",),
+        "route_template": None,
+        "evidence_refs": ("review_workflow", "case-db:review_mark", "case-db:review_mark_history"),
+        "blockers": ("role-based-review-queue-not-enabled", "trusted-review-audit-diff-required"),
+    },
+    {
+        "item_number": 52,
+        "label": "A/B/C compare",
+        "primary_families": (),
+        "route_template": None,
+        "evidence_refs": ("compare_workflow", "command:compare"),
+        "blockers": ("semantic-binary-table-visual-diff-required", "trusted-expected-diff-required"),
+    },
+    {
+        "item_number": 53,
+        "label": "raw/hex viewer",
+        "primary_families": ("text-or-hex-preview",),
+        "route_template": "/api/runs/{run_id}/source-preview?path={quoted_path}",
+        "evidence_refs": ("hex.hex_preview_manifest", "hex.range_citation_profile"),
+        "blockers": ("trusted-offset-manifest-required",),
+    },
+    {
+        "item_number": 54,
+        "label": "SQLite/table viewer",
+        "primary_families": ("sqlite-table-preview",),
+        "route_template": "/api/runs/{run_id}/source-sqlite-table?path={quoted_path}",
+        "evidence_refs": ("sqlite.sqlite_preview_manifest", "sqlite.table_page_profile"),
+        "blockers": ("deleted-row-wal-validation-required", "trusted-sqlite-query-schema-diff-required"),
+    },
+    {
+        "item_number": 55,
+        "label": "email conversation viewer",
+        "primary_families": ("email-thread-preview",),
+        "route_template": "/api/runs/{run_id}/source-email-attachment?path={quoted_path}",
+        "evidence_refs": ("email.email_conversation_manifest", "email.attachment_package_profile"),
+        "blockers": ("native-pst-ost-msg-validation-required", "trusted-mail-thread-export-required"),
+    },
+    {
+        "item_number": 56,
+        "label": "image gallery review",
+        "primary_families": ("image-gallery-preview",),
+        "route_template": "/api/runs/{run_id}/source-image-gallery?path={quoted_path}",
+        "evidence_refs": ("image.gallery_page_profile", "image.image_gallery_manifest"),
+        "blockers": ("large-gallery-browser-e2e-required", "trusted-image-manifest-required"),
+    },
+    {
+        "item_number": 57,
+        "label": "video/audio transcript viewer",
+        "primary_families": ("media-preview",),
+        "route_template": "/api/runs/{run_id}/source-media-cue?path={quoted_path}",
+        "evidence_refs": ("media.transcript_sidecars", "media.cue_package_profile"),
+        "blockers": ("safe-playback-asr-alignment-corpus-required", "trusted-transcript-cue-diff-required"),
+    },
+    {
+        "item_number": 58,
+        "label": "OCR queue",
+        "primary_families": ("image-gallery-preview",),
+        "route_template": "/api/runs/{run_id}/source-ocr-queue?path={quoted_path}",
+        "evidence_refs": ("image.ocr_queue_profile", "ocr_queue.core_accuracy_gates"),
+        "blockers": ("native-ocr-engine-log-required", "trusted-ocr-sidecar-diff-required"),
+    },
+    {
+        "item_number": 59,
+        "label": "Korean OCR/translation review",
+        "primary_families": ("image-gallery-preview",),
+        "route_template": "/api/runs/{run_id}/source-ocr-translation?path={quoted_path}",
+        "evidence_refs": ("image.ocr_translation_profile", "source-ocr-translation-review-manifest"),
+        "blockers": ("korean-ocr-calibration-corpus-required", "certified-translation-review-required"),
+    },
+    {
+        "item_number": 60,
+        "label": "search hit dedup review",
+        "primary_families": (),
+        "route_template": None,
+        "evidence_refs": ("analysis_analyst_review_profile.dedup_review", "search-analysis.duplicate_groups"),
+        "blockers": ("persistent-suppression-workflow-required", "trusted-duplicate-manifest-required"),
+    },
+)
 
 
 def stable_payload_sha256(payload: Mapping[str, object] | Sequence[Mapping[str, object]]) -> str:
@@ -2943,15 +3031,7 @@ def source_analyst_workbench_profile(
 
 
 def stage10_viewer_item_number(viewer_family: str) -> int:
-    if viewer_family == "sqlite-table-preview":
-        return 54
-    if viewer_family == "email-thread-preview":
-        return 55
-    if viewer_family == "image-gallery-preview":
-        return 56
-    if viewer_family == "media-preview":
-        return 57
-    return 53
+    return STAGE10_VIEWER_ITEM_BY_FAMILY.get(viewer_family, 53)
 
 
 def source_stage10_capability_matrix(
@@ -2963,96 +3043,13 @@ def source_stage10_capability_matrix(
 ) -> dict[str, object]:
     """Expose the #51-#60 review/viewer workbench as one UI contract."""
     entries = [
-        stage10_capability_entry(
-            51,
-            "reviewer workflow",
-            implemented=True,
-            primary=viewer_family == "document-text-preview",
-            route=None,
-            evidence_refs=["review_workflow", "case-db:review_mark", "case-db:review_mark_history"],
-            blockers=["role-based-review-queue-not-enabled", "trusted-review-audit-diff-required"],
-        ),
-        stage10_capability_entry(
-            52,
-            "A/B/C compare",
-            implemented=True,
-            primary=False,
-            route=None,
-            evidence_refs=["compare_workflow", "command:compare"],
-            blockers=["semantic-binary-table-visual-diff-required", "trusted-expected-diff-required"],
-        ),
-        stage10_capability_entry(
-            53,
-            "raw/hex viewer",
-            implemented=True,
-            primary=viewer_family == "text-or-hex-preview",
-            route=f"/api/runs/{run_id}/source-preview?path={quoted_path}",
-            evidence_refs=["hex.hex_preview_manifest", "hex.range_citation_profile"],
-            blockers=["trusted-offset-manifest-required"],
-        ),
-        stage10_capability_entry(
-            54,
-            "SQLite/table viewer",
-            implemented=True,
-            primary=viewer_family == "sqlite-table-preview",
-            route=f"/api/runs/{run_id}/source-sqlite-table?path={quoted_path}",
-            evidence_refs=["sqlite.sqlite_preview_manifest", "sqlite.table_page_profile"],
-            blockers=["deleted-row-wal-validation-required", "trusted-sqlite-query-schema-diff-required"],
-        ),
-        stage10_capability_entry(
-            55,
-            "email conversation viewer",
-            implemented=True,
-            primary=viewer_family == "email-thread-preview",
-            route=f"/api/runs/{run_id}/source-email-attachment?path={quoted_path}",
-            evidence_refs=["email.email_conversation_manifest", "email.attachment_package_profile"],
-            blockers=["native-pst-ost-msg-validation-required", "trusted-mail-thread-export-required"],
-        ),
-        stage10_capability_entry(
-            56,
-            "image gallery review",
-            implemented=True,
-            primary=viewer_family == "image-gallery-preview",
-            route=f"/api/runs/{run_id}/source-image-gallery?path={quoted_path}",
-            evidence_refs=["image.gallery_page_profile", "image.image_gallery_manifest"],
-            blockers=["large-gallery-browser-e2e-required", "trusted-image-manifest-required"],
-        ),
-        stage10_capability_entry(
-            57,
-            "video/audio transcript viewer",
-            implemented=True,
-            primary=viewer_family == "media-preview",
-            route=f"/api/runs/{run_id}/source-media-cue?path={quoted_path}",
-            evidence_refs=["media.transcript_sidecars", "media.cue_package_profile"],
-            blockers=["safe-playback-asr-alignment-corpus-required", "trusted-transcript-cue-diff-required"],
-        ),
-        stage10_capability_entry(
-            58,
-            "OCR queue",
-            implemented=True,
-            primary=viewer_family == "image-gallery-preview",
-            route=f"/api/runs/{run_id}/source-ocr-queue?path={quoted_path}",
-            evidence_refs=["image.ocr_queue_profile", "ocr_queue.core_accuracy_gates"],
-            blockers=["native-ocr-engine-log-required", "trusted-ocr-sidecar-diff-required"],
-        ),
-        stage10_capability_entry(
-            59,
-            "Korean OCR/translation review",
-            implemented=True,
-            primary=viewer_family == "image-gallery-preview",
-            route=f"/api/runs/{run_id}/source-ocr-translation?path={quoted_path}",
-            evidence_refs=["image.ocr_translation_profile", "source-ocr-translation-review-manifest"],
-            blockers=["korean-ocr-calibration-corpus-required", "certified-translation-review-required"],
-        ),
-        stage10_capability_entry(
-            60,
-            "search hit dedup review",
-            implemented=True,
-            primary=False,
-            route=None,
-            evidence_refs=["analysis_analyst_review_profile.dedup_review", "search-analysis.duplicate_groups"],
-            blockers=["persistent-suppression-workflow-required", "trusted-duplicate-manifest-required"],
-        ),
+        stage10_capability_entry_from_spec(
+            spec,
+            run_id=run_id,
+            quoted_path=quoted_path,
+            viewer_family=viewer_family,
+        )
+        for spec in STAGE10_CAPABILITY_SPECS
     ]
     implemented_count = sum(1 for entry in entries if entry["implemented"])
     primary_count = sum(1 for entry in entries if entry["primary_for_current_source"])
@@ -3077,6 +3074,32 @@ def source_stage10_capability_matrix(
             ],
         },
     }
+
+
+def stage10_capability_entry_from_spec(
+    spec: Mapping[str, object],
+    *,
+    run_id: str,
+    quoted_path: str,
+    viewer_family: str,
+) -> dict[str, object]:
+    route_template = spec.get("route_template")
+    route = (
+        str(route_template).format(run_id=run_id, quoted_path=quoted_path)
+        if isinstance(route_template, str)
+        else None
+    )
+    primary_families = spec.get("primary_families")
+    primary = isinstance(primary_families, tuple) and viewer_family in primary_families
+    return stage10_capability_entry(
+        int(spec["item_number"]),
+        str(spec["label"]),
+        implemented=True,
+        primary=primary,
+        route=route,
+        evidence_refs=tuple(str(item) for item in spec.get("evidence_refs", ())),
+        blockers=tuple(str(item) for item in spec.get("blockers", ())),
+    )
 
 
 def stage10_capability_entry(
