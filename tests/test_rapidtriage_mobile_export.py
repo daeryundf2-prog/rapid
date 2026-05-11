@@ -275,6 +275,7 @@ class RapidTriageMobileExportTests(unittest.TestCase):
             self.assertEqual(kakao_parser_manifest["manifest_version"], "kakaotalk-parser-manifest-v1")
             self.assertEqual(kakao_parser_manifest["item_number"], 31)
             self.assertEqual(kakao_parser_manifest["gap_id"], "#31")
+            self.assertEqual(kakao_parser_manifest["qc_prep_item_number"], 37)
             self.assertEqual(kakao_parser_manifest["service"], "KakaoTalk")
             self.assertEqual(kakao_parser_manifest["source_tool"], "axiom")
             self.assertEqual(kakao_parser_manifest["compatibility"]["status"], "post-bigbang-legacy-method-not-applicable")
@@ -322,7 +323,9 @@ class RapidTriageMobileExportTests(unittest.TestCase):
             kakao_uplift = kakao["details"]["chat_app_commercial_uplift_evidence"]
             self.assertEqual(kakao_uplift["batch_id"], "commercial-uplift-031-035")
             self.assertEqual(kakao_uplift["item_numbers"], [31])
+            self.assertEqual(kakao_uplift["qc_prep_item_numbers"], [37])
             self.assertEqual(kakao_uplift["functional_priority_profile"]["item_number"], 50)
+            self.assertEqual(kakao_uplift["functional_priority_profile"]["qc_prep_item_numbers"], [37])
             self.assertEqual(kakao_uplift["functional_priority_profile"]["batch_id"], "commercial-uplift-046-050")
             self.assertIn(
                 "messenger-trusted-export-or-native-db-diff-required",
@@ -432,6 +435,7 @@ class RapidTriageMobileExportTests(unittest.TestCase):
             self.assertEqual(whatsapp_parser_manifest["manifest_version"], "whatsapp-parser-manifest-v1")
             self.assertEqual(whatsapp_parser_manifest["item_number"], 32)
             self.assertEqual(whatsapp_parser_manifest["gap_id"], "#32")
+            self.assertEqual(whatsapp_parser_manifest["qc_prep_item_number"], 38)
             self.assertEqual(whatsapp_parser_manifest["service"], "WhatsApp")
             self.assertEqual(
                 whatsapp_parser_manifest["row_citation"]["source_viewer_locator"]["viewer"],
@@ -456,6 +460,7 @@ class RapidTriageMobileExportTests(unittest.TestCase):
             )
             whatsapp_uplift = whatsapp["details"]["chat_app_commercial_uplift_evidence"]
             self.assertEqual(whatsapp_uplift["item_numbers"], [32])
+            self.assertEqual(whatsapp_uplift["qc_prep_item_numbers"], [38])
             self.assertIn("encrypted-store-authority", whatsapp_uplift["failed_issue_matrix_ids"])
             self.assertTrue(whatsapp_uplift["large_data_controls"]["whatsapp_message_review_profile_present"])
             self.assertEqual(
@@ -525,6 +530,7 @@ class RapidTriageMobileExportTests(unittest.TestCase):
             self.assertEqual(telegram_parser_manifest["manifest_version"], "telegram-parser-manifest-v1")
             self.assertEqual(telegram_parser_manifest["item_number"], 33)
             self.assertEqual(telegram_parser_manifest["gap_id"], "#33")
+            self.assertEqual(telegram_parser_manifest["qc_prep_item_number"], 39)
             self.assertEqual(telegram_parser_manifest["service"], "Telegram")
             self.assertEqual(
                 telegram_parser_manifest["row_citation"]["source_viewer_locator"]["viewer"],
@@ -546,6 +552,10 @@ class RapidTriageMobileExportTests(unittest.TestCase):
                 telegram_parser_manifest["manifest_sha256"],
             )
             self.assertEqual(telegram["details"]["chat_app_commercial_uplift_evidence"]["item_numbers"], [33])
+            self.assertEqual(
+                telegram["details"]["chat_app_commercial_uplift_evidence"]["qc_prep_item_numbers"],
+                [39],
+            )
             self.assertEqual(
                 telegram["details"]["chat_app_commercial_uplift_evidence"]["large_data_controls"][
                     "telegram_parser_manifest_hash"
@@ -628,6 +638,7 @@ class RapidTriageMobileExportTests(unittest.TestCase):
             self.assertEqual(signal_parser_manifest["manifest_version"], "signal-parser-manifest-v1")
             self.assertEqual(signal_parser_manifest["item_number"], 34)
             self.assertEqual(signal_parser_manifest["gap_id"], "#34")
+            self.assertEqual(signal_parser_manifest["qc_prep_item_number"], 40)
             self.assertEqual(signal_parser_manifest["service"], "Signal")
             self.assertEqual(
                 signal_parser_manifest["row_citation"]["source_viewer_locator"]["viewer"],
@@ -650,6 +661,10 @@ class RapidTriageMobileExportTests(unittest.TestCase):
                 signal_parser_manifest["manifest_sha256"],
             )
             self.assertEqual(signal["details"]["chat_app_commercial_uplift_evidence"]["item_numbers"], [34])
+            self.assertEqual(
+                signal["details"]["chat_app_commercial_uplift_evidence"]["qc_prep_item_numbers"],
+                [40],
+            )
             self.assertEqual(
                 signal["details"]["chat_app_commercial_uplift_evidence"]["large_data_controls"][
                     "signal_parser_manifest_hash"

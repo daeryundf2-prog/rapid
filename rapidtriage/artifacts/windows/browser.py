@@ -79,6 +79,26 @@ QC_PREP_BROWSER_SECRET_CONTRACT = {
         "trusted secret authority diff evidence",
     ],
 }
+QC_PREP_AI_TRANSCRIPT_ITEM = 36
+QC_PREP_AI_TRANSCRIPT_GOAL = (
+    "Parse AI service exports and browser traces for ChatGPT, Claude, Gemini, "
+    "Perplexity, and Copilot-style Q/A pairing."
+)
+QC_PREP_AI_TRANSCRIPT_CONTRACT = {
+    "item_number": QC_PREP_AI_TRANSCRIPT_ITEM,
+    "goal": QC_PREP_AI_TRANSCRIPT_GOAL,
+    "implemented_outputs": [
+        "AI service domain detection across browser history and storage fragments",
+        "candidate question/answer pairing with confidence, orphan tracking, and source citations",
+        "candidate and schema validation manifests with source hashes and report blockers",
+    ],
+    "commercial_blockers": [
+        "service-side export/schema-version validation",
+        "provider-specific Q/A schema corpus",
+        "deleted-fragment recovery validation",
+        "trusted ChatGPT/Claude/Gemini/Perplexity/Copilot export diffs",
+    ],
+}
 MAX_USAGE_ROWS = 500
 MAX_AI_STORAGE_FILES = 80
 MAX_AI_STORAGE_FILE_BYTES = 5 * 1024 * 1024
@@ -1977,6 +1997,9 @@ def ai_transcript_analyst_review_profile(details: Mapping[str, object]) -> Dict[
     return {
         "profile_version": "ai-transcript-analyst-review-profile-v1",
         "gap_id": "#21",
+        "qc_prep_item_number": QC_PREP_AI_TRANSCRIPT_ITEM,
+        "qc_prep_item_goal": QC_PREP_AI_TRANSCRIPT_GOAL,
+        "qc_prep_contract": dict(QC_PREP_AI_TRANSCRIPT_CONTRACT),
         "artifact_type": "ai-transcript-candidate",
         "severity": "high" if conversation_rows and has_pairs else "medium",
         "summary": "AI transcript rows are candidate Q/A pairings from browser storage and must be verified against raw source or service exports.",
@@ -2070,6 +2093,8 @@ def ai_transcript_commercial_uplift_evidence(details: Mapping[str, object]) -> D
     return {
         "batch_id": "commercial-uplift-021-025",
         "item_numbers": [21],
+        "qc_prep_item_numbers": [QC_PREP_AI_TRANSCRIPT_ITEM],
+        "qc_prep_contracts": [dict(QC_PREP_AI_TRANSCRIPT_CONTRACT)],
         "functional_priority_profile": ai_transcript_functional_profile(
             details,
             checks=checks,
@@ -3327,6 +3352,9 @@ def build_ai_transcript_candidate_manifest(
         "batch_id": FUNCTIONAL_SOURCE_BATCH_ID,
         "gap_id": "#48",
         "commercial_gap_ids": ["#21", "#48"],
+        "qc_prep_item_number": QC_PREP_AI_TRANSCRIPT_ITEM,
+        "qc_prep_item_goal": QC_PREP_AI_TRANSCRIPT_GOAL,
+        "qc_prep_contract": dict(QC_PREP_AI_TRANSCRIPT_CONTRACT),
         "browser": browser,
         "profile": profile,
         "user": user,
@@ -3404,6 +3432,9 @@ def build_ai_transcript_schema_validation_manifest(
         "commercial_batch_id": "commercial-uplift-021-025",
         "item_number": 21,
         "gap_id": "#21",
+        "qc_prep_item_number": QC_PREP_AI_TRANSCRIPT_ITEM,
+        "qc_prep_item_goal": QC_PREP_AI_TRANSCRIPT_GOAL,
+        "qc_prep_contract": dict(QC_PREP_AI_TRANSCRIPT_CONTRACT),
         "browser": browser,
         "profile": profile,
         "user": user,

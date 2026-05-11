@@ -408,6 +408,80 @@ CHAT_APP_TRUSTED_DIFF_CHECKS = {
     34: ("trusted Signal export/native DB diff pass", "signal-trusted-export-or-native-db-diff-required"),
     35: ("trusted extended messenger export/native DB diff pass", "extended-messenger-trusted-export-or-native-db-diff-required"),
 }
+QC_PREP_CHAT_APP_ITEMS = {
+    "KakaoTalk": 37,
+    "WhatsApp": 38,
+    "Telegram": 39,
+    "Signal": 40,
+}
+QC_PREP_CHAT_APP_GOALS = {
+    37: "Formalize PC KakaoTalk legacy and post-patch schema/version matrix with fixtures and Windows packaging notes.",
+    38: "Add WhatsApp export/native parser with message, contacts, calls, media, deleted-row limitations, and lawful key workflow.",
+    39: "Add Telegram export/native parser with account, media, cache, and encrypted-store warning.",
+    40: "Add Signal parser with SQLCipher/key handling separated into secure lawful workflow.",
+}
+QC_PREP_CHAT_APP_CONTRACTS = {
+    37: {
+        "item_number": 37,
+        "goal": QC_PREP_CHAT_APP_GOALS[37],
+        "implemented_outputs": [
+            "KakaoTalk export row normalization and database inventory",
+            "legacy/post-BigBang compatibility assessment and strategy profile",
+            "message review profile with hashes, attachment metadata, source citation, and viewer controls",
+        ],
+        "commercial_blockers": [
+            "post-BigBang known-answer corpus",
+            "trusted KakaoTalk export/native DB diff",
+            "schema-version parser map",
+            "attachment bytes and deleted-record validation",
+        ],
+    },
+    38: {
+        "item_number": 38,
+        "goal": QC_PREP_CHAT_APP_GOALS[38],
+        "implemented_outputs": [
+            "WhatsApp export row normalization and msgstore/wa.db inventory",
+            "JID attribution, media metadata, quoted/read/deleted state markers",
+            "crypt backup key workflow disclosed as authority-gated and not performed by default",
+        ],
+        "commercial_blockers": [
+            "crypt key authority workflow",
+            "trusted WhatsApp export/native DB diff",
+            "msgstore/wa.db schema-version known answers",
+            "deleted-row and media locality validation",
+        ],
+    },
+    39: {
+        "item_number": 39,
+        "goal": QC_PREP_CHAT_APP_GOALS[39],
+        "implemented_outputs": [
+            "Telegram export row normalization and cache/database inventory",
+            "account/dialog/media-cache attribution and source citation",
+            "encrypted local-store and secret/deleted chat warnings",
+        ],
+        "commercial_blockers": [
+            "Telegram local-store decryption validation",
+            "trusted Telegram export/native DB diff",
+            "account/dialog peer known answers",
+            "secret-chat edited/deleted semantics validation",
+        ],
+    },
+    40: {
+        "item_number": 40,
+        "goal": QC_PREP_CHAT_APP_GOALS[40],
+        "implemented_outputs": [
+            "Signal export row normalization and SQLCipher database inventory",
+            "thread/recipient attribution and attachment metadata",
+            "SQLCipher key handling separated into authority-gated workflow",
+        ],
+        "commercial_blockers": [
+            "SQLCipher key authority workflow",
+            "trusted Signal export/native DB diff",
+            "recipient/thread schema known answers",
+            "deleted/disappearing message validation",
+        ],
+    },
+}
 
 TIMESTAMP_KEYS = (
     "timestamp",
@@ -1940,6 +2014,9 @@ def build_kakaotalk_parser_manifest(
         "item_number": 31,
         "batch_id": "commercial-uplift-031-035",
         "gap_id": "#31",
+        "qc_prep_item_number": 37,
+        "qc_prep_item_goal": QC_PREP_CHAT_APP_GOALS[37],
+        "qc_prep_contract": dict(QC_PREP_CHAT_APP_CONTRACTS[37]),
         "artifact_type": artifact_type,
         "service": "KakaoTalk",
         "source_tool": source_tool,
@@ -2198,6 +2275,9 @@ def build_whatsapp_parser_manifest(
         "item_number": 32,
         "batch_id": "commercial-uplift-031-035",
         "gap_id": "#32",
+        "qc_prep_item_number": 38,
+        "qc_prep_item_goal": QC_PREP_CHAT_APP_GOALS[38],
+        "qc_prep_contract": dict(QC_PREP_CHAT_APP_CONTRACTS[38]),
         "artifact_type": artifact_type,
         "service": "WhatsApp",
         "source_tool": source_tool,
@@ -2496,6 +2576,9 @@ def build_telegram_parser_manifest(
         "item_number": 33,
         "batch_id": "commercial-uplift-031-035",
         "gap_id": "#33",
+        "qc_prep_item_number": 39,
+        "qc_prep_item_goal": QC_PREP_CHAT_APP_GOALS[39],
+        "qc_prep_contract": dict(QC_PREP_CHAT_APP_CONTRACTS[39]),
         "artifact_type": artifact_type,
         "service": "Telegram",
         "source_tool": source_tool,
@@ -2779,6 +2862,9 @@ def build_signal_parser_manifest(
         "item_number": 34,
         "batch_id": "commercial-uplift-031-035",
         "gap_id": "#34",
+        "qc_prep_item_number": 40,
+        "qc_prep_item_goal": QC_PREP_CHAT_APP_GOALS[40],
+        "qc_prep_contract": dict(QC_PREP_CHAT_APP_CONTRACTS[40]),
         "artifact_type": artifact_type,
         "service": "Signal",
         "source_tool": source_tool,
@@ -7223,6 +7309,7 @@ def chat_app_commercial_uplift_evidence(
         for gap_id in gap_ids
         if gap_id.startswith("#") and gap_id.lstrip("#").isdigit()
     )
+    qc_prep_item_numbers = chat_app_qc_prep_item_numbers(service)
     issue_matrix = [
         item for item in details.get("chat_app_issue_matrix") or [] if isinstance(item, Mapping)
     ]
@@ -7304,6 +7391,8 @@ def chat_app_commercial_uplift_evidence(
     return {
         "batch_id": "commercial-uplift-031-035",
         "item_numbers": item_numbers,
+        "qc_prep_item_numbers": qc_prep_item_numbers,
+        "qc_prep_contracts": chat_app_qc_prep_contracts(service),
         "functional_priority_profile": messenger_export_functional_profile(
             artifact_type=artifact_type,
             service=service,
@@ -7547,6 +7636,8 @@ def messenger_export_functional_profile(
     return {
         "item_number": 50,
         "batch_id": FUNCTIONAL_SOURCE_BATCH_ID,
+        "qc_prep_item_numbers": chat_app_qc_prep_item_numbers(service),
+        "qc_prep_contracts": chat_app_qc_prep_contracts(service),
         "status": "complete" if not failed_checks else "partial",
         "implemented_controls": {
             "artifact_type": artifact_type,
@@ -7635,6 +7726,8 @@ def chat_app_reportability_decision(
     return {
         "profile_version": "messenger-reportability-decision-v1",
         "commercial_gap_ids": [f"#{number}" for number in item_numbers],
+        "qc_prep_item_numbers": chat_app_qc_prep_item_numbers(service),
+        "qc_prep_contracts": chat_app_qc_prep_contracts(service),
         "decision": decision,
         "allowed_use": allowed_use,
         "service": service or "unknown",
@@ -7658,6 +7751,15 @@ def chat_app_reportability_decision(
 def chat_app_gap_ids(service: str) -> list[str]:
     gap = CHAT_APP_GAP_IDS.get(service)
     return [gap] if gap else ["#31", "#32", "#33", "#34", "#35"]
+
+
+def chat_app_qc_prep_item_numbers(service: str) -> list[int]:
+    item_number = QC_PREP_CHAT_APP_ITEMS.get(service)
+    return [item_number] if item_number else []
+
+
+def chat_app_qc_prep_contracts(service: str) -> list[dict[str, object]]:
+    return [dict(QC_PREP_CHAT_APP_CONTRACTS[number]) for number in chat_app_qc_prep_item_numbers(service)]
 
 
 def chat_app_native_capabilities(service: str) -> dict[str, object]:

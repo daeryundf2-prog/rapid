@@ -569,6 +569,7 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
             ai_uplift = ai_conversation["details"]["commercial_uplift_evidence"]
             self.assertEqual(ai_uplift["batch_id"], "commercial-uplift-021-025")
             self.assertEqual(ai_uplift["item_numbers"], [21])
+            self.assertEqual(ai_uplift["qc_prep_item_numbers"], [36])
             self.assertIn("has_question_answer_pair", ai_uplift["passed_validation_check_ids"])
             self.assertIn("service_side_export_validated", ai_uplift["failed_validation_check_ids"])
             self.assertGreaterEqual(ai_uplift["candidate_quality"]["complete_pair_count"], 2)
@@ -599,6 +600,7 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
             self.assertEqual(ai_manifest["manifest_version"], "ai-transcript-candidate-manifest-v1")
             self.assertEqual(ai_manifest["item_number"], 48)
             self.assertEqual(ai_manifest["gap_id"], "#48")
+            self.assertEqual(ai_manifest["qc_prep_item_number"], 36)
             self.assertEqual(len(ai_manifest["manifest_sha256"]), 64)
             self.assertEqual(
                 ai_conversation["details"]["ai_transcript_candidate_manifest_hash"],
@@ -615,6 +617,7 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
             )
             self.assertEqual(ai_schema_manifest["item_number"], 21)
             self.assertEqual(ai_schema_manifest["gap_id"], "#21")
+            self.assertEqual(ai_schema_manifest["qc_prep_item_number"], 36)
             self.assertEqual(
                 ai_schema_manifest["service_schema_validation_status"],
                 "service-export-and-schema-validation-required",
