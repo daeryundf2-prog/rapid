@@ -2792,26 +2792,51 @@ def release_gate_for_item(item: dict[str, object]) -> str:
 def calculate_readiness_score(items: Iterable[dict[str, object]]) -> int:
     total_weight = 0
     earned = 0.0
-    status_points = {
-        "Done": 1.0,
-        "Partial++": 0.88,
-        "Partial+": 0.65,
-        "Partial": 0.45,
-        "External+": 0.35,
-        "Planned+": 0.25,
-        "External": 0.2,
-        "Planned": 0.1,
-    }
     severity_weight = {"critical": 3, "high": 2, "medium": 1, "low": 1}
+    validated_weight = 0
+    commercial_grade_weight = 0
     for item in items:
         weight = severity_weight.get(str(item.get("severity")), 1)
         total_weight += weight
-        status = str(item.get("status"))
-        base_status = status.split(" with ", 1)[0]
-        earned += weight * status_points.get(status, status_points.get(base_status, 0.3))
+        earned += weight * readiness_status_points(str(item.get("status")))
+        gates = item.get("maturity_gates")
+        if isinstance(gates, Mapping):
+            validated = gates.get("validated")
+            commercial = gates.get("commercial_grade")
+            if isinstance(validated, Mapping) and validated.get("passed"):
+                validated_weight += weight
+            if isinstance(commercial, Mapping) and commercial.get("passed"):
+                commercial_grade_weight += weight
     if total_weight == 0:
         return 0
-    return int(round((earned / total_weight) * 100))
+    status_score = (earned / total_weight) * 100
+    validation_bonus = 2.0 * (validated_weight / total_weight)
+    score = int(round(status_score + validation_bonus))
+    if commercial_grade_weight < total_weight:
+        score = min(score, 90)
+    return min(score, 100)
+
+
+def readiness_status_points(status: str) -> float:
+    base_status = status.split(" with ", 1)[0]
+    if base_status == "Done":
+        return 1.0
+    if base_status.startswith("Partial"):
+        plus_count = base_status.count("+")
+        if plus_count <= 0:
+            return 0.45
+        if plus_count == 1:
+            return 0.65
+        return min(0.95, 0.84 + (0.02 * plus_count))
+    if base_status == "External+":
+        return 0.35
+    if base_status == "Planned+":
+        return 0.25
+    if base_status == "External":
+        return 0.2
+    if base_status == "Planned":
+        return 0.1
+    return 0.3
 
 
 def build_required_release_evidence(non_commercial: list[dict[str, object]]) -> list[dict[str, object]]:

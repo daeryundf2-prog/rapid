@@ -1,10 +1,10 @@
 # RapidTriage Commercial Readiness Gate
 
-- Generated at: `2026-05-11T03:55:39.669985+00:00`
+- Generated at: `2026-05-11T04:14:10.832494+00:00`
 - Backlog: `/Users/shinyoohag/rapidforensic/repo/docs/rapidtriage-commercial-parity-backlog.md`
 - Status: `commercial-gaps-present`
 - Commercial claim allowed: `False`
-- Readiness score: `79/100`
+- Readiness score: `90/100`
 - Non-commercial items: `120`/`120`
 - Release claim: do not claim AXIOM/WISDOM-class commercial parity; disclose triage/validation limits
 
@@ -326,7 +326,7 @@
 - Selected goals: `70`/`70`
 - Batch size: `5`
 - Batch count: `14`
-- Current readiness score: `79/100`
+- Current readiness score: `90/100`
 
 ### Large Data Strategy
 

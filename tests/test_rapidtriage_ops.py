@@ -1462,9 +1462,45 @@ class RapidTriageOpsTests(unittest.TestCase):
         }
         partial_plus_score = calculate_readiness_score([{**base, "status": "Partial+"}])
         partial_plus_plus_score = calculate_readiness_score([{**base, "status": "Partial++"}])
+        partial_plus_plus_plus_score = calculate_readiness_score([{**base, "status": "Partial+++"}])
 
         self.assertGreater(partial_plus_plus_score, partial_plus_score)
+        self.assertGreater(partial_plus_plus_plus_score, partial_plus_plus_score)
         self.assertLess(partial_plus_plus_score, 100)
+
+    def test_commercial_readiness_scores_validation_evidence_without_allowing_commercial_claim(self) -> None:
+        base = {
+            "severity": "critical",
+            "category": "core-forensics",
+            "status": "Partial++",
+            "maturity_gates": {
+                "validated": {"passed": False},
+                "commercial_grade": {"passed": False},
+            },
+        }
+        validated = {
+            **base,
+            "maturity_gates": {
+                "validated": {"passed": True},
+                "commercial_grade": {"passed": False},
+            },
+        }
+        commercial = {
+            **base,
+            "status": "Done",
+            "maturity_gates": {
+                "validated": {"passed": True},
+                "commercial_grade": {"passed": True},
+            },
+        }
+
+        unvalidated_score = calculate_readiness_score([base])
+        internally_validated_score = calculate_readiness_score([validated])
+        commercial_score = calculate_readiness_score([commercial])
+
+        self.assertGreater(internally_validated_score, unvalidated_score)
+        self.assertLessEqual(internally_validated_score, 90)
+        self.assertEqual(commercial_score, 100)
 
     def test_commercial_readiness_can_focus_next_gate_items(self) -> None:
         stdout = io.StringIO()

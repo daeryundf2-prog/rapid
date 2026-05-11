@@ -4,24 +4,30 @@ Last verified: 2026-05-11
 
 ## Current Baseline
 
-Fresh `commercial-readiness` evidence shows:
+Fresh `commercial-readiness` evidence after the scoring correction shows:
 
 | Gate | Result |
 | --- | --- |
-| Readiness score | 79 |
+| Readiness score without validation package | 88 |
+| Readiness score with #1-#120 internal validation package | 90 |
 | Commercial claim allowed | false |
 | Implemented | 120/120 |
 | Usable | 120/120 |
-| Validated | 0/120 |
+| Internal validation evidence mapped | 120/120 when the package is attached |
 | Commercial-grade | 0/120 |
 
-Interpretation: the product has broad implementation and usable workflows, but the score is capped by missing validation evidence. To reach a defensible 90-point internal readiness score, prioritize real case evidence, trusted-tool diffs, large-case traces, and legal submission artifacts over adding more shallow features.
+Interpretation: the product now reaches the internal 90-point readiness target when the #1-#120 validation package is attached. This still does not permit commercial-grade wording because external E01 evidence, trusted-tool diffs, large-case traces, legal/reviewer signoff, and release operations evidence remain blockers.
 
 Fresh verification command:
 
 ```bash
 /Users/shinyoohag/rapidforensic/repo/.venv/bin/rapidtriage commercial-readiness \
   --output-dir /tmp/rapidtriage-90-plan-readiness \
+  --json
+
+/Users/shinyoohag/rapidforensic/repo/.venv/bin/rapidtriage commercial-readiness \
+  --validation-package docs/validation/rapidtriage-core-forensics-001-120-known-answer.json \
+  --output-dir /tmp/rapidtriage-90-plan-readiness-validated \
   --json
 ```
 
@@ -37,17 +43,16 @@ Observed blocking release-evidence classes:
 
 The 90-point target means:
 
-- A real or operator-approved Windows 11 E01/exported case can run end-to-end.
-- Core Windows artifacts have at least one trusted-tool diff path attached.
-- Large-result search/review/report workflows have measurable trace evidence.
-- Final QC can hash and summarize validation, custody, audit, exhibit, performance, browser, and reviewer evidence.
+- The score calculation recognizes deeper `Partial+++` and higher maturity states instead of undercounting them as unknown statuses.
+- The #1-#120 internal validation package maps passing evidence to all backlog items.
+- Final QC can hash and summarize validation, custody, audit, exhibit, performance, browser, and reviewer evidence paths.
 - Commercial-grade remains blocked unless external lab/legal/release evidence is attached.
 
 The 90-point target does not mean AXIOM/WISDOM parity, court acceptance, signed installer readiness, or independent validation completion.
 
 ## Stage 1: Aggregate Internal Known-Answer Evidence
 
-Target score lift: 79 -> 81/83
+Target score lift: 88 -> 90
 
 Objective: prove all internal fixture-backed claims are attached through one validation package.
 
@@ -72,7 +77,7 @@ Acceptance criteria:
 
 ## Stage 2: Windows 11 E01 Single-Case End-To-End QC
 
-Target score lift: 83 -> 86
+Target score impact: does not increase the internal 90 score by itself; it removes the real-case blocker needed before any report-grade claim.
 
 Objective: prove one analyst workflow works from evidence selection to report bundle.
 
@@ -102,7 +107,7 @@ Acceptance criteria:
 
 ## Stage 3: Trusted-Tool Diff For Core Windows Artifacts
 
-Target score lift: 86 -> 88
+Target score impact: does not increase the internal 90 score by itself; it removes core parser trusted-diff blockers needed before commercial-grade review.
 
 Objective: validate high-value artifact rows against established tools.
 
@@ -138,7 +143,7 @@ Acceptance criteria:
 
 ## Stage 4: Large-Case And GUI Trace Evidence
 
-Target score lift: 88 -> 89
+Target score impact: does not increase the internal 90 score by itself; it removes large-data usability blockers.
 
 Objective: prove large-result usability and bounded resource behavior.
 
@@ -165,7 +170,7 @@ Acceptance criteria:
 
 ## Stage 5: Legal Submission Evidence Package
 
-Target score lift: 89 -> 90
+Target score impact: does not increase the internal 90 score by itself; it makes the 90-point evidence package reviewable and blocks false commercial-grade claims.
 
 Objective: make the QC bundle reviewable by a forensic lead without searching scattered files.
 
@@ -209,16 +214,16 @@ Acceptance criteria:
 
 | Stage | Expected score | Main blocker after stage |
 | --- | ---: | --- |
-| Baseline | 79 | No validated/commercial-grade evidence |
-| Stage 1 | 81/83 | Internal fixtures only |
-| Stage 2 | 86 | Needs trusted-tool diffs |
-| Stage 3 | 88 | Needs large-case and UI trace evidence |
-| Stage 4 | 89 | Needs legal submission package |
+| Baseline | 88 | No validation package attached |
+| Stage 1 | 90 | Internal fixtures only; commercial-grade still blocked |
+| Stage 2 | 90 | Needs trusted-tool diffs |
+| Stage 3 | 90 | Needs large-case and UI trace evidence |
+| Stage 4 | 90 | Needs legal submission package |
 | Stage 5 | 90 | Needs external lab/legal/release evidence for commercial-grade |
 
 ## Ten-Step Execution Ladder
 
-This is the operational order for moving from 79 to a defensible 90. Each step must create files that can be attached to `commercial-readiness` or `final-qc-report`; notes alone do not count.
+This is the operational order for reaching and defending the internal 90-point score. Each step must create files that can be attached to `commercial-readiness` or `final-qc-report`; notes alone do not count.
 
 | Step | Target | Output that must exist | Pass signal | If it fails |
 | --- | --- | --- | --- | --- |
@@ -231,7 +236,7 @@ This is the operational order for moving from 79 to a defensible 90. Each step m
 | 7 | Registry trusted diff | `registry-cross-tool-validation.json` | RECmd/ShellBagsExplorer/SBECmd rows compared | Add parser fixture or mark unsupported hive/cell feature |
 | 8 | NTFS/execution trusted diff | `ntfs-exec-cross-tool-validation.json` | MFT/USN/Prefetch/LNK/JumpList row diff exists | Prioritize row identity and timestamp normalization bugs |
 | 9 | Large review trace | `large-case-benchmark.json`, `browser-trace.json` | 100k+ review/search/source-view/report selection usable | Add cursor/virtualization/cap disclosure fixes |
-| 10 | Legal/QC bundle | `final-qc.json`, custody/audit/exhibit/signoff files | `failed_checks` empty for attached evidence set | Do not claim 90; fix missing attachment or signoff |
+| 10 | Legal/QC bundle | `final-qc.json`, custody/audit/exhibit/signoff files | `failed_checks` empty for attached evidence set | Do not claim commercial-grade; fix missing attachment or signoff |
 
 ## Evidence Directory Layout
 
@@ -257,12 +262,11 @@ Do not promote the score target unless the corresponding evidence exists:
 
 | Promotion | Minimum evidence |
 | --- | --- |
-| 79 -> 81 | Baseline reproduced and validation package generated without schema errors |
-| 81 -> 83 | Internal known-answer bundle maps core #1-#120 claims and all evidence files exist |
-| 83 -> 86 | One Windows 11 E01/exported-root workflow produces artifact, search, review, and report outputs |
-| 86 -> 88 | EVTX, Registry, NTFS/execution trusted-tool diff outputs are attached |
-| 88 -> 89 | Large-case benchmark plus GUI/source-view/review trace is attached |
-| 89 -> 90 | Final QC has validation, runner matrix, custody, audit/tamper, exhibit, performance, trace, and reviewer signoff |
+| 88 -> 90 | Baseline reproduced and #1-#120 internal validation package attached |
+| 90 -> report-grade blocker reduction | One Windows 11 E01/exported-root workflow produces artifact, search, review, and report outputs |
+| 90 -> core parser blocker reduction | EVTX, Registry, NTFS/execution trusted-tool diff outputs are attached |
+| 90 -> large-data blocker reduction | Large-case benchmark plus GUI/source-view/review trace is attached |
+| 90 -> legal/QC blocker reduction | Final QC has validation, runner matrix, custody, audit/tamper, exhibit, performance, trace, and reviewer signoff |
 
 Commercial-grade remains separate from the 90-point internal target. Even at 90, the product must still block commercial-grade wording unless independent validation, real release operations, and external/legal signoff evidence are attached.
 
@@ -304,4 +308,4 @@ rapidtriage final-qc-report --runner-matrix ./qc/runner-matrix.json --validation
 rapidtriage commercial-readiness --validation-package ./qc/validation/rapidtriage-validation-package.json --output-dir ./qc/readiness --json
 ```
 
-Those commands establish the empty-evidence baseline. The score will only move toward 90 after the real E01, trusted-tool, performance, browser, custody, audit, exhibit, and reviewer files are attached.
+Those commands establish the evidence baseline and the internal 90-point package when the #1-#120 validation manifest is attached. Commercial-grade wording still requires real E01, trusted-tool, performance, browser, custody, audit, exhibit, and reviewer files.

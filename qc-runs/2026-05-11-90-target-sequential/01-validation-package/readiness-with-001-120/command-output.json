@@ -1,6 +1,6 @@
 {
   "command": "commercial-readiness",
-  "generated_at": "2026-05-11T03:51:47.911537+00:00",
+  "generated_at": "2026-05-11T04:14:10.471113+00:00",
   "backlog_path": "/Users/shinyoohag/rapidforensic/repo/docs/rapidtriage-commercial-parity-backlog.md",
   "status": "commercial-gaps-present",
   "commercial_claim_allowed": false,
@@ -11,9 +11,9 @@
     "implemented_controls": {
       "commercial_claim_allowed": false,
       "non_commercial_count": 120,
-      "readiness_score": 79,
+      "readiness_score": 90,
       "validation_evidence_mapped_count": 120,
-      "claim_discipline_manifest_hash": "744d3897ff84b33bda09ebbc3cd29d7b2f2ece0171eaa3a48b33a1063f8acc2d",
+      "claim_discipline_manifest_hash": "d32ef13502ce8d41716dae4c9dae3c03cfe2bd2574afd6935142e2a996a1fb07",
       "release_claim_guard": "block-commercial-parity-wording"
     },
     "passed_validation_check_ids": [
@@ -40,7 +40,7 @@
     "gap_id": "#45",
     "commercial_claim_allowed": false,
     "release_claim_guard": "block-commercial-parity-wording",
-    "readiness_score": 79,
+    "readiness_score": 90,
     "non_commercial_count": 120,
     "validation_evidence_mapped_count": 120,
     "validation_evidence_complete_for_all_items": true,
@@ -70,11 +70,11 @@
       "validation evidence mapped for all 120 items",
       "commercial_grade gate passed for every item"
     ],
-    "manifest_hash": "744d3897ff84b33bda09ebbc3cd29d7b2f2ece0171eaa3a48b33a1063f8acc2d"
+    "manifest_hash": "d32ef13502ce8d41716dae4c9dae3c03cfe2bd2574afd6935142e2a996a1fb07"
   },
-  "claim_discipline_manifest_hash": "744d3897ff84b33bda09ebbc3cd29d7b2f2ece0171eaa3a48b33a1063f8acc2d",
+  "claim_discipline_manifest_hash": "d32ef13502ce8d41716dae4c9dae3c03cfe2bd2574afd6935142e2a996a1fb07",
   "release_claim": "do not claim AXIOM/WISDOM-class commercial parity; disclose triage/validation limits",
-  "readiness_score": 79,
+  "readiness_score": 90,
   "item_count": 120,
   "commercial_ready_count": 0,
   "non_commercial_count": 120,
@@ -3648,7 +3648,7 @@
   "commercial_uplift_plan": {
     "version": "commercial-uplift-plan-v1",
     "status": "active",
-    "current_readiness_score": 79,
+    "current_readiness_score": 90,
     "target_goal_count": 70,
     "selected_goal_count": 70,
     "batch_size": 5,
