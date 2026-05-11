@@ -98,11 +98,49 @@ class RapidTriageEmailArtifactsTests(unittest.TestCase):
                 eml["details"]["email_mailbox_parser_manifest_hash"],
                 eml_mailbox_manifest["manifest_sha256"],
             )
+            self.assertEqual(
+                eml_mailbox_manifest["attachment_locator_profile"]["profile_sha256"],
+                eml["details"]["email_attachment_locator_profile"]["profile_sha256"],
+            )
+            self.assertEqual(eml_mailbox_manifest["attachment_locator_profile"]["locator_count"], 1)
             self.assertEqual(eml["details"]["email_thread_profile"]["normalized_subject"], "Password review")
             self.assertEqual(eml["details"]["email_thread_profile"]["participant_count"], 2)
+            attachment = eml["details"]["attachments"][0]
+            self.assertEqual(attachment["index"], 1)
+            self.assertEqual(attachment["filename"], "invoice.pdf")
+            self.assertEqual(len(attachment["sha256"]), 64)
+            self.assertEqual(attachment["bounded_preview_hex"], b"invoice bytes".hex())
+            self.assertFalse(attachment["bounded_preview_truncated"])
+            self.assertIn("trusted parser", attachment["export_warning"])
+            attachment_locator = attachment["source_viewer_locator"]
+            self.assertEqual(attachment_locator["profile_version"], "email-attachment-source-viewer-locator-v1")
+            self.assertEqual(attachment_locator["qc_prep_item"], 10)
+            self.assertEqual(attachment_locator["viewer"], "source-email-attachment")
+            self.assertEqual(attachment_locator["message_index"], 1)
+            self.assertEqual(attachment_locator["message_id"], "<fixture-message@example.test>")
+            self.assertEqual(attachment_locator["attachment_index"], 1)
+            self.assertEqual(attachment_locator["filename"], "invoice.pdf")
+            self.assertEqual(attachment_locator["sha256"], attachment["sha256"])
+            self.assertEqual(attachment_locator["bounded_preview_sha256"], attachment["bounded_preview_sha256"])
+            self.assertIn("/api/runs/{run_id}/source-email-attachment", attachment_locator["endpoint"])
+            attachment_locator_profile = eml["details"]["email_attachment_locator_profile"]
+            self.assertEqual(
+                attachment_locator_profile["profile_version"],
+                "email-attachment-locator-profile-v1",
+            )
+            self.assertEqual(attachment_locator_profile["qc_prep_item"], 10)
+            self.assertEqual(attachment_locator_profile["attachment_count"], 1)
+            self.assertEqual(attachment_locator_profile["locator_count"], 1)
+            self.assertEqual(attachment_locator_profile["locators"][0]["locator_sha256"], attachment_locator["locator_sha256"])
+            self.assertEqual(len(attachment_locator_profile["profile_sha256"]), 64)
             self.assertEqual(eml_manifest["message_citation_count"], 1)
             self.assertEqual(eml_manifest["attachment_citation_count"], 1)
             self.assertIn("row_hash", eml_manifest["message_citations"][0])
+            self.assertEqual(
+                eml_manifest["attachment_citations"][0]["source_viewer_locator"]["profile_version"],
+                "email-attachment-source-viewer-locator-v1",
+            )
+            self.assertEqual(eml_manifest["attachment_citations"][0]["attachment_index"], 1)
             self.assertEqual(
                 eml_uplift["functional_priority_profile"]["implemented_controls"]["citation_manifest_hash"],
                 eml_manifest["manifest_sha256"],
@@ -118,6 +156,20 @@ class RapidTriageEmailArtifactsTests(unittest.TestCase):
             self.assertIn(
                 "email-mailbox-source-locator-emitted",
                 eml_uplift["functional_priority_profile"]["passed_validation_check_ids"],
+            )
+            self.assertIn(
+                "email-attachment-locator-profile-emitted",
+                eml_uplift["functional_priority_profile"]["passed_validation_check_ids"],
+            )
+            self.assertEqual(
+                eml_uplift["functional_priority_profile"]["implemented_controls"][
+                    "email_attachment_locator_profile_hash"
+                ],
+                attachment_locator_profile["profile_sha256"],
+            )
+            self.assertEqual(
+                eml_uplift["large_data_controls"]["email_attachment_locator_count"],
+                1,
             )
             self.assertEqual(
                 eml_uplift["functional_priority_profile"]["implemented_controls"][
@@ -292,6 +344,7 @@ def write_email_fixture(root: Path) -> None:
     message["To"] = "bob@example.test"
     message["Subject"] = "Password review"
     message["Date"] = "Mon, 1 Apr 2024 00:00:00 +0000"
+    message["Message-ID"] = "<fixture-message@example.test>"
     message.set_content("password email body")
     message.add_attachment(b"invoice bytes", maintype="application", subtype="pdf", filename="invoice.pdf")
     (root / "message.eml").write_bytes(message.as_bytes())

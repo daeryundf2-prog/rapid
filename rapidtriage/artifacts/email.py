@@ -22,6 +22,7 @@ EMAIL_SUFFIXES = {".eml", ".emlx", ".mbox", ".msg", ".pst", ".ost"}
 MAX_MBOX_MESSAGES = 200
 CONTAINER_SCAN_LIMIT = 16 * 1024 * 1024
 MAX_CONTAINER_CANDIDATES = 200
+EMAIL_ATTACHMENT_PREVIEW_BYTES = 64
 EMAIL_RE = re.compile(rb"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}")
 SUBJECT_RE = re.compile(rb"(?:Subject|SUBJECT)\s*:\s*([^\r\n]{1,240})")
 EMAIL_NATIVE_CAPABILITIES = {
@@ -253,7 +254,22 @@ def build_message_record(
     source_format: str,
 ) -> ArtifactRecord:
     body_preview, body_hash, body_truncated = message_body_summary(message)
-    attachments = attachment_summaries(message)
+    attachments = attach_email_attachment_locators(
+        path,
+        source_hashes,
+        source_format=source_format,
+        message_index=source_index + 1,
+        message_id=header_value(message, "Message-ID"),
+        attachments=attachment_summaries(message),
+    )
+    attachment_locator_profile = email_attachment_locator_profile(
+        source_path=path,
+        source_hashes=source_hashes,
+        source_format=source_format,
+        message_index=source_index + 1,
+        message_id=header_value(message, "Message-ID"),
+        attachments=attachments,
+    )
     thread_profile = email_thread_profile(message)
     validation_checks = {
         "headers_parsed": True,
@@ -302,6 +318,7 @@ def build_message_record(
             "body_sha256": body_hash,
             "attachment_count": len(attachments),
             "attachments": attachments,
+            "email_attachment_locator_profile": attachment_locator_profile,
             "email_thread_profile": thread_profile,
             "email_expansion_citation_manifest": citation_manifest,
             "validation_checks": validation_checks,
@@ -326,6 +343,7 @@ def build_message_record(
         "body_truncated": body_truncated,
         "attachment_count": len(attachments),
         "attachments": attachments,
+        "email_attachment_locator_profile": attachment_locator_profile,
         "email_thread_profile": thread_profile,
         "validation_checks": validation_checks,
         "email_mailbox_strategy_profile": strategy_profile,
@@ -344,6 +362,7 @@ def build_message_record(
                 "message_id": header_value(message, "Message-ID"),
                 "subject": header_value(message, "Subject"),
                 "attachment_count": len(attachments),
+                "email_attachment_locator_profile": attachment_locator_profile,
                 "email_expansion_citation_manifest": citation_manifest,
                 "email_mailbox_parser_manifest": mailbox_manifest,
                 "email_thread_profile": thread_profile,
@@ -364,6 +383,7 @@ def build_message_record(
                 "subject": header_value(message, "Subject"),
                 "body_sha256": body_hash,
                 "attachments": attachments,
+                "email_attachment_locator_profile": attachment_locator_profile,
                 "email_expansion_citation_manifest": citation_manifest,
                 "email_mailbox_parser_manifest": mailbox_manifest,
                 "email_thread_profile": thread_profile,
@@ -392,6 +412,7 @@ def build_message_record(
                 "from": header_value(message, "From"),
                 "to": header_value(message, "To"),
                 "attachment_count": len(attachments),
+                "email_attachment_locator_profile": attachment_locator_profile,
                 "risk_flags": email_risk_flags(header_value(message, "Subject"), body_preview, attachments),
                 "email_expansion_citation_manifest": citation_manifest,
                 "email_mailbox_parser_manifest": mailbox_manifest,
@@ -562,19 +583,155 @@ def message_body_summary(message: EmailMessage) -> tuple[str, str, bool]:
 
 def attachment_summaries(message: EmailMessage) -> list[dict[str, object]]:
     attachments: list[dict[str, object]] = []
-    for part in message.walk() if message.is_multipart() else []:
-        if part.get_content_disposition() != "attachment":
-            continue
+    attachment_parts = [
+        part
+        for part in (message.walk() if message.is_multipart() else [])
+        if part.get_content_disposition() == "attachment"
+    ]
+    for index, part in enumerate(attachment_parts, start=1):
         payload = part.get_payload(decode=True) or b""
+        preview = payload[:EMAIL_ATTACHMENT_PREVIEW_BYTES]
         attachments.append(
             {
+                "index": index,
                 "filename": part.get_filename() or "",
                 "content_type": part.get_content_type(),
                 "size": len(payload),
                 "sha256": hashlib.sha256(payload).hexdigest() if payload else "",
+                "bounded_preview_bytes": len(preview),
+                "bounded_preview_hex": preview.hex(),
+                "bounded_preview_sha256": hashlib.sha256(preview).hexdigest() if preview else "",
+                "bounded_preview_truncated": len(payload) > len(preview),
+                "export_warning": "Attachment export is bounded metadata/content evidence; validate against the original mailbox and trusted parser before report-grade use.",
             }
         )
     return attachments[:100]
+
+
+def attach_email_attachment_locators(
+    source_path: Path,
+    source_hashes: Mapping[str, str],
+    *,
+    source_format: str,
+    message_index: int,
+    message_id: str,
+    attachments: list[dict[str, object]],
+) -> list[dict[str, object]]:
+    output: list[dict[str, object]] = []
+    for fallback_index, attachment in enumerate(attachments, start=1):
+        attachment_index = int(attachment.get("index") or fallback_index)
+        locator = email_attachment_source_viewer_locator(
+            source_path=source_path,
+            source_hashes=source_hashes,
+            source_format=source_format,
+            message_index=message_index,
+            message_id=message_id,
+            attachment_index=attachment_index,
+            attachment=attachment,
+        )
+        output.append(
+            {
+                **attachment,
+                "index": attachment_index,
+                "source_viewer_locator": locator,
+                "email_attachment_locator": locator,
+                "locator_sha256": locator["locator_sha256"],
+            }
+        )
+    return output
+
+
+def email_attachment_source_viewer_locator(
+    *,
+    source_path: Path,
+    source_hashes: Mapping[str, str],
+    source_format: str,
+    message_index: int,
+    message_id: str,
+    attachment_index: int,
+    attachment: Mapping[str, object],
+) -> dict[str, object]:
+    payload: dict[str, object] = {
+        "profile_version": "email-attachment-source-viewer-locator-v1",
+        "qc_prep_item": 10,
+        "viewer": "source-email-attachment",
+        "source_path": str(source_path.resolve()),
+        "source_format": source_format,
+        "source_sha256": source_hashes.get("sha256", ""),
+        "message_index": message_index,
+        "message_id": str(message_id or ""),
+        "attachment_index": attachment_index,
+        "filename": str(attachment.get("filename") or ""),
+        "content_type": str(attachment.get("content_type") or ""),
+        "size": int(attachment.get("size") or 0),
+        "sha256": str(attachment.get("sha256") or ""),
+        "bounded_preview_bytes": int(attachment.get("bounded_preview_bytes") or 0),
+        "bounded_preview_hex": str(attachment.get("bounded_preview_hex") or ""),
+        "bounded_preview_sha256": str(attachment.get("bounded_preview_sha256") or ""),
+        "bounded_preview_truncated": bool(attachment.get("bounded_preview_truncated")),
+        "export_warning": str(
+            attachment.get("export_warning")
+            or "Attachment export must be validated against source mailbox before report-grade use."
+        ),
+        "endpoint": "/api/runs/{run_id}/source-email-attachment",
+        "include_content_default": False,
+        "bounded_content_export_only": True,
+        "native_pst_ost_msg_supported": False,
+        "required_before_report": [
+            "verify source mailbox hash",
+            "open attachment package endpoint and compare attachment hash",
+            "validate thread/message identity with trusted mailbox parser",
+            "review legal privilege/scope before exporting content",
+        ],
+        "commercial_grade_ready": False,
+        "commercial_grade_blockers": [
+            "trusted-mailbox-attachment-diff-required",
+            "native-pst-ost-msg-attachment-extraction-not-implemented",
+            "deleted-mailbox-attachment-recovery-not-implemented",
+        ],
+    }
+    payload["locator_sha256"] = stable_email_sha256(payload)
+    return payload
+
+
+def email_attachment_locator_profile(
+    *,
+    source_path: Path,
+    source_hashes: Mapping[str, str],
+    source_format: str,
+    message_index: int,
+    message_id: str,
+    attachments: list[Mapping[str, object]],
+) -> dict[str, object]:
+    locators = [
+        dict(attachment.get("source_viewer_locator") or {})
+        for attachment in attachments
+        if isinstance(attachment.get("source_viewer_locator"), Mapping)
+    ]
+    payload: dict[str, object] = {
+        "profile_version": "email-attachment-locator-profile-v1",
+        "qc_prep_item": 10,
+        "source_path": str(source_path.resolve()),
+        "source_format": source_format,
+        "source_sha256": source_hashes.get("sha256", ""),
+        "message_index": message_index,
+        "message_id": str(message_id or ""),
+        "attachment_count": len(attachments),
+        "locator_count": len(locators),
+        "locators": locators[:100],
+        "max_locator_count": 100,
+        "preview_bytes_per_attachment": EMAIL_ATTACHMENT_PREVIEW_BYTES,
+        "endpoint": "/api/runs/{run_id}/source-email-attachment",
+        "export_warning": "Attachment content export is bounded and disabled by default; cite hashes and validate mailbox provenance before report-grade use.",
+        "commercial_grade_ready": False,
+        "commercial_grade_blockers": [
+            "trusted-mailbox-attachment-diff-required",
+            "native-pst-ost-msg-attachment-extraction-not-implemented",
+            "deleted-mailbox-attachment-recovery-not-implemented",
+        ],
+    }
+    payload["profile_sha256"] = stable_email_sha256(payload)
+    return payload
 
 
 def build_email_expansion_citation_manifest(
@@ -614,8 +771,15 @@ def build_email_expansion_citation_manifest(
             }
         )
     attachment_citations = [
-        email_attachment_citation(source_path=source_path, source_hashes=source_hashes, attachment=item, source_index=index)
-        for index, item in enumerate(details.get("attachments") or [])
+        email_attachment_citation(
+            source_path=source_path,
+            source_hashes=source_hashes,
+            attachment=item,
+            attachment_index=index,
+            message_index=int(details.get("source_index") or 0) + 1,
+            message_id=str(details.get("message_id") or ""),
+        )
+        for index, item in enumerate(details.get("attachments") or [], start=1)
         if isinstance(item, Mapping)
     ]
     candidate_citations = email_container_candidate_citations(
@@ -684,6 +848,11 @@ def build_email_mailbox_parser_manifest(
     mailbox_manifest = (
         details.get("email_mailbox_parser_manifest")
         if isinstance(details.get("email_mailbox_parser_manifest"), Mapping)
+        else {}
+    )
+    attachment_locator_profile = (
+        details.get("email_attachment_locator_profile")
+        if isinstance(details.get("email_attachment_locator_profile"), Mapping)
         else {}
     )
     thread_profile = (
@@ -776,6 +945,15 @@ def build_email_mailbox_parser_manifest(
             "message_citation_count": int(citation_manifest.get("message_citation_count") or 0),
             "attachment_citation_count": int(citation_manifest.get("attachment_citation_count") or 0),
             "candidate_citation_count": int(citation_manifest.get("candidate_citation_count") or 0),
+        },
+        "attachment_locator_profile": {
+            "profile_sha256": str(attachment_locator_profile.get("profile_sha256") or ""),
+            "locator_count": int(attachment_locator_profile.get("locator_count") or 0),
+            "preview_bytes_per_attachment": int(
+                attachment_locator_profile.get("preview_bytes_per_attachment") or EMAIL_ATTACHMENT_PREVIEW_BYTES
+            ),
+            "endpoint": str(attachment_locator_profile.get("endpoint") or "/api/runs/{run_id}/source-email-attachment"),
+            "export_warning": str(attachment_locator_profile.get("export_warning") or ""),
         },
         "validation": {
             "source_hash_present": bool(source_hashes.get("sha256")),
@@ -878,26 +1056,42 @@ def email_attachment_citation(
     source_path: Path,
     source_hashes: Mapping[str, str],
     attachment: Mapping[str, object],
-    source_index: int,
+    attachment_index: int,
+    message_index: int,
+    message_id: str,
 ) -> dict[str, object]:
+    locator = (
+        dict(attachment.get("source_viewer_locator"))
+        if isinstance(attachment.get("source_viewer_locator"), Mapping)
+        else email_attachment_source_viewer_locator(
+            source_path=source_path,
+            source_hashes=source_hashes,
+            source_format=source_path.suffix.lower().lstrip("."),
+            message_index=message_index,
+            message_id=message_id,
+            attachment_index=attachment_index,
+            attachment=attachment,
+        )
+    )
     payload = {
         "source_path": str(source_path.resolve()),
         "source_sha256": source_hashes.get("sha256", ""),
-        "source_index": source_index,
+        "source_index": attachment_index - 1,
+        "message_index": message_index,
+        "message_id": str(message_id or ""),
+        "attachment_index": attachment_index,
         "filename": str(attachment.get("filename") or ""),
         "content_type": str(attachment.get("content_type") or ""),
         "size": int(attachment.get("size") or 0),
         "sha256": str(attachment.get("sha256") or ""),
+        "bounded_preview_sha256": str(attachment.get("bounded_preview_sha256") or ""),
+        "bounded_preview_bytes": int(attachment.get("bounded_preview_bytes") or 0),
+        "export_warning": str(attachment.get("export_warning") or ""),
     }
     return {
         **payload,
         "row_hash": stable_email_sha256(payload),
-        "source_viewer_locator": {
-            "viewer": "email-attachment",
-            "source_path": str(source_path.resolve()),
-            "attachment_index": source_index,
-            "filename": payload["filename"],
-        },
+        "source_viewer_locator": locator,
         "validation_status": "attachment-metadata-citation-candidate",
     }
 
@@ -1195,6 +1389,11 @@ def email_commercial_uplift_evidence(
         if isinstance(details.get("email_mailbox_parser_manifest"), Mapping)
         else {}
     )
+    attachment_locator_profile = (
+        details.get("email_attachment_locator_profile")
+        if isinstance(details.get("email_attachment_locator_profile"), Mapping)
+        else {}
+    )
     matrix = email_validation_matrix(source_format, validation)
     issue_matrix = email_issue_matrix(source_format)
     passed_validation_matrix_ids = [str(item.get("id")) for item in matrix if item.get("passed")]
@@ -1254,6 +1453,7 @@ def email_commercial_uplift_evidence(
             "mapi_container_review_profile_present": bool(details.get("mapi_container_review_profile")),
             "citation_manifest_hash": str(citation_manifest.get("manifest_sha256") or ""),
             "email_mailbox_parser_manifest_hash": str(mailbox_manifest.get("manifest_sha256") or ""),
+            "email_attachment_locator_profile_hash": str(attachment_locator_profile.get("profile_sha256") or ""),
             "email_mailbox_source_row_citation_present": bool(
                 isinstance(mailbox_manifest.get("row_citation"), Mapping)
                 and mailbox_manifest.get("row_citation", {}).get("row_hash")
@@ -1262,6 +1462,7 @@ def email_commercial_uplift_evidence(
                 isinstance(mailbox_manifest.get("large_data_controls"), Mapping)
                 and mailbox_manifest.get("large_data_controls", {}).get("viewer_default")
             ),
+            "email_attachment_locator_count": int(attachment_locator_profile.get("locator_count") or 0),
             "citation_row_count": int(citation_manifest.get("message_citation_count") or 0)
             + int(citation_manifest.get("attachment_citation_count") or 0)
             + int(citation_manifest.get("candidate_citation_count") or 0),
@@ -1303,6 +1504,11 @@ def email_expansion_functional_profile(
         if isinstance(details.get("email_mailbox_parser_manifest"), Mapping)
         else {}
     )
+    attachment_locator_profile = (
+        details.get("email_attachment_locator_profile")
+        if isinstance(details.get("email_attachment_locator_profile"), Mapping)
+        else {}
+    )
     if not citation_manifest.get("manifest_sha256"):
         failed_checks.append("email-expansion-citation-manifest-not-emitted")
     if not mailbox_manifest.get("manifest_sha256"):
@@ -1320,6 +1526,8 @@ def email_expansion_functional_profile(
         passed_checks.append("email-mailbox-parser-manifest-emitted")
     if isinstance(mailbox_manifest.get("row_citation"), Mapping) and mailbox_manifest.get("row_citation", {}).get("source_viewer_locator"):
         passed_checks.append("email-mailbox-source-locator-emitted")
+    if attachment_locator_profile.get("profile_sha256"):
+        passed_checks.append("email-attachment-locator-profile-emitted")
     if int(citation_manifest.get("candidate_citation_count") or 0) > 0:
         passed_checks.append("bounded-container-candidate-citations-emitted")
     return {
@@ -1337,6 +1545,8 @@ def email_expansion_functional_profile(
             "source_sha256_present": bool(source_hashes.get("sha256")),
             "citation_manifest_hash": str(citation_manifest.get("manifest_sha256") or ""),
             "email_mailbox_parser_manifest_hash": str(mailbox_manifest.get("manifest_sha256") or ""),
+            "email_attachment_locator_profile_hash": str(attachment_locator_profile.get("profile_sha256") or ""),
+            "email_attachment_locator_count": int(attachment_locator_profile.get("locator_count") or 0),
             "email_mailbox_row_citation_present": bool(
                 isinstance(mailbox_manifest.get("row_citation"), Mapping)
                 and mailbox_manifest.get("row_citation", {}).get("row_hash")
@@ -1422,6 +1632,13 @@ def email_core_accuracy_gates(
     )
     if mailbox_manifest.get("manifest_sha256"):
         evidence_refs.append(f"email_mailbox_parser_manifest_sha256:{mailbox_manifest['manifest_sha256']}")
+    attachment_locator_profile = (
+        details.get("email_attachment_locator_profile")
+        if isinstance(details.get("email_attachment_locator_profile"), Mapping)
+        else {}
+    )
+    if attachment_locator_profile.get("profile_sha256"):
+        evidence_refs.append(f"email_attachment_locator_profile_sha256:{attachment_locator_profile['profile_sha256']}")
     trusted_diff = details.get("email_trusted_diff") if isinstance(details.get("email_trusted_diff"), Mapping) else {}
     if trusted_diff:
         evidence_refs.append(f"trusted_diff_status:{trusted_diff.get('status', '')}")
@@ -1443,6 +1660,8 @@ def email_core_accuracy_gates(
         satisfied.append("message header/body/attachment inventory")
     if details.get("email_thread_profile"):
         satisfied.append("email thread/participant profile")
+    if attachment_locator_profile.get("profile_sha256"):
+        satisfied.append("email attachment source locator")
     if details.get("mapi_container_review_profile"):
         satisfied.append("MAPI container bounded review profile")
     if validation.get("bounded_candidate_inventory_present"):
