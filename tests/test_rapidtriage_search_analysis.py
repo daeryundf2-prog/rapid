@@ -5,10 +5,11 @@ import tempfile
 import unittest
 from pathlib import Path
 from typing import Any
+from unittest.mock import patch
 
 from rapidtriage.core.analysis import build_analysis_trusted_diff, build_search_analysis
 from rapidtriage.core.keyword_packs import resolve_keyword_packs
-from rapidtriage.core.search import build_advanced_search_trusted_diff, run_unified_search, search_core_accuracy_gates
+from rapidtriage.core.search import build_advanced_search_trusted_diff, filter_matches, run_unified_search, search_core_accuracy_gates, search_docs
 from rapidtriage.core.search_backend import (
     build_external_search_adapter_contract,
     build_search_backend_contract,
@@ -70,6 +71,75 @@ class RapidTriageSearchAnalysisTests(unittest.TestCase):
                 "metadata": {"timestamp": "2026-04-25T01:10:00+00:00"},
             },
         ]
+
+    def test_search_docs_surfaces_document_extraction_errors(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            docs_path = root / "rapidtriage-docs.json"
+            evidence_path = root / "broken.pdf"
+            write_json(
+                docs_path,
+                {
+                    "candidates": [{"path": str(evidence_path), "kind": "pdf"}],
+                    "results": [{"path": str(evidence_path)}],
+                },
+            )
+
+            with patch("rapidtriage.core.search.extract_text", side_effect=OSError("cannot read pdf")):
+                matches, errors = search_docs({"docs": str(docs_path)}, ["secret"], limit=10)
+
+            self.assertEqual(matches, [])
+            self.assertEqual(len(errors), 1)
+            self.assertEqual(errors[0]["path"], str(evidence_path))
+            self.assertEqual(errors[0]["kind"], "pdf")
+            self.assertIn("OSError: cannot read pdf", errors[0]["error"])
+
+    def test_filter_matches_fast_path_preserves_copy_semantics(self) -> None:
+        matches = self.make_matches()
+
+        filtered = filter_matches(matches, sources=set(), extensions=set(), path_fragment="")
+
+        self.assertEqual(filtered, matches)
+        self.assertIsNot(filtered[0], matches[0])
+
+    def test_filter_matches_combines_source_extension_and_path_filters(self) -> None:
+        matches = self.make_matches()
+
+        filtered = filter_matches(matches, sources={"documents"}, extensions={".txt"}, path_fragment="notes")
+
+        self.assertEqual(len(filtered), 1)
+        self.assertEqual(filtered[0]["source"], "documents")
+        self.assertEqual(filtered[0]["path"], "/cases/CASE-1/notes/passwords.txt")
+
+    def test_filter_matches_path_fragment_is_case_insensitive(self) -> None:
+        matches = self.make_matches()
+
+        filtered = filter_matches(matches, sources=set(), extensions=set(), path_fragment="security.evtx")
+
+        self.assertEqual(len(filtered), 1)
+        self.assertEqual(filtered[0]["source"], "timeline")
+
+    def test_run_unified_search_reports_document_error_counts(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            docs_path = root / "rapidtriage-docs.json"
+            summary_path = root / "summary.json"
+            evidence_path = root / "broken.docx"
+            write_json(
+                docs_path,
+                {
+                    "candidates": [{"path": str(evidence_path), "kind": "docx"}],
+                    "results": [{"path": str(evidence_path)}],
+                },
+            )
+            write_json(summary_path, {"outputs": {"summary": str(summary_path), "docs": str(docs_path)}})
+
+            with patch("rapidtriage.core.search.extract_text", side_effect=ValueError("corrupt document")):
+                payload = run_unified_search(summary_path, ["secret"], include_analysis=False)
+
+            self.assertEqual(payload["summary"]["document_error_count"], 1)
+            self.assertEqual(payload["documents"]["errors"][0]["kind"], "docx")
+            self.assertIn("ValueError: corrupt document", payload["documents"]["errors"][0]["error"])
 
     def test_build_search_analysis_adds_clusters_entities_graph_timeline_and_workbook(self) -> None:
         analysis = build_search_analysis(self.make_matches(), ["password", "powershell"])

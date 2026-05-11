@@ -22,7 +22,20 @@ def have(cmd: str) -> bool:
 def rsync_copy(src: Path, dst: Path) -> None:
     dst.mkdir(parents=True, exist_ok=True)
     cmd = ["rsync", "-a", "--ignore-existing", "--times", f"{src}/", f"{dst}/"]
-    subprocess.run(cmd, check=False)
+    try:
+        completed = subprocess.run(cmd, text=True, capture_output=True, check=False)
+    except OSError as exc:
+        raise RuntimeError(f"rsync failed for {src} -> {dst}: {type(exc).__name__}: {exc}") from exc
+    if completed.returncode != 0:
+        detail = (completed.stderr or completed.stdout or "rsync failed").strip()
+        raise RuntimeError(f"rsync failed for {src} -> {dst}: {detail}")
+
+
+def run_unmount_command(cmd: List[str]) -> subprocess.CompletedProcess[str]:
+    try:
+        return subprocess.run(cmd, text=True, capture_output=True, check=False)
+    except OSError as exc:
+        return subprocess.CompletedProcess(cmd, 127, stdout="", stderr=f"{type(exc).__name__}: {exc}")
 
 
 def ensure_tools_or_warn() -> None:
@@ -77,8 +90,13 @@ def extract_from_e01(e01: Path, stage_dir: Path) -> Optional[Path]:
         return extract_dir
     finally:
         if mount_dir.exists():
-            subprocess.run(["umount", str(mount_dir)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-            subprocess.run(["fusermount", "-u", str(mount_dir)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            unmount_results = [
+                run_unmount_command(["umount", str(mount_dir)]),
+                run_unmount_command(["fusermount", "-u", str(mount_dir)]),
+            ]
+            if all(result.returncode != 0 for result in unmount_results):
+                messages = "; ".join((result.stderr or result.stdout or "unmount failed").strip() for result in unmount_results)
+                print(f"[warn] cleanup failed for mount {mount_dir}: {messages}", file=sys.stderr)
 
 
 def collect_videos(src_root: Path, dest_root: Path) -> int:
@@ -98,7 +116,7 @@ def collect_videos(src_root: Path, dest_root: Path) -> int:
 
 
 def run_renamer(dest_root: Path, profiles: List[str], strict_ocr: bool, prefer_start: bool,
-                workers: int, max_ocr: int, extra_args: List[str]) -> None:
+                workers: int, max_ocr: int, extra_args: List[str]) -> int:
     base_cmd = [sys.executable, "-m", "dashcam_tools.rename", "--dir", str(dest_root), "--workers", str(workers),
                 "--max-ocr-per-run", str(max_ocr)]
     if strict_ocr:
@@ -109,10 +127,15 @@ def run_renamer(dest_root: Path, profiles: List[str], strict_ocr: bool, prefer_s
     stamp = dt.datetime.now().strftime("%Y%m%d")
     base_cmd += ["--audit", str(dest_root / f"ingest_audit_{stamp}.csv")]
     base_cmd += extra_args
+    failures = 0
     for prof in profiles:
         cmd = base_cmd + ["--profile", prof]
         print("[renamer]", " ".join(cmd))
-        subprocess.run(cmd, check=False)
+        completed = subprocess.run(cmd, check=False)
+        if completed.returncode != 0:
+            failures += 1
+            print(f"[error] renamer failed for profile {prof}: exit {completed.returncode}", file=sys.stderr)
+    return failures
 
 
 def cli(argv=None):
@@ -134,29 +157,37 @@ def cli(argv=None):
     dest_root.mkdir(parents=True, exist_ok=True)
 
     total_copied = 0
+    failures = 0
     for src_s in args.src:
         src = Path(src_s).expanduser().resolve()
         if not src.exists():
-            print(f"[skip] not found: {src}"); continue
+            print(f"[skip] not found: {src}"); failures += 1; continue
         stamp = dt.datetime.now().strftime("%Y/%m/%d")
         rollin = dest_root / stamp / src.stem
         rollin.mkdir(parents=True, exist_ok=True)
         if src.is_dir():
-            print(f"[ingest:dir] {src} -> {rollin}"); rsync_copy(src, rollin)
+            print(f"[ingest:dir] {src} -> {rollin}")
+            try:
+                rsync_copy(src, rollin)
+            except RuntimeError as exc:
+                print(f"[error] {exc}", file=sys.stderr)
+                failures += 1
+                continue
         elif src.suffix.lower() == ".e01":
             print(f"[ingest:e01] {src} -> {rollin}"); ensure_tools_or_warn()
             extract_dir = extract_from_e01(src, rollin / "_stage")
             if extract_dir is None:
-                print(f"[skip:e01] could not extract from {src}"); continue
+                print(f"[skip:e01] could not extract from {src}"); failures += 1; continue
             total_copied += collect_videos(extract_dir, rollin)
         else:
-            print(f"[skip] unsupported source type: {src}"); continue
+            print(f"[skip] unsupported source type: {src}"); failures += 1; continue
         for dirpath, _, files in os.walk(rollin):
             for name in files:
                 if Path(name).suffix.lower() in VIDEO_EXTS:
                     total_copied += 1
     print(f"Ingest complete. copied~={total_copied}")
-    run_renamer(dest_root, profiles, args.strict_ocr, args.prefer_start, args.workers, args.max_ocr_per_run, extra_args)
+    failures += run_renamer(dest_root, profiles, args.strict_ocr, args.prefer_start, args.workers, args.max_ocr_per_run, extra_args)
+    return 1 if failures else 0
 
 if __name__ == "__main__":
-    cli()
+    raise SystemExit(cli())

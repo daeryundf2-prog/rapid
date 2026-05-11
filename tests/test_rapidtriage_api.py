@@ -204,14 +204,28 @@ class RapidTriageApiTests(unittest.TestCase):
 
         self.assertEqual(index_response.status_code, 200)
         self.assertIn("rapidtriage", index_response.text)
+        favicon_response = client.get("/favicon.ico")
+        self.assertEqual(favicon_response.status_code, 200)
+        self.assertEqual(favicon_response.headers["content-type"].split(";")[0], "image/svg+xml")
+        for asset_name in ("app_workbench_config.js", "app_state.js", "app.js"):
+            asset_response = client.get(f"/assets/{asset_name}")
+            self.assertEqual(asset_response.status_code, 200)
+            self.assertIn("javascript", asset_response.headers["content-type"])
 
     def test_web_console_exposes_maestro_style_artifact_workbench(self) -> None:
         app_js = (REPO_ROOT / "rapidtriage" / "web" / "static" / "app.js").read_text(encoding="utf-8")
+        config_js = (REPO_ROOT / "rapidtriage" / "web" / "static" / "app_workbench_config.js").read_text(encoding="utf-8")
+        state_js = (REPO_ROOT / "rapidtriage" / "web" / "static" / "app_state.js").read_text(encoding="utf-8")
         index_html = (REPO_ROOT / "rapidtriage" / "web" / "static" / "index.html").read_text(encoding="utf-8")
         styles = (REPO_ROOT / "rapidtriage" / "web" / "static" / "styles.css").read_text(encoding="utf-8")
 
-        self.assertIn("FORENSIC_RIBBON_GROUPS", app_js)
-        self.assertIn("FORENSIC_ARTIFACT_TAXONOMY", app_js)
+        self.assertIn('/assets/app_workbench_config.js', index_html)
+        self.assertIn('/assets/app_state.js', index_html)
+        self.assertLess(index_html.index('/assets/app_workbench_config.js'), index_html.index('/assets/app.js'))
+        self.assertLess(index_html.index('/assets/app_workbench_config.js'), index_html.index('/assets/app_state.js'))
+        self.assertLess(index_html.index('/assets/app_state.js'), index_html.index('/assets/app.js'))
+        self.assertIn("FORENSIC_RIBBON_GROUPS", config_js)
+        self.assertIn("FORENSIC_ARTIFACT_TAXONOMY", config_js)
         self.assertIn("renderForensicRibbon(run)", app_js)
         self.assertIn("renderCaseHero(run)", app_js)
         self.assertIn("renderCaseReadinessDashboard(payload)", app_js)
@@ -274,24 +288,24 @@ class RapidTriageApiTests(unittest.TestCase):
         self.assertIn("renderArtifactValidationSummary", app_js)
         self.assertIn("summarizeArtifactValidation", app_js)
         self.assertIn("artifactCommercialBlockers", app_js)
-        self.assertIn("renderVirtualWindowJumpControl", app_js)
+        self.assertIn("renderVirtualWindowJumpControl", state_js)
         self.assertIn("VIRTUAL_WINDOW_STORAGE_PREFIX", app_js)
         self.assertIn("renderForensicArtifactNavigator(payload)", app_js)
         self.assertIn("virtualWindowOffsets", app_js)
         self.assertIn("data-virtual-window-key", app_js)
-        self.assertIn("bindVirtualWindowButtons()", app_js)
-        self.assertIn("WORKBENCH_SMOKE_CHECKPOINTS", app_js)
-        self.assertIn("START_CHOICE_CONTRACT", app_js)
+        self.assertIn("function bindVirtualWindowButtons", state_js)
+        self.assertIn("WORKBENCH_SMOKE_CHECKPOINTS", config_js)
+        self.assertIn("START_CHOICE_CONTRACT", config_js)
         self.assertIn("applyStartChoice", app_js)
-        self.assertIn("WORKBENCH_LAYOUT_CONTRACT", app_js)
-        self.assertIn("WORKBENCH_ARTIFACT_TREE_GROUPS", app_js)
-        self.assertIn("TABLE_CONTROL_CONTRACT", app_js)
-        self.assertIn("PREVIEW_DETAIL_CONTRACT", app_js)
-        self.assertIn("VIEWER_NAVIGATION_CONTRACT", app_js)
-        self.assertIn("WORKBENCH_SESSION_CONTRACT", app_js)
-        self.assertIn("SEARCH_SOURCE_VERIFICATION_CONTRACT", app_js)
-        self.assertIn("SEARCH_RESULT_SOURCE_ACTION_CONTRACT", app_js)
-        self.assertIn("CURRENT_FILE_SEARCH_CONTRACT", app_js)
+        self.assertIn("WORKBENCH_LAYOUT_CONTRACT", config_js)
+        self.assertIn("WORKBENCH_ARTIFACT_TREE_GROUPS", config_js)
+        self.assertIn("TABLE_CONTROL_CONTRACT", config_js)
+        self.assertIn("PREVIEW_DETAIL_CONTRACT", config_js)
+        self.assertIn("VIEWER_NAVIGATION_CONTRACT", config_js)
+        self.assertIn("WORKBENCH_SESSION_CONTRACT", config_js)
+        self.assertIn("SEARCH_SOURCE_VERIFICATION_CONTRACT", config_js)
+        self.assertIn("SEARCH_RESULT_SOURCE_ACTION_CONTRACT", config_js)
+        self.assertIn("CURRENT_FILE_SEARCH_CONTRACT", config_js)
         self.assertIn("renderWorkbenchLayoutFrame", app_js)
         self.assertIn("renderTableControlBar", app_js)
         self.assertIn("renderPreviewRail", app_js)
@@ -299,9 +313,9 @@ class RapidTriageApiTests(unittest.TestCase):
         self.assertIn("recordViewerNavigation", app_js)
         self.assertIn("renderViewerNavigationControls", app_js)
         self.assertIn("goViewerNavigation", app_js)
-        self.assertIn("persistWorkbenchSession", app_js)
-        self.assertIn("restoreWorkbenchSession", app_js)
-        self.assertIn("restoreWorkbenchControls", app_js)
+        self.assertIn("function persistWorkbenchSession", state_js)
+        self.assertIn("function restoreWorkbenchSession", state_js)
+        self.assertIn("function restoreWorkbenchControls", state_js)
         self.assertIn("renderSearchSourceVerification", app_js)
         self.assertIn("renderSearchResultLocator", app_js)
         self.assertIn("renderSearchResultSourceActionStrip", app_js)
@@ -441,6 +455,8 @@ class RapidTriageApiTests(unittest.TestCase):
 
     def test_workbench_smoke_contract_exposes_browser_test_flow(self) -> None:
         client = TestClient(create_app(RunJobStore()))
+        app_js = (REPO_ROOT / "rapidtriage" / "web" / "static" / "app.js").read_text(encoding="utf-8")
+        index_html = (REPO_ROOT / "rapidtriage" / "web" / "static" / "index.html").read_text(encoding="utf-8")
         styles = (REPO_ROOT / "rapidtriage" / "web" / "static" / "styles.css").read_text(encoding="utf-8")
 
         response = client.get("/api/workbench/smoke-contract")
@@ -466,6 +482,21 @@ class RapidTriageApiTests(unittest.TestCase):
         self.assertIn("smoke-test-rapidtriage.sh", platforms["macos"]["script"])
         self.assertIn("source_viewer", payload["selectors"])
         self.assertIn("viewer_review", payload["selectors"])
+        static_markup = index_html + app_js
+        for selector in payload["selectors"].values():
+            if selector.startswith("[data-testid='"):
+                test_id = selector.removeprefix("[data-testid='").removesuffix("']")
+                if f'data-testid="{test_id}"' in static_markup:
+                    continue
+                if test_id.startswith("tab-"):
+                    self.assertIn('data-testid="tab-${escapeHtml(item)}"', app_js)
+                    self.assertIn(test_id.removeprefix("tab-"), app_js)
+                    continue
+                self.fail(f"Smoke selector {selector} is not present in static markup")
+            elif "data-tab='" in selector:
+                tab = selector.split("data-tab='", 1)[1].split("'", 1)[0]
+                self.assertIn(f'data-tab="${{escapeHtml(mode.tab)}}"', app_js)
+                self.assertIn(f'tab: "{tab}"', (REPO_ROOT / "rapidtriage" / "web" / "static" / "app_workbench_config.js").read_text(encoding="utf-8"))
         self.assertIn("case_report", payload["api_routes"])
         step_ids = {step["id"] for step in payload["required_steps"]}
         self.assertEqual(
@@ -480,6 +511,8 @@ class RapidTriageApiTests(unittest.TestCase):
                 "export-report",
             },
         )
+        for step_id in step_ids:
+            self.assertIn(f'id: "{step_id}"', (REPO_ROOT / "rapidtriage" / "web" / "static" / "app_workbench_config.js").read_text(encoding="utf-8"))
         self.assertIn("viewer-evidence-trail", styles)
         self.assertIn("viewer-evidence-card", styles)
         self.assertIn("compare-citation-bundle", styles)
@@ -2440,6 +2473,24 @@ class RapidTriageApiTests(unittest.TestCase):
                 search_payload["review_workflow_summary"]["core_accuracy_gates"][0]["satisfied_checks"],
             )
             target = search_payload["matches"][0]
+            metadata_filter = "fixture_marker=api-roundtrip"
+
+            metadata_search_response = client.post(
+                "/api/case-db/search",
+                json={
+                    "database": str(db_path),
+                    "case_id": "CASE-API-DB",
+                    "keywords": ["password"],
+                    "sources": ["documents"],
+                    "metadata_filters": [metadata_filter],
+                    "save_as": "Password metadata review",
+                },
+            )
+            self.assertEqual(metadata_search_response.status_code, 200, metadata_search_response.text)
+            metadata_payload = metadata_search_response.json()
+            filter_key, filter_value = metadata_filter.split("=", 1)
+            self.assertEqual(metadata_payload["options"]["metadata"], {filter_key: filter_value})
+            self.assertEqual(metadata_payload["saved_search"]["filters"]["metadata"], {filter_key: filter_value})
 
             review_response = client.post(
                 "/api/case-db/review",
@@ -2474,7 +2525,10 @@ class RapidTriageApiTests(unittest.TestCase):
                 },
             )
             self.assertEqual(saved_searches_response.status_code, 200, saved_searches_response.text)
-            self.assertEqual(saved_searches_response.json()["saved_searches"][0]["name"], "Password review")
+            saved_by_name = {item["name"]: item for item in saved_searches_response.json()["saved_searches"]}
+            self.assertIn("Password review", saved_by_name)
+            self.assertIn("Password metadata review", saved_by_name)
+            self.assertEqual(saved_by_name["Password metadata review"]["filters"]["metadata"], {filter_key: filter_value})
 
             batch_response = client.post(
                 "/api/case-db/review-batch",

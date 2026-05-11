@@ -221,13 +221,13 @@ WORKBENCH_SMOKE_SELECTORS = {
     "case_hero": "[data-testid='case-hero']",
     "artifact_validation_summary": "[data-testid='artifact-validation-summary']",
     "global_search": "[data-testid='global-case-search']",
-    "search_view": "[data-testid='view-group-find']",
+    "search_view": ".forensic-view-mode[data-tab='search']",
     "search_tab": "[data-testid='tab-search']",
     "source_viewer": "[data-testid='source-viewer']",
     "source_verification": "[data-testid='source-verification-trail']",
     "viewer_review": "[data-testid='viewer-review-form']",
-    "review_view": "[data-testid='view-group-review']",
-    "report_view": "[data-testid='view-group-deliver']",
+    "review_view": ".forensic-view-mode[data-tab='review']",
+    "report_view": ".forensic-view-mode[data-tab='report']",
     "report_tab": "[data-testid='tab-report']",
 }
 
@@ -311,6 +311,7 @@ class CaseDbSearchRequest(BaseModel):
     keywords: list[str] = Field(..., min_length=1)
     limit: int = Field(100, ge=1, le=1000)
     sources: Optional[list[str]] = None
+    metadata_filters: Optional[list[str]] = None
     review_status: Optional[str] = None
     verification_status: Optional[str] = None
     save_as: Optional[str] = None
@@ -362,6 +363,7 @@ class CaseDbSavedSearchRequest(BaseModel):
     keywords: list[str] = Field(..., min_length=1)
     limit: int = Field(100, ge=1, le=1000)
     sources: Optional[list[str]] = None
+    metadata_filters: Optional[list[str]] = None
     review_status: Optional[str] = None
     verification_status: Optional[str] = None
     created_by: str = ""
@@ -574,6 +576,7 @@ def create_app(job_store: RunJobStore | None = None, auth_token: str | None = No
                 keywords=keywords,
                 limit=request.limit,
                 sources=request.sources,
+                metadata_filters=request.metadata_filters,
                 review_status=request.review_status,
                 verification_status=request.verification_status,
             )
@@ -584,6 +587,7 @@ def create_app(job_store: RunJobStore | None = None, auth_token: str | None = No
                     keywords=keywords,
                     limit=request.limit,
                     sources=request.sources,
+                    metadata_filters=request.metadata_filters,
                     review_status=request.review_status,
                     verification_status=request.verification_status,
                     created_by="web-ui",
@@ -655,6 +659,7 @@ def create_app(job_store: RunJobStore | None = None, auth_token: str | None = No
                 keywords=request.keywords,
                 limit=request.limit,
                 sources=request.sources,
+                metadata_filters=request.metadata_filters,
                 review_status=request.review_status,
                 verification_status=request.verification_status,
                 created_by=request.created_by,
@@ -1278,6 +1283,10 @@ def create_app(job_store: RunJobStore | None = None, auth_token: str | None = No
         @api.get("/", include_in_schema=False)
         def index() -> FileResponse:
             return FileResponse(static_dir / "index.html")
+
+        @api.get("/favicon.ico", include_in_schema=False)
+        def favicon() -> FileResponse:
+            return FileResponse(static_dir / "favicon.svg", media_type="image/svg+xml")
 
     return api
 

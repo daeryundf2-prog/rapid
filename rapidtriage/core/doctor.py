@@ -167,7 +167,7 @@ def package_version(package: str) -> str | None:
 
 
 def check_static_assets(static_dir: Path) -> DoctorCheck:
-    required = ("index.html", "app.js", "styles.css")
+    required = ("index.html", "app_workbench_config.js", "app_state.js", "app.js", "styles.css")
     missing = [name for name in required if not (static_dir / name).is_file()]
     if missing:
         return DoctorCheck(

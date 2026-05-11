@@ -102,6 +102,7 @@ class RunJob:
     started_at: str | None = None
     completed_at: str | None = None
     error: str | None = None
+    error_type: str | None = None
     summary: Dict[str, object] | None = None
     origin: str = "web"
     steps: List[Dict[str, object]] = field(default_factory=list)
@@ -126,6 +127,7 @@ class RunJob:
             "started_at": self.started_at,
             "completed_at": self.completed_at,
             "error": self.error,
+            "error_type": self.error_type,
             "request": self.request.to_dict(),
             "steps": self.steps,
             "cancellation_requested": self.cancellation_requested,
@@ -168,6 +170,7 @@ class RunJob:
             started_at=str(payload["started_at"]) if payload.get("started_at") else None,
             completed_at=str(payload["completed_at"]) if payload.get("completed_at") else None,
             error=str(payload["error"]) if payload.get("error") else None,
+            error_type=str(payload["error_type"]) if payload.get("error_type") else None,
             summary=dict(summary_payload) if isinstance(summary_payload, Mapping) else None,
             steps=[dict(step) for step in payload.get("steps", [])] if isinstance(payload.get("steps"), list) else [],
             cancellation_requested=bool(payload.get("cancellation_requested", False)),
@@ -219,8 +222,20 @@ class RunJobStore:
             self._write_state_locked()
         try:
             self._execute(job.run_id)
-        except Exception:
-            pass
+        except Exception as exc:
+            with self._lock:
+                stored = self._jobs[job.run_id]
+                stored.error_type = stored.error_type or type(exc).__name__
+                stored.error = stored.error or str(exc)
+                append_job_transition(
+                    stored,
+                    event_type="run-sync-exception-observed",
+                    status=stored.status,
+                    step="triage",
+                    message=str(exc),
+                    details={"exception_type": type(exc).__name__},
+                )
+                self._write_state_locked()
         return self.get(job.run_id)
 
     def list(self) -> List[RunJob]:
@@ -408,6 +423,7 @@ class RunJobStore:
             with self._lock:
                 job.status = "failed"
                 job.error = str(exc)
+                job.error_type = type(exc).__name__
                 job.completed_at = now_iso()
                 job.updated_at = job.completed_at
                 job.steps = update_step(job.steps, "triage", "failed", message=str(exc))

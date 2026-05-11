@@ -1321,7 +1321,7 @@ class CaseDatabase:
                     continue
                 path = Path(str(row.get("path") or ""))
                 kind = str(row.get("kind") or "")
-                body = safe_extract_text(path, kind)
+                body, extraction_error = safe_extract_text(path, kind)
                 title = path.name
                 cursor = connection.execute(
                     """
@@ -1347,6 +1347,30 @@ class CaseDatabase:
                     "INSERT INTO indexed_document_fts(rowid, title, body) VALUES (?, ?, ?)",
                     (int(cursor.lastrowid), title, body),
                 )
+                if extraction_error:
+                    connection.execute(
+                        """
+                        INSERT INTO audit_event (
+                            citation_id, case_id, actor, action, target_type, target_id,
+                            timestamp, tool_name, tool_version, params_json, result, error
+                        )
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        """,
+                        (
+                            next_citation_id_for_connection(connection, case_id, "audit"),
+                            case_id,
+                            "case-db-import",
+                            "document-text-extraction",
+                            "indexed_document",
+                            str(cursor.lastrowid),
+                            now_iso(),
+                            "rapidtriage",
+                            "",
+                            json.dumps({"path": str(path), "kind": kind}, ensure_ascii=False, sort_keys=True),
+                            "failed",
+                            extraction_error,
+                        ),
+                    )
                 count += 1
         return count
 
@@ -1974,11 +1998,11 @@ def read_json_path(path: Path) -> dict[str, object]:
     return payload if isinstance(payload, dict) else {}
 
 
-def safe_extract_text(path: Path, kind: str) -> str:
+def safe_extract_text(path: Path, kind: str) -> tuple[str, str]:
     try:
-        return extract_text(path, kind)
-    except Exception:
-        return ""
+        return extract_text(path, kind), ""
+    except Exception as exc:
+        return "", f"{type(exc).__name__}: {exc}"
 
 
 def hash_existing_file(path: str) -> dict[str, str]:
@@ -2531,10 +2555,28 @@ def attach_review_marks(
 ) -> list[dict[str, object]]:
     if not matches:
         return matches
-    rows = connection.execute(
-        "SELECT * FROM review_mark WHERE case_id = ?",
-        (case_id,),
-    ).fetchall()
+    target_pairs = sorted(
+        {
+            (str(match.get("target_type") or ""), str(match.get("target_id") or ""))
+            for match in matches
+            if match.get("target_type") not in (None, "") and match.get("target_id") not in (None, "")
+        }
+    )
+    rows: list[sqlite3.Row] = []
+    for chunk_start in range(0, len(target_pairs), 300):
+        chunk = target_pairs[chunk_start : chunk_start + 300]
+        if not chunk:
+            continue
+        predicates = " OR ".join("(target_type = ? AND target_id = ?)" for _ in chunk)
+        params: list[object] = [case_id]
+        for target_type, target_id in chunk:
+            params.extend([target_type, target_id])
+        rows.extend(
+            connection.execute(
+                f"SELECT * FROM review_mark WHERE case_id = ? AND ({predicates})",
+                params,
+            ).fetchall()
+        )
     review_by_target = {
         (str(row["target_type"]), str(row["target_id"])): review_mark_to_dict(row)
         for row in rows
@@ -2719,8 +2761,8 @@ def search_artifacts(
 ) -> list[dict[str, object]]:
     if artifact_fts_has_rows(connection, case_id):
         fts_matches = search_artifacts_fts(connection, case_id, keywords, limit)
-        scan_matches = search_artifacts_scan(connection, case_id, keywords, limit)
-        return dedupe_matches([*fts_matches, *scan_matches], limit=limit)
+        if fts_matches:
+            return fts_matches[:limit] if limit else fts_matches
     return search_artifacts_scan(connection, case_id, keywords, limit)
 
 
@@ -9392,6 +9434,7 @@ CREATE INDEX IF NOT EXISTS idx_artifact_case_type ON artifact(case_id, artifact_
 CREATE INDEX IF NOT EXISTS idx_event_case_time ON event(case_id, timestamp);
 CREATE INDEX IF NOT EXISTS idx_indexed_document_case_source ON indexed_document(case_id, source_type);
 CREATE INDEX IF NOT EXISTS idx_review_mark_case_status ON review_mark(case_id, status, verification_status);
+CREATE INDEX IF NOT EXISTS idx_review_mark_case_target ON review_mark(case_id, target_type, target_id);
 CREATE INDEX IF NOT EXISTS idx_review_mark_history_target ON review_mark_history(case_id, target_type, target_id, version);
 CREATE INDEX IF NOT EXISTS idx_saved_search_case_name ON saved_search(case_id, name);
 CREATE INDEX IF NOT EXISTS idx_audit_event_case_time ON audit_event(case_id, timestamp);

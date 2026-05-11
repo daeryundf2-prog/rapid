@@ -156,6 +156,13 @@ class RapidTriageCaseDatabaseTests(unittest.TestCase):
                 self.assertIn("filters_json", table_columns(connection, "saved_search"))
                 self.assertIn("citation_id", table_columns(connection, "audit_event"))
                 self.assertIn("write_blocker", table_columns(connection, "acquisition_metadata"))
+                indexes = {
+                    str(row["name"])
+                    for row in connection.execute(
+                        "SELECT name FROM sqlite_master WHERE type = 'index' AND name LIKE 'idx_%'"
+                    ).fetchall()
+                }
+                self.assertIn("idx_review_mark_case_target", indexes)
 
     def test_create_list_and_get_case(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -353,6 +360,47 @@ class RapidTriageCaseDatabaseTests(unittest.TestCase):
             self.assertGreaterEqual(counts["event"], 1)
             self.assertGreaterEqual(counts["audit_event"], 1)
             self.assertGreaterEqual(fts_count, 1)
+
+    def test_import_run_output_audits_document_extraction_failures(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            docs_output = root / "rapidtriage-docs.json"
+            missing_document = root / "missing.pdf"
+            docs_output.write_text(
+                json.dumps(
+                    {
+                        "candidates": [{"path": str(missing_document), "kind": "pdf"}],
+                        "results": [{"path": str(missing_document)}],
+                    }
+                ),
+                encoding="utf-8",
+            )
+            summary = {
+                "root": str(root),
+                "outputs": {
+                    "summary": str(root / "summary.json"),
+                    "docs": str(docs_output),
+                },
+            }
+            db_path = root / "case.db"
+            database = open_case_database(db_path)
+
+            import_payload = database.import_run_output(summary, case_id="CASE-DOC-ERROR")
+
+            self.assertEqual(import_payload["summary"]["indexed_document_count"], 1)
+            with contextlib.closing(sqlite3.connect(db_path)) as connection:
+                connection.row_factory = sqlite3.Row
+                row = connection.execute(
+                    "SELECT action, target_type, result, error, params_json FROM audit_event WHERE action = ?",
+                    ("document-text-extraction",),
+                ).fetchone()
+
+            self.assertIsNotNone(row)
+            assert row is not None
+            self.assertEqual(row["target_type"], "indexed_document")
+            self.assertEqual(row["result"], "failed")
+            self.assertIn("FileNotFoundError", row["error"])
+            self.assertEqual(json.loads(row["params_json"])["path"], str(missing_document))
 
     def test_cli_case_db_import_run_outputs_counts(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:

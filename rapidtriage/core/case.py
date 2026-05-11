@@ -53,7 +53,7 @@ ARTIFACT_KEYS = (
     "tab_url",
     "status",
 )
-REVIEW_STATUSES = ("unreviewed", "relevant", "needs-review", "not-relevant")
+REVIEW_STATUSES = ("unreviewed", "relevant", "needs-review", "not-relevant", "excluded")
 
 CASE_SOURCE_ROWS = {
     "files": "candidates",

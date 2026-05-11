@@ -18,6 +18,8 @@ from rapidtriage.core.jobs import RunJobStore
 def make_static_assets(root: Path) -> None:
     root.mkdir(parents=True, exist_ok=True)
     (root / "index.html").write_text("<html>rapidtriage</html>", encoding="utf-8")
+    (root / "app_workbench_config.js").write_text("const WORKBENCH_SMOKE_CHECKPOINTS = [];\n", encoding="utf-8")
+    (root / "app_state.js").write_text("function storageAvailable() { return false; }\n", encoding="utf-8")
     (root / "app.js").write_text("console.log('rapidtriage');\n", encoding="utf-8")
     (root / "styles.css").write_text("body {}\n", encoding="utf-8")
 

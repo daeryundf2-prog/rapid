@@ -250,6 +250,41 @@
               "commercial_batch_id": "commercial-uplift-016-020",
               "item_number": 19,
               "gap_id": "#19",
+              "qc_prep_item_numbers": [
+                33,
+                34
+              ],
+              "qc_prep_contracts": [
+                {
+                  "item_number": 33,
+                  "goal": "Reconstruct browser cache objects with request/response metadata and validation warnings.",
+                  "implemented_outputs": [
+                    "cache store inventory by browser/profile/user with source path and hash samples",
+                    "cache presence and truncation metadata in browser-storage-depth manifests",
+                    "explicit validation warnings that request/response body/header reconstruction is not complete"
+                  ],
+                  "commercial_blockers": [
+                    "full Chromium/Firefox cache entry schema decoding",
+                    "request/response header/body reconstruction",
+                    "deleted cache recovery and trusted Hindsight/Velociraptor diffs"
+                  ]
+                },
+                {
+                  "item_number": 34,
+                  "goal": "Decode browser session, local storage, extension, sync, and IndexedDB stores with profile attribution.",
+                  "implemented_outputs": [
+                    "session, local storage, extension, sync, cookie, credential, and IndexedDB inventory",
+                    "profile attribution for browser, user, profile directory, storage type, relative path, and source locators",
+                    "storage-depth manifest with type counts, sensitive counts, and reportability blockers"
+                  ],
+                  "commercial_blockers": [
+                    "browser-version session restore schema decoding",
+                    "extension-specific schema validation",
+                    "sync engine account/scope semantics",
+                    "deleted session recovery known-answer evidence"
+                  ]
+                }
+              ],
               "browser": "firefox",
               "profile": "default-release",
               "user": "alice",
@@ -742,6 +777,41 @@
                 19,
                 20
               ],
+              "qc_prep_item_numbers": [
+                33,
+                34
+              ],
+              "qc_prep_contracts": [
+                {
+                  "item_number": 33,
+                  "goal": "Reconstruct browser cache objects with request/response metadata and validation warnings.",
+                  "implemented_outputs": [
+                    "cache store inventory by browser/profile/user with source path and hash samples",
+                    "cache presence and truncation metadata in browser-storage-depth manifests",
+                    "explicit validation warnings that request/response body/header reconstruction is not complete"
+                  ],
+                  "commercial_blockers": [
+                    "full Chromium/Firefox cache entry schema decoding",
+                    "request/response header/body reconstruction",
+                    "deleted cache recovery and trusted Hindsight/Velociraptor diffs"
+                  ]
+                },
+                {
+                  "item_number": 34,
+                  "goal": "Decode browser session, local storage, extension, sync, and IndexedDB stores with profile attribution.",
+                  "implemented_outputs": [
+                    "session, local storage, extension, sync, cookie, credential, and IndexedDB inventory",
+                    "profile attribution for browser, user, profile directory, storage type, relative path, and source locators",
+                    "storage-depth manifest with type counts, sensitive counts, and reportability blockers"
+                  ],
+                  "commercial_blockers": [
+                    "browser-version session restore schema decoding",
+                    "extension-specific schema validation",
+                    "sync engine account/scope semantics",
+                    "deleted session recovery known-answer evidence"
+                  ]
+                }
+              ],
               "functional_priority_profiles": [
                 {
                   "item_number": 46,
@@ -848,6 +918,11 @@
                 "commercial_gap_ids": [
                   "#19",
                   "#20"
+                ],
+                "qc_prep_item_numbers": [
+                  33,
+                  34,
+                  35
                 ],
                 "decision": "do-not-report-browser-storage-or-timeline-as-complete",
                 "allowed_use": "browser-storage-and-timeline-triage-pivot",
@@ -1212,6 +1287,41 @@
               "commercial_batch_id": "commercial-uplift-016-020",
               "item_number": 19,
               "gap_id": "#19",
+              "qc_prep_item_numbers": [
+                33,
+                34
+              ],
+              "qc_prep_contracts": [
+                {
+                  "item_number": 33,
+                  "goal": "Reconstruct browser cache objects with request/response metadata and validation warnings.",
+                  "implemented_outputs": [
+                    "cache store inventory by browser/profile/user with source path and hash samples",
+                    "cache presence and truncation metadata in browser-storage-depth manifests",
+                    "explicit validation warnings that request/response body/header reconstruction is not complete"
+                  ],
+                  "commercial_blockers": [
+                    "full Chromium/Firefox cache entry schema decoding",
+                    "request/response header/body reconstruction",
+                    "deleted cache recovery and trusted Hindsight/Velociraptor diffs"
+                  ]
+                },
+                {
+                  "item_number": 34,
+                  "goal": "Decode browser session, local storage, extension, sync, and IndexedDB stores with profile attribution.",
+                  "implemented_outputs": [
+                    "session, local storage, extension, sync, cookie, credential, and IndexedDB inventory",
+                    "profile attribution for browser, user, profile directory, storage type, relative path, and source locators",
+                    "storage-depth manifest with type counts, sensitive counts, and reportability blockers"
+                  ],
+                  "commercial_blockers": [
+                    "browser-version session restore schema decoding",
+                    "extension-specific schema validation",
+                    "sync engine account/scope semantics",
+                    "deleted session recovery known-answer evidence"
+                  ]
+                }
+              ],
               "browser": "chrome",
               "profile": "Default",
               "user": "alice",
@@ -1803,6 +1913,41 @@
                 19,
                 20
               ],
+              "qc_prep_item_numbers": [
+                33,
+                34
+              ],
+              "qc_prep_contracts": [
+                {
+                  "item_number": 33,
+                  "goal": "Reconstruct browser cache objects with request/response metadata and validation warnings.",
+                  "implemented_outputs": [
+                    "cache store inventory by browser/profile/user with source path and hash samples",
+                    "cache presence and truncation metadata in browser-storage-depth manifests",
+                    "explicit validation warnings that request/response body/header reconstruction is not complete"
+                  ],
+                  "commercial_blockers": [
+                    "full Chromium/Firefox cache entry schema decoding",
+                    "request/response header/body reconstruction",
+                    "deleted cache recovery and trusted Hindsight/Velociraptor diffs"
+                  ]
+                },
+                {
+                  "item_number": 34,
+                  "goal": "Decode browser session, local storage, extension, sync, and IndexedDB stores with profile attribution.",
+                  "implemented_outputs": [
+                    "session, local storage, extension, sync, cookie, credential, and IndexedDB inventory",
+                    "profile attribution for browser, user, profile directory, storage type, relative path, and source locators",
+                    "storage-depth manifest with type counts, sensitive counts, and reportability blockers"
+                  ],
+                  "commercial_blockers": [
+                    "browser-version session restore schema decoding",
+                    "extension-specific schema validation",
+                    "sync engine account/scope semantics",
+                    "deleted session recovery known-answer evidence"
+                  ]
+                }
+              ],
               "functional_priority_profiles": [
                 {
                   "item_number": 46,
@@ -1909,6 +2054,11 @@
                 "commercial_gap_ids": [
                   "#19",
                   "#20"
+                ],
+                "qc_prep_item_numbers": [
+                  33,
+                  34,
+                  35
                 ],
                 "decision": "do-not-report-browser-storage-or-timeline-as-complete",
                 "allowed_use": "browser-storage-and-timeline-triage-pivot",
@@ -2243,6 +2393,41 @@
               "commercial_batch_id": "commercial-uplift-016-020",
               "item_number": 19,
               "gap_id": "#19",
+              "qc_prep_item_numbers": [
+                33,
+                34
+              ],
+              "qc_prep_contracts": [
+                {
+                  "item_number": 33,
+                  "goal": "Reconstruct browser cache objects with request/response metadata and validation warnings.",
+                  "implemented_outputs": [
+                    "cache store inventory by browser/profile/user with source path and hash samples",
+                    "cache presence and truncation metadata in browser-storage-depth manifests",
+                    "explicit validation warnings that request/response body/header reconstruction is not complete"
+                  ],
+                  "commercial_blockers": [
+                    "full Chromium/Firefox cache entry schema decoding",
+                    "request/response header/body reconstruction",
+                    "deleted cache recovery and trusted Hindsight/Velociraptor diffs"
+                  ]
+                },
+                {
+                  "item_number": 34,
+                  "goal": "Decode browser session, local storage, extension, sync, and IndexedDB stores with profile attribution.",
+                  "implemented_outputs": [
+                    "session, local storage, extension, sync, cookie, credential, and IndexedDB inventory",
+                    "profile attribution for browser, user, profile directory, storage type, relative path, and source locators",
+                    "storage-depth manifest with type counts, sensitive counts, and reportability blockers"
+                  ],
+                  "commercial_blockers": [
+                    "browser-version session restore schema decoding",
+                    "extension-specific schema validation",
+                    "sync engine account/scope semantics",
+                    "deleted session recovery known-answer evidence"
+                  ]
+                }
+              ],
               "browser": "edge",
               "profile": "Profile 1",
               "user": "alice",
@@ -2788,6 +2973,41 @@
                 19,
                 20
               ],
+              "qc_prep_item_numbers": [
+                33,
+                34
+              ],
+              "qc_prep_contracts": [
+                {
+                  "item_number": 33,
+                  "goal": "Reconstruct browser cache objects with request/response metadata and validation warnings.",
+                  "implemented_outputs": [
+                    "cache store inventory by browser/profile/user with source path and hash samples",
+                    "cache presence and truncation metadata in browser-storage-depth manifests",
+                    "explicit validation warnings that request/response body/header reconstruction is not complete"
+                  ],
+                  "commercial_blockers": [
+                    "full Chromium/Firefox cache entry schema decoding",
+                    "request/response header/body reconstruction",
+                    "deleted cache recovery and trusted Hindsight/Velociraptor diffs"
+                  ]
+                },
+                {
+                  "item_number": 34,
+                  "goal": "Decode browser session, local storage, extension, sync, and IndexedDB stores with profile attribution.",
+                  "implemented_outputs": [
+                    "session, local storage, extension, sync, cookie, credential, and IndexedDB inventory",
+                    "profile attribution for browser, user, profile directory, storage type, relative path, and source locators",
+                    "storage-depth manifest with type counts, sensitive counts, and reportability blockers"
+                  ],
+                  "commercial_blockers": [
+                    "browser-version session restore schema decoding",
+                    "extension-specific schema validation",
+                    "sync engine account/scope semantics",
+                    "deleted session recovery known-answer evidence"
+                  ]
+                }
+              ],
               "functional_priority_profiles": [
                 {
                   "item_number": 46,
@@ -2894,6 +3114,11 @@
                 "commercial_gap_ids": [
                   "#19",
                   "#20"
+                ],
+                "qc_prep_item_numbers": [
+                  33,
+                  34,
+                  35
                 ],
                 "decision": "do-not-report-browser-storage-or-timeline-as-complete",
                 "allowed_use": "browser-storage-and-timeline-triage-pivot",
@@ -3335,8 +3560,11 @@
               "item_numbers": [
                 14
               ],
+              "qc_prep_item_numbers": [
+                29
+              ],
               "implementation_track": "native-parser-depth",
-              "objective": "Expose JumpList DestList validation, OLE/LNK provenance, deleted-entry blockers, and AppID gaps.",
+              "objective": "Expose JumpList DestList validation, OLE/LNK provenance, deleted-entry blockers, and AppID gaps for #14 / QC-prep #29.",
               "source_refs": [
                 "source_path:<ROOT>/Users/alice/AppData/Roaming/Microsoft/Windows/Recent/AutomaticDestinations/5f7b5f1e01b83767.automaticDestinations-ms",
                 "source_sha256:ae143e19a1ddda24e8396b307d423f857ba63cbfcf31cbb4537c1e36d0c22eee",
@@ -3358,6 +3586,7 @@
               "reportability_decision": {
                 "profile_version": "jumplist-reportability-decision-v1",
                 "commercial_gap_id": "#14",
+                "qc_prep_item_number": 29,
                 "decision": "do-not-report-destlist-semantics-as-final",
                 "allowed_use": "recent-destination-triage-pivot",
                 "blockers": [
@@ -3548,8 +3777,35 @@
               "parser_version": "windows-recent-files-v6",
               "commercial_batch_id": "commercial-uplift-011-015",
               "item_number": 14,
+              "qc_prep_item_number": 29,
+              "qc_prep_item_goal": "Deepen JumpList DestList, CFB/OLE stream, AppID mapping, deleted entry recovery, and embedded LNK linkage.",
               "gap_id": "#14",
               "artifact_type": "jumplist-automatic",
+              "qc_prep_contract": {
+                "implemented": [
+                  "CFB/OLE stream inventory with bounded stream limits",
+                  "DestList header and entry candidate parsing",
+                  "embedded LNK destination extraction and linkage candidates",
+                  "AppID hash provenance and deleted/unlinked entry warning",
+                  "trusted JLECmd/LECmd-style DestList diff helper"
+                ],
+                "usable_outputs": [
+                  "jumplist-automatic",
+                  "jumplist-custom"
+                ],
+                "validated_by_current_tests": [
+                  "DestList linked destination fixture",
+                  "unlinked/deleted entry review-only candidate fixture",
+                  "trusted JumpList diff pass",
+                  "DestList offset mismatch blocking"
+                ],
+                "not_report_grade_until": [
+                  "OS-version-specific DestList field semantics are validated",
+                  "AppID hash mapping database is attached",
+                  "deleted/unlinked entry recovery is known-answer validated",
+                  "embedded LNK and DestList entries are diffed against trusted parser output"
+                ]
+              },
               "source": {
                 "source_path": "<ROOT>/Users/alice/AppData/Roaming/Microsoft/Windows/Recent/AutomaticDestinations/5f7b5f1e01b83767.automaticDestinations-ms",
                 "source_sha256": "ae143e19a1ddda24e8396b307d423f857ba63cbfcf31cbb4537c1e36d0c22eee",
@@ -3923,8 +4179,11 @@
               "item_numbers": [
                 14
               ],
+              "qc_prep_item_numbers": [
+                29
+              ],
               "implementation_track": "native-parser-depth",
-              "objective": "Expose JumpList DestList validation, OLE/LNK provenance, deleted-entry blockers, and AppID gaps.",
+              "objective": "Expose JumpList DestList validation, OLE/LNK provenance, deleted-entry blockers, and AppID gaps for #14 / QC-prep #29.",
               "source_refs": [
                 "source_path:<ROOT>/Users/alice/AppData/Roaming/Microsoft/Windows/Recent/CustomDestinations/9b9cdc69c1c24e2b.customDestinations-ms",
                 "source_sha256:c04f2f402446ea24335c08475374b0167bc59f82017cb8c64ef9cf95f2eb382d",
@@ -3946,6 +4205,7 @@
               "reportability_decision": {
                 "profile_version": "jumplist-reportability-decision-v1",
                 "commercial_gap_id": "#14",
+                "qc_prep_item_number": 29,
                 "decision": "do-not-report-destlist-semantics-as-final",
                 "allowed_use": "recent-destination-triage-pivot",
                 "blockers": [
@@ -4136,8 +4396,35 @@
               "parser_version": "windows-recent-files-v6",
               "commercial_batch_id": "commercial-uplift-011-015",
               "item_number": 14,
+              "qc_prep_item_number": 29,
+              "qc_prep_item_goal": "Deepen JumpList DestList, CFB/OLE stream, AppID mapping, deleted entry recovery, and embedded LNK linkage.",
               "gap_id": "#14",
               "artifact_type": "jumplist-custom",
+              "qc_prep_contract": {
+                "implemented": [
+                  "CFB/OLE stream inventory with bounded stream limits",
+                  "DestList header and entry candidate parsing",
+                  "embedded LNK destination extraction and linkage candidates",
+                  "AppID hash provenance and deleted/unlinked entry warning",
+                  "trusted JLECmd/LECmd-style DestList diff helper"
+                ],
+                "usable_outputs": [
+                  "jumplist-automatic",
+                  "jumplist-custom"
+                ],
+                "validated_by_current_tests": [
+                  "DestList linked destination fixture",
+                  "unlinked/deleted entry review-only candidate fixture",
+                  "trusted JumpList diff pass",
+                  "DestList offset mismatch blocking"
+                ],
+                "not_report_grade_until": [
+                  "OS-version-specific DestList field semantics are validated",
+                  "AppID hash mapping database is attached",
+                  "deleted/unlinked entry recovery is known-answer validated",
+                  "embedded LNK and DestList entries are diffed against trusted parser output"
+                ]
+              },
               "source": {
                 "source_path": "<ROOT>/Users/alice/AppData/Roaming/Microsoft/Windows/Recent/CustomDestinations/9b9cdc69c1c24e2b.customDestinations-ms",
                 "source_sha256": "c04f2f402446ea24335c08475374b0167bc59f82017cb8c64ef9cf95f2eb382d",
@@ -4536,6 +4823,27 @@
               "item_numbers": [
                 17
               ],
+              "qc_prep_item_numbers": [
+                32
+              ],
+              "qc_prep_contracts": [
+                {
+                  "item_number": 32,
+                  "goal": "Deepen LNK ShellLinkHeader, LinkInfo, StringData, ExtraData, TrackerDataBlock, and target/source citation.",
+                  "implemented_outputs": [
+                    "ShellLinkHeader flags, attributes, timestamps, size, show command, and hotkey fields",
+                    "LinkInfo local/common path candidates and StringData target context",
+                    "ExtraData block inventory with TrackerDataBlock and property-store candidate preservation",
+                    "depth manifest with source hash, target identity hash, citation refs, and report blockers"
+                  ],
+                  "commercial_blockers": [
+                    "complete shell item semantic decoding",
+                    "full property-store schema validation",
+                    "LinkInfo/network-provider OS-version validation",
+                    "LECmd/known-answer trusted diff evidence for critical shortcuts"
+                  ]
+                }
+              ],
               "implementation_track": "native-parser-depth",
               "objective": "Expose Shell Link header, LinkInfo/StringData/ExtraData validation and remaining property-store blockers.",
               "source_refs": [
@@ -4560,6 +4868,24 @@
               "reportability_decision": {
                 "profile_version": "lnk-reportability-decision-v1",
                 "commercial_gap_id": "#17",
+                "qc_prep_item_number": 32,
+                "qc_prep_item_goal": "Deepen LNK ShellLinkHeader, LinkInfo, StringData, ExtraData, TrackerDataBlock, and target/source citation.",
+                "qc_prep_contract": {
+                  "item_number": 32,
+                  "goal": "Deepen LNK ShellLinkHeader, LinkInfo, StringData, ExtraData, TrackerDataBlock, and target/source citation.",
+                  "implemented_outputs": [
+                    "ShellLinkHeader flags, attributes, timestamps, size, show command, and hotkey fields",
+                    "LinkInfo local/common path candidates and StringData target context",
+                    "ExtraData block inventory with TrackerDataBlock and property-store candidate preservation",
+                    "depth manifest with source hash, target identity hash, citation refs, and report blockers"
+                  ],
+                  "commercial_blockers": [
+                    "complete shell item semantic decoding",
+                    "full property-store schema validation",
+                    "LinkInfo/network-provider OS-version validation",
+                    "LECmd/known-answer trusted diff evidence for critical shortcuts"
+                  ]
+                },
                 "decision": "do-not-report-target-context-as-complete",
                 "allowed_use": "shortcut-target-and-metadata-triage-pivot",
                 "blockers": [
@@ -4604,6 +4930,8 @@
             },
             "lnk_analyst_review_profile": {
               "profile_version": "lnk-analyst-review-profile-v1",
+              "qc_prep_item_number": 32,
+              "qc_prep_item_goal": "Deepen LNK ShellLinkHeader, LinkInfo, StringData, ExtraData, TrackerDataBlock, and target/source citation.",
               "artifact_type": "recent-shortcut",
               "severity": "medium",
               "summary": "Shell Link shortcut pivot with target path, LinkInfo/StringData, timestamps, and tracker context.",
@@ -4672,6 +5000,24 @@
               "commercial_batch_id": "commercial-uplift-016-020",
               "item_number": 17,
               "gap_id": "#17",
+              "qc_prep_item_number": 32,
+              "qc_prep_item_goal": "Deepen LNK ShellLinkHeader, LinkInfo, StringData, ExtraData, TrackerDataBlock, and target/source citation.",
+              "qc_prep_contract": {
+                "item_number": 32,
+                "goal": "Deepen LNK ShellLinkHeader, LinkInfo, StringData, ExtraData, TrackerDataBlock, and target/source citation.",
+                "implemented_outputs": [
+                  "ShellLinkHeader flags, attributes, timestamps, size, show command, and hotkey fields",
+                  "LinkInfo local/common path candidates and StringData target context",
+                  "ExtraData block inventory with TrackerDataBlock and property-store candidate preservation",
+                  "depth manifest with source hash, target identity hash, citation refs, and report blockers"
+                ],
+                "commercial_blockers": [
+                  "complete shell item semantic decoding",
+                  "full property-store schema validation",
+                  "LinkInfo/network-provider OS-version validation",
+                  "LECmd/known-answer trusted diff evidence for critical shortcuts"
+                ]
+              },
               "artifact_type": "recent-shortcut",
               "source": {
                 "source_path": "<ROOT>/Users/alice/AppData/Roaming/Microsoft/Windows/Recent/Case Notes.lnk",
@@ -5016,10 +5362,40 @@
               "profile_version": "srum-ese-validation-v1",
               "commercial_batch_id": "commercial-uplift-011-015",
               "readiness_item_number": 15,
+              "qc_prep_item_number": 25,
+              "qc_prep_item_goal": "Deepen SRUM native ESE table/page decoding and counter semantics.",
               "commercial_gap_id": "#10",
               "artifact_family": "srum-srudb-ese",
               "artifact_scope": "database",
               "current_decode_level": "source-export-or-native-header-string-candidate",
+              "qc_prep_contract": {
+                "implemented": [
+                  "SrumECmd-style source export mapping",
+                  "native SRUDB.dat ESE header probe",
+                  "bounded table marker, string pivot, and row-candidate clustering",
+                  "counter/timestamp semantics labeling and citation manifest"
+                ],
+                "usable_outputs": [
+                  "srum-network-usage",
+                  "srum-app-resource-usage",
+                  "srum-database-file",
+                  "srum-database-pivot",
+                  "srum-table-candidate",
+                  "srum-row-candidate"
+                ],
+                "validated_by_current_tests": [
+                  "source export counter normalization",
+                  "native row candidate field presence profile",
+                  "trusted SrumECmd-style counter diff helper",
+                  "counter mismatch blocking"
+                ],
+                "not_report_grade_until": [
+                  "native ESE catalog/page/tagged-column decoder is implemented",
+                  "SRUM table GUID schemas are mapped by Windows build",
+                  "row-level counters/timestamps/SIDs/app IDs are trusted-diff validated",
+                  "large SRUDB cursor pagination is stress tested"
+                ]
+              },
               "decoded_components": {
                 "ese_header": true,
                 "ese_signature": true,
@@ -5429,8 +5805,11 @@
               "item_numbers": [
                 10
               ],
+              "qc_prep_item_numbers": [
+                25
+              ],
               "implementation_track": "native-parser-depth",
-              "objective": "Expose execution-artifact validation evidence, commercial blockers, and large-data limits on each #7-#10 row.",
+              "objective": "Expose execution-artifact validation evidence, commercial blockers, and large-data limits on each #7-#10 / QC-prep #22-#25 row.",
               "source_refs": [
                 "source_path:<ROOT>/Windows/System32/sru/SRUDB.dat",
                 "source_index:0",
@@ -5713,10 +6092,40 @@
               "profile_version": "srum-ese-validation-v1",
               "commercial_batch_id": "commercial-uplift-011-015",
               "readiness_item_number": 15,
+              "qc_prep_item_number": 25,
+              "qc_prep_item_goal": "Deepen SRUM native ESE table/page decoding and counter semantics.",
               "commercial_gap_id": "#10",
               "artifact_family": "srum-srudb-ese",
               "artifact_scope": "string-pivot",
               "current_decode_level": "source-export-or-native-header-string-candidate",
+              "qc_prep_contract": {
+                "implemented": [
+                  "SrumECmd-style source export mapping",
+                  "native SRUDB.dat ESE header probe",
+                  "bounded table marker, string pivot, and row-candidate clustering",
+                  "counter/timestamp semantics labeling and citation manifest"
+                ],
+                "usable_outputs": [
+                  "srum-network-usage",
+                  "srum-app-resource-usage",
+                  "srum-database-file",
+                  "srum-database-pivot",
+                  "srum-table-candidate",
+                  "srum-row-candidate"
+                ],
+                "validated_by_current_tests": [
+                  "source export counter normalization",
+                  "native row candidate field presence profile",
+                  "trusted SrumECmd-style counter diff helper",
+                  "counter mismatch blocking"
+                ],
+                "not_report_grade_until": [
+                  "native ESE catalog/page/tagged-column decoder is implemented",
+                  "SRUM table GUID schemas are mapped by Windows build",
+                  "row-level counters/timestamps/SIDs/app IDs are trusted-diff validated",
+                  "large SRUDB cursor pagination is stress tested"
+                ]
+              },
               "decoded_components": {
                 "ese_header": true,
                 "ese_signature": true,
@@ -6238,10 +6647,40 @@
               "profile_version": "srum-ese-validation-v1",
               "commercial_batch_id": "commercial-uplift-011-015",
               "readiness_item_number": 15,
+              "qc_prep_item_number": 25,
+              "qc_prep_item_goal": "Deepen SRUM native ESE table/page decoding and counter semantics.",
               "commercial_gap_id": "#10",
               "artifact_family": "srum-srudb-ese",
               "artifact_scope": "string-pivot",
               "current_decode_level": "source-export-or-native-header-string-candidate",
+              "qc_prep_contract": {
+                "implemented": [
+                  "SrumECmd-style source export mapping",
+                  "native SRUDB.dat ESE header probe",
+                  "bounded table marker, string pivot, and row-candidate clustering",
+                  "counter/timestamp semantics labeling and citation manifest"
+                ],
+                "usable_outputs": [
+                  "srum-network-usage",
+                  "srum-app-resource-usage",
+                  "srum-database-file",
+                  "srum-database-pivot",
+                  "srum-table-candidate",
+                  "srum-row-candidate"
+                ],
+                "validated_by_current_tests": [
+                  "source export counter normalization",
+                  "native row candidate field presence profile",
+                  "trusted SrumECmd-style counter diff helper",
+                  "counter mismatch blocking"
+                ],
+                "not_report_grade_until": [
+                  "native ESE catalog/page/tagged-column decoder is implemented",
+                  "SRUM table GUID schemas are mapped by Windows build",
+                  "row-level counters/timestamps/SIDs/app IDs are trusted-diff validated",
+                  "large SRUDB cursor pagination is stress tested"
+                ]
+              },
               "decoded_components": {
                 "ese_header": true,
                 "ese_signature": true,
@@ -6763,10 +7202,40 @@
               "profile_version": "srum-ese-validation-v1",
               "commercial_batch_id": "commercial-uplift-011-015",
               "readiness_item_number": 15,
+              "qc_prep_item_number": 25,
+              "qc_prep_item_goal": "Deepen SRUM native ESE table/page decoding and counter semantics.",
               "commercial_gap_id": "#10",
               "artifact_family": "srum-srudb-ese",
               "artifact_scope": "string-pivot",
               "current_decode_level": "source-export-or-native-header-string-candidate",
+              "qc_prep_contract": {
+                "implemented": [
+                  "SrumECmd-style source export mapping",
+                  "native SRUDB.dat ESE header probe",
+                  "bounded table marker, string pivot, and row-candidate clustering",
+                  "counter/timestamp semantics labeling and citation manifest"
+                ],
+                "usable_outputs": [
+                  "srum-network-usage",
+                  "srum-app-resource-usage",
+                  "srum-database-file",
+                  "srum-database-pivot",
+                  "srum-table-candidate",
+                  "srum-row-candidate"
+                ],
+                "validated_by_current_tests": [
+                  "source export counter normalization",
+                  "native row candidate field presence profile",
+                  "trusted SrumECmd-style counter diff helper",
+                  "counter mismatch blocking"
+                ],
+                "not_report_grade_until": [
+                  "native ESE catalog/page/tagged-column decoder is implemented",
+                  "SRUM table GUID schemas are mapped by Windows build",
+                  "row-level counters/timestamps/SIDs/app IDs are trusted-diff validated",
+                  "large SRUDB cursor pagination is stress tested"
+                ]
+              },
               "decoded_components": {
                 "ese_header": true,
                 "ese_signature": true,
@@ -7285,10 +7754,40 @@
               "profile_version": "srum-ese-validation-v1",
               "commercial_batch_id": "commercial-uplift-011-015",
               "readiness_item_number": 15,
+              "qc_prep_item_number": 25,
+              "qc_prep_item_goal": "Deepen SRUM native ESE table/page decoding and counter semantics.",
               "commercial_gap_id": "#10",
               "artifact_family": "srum-srudb-ese",
               "artifact_scope": "string-pivot",
               "current_decode_level": "source-export-or-native-header-string-candidate",
+              "qc_prep_contract": {
+                "implemented": [
+                  "SrumECmd-style source export mapping",
+                  "native SRUDB.dat ESE header probe",
+                  "bounded table marker, string pivot, and row-candidate clustering",
+                  "counter/timestamp semantics labeling and citation manifest"
+                ],
+                "usable_outputs": [
+                  "srum-network-usage",
+                  "srum-app-resource-usage",
+                  "srum-database-file",
+                  "srum-database-pivot",
+                  "srum-table-candidate",
+                  "srum-row-candidate"
+                ],
+                "validated_by_current_tests": [
+                  "source export counter normalization",
+                  "native row candidate field presence profile",
+                  "trusted SrumECmd-style counter diff helper",
+                  "counter mismatch blocking"
+                ],
+                "not_report_grade_until": [
+                  "native ESE catalog/page/tagged-column decoder is implemented",
+                  "SRUM table GUID schemas are mapped by Windows build",
+                  "row-level counters/timestamps/SIDs/app IDs are trusted-diff validated",
+                  "large SRUDB cursor pagination is stress tested"
+                ]
+              },
               "decoded_components": {
                 "ese_header": true,
                 "ese_signature": true,
@@ -7871,10 +8370,40 @@
               "profile_version": "srum-ese-validation-v1",
               "commercial_batch_id": "commercial-uplift-011-015",
               "readiness_item_number": 15,
+              "qc_prep_item_number": 25,
+              "qc_prep_item_goal": "Deepen SRUM native ESE table/page decoding and counter semantics.",
               "commercial_gap_id": "#10",
               "artifact_family": "srum-srudb-ese",
               "artifact_scope": "row-candidate",
               "current_decode_level": "source-export-or-native-header-string-candidate",
+              "qc_prep_contract": {
+                "implemented": [
+                  "SrumECmd-style source export mapping",
+                  "native SRUDB.dat ESE header probe",
+                  "bounded table marker, string pivot, and row-candidate clustering",
+                  "counter/timestamp semantics labeling and citation manifest"
+                ],
+                "usable_outputs": [
+                  "srum-network-usage",
+                  "srum-app-resource-usage",
+                  "srum-database-file",
+                  "srum-database-pivot",
+                  "srum-table-candidate",
+                  "srum-row-candidate"
+                ],
+                "validated_by_current_tests": [
+                  "source export counter normalization",
+                  "native row candidate field presence profile",
+                  "trusted SrumECmd-style counter diff helper",
+                  "counter mismatch blocking"
+                ],
+                "not_report_grade_until": [
+                  "native ESE catalog/page/tagged-column decoder is implemented",
+                  "SRUM table GUID schemas are mapped by Windows build",
+                  "row-level counters/timestamps/SIDs/app IDs are trusted-diff validated",
+                  "large SRUDB cursor pagination is stress tested"
+                ]
+              },
               "decoded_components": {
                 "ese_header": true,
                 "ese_signature": true,
@@ -8464,10 +8993,40 @@
               "profile_version": "srum-ese-validation-v1",
               "commercial_batch_id": "commercial-uplift-011-015",
               "readiness_item_number": 15,
+              "qc_prep_item_number": 25,
+              "qc_prep_item_goal": "Deepen SRUM native ESE table/page decoding and counter semantics.",
               "commercial_gap_id": "#10",
               "artifact_family": "srum-srudb-ese",
               "artifact_scope": "table-candidate",
               "current_decode_level": "source-export-or-native-header-string-candidate",
+              "qc_prep_contract": {
+                "implemented": [
+                  "SrumECmd-style source export mapping",
+                  "native SRUDB.dat ESE header probe",
+                  "bounded table marker, string pivot, and row-candidate clustering",
+                  "counter/timestamp semantics labeling and citation manifest"
+                ],
+                "usable_outputs": [
+                  "srum-network-usage",
+                  "srum-app-resource-usage",
+                  "srum-database-file",
+                  "srum-database-pivot",
+                  "srum-table-candidate",
+                  "srum-row-candidate"
+                ],
+                "validated_by_current_tests": [
+                  "source export counter normalization",
+                  "native row candidate field presence profile",
+                  "trusted SrumECmd-style counter diff helper",
+                  "counter mismatch blocking"
+                ],
+                "not_report_grade_until": [
+                  "native ESE catalog/page/tagged-column decoder is implemented",
+                  "SRUM table GUID schemas are mapped by Windows build",
+                  "row-level counters/timestamps/SIDs/app IDs are trusted-diff validated",
+                  "large SRUDB cursor pagination is stress tested"
+                ]
+              },
               "decoded_components": {
                 "ese_header": true,
                 "ese_signature": true,
@@ -8955,10 +9514,40 @@
               "profile_version": "srum-ese-validation-v1",
               "commercial_batch_id": "commercial-uplift-011-015",
               "readiness_item_number": 15,
+              "qc_prep_item_number": 25,
+              "qc_prep_item_goal": "Deepen SRUM native ESE table/page decoding and counter semantics.",
               "commercial_gap_id": "#10",
               "artifact_family": "srum-srudb-ese",
               "artifact_scope": "table-candidate",
               "current_decode_level": "source-export-or-native-header-string-candidate",
+              "qc_prep_contract": {
+                "implemented": [
+                  "SrumECmd-style source export mapping",
+                  "native SRUDB.dat ESE header probe",
+                  "bounded table marker, string pivot, and row-candidate clustering",
+                  "counter/timestamp semantics labeling and citation manifest"
+                ],
+                "usable_outputs": [
+                  "srum-network-usage",
+                  "srum-app-resource-usage",
+                  "srum-database-file",
+                  "srum-database-pivot",
+                  "srum-table-candidate",
+                  "srum-row-candidate"
+                ],
+                "validated_by_current_tests": [
+                  "source export counter normalization",
+                  "native row candidate field presence profile",
+                  "trusted SrumECmd-style counter diff helper",
+                  "counter mismatch blocking"
+                ],
+                "not_report_grade_until": [
+                  "native ESE catalog/page/tagged-column decoder is implemented",
+                  "SRUM table GUID schemas are mapped by Windows build",
+                  "row-level counters/timestamps/SIDs/app IDs are trusted-diff validated",
+                  "large SRUDB cursor pagination is stress tested"
+                ]
+              },
               "decoded_components": {
                 "ese_header": true,
                 "ese_signature": true,
@@ -9447,10 +10036,40 @@
               "profile_version": "srum-ese-validation-v1",
               "commercial_batch_id": "commercial-uplift-011-015",
               "readiness_item_number": 15,
+              "qc_prep_item_number": 25,
+              "qc_prep_item_goal": "Deepen SRUM native ESE table/page decoding and counter semantics.",
               "commercial_gap_id": "#10",
               "artifact_family": "srum-srudb-ese",
               "artifact_scope": "table-candidate",
               "current_decode_level": "source-export-or-native-header-string-candidate",
+              "qc_prep_contract": {
+                "implemented": [
+                  "SrumECmd-style source export mapping",
+                  "native SRUDB.dat ESE header probe",
+                  "bounded table marker, string pivot, and row-candidate clustering",
+                  "counter/timestamp semantics labeling and citation manifest"
+                ],
+                "usable_outputs": [
+                  "srum-network-usage",
+                  "srum-app-resource-usage",
+                  "srum-database-file",
+                  "srum-database-pivot",
+                  "srum-table-candidate",
+                  "srum-row-candidate"
+                ],
+                "validated_by_current_tests": [
+                  "source export counter normalization",
+                  "native row candidate field presence profile",
+                  "trusted SrumECmd-style counter diff helper",
+                  "counter mismatch blocking"
+                ],
+                "not_report_grade_until": [
+                  "native ESE catalog/page/tagged-column decoder is implemented",
+                  "SRUM table GUID schemas are mapped by Windows build",
+                  "row-level counters/timestamps/SIDs/app IDs are trusted-diff validated",
+                  "large SRUDB cursor pagination is stress tested"
+                ]
+              },
               "decoded_components": {
                 "ese_header": true,
                 "ese_signature": true,
@@ -10487,6 +11106,62 @@
                 "validation_required": false
               }
             },
+            "source_viewer_locator": {
+              "profile_version": "eventlog-record-source-viewer-locator-v1",
+              "qc_prep_item": 7,
+              "viewer": "eventlog-record",
+              "source_path": "<ROOT>/Windows/System32/winevt/Logs/Security.xml",
+              "source_format": "xml",
+              "source_sha256": "3280198506b93b1d8c90fed52b92c8740c1b0ebb493bbe0d86d40941bad6f906",
+              "record_id": "1001",
+              "channel": "Security",
+              "provider_name": "Microsoft-Windows-Security-Auditing",
+              "event_id": "4624",
+              "record_offset": null,
+              "record_offset_hex": "",
+              "record_offset_available": false,
+              "source_hash_available": true,
+              "validation_warning": "validate record locator with EvtxECmd/Hayabusa record-level diff before report use | provider message rendering may require Windows provider resources | record byte offset unavailable for this exported event format",
+              "required_before_report": [
+                "open source viewer",
+                "confirm record ID/channel/provider/event ID",
+                "verify source hash",
+                "attach trusted-tool record diff for report-grade EVTX claims"
+              ],
+              "commercial_grade_ready": false,
+              "commercial_grade_blockers": [
+                "trusted-tool-record-diff-required",
+                "provider-message-rendering-diff-required"
+              ]
+            },
+            "eventlog_record_locator_profile": {
+              "profile_version": "eventlog-record-source-viewer-locator-v1",
+              "qc_prep_item": 7,
+              "viewer": "eventlog-record",
+              "source_path": "<ROOT>/Windows/System32/winevt/Logs/Security.xml",
+              "source_format": "xml",
+              "source_sha256": "3280198506b93b1d8c90fed52b92c8740c1b0ebb493bbe0d86d40941bad6f906",
+              "record_id": "1001",
+              "channel": "Security",
+              "provider_name": "Microsoft-Windows-Security-Auditing",
+              "event_id": "4624",
+              "record_offset": null,
+              "record_offset_hex": "",
+              "record_offset_available": false,
+              "source_hash_available": true,
+              "validation_warning": "validate record locator with EvtxECmd/Hayabusa record-level diff before report use | provider message rendering may require Windows provider resources | record byte offset unavailable for this exported event format",
+              "required_before_report": [
+                "open source viewer",
+                "confirm record ID/channel/provider/event ID",
+                "verify source hash",
+                "attach trusted-tool record diff for report-grade EVTX claims"
+              ],
+              "commercial_grade_ready": false,
+              "commercial_grade_blockers": [
+                "trusted-tool-record-diff-required",
+                "provider-message-rendering-diff-required"
+              ]
+            },
             "record_id": "1001",
             "channel": "Security",
             "channel_family": "security",
@@ -10761,6 +11436,40 @@
             "source_hashes": {
               "sha256": "0f139d73d428d6766d10fca441717b54de3ef17f11947d296c2ba37d5c5cafb4"
             },
+            "source_viewer_locator": {
+              "profile_version": "registry-record-source-viewer-locator-v1",
+              "qc_prep_item": 8,
+              "viewer": "registry-record",
+              "source_path": "<ROOT>/Users/alice/NTUSER-shellbags.reg",
+              "source_sha256": "0f139d73d428d6766d10fca441717b54de3ef17f11947d296c2ba37d5c5cafb4",
+              "hive_name": "",
+              "hive_hint": "HKEY_CURRENT_USER",
+              "key_path": "HKEY_CURRENT_USER\\Software\\Classes\\Local Settings\\Software\\Microsoft\\Windows\\Shell\\BagMRU\\0",
+              "value_name": "",
+              "cell_offset": 0,
+              "cell_offset_hex": "",
+              "cell_relative_offset": 0,
+              "hbin_offset": 0,
+              "allocation_status": "exported-reg-key",
+              "deleted_or_recovered_candidate": false,
+              "source_hash_available": true,
+              "transaction_replay_status": "unknown",
+              "transaction_replay_applied": false,
+              "validation_warning": "validate registry locator with RECmd/Registry Explorer diff before report use | LOG1/LOG2 transaction replay status must be reviewed before final interpretation",
+              "required_before_report": [
+                "open registry source viewer",
+                "confirm hive/key/value/cell offset",
+                "verify hive source hash",
+                "review transaction replay status",
+                "attach trusted registry-parser diff for report-grade claims"
+              ],
+              "commercial_grade_ready": false,
+              "commercial_grade_blockers": [
+                "registry-key-tree-cross-tool-diff-required",
+                "transaction-log-replay-or-second-parser-diff-required",
+                "registry-deleted-cell-cross-tool-diff-required"
+              ]
+            },
             "key": "HKEY_CURRENT_USER\\Software\\Classes\\Local Settings\\Software\\Microsoft\\Windows\\Shell\\BagMRU\\0",
             "hive_hint": "HKEY_CURRENT_USER",
             "value_count": 2,
@@ -10794,6 +11503,40 @@
             "source_hashes": {
               "sha256": "0f2b6d48874757936e4c25cafff657a0be3041b52644b0198ca64f21f0860183"
             },
+            "source_viewer_locator": {
+              "profile_version": "registry-record-source-viewer-locator-v1",
+              "qc_prep_item": 8,
+              "viewer": "registry-record",
+              "source_path": "<ROOT>/Windows/System32/config/rdp.reg",
+              "source_sha256": "0f2b6d48874757936e4c25cafff657a0be3041b52644b0198ca64f21f0860183",
+              "hive_name": "",
+              "hive_hint": "HKEY_CURRENT_USER",
+              "key_path": "HKEY_CURRENT_USER\\Software\\Microsoft\\Terminal Server Client\\Default\\10.0.0.50",
+              "value_name": "",
+              "cell_offset": 0,
+              "cell_offset_hex": "",
+              "cell_relative_offset": 0,
+              "hbin_offset": 0,
+              "allocation_status": "exported-reg-key",
+              "deleted_or_recovered_candidate": false,
+              "source_hash_available": true,
+              "transaction_replay_status": "unknown",
+              "transaction_replay_applied": false,
+              "validation_warning": "validate registry locator with RECmd/Registry Explorer diff before report use | LOG1/LOG2 transaction replay status must be reviewed before final interpretation",
+              "required_before_report": [
+                "open registry source viewer",
+                "confirm hive/key/value/cell offset",
+                "verify hive source hash",
+                "review transaction replay status",
+                "attach trusted registry-parser diff for report-grade claims"
+              ],
+              "commercial_grade_ready": false,
+              "commercial_grade_blockers": [
+                "registry-key-tree-cross-tool-diff-required",
+                "transaction-log-replay-or-second-parser-diff-required",
+                "registry-deleted-cell-cross-tool-diff-required"
+              ]
+            },
             "key": "HKEY_CURRENT_USER\\Software\\Microsoft\\Terminal Server Client\\Default\\10.0.0.50",
             "hive_hint": "HKEY_CURRENT_USER",
             "value_count": 1,
@@ -10824,6 +11567,40 @@
             "source_format": "reg",
             "source_hashes": {
               "sha256": "bdd4195a9ef353c5742507127c1d80ed88b28e24a7038f5797582bb5258ba764"
+            },
+            "source_viewer_locator": {
+              "profile_version": "registry-record-source-viewer-locator-v1",
+              "qc_prep_item": 8,
+              "viewer": "registry-record",
+              "source_path": "<ROOT>/Windows/System32/config/software.reg",
+              "source_sha256": "bdd4195a9ef353c5742507127c1d80ed88b28e24a7038f5797582bb5258ba764",
+              "hive_name": "",
+              "hive_hint": "HKEY_LOCAL_MACHINE",
+              "key_path": "HKEY_LOCAL_MACHINE\\Software\\Microsoft\\Windows\\CurrentVersion\\Run",
+              "value_name": "",
+              "cell_offset": 0,
+              "cell_offset_hex": "",
+              "cell_relative_offset": 0,
+              "hbin_offset": 0,
+              "allocation_status": "exported-reg-key",
+              "deleted_or_recovered_candidate": false,
+              "source_hash_available": true,
+              "transaction_replay_status": "unknown",
+              "transaction_replay_applied": false,
+              "validation_warning": "validate registry locator with RECmd/Registry Explorer diff before report use | LOG1/LOG2 transaction replay status must be reviewed before final interpretation",
+              "required_before_report": [
+                "open registry source viewer",
+                "confirm hive/key/value/cell offset",
+                "verify hive source hash",
+                "review transaction replay status",
+                "attach trusted registry-parser diff for report-grade claims"
+              ],
+              "commercial_grade_ready": false,
+              "commercial_grade_blockers": [
+                "registry-key-tree-cross-tool-diff-required",
+                "transaction-log-replay-or-second-parser-diff-required",
+                "registry-deleted-cell-cross-tool-diff-required"
+              ]
             },
             "key": "HKEY_LOCAL_MACHINE\\Software\\Microsoft\\Windows\\CurrentVersion\\Run",
             "hive_hint": "HKEY_LOCAL_MACHINE",
@@ -11058,6 +11835,40 @@
             "source_format": "reg",
             "source_hashes": {
               "sha256": "bdd4195a9ef353c5742507127c1d80ed88b28e24a7038f5797582bb5258ba764"
+            },
+            "source_viewer_locator": {
+              "profile_version": "registry-record-source-viewer-locator-v1",
+              "qc_prep_item": 8,
+              "viewer": "registry-record",
+              "source_path": "<ROOT>/Windows/System32/config/software.reg",
+              "source_sha256": "bdd4195a9ef353c5742507127c1d80ed88b28e24a7038f5797582bb5258ba764",
+              "hive_name": "",
+              "hive_hint": "HKEY_LOCAL_MACHINE",
+              "key_path": "HKEY_LOCAL_MACHINE\\SYSTEM\\CurrentControlSet\\Enum\\USBSTOR\\Disk&Ven_Test&Prod_USB&Rev_1.00\\1234567890",
+              "value_name": "",
+              "cell_offset": 0,
+              "cell_offset_hex": "",
+              "cell_relative_offset": 0,
+              "hbin_offset": 0,
+              "allocation_status": "exported-reg-key",
+              "deleted_or_recovered_candidate": false,
+              "source_hash_available": true,
+              "transaction_replay_status": "unknown",
+              "transaction_replay_applied": false,
+              "validation_warning": "validate registry locator with RECmd/Registry Explorer diff before report use | LOG1/LOG2 transaction replay status must be reviewed before final interpretation",
+              "required_before_report": [
+                "open registry source viewer",
+                "confirm hive/key/value/cell offset",
+                "verify hive source hash",
+                "review transaction replay status",
+                "attach trusted registry-parser diff for report-grade claims"
+              ],
+              "commercial_grade_ready": false,
+              "commercial_grade_blockers": [
+                "registry-key-tree-cross-tool-diff-required",
+                "transaction-log-replay-or-second-parser-diff-required",
+                "registry-deleted-cell-cross-tool-diff-required"
+              ]
             },
             "key": "HKEY_LOCAL_MACHINE\\SYSTEM\\CurrentControlSet\\Enum\\USBSTOR\\Disk&Ven_Test&Prod_USB&Rev_1.00\\1234567890",
             "hive_hint": "HKEY_LOCAL_MACHINE",
@@ -11864,7 +12675,38 @@
             "windows_edb_report_citation_manifest": {
               "manifest_version": "windows-edb-report-citation-manifest-v1",
               "parser_version": "windows-search-index-import-v7",
+              "qc_prep_item_number": 26,
+              "qc_prep_item_goal": "Deepen Windows.edb ESE table, property, content, and deleted-state decoding.",
               "artifact_type": "windows-search-edb-file",
+              "qc_prep_contract": {
+                "implemented": [
+                  "source-tool Windows Search export import",
+                  "native Windows.edb ESE header and page-map triage",
+                  "page-local path, URL, content, and table-marker candidates",
+                  "deleted/index-state candidate marker disclosure",
+                  "trusted Windows.edb parser diff helper"
+                ],
+                "usable_outputs": [
+                  "windows-search-index-entry",
+                  "windows-search-edb-file",
+                  "windows-search-edb-pivot",
+                  "windows-search-edb-page-candidate",
+                  "windows-search-edb-table-candidate",
+                  "windows-search-edb-row-candidate"
+                ],
+                "validated_by_current_tests": [
+                  "ESE signature/page-map fixture",
+                  "path/URL/content candidate correlation",
+                  "trusted WinSearchDBAnalyzer/libesedb-style diff pass",
+                  "deleted-state mismatch blocking"
+                ],
+                "not_report_grade_until": [
+                  "native ESE catalog/table/property decoder is implemented",
+                  "native row-level timestamp/content/deleted-state semantics are decoded",
+                  "long-value/space-tree deleted content handling is validated",
+                  "trusted parser diffs are attached for the case evidence"
+                ]
+              },
               "source": {
                 "path": "<ROOT>/ProgramData/Microsoft/Search/Data/Applications/Windows/Windows.edb",
                 "sha256": "c2bfcaaa710b7e106d947789d62355b2b8159ad68e24a10fb6f1f43a5e65a91b",
@@ -12279,8 +13121,11 @@
               "item_numbers": [
                 11
               ],
+              "qc_prep_item_numbers": [
+                26
+              ],
               "implementation_track": "native-parser-depth",
-              "objective": "Expose Windows.edb ESE/Search validation evidence, row limits, and commercial blockers on native candidates.",
+              "objective": "Expose Windows.edb ESE/Search validation evidence, row limits, and commercial blockers on #11 / QC-prep #26 native candidates.",
               "source_refs": [
                 "source_path:<ROOT>/ProgramData/Microsoft/Search/Data/Applications/Windows/Windows.edb",
                 "source_index:",
@@ -12309,6 +13154,7 @@
               "reportability_decision": {
                 "profile_version": "windows-search-reportability-decision-v1",
                 "commercial_gap_id": "#11",
+                "qc_prep_item_number": 26,
                 "decision": "do-not-report-native-row-as-decoded-fact",
                 "allowed_use": "search-index-triage-pivot",
                 "blockers": [
@@ -12484,7 +13330,38 @@
             "windows_edb_report_citation_manifest": {
               "manifest_version": "windows-edb-report-citation-manifest-v1",
               "parser_version": "windows-search-index-import-v7",
+              "qc_prep_item_number": 26,
+              "qc_prep_item_goal": "Deepen Windows.edb ESE table, property, content, and deleted-state decoding.",
               "artifact_type": "windows-search-edb-page-candidate",
+              "qc_prep_contract": {
+                "implemented": [
+                  "source-tool Windows Search export import",
+                  "native Windows.edb ESE header and page-map triage",
+                  "page-local path, URL, content, and table-marker candidates",
+                  "deleted/index-state candidate marker disclosure",
+                  "trusted Windows.edb parser diff helper"
+                ],
+                "usable_outputs": [
+                  "windows-search-index-entry",
+                  "windows-search-edb-file",
+                  "windows-search-edb-pivot",
+                  "windows-search-edb-page-candidate",
+                  "windows-search-edb-table-candidate",
+                  "windows-search-edb-row-candidate"
+                ],
+                "validated_by_current_tests": [
+                  "ESE signature/page-map fixture",
+                  "path/URL/content candidate correlation",
+                  "trusted WinSearchDBAnalyzer/libesedb-style diff pass",
+                  "deleted-state mismatch blocking"
+                ],
+                "not_report_grade_until": [
+                  "native ESE catalog/table/property decoder is implemented",
+                  "native row-level timestamp/content/deleted-state semantics are decoded",
+                  "long-value/space-tree deleted content handling is validated",
+                  "trusted parser diffs are attached for the case evidence"
+                ]
+              },
               "source": {
                 "path": "<ROOT>/ProgramData/Microsoft/Search/Data/Applications/Windows/Windows.edb",
                 "sha256": "c2bfcaaa710b7e106d947789d62355b2b8159ad68e24a10fb6f1f43a5e65a91b",
@@ -12888,8 +13765,11 @@
               "item_numbers": [
                 11
               ],
+              "qc_prep_item_numbers": [
+                26
+              ],
               "implementation_track": "native-parser-depth",
-              "objective": "Expose Windows.edb ESE/Search validation evidence, row limits, and commercial blockers on native candidates.",
+              "objective": "Expose Windows.edb ESE/Search validation evidence, row limits, and commercial blockers on #11 / QC-prep #26 native candidates.",
               "source_refs": [
                 "source_path:<ROOT>/ProgramData/Microsoft/Search/Data/Applications/Windows/Windows.edb",
                 "source_index:0",
@@ -12914,6 +13794,7 @@
               "reportability_decision": {
                 "profile_version": "windows-search-reportability-decision-v1",
                 "commercial_gap_id": "#11",
+                "qc_prep_item_number": 26,
                 "decision": "do-not-report-native-row-as-decoded-fact",
                 "allowed_use": "search-index-triage-pivot",
                 "blockers": [
@@ -13051,7 +13932,38 @@
             "windows_edb_report_citation_manifest": {
               "manifest_version": "windows-edb-report-citation-manifest-v1",
               "parser_version": "windows-search-index-import-v7",
+              "qc_prep_item_number": 26,
+              "qc_prep_item_goal": "Deepen Windows.edb ESE table, property, content, and deleted-state decoding.",
               "artifact_type": "windows-search-edb-pivot",
+              "qc_prep_contract": {
+                "implemented": [
+                  "source-tool Windows Search export import",
+                  "native Windows.edb ESE header and page-map triage",
+                  "page-local path, URL, content, and table-marker candidates",
+                  "deleted/index-state candidate marker disclosure",
+                  "trusted Windows.edb parser diff helper"
+                ],
+                "usable_outputs": [
+                  "windows-search-index-entry",
+                  "windows-search-edb-file",
+                  "windows-search-edb-pivot",
+                  "windows-search-edb-page-candidate",
+                  "windows-search-edb-table-candidate",
+                  "windows-search-edb-row-candidate"
+                ],
+                "validated_by_current_tests": [
+                  "ESE signature/page-map fixture",
+                  "path/URL/content candidate correlation",
+                  "trusted WinSearchDBAnalyzer/libesedb-style diff pass",
+                  "deleted-state mismatch blocking"
+                ],
+                "not_report_grade_until": [
+                  "native ESE catalog/table/property decoder is implemented",
+                  "native row-level timestamp/content/deleted-state semantics are decoded",
+                  "long-value/space-tree deleted content handling is validated",
+                  "trusted parser diffs are attached for the case evidence"
+                ]
+              },
               "source": {
                 "path": "<ROOT>/ProgramData/Microsoft/Search/Data/Applications/Windows/Windows.edb",
                 "sha256": "c2bfcaaa710b7e106d947789d62355b2b8159ad68e24a10fb6f1f43a5e65a91b",
@@ -13338,8 +14250,11 @@
               "item_numbers": [
                 11
               ],
+              "qc_prep_item_numbers": [
+                26
+              ],
               "implementation_track": "native-parser-depth",
-              "objective": "Expose Windows.edb ESE/Search validation evidence, row limits, and commercial blockers on native candidates.",
+              "objective": "Expose Windows.edb ESE/Search validation evidence, row limits, and commercial blockers on #11 / QC-prep #26 native candidates.",
               "source_refs": [
                 "source_path:<ROOT>/ProgramData/Microsoft/Search/Data/Applications/Windows/Windows.edb",
                 "source_index:2",
@@ -13358,6 +14273,7 @@
               "reportability_decision": {
                 "profile_version": "windows-search-reportability-decision-v1",
                 "commercial_gap_id": "#11",
+                "qc_prep_item_number": 26,
                 "decision": "do-not-report-native-row-as-decoded-fact",
                 "allowed_use": "search-index-triage-pivot",
                 "blockers": [
@@ -13474,7 +14390,38 @@
             "windows_edb_report_citation_manifest": {
               "manifest_version": "windows-edb-report-citation-manifest-v1",
               "parser_version": "windows-search-index-import-v7",
+              "qc_prep_item_number": 26,
+              "qc_prep_item_goal": "Deepen Windows.edb ESE table, property, content, and deleted-state decoding.",
               "artifact_type": "windows-search-edb-pivot",
+              "qc_prep_contract": {
+                "implemented": [
+                  "source-tool Windows Search export import",
+                  "native Windows.edb ESE header and page-map triage",
+                  "page-local path, URL, content, and table-marker candidates",
+                  "deleted/index-state candidate marker disclosure",
+                  "trusted Windows.edb parser diff helper"
+                ],
+                "usable_outputs": [
+                  "windows-search-index-entry",
+                  "windows-search-edb-file",
+                  "windows-search-edb-pivot",
+                  "windows-search-edb-page-candidate",
+                  "windows-search-edb-table-candidate",
+                  "windows-search-edb-row-candidate"
+                ],
+                "validated_by_current_tests": [
+                  "ESE signature/page-map fixture",
+                  "path/URL/content candidate correlation",
+                  "trusted WinSearchDBAnalyzer/libesedb-style diff pass",
+                  "deleted-state mismatch blocking"
+                ],
+                "not_report_grade_until": [
+                  "native ESE catalog/table/property decoder is implemented",
+                  "native row-level timestamp/content/deleted-state semantics are decoded",
+                  "long-value/space-tree deleted content handling is validated",
+                  "trusted parser diffs are attached for the case evidence"
+                ]
+              },
               "source": {
                 "path": "<ROOT>/ProgramData/Microsoft/Search/Data/Applications/Windows/Windows.edb",
                 "sha256": "c2bfcaaa710b7e106d947789d62355b2b8159ad68e24a10fb6f1f43a5e65a91b",
@@ -13758,8 +14705,11 @@
               "item_numbers": [
                 11
               ],
+              "qc_prep_item_numbers": [
+                26
+              ],
               "implementation_track": "native-parser-depth",
-              "objective": "Expose Windows.edb ESE/Search validation evidence, row limits, and commercial blockers on native candidates.",
+              "objective": "Expose Windows.edb ESE/Search validation evidence, row limits, and commercial blockers on #11 / QC-prep #26 native candidates.",
               "source_refs": [
                 "source_path:<ROOT>/ProgramData/Microsoft/Search/Data/Applications/Windows/Windows.edb",
                 "source_index:0",
@@ -13778,6 +14728,7 @@
               "reportability_decision": {
                 "profile_version": "windows-search-reportability-decision-v1",
                 "commercial_gap_id": "#11",
+                "qc_prep_item_number": 26,
                 "decision": "do-not-report-native-row-as-decoded-fact",
                 "allowed_use": "search-index-triage-pivot",
                 "blockers": [
@@ -13891,7 +14842,38 @@
             "windows_edb_report_citation_manifest": {
               "manifest_version": "windows-edb-report-citation-manifest-v1",
               "parser_version": "windows-search-index-import-v7",
+              "qc_prep_item_number": 26,
+              "qc_prep_item_goal": "Deepen Windows.edb ESE table, property, content, and deleted-state decoding.",
               "artifact_type": "windows-search-edb-pivot",
+              "qc_prep_contract": {
+                "implemented": [
+                  "source-tool Windows Search export import",
+                  "native Windows.edb ESE header and page-map triage",
+                  "page-local path, URL, content, and table-marker candidates",
+                  "deleted/index-state candidate marker disclosure",
+                  "trusted Windows.edb parser diff helper"
+                ],
+                "usable_outputs": [
+                  "windows-search-index-entry",
+                  "windows-search-edb-file",
+                  "windows-search-edb-pivot",
+                  "windows-search-edb-page-candidate",
+                  "windows-search-edb-table-candidate",
+                  "windows-search-edb-row-candidate"
+                ],
+                "validated_by_current_tests": [
+                  "ESE signature/page-map fixture",
+                  "path/URL/content candidate correlation",
+                  "trusted WinSearchDBAnalyzer/libesedb-style diff pass",
+                  "deleted-state mismatch blocking"
+                ],
+                "not_report_grade_until": [
+                  "native ESE catalog/table/property decoder is implemented",
+                  "native row-level timestamp/content/deleted-state semantics are decoded",
+                  "long-value/space-tree deleted content handling is validated",
+                  "trusted parser diffs are attached for the case evidence"
+                ]
+              },
               "source": {
                 "path": "<ROOT>/ProgramData/Microsoft/Search/Data/Applications/Windows/Windows.edb",
                 "sha256": "c2bfcaaa710b7e106d947789d62355b2b8159ad68e24a10fb6f1f43a5e65a91b",
@@ -14176,8 +15158,11 @@
               "item_numbers": [
                 11
               ],
+              "qc_prep_item_numbers": [
+                26
+              ],
               "implementation_track": "native-parser-depth",
-              "objective": "Expose Windows.edb ESE/Search validation evidence, row limits, and commercial blockers on native candidates.",
+              "objective": "Expose Windows.edb ESE/Search validation evidence, row limits, and commercial blockers on #11 / QC-prep #26 native candidates.",
               "source_refs": [
                 "source_path:<ROOT>/ProgramData/Microsoft/Search/Data/Applications/Windows/Windows.edb",
                 "source_index:3",
@@ -14196,6 +15181,7 @@
               "reportability_decision": {
                 "profile_version": "windows-search-reportability-decision-v1",
                 "commercial_gap_id": "#11",
+                "qc_prep_item_number": 26,
                 "decision": "do-not-report-native-row-as-decoded-fact",
                 "allowed_use": "search-index-triage-pivot",
                 "blockers": [
@@ -14310,7 +15296,38 @@
             "windows_edb_report_citation_manifest": {
               "manifest_version": "windows-edb-report-citation-manifest-v1",
               "parser_version": "windows-search-index-import-v7",
+              "qc_prep_item_number": 26,
+              "qc_prep_item_goal": "Deepen Windows.edb ESE table, property, content, and deleted-state decoding.",
               "artifact_type": "windows-search-edb-pivot",
+              "qc_prep_contract": {
+                "implemented": [
+                  "source-tool Windows Search export import",
+                  "native Windows.edb ESE header and page-map triage",
+                  "page-local path, URL, content, and table-marker candidates",
+                  "deleted/index-state candidate marker disclosure",
+                  "trusted Windows.edb parser diff helper"
+                ],
+                "usable_outputs": [
+                  "windows-search-index-entry",
+                  "windows-search-edb-file",
+                  "windows-search-edb-pivot",
+                  "windows-search-edb-page-candidate",
+                  "windows-search-edb-table-candidate",
+                  "windows-search-edb-row-candidate"
+                ],
+                "validated_by_current_tests": [
+                  "ESE signature/page-map fixture",
+                  "path/URL/content candidate correlation",
+                  "trusted WinSearchDBAnalyzer/libesedb-style diff pass",
+                  "deleted-state mismatch blocking"
+                ],
+                "not_report_grade_until": [
+                  "native ESE catalog/table/property decoder is implemented",
+                  "native row-level timestamp/content/deleted-state semantics are decoded",
+                  "long-value/space-tree deleted content handling is validated",
+                  "trusted parser diffs are attached for the case evidence"
+                ]
+              },
               "source": {
                 "path": "<ROOT>/ProgramData/Microsoft/Search/Data/Applications/Windows/Windows.edb",
                 "sha256": "c2bfcaaa710b7e106d947789d62355b2b8159ad68e24a10fb6f1f43a5e65a91b",
@@ -14595,8 +15612,11 @@
               "item_numbers": [
                 11
               ],
+              "qc_prep_item_numbers": [
+                26
+              ],
               "implementation_track": "native-parser-depth",
-              "objective": "Expose Windows.edb ESE/Search validation evidence, row limits, and commercial blockers on native candidates.",
+              "objective": "Expose Windows.edb ESE/Search validation evidence, row limits, and commercial blockers on #11 / QC-prep #26 native candidates.",
               "source_refs": [
                 "source_path:<ROOT>/ProgramData/Microsoft/Search/Data/Applications/Windows/Windows.edb",
                 "source_index:1",
@@ -14615,6 +15635,7 @@
               "reportability_decision": {
                 "profile_version": "windows-search-reportability-decision-v1",
                 "commercial_gap_id": "#11",
+                "qc_prep_item_number": 26,
                 "decision": "do-not-report-native-row-as-decoded-fact",
                 "allowed_use": "search-index-triage-pivot",
                 "blockers": [
@@ -14786,7 +15807,38 @@
             "windows_edb_report_citation_manifest": {
               "manifest_version": "windows-edb-report-citation-manifest-v1",
               "parser_version": "windows-search-index-import-v7",
+              "qc_prep_item_number": 26,
+              "qc_prep_item_goal": "Deepen Windows.edb ESE table, property, content, and deleted-state decoding.",
               "artifact_type": "windows-search-edb-row-candidate",
+              "qc_prep_contract": {
+                "implemented": [
+                  "source-tool Windows Search export import",
+                  "native Windows.edb ESE header and page-map triage",
+                  "page-local path, URL, content, and table-marker candidates",
+                  "deleted/index-state candidate marker disclosure",
+                  "trusted Windows.edb parser diff helper"
+                ],
+                "usable_outputs": [
+                  "windows-search-index-entry",
+                  "windows-search-edb-file",
+                  "windows-search-edb-pivot",
+                  "windows-search-edb-page-candidate",
+                  "windows-search-edb-table-candidate",
+                  "windows-search-edb-row-candidate"
+                ],
+                "validated_by_current_tests": [
+                  "ESE signature/page-map fixture",
+                  "path/URL/content candidate correlation",
+                  "trusted WinSearchDBAnalyzer/libesedb-style diff pass",
+                  "deleted-state mismatch blocking"
+                ],
+                "not_report_grade_until": [
+                  "native ESE catalog/table/property decoder is implemented",
+                  "native row-level timestamp/content/deleted-state semantics are decoded",
+                  "long-value/space-tree deleted content handling is validated",
+                  "trusted parser diffs are attached for the case evidence"
+                ]
+              },
               "source": {
                 "path": "<ROOT>/ProgramData/Microsoft/Search/Data/Applications/Windows/Windows.edb",
                 "sha256": "c2bfcaaa710b7e106d947789d62355b2b8159ad68e24a10fb6f1f43a5e65a91b",
@@ -15210,8 +16262,11 @@
               "item_numbers": [
                 11
               ],
+              "qc_prep_item_numbers": [
+                26
+              ],
               "implementation_track": "native-parser-depth",
-              "objective": "Expose Windows.edb ESE/Search validation evidence, row limits, and commercial blockers on native candidates.",
+              "objective": "Expose Windows.edb ESE/Search validation evidence, row limits, and commercial blockers on #11 / QC-prep #26 native candidates.",
               "source_refs": [
                 "source_path:<ROOT>/ProgramData/Microsoft/Search/Data/Applications/Windows/Windows.edb",
                 "source_index:0",
@@ -15237,6 +16292,7 @@
               "reportability_decision": {
                 "profile_version": "windows-search-reportability-decision-v1",
                 "commercial_gap_id": "#11",
+                "qc_prep_item_number": 26,
                 "decision": "do-not-report-native-row-as-decoded-fact",
                 "allowed_use": "search-index-triage-pivot",
                 "blockers": [
@@ -15402,7 +16458,38 @@
             "windows_edb_report_citation_manifest": {
               "manifest_version": "windows-edb-report-citation-manifest-v1",
               "parser_version": "windows-search-index-import-v7",
+              "qc_prep_item_number": 26,
+              "qc_prep_item_goal": "Deepen Windows.edb ESE table, property, content, and deleted-state decoding.",
               "artifact_type": "windows-search-edb-table-candidate",
+              "qc_prep_contract": {
+                "implemented": [
+                  "source-tool Windows Search export import",
+                  "native Windows.edb ESE header and page-map triage",
+                  "page-local path, URL, content, and table-marker candidates",
+                  "deleted/index-state candidate marker disclosure",
+                  "trusted Windows.edb parser diff helper"
+                ],
+                "usable_outputs": [
+                  "windows-search-index-entry",
+                  "windows-search-edb-file",
+                  "windows-search-edb-pivot",
+                  "windows-search-edb-page-candidate",
+                  "windows-search-edb-table-candidate",
+                  "windows-search-edb-row-candidate"
+                ],
+                "validated_by_current_tests": [
+                  "ESE signature/page-map fixture",
+                  "path/URL/content candidate correlation",
+                  "trusted WinSearchDBAnalyzer/libesedb-style diff pass",
+                  "deleted-state mismatch blocking"
+                ],
+                "not_report_grade_until": [
+                  "native ESE catalog/table/property decoder is implemented",
+                  "native row-level timestamp/content/deleted-state semantics are decoded",
+                  "long-value/space-tree deleted content handling is validated",
+                  "trusted parser diffs are attached for the case evidence"
+                ]
+              },
               "source": {
                 "path": "<ROOT>/ProgramData/Microsoft/Search/Data/Applications/Windows/Windows.edb",
                 "sha256": "c2bfcaaa710b7e106d947789d62355b2b8159ad68e24a10fb6f1f43a5e65a91b",
@@ -15756,8 +16843,11 @@
               "item_numbers": [
                 11
               ],
+              "qc_prep_item_numbers": [
+                26
+              ],
               "implementation_track": "native-parser-depth",
-              "objective": "Expose Windows.edb ESE/Search validation evidence, row limits, and commercial blockers on native candidates.",
+              "objective": "Expose Windows.edb ESE/Search validation evidence, row limits, and commercial blockers on #11 / QC-prep #26 native candidates.",
               "source_refs": [
                 "source_path:<ROOT>/ProgramData/Microsoft/Search/Data/Applications/Windows/Windows.edb",
                 "source_index:0",
@@ -15778,6 +16868,7 @@
               "reportability_decision": {
                 "profile_version": "windows-search-reportability-decision-v1",
                 "commercial_gap_id": "#11",
+                "qc_prep_item_number": 26,
                 "decision": "do-not-report-native-row-as-decoded-fact",
                 "allowed_use": "search-index-triage-pivot",
                 "blockers": [
@@ -15944,7 +17035,38 @@
             "windows_edb_report_citation_manifest": {
               "manifest_version": "windows-edb-report-citation-manifest-v1",
               "parser_version": "windows-search-index-import-v7",
+              "qc_prep_item_number": 26,
+              "qc_prep_item_goal": "Deepen Windows.edb ESE table, property, content, and deleted-state decoding.",
               "artifact_type": "windows-search-edb-table-candidate",
+              "qc_prep_contract": {
+                "implemented": [
+                  "source-tool Windows Search export import",
+                  "native Windows.edb ESE header and page-map triage",
+                  "page-local path, URL, content, and table-marker candidates",
+                  "deleted/index-state candidate marker disclosure",
+                  "trusted Windows.edb parser diff helper"
+                ],
+                "usable_outputs": [
+                  "windows-search-index-entry",
+                  "windows-search-edb-file",
+                  "windows-search-edb-pivot",
+                  "windows-search-edb-page-candidate",
+                  "windows-search-edb-table-candidate",
+                  "windows-search-edb-row-candidate"
+                ],
+                "validated_by_current_tests": [
+                  "ESE signature/page-map fixture",
+                  "path/URL/content candidate correlation",
+                  "trusted WinSearchDBAnalyzer/libesedb-style diff pass",
+                  "deleted-state mismatch blocking"
+                ],
+                "not_report_grade_until": [
+                  "native ESE catalog/table/property decoder is implemented",
+                  "native row-level timestamp/content/deleted-state semantics are decoded",
+                  "long-value/space-tree deleted content handling is validated",
+                  "trusted parser diffs are attached for the case evidence"
+                ]
+              },
               "source": {
                 "path": "<ROOT>/ProgramData/Microsoft/Search/Data/Applications/Windows/Windows.edb",
                 "sha256": "c2bfcaaa710b7e106d947789d62355b2b8159ad68e24a10fb6f1f43a5e65a91b",
@@ -16298,8 +17420,11 @@
               "item_numbers": [
                 11
               ],
+              "qc_prep_item_numbers": [
+                26
+              ],
               "implementation_track": "native-parser-depth",
-              "objective": "Expose Windows.edb ESE/Search validation evidence, row limits, and commercial blockers on native candidates.",
+              "objective": "Expose Windows.edb ESE/Search validation evidence, row limits, and commercial blockers on #11 / QC-prep #26 native candidates.",
               "source_refs": [
                 "source_path:<ROOT>/ProgramData/Microsoft/Search/Data/Applications/Windows/Windows.edb",
                 "source_index:1",
@@ -16320,6 +17445,7 @@
               "reportability_decision": {
                 "profile_version": "windows-search-reportability-decision-v1",
                 "commercial_gap_id": "#11",
+                "qc_prep_item_number": 26,
                 "decision": "do-not-report-native-row-as-decoded-fact",
                 "allowed_use": "search-index-triage-pivot",
                 "blockers": [
@@ -16487,7 +17613,38 @@
             "windows_edb_report_citation_manifest": {
               "manifest_version": "windows-edb-report-citation-manifest-v1",
               "parser_version": "windows-search-index-import-v7",
+              "qc_prep_item_number": 26,
+              "qc_prep_item_goal": "Deepen Windows.edb ESE table, property, content, and deleted-state decoding.",
               "artifact_type": "windows-search-edb-table-candidate",
+              "qc_prep_contract": {
+                "implemented": [
+                  "source-tool Windows Search export import",
+                  "native Windows.edb ESE header and page-map triage",
+                  "page-local path, URL, content, and table-marker candidates",
+                  "deleted/index-state candidate marker disclosure",
+                  "trusted Windows.edb parser diff helper"
+                ],
+                "usable_outputs": [
+                  "windows-search-index-entry",
+                  "windows-search-edb-file",
+                  "windows-search-edb-pivot",
+                  "windows-search-edb-page-candidate",
+                  "windows-search-edb-table-candidate",
+                  "windows-search-edb-row-candidate"
+                ],
+                "validated_by_current_tests": [
+                  "ESE signature/page-map fixture",
+                  "path/URL/content candidate correlation",
+                  "trusted WinSearchDBAnalyzer/libesedb-style diff pass",
+                  "deleted-state mismatch blocking"
+                ],
+                "not_report_grade_until": [
+                  "native ESE catalog/table/property decoder is implemented",
+                  "native row-level timestamp/content/deleted-state semantics are decoded",
+                  "long-value/space-tree deleted content handling is validated",
+                  "trusted parser diffs are attached for the case evidence"
+                ]
+              },
               "source": {
                 "path": "<ROOT>/ProgramData/Microsoft/Search/Data/Applications/Windows/Windows.edb",
                 "sha256": "c2bfcaaa710b7e106d947789d62355b2b8159ad68e24a10fb6f1f43a5e65a91b",
@@ -16842,8 +17999,11 @@
               "item_numbers": [
                 11
               ],
+              "qc_prep_item_numbers": [
+                26
+              ],
               "implementation_track": "native-parser-depth",
-              "objective": "Expose Windows.edb ESE/Search validation evidence, row limits, and commercial blockers on native candidates.",
+              "objective": "Expose Windows.edb ESE/Search validation evidence, row limits, and commercial blockers on #11 / QC-prep #26 native candidates.",
               "source_refs": [
                 "source_path:<ROOT>/ProgramData/Microsoft/Search/Data/Applications/Windows/Windows.edb",
                 "source_index:2",
@@ -16864,6 +18024,7 @@
               "reportability_decision": {
                 "profile_version": "windows-search-reportability-decision-v1",
                 "commercial_gap_id": "#11",
+                "qc_prep_item_number": 26,
                 "decision": "do-not-report-native-row-as-decoded-fact",
                 "allowed_use": "search-index-triage-pivot",
                 "blockers": [
@@ -17029,7 +18190,38 @@
             "windows_edb_report_citation_manifest": {
               "manifest_version": "windows-edb-report-citation-manifest-v1",
               "parser_version": "windows-search-index-import-v7",
+              "qc_prep_item_number": 26,
+              "qc_prep_item_goal": "Deepen Windows.edb ESE table, property, content, and deleted-state decoding.",
               "artifact_type": "windows-search-edb-table-candidate",
+              "qc_prep_contract": {
+                "implemented": [
+                  "source-tool Windows Search export import",
+                  "native Windows.edb ESE header and page-map triage",
+                  "page-local path, URL, content, and table-marker candidates",
+                  "deleted/index-state candidate marker disclosure",
+                  "trusted Windows.edb parser diff helper"
+                ],
+                "usable_outputs": [
+                  "windows-search-index-entry",
+                  "windows-search-edb-file",
+                  "windows-search-edb-pivot",
+                  "windows-search-edb-page-candidate",
+                  "windows-search-edb-table-candidate",
+                  "windows-search-edb-row-candidate"
+                ],
+                "validated_by_current_tests": [
+                  "ESE signature/page-map fixture",
+                  "path/URL/content candidate correlation",
+                  "trusted WinSearchDBAnalyzer/libesedb-style diff pass",
+                  "deleted-state mismatch blocking"
+                ],
+                "not_report_grade_until": [
+                  "native ESE catalog/table/property decoder is implemented",
+                  "native row-level timestamp/content/deleted-state semantics are decoded",
+                  "long-value/space-tree deleted content handling is validated",
+                  "trusted parser diffs are attached for the case evidence"
+                ]
+              },
               "source": {
                 "path": "<ROOT>/ProgramData/Microsoft/Search/Data/Applications/Windows/Windows.edb",
                 "sha256": "c2bfcaaa710b7e106d947789d62355b2b8159ad68e24a10fb6f1f43a5e65a91b",
@@ -17382,8 +18574,11 @@
               "item_numbers": [
                 11
               ],
+              "qc_prep_item_numbers": [
+                26
+              ],
               "implementation_track": "native-parser-depth",
-              "objective": "Expose Windows.edb ESE/Search validation evidence, row limits, and commercial blockers on native candidates.",
+              "objective": "Expose Windows.edb ESE/Search validation evidence, row limits, and commercial blockers on #11 / QC-prep #26 native candidates.",
               "source_refs": [
                 "source_path:<ROOT>/ProgramData/Microsoft/Search/Data/Applications/Windows/Windows.edb",
                 "source_index:3",
@@ -17404,6 +18599,7 @@
               "reportability_decision": {
                 "profile_version": "windows-search-reportability-decision-v1",
                 "commercial_gap_id": "#11",
+                "qc_prep_item_number": 26,
                 "decision": "do-not-report-native-row-as-decoded-fact",
                 "allowed_use": "search-index-triage-pivot",
                 "blockers": [
@@ -17571,7 +18767,38 @@
             "windows_edb_report_citation_manifest": {
               "manifest_version": "windows-edb-report-citation-manifest-v1",
               "parser_version": "windows-search-index-import-v7",
+              "qc_prep_item_number": 26,
+              "qc_prep_item_goal": "Deepen Windows.edb ESE table, property, content, and deleted-state decoding.",
               "artifact_type": "windows-search-edb-table-candidate",
+              "qc_prep_contract": {
+                "implemented": [
+                  "source-tool Windows Search export import",
+                  "native Windows.edb ESE header and page-map triage",
+                  "page-local path, URL, content, and table-marker candidates",
+                  "deleted/index-state candidate marker disclosure",
+                  "trusted Windows.edb parser diff helper"
+                ],
+                "usable_outputs": [
+                  "windows-search-index-entry",
+                  "windows-search-edb-file",
+                  "windows-search-edb-pivot",
+                  "windows-search-edb-page-candidate",
+                  "windows-search-edb-table-candidate",
+                  "windows-search-edb-row-candidate"
+                ],
+                "validated_by_current_tests": [
+                  "ESE signature/page-map fixture",
+                  "path/URL/content candidate correlation",
+                  "trusted WinSearchDBAnalyzer/libesedb-style diff pass",
+                  "deleted-state mismatch blocking"
+                ],
+                "not_report_grade_until": [
+                  "native ESE catalog/table/property decoder is implemented",
+                  "native row-level timestamp/content/deleted-state semantics are decoded",
+                  "long-value/space-tree deleted content handling is validated",
+                  "trusted parser diffs are attached for the case evidence"
+                ]
+              },
               "source": {
                 "path": "<ROOT>/ProgramData/Microsoft/Search/Data/Applications/Windows/Windows.edb",
                 "sha256": "c2bfcaaa710b7e106d947789d62355b2b8159ad68e24a10fb6f1f43a5e65a91b",
@@ -17926,8 +19153,11 @@
               "item_numbers": [
                 11
               ],
+              "qc_prep_item_numbers": [
+                26
+              ],
               "implementation_track": "native-parser-depth",
-              "objective": "Expose Windows.edb ESE/Search validation evidence, row limits, and commercial blockers on native candidates.",
+              "objective": "Expose Windows.edb ESE/Search validation evidence, row limits, and commercial blockers on #11 / QC-prep #26 native candidates.",
               "source_refs": [
                 "source_path:<ROOT>/ProgramData/Microsoft/Search/Data/Applications/Windows/Windows.edb",
                 "source_index:4",
@@ -17948,6 +19178,7 @@
               "reportability_decision": {
                 "profile_version": "windows-search-reportability-decision-v1",
                 "commercial_gap_id": "#11",
+                "qc_prep_item_number": 26,
                 "decision": "do-not-report-native-row-as-decoded-fact",
                 "allowed_use": "search-index-triage-pivot",
                 "blockers": [
@@ -18080,7 +19311,38 @@
             "windows_edb_report_citation_manifest": {
               "manifest_version": "windows-edb-report-citation-manifest-v1",
               "parser_version": "windows-search-index-import-v7",
+              "qc_prep_item_number": 26,
+              "qc_prep_item_goal": "Deepen Windows.edb ESE table, property, content, and deleted-state decoding.",
               "artifact_type": "windows-search-index-entry",
+              "qc_prep_contract": {
+                "implemented": [
+                  "source-tool Windows Search export import",
+                  "native Windows.edb ESE header and page-map triage",
+                  "page-local path, URL, content, and table-marker candidates",
+                  "deleted/index-state candidate marker disclosure",
+                  "trusted Windows.edb parser diff helper"
+                ],
+                "usable_outputs": [
+                  "windows-search-index-entry",
+                  "windows-search-edb-file",
+                  "windows-search-edb-pivot",
+                  "windows-search-edb-page-candidate",
+                  "windows-search-edb-table-candidate",
+                  "windows-search-edb-row-candidate"
+                ],
+                "validated_by_current_tests": [
+                  "ESE signature/page-map fixture",
+                  "path/URL/content candidate correlation",
+                  "trusted WinSearchDBAnalyzer/libesedb-style diff pass",
+                  "deleted-state mismatch blocking"
+                ],
+                "not_report_grade_until": [
+                  "native ESE catalog/table/property decoder is implemented",
+                  "native row-level timestamp/content/deleted-state semantics are decoded",
+                  "long-value/space-tree deleted content handling is validated",
+                  "trusted parser diffs are attached for the case evidence"
+                ]
+              },
               "source": {
                 "path": "<ROOT>/analysis/windows-search-index.csv",
                 "sha256": "13a3a3181d5d8859b9d506e6ed73ad23220683c060edab43ec41df69f03bccdb",
@@ -18793,6 +20055,40 @@
             "source_hashes": {
               "sha256": "0f139d73d428d6766d10fca441717b54de3ef17f11947d296c2ba37d5c5cafb4"
             },
+            "source_viewer_locator": {
+              "profile_version": "registry-record-source-viewer-locator-v1",
+              "qc_prep_item": 8,
+              "viewer": "registry-record",
+              "source_path": "<ROOT>/Users/alice/NTUSER-shellbags.reg",
+              "source_sha256": "0f139d73d428d6766d10fca441717b54de3ef17f11947d296c2ba37d5c5cafb4",
+              "hive_name": "",
+              "hive_hint": "HKEY_CURRENT_USER",
+              "key_path": "HKEY_CURRENT_USER\\Software\\Classes\\Local Settings\\Software\\Microsoft\\Windows\\Shell\\BagMRU\\0",
+              "value_name": "",
+              "cell_offset": 0,
+              "cell_offset_hex": "",
+              "cell_relative_offset": 0,
+              "hbin_offset": 0,
+              "allocation_status": "exported-reg-key",
+              "deleted_or_recovered_candidate": false,
+              "source_hash_available": true,
+              "transaction_replay_status": "unknown",
+              "transaction_replay_applied": false,
+              "validation_warning": "validate registry locator with RECmd/Registry Explorer diff before report use | LOG1/LOG2 transaction replay status must be reviewed before final interpretation",
+              "required_before_report": [
+                "open registry source viewer",
+                "confirm hive/key/value/cell offset",
+                "verify hive source hash",
+                "review transaction replay status",
+                "attach trusted registry-parser diff for report-grade claims"
+              ],
+              "commercial_grade_ready": false,
+              "commercial_grade_blockers": [
+                "registry-key-tree-cross-tool-diff-required",
+                "transaction-log-replay-or-second-parser-diff-required",
+                "registry-deleted-cell-cross-tool-diff-required"
+              ]
+            },
             "key": "HKEY_CURRENT_USER\\Software\\Classes\\Local Settings\\Software\\Microsoft\\Windows\\Shell\\BagMRU\\0",
             "hive_hint": "HKEY_CURRENT_USER",
             "value_count": 2,
@@ -19075,6 +20371,27 @@
               "item_numbers": [
                 16
               ],
+              "qc_prep_item_numbers": [
+                31
+              ],
+              "qc_prep_contracts": [
+                {
+                  "item_number": 31,
+                  "goal": "Deepen Prefetch version 17/23/26/30/31 support, compressed PF handling, volume/file metrics, and trace-chain evidence.",
+                  "implemented_outputs": [
+                    "version-specific common-header profile for versions 17, 23, 26, 30, and observed 31",
+                    "compressed MAM/PF detection with explicit decompression limitation",
+                    "bounded referenced-path, volume-device, and file-reference candidate pivots",
+                    "execution-depth manifest with source hash, offsets, validation checks, and report blockers"
+                  ],
+                  "commercial_blockers": [
+                    "native file metrics array decoding",
+                    "authoritative volume table decoding",
+                    "trace-chain/directory section validation",
+                    "PECmd/known-answer cross-version corpus diff evidence"
+                  ]
+                }
+              ],
               "implementation_track": "native-parser-depth",
               "objective": "Expose Prefetch version/layout validation, referenced-path evidence, and commercial blockers.",
               "source_refs": [
@@ -19097,6 +20414,24 @@
               "reportability_decision": {
                 "profile_version": "prefetch-reportability-decision-v1",
                 "commercial_gap_id": "#16",
+                "qc_prep_item_number": 31,
+                "qc_prep_item_goal": "Deepen Prefetch version 17/23/26/30/31 support, compressed PF handling, volume/file metrics, and trace-chain evidence.",
+                "qc_prep_contract": {
+                  "item_number": 31,
+                  "goal": "Deepen Prefetch version 17/23/26/30/31 support, compressed PF handling, volume/file metrics, and trace-chain evidence.",
+                  "implemented_outputs": [
+                    "version-specific common-header profile for versions 17, 23, 26, 30, and observed 31",
+                    "compressed MAM/PF detection with explicit decompression limitation",
+                    "bounded referenced-path, volume-device, and file-reference candidate pivots",
+                    "execution-depth manifest with source hash, offsets, validation checks, and report blockers"
+                  ],
+                  "commercial_blockers": [
+                    "native file metrics array decoding",
+                    "authoritative volume table decoding",
+                    "trace-chain/directory section validation",
+                    "PECmd/known-answer cross-version corpus diff evidence"
+                  ]
+                },
                 "decision": "report-only-with-execution-correlation",
                 "allowed_use": "prefetch-execution-triage-pivot",
                 "blockers": [
@@ -19167,6 +20502,8 @@
             "note": "Prefetch triage parser uses version-specific common-header offsets plus bounded native candidates; validate critical findings with a dedicated parser such as PECmd.",
             "prefetch_analyst_review_profile": {
               "profile_version": "prefetch-analyst-review-profile-v1",
+              "qc_prep_item_number": 31,
+              "qc_prep_item_goal": "Deepen Prefetch version 17/23/26/30/31 support, compressed PF handling, volume/file metrics, and trace-chain evidence.",
               "artifact_type": "prefetch-file",
               "severity": "high",
               "summary": "Prefetch execution pivot with run count, last-run time, version layout, and referenced-file context.",
@@ -19238,6 +20575,24 @@
               "commercial_batch_id": "commercial-uplift-016-020",
               "item_number": 16,
               "gap_id": "#16",
+              "qc_prep_item_number": 31,
+              "qc_prep_item_goal": "Deepen Prefetch version 17/23/26/30/31 support, compressed PF handling, volume/file metrics, and trace-chain evidence.",
+              "qc_prep_contract": {
+                "item_number": 31,
+                "goal": "Deepen Prefetch version 17/23/26/30/31 support, compressed PF handling, volume/file metrics, and trace-chain evidence.",
+                "implemented_outputs": [
+                  "version-specific common-header profile for versions 17, 23, 26, 30, and observed 31",
+                  "compressed MAM/PF detection with explicit decompression limitation",
+                  "bounded referenced-path, volume-device, and file-reference candidate pivots",
+                  "execution-depth manifest with source hash, offsets, validation checks, and report blockers"
+                ],
+                "commercial_blockers": [
+                  "native file metrics array decoding",
+                  "authoritative volume table decoding",
+                  "trace-chain/directory section validation",
+                  "PECmd/known-answer cross-version corpus diff evidence"
+                ]
+              },
               "artifact_type": "prefetch-file",
               "source": {
                 "source_path": "<ROOT>/Windows/Prefetch/POWERSHELL.EXE-12345678.pf",
@@ -19551,6 +20906,27 @@
               "item_numbers": [
                 16
               ],
+              "qc_prep_item_numbers": [
+                31
+              ],
+              "qc_prep_contracts": [
+                {
+                  "item_number": 31,
+                  "goal": "Deepen Prefetch version 17/23/26/30/31 support, compressed PF handling, volume/file metrics, and trace-chain evidence.",
+                  "implemented_outputs": [
+                    "version-specific common-header profile for versions 17, 23, 26, 30, and observed 31",
+                    "compressed MAM/PF detection with explicit decompression limitation",
+                    "bounded referenced-path, volume-device, and file-reference candidate pivots",
+                    "execution-depth manifest with source hash, offsets, validation checks, and report blockers"
+                  ],
+                  "commercial_blockers": [
+                    "native file metrics array decoding",
+                    "authoritative volume table decoding",
+                    "trace-chain/directory section validation",
+                    "PECmd/known-answer cross-version corpus diff evidence"
+                  ]
+                }
+              ],
               "implementation_track": "native-parser-depth",
               "objective": "Expose Prefetch version/layout validation, referenced-path evidence, and commercial blockers.",
               "source_refs": [
@@ -19573,6 +20949,24 @@
               "reportability_decision": {
                 "profile_version": "prefetch-reportability-decision-v1",
                 "commercial_gap_id": "#16",
+                "qc_prep_item_number": 31,
+                "qc_prep_item_goal": "Deepen Prefetch version 17/23/26/30/31 support, compressed PF handling, volume/file metrics, and trace-chain evidence.",
+                "qc_prep_contract": {
+                  "item_number": 31,
+                  "goal": "Deepen Prefetch version 17/23/26/30/31 support, compressed PF handling, volume/file metrics, and trace-chain evidence.",
+                  "implemented_outputs": [
+                    "version-specific common-header profile for versions 17, 23, 26, 30, and observed 31",
+                    "compressed MAM/PF detection with explicit decompression limitation",
+                    "bounded referenced-path, volume-device, and file-reference candidate pivots",
+                    "execution-depth manifest with source hash, offsets, validation checks, and report blockers"
+                  ],
+                  "commercial_blockers": [
+                    "native file metrics array decoding",
+                    "authoritative volume table decoding",
+                    "trace-chain/directory section validation",
+                    "PECmd/known-answer cross-version corpus diff evidence"
+                  ]
+                },
                 "decision": "report-only-with-execution-correlation",
                 "allowed_use": "prefetch-execution-triage-pivot",
                 "blockers": [
@@ -19641,6 +21035,8 @@
             "raw_preview": "\\DEVICE\\HARDDISKVOLUME3\\WINDOWS\\SYSTEM32\\WINDOWSPOWERSHELL\\V1.0\\POWERSHELL.EXE",
             "prefetch_analyst_review_profile": {
               "profile_version": "prefetch-analyst-review-profile-v1",
+              "qc_prep_item_number": 31,
+              "qc_prep_item_goal": "Deepen Prefetch version 17/23/26/30/31 support, compressed PF handling, volume/file metrics, and trace-chain evidence.",
               "artifact_type": "prefetch-reference",
               "severity": "high",
               "summary": "Prefetch execution pivot with run count, last-run time, version layout, and referenced-file context.",
@@ -19708,6 +21104,24 @@
               "commercial_batch_id": "commercial-uplift-016-020",
               "item_number": 16,
               "gap_id": "#16",
+              "qc_prep_item_number": 31,
+              "qc_prep_item_goal": "Deepen Prefetch version 17/23/26/30/31 support, compressed PF handling, volume/file metrics, and trace-chain evidence.",
+              "qc_prep_contract": {
+                "item_number": 31,
+                "goal": "Deepen Prefetch version 17/23/26/30/31 support, compressed PF handling, volume/file metrics, and trace-chain evidence.",
+                "implemented_outputs": [
+                  "version-specific common-header profile for versions 17, 23, 26, 30, and observed 31",
+                  "compressed MAM/PF detection with explicit decompression limitation",
+                  "bounded referenced-path, volume-device, and file-reference candidate pivots",
+                  "execution-depth manifest with source hash, offsets, validation checks, and report blockers"
+                ],
+                "commercial_blockers": [
+                  "native file metrics array decoding",
+                  "authoritative volume table decoding",
+                  "trace-chain/directory section validation",
+                  "PECmd/known-answer cross-version corpus diff evidence"
+                ]
+              },
               "artifact_type": "prefetch-reference",
               "source": {
                 "source_path": "<ROOT>/Windows/Prefetch/POWERSHELL.EXE-12345678.pf",

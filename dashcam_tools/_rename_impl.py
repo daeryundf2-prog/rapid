@@ -625,7 +625,7 @@ def main(argv: Sequence[str]) -> int:
                 fail += 1
                 print(f"[error] {p}: {e}", file=sys.stderr)
         print(f"Done. total={len(to_process)} ok={ok} fail={fail} (skipped-cache={len(all_videos)-len(to_process)}); OCR used {ocr_attempted}/{ocr_budget}")
-        return 0
+        return 1 if fail else 0
     finally:
         if audit_fp:
             audit_fp.close()

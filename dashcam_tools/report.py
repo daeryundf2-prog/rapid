@@ -12,6 +12,8 @@ import subprocess
 from pathlib import Path
 from typing import Dict, Iterable, List, Optional, Tuple
 
+RENAME_HELPER_IMPORT_ERROR = ""
+
 try:
     # Reuse renamer internals for consistency
     from ._rename_impl import (
@@ -20,7 +22,8 @@ try:
         get_file_times,
         get_duration_ffprobe,
     )
-except Exception:
+except Exception as exc:
+    RENAME_HELPER_IMPORT_ERROR = f"{type(exc).__name__}: {exc}"
     VENDOR_PROFILES = {}
     def best_guess_time(path, profile, use_metadata_first=True, prefer_start_from_filetime=False):
         return (None, "none")
@@ -94,6 +97,7 @@ def main(argv=None) -> int:
     profile = VENDOR_PROFILES.get(args.profile) if VENDOR_PROFILES else None
 
     rows: List[Dict[str, object]] = []
+    errors: List[Dict[str, str]] = []
     total = 0
 
     for p in iter_videos(root):
@@ -104,8 +108,8 @@ def main(argv=None) -> int:
         try:
             stat = p.stat()
             size = stat.st_size
-        except Exception:
-            pass
+        except OSError as exc:
+            errors.append({"path": str(p), "stage": "stat", "error": f"{type(exc).__name__}: {exc}"})
 
         # Filesystem times
         btime, mtime = get_file_times(p)
@@ -125,7 +129,8 @@ def main(argv=None) -> int:
         if args.hash:
             try:
                 hval = compute_hash(p, args.hash)
-            except Exception:
+            except OSError as exc:
+                errors.append({"path": str(p), "stage": "hash", "error": f"{type(exc).__name__}: {exc}"})
                 hval = None
 
         # Emit events
@@ -172,7 +177,8 @@ def main(argv=None) -> int:
                     atime=mtime=ctime=crtime=0
                     try:
                         ts = int(dt.datetime.fromisoformat(t).timestamp())
-                    except Exception:
+                    except (TypeError, ValueError) as exc:
+                        errors.append({"path": str(r.get("path") or ""), "stage": "bodyfile-time", "error": f"{type(exc).__name__}: {exc}"})
                         ts = 0
                     if r["event"] == "file_mtime":
                         mtime = ts
@@ -192,18 +198,21 @@ def main(argv=None) -> int:
     summary = {
         "total_events": len(rows),
         "total_files": total,
+        "error_count": len(errors),
         "hash_algo": args.hash or "",
         "generated_at": dt.datetime.now().isoformat(),
         "env": env,
+        "helper_import_error": RENAME_HELPER_IMPORT_ERROR,
+        "degraded": bool(RENAME_HELPER_IMPORT_ERROR or errors),
     }
     with open(out_json, "w") as jf:
-        json.dump({"summary": summary, "timeline": rows}, jf, ensure_ascii=False, indent=2)
+        json.dump({"summary": summary, "timeline": rows, "errors": errors}, jf, ensure_ascii=False, indent=2)
 
     print(f"Timeline CSV: {out_csv}")
     if bf_path:
         print(f"Bodyfile: {bf_path}")
     print(f"JSON: {out_json}")
-    return 0
+    return 1 if RENAME_HELPER_IMPORT_ERROR else 0
 
 if __name__ == "__main__":
     raise SystemExit(main())

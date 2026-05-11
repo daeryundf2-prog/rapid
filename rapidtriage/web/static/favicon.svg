@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="RapidForensic">
+  <rect width="64" height="64" rx="14" fill="#202b37"/>
+  <path d="M18 18h19c7 0 12 4 12 10 0 4-2 7-6 9l8 11H39l-7-10h-5v10h-9V18Zm9 8v5h9c3 0 4-1 4-3s-1-2-4-2h-9Z" fill="#d8e6ef"/>
+  <path d="M14 50h36" stroke="#8db3c7" stroke-width="4" stroke-linecap="round"/>
+</svg>

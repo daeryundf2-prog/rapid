@@ -65,278 +65,12 @@ const VIRTUALIZATION_ASSESSMENT = {
 };
 const COMPARE_LIMIT = 6;
 const VIEWER_NAVIGATION_LIMIT = 30;
-const VIEW_GROUPS = [
-  {
-    id: "triage",
-    label: "Triage",
-    summary: "Inventory first, one bounded table at a time.",
-    tabs: ["summary", "files", "docs", "artifacts", "timeline", "indicators"],
-  },
-  {
-    id: "find",
-    label: "Find",
-    summary: "Search documents, logs, web artifacts, metadata, and OCR.",
-    tabs: ["search"],
-  },
-  {
-    id: "review",
-    label: "Review",
-    summary: "Classify hits, add notes, and separate evidence from noise.",
-    tabs: ["review"],
-  },
-  {
-    id: "deliver",
-    label: "Deliver",
-    summary: "Read generated reports and export submission material.",
-    tabs: ["report"],
-  },
-];
-const TAB_LABELS = {
-  summary: "Overview",
-  search: "Keyword search",
-  review: "Review board",
-  timeline: "Timeline",
-  indicators: "Indicators",
-  artifacts: "Artifacts",
-  files: "Files",
-  docs: "Documents",
-  report: "Run report",
-};
-const SHORTCUTS = [
-  { keys: ["1", "2", "3", "4"], label: "Switch Triage / Find / Review / Deliver" },
-  { keys: ["Ctrl K", "Cmd K"], label: "Open entire case search" },
-  { keys: ["Ctrl F", "Cmd F"], label: "Search current file, or filter visible rows" },
-  { keys: ["[", "]"], label: "Previous / next page in heavy tables" },
-  { keys: ["Alt [", "Alt ]"], label: "Previous / next opened search hit" },
-  { keys: ["Alt R"], label: "Mark the open viewer hit relevant and save" },
-  { keys: ["Alt X"], label: "Reject the open viewer hit as not relevant and save" },
-  { keys: ["Alt I"], label: "Toggle include-in-report for the open viewer hit" },
-  { keys: ["/"], label: "Jump to global case search" },
-  { keys: ["?"], label: "Show or hide this shortcut guide" },
-];
-const FORENSIC_RIBBON_GROUPS = [
-  {
-    id: "case",
-    label: "Case",
-    tab: "summary",
-    modules: ["Case info", "Evidence intake", "Validation", "Report"],
-    terms: ["case", "report", "validation", "custody"],
-  },
-  {
-    id: "core",
-    label: "Core forensic",
-    tab: "artifacts",
-    modules: ["File system", "Timeline", "Registry", "Event logs", "Browser", "USB"],
-    terms: ["file", "timeline", "registry", "event", "browser", "usb", "mft", "usn"],
-  },
-  {
-    id: "apps",
-    label: "Apps / SNS",
-    tab: "artifacts",
-    modules: ["SNS / CHAT", "Email", "AI usage", "Cloud", "Downloads"],
-    terms: ["chat", "sns", "email", "ai", "cloud", "download", "kakao", "browser"],
-  },
-  {
-    id: "media",
-    label: "Media / OCR",
-    tab: "files",
-    modules: ["Image", "Video", "Audio", "OCR / translation", "Attachments"],
-    terms: ["image", "video", "audio", "ocr", "media", "attachment", "jpg", "png"],
-  },
-  {
-    id: "dfir",
-    label: "DFIR",
-    tab: "indicators",
-    modules: ["LoL / fileless", "Scripts", "Threat intel", "Memory", "WebShell"],
-    terms: ["powershell", "script", "threat", "indicator", "memory", "webshell", "lol"],
-  },
-];
-const FORENSIC_ARTIFACT_TAXONOMY = [
-  {
-    label: "Windows artifacts",
-    hint: "EVTX, Registry, Prefetch, MFT/USN, ShellBags",
-    tab: "artifacts",
-    terms: ["eventlog", "evtx", "registry", "prefetch", "mft", "usn", "shellbag", "lnk", "amcache", "shimcache"],
-  },
-  {
-    label: "Web / AI usage",
-    hint: "Browser history, downloads, AI service prompts and answers",
-    tab: "artifacts",
-    terms: ["browser", "download", "history", "cookie", "cache", "ai", "chatgpt", "claude", "gemini", "perplexity"],
-  },
-  {
-    label: "SNS / chat / mobile",
-    hint: "KakaoTalk, messengers, mobile imports, attachments",
-    tab: "artifacts",
-    terms: ["chat", "sns", "kakao", "telegram", "whatsapp", "signal", "line", "mobile", "message"],
-  },
-  {
-    label: "Documents / DB / mail",
-    hint: "Office/PDF/text, SQLite, PST/OST, mailbox exports",
-    tab: "docs",
-    terms: ["document", "pdf", "office", "sqlite", "database", "email", "pst", "ost", "mbox"],
-  },
-  {
-    label: "Media / OCR",
-    hint: "Images, video/audio, OCR text, thumbnails",
-    tab: "files",
-    terms: ["image", "photo", "video", "audio", "ocr", "thumbnail", "jpg", "png", "mp4"],
-  },
-  {
-    label: "IR / threat traces",
-    hint: "Scripts, LoL, indicators, suspicious execution",
-    tab: "indicators",
-    terms: ["indicator", "ioc", "powershell", "script", "execution", "malware", "webshell", "lol", "fileless"],
-  },
-];
-const WORKBENCH_ARTIFACT_TREE_GROUPS = [
-  {
-    label: "Windows",
-    hint: "EVTX, Registry, Prefetch, MFT/USN, ShellBags, execution",
-    tab: "artifacts",
-    terms: ["windows", "eventlog", "evtx", "registry", "prefetch", "mft", "usn", "shellbag", "lnk", "amcache", "shimcache", "bam"],
-  },
-  {
-    label: "Browser / AI",
-    hint: "History, downloads, cache, ChatGPT, Claude, Gemini, Perplexity",
-    tab: "artifacts",
-    terms: ["browser", "download", "history", "cookie", "cache", "ai", "chatgpt", "claude", "gemini", "perplexity", "copilot"],
-  },
-  {
-    label: "Mail",
-    hint: "EML, MBOX, PST/OST-style exports, attachments",
-    tab: "docs",
-    terms: ["email", "mail", "eml", "mbox", "pst", "ost", "attachment"],
-  },
-  {
-    label: "Messenger",
-    hint: "KakaoTalk, WhatsApp, Telegram, Signal, LINE, Discord",
-    tab: "artifacts",
-    terms: ["chat", "sns", "kakao", "whatsapp", "telegram", "signal", "line", "discord", "message"],
-  },
-  {
-    label: "Mobile",
-    hint: "iOS/Android backups, APKs, contacts, calls, SMS",
-    tab: "artifacts",
-    terms: ["mobile", "ios", "android", "apk", "sms", "call", "contact"],
-  },
-  {
-    label: "Media / OCR",
-    hint: "Images, video, audio, OCR, translation, thumbnails",
-    tab: "files",
-    terms: ["image", "photo", "video", "audio", "ocr", "translation", "thumbnail", "jpg", "png", "mp4"],
-  },
-  {
-    label: "Timeline",
-    hint: "Unified time view, filesystem, event, web, app activity",
-    tab: "timeline",
-    terms: ["timeline", "event", "time", "created", "modified", "accessed"],
-  },
-  {
-    label: "Search",
-    hint: "Case-wide keyword, current-file search, source hits",
-    tab: "search",
-    terms: ["search", "keyword", "hit", "docs", "index", "fts"],
-  },
-  {
-    label: "Reports",
-    hint: "Review candidates, citations, export bundle",
-    tab: "report",
-    terms: ["report", "citation", "export", "bundle", "custody"],
-  },
-  {
-    label: "Validation",
-    hint: "QC, trusted diffs, parser blockers, readiness",
-    tab: "summary",
-    terms: ["validation", "qc", "readiness", "diff", "blocker", "commercial"],
-  },
-];
-const USER_WORKFLOW_STEPS = [
-  {
-    label: "Input",
-    title: "증거를 작게 시작",
-    text: "E01은 지원 여부를 먼저 확인하고, 대용량은 Fast first pass로 색인/요약부터 만듭니다.",
-  },
-  {
-    label: "Find",
-    title: "전체 검색으로 좁히기",
-    text: "문서, 웹/AI 사용 흔적, 로그, OCR, 메타데이터를 같은 검색 창에서 찾습니다.",
-  },
-  {
-    label: "Verify",
-    title: "원본 뷰어에서 재확인",
-    text: "결과 클릭 후 파일 내부 검색, 해시 계산, 비교 핀으로 판단 근거를 고정합니다.",
-  },
-  {
-    label: "Report",
-    title: "보고서 후보만 남기기",
-    text: "relevant와 include-in-report만 제출 묶음으로 빼고 나머지는 제외 사유를 남깁니다.",
-  },
-];
-const WORKBENCH_SMOKE_CHECKPOINTS = [
-  { id: "open-workbench", selector: "[data-testid='workbench-shell']", label: "Open analyst console" },
-  { id: "select-run", selector: "[data-testid='case-hero']", label: "Select completed run" },
-  { id: "verify-artifacts", selector: "[data-testid='artifact-validation-summary']", label: "Verify artifact summary" },
-  { id: "source-viewer", selector: "[data-testid='source-viewer']", label: "Open source viewer" },
-  { id: "review-mark", selector: "[data-testid='viewer-review-form']", label: "Mark evidence" },
-  { id: "report-export", selector: "[data-testid='tab-report']", label: "Export report" },
-];
-const START_CHOICE_CONTRACT = {
-  profile_version: "start-screen-choice-contract-v1",
-  checklist_item: 9,
-  required_choices: ["e01", "folder", "recent", "sample", "qc"],
-};
-const WORKBENCH_LAYOUT_CONTRACT = {
-  profile_version: "single-case-workbench-layout-v1",
-  checklist_item: 10,
-  required_regions: ["artifact-tree", "result-table", "preview-detail", "evidence-tray", "report-tray"],
-  large_case_policy: "paged-results-plus-virtual-dom-window",
-};
-const TABLE_CONTROL_CONTRACT = {
-  profile_version: "large-result-table-control-contract-v1",
-  checklist_item: 12,
-  controls: ["pagination", "virtual-window", "visible-row-filter", "column-preset", "source-filter", "time-filter", "keyboard-navigation"],
-};
-const PREVIEW_DETAIL_CONTRACT = {
-  profile_version: "analyst-preview-detail-contract-v1",
-  checklist_item: 13,
-  default_metadata_state: "collapsed",
-  required_cards: ["analyst-summary", "source-locator", "hash-verification", "limitation-warning", "review-actions"],
-};
-const VIEWER_NAVIGATION_CONTRACT = {
-  profile_version: "viewer-navigation-history-contract-v1",
-  checklist_item: 14,
-  storage_scope: "per-run-local-browser",
-  controls: ["back", "forward", "current-position", "history-preserves-review-context", "compare-pin-compatible"],
-};
-const WORKBENCH_SESSION_CONTRACT = {
-  profile_version: "workbench-session-restore-contract-v1",
-  checklist_item: 15,
-  persisted_fields: ["selectedRunId", "activeTab", "activeViewGroup", "tableControls", "virtualWindowOffsets", "compareTray"],
-};
-const SEARCH_SOURCE_VERIFICATION_CONTRACT = {
-  profile_version: "search-source-verification-contract-v1",
-  checklist_item: 16,
-  required_row_controls: ["view-review", "open-source", "pin-compare", "mark-review"],
-  report_rule: "search-hit-is-a-lead-until-source-viewer-citation-and-hash-are-checked",
-};
-const SEARCH_RESULT_SOURCE_ACTION_CONTRACT = {
-  profile_version: "search-result-source-viewer-actions-v1",
-  qc_prep_item: 6,
-  required_row_controls: ["open-source-viewer", "open-source-file", "search-inside-source", "pin-compare", "save-review"],
-  report_rule: "viewer-open-and-review-save-before-report",
-};
-const CURRENT_FILE_SEARCH_CONTRACT = {
-  profile_version: "current-file-search-ui-contract-v1",
-  checklist_item: 17,
-  required_fields: ["match-count", "result-limit", "truncation-state", "sqlite-scan-state", "reportability-warning"],
-};
-
 let selectedRunId = null;
 let selectedRun = null;
 let activeTab = "summary";
 let activeViewGroup = "triage";
 let pollTimer = null;
+let workbenchFilterTimer = null;
 const pageOffsets = { timeline: 0, artifacts: 0, files: 0, docs: 0, indicators: 0 };
 const virtualWindowOffsets = { search: 0, caseDb: 0 };
 let currentSearchPayload = null;
@@ -402,6 +136,7 @@ async function loadRuns() {
 
 function renderRunList(runs) {
   runList.innerHTML = "";
+  document.body.classList.toggle("analysis-active", Boolean(selectedRunId));
   if (!runs.length) {
     runList.innerHTML = renderEmptyRunList();
     return;
@@ -410,6 +145,8 @@ function renderRunList(runs) {
     const button = document.createElement("button");
     button.type = "button";
     button.className = `run-item ${run.run_id === selectedRunId ? "selected" : ""}`;
+    button.title = `${run.request.mode} · ${run.run_id} · ${run.status}`;
+    button.setAttribute("aria-label", `Open run ${run.run_id}, mode ${run.request.mode}, status ${run.status}`);
     button.innerHTML = `
       <span>
         <strong>${escapeHtml(run.request.mode)} · ${escapeHtml(run.run_id)}</strong>
@@ -440,6 +177,7 @@ function renderEmptyRunList() {
 
 async function loadRunDetail(runId, tab = "summary") {
   selectedRunId = runId;
+  document.body.classList.add("analysis-active");
   loadVirtualWindowOffsets();
   activeTab = tab;
   activeViewGroup = groupForTab(tab);
@@ -509,8 +247,8 @@ function renderDetailShell(run, tab) {
     ${renderWorkbenchSmokePanel(run)}
     ${renderCaseCommandBar(run)}
     ${renderForensicRibbon(run)}
-    ${renderViewSwitcher(activeViewGroup)}
-    <p class="view-helper">${escapeHtml(group.summary)}</p>
+    ${renderForensicViewModeBar(run, tab)}
+    <p class="view-helper compact-view-helper">${escapeHtml(group.summary)}</p>
     ${renderShortcutHelp()}
     ${renderCompareTray()}
     <div class="tab-row">
@@ -518,6 +256,24 @@ function renderDetailShell(run, tab) {
     </div>
     ${renderTableControlBar(tab)}
     ${renderWorkbenchLayoutFrame(run, tab)}
+  `;
+}
+
+function renderForensicViewModeBar(run, tab) {
+  return `
+    <nav class="forensic-view-mode-bar" aria-label="Forensic evidence views" data-testid="forensic-view-mode-bar">
+      ${FORENSIC_VIEW_MODES.map((mode) => {
+        const terms = WORKBENCH_ARTIFACT_TREE_GROUPS.find((group) => group.tab === mode.tab)?.terms || [mode.tab];
+        const count = artifactGroupCount(run, terms);
+        return `
+          <button class="forensic-view-mode ${mode.tab === tab ? "active" : ""}" type="button" data-tab="${escapeHtml(mode.tab)}" title="${escapeHtml(mode.hint)}" aria-current="${mode.tab === tab ? "page" : "false"}">
+            <span>${escapeHtml(mode.icon)}</span>
+            <strong>${escapeHtml(mode.label)}</strong>
+            <em>${formatNumber(count)}</em>
+          </button>
+        `;
+      }).join("")}
+    </nav>
   `;
 }
 
@@ -560,18 +316,14 @@ function renderWorkbenchLayoutFrame(run, tab) {
           <p class="eyebrow">artifact tree</p>
           <strong>Forensic artifacts</strong>
         </div>
-        ${WORKBENCH_ARTIFACT_TREE_GROUPS.map((group) => {
-          const count = artifactGroupCount(run, group.terms);
-          return `
-            <button class="artifact-tree-row ${tab === group.tab ? "active" : ""}" type="button" data-open-tab="${escapeHtml(group.tab)}">
-              <span>
-                <strong>${escapeHtml(group.label)}</strong>
-                <small>${escapeHtml(group.hint)}</small>
-              </span>
-              <em>${formatNumber(count)}</em>
-            </button>
-          `;
-        }).join("")}
+        <div class="artifact-tree-lane" data-testid="artifact-tree-lane-find">
+          <span class="artifact-tree-lane-label">Find</span>
+          ${renderArtifactTreeRows(run, tab, ["Windows", "Browser / AI", "Mail", "Messenger", "Mobile", "Media / OCR", "Timeline", "Search"])}
+        </div>
+        <div class="artifact-tree-lane" data-testid="artifact-tree-lane-deliver">
+          <span class="artifact-tree-lane-label">Review / deliver</span>
+          ${renderArtifactTreeRows(run, tab, ["Reports", "Validation"])}
+        </div>
       </aside>
       <main class="workbench-result-zone" aria-label="Virtualized result table region" data-testid="workbench-result-table">
         <div class="workbench-region-header">
@@ -586,9 +338,30 @@ function renderWorkbenchLayoutFrame(run, tab) {
   `;
 }
 
+function renderArtifactTreeRows(run, tab, labels) {
+  return labels.map((label) => {
+    const group = WORKBENCH_ARTIFACT_TREE_GROUPS.find((item) => item.label === label);
+    if (!group) return "";
+    const count = artifactGroupCount(run, group.terms);
+    const filterTerm = group.terms?.[0] || group.label;
+    const countLabel = count ? `${formatNumber(count)} signal(s)` : "No matching signal yet";
+    return `
+      <button class="artifact-tree-row ${tab === group.tab ? "active" : ""}" type="button" data-open-tab="${escapeHtml(group.tab)}" data-artifact-filter="${escapeHtml(filterTerm)}" aria-label="Open ${escapeHtml(group.label)} artifacts, ${escapeHtml(countLabel)}">
+        <span>
+          <strong>${escapeHtml(group.label)}</strong>
+          <small>${escapeHtml(group.hint)}</small>
+          <small class="artifact-tree-review-hint">${escapeHtml(count ? "Open and filter visible rows" : "Open the module checklist")}</small>
+        </span>
+        <em>${formatNumber(count)}</em>
+      </button>
+    `;
+  }).join("");
+}
+
 function renderPreviewRail(run, tab, reportCandidates) {
   return `
     <aside class="workbench-preview-rail" aria-label="Preview, evidence tray, and report tray" data-testid="workbench-preview-detail" data-preview-contract="${escapeHtml(PREVIEW_DETAIL_CONTRACT.profile_version)}">
+      ${tab === "search" ? "" : renderWorkbenchEvidenceViewerSlot()}
       ${renderPreviewDetailCard(run, tab)}
       ${renderSourceLocatorCard(run)}
       ${renderHashVerificationCard(run)}
@@ -609,6 +382,17 @@ function renderPreviewRail(run, tab, reportCandidates) {
         <button class="secondary-button" type="button" data-open-tab="report">Open report</button>
       </section>
     </aside>
+  `;
+}
+
+function renderWorkbenchEvidenceViewerSlot() {
+  return `
+    <section id="evidenceViewer" class="viewer-panel viewer-dock primary-viewer-dock" data-testid="source-viewer" role="region" aria-label="Evidence preview" aria-live="polite" aria-busy="false">
+      <div class="viewer-empty-state">
+        <strong>Preview</strong>
+        <span>중앙 그리드에서 행을 선택하면 내용, 메타데이터, 해시, 리뷰 폼이 여기에 열립니다.</span>
+      </div>
+    </section>
   `;
 }
 
@@ -916,26 +700,16 @@ function primaryTaskForTab(tab) {
 }
 
 function bindTabButtons() {
-  for (const button of detailPanel.querySelectorAll(".view-button")) {
-    button.addEventListener("click", async () => {
-      const nextGroup = button.dataset.viewGroup;
-      const tabs = tabsForGroup(nextGroup);
-      if (!tabs.length) return;
-      activeViewGroup = nextGroup;
-      activeTab = tabs.includes(activeTab) ? activeTab : tabs[0];
-      detailPanel.innerHTML = renderDetailShell(selectedRun, activeTab);
-      bindTabButtons();
-      restoreWorkbenchControls();
-      persistWorkbenchSession();
-      await renderActiveTab();
-    });
-  }
-  for (const button of detailPanel.querySelectorAll(".tab-button")) {
+  for (const button of detailPanel.querySelectorAll(".tab-button, .forensic-view-mode")) {
     button.addEventListener("click", async () => {
       activeTab = button.dataset.tab;
       activeViewGroup = groupForTab(activeTab);
       for (const item of detailPanel.querySelectorAll(".tab-button")) {
         item.classList.toggle("active", item === button);
+      }
+      for (const item of detailPanel.querySelectorAll(".forensic-view-mode")) {
+        item.classList.toggle("active", item.dataset.tab === activeTab);
+        item.setAttribute("aria-current", item.dataset.tab === activeTab ? "page" : "false");
       }
       persistWorkbenchSession();
       await renderActiveTab();
@@ -952,38 +726,15 @@ function bindTabButtons() {
     applyWorkbenchFilters();
     persistWorkbenchSession();
   });
-  detailPanel.querySelector("#tableFilter")?.addEventListener("input", (event) => {
-    applyWorkbenchFilters();
-    persistWorkbenchSession();
-  });
-  detailPanel.querySelector("#sourceFilterInput")?.addEventListener("input", () => {
-    applyWorkbenchFilters();
-    persistWorkbenchSession();
-  });
-  detailPanel.querySelector("#timeFilterInput")?.addEventListener("input", () => {
-    applyWorkbenchFilters();
-    persistWorkbenchSession();
-  });
+  for (const selector of ["#tableFilter", "#sourceFilterInput", "#timeFilterInput"]) {
+    detailPanel.querySelector(selector)?.addEventListener("input", scheduleWorkbenchFilterUpdate);
+  }
   detailPanel.querySelector("#columnPresetInput")?.addEventListener("change", (event) => {
     applyColumnPreset(event.target.value || "analyst");
     persistWorkbenchSession();
   });
   detailPanel.querySelector("#removeRunButton")?.addEventListener("click", removeSelectedRun);
   bindCompareActions();
-}
-
-function renderViewSwitcher(activeGroup) {
-  return `
-    <nav class="view-switcher" aria-label="Case workflow views">
-      ${VIEW_GROUPS.map((group) => `
-        <button class="view-button ${group.id === activeGroup ? "active" : ""}" data-view-group="${escapeHtml(group.id)}" data-testid="view-group-${escapeHtml(group.id)}" type="button">
-          <strong>${escapeHtml(group.label)}</strong>
-          <span>${escapeHtml(group.tabs.map(tabLabel).join(" / "))}</span>
-          <kbd>${escapeHtml(String(VIEW_GROUPS.findIndex((item) => item.id === group.id) + 1))}</kbd>
-        </button>
-      `).join("")}
-    </nav>
-  `;
 }
 
 function renderShortcutHelp() {
@@ -1021,6 +772,7 @@ async function renderActiveTab() {
   bindPanelActions();
   bindBookmarkButtons();
   bindSearchForm();
+  bindSearchResultButtons();
   restoreWorkbenchControls();
 }
 
@@ -2475,15 +2227,19 @@ function renderFiles(payload) {
     <table class="data-table">
       <thead><tr><th>Name</th><th>Categories</th><th>Size</th><th>Modified</th><th></th></tr></thead>
       <tbody>
-        ${rows.map((file, index) => `
-          <tr data-filter="${rowText(file)}">
-            <td><strong>${escapeHtml(file.name)}</strong><span>${escapeHtml(file.path)}</span></td>
-            <td>${escapeHtml((file.categories || []).join(", "))}</td>
-            <td>${formatBytes(file.size)}</td>
-            <td>${escapeHtml(file.modified_at)}</td>
-            <td>${bookmarkButton("files", `/candidates/${offset + index}`, file.name)}</td>
-          </tr>
-        `).join("")}
+        ${rows.map((file, index) => {
+          const context = { source: "files", pointer: `/candidates/${offset + index}`, title: file.name || fileName(file.path), note: file.name || "", path: file.path || "", tags: ["file", ...(file.categories || [])].filter(Boolean) };
+          const match = { source: "files", kind: (file.categories || []).join(", "), path: file.path || "", title: file.name || fileName(file.path), preview: file.name || "", pointer: context.pointer };
+          return `
+            <tr data-filter="${rowText(file)}" ${file.path ? `data-viewer-row-path="${escapeHtml(file.path)}" data-review-context="${escapeHtml(JSON.stringify(context))}"` : ""}>
+              <td><strong>${escapeHtml(file.name)}</strong><span>${escapeHtml(file.path)}</span></td>
+              <td>${escapeHtml((file.categories || []).join(", "))}</td>
+              <td>${formatBytes(file.size)}</td>
+              <td>${escapeHtml(file.modified_at)}</td>
+              <td class="action-stack">${file.path ? viewSourceButton(match, context) : ""}${compareButton(compareItemFromMatch(match, context))}${bookmarkButton("files", context.pointer, file.name)}</td>
+            </tr>
+          `;
+        }).join("")}
       </tbody>
     </table>
     ${renderPaginationControls(payload.pagination, "files")}
@@ -2499,15 +2255,19 @@ function renderDocs(payload) {
     <table class="data-table">
       <thead><tr><th>Document</th><th>Kind</th><th>Keywords</th><th>Preview</th><th></th></tr></thead>
       <tbody>
-        ${rows.map((doc, index) => `
-          <tr data-filter="${rowText(doc)}">
-            <td><strong>${escapeHtml(fileName(doc.path))}</strong><span>${escapeHtml(doc.path)}</span></td>
-            <td>${escapeHtml(doc.kind)}</td>
-            <td>${escapeHtml((doc.matched_keywords || []).join(", "))}</td>
-            <td>${escapeHtml(doc.preview || "")}</td>
-            <td>${bookmarkButton("docs", `/results/${offset + index}`, fileName(doc.path))}</td>
-          </tr>
-        `).join("")}
+        ${rows.map((doc, index) => {
+          const context = { source: "docs", pointer: `/results/${offset + index}`, title: fileName(doc.path), note: doc.preview || "", path: doc.path || "", tags: ["document", doc.kind].filter(Boolean) };
+          const match = { source: "documents", kind: doc.kind || "", path: doc.path || "", title: fileName(doc.path), preview: doc.preview || "", pointer: context.pointer };
+          return `
+            <tr data-filter="${rowText(doc)}" ${doc.path ? `data-viewer-row-path="${escapeHtml(doc.path)}" data-review-context="${escapeHtml(JSON.stringify(context))}"` : ""}>
+              <td><strong>${escapeHtml(fileName(doc.path))}</strong><span>${escapeHtml(doc.path)}</span></td>
+              <td>${escapeHtml(doc.kind)}</td>
+              <td>${escapeHtml((doc.matched_keywords || []).join(", "))}</td>
+              <td>${escapeHtml(doc.preview || "")}</td>
+              <td class="action-stack">${doc.path ? viewSourceButton(match, context) : ""}${compareButton(compareItemFromMatch(match, context))}${bookmarkButton("docs", context.pointer, fileName(doc.path))}</td>
+            </tr>
+          `;
+        }).join("")}
       </tbody>
     </table>
     ${renderPaginationControls(payload.pagination, "docs")}
@@ -2532,11 +2292,11 @@ function renderSearch(payload = null) {
     : getSearchDraft();
   const draftText = (draft.keywords || []).join(", ");
   return `
-    <section class="search-hero">
+    <section class="search-hero compact-viewer-hero">
       <div>
         <p class="eyebrow">find evidence</p>
-        <h3>전체에서 찾고, 옆 뷰어에서 바로 검증</h3>
-        <p>검색 결과를 열면 오른쪽 뷰어에 원본이 고정됩니다. 같은 파일 내부 검색과 리뷰 저장까지 한 자리에서 처리하세요.</p>
+        <h3>Search → viewer → review</h3>
+        <p>결과를 열면 뷰어가 먼저 고정됩니다. 본문 검색, 해시, 리뷰 저장을 같은 패널에서 처리합니다.</p>
       </div>
       <div class="search-hero-tips">
         <span>${kbd("Ctrl K")} 전체 검색</span>
@@ -2603,14 +2363,16 @@ function renderSearch(payload = null) {
     <div class="preset-row" aria-label="Keyword presets">
       ${SEARCH_PRESETS.map((preset) => `<button class="preset-chip" type="button" data-keywords="${escapeHtml(preset.keywords.join(", "))}">${escapeHtml(preset.label)}</button>`).join("")}
     </div>
-    <p class="help-text">Tip: this searches the whole case. Open a result in the viewer to search only inside that file.</p>
-    <section class="search-workbench">
+    <section class="search-workbench viewer-first-workbench">
+      <aside id="evidenceViewer" class="viewer-panel viewer-dock primary-viewer-dock" data-testid="source-viewer" role="region" aria-label="Evidence preview" aria-live="polite" aria-busy="false">
+        <div class="viewer-empty-state">
+          <strong>Evidence viewer</strong>
+          <span>검색 결과의 <b>Open viewer</b> 또는 <b>Search inside</b>를 누르면 원본 내용이 여기에 표시됩니다.</span>
+        </div>
+      </aside>
       <div class="search-results-pane">
         ${payload ? renderSearchResults(payload, rows) : '<p class="empty-state">Enter one or more keywords. Separate multiple terms with commas.</p>'}
       </div>
-      <aside id="evidenceViewer" class="viewer-panel viewer-dock" data-testid="source-viewer">
-        <p class="empty-state">검색 결과의 Preview를 누르면 원본 뷰어가 여기에 고정됩니다.</p>
-      </aside>
     </section>
   `;
 }
@@ -2639,6 +2401,7 @@ function renderSearchResults(payload, rows) {
       ${metric("Keywords", (payload.keywords || []).length)}
     </div>
     ${renderSearchSourceVerification(payload)}
+    ${renderSearchFacets(payload, rows)}
     ${renderAdvancedSearchProfile(advancedProfile)}
     ${renderKeywordPackSelectionProfile(keywordPackProfile)}
     ${renderSearchAnalysis(payload.analysis)}
@@ -2646,23 +2409,65 @@ function renderSearchResults(payload, rows) {
     <table class="data-table">
       <thead><tr><th>Source</th><th>Item</th><th>Keywords</th><th>Preview / Evidence</th><th></th></tr></thead>
       <tbody>
-        ${visibleRows.map((match, index) => `
-          <tr data-filter="${rowText(match)}">
-            <td>${escapeHtml(match.source)}<span>${escapeHtml(match.kind || "")}</span></td>
-            <td><strong>${escapeHtml(match.title || fileName(match.path))}</strong><span>${escapeHtml(match.path || "")}</span>${renderSearchResultLocator(match)}</td>
-            <td>${escapeHtml((match.matched_keywords || []).join(", "))}</td>
-            <td>
-              ${escapeHtml(match.preview || "")}
-              ${renderSearchMetadata(match)}
-            </td>
-            <td class="action-stack">
-              ${reviewActionButtons(match, index)}
-            </td>
-          </tr>
-        `).join("")}
+        ${visibleRows.map((match, index) => {
+          const context = bookmarkContextForMatch(match) || {};
+          return `
+            <tr data-filter="${rowText(match)}" ${match.path ? `data-viewer-row-path="${escapeHtml(match.path)}" data-review-context="${escapeHtml(JSON.stringify(context))}" data-search-result-index="${escapeHtml(index)}"` : ""}>
+              <td>${escapeHtml(match.source)}<span>${escapeHtml(match.kind || "")}</span></td>
+              <td><strong>${escapeHtml(match.title || fileName(match.path))}</strong><span>${escapeHtml(match.path || "")}</span>${renderSearchResultLocator(match)}</td>
+              <td>${escapeHtml((match.matched_keywords || []).join(", "))}</td>
+              <td>
+                ${escapeHtml(match.preview || "")}
+                ${renderSearchMetadata(match)}
+              </td>
+              <td class="action-stack">
+                ${reviewActionButtons(match, index)}
+              </td>
+            </tr>
+          `;
+        }).join("")}
       </tbody>
     </table>
     ${renderOcrErrors(payload.ocr?.errors || [])}
+  `;
+}
+
+function renderSearchFacets(payload, rows) {
+  const summary = payload.summary || {};
+  const sourceCounts = Object.entries(summary.source_counts || {})
+    .filter(([, count]) => Number(count) > 0)
+    .sort((left, right) => Number(right[1]) - Number(left[1]));
+  const kindCounts = rows.reduce((counts, match) => {
+    const kind = String(match.kind || match.source || "unknown").trim() || "unknown";
+    counts[kind] = (counts[kind] || 0) + 1;
+    return counts;
+  }, {});
+  const topKinds = Object.entries(kindCounts)
+    .sort((left, right) => Number(right[1]) - Number(left[1]))
+    .slice(0, 10);
+  if (!sourceCounts.length && !topKinds.length) return "";
+  const facetButton = (label, count) => `
+    <button class="search-facet-chip" type="button" data-filter="${escapeHtml(label)}" aria-label="Filter results by ${escapeHtml(label)} (${formatNumber(count)} hits)">
+      <span>${escapeHtml(label)}</span>
+      <strong>${escapeHtml(count)}</strong>
+    </button>
+  `;
+  return `
+    <section class="search-facet-panel" aria-label="Search result facets">
+      <div>
+        <p class="eyebrow">review facets</p>
+        <h4>현재 결과를 바로 좁혀보기</h4>
+        <p>Source나 artifact kind를 눌러 같은 검색 결과 안에서 빠르게 필터링합니다. 원본 검토 흐름은 유지됩니다.</p>
+      </div>
+      <div class="search-facet-group" aria-label="Source facets">
+        <span>Source</span>
+        ${sourceCounts.map(([source, count]) => facetButton(String(source), count)).join("")}
+      </div>
+      <div class="search-facet-group" aria-label="Kind facets">
+        <span>Kind</span>
+        ${topKinds.map(([kind, count]) => facetButton(String(kind), count)).join("")}
+      </div>
+    </section>
   `;
 }
 
@@ -2954,6 +2759,14 @@ function bindSearchForm() {
 }
 
 function bindSearchResultButtons() {
+  for (const row of detailPanel.querySelectorAll("[data-viewer-row-path]")) {
+    if (row.dataset.viewerRowBound) continue;
+    row.dataset.viewerRowBound = "1";
+    row.addEventListener("click", async (event) => {
+      if (event.target.closest("button, a, input, select, textarea")) return;
+      await loadEvidencePreview(row.dataset.viewerRowPath, parseReviewContext(row.dataset.reviewContext), row.dataset.searchResultIndex);
+    });
+  }
   for (const button of detailPanel.querySelectorAll("[data-view-source-path]")) {
     if (button.dataset.sourcePreviewBound) continue;
     button.dataset.sourcePreviewBound = "1";
@@ -2963,6 +2776,9 @@ function bindSearchResultButtons() {
         parseReviewContext(button.dataset.reviewContext),
         button.dataset.searchResultIndex,
       );
+      if (button.dataset.focusFileSearch === "1") {
+        detailPanel.querySelector("#fileSearchForm input[name='keyword']")?.focus();
+      }
     });
   }
 }
@@ -2979,7 +2795,7 @@ function bindSearchPresetButtons(form) {
       form.requestSubmit();
     });
   }
-  for (const button of detailPanel.querySelectorAll(".analysis-chip[data-filter], .entity-pill[data-filter]")) {
+  for (const button of detailPanel.querySelectorAll(".analysis-chip[data-filter], .entity-pill[data-filter], .search-facet-chip[data-filter]")) {
     if (button.dataset.filterBound) continue;
     button.dataset.filterBound = "1";
     button.addEventListener("click", () => applyFilter(button.dataset.filter || ""));
@@ -2992,6 +2808,7 @@ async function loadEvidencePreview(path, reviewContext = null, searchResultIndex
   if (searchResultIndex !== null && searchResultIndex !== undefined && searchResultIndex !== "") {
     viewer.dataset.currentSearchResultIndex = String(searchResultIndex);
   }
+  viewer.setAttribute("aria-busy", "true");
   viewer.innerHTML = '<p class="empty-state">Loading preview...</p>';
   try {
     const payload = await api(`/api/runs/${selectedRunId}/source-preview?path=${encodeURIComponent(path)}`);
@@ -3006,6 +2823,8 @@ async function loadEvidencePreview(path, reviewContext = null, searchResultIndex
       <p class="empty-state">${escapeHtml(error.message)}</p>
       ${renderSourceResolutionDiagnostics(error.detail)}
     `;
+  } finally {
+    viewer.setAttribute("aria-busy", "false");
   }
 }
 
@@ -3258,6 +3077,7 @@ function renderSqlitePreview(sqlite) {
             ${table.primary_key_columns?.length ? ` · PK: ${escapeHtml(table.primary_key_columns.join(", "))}` : ""}
             ${table.indexes?.length ? ` · Indexes: ${escapeHtml(table.indexes.map((index) => index.name).join(", "))}` : ""}
           </p>
+          ${renderSqliteSchemaPanel(table)}
           ${renderSqliteTablePageLink(pageLinks, table.name)}
           ${table.schema_sql ? `<pre class="code-preview compact">${escapeHtml(table.schema_sql)}</pre>` : ""}
           <div class="table-wrap">
@@ -3283,6 +3103,24 @@ function renderSqlitePreview(sqlite) {
       `).join("")}
       ${sqlite.truncated ? '<p class="help-text">Additional tables are hidden to keep the viewer responsive.</p>' : ""}
     </section>
+  `;
+}
+
+function renderSqliteSchemaPanel(table) {
+  const details = Array.isArray(table.column_details) ? table.column_details : [];
+  if (!details.length) return "";
+  return `
+    <details class="sqlite-schema-panel" data-testid="sqlite-schema-panel" open>
+      <summary>Schema visibility · ${escapeHtml(details.length)} column(s)</summary>
+      <div class="sqlite-column-grid">
+        ${details.map((column) => `
+          <span class="sqlite-column-chip" title="${escapeHtml(column.name || "column")}">
+            <strong>${escapeHtml(column.name || "column")}</strong>
+            <small>${escapeHtml(column.type || "untyped")}${column.notnull ? " · NOT NULL" : ""}${column.pk ? " · PK" : ""}</small>
+          </span>
+        `).join("")}
+      </div>
+    </details>
   `;
 }
 
@@ -4024,18 +3862,32 @@ function renderReviewSelectionTray(bookmarks) {
   const selectedIds = getReviewSelection();
   const selectedBookmarks = bookmarks.filter((bookmark) => selectedIds.includes(String(bookmark.bookmark_id || "")));
   const reportSelectedCount = selectedBookmarks.filter((bookmark) => Boolean(bookmark.review?.include_in_report)).length;
+  const selectedStatusCounts = selectedBookmarks.reduce((counts, bookmark) => {
+    const status = bookmark.review?.status || "unreviewed";
+    counts[status] = (counts[status] || 0) + 1;
+    return counts;
+  }, {});
+  const selectedQueueText = ["relevant", "needs-review", "not-relevant", "unreviewed"]
+    .map((status) => `${status} ${formatNumber(selectedStatusCounts[status] || 0)}`)
+    .join(" · ");
   return `
-    <section id="reviewSelectionTray" class="review-selection-tray ${selectedBookmarks.length ? "" : "empty"}">
+    <section id="reviewSelectionTray" class="review-selection-tray ${selectedBookmarks.length ? "" : "empty"}" data-testid="review-bulk-queue">
       <div class="review-group-header">
         <div>
           <p class="eyebrow">review selection</p>
           <h3>현재 검토 묶음</h3>
+          <p class="help-text">선택 묶음은 브라우저에 유지됩니다. 관련 증거를 모은 뒤 source path와 report 포함 여부를 한 화면에서 대조하세요.</p>
         </div>
         <div class="detail-actions">
           <span class="status-pill">${selectedBookmarks.length}</span>
           <span class="status-pill">${reportSelectedCount} report set</span>
           <button class="secondary-button" type="button" data-clear-review-selection ${selectedBookmarks.length ? "" : "disabled"}>Clear selection</button>
         </div>
+      </div>
+      <div class="review-bulk-toolbar" aria-label="Selected evidence workflow">
+        <span>${escapeHtml(selectedQueueText)}</span>
+        <button class="secondary-button" type="button" data-open-tab="search">Find related</button>
+        <button class="secondary-button" type="button" data-open-tab="report">Prepare report</button>
       </div>
       ${selectedBookmarks.length ? `
         <div class="dense-list">
@@ -4390,7 +4242,7 @@ function renderSearchResultSourceActionControl(action, match, context, searchRes
     return sourceFileLink(match);
   }
   if (action.id === "search-inside-source") {
-    return `<button class="icon-action subtle" type="button" data-view-source-path="${escapeHtml(match.path || "")}" data-review-context="${escapeHtml(JSON.stringify(context || {}))}" data-search-result-index="${escapeHtml(searchResultIndex ?? "")}">Search inside</button>`;
+    return `<button class="icon-action subtle" type="button" data-view-source-path="${escapeHtml(match.path || "")}" data-review-context="${escapeHtml(JSON.stringify(context || {}))}" data-search-result-index="${escapeHtml(searchResultIndex ?? "")}" data-focus-file-search="1">Search inside</button>`;
   }
   if (action.id === "pin-compare") {
     return compareButton(compareItemFromMatch(match, context));
@@ -4450,7 +4302,7 @@ function compareItemFromBookmark(bookmark) {
 function viewSourceButton(match, context, searchResultIndex = null) {
   if (!match.path) return "";
   const indexAttribute = searchResultIndex === null || searchResultIndex === undefined ? "" : ` data-search-result-index="${escapeHtml(searchResultIndex)}"`;
-  return `<button class="icon-action" type="button" data-view-source-path="${escapeHtml(match.path)}" data-review-context="${escapeHtml(JSON.stringify(context || {}))}"${indexAttribute}>View / review</button>`;
+  return `<button class="icon-action primary-viewer-action" type="button" data-view-source-path="${escapeHtml(match.path)}" data-review-context="${escapeHtml(JSON.stringify(context || {}))}"${indexAttribute}>Open viewer</button>`;
 }
 
 function sourceFileLink(match) {
@@ -4480,6 +4332,15 @@ function applyWorkbenchFilters() {
   }
 }
 
+function scheduleWorkbenchFilterUpdate() {
+  if (workbenchFilterTimer) window.clearTimeout(workbenchFilterTimer);
+  workbenchFilterTimer = window.setTimeout(() => {
+    applyWorkbenchFilters();
+    persistWorkbenchSession();
+    workbenchFilterTimer = null;
+  }, 120);
+}
+
 function applyColumnPreset(preset) {
   detailPanel.classList.remove("table-columns-compact", "table-columns-source");
   if (preset === "compact") detailPanel.classList.add("table-columns-compact");
@@ -4493,57 +4354,6 @@ function currentWorkbenchControls() {
     time_filter: detailPanel.querySelector("#timeFilterInput")?.value || "",
     column_preset: detailPanel.querySelector("#columnPresetInput")?.value || "analyst",
   };
-}
-
-function getWorkbenchSession() {
-  if (!storageAvailable()) return {};
-  try {
-    const payload = JSON.parse(window.localStorage.getItem(WORKBENCH_SESSION_STORAGE_KEY) || "{}");
-    return payload && typeof payload === "object" ? payload : {};
-  } catch {
-    return {};
-  }
-}
-
-function persistWorkbenchSession(extra = {}) {
-  if (!storageAvailable()) return;
-  const payload = {
-    profile_version: WORKBENCH_SESSION_CONTRACT.profile_version,
-    selectedRunId,
-    activeTab,
-    activeViewGroup,
-    tableControls: currentWorkbenchControls(),
-    virtualWindowOffsets,
-    updated_at: new Date().toISOString(),
-    ...extra,
-  };
-  window.localStorage.setItem(WORKBENCH_SESSION_STORAGE_KEY, JSON.stringify(payload));
-}
-
-function restoreWorkbenchSession() {
-  const payload = getWorkbenchSession();
-  if (!payload?.selectedRunId) return;
-  selectedRunId = payload.selectedRunId;
-  activeTab = payload.activeTab || "summary";
-  activeViewGroup = payload.activeViewGroup || groupForTab(activeTab);
-}
-
-function restoreWorkbenchControls() {
-  const controls = getWorkbenchSession().tableControls || {};
-  const mapping = [
-    ["#tableFilter", controls.visible_filter],
-    ["#sourceFilterInput", controls.source_filter],
-    ["#timeFilterInput", controls.time_filter],
-  ];
-  for (const [selector, value] of mapping) {
-    const input = detailPanel.querySelector(selector);
-    if (input && value !== undefined) input.value = value || "";
-  }
-  const preset = controls.column_preset || "analyst";
-  const presetInput = detailPanel.querySelector("#columnPresetInput");
-  if (presetInput) presetInput.value = preset;
-  applyColumnPreset(preset);
-  applyWorkbenchFilters();
 }
 
 function metric(label, value) {
@@ -4963,6 +4773,7 @@ function bindPanelActions() {
   for (const button of detailPanel.querySelectorAll("[data-open-tab]")) {
     button.addEventListener("click", async () => {
       await switchTab(button.dataset.openTab);
+      applyArtifactTreeFilter(button.dataset.artifactFilter || "");
     });
   }
   for (const button of detailPanel.querySelectorAll("[data-start-configured-e01-run]")) {
@@ -4998,6 +4809,16 @@ function bindPanelActions() {
   bindCompareActions();
   bindReviewSelectionActions();
   bindVirtualWindowButtons();
+}
+
+function applyArtifactTreeFilter(filterTerm) {
+  const term = String(filterTerm || "").trim();
+  if (!term) return;
+  const input = detailPanel.querySelector("#tableFilter");
+  if (!input) return;
+  input.value = term;
+  applyWorkbenchFilters();
+  persistWorkbenchSession();
 }
 
 async function runGlobalCommandSearch(event) {
@@ -5732,141 +5553,6 @@ function renderPaginationControls(pagination, tab) {
   `;
 }
 
-function virtualizedRows(rows, windowKey = "default") {
-  const total = (rows || []).length;
-  const offset = virtualWindowOffset(windowKey, total);
-  return (rows || []).slice(offset, offset + VIRTUAL_TABLE_ROW_LIMIT);
-}
-
-function virtualWindowStorageKey() {
-  return `${VIRTUAL_WINDOW_STORAGE_PREFIX}${selectedRunId || "default"}`;
-}
-
-function loadVirtualWindowOffsets() {
-  if (!storageAvailable()) return;
-  try {
-    const saved = JSON.parse(window.localStorage.getItem(virtualWindowStorageKey()) || "{}");
-    for (const [key, value] of Object.entries(saved || {})) {
-      virtualWindowOffsets[key] = Math.max(0, Number(value) || 0);
-    }
-  } catch {
-    // Ignore corrupt client-side viewport state; server data remains authoritative.
-  }
-}
-
-function persistVirtualWindowOffset(windowKey, offset) {
-  if (!storageAvailable()) return;
-  try {
-    const saved = JSON.parse(window.localStorage.getItem(virtualWindowStorageKey()) || "{}");
-    saved[windowKey] = Math.max(0, Number(offset) || 0);
-    window.localStorage.setItem(virtualWindowStorageKey(), JSON.stringify(saved));
-  } catch {
-    // Viewport persistence is a convenience, never a blocker for evidence review.
-  }
-}
-
-function virtualWindowOffset(windowKey, total) {
-  const rawOffset = Number(virtualWindowOffsets[windowKey] || 0);
-  const safeTotal = Math.max(0, Number(total) || 0);
-  const maxOffset = Math.max(0, safeTotal - VIRTUAL_TABLE_ROW_LIMIT);
-  const clamped = Math.min(Math.max(0, rawOffset), maxOffset);
-  virtualWindowOffsets[windowKey] = clamped;
-  return clamped;
-}
-
-function renderVirtualizationNotice(rows, visibleRows, label, windowKey = "default") {
-  const total = (rows || []).length;
-  const visible = (visibleRows || []).length;
-  const offset = virtualWindowOffset(windowKey, total);
-  const start = total ? offset + 1 : 0;
-  const end = offset + visible;
-  if (total <= visible) return "";
-  return `
-    <div class="pagination-bar virtual-window-card" data-commercial-gap="#79">
-      <span>Rendering ${start}-${end} of ${total} ${escapeHtml(label)}. The DOM only keeps ${visible} rows mounted for responsiveness.</span>
-      <div class="pagination-actions">
-        <button class="secondary-button" type="button" data-virtual-window-key="${escapeHtml(windowKey)}" data-virtual-window-offset="${Math.max(0, offset - VIRTUAL_TABLE_ROW_LIMIT)}" ${offset <= 0 ? "disabled" : ""}>${kbd("[")} Previous window</button>
-        <button class="secondary-button" type="button" data-virtual-window-key="${escapeHtml(windowKey)}" data-virtual-window-offset="${Math.min(Math.max(0, total - VIRTUAL_TABLE_ROW_LIMIT), offset + VIRTUAL_TABLE_ROW_LIMIT)}" ${end >= total ? "disabled" : ""}>Next window ${kbd("]")}</button>
-      </div>
-      ${renderVirtualWindowJumpControl(windowKey, total, offset, label)}
-      <small>${escapeHtml(VIRTUALIZATION_ASSESSMENT.status)} · max ${VIRTUALIZATION_ASSESSMENT.row_limit} rows · ${escapeHtml(VIRTUALIZATION_ASSESSMENT.commercial_gap_ids.join(","))}</small>
-    </div>
-  `;
-}
-
-function renderVirtualWindowJumpControl(windowKey, total, offset, label) {
-  return `
-    <form class="virtual-window-jump" data-virtual-window-jump-key="${escapeHtml(windowKey)}" data-virtual-window-total="${total}">
-      <label>
-        Jump to row
-        <input type="number" min="1" max="${total}" value="${Math.min(total, offset + 1)}" inputmode="numeric" aria-label="Jump to ${escapeHtml(label)} row" />
-      </label>
-      <button class="mini-inline-button" type="submit">Go</button>
-    </form>
-  `;
-}
-
-function bindVirtualWindowButtons() {
-  for (const button of detailPanel.querySelectorAll("[data-virtual-window-key]")) {
-    if (button.dataset.virtualWindowBound) continue;
-    button.dataset.virtualWindowBound = "1";
-    button.addEventListener("click", () => {
-      setVirtualWindowOffset(button.dataset.virtualWindowKey, Number(button.dataset.virtualWindowOffset || 0));
-    });
-  }
-  for (const form of detailPanel.querySelectorAll("[data-virtual-window-jump-key]")) {
-    if (form.dataset.virtualWindowBound) continue;
-    form.dataset.virtualWindowBound = "1";
-    form.addEventListener("submit", (event) => {
-      event.preventDefault();
-      const input = form.querySelector("input");
-      const total = Number(form.dataset.virtualWindowTotal || 0);
-      const requestedRow = Math.max(1, Math.min(total || 1, Number(input?.value || 1)));
-      const alignedOffset = Math.floor((requestedRow - 1) / VIRTUAL_TABLE_ROW_LIMIT) * VIRTUAL_TABLE_ROW_LIMIT;
-      setVirtualWindowOffset(form.dataset.virtualWindowJumpKey, alignedOffset);
-    });
-  }
-}
-
-function setVirtualWindowOffset(windowKey, offset) {
-  virtualWindowOffsets[windowKey] = Math.max(0, Number(offset) || 0);
-  persistVirtualWindowOffset(windowKey, virtualWindowOffsets[windowKey]);
-  if (windowKey === "search" && currentSearchPayload) {
-    const pane = detailPanel.querySelector(".search-results-pane");
-    if (pane) {
-      pane.innerHTML = renderSearchResults(currentSearchPayload, currentSearchPayload.matches || []);
-      bindSearchResultButtons();
-      bindSearchPresetButtons(detailPanel.querySelector("#unifiedSearchForm"));
-      bindVirtualWindowButtons();
-    }
-  }
-  if (windowKey === "caseDb" && currentCaseDbSearchPayload) {
-    const output = detailPanel.querySelector("#caseDbResult");
-    if (output) {
-      output.innerHTML = renderCaseDbSearchResult(currentCaseDbSearchPayload);
-      const importForm = detailPanel.querySelector("#caseDbImportForm");
-      const database = importForm?.elements.database?.value || "";
-      const caseId = importForm?.elements.case_id?.value || "";
-      if (database && caseId) {
-        bindCaseDbReviewButtons(database, caseId);
-        bindCaseDbBatchButtons(database, caseId);
-        bindCaseDbReportExportButton(database, caseId);
-      }
-      bindVirtualWindowButtons();
-    }
-  }
-}
-
-function storageAvailable() {
-  try {
-    window.localStorage.setItem("rapidtriage.storage-test", "1");
-    window.localStorage.removeItem("rapidtriage.storage-test");
-    return true;
-  } catch {
-    return false;
-  }
-}
-
 function hydrateRunForm() {
   if (!storageAvailable()) return;
   const saved = JSON.parse(window.localStorage.getItem(RUN_FORM_STORAGE_KEY) || "{}");
@@ -6179,119 +5865,6 @@ function shellQuote(value) {
   const text = String(value || "");
   if (/^[A-Za-z0-9_./:@%+=,-]+$/.test(text)) return text;
   return `'${text.replace(/'/g, "'\\''")}'`;
-}
-
-function searchStorageKey() {
-  return `${SEARCH_STORAGE_PREFIX}${selectedRunId || "default"}`;
-}
-
-function searchHistoryStorageKey() {
-  return `${SEARCH_HISTORY_PREFIX}${selectedRunId || "default"}`;
-}
-
-function caseDbHistoryStorageKey() {
-  return `${SEARCH_HISTORY_PREFIX}caseDb.${selectedRunId || "default"}`;
-}
-
-function getSearchDraft() {
-  if (!storageAvailable()) {
-    return { keywords: [], ocr: true, source: "", extension: "", path_contains: "", search_mode: "exact", fuzzy_distance: 1, proximity_window: 0, keyword_packs: [] };
-  }
-  try {
-    const payload = JSON.parse(window.localStorage.getItem(searchStorageKey()) || "{}");
-    return {
-      keywords: Array.isArray(payload.keywords) ? payload.keywords : [],
-      ocr: payload.ocr !== false,
-      source: payload.source || "",
-      extension: payload.extension || "",
-      path_contains: payload.path_contains || "",
-      search_mode: payload.search_mode || "exact",
-      fuzzy_distance: payload.fuzzy_distance ?? 1,
-      proximity_window: payload.proximity_window ?? 0,
-      keyword_packs: Array.isArray(payload.keyword_packs) ? payload.keyword_packs : [],
-    };
-  } catch {
-    return { keywords: [], ocr: true, source: "", extension: "", path_contains: "", search_mode: "exact", fuzzy_distance: 1, proximity_window: 0, keyword_packs: [] };
-  }
-}
-
-function setSearchDraft(payload) {
-  if (!storageAvailable()) return;
-  window.localStorage.setItem(searchStorageKey(), JSON.stringify(payload));
-}
-
-function getSearchHistory() {
-  if (!storageAvailable()) return [];
-  try {
-    const payload = JSON.parse(window.localStorage.getItem(searchHistoryStorageKey()) || "[]");
-    return Array.isArray(payload) ? payload.filter((item) => Array.isArray(item.keywords)) : [];
-  } catch {
-    return [];
-  }
-}
-
-function rememberSearchKeywords(entry) {
-  if (!storageAvailable()) return;
-  const normalized = {
-    keywords: (entry.keywords || []).map(String).filter(Boolean),
-    source: entry.source || "",
-    extension: entry.extension || "",
-    path_contains: entry.path_contains || "",
-    updated_at: new Date().toISOString(),
-  };
-  const signature = JSON.stringify({
-    keywords: normalized.keywords.map((item) => item.toLowerCase()),
-    source: normalized.source,
-    extension: normalized.extension,
-    path_contains: normalized.path_contains,
-  });
-  const history = getSearchHistory().filter((item) => {
-    const itemSignature = JSON.stringify({
-      keywords: (item.keywords || []).map((keyword) => String(keyword).toLowerCase()),
-      source: item.source || "",
-      extension: item.extension || "",
-      path_contains: item.path_contains || "",
-    });
-    return itemSignature !== signature;
-  });
-  window.localStorage.setItem(searchHistoryStorageKey(), JSON.stringify([normalized, ...history].slice(0, 12)));
-}
-
-function getCaseDbKeywordHistory() {
-  if (!storageAvailable()) return [];
-  try {
-    const payload = JSON.parse(window.localStorage.getItem(caseDbHistoryStorageKey()) || "[]");
-    return Array.isArray(payload) ? payload.filter((item) => Array.isArray(item.keywords)) : [];
-  } catch {
-    return [];
-  }
-}
-
-function rememberCaseDbKeywords(entry) {
-  if (!storageAvailable()) return;
-  const normalized = {
-    keywords: (entry.keywords || []).map(String).filter(Boolean),
-    source: (entry.sources || [])[0] || "",
-    review_status: entry.review_status || "",
-    verification_status: entry.verification_status || "",
-    updated_at: new Date().toISOString(),
-  };
-  const signature = JSON.stringify({
-    keywords: normalized.keywords.map((item) => item.toLowerCase()),
-    source: normalized.source,
-    review_status: normalized.review_status,
-    verification_status: normalized.verification_status,
-  });
-  const history = getCaseDbKeywordHistory().filter((item) => {
-    const itemSignature = JSON.stringify({
-      keywords: (item.keywords || []).map((keyword) => String(keyword).toLowerCase()),
-      source: item.source || "",
-      review_status: item.review_status || "",
-      verification_status: item.verification_status || "",
-    });
-    return itemSignature !== signature;
-  });
-  window.localStorage.setItem(caseDbHistoryStorageKey(), JSON.stringify([normalized, ...history].slice(0, 12)));
 }
 
 runForm.addEventListener("submit", async (event) => {
@@ -6861,6 +6434,7 @@ async function removeSelectedRun() {
     await api(`/api/runs/${runId}`, { method: "DELETE" });
     selectedRunId = null;
     selectedRun = null;
+    document.body.classList.remove("analysis-active");
     persistWorkbenchSession({ selectedRunId: null, activeTab: "summary", activeViewGroup: "triage" });
     detailPanel.innerHTML = '<p class="empty-state">Run removed from the local catalog. Output files were not deleted.</p>';
     await loadRuns();

@@ -76,6 +76,67 @@ class RapidTriageSchemaValidationTests(unittest.TestCase):
             validate(json.loads(extract_path.read_text(encoding="utf-8")), load_schema("extract.schema.json"))
             validate(json.loads(case_path.read_text(encoding="utf-8")), load_schema("case.schema.json"))
 
+    def test_case_schema_accepts_excluded_review_status(self) -> None:
+        schema = load_schema("case.schema.json")
+        payload = {
+            "command": "case",
+            "case_id": "schema-case",
+            "title": "Schema Case",
+            "generated_at": "2026-05-11T00:00:00+00:00",
+            "updated_at": "2026-05-11T00:01:00+00:00",
+            "summary": {
+                "bookmark_count": 1,
+                "tagged_bookmark_count": 0,
+                "report_item_count": 0,
+                "review_status_counts": {"excluded": 1},
+                "tag_counts": {},
+                "source_command_counts": {"files": 1},
+                "review_revision_count": 1,
+            },
+            "bookmarks": [
+                {
+                    "bookmark_id": "bm-1",
+                    "reference": {
+                        "command": "files",
+                        "file": "/case/files.json",
+                        "pointer": "/candidates/0",
+                        "root": None,
+                        "stable_key": "bookmark-files-0",
+                    },
+                    "snapshot": {
+                        "path": "/case/evidence.txt",
+                        "hash": None,
+                        "timestamp": None,
+                        "artifact_key": None,
+                        "summary": "evidence.txt",
+                    },
+                    "tags": [],
+                    "note": "Excluded as noise after source review.",
+                    "summary": "evidence.txt",
+                    "review": {
+                        "status": "excluded",
+                        "include_in_report": False,
+                        "reviewed_at": "2026-05-11T00:01:00+00:00",
+                    },
+                    "review_history": [
+                        {
+                            "action": "created",
+                            "at": "2026-05-11T00:01:00+00:00",
+                            "status": "excluded",
+                            "include_in_report": False,
+                            "tags": [],
+                            "note": "Excluded as noise after source review.",
+                            "changed_fields": ["created"],
+                        }
+                    ],
+                    "created_at": "2026-05-11T00:01:00+00:00",
+                    "updated_at": "2026-05-11T00:01:00+00:00",
+                }
+            ],
+        }
+
+        validate(payload, schema)
+
     def test_run_summaries_validate_for_all_modes(self) -> None:
         schema = load_schema("run-summary.schema.json")
         for mode in ("seizure", "fraud", "hacking", "recovery"):

@@ -241,6 +241,26 @@ class RapidTriageCaseCommandTests(unittest.TestCase):
             self.assertIn("tags", updated_second["review_history"][1]["changed_fields"])
             self.assertEqual(payload["summary"]["review_revision_count"], 3)
 
+            exit_code, output = run_cli(
+                "case",
+                str(case_json),
+                "--source",
+                str(timeline_json),
+                "--pointer",
+                "/events/0",
+                "--bookmark-id",
+                "bm-timeline-1",
+                "--review-status",
+                "excluded",
+            )
+
+            self.assertEqual(exit_code, 0, output)
+            payload = json.loads(case_json.read_text(encoding="utf-8"))
+            excluded_first = payload["bookmarks"][0]
+            self.assertEqual(excluded_first["review"]["status"], "excluded")
+            self.assertEqual(excluded_first["review_history"][-1]["status"], "excluded")
+            self.assertIn("excluded", payload["summary"]["review_status_counts"])
+
             exit_code, show_output = run_cli("case", str(case_json), "--show")
 
             self.assertEqual(exit_code, 0, show_output)

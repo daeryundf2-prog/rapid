@@ -128,7 +128,8 @@
                   "unreviewed",
                   "relevant",
                   "needs-review",
-                  "not-relevant"
+                  "not-relevant",
+                  "excluded"
                 ]
               },
               "include_in_report": {
@@ -173,7 +174,8 @@
                     "unreviewed",
                     "relevant",
                     "needs-review",
-                    "not-relevant"
+                    "not-relevant",
+                    "excluded"
                   ]
                 },
                 "include_in_report": {

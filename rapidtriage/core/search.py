@@ -72,13 +72,15 @@ def run_unified_search(
         raise SearchError("run summary does not include outputs")
 
     matches: list[dict[str, object]] = []
+    document_errors: list[dict[str, str]] = []
     ocr_errors: list[dict[str, str]] = []
     search_options = {
         "search_mode": normalized_search_mode,
         "fuzzy_distance": normalized_fuzzy_distance,
         "proximity_window": normalized_proximity_window,
     }
-    matches.extend(search_docs(outputs, normalized, limit=limit, search_options=search_options))
+    document_matches, document_errors = search_docs(outputs, normalized, limit=limit, search_options=search_options)
+    matches.extend(document_matches)
     matches.extend(search_files(outputs, normalized, limit=limit, search_options=search_options))
     matches.extend(search_artifacts(outputs, normalized, limit=limit, search_options=search_options))
     matches.extend(search_indicators(outputs, normalized, limit=limit, search_options=search_options))
@@ -147,18 +149,22 @@ def run_unified_search(
             "path_contains": normalized_path_fragment,
             **search_options,
         },
-        "summary": {
-            "match_count": len(matches),
-            "source_counts": source_counts,
-            "keyword_counts": keyword_counts,
-            "ocr_error_count": len(ocr_errors),
-            "commercial_gap_ids": [SEARCH_FEATURE_GAP_ID],
-            "commercial_grade_ready": False,
-        },
-        "matches": matches,
-        "ocr": {
-            "enabled": include_ocr,
-            "errors": ocr_errors,
+            "summary": {
+                "match_count": len(matches),
+                "source_counts": source_counts,
+                "keyword_counts": keyword_counts,
+                "document_error_count": len(document_errors),
+                "ocr_error_count": len(ocr_errors),
+                "commercial_gap_ids": [SEARCH_FEATURE_GAP_ID],
+                "commercial_grade_ready": False,
+            },
+            "matches": matches,
+            "documents": {
+                "errors": document_errors,
+            },
+            "ocr": {
+                "enabled": include_ocr,
+                "errors": ocr_errors,
         },
         "advanced_search_profile": advanced_profile,
         "advanced_search_query_hit_manifest": query_hit_manifest,
@@ -677,11 +683,12 @@ def search_docs(
     *,
     limit: int,
     search_options: Mapping[str, object] | None = None,
-) -> list[dict[str, object]]:
+) -> tuple[list[dict[str, object]], list[dict[str, str]]]:
     payload = read_json_output(outputs, "docs")
     if not payload:
-        return []
+        return [], []
     matches = []
+    errors: list[dict[str, str]] = []
     result_index_by_path = {
         str(item.get("path")): index
         for index, item in enumerate(payload.get("results", []))
@@ -694,7 +701,8 @@ def search_docs(
         kind = str(candidate.get("kind", ""))
         try:
             text = extract_text(path, kind)
-        except Exception:
+        except Exception as exc:
+            errors.append({"path": str(path), "kind": kind, "error": f"{type(exc).__name__}: {exc}"})
             text = ""
         matched = match_keywords(text, keywords, search_options=search_options)
         if not matched:
@@ -714,7 +722,7 @@ def search_docs(
         )
         if limit and len(matches) >= limit:
             break
-    return matches
+    return matches, errors
 
 
 def search_files(
@@ -1299,6 +1307,8 @@ def filter_matches(
     extensions: set[str],
     path_fragment: str,
 ) -> list[dict[str, object]]:
+    if not sources and not extensions and not path_fragment:
+        return [dict(match) for match in matches]
     filtered: list[dict[str, object]] = []
     for match in matches:
         source = str(match.get("source") or "").lower()
