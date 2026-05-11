@@ -117,6 +117,7 @@ from .core.timeline import TimelineError, build_timeline_report, run_timeline
 from .core.timeline_export import TimelineExportError, build_unified_timeline_export
 from .core.validation import ValidationError, build_validation_package
 from .core.validation_diff_runners import build_validation_diff_runner_matrix, write_validation_diff_runner_matrix
+from .core.validation_final_qc import build_final_qc_execution_report, write_final_qc_execution_report
 from .core.vsc import VscCompareError, compare_vsc_snapshots, discover_vsc_snapshot_roots, extract_vsc_changes
 from .core.worker import RustWorkerClient, WorkerError
 from .core.forensic_validation_plan import (
@@ -1240,6 +1241,19 @@ def build_parser() -> argparse.ArgumentParser:
     )
     validation_diff_runners.add_argument("--output", help="Optional JSON output path")
     validation_diff_runners.add_argument("--json", action="store_true", help="Print machine-readable JSON")
+
+    final_qc_report = sub.add_parser(
+        "final-qc-report",
+        help="Build final QC execution report for items #81-#85",
+        description="Generate the final QC wrapper report from validation package, runner matrix, performance runs, browser traces, reviewer signoff, and blocker ledger requirements",
+    )
+    final_qc_report.add_argument("--validation-package", help="Validation package JSON to hash into the final QC report")
+    final_qc_report.add_argument("--runner-matrix", help="Validation diff runner matrix JSON to hash into the final QC report")
+    final_qc_report.add_argument("--performance-run", action="append", help="Performance run JSON/log path; repeatable")
+    final_qc_report.add_argument("--browser-trace", action="append", help="Browser trace/screenshot artifact path; repeatable")
+    final_qc_report.add_argument("--reviewer-signoff", action="append", help="Reviewer signoff document path; repeatable")
+    final_qc_report.add_argument("--output", help="Optional final QC JSON output path")
+    final_qc_report.add_argument("--json", action="store_true", help="Print machine-readable JSON")
 
     commercial_readiness = sub.add_parser(
         "commercial-readiness",
@@ -2615,6 +2629,30 @@ def main(argv=None) -> int:
             )
             if payload.get("output_manifest"):
                 print(f"Saved matrix: {payload['output_manifest']['output']}")
+        return 0
+
+    if args.command == "final-qc-report":
+        payload = build_final_qc_execution_report(
+            validation_package=Path(args.validation_package).expanduser().resolve() if args.validation_package else None,
+            runner_matrix=Path(args.runner_matrix).expanduser().resolve() if args.runner_matrix else None,
+            performance_runs=[Path(path).expanduser().resolve() for path in args.performance_run or []],
+            browser_traces=[Path(path).expanduser().resolve() for path in args.browser_trace or []],
+            reviewer_signoffs=[Path(path).expanduser().resolve() for path in args.reviewer_signoff or []],
+        )
+        if args.output:
+            payload["output_manifest"] = write_final_qc_execution_report(
+                payload,
+                Path(args.output).expanduser().resolve(),
+            )
+        if args.json:
+            print(json.dumps(payload, ensure_ascii=False, indent=2))
+        else:
+            print("RapidTriage final QC execution report")
+            print(f"QC items: {payload['qc_prep_item_numbers']}")
+            print(f"Status: {payload['status']}")
+            print(f"Failed checks: {len(payload['final_qc_checklist']['failed_check_ids'])}")
+            if payload.get("output_manifest"):
+                print(f"Saved report: {payload['output_manifest']['output']}")
         return 0
 
     if args.command == "commercial-readiness":

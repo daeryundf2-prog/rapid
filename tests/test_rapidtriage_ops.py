@@ -98,6 +98,8 @@ class RapidTriageOpsTests(unittest.TestCase):
         self.assertIn("--output-dir", commands["validation"].format_help())
         self.assertIn("validation-diff-runners", commands)
         self.assertIn("--output", commands["validation-diff-runners"].format_help())
+        self.assertIn("final-qc-report", commands)
+        self.assertIn("--reviewer-signoff", commands["final-qc-report"].format_help())
         self.assertIn("commercial-readiness", commands)
         self.assertIn("--strict", commands["commercial-readiness"].format_help())
         self.assertIn("--write-known-answer-template", commands["commercial-readiness"].format_help())
@@ -749,11 +751,17 @@ class RapidTriageOpsTests(unittest.TestCase):
             self.assertIn("#83", payload["parser_false_positive_false_negative_notes"][0]["commercial_gap_ids"])
             runner_matrix = payload["validation_diff_runner_matrix"]
             self.assertEqual(runner_matrix["profile_version"], "validation-diff-runner-matrix-v1")
-            self.assertEqual(runner_matrix["qc_prep_item_numbers"], [76, 77, 78, 79, 80])
-            self.assertEqual(runner_matrix["summary"]["runner_group_count"], 4)
+            self.assertEqual(runner_matrix["qc_prep_item_numbers"], [76, 77, 78, 79, 80, 81])
+            self.assertEqual(runner_matrix["summary"]["runner_group_count"], 5)
             self.assertEqual(len(runner_matrix["matrix_hash"]), 64)
             self.assertIn("NIST CFReDS", {row["corpus_name"] for row in runner_matrix["public_corpus_registry"]})
             self.assertIn("EvtxECmd", {tool["name"] for group in runner_matrix["runner_groups"] for tool in group["trusted_tools"]})
+            self.assertIn("PECmd", {tool["name"] for group in runner_matrix["runner_groups"] for tool in group["trusted_tools"]})
+            final_qc = payload["final_qc_execution_report"]
+            self.assertEqual(final_qc["profile_version"], "final-qc-execution-report-v1")
+            self.assertEqual(final_qc["qc_prep_item_numbers"], [81, 82, 83, 84, 85])
+            self.assertEqual(len(final_qc["report_hash"]), 64)
+            self.assertIn("validation-package-attached", final_qc["final_qc_checklist"]["failed_check_ids"])
             self.assertEqual(len(payload["parser_false_positive_false_negative_notes"][0]["risk_note_hash"]), 64)
             self.assertEqual(payload["parser_fp_fn_risk_register_profile"]["profile_version"], "parser-fp-fn-risk-register-v1")
             self.assertEqual(len(payload["parser_fp_fn_risk_register_profile"]["register_digest"]), 64)
@@ -923,18 +931,65 @@ class RapidTriageOpsTests(unittest.TestCase):
             self.assertEqual(exit_code, 0)
             payload = json.loads(stdout.getvalue())
             self.assertEqual(payload["profile_version"], "validation-diff-runner-matrix-v1")
-            self.assertEqual(payload["qc_prep_item_numbers"], [76, 77, 78, 79, 80])
+            self.assertEqual(payload["qc_prep_item_numbers"], [76, 77, 78, 79, 80, 81])
             self.assertTrue(output.is_file())
             self.assertEqual(len(payload["matrix_hash"]), 64)
-            self.assertEqual(payload["summary"]["runner_group_count"], 4)
-            self.assertEqual(payload["summary"]["trusted_tool_count"], 10)
+            self.assertEqual(payload["summary"]["runner_group_count"], 5)
+            self.assertEqual(payload["summary"]["trusted_tool_count"], 13)
             self.assertEqual(payload["output_manifest"]["bytes"], output.stat().st_size)
             groups = {group["item_number"]: group for group in payload["runner_groups"]}
             self.assertIn("evtx", groups[77]["artifact_family"])
             self.assertIn("registry", groups[78]["artifact_family"])
             self.assertIn("ntfs", groups[79]["artifact_family"])
             self.assertIn("ese", groups[80]["artifact_family"])
+            self.assertIn("execution-user-activity", groups[81]["artifact_family"])
             self.assertIn("--tool-version", groups[77]["required_cross_tool_metadata"])
+
+    def test_final_qc_report_command_hashes_attached_evidence(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            validation_package = root / "validation.json"
+            runner_matrix = root / "runner.json"
+            performance = root / "performance.json"
+            browser_trace = root / "trace.json"
+            signoff = root / "signoff.md"
+            output = root / "final-qc.json"
+            validation_package.write_text('{"status":"pass"}', encoding="utf-8")
+            runner_matrix.write_text('{"profile_version":"validation-diff-runner-matrix-v1"}', encoding="utf-8")
+            performance.write_text('{"p95":123}', encoding="utf-8")
+            browser_trace.write_text('{"trace":"ok"}', encoding="utf-8")
+            signoff.write_text("# Reviewer signoff\n", encoding="utf-8")
+            stdout = io.StringIO()
+
+            with contextlib.redirect_stdout(stdout):
+                exit_code = main(
+                    [
+                        "final-qc-report",
+                        "--validation-package",
+                        str(validation_package),
+                        "--runner-matrix",
+                        str(runner_matrix),
+                        "--performance-run",
+                        str(performance),
+                        "--browser-trace",
+                        str(browser_trace),
+                        "--reviewer-signoff",
+                        str(signoff),
+                        "--output",
+                        str(output),
+                        "--json",
+                    ]
+                )
+
+            self.assertEqual(exit_code, 0)
+            payload = json.loads(stdout.getvalue())
+            self.assertEqual(payload["profile_version"], "final-qc-execution-report-v1")
+            self.assertEqual(payload["qc_prep_item_numbers"], [81, 82, 83, 84, 85])
+            self.assertTrue(output.is_file())
+            self.assertEqual(len(payload["report_hash"]), 64)
+            self.assertEqual(payload["evidence_inputs"]["validation_package"]["exists"], True)
+            self.assertEqual(payload["final_qc_checklist"]["failed_check_ids"], [])
+            self.assertTrue(payload["final_qc_checklist"]["ready_for_final_qc_review"])
 
     def test_validation_trusted_diffs_promote_legal_validation_gates(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:

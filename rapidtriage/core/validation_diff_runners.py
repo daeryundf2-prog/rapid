@@ -163,6 +163,41 @@ RUNNER_GROUPS: tuple[dict[str, object], ...] = (
             "--backlog-item 10 --backlog-item 11"
         ),
     },
+    {
+        "item_number": 81,
+        "artifact_family": "execution-user-activity",
+        "title": "Execution and user-activity trusted diff runners",
+        "trusted_tools": (
+            {
+                "name": "PECmd",
+                "binary_candidates": ("PECmd", "PECmd.exe"),
+                "reference_name": "pecmd",
+                "output_format": "CSV",
+                "command_template": "PECmd -d <Prefetch-dir> --csv <reference-dir>",
+            },
+            {
+                "name": "JLECmd",
+                "binary_candidates": ("JLECmd", "JLECmd.exe"),
+                "reference_name": "jlecmd",
+                "output_format": "CSV",
+                "command_template": "JLECmd -d <JumpList-dir> --csv <reference-dir>",
+            },
+            {
+                "name": "ShellBagsExplorer",
+                "binary_candidates": ("ShellBagsExplorer", "ShellBagsExplorer.exe", "SBECmd", "SBECmd.exe"),
+                "reference_name": "shellbagsexplorer",
+                "output_format": "CSV export",
+                "command_template": "SBECmd -d <NTUSER-UsrClass-root> --csv <reference-dir>",
+            },
+        ),
+        "rapid_output_hint": "rapidtriage artifacts --kind execution --kind shellbags --kind recent-files --output rapid-user-activity.json",
+        "cross_tool_template": (
+            "rapidtriage cross-tool-validate --rapid-output rapid-user-activity.json "
+            "--reference-output pecmd=<PECmd.csv> --reference-output jlecmd=<JLECmd.csv> "
+            "--reference-output shellbagsexplorer=<ShellBagsExplorer.csv> "
+            "--backlog-item 14 --backlog-item 15 --backlog-item 16 --backlog-item 17"
+        ),
+    },
 )
 
 
@@ -177,7 +212,7 @@ def build_validation_diff_runner_matrix(*, search_path: str | None = None) -> di
     total_tool_count = sum(len(group["trusted_tools"]) for group in runner_groups)
     core = {
         "profile_version": "validation-diff-runner-matrix-v1",
-        "qc_prep_item_numbers": [76, 77, 78, 79, 80],
+        "qc_prep_item_numbers": [76, 77, 78, 79, 80, 81],
         "public_corpus_registry": list(PUBLIC_CORPUS_ROWS),
         "runner_groups": runner_groups,
         "summary": {
