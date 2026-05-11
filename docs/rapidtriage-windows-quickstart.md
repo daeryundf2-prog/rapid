@@ -117,7 +117,7 @@ Before handing a Windows build to another analyst, run the automated smoke test:
 .\scripts\windows\smoke-test-rapidtriage.ps1
 ```
 
-The smoke test installs the package, runs `doctor`, creates and searches the sample case, runs a small benchmark, builds the validation package, checks evidence-support guidance, confirms the web UI returns HTTP 200, and writes `smoke-summary.json` plus `smoke-summary.md`. Outputs are written to:
+The smoke test installs the package, runs `doctor`, creates and searches the sample case, runs a small benchmark, builds the validation package, checks evidence-support guidance, confirms the web UI returns HTTP 200, saves `workbench-smoke-contract.json`, and writes `smoke-summary.json` plus `smoke-summary.md`. Outputs are written to:
 
 ```text
 rapidtriage-windows-smoke

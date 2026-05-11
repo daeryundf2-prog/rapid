@@ -162,8 +162,34 @@ PY
     exit 1
   fi
 
+  "$VENV_PYTHON" - "$WEB_URL" "$SMOKE_DIR/workbench-smoke-contract.json" >/dev/null 2>&1 <<'PY'
+from __future__ import annotations
+
+import json
+import sys
+from pathlib import Path
+from urllib.request import urlopen
+
+url = sys.argv[1].rstrip("/") + "/api/workbench/smoke-contract"
+output = Path(sys.argv[2])
+with urlopen(url, timeout=5) as response:
+    payload = json.loads(response.read().decode("utf-8"))
+    if payload.get("profile_version") != "single-case-workbench-smoke-v1":
+        raise SystemExit(1)
+output.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+PY
+
   kill "$WEB_PID" >/dev/null 2>&1 || true
   trap - EXIT INT TERM
+else
+  checked_python "Writing workbench smoke contract artifact" --output-file "$SMOKE_DIR/workbench-smoke-contract.json" - <<'PY'
+from __future__ import annotations
+
+import json
+from rapidtriage.api.app import build_workbench_smoke_contract
+
+print(json.dumps(build_workbench_smoke_contract(), ensure_ascii=False, indent=2))
+PY
 fi
 
 if [ "$SKIP_WEB" -eq 0 ]; then

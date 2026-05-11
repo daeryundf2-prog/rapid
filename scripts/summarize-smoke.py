@@ -40,6 +40,7 @@ def build_summary(smoke_dir: Path, *, platform_label: str = "", allow_missing_we
         check_validation(smoke_dir),
         check_evidence(smoke_dir),
         check_web(smoke_dir, allow_missing=allow_missing_web),
+        check_workbench_contract(smoke_dir),
     ]
     return {
         "command": "smoke-summary",
@@ -99,6 +100,17 @@ def check_web(smoke_dir: Path, *, allow_missing: bool = False) -> dict[str, Any]
     if not available and allow_missing:
         return {"name": "web", "status": "skip", "detail": "web-index.html skipped by smoke-test option"}
     return check("web", available, f"web-index.html {'present' if available else 'missing'}")
+
+
+def check_workbench_contract(smoke_dir: Path) -> dict[str, Any]:
+    payload = read_json(smoke_dir / "workbench-smoke-contract.json")
+    profile = payload.get("profile_version") if isinstance(payload, dict) else None
+    platforms = payload.get("platform_evidence") if isinstance(payload, dict) else None
+    return check(
+        "workbench-smoke-contract",
+        profile == "single-case-workbench-smoke-v1" and isinstance(platforms, list) and len(platforms) >= 2,
+        f"contract profile: {profile or 'missing'}",
+    )
 
 
 def check(name: str, passed: bool, detail: str) -> dict[str, str]:

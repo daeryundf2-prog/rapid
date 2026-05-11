@@ -3176,14 +3176,55 @@ def build_workbench_smoke_contract() -> dict[str, object]:
             "assertion": "Report view and report export endpoint are reachable after review marking.",
         },
     ]
-    return {
+    platform_evidence = [
+        {
+            "platform": "windows",
+            "script": "scripts/windows/smoke-test-rapidtriage.ps1",
+            "summary_json": "rapidtriage-windows-smoke/smoke-summary.json",
+            "summary_markdown": "rapidtriage-windows-smoke/smoke-summary.md",
+            "contract_json": "rapidtriage-windows-smoke/workbench-smoke-contract.json",
+            "required_fresh_host": "Fresh Windows 11 workstation or VM",
+            "status": "external-evidence-required",
+        },
+        {
+            "platform": "macos",
+            "script": "scripts/smoke-test-rapidtriage.sh --output-dir rapidtriage-macos-smoke",
+            "summary_json": "rapidtriage-macos-smoke/smoke-summary.json",
+            "summary_markdown": "rapidtriage-macos-smoke/smoke-summary.md",
+            "contract_json": "rapidtriage-macos-smoke/workbench-smoke-contract.json",
+            "required_fresh_host": "Fresh macOS workstation or VM",
+            "status": "external-evidence-required",
+        },
+    ]
+    payload = {
         "command": "workbench.smoke-contract",
         "profile_version": WORKBENCH_SMOKE_CONTRACT_VERSION,
+        "qc_prep_item": 5,
         "immediate_queue_item": 7,
         "status": "implemented-browser-e2e-evidence-required",
         "browser_test_ready": True,
         "selectors": WORKBENCH_SMOKE_SELECTORS,
         "required_steps": required_steps,
+        "platform_evidence": platform_evidence,
+        "fresh_gui_launch_evidence": {
+            "profile_version": "fresh-gui-launch-smoke-evidence-v1",
+            "required_platforms": ["windows", "macos"],
+            "required_outputs": [
+                "smoke-summary.json",
+                "smoke-summary.md",
+                "workbench-smoke-contract.json",
+                "web-index.html or browser screenshot",
+                "web-server.log",
+            ],
+            "required_assertions": [
+                "web server returns HTTP 200",
+                "workbench shell selector is present",
+                "sample or imported run reaches summary",
+                "source viewer and review selectors are present",
+                "report/export path is reachable",
+            ],
+            "commercial_claim_allowed_without_external_runs": False,
+        },
         "api_routes": {
             "open_workbench": "/",
             "health": "/api/health",
@@ -3202,6 +3243,8 @@ def build_workbench_smoke_contract() -> dict[str, object]:
             "source_viewer_contract": True,
             "review_mark_contract": True,
             "report_export_contract": True,
+            "platform_smoke_scripts": True,
+            "smoke_contract_artifact": True,
             "browser_e2e_attached": False,
         },
         "functional_priority_profile": {
@@ -3220,6 +3263,7 @@ def build_workbench_smoke_contract() -> dict[str, object]:
                 "playwright-browser-smoke-log-not-attached",
                 "screenshot-evidence-not-attached",
                 "fresh-windows-browser-run-not-attached",
+                "fresh-macos-browser-run-not-attached",
             ],
         },
         "commercial_grade_ready": False,
@@ -3227,8 +3271,11 @@ def build_workbench_smoke_contract() -> dict[str, object]:
             "browser-e2e-smoke-log-not-attached",
             "visual-regression-screenshot-not-attached",
             "fresh-windows-11-browser-smoke-required",
+            "fresh-macos-browser-smoke-required",
         ],
     }
+    payload["manifest_sha256"] = stable_payload_sha256(payload)
+    return payload
 
 
 def build_workbench_large_result_evidence(*, record_count: int) -> dict[str, object]:

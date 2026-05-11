@@ -4207,6 +4207,15 @@ class RapidTriageOpsTests(unittest.TestCase):
                 encoding="utf-8",
             )
             (smoke_dir / "web-index.html").write_text("<!doctype html>", encoding="utf-8")
+            (smoke_dir / "workbench-smoke-contract.json").write_text(
+                json.dumps(
+                    {
+                        "profile_version": "single-case-workbench-smoke-v1",
+                        "platform_evidence": [{"platform": "windows"}, {"platform": "macos"}],
+                    }
+                ),
+                encoding="utf-8",
+            )
 
             result = subprocess.run(
                 ["python", "scripts/summarize-smoke.py", str(smoke_dir)],
@@ -4220,6 +4229,8 @@ class RapidTriageOpsTests(unittest.TestCase):
             summary = json.loads((smoke_dir / "smoke-summary.json").read_text(encoding="utf-8"))
             self.assertTrue(summary["passed"])
             self.assertIn(summary["platform"], {"macos-linux", "windows"})
+            check_names = {row["name"] for row in summary["checks"]}
+            self.assertIn("workbench-smoke-contract", check_names)
             self.assertTrue((smoke_dir / "smoke-summary.md").is_file())
 
     def test_release_evidence_script_reports_pass_for_complete_evidence(self) -> None:

@@ -107,6 +107,11 @@ if (!$SkipWeb) {
                 if ($response.StatusCode -eq 200) {
                     $ready = $true
                     $response.Content | Out-File -FilePath (Join-Path $SmokeDir "web-index.html") -Encoding utf8
+                    $contract = Invoke-WebRequest -Uri "$WebUrl/api/workbench/smoke-contract" -UseBasicParsing -TimeoutSec 5
+                    if ($contract.StatusCode -ne 200) {
+                        throw "Workbench smoke contract did not respond with HTTP 200."
+                    }
+                    $contract.Content | Out-File -FilePath (Join-Path $SmokeDir "workbench-smoke-contract.json") -Encoding utf8
                     break
                 }
             } catch {
@@ -121,6 +126,8 @@ if (!$SkipWeb) {
         Receive-Job $job -ErrorAction SilentlyContinue | Out-File -FilePath (Join-Path $SmokeDir "web-server.log") -Encoding utf8
         Remove-Job $job -Force -ErrorAction SilentlyContinue | Out-Null
     }
+} else {
+    Invoke-CheckedPython "Writing workbench smoke contract artifact" @("-c", "import json; from rapidtriage.api.app import build_workbench_smoke_contract; print(json.dumps(build_workbench_smoke_contract(), ensure_ascii=False, indent=2))") (Join-Path $SmokeDir "workbench-smoke-contract.json")
 }
 
 if ($SkipWeb) {
