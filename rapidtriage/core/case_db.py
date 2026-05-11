@@ -15,6 +15,7 @@ from .docs import extract_text
 from .forensic_accuracy import build_accuracy_gate
 from .review_reporting_controls import build_review_reporting_contract
 from .search import SearchError, load_run_summary
+from .submission_qc_controls import build_submission_qc_contract
 from .submission import compute_hashes
 
 
@@ -1186,8 +1187,18 @@ class CaseDatabase:
             citation_index=citation_index,
             history_rows=history_rows,
         )
+        submission_qc_contract = build_submission_qc_contract(
+            court_exhibit_package=court_exhibit_package,
+            custody_workflow=custody_workflow,
+            acquisition_metadata=acquisition_metadata,
+            audit_integrity=audit_integrity,
+            report_generation_package=report_generation_package,
+            items=items,
+        )
         summary["review_reporting_qc_gap_ids"] = ["#61", "#62", "#63", "#64", "#65"]
         summary["review_reporting_qc_contract_hash"] = review_reporting_qc_contract["contract_hash"]
+        summary["submission_qc_gap_ids"] = ["#66", "#67", "#68", "#69", "#70"]
+        summary["submission_qc_contract_hash"] = submission_qc_contract["contract_hash"]
         return {
             "command": "case-db-report-export",
             "generated_at": now_iso(),
@@ -1206,6 +1217,7 @@ class CaseDatabase:
             "report_citation_manager": build_report_citation_manager(citation_index),
             "evidence_selection_version_history": build_evidence_selection_version_history(items),
             "review_reporting_qc_contract": review_reporting_qc_contract,
+            "submission_qc_contract": submission_qc_contract,
             "custody_workflow": custody_workflow,
             "acquisition_hash_workflow": acquisition_hash_workflow,
             "audit_integrity": audit_integrity,
