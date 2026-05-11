@@ -4457,6 +4457,15 @@ class RapidTriageWindowsArtifactsCollectorTests(unittest.TestCase):
             self.assertEqual(updater_value["details"]["allocation_status"], "free-or-deleted-candidate")
             self.assertEqual(updater_value["details"]["cell_scan_method"], "hbin-walk")
             self.assertGreater(updater_value["details"]["hbin_offset"], 0)
+            updater_locator = updater_value["details"]["source_viewer_locator"]
+            self.assertEqual(updater_locator["profile_version"], "registry-record-source-viewer-locator-v1")
+            self.assertEqual(updater_locator["qc_prep_item"], 8)
+            self.assertEqual(updater_locator["viewer"], "registry-record")
+            self.assertEqual(updater_locator["value_name"], "SecurityUpdater")
+            self.assertEqual(updater_locator["cell_offset"], updater_value["details"]["cell_offset"])
+            self.assertTrue(updater_locator["deleted_or_recovered_candidate"])
+            self.assertEqual(len(updater_locator["source_sha256"]), 64)
+            self.assertIn("LOG1/LOG2 transaction replay status", updater_locator["validation_warning"])
             self.assertIn("deleted-or-free-cell-candidate", updater_value["details"]["risk_flags"])
             key_tree_nodes = [
                 artifact for artifact in registry_provider["artifacts"] if artifact["artifact_type"] == "registry-key-tree-node"
@@ -4529,6 +4538,10 @@ class RapidTriageWindowsArtifactsCollectorTests(unittest.TestCase):
                 )
             )
             run_key = next(artifact for artifact in registry_provider["artifacts"] if artifact["artifact_type"] == "registry-run-key")
+            run_key_locator = run_key["details"]["source_viewer_locator"]
+            self.assertEqual(run_key_locator["profile_version"], "registry-record-source-viewer-locator-v1")
+            self.assertEqual(run_key_locator["key_path"], run_key["details"]["key"])
+            self.assertEqual(run_key_locator["transaction_replay_status"], "unknown")
             self.assertIn("SecurityUpdater", run_key["details"]["values"])
             self.assertEqual(run_key["details"]["persistence_values"][0]["value_name"], "SecurityUpdater")
             self.assertIn("suspicious-value:appdata", run_key["details"]["risk_flags"])

@@ -472,6 +472,22 @@ def build_registry_hive_cell_record(
             "source_path": str(path.resolve()),
             "source_format": "registry-hive",
             "source_hashes": dict(source_hashes),
+            "source_viewer_locator": registry_record_source_viewer_locator(
+                source_path=str(path.resolve()),
+                source_hashes=source_hashes,
+                hive_name=path.name,
+                hive_hint=hive_hint_from_path(path),
+                key_path="",
+                value_name=name if candidate.get("cell_kind") == "value" else "",
+                cell_offset=candidate.get("cell_offset", 0),
+                cell_relative_offset=candidate.get("cell_relative_offset", 0),
+                hbin_offset=candidate.get("hbin_offset", 0),
+                allocation_status=candidate.get("allocation_status", ""),
+                transaction_log_evidence=metadata.get("transaction_log_evidence")
+                if isinstance(metadata.get("transaction_log_evidence"), Mapping)
+                else {},
+                deleted_or_recovered=bool(candidate.get("allocation_status") == "free-or-deleted-candidate"),
+            ),
             "hive_name": path.name,
             "hive_hint": hive_hint_from_path(path),
             "parser_confidence": 0.58 if metadata.get("regf_valid") else 0.25,
@@ -535,6 +551,22 @@ def build_registry_deleted_cell_record(
             "source_path": str(path.resolve()),
             "source_format": "registry-hive",
             "source_hashes": dict(source_hashes),
+            "source_viewer_locator": registry_record_source_viewer_locator(
+                source_path=str(path.resolve()),
+                source_hashes=source_hashes,
+                hive_name=path.name,
+                hive_hint=hive_hint_from_path(path),
+                key_path="",
+                value_name=name if candidate.get("cell_kind") == "value" else "",
+                cell_offset=candidate.get("cell_offset", 0),
+                cell_relative_offset=candidate.get("cell_relative_offset", 0),
+                hbin_offset=candidate.get("hbin_offset", 0),
+                allocation_status=candidate.get("allocation_status", ""),
+                transaction_log_evidence=metadata.get("transaction_log_evidence")
+                if isinstance(metadata.get("transaction_log_evidence"), Mapping)
+                else {},
+                deleted_or_recovered=True,
+            ),
             "hive_name": path.name,
             "hive_hint": hive_hint_from_path(path),
             "parser_confidence": 0.5 if metadata.get("regf_valid") else 0.2,
@@ -567,6 +599,65 @@ def build_registry_deleted_cell_record(
             "raw_preview": f"deleted/free {candidate.get('cell_kind', 'cell')} {name}".strip(),
         },
     )
+
+
+def registry_record_source_viewer_locator(
+    *,
+    source_path: str,
+    source_hashes: Mapping[str, str],
+    hive_name: str,
+    hive_hint: str,
+    key_path: str,
+    value_name: str = "",
+    cell_offset: object = 0,
+    cell_relative_offset: object = 0,
+    hbin_offset: object = 0,
+    allocation_status: object = "",
+    transaction_log_evidence: Mapping[str, object] | None = None,
+    deleted_or_recovered: bool = False,
+) -> dict[str, object]:
+    transaction_profile = registry_transaction_replay_profile(transaction_log_evidence or {})
+    cell_offset_int = int(cell_offset or 0)
+    validation_warnings = [
+        "validate registry locator with RECmd/Registry Explorer diff before report use",
+        "LOG1/LOG2 transaction replay status must be reviewed before final interpretation",
+    ]
+    if deleted_or_recovered or str(allocation_status) == "free-or-deleted-candidate":
+        validation_warnings.append("deleted/free cell candidates require allocator and known-answer validation")
+    return {
+        "profile_version": "registry-record-source-viewer-locator-v1",
+        "qc_prep_item": 8,
+        "viewer": "registry-record",
+        "source_path": source_path,
+        "source_sha256": str(source_hashes.get("sha256") or ""),
+        "hive_name": hive_name,
+        "hive_hint": hive_hint,
+        "key_path": key_path,
+        "value_name": value_name,
+        "cell_offset": cell_offset_int,
+        "cell_offset_hex": f"0x{cell_offset_int:x}" if cell_offset_int else "",
+        "cell_relative_offset": int(cell_relative_offset or 0),
+        "hbin_offset": int(hbin_offset or 0),
+        "allocation_status": str(allocation_status or ""),
+        "deleted_or_recovered_candidate": deleted_or_recovered or str(allocation_status) == "free-or-deleted-candidate",
+        "source_hash_available": bool(source_hashes.get("sha256")),
+        "transaction_replay_status": transaction_profile.get("transaction_log_status", "not-present"),
+        "transaction_replay_applied": bool(transaction_profile.get("transaction_log_replay_applied")),
+        "validation_warning": " | ".join(validation_warnings),
+        "required_before_report": [
+            "open registry source viewer",
+            "confirm hive/key/value/cell offset",
+            "verify hive source hash",
+            "review transaction replay status",
+            "attach trusted registry-parser diff for report-grade claims",
+        ],
+        "commercial_grade_ready": False,
+        "commercial_grade_blockers": [
+            "registry-key-tree-cross-tool-diff-required",
+            "transaction-log-replay-or-second-parser-diff-required",
+            "registry-deleted-cell-cross-tool-diff-required",
+        ],
+    }
 
 
 def build_registry_key_tree_records(
@@ -686,6 +777,20 @@ def build_registry_key_tree_records(
                 "source_path": str(path.resolve()),
                 "source_format": "registry-hive",
                 "source_hashes": dict(source_hashes),
+                "source_viewer_locator": registry_record_source_viewer_locator(
+                    source_path=str(path.resolve()),
+                    source_hashes=source_hashes,
+                    hive_name=path.name,
+                    hive_hint=hive_hint_from_path(path),
+                    key_path=f"{hive_hint_from_path(path)}\\{key_path}" if key_path else hive_hint_from_path(path),
+                    cell_offset=key_node.get("cell_offset", 0),
+                    cell_relative_offset=key_node.get("cell_relative_offset", 0),
+                    hbin_offset=key_node.get("hbin_offset", 0),
+                    allocation_status=allocation_status,
+                    transaction_log_evidence=metadata.get("transaction_log_evidence")
+                    if isinstance(metadata.get("transaction_log_evidence"), Mapping)
+                    else {},
+                ),
                 "hive_name": path.name,
                 "hive_hint": hive_hint_from_path(path),
                 "parser_confidence": registry_key_tree_confidence(key_node, path_confidence, bool(metadata.get("regf_valid"))),
@@ -910,6 +1015,19 @@ def build_registry_key_recovery_records(
                 "source_path": str(path.resolve()),
                 "source_format": "registry-hive",
                 "source_hashes": dict(source_hashes),
+                "source_viewer_locator": registry_record_source_viewer_locator(
+                    source_path=str(path.resolve()),
+                    source_hashes=source_hashes,
+                    hive_name=path.name,
+                    hive_hint=hive_hint_from_path(path),
+                    key_path=recovered_key_path,
+                    cell_offset=candidate.get("cell_offset", 0),
+                    cell_relative_offset=candidate.get("cell_relative_offset", 0),
+                    hbin_offset=candidate.get("hbin_offset", 0),
+                    allocation_status=candidate.get("allocation_status", ""),
+                    transaction_log_evidence=transaction_log_evidence,
+                    deleted_or_recovered=True,
+                ),
                 "hive_name": path.name,
                 "hive_hint": hive_hint_from_path(path),
                 "parser_confidence": registry_key_tree_confidence(candidate, path_confidence, bool(metadata.get("regf_valid"))),
@@ -1116,6 +1234,20 @@ def build_registry_value_recovery_records(
                 "source_path": str(path.resolve()),
                 "source_format": "registry-hive",
                 "source_hashes": dict(source_hashes),
+                "source_viewer_locator": registry_record_source_viewer_locator(
+                    source_path=str(path.resolve()),
+                    source_hashes=source_hashes,
+                    hive_name=path.name,
+                    hive_hint=hive_hint_from_path(path),
+                    key_path=parent_path,
+                    value_name=str(candidate.get("name") or ""),
+                    cell_offset=candidate.get("cell_offset", 0),
+                    cell_relative_offset=candidate.get("cell_relative_offset", 0),
+                    hbin_offset=candidate.get("hbin_offset", 0),
+                    allocation_status=candidate.get("allocation_status", ""),
+                    transaction_log_evidence=transaction_log_evidence,
+                    deleted_or_recovered=True,
+                ),
                 "hive_name": path.name,
                 "hive_hint": hive_hint_from_path(path),
                 "parser_confidence": 0.54 if metadata.get("regf_valid") else 0.22,
@@ -2099,6 +2231,7 @@ def build_registry_record(
     values: dict[str, str],
     source_hashes: Mapping[str, str] | None = None,
 ) -> ArtifactRecord:
+    resolved_hashes = dict(source_hashes or file_hashes(path))
     lowered_key = key.lower()
     artifact_type = "registry-key"
     if "usb" in lowered_key or "usbstor" in lowered_key:
@@ -2120,7 +2253,17 @@ def build_registry_record(
             "reportability": "triage",
             "source_path": str(path.resolve()),
             "source_format": "reg",
-            "source_hashes": dict(source_hashes or file_hashes(path)),
+            "source_hashes": resolved_hashes,
+            "source_viewer_locator": registry_record_source_viewer_locator(
+                source_path=str(path.resolve()),
+                source_hashes=resolved_hashes,
+                hive_name="",
+                hive_hint=key.split("\\", 1)[0],
+                key_path=key,
+                cell_offset=0,
+                allocation_status="exported-reg-key",
+                transaction_log_evidence={},
+            ),
             "key": key,
             "hive_hint": key.split("\\", 1)[0],
             "value_count": len(values),
