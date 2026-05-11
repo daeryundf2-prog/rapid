@@ -320,6 +320,12 @@ const SEARCH_SOURCE_VERIFICATION_CONTRACT = {
   required_row_controls: ["view-review", "open-source", "pin-compare", "mark-review"],
   report_rule: "search-hit-is-a-lead-until-source-viewer-citation-and-hash-are-checked",
 };
+const SEARCH_RESULT_SOURCE_ACTION_CONTRACT = {
+  profile_version: "search-result-source-viewer-actions-v1",
+  qc_prep_item: 6,
+  required_row_controls: ["open-source-viewer", "open-source-file", "search-inside-source", "pin-compare", "save-review"],
+  report_rule: "viewer-open-and-review-save-before-report",
+};
 const CURRENT_FILE_SEARCH_CONTRACT = {
   profile_version: "current-file-search-ui-contract-v1",
   checklist_item: 17,
@@ -4336,6 +4342,9 @@ function bookmarkContextForMatch(match) {
 }
 
 function reviewActionButtons(match, searchResultIndex = null) {
+  if (match.source_viewer_action_profile?.profile_version) {
+    return renderSearchResultSourceActionStrip(match, searchResultIndex);
+  }
   const context = bookmarkContextForMatch(match);
   const items = [];
   if (match.path) {
@@ -4347,6 +4356,45 @@ function reviewActionButtons(match, searchResultIndex = null) {
     items.push(bookmarkButton(context.source, context.pointer, context.note || context.title));
   }
   return items.join("");
+}
+
+function renderSearchResultSourceActionStrip(match, searchResultIndex = null) {
+  const profile = match.source_viewer_action_profile || {};
+  const context = bookmarkContextForMatch(match);
+  const enabledCount = (profile.actions || []).filter((action) => action.enabled !== false).length;
+  return `
+    <div
+      class="search-result-source-actions"
+      data-testid="search-result-source-actions"
+      data-source-action-contract="${escapeHtml(profile.profile_version || SEARCH_RESULT_SOURCE_ACTION_CONTRACT.profile_version)}"
+      data-qc-prep-item="${escapeHtml(profile.qc_prep_item || SEARCH_RESULT_SOURCE_ACTION_CONTRACT.qc_prep_item)}"
+    >
+      ${(profile.actions || []).map((action) => renderSearchResultSourceActionControl(action, match, context, searchResultIndex)).join("")}
+      <small>${escapeHtml(enabledCount)} action(s) · ${profile.ready_for_report_workflow ? "review-ready" : "needs locator"}</small>
+    </div>
+  `;
+}
+
+function renderSearchResultSourceActionControl(action, match, context, searchResultIndex = null) {
+  if (!action?.id || action.enabled === false) {
+    return "";
+  }
+  if (action.id === "open-source-viewer") {
+    return viewSourceButton(match, context, searchResultIndex);
+  }
+  if (action.id === "open-source-file") {
+    return sourceFileLink(match);
+  }
+  if (action.id === "search-inside-source") {
+    return `<button class="icon-action subtle" type="button" data-view-source-path="${escapeHtml(match.path || "")}" data-review-context="${escapeHtml(JSON.stringify(context || {}))}" data-search-result-index="${escapeHtml(searchResultIndex ?? "")}">Search inside</button>`;
+  }
+  if (action.id === "pin-compare") {
+    return compareButton(compareItemFromMatch(match, context));
+  }
+  if (action.id === "save-review" && context) {
+    return bookmarkButton(context.source, context.pointer, context.note || context.title);
+  }
+  return "";
 }
 
 function compareButton(item) {

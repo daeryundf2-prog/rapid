@@ -995,6 +995,31 @@ button:disabled {
   overflow-wrap: anywhere;
 }
 
+.search-result-source-actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(92px, 1fr));
+  gap: 6px;
+  align-items: stretch;
+}
+
+.search-result-source-actions .icon-action,
+.search-result-source-actions .mini-link {
+  justify-content: center;
+  width: 100%;
+  min-height: 32px;
+  text-align: center;
+}
+
+.search-result-source-actions .subtle {
+  border-style: dashed;
+}
+
+.search-result-source-actions small {
+  grid-column: 1 / -1;
+  color: var(--muted);
+  font-size: 0.72rem;
+}
+
 .current-file-search-profile {
   display: grid;
   gap: 8px;

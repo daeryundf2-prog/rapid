@@ -34,7 +34,7 @@ Before formal QC, a Windows 11 E01 single-case workflow should let an analyst:
 
 ## Phase 2: Source Verification And Viewer Locators
 
-6. Connect search-result rows to source viewer actions in the GUI.
+6. Connect search-result rows to source viewer actions in the GUI. Current implementation adds `search-result-source-viewer-actions-v1` per search hit, a summary action contract, GUI action strips with `View / review`, `Open source`, `Search inside`, `Pin compare`, and `Mark`, plus tests that verify the API/DOM contract; remaining QC still requires browser E2E evidence that these controls open the viewer, save review state, and return to the same virtualized row under a large result set.
 7. Add EVTX record locator with file path, record ID, channel, provider, event ID, record offset where available, source hash, and validation warning.
 8. Add Registry key/value/cell locator with hive path, key path, value name, cell offset, allocation/deleted status, source hash, and transaction replay status.
 9. Add MFT/USN record locator with FRN, parent FRN, sequence, USN, reason flags, path confidence, and source citation.

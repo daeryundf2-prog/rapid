@@ -246,6 +246,7 @@ class RapidTriageApiTests(unittest.TestCase):
         self.assertIn("VIEWER_NAVIGATION_CONTRACT", app_js)
         self.assertIn("WORKBENCH_SESSION_CONTRACT", app_js)
         self.assertIn("SEARCH_SOURCE_VERIFICATION_CONTRACT", app_js)
+        self.assertIn("SEARCH_RESULT_SOURCE_ACTION_CONTRACT", app_js)
         self.assertIn("CURRENT_FILE_SEARCH_CONTRACT", app_js)
         self.assertIn("renderWorkbenchLayoutFrame", app_js)
         self.assertIn("renderTableControlBar", app_js)
@@ -259,6 +260,7 @@ class RapidTriageApiTests(unittest.TestCase):
         self.assertIn("restoreWorkbenchControls", app_js)
         self.assertIn("renderSearchSourceVerification", app_js)
         self.assertIn("renderSearchResultLocator", app_js)
+        self.assertIn("renderSearchResultSourceActionStrip", app_js)
         self.assertIn("renderCurrentFileSearchProfile", app_js)
         self.assertIn("applyWorkbenchFilters", app_js)
         self.assertIn("applyColumnPreset", app_js)
@@ -277,6 +279,7 @@ class RapidTriageApiTests(unittest.TestCase):
         self.assertIn("data-viewer-history-delta", app_js)
         self.assertIn("data-testid=\"search-source-verification\"", app_js)
         self.assertIn("data-testid=\"search-result-locator\"", app_js)
+        self.assertIn("data-testid=\"search-result-source-actions\"", app_js)
         self.assertIn("data-testid=\"current-file-search-profile\"", app_js)
         self.assertIn("data-testid=\"evidence-tray\"", app_js)
         self.assertIn("data-testid=\"report-tray\"", app_js)
@@ -302,6 +305,7 @@ class RapidTriageApiTests(unittest.TestCase):
         self.assertIn("viewer-navigation-bar", styles)
         self.assertIn("search-verification-card", styles)
         self.assertIn("search-result-locator", styles)
+        self.assertIn("search-result-source-actions", styles)
         self.assertIn("current-file-search-profile", styles)
         self.assertIn("renderWorkbenchSmokePanel(run)", app_js)
         self.assertIn("renderRunValidationPackageSummary", app_js)
@@ -897,6 +901,22 @@ class RapidTriageApiTests(unittest.TestCase):
             self.assertIn("metadata", document_match)
             self.assertEqual(document_match["source_verification_profile"]["profile_version"], "unified-search-source-verification-v1")
             self.assertTrue(document_match["source_verification_profile"]["viewer_supported"])
+            self.assertEqual(
+                search_response.json()["search_result_source_action_profile"]["profile_version"],
+                "search-result-source-viewer-actions-summary-v1",
+            )
+            self.assertEqual(search_response.json()["search_result_source_action_profile"]["qc_prep_item"], 6)
+            self.assertGreaterEqual(search_response.json()["search_result_source_action_profile"]["actionable_viewer_count"], 1)
+            action_profile = document_match["source_viewer_action_profile"]
+            self.assertEqual(action_profile["profile_version"], "search-result-source-viewer-actions-v1")
+            self.assertEqual(action_profile["qc_prep_item"], 6)
+            self.assertTrue(action_profile["viewer_supported"])
+            self.assertEqual(action_profile["review_context"]["source"], "docs")
+            self.assertEqual(
+                {action["id"] for action in action_profile["actions"]},
+                {"open-source-viewer", "open-source-file", "search-inside-source", "pin-compare", "save-review"},
+            )
+            self.assertIn("/source-preview", next(action["url"] for action in action_profile["actions"] if action["id"] == "open-source-viewer"))
             self.assertEqual(
                 search_response.json()["workbench_search_profile"]["source_verification_summary"]["profile_version"],
                 "unified-search-source-verification-summary-v1",

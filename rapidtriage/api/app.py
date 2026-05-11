@@ -13,7 +13,7 @@ import wave
 import base64
 from email import policy
 from pathlib import Path
-from typing import Any, Dict, Mapping, Optional, Sequence
+from typing import Any, Dict, Mapping, MutableMapping, Optional, Sequence
 from urllib.parse import quote
 from xml.etree import ElementTree as ET
 
@@ -1081,6 +1081,7 @@ def create_app(job_store: RunJobStore | None = None, auth_token: str | None = No
                 keyword_count=len(keywords),
                 expanded_keywords=keywords,
             )
+            attach_search_result_source_actions(payload, run_id)
             return payload
         except (SearchError, KeywordPackError) as exc:
             raise HTTPException(status_code=400, detail=str(exc))
@@ -3276,6 +3277,148 @@ def build_workbench_smoke_contract() -> dict[str, object]:
     }
     payload["manifest_sha256"] = stable_payload_sha256(payload)
     return payload
+
+
+def attach_search_result_source_actions(payload: MutableMapping[str, object], run_id: str) -> None:
+    matches = payload.get("matches")
+    if not isinstance(matches, list):
+        return
+    actionable = 0
+    for index, match in enumerate(matches):
+        if not isinstance(match, MutableMapping):
+            continue
+        action_profile = build_search_result_source_action_profile(run_id, match, index=index)
+        match["source_viewer_action_profile"] = action_profile
+        if action_profile.get("viewer_supported"):
+            actionable += 1
+    payload["search_result_source_action_profile"] = {
+        "profile_version": "search-result-source-viewer-actions-summary-v1",
+        "qc_prep_item": 6,
+        "match_count": len(matches),
+        "actionable_viewer_count": actionable,
+        "viewer_action_contract": "search-result-source-viewer-actions-v1",
+        "required_gui_selector": "[data-testid='search-result-source-actions']",
+        "required_before_report": [
+            "open source viewer",
+            "verify source locator and source hash",
+            "save review decision before include-in-report",
+        ],
+        "commercial_grade_ready": False,
+        "commercial_grade_blockers": [
+            "browser-e2e-search-result-viewer-action-evidence-required",
+            "trusted-source-locator-diff-required",
+        ],
+    }
+
+
+def build_search_result_source_action_profile(
+    run_id: str,
+    match: Mapping[str, object],
+    *,
+    index: int,
+) -> dict[str, object]:
+    path = str(match.get("path") or "")
+    pointer = str(match.get("pointer") or "")
+    source = str(match.get("source") or "")
+    quoted_path = quote(path)
+    viewer_supported = bool(path)
+    review_source = review_source_for_search_match(match)
+    review_context = {
+        "source": review_source,
+        "pointer": pointer,
+        "title": str(match.get("title") or (Path(path).name if path else "search hit")),
+        "path": path,
+        "note": str(match.get("preview") or ""),
+        "tags": [item for item in [source, str(match.get("kind") or "")] if item],
+    }
+    actions: list[dict[str, object]] = [
+        {
+            "id": "open-source-viewer",
+            "label": "View / review",
+            "method": "GET",
+            "url": f"/api/runs/{quote(run_id)}/source-preview?path={quoted_path}" if path else "",
+            "enabled": viewer_supported,
+            "gui_binding": "data-view-source-path",
+            "must_precede_report": True,
+        },
+        {
+            "id": "open-source-file",
+            "label": "Open source",
+            "method": "GET",
+            "url": f"/api/runs/{quote(run_id)}/source-file?path={quoted_path}" if path else "",
+            "enabled": viewer_supported,
+            "gui_binding": "href",
+            "must_precede_report": False,
+        },
+        {
+            "id": "search-inside-source",
+            "label": "Search inside",
+            "method": "GET",
+            "url": f"/api/runs/{quote(run_id)}/source-search?path={quoted_path}" if path else "",
+            "enabled": viewer_supported,
+            "gui_binding": "viewer-current-file-search",
+            "must_precede_report": True,
+        },
+        {
+            "id": "pin-compare",
+            "label": "Pin compare",
+            "method": "UI",
+            "url": "",
+            "enabled": viewer_supported,
+            "gui_binding": "data-compare-item",
+            "must_precede_report": False,
+        },
+        {
+            "id": "save-review",
+            "label": "Mark",
+            "method": "POST",
+            "url": f"/api/runs/{quote(run_id)}/bookmarks",
+            "enabled": bool(review_source and pointer),
+            "gui_binding": "data-bookmark-source",
+            "must_precede_report": True,
+        },
+    ]
+    blockers: list[str] = []
+    if not path:
+        blockers.append("source-path-required-for-viewer-action")
+    if not pointer:
+        blockers.append("search-result-pointer-required-for-review-action")
+    if not review_source:
+        blockers.append("bookmark-source-mapping-required")
+    return {
+        "profile_version": "search-result-source-viewer-actions-v1",
+        "qc_prep_item": 6,
+        "search_result_index": index,
+        "search_result_id": str(match.get("search_result_id") or ""),
+        "source": source,
+        "kind": str(match.get("kind") or ""),
+        "path": path,
+        "pointer": pointer,
+        "viewer_supported": viewer_supported,
+        "review_context": review_context,
+        "actions": actions,
+        "ready_for_report_workflow": viewer_supported and bool(review_source and pointer),
+        "blockers": blockers,
+        "report_use_rule": "Search result rows are leads until the source viewer action is opened and review state is saved.",
+    }
+
+
+def review_source_for_search_match(match: Mapping[str, object]) -> str:
+    source = str(match.get("source") or "")
+    if source == "documents":
+        return "docs"
+    if source in {"files", "ocr"}:
+        return "files"
+    if source == "timeline":
+        return "timeline"
+    if source == "indicators":
+        return "indicators"
+    if source == "web":
+        return "artifacts:browser"
+    if source == "artifacts":
+        kind = str(match.get("kind") or "").strip()
+        return f"artifacts:{kind}" if kind else ""
+    return ""
 
 
 def build_workbench_large_result_evidence(*, record_count: int) -> dict[str, object]:
