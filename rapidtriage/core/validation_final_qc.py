@@ -12,6 +12,9 @@ def build_final_qc_execution_report(
     *,
     validation_package: Path | None = None,
     runner_matrix: Path | None = None,
+    chain_of_custody: Path | None = None,
+    audit_bundle: Path | None = None,
+    exhibit_bundle: Path | None = None,
     performance_runs: Sequence[Path] | None = None,
     browser_traces: Sequence[Path] | None = None,
     reviewer_signoffs: Sequence[Path] | None = None,
@@ -23,6 +26,9 @@ def build_final_qc_execution_report(
     evidence_inputs = {
         "validation_package": _file_state(validation_package),
         "runner_matrix": _file_state(runner_matrix),
+        "chain_of_custody": _file_state(chain_of_custody),
+        "audit_bundle": _file_state(audit_bundle),
+        "exhibit_bundle": _file_state(exhibit_bundle),
         "performance_runs": [_file_state(path) for path in performance_runs],
         "browser_traces": [_file_state(path) for path in browser_traces],
         "reviewer_signoffs": [_file_state(path) for path in reviewer_signoffs],
@@ -31,19 +37,21 @@ def build_final_qc_execution_report(
     fixture_contract = _adverse_fixture_corpus_contract()
     large_case_contract = _large_case_browser_trace_contract()
     final_report_contract = _final_report_contract(evidence_inputs=evidence_inputs)
+    legal_submission_contract = _legal_submission_contract(evidence_inputs=evidence_inputs)
     checklist = _final_qc_checklist(
         evidence_inputs=evidence_inputs,
         runner_matrix=diff_runner_matrix,
     )
     core = {
         "profile_version": "final-qc-execution-report-v1",
-        "qc_prep_item_numbers": [81, 82, 83, 84, 85],
+        "qc_prep_item_numbers": [81, 82, 83, 84, 85, 86, 87, 88, 89, 90],
         "status": "external-evidence-required" if checklist["failed_check_ids"] else "ready-for-qc-review",
         "diff_runner_matrix": diff_runner_matrix,
         "windows11_e01_known_answer_contract": e01_contract,
         "adverse_fixture_corpus_contract": fixture_contract,
         "large_case_browser_trace_contract": large_case_contract,
         "final_report_contract": final_report_contract,
+        "legal_submission_qc_contract": legal_submission_contract,
         "evidence_inputs": evidence_inputs,
         "final_qc_checklist": checklist,
         "commercial_grade_blockers": [
@@ -52,6 +60,9 @@ def build_final_qc_execution_report(
             "large-case-performance-and-browser-trace-required",
             "reviewer-signoff-required",
             "remaining-blocker-ledger-review-required",
+            "chain-of-custody-records-required",
+            "audit-hash-chain-or-tamper-bundle-required",
+            "court-exhibit-bundle-required",
         ],
     }
     return {
@@ -160,6 +171,82 @@ def _final_report_contract(*, evidence_inputs: Mapping[str, object]) -> dict[str
     }
 
 
+def _legal_submission_contract(*, evidence_inputs: Mapping[str, object]) -> dict[str, object]:
+    return {
+        "profile_version": "legal-submission-qc-contract-v1",
+        "qc_prep_item_numbers": [86, 87, 88, 89, 90],
+        "contracts": [
+            {
+                "qc_prep_item_number": 86,
+                "profile_version": "chain-of-custody-qc-contract-v1",
+                "required_sections": [
+                    "acquisition metadata",
+                    "transfer records",
+                    "write-blocker or acquisition safety notes",
+                    "analyst action summary",
+                    "export event inventory",
+                    "source and output hashes",
+                ],
+                "attached": bool(evidence_inputs["chain_of_custody"]["exists"]),
+            },
+            {
+                "qc_prep_item_number": 87,
+                "profile_version": "audit-hash-chain-qc-contract-v1",
+                "required_sections": [
+                    "append-only audit rows",
+                    "previous/event hash chain",
+                    "head hash",
+                    "recompute instructions",
+                    "external signing slot",
+                ],
+                "attached": bool(evidence_inputs["audit_bundle"]["exists"]),
+            },
+            {
+                "qc_prep_item_number": 88,
+                "profile_version": "court-exhibit-bundle-qc-contract-v1",
+                "required_sections": [
+                    "selected evidence manifest",
+                    "report exports",
+                    "provenance and limitation rows",
+                    "hash manifest",
+                    "signing/notarization slot",
+                ],
+                "attached": bool(evidence_inputs["exhibit_bundle"]["exists"]),
+            },
+            {
+                "qc_prep_item_number": 89,
+                "profile_version": "qc-checklist-qc-contract-v1",
+                "required_sections": [
+                    "passed checks",
+                    "blocked checks",
+                    "external evidence gaps",
+                    "trusted diff status",
+                    "reviewer decision",
+                ],
+                "attached": True,
+            },
+            {
+                "qc_prep_item_number": 90,
+                "profile_version": "final-qc-summary-qc-contract-v1",
+                "required_sections": [
+                    "feature-family pass/fail/blocked summary",
+                    "parser-family validation state",
+                    "commercial claim decision",
+                    "remaining blocker ledger",
+                    "operator signoff",
+                ],
+                "attached": True,
+            },
+        ],
+        "attached_evidence_hashes": {
+            "chain_of_custody_sha256": str(evidence_inputs["chain_of_custody"].get("sha256") or ""),
+            "audit_bundle_sha256": str(evidence_inputs["audit_bundle"].get("sha256") or ""),
+            "exhibit_bundle_sha256": str(evidence_inputs["exhibit_bundle"].get("sha256") or ""),
+        },
+        "operator_warning": "Submission QC contracts are evidence wrappers. Legal sufficiency still depends on real operator records and jurisdiction-specific review.",
+    }
+
+
 def _final_qc_checklist(
     *,
     evidence_inputs: Mapping[str, object],
@@ -169,6 +256,9 @@ def _final_qc_checklist(
         _check("execution-user-activity-runners-defined", _has_runner_group(runner_matrix, 81), "#81 runner group exists"),
         _check("validation-package-attached", bool(evidence_inputs["validation_package"]["exists"]), "validation package path exists"),
         _check("runner-matrix-attached", bool(evidence_inputs["runner_matrix"]["exists"]), "runner matrix path exists"),
+        _check("chain-of-custody-attached", bool(evidence_inputs["chain_of_custody"]["exists"]), "chain-of-custody record path exists"),
+        _check("audit-bundle-attached", bool(evidence_inputs["audit_bundle"]["exists"]), "audit hash chain or tamper bundle path exists"),
+        _check("court-exhibit-bundle-attached", bool(evidence_inputs["exhibit_bundle"]["exists"]), "court exhibit bundle path exists"),
         _check("performance-run-attached", bool(evidence_inputs.get("performance_runs")), "at least one performance run path provided"),
         _check("browser-trace-attached", bool(evidence_inputs.get("browser_traces")), "at least one browser trace path provided"),
         _check("reviewer-signoff-attached", bool(evidence_inputs.get("reviewer_signoffs")), "at least one reviewer signoff path provided"),

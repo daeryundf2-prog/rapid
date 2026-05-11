@@ -100,6 +100,9 @@ class RapidTriageOpsTests(unittest.TestCase):
         self.assertIn("--output", commands["validation-diff-runners"].format_help())
         self.assertIn("final-qc-report", commands)
         self.assertIn("--reviewer-signoff", commands["final-qc-report"].format_help())
+        self.assertIn("--chain-of-custody", commands["final-qc-report"].format_help())
+        self.assertIn("--audit-bundle", commands["final-qc-report"].format_help())
+        self.assertIn("--exhibit-bundle", commands["final-qc-report"].format_help())
         self.assertIn("commercial-readiness", commands)
         self.assertIn("--strict", commands["commercial-readiness"].format_help())
         self.assertIn("--write-known-answer-template", commands["commercial-readiness"].format_help())
@@ -759,8 +762,9 @@ class RapidTriageOpsTests(unittest.TestCase):
             self.assertIn("PECmd", {tool["name"] for group in runner_matrix["runner_groups"] for tool in group["trusted_tools"]})
             final_qc = payload["final_qc_execution_report"]
             self.assertEqual(final_qc["profile_version"], "final-qc-execution-report-v1")
-            self.assertEqual(final_qc["qc_prep_item_numbers"], [81, 82, 83, 84, 85])
+            self.assertEqual(final_qc["qc_prep_item_numbers"], [81, 82, 83, 84, 85, 86, 87, 88, 89, 90])
             self.assertEqual(len(final_qc["report_hash"]), 64)
+            self.assertEqual(final_qc["legal_submission_qc_contract"]["profile_version"], "legal-submission-qc-contract-v1")
             self.assertIn("validation-package-attached", final_qc["final_qc_checklist"]["failed_check_ids"])
             self.assertEqual(len(payload["parser_false_positive_false_negative_notes"][0]["risk_note_hash"]), 64)
             self.assertEqual(payload["parser_fp_fn_risk_register_profile"]["profile_version"], "parser-fp-fn-risk-register-v1")
@@ -952,12 +956,18 @@ class RapidTriageOpsTests(unittest.TestCase):
             runner_matrix = root / "runner.json"
             performance = root / "performance.json"
             browser_trace = root / "trace.json"
+            custody = root / "custody.json"
+            audit = root / "audit.json"
+            exhibit = root / "exhibit.zip"
             signoff = root / "signoff.md"
             output = root / "final-qc.json"
             validation_package.write_text('{"status":"pass"}', encoding="utf-8")
             runner_matrix.write_text('{"profile_version":"validation-diff-runner-matrix-v1"}', encoding="utf-8")
             performance.write_text('{"p95":123}', encoding="utf-8")
             browser_trace.write_text('{"trace":"ok"}', encoding="utf-8")
+            custody.write_text('{"chain":"ok"}', encoding="utf-8")
+            audit.write_text('{"head_hash":"abc"}', encoding="utf-8")
+            exhibit.write_bytes(b"exhibit bundle")
             signoff.write_text("# Reviewer signoff\n", encoding="utf-8")
             stdout = io.StringIO()
 
@@ -969,6 +979,12 @@ class RapidTriageOpsTests(unittest.TestCase):
                         str(validation_package),
                         "--runner-matrix",
                         str(runner_matrix),
+                        "--chain-of-custody",
+                        str(custody),
+                        "--audit-bundle",
+                        str(audit),
+                        "--exhibit-bundle",
+                        str(exhibit),
                         "--performance-run",
                         str(performance),
                         "--browser-trace",
@@ -984,10 +1000,13 @@ class RapidTriageOpsTests(unittest.TestCase):
             self.assertEqual(exit_code, 0)
             payload = json.loads(stdout.getvalue())
             self.assertEqual(payload["profile_version"], "final-qc-execution-report-v1")
-            self.assertEqual(payload["qc_prep_item_numbers"], [81, 82, 83, 84, 85])
+            self.assertEqual(payload["qc_prep_item_numbers"], [81, 82, 83, 84, 85, 86, 87, 88, 89, 90])
             self.assertTrue(output.is_file())
             self.assertEqual(len(payload["report_hash"]), 64)
             self.assertEqual(payload["evidence_inputs"]["validation_package"]["exists"], True)
+            self.assertEqual(payload["evidence_inputs"]["chain_of_custody"]["exists"], True)
+            self.assertEqual(payload["legal_submission_qc_contract"]["qc_prep_item_numbers"], [86, 87, 88, 89, 90])
+            self.assertEqual(len(payload["legal_submission_qc_contract"]["attached_evidence_hashes"]["audit_bundle_sha256"]), 64)
             self.assertEqual(payload["final_qc_checklist"]["failed_check_ids"], [])
             self.assertTrue(payload["final_qc_checklist"]["ready_for_final_qc_review"])
 

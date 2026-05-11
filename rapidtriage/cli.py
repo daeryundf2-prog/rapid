@@ -1249,6 +1249,9 @@ def build_parser() -> argparse.ArgumentParser:
     )
     final_qc_report.add_argument("--validation-package", help="Validation package JSON to hash into the final QC report")
     final_qc_report.add_argument("--runner-matrix", help="Validation diff runner matrix JSON to hash into the final QC report")
+    final_qc_report.add_argument("--chain-of-custody", help="Chain-of-custody record/report path to hash into the final QC report")
+    final_qc_report.add_argument("--audit-bundle", help="Audit hash chain or tamper-evident bundle path")
+    final_qc_report.add_argument("--exhibit-bundle", help="Court exhibit bundle, manifest, or ZIP path")
     final_qc_report.add_argument("--performance-run", action="append", help="Performance run JSON/log path; repeatable")
     final_qc_report.add_argument("--browser-trace", action="append", help="Browser trace/screenshot artifact path; repeatable")
     final_qc_report.add_argument("--reviewer-signoff", action="append", help="Reviewer signoff document path; repeatable")
@@ -2635,6 +2638,9 @@ def main(argv=None) -> int:
         payload = build_final_qc_execution_report(
             validation_package=Path(args.validation_package).expanduser().resolve() if args.validation_package else None,
             runner_matrix=Path(args.runner_matrix).expanduser().resolve() if args.runner_matrix else None,
+            chain_of_custody=Path(args.chain_of_custody).expanduser().resolve() if args.chain_of_custody else None,
+            audit_bundle=Path(args.audit_bundle).expanduser().resolve() if args.audit_bundle else None,
+            exhibit_bundle=Path(args.exhibit_bundle).expanduser().resolve() if args.exhibit_bundle else None,
             performance_runs=[Path(path).expanduser().resolve() for path in args.performance_run or []],
             browser_traces=[Path(path).expanduser().resolve() for path in args.browser_trace or []],
             reviewer_signoffs=[Path(path).expanduser().resolve() for path in args.reviewer_signoff or []],
