@@ -116,6 +116,7 @@ from .core.source_reader import SourceReadError, render_source_read_text, run_so
 from .core.timeline import TimelineError, build_timeline_report, run_timeline
 from .core.timeline_export import TimelineExportError, build_unified_timeline_export
 from .core.validation import ValidationError, build_validation_package
+from .core.validation_diff_runners import build_validation_diff_runner_matrix, write_validation_diff_runner_matrix
 from .core.vsc import VscCompareError, compare_vsc_snapshots, discover_vsc_snapshot_roots, extract_vsc_changes
 from .core.worker import RustWorkerClient, WorkerError
 from .core.forensic_validation_plan import (
@@ -1231,6 +1232,14 @@ def build_parser() -> argparse.ArgumentParser:
     validation.add_argument("--fixture-root", help="Repository/root path used to discover parser fixture corpus coverage")
     validation.add_argument("--independent-report", help="Optional independent validation report to hash and attach")
     validation.add_argument("--json", action="store_true", help="Print machine-readable JSON")
+
+    validation_diff_runners = sub.add_parser(
+        "validation-diff-runners",
+        help="Show trusted-tool runner matrix for QC items #76-#80",
+        description="Build a machine-readable public corpus and trusted-tool diff runner matrix for EVTX, Registry, NTFS, and ESE validation",
+    )
+    validation_diff_runners.add_argument("--output", help="Optional JSON output path")
+    validation_diff_runners.add_argument("--json", action="store_true", help="Print machine-readable JSON")
 
     commercial_readiness = sub.add_parser(
         "commercial-readiness",
@@ -2585,6 +2594,27 @@ def main(argv=None) -> int:
             print(f"Saved validation JSON: {payload['outputs']['json']}")
             print(f"Saved validation report: {payload['outputs']['markdown']}")
             print(f"Score target: {payload['score_target']}/100")
+        return 0
+
+    if args.command == "validation-diff-runners":
+        payload = build_validation_diff_runner_matrix()
+        if args.output:
+            payload["output_manifest"] = write_validation_diff_runner_matrix(
+                payload,
+                Path(args.output).expanduser().resolve(),
+            )
+        if args.json:
+            print(json.dumps(payload, ensure_ascii=False, indent=2))
+        else:
+            summary = payload["summary"]
+            print("RapidTriage validation diff runner matrix")
+            print(f"QC items: {payload['qc_prep_item_numbers']}")
+            print(
+                f"Runner groups: {summary['runner_group_count']}  "
+                f"Tools: {summary['available_tool_count']}/{summary['trusted_tool_count']} available"
+            )
+            if payload.get("output_manifest"):
+                print(f"Saved matrix: {payload['output_manifest']['output']}")
         return 0
 
     if args.command == "commercial-readiness":

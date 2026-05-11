@@ -119,11 +119,11 @@ Before formal QC, a Windows 11 E01 single-case workflow should let an analyst:
 
 ## Phase 7: Validation Corpus And QC Execution
 
-76. Connect NIST CFReDS/CFTT and other public forensic corpora where licensing permits.
-77. Add EvtxECmd and Hayabusa diff runners for EVTX validation.
-78. Add RECmd and Registry Explorer diff runners for Registry validation.
-79. Add MFTECmd, analyzeMFT, and UsnJrnl2Csv diff runners for NTFS validation.
-80. Add SrumECmd, libesedb, and Windows Search export diff runners for ESE validation.
+76. Connect NIST CFReDS/CFTT and other public forensic corpora where licensing permits. Current implementation emits `validation-diff-runner-matrix-v1` with a public corpus registry for NIST CFReDS/CFTT-style evidence, required source hashes, expected answers, trusted-tool output, row/field diff output, and reviewer signoff; remaining QC requires operator-confirmed downloads/licensing and real corpus manifests.
+77. Add EvtxECmd and Hayabusa diff runners for EVTX validation. Current implementation exposes EVTX runner definitions, binary preflight, command templates, RapidTriage output hints, and `cross-tool-validate` templates for EvtxECmd/Hayabusa; remaining QC requires installed tools and real EVTX corpus output.
+78. Add RECmd and Registry Explorer diff runners for Registry validation. Current implementation exposes Registry runner definitions, binary preflight, command templates, RapidTriage output hints, and `cross-tool-validate` templates for RECmd/Registry Explorer; remaining QC requires installed tools, transaction-log-aware source hives, and real trusted exports.
+79. Add MFTECmd, analyzeMFT, and UsnJrnl2Csv diff runners for NTFS validation. Current implementation exposes MFT/USN runner definitions, binary preflight, command templates, RapidTriage output hints, and `cross-tool-validate` templates for MFTECmd/analyzeMFT/UsnJrnl2Csv; remaining QC requires full-volume NTFS corpus and large journal replay output.
+80. Add SrumECmd, libesedb, and Windows Search export diff runners for ESE validation. Current implementation exposes SRUM/Windows.edb runner definitions, binary preflight, command templates, RapidTriage output hints, and `cross-tool-validate` templates for SrumECmd/libesedb/Windows Search DB Analyzer; remaining QC requires installed tools and real ESE table/page/deleted-state exports.
 81. Add PECmd, JLECmd, and ShellBagsExplorer diff runners for execution and user activity artifacts.
 82. Build or attach a real Windows 11 E01 known-answer case manifest.
 83. Build corrupt, deleted, slack, encrypted, and malformed fixture corpora.

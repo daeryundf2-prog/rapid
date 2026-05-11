@@ -96,6 +96,8 @@ class RapidTriageOpsTests(unittest.TestCase):
         self.assertIn("--add-run", commands["case-catalog"].format_help())
         self.assertIn("validation", commands)
         self.assertIn("--output-dir", commands["validation"].format_help())
+        self.assertIn("validation-diff-runners", commands)
+        self.assertIn("--output", commands["validation-diff-runners"].format_help())
         self.assertIn("commercial-readiness", commands)
         self.assertIn("--strict", commands["commercial-readiness"].format_help())
         self.assertIn("--write-known-answer-template", commands["commercial-readiness"].format_help())
@@ -745,6 +747,13 @@ class RapidTriageOpsTests(unittest.TestCase):
             self.assertEqual(payload["parser_fixture_corpus"]["trusted_fixture_corpus_diff"]["status"], "missing")
             self.assertIn("trusted-fixture-corpus-manifest-diff-missing", payload["parser_fixture_corpus"]["blockers"])
             self.assertIn("#83", payload["parser_false_positive_false_negative_notes"][0]["commercial_gap_ids"])
+            runner_matrix = payload["validation_diff_runner_matrix"]
+            self.assertEqual(runner_matrix["profile_version"], "validation-diff-runner-matrix-v1")
+            self.assertEqual(runner_matrix["qc_prep_item_numbers"], [76, 77, 78, 79, 80])
+            self.assertEqual(runner_matrix["summary"]["runner_group_count"], 4)
+            self.assertEqual(len(runner_matrix["matrix_hash"]), 64)
+            self.assertIn("NIST CFReDS", {row["corpus_name"] for row in runner_matrix["public_corpus_registry"]})
+            self.assertIn("EvtxECmd", {tool["name"] for group in runner_matrix["runner_groups"] for tool in group["trusted_tools"]})
             self.assertEqual(len(payload["parser_false_positive_false_negative_notes"][0]["risk_note_hash"]), 64)
             self.assertEqual(payload["parser_fp_fn_risk_register_profile"]["profile_version"], "parser-fp-fn-risk-register-v1")
             self.assertEqual(len(payload["parser_fp_fn_risk_register_profile"]["register_digest"]), 64)
@@ -816,6 +825,7 @@ class RapidTriageOpsTests(unittest.TestCase):
                 "trusted-external-tool-version-transcript-diff-missing",
                 payload["external_tool_version_assessment"]["blockers"],
             )
+
             self.assertEqual(
                 payload["external_tool_version_assessment"]["external_tool_version_manifest"]["profile_version"],
                 "external-tool-version-manifest-v1",
@@ -901,6 +911,30 @@ class RapidTriageOpsTests(unittest.TestCase):
             self.assertIn("verify-release-checksums", command_names)
             self.assertIn("smoke-summary", command_names)
             self.assertIn("release-evidence", command_names)
+
+    def test_validation_diff_runners_command_emits_qc_runner_matrix(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            output = Path(tmp_dir) / "runner-matrix.json"
+            stdout = io.StringIO()
+
+            with contextlib.redirect_stdout(stdout):
+                exit_code = main(["validation-diff-runners", "--output", str(output), "--json"])
+
+            self.assertEqual(exit_code, 0)
+            payload = json.loads(stdout.getvalue())
+            self.assertEqual(payload["profile_version"], "validation-diff-runner-matrix-v1")
+            self.assertEqual(payload["qc_prep_item_numbers"], [76, 77, 78, 79, 80])
+            self.assertTrue(output.is_file())
+            self.assertEqual(len(payload["matrix_hash"]), 64)
+            self.assertEqual(payload["summary"]["runner_group_count"], 4)
+            self.assertEqual(payload["summary"]["trusted_tool_count"], 10)
+            self.assertEqual(payload["output_manifest"]["bytes"], output.stat().st_size)
+            groups = {group["item_number"]: group for group in payload["runner_groups"]}
+            self.assertIn("evtx", groups[77]["artifact_family"])
+            self.assertIn("registry", groups[78]["artifact_family"])
+            self.assertIn("ntfs", groups[79]["artifact_family"])
+            self.assertIn("ese", groups[80]["artifact_family"])
+            self.assertIn("--tool-version", groups[77]["required_cross_tool_metadata"])
 
     def test_validation_trusted_diffs_promote_legal_validation_gates(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:

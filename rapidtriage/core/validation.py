@@ -15,6 +15,7 @@ from .commercial_readiness import build_commercial_readiness_report
 from .docs import write_result
 from .enterprise import build_enterprise_policy
 from .forensic_accuracy import build_accuracy_gate, build_core_forensics_accuracy_profiles, build_core_forensics_known_answer_template
+from .validation_diff_runners import build_validation_diff_runner_matrix
 
 
 VALIDATION_JSON_NAME = "rapidtriage-validation-package.json"
@@ -25,6 +26,7 @@ VALIDATION_PACKAGE_REQUIRED_SECTIONS = [
     "known_answer_validation",
     "parser_fixture_corpus",
     "parser_false_positive_false_negative_notes",
+    "validation_diff_runner_matrix",
     "independent_validation_report",
     "validation_package_assessment",
 ]
@@ -244,6 +246,7 @@ def build_validation_package(
         parser_fp_fn_notes,
         manifest=parser_fp_fn_manifest,
     )
+    validation_diff_runner_matrix = build_validation_diff_runner_matrix()
     independent_validation_report = build_independent_validation_report(independent_report)
     validation_package_assessment = build_validation_package_assessment(output_dir)
     payload: dict[str, object] = {
@@ -269,6 +272,7 @@ def build_validation_package(
         "parser_false_positive_false_negative_notes": parser_fp_fn_notes,
         "parser_fp_fn_risk_register_profile": parser_fp_fn_profile,
         "parser_fp_fn_risk_register_manifest": parser_fp_fn_manifest,
+        "validation_diff_runner_matrix": validation_diff_runner_matrix,
         "independent_validation_report": independent_validation_report,
         "validation_legal_defensibility_matrix": build_validation_legal_defensibility_matrix(
             known_answer_validation=known_answer_validation,
