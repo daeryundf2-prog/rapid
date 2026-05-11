@@ -8127,6 +8127,7 @@ def build_source_search(
     limit: int = 100,
     context: int = 120,
     max_plain_text_bytes: int = 50_000_000,
+    sqlite_row_scan_limit: int | None = SQLITE_SOURCE_SEARCH_ROW_SCAN_LIMIT,
 ) -> Dict[str, object]:
     normalized = [item.strip().lower() for item in keywords if item.strip()]
     if not normalized:
@@ -8151,6 +8152,7 @@ def build_source_search(
                 normalized,
                 limit=limit,
                 context=context,
+                row_scan_limit=sqlite_row_scan_limit,
             )
             truncated = sqlite_truncated or len(matches) >= limit
             message = "SQLite text search completed."

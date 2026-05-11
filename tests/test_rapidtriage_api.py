@@ -77,7 +77,7 @@ class RapidTriageApiTests(unittest.TestCase):
         self.assertEqual(payload["summary"]["match_count"], 1)
         self.assertEqual(payload["matches"][0]["row_number"], 6001)
         self.assertEqual(payload["summary"]["sqlite_scanned_row_count"], 6001)
-        self.assertIsNone(payload["summary"]["sqlite_row_scan_limit"])
+        self.assertEqual(payload["summary"]["sqlite_row_scan_limit"], 100_000)
         self.assertTrue(payload["summary"]["sqlite_full_cursor_scan"])
         self.assertFalse(payload["summary"]["sqlite_scan_truncated"])
         self.assertEqual(payload["source_search_profile"]["qc_prep_item_number"], 56)
@@ -104,6 +104,82 @@ class RapidTriageApiTests(unittest.TestCase):
         self.assertEqual(payload["summary"]["sqlite_resume_state"]["reason"], "result-limit")
         self.assertFalse(payload["summary"]["sqlite_full_cursor_scan"])
         self.assertTrue(payload["truncated"])
+
+    def test_source_search_sqlite_default_row_scan_limit_prevents_full_db_sweep(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            db_path = Path(temp) / "bounded.db"
+            connection = sqlite3.connect(db_path)
+            try:
+                connection.execute("CREATE TABLE notes(id INTEGER PRIMARY KEY, body TEXT)")
+                connection.executemany("INSERT INTO notes(body) VALUES (?)", [(f"ordinary row {index}",) for index in range(25)])
+                connection.commit()
+            finally:
+                connection.close()
+
+            payload = build_source_search(db_path, ["needle"], limit=10, context=10, sqlite_row_scan_limit=12)
+
+        self.assertEqual(payload["summary"]["match_count"], 0)
+        self.assertEqual(payload["summary"]["sqlite_row_scan_limit"], 12)
+        self.assertEqual(payload["summary"]["sqlite_scanned_row_count"], 12)
+        self.assertTrue(payload["summary"]["sqlite_scan_truncated"])
+        self.assertFalse(payload["summary"]["sqlite_full_cursor_scan"])
+        self.assertEqual(payload["summary"]["sqlite_resume_state"]["reason"], "sqlite-row-scan-limit")
+
+    def test_source_search_api_preserves_sqlite_scan_limit_contract(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp) / "evidence"
+            run_dir = Path(temp) / "run"
+            root.mkdir()
+            run_dir.mkdir()
+            db_path = root / "bounded-api.db"
+            connection = sqlite3.connect(db_path)
+            try:
+                connection.execute("CREATE TABLE notes(id INTEGER PRIMARY KEY, body TEXT)")
+                connection.executemany(
+                    "INSERT INTO notes(body) VALUES (?)",
+                    [(f"ordinary row {index}",) for index in range(100_001)],
+                )
+                connection.commit()
+            finally:
+                connection.close()
+            summary_path = run_dir / "rapidtriage-run-summary.json"
+            summary_path.write_text(
+                json.dumps(
+                    {
+                        "profile_version": "rapidtriage-run-summary-v1",
+                        "mode": "fraud",
+                        "root": str(root),
+                        "output_dir": str(run_dir),
+                        "outputs": {"summary": str(summary_path)},
+                    }
+                ),
+                encoding="utf-8",
+            )
+            store = RunJobStore()
+            job = store.import_completed_run(run_dir)
+            client = TestClient(create_app(store))
+
+            response = client.get(
+                f"/api/runs/{job.run_id}/source-search",
+                params={"path": str(db_path), "keyword": "needle", "limit": 10, "context": 40},
+            )
+
+        self.assertEqual(response.status_code, 200, response.text)
+        payload = response.json()
+        self.assertEqual(payload["summary"]["match_count"], 0)
+        self.assertEqual(payload["summary"]["sqlite_row_scan_limit"], 100_000)
+        self.assertEqual(payload["summary"]["sqlite_scanned_row_count"], 100_000)
+        self.assertTrue(payload["summary"]["sqlite_scan_truncated"])
+        self.assertFalse(payload["summary"]["sqlite_full_cursor_scan"])
+        self.assertEqual(payload["summary"]["sqlite_resume_state"]["reason"], "sqlite-row-scan-limit")
+        self.assertEqual(
+            payload["source_search_full_cursor_contract"]["profile_version"],
+            "source-search-full-cursor-scan-contract-v1",
+        )
+        self.assertEqual(
+            payload["source_search_profile"]["large_data_controls"]["sqlite_resume_state"]["reason"],
+            "sqlite-row-scan-limit",
+        )
 
     def test_source_search_rejects_oversized_docx_member_before_expanding(self) -> None:
         with tempfile.TemporaryDirectory() as temp:

@@ -108,6 +108,17 @@ class RapidTriageWebStaticTests(unittest.TestCase):
         self.assertIn("sqlite-schema-panel", styles)
         self.assertIn("sqlite-column-chip", styles)
 
+    def test_row_filter_text_is_bounded_for_large_records(self) -> None:
+        app_js = (REPO_ROOT / "rapidtriage" / "web" / "static" / "app.js").read_text(encoding="utf-8")
+
+        row_text_body = app_js.split("function rowText(value) {", 1)[1].split("function compactRowFilterText", 1)[0]
+        self.assertIn("ROW_FILTER_TEXT_LIMIT", app_js)
+        self.assertIn("ROW_FILTER_KEYS", app_js)
+        self.assertIn("compactRowFilterText(value)", row_text_body)
+        self.assertNotIn("JSON.stringify", row_text_body)
+        self.assertIn("slice(0, ROW_FILTER_TEXT_LIMIT)", app_js)
+        self.assertIn("filter text bounded to ${ROW_FILTER_TEXT_LIMIT} chars/row", app_js)
+
 
 if __name__ == "__main__":
     unittest.main()

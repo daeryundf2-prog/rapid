@@ -71,6 +71,9 @@ ACQUISITION_QUALITY_TRUSTED_TOOLS = {
     "contamination-checklist",
 }
 REVIEW_WORKFLOW_TRUSTED_DIFF_BLOCKER = "review-workflow-trusted-audit-diff-required"
+CASE_DB_SEARCH_SCAN_ROW_LIMIT = 100_000
+CASE_DB_SEARCH_SCAN_OVERSAMPLE = 100
+CASE_DB_SEARCH_MIN_SCAN_ROWS = 10_000
 REVIEW_WORKFLOW_TRUSTED_TOOLS = {
     "analyst-review-log",
     "case-review-ground-truth",
@@ -477,15 +480,20 @@ class CaseDatabase:
         normalized_case_id = normalize_identifier(case_id, fallback="case")
         source_filter = {source.strip() for source in (sources or []) if source.strip()}
         metadata_filter = parse_metadata_filters(metadata_filters or [])
+        scan_candidate_limit = case_search_scan_candidate_limit(limit)
         with self.connect() as connection:
             apply_schema(connection)
             if connection.execute("SELECT 1 FROM case_record WHERE case_id = ?", (normalized_case_id,)).fetchone() is None:
                 raise CaseDatabaseError(f"case not found: {normalized_case_id}")
             matches: list[dict[str, object]] = []
-            matches.extend(search_indexed_documents(connection, normalized_case_id, normalized_keywords, limit))
-            matches.extend(search_file_records(connection, normalized_case_id, normalized_keywords, limit))
-            matches.extend(search_artifacts(connection, normalized_case_id, normalized_keywords, limit))
-            matches.extend(search_events(connection, normalized_case_id, normalized_keywords, limit))
+            if case_search_source_requested(source_filter, "documents"):
+                matches.extend(search_indexed_documents(connection, normalized_case_id, normalized_keywords, limit))
+            if case_search_source_requested(source_filter, "files"):
+                matches.extend(search_file_records(connection, normalized_case_id, normalized_keywords, limit, scan_candidate_limit))
+            if case_search_source_requested(source_filter, "artifacts", "indicators"):
+                matches.extend(search_artifacts(connection, normalized_case_id, normalized_keywords, limit, scan_candidate_limit))
+            if case_search_source_requested(source_filter, "timeline"):
+                matches.extend(search_events(connection, normalized_case_id, normalized_keywords, limit, scan_candidate_limit))
             matches = attach_review_marks(connection, normalized_case_id, matches)
             if source_filter:
                 matches = [match for match in matches if str(match.get("source") or "") in source_filter]
@@ -534,6 +542,7 @@ class CaseDatabase:
                 "metadata": dict(metadata_filter),
                 "review_status": review_status,
                 "verification_status": verification_status,
+                "scan_candidate_limit": scan_candidate_limit,
             },
             "summary": {
                 "match_count": len(matches),
@@ -2707,6 +2716,7 @@ def search_file_records(
     case_id: str,
     keywords: list[str],
     limit: int,
+    scan_candidate_limit: int,
 ) -> list[dict[str, object]]:
     rows = connection.execute(
         """
@@ -2714,8 +2724,9 @@ def search_file_records(
         FROM file_record
         WHERE case_id = ?
         ORDER BY id ASC
+        LIMIT ?
         """,
-        (case_id,),
+        (case_id, scan_candidate_limit),
     ).fetchall()
     matches = []
     for row in rows:
@@ -2758,12 +2769,13 @@ def search_artifacts(
     case_id: str,
     keywords: list[str],
     limit: int,
+    scan_candidate_limit: int,
 ) -> list[dict[str, object]]:
     if artifact_fts_has_rows(connection, case_id):
         fts_matches = search_artifacts_fts(connection, case_id, keywords, limit)
         if fts_matches:
             return fts_matches[:limit] if limit else fts_matches
-    return search_artifacts_scan(connection, case_id, keywords, limit)
+    return search_artifacts_scan(connection, case_id, keywords, limit, scan_candidate_limit)
 
 
 def search_artifacts_scan(
@@ -2771,6 +2783,7 @@ def search_artifacts_scan(
     case_id: str,
     keywords: list[str],
     limit: int,
+    scan_candidate_limit: int,
 ) -> list[dict[str, object]]:
     rows = connection.execute(
         """
@@ -2778,8 +2791,9 @@ def search_artifacts_scan(
         FROM artifact
         WHERE case_id = ?
         ORDER BY id ASC
+        LIMIT ?
         """,
-        (case_id,),
+        (case_id, scan_candidate_limit),
     ).fetchall()
     matches = []
     for row in rows:
@@ -2810,6 +2824,17 @@ def search_artifacts_scan(
 
 def artifact_match_source(artifact_type: str) -> str:
     return "indicators" if artifact_type.startswith("indicator-") else "artifacts"
+
+
+def case_search_source_requested(source_filter: set[str], *sources: str) -> bool:
+    return not source_filter or any(source in source_filter for source in sources)
+
+
+def case_search_scan_candidate_limit(limit: int) -> int:
+    if limit <= 0:
+        return CASE_DB_SEARCH_SCAN_ROW_LIMIT
+    requested = max(CASE_DB_SEARCH_MIN_SCAN_ROWS, int(limit) * CASE_DB_SEARCH_SCAN_OVERSAMPLE)
+    return min(CASE_DB_SEARCH_SCAN_ROW_LIMIT, requested)
 
 
 def dedupe_matches(matches: list[dict[str, object]], *, limit: int) -> list[dict[str, object]]:
@@ -2899,6 +2924,7 @@ def search_events(
     case_id: str,
     keywords: list[str],
     limit: int,
+    scan_candidate_limit: int,
 ) -> list[dict[str, object]]:
     rows = connection.execute(
         """
@@ -2906,8 +2932,9 @@ def search_events(
         FROM event
         WHERE case_id = ?
         ORDER BY timestamp ASC, id ASC
+        LIMIT ?
         """,
-        (case_id,),
+        (case_id, scan_candidate_limit),
     ).fetchall()
     matches = []
     for row in rows:

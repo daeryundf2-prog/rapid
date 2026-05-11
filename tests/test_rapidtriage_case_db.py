@@ -7,8 +7,10 @@ import contextlib
 import io
 import json
 from pathlib import Path
+from unittest import mock
 
 from rapidtriage.cli import build_parser, main
+from rapidtriage.core import case_db as case_db_module
 from rapidtriage.core.case_db import (
     SCHEMA_VERSION,
     CaseDatabase,
@@ -401,6 +403,133 @@ class RapidTriageCaseDatabaseTests(unittest.TestCase):
             self.assertEqual(row["result"], "failed")
             self.assertIn("FileNotFoundError", row["error"])
             self.assertEqual(json.loads(row["params_json"])["path"], str(missing_document))
+
+    def test_case_search_caps_scan_candidates_before_materializing_large_tables(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            db_path = Path(tmp_dir) / "case.db"
+            database = open_case_database(db_path)
+            database.create_case(case_id="CASE-SCAN-CAP")
+            with contextlib.closing(sqlite3.connect(db_path)) as connection:
+                connection.executemany(
+                    """
+                    INSERT INTO file_record (citation_id, case_id, path, normalized_path, extension)
+                    VALUES (?, ?, ?, ?, ?)
+                    """,
+                    [
+                        (
+                            f"CASE-SCAN-CAP-FILE-{index:06d}",
+                            "CASE-SCAN-CAP",
+                            f"/evidence/ordinary-{index}.txt",
+                            f"/evidence/ordinary-{index}.txt",
+                            ".txt",
+                        )
+                        for index in range(10_050)
+                    ],
+                )
+                connection.executemany(
+                    """
+                    INSERT INTO artifact (citation_id, case_id, artifact_type, parser_name, title, summary, data_json, created_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    [
+                        (
+                            f"CASE-SCAN-CAP-ARTIFACT-{index:06d}",
+                            "CASE-SCAN-CAP",
+                            "browser-history",
+                            "test-parser",
+                            f"ordinary artifact {index}",
+                            "ordinary summary",
+                            json.dumps({"url": f"https://example.test/{index}"}),
+                            "2026-05-11T00:00:00+00:00",
+                        )
+                        for index in range(10_050)
+                    ],
+                )
+                connection.executemany(
+                    """
+                    INSERT INTO event (citation_id, case_id, event_type, timestamp, target, description, source)
+                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    [
+                        (
+                            f"CASE-SCAN-CAP-EVENT-{index:06d}",
+                            "CASE-SCAN-CAP",
+                            "file-observed",
+                            f"2026-05-11T00:00:{index % 60:02d}+00:00",
+                            f"/evidence/ordinary-{index}.txt",
+                            "ordinary event",
+                            "test-timeline",
+                        )
+                        for index in range(10_050)
+                    ],
+                )
+                connection.execute(
+                    """
+                    INSERT INTO file_record (citation_id, case_id, path, normalized_path, extension)
+                    VALUES (?, ?, ?, ?, ?)
+                    """,
+                    (
+                        "CASE-SCAN-CAP-FILE-999999",
+                        "CASE-SCAN-CAP",
+                        "/evidence/needle-after-cap.txt",
+                        "/evidence/needle-after-cap.txt",
+                        ".txt",
+                    ),
+                )
+                connection.execute(
+                    """
+                    INSERT INTO artifact (citation_id, case_id, artifact_type, parser_name, title, summary, data_json, created_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        "CASE-SCAN-CAP-ARTIFACT-999999",
+                        "CASE-SCAN-CAP",
+                        "browser-history",
+                        "test-parser",
+                        "needle artifact after cap",
+                        "needle summary after cap",
+                        json.dumps({"url": "https://needle.example.test"}),
+                        "2026-05-11T00:00:00+00:00",
+                    ),
+                )
+                connection.execute(
+                    """
+                    INSERT INTO event (citation_id, case_id, event_type, timestamp, target, description, source)
+                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        "CASE-SCAN-CAP-EVENT-999999",
+                        "CASE-SCAN-CAP",
+                        "file-observed",
+                        "9999-12-31T23:59:59+00:00",
+                        "/evidence/needle-after-cap.txt",
+                        "needle event after cap",
+                        "test-timeline",
+                    ),
+                )
+                connection.commit()
+
+            for source in ("files", "artifacts", "timeline"):
+                with self.subTest(source=source):
+                    payload = database.search_case(case_id="CASE-SCAN-CAP", keywords=["needle"], limit=10, sources=[source])
+
+                    self.assertEqual(payload["options"]["scan_candidate_limit"], 10_000)
+                    self.assertEqual(payload["summary"]["match_count"], 0)
+
+    def test_case_search_source_filter_skips_unrequested_large_backends(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            db_path = Path(tmp_dir) / "case.db"
+            database = open_case_database(db_path)
+            database.create_case(case_id="CASE-SOURCE-SCOPE")
+
+            with mock.patch.object(case_db_module, "search_indexed_documents", side_effect=AssertionError("documents scanned")), mock.patch.object(
+                case_db_module,
+                "search_artifacts",
+                side_effect=AssertionError("artifacts scanned"),
+            ), mock.patch.object(case_db_module, "search_events", side_effect=AssertionError("events scanned")):
+                payload = database.search_case(case_id="CASE-SOURCE-SCOPE", keywords=["needle"], limit=10, sources=["files"])
+
+            self.assertEqual(payload["summary"]["match_count"], 0)
 
     def test_cli_case_db_import_run_outputs_counts(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:

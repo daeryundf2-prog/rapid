@@ -301,7 +301,7 @@ function renderTableControlBar(tab) {
         <input id="timeFilterInput" placeholder="YYYY-MM-DD or time text" />
       </label>
       <button id="clearFilter" type="button">Clear</button>
-      <span class="table-control-hint">${escapeHtml(tabLabel(tab))} · ${kbd("[")} ${kbd("]")} page/window · DOM window ${VIRTUAL_TABLE_ROW_LIMIT}</span>
+      <span class="table-control-hint">${escapeHtml(tabLabel(tab))} · ${kbd("[")} ${kbd("]")} page/window · DOM window ${VIRTUAL_TABLE_ROW_LIMIT} · filter text bounded to ${ROW_FILTER_TEXT_LIMIT} chars/row</span>
     </section>
   `;
 }
@@ -4387,8 +4387,62 @@ function formatNumber(value) {
   return Number(value || 0).toLocaleString();
 }
 
+const ROW_FILTER_TEXT_LIMIT = 900;
+const ROW_FILTER_KEYS = [
+  "title",
+  "name",
+  "path",
+  "source",
+  "kind",
+  "type",
+  "status",
+  "review_status",
+  "verification_status",
+  "priority",
+  "summary",
+  "preview",
+  "matched_keywords",
+  "tags",
+  "note",
+  "pointer",
+  "target_id",
+  "target_type",
+  "timestamp",
+  "created_at",
+  "modified_at",
+  "accessed_at",
+  "url",
+  "domain",
+  "value",
+];
+
 function rowText(value) {
-  return escapeHtml(JSON.stringify(value || {}).toLowerCase());
+  return escapeHtml(compactRowFilterText(value));
+}
+
+function compactRowFilterText(value) {
+  const fragments = [];
+  appendRowFilterFragments(fragments, value, 0);
+  return fragments.join(" ").toLowerCase().slice(0, ROW_FILTER_TEXT_LIMIT);
+}
+
+function appendRowFilterFragments(fragments, value, depth) {
+  if (fragments.join(" ").length >= ROW_FILTER_TEXT_LIMIT) return;
+  if (value === null || value === undefined) return;
+  if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
+    const text = String(value).trim();
+    if (text) fragments.push(text.slice(0, 220));
+    return;
+  }
+  if (Array.isArray(value)) {
+    for (const item of value.slice(0, 8)) appendRowFilterFragments(fragments, item, depth + 1);
+    return;
+  }
+  if (typeof value !== "object" || depth > 1) return;
+  for (const key of ROW_FILTER_KEYS) {
+    if (!Object.prototype.hasOwnProperty.call(value, key)) continue;
+    appendRowFilterFragments(fragments, value[key], depth + 1);
+  }
 }
 
 function highlightSnippet(value, keywords) {
