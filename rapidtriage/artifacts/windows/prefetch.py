@@ -13,6 +13,27 @@ from .common import build_forensic_review, isoformat_from_timestamp
 
 PREFETCH_ROOT = ("Windows", "Prefetch")
 PARSER_VERSION = "prefetch-inventory-v8"
+QC_PREP_PREFETCH_ITEM = 31
+QC_PREP_PREFETCH_GOAL = (
+    "Deepen Prefetch version 17/23/26/30/31 support, compressed PF handling, "
+    "volume/file metrics, and trace-chain evidence."
+)
+QC_PREP_PREFETCH_CONTRACT = {
+    "item_number": QC_PREP_PREFETCH_ITEM,
+    "goal": QC_PREP_PREFETCH_GOAL,
+    "implemented_outputs": [
+        "version-specific common-header profile for versions 17, 23, 26, 30, and observed 31",
+        "compressed MAM/PF detection with explicit decompression limitation",
+        "bounded referenced-path, volume-device, and file-reference candidate pivots",
+        "execution-depth manifest with source hash, offsets, validation checks, and report blockers",
+    ],
+    "commercial_blockers": [
+        "native file metrics array decoding",
+        "authoritative volume table decoding",
+        "trace-chain/directory section validation",
+        "PECmd/known-answer cross-version corpus diff evidence",
+    ],
+}
 MAX_PREFETCH_SCAN_BYTES = 1024 * 1024
 MAX_REFERENCED_PATHS = 200
 MAX_CANDIDATES = 200
@@ -616,6 +637,8 @@ def prefetch_commercial_uplift_evidence(details: Mapping[str, object]) -> dict[s
     return {
         "batch_id": "commercial-uplift-016-020",
         "item_numbers": [16],
+        "qc_prep_item_numbers": [QC_PREP_PREFETCH_ITEM],
+        "qc_prep_contracts": [dict(QC_PREP_PREFETCH_CONTRACT)],
         "implementation_track": "native-parser-depth",
         "objective": "Expose Prefetch version/layout validation, referenced-path evidence, and commercial blockers.",
         "source_refs": [
@@ -657,6 +680,9 @@ def prefetch_reportability_decision(
     return {
         "profile_version": "prefetch-reportability-decision-v1",
         "commercial_gap_id": "#16",
+        "qc_prep_item_number": QC_PREP_PREFETCH_ITEM,
+        "qc_prep_item_goal": QC_PREP_PREFETCH_GOAL,
+        "qc_prep_contract": dict(QC_PREP_PREFETCH_CONTRACT),
         "decision": "report-only-with-execution-correlation",
         "allowed_use": "prefetch-execution-triage-pivot",
         "blockers": sorted(blockers),
@@ -697,6 +723,8 @@ def prefetch_analyst_review_profile(details: Mapping[str, object]) -> dict[str, 
     blockers = sorted(set(str(item) for item in report_grade.get("blockers", []) if str(item)) | set(PREFETCH_REPORT_GRADE_BLOCKERS))
     return {
         "profile_version": "prefetch-analyst-review-profile-v1",
+        "qc_prep_item_number": QC_PREP_PREFETCH_ITEM,
+        "qc_prep_item_goal": QC_PREP_PREFETCH_GOAL,
         "artifact_type": str(details.get("artifact_type") or ""),
         "severity": "high" if int(details.get("run_count") or 0) or details.get("last_run_at") else "medium",
         "summary": "Prefetch execution pivot with run count, last-run time, version layout, and referenced-file context.",
@@ -772,6 +800,9 @@ def prefetch_execution_depth_manifest(details: Mapping[str, object]) -> dict[str
         "commercial_batch_id": "commercial-uplift-016-020",
         "item_number": 16,
         "gap_id": "#16",
+        "qc_prep_item_number": QC_PREP_PREFETCH_ITEM,
+        "qc_prep_item_goal": QC_PREP_PREFETCH_GOAL,
+        "qc_prep_contract": dict(QC_PREP_PREFETCH_CONTRACT),
         "artifact_type": str(details.get("artifact_type") or "prefetch-file"),
         "source": {
             "source_path": str(details.get("source_path") or ""),

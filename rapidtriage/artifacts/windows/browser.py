@@ -27,6 +27,58 @@ CHROMIUM_BROWSER_ROOTS: Tuple[Tuple[str, Sequence[str]], ...] = (
 FIREFOX_PROFILE_ROOT = ("AppData", "Roaming", "Mozilla", "Firefox", "Profiles")
 PARSER_VERSION = "windows-browser-v8"
 FUNCTIONAL_SOURCE_BATCH_ID = "commercial-uplift-046-050"
+QC_PREP_BROWSER_CACHE_ITEM = 33
+QC_PREP_BROWSER_SESSION_ITEM = 34
+QC_PREP_BROWSER_SECRET_ITEM = 35
+QC_PREP_BROWSER_CACHE_GOAL = "Reconstruct browser cache objects with request/response metadata and validation warnings."
+QC_PREP_BROWSER_SESSION_GOAL = (
+    "Decode browser session, local storage, extension, sync, and IndexedDB stores with profile attribution."
+)
+QC_PREP_BROWSER_SECRET_GOAL = "Keep cookies/passwords/tokens behind lawful authority gates, redaction, and audit logs."
+QC_PREP_BROWSER_CACHE_CONTRACT = {
+    "item_number": QC_PREP_BROWSER_CACHE_ITEM,
+    "goal": QC_PREP_BROWSER_CACHE_GOAL,
+    "implemented_outputs": [
+        "cache store inventory by browser/profile/user with source path and hash samples",
+        "cache presence and truncation metadata in browser-storage-depth manifests",
+        "explicit validation warnings that request/response body/header reconstruction is not complete",
+    ],
+    "commercial_blockers": [
+        "full Chromium/Firefox cache entry schema decoding",
+        "request/response header/body reconstruction",
+        "deleted cache recovery and trusted Hindsight/Velociraptor diffs",
+    ],
+}
+QC_PREP_BROWSER_SESSION_CONTRACT = {
+    "item_number": QC_PREP_BROWSER_SESSION_ITEM,
+    "goal": QC_PREP_BROWSER_SESSION_GOAL,
+    "implemented_outputs": [
+        "session, local storage, extension, sync, cookie, credential, and IndexedDB inventory",
+        "profile attribution for browser, user, profile directory, storage type, relative path, and source locators",
+        "storage-depth manifest with type counts, sensitive counts, and reportability blockers",
+    ],
+    "commercial_blockers": [
+        "browser-version session restore schema decoding",
+        "extension-specific schema validation",
+        "sync engine account/scope semantics",
+        "deleted session recovery known-answer evidence",
+    ],
+}
+QC_PREP_BROWSER_SECRET_CONTRACT = {
+    "item_number": QC_PREP_BROWSER_SECRET_ITEM,
+    "goal": QC_PREP_BROWSER_SECRET_GOAL,
+    "implemented_outputs": [
+        "secret store inventory only; raw values are not serialized or decrypted",
+        "authority profile and per-store manifest with controlled reveal disabled by default",
+        "legal warning, scope review, and audit-log requirements exposed in reportability decisions",
+    ],
+    "commercial_blockers": [
+        "lawful authority record attachment",
+        "controlled reveal audit workflow",
+        "DPAPI/keychain known-answer validation",
+        "trusted secret authority diff evidence",
+    ],
+}
 MAX_USAGE_ROWS = 500
 MAX_AI_STORAGE_FILES = 80
 MAX_AI_STORAGE_FILE_BYTES = 5 * 1024 * 1024
@@ -1193,6 +1245,11 @@ def build_browser_storage_depth_manifest(
         "commercial_batch_id": "commercial-uplift-016-020",
         "item_number": 19,
         "gap_id": "#19",
+        "qc_prep_item_numbers": [QC_PREP_BROWSER_CACHE_ITEM, QC_PREP_BROWSER_SESSION_ITEM],
+        "qc_prep_contracts": [
+            dict(QC_PREP_BROWSER_CACHE_CONTRACT),
+            dict(QC_PREP_BROWSER_SESSION_CONTRACT),
+        ],
         "browser": browser,
         "profile": profile,
         "user": user,
@@ -1682,6 +1739,11 @@ def browser_commercial_uplift_evidence(details: Mapping[str, object]) -> Dict[st
     return {
         "batch_id": "commercial-uplift-016-020",
         "item_numbers": [19, 20],
+        "qc_prep_item_numbers": [QC_PREP_BROWSER_CACHE_ITEM, QC_PREP_BROWSER_SESSION_ITEM],
+        "qc_prep_contracts": [
+            dict(QC_PREP_BROWSER_CACHE_CONTRACT),
+            dict(QC_PREP_BROWSER_SESSION_CONTRACT),
+        ],
         "functional_priority_profiles": [
             browser_history_downloads_functional_profile(details),
             browser_storage_inventory_functional_profile(details, storage_diff=storage_diff),
@@ -1733,6 +1795,11 @@ def browser_reportability_decision(
     return {
         "profile_version": "browser-reportability-decision-v1",
         "commercial_gap_ids": ["#19", "#20"],
+        "qc_prep_item_numbers": [
+            QC_PREP_BROWSER_CACHE_ITEM,
+            QC_PREP_BROWSER_SESSION_ITEM,
+            QC_PREP_BROWSER_SECRET_ITEM,
+        ],
         "decision": "do-not-report-browser-storage-or-timeline-as-complete",
         "allowed_use": "browser-storage-and-timeline-triage-pivot",
         "blockers": sorted(blockers),
@@ -2808,6 +2875,9 @@ def browser_secret_authority_profile(
     sensitive_name_counts = count_field(sensitive_rows, "storage_name")
     return {
         "profile_version": "browser-secret-authority-v1",
+        "qc_prep_item_number": QC_PREP_BROWSER_SECRET_ITEM,
+        "qc_prep_item_goal": QC_PREP_BROWSER_SECRET_GOAL,
+        "qc_prep_contract": dict(QC_PREP_BROWSER_SECRET_CONTRACT),
         "selected_track": "inventory-only-controlled-reveal-required",
         "browser": browser,
         "profile": profile,
@@ -2888,6 +2958,9 @@ def browser_secret_authority_manifest(
         "manifest_version": "browser-secret-authority-manifest-v1",
         "item_number": 42,
         "batch_id": "commercial-uplift-041-045",
+        "qc_prep_item_number": QC_PREP_BROWSER_SECRET_ITEM,
+        "qc_prep_item_goal": QC_PREP_BROWSER_SECRET_GOAL,
+        "qc_prep_contract": dict(QC_PREP_BROWSER_SECRET_CONTRACT),
         "selected_track": "per-store-controlled-reveal-inventory",
         "browser": browser,
         "profile": profile,
@@ -2948,6 +3021,7 @@ def browser_secret_handling_assessment(checks: Mapping[str, object]) -> Dict[str
     return {
         "status": "inventory-only-validation-required",
         "commercial_gap_ids": ["#42"],
+        "qc_prep_item_numbers": [QC_PREP_BROWSER_SECRET_ITEM],
         "ready_for_court_report": False,
         "secret_values_extracted": bool(checks.get("raw_secret_values_extracted")),
         "blockers": [
@@ -3025,6 +3099,8 @@ def browser_secret_commercial_uplift_evidence(details: Mapping[str, object]) -> 
     return {
         "batch_id": "commercial-uplift-041-045",
         "item_numbers": [42],
+        "qc_prep_item_numbers": [QC_PREP_BROWSER_SECRET_ITEM],
+        "qc_prep_contracts": [dict(QC_PREP_BROWSER_SECRET_CONTRACT)],
         "implementation_track": "browser-secret-legal-gate",
         "reportability_decision": browser_secret_reportability_decision(
             checks=checks,
@@ -3100,6 +3176,9 @@ def browser_secret_reportability_decision(
     return {
         "profile_version": "browser-secret-reportability-decision-v1",
         "commercial_gap_ids": ["#42"],
+        "qc_prep_item_number": QC_PREP_BROWSER_SECRET_ITEM,
+        "qc_prep_item_goal": QC_PREP_BROWSER_SECRET_GOAL,
+        "qc_prep_contract": dict(QC_PREP_BROWSER_SECRET_CONTRACT),
         "decision": "do-not-report-browser-secrets-as-decrypted-or-revealed",
         "allowed_use": "browser-secret-store-inventory-triage-pivot",
         "blockers": sorted(blockers),

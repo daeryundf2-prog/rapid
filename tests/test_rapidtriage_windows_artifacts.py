@@ -513,6 +513,9 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
             chrome_storage_depth = chrome["details"]["browser_storage_depth_manifest"]
             self.assertEqual(chrome_storage_depth["manifest_version"], "browser-storage-depth-manifest-v1")
             self.assertEqual(chrome_storage_depth["gap_id"], "#19")
+            self.assertEqual(chrome_storage_depth["qc_prep_item_numbers"], [33, 34])
+            self.assertEqual(chrome_storage_depth["qc_prep_contracts"][0]["item_number"], 33)
+            self.assertEqual(chrome_storage_depth["qc_prep_contracts"][1]["item_number"], 34)
             self.assertTrue(chrome_storage_depth["storage_scope"]["cache_present"])
             self.assertTrue(chrome_storage_depth["storage_scope"]["session_present"])
             self.assertTrue(chrome_storage_depth["storage_scope"]["extension_present"])
@@ -668,6 +671,7 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
             storage_depth = storage_inventory["details"]["browser_storage_depth_manifest"]
             self.assertEqual(storage_depth["manifest_version"], "browser-storage-depth-manifest-v1")
             self.assertEqual(storage_depth["item_number"], 19)
+            self.assertEqual(storage_depth["qc_prep_item_numbers"], [33, 34])
             self.assertTrue(storage_depth["storage_scope"]["cookie_present"])
             self.assertGreaterEqual(storage_depth["storage_scope"]["sensitive_inventory_count"], 3)
             self.assertEqual(storage_depth["reportability"]["allowed_use"], "browser-storage-inventory-triage-pivot")
@@ -698,6 +702,7 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
             self.assertIn("controlled reveal disabled by default", storage_gates["#42"]["satisfied_checks"])
             authority_profile = storage_inventory["details"]["browser_secret_authority_profile"]
             self.assertEqual(authority_profile["profile_version"], "browser-secret-authority-v1")
+            self.assertEqual(authority_profile["qc_prep_item_number"], 35)
             self.assertEqual(authority_profile["selected_track"], "inventory-only-controlled-reveal-required")
             self.assertFalse(authority_profile["raw_secret_reveal_allowed"])
             self.assertTrue(authority_profile["secret_values_redacted_by_default"])
@@ -707,6 +712,7 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
             authority_manifest = storage_inventory["details"]["browser_secret_authority_manifest"]
             self.assertEqual(authority_manifest["manifest_version"], "browser-secret-authority-manifest-v1")
             self.assertEqual(authority_manifest["item_number"], 42)
+            self.assertEqual(authority_manifest["qc_prep_item_number"], 35)
             self.assertGreaterEqual(authority_manifest["sensitive_store_count"], 3)
             self.assertEqual(authority_manifest["controlled_reveal_policy"], "disabled-by-default")
             self.assertFalse(authority_manifest["raw_secret_reveal_allowed"])
@@ -720,6 +726,7 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
             secret_uplift = storage_inventory["details"]["secret_handling_commercial_uplift_evidence"]
             self.assertEqual(secret_uplift["batch_id"], "commercial-uplift-041-045")
             self.assertEqual(secret_uplift["item_numbers"], [42])
+            self.assertEqual(secret_uplift["qc_prep_item_numbers"], [35])
             self.assertIn("raw-secret-values-redacted", secret_uplift["passed_control_ids"])
             self.assertIn("strict_legal_warning_present", secret_uplift["passed_control_ids"])
             self.assertIn("browser-secret-authority-profile-present", secret_uplift["passed_control_ids"])
@@ -749,6 +756,7 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
             storage_uplift = storage_inventory["details"]["commercial_uplift_evidence"]
             self.assertEqual(storage_uplift["batch_id"], "commercial-uplift-016-020")
             self.assertEqual(storage_uplift["item_numbers"], [19, 20])
+            self.assertEqual(storage_uplift["qc_prep_item_numbers"], [33, 34])
             self.assertGreaterEqual(storage_uplift["large_data_controls"]["storage_inventory_count"], 5)
             inventory_types = {row["storage_type"] for row in storage_inventory["details"]["storage_inventory"]}
             self.assertIn("cache", inventory_types)
@@ -874,6 +882,7 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
             lnk_uplift = details["commercial_uplift_evidence"]
             self.assertEqual(lnk_uplift["batch_id"], "commercial-uplift-016-020")
             self.assertEqual(lnk_uplift["item_numbers"], [17])
+            self.assertEqual(lnk_uplift["qc_prep_item_numbers"], [32])
             self.assertEqual(
                 lnk_uplift["reportability_decision"]["decision"],
                 "do-not-report-target-context-as-complete",
@@ -882,6 +891,7 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
             self.assertTrue(lnk_uplift["large_data_controls"]["property_store_decode_required_for_commercial_claims"])
             lnk_review_profile = details["lnk_analyst_review_profile"]
             self.assertEqual(lnk_review_profile["profile_version"], "lnk-analyst-review-profile-v1")
+            self.assertEqual(lnk_review_profile["qc_prep_item_number"], 32)
             self.assertEqual(
                 lnk_review_profile["source_field_values"]["target_path"],
                 r"C:\Users\alice\Documents\Incident Notes.docx",
@@ -892,6 +902,7 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
             lnk_manifest = details["lnk_metadata_depth_manifest"]
             self.assertEqual(lnk_manifest["manifest_version"], "lnk-metadata-depth-manifest-v1")
             self.assertEqual(lnk_manifest["gap_id"], "#17")
+            self.assertEqual(lnk_manifest["qc_prep_item_number"], 32)
             self.assertEqual(lnk_manifest["source"]["source_format"], "lnk-shell-link")
             self.assertEqual(lnk_manifest["row_identity"]["target_path"], r"C:\Users\alice\Documents\Incident Notes.docx")
             self.assertEqual(lnk_manifest["row_identity"]["tracker_machine_id"], "ALICE-PC")
@@ -2732,6 +2743,7 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
             prefetch_uplift = details["commercial_uplift_evidence"]
             self.assertEqual(prefetch_uplift["batch_id"], "commercial-uplift-016-020")
             self.assertEqual(prefetch_uplift["item_numbers"], [16])
+            self.assertEqual(prefetch_uplift["qc_prep_item_numbers"], [31])
             self.assertEqual(
                 prefetch_uplift["reportability_decision"]["allowed_use"],
                 "prefetch-execution-triage-pivot",
@@ -2742,6 +2754,7 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
             )
             prefetch_review_profile = details["prefetch_analyst_review_profile"]
             self.assertEqual(prefetch_review_profile["profile_version"], "prefetch-analyst-review-profile-v1")
+            self.assertEqual(prefetch_review_profile["qc_prep_item_number"], 31)
             self.assertEqual(prefetch_review_profile["source_field_values"]["executable_hint"], "POWERSHELL.EXE")
             self.assertEqual(prefetch_review_profile["source_field_values"]["run_count"], 3)
             self.assertIn("Amcache", prefetch_review_profile["correlation_targets"])
@@ -2749,6 +2762,7 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
             prefetch_manifest = details["prefetch_execution_depth_manifest"]
             self.assertEqual(prefetch_manifest["manifest_version"], "prefetch-execution-depth-manifest-v1")
             self.assertEqual(prefetch_manifest["gap_id"], "#16")
+            self.assertEqual(prefetch_manifest["qc_prep_item_number"], 31)
             self.assertEqual(prefetch_manifest["format_validation"]["layout_name"], "windows-10")
             self.assertTrue(prefetch_manifest["format_validation"]["supported_common_layout"])
             self.assertEqual(prefetch_manifest["execution_counters"]["run_count"], 3)
@@ -2778,6 +2792,7 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
             self.assertEqual(references[0]["details"]["last_run_at"], "2024-04-01T09:10:11+00:00")
             self.assertTrue(references[0]["details"]["validation_required"])
             self.assertEqual(references[0]["details"]["commercial_uplift_evidence"]["item_numbers"], [16])
+            self.assertEqual(references[0]["details"]["commercial_uplift_evidence"]["qc_prep_item_numbers"], [31])
             self.assertFalse(references[0]["details"]["commercial_grade_ready"])
             self.assertIn("#16", references[0]["details"]["prefetch_report_grade_assessment"]["commercial_gap_ids"])
             self.assertEqual(references[0]["details"]["forensic_review"]["gap_id"], "#16")

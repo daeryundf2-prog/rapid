@@ -40,6 +40,27 @@ JUMPLIST_COMMERCIAL_BLOCKERS = [
 JUMPLIST_TRUSTED_TOOLS = {"jlecmd", "lnkecmd", "lecmd", "jumplistexplorer", "velociraptor"}
 LNK_TRUSTED_TOOLS = {"lecmd", "lnkecmd", "windows shell", "shell properties", "velociraptor"}
 QC_PREP_JUMPLIST_ITEM = 29
+QC_PREP_LNK_ITEM = 32
+QC_PREP_LNK_GOAL = (
+    "Deepen LNK ShellLinkHeader, LinkInfo, StringData, ExtraData, "
+    "TrackerDataBlock, and target/source citation."
+)
+QC_PREP_LNK_CONTRACT = {
+    "item_number": QC_PREP_LNK_ITEM,
+    "goal": QC_PREP_LNK_GOAL,
+    "implemented_outputs": [
+        "ShellLinkHeader flags, attributes, timestamps, size, show command, and hotkey fields",
+        "LinkInfo local/common path candidates and StringData target context",
+        "ExtraData block inventory with TrackerDataBlock and property-store candidate preservation",
+        "depth manifest with source hash, target identity hash, citation refs, and report blockers",
+    ],
+    "commercial_blockers": [
+        "complete shell item semantic decoding",
+        "full property-store schema validation",
+        "LinkInfo/network-provider OS-version validation",
+        "LECmd/known-answer trusted diff evidence for critical shortcuts",
+    ],
+}
 JUMPLIST_CAPABILITIES = {
     "lnk_header_decode": True,
     "lnk_linkinfo_decode": True,
@@ -739,6 +760,9 @@ def lnk_metadata_depth_manifest(details: Mapping[str, object]) -> dict[str, obje
         "commercial_batch_id": "commercial-uplift-016-020",
         "item_number": 17,
         "gap_id": "#17",
+        "qc_prep_item_number": QC_PREP_LNK_ITEM,
+        "qc_prep_item_goal": QC_PREP_LNK_GOAL,
+        "qc_prep_contract": dict(QC_PREP_LNK_CONTRACT),
         "artifact_type": str(details.get("artifact_type") or "recent-shortcut"),
         "source": {
             "source_path": str(details.get("source_path") or ""),
@@ -877,6 +901,8 @@ def lnk_analyst_review_profile(details: Mapping[str, object]) -> dict[str, objec
     blockers = sorted(set(str(item) for item in report_grade.get("blockers", []) if str(item)))
     return {
         "profile_version": "lnk-analyst-review-profile-v1",
+        "qc_prep_item_number": QC_PREP_LNK_ITEM,
+        "qc_prep_item_goal": QC_PREP_LNK_GOAL,
         "artifact_type": str(details.get("artifact_type") or "recent-shortcut"),
         "severity": "medium",
         "summary": "Shell Link shortcut pivot with target path, LinkInfo/StringData, timestamps, and tracker context.",
@@ -1573,6 +1599,8 @@ def lnk_commercial_uplift_evidence(details: Mapping[str, object]) -> dict[str, o
     return {
         "batch_id": "commercial-uplift-016-020",
         "item_numbers": [17],
+        "qc_prep_item_numbers": [QC_PREP_LNK_ITEM],
+        "qc_prep_contracts": [dict(QC_PREP_LNK_CONTRACT)],
         "implementation_track": "native-parser-depth",
         "objective": "Expose Shell Link header, LinkInfo/StringData/ExtraData validation and remaining property-store blockers.",
         "source_refs": [
@@ -1613,6 +1641,9 @@ def lnk_reportability_decision(
     return {
         "profile_version": "lnk-reportability-decision-v1",
         "commercial_gap_id": "#17",
+        "qc_prep_item_number": QC_PREP_LNK_ITEM,
+        "qc_prep_item_goal": QC_PREP_LNK_GOAL,
+        "qc_prep_contract": dict(QC_PREP_LNK_CONTRACT),
         "decision": "do-not-report-target-context-as-complete",
         "allowed_use": "shortcut-target-and-metadata-triage-pivot",
         "blockers": sorted(blockers),
