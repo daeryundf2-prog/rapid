@@ -531,6 +531,8 @@ def build_native_mft_record(
     )
     details["ntfs_report_citation_manifest"] = ntfs_report_citation_manifest("mft", details)
     details["ntfs_report_citation_manifest_hash"] = details["ntfs_report_citation_manifest"]["manifest_sha256"]
+    details["source_viewer_locator"] = ntfs_record_source_viewer_locator("mft", details)
+    details["ntfs_record_locator_profile"] = details["source_viewer_locator"]
     details["ntfs_native_capabilities"] = NTFS_FILESYSTEM_CAPABILITIES
     details["mft_full_parser_profile"] = mft_full_parser_profile("record", details)
     details["mft_parser_depth_manifest"] = mft_parser_depth_manifest(details)
@@ -664,6 +666,8 @@ def build_native_usn_record(
     )
     details["ntfs_report_citation_manifest"] = ntfs_report_citation_manifest("usn", details)
     details["ntfs_report_citation_manifest_hash"] = details["ntfs_report_citation_manifest"]["manifest_sha256"]
+    details["source_viewer_locator"] = ntfs_record_source_viewer_locator("usn", details)
+    details["ntfs_record_locator_profile"] = details["source_viewer_locator"]
     details["ntfs_native_capabilities"] = NTFS_FILESYSTEM_CAPABILITIES
     details["usn_journal_replay_profile"] = usn_journal_replay_profile("record", details)
     details["usn_timeline_depth_manifest"] = usn_timeline_depth_manifest(details)
@@ -2412,6 +2416,145 @@ def ntfs_row_identity(family: str, details: Mapping[str, object]) -> dict[str, o
         "parent_reference": str(details.get("parent_reference") or ""),
         "file_path": str(details.get("file_path") or ""),
     }
+
+
+def ntfs_record_source_viewer_locator(family: str, details: Mapping[str, object]) -> dict[str, object]:
+    source_hashes = details.get("source_hashes") if isinstance(details.get("source_hashes"), Mapping) else {}
+    report_grade = (
+        details.get("ntfs_report_grade_assessment")
+        if isinstance(details.get("ntfs_report_grade_assessment"), Mapping)
+        else {}
+    )
+    base_payload: dict[str, object] = {
+        "profile_version": "ntfs-record-source-viewer-locator-v1",
+        "qc_prep_item": 9,
+        "artifact_family": family,
+        "source_path": str(details.get("source_path") or ""),
+        "source_format": str(details.get("source_format") or ""),
+        "source_sha256": str(source_hashes.get("sha256") or ""),
+        "source_index": details.get("source_index", ""),
+        "file_path": str(details.get("file_path") or ""),
+        "timestamp": str(details.get("timestamp") or ""),
+        "validation_required": bool(details.get("validation_required", True)),
+        "validation_warnings": list(details.get("validation_warnings") or []),
+        "commercial_grade_ready": bool(details.get("commercial_grade_ready")),
+        "commercial_grade_blockers": list(
+            report_grade.get("blockers")
+            if isinstance(report_grade.get("blockers"), list)
+            else details.get("commercial_grade_blockers") or []
+        ),
+        "report_citation_manifest_hash": str(details.get("ntfs_report_citation_manifest_hash") or ""),
+        "required_before_report": [
+            "source_sha256",
+            "record offset/cursor",
+            "decoded FRN identity",
+            "path confidence",
+            "trusted parser diff for report-grade claims",
+        ],
+    }
+    if family == "mft":
+        path_profile = (
+            details.get("mft_path_reconstruction_profile")
+            if isinstance(details.get("mft_path_reconstruction_profile"), Mapping)
+            else {}
+        )
+        parent_decoded = (
+            details.get("parent_reference_decoded")
+            if isinstance(details.get("parent_reference_decoded"), Mapping)
+            else {}
+        )
+        payload = {
+            **base_payload,
+            "viewer": "ntfs-mft-record",
+            "record_locator_type": "mft-file-record",
+            "record_number": str(details.get("record_number") or ""),
+            "frn": str(details.get("record_number") or ""),
+            "frn_record_number": details.get("record_number", ""),
+            "parent_frn": str(details.get("parent_reference") or ""),
+            "parent_frn_record_number": parent_decoded.get("record_number", ""),
+            "parent_sequence": parent_decoded.get("sequence_number", ""),
+            "sequence": details.get("sequence_number", ""),
+            "usn": "",
+            "reason_flags": [],
+            "record_offset": details.get("record_offset", ""),
+            "record_cursor": "",
+            "next_record_cursor": "",
+            "path_confidence": str(path_profile.get("source_mode") or ""),
+            "path_candidate": str(path_profile.get("best_available_path") or details.get("file_path") or ""),
+            "source_citation": (
+                f"$MFT record {details.get('record_number', '')} "
+                f"seq {details.get('sequence_number', '')} "
+                f"offset {details.get('record_offset', '')} "
+                f"path {details.get('file_path', '')}"
+            ).strip(),
+            "viewer_actions": [
+                {
+                    "label": "Open raw MFT record",
+                    "viewer": "hex",
+                    "byte_offset": details.get("record_offset", ""),
+                },
+                {
+                    "label": "Inspect decoded MFT attributes",
+                    "viewer": "mft-attributes",
+                    "record_number": str(details.get("record_number") or ""),
+                },
+            ],
+        }
+    else:
+        file_ref_decoded = (
+            details.get("file_reference_number_decoded")
+            if isinstance(details.get("file_reference_number_decoded"), Mapping)
+            else {}
+        )
+        parent_ref_decoded = (
+            details.get("parent_file_reference_number_decoded")
+            if isinstance(details.get("parent_file_reference_number_decoded"), Mapping)
+            else {}
+        )
+        bounded_path = (
+            details.get("usn_bounded_mft_path") if isinstance(details.get("usn_bounded_mft_path"), Mapping) else {}
+        )
+        payload = {
+            **base_payload,
+            "viewer": "ntfs-usn-record",
+            "record_locator_type": "usn-change-record",
+            "record_number": str(details.get("record_number") or ""),
+            "frn": str(details.get("record_number") or ""),
+            "frn_record_number": file_ref_decoded.get("record_number", ""),
+            "parent_frn": str(details.get("parent_reference") or ""),
+            "parent_frn_record_number": parent_ref_decoded.get("record_number", ""),
+            "parent_sequence": parent_ref_decoded.get("sequence_number", ""),
+            "sequence": file_ref_decoded.get("sequence_number", ""),
+            "usn": details.get("usn", ""),
+            "reason_flags": list(details.get("reason_flags") or []),
+            "record_offset": details.get("record_offset", ""),
+            "record_cursor": details.get("record_cursor", ""),
+            "next_record_cursor": details.get("next_record_cursor", ""),
+            "path_confidence": str(bounded_path.get("status") or "usn-file-name-only"),
+            "path_candidate": str(bounded_path.get("path_candidate") or details.get("file_path") or ""),
+            "source_citation": (
+                f"USN {details.get('usn', '')} "
+                f"FRN {details.get('record_number', '')} "
+                f"parent {details.get('parent_reference', '')} "
+                f"cursor {details.get('record_cursor', '')} "
+                f"reason {','.join(str(item) for item in details.get('reason_flags') or [])} "
+                f"path {details.get('file_path', '')}"
+            ).strip(),
+            "viewer_actions": [
+                {
+                    "label": "Open raw USN record",
+                    "viewer": "hex",
+                    "byte_offset": details.get("record_cursor", ""),
+                },
+                {
+                    "label": "Inspect reason and FRN decode",
+                    "viewer": "usn-record",
+                    "usn": details.get("usn", ""),
+                },
+            ],
+        }
+    payload["locator_sha256"] = ntfs_stable_sha256(payload)
+    return payload
 
 
 def ntfs_mft_citation_refs(details: Mapping[str, object]) -> list[dict[str, object]]:
