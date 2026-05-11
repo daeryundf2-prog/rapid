@@ -9,7 +9,13 @@ from typing import Any
 from rapidtriage.core.analysis import build_analysis_trusted_diff, build_search_analysis
 from rapidtriage.core.keyword_packs import resolve_keyword_packs
 from rapidtriage.core.search import build_advanced_search_trusted_diff, run_unified_search, search_core_accuracy_gates
-from rapidtriage.core.search_backend import build_search_backend_contract
+from rapidtriage.core.search_backend import (
+    build_external_search_adapter_contract,
+    build_search_backend_contract,
+    build_synthetic_benchmark_generator_manifest,
+    build_ui_virtualization_contract,
+    build_uniform_cursor_pagination_contract,
+)
 
 
 def write_json(path: Path, payload: dict[str, Any]) -> None:
@@ -667,7 +673,7 @@ class RapidTriageSearchAnalysisTests(unittest.TestCase):
             self.assertEqual(query_manifest["source_locator_count"], 1)
             backend_contract = fuzzy["search_backend_contract"]
             self.assertEqual(backend_contract["profile_version"], "search-backend-contract-v1")
-            self.assertEqual(backend_contract["qc_prep_item_numbers"], [48, 49, 50])
+            self.assertEqual(backend_contract["qc_prep_item_numbers"], [48, 49, 50, 51, 52, 53, 54, 55])
             self.assertEqual(backend_contract["selected_backend_id"], "sqlite-fts-local")
             self.assertTrue(backend_contract["ui_cli_contract"]["query_plan_metadata"])
             self.assertEqual(backend_contract["sqlite_fts_default_plan"]["qc_prep_item_number"], 49)
@@ -675,6 +681,13 @@ class RapidTriageSearchAnalysisTests(unittest.TestCase):
                 backend_contract["local_inverted_candidate_evaluation"]["qc_prep_item_number"],
                 50,
             )
+            self.assertEqual(backend_contract["external_search_adapter_contract"]["qc_prep_item_number"], 51)
+            self.assertFalse(backend_contract["external_search_adapter_contract"]["mandatory_for_single_case_desktop"])
+            self.assertEqual(backend_contract["normalized_index_schema_contract"]["qc_prep_item_number"], 52)
+            self.assertIn("evtx", backend_contract["normalized_index_schema_contract"]["artifact_families"])
+            self.assertEqual(backend_contract["synthetic_benchmark_generator_manifest"]["qc_prep_item_number"], 53)
+            self.assertEqual(backend_contract["uniform_cursor_pagination_contract"]["qc_prep_item_number"], 54)
+            self.assertEqual(backend_contract["ui_virtualization_contract"]["qc_prep_item_number"], 55)
             self.assertEqual(fuzzy["search_backend_contract_hash"], backend_contract["contract_hash"])
             self.assertEqual(query_manifest["hits"][0]["search_result_id"], "search-hit-000001")
             self.assertTrue(query_manifest["hits"][0]["hit_row_hash"])
@@ -767,12 +780,38 @@ class RapidTriageSearchAnalysisTests(unittest.TestCase):
         )
 
         self.assertEqual(contract["selected_backend_id"], "sqlite-fts-local")
-        self.assertEqual(contract["qc_prep_item_numbers"], [48, 49, 50])
+        self.assertEqual(contract["qc_prep_item_numbers"], [48, 49, 50, 51, 52, 53, 54, 55])
         self.assertEqual(contract["sqlite_fts_default_plan"]["effective_interactive_limit"], 5000)
         self.assertTrue(contract["sqlite_fts_default_plan"]["cursor_pagination_required"])
         self.assertEqual(contract["local_inverted_candidate_evaluation"]["target_rows"], 1_000_000)
         self.assertFalse(contract["local_inverted_candidate_evaluation"]["prototype_dependency_added"])
+        self.assertEqual(contract["external_search_adapter_contract"]["backend_id"], "elasticsearch-opensearch-optional")
+        self.assertFalse(contract["external_search_adapter_contract"]["privacy_controls"]["export_evidence_text_to_external_service_by_default"])
+        self.assertIn("messenger", contract["normalized_index_schema_contract"]["artifact_families"])
+        self.assertEqual(contract["synthetic_benchmark_generator_manifest"]["targets"], [100_000, 1_000_000, 10_000_000])
+        self.assertTrue(contract["uniform_cursor_pagination_contract"]["collection_contracts"]["search"]["cursor_required"])
+        self.assertTrue(contract["ui_virtualization_contract"]["required_behaviors"]["selection_state_survives_virtual_unmount"])
         self.assertIn("sqlite-fts-parity-diff-required", contract["commercial_blockers"])
+
+    def test_search_large_case_qc_contracts_cover_items_51_to_55(self) -> None:
+        external = build_external_search_adapter_contract(corpus_estimate={"target_rows": 10_000_000})
+        benchmark = build_synthetic_benchmark_generator_manifest()
+        cursor = build_uniform_cursor_pagination_contract()
+        virtualization = build_ui_virtualization_contract()
+
+        self.assertEqual(external["qc_prep_item_number"], 51)
+        self.assertEqual(external["target_rows"], 10_000_000)
+        self.assertIn("OpenSearch", external["supported_service_families"])
+        self.assertIn("local SQLite fallback if external service is unavailable", external["required_connection_controls"])
+        self.assertEqual(benchmark["qc_prep_item_number"], 53)
+        self.assertEqual([item["target_rows"] for item in benchmark["generators"]], [100_000, 1_000_000, 10_000_000])
+        self.assertTrue(benchmark["reproducibility_controls"]["deterministic_row_order_required"])
+        self.assertEqual(cursor["qc_prep_item_number"], 54)
+        self.assertTrue(cursor["collection_contracts"]["review_queue"]["resume_token_required"])
+        self.assertTrue(cursor["collection_contracts"]["report_candidates"]["source_locator_required"])
+        self.assertEqual(virtualization["qc_prep_item_number"], 55)
+        self.assertTrue(virtualization["required_behaviors"]["viewport_restore_required"])
+        self.assertTrue(virtualization["persistence_contract"]["focused_row_id"])
 
 
 if __name__ == "__main__":
