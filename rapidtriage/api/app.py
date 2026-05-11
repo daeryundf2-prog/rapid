@@ -45,6 +45,7 @@ from ..core.keyword_packs import (
     resolve_keyword_packs,
 )
 from ..core.indicators import IndicatorSummaryError, build_indicator_ti_enrichment_package
+from ..core.large_case_controls import build_source_search_full_cursor_contract
 from ..core.run import RunModeError
 from ..core.sample_case import DEFAULT_SAMPLE_MODE, SampleCaseError, run_sample_workflow
 from ..core.search import SearchError, run_unified_search
@@ -8202,6 +8203,7 @@ def build_source_search(
             context=context,
             diagnostics=search_diagnostics,
         ),
+        "source_search_full_cursor_contract": build_source_search_full_cursor_contract(),
         "matches": enrich_source_search_matches(source_path, matches),
     }
 
@@ -8221,6 +8223,9 @@ def source_search_profile(
         "profile_version": "current-file-search-v1",
         "commercial_batch_id": "commercial-uplift-016-020",
         "item_number": 17,
+        "qc_prep_item_number": 56,
+        "qc_prep_profile": "source-search-full-cursor-scan-v1",
+        "source_search_full_cursor_contract": build_source_search_full_cursor_contract(),
         "source_path": str(source_path),
         "searchable": searchable,
         "match_count": match_count,
@@ -8231,8 +8236,11 @@ def source_search_profile(
             "sqlite_row_scan_limit": diagnostics.get("sqlite_row_scan_limit"),
             "sqlite_scanned_row_count": diagnostics.get("sqlite_scanned_row_count"),
             "sqlite_scan_truncated": diagnostics.get("sqlite_scan_truncated"),
+            "sqlite_full_cursor_scan": diagnostics.get("sqlite_full_cursor_scan"),
+            "sqlite_result_limit_reached": diagnostics.get("sqlite_result_limit_reached"),
+            "sqlite_resume_state": diagnostics.get("sqlite_resume_state"),
             "full_case_reindex_not_required": True,
-            "sqlite_table_search_uses_limit": True,
+            "sqlite_table_search_uses_limit": bool(diagnostics.get("sqlite_row_scan_limit")),
             "binary_search_is_bounded": True,
         },
         "reportability_decision": {
@@ -8413,12 +8421,15 @@ def search_sqlite_file(
     *,
     limit: int,
     context: int,
-    row_scan_limit: int = SQLITE_SOURCE_SEARCH_ROW_SCAN_LIMIT,
+    row_scan_limit: int | None = None,
 ) -> tuple[list[dict[str, object]], bool, dict[str, object]]:
     matches: list[dict[str, object]] = []
     scanned_rows = 0
     scanned_tables = 0
     truncated_tables: list[str] = []
+    result_limit_reached = False
+    resume_state: dict[str, object] | None = None
+    effective_row_scan_limit = int(row_scan_limit or 0)
     with contextlib.closing(sqlite3.connect(f"{source_path.as_uri()}?mode=ro", uri=True)) as connection:
         connection.row_factory = sqlite3.Row
         for table in list_sqlite_tables(connection):
@@ -8443,16 +8454,30 @@ def search_sqlite_file(
             select_clause = ", ".join(quote_sqlite_identifier(column) for column in scan_columns)
             rowid_available = True
             try:
-                row_cursor = connection.execute(
-                    f"SELECT rowid AS __rapid_source_rowid, {select_clause} FROM {quoted} LIMIT ?",
-                    (row_scan_limit + 1,),
-                )
+                query = f"SELECT rowid AS __rapid_source_rowid, {select_clause} FROM {quoted}"
+                params: tuple[object, ...] = ()
+                if effective_row_scan_limit > 0:
+                    query += " LIMIT ?"
+                    params = (effective_row_scan_limit + 1,)
+                row_cursor = connection.execute(query, params)
             except sqlite3.DatabaseError:
                 rowid_available = False
-                row_cursor = connection.execute(f"SELECT {select_clause} FROM {quoted} LIMIT ?", (row_scan_limit + 1,))
+                query = f"SELECT {select_clause} FROM {quoted}"
+                params = ()
+                if effective_row_scan_limit > 0:
+                    query += " LIMIT ?"
+                    params = (effective_row_scan_limit + 1,)
+                row_cursor = connection.execute(query, params)
             for row_index, row in enumerate(row_cursor, start=1):
-                if row_index > row_scan_limit:
+                if effective_row_scan_limit > 0 and row_index > effective_row_scan_limit:
                     truncated_tables.append(table)
+                    resume_state = {
+                        "table": table,
+                        "next_row_number": row_index,
+                        "reason": "sqlite-row-scan-limit",
+                        "scanned_row_count": scanned_rows,
+                        "match_count": len(matches),
+                    }
                     break
                 scanned_rows += 1
                 row_values = {column: sqlite_preview_value(row[column]) for column in scan_columns}
@@ -8472,7 +8497,7 @@ def search_sqlite_file(
                                     "columns": text_columns,
                                     "mode": "source-search",
                                     "keyword": keyword,
-                                    "row_scan_limit": row_scan_limit,
+                                    "row_scan_limit": effective_row_scan_limit or "unbounded",
                                 }
                             )
                             sqlite_locator = sqlite_row_source_viewer_locator(
@@ -8504,21 +8529,36 @@ def search_sqlite_file(
                                 }
                             )
                             if len(matches) >= limit:
+                                result_limit_reached = True
+                                resume_state = {
+                                    "table": table,
+                                    "next_row_number": row_index + 1,
+                                    "reason": "result-limit",
+                                    "scanned_row_count": scanned_rows,
+                                    "match_count": len(matches),
+                                    "rowid": row["__rapid_source_rowid"] if rowid_available else "",
+                                }
                                 return matches, True, {
                                     "sqlite_scanned_table_count": scanned_tables,
                                     "sqlite_scanned_row_count": scanned_rows,
-                                    "sqlite_row_scan_limit": row_scan_limit,
+                                    "sqlite_row_scan_limit": effective_row_scan_limit or None,
                                     "sqlite_scan_truncated": True,
                                     "sqlite_truncated_tables": truncated_tables[:10],
+                                    "sqlite_full_cursor_scan": False,
+                                    "sqlite_result_limit_reached": result_limit_reached,
+                                    "sqlite_resume_state": resume_state,
                                 }
                             break
     truncated = bool(truncated_tables)
     return matches, truncated, {
         "sqlite_scanned_table_count": scanned_tables,
         "sqlite_scanned_row_count": scanned_rows,
-        "sqlite_row_scan_limit": row_scan_limit,
+        "sqlite_row_scan_limit": effective_row_scan_limit or None,
         "sqlite_scan_truncated": truncated,
         "sqlite_truncated_tables": truncated_tables[:10],
+        "sqlite_full_cursor_scan": not truncated,
+        "sqlite_result_limit_reached": result_limit_reached,
+        "sqlite_resume_state": resume_state,
     }
 
 

@@ -41,6 +41,7 @@ from rapidtriage.cli import build_web_parser
 from rapidtriage.core.crash import write_crash_report
 from rapidtriage.core.jobs import RunJobStore
 from rapidtriage.core.keyword_packs import build_keyword_pack_trusted_diff, keyword_pack_core_accuracy_gates
+from rapidtriage.core.large_case_controls import build_large_case_resilience_contract
 from tests.schema_validation import validate
 from tests.test_rapidtriage_run import build_run_fixture
 from tests.windows_artifact_fixtures import build_windows_artifact_fixture
@@ -76,7 +77,33 @@ class RapidTriageApiTests(unittest.TestCase):
         self.assertEqual(payload["summary"]["match_count"], 1)
         self.assertEqual(payload["matches"][0]["row_number"], 6001)
         self.assertEqual(payload["summary"]["sqlite_scanned_row_count"], 6001)
+        self.assertIsNone(payload["summary"]["sqlite_row_scan_limit"])
+        self.assertTrue(payload["summary"]["sqlite_full_cursor_scan"])
         self.assertFalse(payload["summary"]["sqlite_scan_truncated"])
+        self.assertEqual(payload["source_search_profile"]["qc_prep_item_number"], 56)
+        self.assertEqual(
+            payload["source_search_full_cursor_contract"]["profile_version"],
+            "source-search-full-cursor-scan-contract-v1",
+        )
+
+    def test_source_search_sqlite_result_limit_discloses_resume_state(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            db_path = Path(temp) / "many-hits.db"
+            connection = sqlite3.connect(db_path)
+            try:
+                connection.execute("CREATE TABLE notes(id INTEGER PRIMARY KEY, body TEXT)")
+                connection.executemany("INSERT INTO notes(body) VALUES (?)", [("needle",) for _ in range(5)])
+                connection.commit()
+            finally:
+                connection.close()
+
+            payload = build_source_search(db_path, ["needle"], limit=2, context=10)
+
+        self.assertEqual(payload["summary"]["match_count"], 2)
+        self.assertTrue(payload["summary"]["sqlite_result_limit_reached"])
+        self.assertEqual(payload["summary"]["sqlite_resume_state"]["reason"], "result-limit")
+        self.assertFalse(payload["summary"]["sqlite_full_cursor_scan"])
+        self.assertTrue(payload["truncated"])
 
     def test_source_search_rejects_oversized_docx_member_before_expanding(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
@@ -89,6 +116,23 @@ class RapidTriageApiTests(unittest.TestCase):
         self.assertFalse(payload["searchable"])
         self.assertEqual(payload["summary"]["match_count"], 0)
         self.assertIn("size limit", payload["message"])
+
+    def test_large_case_resilience_contract_covers_items_56_to_60(self) -> None:
+        contract = build_large_case_resilience_contract(requested_cap_bytes=512 * 1024 * 1024)
+
+        self.assertEqual(contract["qc_prep_item_numbers"], [56, 57, 58, 59, 60])
+        self.assertEqual(contract["source_search_full_cursor_contract"]["qc_prep_item_number"], 56)
+        self.assertTrue(
+            contract["source_search_full_cursor_contract"]["result_limit_policy"]["must_emit_resume_state_when_limit_reached"]
+        )
+        self.assertEqual(contract["hash_cache_persistence_contract"]["qc_prep_item_number"], 57)
+        self.assertTrue(contract["hash_cache_persistence_contract"]["required_behaviors"]["invalidate_on_mtime_change"])
+        self.assertEqual(contract["duplicate_grouping_contract"]["qc_prep_item_number"], 58)
+        self.assertIn("perceptual-image-hash", contract["duplicate_grouping_contract"]["grouping_modes"])
+        self.assertEqual(contract["parser_isolation_contract"]["qc_prep_item_number"], 59)
+        self.assertTrue(contract["parser_isolation_contract"]["required_behaviors"]["partial_output_quarantine"])
+        self.assertEqual(contract["memory_cap_contract"]["qc_prep_item_number"], 60)
+        self.assertEqual(contract["memory_cap_contract"]["requested_cap_bytes"], 512 * 1024 * 1024)
 
     def test_web_entrypoint_parser_supports_direct_launch_options(self) -> None:
         args = build_web_parser().parse_args(["--host", "0.0.0.0", "--port", "9000"])
