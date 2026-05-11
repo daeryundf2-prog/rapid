@@ -4414,6 +4414,17 @@ class RapidTriageWindowsArtifactsCollectorTests(unittest.TestCase):
             self.assertEqual(event_provider["artifacts"][0]["details"]["event_id"], "4624")
             self.assertEqual(event_provider["artifacts"][0]["details"]["data"]["TargetUserName"], "alice")
             self.assertEqual(event_provider["artifacts"][0]["details"]["source_format"], "xml")
+            event_locator = event_provider["artifacts"][0]["details"]["eventlog_record_locator_profile"]
+            self.assertEqual(event_locator["profile_version"], "eventlog-record-source-viewer-locator-v1")
+            self.assertEqual(event_locator["qc_prep_item"], 7)
+            self.assertEqual(event_locator["viewer"], "eventlog-record")
+            self.assertEqual(event_locator["record_id"], event_provider["artifacts"][0]["details"]["record_id"])
+            self.assertEqual(event_locator["channel"], "Security")
+            self.assertEqual(event_locator["provider_name"], "Microsoft-Windows-Security-Auditing")
+            self.assertEqual(event_locator["event_id"], "4624")
+            self.assertEqual(len(event_locator["source_sha256"]), 64)
+            self.assertFalse(event_locator["record_offset_available"])
+            self.assertIn("record byte offset unavailable", event_locator["validation_warning"])
 
             registry_provider = providers["windows-registry"]
             registry_types = {artifact["artifact_type"] for artifact in registry_provider["artifacts"]}

@@ -5089,6 +5089,17 @@ def normalize_event_details(
         is_native_evtx=is_native_evtx,
         message_catalog=message_catalog,
     )
+    source_viewer_locator = eventlog_record_source_viewer_locator(
+        source_path=source_path,
+        source_format=source_format,
+        source_hashes=source_hashes,
+        record_id=str(record_id or ""),
+        channel=channel,
+        provider_name=provider_name,
+        event_id=normalized_event_id,
+        data=data,
+        is_native_evtx=is_native_evtx,
+    )
     normalized_field_values = {
         "computer": computer,
         "event_created_at": normalized_timestamp,
@@ -5158,6 +5169,8 @@ def normalize_event_details(
         "event_semantics_profile": semantics_profile,
         "event_message": message_rendering.get("message") or "",
         "message_rendering": message_rendering,
+        "source_viewer_locator": source_viewer_locator,
+        "eventlog_record_locator_profile": source_viewer_locator,
         "record_id": str(record_id or ""),
         "channel": channel,
         "channel_family": channel_family_value,
@@ -5211,6 +5224,59 @@ def normalize_event_details(
         "triage_recommendation": triage_recommendation(category, detected_terms),
         "data": dict(data),
         "raw_preview": raw_preview,
+    }
+
+
+def eventlog_record_source_viewer_locator(
+    *,
+    source_path: Path,
+    source_format: str,
+    source_hashes: Mapping[str, str],
+    record_id: str,
+    channel: str,
+    provider_name: str,
+    event_id: str,
+    data: Mapping[str, object],
+    is_native_evtx: bool,
+) -> dict[str, object]:
+    offset = data.get("evtx_record_offset")
+    offset_int = int_text(offset)
+    source_sha256 = str(source_hashes.get("sha256") or "")
+    validation_warnings = [
+        "validate record locator with EvtxECmd/Hayabusa record-level diff before report use",
+        "provider message rendering may require Windows provider resources",
+    ]
+    if is_native_evtx:
+        validation_warnings.append("native EVTX BinXML parsing is partial and validation-required")
+    if offset_int is None:
+        validation_warnings.append("record byte offset unavailable for this exported event format")
+    return {
+        "profile_version": "eventlog-record-source-viewer-locator-v1",
+        "qc_prep_item": 7,
+        "viewer": "eventlog-record",
+        "source_path": str(source_path.resolve()),
+        "source_format": source_format,
+        "source_sha256": source_sha256,
+        "record_id": str(record_id or ""),
+        "channel": channel,
+        "provider_name": provider_name,
+        "event_id": event_id,
+        "record_offset": offset_int,
+        "record_offset_hex": f"0x{offset_int:x}" if offset_int is not None else "",
+        "record_offset_available": offset_int is not None,
+        "source_hash_available": bool(source_sha256),
+        "validation_warning": " | ".join(validation_warnings),
+        "required_before_report": [
+            "open source viewer",
+            "confirm record ID/channel/provider/event ID",
+            "verify source hash",
+            "attach trusted-tool record diff for report-grade EVTX claims",
+        ],
+        "commercial_grade_ready": False,
+        "commercial_grade_blockers": [
+            "trusted-tool-record-diff-required",
+            "provider-message-rendering-diff-required",
+        ],
     }
 
 
