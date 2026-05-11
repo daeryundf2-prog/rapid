@@ -56,6 +56,25 @@ EMAIL_TRUSTED_DIFF_TOOLS = {
     "maildir-ground-truth",
     "vendor-mailbox-export",
 }
+EMAIL_QC_PREP_ITEM_NUMBER = 42
+EMAIL_QC_PREP_GOAL = (
+    "Add PST/OST mailbox parsing depth for folders, messages, attachments, deleted items, headers, and threading."
+)
+EMAIL_QC_PREP_CONTRACT = {
+    "item_number": EMAIL_QC_PREP_ITEM_NUMBER,
+    "goal": EMAIL_QC_PREP_GOAL,
+    "implemented_outputs": [
+        "EML/EMLX/MBOX/Maildir message parsing with hashes, headers, body hash, attachments, and citation manifest",
+        "PST/OST/MSG bounded mailbox inventory with candidate folders, subjects, email addresses, attachments, and source viewer locator",
+        "Mailbox strategy, reportability decision, attachment locator profile, and trusted-diff blocker metadata",
+    ],
+    "commercial_blockers": [
+        "native PST/OST/MSG MAPI object decode",
+        "folder hierarchy, message flags, deleted/recoverable items, and corrupt-store recovery",
+        "conversation threading/deduplication and attachment byte validation",
+        "trusted libpff/readpst/Outlook/Purview diff plus broad mailbox known-answer corpus",
+    ],
+}
 EMAIL_FORMAT_PROFILES = {
     "eml": {
         "family": "internet-message",
@@ -884,6 +903,9 @@ def build_email_mailbox_parser_manifest(
         "item_number": 36,
         "batch_id": "commercial-uplift-036-040",
         "gap_id": "#36",
+        "qc_prep_item_number": EMAIL_QC_PREP_ITEM_NUMBER,
+        "qc_prep_item_goal": EMAIL_QC_PREP_GOAL,
+        "qc_prep_contract": dict(EMAIL_QC_PREP_CONTRACT),
         "artifact_type": artifact_type,
         "source_format": source_format,
         "format_family": email_format_profile(source_format)["family"],
@@ -1403,6 +1425,8 @@ def email_commercial_uplift_evidence(
     return {
         "batch_id": "commercial-uplift-036-040",
         "item_numbers": [36],
+        "qc_prep_item_numbers": [EMAIL_QC_PREP_ITEM_NUMBER],
+        "qc_prep_contracts": [dict(EMAIL_QC_PREP_CONTRACT)],
         "functional_priority_profile": email_expansion_functional_profile(
             source_format=source_format,
             source_hashes=source_hashes,
@@ -1533,6 +1557,8 @@ def email_expansion_functional_profile(
     return {
         "item_number": 49,
         "batch_id": FUNCTIONAL_SOURCE_BATCH_ID,
+        "qc_prep_item_numbers": [EMAIL_QC_PREP_ITEM_NUMBER],
+        "qc_prep_contracts": [dict(EMAIL_QC_PREP_CONTRACT)],
         "status": "complete" if not failed_checks else "partial",
         "implemented_controls": {
             "source_format": source_format,
@@ -1594,6 +1620,8 @@ def email_reportability_decision(
     return {
         "profile_version": "email-reportability-decision-v1",
         "commercial_gap_ids": ["#36"],
+        "qc_prep_item_numbers": [EMAIL_QC_PREP_ITEM_NUMBER],
+        "qc_prep_contracts": [dict(EMAIL_QC_PREP_CONTRACT)],
         "decision": "do-not-report-mailbox-as-native-or-deleted-complete",
         "allowed_use": "email-message-or-mailbox-inventory-triage-pivot",
         "source_format": source_format,

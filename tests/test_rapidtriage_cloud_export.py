@@ -104,6 +104,8 @@ class RapidTriageCloudExportTests(unittest.TestCase):
             self.assertEqual(google_manifest["manifest_version"], "google-takeout-parser-manifest-v1")
             self.assertEqual(google_manifest["item_number"], 37)
             self.assertEqual(google_manifest["gap_id"], "#37")
+            self.assertEqual(google_manifest["qc_prep_item_number"], 43)
+            self.assertIn("Google Takeout product matrix", google_manifest["qc_prep_item_goal"])
             self.assertEqual(google_manifest["service"], "gmail-takeout")
             self.assertEqual(google_manifest["product_family"], "gmail")
             self.assertEqual(google_manifest["row_citation"]["source_viewer_locator"]["viewer"], "google-takeout-product-row")
@@ -123,8 +125,11 @@ class RapidTriageCloudExportTests(unittest.TestCase):
             )
             self.assertEqual(mail_uplift["batch_id"], "commercial-uplift-036-040")
             self.assertEqual(mail_uplift["item_numbers"], [37])
+            self.assertEqual(mail_uplift["qc_prep_item_numbers"], [43])
+            self.assertEqual(mail_uplift["qc_prep_contracts"][0]["item_number"], 43)
             mail_profile = mail_uplift["functional_priority_profile"]
             self.assertEqual(mail_profile["item_number"], 55)
+            self.assertEqual(mail_profile["qc_prep_item_numbers"], [43])
             self.assertEqual(mail_profile["batch_id"], "commercial-uplift-051-055")
             self.assertTrue(mail_profile["implemented_controls"]["google_takeout_gmail_drive_photos_location_inventory"])
             self.assertEqual(
@@ -171,6 +176,7 @@ class RapidTriageCloudExportTests(unittest.TestCase):
                 mail_uplift["reportability_decision"]["allowed_use"],
                 "google-export-triage-pivot",
             )
+            self.assertEqual(mail_uplift["reportability_decision"]["qc_prep_item_numbers"], [43])
             self.assertIn(
                 "provider-export-scope-not-verified",
                 mail_uplift["reportability_decision"]["blockers"],
@@ -203,6 +209,8 @@ class RapidTriageCloudExportTests(unittest.TestCase):
             self.assertTrue(account["details"]["validation_checks"]["icloud_row_pivot_present"])
             account_uplift = account["details"]["commercial_uplift_evidence"]
             self.assertEqual(account_uplift["item_numbers"], [38])
+            self.assertEqual(account_uplift["qc_prep_item_numbers"], [44])
+            self.assertEqual(account_uplift["qc_prep_contracts"][0]["item_number"], 44)
             account_manifest = account["details"]["cloud_export_import_manifest"]
             self.assertEqual(account_manifest["provider_review"]["product_or_workload_family"], "account")
             self.assertEqual(account_manifest["source_viewer_locator"]["viewer"], "cloud-provider-export-row")
@@ -210,6 +218,8 @@ class RapidTriageCloudExportTests(unittest.TestCase):
             self.assertEqual(icloud_manifest["manifest_version"], "icloud-export-parser-manifest-v1")
             self.assertEqual(icloud_manifest["item_number"], 38)
             self.assertEqual(icloud_manifest["gap_id"], "#38")
+            self.assertEqual(icloud_manifest["qc_prep_item_number"], 44)
+            self.assertIn("iCloud export parser", icloud_manifest["qc_prep_item_goal"])
             self.assertEqual(icloud_manifest["service"], "apple-export")
             self.assertEqual(icloud_manifest["product_family"], "account")
             self.assertEqual(icloud_manifest["row_citation"]["source_viewer_locator"]["viewer"], "icloud-export-product-row")
@@ -235,6 +245,7 @@ class RapidTriageCloudExportTests(unittest.TestCase):
             self.assertIn("icloud-copy-limitations", account_uplift["failed_issue_matrix_ids"])
             self.assertTrue(account_uplift["large_data_controls"]["icloud_export_review_profile_present"])
             account_profile = account_uplift["functional_priority_profile"]
+            self.assertEqual(account_profile["qc_prep_item_numbers"], [44])
             self.assertIn("icloud-export-parser-manifest-emitted", account_profile["passed_validation_check_ids"])
             self.assertIn("icloud-export-source-locator-emitted", account_profile["passed_validation_check_ids"])
             self.assertEqual(
@@ -252,6 +263,7 @@ class RapidTriageCloudExportTests(unittest.TestCase):
                 account_uplift["reportability_decision"]["allowed_use"],
                 "icloud-export-triage-pivot",
             )
+            self.assertEqual(account_uplift["reportability_decision"]["qc_prep_item_numbers"], [44])
 
             icloud_photo = next(
                 artifact
@@ -300,6 +312,8 @@ class RapidTriageCloudExportTests(unittest.TestCase):
             self.assertTrue(cloud_file["details"]["validation_checks"]["m365_row_pivot_present"])
             file_uplift = cloud_file["details"]["commercial_uplift_evidence"]
             self.assertEqual(file_uplift["item_numbers"], [39])
+            self.assertEqual(file_uplift["qc_prep_item_numbers"], [45])
+            self.assertEqual(file_uplift["qc_prep_contracts"][0]["item_number"], 45)
             cloud_file_manifest = cloud_file["details"]["cloud_export_import_manifest"]
             self.assertEqual(
                 cloud_file_manifest["provider_review"]["product_or_workload_family"],
@@ -310,6 +324,8 @@ class RapidTriageCloudExportTests(unittest.TestCase):
             self.assertEqual(m365_manifest["manifest_version"], "m365-export-parser-manifest-v1")
             self.assertEqual(m365_manifest["item_number"], 39)
             self.assertEqual(m365_manifest["gap_id"], "#39")
+            self.assertEqual(m365_manifest["qc_prep_item_number"], 45)
+            self.assertIn("M365/Teams/OneDrive", m365_manifest["qc_prep_item_goal"])
             self.assertEqual(m365_manifest["service"], "microsoft-onedrive")
             self.assertEqual(m365_manifest["workload_family"], "onedrive-sharepoint")
             self.assertEqual(m365_manifest["row_citation"]["source_viewer_locator"]["viewer"], "m365-export-workload-row")
@@ -340,6 +356,7 @@ class RapidTriageCloudExportTests(unittest.TestCase):
             self.assertIn("retention-hold-and-deleted-state", file_uplift["failed_issue_matrix_ids"])
             self.assertTrue(file_uplift["large_data_controls"]["m365_export_review_profile_present"])
             file_profile = file_uplift["functional_priority_profile"]
+            self.assertEqual(file_profile["qc_prep_item_numbers"], [45])
             self.assertIn("m365-export-parser-manifest-emitted", file_profile["passed_validation_check_ids"])
             self.assertIn("m365-export-source-locator-emitted", file_profile["passed_validation_check_ids"])
             self.assertEqual(
@@ -361,6 +378,7 @@ class RapidTriageCloudExportTests(unittest.TestCase):
                 file_uplift["reportability_decision"]["allowed_use"],
                 "m365-export-triage-pivot",
             )
+            self.assertEqual(file_uplift["reportability_decision"]["qc_prep_item_numbers"], [45])
 
             message = next(artifact for artifact in payload["artifacts"] if artifact["artifact_type"] == "cloud-message")
             self.assertEqual(message["details"]["service"], "microsoft-teams")

@@ -66,6 +66,63 @@ CLOUD_TRUSTED_DIFF_TOOLS = {
         "provider-known-answer",
     },
 }
+CLOUD_QC_PREP_ITEMS = {
+    "google": 43,
+    "apple-icloud": 44,
+    "microsoft-365": 45,
+}
+CLOUD_QC_PREP_GOALS = {
+    43: "Add Google Takeout product matrix for Gmail, Drive, Photos, Activity, Location, account, and device attribution.",
+    44: "Add iCloud export parser for Photos, albums, shares, devices, EXIF, and account context.",
+    45: "Add M365/Teams/OneDrive/eDiscovery parser for permissions, reactions, attachments, SharePoint, and audit exports.",
+}
+CLOUD_QC_PREP_CONTRACTS = {
+    43: {
+        "item_number": 43,
+        "goal": CLOUD_QC_PREP_GOALS[43],
+        "implemented_outputs": [
+            "Google Takeout/Gmail/Drive/Photos/Activity/Location row normalization",
+            "product-family review profile, row pivots, parser manifest, and source viewer locator",
+            "selected-products, sidecar, timezone, and provider-diff blockers",
+        ],
+        "commercial_blockers": [
+            "selected Takeout product manifest and original archive hash",
+            "Drive/Photos/Gmail sidecar and timezone validation",
+            "provider-native/API or known-answer diff",
+            "deleted/retention/sharing scope validation",
+        ],
+    },
+    44: {
+        "item_number": 44,
+        "goal": CLOUD_QC_PREP_GOALS[44],
+        "implemented_outputs": [
+            "iCloud account, file, photo, and mail export row normalization",
+            "ADP/shared-album/container review profile, parser manifest, and source viewer locator",
+            "Photos sidecar/EXIF/album/share blocker metadata",
+        ],
+        "commercial_blockers": [
+            "Apple export scope and original archive hash",
+            "Advanced Data Protection and shared album validation",
+            "photo sidecar/EXIF merge validation",
+            "Apple/iCloud provider-native diff",
+        ],
+    },
+    45: {
+        "item_number": 45,
+        "goal": CLOUD_QC_PREP_GOALS[45],
+        "implemented_outputs": [
+            "M365/Teams/OneDrive/SharePoint/eDiscovery/audit row normalization",
+            "workload review profile, parser manifest, source viewer locator, and row pivots",
+            "Teams, SharePoint permission, retention, deleted/version-state blocker metadata",
+        ],
+        "commercial_blockers": [
+            "Purview/eDiscovery export manifest, tenant/custodian/query scope, and package hash",
+            "Graph API scope/pagination/throttling validation",
+            "Teams compliance record and SharePoint permission graph reconciliation",
+            "retention/deleted/version history validation and provider diff",
+        ],
+    },
+}
 CLOUD_PROVIDER_PROFILES = {
     "google": {
         "services": ("google-takeout", "gmail-takeout", "google-drive", "google-photos", "google-activity"),
@@ -775,6 +832,8 @@ def cloud_export_import_functional_profile(
     return {
         "batch_id": FUNCTIONAL_EXPANSION_BATCH_ID,
         "item_number": 55,
+        "qc_prep_item_numbers": cloud_qc_prep_item_numbers(family),
+        "qc_prep_contracts": cloud_qc_prep_contracts(family),
         "implementation_track": "cloud-export-import-provider-matrix",
         "status": "usable-internal-triage-not-provider-complete",
         "family": family,
@@ -919,6 +978,8 @@ def cloud_commercial_uplift_evidence(
     return {
         "batch_id": "commercial-uplift-036-040",
         "item_numbers": item_numbers,
+        "qc_prep_item_numbers": cloud_qc_prep_item_numbers(family),
+        "qc_prep_contracts": cloud_qc_prep_contracts(family),
         "implementation_track": "cloud-export-provider-validation",
         "objective": " ".join(objectives[number] for number in item_numbers if number in objectives),
         "reportability_decision": cloud_reportability_decision(
@@ -1158,6 +1219,9 @@ def build_google_takeout_parser_manifest(
         "item_number": 37,
         "batch_id": "commercial-uplift-036-040",
         "gap_id": "#37",
+        "qc_prep_item_number": 43,
+        "qc_prep_item_goal": CLOUD_QC_PREP_GOALS[43],
+        "qc_prep_contract": dict(CLOUD_QC_PREP_CONTRACTS[43]),
         "artifact_type": artifact_type,
         "service": service or "unknown",
         "product_family": product_family,
@@ -1298,6 +1362,9 @@ def build_icloud_export_parser_manifest(
         "item_number": 38,
         "batch_id": "commercial-uplift-036-040",
         "gap_id": "#38",
+        "qc_prep_item_number": 44,
+        "qc_prep_item_goal": CLOUD_QC_PREP_GOALS[44],
+        "qc_prep_contract": dict(CLOUD_QC_PREP_CONTRACTS[44]),
         "artifact_type": artifact_type,
         "service": service or "unknown",
         "product_family": product_family,
@@ -1449,6 +1516,9 @@ def build_m365_export_parser_manifest(
         "item_number": 39,
         "batch_id": "commercial-uplift-036-040",
         "gap_id": "#39",
+        "qc_prep_item_number": 45,
+        "qc_prep_item_goal": CLOUD_QC_PREP_GOALS[45],
+        "qc_prep_contract": dict(CLOUD_QC_PREP_CONTRACTS[45]),
         "artifact_type": artifact_type,
         "service": service or "unknown",
         "workload_family": workload_family,
@@ -1585,6 +1655,8 @@ def cloud_reportability_decision(
     return {
         "profile_version": "cloud-export-reportability-decision-v1",
         "commercial_gap_ids": [f"#{number}" for number in item_numbers],
+        "qc_prep_item_numbers": cloud_qc_prep_item_numbers(family),
+        "qc_prep_contracts": cloud_qc_prep_contracts(family),
         "decision": decision,
         "allowed_use": allowed_use,
         "family": family,
@@ -1603,6 +1675,15 @@ def cloud_reportability_decision(
             "document retention/deleted-state, sharing/permission, sidecar, and product-scope limitations",
         ],
     }
+
+
+def cloud_qc_prep_item_numbers(family: str) -> list[int]:
+    item_number = CLOUD_QC_PREP_ITEMS.get(family)
+    return [item_number] if item_number else []
+
+
+def cloud_qc_prep_contracts(family: str) -> list[dict[str, object]]:
+    return [dict(CLOUD_QC_PREP_CONTRACTS[number]) for number in cloud_qc_prep_item_numbers(family)]
 
 
 def cloud_core_accuracy_gates(

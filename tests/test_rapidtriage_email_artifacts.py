@@ -258,7 +258,10 @@ class RapidTriageEmailArtifactsTests(unittest.TestCase):
             )
             self.assertTrue(pst["details"]["email_mailbox_strategy_profile"]["bounded_inventory_only"])
             pst_uplift = pst["details"]["commercial_uplift_evidence"]
+            self.assertEqual(pst_uplift["qc_prep_item_numbers"], [42])
+            self.assertEqual(pst_uplift["qc_prep_contracts"][0]["item_number"], 42)
             self.assertEqual(pst_uplift["functional_priority_profile"]["item_number"], 49)
+            self.assertEqual(pst_uplift["functional_priority_profile"]["qc_prep_item_numbers"], [42])
             pst_manifest = pst["details"]["email_expansion_citation_manifest"]
             self.assertEqual(pst_manifest["manifest_version"], "email-expansion-citation-manifest-v1")
             self.assertEqual(pst_manifest["item_number"], 49)
@@ -268,6 +271,8 @@ class RapidTriageEmailArtifactsTests(unittest.TestCase):
             pst_mailbox_manifest = pst["details"]["email_mailbox_parser_manifest"]
             self.assertEqual(pst_mailbox_manifest["manifest_version"], "email-mailbox-parser-manifest-v1")
             self.assertEqual(pst_mailbox_manifest["item_number"], 36)
+            self.assertEqual(pst_mailbox_manifest["qc_prep_item_number"], 42)
+            self.assertIn("PST/OST mailbox parsing depth", pst_mailbox_manifest["qc_prep_item_goal"])
             self.assertEqual(pst_mailbox_manifest["artifact_type"], "email-mailbox")
             self.assertEqual(pst_mailbox_manifest["row_citation"]["source_viewer_locator"]["viewer"], "email-mailbox-inventory")
             self.assertTrue(pst_mailbox_manifest["mailbox_review"]["bounded_inventory_only"])
@@ -297,6 +302,7 @@ class RapidTriageEmailArtifactsTests(unittest.TestCase):
                 "native-mapi-container-decoding-not-validated",
                 pst_uplift["reportability_decision"]["blockers"],
             )
+            self.assertEqual(pst_uplift["reportability_decision"]["qc_prep_item_numbers"], [42])
 
     def test_email_trusted_diff_controls_core_accuracy_gate(self) -> None:
         rapid = [

@@ -745,6 +745,8 @@ class RapidTriageMobileExportTests(unittest.TestCase):
             self.assertEqual(line_manifest["manifest_version"], "extended-messenger-parser-manifest-v1")
             self.assertEqual(line_manifest["item_number"], 35)
             self.assertEqual(line_manifest["gap_id"], "#35")
+            self.assertEqual(line_manifest["qc_prep_item_number"], 41)
+            self.assertIn("LINE, Discord, Instagram, and WeChat", line_manifest["qc_prep_item_goal"])
             self.assertEqual(line_manifest["service"], "LINE")
             self.assertEqual(line_manifest["row_citation"]["source_viewer_locator"]["viewer"], "extended-messenger-message-row")
             self.assertEqual(len(line_manifest["row_citation"]["row_hash"]), 64)
@@ -760,12 +762,16 @@ class RapidTriageMobileExportTests(unittest.TestCase):
             )
             line_uplift = line["details"]["chat_app_commercial_uplift_evidence"]
             self.assertEqual(line_uplift["item_numbers"], [35])
+            self.assertEqual(line_uplift["qc_prep_item_numbers"], [41])
+            self.assertEqual(line_uplift["qc_prep_contracts"][0]["item_number"], 41)
             self.assertEqual(line_uplift["functional_priority_profile"]["item_number"], 50)
+            self.assertEqual(line_uplift["functional_priority_profile"]["qc_prep_item_numbers"], [41])
             self.assertIn("schema-version-known-answer", line_uplift["failed_issue_matrix_ids"])
             self.assertEqual(
                 line_uplift["reportability_decision"]["allowed_use"],
                 "extended-messenger-export-triage-pivot",
             )
+            self.assertEqual(line_uplift["reportability_decision"]["qc_prep_item_numbers"], [41])
             self.assertTrue(
                 line_uplift["large_data_controls"]["extended_messenger_message_review_profile_present"]
             )
@@ -804,6 +810,7 @@ class RapidTriageMobileExportTests(unittest.TestCase):
                 self.assertEqual(manifest["manifest_version"], "extended-messenger-parser-manifest-v1")
                 self.assertEqual(manifest["service"], service)
                 self.assertEqual(manifest["gap_id"], "#35")
+                self.assertEqual(manifest["qc_prep_item_number"], 41)
                 self.assertEqual(manifest["manifest_sha256"], artifact["details"]["extended_messenger_parser_manifest_hash"])
 
             app = next(artifact for artifact in payload["artifacts"] if artifact["artifact_type"] == "mobile-app")

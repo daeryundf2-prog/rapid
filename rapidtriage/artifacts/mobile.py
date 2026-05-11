@@ -413,12 +413,17 @@ QC_PREP_CHAT_APP_ITEMS = {
     "WhatsApp": 38,
     "Telegram": 39,
     "Signal": 40,
+    "WeChat": 41,
+    "LINE": 41,
+    "Discord": 41,
+    "Instagram": 41,
 }
 QC_PREP_CHAT_APP_GOALS = {
     37: "Formalize PC KakaoTalk legacy and post-patch schema/version matrix with fixtures and Windows packaging notes.",
     38: "Add WhatsApp export/native parser with message, contacts, calls, media, deleted-row limitations, and lawful key workflow.",
     39: "Add Telegram export/native parser with account, media, cache, and encrypted-store warning.",
     40: "Add Signal parser with SQLCipher/key handling separated into secure lawful workflow.",
+    41: "Add LINE, Discord, Instagram, and WeChat service-specific export/native schema mappers with review-ready source citations.",
 }
 QC_PREP_CHAT_APP_CONTRACTS = {
     37: {
@@ -479,6 +484,21 @@ QC_PREP_CHAT_APP_CONTRACTS = {
             "trusted Signal export/native DB diff",
             "recipient/thread schema known answers",
             "deleted/disappearing message validation",
+        ],
+    },
+    41: {
+        "item_number": 41,
+        "goal": QC_PREP_CHAT_APP_GOALS[41],
+        "implemented_outputs": [
+            "LINE, Discord, Instagram, and WeChat export row normalization",
+            "service-specific thread/channel, actor, recipient, media, reaction, read/edit/deleted-state review profile",
+            "extended messenger parser manifest with row citation, source viewer locator, and metadata-collapsed viewer controls",
+        ],
+        "commercial_blockers": [
+            "service/version schema matrix and fixture corpus",
+            "trusted service export/native DB diff",
+            "attachment byte locality and hash validation",
+            "edited/deleted/read/ephemeral semantics validation",
         ],
     },
 }
@@ -3185,6 +3205,9 @@ def build_extended_messenger_parser_manifest(
         "item_number": 35,
         "batch_id": "commercial-uplift-031-035",
         "gap_id": "#35",
+        "qc_prep_item_number": 41,
+        "qc_prep_item_goal": QC_PREP_CHAT_APP_GOALS[41],
+        "qc_prep_contract": dict(QC_PREP_CHAT_APP_CONTRACTS[41]),
         "artifact_type": artifact_type,
         "service": service or "unknown",
         "service_family": service_family(service),
@@ -7755,7 +7778,9 @@ def chat_app_gap_ids(service: str) -> list[str]:
 
 def chat_app_qc_prep_item_numbers(service: str) -> list[int]:
     item_number = QC_PREP_CHAT_APP_ITEMS.get(service)
-    return [item_number] if item_number else []
+    if item_number:
+        return [item_number]
+    return [41] if chat_app_gap_ids(service) == ["#35"] else []
 
 
 def chat_app_qc_prep_contracts(service: str) -> list[dict[str, object]]:
