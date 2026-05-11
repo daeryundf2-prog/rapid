@@ -1955,6 +1955,18 @@ class RapidTriageOpsTests(unittest.TestCase):
             self.assertEqual(comparison["reference_name"], "evtxecmd")
             self.assertLess(comparison["overlap_ratio"], 0.9)
             self.assertIn("1003", comparison["missing_in_rapid_sample"])
+            qc_contract = payload["validation_qc_contract"]
+            self.assertEqual(qc_contract["profile_version"], "validation-qc-controls-v1")
+            self.assertEqual(qc_contract["qc_prep_item_numbers"], [71, 72, 73, 74, 75])
+            self.assertEqual(
+                qc_contract["mismatch_dashboard"]["summary"]["severity_counts"]["critical"],
+                1,
+            )
+            self.assertIn(
+                "cross-tool-status-pass",
+                qc_contract["qc_checklist"]["failed_check_ids"],
+            )
+            self.assertFalse(qc_contract["qc_checklist"]["ready_for_validated_review"])
 
     def test_cross_tool_validate_can_emit_readiness_validation_dataset(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -2038,6 +2050,7 @@ class RapidTriageOpsTests(unittest.TestCase):
             readiness_checks = payload["cross_tool_validation_assessment"]["commercial_grade_readiness_checks"]
             functional_profile = payload["cross_tool_validation_assessment"]["functional_priority_profile"]
             trusted_manifest = payload["cross_tool_validation_assessment"]["trusted_tool_diff_manifest"]
+            qc_contract = payload["validation_qc_contract"]
             self.assertEqual(functional_profile["item_number"], 37)
             self.assertEqual(functional_profile["status"], "complete")
             self.assertEqual(functional_profile["implemented_controls"]["mapped_backlog_items"], [1, 2])
@@ -2059,6 +2072,17 @@ class RapidTriageOpsTests(unittest.TestCase):
                 functional_profile["implemented_controls"]["trusted_tool_diff_manifest_hash"],
                 trusted_manifest["manifest_hash"],
             )
+            self.assertEqual(qc_contract["profile_version"], "validation-qc-controls-v1")
+            self.assertEqual(qc_contract["qc_prep_item_numbers"], [71, 72, 73, 74, 75])
+            self.assertEqual(payload["validation_qc_contract_hash"], qc_contract["contract_hash"])
+            self.assertEqual(qc_contract["mismatch_dashboard"]["profile_version"], "trusted-diff-mismatch-dashboard-v1")
+            self.assertEqual(qc_contract["mismatch_dashboard"]["summary"]["field_mismatch_count"], 0)
+            self.assertEqual(qc_contract["false_positive_false_negative_register"]["profile_version"], "fp-fn-recording-contract-v1")
+            self.assertEqual(qc_contract["parser_confidence_matrix"]["profile_version"], "parser-confidence-reportability-v1")
+            self.assertEqual(qc_contract["legal_limitation_guardrails"]["profile_version"], "legal-limitation-guardrails-v1")
+            self.assertEqual(qc_contract["qc_checklist"]["profile_version"], "auto-qc-checklist-v1")
+            self.assertTrue(qc_contract["qc_checklist"]["ready_for_validated_review"])
+            self.assertTrue(qc_contract["qc_checklist"]["ready_for_commercial_grade_review"])
             self.assertTrue(readiness_checks["source_evidence_hashes_attached"])
             self.assertTrue(readiness_checks["corpus_scope_attached"])
             self.assertTrue(readiness_checks["external_tool_versions_attached"])

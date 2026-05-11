@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Iterable, Mapping, Sequence
 
 from .docs import write_result
+from .validation_qc_controls import build_validation_qc_contract
 
 
 MAX_ROWS_PER_TOOL = 100_000
@@ -389,6 +390,42 @@ def build_cross_tool_validation_report(
         status = "failed"
     elif any(item["status"] == "warning" for item in comparisons):
         status = "warning"
+    assessment = cross_tool_validation_assessment(
+        status=status,
+        comparisons=comparisons,
+        backlog_items=mapped_items,
+        output=output,
+        min_overlap=min_overlap,
+        source_evidence_integrity=source_evidence_integrity,
+        independent_review_integrity=independent_review_integrity,
+        corpus_scope=corpus_scope,
+        tool_metadata=tool_metadata,
+    )
+    readiness_checks = assessment.get("commercial_grade_readiness_checks", {})
+    validation_qc_contract = build_validation_qc_contract(
+        comparisons=comparisons,
+        status=status,
+        backlog_items=mapped_items,
+        output_written=output is not None,
+        source_evidence_count=len(source_evidence_integrity),
+        independent_review_count=len(independent_review_integrity),
+        commercial_grade_blockers=assessment.get("commercial_grade_blockers", []),
+        tool_versions_attached=bool(
+            readiness_checks.get("external_tool_versions_attached")
+            if isinstance(readiness_checks, Mapping)
+            else False
+        ),
+        tool_commands_attached=bool(
+            readiness_checks.get("external_tool_commands_attached")
+            if isinstance(readiness_checks, Mapping)
+            else False
+        ),
+        corpus_scope_attached=bool(
+            readiness_checks.get("corpus_scope_attached")
+            if isinstance(readiness_checks, Mapping)
+            else False
+        ),
+    )
     payload = {
         "command": "cross-tool-validate",
         "generated_at": dt.datetime.now(dt.timezone.utc).isoformat(),
@@ -402,17 +439,9 @@ def build_cross_tool_validation_report(
         "corpus_scope": corpus_scope.strip(),
         "tool_metadata": tool_metadata,
         "comparisons": comparisons,
-        "cross_tool_validation_assessment": cross_tool_validation_assessment(
-            status=status,
-            comparisons=comparisons,
-            backlog_items=mapped_items,
-            output=output,
-            min_overlap=min_overlap,
-            source_evidence_integrity=source_evidence_integrity,
-            independent_review_integrity=independent_review_integrity,
-            corpus_scope=corpus_scope,
-            tool_metadata=tool_metadata,
-        ),
+        "cross_tool_validation_assessment": assessment,
+        "validation_qc_contract": validation_qc_contract,
+        "validation_qc_contract_hash": validation_qc_contract["contract_hash"],
         "operator_guidance": build_operator_guidance(comparisons),
     }
     if mapped_items:
