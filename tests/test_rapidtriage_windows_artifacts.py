@@ -1925,6 +1925,10 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
             self.assertTrue(lifecycle["details"]["validation_checks"]["has_sam_v_value"])
             sam_deep_profile = lifecycle["details"]["sam_security_system_deep_parser_profile"]
             self.assertEqual(sam_deep_profile["item_number"], 12)
+            self.assertEqual(sam_deep_profile["qc_prep_item_number"], 21)
+            self.assertIn("SAM F/V", sam_deep_profile["qc_prep_item_goal"])
+            self.assertIn("SAM F/V candidate field decoding", sam_deep_profile["qc_prep_contract"]["validated_by_current_tests"])
+            self.assertIn("windows-account-lifecycle", sam_deep_profile["qc_prep_contract"]["usable_outputs"])
             self.assertEqual(sam_deep_profile["target_hives"], ["SAM", "SECURITY", "SYSTEM"])
             self.assertTrue(sam_deep_profile["decoded_components"]["sam_f_value_metadata"])
             self.assertTrue(sam_deep_profile["decoded_components"]["sam_v_value_metadata"])
@@ -2008,6 +2012,7 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
             lifecycle_uplift = lifecycle["details"]["commercial_uplift_evidence"]
             self.assertEqual(lifecycle_uplift["batch_id"], "commercial-uplift-006-010")
             self.assertEqual(lifecycle_uplift["item_numbers"], [6])
+            self.assertEqual(lifecycle_uplift["qc_prep_item_numbers"], [21])
             self.assertIn("has-sam-f-value", lifecycle_uplift["passed_validation_matrix_ids"])
             self.assertIn("native-sam-fv-report-grade", lifecycle_uplift["failed_validation_matrix_ids"])
             self.assertEqual(
@@ -2204,6 +2209,11 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
             )
             self.assertEqual(exported_amcache["details"]["amcache_schema_profile"]["commercial_gap_id"], "#7")
             self.assertEqual(exported_amcache["details"]["amcache_schema_profile"]["readiness_item_number"], 15)
+            self.assertEqual(exported_amcache["details"]["amcache_schema_profile"]["qc_prep_item_number"], 22)
+            self.assertIn(
+                "reg-export Amcache row mapping",
+                exported_amcache["details"]["amcache_schema_profile"]["qc_prep_contract"]["implemented"],
+            )
             self.assertEqual(
                 exported_amcache["details"]["amcache_schema_profile"]["execution_artifact_validation_profile"]["item_number"],
                 15,
@@ -2257,6 +2267,7 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
             amcache_uplift = exported_amcache["details"]["commercial_uplift_evidence"]
             self.assertEqual(amcache_uplift["batch_id"], "commercial-uplift-006-010")
             self.assertEqual(amcache_uplift["item_numbers"], [7])
+            self.assertEqual(amcache_uplift["qc_prep_item_numbers"], [22])
             self.assertEqual(
                 amcache_uplift["reportability_decision"]["allowed_use"],
                 "program-presence-install-execution-related-pivot",
@@ -2303,6 +2314,11 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
             )
             self.assertTrue(bam["details"]["bam_dam_evidence"]["requires_native_system_hive_validation"])
             self.assertEqual(bam["details"]["bam_dam_decode_profile"]["commercial_gap_id"], "#9")
+            self.assertEqual(bam["details"]["bam_dam_decode_profile"]["qc_prep_item_number"], 24)
+            self.assertIn(
+                "native cluster SID/path/timestamp/source extraction",
+                bam["details"]["bam_dam_decode_profile"]["qc_prep_contract"]["validated_by_current_tests"],
+            )
             self.assertEqual(
                 bam["details"]["bam_dam_decode_profile"]["execution_artifact_validation_profile"]["artifact_family"],
                 "bam-dam",
@@ -2353,6 +2369,7 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
             self.assertIn("native-system-hive-bam-decoding-required", bam_review_profile["commercial_blockers"])
             bam_uplift = bam["details"]["commercial_uplift_evidence"]
             self.assertEqual(bam_uplift["item_numbers"], [9])
+            self.assertEqual(bam_uplift["qc_prep_item_numbers"], [24])
             self.assertEqual(
                 bam_uplift["reportability_decision"]["allowed_use"],
                 "recent-execution-pivot-corroborate-before-testimony",
@@ -2396,6 +2413,11 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
             self.assertEqual(
                 shimcache["details"]["shimcache_execution_caveat_profile"]["execution_artifact_validation_profile"]["normalized_row_contract"]["execution_caveat_required"],
                 True,
+            )
+            self.assertEqual(shimcache["details"]["shimcache_execution_caveat_profile"]["qc_prep_item_number"], 23)
+            self.assertIn(
+                "not-proof-of-execution UX wording",
+                shimcache["details"]["shimcache_execution_caveat_profile"]["qc_prep_contract"]["validated_by_current_tests"],
             )
             self.assertFalse(shimcache["details"]["shimcache_execution_caveat_profile"]["standalone_execution_proof"])
             self.assertEqual(
@@ -2441,6 +2463,7 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
             self.assertIn("malformed binary bounds checks", shimcache_gate["satisfied_checks"])
             shimcache_uplift = shimcache["details"]["commercial_uplift_evidence"]
             self.assertEqual(shimcache_uplift["item_numbers"], [8])
+            self.assertEqual(shimcache_uplift["qc_prep_item_numbers"], [23])
             self.assertEqual(
                 shimcache_uplift["reportability_decision"]["allowed_use"],
                 "program-presence-cache-order-pivot",
@@ -2508,6 +2531,11 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
             self.assertTrue(srum_database_rows[0]["details"]["ese_header"]["signature_valid"])
             self.assertTrue(srum_database_rows[0]["details"]["srum_database_evidence"]["ese_signature_valid"])
             self.assertEqual(srum_database_rows[0]["details"]["srum_ese_validation_profile"]["commercial_gap_id"], "#10")
+            self.assertEqual(srum_database_rows[0]["details"]["srum_ese_validation_profile"]["qc_prep_item_number"], 25)
+            self.assertIn(
+                "native SRUDB.dat ESE header probe",
+                srum_database_rows[0]["details"]["srum_ese_validation_profile"]["qc_prep_contract"]["implemented"],
+            )
             self.assertEqual(srum_database_rows[0]["details"]["srum_ese_validation_profile"]["artifact_scope"], "database")
             self.assertTrue(srum_database_rows[0]["details"]["srum_ese_validation_profile"]["decoded_components"]["ese_header"])
             self.assertEqual(
@@ -2542,6 +2570,7 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
             srum_uplift = srum_database_rows[0]["details"]["commercial_uplift_evidence"]
             self.assertEqual(srum_uplift["batch_id"], "commercial-uplift-006-010")
             self.assertEqual(srum_uplift["item_numbers"], [10])
+            self.assertEqual(srum_uplift["qc_prep_item_numbers"], [25])
             self.assertEqual(srum_uplift["reportability_decision"]["allowed_use"], "srum-usage-triage-pivot")
             self.assertTrue(srum_uplift["large_data_controls"]["row_level_native_decode_required_for_commercial_claims"])
             self.assertTrue(any("powershell.exe" in value.lower() for value in srum_database_rows[0]["details"]["path_candidates"]))

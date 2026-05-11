@@ -103,6 +103,7 @@ OS_ACCOUNT_REPORT_GRADE_BLOCKERS = [
     "domain-context-and-transaction-log-validation-required",
 ]
 OS_ACCOUNT_TRUSTED_TOOL_HINTS = ("recmd", "registryexplorer", "regripper", "windowsapi", "samparser", "secretsdump")
+QC_PREP_SAM_SECURITY_SYSTEM_ITEM = 21
 
 
 class WindowsOsAccountProvider:
@@ -1225,6 +1226,11 @@ def sam_security_system_deep_parser_profile(
         "profile_version": "sam-security-system-deep-parser-v1",
         "commercial_batch_id": "commercial-uplift-011-015",
         "item_number": 12,
+        "qc_prep_item_number": QC_PREP_SAM_SECURITY_SYSTEM_ITEM,
+        "qc_prep_item_goal": (
+            "Deepen SAM/SECURITY/SYSTEM parsing for SAM F/V records, aliases, memberships, "
+            "LSA metadata, privileges, services, ControlSets, and mounted devices."
+        ),
         "artifact_scope": artifact_scope,
         "target_hives": ["SAM", "SECURITY", "SYSTEM"],
         "decoded_components": {
@@ -1242,6 +1248,37 @@ def sam_security_system_deep_parser_profile(
             "native_sam_alias_member_decode": bool(OS_ACCOUNT_NATIVE_CAPABILITIES["native_sam_alias_member_binary_decode"]),
             "security_secret_decryption": bool(OS_ACCOUNT_NATIVE_CAPABILITIES["security_secret_decryption"]),
             "transaction_log_replay": bool(OS_ACCOUNT_NATIVE_CAPABILITIES["transaction_log_replay"]),
+        },
+        "qc_prep_contract": {
+            "implemented": [
+                "SAM account RID/name key candidates",
+                "SAM F/V value metadata and conservative timestamp/UAC/string candidates",
+                "group/alias membership hints with SID tail correlation",
+                "SECURITY LSA secret metadata inventory with protected values redacted",
+                "privilege-rights export mapping and inherited privilege context",
+                "SYSTEM CurrentControlSet, services, mounted devices, and USB storage hints",
+            ],
+            "usable_outputs": [
+                "windows-account-lifecycle",
+                "windows-sam-account-candidate",
+                "windows-sam-group-candidate",
+                "windows-security-policy-secret",
+                "windows-service-configuration",
+                "windows-mounted-device",
+                "windows-privilege-assignment",
+            ],
+            "validated_by_current_tests": [
+                "SAM F/V candidate field decoding",
+                "normalized security context manifest hashing",
+                "secret-value redaction policy",
+                "admin/group/privilege risk flags",
+            ],
+            "not_report_grade_until": [
+                "OS-version-specific SAM F/V layouts are fully validated",
+                "SAM alias/member binary values are decoded natively",
+                "SAM/SECURITY/SYSTEM LOG transaction replay is implemented or trusted-diff proven",
+                "domain/local SID context is resolved",
+            ],
         },
         "evidence_fields": dict(evidence_fields),
         "normalized_security_context_schema": {
@@ -1386,8 +1423,9 @@ def os_account_commercial_uplift_evidence(details: Mapping[str, object]) -> dict
     return {
         "batch_id": "commercial-uplift-006-010",
         "item_numbers": [6],
+        "qc_prep_item_numbers": [QC_PREP_SAM_SECURITY_SYSTEM_ITEM],
         "implementation_track": "native-parser-depth",
-        "objective": "Expose SAM/SECURITY/SYSTEM account validation evidence and commercial blockers on account rows.",
+        "objective": "Expose SAM/SECURITY/SYSTEM account validation evidence and commercial blockers on #6 / QC-prep #21 account rows.",
         "source_refs": [
             f"source_path:{details.get('source_path', '')}",
             f"source_index:{details.get('source_index', '')}",

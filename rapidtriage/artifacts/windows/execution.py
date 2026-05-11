@@ -76,6 +76,18 @@ EXECUTION_REPORT_GRADE_BLOCKERS = [
     "known-answer-execution-artifact-validation-required",
 ]
 EXECUTION_TRUSTED_TOOL_HINTS = ("amcacheparser", "appcompatcacheparser", "shimcacheparser", "srumecmd", "recmd", "velociraptor")
+QC_PREP_EXECUTION_ITEM_NUMBERS = {
+    "amcache-entry": 22,
+    "amcache-hive": 22,
+    "shimcache-entry": 23,
+    "bam-entry": 24,
+    "srum-network-usage": 25,
+    "srum-app-resource-usage": 25,
+    "srum-database-file": 25,
+    "srum-database-pivot": 25,
+    "srum-table-candidate": 25,
+    "srum-row-candidate": 25,
+}
 EXECUTION_ANALYST_REVIEW_CATALOG = {
     "amcache-entry": {
         "severity": "medium",
@@ -2412,10 +2424,31 @@ def amcache_schema_profile(
         "profile_version": "amcache-schema-v1",
         "commercial_batch_id": "commercial-uplift-011-015",
         "readiness_item_number": 15,
+        "qc_prep_item_number": QC_PREP_EXECUTION_ITEM_NUMBERS["amcache-entry"],
+        "qc_prep_item_goal": "Deepen Amcache schema/version decoding and timestamp semantics.",
         "commercial_gap_id": "#7",
         "artifact_family": "amcache",
         "source_format": source_format,
         "current_decode_level": "reg-export-mapping" if source_format == "reg" else "native-string-pivot-only",
+        "qc_prep_contract": {
+            "implemented": [
+                "reg-export Amcache row mapping",
+                "native Amcache.hve bounded path/hash string pivots",
+                "path, SHA1, publisher, product, description, and timestamp-source normalization",
+                "row citation manifest and reportability decision",
+            ],
+            "usable_outputs": ["amcache-entry", "amcache-hive"],
+            "validated_by_current_tests": [
+                "trusted AmcacheParser-style row diff helper",
+                "metadata mismatch blocking",
+                "timestamp-source and not-standalone-execution wording",
+            ],
+            "not_report_grade_until": [
+                "native Amcache schema row decoder is implemented by Windows build",
+                "timestamp semantics are validated with known-answer fixtures",
+                "trusted parser diffs are attached for the case evidence",
+            ],
+        },
         "schema_components": {
             "inventory_application_file": True,
             "inventory_application": True,
@@ -2990,10 +3023,35 @@ def shimcache_execution_caveat_profile(
         "profile_version": "shimcache-caveat-v1",
         "commercial_batch_id": "commercial-uplift-011-015",
         "readiness_item_number": 15,
+        "qc_prep_item_number": QC_PREP_EXECUTION_ITEM_NUMBERS["shimcache-entry"],
+        "qc_prep_item_goal": (
+            "Deepen ShimCache/AppCompatCache OS-version binary layouts and preserve the "
+            "not-direct-execution-proof analyst warning."
+        ),
         "commercial_gap_id": "#8",
         "artifact_family": "shimcache-appcompatcache",
         "source_format": source_format,
         "current_decode_level": "reg-export-mapping" if source_format == "reg" else "native-system-hive-string-pivot",
+        "qc_prep_contract": {
+            "implemented": [
+                "reg-export ShimCache mapping",
+                "native SYSTEM hive bounded AppCompatCache path cluster scan",
+                "cache-order, source-offset, timestamp-candidate, and caveat preservation",
+                "trusted-diff helper that compares path/order/offset/timestamp/warning",
+            ],
+            "usable_outputs": ["shimcache-entry"],
+            "validated_by_current_tests": [
+                "native cluster order/offset preservation",
+                "trusted AppCompatCacheParser-style diff pass",
+                "order mismatch blocking",
+                "not-proof-of-execution UX wording",
+            ],
+            "not_report_grade_until": [
+                "OS-build-specific binary AppCompatCache layouts are decoded",
+                "malformed layout fixtures and known-answer image diffs pass",
+                "execution claims are corroborated by independent artifacts",
+            ],
+        },
         "standalone_execution_proof": False,
         "interpretation": "program-presence-and-cache-order-candidate",
         "timestamp_semantics": "os-version-dependent-and-not-proof-of-execution" if timestamp else "not-available",
@@ -3083,10 +3141,31 @@ def bam_dam_decode_profile(
         "profile_version": "bam-dam-decode-v1",
         "commercial_batch_id": "commercial-uplift-011-015",
         "readiness_item_number": 15,
+        "qc_prep_item_number": QC_PREP_EXECUTION_ITEM_NUMBERS["bam-entry"],
+        "qc_prep_item_goal": "Deepen BAM/DAM binary value decoding and SID/path/timestamp correlation.",
         "commercial_gap_id": "#9",
         "artifact_family": "bam-dam",
         "source_format": source_format,
         "current_decode_level": "reg-export-mapping" if source_format == "reg" else "native-system-hive-string-pivot",
+        "qc_prep_contract": {
+            "implemented": [
+                "reg-export BAM/DAM row mapping",
+                "native SYSTEM hive bounded SID/path/timestamp cluster scan",
+                "device-path, user SID, FILETIME/timestamp-source, ControlSet, and source-offset normalization",
+                "trusted-diff helper that compares SID, device path, timestamp, source key, and warning",
+            ],
+            "usable_outputs": ["bam-entry"],
+            "validated_by_current_tests": [
+                "native cluster SID/path/timestamp/source extraction",
+                "trusted RECmd-style BAM/DAM diff pass",
+                "SID mismatch blocking",
+            ],
+            "not_report_grade_until": [
+                "native BAM/DAM binary value layout is decoded by Windows build",
+                "ControlSet and rotated/disabled BAM edge cases are known-answer tested",
+                "recent execution is correlated with Prefetch, SRUM, UserAssist, or Event Logs",
+            ],
+        },
         "decoded_components": {
             "sid": bool(user_sid),
             "path": bool(executable_path),
@@ -3304,10 +3383,40 @@ def srum_ese_validation_profile(
         "profile_version": "srum-ese-validation-v1",
         "commercial_batch_id": "commercial-uplift-011-015",
         "readiness_item_number": 15,
+        "qc_prep_item_number": QC_PREP_EXECUTION_ITEM_NUMBERS["srum-database-file"],
+        "qc_prep_item_goal": "Deepen SRUM native ESE table/page decoding and counter semantics.",
         "commercial_gap_id": "#10",
         "artifact_family": "srum-srudb-ese",
         "artifact_scope": artifact_scope,
         "current_decode_level": "source-export-or-native-header-string-candidate",
+        "qc_prep_contract": {
+            "implemented": [
+                "SrumECmd-style source export mapping",
+                "native SRUDB.dat ESE header probe",
+                "bounded table marker, string pivot, and row-candidate clustering",
+                "counter/timestamp semantics labeling and citation manifest",
+            ],
+            "usable_outputs": [
+                "srum-network-usage",
+                "srum-app-resource-usage",
+                "srum-database-file",
+                "srum-database-pivot",
+                "srum-table-candidate",
+                "srum-row-candidate",
+            ],
+            "validated_by_current_tests": [
+                "source export counter normalization",
+                "native row candidate field presence profile",
+                "trusted SrumECmd-style counter diff helper",
+                "counter mismatch blocking",
+            ],
+            "not_report_grade_until": [
+                "native ESE catalog/page/tagged-column decoder is implemented",
+                "SRUM table GUID schemas are mapped by Windows build",
+                "row-level counters/timestamps/SIDs/app IDs are trusted-diff validated",
+                "large SRUDB cursor pagination is stress tested",
+            ],
+        },
         "decoded_components": {
             "ese_header": bool(validation_checks.get("ese_header_readable") or artifact_scope != "database"),
             "ese_signature": bool(validation_checks.get("ese_signature_valid") or artifact_scope != "database"),
@@ -3521,11 +3630,13 @@ def execution_commercial_uplift_evidence(artifact_type: str, details: Mapping[st
         )
     gap_ids = execution_gap_ids(artifact_type)
     item_numbers = [int(gap_id.lstrip("#")) for gap_id in gap_ids if gap_id.lstrip("#").isdigit()]
+    qc_prep_item_number = QC_PREP_EXECUTION_ITEM_NUMBERS.get(artifact_type, 25 if artifact_type.startswith("srum-") else 0)
     return {
         "batch_id": "commercial-uplift-006-010",
         "item_numbers": item_numbers,
+        "qc_prep_item_numbers": [qc_prep_item_number] if qc_prep_item_number else [],
         "implementation_track": "native-parser-depth",
-        "objective": "Expose execution-artifact validation evidence, commercial blockers, and large-data limits on each #7-#10 row.",
+        "objective": "Expose execution-artifact validation evidence, commercial blockers, and large-data limits on each #7-#10 / QC-prep #22-#25 row.",
         "source_refs": [
             f"source_path:{details.get('source_path', '')}",
             f"source_index:{details.get('source_index', '')}",
