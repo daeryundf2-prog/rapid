@@ -13,6 +13,7 @@ from typing import Any, Iterable, Iterator, Mapping, Optional, Sequence
 from .artifact_store import read_jsonl_artifacts, validate_artifact_record
 from .docs import extract_text
 from .forensic_accuracy import build_accuracy_gate
+from .review_reporting_controls import build_review_reporting_contract
 from .search import SearchError, load_run_summary
 from .submission import compute_hashes
 
@@ -1170,6 +1171,23 @@ class CaseDatabase:
             "clock_skew_warning_count": clock_skew_analysis["summary"]["warning_count"],
             "contamination_warning_count": contamination_warnings["summary"]["warning_count"],
         }
+        history_rows = [
+            history
+            for item in items
+            if isinstance(item.get("review_history"), list)
+            for history in item.get("review_history", [])
+            if isinstance(history, Mapping)
+        ]
+        review_reporting_qc_contract = build_review_reporting_contract(
+            review_marks=[
+                item.get("review") if isinstance(item.get("review"), Mapping) else {}
+                for item in items
+            ],
+            citation_index=citation_index,
+            history_rows=history_rows,
+        )
+        summary["review_reporting_qc_gap_ids"] = ["#61", "#62", "#63", "#64", "#65"]
+        summary["review_reporting_qc_contract_hash"] = review_reporting_qc_contract["contract_hash"]
         return {
             "command": "case-db-report-export",
             "generated_at": now_iso(),
@@ -1187,6 +1205,7 @@ class CaseDatabase:
             "report_quality_matrix": report_quality_matrix,
             "report_citation_manager": build_report_citation_manager(citation_index),
             "evidence_selection_version_history": build_evidence_selection_version_history(items),
+            "review_reporting_qc_contract": review_reporting_qc_contract,
             "custody_workflow": custody_workflow,
             "acquisition_hash_workflow": acquisition_hash_workflow,
             "audit_integrity": audit_integrity,
@@ -8534,7 +8553,7 @@ def review_mark_to_dict(row: sqlite3.Row) -> dict[str, object]:
     assignee = str(row["assignee"] or "") if "assignee" in row.keys() else ""
     priority = str(row["priority"] or "normal") if "priority" in row.keys() else "normal"
     due_at = str(row["due_at"] or "") if "due_at" in row.keys() else ""
-    return {
+    review_mark = {
         "citation_id": str(row["citation_id"]),
         "case_id": str(row["case_id"]),
         "target_type": str(row["target_type"]),
@@ -8558,6 +8577,8 @@ def review_mark_to_dict(row: sqlite3.Row) -> dict[str, object]:
         "created_at": str(row["created_at"]),
         "updated_at": str(row["updated_at"]),
     }
+    review_mark["review_reporting_qc_contract"] = build_review_reporting_contract(review_marks=[review_mark])
+    return review_mark
 
 
 def review_workflow_assessment(

@@ -101,11 +101,11 @@ Before formal QC, a Windows 11 E01 single-case workflow should let an analyst:
 
 ## Phase 6: Review, Reporting, And Evidence Packages
 
-61. Harden evidence tray state for selected, pinned, compared, and report-candidate evidence.
-62. Stabilize relevant, needs-review, excluded, include-in-report, tags, notes, assignee, priority, and verification status.
-63. Persist A/B/C compare notes and connect compared snippets to report candidates.
-64. Strengthen report citation manager with source path, source hash, parser version, offset/row/record locator, confidence, and limitation text.
-65. Strengthen selected evidence version history with immutable local history hashes.
+61. Harden evidence tray state for selected, pinned, compared, and report-candidate evidence. Current implementation emits `evidence-tray-state-contract-v1` from review marks and Case DB report export, preserving selected/report-candidate counts, source locator requirements, explicit compare slot requirements, and report-candidate state rules; remaining QC still requires browser E2E tray persistence, large-case virtualized tray tests, and multi-user conflict tests.
+62. Stabilize relevant, needs-review, excluded, include-in-report, tags, notes, assignee, priority, and verification status. Current implementation emits `review-state-contract-v1`, records observed and required review/verification statuses, confirms tags/priority/report-inclusion normalization rules, and attaches the contract to individual review marks plus exports; remaining QC still requires trusted review-state audit diffs, role-based queue conflict tests, and browser E2E.
+63. Persist A/B/C compare notes and connect compared snippets to report candidates. Current implementation emits `compare-notes-contract-v1` with A/B/C slot requirements, snippet hash, note, reviewer, source locator, and report-candidate link requirements; remaining QC still requires a persistent compare-note table, A/B/C browser E2E, and trusted compare-note export diffs.
+64. Strengthen report citation manager with source path, source hash, parser version, offset/row/record locator, confidence, and limitation text. Current implementation emits `report-citation-manager-contract-v1` alongside existing report citation manager output, counting citation rows, source records, source hash/parser version coverage, and source viewer locators; remaining QC still requires source-hash completeness validation, parser-version completeness validation, and trusted citation-index diffs.
+65. Strengthen selected evidence version history with immutable local history hashes. Current implementation emits `selected-evidence-history-contract-v1` alongside existing evidence selection history, preserving history row counts, row hash counts, include-in-report changes, append-only/hash-chain/history viewer requirements, and export manifest requirements; remaining QC still requires signed multi-user history, trusted evidence-history diffs, and DB trigger enforcement review.
 66. Automate court exhibit bundle generation with selected evidence, report outputs, manifest, hashes, provenance, and signing slot.
 67. Strengthen chain-of-custody workflow and acquisition metadata capture.
 68. Strengthen audit hash chain and tamper-evident bundle export.

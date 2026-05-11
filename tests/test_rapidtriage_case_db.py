@@ -706,6 +706,11 @@ class RapidTriageCaseDatabaseTests(unittest.TestCase):
             self.assertEqual(review["status"], "relevant")
             self.assertEqual(review["verification_status"], "source_opened")
             self.assertEqual(review["include_in_report"], True)
+            review_qc = review["review_reporting_qc_contract"]
+            self.assertEqual(review_qc["qc_prep_item_numbers"], [61, 62, 63, 64, 65])
+            self.assertEqual(review_qc["evidence_tray_state_contract"]["qc_prep_item_number"], 61)
+            self.assertEqual(review_qc["review_state_contract"]["qc_prep_item_number"], 62)
+            self.assertIn("relevant", review_qc["review_state_contract"]["observed_statuses"])
             self.assertIn("#51", review["review_workflow"]["commercial_gap_ids"])
             review_gate = review["review_workflow"]["core_accuracy_gates"][0]
             self.assertEqual(review_gate["gap_id"], "#51")
@@ -990,6 +995,18 @@ class RapidTriageCaseDatabaseTests(unittest.TestCase):
             self.assertIn("#51", export["summary"]["review_workflow_gap_ids"])
             self.assertIn("#64", export["summary"]["report_citation_gap_ids"])
             self.assertIn("#65", export["summary"]["evidence_selection_gap_ids"])
+            self.assertEqual(export["summary"]["review_reporting_qc_gap_ids"], ["#61", "#62", "#63", "#64", "#65"])
+            review_reporting_qc = export["review_reporting_qc_contract"]
+            self.assertEqual(review_reporting_qc["qc_prep_item_numbers"], [61, 62, 63, 64, 65])
+            self.assertEqual(review_reporting_qc["evidence_tray_state_contract"]["state_counts"]["report_candidates"], len(targets))
+            self.assertEqual(review_reporting_qc["review_state_contract"]["review_mark_count"], len(targets))
+            self.assertEqual(review_reporting_qc["compare_notes_contract"]["required_compare_slots"], ["A", "B", "C"])
+            self.assertEqual(review_reporting_qc["report_citation_manager_contract"]["citation_count"], len(export["citation_index"]))
+            self.assertGreaterEqual(
+                review_reporting_qc["selected_evidence_history_contract"]["history_row_count"],
+                len(targets),
+            )
+            self.assertEqual(export["summary"]["review_reporting_qc_contract_hash"], review_reporting_qc["contract_hash"])
             self.assertTrue(export["summary"]["review_assignment_enabled"])
             self.assertEqual(export["summary"]["exported_item_count"], len(targets))
             self.assertTrue(all(item["review"]["include_in_report"] for item in export["items"]))
