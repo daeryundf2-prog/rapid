@@ -1,0 +1,97 @@
+{
+  "case_id": "windows11-e01-operator-required",
+  "generated_artifacts": [
+    {
+      "path": "00-baseline/command-output.json",
+      "sha256": "8e2b7318681d09890b68a48334379c8388d7f1c933da33ceeb710a2519e52e0f",
+      "size_bytes": 1324119
+    },
+    {
+      "path": "00-baseline/rapidtriage-commercial-readiness.json",
+      "sha256": "7e2872c6fd5f98965b51b423a2cd9e04eb9b663fde7f7047911a94e94a542464",
+      "size_bytes": 1323814
+    },
+    {
+      "path": "00-baseline/rapidtriage-commercial-readiness.md",
+      "sha256": "76da3c948591523c62733b918022215a31e3848eaa0ae25fad32c882c30f83d1",
+      "size_bytes": 76342
+    },
+    {
+      "path": "01-validation-package/command-output.json",
+      "sha256": "ae1ec694ce1df047d7ba94cfa399b5816e26abd27df0bb9f2c5fd9c16721298c",
+      "size_bytes": 2587368
+    },
+    {
+      "path": "01-validation-package/rapidtriage-core-forensics-001-120-aggregate-known-answer.json",
+      "sha256": "83dec28e70b6497807e8b85d34a533e9974b3db8972c6ca77712f7120dd0d8b3",
+      "size_bytes": 124070
+    },
+    {
+      "path": "01-validation-package/rapidtriage-validation-artifacts.json",
+      "sha256": "8e954af4de9c5a8fcf527171f492b8857172472c5eceaf206d1619404bd0db92",
+      "size_bytes": 6425
+    },
+    {
+      "path": "01-validation-package/rapidtriage-validation-package.json",
+      "sha256": "ae1ec694ce1df047d7ba94cfa399b5816e26abd27df0bb9f2c5fd9c16721298c",
+      "size_bytes": 2587368
+    },
+    {
+      "path": "01-validation-package/rapidtriage-validation-report.md",
+      "sha256": "d75658214b16ce4183a0c324416aeb677126e171c51ae59f188687b4d29b8f0e",
+      "size_bytes": 25657
+    },
+    {
+      "path": "01-validation-package/readiness-with-001-120/command-output.json",
+      "sha256": "8326c2af631f1a33911a27644b28855613cc15db9dd8fe164fbf1990d2aac055",
+      "size_bytes": 1538054
+    },
+    {
+      "path": "01-validation-package/readiness-with-001-120/rapidtriage-commercial-readiness.json",
+      "sha256": "ff5f7d38543f8764366131835c9caeaccf590b614242812d934155bce5022a0f",
+      "size_bytes": 1537683
+    },
+    {
+      "path": "01-validation-package/readiness-with-001-120/rapidtriage-commercial-readiness.md",
+      "sha256": "4020b991d3ad9feb7d3e5e739a57b9544d8ec5aee84dbcadad4dbb0897ed1716",
+      "size_bytes": 78983
+    },
+    {
+      "path": "02-e01-run/command-output.json",
+      "sha256": "30368757220905792fa77c24b9ebfad0116355f113ad93c3a3e22367f7d497de",
+      "size_bytes": 55335
+    },
+    {
+      "path": "02-e01-run/rapidforensic-e01-smoke.json",
+      "sha256": "30368757220905792fa77c24b9ebfad0116355f113ad93c3a3e22367f7d497de",
+      "size_bytes": 55335
+    },
+    {
+      "path": "02-e01-run/rapidforensic-e01-workflow-stage-status.json",
+      "sha256": "a06e5a146cc6d3ad5e6e7af2e86f8afe82308ee3732407e8ba64c96bed5e79c3",
+      "size_bytes": 2887
+    },
+    {
+      "path": "02-e01-run/rapidtriage-evidence-preflight.json",
+      "sha256": "f3e7e433d41c1ff39e374b7b685910a39510fa0bb86e515c89a4d363d395a230",
+      "size_bytes": 35300
+    },
+    {
+      "path": "02-e01-run/windows11-e01-known-answer.json",
+      "sha256": "8f1fdfe450f026d0cf2e02eb4143696339e5e4dfb33ca031c768e11f5820eb29",
+      "size_bytes": 10547
+    },
+    {
+      "path": "02-e01-run/windows11-e01-run-summary.json",
+      "sha256": "592f2d6523183d6235488cca690a2cfeb72d98d695362d8da076b79c9f362993",
+      "size_bytes": 1131
+    }
+  ],
+  "generated_at": "2026-05-11T03:54:46.719642+00:00",
+  "parser_version_source": "repo HEAD plus generated QC run artifacts",
+  "report_gate": "block-report-grade-evidence-selection-until-real-source-provenance-exists",
+  "schema": "rapidforensic-artifact-provenance-v1",
+  "selected_evidence_rows": [],
+  "status": "partial-generated-artifact-provenance",
+  "step": 5
+}

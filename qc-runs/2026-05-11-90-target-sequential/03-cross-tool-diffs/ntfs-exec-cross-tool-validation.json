@@ -1,0 +1,50 @@
+{
+  "generated_at": "2026-05-11T03:54:46.719642+00:00",
+  "overall_decision": "do-not-promote-ntfs-execution-to-report-grade-without MFTECmd/analyzeMFT/UsnJrnl2Csv/PECmd/LECmd/JLECmd outputs",
+  "repetition_count": 10,
+  "repetitions": [
+    {
+      "path": "03-cross-tool-diffs/ntfs-exec-repetitions/ntfs-exec-cross-tool-validation-run-01.json",
+      "sha256": "471ea6b1888bdebe280de2aa02c94957b1fd542bd17046ff4ab41b8881a6c64c"
+    },
+    {
+      "path": "03-cross-tool-diffs/ntfs-exec-repetitions/ntfs-exec-cross-tool-validation-run-02.json",
+      "sha256": "02a92732f4aba27810a3102546d5430983271286f998035ca805dd515e3130d2"
+    },
+    {
+      "path": "03-cross-tool-diffs/ntfs-exec-repetitions/ntfs-exec-cross-tool-validation-run-03.json",
+      "sha256": "51553fae3bb924ade6ba41834a298b87e696d0b20492b9a504df83e739f4b2e0"
+    },
+    {
+      "path": "03-cross-tool-diffs/ntfs-exec-repetitions/ntfs-exec-cross-tool-validation-run-04.json",
+      "sha256": "308246b0e407512a920cccc5a4848b3a5592501d6ce22630f91d07defa30d626"
+    },
+    {
+      "path": "03-cross-tool-diffs/ntfs-exec-repetitions/ntfs-exec-cross-tool-validation-run-05.json",
+      "sha256": "0aae649c58d85714235201117f6b1d09b58c7c4c455bdcd90f0d76383e2ef060"
+    },
+    {
+      "path": "03-cross-tool-diffs/ntfs-exec-repetitions/ntfs-exec-cross-tool-validation-run-06.json",
+      "sha256": "644ccf62759173dbd23297d5f26157ec5de58e9e49a77d7bdab619159d06f66b"
+    },
+    {
+      "path": "03-cross-tool-diffs/ntfs-exec-repetitions/ntfs-exec-cross-tool-validation-run-07.json",
+      "sha256": "1c21f6219228d19688659c88f651083f120fd2317047b103dade957407064c9f"
+    },
+    {
+      "path": "03-cross-tool-diffs/ntfs-exec-repetitions/ntfs-exec-cross-tool-validation-run-08.json",
+      "sha256": "3fd7bf1db7a977cb2c4ab6de20d2d5a68760f5ff7de62ebd17e84fc559eecb32"
+    },
+    {
+      "path": "03-cross-tool-diffs/ntfs-exec-repetitions/ntfs-exec-cross-tool-validation-run-09.json",
+      "sha256": "6d403c82757d48c79c99907f7e8f45cb0a2e5dc9bae108cfe2fba4efad6f976b"
+    },
+    {
+      "path": "03-cross-tool-diffs/ntfs-exec-repetitions/ntfs-exec-cross-tool-validation-run-10.json",
+      "sha256": "921d967ec071bfc5d99ddb27f1af0e64d835ddbd150121308f8d187c69a0e568"
+    }
+  ],
+  "schema": "rapidforensic-ntfs-exec-diff-repetition-summary-v1",
+  "status": "10-repetition-qc-complete-but-external-evidence-blocked",
+  "step": 8
+}

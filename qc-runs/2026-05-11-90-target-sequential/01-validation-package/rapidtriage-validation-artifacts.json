@@ -1,0 +1,157 @@
+{
+  "command": "validation-artifact-manifest",
+  "generated_at": "2026-05-11T03:51:14.872598+00:00",
+  "output_dir": "/Users/shinyoohag/rapidforensic/repo/qc-runs/2026-05-11-90-target-sequential/01-validation-package",
+  "commercial_gap_ids": [
+    "#85"
+  ],
+  "artifact_count": 2,
+  "artifacts": [
+    {
+      "name": "rapidtriage-validation-package.json",
+      "path": "/Users/shinyoohag/rapidforensic/repo/qc-runs/2026-05-11-90-target-sequential/01-validation-package/rapidtriage-validation-package.json",
+      "sha256": "ae1ec694ce1df047d7ba94cfa399b5816e26abd27df0bb9f2c5fd9c16721298c",
+      "size_bytes": 2587368
+    },
+    {
+      "name": "rapidtriage-validation-report.md",
+      "path": "/Users/shinyoohag/rapidforensic/repo/qc-runs/2026-05-11-90-target-sequential/01-validation-package/rapidtriage-validation-report.md",
+      "sha256": "d75658214b16ce4183a0c324416aeb677126e171c51ae59f188687b4d29b8f0e",
+      "size_bytes": 25657
+    }
+  ],
+  "validation_package_manifest": {
+    "profile_version": "validation-package-manifest-v1",
+    "item_number": 85,
+    "output_dir": "/Users/shinyoohag/rapidforensic/repo/qc-runs/2026-05-11-90-target-sequential/01-validation-package",
+    "required_outputs": [
+      "rapidtriage-validation-package.json",
+      "rapidtriage-validation-report.md",
+      "rapidtriage-validation-artifacts.json"
+    ],
+    "required_output_presence": {
+      "rapidtriage-validation-package.json": true,
+      "rapidtriage-validation-report.md": true,
+      "rapidtriage-validation-artifacts.json": true
+    },
+    "required_output_presence_hash": "d827b8b8a89eb5f9443f2fb1ae55cfa014197e7f173d66c00dca3a7db2aa3fb6",
+    "required_sections": [
+      "known_answer_validation",
+      "parser_fixture_corpus",
+      "parser_false_positive_false_negative_notes",
+      "validation_diff_runner_matrix",
+      "final_qc_execution_report",
+      "independent_validation_report",
+      "validation_package_assessment"
+    ],
+    "required_section_count": 7,
+    "required_section_presence_declared": {
+      "known_answer_validation": true,
+      "parser_fixture_corpus": true,
+      "parser_false_positive_false_negative_notes": true,
+      "validation_diff_runner_matrix": true,
+      "final_qc_execution_report": true,
+      "independent_validation_report": true,
+      "validation_package_assessment": true
+    },
+    "artifact_count": 2,
+    "artifact_hashes": [
+      {
+        "name": "rapidtriage-validation-package.json",
+        "sha256": "ae1ec694ce1df047d7ba94cfa399b5816e26abd27df0bb9f2c5fd9c16721298c",
+        "size_bytes": 2587368
+      },
+      {
+        "name": "rapidtriage-validation-report.md",
+        "sha256": "d75658214b16ce4183a0c324416aeb677126e171c51ae59f188687b4d29b8f0e",
+        "size_bytes": 25657
+      }
+    ],
+    "artifact_set_hash": "6f00d93310ea9e1125bab9d3988cfdd5a1c0b3be7cd7ca55df4e1a15bc05be22",
+    "reproduction_commands": [
+      "rapidtriage validation --output-dir <output-dir> --json",
+      "rapidtriage commercial-readiness --validation-package <output-dir>/rapidtriage-validation-package.json --json"
+    ],
+    "commercial_gap_ids": [
+      "#85"
+    ],
+    "commercial_claim_allowed": false,
+    "package_manifest_hash": "452d1c8f94f6219ca89fee4a5eb782d6f4f2f3af1d34c79bed7425133af2ff04"
+  },
+  "package_manifest_hash": "452d1c8f94f6219ca89fee4a5eb782d6f4f2f3af1d34c79bed7425133af2ff04",
+  "reproduction_commands": [
+    "rapidtriage validation --output-dir <output-dir> --json",
+    "rapidtriage commercial-readiness --validation-package <output-dir>/rapidtriage-validation-package.json --json"
+  ],
+  "trusted_validation_package_diff": {
+    "status": "missing",
+    "trusted_tool": null,
+    "commercial_gap_ids": [
+      "#85"
+    ],
+    "blocker": "trusted-validation-package-manifest-diff-missing",
+    "required_trusted_tool": "validation-package-manifest"
+  },
+  "blockers": [
+    "trusted-validation-package-manifest-diff-missing"
+  ],
+  "core_accuracy_gates": [
+    {
+      "profile_version": "core-forensics-accuracy-v1",
+      "gap_id": "#85",
+      "title": "Tool validation package automation",
+      "status": "validation-required",
+      "required_checks": [
+        "validation JSON output generated",
+        "validation Markdown output generated",
+        "artifact hash manifest generated",
+        "validation package manifest profile emitted",
+        "package manifest hash emitted",
+        "reproduction commands recorded",
+        "known-answer/fixture sections included",
+        "package generation limitation warning",
+        "trusted validation package manifest diff pass"
+      ],
+      "satisfied_checks": [
+        "validation JSON output generated",
+        "validation Markdown output generated",
+        "artifact hash manifest generated",
+        "validation package manifest profile emitted",
+        "package manifest hash emitted",
+        "reproduction commands recorded",
+        "known-answer/fixture sections included",
+        "package generation limitation warning"
+      ],
+      "missing_required_checks": [
+        "trusted validation package manifest diff pass"
+      ],
+      "minimum_evidence": [
+        "source file or export hash",
+        "tool/parser version and command",
+        "expected-answer manifest",
+        "observed RapidTriage output",
+        "record-level or row-level diff",
+        "reviewer sign-off and limitation note"
+      ],
+      "accuracy_controls": {
+        "source_provenance_required": true,
+        "offset_or_record_id_required": false,
+        "hash_required": true,
+        "timezone_or_timestamp_semantics_required": false,
+        "secret_redaction_required": false,
+        "legal_or_authority_gate_required": true,
+        "cross_tool_diff_required": true,
+        "known_answer_required": true
+      },
+      "evidence_refs": [
+        "artifact_count:2",
+        "output_dir:/Users/shinyoohag/rapidforensic/repo/qc-runs/2026-05-11-90-target-sequential/01-validation-package",
+        "package_manifest_hash:452d1c8f94f6219ca89fee4a5eb782d6f4f2f3af1d34c79bed7425133af2ff04"
+      ],
+      "default_reportability": "validation-required",
+      "commercial_grade_ready": false,
+      "next_validation_step": "Attach known-answer corpus output, cross-tool diff, and reviewer sign-off before report-grade claims."
+    }
+  ],
+  "tamper_note": "Recompute SHA256 values before release publication; this manifest covers the validation package outputs."
+}

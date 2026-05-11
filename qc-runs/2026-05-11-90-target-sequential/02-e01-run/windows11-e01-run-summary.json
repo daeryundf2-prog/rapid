@@ -1,0 +1,35 @@
+{
+  "blockers": [
+    "real Windows 11 E01/Ex01 or trusted exported root is not attached in this environment",
+    "source evidence hash, partition selection proof, extracted artifact outputs, search/review/report outputs are required before score promotion"
+  ],
+  "case_id": "windows11-e01-operator-required",
+  "generated_at": "2026-05-11T03:54:46.719642+00:00",
+  "plan_only_status": "planned",
+  "produced_files": [
+    "02-e01-run/command-output.json",
+    "02-e01-run/rapidforensic-e01-smoke.json",
+    "02-e01-run/rapidforensic-e01-workflow-stage-status.json",
+    "02-e01-run/rapidtriage-evidence-preflight.json",
+    "02-e01-run/windows11-e01-known-answer.json"
+  ],
+  "schema": "rapidforensic-90-step-run-summary-v1",
+  "source_path": "/operator/evidence/windows11-case.E01",
+  "stage_statuses": [
+    {
+      "id": "known-answer-manifest",
+      "status": "complete"
+    },
+    {
+      "id": "evidence-preflight",
+      "status": "complete"
+    },
+    {
+      "id": "triage-run",
+      "status": "skipped"
+    }
+  ],
+  "status": "external-evidence-required",
+  "step": 4,
+  "target": "Windows 11 E01/export workflow"
+}

@@ -1,0 +1,24 @@
+{
+  "available_inputs": [],
+  "decision": "do-not-promote-evtx-to-report-grade-without-record-level-diff",
+  "generated_at": "2026-05-11T03:54:46.719642+00:00",
+  "required_comparison": [
+    "EventRecordID",
+    "EventID",
+    "provider",
+    "channel",
+    "computer",
+    "timestamp",
+    "rendered_message_hash",
+    "template_hash"
+  ],
+  "required_tools": [
+    "EvtxECmd",
+    "Hayabusa",
+    "Windows Event Viewer export"
+  ],
+  "schema": "rapidforensic-trusted-diff-blocker-v1",
+  "status": "blocked-external-tool-output-required",
+  "step": 6,
+  "target": "EVTX trusted diff"
+}

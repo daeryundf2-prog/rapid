@@ -1,0 +1,23 @@
+{
+  "available_inputs": [],
+  "decision": "do-not-promote-registry-to-report-grade-without-hive/cell-level-diff",
+  "generated_at": "2026-05-11T03:54:46.719642+00:00",
+  "required_comparison": [
+    "key_path",
+    "value_name",
+    "last_write_time",
+    "cell_offset",
+    "deleted_candidate_class",
+    "source_hive"
+  ],
+  "required_tools": [
+    "RECmd",
+    "Registry Explorer",
+    "ShellBagsExplorer",
+    "SBECmd"
+  ],
+  "schema": "rapidforensic-trusted-diff-blocker-v1",
+  "status": "blocked-external-tool-output-required",
+  "step": 7,
+  "target": "Registry trusted diff"
+}

@@ -1,0 +1,1370 @@
+{
+  "schema": "rapidforensic-e01-smoke-report-v1",
+  "profile_version": "windows11-e01-end-to-end-smoke-v1",
+  "generated_at": "2026-05-11T03:52:29.129669+00:00",
+  "case_id": "windows11-e01-operator-required",
+  "source_path": "/operator/evidence/windows11-case.E01",
+  "mode": "hacking",
+  "input_kind": "e01-derived",
+  "status": "planned",
+  "stages": [
+    {
+      "id": "known-answer-manifest",
+      "name": "Windows 11 E01 known-answer manifest",
+      "status": "complete",
+      "generated_at": "2026-05-11T03:52:29.010788+00:00",
+      "output": {
+        "path": "/Users/shinyoohag/rapidforensic/repo/qc-runs/2026-05-11-90-target-sequential/02-e01-run/windows11-e01-known-answer.json",
+        "exists": true,
+        "size_bytes": 10547,
+        "sha256": "8f1fdfe450f026d0cf2e02eb4143696339e5e4dfb33ca031c768e11f5820eb29"
+      },
+      "details": {
+        "manifest_sha256": "786a0201b0b73426b769f3c8d22380d3a491b556b99615eeb407a40ac7a1e140",
+        "commercial_grade_ready": false
+      }
+    },
+    {
+      "id": "evidence-preflight",
+      "name": "Evidence adapter and dependency preflight",
+      "status": "complete",
+      "generated_at": "2026-05-11T03:52:29.128242+00:00",
+      "output": {
+        "path": "/Users/shinyoohag/rapidforensic/repo/qc-runs/2026-05-11-90-target-sequential/02-e01-run/rapidtriage-evidence-preflight.json",
+        "exists": true,
+        "size_bytes": 35300,
+        "sha256": "f3e7e433d41c1ff39e374b7b685910a39510fa0bb86e515c89a4d363d395a230"
+      },
+      "details": {
+        "adapter": "ewf",
+        "detected_format": "e01",
+        "missing_tools": [],
+        "support_level": "direct-extract"
+      }
+    },
+    {
+      "id": "triage-run",
+      "name": "E01 extraction, artifact analysis, search indexes, and report",
+      "status": "skipped",
+      "generated_at": "2026-05-11T03:52:29.128550+00:00",
+      "details": {
+        "reason": "plan-only"
+      }
+    }
+  ],
+  "stage_status": {
+    "schema": "rapidforensic-e01-workflow-stage-status-v1",
+    "profile_version": "windows11-e01-stage-status-v1",
+    "generated_at": "2026-05-11T03:52:29.128567+00:00",
+    "case_id": "windows11-e01-operator-required",
+    "source_path": "/operator/evidence/windows11-case.E01",
+    "status": "planned",
+    "read_only": true,
+    "resume_requested": false,
+    "run_dir": "/Users/shinyoohag/rapidforensic/repo/qc-runs/2026-05-11-90-target-sequential/02-e01-run/run",
+    "stage_counts": {
+      "total": 3,
+      "complete": 2,
+      "blocked": 0,
+      "skipped": 1
+    },
+    "blocked_stage_ids": [],
+    "stages": [
+      {
+        "id": "known-answer-manifest",
+        "name": "Windows 11 E01 known-answer manifest",
+        "status": "complete",
+        "generated_at": "2026-05-11T03:52:29.010788+00:00",
+        "output": {
+          "path": "/Users/shinyoohag/rapidforensic/repo/qc-runs/2026-05-11-90-target-sequential/02-e01-run/windows11-e01-known-answer.json",
+          "exists": true,
+          "size_bytes": 10547,
+          "sha256": "8f1fdfe450f026d0cf2e02eb4143696339e5e4dfb33ca031c768e11f5820eb29"
+        },
+        "details": {
+          "manifest_sha256": "786a0201b0b73426b769f3c8d22380d3a491b556b99615eeb407a40ac7a1e140",
+          "commercial_grade_ready": false
+        }
+      },
+      {
+        "id": "evidence-preflight",
+        "name": "Evidence adapter and dependency preflight",
+        "status": "complete",
+        "generated_at": "2026-05-11T03:52:29.128242+00:00",
+        "output": {
+          "path": "/Users/shinyoohag/rapidforensic/repo/qc-runs/2026-05-11-90-target-sequential/02-e01-run/rapidtriage-evidence-preflight.json",
+          "exists": true,
+          "size_bytes": 35300,
+          "sha256": "f3e7e433d41c1ff39e374b7b685910a39510fa0bb86e515c89a4d363d395a230"
+        },
+        "details": {
+          "adapter": "ewf",
+          "detected_format": "e01",
+          "missing_tools": [],
+          "support_level": "direct-extract"
+        }
+      },
+      {
+        "id": "triage-run",
+        "name": "E01 extraction, artifact analysis, search indexes, and report",
+        "status": "skipped",
+        "generated_at": "2026-05-11T03:52:29.128550+00:00",
+        "details": {
+          "reason": "plan-only"
+        }
+      }
+    ],
+    "checkpoint_resume_policy": {
+      "resume_supported": true,
+      "resume_requested": false,
+      "reuse_completed_extraction_stages_when_source_fingerprint_matches": true,
+      "stage_status_sidecar": "rapidforensic-e01-workflow-stage-status.json"
+    },
+    "qc_links": {
+      "known_answer_manifest": "/Users/shinyoohag/rapidforensic/repo/qc-runs/2026-05-11-90-target-sequential/02-e01-run/windows11-e01-known-answer.json",
+      "evidence_preflight": "/Users/shinyoohag/rapidforensic/repo/qc-runs/2026-05-11-90-target-sequential/02-e01-run/rapidtriage-evidence-preflight.json",
+      "smoke_report": "/Users/shinyoohag/rapidforensic/repo/qc-runs/2026-05-11-90-target-sequential/02-e01-run/rapidforensic-e01-smoke.json"
+    }
+  },
+  "known_answer_manifest": {
+    "schema": "rapidforensic-windows11-e01-known-answer-manifest-v1",
+    "compatible_known_answer_schema": "rapidtriage-known-answer-manifest-v1",
+    "case_id": "windows11-e01-operator-required",
+    "name": "windows11-e01-operator-required Windows 11 E01 known-answer manifest",
+    "status": "draft-needs-execution",
+    "commercial_grade_ready": false,
+    "generated_for": {
+      "workflow": "Windows 11 E01 single-case validation",
+      "backlog_items": [
+        22
+      ],
+      "commercial_gap_ids": [
+        "#22"
+      ]
+    },
+    "source_image": {
+      "path": "/operator/evidence/windows11-case.E01",
+      "name": "windows11-case.E01",
+      "exists": false,
+      "is_supported_e01": true,
+      "integrity": {
+        "path": "/operator/evidence/windows11-case.E01",
+        "hash_status": "unavailable",
+        "error": "[Errno 2] No such file or directory: '/operator/evidence/windows11-case.E01'"
+      },
+      "segment_set_profile": {
+        "profile_version": "ewf-segment-set-v1",
+        "selected_segment": "/operator/evidence/windows11-case.E01",
+        "segment_count": 0,
+        "segments": [],
+        "warnings": [
+          "source image is missing or is not a supported E01/Ex01 path"
+        ],
+        "validation_status": "missing-or-unsupported"
+      },
+      "intake_profile": {
+        "profile_version": "e01-intake-profile-v1",
+        "checklist_item": 1,
+        "qc_gap_id": "#1",
+        "source": {
+          "path": "/operator/evidence/windows11-case.E01",
+          "filename": "windows11-case.E01",
+          "extension": ".e01",
+          "exists": false,
+          "supported_extension": true
+        },
+        "source_signature": {
+          "path": "/operator/evidence/windows11-case.E01",
+          "filename": "windows11-case.E01",
+          "size_bytes": 0,
+          "mtime_ns": null,
+          "segment_count": 0,
+          "selected_segment": "/operator/evidence/windows11-case.E01"
+        },
+        "segment_set_profile": {
+          "profile_version": "ewf-segment-set-v1",
+          "selected_segment": "/operator/evidence/windows11-case.E01",
+          "segment_count": 0,
+          "segments": [],
+          "warnings": [
+            "source image is missing or is not a supported E01/Ex01 path"
+          ],
+          "validation_status": "missing-or-unsupported"
+        },
+        "hash_feasibility": {
+          "preflight_hash_algorithm": "sha256",
+          "preflight_hash_status": "unavailable",
+          "preflight_sha256": null,
+          "max_preflight_hash_bytes": 134217728,
+          "source_size_bytes": 0,
+          "full_hash_feasible_in_preflight": false,
+          "full_image_hash_required_before_report": true,
+          "acquisition_hash_warning": "Attach an acquisition/full-image hash before report-grade use."
+        },
+        "read_only_posture": {
+          "source_open_mode": "read-only",
+          "writes_to_source": false,
+          "writes_to_source_folder": false,
+          "writes_to_stage_or_output_only": true,
+          "operator_warning": "Do not write outputs next to the original evidence image unless the location is a separate working copy."
+        },
+        "processing_decision": {
+          "can_continue_to_dependency_preflight": false,
+          "blocked_reason": "Select a readable .E01/.Ex01 first segment before processing.",
+          "next_stage": "select-supported-e01"
+        },
+        "reportability_decision": {
+          "decision": "intake-blocked",
+          "allowed_use": "source-selection-and-preflight-context",
+          "not_allowed_use": "native-EWF-parser-completeness-claim",
+          "required_before_report": [
+            "full source/acquisition hash",
+            "segment set inventory",
+            "dependency preflight",
+            "partition selection",
+            "trusted-tool or known-answer validation when making report-grade claims"
+          ]
+        },
+        "manifest_sha256": "7d3f2507b192c6ed3123b821757a83652407cd91c7f4db65fb7e583237b712c4"
+      }
+    },
+    "expected": {
+      "partitions": [],
+      "high_value_artifacts": [
+        {
+          "id": "artifact-001",
+          "description": "Windows 11 E01 operator evidence not attached in this environment",
+          "required": true,
+          "validation_status": "not-run"
+        }
+      ],
+      "minimum_workflow_outputs": [
+        "dependency preflight",
+        "partition table and selected offset",
+        "read-only extraction command history",
+        "artifact collection summary",
+        "search/review/report bundle metadata"
+      ]
+    },
+    "validation_commands": [
+      {
+        "id": "validation-command-001",
+        "command": "Attach real E01 or trusted exported root before score promotion",
+        "purpose": "known-answer-validation",
+        "status": "not-run"
+      }
+    ],
+    "trusted_diff_targets": [
+      "libewf/ewfverify source integrity transcript",
+      "mmls partition table transcript",
+      "tsk_recover or trusted export manifest",
+      "RapidForensic run summary",
+      "selected trusted suite export log when direct extraction is unavailable"
+    ],
+    "required_evidence_slots": {
+      "source_image_hash": "Full E01/Ex01 acquisition hash or deferred-large-source acquisition hash record.",
+      "segment_set_inventory": "All EWF split segments with path, size, order, and missing-segment warnings.",
+      "partition_assertions": "Expected Windows partition start sector and filesystem description.",
+      "artifact_assertions": "Expected EVTX/Registry/MFT/USN/browser/document rows for this case.",
+      "command_transcripts": "Tool versions, commands, stdout/stderr, and exit codes for extraction and validation.",
+      "report_bundle": "Generated report/manifest hashes and citation coverage after the smoke run."
+    },
+    "validation_matrix": [
+      {
+        "id": "#22-source-integrity",
+        "label": "Source integrity metadata is captured",
+        "passed": false,
+        "severity": "critical"
+      },
+      {
+        "id": "#22-tool-preflight",
+        "label": "External tool availability/version preflight is captured",
+        "passed": false,
+        "severity": "high"
+      },
+      {
+        "id": "#22-partition-or-container-metadata",
+        "label": "Partition/container metadata is captured when available",
+        "passed": false,
+        "severity": "high"
+      },
+      {
+        "id": "#22-command-history",
+        "label": "Read-only extraction command history is preserved",
+        "passed": true,
+        "severity": "high"
+      },
+      {
+        "id": "#22-native-commercial-parser",
+        "label": "Native parser is complete enough for standalone commercial/report-grade testimony",
+        "passed": false,
+        "severity": "critical"
+      }
+    ],
+    "core_accuracy_gates": [
+      {
+        "profile_version": "core-forensics-accuracy-v1",
+        "gap_id": "#22",
+        "title": "E01/Ex01 fully integrated workflow",
+        "status": "validation-required",
+        "required_checks": [
+          "source hash and segment integrity",
+          "tool version/command capture",
+          "partition offset correctness",
+          "read-only extraction provenance",
+          "corrupt/encrypted limitation reporting",
+          "trusted E01/Ex01 workflow diff pass"
+        ],
+        "satisfied_checks": [
+          "source hash and segment integrity",
+          "EWF segment-set order validation",
+          "tool version/command capture",
+          "read-only extraction provenance",
+          "corrupt/encrypted limitation reporting"
+        ],
+        "missing_required_checks": [
+          "partition offset correctness",
+          "trusted E01/Ex01 workflow diff pass"
+        ],
+        "minimum_evidence": [
+          "source file or export hash",
+          "tool/parser version and command",
+          "expected-answer manifest",
+          "observed RapidTriage output",
+          "record-level or row-level diff",
+          "reviewer sign-off and limitation note"
+        ],
+        "accuracy_controls": {
+          "source_provenance_required": true,
+          "offset_or_record_id_required": true,
+          "hash_required": true,
+          "timezone_or_timestamp_semantics_required": true,
+          "secret_redaction_required": false,
+          "legal_or_authority_gate_required": true,
+          "cross_tool_diff_required": true,
+          "known_answer_required": true
+        },
+        "evidence_refs": [
+          "source_path:/operator/evidence/windows11-case.E01"
+        ],
+        "default_reportability": "validation-required",
+        "commercial_grade_ready": false,
+        "next_validation_step": "Attach known-answer corpus output, cross-tool diff, and reviewer sign-off before report-grade claims."
+      }
+    ],
+    "commercial_grade_blockers": [
+      "native-e01-ex01-segment-metadata-decoding-not-implemented",
+      "external-tool-fuse-platform-behavior-validation-required",
+      "encrypted-volume-unlock-workflow-not-implemented",
+      "deleted-corrupt-filesystem-recovery-delegated-to-sleuthkit",
+      "large-known-answer-e01-ex01-corpus-required"
+    ],
+    "reportability_decision": {
+      "profile_version": "image-workflow-reportability-decision-v1",
+      "commercial_gap_ids": [
+        "#22"
+      ],
+      "decision": "do-not-report-e01-ex01-workflow-as-native-complete",
+      "allowed_use": "e01-ex01-extraction-triage-pivot",
+      "blockers": [
+        "deleted-corrupt-filesystem-recovery-delegated-to-sleuthkit",
+        "e01-ex01-trusted-workflow-diff-required",
+        "encrypted-volume-unlock-workflow-not-implemented",
+        "external-tool-fuse-platform-behavior-validation-required",
+        "large-known-answer-e01-ex01-corpus-required",
+        "native-e01-ex01-segment-metadata-decoding-not-implemented"
+      ],
+      "failed_validation_matrix_ids": [
+        "#22-source-integrity",
+        "#22-tool-preflight",
+        "#22-partition-or-container-metadata",
+        "#22-native-commercial-parser"
+      ],
+      "source_hash_statuses": [
+        "unavailable"
+      ],
+      "native_parser_complete": false,
+      "external_tool_or_vendor_workflow_required": true,
+      "ready_for_court_report": false,
+      "required_before_report": [
+        "validate E01/Ex01 segment metadata and extraction against known-answer images",
+        "attach libewf/Sleuth Kit versions, commands, hashes, and corrupt/encrypted image limitations",
+        "confirm extracted filesystem contents against a trusted forensic suite before final testimony"
+      ]
+    },
+    "operator_next_steps": [
+      "Fill expected high-value artifacts from a trusted baseline case review.",
+      "Run the validation commands and attach command transcripts plus output hashes.",
+      "Diff extracted artifacts against trusted parser/export outputs before changing status to pass.",
+      "Keep this manifest with the case validation package and cite it in commercial-readiness input."
+    ],
+    "manifest_sha256": "786a0201b0b73426b769f3c8d22380d3a491b556b99615eeb407a40ac7a1e140"
+  },
+  "evidence_preflight": {
+    "adapter": "ewf",
+    "source_path": "/operator/evidence/windows11-case.E01",
+    "detected_format": "e01",
+    "supported": true,
+    "can_mount": true,
+    "can_extract": true,
+    "required_tools": [
+      "ewfmount",
+      "mmls",
+      "tsk_recover"
+    ],
+    "missing_tools": [],
+    "message": "E01/Ex01 can be extracted with libewf and Sleuth Kit tools.",
+    "support_level": "direct-extract",
+    "scan_strategy": "auto-extract-then-scan",
+    "next_actions": [
+      "Run rapidtriage run IMAGE.E01 --mode hacking --output-dir OUTPUT."
+    ],
+    "warnings": [],
+    "external_validation_required": true,
+    "source_integrity": null,
+    "tool_preflight": [
+      {
+        "tool": "ewfmount",
+        "path": "/opt/homebrew/bin/ewfmount",
+        "available": true,
+        "version": "ewfmount 20140816",
+        "purpose": "Expose E01/Ex01 evidence as a read-only raw image through libewf.",
+        "package": "libewf",
+        "install_hint": "Install libewf/ewf-tools, then verify `ewfmount` is on PATH.",
+        "windows_hint": "On Windows, use WSL2 with libewf installed or mount/export the image with a trusted forensic suite.",
+        "version_command": [
+          "ewfmount",
+          "-V"
+        ],
+        "version_commands": [
+          [
+            "ewfmount",
+            "--version"
+          ],
+          [
+            "ewfmount",
+            "-V"
+          ]
+        ],
+        "remediation": null,
+        "version_returncode": 0,
+        "version_attempts": [
+          {
+            "command": [
+              "ewfmount",
+              "--version"
+            ],
+            "returncode": 1,
+            "preview": "ewfmount 20140816"
+          },
+          {
+            "command": [
+              "ewfmount",
+              "-V"
+            ],
+            "returncode": 0,
+            "preview": "ewfmount 20140816"
+          }
+        ]
+      },
+      {
+        "tool": "mmls",
+        "path": "/opt/homebrew/bin/mmls",
+        "available": true,
+        "version": "The Sleuth Kit ver 4.14.0",
+        "purpose": "Enumerate partitions and filesystem offsets before recovery.",
+        "package": "sleuthkit",
+        "install_hint": "Install Sleuth Kit, then verify `mmls` is on PATH.",
+        "windows_hint": "On Windows, install Sleuth Kit in WSL2 or use a trusted tool to export the filesystem folder.",
+        "version_command": [
+          "mmls",
+          "-V"
+        ],
+        "version_commands": [
+          [
+            "mmls",
+            "--version"
+          ],
+          [
+            "mmls",
+            "-V"
+          ]
+        ],
+        "remediation": null,
+        "version_returncode": 0,
+        "version_attempts": [
+          {
+            "command": [
+              "mmls",
+              "--version"
+            ],
+            "returncode": 1,
+            "preview": "mmls: illegal option -- -"
+          },
+          {
+            "command": [
+              "mmls",
+              "-V"
+            ],
+            "returncode": 0,
+            "preview": "The Sleuth Kit ver 4.14.0"
+          }
+        ]
+      },
+      {
+        "tool": "tsk_recover",
+        "path": "/opt/homebrew/bin/tsk_recover",
+        "available": true,
+        "version": "The Sleuth Kit ver 4.14.0",
+        "purpose": "Recover files from the selected partition into the run output directory.",
+        "package": "sleuthkit",
+        "install_hint": "Install Sleuth Kit, then verify `tsk_recover` is on PATH.",
+        "windows_hint": "On Windows, prefer WSL2 or a vendor export if native Sleuth Kit recovery is unavailable.",
+        "version_command": [
+          "tsk_recover",
+          "-V"
+        ],
+        "version_commands": [
+          [
+            "tsk_recover",
+            "--version"
+          ],
+          [
+            "tsk_recover",
+            "-V"
+          ]
+        ],
+        "remediation": null,
+        "version_returncode": 0,
+        "version_attempts": [
+          {
+            "command": [
+              "tsk_recover",
+              "--version"
+            ],
+            "returncode": 1,
+            "preview": "tsk_recover: illegal option -- -"
+          },
+          {
+            "command": [
+              "tsk_recover",
+              "-V"
+            ],
+            "returncode": 0,
+            "preview": "The Sleuth Kit ver 4.14.0"
+          }
+        ]
+      }
+    ],
+    "preflight_summary": {
+      "profile_version": "e01-dependency-preflight-v2",
+      "status": "ready",
+      "required_tools": [
+        "ewfmount",
+        "mmls",
+        "tsk_recover"
+      ],
+      "available_tools": [
+        "ewfmount",
+        "mmls",
+        "tsk_recover"
+      ],
+      "missing_tools": [],
+      "available_count": 3,
+      "missing_count": 0,
+      "version_unverified_tools": [],
+      "blocked": false,
+      "direct_extract_ready": true,
+      "remediation_steps": [],
+      "windows_guidance": [
+        "Use WSL2 with libewf and Sleuth Kit installed for direct extraction, or scan a trusted read-only export folder.",
+        "Keep the external mount/export log with the RapidForensic run output."
+      ],
+      "fallback_strategy": "auto-extract-then-scan",
+      "operator_message": "All required E01 tools are available; direct extraction can be attempted."
+    },
+    "commercial_grade_ready": false,
+    "commercial_gap_ids": [
+      "#22"
+    ],
+    "report_grade_assessment": {
+      "status": "validation-required",
+      "commercial_gap_ids": [
+        "#22"
+      ],
+      "blockers": [
+        "native-e01-ex01-segment-metadata-decoding-not-implemented",
+        "external-tool-fuse-platform-behavior-validation-required",
+        "encrypted-volume-unlock-workflow-not-implemented",
+        "deleted-corrupt-filesystem-recovery-delegated-to-sleuthkit",
+        "large-known-answer-e01-ex01-corpus-required"
+      ],
+      "ready_for_court_report": false,
+      "recommended_validation": [
+        "Preserve original acquisition hash, tool versions, command logs, and export/mount logs with the case.",
+        "Validate extracted filesystem contents against a trusted forensic tool before report-grade conclusions."
+      ]
+    },
+    "forensic_review": {
+      "gap_id": "#22",
+      "artifact_goal": "E01/Ex01 read-only workflow, source integrity, external tool preflight, extraction and resume context",
+      "review_status": "triage-review",
+      "report_grade_ready": false,
+      "validation_required": true,
+      "primary_evidence": [
+        "detected_format=e01",
+        "ready=True",
+        "missing_tools=",
+        "preflight_status=ready"
+      ],
+      "blockers": [
+        "native-e01-ex01-segment-metadata-decoding-not-implemented",
+        "external-tool-fuse-platform-behavior-validation-required",
+        "encrypted-volume-unlock-workflow-not-implemented",
+        "deleted-corrupt-filesystem-recovery-delegated-to-sleuthkit",
+        "large-known-answer-e01-ex01-corpus-required"
+      ],
+      "caveats": [
+        "Workflow orchestrates libewf/Sleuth Kit rather than a native E01/Ex01 parser.",
+        "Encrypted, corrupt, and malformed images require independent validation."
+      ]
+    },
+    "native_capabilities": {
+      "ewf_libewf_mount_orchestration": true,
+      "auto_extract_then_scan": true,
+      "native_e01_ex01_parser": false,
+      "encrypted_volume_unlock_workflow": false
+    },
+    "limitations": [
+      "Direct E01/Ex01 support orchestrates libewf and Sleuth Kit rather than native commercial-grade parsing.",
+      "Deleted/corrupt records, encrypted volumes, and malformed images require independent validation."
+    ],
+    "fallback_guidance": [
+      "Use a write-blocked/read-only forensic mount or vendor export if direct tools are unavailable or fail.",
+      "Preserve libewf/Sleuth Kit or vendor export logs with the RapidTriage run outputs."
+    ],
+    "safety_notes": [
+      "RapidTriage never writes to the source image; extraction writes only under the selected output directory."
+    ],
+    "core_accuracy_gates": [
+      {
+        "profile_version": "core-forensics-accuracy-v1",
+        "gap_id": "#22",
+        "title": "E01/Ex01 fully integrated workflow",
+        "status": "validation-required",
+        "required_checks": [
+          "source hash and segment integrity",
+          "tool version/command capture",
+          "partition offset correctness",
+          "read-only extraction provenance",
+          "corrupt/encrypted limitation reporting",
+          "trusted E01/Ex01 workflow diff pass"
+        ],
+        "satisfied_checks": [
+          "tool version/command capture",
+          "corrupt/encrypted limitation reporting"
+        ],
+        "missing_required_checks": [
+          "source hash and segment integrity",
+          "partition offset correctness",
+          "read-only extraction provenance",
+          "trusted E01/Ex01 workflow diff pass"
+        ],
+        "minimum_evidence": [
+          "source file or export hash",
+          "tool/parser version and command",
+          "expected-answer manifest",
+          "observed RapidTriage output",
+          "record-level or row-level diff",
+          "reviewer sign-off and limitation note"
+        ],
+        "accuracy_controls": {
+          "source_provenance_required": true,
+          "offset_or_record_id_required": true,
+          "hash_required": true,
+          "timezone_or_timestamp_semantics_required": true,
+          "secret_redaction_required": false,
+          "legal_or_authority_gate_required": true,
+          "cross_tool_diff_required": true,
+          "known_answer_required": true
+        },
+        "evidence_refs": [
+          "source_path:/operator/evidence/windows11-case.E01"
+        ],
+        "default_reportability": "validation-required",
+        "commercial_grade_ready": false,
+        "next_validation_step": "Attach known-answer corpus output, cross-tool diff, and reviewer sign-off before report-grade claims."
+      }
+    ],
+    "commercial_uplift_evidence": {
+      "batch_id": "commercial-uplift-021-025",
+      "item_numbers": [
+        22
+      ],
+      "implementation_track": "evidence-image-workflow",
+      "implemented": true,
+      "usable": true,
+      "validated": true,
+      "commercial_grade_ready": false,
+      "objective": "Make E01/Ex01 workflow evidence explicit: source integrity, tool preflight, partition selection, read-only extraction provenance, and blockers.",
+      "reportability_decision": {
+        "profile_version": "image-workflow-reportability-decision-v1",
+        "commercial_gap_ids": [
+          "#22"
+        ],
+        "decision": "do-not-report-e01-ex01-workflow-as-native-complete",
+        "allowed_use": "e01-ex01-extraction-triage-pivot",
+        "blockers": [
+          "deleted-corrupt-filesystem-recovery-delegated-to-sleuthkit",
+          "e01-ex01-trusted-workflow-diff-required",
+          "encrypted-volume-unlock-workflow-not-implemented",
+          "external-tool-fuse-platform-behavior-validation-required",
+          "large-known-answer-e01-ex01-corpus-required",
+          "native-e01-ex01-segment-metadata-decoding-not-implemented"
+        ],
+        "failed_validation_matrix_ids": [
+          "#22-source-integrity",
+          "#22-command-history",
+          "#22-native-commercial-parser"
+        ],
+        "source_hash_statuses": [],
+        "native_parser_complete": false,
+        "external_tool_or_vendor_workflow_required": true,
+        "ready_for_court_report": false,
+        "required_before_report": [
+          "validate E01/Ex01 segment metadata and extraction against known-answer images",
+          "attach libewf/Sleuth Kit versions, commands, hashes, and corrupt/encrypted image limitations",
+          "confirm extracted filesystem contents against a trusted forensic suite before final testimony"
+        ]
+      },
+      "image_trusted_diff": {
+        "status": "not-attached",
+        "commercial_grade_evidence": false
+      },
+      "source_refs": [
+        "source_path:/operator/evidence/windows11-case.E01",
+        "detected_format:e01",
+        "converted_raw_path:"
+      ],
+      "passed_validation_matrix_ids": [
+        "#22-tool-preflight",
+        "#22-partition-or-container-metadata"
+      ],
+      "failed_validation_matrix_ids": [
+        "#22-source-integrity",
+        "#22-command-history",
+        "#22-native-commercial-parser"
+      ],
+      "commercial_blockers": [
+        "native-e01-ex01-segment-metadata-decoding-not-implemented",
+        "external-tool-fuse-platform-behavior-validation-required",
+        "encrypted-volume-unlock-workflow-not-implemented",
+        "deleted-corrupt-filesystem-recovery-delegated-to-sleuthkit",
+        "large-known-answer-e01-ex01-corpus-required"
+      ],
+      "large_data_controls": {
+        "direct_image_hash_limit_bytes": 134217728,
+        "source_hash_statuses": [],
+        "split_part_count": 0,
+        "ewf_segment_count": 0,
+        "ewf_segment_warnings": [],
+        "split_set_contiguous": null,
+        "split_set_warnings": [],
+        "virtual_disk_chain_status": null,
+        "virtual_disk_chain_warnings": [],
+        "export_manifest_sha256": "",
+        "partition_table_row_count": 0,
+        "tool_preflight_count": 3,
+        "command_history_count": 0,
+        "external_tool_or_vendor_workflow_required": true,
+        "native_parser_complete": false
+      },
+      "next_internal_step": "Add native E01/Ex01 segment metadata parsing and run encrypted/corrupt image known-answer corpora.",
+      "external_evidence_required": true
+    },
+    "failure_guidance": null,
+    "segment_set_profile": null,
+    "split_set_profile": null,
+    "virtual_disk_chain_profile": null,
+    "container_export_profile": null,
+    "verified_export_manifest_profile": null,
+    "forensic_container_workflow_manifest": null,
+    "ingest_workflow": {
+      "profile_version": "windows11-e01-single-case-workflow-v1",
+      "qc_prep_item": 1,
+      "workflow_goal": "Select an E01, verify dependencies, choose a partition, extract read-only, analyze artifacts, search/review, and export report evidence from one flow.",
+      "source_path": "/operator/evidence/windows11-case.E01",
+      "direct_extract_ready": true,
+      "blocked": false,
+      "blocked_reason": "Select a readable .E01/.Ex01 first segment before analysis.",
+      "failure_category": null,
+      "recommended_processing_profile": "fast-first-pass",
+      "recommended_input_kind": "e01-derived",
+      "ui_primary_action": "Start run",
+      "large_case_controls": [
+        "Use Fast first pass before deep extraction.",
+        "Keep extraction caps unless a focused deep review requires more output.",
+        "Use cursor pages and virtualized tables for high-volume result sets."
+      ],
+      "stages": [
+        {
+          "id": "select-e01",
+          "label": "Select E01/Ex01",
+          "status": "blocked",
+          "operator_action": "Choose the first EWF segment and keep all split segments in the same folder.",
+          "evidence": [
+            "source=windows11-case.E01",
+            "segments=unknown",
+            "hash_status=not-run"
+          ]
+        },
+        {
+          "id": "dependency-preflight",
+          "label": "Dependency preflight",
+          "status": "complete",
+          "operator_action": "Verify ewfmount, mmls, and tsk_recover before direct extraction.",
+          "evidence": [
+            "status=ready",
+            "available=3",
+            "missing=0"
+          ]
+        },
+        {
+          "id": "partition-selection",
+          "label": "Partition selection",
+          "status": "ready",
+          "operator_action": "Use auto largest supported filesystem first, or enter a known start sector for manual override.",
+          "evidence": [
+            "mmls partition table will be captured during extraction."
+          ]
+        },
+        {
+          "id": "filesystem-extraction",
+          "label": "Read-only extraction",
+          "status": "ready",
+          "operator_action": "Recover the selected filesystem into the output stage and preserve command history.",
+          "evidence": [
+            "ewfmount + tsk_recover command history becomes provenance."
+          ]
+        },
+        {
+          "id": "artifact-analysis",
+          "label": "Artifact analysis",
+          "status": "pending-after-extraction",
+          "operator_action": "Run Windows artifact collectors, document/file indexing, OCR sidecars, and timeline generation.",
+          "evidence": [
+            "analysis starts from the extracted filesystem root."
+          ]
+        },
+        {
+          "id": "search-review-report",
+          "label": "Search, review, report",
+          "status": "pending-after-analysis",
+          "operator_action": "Search all evidence, verify in source viewer, mark review decisions, and export report material.",
+          "evidence": [
+            "Case DB review marks and report bundles keep source citations."
+          ]
+        }
+      ],
+      "operator_runbook": {
+        "profile_version": "windows11-e01-operator-runbook-v1",
+        "goal": "Move one Windows 11 E01/Ex01 case from input selection through extraction, analysis, search, review, and report export.",
+        "direct_extract_ready": true,
+        "blocked_reason": "Select a readable .E01/.Ex01 first segment before analysis.",
+        "recommended_commands": {
+          "preflight": "rapidtriage evidence \"/operator/evidence/windows11-case.E01\" --json --output ./rapidtriage-run-e01/rapidtriage-evidence-preflight.json",
+          "plan_or_smoke": "rapidtriage e01-smoke \"/operator/evidence/windows11-case.E01\" --output-dir ./rapidtriage-run-e01/e01-smoke --plan-only --json",
+          "run": "rapidtriage run \"/operator/evidence/windows11-case.E01\" --mode hacking --output-dir ./rapidtriage-run-e01 --resume",
+          "review": "rapidtriage web --root ./rapidtriage-run-e01"
+        },
+        "gui_flow": [
+          {
+            "step": 1,
+            "label": "Select E01/Ex01",
+            "user_action": "Select the first EWF segment; keep all E01/E02/... or Ex01/Ex02/... segments in the same folder.",
+            "success_evidence": "segment_set_profile shows selected_is_first_segment=true and no missing segment warnings."
+          },
+          {
+            "step": 2,
+            "label": "Dependency check",
+            "user_action": "Confirm ewfmount, mmls, and tsk_recover are available, or switch to trusted export folder input.",
+            "success_evidence": "preflight_summary.status is ready or ready-version-unverified."
+          },
+          {
+            "step": 3,
+            "label": "Partition selection",
+            "user_action": "Use automatic largest supported Windows filesystem first, or enter a verified mmls start sector.",
+            "success_evidence": "partition_selection.selected_start_sector is recorded with requested/recommended sector provenance."
+          },
+          {
+            "step": 4,
+            "label": "Read-only extraction",
+            "user_action": "Recover to the run output stage; never write into the source image folder.",
+            "success_evidence": "rapidtriage-e01.json records command_history and recovered_root_manifest hashes."
+          },
+          {
+            "step": 5,
+            "label": "Artifact analysis",
+            "user_action": "Run Windows artifact collectors, file/document indexing, timeline, and indicators from the extracted root.",
+            "success_evidence": "run summary contains manifest/docs/files/artifacts/timeline/indicators outputs."
+          },
+          {
+            "step": 6,
+            "label": "Search, review, report",
+            "user_action": "Search globally, open source viewers, tag evidence, then export reviewed report candidates.",
+            "success_evidence": "report/export items preserve source hashes, parser versions, offsets or source locators, and review status."
+          }
+        ],
+        "expected_outputs": [
+          "rapidtriage-evidence-preflight.json",
+          "rapidtriage-e01.json",
+          "rapidtriage-run-summary.json",
+          "rapidtriage-run-report.md",
+          "rapidtriage-case.db when web/review workflow is used"
+        ],
+        "large_case_controls": [
+          "Use --resume so extraction and analysis can continue after interruption.",
+          "Use --max-file-count and --max-extract-size-bytes for first-pass triage on very large evidence.",
+          "Use the web result table cursor/virtualized views instead of opening full raw JSON for review."
+        ],
+        "report_limitations": [
+          "Direct E01 support orchestrates libewf and Sleuth Kit; it is not a native commercial-grade EWF parser.",
+          "Encrypted, malformed, corrupt, or deleted filesystem claims require trusted-tool comparison and known-answer validation."
+        ]
+      },
+      "recommended_commands": {
+        "preflight": "rapidtriage evidence \"/operator/evidence/windows11-case.E01\" --json --output ./rapidtriage-run-e01/rapidtriage-evidence-preflight.json",
+        "plan_or_smoke": "rapidtriage e01-smoke \"/operator/evidence/windows11-case.E01\" --output-dir ./rapidtriage-run-e01/e01-smoke --plan-only --json",
+        "run": "rapidtriage run \"/operator/evidence/windows11-case.E01\" --mode hacking --output-dir ./rapidtriage-run-e01 --resume",
+        "review": "rapidtriage web --root ./rapidtriage-run-e01"
+      },
+      "handoff_contract": {
+        "profile_version": "qc-prep-e01-end-to-end-handoff-v1",
+        "qc_prep_item": 1,
+        "goal": "Keep E01 preflight, partition selection, extraction, artifact run, search, review, and report actions connected as one analyst workflow.",
+        "gui_entrypoints": [
+          {
+            "id": "e01-evidence-check",
+            "label": "Check evidence support",
+            "required_before": "start-run",
+            "status": "blocked"
+          },
+          {
+            "id": "start-configured-run",
+            "label": "Start configured E01 analysis",
+            "required_before": "search",
+            "status": "ready"
+          },
+          {
+            "id": "search-review-report",
+            "label": "Search, review, report after run completion",
+            "required_before": "qc-signoff",
+            "status": "pending-after-run"
+          }
+        ],
+        "required_output_chain": [
+          "rapidtriage-evidence-preflight.json",
+          "rapidtriage-e01.json",
+          "rapidtriage-run-summary.json",
+          "source viewer citations",
+          "review decisions",
+          "rapidtriage-run-report.md or reviewer bundle"
+        ],
+        "blocked_reason": "Select a readable .E01/.Ex01 first segment before analysis.",
+        "run_command": "rapidtriage run \"/operator/evidence/windows11-case.E01\" --mode hacking --output-dir ./rapidtriage-run-e01 --resume",
+        "review_url_hint": "rapidtriage web --root ./rapidtriage-run-e01",
+        "commercial_note": "This is an end-to-end usability/QC-prep handoff, not proof of native commercial EWF parser completeness."
+      },
+      "partition_browser": {
+        "profile_version": "e01-partition-browser-v1",
+        "qc_prep_item": 2,
+        "goal": "Let analysts inspect the mmls partition table, accept the recommendation, or manually override the start sector before extraction.",
+        "status": "pending-mmls",
+        "blocked_reason": "",
+        "columns": [
+          "partition_number",
+          "start_sector",
+          "size_bytes",
+          "filesystem_guess",
+          "recommendation",
+          "manual_override"
+        ],
+        "partition_count": 0,
+        "supported_partition_count": 0,
+        "partitions": [],
+        "selected_start_sector": null,
+        "recommended_start_sector": null,
+        "requested_start_sector": null,
+        "manual_override": {
+          "enabled": true,
+          "input_id": "e01PartitionStartSectorInput",
+          "field": "start_sector",
+          "warning": "Only override the sector after reviewing mmls or trusted-tool partition evidence."
+        },
+        "empty_state": "Run E01 extraction/smoke or attach trusted mmls output to populate the partition table.",
+        "validation_evidence_required": [
+          "mmls partition table transcript",
+          "selected/recommended start-sector provenance",
+          "manual override reason when the selected sector differs from the recommendation"
+        ]
+      },
+      "vsc_workflow_handoff": {
+        "profile_version": "vsc-image-workflow-handoff-v1",
+        "qc_prep_item": 3,
+        "goal": "Discover mounted/exported Volume Shadow Copy roots, compare them with the recovered current volume, and preserve deleted/modified candidates with hashes.",
+        "source_kind": "e01-ex01",
+        "source_path": "/operator/evidence/windows11-case.E01",
+        "current_root": "<analysis-root>",
+        "stage_dir": "./rapidtriage-run-e01",
+        "status": "pending-after-extraction",
+        "snapshot_count": 0,
+        "direct_image_level_mount_supported": false,
+        "operator_warning": "RapidForensic does not mount VSC directly from E01/RAW yet; mount/export VSC snapshots read-only with a trusted tool, then use these commands.",
+        "commands": {
+          "discover": "rapidtriage vsc-discover \"<analysis-root>\" --output \"rapidtriage-run-e01/vsc-discovery.json\"",
+          "compare": "rapidtriage vsc-compare \"<analysis-root>\" <snapshot-root> [<snapshot-root>...] --hash --output \"rapidtriage-run-e01/vsc-compare.json\"",
+          "extract": "rapidtriage vsc-extract \"<analysis-root>\" <snapshot-root> [<snapshot-root>...] --output-dir \"rapidtriage-run-e01/vsc-evidence\" --status deleted --status modified",
+          "case_db_import": "rapidtriage case-db --import-vsc-compare \"rapidtriage-run-e01/vsc-compare.json\" --case-id <case-id>"
+        },
+        "workflow_steps": [
+          {
+            "id": "discover-mounted-snapshots",
+            "label": "Discover mounted/exported snapshots",
+            "status": "pending-after-extraction",
+            "evidence": "vsc-discovery JSON lists candidate snapshot roots and reason scores."
+          },
+          {
+            "id": "compare-current-vs-snapshot",
+            "label": "Compare current volume against snapshots",
+            "status": "pending-snapshot-root",
+            "evidence": "vsc-compare JSON records deleted/added/modified rows with optional SHA256."
+          },
+          {
+            "id": "extract-vsc-candidates",
+            "label": "Extract deleted/modified candidates",
+            "status": "ready-after-compare",
+            "evidence": "vsc-extract copies selected files and records source/destination SHA256."
+          },
+          {
+            "id": "review-and-report",
+            "label": "Review VSC deltas in Case DB",
+            "status": "ready-after-import",
+            "evidence": "Case DB imports VSC status, snapshot path, hashes, and review state."
+          }
+        ],
+        "validation_evidence_required": [
+          "trusted tool or OS transcript showing mounted/exported VSC snapshot roots",
+          "vsc-discovery JSON with snapshot path/reason scores",
+          "vsc-compare JSON with deleted/modified/added summary",
+          "vsc-extract manifest with copied file hashes for preserved candidates"
+        ],
+        "commercial_blockers": [
+          "direct-image-level-vsc-mount-not-implemented",
+          "trusted-vsc-snapshot-export-transcript-required",
+          "known-answer-vsc-deleted-file-corpus-required"
+        ],
+        "manifest_sha256": "6071cba028d5aad6acc4228864133b4469efd074c3ef8b36616ffdd868561b2f"
+      },
+      "stage_control_contract": {
+        "profile_version": "image-stage-control-contract-v1",
+        "qc_prep_item": 4,
+        "source_kind": "e01-ex01",
+        "stage_dir": "./rapidtriage-run-e01/_e01",
+        "status": "failed-stage-present",
+        "stage_count": 6,
+        "stage_rows": [
+          {
+            "index": 1,
+            "id": "select-e01",
+            "label": "Select E01/Ex01",
+            "status": "blocked",
+            "evidence_present": true
+          },
+          {
+            "index": 2,
+            "id": "dependency-preflight",
+            "label": "Dependency preflight",
+            "status": "complete",
+            "evidence_present": true
+          },
+          {
+            "index": 3,
+            "id": "partition-selection",
+            "label": "Partition selection",
+            "status": "ready",
+            "evidence_present": true
+          },
+          {
+            "index": 4,
+            "id": "filesystem-extraction",
+            "label": "Read-only extraction",
+            "status": "ready",
+            "evidence_present": true
+          },
+          {
+            "index": 5,
+            "id": "artifact-analysis",
+            "label": "Artifact analysis",
+            "status": "pending-after-extraction",
+            "evidence_present": true
+          },
+          {
+            "index": 6,
+            "id": "search-review-report",
+            "label": "Search, review, report",
+            "status": "pending-after-analysis",
+            "evidence_present": true
+          }
+        ],
+        "checkpoint": {
+          "supported": true,
+          "path": "./rapidtriage-run-e01/_e01/rapidtriage-e01-stage-status.json",
+          "exists": false,
+          "resume_ready": false,
+          "completed": false,
+          "resumed_from_checkpoint": false,
+          "sidecar_required_for_report": true
+        },
+        "resume": {
+          "supported": true,
+          "cli_flag": "--resume",
+          "completed_stages": [
+            "dependency-preflight",
+            "partition-selection",
+            "filesystem-extraction"
+          ],
+          "failed_stages": [
+            "select-e01"
+          ],
+          "reuse_reasons": [],
+          "warning": ""
+        },
+        "cancel_retry": {
+          "cancel_supported": true,
+          "retry_supported_for": [
+            "failed",
+            "canceled"
+          ],
+          "cancel_route": "/api/runs/<run-id>/cancel",
+          "retry_route": "/api/runs/<run-id>/retry",
+          "running_cancel_policy": "cooperative-stage-boundary",
+          "partial_output_policy": "preserve-stage-output-and-record-warning"
+        },
+        "failure_classification": {
+          "category": "none",
+          "known_categories": [
+            "corrupt-image",
+            "encrypted-volume",
+            "external-tool-failure",
+            "missing-tool",
+            "partition-ambiguity",
+            "permission",
+            "unsupported-filesystem",
+            "unsupported-image"
+          ],
+          "guidance_title": "",
+          "retry_after_fix": false
+        },
+        "validation_evidence_required": [
+          "stage checkpoint or explicit no-checkpoint limitation",
+          "resume decision with completed/failed stage list",
+          "cancel/retry transition log from web job API when used",
+          "failure category and operator guidance for blocked stages"
+        ],
+        "commercial_blockers": [
+          "long-running-cancel-under-load-validation-required",
+          "trusted-checkpoint-resume-diff-required",
+          "partial-output-cleanup-validation-required"
+        ],
+        "manifest_sha256": "86ac3176ca5faedbf783ef2ecc001005b12a8c44155797c608be465132303c1d"
+      },
+      "commercial_gap_ids": [
+        "#22",
+        "#23",
+        "#78",
+        "#79"
+      ],
+      "commercial_note": "This workflow is usable for triage, but commercial-grade E01 claims still require external corpus validation and trusted tool logs."
+    },
+    "image_analyst_review_profile": {
+      "profile_version": "image-workflow-analyst-review-profile-v1",
+      "gap_id": "#22",
+      "artifact_type": "e01-ex01-workflow",
+      "detected_format": "e01",
+      "severity": "high",
+      "summary": "e01 workflow is usable as a triage/review path, not a native commercial parser claim.",
+      "evidence_interpretation": "E01/Ex01 source can be identified, integrity-checked, and routed through preflight/extraction/review workflow evidence.",
+      "not_proof_of": [
+        "native EWF parser completeness",
+        "encrypted or corrupt image support",
+        "all deleted files recovered"
+      ],
+      "analyst_questions": [
+        "Is the source hash recorded and matched to the acquisition record?",
+        "Which external tool versions/commands produced the derived evidence?",
+        "Was the selected partition or vendor export validated against a trusted baseline?",
+        "Are blocked/review-required stages disclosed in the report?"
+      ],
+      "primary_pivots": [
+        "source_path",
+        "detected_format",
+        "source_sha256",
+        "support_level",
+        "scan_strategy",
+        "workflow_manifest_hash",
+        "partition_start_sector",
+        "converted_raw_sha256",
+        "export_manifest_sha256"
+      ],
+      "source_field_values": {
+        "source_path": "/operator/evidence/windows11-case.E01",
+        "detected_format": "e01",
+        "source_sha256": "",
+        "hash_status": "not-recorded",
+        "support_level": "direct-extract",
+        "scan_strategy": "auto-extract-then-scan",
+        "workflow_manifest_hash": "",
+        "partition_start_sector": null,
+        "converted_raw_sha256": "",
+        "export_manifest_sha256": "",
+        "missing_tools": [],
+        "blocked_stages": [
+          "select-e01"
+        ],
+        "review_required_stages": []
+      },
+      "correlation_targets": [
+        "partition table",
+        "filesystem extraction log",
+        "case run outputs",
+        "trusted EWF/TSK diff"
+      ],
+      "risk_tags": [
+        "external-tool-dependency",
+        "native-parser-incomplete",
+        "encrypted-or-corrupt-corpus-required"
+      ],
+      "validation_required": true,
+      "report_grade_ready": false,
+      "commercial_blockers": [
+        "native-e01-ex01-segment-metadata-decoding-not-implemented",
+        "external-tool-fuse-platform-behavior-validation-required",
+        "encrypted-volume-unlock-workflow-not-implemented",
+        "deleted-corrupt-filesystem-recovery-delegated-to-sleuthkit",
+        "large-known-answer-e01-ex01-corpus-required"
+      ],
+      "report_guidance": "Cite this as workflow/provenance evidence only. Attach trusted-tool diff, known-answer results, and source hashes before report-grade image/container claims."
+    },
+    "e01_intake_profile": {
+      "profile_version": "e01-intake-profile-v1",
+      "checklist_item": 1,
+      "qc_gap_id": "#1",
+      "source": {
+        "path": "/operator/evidence/windows11-case.E01",
+        "filename": "windows11-case.E01",
+        "extension": ".e01",
+        "exists": false,
+        "supported_extension": true
+      },
+      "source_signature": {
+        "path": "/operator/evidence/windows11-case.E01",
+        "filename": "windows11-case.E01",
+        "size_bytes": 0,
+        "mtime_ns": null,
+        "segment_count": 0,
+        "selected_segment": "/operator/evidence/windows11-case.E01"
+      },
+      "segment_set_profile": {
+        "profile_version": "ewf-segment-set-v1",
+        "selected_segment": "/operator/evidence/windows11-case.E01",
+        "segment_count": 0,
+        "segment_numbers": [],
+        "segments": [],
+        "warnings": [
+          "source image is missing or is not a supported E01/Ex01 path"
+        ],
+        "validation_status": "missing-or-unsupported"
+      },
+      "hash_feasibility": {
+        "preflight_hash_algorithm": "sha256",
+        "preflight_hash_status": "not-run",
+        "preflight_sha256": null,
+        "max_preflight_hash_bytes": 134217728,
+        "source_size_bytes": 0,
+        "full_hash_feasible_in_preflight": false,
+        "full_image_hash_required_before_report": true,
+        "acquisition_hash_warning": "Attach an acquisition/full-image hash before report-grade use."
+      },
+      "read_only_posture": {
+        "source_open_mode": "read-only",
+        "writes_to_source": false,
+        "writes_to_source_folder": false,
+        "writes_to_stage_or_output_only": true,
+        "operator_warning": "Do not write outputs next to the original evidence image unless the location is a separate working copy."
+      },
+      "processing_decision": {
+        "can_continue_to_dependency_preflight": false,
+        "blocked_reason": "Select a readable .E01/.Ex01 first segment before processing.",
+        "next_stage": "select-supported-e01"
+      },
+      "reportability_decision": {
+        "decision": "intake-blocked",
+        "allowed_use": "source-selection-and-preflight-context",
+        "not_allowed_use": "native-EWF-parser-completeness-claim",
+        "required_before_report": [
+          "full source/acquisition hash",
+          "segment set inventory",
+          "dependency preflight",
+          "partition selection",
+          "trusted-tool or known-answer validation when making report-grade claims"
+        ]
+      },
+      "manifest_sha256": "e66f84074177189821a2d18e80db9123b6c19e29f7b63a85151623a5e0082bc0"
+    }
+  },
+  "run_summary": {},
+  "run_error": null,
+  "outputs": {
+    "known_answer_manifest": {
+      "path": "/Users/shinyoohag/rapidforensic/repo/qc-runs/2026-05-11-90-target-sequential/02-e01-run/windows11-e01-known-answer.json",
+      "exists": true,
+      "size_bytes": 10547,
+      "sha256": "8f1fdfe450f026d0cf2e02eb4143696339e5e4dfb33ca031c768e11f5820eb29"
+    },
+    "evidence_preflight": {
+      "path": "/Users/shinyoohag/rapidforensic/repo/qc-runs/2026-05-11-90-target-sequential/02-e01-run/rapidtriage-evidence-preflight.json",
+      "exists": true,
+      "size_bytes": 35300,
+      "sha256": "f3e7e433d41c1ff39e374b7b685910a39510fa0bb86e515c89a4d363d395a230"
+    },
+    "stage_status": {
+      "path": "/Users/shinyoohag/rapidforensic/repo/qc-runs/2026-05-11-90-target-sequential/02-e01-run/rapidforensic-e01-workflow-stage-status.json",
+      "exists": true,
+      "size_bytes": 2887,
+      "sha256": "a06e5a146cc6d3ad5e6e7af2e86f8afe82308ee3732407e8ba64c96bed5e79c3"
+    },
+    "smoke_report": {
+      "path": "/Users/shinyoohag/rapidforensic/repo/qc-runs/2026-05-11-90-target-sequential/02-e01-run/rapidforensic-e01-smoke.json",
+      "exists": true,
+      "sha256": null,
+      "hash_note": "Self-referential smoke report hash is omitted; hash the saved file externally when packaging evidence."
+    }
+  },
+  "commercial_gap_ids": [
+    "#22",
+    "#64",
+    "#85",
+    "#90"
+  ],
+  "commercial_grade_ready": false,
+  "commercial_grade_blockers": [
+    "Known-answer assertions must be executed against a real Windows 11 E01 and trusted-tool outputs.",
+    "Direct E01 extraction depends on libewf/Sleuth Kit availability and platform mount behavior.",
+    "Report citations still require reviewer validation against original source paths, offsets, and hashes."
+  ],
+  "operator_next_steps": [
+    "Run this command against the real Windows 11 E01 on the target workstation.",
+    "If triage-run is blocked, follow failure_guidance and rerun with --resume.",
+    "Attach trusted-tool diff output before claiming commercial-grade E01 support."
+  ]
+}

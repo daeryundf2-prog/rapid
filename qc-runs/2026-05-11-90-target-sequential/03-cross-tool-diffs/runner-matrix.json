@@ -1,0 +1,333 @@
+{
+  "profile_version": "validation-diff-runner-matrix-v1",
+  "qc_prep_item_numbers": [
+    76,
+    77,
+    78,
+    79,
+    80,
+    81
+  ],
+  "public_corpus_registry": [
+    {
+      "item_number": 76,
+      "corpus_name": "NIST CFReDS",
+      "purpose": "Public forensic reference datasets for known-answer case validation.",
+      "evidence_required": [
+        "dataset identifier and acquisition notes",
+        "source evidence SHA256",
+        "expected-answer notes or lab oracle",
+        "RapidTriage output",
+        "trusted-tool output",
+        "row/field diff output",
+        "reviewer signoff"
+      ],
+      "licensing_gate": "operator-must-confirm-download-and-redistribution-terms"
+    },
+    {
+      "item_number": 76,
+      "corpus_name": "NIST CFTT",
+      "purpose": "Tool-testing assertions and methodology for forensic functions.",
+      "evidence_required": [
+        "test assertion identifier",
+        "expected result",
+        "observed RapidTriage result",
+        "pass/fail decision",
+        "limitation note",
+        "reviewer signoff"
+      ],
+      "licensing_gate": "operator-must-confirm-test-material-scope"
+    }
+  ],
+  "runner_groups": [
+    {
+      "item_number": 77,
+      "artifact_family": "evtx",
+      "title": "EVTX trusted diff runners",
+      "trusted_tools": [
+        {
+          "name": "EvtxECmd",
+          "binary_candidates": [
+            "EvtxECmd",
+            "EvtxECmd.exe"
+          ],
+          "reference_name": "evtxecmd",
+          "output_format": "CSV",
+          "command_template": "EvtxECmd -f <source.evtx> --csv <reference-dir>",
+          "available": false,
+          "resolved_path": "",
+          "version_capture_required": true,
+          "command_capture_required": true
+        },
+        {
+          "name": "Hayabusa",
+          "binary_candidates": [
+            "hayabusa",
+            "hayabusa.exe"
+          ],
+          "reference_name": "hayabusa",
+          "output_format": "CSV/JSON timeline",
+          "command_template": "hayabusa csv-timeline -d <evtx-dir> -o <reference.csv>",
+          "available": false,
+          "resolved_path": "",
+          "version_capture_required": true,
+          "command_capture_required": true
+        }
+      ],
+      "rapid_output_hint": "rapidtriage artifacts --kind eventlog --output rapid-evtx.json",
+      "cross_tool_template": "rapidtriage cross-tool-validate --rapid-output rapid-evtx.json --reference-output evtxecmd=<EvtxECmd.csv> --reference-output hayabusa=<hayabusa.csv> --backlog-item 1 --backlog-item 2 --backlog-item 3",
+      "available_tool_count": 0,
+      "ready_to_execute_locally": false,
+      "required_cross_tool_metadata": [
+        "--source-evidence",
+        "--tool-version",
+        "--tool-command",
+        "--independent-report",
+        "--corpus-scope"
+      ]
+    },
+    {
+      "item_number": 78,
+      "artifact_family": "registry",
+      "title": "Registry trusted diff runners",
+      "trusted_tools": [
+        {
+          "name": "RECmd",
+          "binary_candidates": [
+            "RECmd",
+            "RECmd.exe"
+          ],
+          "reference_name": "recmd",
+          "output_format": "CSV",
+          "command_template": "RECmd -f <hive> --csv <reference-dir>",
+          "available": false,
+          "resolved_path": "",
+          "version_capture_required": true,
+          "command_capture_required": true
+        },
+        {
+          "name": "Registry Explorer",
+          "binary_candidates": [
+            "RegistryExplorer",
+            "RegistryExplorer.exe"
+          ],
+          "reference_name": "registryexplorer",
+          "output_format": "CSV export",
+          "command_template": "RegistryExplorer.exe <hive> <manual/exported-csv>",
+          "available": false,
+          "resolved_path": "",
+          "version_capture_required": true,
+          "command_capture_required": true
+        }
+      ],
+      "rapid_output_hint": "rapidtriage artifacts --kind registry --output rapid-registry.json",
+      "cross_tool_template": "rapidtriage cross-tool-validate --rapid-output rapid-registry.json --reference-output recmd=<RECmd.csv> --reference-output registryexplorer=<RegistryExplorer.csv> --backlog-item 4 --backlog-item 5 --backlog-item 15",
+      "available_tool_count": 0,
+      "ready_to_execute_locally": false,
+      "required_cross_tool_metadata": [
+        "--source-evidence",
+        "--tool-version",
+        "--tool-command",
+        "--independent-report",
+        "--corpus-scope"
+      ]
+    },
+    {
+      "item_number": 79,
+      "artifact_family": "ntfs",
+      "title": "MFT/USN trusted diff runners",
+      "trusted_tools": [
+        {
+          "name": "MFTECmd",
+          "binary_candidates": [
+            "MFTECmd",
+            "MFTECmd.exe"
+          ],
+          "reference_name": "mftecmd",
+          "output_format": "CSV",
+          "command_template": "MFTECmd -f <$MFT> --csv <reference-dir>",
+          "available": false,
+          "resolved_path": "",
+          "version_capture_required": true,
+          "command_capture_required": true
+        },
+        {
+          "name": "analyzeMFT",
+          "binary_candidates": [
+            "analyzeMFT.py",
+            "analyzeMFT"
+          ],
+          "reference_name": "analyzemft",
+          "output_format": "CSV",
+          "command_template": "analyzeMFT.py -f <$MFT> -o <analyzeMFT.csv>",
+          "available": false,
+          "resolved_path": "",
+          "version_capture_required": true,
+          "command_capture_required": true
+        },
+        {
+          "name": "UsnJrnl2Csv",
+          "binary_candidates": [
+            "UsnJrnl2Csv",
+            "UsnJrnl2Csv.exe"
+          ],
+          "reference_name": "usnjrnl2csv",
+          "output_format": "CSV",
+          "command_template": "UsnJrnl2Csv <\\$J> <reference.csv>",
+          "available": false,
+          "resolved_path": "",
+          "version_capture_required": true,
+          "command_capture_required": true
+        }
+      ],
+      "rapid_output_hint": "rapidtriage artifacts --kind filesystem --output rapid-ntfs.json",
+      "cross_tool_template": "rapidtriage cross-tool-validate --rapid-output rapid-ntfs.json --reference-output mftecmd=<MFTECmd.csv> --reference-output usnjrnl2csv=<UsnJrnl2Csv.csv> --backlog-item 12 --backlog-item 13",
+      "available_tool_count": 0,
+      "ready_to_execute_locally": false,
+      "required_cross_tool_metadata": [
+        "--source-evidence",
+        "--tool-version",
+        "--tool-command",
+        "--independent-report",
+        "--corpus-scope"
+      ]
+    },
+    {
+      "item_number": 80,
+      "artifact_family": "ese",
+      "title": "SRUM/Windows.edb trusted diff runners",
+      "trusted_tools": [
+        {
+          "name": "SrumECmd",
+          "binary_candidates": [
+            "SrumECmd",
+            "SrumECmd.exe"
+          ],
+          "reference_name": "srumecmd",
+          "output_format": "CSV",
+          "command_template": "SrumECmd -f <SRUDB.dat> --csv <reference-dir>",
+          "available": false,
+          "resolved_path": "",
+          "version_capture_required": true,
+          "command_capture_required": true
+        },
+        {
+          "name": "libesedb esedbexport",
+          "binary_candidates": [
+            "esedbexport"
+          ],
+          "reference_name": "libesedb",
+          "output_format": "tables/CSV conversion",
+          "command_template": "esedbexport -t <reference-dir> <Windows.edb-or-SRUDB.dat>",
+          "available": false,
+          "resolved_path": "",
+          "version_capture_required": true,
+          "command_capture_required": true
+        },
+        {
+          "name": "Windows Search DB Analyzer",
+          "binary_candidates": [
+            "WinSearchDBAnalyzer",
+            "WinSearchDBAnalyzer.exe"
+          ],
+          "reference_name": "winsearchdbanalyzer",
+          "output_format": "CSV/SQLite export",
+          "command_template": "WinSearchDBAnalyzer <Windows.edb> <reference-export>",
+          "available": false,
+          "resolved_path": "",
+          "version_capture_required": true,
+          "command_capture_required": true
+        }
+      ],
+      "rapid_output_hint": "rapidtriage artifacts --kind windows-search --output rapid-ese.json",
+      "cross_tool_template": "rapidtriage cross-tool-validate --rapid-output rapid-ese.json --reference-output srumecmd=<SrumECmd.csv> --reference-output libesedb=<esedbexport.csv> --backlog-item 10 --backlog-item 11",
+      "available_tool_count": 0,
+      "ready_to_execute_locally": false,
+      "required_cross_tool_metadata": [
+        "--source-evidence",
+        "--tool-version",
+        "--tool-command",
+        "--independent-report",
+        "--corpus-scope"
+      ]
+    },
+    {
+      "item_number": 81,
+      "artifact_family": "execution-user-activity",
+      "title": "Execution and user-activity trusted diff runners",
+      "trusted_tools": [
+        {
+          "name": "PECmd",
+          "binary_candidates": [
+            "PECmd",
+            "PECmd.exe"
+          ],
+          "reference_name": "pecmd",
+          "output_format": "CSV",
+          "command_template": "PECmd -d <Prefetch-dir> --csv <reference-dir>",
+          "available": false,
+          "resolved_path": "",
+          "version_capture_required": true,
+          "command_capture_required": true
+        },
+        {
+          "name": "JLECmd",
+          "binary_candidates": [
+            "JLECmd",
+            "JLECmd.exe"
+          ],
+          "reference_name": "jlecmd",
+          "output_format": "CSV",
+          "command_template": "JLECmd -d <JumpList-dir> --csv <reference-dir>",
+          "available": false,
+          "resolved_path": "",
+          "version_capture_required": true,
+          "command_capture_required": true
+        },
+        {
+          "name": "ShellBagsExplorer",
+          "binary_candidates": [
+            "ShellBagsExplorer",
+            "ShellBagsExplorer.exe",
+            "SBECmd",
+            "SBECmd.exe"
+          ],
+          "reference_name": "shellbagsexplorer",
+          "output_format": "CSV export",
+          "command_template": "SBECmd -d <NTUSER-UsrClass-root> --csv <reference-dir>",
+          "available": false,
+          "resolved_path": "",
+          "version_capture_required": true,
+          "command_capture_required": true
+        }
+      ],
+      "rapid_output_hint": "rapidtriage artifacts --kind execution --kind shellbags --kind recent-files --output rapid-user-activity.json",
+      "cross_tool_template": "rapidtriage cross-tool-validate --rapid-output rapid-user-activity.json --reference-output pecmd=<PECmd.csv> --reference-output jlecmd=<JLECmd.csv> --reference-output shellbagsexplorer=<ShellBagsExplorer.csv> --backlog-item 14 --backlog-item 15 --backlog-item 16 --backlog-item 17",
+      "available_tool_count": 0,
+      "ready_to_execute_locally": false,
+      "required_cross_tool_metadata": [
+        "--source-evidence",
+        "--tool-version",
+        "--tool-command",
+        "--independent-report",
+        "--corpus-scope"
+      ]
+    }
+  ],
+  "summary": {
+    "runner_group_count": 5,
+    "trusted_tool_count": 13,
+    "available_tool_count": 0,
+    "missing_tool_count": 13,
+    "all_runner_groups_defined": true,
+    "public_corpus_registry_defined": true
+  },
+  "commercial_grade_blockers": [
+    "public-corpus-download-and-license-confirmation-required",
+    "trusted-tool-binaries-and-versions-required",
+    "real-source-evidence-hashes-required",
+    "row-field-diff-outputs-required",
+    "independent-reviewer-signoff-required"
+  ],
+  "matrix_hash": "23fb8c5a2ac5d987829c77d624061b441b0a6d7459dee323110e85e2ae4bbfab"
+}
