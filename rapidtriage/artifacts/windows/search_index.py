@@ -33,6 +33,7 @@ WINDOWS_SEARCH_TRUSTED_TOOLS = {
     "windows-search",
     "velociraptor",
 }
+QC_PREP_WINDOWS_EDB_ITEM = 26
 WINDOWS_SEARCH_CAPABILITIES = {
     "csv_json_export_import": True,
     "ese_header_probe": True,
@@ -1313,7 +1314,38 @@ def windows_edb_report_citation_manifest(
     manifest: dict[str, object] = {
         "manifest_version": "windows-edb-report-citation-manifest-v1",
         "parser_version": PARSER_VERSION,
+        "qc_prep_item_number": QC_PREP_WINDOWS_EDB_ITEM,
+        "qc_prep_item_goal": "Deepen Windows.edb ESE table, property, content, and deleted-state decoding.",
         "artifact_type": artifact_type,
+        "qc_prep_contract": {
+            "implemented": [
+                "source-tool Windows Search export import",
+                "native Windows.edb ESE header and page-map triage",
+                "page-local path, URL, content, and table-marker candidates",
+                "deleted/index-state candidate marker disclosure",
+                "trusted Windows.edb parser diff helper",
+            ],
+            "usable_outputs": [
+                "windows-search-index-entry",
+                "windows-search-edb-file",
+                "windows-search-edb-pivot",
+                "windows-search-edb-page-candidate",
+                "windows-search-edb-table-candidate",
+                "windows-search-edb-row-candidate",
+            ],
+            "validated_by_current_tests": [
+                "ESE signature/page-map fixture",
+                "path/URL/content candidate correlation",
+                "trusted WinSearchDBAnalyzer/libesedb-style diff pass",
+                "deleted-state mismatch blocking",
+            ],
+            "not_report_grade_until": [
+                "native ESE catalog/table/property decoder is implemented",
+                "native row-level timestamp/content/deleted-state semantics are decoded",
+                "long-value/space-tree deleted content handling is validated",
+                "trusted parser diffs are attached for the case evidence",
+            ],
+        },
         "source": {
             "path": source_path,
             "sha256": source_hashes.get("sha256", ""),
@@ -1718,8 +1750,9 @@ def windows_search_commercial_uplift_evidence(details: Mapping[str, object]) -> 
     return {
         "batch_id": "commercial-uplift-011-015",
         "item_numbers": [11],
+        "qc_prep_item_numbers": [QC_PREP_WINDOWS_EDB_ITEM],
         "implementation_track": "native-parser-depth",
-        "objective": "Expose Windows.edb ESE/Search validation evidence, row limits, and commercial blockers on native candidates.",
+        "objective": "Expose Windows.edb ESE/Search validation evidence, row limits, and commercial blockers on #11 / QC-prep #26 native candidates.",
         "source_refs": [
             f"source_path:{details.get('source_path', '')}",
             f"source_index:{details.get('source_index', '')}",
@@ -1758,6 +1791,7 @@ def windows_search_reportability_decision(
     return {
         "profile_version": "windows-search-reportability-decision-v1",
         "commercial_gap_id": "#11",
+        "qc_prep_item_number": QC_PREP_WINDOWS_EDB_ITEM,
         "decision": "do-not-report-native-row-as-decoded-fact",
         "allowed_use": "search-index-triage-pivot",
         "blockers": sorted(blockers),

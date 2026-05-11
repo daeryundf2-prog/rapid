@@ -3530,6 +3530,7 @@ class RapidTriageWindowsArtifactsCollectorTests(unittest.TestCase):
                 shellbag_uplift["reportability_decision"]["allowed_use"],
                 "folder-view-history-triage-pivot",
             )
+            self.assertEqual(shellbag_uplift["qc_prep_item_numbers"], [30])
             self.assertIn("regf-header-valid", shellbag_uplift["passed_validation_matrix_ids"])
             self.assertIn("binary-shell-item-decoding-available", shellbag_uplift["failed_validation_matrix_ids"])
             self.assertTrue(
@@ -3538,6 +3539,8 @@ class RapidTriageWindowsArtifactsCollectorTests(unittest.TestCase):
             shellbag_manifest = key_tree.details["shellbag_depth_manifest"]
             self.assertEqual(shellbag_manifest["manifest_version"], "shellbag-depth-manifest-v1")
             self.assertEqual(shellbag_manifest["gap_id"], "#15")
+            self.assertEqual(shellbag_manifest["qc_prep_item_number"], 30)
+            self.assertIn("native NTUSER/UsrClass key-tree and string-pivot candidates", shellbag_manifest["qc_prep_contract"]["implemented"])
             self.assertEqual(shellbag_manifest["source"]["user_hive_scope"], "usrclass")
             self.assertEqual(shellbag_manifest["row_identity"]["shellbag_section"], "bagmru")
             self.assertIn("42", shellbag_manifest["bag_relationship"]["bag_id_candidates"])

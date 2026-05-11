@@ -952,6 +952,7 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
             jumplist_uplift = automatic["details"]["commercial_uplift_evidence"]
             self.assertEqual(jumplist_uplift["batch_id"], "commercial-uplift-011-015")
             self.assertEqual(jumplist_uplift["item_numbers"], [14])
+            self.assertEqual(jumplist_uplift["qc_prep_item_numbers"], [29])
             self.assertEqual(
                 jumplist_uplift["reportability_decision"]["decision"],
                 "do-not-report-destlist-semantics-as-final",
@@ -967,6 +968,8 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
             jumplist_manifest = automatic["details"]["jumplist_destlist_depth_manifest"]
             self.assertEqual(jumplist_manifest["manifest_version"], "jumplist-destlist-depth-manifest-v1")
             self.assertEqual(jumplist_manifest["gap_id"], "#14")
+            self.assertEqual(jumplist_manifest["qc_prep_item_number"], 29)
+            self.assertIn("embedded LNK destination extraction and linkage candidates", jumplist_manifest["qc_prep_contract"]["implemented"])
             self.assertEqual(jumplist_manifest["source"]["artifact_type"], "jumplist-automatic")
             self.assertEqual(jumplist_manifest["destlist_decoding"]["parse_status"], "parsed-candidate")
             self.assertEqual(jumplist_manifest["destlist_decoding"]["entry_candidate_count"], 1)
@@ -2988,6 +2991,11 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
                 mft_parser_manifest["manifest_sha256"],
             )
             self.assertEqual(native_mft[0]["details"]["mft_full_parser_profile"]["item_number"], 12)
+            self.assertEqual(native_mft[0]["details"]["mft_full_parser_profile"]["qc_prep_item_number"], 27)
+            self.assertIn(
+                "native FILE record header and USA sequence fixup validation",
+                native_mft[0]["details"]["mft_full_parser_profile"]["qc_prep_contract"]["implemented"],
+            )
             self.assertEqual(native_mft[0]["details"]["mft_full_parser_profile"]["artifact_scope"], "record")
             self.assertTrue(native_mft[0]["details"]["mft_full_parser_profile"]["decoded_components"]["usa_sequence_fixup"])
             self.assertTrue(native_mft[0]["details"]["mft_full_parser_profile"]["decoded_components"]["file_name_attributes"])
@@ -3004,6 +3012,7 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
             mft_uplift = native_mft[0]["details"]["commercial_uplift_evidence"]
             self.assertEqual(mft_uplift["batch_id"], "commercial-uplift-011-015")
             self.assertEqual(mft_uplift["item_numbers"], [12])
+            self.assertEqual(mft_uplift["qc_prep_item_numbers"], [27])
             self.assertEqual(
                 mft_uplift["reportability_decision"]["decision"],
                 "do-not-report-full-path-or-file-content-as-complete",
@@ -3061,6 +3070,11 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
             )
             self.assertFalse(usn_files[0]["details"]["usn_replay_inventory_profile"]["full_frn_path_cache_replay_done"])
             self.assertEqual(usn_files[0]["details"]["usn_journal_replay_profile"]["item_number"], 14)
+            self.assertEqual(usn_files[0]["details"]["usn_journal_replay_profile"]["qc_prep_item_number"], 28)
+            self.assertIn(
+                "native USN v2/v3 record scan and v4 extent preview",
+                usn_files[0]["details"]["usn_journal_replay_profile"]["qc_prep_contract"]["implemented"],
+            )
             self.assertEqual(usn_files[0]["details"]["usn_journal_replay_profile"]["artifact_scope"], "inventory")
             self.assertEqual(
                 usn_files[0]["details"]["usn_journal_replay_profile"]["inventory_replay_profile"]["delete_count"],
@@ -3128,6 +3142,7 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
             self.assertEqual(native_usn[0]["details"]["usn_journal_replay_profile"]["artifact_scope"], "record")
             self.assertTrue(native_usn[0]["details"]["usn_journal_replay_profile"]["decoded_components"]["reason_flags"])
             self.assertTrue(native_usn[0]["details"]["usn_journal_replay_profile"]["decoded_components"]["cursor_pagination"])
+            self.assertEqual(native_usn[0]["details"]["commercial_uplift_evidence"]["qc_prep_item_numbers"], [28])
             self.assertIn(
                 "usn-frn-path-cache-replay-required",
                 native_usn[0]["details"]["usn_journal_replay_profile"]["commercial_grade_blockers"],
@@ -3262,6 +3277,8 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
             self.assertGreaterEqual(edb_files[0]["details"]["native_candidate_metadata"]["row_candidate_count"], 1)
             edb_manifest = edb_files[0]["details"]["windows_edb_report_citation_manifest"]
             self.assertEqual(edb_manifest["row_identity"]["artifact_scope"], "database")
+            self.assertEqual(edb_manifest["qc_prep_item_number"], 26)
+            self.assertIn("native Windows.edb ESE header and page-map triage", edb_manifest["qc_prep_contract"]["implemented"])
             self.assertFalse(edb_manifest["validation_summary"]["native_row_level_decode_available"])
             self.assertFalse(edb_manifest["validation_summary"]["native_deleted_state_decode_available"])
             self.assertIn(
@@ -3271,6 +3288,7 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
             edb_uplift = edb_files[0]["details"]["commercial_uplift_evidence"]
             self.assertEqual(edb_uplift["batch_id"], "commercial-uplift-011-015")
             self.assertEqual(edb_uplift["item_numbers"], [11])
+            self.assertEqual(edb_uplift["qc_prep_item_numbers"], [26])
             self.assertEqual(
                 edb_uplift["reportability_decision"]["decision"],
                 "do-not-report-native-row-as-decoded-fact",

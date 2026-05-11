@@ -116,6 +116,10 @@ USN_REPORT_GRADE_BLOCKERS = [
 ]
 MFT_TRUSTED_TOOLS = {"mftecmd", "tsk", "sleuthkit", "fls", "istat", "velociraptor"}
 USN_TRUSTED_TOOLS = {"mftecmd", "usnjrnl2csv", "usnparser", "velociraptor", "tsk", "sleuthkit"}
+QC_PREP_NTFS_ITEM_NUMBERS = {
+    "mft": 27,
+    "usn": 28,
+}
 FILE_NAME_NAMESPACE_NAMES = {
     0: "POSIX",
     1: "WIN32",
@@ -2757,8 +2761,9 @@ def ntfs_commercial_uplift_evidence(family: str, details: Mapping[str, object]) 
     return {
         "batch_id": "commercial-uplift-011-015",
         "item_numbers": [item_number],
+        "qc_prep_item_numbers": [QC_PREP_NTFS_ITEM_NUMBERS[family]],
         "implementation_track": "native-parser-depth",
-        "objective": "Expose native NTFS record validation, cursor/offset provenance, and commercial blockers on MFT/USN rows.",
+        "objective": "Expose native NTFS record validation, cursor/offset provenance, and commercial blockers on #12-#13 / QC-prep #27-#28 MFT/USN rows.",
         "source_refs": [
             f"source_path:{details.get('source_path', '')}",
             f"source_index:{details.get('source_index', '')}",
@@ -2823,6 +2828,7 @@ def ntfs_reportability_decision(
     return {
         "profile_version": "ntfs-reportability-decision-v1",
         "commercial_gap_id": "#12" if family == "mft" else "#13",
+        "qc_prep_item_number": QC_PREP_NTFS_ITEM_NUMBERS[family],
         "decision": decision,
         "allowed_use": allowed_use,
         "blockers": sorted(blockers),
@@ -3087,7 +3093,34 @@ def mft_full_parser_profile(artifact_scope: str, details: Mapping[str, object]) 
         "profile_version": "mft-full-parser-readiness-v1",
         "commercial_batch_id": "commercial-uplift-011-015",
         "item_number": 12,
+        "qc_prep_item_number": QC_PREP_NTFS_ITEM_NUMBERS["mft"],
+        "qc_prep_item_goal": (
+            "Complete MFT attribute-list, runlist, resident/nonresident data, "
+            "parent path reconstruction, and deleted-state validation."
+        ),
         "artifact_scope": artifact_scope,
+        "qc_prep_contract": {
+            "implemented": [
+                "native FILE record header and USA sequence fixup validation",
+                "STANDARD_INFORMATION and FILE_NAME attribute decoding",
+                "resident data hashing and nonresident runlist preview",
+                "bounded parent path cache and source locator/citation",
+                "trusted MFTECmd/analyzeMFT-style record diff helper",
+            ],
+            "usable_outputs": ["mft-file", "mft-record"],
+            "validated_by_current_tests": [
+                "native MFT fixture record decode",
+                "attribute list detection without false resolution claim",
+                "nonresident runlist preview decode",
+                "trusted MFT diff pass and mismatch blocking",
+            ],
+            "not_report_grade_until": [
+                "ATTRIBUTE_LIST extension records are resolved",
+                "nonresident runlists are fully decoded and cluster ranges validated",
+                "full-volume FRN parent path reconstruction is complete",
+                "deleted-state/path/timestamp rows pass trusted parser diffs",
+            ],
+        },
         "current_decode_level": (
             "native-file-record-attributes-partial"
             if str(details.get("source_format") or "") == "ntfs-mft"
@@ -3174,7 +3207,34 @@ def usn_journal_replay_profile(artifact_scope: str, details: Mapping[str, object
         "profile_version": "usn-journal-replay-readiness-v1",
         "commercial_batch_id": "commercial-uplift-011-015",
         "item_number": 14,
+        "qc_prep_item_number": QC_PREP_NTFS_ITEM_NUMBERS["usn"],
+        "qc_prep_item_goal": (
+            "Complete USN v2/v3/v4 replay, FRN path cache, rename/delete reconstruction, "
+            "and large-journal cursor handling."
+        ),
         "artifact_scope": artifact_scope,
+        "qc_prep_contract": {
+            "implemented": [
+                "native USN v2/v3 record scan and v4 extent preview",
+                "reason/source/file-attribute flag decoding",
+                "record cursor pagination and next-cursor metadata",
+                "bounded MFT path correlation and rename/delete transition previews",
+                "trusted UsnJrnl2Csv/MFTECmd-style row and state-replay diff helpers",
+            ],
+            "usable_outputs": ["usn-journal-file", "usn-record"],
+            "validated_by_current_tests": [
+                "native USN fixture decode with cursor metadata",
+                "v4 extent record preservation",
+                "bounded state replay preview",
+                "trusted USN diff pass and reason mismatch blocking",
+            ],
+            "not_report_grade_until": [
+                "complete journal replay is performed with a full FRN path cache",
+                "rename/delete/create lifecycle is validated against known-answer transitions",
+                "large-journal cursor behavior is stress tested",
+                "trusted timeline and state-replay diffs are attached for the case evidence",
+            ],
+        },
         "current_decode_level": (
             "native-v2-v3-record-scan"
             if str(details.get("source_format") or "") == "ntfs-usn-journal"

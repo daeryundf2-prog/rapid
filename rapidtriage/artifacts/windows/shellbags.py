@@ -35,6 +35,7 @@ SHELLBAG_BLOCKERS = [
     "trusted ShellBags parser diff is required",
 ]
 SHELLBAG_TRUSTED_TOOLS = {"shellbagsexplorer", "sbecmd", "recmd", "registryexplorer", "regripper"}
+QC_PREP_SHELLBAG_ITEM = 30
 SHELLBAG_CAPABILITIES = {
     "reg_export_shellbag_key_mapping": True,
     "native_user_hive_key_tree_candidates": True,
@@ -425,8 +426,32 @@ def shellbag_depth_manifest(details: Mapping[str, object]) -> dict[str, object]:
         "parser_version": PARSER_VERSION,
         "commercial_batch_id": "commercial-uplift-011-015",
         "item_number": 15,
+        "qc_prep_item_number": QC_PREP_SHELLBAG_ITEM,
+        "qc_prep_item_goal": "Deepen ShellBags binary shell item decoding, BagMRU/Bags relationship, transaction logs, and deleted/slack checks.",
         "gap_id": "#15",
         "artifact_type": "shellbag-native-candidate",
+        "qc_prep_contract": {
+            "implemented": [
+                "reg-export ShellBags key mapping",
+                "native NTUSER/UsrClass key-tree and string-pivot candidates",
+                "BagMRU/Bags bag/node ID candidate extraction",
+                "cell/hbin offset, allocation state, timestamp, and transaction-log status disclosure",
+                "trusted ShellBagsExplorer/SBECmd-style diff helper",
+            ],
+            "usable_outputs": ["shellbag-key", "shellbag-native-candidate"],
+            "validated_by_current_tests": [
+                "native hive ShellBags candidate fixture",
+                "BagMRU/Bags relationship candidate manifest",
+                "trusted ShellBags diff pass",
+                "cell-offset mismatch blocking",
+            ],
+            "not_report_grade_until": [
+                "binary shell item payloads are decoded and validated",
+                "BagMRU/Bags relationships are diffed against a dedicated parser",
+                "LOG1/LOG2 transaction logs are replayed or absence documented",
+                "deleted/slack ShellBag candidates pass known-answer validation",
+            ],
+        },
         "source": source,
         "row_identity": row_identity,
         "row_identity_hash": shellbag_stable_sha256(row_identity),
@@ -772,8 +797,9 @@ def shellbag_commercial_uplift_evidence(details: Mapping[str, object]) -> dict[s
     return {
         "batch_id": "commercial-uplift-011-015",
         "item_numbers": [15],
+        "qc_prep_item_numbers": [QC_PREP_SHELLBAG_ITEM],
         "implementation_track": "native-parser-depth",
-        "objective": "Expose ShellBags key-tree evidence, offset provenance, shell-item decoding blockers, and transaction-log gaps.",
+        "objective": "Expose ShellBags key-tree evidence, offset provenance, shell-item decoding blockers, and transaction-log gaps for #15 / QC-prep #30.",
         "source_refs": [
             f"source_path:{details.get('source_path', '')}",
             f"source_sha256:{hashes.get('sha256', '')}",
@@ -814,6 +840,7 @@ def shellbag_reportability_decision(
     return {
         "profile_version": "shellbag-reportability-decision-v1",
         "commercial_gap_id": "#15",
+        "qc_prep_item_number": QC_PREP_SHELLBAG_ITEM,
         "decision": "do-not-report-folder-access-as-final",
         "allowed_use": "folder-view-history-triage-pivot",
         "blockers": sorted(blockers),

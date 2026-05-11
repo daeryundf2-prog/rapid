@@ -39,6 +39,7 @@ JUMPLIST_COMMERCIAL_BLOCKERS = [
 ]
 JUMPLIST_TRUSTED_TOOLS = {"jlecmd", "lnkecmd", "lecmd", "jumplistexplorer", "velociraptor"}
 LNK_TRUSTED_TOOLS = {"lecmd", "lnkecmd", "windows shell", "shell properties", "velociraptor"}
+QC_PREP_JUMPLIST_ITEM = 29
 JUMPLIST_CAPABILITIES = {
     "lnk_header_decode": True,
     "lnk_linkinfo_decode": True,
@@ -946,8 +947,32 @@ def jumplist_destlist_depth_manifest(details: Mapping[str, object]) -> dict[str,
         "parser_version": PARSER_VERSION,
         "commercial_batch_id": "commercial-uplift-011-015",
         "item_number": 14,
+        "qc_prep_item_number": QC_PREP_JUMPLIST_ITEM,
+        "qc_prep_item_goal": "Deepen JumpList DestList, CFB/OLE stream, AppID mapping, deleted entry recovery, and embedded LNK linkage.",
         "gap_id": "#14",
         "artifact_type": str(details.get("artifact_type") or ""),
+        "qc_prep_contract": {
+            "implemented": [
+                "CFB/OLE stream inventory with bounded stream limits",
+                "DestList header and entry candidate parsing",
+                "embedded LNK destination extraction and linkage candidates",
+                "AppID hash provenance and deleted/unlinked entry warning",
+                "trusted JLECmd/LECmd-style DestList diff helper",
+            ],
+            "usable_outputs": ["jumplist-automatic", "jumplist-custom"],
+            "validated_by_current_tests": [
+                "DestList linked destination fixture",
+                "unlinked/deleted entry review-only candidate fixture",
+                "trusted JumpList diff pass",
+                "DestList offset mismatch blocking",
+            ],
+            "not_report_grade_until": [
+                "OS-version-specific DestList field semantics are validated",
+                "AppID hash mapping database is attached",
+                "deleted/unlinked entry recovery is known-answer validated",
+                "embedded LNK and DestList entries are diffed against trusted parser output",
+            ],
+        },
         "source": source,
         "container_identity": container_identity,
         "container_identity_hash": recent_stable_sha256(container_identity),
@@ -1617,8 +1642,9 @@ def jumplist_commercial_uplift_evidence(details: Mapping[str, object]) -> dict[s
     return {
         "batch_id": "commercial-uplift-011-015",
         "item_numbers": [14],
+        "qc_prep_item_numbers": [QC_PREP_JUMPLIST_ITEM],
         "implementation_track": "native-parser-depth",
-        "objective": "Expose JumpList DestList validation, OLE/LNK provenance, deleted-entry blockers, and AppID gaps.",
+        "objective": "Expose JumpList DestList validation, OLE/LNK provenance, deleted-entry blockers, and AppID gaps for #14 / QC-prep #29.",
         "source_refs": [
             f"source_path:{details.get('source_path', '')}",
             f"source_sha256:{hashes.get('sha256', '')}",
@@ -1658,6 +1684,7 @@ def jumplist_reportability_decision(
     return {
         "profile_version": "jumplist-reportability-decision-v1",
         "commercial_gap_id": "#14",
+        "qc_prep_item_number": QC_PREP_JUMPLIST_ITEM,
         "decision": "do-not-report-destlist-semantics-as-final",
         "allowed_use": "recent-destination-triage-pivot",
         "blockers": sorted(blockers),
