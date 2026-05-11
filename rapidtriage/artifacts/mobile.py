@@ -71,6 +71,26 @@ MOBILE_TRUSTED_DIFF_BLOCKERS = {
     27: "ios-backup-manifest-trusted-diff-required",
     28: "ios-keychain-inventory-trusted-diff-required",
 }
+IOS_QC_PREP_ITEM_NUMBER = 46
+IOS_QC_PREP_GOAL = (
+    "Deepen iOS backup parser for Manifest.db, domains, app DB mapping, SMS, media, and encrypted-backup lawful key workflow."
+)
+IOS_QC_PREP_CONTRACT = {
+    "item_number": IOS_QC_PREP_ITEM_NUMBER,
+    "goal": IOS_QC_PREP_GOAL,
+    "implemented_outputs": [
+        "Manifest.db domain/fileID/logical path inventory with source viewer locators",
+        "Info.plist and Status.plist backup root/scope profile",
+        "SMS/media/app database candidate detection and keychain redacted inventory boundaries",
+        "encrypted-backup lawful key workflow flags without exposing protected values",
+    ],
+    "commercial_blockers": [
+        "encrypted backup unlock workflow evidence",
+        "protected data class validation",
+        "trusted iOS backup known-answer corpus",
+        "application DB payload parser validation",
+    ],
+}
 MOBILE_CORRELATION_TRUSTED_DIFF_BLOCKERS = {
     43: "mobile-correlation-vendor-timeline-diff-required",
     44: "mobile-actor-vendor-report-diff-required",
@@ -5813,6 +5833,8 @@ def mobile_functional_expansion_profiles(
             {
                 "batch_id": FUNCTIONAL_EXPANSION_BATCH_ID,
                 "item_number": 53,
+                "qc_prep_item_numbers": [IOS_QC_PREP_ITEM_NUMBER],
+                "qc_prep_contracts": [dict(IOS_QC_PREP_CONTRACT)],
                 "implementation_track": "ios-backup-keychain-parser",
                 "status": "usable-internal-inventory-not-decrypted-commercial-grade",
                 "implemented_controls": {
@@ -5997,6 +6019,8 @@ def mobile_commercial_uplift_evidence(
     return {
         "batch_id": "commercial-uplift-026-030",
         "item_numbers": item_numbers,
+        "qc_prep_item_numbers": mobile_qc_prep_item_numbers(artifact_type, item_numbers),
+        "qc_prep_contracts": mobile_qc_prep_contracts(artifact_type, item_numbers),
         "implementation_track": "mobile-and-app-import-validation",
         "objective": " ".join(objectives[number] for number in item_numbers if number in objectives),
         "reportability_decision": mobile_reportability_decision(
@@ -6115,6 +6139,8 @@ def mobile_reportability_decision(
     return {
         "profile_version": "mobile-reportability-decision-v1",
         "commercial_gap_ids": [f"#{number}" for number in item_numbers],
+        "qc_prep_item_numbers": mobile_qc_prep_item_numbers(artifact_type, item_numbers),
+        "qc_prep_contracts": mobile_qc_prep_contracts(artifact_type, item_numbers),
         "decision": decision,
         "allowed_use": allowed.get(primary_item, "mobile-artifact-triage-pivot"),
         "blockers": sorted(blockers),
@@ -6131,6 +6157,16 @@ def mobile_reportability_decision(
             "preserve lawful authority and reviewer audit evidence for any protected data reveal",
         ],
     }
+
+
+def mobile_qc_prep_item_numbers(artifact_type: str, item_numbers: Sequence[int]) -> list[int]:
+    if artifact_type.startswith("ios-") or any(number in (27, 28) for number in item_numbers):
+        return [IOS_QC_PREP_ITEM_NUMBER]
+    return []
+
+
+def mobile_qc_prep_contracts(artifact_type: str, item_numbers: Sequence[int]) -> list[dict[str, object]]:
+    return [dict(IOS_QC_PREP_CONTRACT)] if mobile_qc_prep_item_numbers(artifact_type, item_numbers) else []
 
 
 def mobile_core_accuracy_gates(
@@ -7185,6 +7221,9 @@ def build_ios_backup_parser_manifest(
         "manifest_version": "ios-backup-parser-manifest-v1",
         "item_number": 53,
         "batch_id": FUNCTIONAL_EXPANSION_BATCH_ID,
+        "qc_prep_item_number": IOS_QC_PREP_ITEM_NUMBER,
+        "qc_prep_item_goal": IOS_QC_PREP_GOAL,
+        "qc_prep_contract": dict(IOS_QC_PREP_CONTRACT),
         "artifact_type": artifact_type,
         "source_tool": source_tool,
         "source_format": source_format,

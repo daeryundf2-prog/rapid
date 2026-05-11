@@ -9,6 +9,7 @@ from typing import Any
 from rapidtriage.core.analysis import build_analysis_trusted_diff, build_search_analysis
 from rapidtriage.core.keyword_packs import resolve_keyword_packs
 from rapidtriage.core.search import build_advanced_search_trusted_diff, run_unified_search, search_core_accuracy_gates
+from rapidtriage.core.search_backend import build_search_backend_contract
 
 
 def write_json(path: Path, payload: dict[str, Any]) -> None:
@@ -664,6 +665,17 @@ class RapidTriageSearchAnalysisTests(unittest.TestCase):
             self.assertEqual(query_manifest["match_count"], 1)
             self.assertEqual(query_manifest["hit_row_hash_count"], 1)
             self.assertEqual(query_manifest["source_locator_count"], 1)
+            backend_contract = fuzzy["search_backend_contract"]
+            self.assertEqual(backend_contract["profile_version"], "search-backend-contract-v1")
+            self.assertEqual(backend_contract["qc_prep_item_numbers"], [48, 49, 50])
+            self.assertEqual(backend_contract["selected_backend_id"], "sqlite-fts-local")
+            self.assertTrue(backend_contract["ui_cli_contract"]["query_plan_metadata"])
+            self.assertEqual(backend_contract["sqlite_fts_default_plan"]["qc_prep_item_number"], 49)
+            self.assertEqual(
+                backend_contract["local_inverted_candidate_evaluation"]["qc_prep_item_number"],
+                50,
+            )
+            self.assertEqual(fuzzy["search_backend_contract_hash"], backend_contract["contract_hash"])
             self.assertEqual(query_manifest["hits"][0]["search_result_id"], "search-hit-000001")
             self.assertTrue(query_manifest["hits"][0]["hit_row_hash"])
             self.assertEqual(
@@ -746,6 +758,21 @@ class RapidTriageSearchAnalysisTests(unittest.TestCase):
 
             self.assertEqual(trusted_diff["status"], "pass")
             self.assertIn("trusted advanced-search query-hit diff pass", gates[0]["satisfied_checks"])
+
+    def test_search_backend_contract_exposes_default_and_candidate_engines(self) -> None:
+        contract = build_search_backend_contract(
+            keywords=["password"],
+            limit=9000,
+            corpus_estimate={"document_rows": 100_000, "artifact_rows": 250_000, "target_rows": 1_000_000},
+        )
+
+        self.assertEqual(contract["selected_backend_id"], "sqlite-fts-local")
+        self.assertEqual(contract["qc_prep_item_numbers"], [48, 49, 50])
+        self.assertEqual(contract["sqlite_fts_default_plan"]["effective_interactive_limit"], 5000)
+        self.assertTrue(contract["sqlite_fts_default_plan"]["cursor_pagination_required"])
+        self.assertEqual(contract["local_inverted_candidate_evaluation"]["target_rows"], 1_000_000)
+        self.assertFalse(contract["local_inverted_candidate_evaluation"]["prototype_dependency_added"])
+        self.assertIn("sqlite-fts-parity-diff-required", contract["commercial_blockers"])
 
 
 if __name__ == "__main__":

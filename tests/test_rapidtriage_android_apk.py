@@ -95,6 +95,8 @@ class RapidTriageAndroidApkTests(unittest.TestCase):
             android_manifest = details["android_parser_manifest"]
             self.assertEqual(android_manifest["manifest_version"], "android-backup-app-data-parser-manifest-v1")
             self.assertEqual(android_manifest["item_number"], 54)
+            self.assertEqual(android_manifest["qc_prep_item_number"], 47)
+            self.assertIn("Android artifact parser", android_manifest["qc_prep_item_goal"])
             self.assertEqual(android_manifest["source_viewer_locator"]["viewer"], "android-apk-inventory")
             self.assertEqual(android_manifest["apk_inventory"]["dex_count"], 2)
             self.assertEqual(android_manifest["apk_inventory"]["dangerous_permission_count"], 2)
@@ -129,6 +131,8 @@ class RapidTriageAndroidApkTests(unittest.TestCase):
             apk_uplift = details["commercial_uplift_evidence"]
             self.assertEqual(apk_uplift["batch_id"], "commercial-uplift-026-030")
             self.assertEqual(apk_uplift["item_numbers"], [30])
+            self.assertEqual(apk_uplift["qc_prep_item_numbers"], [47])
+            self.assertEqual(apk_uplift["qc_prep_contracts"][0]["item_number"], 47)
             self.assertIn("source-readable", apk_uplift["passed_validation_matrix_ids"])
             self.assertIn("signature-and-binary-manifest", apk_uplift["failed_validation_matrix_ids"])
             self.assertEqual(apk_uplift["large_data_controls"]["apk_string_scan_limit"], 1024 * 1024)
@@ -144,6 +148,7 @@ class RapidTriageAndroidApkTests(unittest.TestCase):
             self.assertTrue(apk_uplift["large_data_controls"]["android_apk_deep_analysis_source_locator_present"])
             self.assertTrue(apk_uplift["large_data_controls"]["android_source_locator_present"])
             apk_profiles = {profile["item_number"]: profile for profile in apk_uplift["functional_priority_profiles"]}
+            self.assertEqual(apk_profiles[54]["qc_prep_item_numbers"], [47])
             self.assertEqual(
                 apk_profiles[54]["implemented_controls"]["android_apk_deep_analysis_manifest_hash"],
                 apk_deep_manifest["manifest_sha256"],
@@ -208,6 +213,7 @@ class RapidTriageAndroidApkTests(unittest.TestCase):
             self.assertIn("Android app-data deep parser source locator", app_data_gates["#29"]["satisfied_checks"])
             self.assertIn("app-data schema and secret-handling warnings", app_data_gates["#30"]["satisfied_checks"])
             app_data_manifest = app_data["details"]["android_parser_manifest"]
+            self.assertEqual(app_data_manifest["qc_prep_item_number"], 47)
             self.assertEqual(app_data_manifest["source_viewer_locator"]["viewer"], "android-app-data-inventory")
             self.assertEqual(app_data_manifest["app_data_inventory"]["sqlite_table_count"], 1)
             self.assertTrue(app_data_manifest["app_data_inventory"]["values_redacted"])
@@ -252,12 +258,14 @@ class RapidTriageAndroidApkTests(unittest.TestCase):
             self.assertIn("mobile timeline", app_data_review["correlation_targets"])
             app_data_uplift = app_data["details"]["commercial_uplift_evidence"]
             self.assertEqual(app_data_uplift["item_numbers"], [29, 30])
+            self.assertEqual(app_data_uplift["qc_prep_item_numbers"], [47])
             app_data_profiles = {
                 profile["item_number"]: profile for profile in app_data_uplift["functional_priority_profiles"]
             }
             self.assertIn(52, app_data_profiles)
             self.assertIn(54, app_data_profiles)
             self.assertEqual(app_data_profiles[54]["batch_id"], "commercial-uplift-051-055")
+            self.assertEqual(app_data_profiles[54]["qc_prep_item_numbers"], [47])
             self.assertFalse(app_data_profiles[54]["implemented_controls"]["secret_values_extracted"])
             self.assertEqual(
                 app_data_profiles[54]["implemented_controls"]["android_parser_manifest_hash"],
@@ -285,6 +293,7 @@ class RapidTriageAndroidApkTests(unittest.TestCase):
                 app_data_uplift["reportability_decision"]["allowed_use"],
                 "android-app-data-inventory-triage-pivot",
             )
+            self.assertEqual(app_data_uplift["reportability_decision"]["qc_prep_item_numbers"], [47])
             self.assertEqual(
                 app_data_uplift["large_data_controls"]["android_app_data_deep_parser_manifest_hash"],
                 app_data_deep_manifest["manifest_sha256"],

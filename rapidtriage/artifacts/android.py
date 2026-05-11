@@ -96,6 +96,25 @@ ANDROID_TRUSTED_DIFF_BLOCKERS = {
     29: "android-artifact-export-trusted-diff-required",
     30: "apk-tool-analysis-trusted-diff-required",
 }
+ANDROID_QC_PREP_ITEM_NUMBER = 47
+ANDROID_QC_PREP_GOAL = (
+    "Deepen Android artifact parser for SMS, call log, contacts, browser, media, app DBs, packages, signatures, and permissions."
+)
+ANDROID_QC_PREP_CONTRACT = {
+    "item_number": ANDROID_QC_PREP_ITEM_NUMBER,
+    "goal": ANDROID_QC_PREP_GOAL,
+    "implemented_outputs": [
+        "APK ZIP inventory, manifest text metadata, permissions, components, DEX/native pivots, and signing-entry inventory",
+        "Android app-data path/package attribution with SQLite table and artifact-family matrix",
+        "SMS/browser/media/app DB candidate detection with secret-value redaction and source viewer locators",
+    ],
+    "commercial_blockers": [
+        "binary AndroidManifest decoder and signature-chain validation",
+        "native Android backup payload decoding",
+        "app-specific schema fixtures and deleted-record validation",
+        "trusted Android export/APK tool diff and known-answer corpus",
+    ],
+}
 
 
 class AndroidApkProvider:
@@ -576,6 +595,9 @@ def build_android_parser_manifest(details: dict[str, object]) -> dict[str, objec
         "manifest_version": "android-backup-app-data-parser-manifest-v1",
         "item_number": 54,
         "batch_id": FUNCTIONAL_EXPANSION_BATCH_ID,
+        "qc_prep_item_number": ANDROID_QC_PREP_ITEM_NUMBER,
+        "qc_prep_item_goal": ANDROID_QC_PREP_GOAL,
+        "qc_prep_contract": dict(ANDROID_QC_PREP_CONTRACT),
         "artifact_type": artifact_type,
         "source_path": str(details.get("source_path") or ""),
         "source_format": str(details.get("source_format") or ""),
@@ -1393,6 +1415,8 @@ def android_commercial_uplift_evidence(details: dict[str, object], *, gap_ids: l
     return {
         "batch_id": "commercial-uplift-026-030",
         "item_numbers": sorted(gap_ids),
+        "qc_prep_item_numbers": [ANDROID_QC_PREP_ITEM_NUMBER],
+        "qc_prep_contracts": [dict(ANDROID_QC_PREP_CONTRACT)],
         "implementation_track": "android-app-and-backup-validation",
         "objective": " ".join(objectives[number] for number in sorted(gap_ids) if number in objectives),
         "reportability_decision": android_reportability_decision(
@@ -1497,6 +1521,8 @@ def android_functional_expansion_profiles(
             {
                 "batch_id": FUNCTIONAL_EXPANSION_BATCH_ID,
                 "item_number": 54,
+                "qc_prep_item_numbers": [ANDROID_QC_PREP_ITEM_NUMBER],
+                "qc_prep_contracts": [dict(ANDROID_QC_PREP_CONTRACT)],
                 "implementation_track": "android-backup-app-data-parser",
                 "status": "usable-internal-inventory-not-app-specific-commercial-grade",
                 "package": str(details.get("package") or ""),
@@ -1575,6 +1601,8 @@ def android_reportability_decision(
     return {
         "profile_version": "android-reportability-decision-v1",
         "commercial_gap_ids": [f"#{number}" for number in gap_ids],
+        "qc_prep_item_numbers": [ANDROID_QC_PREP_ITEM_NUMBER],
+        "qc_prep_contracts": [dict(ANDROID_QC_PREP_CONTRACT)],
         "decision": (
             "do-not-report-android-app-data-as-decoded-content"
             if primary == 29

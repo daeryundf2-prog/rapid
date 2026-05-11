@@ -853,6 +853,8 @@ class RapidTriageMobileExportTests(unittest.TestCase):
             ios_manifest = ios_file["details"]["ios_backup_parser_manifest"]
             self.assertEqual(ios_manifest["manifest_version"], "ios-backup-parser-manifest-v1")
             self.assertEqual(ios_manifest["item_number"], 53)
+            self.assertEqual(ios_manifest["qc_prep_item_number"], 46)
+            self.assertIn("Manifest.db", ios_manifest["qc_prep_item_goal"])
             self.assertEqual(ios_manifest["source_viewer_locator"]["viewer"], "ios-manifest-file-row")
             self.assertEqual(ios_manifest["manifest_row"]["file_id"], "abcdef123456")
             self.assertEqual(ios_manifest["manifest_row"]["category"], "message-or-chat-store")
@@ -860,10 +862,13 @@ class RapidTriageMobileExportTests(unittest.TestCase):
             self.assertEqual(ios_file["details"]["ios_backup_parser_manifest_hash"], ios_manifest["manifest_sha256"])
             ios_uplift = ios_file["details"]["commercial_uplift_evidence"]
             self.assertEqual(ios_uplift["item_numbers"], [27])
+            self.assertEqual(ios_uplift["qc_prep_item_numbers"], [46])
+            self.assertEqual(ios_uplift["qc_prep_contracts"][0]["item_number"], 46)
             ios_profiles = {profile["item_number"]: profile for profile in ios_uplift["functional_priority_profiles"]}
             self.assertIn(52, ios_profiles)
             self.assertIn(53, ios_profiles)
             self.assertEqual(ios_profiles[53]["batch_id"], "commercial-uplift-051-055")
+            self.assertEqual(ios_profiles[53]["qc_prep_item_numbers"], [46])
             self.assertTrue(ios_profiles[53]["implemented_controls"]["encrypted_backup_lawful_key_workflow_required"])
             self.assertEqual(
                 ios_profiles[53]["implemented_controls"]["ios_backup_parser_manifest_hash"],
@@ -886,6 +891,7 @@ class RapidTriageMobileExportTests(unittest.TestCase):
                 ios_uplift["reportability_decision"]["allowed_use"],
                 "ios-backup-inventory-triage-pivot",
             )
+            self.assertEqual(ios_uplift["reportability_decision"]["qc_prep_item_numbers"], [46])
 
             ios_metadata = next(
                 artifact

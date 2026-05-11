@@ -11,6 +11,7 @@ from .analysis import build_search_analysis
 from .docs import build_preview, extract_text
 from .files import CATEGORY_RULES
 from .forensic_accuracy import build_accuracy_gate
+from .search_backend import build_search_backend_contract
 
 IMAGE_EXTS = set(CATEGORY_RULES["images"]["extensions"])
 SEARCH_FEATURE_GAP_ID = "#61"
@@ -124,6 +125,15 @@ def run_unified_search(
         limit=limit,
         query_hit_manifest=query_hit_manifest,
     )
+    search_backend_contract = build_search_backend_contract(
+        keywords=normalized,
+        limit=limit,
+        corpus_estimate={
+            "document_rows": len(source_counts),
+            "artifact_rows": len(matches),
+            "target_rows": 1_000_000,
+        },
+    )
     payload: Dict[str, object] = {
         "command": "search",
         "generated_at": dt.datetime.now().isoformat(),
@@ -153,6 +163,8 @@ def run_unified_search(
         "advanced_search_profile": advanced_profile,
         "advanced_search_query_hit_manifest": query_hit_manifest,
         "advanced_search_query_hit_manifest_hash": query_hit_manifest["manifest_hash"],
+        "search_backend_contract": search_backend_contract,
+        "search_backend_contract_hash": search_backend_contract["contract_hash"],
         "search_native_capabilities": dict(SEARCH_NATIVE_CAPABILITIES),
         "workbench_search_profile": workbench_search_profile(
             matches=matches,
