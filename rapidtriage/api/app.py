@@ -4119,7 +4119,10 @@ def build_sqlite_preview(source_path: Path, *, run_id: str | None = None) -> Dic
             connection.row_factory = sqlite3.Row
             database_metadata = sqlite_database_metadata(connection, source_path)
             tables = list_sqlite_tables(connection)
-            previews = [preview_sqlite_table(connection, table) for table in tables[:SQLITE_PREVIEW_TABLE_LIMIT]]
+            previews = [
+                preview_sqlite_table(connection, table, source_path=source_path)
+                for table in tables[:SQLITE_PREVIEW_TABLE_LIMIT]
+            ]
             table_page_profile = sqlite_table_page_profile(run_id=run_id, source_path=source_path, tables=previews)
             sqlite_manifest = build_sqlite_preview_manifest(
                 source_path=source_path,
@@ -6979,7 +6982,7 @@ def sqlite_database_metadata(connection: sqlite3.Connection, source_path: Path) 
     return metadata
 
 
-def preview_sqlite_table(connection: sqlite3.Connection, table: str) -> dict[str, object]:
+def preview_sqlite_table(connection: sqlite3.Connection, table: str, *, source_path: Path | None = None) -> dict[str, object]:
     quoted = quote_sqlite_identifier(table)
     column_rows = connection.execute(f"PRAGMA table_info({quoted})").fetchall()
     column_details = [
@@ -7014,14 +7017,56 @@ def preview_sqlite_table(connection: sqlite3.Connection, table: str) -> dict[str
     except sqlite3.DatabaseError:
         count = None
     selected_columns = columns[:SQLITE_PREVIEW_COLUMN_LIMIT]
+    primary_key_columns = [
+        str(column["name"])
+        for column in sorted(column_details, key=lambda item: int(item["primary_key_position"]))
+        if int(column["primary_key_position"]) > 0
+    ]
     rows: list[dict[str, object]] = []
     if selected_columns:
         select_clause = ", ".join(quote_sqlite_identifier(column) for column in selected_columns)
-        for index, row in enumerate(connection.execute(f"SELECT {select_clause} FROM {quoted} LIMIT ?", (SQLITE_PREVIEW_ROW_LIMIT,)), start=1):
+        rowid_available = True
+        try:
+            row_cursor = connection.execute(
+                f"SELECT rowid AS __rapid_source_rowid, {select_clause} FROM {quoted} LIMIT ?",
+                (SQLITE_PREVIEW_ROW_LIMIT,),
+            )
+        except sqlite3.DatabaseError:
+            rowid_available = False
+            row_cursor = connection.execute(f"SELECT {select_clause} FROM {quoted} LIMIT ?", (SQLITE_PREVIEW_ROW_LIMIT,))
+        query_hash = sqlite_table_query_hash(
+            table=table,
+            columns=selected_columns,
+            offset=0,
+            limit=SQLITE_PREVIEW_ROW_LIMIT,
+            where_column=None,
+            where_contains=None,
+            order_by=None,
+            descending=False,
+        )
+        for index, row in enumerate(row_cursor, start=1):
+            values = {column: sqlite_preview_value(row[column]) for column in selected_columns}
+            locator = sqlite_row_source_viewer_locator(
+                source_path=source_path,
+                table=table,
+                row_number=index,
+                rowid=row["__rapid_source_rowid"] if rowid_available else "",
+                primary_key_values=sqlite_primary_key_values(values, primary_key_columns),
+                column="",
+                offset=0,
+                limit=SQLITE_PREVIEW_ROW_LIMIT,
+                query_hash=query_hash,
+                source_context="preview",
+            )
             rows.append(
                 {
                     "row_number": index,
-                    "values": {column: sqlite_preview_value(row[column]) for column in selected_columns},
+                    "rowid": row["__rapid_source_rowid"] if rowid_available else "",
+                    "primary_key_values": sqlite_primary_key_values(values, primary_key_columns),
+                    "values": values,
+                    "source_viewer_locator": locator,
+                    "sqlite_row_locator": locator,
+                    "review_note_citation": sqlite_row_review_note_citation(locator),
                 }
             )
     return {
@@ -7034,11 +7079,7 @@ def preview_sqlite_table(connection: sqlite3.Connection, table: str) -> dict[str
         "schema_sql": str(schema_row["sql"] or "") if schema_row is not None else "",
         "object_type": str(schema_row["type"] or "table") if schema_row is not None else "table",
         "indexes": indexes,
-        "primary_key_columns": [
-            str(column["name"])
-            for column in sorted(column_details, key=lambda item: int(item["primary_key_position"]))
-            if int(column["primary_key_position"]) > 0
-        ],
+        "primary_key_columns": primary_key_columns,
         "truncated_columns": len(columns) > SQLITE_PREVIEW_COLUMN_LIMIT,
         "truncated_rows": bool(count is not None and count > SQLITE_PREVIEW_ROW_LIMIT),
         "truncated_indexes": len(index_rows) > 8,
@@ -7081,6 +7122,126 @@ def sqlite_table_page_profile(*, run_id: str | None, source_path: Path, tables: 
     }
 
 
+def sqlite_primary_key_values(values: Mapping[str, object], primary_key_columns: Sequence[str]) -> dict[str, object]:
+    return {column: values.get(column, "") for column in primary_key_columns if column in values}
+
+
+def sqlite_table_query_core(
+    *,
+    table: str,
+    columns: Sequence[str],
+    offset: int,
+    limit: int,
+    where_column: str | None,
+    where_contains: str | None,
+    order_by: str | None,
+    descending: bool,
+) -> dict[str, object]:
+    return {
+        "table": table,
+        "columns": list(columns),
+        "offset": offset,
+        "limit": limit,
+        "where_column": where_column or "",
+        "where_contains_sha256": hashlib.sha256(str(where_contains or "").encode("utf-8", errors="replace")).hexdigest()
+        if where_contains
+        else "",
+        "order_by": order_by or "",
+        "descending": descending,
+    }
+
+
+def sqlite_table_query_hash(
+    *,
+    table: str,
+    columns: Sequence[str],
+    offset: int,
+    limit: int,
+    where_column: str | None,
+    where_contains: str | None,
+    order_by: str | None,
+    descending: bool,
+) -> str:
+    return stable_payload_sha256(
+        sqlite_table_query_core(
+            table=table,
+            columns=columns,
+            offset=offset,
+            limit=limit,
+            where_column=where_column,
+            where_contains=where_contains,
+            order_by=order_by,
+            descending=descending,
+        )
+    )
+
+
+def sqlite_row_source_viewer_locator(
+    *,
+    source_path: Path | None,
+    table: str,
+    row_number: int,
+    rowid: object,
+    primary_key_values: Mapping[str, object],
+    column: str,
+    offset: int,
+    limit: int,
+    query_hash: str,
+    source_context: str,
+) -> dict[str, object]:
+    path = str(source_path) if source_path is not None else ""
+    payload: dict[str, object] = {
+        "profile_version": "sqlite-row-source-viewer-locator-v1",
+        "qc_prep_item": 11,
+        "viewer": "source-sqlite-table",
+        "source_path": path,
+        "source_name": Path(path).name if path else "",
+        "table": table,
+        "row_number": row_number,
+        "rowid": rowid if rowid is not None else "",
+        "primary_key_values": dict(primary_key_values),
+        "column": column,
+        "offset": offset,
+        "limit": limit,
+        "query_hash": query_hash,
+        "source_context": source_context,
+        "endpoint": "/api/runs/{run_id}/source-sqlite-table",
+        "open_action": "open-sqlite-row-in-source-viewer",
+        "review_note_ready": True,
+        "report_ready": False,
+        "required_before_report": [
+            "verify source database hash",
+            "confirm row in source SQLite viewer",
+            "attach reviewer status and note",
+            "validate schema/query output with trusted sqlite3 or known-answer manifest",
+        ],
+        "commercial_grade_blockers": [
+            "trusted-sqlite-query-schema-diff-required-before-court-use",
+            "deleted-row-and-wal-recovery-not-implemented-in-viewer",
+        ],
+    }
+    payload["locator_sha256"] = stable_payload_sha256(payload)
+    return payload
+
+
+def sqlite_row_review_note_citation(locator: Mapping[str, object]) -> dict[str, object]:
+    text = (
+        f"SQLite row citation: {locator.get('source_name') or 'source'} "
+        f"table={locator.get('table')} row={locator.get('row_number')} "
+        f"rowid={locator.get('rowid')} column={locator.get('column') or '*'} "
+        f"query_hash={locator.get('query_hash')} locator={locator.get('locator_sha256')}"
+    )
+    return {
+        "profile_version": "sqlite-row-review-note-citation-v1",
+        "qc_prep_item": 11,
+        "text": text,
+        "source_viewer_locator": dict(locator),
+        "tags": ["sqlite-row", "source-viewer-locator"],
+        "ready_for_review_note": True,
+        "ready_for_report": False,
+    }
+
+
 def build_sqlite_preview_manifest(
     *,
     source_path: Path,
@@ -7097,9 +7258,24 @@ def build_sqlite_preview_manifest(
                 continue
             row_core = {
                 "row_number": row.get("row_number"),
+                "rowid": row.get("rowid", ""),
+                "primary_key_values": row.get("primary_key_values")
+                if isinstance(row.get("primary_key_values"), Mapping)
+                else {},
                 "values": row.get("values") if isinstance(row.get("values"), Mapping) else {},
+                "source_viewer_locator": row.get("source_viewer_locator")
+                if isinstance(row.get("source_viewer_locator"), Mapping)
+                else {},
             }
-            row_entries.append({**row_core, "row_hash": stable_payload_sha256(row_core)})
+            row_entries.append(
+                {
+                    **row_core,
+                    "row_hash": stable_payload_sha256(row_core),
+                    "review_note_citation": row.get("review_note_citation")
+                    if isinstance(row.get("review_note_citation"), Mapping)
+                    else {},
+                }
+            )
         row_hash_count += sum(1 for row in row_entries if row.get("row_hash"))
         table_core = {
             "name": str(table.get("name") or ""),
@@ -7205,19 +7381,60 @@ def build_sqlite_table_page(
             count_row = connection.execute(f"SELECT COUNT(*) AS count FROM {quoted_table}{where_sql}", params).fetchone()
             total = int(count_row["count"] or 0)
             page_params = [*params, limit, offset]
-            rows = [
-                {
-                    "row_number": offset + index,
-                    "values": {column: sqlite_preview_value(row[column]) for column in selected_columns},
-                }
-                for index, row in enumerate(
-                    connection.execute(
-                        f"SELECT {select_clause} FROM {quoted_table}{where_sql}{order_sql} LIMIT ? OFFSET ?",
-                        page_params,
-                    ),
-                    start=1,
-                )
+            primary_key_columns = [
+                str(row["name"])
+                for row in sorted(column_rows, key=lambda item: int(item["pk"] or 0))
+                if int(row["pk"] or 0) > 0
             ]
+            query_hash = sqlite_table_query_hash(
+                table=table,
+                columns=selected_columns,
+                offset=offset,
+                limit=limit,
+                where_column=where_column,
+                where_contains=where_contains,
+                order_by=order_by,
+                descending=descending,
+            )
+            rowid_available = True
+            try:
+                row_cursor = connection.execute(
+                    f"SELECT rowid AS __rapid_source_rowid, {select_clause} FROM {quoted_table}{where_sql}{order_sql} LIMIT ? OFFSET ?",
+                    page_params,
+                )
+            except sqlite3.DatabaseError:
+                rowid_available = False
+                row_cursor = connection.execute(
+                    f"SELECT {select_clause} FROM {quoted_table}{where_sql}{order_sql} LIMIT ? OFFSET ?",
+                    page_params,
+                )
+            rows = []
+            for index, row in enumerate(row_cursor, start=1):
+                row_number = offset + index
+                values = {column: sqlite_preview_value(row[column]) for column in selected_columns}
+                locator = sqlite_row_source_viewer_locator(
+                    source_path=source_path,
+                    table=table,
+                    row_number=row_number,
+                    rowid=row["__rapid_source_rowid"] if rowid_available else "",
+                    primary_key_values=sqlite_primary_key_values(values, primary_key_columns),
+                    column="",
+                    offset=offset,
+                    limit=limit,
+                    query_hash=query_hash,
+                    source_context="page",
+                )
+                rows.append(
+                    {
+                        "row_number": row_number,
+                        "rowid": row["__rapid_source_rowid"] if rowid_available else "",
+                        "primary_key_values": sqlite_primary_key_values(values, primary_key_columns),
+                        "values": values,
+                        "source_viewer_locator": locator,
+                        "sqlite_row_locator": locator,
+                        "review_note_citation": sqlite_row_review_note_citation(locator),
+                    }
+                )
     except sqlite3.DatabaseError as exc:
         raise HTTPException(status_code=400, detail=f"SQLite table page failed: {exc}") from exc
     next_offset = offset + len(rows)
@@ -7244,6 +7461,7 @@ def build_sqlite_table_page(
         "table": table,
         "columns": selected_columns,
         "column_count": len(all_columns),
+        "primary_key_columns": primary_key_columns,
         "rows": rows,
         "pagination": {
             "offset": offset,
@@ -7270,7 +7488,7 @@ def build_sqlite_table_page(
         "copy_safe_citation": {
             "text": (
                 f"Source={source_path.name}; sqlite_table={table}; offset={offset}; limit={limit}; "
-                f"returned={len(rows)}; where={where_column or ''}:{where_contains or ''}"
+                f"returned={len(rows)}; where={where_column or ''}:{where_contains or ''}; query_hash={page_manifest['query_hash']}"
             ),
             "redacts_full_path": True,
         },
@@ -7319,19 +7537,34 @@ def build_sqlite_table_page_manifest(
     for row in rows:
         row_core = {
             "row_number": row.get("row_number"),
+            "rowid": row.get("rowid", ""),
+            "primary_key_values": row.get("primary_key_values")
+            if isinstance(row.get("primary_key_values"), Mapping)
+            else {},
             "values": row.get("values") if isinstance(row.get("values"), Mapping) else {},
+            "source_viewer_locator": row.get("source_viewer_locator")
+            if isinstance(row.get("source_viewer_locator"), Mapping)
+            else {},
         }
-        row_entries.append({**row_core, "row_hash": stable_payload_sha256(row_core)})
-    query_core = {
-        "table": table,
-        "columns": list(columns),
-        "offset": offset,
-        "limit": limit,
-        "where_column": where_column or "",
-        "where_contains_sha256": hashlib.sha256(str(where_contains or "").encode("utf-8", errors="replace")).hexdigest() if where_contains else "",
-        "order_by": order_by or "",
-        "descending": descending,
-    }
+        row_entries.append(
+            {
+                **row_core,
+                "row_hash": stable_payload_sha256(row_core),
+                "review_note_citation": row.get("review_note_citation")
+                if isinstance(row.get("review_note_citation"), Mapping)
+                else {},
+            }
+        )
+    query_core = sqlite_table_query_core(
+        table=table,
+        columns=columns,
+        offset=offset,
+        limit=limit,
+        where_column=where_column,
+        where_contains=where_contains,
+        order_by=order_by,
+        descending=descending,
+    )
     manifest_core: dict[str, object] = {
         "manifest_version": "sqlite-table-page-proof-manifest-v1",
         "item_number": 54,
@@ -7875,6 +8108,7 @@ def enrich_source_search_matches(source_path: Path, matches: Sequence[dict[str, 
         locator = source_search_locator(match)
         citation = source_search_citation(source_path, match, locator)
         match_id = hashlib.sha256(f"{source_path}|{index}|{citation}|{match.get('snippet', '')}".encode("utf-8")).hexdigest()[:16]
+        citation_profile = source_search_citation_profile(source_path, match, locator, citation)
         item = dict(match)
         item.update(
             {
@@ -7885,7 +8119,9 @@ def enrich_source_search_matches(source_path: Path, matches: Sequence[dict[str, 
                 "source_name": source_path.name,
                 "locator": locator,
                 "citation": citation,
-                "citation_profile": source_search_citation_profile(source_path, match, locator, citation),
+                "citation_profile": citation_profile,
+                "source_viewer_locator": citation_profile.get("source_viewer_locator", {}),
+                "review_note_citation": citation_profile.get("review_note_citation", {}),
                 "review_hint": "Use this citation in the viewer review note, then verify source hashes before reporting.",
                 "compare_preview": f"{citation}\n{match.get('snippet', '')}",
             }
@@ -7900,9 +8136,13 @@ def source_search_locator(match: dict[str, object]) -> dict[str, object]:
         "offset": match.get("offset"),
         "keyword": match.get("keyword"),
     }
-    for key in ("table", "column", "row_number"):
+    for key in ("table", "column", "row_number", "rowid", "primary_key_values"):
         if key in match:
             locator[key] = match[key]
+    if isinstance(match.get("source_viewer_locator"), Mapping):
+        locator["source_viewer_locator"] = dict(match["source_viewer_locator"])
+    elif isinstance(match.get("sqlite_row_locator"), Mapping):
+        locator["source_viewer_locator"] = dict(match["sqlite_row_locator"])
     for key in ("offset_hex", "byte_length"):
         if key in match:
             locator[key] = match[key]
@@ -7930,9 +8170,22 @@ def source_search_citation_profile(
     citation: str,
 ) -> dict[str, object]:
     locator_type = "sqlite-table-row" if locator.get("table") else "byte-offset" if locator.get("offset_hex") else "text-line-offset"
+    source_viewer_locator = (
+        locator.get("source_viewer_locator")
+        if isinstance(locator.get("source_viewer_locator"), Mapping)
+        else {}
+    )
+    review_note = (
+        match.get("review_note_citation")
+        if isinstance(match.get("review_note_citation"), Mapping)
+        else sqlite_row_review_note_citation(source_viewer_locator)
+        if source_viewer_locator
+        else {}
+    )
     return {
         "profile_version": "current-file-search-citation-v1",
         "item_number": 17,
+        "qc_prep_item": 11 if locator_type == "sqlite-table-row" else 17,
         "source_path": str(source_path),
         "source_name": source_path.name,
         "locator_type": locator_type,
@@ -7944,6 +8197,10 @@ def source_search_citation_profile(
         "table": locator.get("table", ""),
         "column": locator.get("column", ""),
         "row_number": locator.get("row_number", ""),
+        "rowid": locator.get("rowid", ""),
+        "primary_key_values": locator.get("primary_key_values", {}),
+        "source_viewer_locator": dict(source_viewer_locator),
+        "review_note_citation": dict(review_note),
         "ready_for_review_note": bool(citation and match.get("snippet")),
         "ready_for_report": False,
         "required_before_report": [
@@ -7976,23 +8233,38 @@ def search_sqlite_file(
             if len(matches) >= limit:
                 break
             quoted = quote_sqlite_identifier(table)
+            column_rows = connection.execute(f"PRAGMA table_info({quoted})").fetchall()
             text_columns = [
                 str(row["name"])
-                for row in connection.execute(f"PRAGMA table_info({quoted})").fetchall()
+                for row in column_rows
                 if str(row["type"] or "").upper() in {"", "TEXT", "VARCHAR", "CHAR", "CLOB"}
             ][:SQLITE_PREVIEW_COLUMN_LIMIT]
             if not text_columns:
                 continue
+            primary_key_columns = [
+                str(row["name"])
+                for row in sorted(column_rows, key=lambda item: int(item["pk"] or 0))
+                if int(row["pk"] or 0) > 0
+            ]
             scanned_tables += 1
-            select_clause = ", ".join(quote_sqlite_identifier(column) for column in text_columns)
-            for row_index, row in enumerate(
-                connection.execute(f"SELECT {select_clause} FROM {quoted} LIMIT ?", (row_scan_limit + 1,)),
-                start=1,
-            ):
+            scan_columns = [*text_columns, *[column for column in primary_key_columns if column not in text_columns]]
+            select_clause = ", ".join(quote_sqlite_identifier(column) for column in scan_columns)
+            rowid_available = True
+            try:
+                row_cursor = connection.execute(
+                    f"SELECT rowid AS __rapid_source_rowid, {select_clause} FROM {quoted} LIMIT ?",
+                    (row_scan_limit + 1,),
+                )
+            except sqlite3.DatabaseError:
+                rowid_available = False
+                row_cursor = connection.execute(f"SELECT {select_clause} FROM {quoted} LIMIT ?", (row_scan_limit + 1,))
+            for row_index, row in enumerate(row_cursor, start=1):
                 if row_index > row_scan_limit:
                     truncated_tables.append(table)
                     break
                 scanned_rows += 1
+                row_values = {column: sqlite_preview_value(row[column]) for column in scan_columns}
+                primary_key_values = sqlite_primary_key_values(row_values, primary_key_columns)
                 for column in text_columns:
                     value = row[column]
                     if value is None:
@@ -8002,6 +8274,27 @@ def search_sqlite_file(
                     for keyword in keywords:
                         offset = lowered.find(keyword)
                         if offset >= 0:
+                            query_hash = stable_payload_sha256(
+                                {
+                                    "table": table,
+                                    "columns": text_columns,
+                                    "mode": "source-search",
+                                    "keyword": keyword,
+                                    "row_scan_limit": row_scan_limit,
+                                }
+                            )
+                            sqlite_locator = sqlite_row_source_viewer_locator(
+                                source_path=source_path,
+                                table=table,
+                                row_number=row_index,
+                                rowid=row["__rapid_source_rowid"] if rowid_available else "",
+                                primary_key_values=primary_key_values,
+                                column=column,
+                                offset=0,
+                                limit=row_scan_limit,
+                                query_hash=query_hash,
+                                source_context="source-search",
+                            )
                             matches.append(
                                 {
                                     "keyword": keyword,
@@ -8011,6 +8304,11 @@ def search_sqlite_file(
                                     "table": table,
                                     "column": column,
                                     "row_number": row_index,
+                                    "rowid": row["__rapid_source_rowid"] if rowid_available else "",
+                                    "primary_key_values": primary_key_values,
+                                    "source_viewer_locator": sqlite_locator,
+                                    "sqlite_row_locator": sqlite_locator,
+                                    "review_note_citation": sqlite_row_review_note_citation(sqlite_locator),
                                 }
                             )
                             if len(matches) >= limit:

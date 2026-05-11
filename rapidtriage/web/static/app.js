@@ -3773,8 +3773,12 @@ function compareItemFromFileSearchMatch(payload, match) {
 }
 
 function reviewNoteFromFileSearchMatch(match) {
+  const reviewCitation = match.review_note_citation || match.citation_profile?.review_note_citation || {};
+  const locator = match.source_viewer_locator || match.citation_profile?.source_viewer_locator || {};
   return [
     `Current-file hit: ${match.citation || match.match_id || "source-search hit"}`,
+    reviewCitation.text ? `Structured citation: ${reviewCitation.text}` : "",
+    locator.locator_sha256 ? `Source locator: ${locator.locator_sha256}` : "",
     match.snippet ? `Snippet: ${match.snippet}` : "",
     match.review_hint ? `Review hint: ${match.review_hint}` : "",
   ].filter(Boolean).join("\n");

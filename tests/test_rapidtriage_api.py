@@ -1130,6 +1130,16 @@ class RapidTriageApiTests(unittest.TestCase):
             self.assertEqual(sqlite_preview["preview_type"], "sqlite")
             self.assertEqual(sqlite_preview["sqlite"]["tables"][0]["name"], "notes")
             self.assertEqual(sqlite_preview["sqlite"]["tables"][0]["rows"][0]["values"]["body"], "password in sqlite viewer")
+            preview_row = sqlite_preview["sqlite"]["tables"][0]["rows"][0]
+            self.assertEqual(preview_row["source_viewer_locator"]["profile_version"], "sqlite-row-source-viewer-locator-v1")
+            self.assertEqual(preview_row["source_viewer_locator"]["qc_prep_item"], 11)
+            self.assertEqual(preview_row["source_viewer_locator"]["viewer"], "source-sqlite-table")
+            self.assertEqual(preview_row["source_viewer_locator"]["table"], "notes")
+            self.assertEqual(preview_row["source_viewer_locator"]["rowid"], 1)
+            self.assertEqual(preview_row["source_viewer_locator"]["primary_key_values"], {"id": 1})
+            self.assertTrue(preview_row["source_viewer_locator"]["review_note_ready"])
+            self.assertEqual(preview_row["review_note_citation"]["profile_version"], "sqlite-row-review-note-citation-v1")
+            self.assertIn("locator=", preview_row["review_note_citation"]["text"])
             self.assertIn("database_metadata", sqlite_preview["sqlite"])
             self.assertTrue(
                 any(column["name"] == "body" for column in sqlite_preview["sqlite"]["tables"][0]["column_details"])
@@ -1156,6 +1166,9 @@ class RapidTriageApiTests(unittest.TestCase):
             self.assertEqual(sqlite_preview["sqlite"]["sqlite_preview_manifest"]["source_viewer_locator"]["viewer"], "source-sqlite")
             self.assertGreaterEqual(sqlite_preview["sqlite"]["sqlite_preview_manifest"]["table_hash_count"], 1)
             self.assertGreaterEqual(sqlite_preview["sqlite"]["sqlite_preview_manifest"]["row_hash_count"], 1)
+            manifest_row = sqlite_preview["sqlite"]["sqlite_preview_manifest"]["tables"][0]["row_hashes"][0]
+            self.assertEqual(manifest_row["source_viewer_locator"]["profile_version"], "sqlite-row-source-viewer-locator-v1")
+            self.assertEqual(manifest_row["review_note_citation"]["qc_prep_item"], 11)
             self.assertIn(
                 "SQLite preview source manifest",
                 sqlite_preview["sqlite"]["core_accuracy_gates"][0]["satisfied_checks"],
@@ -1280,6 +1293,17 @@ class RapidTriageApiTests(unittest.TestCase):
             self.assertEqual(sqlite_search["summary"]["match_count"], 1)
             self.assertEqual(sqlite_search["matches"][0]["table"], "notes")
             self.assertEqual(sqlite_search["matches"][0]["locator"]["table"], "notes")
+            self.assertEqual(
+                sqlite_search["matches"][0]["source_viewer_locator"]["profile_version"],
+                "sqlite-row-source-viewer-locator-v1",
+            )
+            self.assertEqual(sqlite_search["matches"][0]["source_viewer_locator"]["column"], "body")
+            self.assertEqual(sqlite_search["matches"][0]["source_viewer_locator"]["primary_key_values"], {"id": 1})
+            self.assertEqual(
+                sqlite_search["matches"][0]["citation_profile"]["review_note_citation"]["profile_version"],
+                "sqlite-row-review-note-citation-v1",
+            )
+            self.assertEqual(sqlite_search["matches"][0]["citation_profile"]["qc_prep_item"], 11)
             self.assertIn("table notes", sqlite_search["matches"][0]["citation"])
             sqlite_page_response = client.get(
                 f"/api/runs/{run_id}/source-sqlite-table",
@@ -1308,6 +1332,13 @@ class RapidTriageApiTests(unittest.TestCase):
             self.assertEqual(sqlite_page["sqlite_table_page_manifest_hash"], sqlite_page["sqlite_table_page_manifest"]["manifest_hash"])
             self.assertEqual(sqlite_page["sqlite_table_page_manifest"]["source_viewer_locator"]["viewer"], "source-sqlite-table")
             self.assertGreaterEqual(sqlite_page["sqlite_table_page_manifest"]["row_hash_count"], 1)
+            self.assertEqual(sqlite_page["rows"][0]["source_viewer_locator"]["profile_version"], "sqlite-row-source-viewer-locator-v1")
+            self.assertEqual(sqlite_page["rows"][0]["source_viewer_locator"]["query_hash"], sqlite_page["sqlite_table_page_manifest"]["query_hash"])
+            self.assertEqual(sqlite_page["rows"][0]["review_note_citation"]["qc_prep_item"], 11)
+            self.assertEqual(
+                sqlite_page["sqlite_table_page_manifest"]["rows"][0]["source_viewer_locator"]["locator_sha256"],
+                sqlite_page["rows"][0]["source_viewer_locator"]["locator_sha256"],
+            )
             self.assertIn("SQLite table page proof manifest", sqlite_page["core_accuracy_gates"][0]["satisfied_checks"])
             self.assertIn("password", sqlite_page["rows"][0]["values"]["body"])
             self.assertIn("sqlite_table=notes", sqlite_page["copy_safe_citation"]["text"])
