@@ -2783,10 +2783,12 @@ def source_review_workflow_metadata() -> dict[str, object]:
 
 def source_review_evidence_tray_profile(*, run_id: str, source_path: Path) -> dict[str, object]:
     quoted_path = quote(str(source_path))
+    sidecar_contract = source_evidence_tray_sidecar_contract(run_id=run_id, source_path=source_path)
     return {
         "profile_version": "review-evidence-tray-profile-v1",
         "commercial_batch_id": "commercial-uplift-016-020",
         "item_number": 19,
+        "qc_prep_item": 13,
         "source_path": str(source_path),
         "source_name": source_path.name,
         "tray_item_contract": {
@@ -2799,6 +2801,8 @@ def source_review_evidence_tray_profile(*, run_id: str, source_path: Path) -> di
             "include_in_report": True,
             "citation_or_locator": True,
         },
+        "sidecar_viewer_contract": sidecar_contract,
+        "sidecar_viewer_contract_hash": stable_payload_sha256(sidecar_contract),
         "default_review_states": ["unreviewed", "needs-review", "relevant", "not-relevant", "excluded"],
         "default_verification_states": ["unverified", "source_opened", "hash_verified", "cross_tool_verified"],
         "source_actions": {
@@ -2820,6 +2824,80 @@ def source_review_evidence_tray_profile(*, run_id: str, source_path: Path) -> di
             "role-based-review-queue-not-enabled",
             "multi-user-conflict-resolution-required",
             "review-tray-audit-diff-required",
+        ],
+    }
+
+
+def source_evidence_tray_sidecar_contract(*, run_id: str, source_path: Path) -> dict[str, object]:
+    suffix = source_path.suffix.lower()
+    mime_type = mimetypes.guess_type(source_path.name)[0] or "application/octet-stream"
+    quoted_path = quote(str(source_path))
+    links: list[dict[str, object]] = []
+    if mime_type.startswith("image/"):
+        links.extend(
+            [
+                {
+                    "id": "image-gallery",
+                    "label": "Image gallery / similarity",
+                    "viewer": "source-image-gallery",
+                    "url": f"/api/runs/{run_id}/source-image-gallery?path={quoted_path}",
+                    "sidecar_type": "nearby-image-review",
+                },
+                {
+                    "id": "ocr-queue",
+                    "label": "OCR queue",
+                    "viewer": "source-ocr-queue",
+                    "url": f"/api/runs/{run_id}/source-ocr-queue?path={quoted_path}",
+                    "sidecar_type": "ocr-work-queue",
+                },
+                {
+                    "id": "ocr-translation",
+                    "label": "OCR / translation review",
+                    "viewer": "source-ocr-translation",
+                    "url": f"/api/runs/{run_id}/source-ocr-translation?path={quoted_path}",
+                    "sidecar_type": "ocr-translation-sidecar",
+                },
+            ]
+        )
+    if mime_type.startswith(("audio/", "video/")):
+        links.append(
+            {
+                "id": "media-cue",
+                "label": "Transcript cue package",
+                "viewer": "source-media-cue",
+                "url": f"/api/runs/{run_id}/source-media-cue?path={quoted_path}&sidecar_index=1&cue_index=1",
+                "sidecar_type": "media-transcript-cue",
+            }
+        )
+    if suffix in {".eml", ".mbox"}:
+        links.append(
+            {
+                "id": "email-attachment",
+                "label": "Email attachment package",
+                "viewer": "source-email-attachment",
+                "url": f"/api/runs/{run_id}/source-email-attachment?path={quoted_path}&message_index=1&attachment_index=1",
+                "sidecar_type": "email-attachment",
+            }
+        )
+    return {
+        "profile_version": "evidence-tray-sidecar-viewer-contract-v1",
+        "qc_prep_item": 13,
+        "source_path": str(source_path),
+        "source_name": source_path.name,
+        "viewer_family_hint": source_viewer_family(source_path, suffix=suffix, mime_type=mime_type),
+        "sidecar_link_count": len(links),
+        "sidecar_links": links,
+        "supports_sidecar_selection": bool(links),
+        "supports_report_candidate_promotion": True,
+        "required_before_report": [
+            "open sidecar viewer package",
+            "verify source hash or sidecar hash",
+            "save analyst review note",
+            "mark include_in_report intentionally",
+        ],
+        "commercial_grade_blockers": [
+            "browser-e2e-sidecar-tray-selection-required",
+            "trusted-sidecar-rendering-diff-required",
         ],
     }
 
@@ -4623,6 +4701,7 @@ def hex_range_citation_profile(*, run_id: str | None, source_path: Path, preview
     return {
         "profile_version": "hex-range-citation-v1",
         "commercial_gap_ids": [VIEWER_WORKFLOW_GAP_IDS["hex"]],
+        "qc_prep_item": 12,
         "range_export_endpoint": "/api/runs/{run_id}/source-hex-range",
         "default_offset": 0,
         "default_offset_hex": "0x00000000" if default_length else "",
@@ -4632,9 +4711,71 @@ def hex_range_citation_profile(*, run_id: str | None, source_path: Path, preview
         "supports_offset_jump": True,
         "supports_range_hashes": True,
         "supports_copy_safe_citation": True,
+        "supports_report_candidate_payload": True,
+        "supports_compare_pin_payload": True,
         "source_hash_policy": "preview/range hashes are immediate; full-source hashes require include_hashes=true or source-metadata?hash=true",
         "report_use_warning": "Attach the range package, source hash, and trusted offset validation before using byte offsets in a court exhibit.",
     }
+
+
+def hex_range_review_link_profile(package: Mapping[str, object]) -> dict[str, object]:
+    locator = (
+        package.get("hex_range_proof_manifest", {}).get("source_viewer_locator", {})
+        if isinstance(package.get("hex_range_proof_manifest"), Mapping)
+        else {}
+    )
+    copy_safe = package.get("copy_safe_citation") if isinstance(package.get("copy_safe_citation"), Mapping) else {}
+    citation_text = str(copy_safe.get("text") or package.get("citation") or "")
+    core = {
+        "citation_id": str(package.get("citation_id") or ""),
+        "source_name": str(package.get("name") or ""),
+        "offset_hex": str(package.get("offset_hex") or ""),
+        "length_returned": optional_int_for_api(package.get("length_returned")) or 0,
+        "range_sha256": str((package.get("range_hashes") or {}).get("sha256") or "")
+        if isinstance(package.get("range_hashes"), Mapping)
+        else "",
+        "manifest_hash": str(package.get("hex_range_proof_manifest_hash") or ""),
+    }
+    profile = {
+        "profile_version": "hex-range-review-link-profile-v1",
+        "qc_prep_item": 12,
+        "source_viewer_locator": dict(locator) if isinstance(locator, Mapping) else {},
+        "review_note_citation": {
+            "profile_version": "hex-range-review-note-citation-v1",
+            "qc_prep_item": 12,
+            "text": citation_text,
+            "source_viewer_locator": dict(locator) if isinstance(locator, Mapping) else {},
+            "ready_for_review_note": bool(citation_text),
+            "ready_for_report": bool(package.get("source_hashes")),
+        },
+        "compare_pin_payload": {
+            "source": "hex-range",
+            "title": f"{core['source_name']} {core['offset_hex']}",
+            "pointer": f"hex-range:{core['citation_id']}",
+            "preview": citation_text,
+            "source_viewer_locator": dict(locator) if isinstance(locator, Mapping) else {},
+            "manifest_hash": core["manifest_hash"],
+        },
+        "report_candidate_payload": {
+            "source": "hex-range",
+            "citation_id": core["citation_id"],
+            "summary": f"{core['source_name']} byte range {core['offset_hex']} len={core['length_returned']}",
+            "citation": citation_text,
+            "range_sha256": core["range_sha256"],
+            "source_hash_status": str(package.get("source_hash_status") or ""),
+            "ready_for_report_draft": bool(package.get("source_hashes")),
+            "required_before_report": [
+                "include source hashes",
+                "attach hex range proof manifest",
+                "validate offset/range with trusted hex manifest",
+            ],
+        },
+        "commercial_grade_blockers": [
+            "trusted-offset-manifest-diff-required-before-court-use",
+            "browser-e2e-compare-pin-flow-required",
+        ],
+    }
+    return {**profile, "profile_hash": stable_payload_sha256({**profile, "core": core})}
 
 
 def build_hex_preview_manifest(
@@ -4718,10 +4859,11 @@ def build_hex_range_citation_package(
         include_source_hashes=include_source_hashes,
         citation_id=citation_id,
     )
-    return {
+    package = {
         "command": "source-hex-range",
         "profile_version": "hex-range-citation-package-v1",
         "commercial_gap_ids": [VIEWER_WORKFLOW_GAP_IDS["hex"]],
+        "qc_prep_item": 12,
         "citation_id": citation_id,
         "path": str(source_path),
         "name": source_path.name,
@@ -4776,6 +4918,14 @@ def build_hex_range_citation_package(
             truncated=length > len(data),
             range_manifest=proof_manifest,
         ),
+    }
+    review_link_profile = hex_range_review_link_profile(package)
+    return {
+        **package,
+        "hex_range_review_link_profile": review_link_profile,
+        "review_note_citation": review_link_profile["review_note_citation"],
+        "compare_pin_payload": review_link_profile["compare_pin_payload"],
+        "report_candidate_payload": review_link_profile["report_candidate_payload"],
     }
 
 
@@ -8201,6 +8351,13 @@ def source_search_citation_profile(
         "primary_key_values": locator.get("primary_key_values", {}),
         "source_viewer_locator": dict(source_viewer_locator),
         "review_note_citation": dict(review_note),
+        "report_draft_profile": source_search_report_draft_profile(
+            source_path=source_path,
+            match=match,
+            locator=locator,
+            citation=citation,
+            review_note=review_note if isinstance(review_note, Mapping) else {},
+        ),
         "ready_for_review_note": bool(citation and match.get("snippet")),
         "ready_for_report": False,
         "required_before_report": [
@@ -8211,6 +8368,41 @@ def source_search_citation_profile(
         "commercial_grade_blockers": [
             "source-search-trusted-locator-diff-required",
             "source-hash-verification-required-for-report",
+        ],
+    }
+
+
+def source_search_report_draft_profile(
+    *,
+    source_path: Path,
+    match: Mapping[str, object],
+    locator: Mapping[str, object],
+    citation: str,
+    review_note: Mapping[str, object],
+) -> dict[str, object]:
+    locator_payload = (
+        locator.get("source_viewer_locator")
+        if isinstance(locator.get("source_viewer_locator"), Mapping)
+        else {}
+    )
+    return {
+        "profile_version": "current-file-search-report-draft-profile-v1",
+        "qc_prep_item": 14,
+        "source_name": source_path.name,
+        "citation": citation,
+        "structured_citation": str(review_note.get("text") or ""),
+        "source_locator_hash": str(locator_payload.get("locator_sha256") or ""),
+        "snippet_sha256": hashlib.sha256(str(match.get("snippet") or "").encode("utf-8", errors="replace")).hexdigest()
+        if match.get("snippet")
+        else "",
+        "ready_for_review_note": bool(citation and match.get("snippet")),
+        "ready_for_report_draft": bool(citation and match.get("snippet")),
+        "report_note_prefixes": ["Current-file hit:", "Structured citation:", "Source locator:", "Snippet:", "Review hint:"],
+        "required_before_report": [
+            "save source-search hit to review note",
+            "verify source hash",
+            "confirm locator in source viewer",
+            "mark include_in_report intentionally",
         ],
     }
 

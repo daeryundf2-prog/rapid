@@ -1118,6 +1118,12 @@ class RapidTriageApiTests(unittest.TestCase):
             )
             self.assertEqual(file_search_payload["matches"][0]["citation_profile"]["locator_type"], "text-line-offset")
             self.assertTrue(file_search_payload["matches"][0]["citation_profile"]["ready_for_review_note"])
+            self.assertEqual(
+                file_search_payload["matches"][0]["citation_profile"]["report_draft_profile"]["profile_version"],
+                "current-file-search-report-draft-profile-v1",
+            )
+            self.assertEqual(file_search_payload["matches"][0]["citation_profile"]["report_draft_profile"]["qc_prep_item"], 14)
+            self.assertTrue(file_search_payload["matches"][0]["citation_profile"]["report_draft_profile"]["ready_for_report_draft"])
             self.assertIn("password", file_search_payload["matches"][0]["snippet"].lower())
             self.assertEqual(len(file_search_payload["matches"][0]["match_id"]), 16)
             self.assertEqual(file_search_payload["matches"][0]["pointer"], "source-search:/matches/0")
@@ -1473,6 +1479,9 @@ class RapidTriageApiTests(unittest.TestCase):
             self.assertTrue(binary_preview["hex"]["offset_navigation"]["supports_keyword_byte_hits"])
             self.assertTrue(binary_preview["hex"]["offset_navigation"]["supports_range_citation_export"])
             self.assertEqual(binary_preview["hex"]["range_citation_profile"]["profile_version"], "hex-range-citation-v1")
+            self.assertEqual(binary_preview["hex"]["range_citation_profile"]["qc_prep_item"], 12)
+            self.assertTrue(binary_preview["hex"]["range_citation_profile"]["supports_report_candidate_payload"])
+            self.assertTrue(binary_preview["hex"]["range_citation_profile"]["supports_compare_pin_payload"])
             self.assertEqual(binary_preview["hex"]["range_citation_profile"]["default_offset_hex"], "0x00000000")
             self.assertIn("source-hex-range", binary_preview["hex"]["range_citation_profile"]["default_export_url"])
             self.assertEqual(
@@ -1494,10 +1503,18 @@ class RapidTriageApiTests(unittest.TestCase):
             hex_range = hex_range_response.json()
             self.assertEqual(hex_range["command"], "source-hex-range")
             self.assertEqual(hex_range["profile_version"], "hex-range-citation-package-v1")
+            self.assertEqual(hex_range["qc_prep_item"], 12)
             self.assertEqual(hex_range["offset_hex"], "0x00000002")
             self.assertEqual(hex_range["length_returned"], 12)
             self.assertEqual(len(hex_range["range_hashes"]["sha256"]), 64)
             self.assertEqual(hex_range["source_hash_status"], "computed")
+            self.assertEqual(
+                hex_range["hex_range_review_link_profile"]["profile_version"],
+                "hex-range-review-link-profile-v1",
+            )
+            self.assertEqual(hex_range["review_note_citation"]["profile_version"], "hex-range-review-note-citation-v1")
+            self.assertTrue(hex_range["report_candidate_payload"]["ready_for_report_draft"])
+            self.assertEqual(hex_range["compare_pin_payload"]["source"], "hex-range")
             self.assertEqual(hex_range["hex_range_proof_manifest"]["manifest_version"], "hex-range-proof-manifest-v1")
             self.assertEqual(hex_range["hex_range_proof_manifest"]["source_viewer_locator"]["viewer"], "source-hex-range")
             self.assertEqual(hex_range["hex_range_proof_manifest_hash"], hex_range["hex_range_proof_manifest"]["manifest_hash"])
@@ -1520,6 +1537,16 @@ class RapidTriageApiTests(unittest.TestCase):
             self.assertEqual(image_preview_response.status_code, 200, image_preview_response.text)
             image_preview = image_preview_response.json()
             self.assertEqual(image_preview["preview_type"], "image")
+            self.assertEqual(
+                image_preview["review_evidence_tray_profile"]["sidecar_viewer_contract"]["profile_version"],
+                "evidence-tray-sidecar-viewer-contract-v1",
+            )
+            self.assertEqual(image_preview["review_evidence_tray_profile"]["sidecar_viewer_contract"]["qc_prep_item"], 13)
+            self.assertGreaterEqual(
+                image_preview["review_evidence_tray_profile"]["sidecar_viewer_contract"]["sidecar_link_count"],
+                3,
+            )
+            self.assertTrue(image_preview["review_evidence_tray_profile"]["sidecar_viewer_contract_hash"])
             self.assertEqual(image_preview["image"]["width"], 16)
             self.assertEqual(len(image_preview["image"]["perceptual_hash"]), 16)
             self.assertIn("#56", image_preview["image"]["gallery_review"]["commercial_gap_ids"])
@@ -1671,6 +1698,10 @@ class RapidTriageApiTests(unittest.TestCase):
             self.assertEqual(media_preview_response.status_code, 200, media_preview_response.text)
             media_preview = media_preview_response.json()
             self.assertEqual(media_preview["preview_type"], "media")
+            self.assertEqual(
+                media_preview["review_evidence_tray_profile"]["sidecar_viewer_contract"]["sidecar_links"][0]["viewer"],
+                "source-media-cue",
+            )
             self.assertEqual(len(media_preview["media"]["source_hashes"]["sha256"]), 64)
             self.assertEqual(media_preview["media"]["review"]["transcript_alignment"], "sidecar-cue-based")
             self.assertIn("#57", media_preview["media"]["review"]["commercial_gap_ids"])
@@ -2100,6 +2131,8 @@ class RapidTriageApiTests(unittest.TestCase):
                     "note": (
                         "Check this file.\n\n"
                         "Current-file hit: credentials.txt line 3 offset 12 keyword password\n"
+                        "Structured citation: SQLite row citation: viewer.sqlite table=notes row=1 rowid=1 locator=abc123\n"
+                        "Source locator: abc123\n"
                         "Snippet: admin password found\n"
                         "Review hint: verify source hashes before report inclusion"
                     ),
@@ -2185,6 +2218,8 @@ class RapidTriageApiTests(unittest.TestCase):
             self.assertIn("Review this indicator pivot.", report_payload["markdown"])
             self.assertIn("Source-search cited hits", report_payload["markdown"])
             self.assertIn("credentials.txt line 3 offset 12 keyword password", report_payload["markdown"])
+            self.assertIn("Structured citation: SQLite row citation", report_payload["markdown"])
+            self.assertIn("Source locator: `abc123`", report_payload["markdown"])
             self.assertIn("Snippet: admin password found", report_payload["markdown"])
             self.assertIn("Review hint: verify source hashes before report inclusion", report_payload["markdown"])
             self.assertIn("CASE-001", report_payload["markdown"])

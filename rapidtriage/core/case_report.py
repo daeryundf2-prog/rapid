@@ -170,6 +170,10 @@ def build_case_report_markdown(
                 lines.append("- Source-search cited hits:")
                 for hit in source_hits:
                     lines.append(f"  - Citation: {hit.get('citation', '')}")
+                    if hit.get("structured_citation"):
+                        lines.append(f"    - Structured citation: {hit.get('structured_citation')}")
+                    if hit.get("source_locator"):
+                        lines.append(f"    - Source locator: `{hit.get('source_locator')}`")
                     if hit.get("snippet"):
                         lines.append(f"    - Snippet: {hit.get('snippet')}")
                     if hit.get("review_hint"):
@@ -266,6 +270,18 @@ def extract_source_hit_notes(note: str) -> list[dict[str, str]]:
         if cleaned.lower().startswith("snippet:"):
             current["snippet"] = trim_report_inline_text(
                 re.sub(r"^snippet:\s*", "", cleaned, flags=re.IGNORECASE)
+            )
+            continue
+        if cleaned.lower().startswith("structured citation:"):
+            current["structured_citation"] = trim_report_inline_text(
+                re.sub(r"^structured citation:\s*", "", cleaned, flags=re.IGNORECASE),
+                limit=360,
+            )
+            continue
+        if cleaned.lower().startswith("source locator:"):
+            current["source_locator"] = trim_report_inline_text(
+                re.sub(r"^source locator:\s*", "", cleaned, flags=re.IGNORECASE),
+                limit=96,
             )
             continue
         if cleaned.lower().startswith("review hint:"):
