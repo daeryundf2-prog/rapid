@@ -128,6 +128,19 @@ rapidtriage rearchitecture-status --json
 rapidtriage commercial-readiness --validation-package docs/validation/rapidtriage-core-forensics-001-120-known-answer.json --output-dir ./commercial-readiness --json
 ```
 
+For QC-prep and large-case validation evidence, use the helper commands below. These commands do not make a parser commercial-grade by themselves; they create reproducible evidence, blocker records, and trusted-diff handoff artifacts that a reviewer can attach to a case or release QC package.
+
+```bash
+rapidtriage e01-hash ./case.E01 --output-dir ./qc/e01-hash --json
+rapidtriage known-answer-qc --manifest ./known-answer.json --trusted-manifest ./trusted-known-answer.json --output-dir ./qc/known-answer --json
+rapidtriage sqlite-fts-benchmark --output-dir ./qc/fts-100k --record-count 100000 --json
+rapidtriage sqlite-wal-preview ./History --output-dir ./qc/sqlite-wal --json
+rapidtriage email-external-parse ./mailbox.pst --output-dir ./qc/email-external --json
+rapidtriage browser-stress --base-url http://127.0.0.1:8765 --output-dir ./qc/browser-stress --json
+```
+
+Use `--overwrite` only for intentionally repeated QC runs. The overwrite paths now clear stale parser exports, SQLite benchmark sidecars, and SQLite WAL safe-copy artifacts before writing fresh evidence, so reruns do not accidentally preserve old parser output as if it came from the current source.
+
 When a `rapid-worker` binary is available, `worker-parse` can run it as a separate process and stage normalized `ArtifactRecordV1` rows without loading a whole evidence source into Python memory:
 
 ```bash

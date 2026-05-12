@@ -1,0 +1,24 @@
+{
+  "version": 1,
+  "createdAt": "2026-05-12T11:12:19.609Z",
+  "updatedAt": "2026-05-12T11:32:27.998Z",
+  "briefPath": ".omx/ultragoal/brief.md",
+  "goalsPath": ".omx/ultragoal/goals.json",
+  "ledgerPath": ".omx/ultragoal/ledger.jsonl",
+  "codexGoalMode": "aggregate",
+  "goals": [
+    {
+      "id": "G001-rapidforensic",
+      "title": "RapidForensic 전체 프로그램을 정적 분석, 테스트, 코드 리뷰 관점에서 검토하고 실제로 고칠 수 있는 결함을 수정...",
+      "objective": "RapidForensic 전체 프로그램을 정적 분석, 테스트, 코드 리뷰 관점에서 검토하고 실제로 고칠 수 있는 결함을 수정한다. 사용자 변경을 보존하고, 수정 후 검증 증거와 남은 리스크를 보고한다.",
+      "status": "complete",
+      "attempt": 1,
+      "createdAt": "2026-05-12T11:12:19.609Z",
+      "updatedAt": "2026-05-12T11:32:27.998Z",
+      "startedAt": "2026-05-12T11:12:34.597Z",
+      "evidence": "Full program review/fix pass completed: stale QC artifact contamination fixed, destructive SQLite safe-copy guard added, CLI failure semantics tightened, user guide updated; 581 pytest tests passed, compileall/diff-check/CLI smokes passed, readiness score 90 with commercial claim false.",
+      "completedAt": "2026-05-12T11:32:27.998Z"
+    }
+  ],
+  "codexObjective": "Complete all ultragoal stories in .omx/ultragoal/goals.json: G001-rapidforensic RapidForensic 전체 프로그램을 정적 분석, 테스트, 코드 리뷰 관점에서 검토하고 실제로 고칠 수 있는 결함을 수정..."
+}

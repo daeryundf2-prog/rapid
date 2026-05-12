@@ -4,12 +4,14 @@ import argparse
 import csv
 import json
 import os
+import sqlite3
 import textwrap
 from pathlib import Path
 
 from .core.audit import audit_path_for, write_audit_record
 from .core.backup import BackupError, build_case_backup, restore_case_backup
 from .core.artifacts import ArtifactCollectionError, SUPPORTED_ARTIFACT_KINDS, run_artifact_collection
+from .artifacts.email_external import EmailExternalParserError, run_email_external_parse
 from .core.artifact_taxonomy import build_taxonomy_audit
 from .core.benchmark import (
     DEFAULT_BENCHMARK_FILE_COUNT,
@@ -17,6 +19,14 @@ from .core.benchmark import (
     BenchmarkError,
     build_stress_test_plan,
     run_benchmark,
+)
+from .core.browser_stress import DEFAULT_BROWSER_STRESS_RECORD_COUNT, run_browser_large_result_stress
+from .core.benchmark_fts import (
+    SQLITE_FTS_DEFAULT_HIT_EVERY,
+    SQLITE_FTS_DEFAULT_QUERY_ITERATIONS,
+    SQLITE_FTS_DEFAULT_RECORD_COUNT,
+    SqliteFtsBenchmarkError,
+    run_sqlite_fts_benchmark,
 )
 from .core.bundle import BundleError, build_submission_bundle
 from .core.carving import (
@@ -78,6 +88,7 @@ from .core.doctor import format_doctor_text, run_doctor
 from .core.enterprise import build_enterprise_policy
 from .core.evidence import identify_evidence
 from .core.e01 import build_windows11_e01_known_answer_manifest
+from .core.e01_hash import E01StreamingHashError, run_e01_streaming_hash
 from .core.e01_smoke import run_windows11_e01_smoke
 from .core.extract import DEFAULT_EXTRACT_MANIFEST_NAME, ExtractError, SUPPORTED_DOC_KINDS, run_extract
 from .core.files import ALL_FILE_CATEGORIES, FileScanError, run_files_scan
@@ -90,6 +101,7 @@ from .core.keyword_packs import (
     list_keyword_packs,
     resolve_keyword_packs,
 )
+from .core.known_answer_qc import run_known_answer_qc
 from .core.kakaotalk import (
     DEFAULT_MEMORY_SQLITE_MAX_CARVE_BYTES,
     DEFAULT_MEMORY_SQLITE_MAX_HITS,
@@ -113,6 +125,7 @@ from .core.run_validation import RunValidationAttachmentError, attach_validation
 from .core.sample_case import DEFAULT_SAMPLE_DIR, DEFAULT_SAMPLE_MODE, SampleCaseError, create_sample_case, run_sample_workflow
 from .core.search import SearchError, run_unified_search
 from .core.source_reader import SourceReadError, render_source_read_text, run_source_read
+from .core.sqlite_wal import SqliteWalPreviewError, build_sqlite_wal_preview
 from .core.timeline import TimelineError, build_timeline_report, run_timeline
 from .core.timeline_export import TimelineExportError, build_unified_timeline_export
 from .core.validation import ValidationError, build_validation_package
@@ -307,6 +320,18 @@ def build_parser() -> argparse.ArgumentParser:
         help="JSON provider/event message catalog for --kind eventlog rendering",
     )
     add_rules_argument(artifacts)
+
+    email_external = sub.add_parser(
+        "email-external-parse",
+        help="Run optional external PST/OST/MSG parser wrappers and record evidence",
+        description="Use pffexport/readpst/msg-extractor when available to export mailbox objects for trusted-diff validation",
+    )
+    email_external.add_argument("source", help="Path to PST, OST, or MSG file")
+    email_external.add_argument("--output-dir", required=True, help="Directory for parser JSON, Markdown, and exported files")
+    email_external.add_argument("--preferred-tool", help="Preferred parser command, e.g. pffexport, readpst, msg-extractor")
+    email_external.add_argument("--timeout-seconds", type=int, default=300, help="External parser timeout")
+    email_external.add_argument("--overwrite", action="store_true", help="Allow writing into a non-empty parser output directory")
+    email_external.add_argument("--json", action="store_true", help="Print machine-readable JSON")
 
     taxonomy_audit = sub.add_parser(
         "taxonomy-audit",
@@ -1159,6 +1184,19 @@ def build_parser() -> argparse.ArgumentParser:
     e01_smoke.add_argument("--memory-cap-bytes", type=int, default=0, help="Soft memory cap for run stages")
     e01_smoke.add_argument("--json", action="store_true", help="Print machine-readable JSON")
 
+    e01_hash = sub.add_parser(
+        "e01-hash",
+        help="Compute streaming full-image hashes for E01/Ex01 evidence files",
+        description="Compute SHA256/SHA1/MD5 over the selected evidence image with progress checkpoints for report-grade hash evidence",
+    )
+    e01_hash.add_argument("source", help="Path to the E01/Ex01 or raw image file to hash")
+    e01_hash.add_argument("--output-dir", required=True, help="Directory for hash JSON, Markdown, and checkpoint outputs")
+    e01_hash.add_argument("--algorithm", action="append", help="Hash algorithm to compute; repeatable; defaults to sha256/sha1/md5")
+    e01_hash.add_argument("--chunk-size", type=int, default=8 * 1024 * 1024, help="Read chunk size in bytes")
+    e01_hash.add_argument("--checkpoint-interval-bytes", type=int, default=128 * 1024 * 1024, help="Bytes between checkpoint writes")
+    e01_hash.add_argument("--overwrite", action="store_true", help="Allow writing into a non-empty hash output directory")
+    e01_hash.add_argument("--json", action="store_true", help="Print machine-readable JSON")
+
     benchmark = sub.add_parser(
         "benchmark",
         help="Run a synthetic or existing-root performance benchmark",
@@ -1213,6 +1251,63 @@ def build_parser() -> argparse.ArgumentParser:
     stress_plan.add_argument("--expected-throughput-mb-s", type=float, default=80.0, help="Expected ingest throughput for wall-clock estimates")
     stress_plan.add_argument("--overwrite", action="store_true", help="Allow writing into a non-empty stress-plan output directory")
     stress_plan.add_argument("--json", action="store_true", help="Print machine-readable JSON")
+
+    browser_stress = sub.add_parser(
+        "browser-stress",
+        help="Run optional Playwright large-result browser stress checks against a running web UI",
+        description="Run Playwright browser checks for large-result DOM windowing, row-filter bounds, console errors, and latency budgets",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=textwrap.dedent(
+            """\
+            Examples:
+              rapidtriage web --host 127.0.0.1 --port 8765
+              rapidtriage browser-stress --base-url http://127.0.0.1:8765 --output-dir ./browser-qc --json
+            """
+        ),
+    )
+    browser_stress.add_argument("--base-url", default="http://127.0.0.1:8765", help="Running RapidTriage web UI base URL")
+    browser_stress.add_argument("--output-dir", required=True, help="Directory for Playwright JSON/screenshot evidence")
+    browser_stress.add_argument("--record-count", type=int, default=DEFAULT_BROWSER_STRESS_RECORD_COUNT, help="Synthetic record count requested from the large-result evidence endpoint")
+    browser_stress.add_argument("--headed", action="store_true", help="Run Chromium headed instead of headless")
+    browser_stress.add_argument("--require-playwright", action="store_true", help="Return non-zero if Playwright is unavailable")
+    browser_stress.add_argument("--timeout-ms", type=int, default=30_000, help="Per-action Playwright timeout in milliseconds")
+    browser_stress.add_argument("--json", action="store_true", help="Print machine-readable JSON")
+
+    sqlite_fts_benchmark = sub.add_parser(
+        "sqlite-fts-benchmark",
+        help="Run a deterministic synthetic SQLite FTS benchmark",
+        description="Generate a synthetic SQLite FTS corpus and measure ingest, query latency, query plan hashes, and scale evidence",
+    )
+    sqlite_fts_benchmark.add_argument("--output-dir", required=True, help="Directory for benchmark database, JSON, and Markdown outputs")
+    sqlite_fts_benchmark.add_argument("--record-count", type=int, default=SQLITE_FTS_DEFAULT_RECORD_COUNT, help="Synthetic row count, e.g. 100000 or 1000000")
+    sqlite_fts_benchmark.add_argument("--keyword", default=DEFAULT_BENCHMARK_KEYWORD, help="Seeded keyword to query")
+    sqlite_fts_benchmark.add_argument("--query-iterations", type=int, default=SQLITE_FTS_DEFAULT_QUERY_ITERATIONS, help="Repeated query samples for p50/p95 latency")
+    sqlite_fts_benchmark.add_argument("--hit-every", type=int, default=SQLITE_FTS_DEFAULT_HIT_EVERY, help="Seed the keyword every N rows")
+    sqlite_fts_benchmark.add_argument("--overwrite", action="store_true", help="Allow writing into a non-empty benchmark output directory")
+    sqlite_fts_benchmark.add_argument("--json", action="store_true", help="Print machine-readable JSON")
+
+    sqlite_wal_preview = sub.add_parser(
+        "sqlite-wal-preview",
+        help="Preview SQLite WAL sidecar frames and page hashes for recovery planning",
+        description="Detect matching -wal/-shm files, parse WAL frame headers, and record page hashes without reconstructing rows",
+    )
+    sqlite_wal_preview.add_argument("database", help="Path to SQLite database")
+    sqlite_wal_preview.add_argument("--output-dir", required=True, help="Directory for WAL preview JSON and Markdown outputs")
+    sqlite_wal_preview.add_argument("--max-frames", type=int, default=20, help="Maximum WAL frames to preview")
+    sqlite_wal_preview.add_argument("--preferred-trusted-tool", help="Preferred trusted comparison command, e.g. sqlite_dissect or xsqlite")
+    sqlite_wal_preview.add_argument("--trusted-tool-timeout-seconds", type=int, default=300, help="Timeout for optional trusted SQLite recovery tool execution")
+    sqlite_wal_preview.add_argument("--json", action="store_true", help="Print machine-readable JSON")
+
+    known_answer_qc = sub.add_parser(
+        "known-answer-qc",
+        help="Assess a known-answer corpus manifest and optional trusted manifest diff",
+        description="Load a CFReDS/CFTT-style known-answer manifest, hash evidence paths, and compare against an optional trusted manifest",
+    )
+    known_answer_qc.add_argument("--manifest", required=True, help="RapidTriage known-answer manifest JSON")
+    known_answer_qc.add_argument("--trusted-manifest", help="Optional trusted/reference known-answer manifest JSON")
+    known_answer_qc.add_argument("--output-dir", required=True, help="Directory for QC JSON and Markdown outputs")
+    known_answer_qc.add_argument("--overwrite", action="store_true", help="Allow writing into a non-empty QC output directory")
+    known_answer_qc.add_argument("--json", action="store_true", help="Print machine-readable JSON")
 
     validation = sub.add_parser(
         "validation",
@@ -2527,6 +2622,26 @@ def main(argv=None) -> int:
             )
         return 0
 
+    if args.command == "e01-hash":
+        try:
+            payload = run_e01_streaming_hash(
+                source_path=Path(args.source).expanduser().resolve(),
+                output_dir=Path(args.output_dir).expanduser().resolve(),
+                algorithms=tuple(args.algorithm or ["sha256", "sha1", "md5"]),
+                chunk_size=args.chunk_size,
+                checkpoint_interval_bytes=args.checkpoint_interval_bytes,
+                overwrite=args.overwrite,
+            )
+        except (E01StreamingHashError, OSError, ValueError) as exc:
+            parser.error(str(exc))
+        if args.json:
+            print(json.dumps(payload, ensure_ascii=False, indent=2))
+        else:
+            print(f"Saved E01 hash JSON: {payload['outputs']['json']}")
+            print(f"Saved E01 hash report: {payload['outputs']['markdown']}")
+            print(f"SHA256: {payload['digests'].get('sha256', '')}")
+        return 0
+
     if args.command == "columnar-benchmark":
         try:
             payload = run_columnar_benchmark(
@@ -2590,6 +2705,86 @@ def main(argv=None) -> int:
             print(f"Saved stress plan JSON: {payload['outputs']['json']}")
             print(f"Saved stress plan report: {payload['outputs']['markdown']}")
             print(f"Scenarios: {payload['summary']['scenario_count']}")
+        return 0
+
+    if args.command == "browser-stress":
+        payload = run_browser_large_result_stress(
+            base_url=args.base_url,
+            output_dir=Path(args.output_dir).expanduser().resolve(),
+            record_count=args.record_count,
+            headless=not args.headed,
+            require_playwright=args.require_playwright,
+            timeout_ms=args.timeout_ms,
+        )
+        if args.json:
+            print(json.dumps(payload, ensure_ascii=False, indent=2))
+        else:
+            print(f"Saved browser stress JSON: {Path(args.output_dir).expanduser().resolve() / 'browser-large-result-stress.json'}")
+            print(f"Status: {payload['status']}")
+            if payload.get("skip_reason"):
+                print(f"Reason: {payload['skip_reason']}")
+        return 1 if payload["status"] in {"failed", "blocked"} else 0
+
+    if args.command == "sqlite-fts-benchmark":
+        try:
+            payload = run_sqlite_fts_benchmark(
+                output_dir=Path(args.output_dir).expanduser().resolve(),
+                record_count=args.record_count,
+                keyword=args.keyword,
+                query_iterations=args.query_iterations,
+                hit_every=args.hit_every,
+                overwrite=args.overwrite,
+            )
+        except (SqliteFtsBenchmarkError, OSError, sqlite3.Error) as exc:
+            parser.error(str(exc))
+        if args.json:
+            print(json.dumps(payload, ensure_ascii=False, indent=2))
+        else:
+            metrics = payload["metrics"]
+            print(f"Saved SQLite FTS benchmark JSON: {payload['outputs']['json']}")
+            print(f"Saved SQLite FTS benchmark report: {payload['outputs']['markdown']}")
+            print(
+                "SQLite FTS: "
+                f"{metrics['record_count']} rows, query p95 {metrics['query_p95_seconds']}s, "
+                f"expected hits {metrics['expected_hit_count']}"
+            )
+        return 0
+
+    if args.command == "known-answer-qc":
+        try:
+            payload = run_known_answer_qc(
+                manifest_path=Path(args.manifest).expanduser().resolve(),
+                trusted_manifest_path=Path(args.trusted_manifest).expanduser().resolve() if args.trusted_manifest else None,
+                output_dir=Path(args.output_dir).expanduser().resolve(),
+                overwrite=args.overwrite,
+            )
+        except (ValidationError, OSError, json.JSONDecodeError) as exc:
+            parser.error(str(exc))
+        if args.json:
+            print(json.dumps(payload, ensure_ascii=False, indent=2))
+        else:
+            print(f"Saved known-answer QC JSON: {payload['outputs']['json']}")
+            print(f"Saved known-answer QC report: {payload['outputs']['markdown']}")
+            print(f"Status: {payload['summary']['status']}  Datasets: {payload['summary']['dataset_count']}")
+        return 0
+
+    if args.command == "sqlite-wal-preview":
+        try:
+            payload = build_sqlite_wal_preview(
+                database_path=Path(args.database).expanduser().resolve(),
+                output_dir=Path(args.output_dir).expanduser().resolve(),
+                max_frames=args.max_frames,
+                preferred_trusted_tool=args.preferred_trusted_tool,
+                trusted_tool_timeout_seconds=args.trusted_tool_timeout_seconds,
+            )
+        except (SqliteWalPreviewError, OSError, ValueError) as exc:
+            parser.error(str(exc))
+        if args.json:
+            print(json.dumps(payload, ensure_ascii=False, indent=2))
+        else:
+            print(f"Saved SQLite WAL preview JSON: {payload['outputs']['json']}")
+            print(f"Saved SQLite WAL preview report: {payload['outputs']['markdown']}")
+            print(f"WAL status: {payload['wal']['status']}")
         return 0
 
     if args.command == "validation":
@@ -4170,6 +4365,25 @@ def main(argv=None) -> int:
                     if isinstance(item, dict):
                         print(f"- {item.get('id')}: {item.get('title')}")
         return 1 if args.strict and not payload["summary"]["strict_pass"] else 0
+
+    if args.command == "email-external-parse":
+        try:
+            payload = run_email_external_parse(
+                source_path=Path(args.source).expanduser().resolve(),
+                output_dir=Path(args.output_dir).expanduser().resolve(),
+                preferred_tool=args.preferred_tool,
+                timeout_seconds=args.timeout_seconds,
+                overwrite=args.overwrite,
+            )
+        except (EmailExternalParserError, OSError) as exc:
+            parser.error(str(exc))
+        if args.json:
+            print(json.dumps(payload, ensure_ascii=False, indent=2))
+        else:
+            print(f"Saved email external parser JSON: {payload['outputs']['json']}")
+            print(f"Saved email external parser report: {payload['outputs']['markdown']}")
+            print(f"Status: {payload['status']}  Export files: {payload['summary']['export_file_count']}")
+        return 1 if payload["status"] == "failed" else 0
 
     root = Path(args.root).expanduser().resolve()
     input_root = resolve_input_root(root, kind=getattr(args, "input_kind", None))
