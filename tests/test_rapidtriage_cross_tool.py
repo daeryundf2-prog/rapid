@@ -7,8 +7,10 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from rapidtriage.cli import main
+from rapidtriage.core.cross_tool import build_cross_tool_validation_report
 
 
 class RapidTriageCrossToolTests(unittest.TestCase):
@@ -211,6 +213,74 @@ class RapidTriageCrossToolTests(unittest.TestCase):
             self.assertEqual(state_diff["mismatch_count"], 1)
             self.assertEqual(state_diff["mismatch_samples"][0]["field"], "transition")
             self.assertFalse(payload["cross_tool_validation_assessment"]["ready_for_validated_gate"])
+
+    def test_cross_tool_validate_blocks_duplicate_record_keys(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            rapid = root / "rapid-evtx.json"
+            reference = root / "evtxecmd.csv"
+            rapid.write_text(
+                json.dumps(
+                    {
+                        "events": [
+                            {"EventRecordID": 42, "EventID": 4624, "Provider": "Microsoft-Windows-Security-Auditing", "Channel": "Security"},
+                            {"EventRecordID": 42, "EventID": 4624, "Provider": "Microsoft-Windows-Security-Auditing", "Channel": "Security"},
+                        ]
+                    }
+                ),
+                encoding="utf-8",
+            )
+            reference.write_text(
+                "EventRecordID,EventID,Provider,Channel\n"
+                "42,4624,Microsoft-Windows-Security-Auditing,Security\n",
+                encoding="utf-8",
+            )
+
+            payload = build_cross_tool_validation_report(
+                rapid_output=rapid,
+                reference_outputs={"evtxecmd": reference},
+                min_overlap=1.0,
+                backlog_items=[1],
+            )
+
+        comparison = payload["comparisons"][0]
+        self.assertEqual(comparison["status"], "failed")
+        self.assertIn("rapid-output-duplicate-record-keys", comparison["input_quality"]["blockers"])
+        self.assertGreater(comparison["input_quality"]["rapid_duplicate_key_count"], 0)
+        assessment = payload["cross_tool_validation_assessment"]
+        self.assertFalse(assessment["ready_for_validated_gate"])
+        self.assertIn("trusted-tool-input-quality-clean-required", assessment["commercial_grade_blockers"])
+
+    def test_cross_tool_validate_blocks_row_cap_truncation(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            rapid = root / "rapid-evtx.csv"
+            reference = root / "evtxecmd.csv"
+            text = (
+                "EventRecordID,EventID,Provider,Channel\n"
+                "1,4624,Microsoft-Windows-Security-Auditing,Security\n"
+                "2,4624,Microsoft-Windows-Security-Auditing,Security\n"
+                "3,4624,Microsoft-Windows-Security-Auditing,Security\n"
+                "4,4624,Microsoft-Windows-Security-Auditing,Security\n"
+            )
+            rapid.write_text(text, encoding="utf-8")
+            reference.write_text(text, encoding="utf-8")
+
+            with patch("rapidtriage.core.cross_tool.MAX_ROWS_PER_TOOL", 3):
+                payload = build_cross_tool_validation_report(
+                    rapid_output=rapid,
+                    reference_outputs={"evtxecmd": reference},
+                    min_overlap=1.0,
+                    backlog_items=[1],
+                )
+
+        comparison = payload["comparisons"][0]
+        self.assertEqual(comparison["status"], "failed")
+        self.assertTrue(comparison["input_quality"]["rapid_truncated"])
+        self.assertTrue(comparison["input_quality"]["reference_truncated"])
+        self.assertIn("rapid-output-row-cap-truncated", comparison["input_quality"]["blockers"])
+        self.assertIn("reference-output-row-cap-truncated", comparison["input_quality"]["blockers"])
+        self.assertIn("input quality", payload["operator_guidance"][0])
 
     def test_run_attach_validation_diff_registers_usn_state_replay_output(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:

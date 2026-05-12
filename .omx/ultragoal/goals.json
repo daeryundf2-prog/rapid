@@ -1,7 +1,7 @@
 {
   "version": 1,
   "createdAt": "2026-05-12T11:50:50.150Z",
-  "updatedAt": "2026-05-12T12:19:22.798Z",
+  "updatedAt": "2026-05-12T12:47:31.863Z",
   "briefPath": ".omx/ultragoal/brief.md",
   "goalsPath": ".omx/ultragoal/goals.json",
   "ledgerPath": ".omx/ultragoal/ledger.jsonl",
@@ -14,7 +14,7 @@
       "status": "in_progress",
       "attempt": 1,
       "createdAt": "2026-05-12T11:50:50.150Z",
-      "updatedAt": "2026-05-12T12:19:22.798Z",
+      "updatedAt": "2026-05-12T12:47:31.863Z",
       "startedAt": "2026-05-12T11:51:02.298Z"
     }
   ],

@@ -135,7 +135,12 @@ from .core.sqlite_wal import SqliteWalPreviewError, build_sqlite_wal_preview
 from .core.timeline import TimelineError, build_timeline_report, run_timeline
 from .core.timeline_export import TimelineExportError, build_unified_timeline_export
 from .core.validation import ValidationError, build_validation_package
-from .core.validation_diff_runners import build_validation_diff_runner_matrix, write_validation_diff_runner_matrix
+from .core.validation_diff_runners import (
+    VERSION_PROBE_TIMEOUT_SECONDS,
+    build_tool_search_path,
+    build_validation_diff_runner_matrix,
+    write_validation_diff_runner_matrix,
+)
 from .core.validation_final_qc import build_final_qc_execution_report, write_final_qc_execution_report
 from .core.vsc import VscCompareError, compare_vsc_snapshots, discover_vsc_snapshot_roots, extract_vsc_changes
 from .core.worker import RustWorkerClient, WorkerError
@@ -1359,6 +1364,23 @@ def build_parser() -> argparse.ArgumentParser:
         description="Build a machine-readable public corpus and trusted-tool diff runner matrix for EVTX, Registry, NTFS, and ESE validation",
     )
     validation_diff_runners.add_argument("--output", help="Optional JSON output path")
+    validation_diff_runners.add_argument(
+        "--search-path",
+        action="append",
+        default=[],
+        help="Additional trusted-tool search path to prepend; repeat or separate directories with the OS path separator",
+    )
+    validation_diff_runners.add_argument(
+        "--probe-versions",
+        action="store_true",
+        help="Run detected trusted-tool binaries with bounded version probes and capture output hashes",
+    )
+    validation_diff_runners.add_argument(
+        "--version-timeout-seconds",
+        type=float,
+        default=VERSION_PROBE_TIMEOUT_SECONDS,
+        help="Timeout per trusted-tool version probe when --probe-versions is set",
+    )
     validation_diff_runners.add_argument("--json", action="store_true", help="Print machine-readable JSON")
 
     final_qc_report = sub.add_parser(
@@ -2859,7 +2881,11 @@ def main(argv=None) -> int:
         return 0
 
     if args.command == "validation-diff-runners":
-        payload = build_validation_diff_runner_matrix()
+        payload = build_validation_diff_runner_matrix(
+            search_path=build_tool_search_path(args.search_path),
+            probe_versions=args.probe_versions,
+            version_probe_timeout_seconds=max(float(args.version_timeout_seconds), 0.1),
+        )
         if args.output:
             payload["output_manifest"] = write_validation_diff_runner_matrix(
                 payload,

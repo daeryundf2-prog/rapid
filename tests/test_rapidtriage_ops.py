@@ -940,6 +940,8 @@ class RapidTriageOpsTests(unittest.TestCase):
             self.assertEqual(len(payload["matrix_hash"]), 64)
             self.assertEqual(payload["summary"]["runner_group_count"], 5)
             self.assertEqual(payload["summary"]["trusted_tool_count"], 13)
+            self.assertFalse(payload["summary"]["version_probe_enabled"])
+            self.assertEqual(payload["summary"]["version_captured_count"], 0)
             self.assertEqual(payload["output_manifest"]["bytes"], output.stat().st_size)
             groups = {group["item_number"]: group for group in payload["runner_groups"]}
             self.assertIn("evtx", groups[77]["artifact_family"])
@@ -948,6 +950,41 @@ class RapidTriageOpsTests(unittest.TestCase):
             self.assertIn("ese", groups[80]["artifact_family"])
             self.assertIn("execution-user-activity", groups[81]["artifact_family"])
             self.assertIn("--tool-version", groups[77]["required_cross_tool_metadata"])
+            self.assertEqual(groups[77]["trusted_tools"][0]["version_probe"]["status"], "not-run")
+
+    def test_validation_diff_runners_can_probe_versions_from_extra_search_path(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            tool_dir = Path(tmp_dir)
+            evtxecmd = tool_dir / "EvtxECmd"
+            evtxecmd.write_text("#!/bin/sh\nprintf 'EvtxECmd 1.2.3\\n'\n", encoding="utf-8")
+            evtxecmd.chmod(0o755)
+            stdout = io.StringIO()
+
+            with contextlib.redirect_stdout(stdout):
+                exit_code = main(
+                    [
+                        "validation-diff-runners",
+                        "--search-path",
+                        str(tool_dir),
+                        "--probe-versions",
+                        "--version-timeout-seconds",
+                        "1",
+                        "--json",
+                    ]
+                )
+
+            self.assertEqual(exit_code, 0)
+            payload = json.loads(stdout.getvalue())
+            self.assertTrue(payload["summary"]["version_probe_enabled"])
+            self.assertGreaterEqual(payload["summary"]["available_tool_count"], 1)
+            self.assertGreaterEqual(payload["summary"]["version_captured_count"], 1)
+            evtx_group = next(group for group in payload["runner_groups"] if group["artifact_family"] == "evtx")
+            evtx_tool = next(tool for tool in evtx_group["trusted_tools"] if tool["name"] == "EvtxECmd")
+            self.assertTrue(evtx_tool["available"])
+            self.assertEqual(evtx_tool["resolved_path"], str(evtxecmd))
+            self.assertEqual(evtx_tool["version_probe"]["status"], "captured")
+            self.assertIn("EvtxECmd 1.2.3", evtx_tool["version_probe"]["output_preview"])
+            self.assertEqual(len(evtx_tool["version_probe"]["output_sha256"]), 64)
 
     def test_final_qc_report_command_hashes_attached_evidence(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:

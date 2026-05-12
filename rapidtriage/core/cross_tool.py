@@ -466,17 +466,22 @@ def load_tool_dataset(name: str, path: Path) -> dict[str, object]:
     path = path.expanduser().resolve()
     if not path.is_file():
         raise CrossToolValidationError(f"{name} output not found: {path}")
-    rows = list(iter_rows(path, max_rows=MAX_ROWS_PER_TOOL))
+    sampled_rows = list(iter_rows(path, max_rows=MAX_ROWS_PER_TOOL + 1))
+    truncated = len(sampled_rows) > MAX_ROWS_PER_TOOL
+    rows = sampled_rows[:MAX_ROWS_PER_TOOL]
     keys = sorted({key for row in rows for key in candidate_keys(row)})
+    key_quality = key_quality_profile(rows)
     return {
         "name": name,
         "path": str(path),
         "format": infer_format(path),
         "file_integrity": file_integrity(path),
         "row_count": len(rows),
-        "truncated": len(rows) >= MAX_ROWS_PER_TOOL,
+        "truncated": truncated,
+        "row_cap": MAX_ROWS_PER_TOOL,
         "key_count": len(keys),
         "keys": keys[:5000],
+        "key_quality": key_quality,
         "sample_rows": rows[:5],
         "record_field_index": record_field_index(rows),
         "registry_field_index": registry_field_index(rows),
@@ -485,6 +490,38 @@ def load_tool_dataset(name: str, path: Path) -> dict[str, object]:
         "usn_state_replay_field_index": usn_state_replay_field_index(rows),
         "ese_field_index": ese_field_index(rows),
     }
+
+
+def key_quality_profile(rows: Sequence[Mapping[str, object]]) -> dict[str, object]:
+    key_counts: dict[str, int] = {}
+    keyed_row_count = 0
+    for row in rows:
+        identity_key = primary_identity_key(row)
+        if identity_key:
+            keyed_row_count += 1
+            key_counts[identity_key] = key_counts.get(identity_key, 0) + 1
+    duplicate_items = sorted(
+        (
+            {"key": key, "row_count": count}
+            for key, count in key_counts.items()
+            if count > 1
+        ),
+        key=lambda item: (-int(item["row_count"]), str(item["key"])),
+    )
+    return {
+        "profile_version": "cross-tool-key-quality-v1",
+        "row_count": len(rows),
+        "keyed_row_count": keyed_row_count,
+        "unkeyed_row_count": max(len(rows) - keyed_row_count, 0),
+        "unique_key_count": len(key_counts),
+        "duplicate_key_count": len(duplicate_items),
+        "duplicate_key_samples": duplicate_items[:50],
+    }
+
+
+def primary_identity_key(row: Mapping[str, object]) -> str:
+    keys = candidate_keys(row)
+    return keys[0] if keys else ""
 
 
 def iter_rows(path: Path, *, max_rows: int) -> Iterable[dict[str, object]]:
@@ -685,6 +722,14 @@ def compare_datasets(
     denominator = max(len(reference_keys), 1)
     overlap_ratio = round(len(overlap) / denominator, 4)
     row_count_delta = int(rapid_dataset.get("row_count", 0)) - int(reference_dataset.get("row_count", 0))
+    rapid_quality = rapid_dataset.get("key_quality") if isinstance(rapid_dataset.get("key_quality"), Mapping) else {}
+    reference_quality = reference_dataset.get("key_quality") if isinstance(reference_dataset.get("key_quality"), Mapping) else {}
+    input_quality_blockers = input_quality_blockers_for_comparison(
+        rapid_dataset=rapid_dataset,
+        reference_dataset=reference_dataset,
+        rapid_quality=rapid_quality,
+        reference_quality=reference_quality,
+    )
     status = "pass"
     if reference_keys and overlap_ratio < min_overlap:
         status = "failed"
@@ -708,6 +753,8 @@ def compare_datasets(
         status = "failed"
     if ese_field_comparison["mismatch_count"]:
         status = "failed"
+    if input_quality_blockers:
+        status = "failed"
     return {
         "reference_name": reference_dataset.get("name", ""),
         "status": status,
@@ -720,6 +767,23 @@ def compare_datasets(
         "overlap_ratio": overlap_ratio,
         "missing_in_rapid_sample": missing_in_rapid[:50],
         "only_in_rapid_sample": only_in_rapid[:50],
+        "input_quality": {
+            "rapid_truncated": bool(rapid_dataset.get("truncated")),
+            "reference_truncated": bool(reference_dataset.get("truncated")),
+            "rapid_row_cap": int(rapid_dataset.get("row_cap") or MAX_ROWS_PER_TOOL),
+            "reference_row_cap": int(reference_dataset.get("row_cap") or MAX_ROWS_PER_TOOL),
+            "rapid_duplicate_key_count": int(rapid_quality.get("duplicate_key_count") or 0),
+            "reference_duplicate_key_count": int(reference_quality.get("duplicate_key_count") or 0),
+            "rapid_unkeyed_row_count": int(rapid_quality.get("unkeyed_row_count") or 0),
+            "reference_unkeyed_row_count": int(reference_quality.get("unkeyed_row_count") or 0),
+            "rapid_duplicate_key_samples": rapid_quality.get("duplicate_key_samples", [])[:10]
+            if isinstance(rapid_quality.get("duplicate_key_samples"), list)
+            else [],
+            "reference_duplicate_key_samples": reference_quality.get("duplicate_key_samples", [])[:10]
+            if isinstance(reference_quality.get("duplicate_key_samples"), list)
+            else [],
+            "blockers": input_quality_blockers,
+        },
         "record_field_comparison": field_comparison,
         "registry_field_comparison": registry_field_comparison,
         "mft_field_comparison": mft_field_comparison,
@@ -728,6 +792,29 @@ def compare_datasets(
         "ese_field_comparison": ese_field_comparison,
         "release_gate": "review-required" if status != "pass" else "comparison-passed",
     }
+
+
+def input_quality_blockers_for_comparison(
+    *,
+    rapid_dataset: Mapping[str, object],
+    reference_dataset: Mapping[str, object],
+    rapid_quality: Mapping[str, object],
+    reference_quality: Mapping[str, object],
+) -> list[str]:
+    blockers: list[str] = []
+    if bool(rapid_dataset.get("truncated")):
+        blockers.append("rapid-output-row-cap-truncated")
+    if bool(reference_dataset.get("truncated")):
+        blockers.append("reference-output-row-cap-truncated")
+    if int(rapid_quality.get("duplicate_key_count") or 0) > 0:
+        blockers.append("rapid-output-duplicate-record-keys")
+    if int(reference_quality.get("duplicate_key_count") or 0) > 0:
+        blockers.append("reference-output-duplicate-record-keys")
+    if int(rapid_quality.get("unkeyed_row_count") or 0) > 0:
+        blockers.append("rapid-output-unkeyed-rows")
+    if int(reference_quality.get("unkeyed_row_count") or 0) > 0:
+        blockers.append("reference-output-unkeyed-rows")
+    return blockers
 
 
 def record_field_index(rows: Sequence[Mapping[str, object]]) -> dict[str, dict[str, str]]:
@@ -1514,6 +1601,12 @@ def compare_ntfs_field_indexes(
 
 
 def build_operator_guidance(comparisons: list[Mapping[str, object]]) -> list[str]:
+    if any(comparison_has_input_quality_blockers(item) for item in comparisons):
+        return [
+            "Fix cross-tool input quality before trusting this validation: duplicate keys or row-cap truncation can hide parser loss.",
+            "Re-export the affected RapidTriage/reference rows with stable unique identifiers and split files or raise the validation cap for large corpora.",
+            "Do not use a comparison with input-quality blockers for report-grade or commercial-grade claims.",
+        ]
     if all(item.get("status") == "pass" for item in comparisons):
         return ["Cross-tool row/key overlap met the configured threshold."]
     return [
@@ -1521,6 +1614,12 @@ def build_operator_guidance(comparisons: list[Mapping[str, object]]) -> list[str
         "Low overlap can indicate parser loss, schema mismatch, wrong evidence root, or incompatible external-tool export settings.",
         "Attach this report with parser version, external tool version, and source evidence hash when validating high-value artifacts.",
     ]
+
+
+def comparison_has_input_quality_blockers(comparison: Mapping[str, object]) -> bool:
+    input_quality = comparison.get("input_quality") if isinstance(comparison.get("input_quality"), Mapping) else {}
+    blockers = input_quality.get("blockers")
+    return isinstance(blockers, list) and bool(blockers)
 
 
 def build_validation_datasets(
@@ -1603,6 +1702,10 @@ def cross_tool_validation_assessment(
         blockers.append("external-tool-version-and-command-capture-required")
     if not independent_review_attached:
         blockers.append("independent-reviewer-signoff-required")
+    if status != "pass":
+        blockers.append("trusted-tool-diff-pass-required")
+    if any(comparison_has_input_quality_blockers(item) for item in comparisons):
+        blockers.append("trusted-tool-input-quality-clean-required")
     ready_for_commercial_grade = (
         bool(backlog_items)
         and status == "pass"
@@ -1710,6 +1813,7 @@ def build_trusted_tool_diff_manifest(
                 "reference_row_count": int(comparison.get("reference_row_count") or 0),
                 "overlap_ratio": float(comparison.get("overlap_ratio") or 0.0),
                 "overlap_count": int(comparison.get("overlap_count") or 0),
+                "input_quality": comparison.get("input_quality") if isinstance(comparison.get("input_quality"), Mapping) else {},
                 "field_diffs": field_blocks,
             }
         )
@@ -1793,6 +1897,8 @@ def trusted_tool_diff_functional_profile(
         failed_checks.append("external-tool-command-not-attached")
     if independent_review_count == 0:
         failed_checks.append("independent-review-not-attached")
+    if any(comparison_has_input_quality_blockers(item) for item in comparisons):
+        failed_checks.append("trusted-tool-input-quality-clean-required")
     overlap_ratios = [float(item.get("overlap_ratio") or 0.0) for item in comparisons]
     return {
         "item_number": 37,
@@ -1829,6 +1935,7 @@ def trusted_tool_diff_functional_profile(
             "ese-srum-row-field-diff-supported",
             "ese-windows-edb-row-field-diff-supported",
             "ese-page-offset-deleted-state-diff-supported",
+            "trusted-tool-input-quality-gate-supported",
         ],
         "failed_validation_check_ids": failed_checks,
         "reportability_decision": {

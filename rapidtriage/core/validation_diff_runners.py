@@ -2,9 +2,22 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
+import shlex
 import shutil
+import subprocess
 from pathlib import Path
 from typing import Mapping, Sequence
+
+
+VERSION_PROBE_TIMEOUT_SECONDS = 3.0
+VERSION_PROBE_ARGUMENTS: tuple[tuple[str, ...], ...] = (
+    ("--version",),
+    ("-V",),
+    ("version",),
+    ("-h",),
+)
+MAX_VERSION_PROBE_OUTPUT_CHARS = 2000
 
 
 PUBLIC_CORPUS_ROWS: tuple[dict[str, object], ...] = (
@@ -201,13 +214,34 @@ RUNNER_GROUPS: tuple[dict[str, object], ...] = (
 )
 
 
-def build_validation_diff_runner_matrix(*, search_path: str | None = None) -> dict[str, object]:
-    runner_groups = [_runner_group_with_preflight(group, search_path=search_path) for group in RUNNER_GROUPS]
+def build_validation_diff_runner_matrix(
+    *,
+    search_path: str | None = None,
+    probe_versions: bool = False,
+    version_probe_timeout_seconds: float = VERSION_PROBE_TIMEOUT_SECONDS,
+) -> dict[str, object]:
+    runner_groups = [
+        _runner_group_with_preflight(
+            group,
+            search_path=search_path,
+            probe_versions=probe_versions,
+            version_probe_timeout_seconds=version_probe_timeout_seconds,
+        )
+        for group in RUNNER_GROUPS
+    ]
     installed_tool_count = sum(
         1
         for group in runner_groups
         for tool in group["trusted_tools"]
         if isinstance(tool, Mapping) and tool.get("available")
+    )
+    version_captured_count = sum(
+        1
+        for group in runner_groups
+        for tool in group["trusted_tools"]
+        if isinstance(tool, Mapping)
+        and isinstance(tool.get("version_probe"), Mapping)
+        and tool["version_probe"].get("status") == "captured"
     )
     total_tool_count = sum(len(group["trusted_tools"]) for group in runner_groups)
     core = {
@@ -220,6 +254,8 @@ def build_validation_diff_runner_matrix(*, search_path: str | None = None) -> di
             "trusted_tool_count": total_tool_count,
             "available_tool_count": installed_tool_count,
             "missing_tool_count": total_tool_count - installed_tool_count,
+            "version_probe_enabled": probe_versions,
+            "version_captured_count": version_captured_count,
             "all_runner_groups_defined": all(group.get("trusted_tools") for group in runner_groups),
             "public_corpus_registry_defined": bool(PUBLIC_CORPUS_ROWS),
         },
@@ -248,17 +284,29 @@ def write_validation_diff_runner_matrix(payload: Mapping[str, object], output: P
     }
 
 
-def _runner_group_with_preflight(group: Mapping[str, object], *, search_path: str | None) -> dict[str, object]:
+def _runner_group_with_preflight(
+    group: Mapping[str, object],
+    *,
+    search_path: str | None,
+    probe_versions: bool,
+    version_probe_timeout_seconds: float,
+) -> dict[str, object]:
     tools = []
     for tool in group.get("trusted_tools") or []:
         if not isinstance(tool, Mapping):
             continue
         found_path = _first_binary(tool.get("binary_candidates") or (), search_path=search_path)
+        version_probe = _version_probe_manifest(
+            found_path,
+            probe_versions=probe_versions,
+            timeout_seconds=version_probe_timeout_seconds,
+        )
         tools.append(
             {
                 **dict(tool),
                 "available": bool(found_path),
                 "resolved_path": found_path,
+                "version_probe": version_probe,
                 "version_capture_required": True,
                 "command_capture_required": True,
             }
@@ -287,3 +335,125 @@ def _first_binary(candidates: Sequence[object], *, search_path: str | None) -> s
         if resolved:
             return resolved
     return ""
+
+
+def build_tool_search_path(extra_paths: Sequence[str] | None, *, base_path: str | None = None) -> str | None:
+    """Prepend operator-supplied tool directories without hiding the existing PATH."""
+    if not extra_paths:
+        return base_path
+    segments: list[str] = []
+    for raw_value in extra_paths:
+        for segment in str(raw_value).split(os.pathsep):
+            if segment:
+                segments.append(str(Path(segment).expanduser()))
+    base = os.environ.get("PATH", "") if base_path is None else base_path
+    if base:
+        segments.append(base)
+    return os.pathsep.join(segments) if segments else base_path
+
+
+def _version_probe_manifest(
+    binary_path: str,
+    *,
+    probe_versions: bool,
+    timeout_seconds: float,
+) -> dict[str, object]:
+    if not binary_path:
+        return {
+            "status": "not-run",
+            "reason": "binary-not-found",
+            "candidate_commands": [],
+        }
+    candidate_commands = [_format_command([binary_path, *arguments]) for arguments in VERSION_PROBE_ARGUMENTS]
+    if not probe_versions:
+        return {
+            "status": "not-run",
+            "reason": "probe-disabled",
+            "candidate_commands": candidate_commands,
+            "timeout_seconds": timeout_seconds,
+        }
+    return _probe_tool_version(binary_path, timeout_seconds=timeout_seconds, candidate_commands=candidate_commands)
+
+
+def _probe_tool_version(
+    binary_path: str,
+    *,
+    timeout_seconds: float,
+    candidate_commands: Sequence[str],
+) -> dict[str, object]:
+    attempts: list[dict[str, object]] = []
+    for arguments in VERSION_PROBE_ARGUMENTS:
+        command = [binary_path, *arguments]
+        command_text = _format_command(command)
+        try:
+            completed = subprocess.run(
+                command,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                timeout=timeout_seconds,
+                check=False,
+            )
+        except subprocess.TimeoutExpired as exc:
+            output = (exc.stdout or "") if isinstance(exc.stdout, str) else ""
+            attempts.append(
+                {
+                    "command": command_text,
+                    "status": "timeout",
+                    "timeout_seconds": timeout_seconds,
+                    "output_preview": _output_preview(output),
+                    "output_sha256": _output_hash(output),
+                }
+            )
+            continue
+        except OSError as exc:
+            attempts.append(
+                {
+                    "command": command_text,
+                    "status": "error",
+                    "error": str(exc),
+                }
+            )
+            continue
+        output = completed.stdout or ""
+        attempt = {
+            "command": command_text,
+            "status": "completed",
+            "exit_code": completed.returncode,
+            "output_preview": _output_preview(output),
+            "output_sha256": _output_hash(output),
+        }
+        attempts.append(attempt)
+        if completed.returncode == 0 and output.strip():
+            return {
+                "status": "captured",
+                "command": command_text,
+                "exit_code": completed.returncode,
+                "output_preview": _output_preview(output),
+                "output_sha256": _output_hash(output),
+                "attempt_count": len(attempts),
+                "timeout_seconds": timeout_seconds,
+                "candidate_commands": list(candidate_commands),
+            }
+    return {
+        "status": "failed",
+        "reason": "no-version-output-captured",
+        "attempt_count": len(attempts),
+        "attempts": attempts,
+        "timeout_seconds": timeout_seconds,
+        "candidate_commands": list(candidate_commands),
+    }
+
+
+def _format_command(command: Sequence[str]) -> str:
+    return " ".join(shlex.quote(str(part)) for part in command)
+
+
+def _output_preview(output: str) -> str:
+    return output[:MAX_VERSION_PROBE_OUTPUT_CHARS]
+
+
+def _output_hash(output: str) -> str:
+    return hashlib.sha256(output.encode("utf-8", errors="replace")).hexdigest()
