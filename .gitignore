@@ -6,6 +6,7 @@
 .rapidtriage-smoke-venv/
 rapidtriage-windows-smoke/
 rapidtriage-macos-linux-smoke/
+qc-runs/
 __pycache__/
 *.pyc
 engines/rust/target/

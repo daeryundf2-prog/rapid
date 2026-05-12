@@ -131,6 +131,7 @@ rapidtriage commercial-readiness --validation-package docs/validation/rapidtriag
 For QC-prep and large-case validation evidence, use the helper commands below. These commands do not make a parser commercial-grade by themselves; they create reproducible evidence, blocker records, and trusted-diff handoff artifacts that a reviewer can attach to a case or release QC package.
 
 ```bash
+rapidtriage macos-live-smoke --output-dir ./qc/macos-live --overwrite --json
 rapidtriage e01-hash ./case.E01 --output-dir ./qc/e01-hash --json
 rapidtriage known-answer-qc --manifest ./known-answer.json --trusted-manifest ./trusted-known-answer.json --output-dir ./qc/known-answer --json
 rapidtriage sqlite-fts-benchmark --output-dir ./qc/fts-100k --record-count 100000 --json
@@ -138,6 +139,8 @@ rapidtriage sqlite-wal-preview ./History --output-dir ./qc/sqlite-wal --json
 rapidtriage email-external-parse ./mailbox.pst --output-dir ./qc/email-external --json
 rapidtriage browser-stress --base-url http://127.0.0.1:8765 --output-dir ./qc/browser-stress --json
 ```
+
+`macos-live-smoke` is designed for the analyst's current Mac. It writes a macOS collect-plan summary, redacted live artifact counts, a small triage benchmark, SQLite FTS benchmark evidence, and validation-tool availability. By default it stores path hashes and counts only; it does not print browser history URLs, quarantine URLs, or TCC client paths. Use `--include-path-details` only for authorized local debugging.
 
 Use `--overwrite` only for intentionally repeated QC runs. The overwrite paths now clear stale parser exports, SQLite benchmark sidecars, and SQLite WAL safe-copy artifacts before writing fresh evidence, so reruns do not accidentally preserve old parser output as if it came from the current source.
 

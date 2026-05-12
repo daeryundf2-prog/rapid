@@ -41,7 +41,10 @@ class RapidTriageSqliteFtsBenchmarkTests(unittest.TestCase):
         self.assertEqual(payload["profile_version"], "sqlite-fts-synthetic-benchmark-v1")
         self.assertEqual(payload["metrics"]["record_count"], 250)
         self.assertEqual(payload["metrics"]["expected_hit_count"], 50)
-        self.assertGreater(payload["metrics"]["returned_hit_count"], 0)
+        self.assertEqual(payload["metrics"]["returned_hit_count"], 50)
+        self.assertEqual(payload["metrics"]["result_window_count"], 50)
+        self.assertFalse(payload["metrics"]["truncated_by_result_window"])
+        self.assertTrue(payload["summary"]["expected_counts_match"])
         self.assertEqual(payload["table_counts"]["benchmark_document"], 250)
         self.assertEqual(payload["query_plan_profile"]["profile_version"], "sqlite-fts-query-plan-profile-v1")
         self.assertEqual(payload["checkpoint_profile"]["mode"], "TRUNCATE")
@@ -103,6 +106,23 @@ class RapidTriageSqliteFtsBenchmarkTests(unittest.TestCase):
         self.assertEqual(exit_code, 0)
         self.assertEqual(payload["metrics"]["record_count"], 200)
         self.assertEqual(payload["metrics"]["expected_hit_count"], 50)
+        self.assertEqual(payload["metrics"]["returned_hit_count"], 50)
+
+    def test_sqlite_fts_benchmark_separates_total_hits_from_result_window(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            payload = run_sqlite_fts_benchmark(
+                output_dir=Path(temp),
+                record_count=2000,
+                keyword="needle",
+                query_iterations=1,
+                hit_every=10,
+            )
+
+        self.assertEqual(payload["metrics"]["expected_hit_count"], 200)
+        self.assertEqual(payload["metrics"]["returned_hit_count"], 200)
+        self.assertEqual(payload["metrics"]["result_window_count"], 100)
+        self.assertTrue(payload["metrics"]["truncated_by_result_window"])
+        self.assertTrue(payload["summary"]["expected_counts_match"])
 
 
 if __name__ == "__main__":

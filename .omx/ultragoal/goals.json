@@ -1,24 +1,23 @@
 {
   "version": 1,
-  "createdAt": "2026-05-12T11:12:19.609Z",
-  "updatedAt": "2026-05-12T11:32:27.998Z",
+  "createdAt": "2026-05-12T11:50:50.150Z",
+  "updatedAt": "2026-05-12T12:19:22.798Z",
   "briefPath": ".omx/ultragoal/brief.md",
   "goalsPath": ".omx/ultragoal/goals.json",
   "ledgerPath": ".omx/ultragoal/ledger.jsonl",
   "codexGoalMode": "aggregate",
   "goals": [
     {
-      "id": "G001-rapidforensic",
-      "title": "RapidForensic 전체 프로그램을 정적 분석, 테스트, 코드 리뷰 관점에서 검토하고 실제로 고칠 수 있는 결함을 수정...",
-      "objective": "RapidForensic 전체 프로그램을 정적 분석, 테스트, 코드 리뷰 관점에서 검토하고 실제로 고칠 수 있는 결함을 수정한다. 사용자 변경을 보존하고, 수정 후 검증 증거와 남은 리스크를 보고한다.",
-      "status": "complete",
+      "id": "G001-rapidforensic-windows-evtx-registry",
+      "title": "RapidForensic 큰 약점 보강: 핵심 Windows 포렌식 아티팩트 정확도(EVTX/Registry/MFT/USN/...",
+      "objective": "RapidForensic 큰 약점 보강: 핵심 Windows 포렌식 아티팩트 정확도(EVTX/Registry/MFT/USN/SRUM/Windows.edb), 대용량 성능/실측, 리뷰/GUI UX, 외부검증/known-answer/cross-tool evidence를 순차적으로 개선한다. 각 스토리는 실제 코드/테스트/문서/검증 산출물을 만들고, macOS에서 가능한 실제 테스트는 로컬에서 수행한다. 불가능한 외부 장비/상용 도구/독립기관 검증은 blocker로 기록하되 내부 구현 가능 작업을 계속 진행한다.",
+      "status": "in_progress",
       "attempt": 1,
-      "createdAt": "2026-05-12T11:12:19.609Z",
-      "updatedAt": "2026-05-12T11:32:27.998Z",
-      "startedAt": "2026-05-12T11:12:34.597Z",
-      "evidence": "Full program review/fix pass completed: stale QC artifact contamination fixed, destructive SQLite safe-copy guard added, CLI failure semantics tightened, user guide updated; 581 pytest tests passed, compileall/diff-check/CLI smokes passed, readiness score 90 with commercial claim false.",
-      "completedAt": "2026-05-12T11:32:27.998Z"
+      "createdAt": "2026-05-12T11:50:50.150Z",
+      "updatedAt": "2026-05-12T12:19:22.798Z",
+      "startedAt": "2026-05-12T11:51:02.298Z"
     }
   ],
-  "codexObjective": "Complete all ultragoal stories in .omx/ultragoal/goals.json: G001-rapidforensic RapidForensic 전체 프로그램을 정적 분석, 테스트, 코드 리뷰 관점에서 검토하고 실제로 고칠 수 있는 결함을 수정..."
+  "codexObjective": "Complete all ultragoal stories in .omx/ultragoal/goals.json: G001-rapidforensic-windows-evtx-registry RapidForensic 큰 약점 보강: 핵심 Windows 포렌식 아티팩트 정확도(EVTX/Registry/MFT/USN/...",
+  "activeGoalId": "G001-rapidforensic-windows-evtx-registry"
 }

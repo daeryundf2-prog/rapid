@@ -20,6 +20,7 @@ SQLITE_FTS_BENCHMARK_SCHEMA_VERSION = "sqlite-fts-benchmark-schema-v1"
 SQLITE_FTS_DEFAULT_RECORD_COUNT = 100_000
 SQLITE_FTS_DEFAULT_QUERY_ITERATIONS = 5
 SQLITE_FTS_DEFAULT_HIT_EVERY = 10
+SQLITE_FTS_DEFAULT_RESULT_WINDOW = 100
 
 
 class SqliteFtsBenchmarkError(ValueError):
@@ -71,21 +72,26 @@ def run_sqlite_fts_benchmark(
         optimize_seconds = time.perf_counter() - optimize_started
         query_plan = sqlite_fts_query_plan_profile(connection, normalized_keyword)
         query_samples = []
-        result_count = 0
+        total_hit_count = 0
+        result_window_count = 0
         for _ in range(query_iterations):
             sample_started = time.perf_counter()
+            total_hit_count = connection.execute(
+                "SELECT COUNT(*) FROM benchmark_fts WHERE benchmark_fts MATCH ?",
+                (normalized_keyword,),
+            ).fetchone()[0]
             rows = connection.execute(
                 """
                 SELECT rowid, title, source_path, rank
                 FROM benchmark_fts
                 WHERE benchmark_fts MATCH ?
                 ORDER BY rank
-                LIMIT 100
+                LIMIT ?
                 """,
-                (normalized_keyword,),
+                (normalized_keyword, SQLITE_FTS_DEFAULT_RESULT_WINDOW),
             ).fetchall()
             query_samples.append(time.perf_counter() - sample_started)
-            result_count = len(rows)
+            result_window_count = len(rows)
         checkpoint_rows = connection.execute("PRAGMA wal_checkpoint(TRUNCATE)").fetchall()
         table_counts = {
             "benchmark_document": connection.execute("SELECT COUNT(*) FROM benchmark_document").fetchone()[0],
@@ -98,7 +104,10 @@ def run_sqlite_fts_benchmark(
     metric_values = {
         "record_count": record_count,
         "expected_hit_count": expected_hits,
-        "returned_hit_count": result_count,
+        "returned_hit_count": total_hit_count,
+        "result_window_count": result_window_count,
+        "result_window_limit": SQLITE_FTS_DEFAULT_RESULT_WINDOW,
+        "truncated_by_result_window": total_hit_count > result_window_count,
         "ingest_seconds": ingest_seconds,
         "optimize_seconds": optimize_seconds,
         "query_p50_seconds": statistics.median(query_samples),
@@ -150,8 +159,11 @@ def run_sqlite_fts_benchmark(
         "summary": {
             "scale_label": scale_label(record_count),
             "expected_hit_count": expected_hits,
-            "returned_hit_count": result_count,
-            "expected_counts_match": expected_hits >= result_count > 0 if expected_hits else result_count == 0,
+            "returned_hit_count": total_hit_count,
+            "result_window_count": result_window_count,
+            "result_window_limit": SQLITE_FTS_DEFAULT_RESULT_WINDOW,
+            "truncated_by_result_window": total_hit_count > result_window_count,
+            "expected_counts_match": total_hit_count == expected_hits,
             "commercial_gap_ids": ["#53", "#74"],
             "commercial_grade_ready": record_count >= 1_000_000,
         },
@@ -290,6 +302,10 @@ def build_sqlite_fts_benchmark_proof_manifest(
         "query_plan_hash": query_plan["plan_hash"],
         "record_count": metrics["record_count"],
         "expected_hit_count": metrics["expected_hit_count"],
+        "returned_hit_count": metrics["returned_hit_count"],
+        "result_window_count": metrics["result_window_count"],
+        "result_window_limit": metrics["result_window_limit"],
+        "truncated_by_result_window": metrics["truncated_by_result_window"],
         "query_p95_seconds": metrics["query_p95_seconds"],
         "database_size_bytes": metrics["database_size_bytes"],
         "outputs": {
@@ -355,7 +371,9 @@ def render_sqlite_fts_benchmark_markdown(payload: dict[str, object]) -> str:
             "",
             f"- Records: {metrics['record_count']}",
             f"- Expected keyword hits: {metrics['expected_hit_count']}",
-            f"- Returned hits: {metrics['returned_hit_count']}",
+            f"- Total returned hits: {metrics['returned_hit_count']}",
+            f"- Result window hits: {metrics['result_window_count']} / {metrics['result_window_limit']}",
+            f"- Result window truncated: {metrics['truncated_by_result_window']}",
             f"- Ingest seconds: {metrics['ingest_seconds']}",
             f"- Query p50 seconds: {metrics['query_p50_seconds']}",
             f"- Query p95 seconds: {metrics['query_p95_seconds']}",

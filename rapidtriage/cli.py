@@ -102,6 +102,12 @@ from .core.keyword_packs import (
     resolve_keyword_packs,
 )
 from .core.known_answer_qc import run_known_answer_qc
+from .core.macos_live_smoke import (
+    DEFAULT_MACOS_SMOKE_BENCHMARK_FILES,
+    DEFAULT_MACOS_SMOKE_FTS_RECORDS,
+    MacOsLiveSmokeError,
+    run_macos_live_smoke,
+)
 from .core.kakaotalk import (
     DEFAULT_MEMORY_SQLITE_MAX_CARVE_BYTES,
     DEFAULT_MEMORY_SQLITE_MAX_HITS,
@@ -1219,6 +1225,24 @@ def build_parser() -> argparse.ArgumentParser:
     benchmark.add_argument("--overwrite", action="store_true", help="Allow writing into a non-empty benchmark output directory")
     benchmark.add_argument("--resume", action="store_true", help="Reuse valid benchmark run outputs when the input fingerprint is unchanged")
     benchmark.add_argument("--json", action="store_true", help="Print machine-readable JSON")
+
+    macos_live_smoke = sub.add_parser(
+        "macos-live-smoke",
+        help="Run redacted local macOS artifact, performance, and validation-tool smoke evidence",
+        description=(
+            "Run a safe macOS-local smoke pass: macOS collect-plan, redacted live artifact counts, "
+            "small triage benchmark, SQLite FTS benchmark, and external validation tool availability."
+        ),
+    )
+    macos_live_smoke.add_argument("--output-dir", required=True, help="Directory for macOS smoke JSON/Markdown and benchmark outputs")
+    macos_live_smoke.add_argument("--root", default="/", help="macOS evidence root for collect-plan (default: /)")
+    macos_live_smoke.add_argument("--home", help="User home to inspect for redacted live artifacts (default: current home)")
+    macos_live_smoke.add_argument("--benchmark-file-count", type=int, default=DEFAULT_MACOS_SMOKE_BENCHMARK_FILES, help="Synthetic triage benchmark file count")
+    macos_live_smoke.add_argument("--fts-record-count", type=int, default=DEFAULT_MACOS_SMOKE_FTS_RECORDS, help="Synthetic SQLite FTS benchmark row count")
+    macos_live_smoke.add_argument("--keyword", default=DEFAULT_BENCHMARK_KEYWORD, help="Keyword used in synthetic benchmark checks")
+    macos_live_smoke.add_argument("--include-path-details", action="store_true", help="Include raw local paths in smoke output; default stores hashes only")
+    macos_live_smoke.add_argument("--overwrite", action="store_true", help="Allow replacing smoke files under OUTPUT_DIR")
+    macos_live_smoke.add_argument("--json", action="store_true", help="Print machine-readable JSON")
 
     columnar_benchmark = sub.add_parser(
         "columnar-benchmark",
@@ -2619,6 +2643,32 @@ def main(argv=None) -> int:
                 "Ingest: "
                 f"{metrics['ingest_seconds']}s  Search p50: {metrics['search_p50_seconds']}s  "
                 f"Search p95: {metrics['search_p95_seconds']}s"
+            )
+        return 0
+
+    if args.command == "macos-live-smoke":
+        try:
+            payload = run_macos_live_smoke(
+                output_dir=Path(args.output_dir),
+                root=Path(args.root),
+                home=Path(args.home) if args.home else None,
+                benchmark_file_count=args.benchmark_file_count,
+                fts_record_count=args.fts_record_count,
+                keyword=args.keyword,
+                overwrite=args.overwrite,
+                include_path_details=args.include_path_details,
+            )
+        except (MacOsLiveSmokeError, BenchmarkError, SearchError, RunModeError, OSError, ValueError) as exc:
+            parser.error(str(exc))
+        if args.json:
+            print(json.dumps(payload, ensure_ascii=False, indent=2))
+        else:
+            summary = payload.get("summary", {})
+            print(f"Saved macOS live smoke JSON: {payload['outputs']['json']}")
+            print(f"Saved macOS live smoke report: {payload['outputs']['markdown']}")
+            print(
+                f"Local smoke score: {summary.get('local_smoke_score')} "
+                f"({summary.get('passed_count')}/{summary.get('check_count')} checks)"
             )
         return 0
 
