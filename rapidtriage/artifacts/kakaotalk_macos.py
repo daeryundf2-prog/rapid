@@ -1,9 +1,14 @@
 from __future__ import annotations
 
 import datetime as dt
+import base64
+import hashlib
 import os
+import plistlib
 import re
+import shutil
 import sqlite3
+import subprocess
 from pathlib import Path
 from typing import Iterable, Iterator, Mapping, Sequence
 
@@ -12,7 +17,7 @@ from ..core.submission import compute_hashes
 from .windows.common import build_forensic_review, open_sqlite_snapshot
 from .kakaotalk_windows import companion_files, inspect_sqlite_database
 
-PARSER_VERSION = "kakaotalk-macos-db-inventory-v1"
+PARSER_VERSION = "kakaotalk-macos-db-inventory-v2"
 KAKAO_MAC_MAX_FILES = 900
 KAKAO_MAC_MAX_SCANNED_FILES = 12_000
 KAKAO_MAC_MAX_DIRS = 1_500
@@ -32,8 +37,10 @@ KAKAO_MAC_CONTAINER_RELATIVE_ROOTS = (
     ("Data", "Library", "Application Support", "Kakao"),
     ("Data", "Documents"),
 )
-KAKAO_MAC_CHAT_TABLE_RE = re.compile(r"(?i)(chat|message|talk|log|channel|room)")
+KAKAO_MAC_CHAT_TABLE_RE = re.compile(r"(?i)(message|messages|chatlogs|chat_messages)")
+KAKAO_MAC_KNOWN_MESSAGE_TABLES = {"NTChatMessage", "chatLogs", "messages"}
 SAFE_SQL_NAME_RE = re.compile(r"[A-Za-z0-9_.$-]{1,128}")
+SHA512_HEX_RE = re.compile(r"^[a-fA-F0-9]{128}$")
 SKIP_USERS = {"shared", "guest", "daemon", "nobody"}
 KAKAO_MAC_SKIP_DIR_NAMES = {
     ".trash",
@@ -47,6 +54,10 @@ KAKAO_MAC_SKIP_DIR_NAMES = {
     "profileresource",
     "webkit",
 }
+EMPTY_ACCOUNT_SHA512 = (
+    "31bca02094eb78126a517b206a88c73cfa9ec6f704c7030d18212cace820f025f00bf0ea68dbf3f3a5436ca63b53bf7bf80ad8d5de7d8359d0b7fed9dbc3ab99"
+)
+SQLCIPHER_TIMEOUT_SECONDS = 6
 
 
 class KakaoTalkMacOsProvider:
@@ -213,7 +224,8 @@ def is_kakaotalk_macos_database_path(path: Path) -> bool:
 
 def collect_kakaotalk_macos_database(path: Path, *, root: Path) -> ArtifactRecord:
     sqlite_meta = inspect_sqlite_database(path)
-    sqlite_analysis = analyze_kakaotalk_macos_sqlite(path, sqlite_meta)
+    identity_context = build_kakaotalk_macos_identity_context(path)
+    sqlite_analysis = analyze_kakaotalk_macos_sqlite(path, sqlite_meta, identity_context=identity_context)
     role = classify_kakaotalk_macos_db_role(path, sqlite_analysis)
     companions = companion_files(path)
     source_hashes = compute_hashes(path)
@@ -226,12 +238,13 @@ def collect_kakaotalk_macos_database(path: Path, *, root: Path) -> ArtifactRecor
         "status": "macos-kakaotalk-db-inventory-validation-required",
         "blockers": [
             "kakaotalk-macos-schema-version-validation-required",
-            "kakaotalk-macos-encryption-or-sqlcipher-validation-required",
+            "kakaotalk-macos-sqlcipher-known-answer-validation-required",
             "kakaotalk-macos-message-semantics-known-answer-required",
         ],
         "validated_strengths": [
             "source-hash-preserved",
             "sqlite-openability-tested",
+            "kakaotalk-macos-db-name-and-key-derivation-probed-without-key-export",
             "wal-shm-companions-recorded",
             "message-table-candidates-counted-without-content-export",
         ],
@@ -251,6 +264,7 @@ def collect_kakaotalk_macos_database(path: Path, *, root: Path) -> ArtifactRecor
         "source_family": "kakaotalk-macos-container-db",
         "database_role": role,
         "sqlite_access": sqlite_meta,
+        "kakaotalk_macos_identity_context": identity_context,
         "kakaotalk_macos_db_analysis": sqlite_analysis,
         "companion_files": companions,
         "has_wal": any(item["kind"] == "wal" for item in companions),
@@ -295,12 +309,18 @@ def collect_kakaotalk_macos_database(path: Path, *, root: Path) -> ArtifactRecor
     )
 
 
-def analyze_kakaotalk_macos_sqlite(path: Path, sqlite_meta: Mapping[str, object]) -> dict[str, object]:
+def analyze_kakaotalk_macos_sqlite(
+    path: Path,
+    sqlite_meta: Mapping[str, object],
+    *,
+    identity_context: Mapping[str, object] | None = None,
+) -> dict[str, object]:
     analysis: dict[str, object] = {
         "db_opened": sqlite_meta.get("open_status") == "opened-read-only",
         "db_access_status": sqlite_meta.get("open_status") or "unknown",
         "plain_sqlite_header": bool(sqlite_meta.get("sqlite_header")),
         "requires_sqlcipher_or_custom_decoder": not bool(sqlite_meta.get("sqlite_header")),
+        "sqlcipher_probe": build_sqlcipher_probe_summary(None),
         "message_table_candidates": [],
         "message_row_count_estimate": 0,
         "schema_samples": [],
@@ -310,6 +330,15 @@ def analyze_kakaotalk_macos_sqlite(path: Path, sqlite_meta: Mapping[str, object]
     if sqlite_meta.get("open_status") != "opened-read-only":
         if not sqlite_meta.get("sqlite_header"):
             analysis["db_access_status"] = "encrypted-or-custom-store-validation-required"
+            probe = probe_kakaotalk_macos_sqlcipher(path, identity_context or {})
+            analysis["sqlcipher_probe"] = build_sqlcipher_probe_summary(probe)
+            if probe.get("opened"):
+                analysis["db_opened"] = True
+                analysis["db_access_status"] = "sqlcipher-opened-read-only"
+                analysis["requires_sqlcipher_or_custom_decoder"] = False
+                analysis["message_table_candidates"] = probe.get("message_table_candidates") or []
+                analysis["message_row_count_estimate"] = int(probe.get("message_row_count_estimate") or 0)
+                analysis["schema_samples"] = probe.get("schema_samples") or []
         return analysis
     try:
         with open_sqlite_snapshot(path) as connection:
@@ -323,13 +352,10 @@ def analyze_kakaotalk_macos_sqlite(path: Path, sqlite_meta: Mapping[str, object]
                 if not SAFE_SQL_NAME_RE.fullmatch(table_name):
                     continue
                 columns = sqlite_columns(connection, table_name)
-                is_message_candidate = bool(KAKAO_MAC_CHAT_TABLE_RE.search(table_name)) or any(
-                    KAKAO_MAC_CHAT_TABLE_RE.search(column) for column in columns
-                )
                 schema_row = {"table": table_name, "columns": columns[:24]}
                 if len(analysis["schema_samples"]) < 20:
                     analysis["schema_samples"].append(schema_row)
-                if not is_message_candidate:
+                if not is_kakaotalk_message_table_candidate(table_name, columns):
                     continue
                 row_count = sqlite_count(connection, table_name)
                 row_total += row_count
@@ -352,6 +378,538 @@ def analyze_kakaotalk_macos_sqlite(path: Path, sqlite_meta: Mapping[str, object]
         analysis["db_access_status"] = "sqlite-analysis-failed"
         analysis["error"] = str(exc)[:200]
     return analysis
+
+
+def build_sqlcipher_probe_summary(probe: Mapping[str, object] | None) -> dict[str, object]:
+    if not probe:
+        return {
+            "attempted": False,
+            "opened": False,
+            "tool": "",
+            "tool_available": bool(shutil.which("sqlcipher")),
+            "compatibility_mode": None,
+            "candidate_count": 0,
+            "derived_database_name_match_count": 0,
+            "matched_user_id_sha256": "",
+            "key_sha256": "",
+            "message": "not-attempted",
+        }
+    return {
+        "attempted": bool(probe.get("attempted")),
+        "opened": bool(probe.get("opened")),
+        "tool": str(probe.get("tool") or ""),
+        "tool_available": bool(probe.get("tool_available")),
+        "compatibility_mode": probe.get("compatibility_mode"),
+        "candidate_count": int(probe.get("candidate_count") or 0),
+        "derived_database_name_match_count": int(probe.get("derived_database_name_match_count") or 0),
+        "matched_user_id_sha256": str(probe.get("matched_user_id_sha256") or ""),
+        "key_sha256": str(probe.get("key_sha256") or ""),
+        "message": str(probe.get("message") or ""),
+    }
+
+
+def build_kakaotalk_macos_identity_context(path: Path) -> dict[str, object]:
+    home_root = find_macos_home_for_path(path)
+    plist_paths = list(iter_kakaotalk_macos_plists(home_root)) if home_root else []
+    user_directory_hashes = discover_kakaotalk_macos_user_directory_hashes(home_root) if home_root else []
+    user_id_candidates, active_hashes, direct_sources = extract_kakaotalk_macos_user_id_candidates(
+        plist_paths,
+        user_directory_hashes=user_directory_hashes,
+    )
+    uuid = kakao_macos_uuid_for_path(path, home_root)
+    derived_names: list[dict[str, object]] = []
+    for candidate in user_id_candidates[:12]:
+        if not uuid:
+            continue
+        derived_name = derive_kakaotalk_macos_database_name(candidate, uuid)
+        derived_names.append(
+            {
+                "database_name": derived_name,
+                "source_user_id_sha256": redact_number(candidate),
+                "matches_source_file": path.name.lower() in {derived_name, f"{derived_name}.db"},
+            }
+        )
+    return {
+        "home_root": str(home_root) if home_root else "",
+        "plist_paths": [str(item) for item in plist_paths[:8]],
+        "platform_uuid_available": bool(uuid),
+        "platform_uuid_source": "env-or-live" if uuid else "",
+        "user_id_candidate_count": len(user_id_candidates),
+        "user_id_candidate_sources": sorted(direct_sources),
+        "user_id_candidate_sha256": [redact_number(candidate) for candidate in user_id_candidates[:20]],
+        "active_account_hash_count": len(active_hashes),
+        "active_account_hash_sha256": [hash_text(item) for item in active_hashes[:12]],
+        "user_directory_hash_count": len(user_directory_hashes),
+        "user_directory_hash_sha256": [hash_text(item) for item in user_directory_hashes[:12]],
+        "derived_database_name_candidates": derived_names[:12],
+        "derived_database_name_match_count": sum(1 for item in derived_names if item["matches_source_file"]),
+        "sqlcipher_key_derivation_supported": bool(uuid and user_id_candidates),
+        "sqlcipher_key_material_exported": False,
+        "external_user_id_override_supported": True,
+        "external_uuid_override_supported": True,
+        "override_env": {
+            "user_ids": "RAPIDTRIAGE_KAKAO_MAC_USER_ID or RAPIDTRIAGE_KAKAO_MAC_USER_IDS",
+            "uuid": "RAPIDTRIAGE_KAKAO_MAC_UUID",
+        },
+    }
+
+
+def find_macos_home_for_path(path: Path) -> Path | None:
+    parts = path.resolve().parts
+    for index, part in enumerate(parts):
+        if part == "Library" and index > 0:
+            return Path(*parts[:index])
+    return None
+
+
+def iter_kakaotalk_macos_plists(home_root: Path) -> Iterator[Path]:
+    candidates: list[Path] = []
+    container_preferences = home_root / "Library" / "Containers" / "com.kakao.KakaoTalkMac" / "Data" / "Library" / "Preferences"
+    if container_preferences.is_dir():
+        try:
+            entries = sorted(container_preferences.iterdir(), key=lambda item: (item.name == "com.kakao.KakaoTalkMac.plist", item.name))
+        except OSError:
+            entries = []
+        for entry in entries:
+            if entry.name.startswith("com.kakao.KakaoTalkMac") and entry.suffix == ".plist":
+                candidates.append(entry)
+    candidates.append(home_root / "Library" / "Preferences" / "com.kakao.KakaoTalkMac.plist")
+    seen: set[Path] = set()
+    for candidate in candidates:
+        if not candidate.is_file():
+            continue
+        try:
+            key = candidate.resolve()
+        except OSError:
+            key = candidate.absolute()
+        if key in seen:
+            continue
+        seen.add(key)
+        yield candidate
+
+
+def extract_kakaotalk_macos_user_id_candidates(
+    plist_paths: Sequence[Path],
+    *,
+    user_directory_hashes: Sequence[str] = (),
+) -> tuple[list[int], list[str], set[str]]:
+    candidates: list[int] = []
+    active_hashes: list[str] = []
+    sources: set[str] = set()
+
+    def add_candidate(value: object, source: str) -> None:
+        parsed = parse_positive_int(value)
+        if parsed is None:
+            return
+        candidates.append(parsed)
+        sources.add(source)
+
+    for plist_path in plist_paths:
+        plist = read_plist(plist_path)
+        if not isinstance(plist, dict):
+            continue
+        alert_ids = plist.get("AlertKakaoIDsList")
+        if isinstance(alert_ids, list):
+            for item in alert_ids:
+                add_candidate(item, "AlertKakaoIDsList")
+        for key in ("userId", "user_id", "KAKAO_USER_ID", "userID"):
+            if key in plist:
+                add_candidate(plist.get(key), key)
+        for prefix, source in (
+            ("FSChatWindowTransparency", "FSChatWindowTransparency-common-suffix"),
+            ("NSWindow Frame FSChatWindowFrame_", "FSChatWindowFrame-common-suffix"),
+        ):
+            suffix = longest_common_suffix([str(key)[len(prefix) :] for key in plist if str(key).startswith(prefix)])
+            if suffix:
+                add_candidate(suffix, source)
+        for key, value in plist.items():
+            key_text = str(key)
+            if ":" not in key_text:
+                continue
+            suffix = key_text.rsplit(":", 1)[-1]
+            if not SHA512_HEX_RE.fullmatch(suffix) or suffix.lower() == EMPTY_ACCOUNT_SHA512:
+                continue
+            if not plist_revision_value_is_active(value):
+                continue
+            active_hashes.append(suffix.lower())
+            recovered = recover_user_id_from_sha512_hash(suffix)
+            if recovered is not None:
+                add_candidate(recovered, "active-revision-sha512-bruteforce")
+    for directory_hash in user_directory_hashes:
+        recovered = recover_user_id_from_sha512_directory_hash(directory_hash)
+        if recovered is not None:
+            add_candidate(recovered, "user-directory-sha512-slice-bruteforce")
+    return dedupe_ints(candidates), sorted(set(active_hashes)), sources
+
+
+def discover_kakaotalk_macos_user_directory_hashes(home_root: Path) -> list[str]:
+    container_root = home_root / "Library" / "Containers" / "com.kakao.KakaoTalkMac" / "Data" / "Library" / "Application Support" / "com.kakao.KakaoTalkMac"
+    if not container_root.is_dir():
+        return []
+    hashes: list[str] = []
+    for child in iter_child_dirs(container_root):
+        if re.fullmatch(r"[a-fA-F0-9]{40}", child.name):
+            hashes.append(child.name.lower())
+    return sorted(set(hashes))
+
+
+def read_plist(path: Path) -> object | None:
+    try:
+        with path.open("rb") as handle:
+            return plistlib.load(handle)
+    except (OSError, plistlib.InvalidFileException, ValueError):
+        return None
+
+
+def parse_positive_int(value: object) -> int | None:
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return value if value > 0 else None
+    if isinstance(value, str):
+        try:
+            parsed = int(value.strip())
+        except ValueError:
+            return None
+        return parsed if parsed > 0 else None
+    return None
+
+
+def plist_revision_value_is_active(value: object) -> bool:
+    if isinstance(value, bool):
+        return bool(value)
+    if isinstance(value, (int, float)):
+        return int(value) != 0
+    return value not in (None, "", b"")
+
+
+def longest_common_suffix(values: Sequence[str]) -> str:
+    if len(values) < 2:
+        return ""
+    reversed_values = [value[::-1] for value in values if value]
+    if len(reversed_values) < 2:
+        return ""
+    common = []
+    for chars in zip(*reversed_values):
+        if len(set(chars)) != 1:
+            break
+        common.append(chars[0])
+    return "".join(common)[::-1]
+
+
+def recover_user_id_from_sha512_hash(hex_hash: str) -> int | None:
+    max_id_text = os.environ.get("RAPIDTRIAGE_KAKAO_MAC_SHA512_BRUTE_MAX", "0").strip()
+    try:
+        max_id = int(max_id_text)
+    except ValueError:
+        max_id = 0
+    if max_id <= 0 or not SHA512_HEX_RE.fullmatch(hex_hash):
+        return None
+    target = bytes.fromhex(hex_hash)
+    for value in range(max_id + 1):
+        if hashlib.sha512(str(value).encode("utf-8")).digest() == target:
+            return value
+    return None
+
+
+def recover_user_id_from_sha512_directory_hash(directory_hash: str) -> int | None:
+    max_id_text = os.environ.get("RAPIDTRIAGE_KAKAO_MAC_SHA512_BRUTE_MAX", "0").strip()
+    try:
+        max_id = int(max_id_text)
+    except ValueError:
+        max_id = 0
+    if max_id <= 0 or not re.fullmatch(r"[a-fA-F0-9]{40}", directory_hash):
+        return None
+    target = bytes.fromhex(directory_hash)
+    for value in range(max_id + 1):
+        digest = hashlib.sha512(str(value).encode("utf-8")).digest()
+        if digest[20:40] == target:
+            return value
+    return None
+
+
+def dedupe_ints(values: Sequence[int]) -> list[int]:
+    seen: set[int] = set()
+    deduped: list[int] = []
+    for value in values:
+        if value in seen:
+            continue
+        seen.add(value)
+        deduped.append(value)
+    for value in env_user_id_overrides():
+        if value not in seen:
+            seen.add(value)
+            deduped.append(value)
+    return deduped
+
+
+def env_user_id_overrides() -> list[int]:
+    values: list[int] = []
+    raw = ",".join(
+        item
+        for item in (
+            os.environ.get("RAPIDTRIAGE_KAKAO_MAC_USER_ID", ""),
+            os.environ.get("RAPIDTRIAGE_KAKAO_MAC_USER_IDS", ""),
+        )
+        if item
+    )
+    for item in re.split(r"[\s,;]+", raw):
+        parsed = parse_positive_int(item)
+        if parsed is not None:
+            values.append(parsed)
+    return values
+
+
+def kakao_macos_uuid_for_path(path: Path, home_root: Path | None) -> str:
+    env_uuid = os.environ.get("RAPIDTRIAGE_KAKAO_MAC_UUID", "").strip()
+    if env_uuid:
+        return env_uuid
+    if home_root and same_or_descendant(home_root, Path.home()):
+        return live_macos_platform_uuid()
+    if same_or_descendant(path, Path.home()):
+        return live_macos_platform_uuid()
+    return ""
+
+
+def same_or_descendant(path: Path, possible_parent: Path) -> bool:
+    try:
+        path.resolve().relative_to(possible_parent.resolve())
+        return True
+    except (OSError, ValueError):
+        return False
+
+
+def live_macos_platform_uuid() -> str:
+    try:
+        completed = subprocess.run(
+            ["/usr/sbin/ioreg", "-rd1", "-c", "IOPlatformExpertDevice"],
+            text=True,
+            capture_output=True,
+            timeout=3,
+            check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return ""
+    match = re.search(r'"IOPlatformUUID"\s*=\s*"([^"]+)"', completed.stdout)
+    return match.group(1) if match else ""
+
+
+def hashed_macos_device_uuid(uuid: str) -> str:
+    data = uuid.encode("utf-8")
+    return base64.b64encode(hashlib.sha1(data).digest() + hashlib.sha256(data).digest()).decode("ascii")
+
+
+def derive_kakaotalk_macos_database_name(user_id: int, uuid: str) -> str:
+    hawawa = ".".join([".", "F", str(user_id), "A", "F", "".join(reversed(uuid)), ".", "|"])
+    salt = "".join(reversed(hashed_macos_device_uuid(uuid)))
+    derived = hashlib.pbkdf2_hmac("sha256", hawawa.encode("utf-8"), salt.encode("utf-8"), 100_000, 128)
+    return derived.hex()[28:106]
+
+
+def derive_kakaotalk_macos_secure_key(user_id: int, uuid: str) -> str:
+    hashed = hashed_macos_device_uuid(uuid)
+    parts = ["A", hashed, "|", "F", uuid[:5], "H", str(user_id), "|", uuid[7:]]
+    hawawa = "F".join(parts)
+    salt = uuid[int(len(uuid) * 0.3) :]
+    derived = hashlib.pbkdf2_hmac("sha256", hawawa[::-1].encode("utf-8"), salt.encode("utf-8"), 100_000, 128)
+    return derived.hex()
+
+
+def probe_kakaotalk_macos_sqlcipher(path: Path, identity_context: Mapping[str, object]) -> dict[str, object]:
+    tool = shutil.which("sqlcipher") or ""
+    candidates = sqlcipher_key_candidates(path, identity_context)
+    match_count = int(identity_context.get("derived_database_name_match_count") or 0)
+    probe: dict[str, object] = {
+        "attempted": bool(tool and candidates),
+        "opened": False,
+        "tool": tool,
+        "tool_available": bool(tool),
+        "candidate_count": len(candidates),
+        "derived_database_name_match_count": match_count,
+        "compatibility_mode": None,
+        "message": "",
+    }
+    if not tool:
+        probe["message"] = "sqlcipher-not-installed"
+        return probe
+    if not candidates:
+        probe["message"] = "missing-platform-uuid-or-user-id-candidate"
+        return probe
+    for candidate in candidates:
+        for compatibility in (3, 4):
+            table_names = sqlcipher_table_names(tool, path, candidate["key"], compatibility)
+            if table_names is None:
+                continue
+            schema_samples, message_candidates, row_total = sqlcipher_schema_and_message_counts(
+                tool,
+                path,
+                candidate["key"],
+                compatibility,
+                table_names,
+            )
+            probe.update(
+                {
+                    "opened": True,
+                    "compatibility_mode": compatibility,
+                    "matched_user_id_sha256": candidate["user_id_sha256"],
+                    "key_sha256": hash_text(candidate["key"]),
+                    "schema_samples": schema_samples,
+                    "message_table_candidates": message_candidates,
+                    "message_row_count_estimate": row_total,
+                    "message": "sqlcipher-opened-read-only",
+                }
+            )
+            return probe
+    probe["message"] = "candidate-keys-did-not-open-database"
+    return probe
+
+
+def sqlcipher_key_candidates(path: Path, identity_context: Mapping[str, object]) -> list[dict[str, str]]:
+    if not identity_context.get("platform_uuid_available"):
+        return []
+    uuid = os.environ.get("RAPIDTRIAGE_KAKAO_MAC_UUID", "").strip()
+    if not uuid:
+        uuid = live_macos_platform_uuid()
+    if not uuid:
+        return []
+    candidates: list[dict[str, str]] = []
+    for user_id in env_user_id_overrides():
+        candidates.append({"key": derive_kakaotalk_macos_secure_key(user_id, uuid), "user_id_sha256": redact_number(user_id)})
+    for item in identity_context.get("derived_database_name_candidates") or []:
+        if not isinstance(item, Mapping):
+            continue
+        user_hash = str(item.get("source_user_id_sha256") or "")
+        # The raw user id is intentionally unavailable here unless supplied through the environment;
+        # candidate keys are generated earlier only for in-memory probing and never serialized.
+        if user_hash:
+            continue
+    # Re-read plist candidates locally so raw IDs exist only inside this process.
+    home_root = find_macos_home_for_path(path)
+    plist_paths = list(iter_kakaotalk_macos_plists(home_root)) if home_root else []
+    directory_hashes = discover_kakaotalk_macos_user_directory_hashes(home_root) if home_root else []
+    raw_ids, _, _ = extract_kakaotalk_macos_user_id_candidates(plist_paths, user_directory_hashes=directory_hashes)
+    for user_id in raw_ids[:12]:
+        key = derive_kakaotalk_macos_secure_key(user_id, uuid)
+        hashed = redact_number(user_id)
+        if all(item["user_id_sha256"] != hashed for item in candidates):
+            candidates.append({"key": key, "user_id_sha256": hashed})
+    return candidates[:16]
+
+
+def sqlcipher_table_names(tool: str, path: Path, key: str, compatibility: int) -> list[str] | None:
+    sql = (
+        f"PRAGMA cipher_default_compatibility = {compatibility};\n"
+        f"PRAGMA key = '{key}';\n"
+        "SELECT name FROM sqlite_master WHERE type='table' ORDER BY name LIMIT 120;\n"
+    )
+    completed = run_sqlcipher(tool, path, sql)
+    if completed is None or completed.returncode != 0:
+        return None
+    names = [
+        line.strip()
+        for line in completed.stdout.splitlines()
+        if line.strip().lower() != "ok" and SAFE_SQL_NAME_RE.fullmatch(line.strip())
+    ]
+    return names or None
+
+
+def sqlcipher_schema_and_message_counts(
+    tool: str,
+    path: Path,
+    key: str,
+    compatibility: int,
+    table_names: Sequence[str],
+) -> tuple[list[dict[str, object]], list[dict[str, object]], int]:
+    schema_samples: list[dict[str, object]] = []
+    message_candidates: list[dict[str, object]] = []
+    row_total = 0
+    for table_name in table_names[:40]:
+        columns = sqlcipher_table_columns(tool, path, key, compatibility, table_name)
+        if len(schema_samples) < 20:
+            schema_samples.append({"table": table_name, "columns": columns[:24]})
+        if not is_kakaotalk_message_table_candidate(table_name, columns):
+            continue
+        row_count = sqlcipher_count_rows(tool, path, key, compatibility, table_name)
+        row_total += row_count
+        message_candidates.append(
+            {
+                "table": table_name,
+                "row_count": row_count,
+                "columns": columns[:24],
+                "content_columns_detected": [
+                    column
+                    for column in columns
+                    if column.lower() in {"message", "msg", "text", "content", "attachment", "data", "localfilepath"}
+                ],
+            }
+        )
+    return schema_samples, message_candidates[:30], row_total
+
+
+def sqlcipher_table_columns(tool: str, path: Path, key: str, compatibility: int, table_name: str) -> list[str]:
+    if not SAFE_SQL_NAME_RE.fullmatch(table_name):
+        return []
+    sql = (
+        f"PRAGMA cipher_default_compatibility = {compatibility};\n"
+        f"PRAGMA key = '{key}';\n"
+        f'PRAGMA table_info("{table_name}");\n'
+    )
+    completed = run_sqlcipher(tool, path, sql)
+    if completed is None or completed.returncode != 0:
+        return []
+    columns: list[str] = []
+    for line in completed.stdout.splitlines():
+        parts = line.split("|")
+        if len(parts) >= 2 and SAFE_SQL_NAME_RE.fullmatch(parts[1]):
+            columns.append(parts[1])
+    return columns
+
+
+def sqlcipher_count_rows(tool: str, path: Path, key: str, compatibility: int, table_name: str) -> int:
+    if not SAFE_SQL_NAME_RE.fullmatch(table_name):
+        return 0
+    sql = (
+        f"PRAGMA cipher_default_compatibility = {compatibility};\n"
+        f"PRAGMA key = '{key}';\n"
+        f'SELECT COUNT(*) FROM "{table_name}";\n'
+    )
+    completed = run_sqlcipher(tool, path, sql)
+    if completed is None or completed.returncode != 0:
+        return 0
+    try:
+        return int(completed.stdout.strip().splitlines()[-1])
+    except (IndexError, ValueError):
+        return 0
+
+
+def run_sqlcipher(tool: str, path: Path, sql: str) -> subprocess.CompletedProcess[str] | None:
+    if not path.exists():
+        return None
+    try:
+        return subprocess.run(
+            [tool, "-readonly", "-ifexists", "-batch", "-noheader", str(path)],
+            input=sql,
+            text=True,
+            capture_output=True,
+            timeout=SQLCIPHER_TIMEOUT_SECONDS,
+            check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+
+
+def is_kakaotalk_message_table_candidate(table_name: str, columns: Sequence[str]) -> bool:
+    if table_name in KAKAO_MAC_KNOWN_MESSAGE_TABLES:
+        return True
+    return bool(KAKAO_MAC_CHAT_TABLE_RE.search(table_name))
+
+
+def redact_number(value: int) -> str:
+    return hash_text(str(value))
+
+
+def hash_text(value: str) -> str:
+    return hashlib.sha256(value.encode("utf-8")).hexdigest()
 
 
 def sqlite_columns(connection: sqlite3.Connection, table_name: str) -> list[str]:
@@ -393,6 +951,8 @@ def build_kakaotalk_macos_summary(
     if not candidate_roots and not records:
         return None
     opened = 0
+    plain_opened = 0
+    sqlcipher_opened = 0
     encrypted_or_custom = 0
     message_candidates = 0
     message_rows = 0
@@ -403,6 +963,10 @@ def build_kakaotalk_macos_summary(
             analysis = {}
         if analysis.get("db_opened"):
             opened += 1
+        if analysis.get("db_access_status") == "plain-sqlite-opened":
+            plain_opened += 1
+        if analysis.get("db_access_status") == "sqlcipher-opened-read-only":
+            sqlcipher_opened += 1
         if analysis.get("requires_sqlcipher_or_custom_decoder"):
             encrypted_or_custom += 1
         table_candidates = analysis.get("message_table_candidates") or []
@@ -422,7 +986,9 @@ def build_kakaotalk_macos_summary(
         "candidate_root_count": len(candidate_roots),
         "candidate_roots": source_paths,
         "database_count": len(records),
-        "plain_sqlite_opened_count": opened,
+        "opened_database_count": opened,
+        "plain_sqlite_opened_count": plain_opened,
+        "sqlcipher_opened_count": sqlcipher_opened,
         "encrypted_or_custom_store_count": encrypted_or_custom,
         "message_database_candidate_count": message_candidates,
         "message_row_count_estimate": message_rows,
@@ -435,7 +1001,8 @@ def build_kakaotalk_macos_summary(
             artifact_goal="macOS KakaoTalk database coverage summary",
             primary_evidence=[
                 f"database_count={len(records)}",
-                f"plain_sqlite_opened_count={opened}",
+                f"plain_sqlite_opened_count={plain_opened}",
+                f"sqlcipher_opened_count={sqlcipher_opened}",
                 f"encrypted_or_custom_store_count={encrypted_or_custom}",
                 f"message_row_count_estimate={message_rows}",
             ],

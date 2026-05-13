@@ -1,16 +1,63 @@
 from __future__ import annotations
 
 import json
+import hashlib
+import os
 import plistlib
 import sqlite3
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from rapidtriage.cli import main
+from rapidtriage.artifacts.kakaotalk_macos import (
+    derive_kakaotalk_macos_database_name,
+    derive_kakaotalk_macos_secure_key,
+    extract_kakaotalk_macos_user_id_candidates,
+    hashed_macos_device_uuid,
+    recover_user_id_from_sha512_directory_hash,
+)
 
 
 class RapidTriageMacOsArtifactsTests(unittest.TestCase):
+    def test_kakaotalk_macos_public_derivation_vectors_are_stable(self) -> None:
+        uuid = "AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE"
+        user_id = 12345
+
+        self.assertEqual(
+            hashed_macos_device_uuid(uuid),
+            "nimoAVPKEChfYbT+0fQ9rqnv84dfSdAmfUERfn8ODHCuZqqkpDv1VDDltK5kAvIyIeZ3KA==",
+        )
+        self.assertEqual(
+            derive_kakaotalk_macos_database_name(user_id, uuid),
+            "41d955f9bda54b4af4c5ef87c2954421e0fc1efb939c01b77077b29dd8d55364706a0e98db7259",
+        )
+        self.assertEqual(
+            hashlib.sha256(derive_kakaotalk_macos_secure_key(user_id, uuid).encode("utf-8")).hexdigest(),
+            "fe3ccd86a1fbc9d088f1fd52f85000e609efd630411cd35bd273b764789746a1",
+        )
+
+    def test_kakaotalk_macos_plist_extracts_alert_ids_without_raw_key_export(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            plist_path = Path(tmp_dir) / "com.kakao.KakaoTalkMac.test.plist"
+            plist_path.write_bytes(plistlib.dumps({"AlertKakaoIDsList": [12345, "67890", 0]}))
+
+            candidates, active_hashes, sources = extract_kakaotalk_macos_user_id_candidates([plist_path])
+
+            self.assertEqual(candidates, [12345, 67890])
+            self.assertEqual(active_hashes, [])
+            self.assertEqual(sources, {"AlertKakaoIDsList"})
+
+    def test_kakaotalk_macos_user_directory_hash_recovery_is_opt_in(self) -> None:
+        user_id = 4242
+        directory_hash = hashlib.sha512(str(user_id).encode("utf-8")).digest()[20:40].hex()
+
+        with patch.dict(os.environ, {"RAPIDTRIAGE_KAKAO_MAC_SHA512_BRUTE_MAX": "0"}):
+            self.assertIsNone(recover_user_id_from_sha512_directory_hash(directory_hash))
+        with patch.dict(os.environ, {"RAPIDTRIAGE_KAKAO_MAC_SHA512_BRUTE_MAX": "5000"}):
+            self.assertEqual(recover_user_id_from_sha512_directory_hash(directory_hash), user_id)
+
     def test_macos_system_collector_imports_user_browser_quarantine_and_launch_agent(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             root = Path(tmp_dir)
@@ -109,12 +156,17 @@ class RapidTriageMacOsArtifactsTests(unittest.TestCase):
                 and item["details"]["sqlite_access"]["open_status"] == "opened-read-only"
             )
             analysis = opened["details"]["kakaotalk_macos_db_analysis"]
+            identity = opened["details"]["kakaotalk_macos_identity_context"]
             self.assertTrue(analysis["db_opened"])
             self.assertEqual(analysis["db_access_status"], "plain-sqlite-opened")
             self.assertEqual(analysis["message_row_count_estimate"], 2)
             self.assertEqual(analysis["message_table_candidates"][0]["table"], "messages")
             self.assertIn("message", analysis["message_table_candidates"][0]["content_columns_detected"])
             self.assertFalse(analysis["content_exported"])
+            self.assertFalse(analysis["sqlcipher_probe"]["attempted"])
+            self.assertGreaterEqual(identity["user_id_candidate_count"], 1)
+            self.assertEqual(identity["user_directory_hash_count"], 1)
+            self.assertFalse(identity["sqlcipher_key_material_exported"])
             self.assertIn("plain-sqlite-opened", opened["details"]["risk_flags"])
             self.assertFalse(opened["details"]["commercial_grade_ready"])
 
@@ -128,6 +180,7 @@ class RapidTriageMacOsArtifactsTests(unittest.TestCase):
                 encrypted["details"]["kakaotalk_macos_db_analysis"]["db_access_status"],
                 "encrypted-or-custom-store-validation-required",
             )
+            self.assertIn("sqlcipher_probe", encrypted["details"]["kakaotalk_macos_db_analysis"])
 
             summary = next(item for item in payload["artifacts"] if item["artifact_type"] == "kakaotalk-macos-summary")
             self.assertEqual(summary["details"]["plain_sqlite_opened_count"], 1)
@@ -285,12 +338,26 @@ def create_quarantine_db(path: Path) -> None:
 
 
 def create_kakaotalk_macos_fixture(user_root: Path) -> None:
-    kakao_root = (
+    user_id = 12345
+    container_root = (
         user_root
         / "Library"
         / "Containers"
         / "com.kakao.KakaoTalkMac"
         / "Data"
+    )
+    user_hash = hashlib.sha512(str(user_id).encode("utf-8")).hexdigest()[40:80]
+    (container_root / "Library" / "Application Support" / "com.kakao.KakaoTalkMac" / user_hash).mkdir(
+        parents=True,
+        exist_ok=True,
+    )
+    preferences_root = container_root / "Library" / "Preferences"
+    preferences_root.mkdir(parents=True, exist_ok=True)
+    (preferences_root / "com.kakao.KakaoTalkMac.ABCDEF.plist").write_bytes(
+        plistlib.dumps({"AlertKakaoIDsList": [user_id]})
+    )
+    kakao_root = (
+        container_root
         / "Library"
         / "Application Support"
         / "KakaoTalk"
