@@ -51,6 +51,8 @@ class RapidTriageKakaoTalkDecryptTests(unittest.TestCase):
         self.assertIn("kakaotalk-sqlcipher-probe", commands)
         self.assertIn("kakaotalk-key-store-inspect", commands)
         self.assertIn("kakaotalk-collect-windows", commands)
+        self.assertIn("kakaotalk-macos-report", commands)
+        self.assertIn("--user-id-file", commands["kakaotalk-macos-report"].format_help())
 
     def test_kakaotalk_decrypt_opens_decrypted_sqlite_and_extracts_previews(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:

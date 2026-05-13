@@ -121,6 +121,11 @@ from .core.kakaotalk import (
     run_kakaotalk_sqlcipher_probe,
     run_kakaotalk_userdir_bruteforce,
 )
+from .artifacts.kakaotalk_macos import (
+    DEFAULT_MACOS_REPORT_MAX_MESSAGES,
+    KakaoTalkMacOsReportError,
+    run_kakaotalk_macos_report,
+)
 from .core.normalize import NormalizationError, build_normalized_case
 from .core.ocr_queue import OcrQueueError, build_ocr_queue
 from .core.plugins import PluginError, load_plugin_registry, validate_plugin_manifest, read_plugin_manifest
@@ -408,6 +413,42 @@ def build_parser() -> argparse.ArgumentParser:
         help="Disable fallback SQLite carving from KakaoTalk process memory dumps when legacy decrypt fails",
     )
     kakao_decrypt.add_argument("--json", action="store_true", help="Print JSON payload to stdout")
+
+    kakao_macos_report = sub.add_parser(
+        "kakaotalk-macos-report",
+        help="Export authorized macOS KakaoTalk messages into CSV and a static HTML viewer",
+        description=(
+            "Build a reviewable macOS KakaoTalk report package from a Mac home, mounted Mac root, "
+            "KakaoTalk container, or extracted collection folder"
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=textwrap.dedent(
+            """\
+            Examples:
+              rapidtriage kakaotalk-macos-report ~/Library/Containers/com.kakao.KakaoTalkMac --output-dir ./kakao-mac-report
+              RAPIDTRIAGE_KAKAO_MAC_USER_ID=12345 RAPIDTRIAGE_KAKAO_MAC_UUID=... rapidtriage kakaotalk-macos-report /Volumes/MacHD --output-dir ./kakao-mac-report --include-message-text
+            """
+        ),
+    )
+    kakao_macos_report.add_argument("root", help="Mac home, mounted Mac root, KakaoTalk container, or extracted folder")
+    kakao_macos_report.add_argument("--output-dir", required=True, help="Directory for JSON, CSV, and HTML report outputs")
+    kakao_macos_report.add_argument(
+        "--include-message-text",
+        action="store_true",
+        help="Include raw message/body fields in CSV and HTML; default exports hashes/lengths only",
+    )
+    kakao_macos_report.add_argument(
+        "--max-messages",
+        type=int,
+        default=DEFAULT_MACOS_REPORT_MAX_MESSAGES,
+        help=f"Maximum message rows to export ({DEFAULT_MACOS_REPORT_MAX_MESSAGES} default, 0 means all)",
+    )
+    kakao_macos_report.add_argument(
+        "--user-id-file",
+        help="File containing an authorized macOS KakaoTalk numeric UserID; value is read in-memory and not exported",
+    )
+    kakao_macos_report.add_argument("--sqlcipher-bin", default="sqlcipher", help="SQLCipher binary for encrypted stores")
+    kakao_macos_report.add_argument("--json", action="store_true", help="Print JSON payload to stdout")
 
     kakao_collect = sub.add_parser(
         "kakaotalk-collect-windows",
@@ -4120,6 +4161,73 @@ def main(argv=None) -> int:
                     f"chat-relevant tables {summary.get('postpatch_memory_carve_chat_relevant_table_count', 0)}  "
                     f"message residues {summary.get('postpatch_memory_chat_message_residue_count', 0)}"
                 )
+        return 0
+
+    if args.command == "kakaotalk-macos-report":
+        root = Path(args.root).expanduser().resolve()
+        output_dir = Path(args.output_dir).expanduser().resolve()
+        previous_user_id_file = os.environ.get("RAPIDTRIAGE_KAKAO_MAC_USER_ID_FILE")
+        if args.user_id_file:
+            os.environ["RAPIDTRIAGE_KAKAO_MAC_USER_ID_FILE"] = str(Path(args.user_id_file).expanduser().resolve())
+        try:
+            payload = run_kakaotalk_macos_report(
+                root,
+                output_dir=output_dir,
+                include_message_text=args.include_message_text,
+                max_messages=args.max_messages,
+                sqlcipher_bin=args.sqlcipher_bin,
+            )
+        except (KakaoTalkMacOsReportError, OSError, ValueError) as exc:
+            parser.error(str(exc))
+        finally:
+            if args.user_id_file:
+                if previous_user_id_file is None:
+                    os.environ.pop("RAPIDTRIAGE_KAKAO_MAC_USER_ID_FILE", None)
+                else:
+                    os.environ["RAPIDTRIAGE_KAKAO_MAC_USER_ID_FILE"] = previous_user_id_file
+        outputs = payload.get("outputs") if isinstance(payload.get("outputs"), dict) else {}
+        report_json = Path(str(outputs.get("report_json", output_dir / "kakaotalk_macos_report.json")))
+        audit_output = audit_path_for(report_json)
+        output_files = [
+            (str(label), Path(str(path)))
+            for label, path in outputs.items()
+            if isinstance(path, str)
+        ]
+        write_audit_record(
+            audit_output,
+            command="kakaotalk-macos-report",
+            options={
+                "output_dir": str(output_dir),
+                "include_message_text": args.include_message_text,
+                "max_messages": args.max_messages,
+                "user_id_file": str(Path(args.user_id_file).expanduser().resolve()) if args.user_id_file else None,
+                "sqlcipher_bin": args.sqlcipher_bin,
+                "raw_user_id_exported": False,
+                "sqlcipher_key_exported": False,
+            },
+            input_root=root,
+            output_files=output_files,
+            notes=[
+                "macOS KakaoTalk SQLCipher stores are opened read-only with -ifexists when sqlcipher is required.",
+                "Raw Kakao UserID and SQLCipher key values are kept in memory and are not written to report or audit JSON.",
+                "Message text is exported only when --include-message-text is explicitly set.",
+            ],
+        )
+        payload["audit_output"] = str(audit_output)
+        if args.json:
+            print(json.dumps(payload, ensure_ascii=False, indent=2))
+        else:
+            summary = payload["summary"]
+            print(f"Saved macOS KakaoTalk report JSON: {outputs.get('report_json')}")
+            print(f"Saved macOS KakaoTalk viewer HTML: {outputs.get('viewer_html')}")
+            print(f"Saved audit JSON: {audit_output}")
+            print(
+                f"Databases: {summary['processed_database_count']}/{summary['database_count']}  "
+                f"SQLCipher opened: {summary['sqlcipher_opened_count']}  "
+                f"Plain SQLite opened: {summary['plain_sqlite_opened_count']}  "
+                f"Messages: {summary['message_count']}  "
+                f"Media refs: {summary['media_reference_count']}"
+            )
         return 0
 
     if args.command == "kakaotalk-collect-windows":

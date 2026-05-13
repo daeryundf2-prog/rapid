@@ -2,7 +2,11 @@ from __future__ import annotations
 
 import datetime as dt
 import base64
+import csv
 import hashlib
+import html
+import io
+import json
 import os
 import plistlib
 import re
@@ -58,6 +62,12 @@ EMPTY_ACCOUNT_SHA512 = (
     "31bca02094eb78126a517b206a88c73cfa9ec6f704c7030d18212cace820f025f00bf0ea68dbf3f3a5436ca63b53bf7bf80ad8d5de7d8359d0b7fed9dbc3ab99"
 )
 SQLCIPHER_TIMEOUT_SECONDS = 6
+DEFAULT_MACOS_REPORT_MAX_MESSAGES = 100_000
+MACOS_REPORT_VERSION = "kakaotalk-macos-report-v1"
+
+
+class KakaoTalkMacOsReportError(RuntimeError):
+    """Raised when a macOS KakaoTalk report cannot be produced safely."""
 
 
 class KakaoTalkMacOsProvider:
@@ -657,6 +667,25 @@ def env_user_id_overrides() -> list[int]:
         parsed = parse_positive_int(item)
         if parsed is not None:
             values.append(parsed)
+    raw_files = ",".join(
+        item
+        for item in (
+            os.environ.get("RAPIDTRIAGE_KAKAO_MAC_USER_ID_FILE", ""),
+            os.environ.get("RAPIDTRIAGE_KAKAO_MAC_USER_ID_FILES", ""),
+        )
+        if item
+    )
+    for item in re.split(r"[\s,;]+", raw_files):
+        if not item:
+            continue
+        try:
+            file_text = Path(item).expanduser().read_bytes().decode("utf-8", errors="ignore")
+        except OSError:
+            continue
+        for token in re.split(r"[\s,;]+", file_text):
+            parsed = parse_positive_int(token)
+            if parsed is not None:
+                values.append(parsed)
     return values
 
 
@@ -1039,6 +1068,728 @@ def build_kakaotalk_macos_summary(
         supported=True,
         details=details,
     )
+
+
+def run_kakaotalk_macos_report(
+    root: Path,
+    *,
+    output_dir: Path,
+    include_message_text: bool = False,
+    max_messages: int = DEFAULT_MACOS_REPORT_MAX_MESSAGES,
+    sqlcipher_bin: str = "sqlcipher",
+) -> dict[str, object]:
+    """Write a reviewable macOS KakaoTalk report package.
+
+    The regular artifact collector intentionally avoids message body export. This
+    report path is the explicit analyst-controlled workflow for turning an
+    authorized macOS KakaoTalk SQLCipher/plain SQLite store into CSV/HTML review
+    outputs. Raw SQLCipher keys and raw Kakao UserID values never leave memory.
+    """
+
+    root = root.expanduser().resolve()
+    output_dir = output_dir.expanduser().resolve()
+    output_dir.mkdir(parents=True, exist_ok=True)
+    candidate_roots = list(iter_kakaotalk_macos_candidate_roots(root))
+    database_paths = list(iter_kakaotalk_macos_databases(candidate_roots))
+    sqlcipher_tool = resolve_sqlcipher_tool(sqlcipher_bin)
+    messages: list[dict[str, object]] = []
+    rooms: list[dict[str, object]] = []
+    media: list[dict[str, object]] = []
+    databases: list[dict[str, object]] = []
+    remaining = max_messages if max_messages > 0 else 0
+
+    for db_path in database_paths:
+        sqlite_meta = inspect_sqlite_database(db_path)
+        identity_context = build_kakaotalk_macos_identity_context(db_path)
+        analysis = analyze_kakaotalk_macos_sqlite(db_path, sqlite_meta, identity_context=identity_context)
+        source_hashes = compute_hashes(db_path)
+        db_entry: dict[str, object] = {
+            "source_path": str(db_path.resolve()),
+            "source_size": safe_file_size(db_path),
+            "source_hashes": dict(source_hashes),
+            "db_access_status": analysis.get("db_access_status"),
+            "message_row_count_estimate": analysis.get("message_row_count_estimate"),
+            "sqlcipher_opened": False,
+            "plain_sqlite_opened": analysis.get("db_access_status") == "plain-sqlite-opened",
+            "compatibility_mode": None,
+            "message_table": "",
+            "message_export_status": "not-attempted",
+        }
+        exported_rows: list[dict[str, object]] = []
+        table_name = ""
+
+        db_access_status = str(analysis.get("db_access_status") or "")
+        requires_sqlcipher = bool(analysis.get("requires_sqlcipher_or_custom_decoder")) or db_access_status == "sqlcipher-opened-read-only"
+        if requires_sqlcipher and db_access_status != "plain-sqlite-opened":
+            if not sqlcipher_tool:
+                db_entry["message_export_status"] = "sqlcipher-not-installed"
+            else:
+                context = open_kakaotalk_macos_sqlcipher_context(db_path, identity_context, tool=sqlcipher_tool)
+                if context is None:
+                    db_entry["message_export_status"] = "sqlcipher-context-not-reopened"
+                else:
+                    db_entry["sqlcipher_opened"] = True
+                    db_entry["db_access_status"] = "sqlcipher-opened-read-only"
+                    db_entry["compatibility_mode"] = context["compatibility"]
+                    exported_rows, table_name = read_kakaotalk_macos_sqlcipher_messages(
+                        db_path,
+                        key=str(context["key"]),
+                        compatibility=int(context["compatibility"]),
+                        table_names=list(context["table_names"]),
+                        max_rows=remaining,
+                        include_message_text=include_message_text,
+                        tool=sqlcipher_tool,
+                        source_hash=str(source_hashes.get("sha256", "")),
+                    )
+                    rooms.extend(
+                        read_kakaotalk_macos_sqlcipher_context_rows(
+                            db_path,
+                            key=str(context["key"]),
+                            compatibility=int(context["compatibility"]),
+                            table_names=list(context["table_names"]),
+                            tool=sqlcipher_tool,
+                            include_text=include_message_text,
+                            source_hash=str(source_hashes.get("sha256", "")),
+                        )
+                    )
+        elif db_access_status == "plain-sqlite-opened":
+            exported_rows, table_name = read_kakaotalk_macos_plain_messages(
+                db_path,
+                max_rows=remaining,
+                include_message_text=include_message_text,
+                source_hash=str(source_hashes.get("sha256", "")),
+            )
+            rooms.extend(
+                read_kakaotalk_macos_plain_context_rows(
+                    db_path,
+                    include_text=include_message_text,
+                    source_hash=str(source_hashes.get("sha256", "")),
+                )
+            )
+
+        if exported_rows:
+            db_entry["message_export_status"] = "exported"
+            db_entry["message_table"] = table_name
+            messages.extend(exported_rows)
+            media.extend(extract_kakaotalk_macos_media_rows(exported_rows, source_hash=str(source_hashes.get("sha256", ""))))
+            if max_messages > 0:
+                remaining = max(max_messages - len(messages), 0)
+        elif db_entry["message_export_status"] == "not-attempted":
+            db_entry["message_export_status"] = "no-readable-message-table"
+        databases.append(db_entry)
+        if max_messages > 0 and remaining <= 0:
+            break
+
+    messages_csv = output_dir / "kakaotalk_macos_messages.csv"
+    rooms_csv = output_dir / "kakaotalk_macos_rooms.csv"
+    media_csv = output_dir / "kakaotalk_macos_media.csv"
+    viewer_html = output_dir / "kakaotalk_macos_viewer.html"
+    report_json = output_dir / "kakaotalk_macos_report.json"
+    summary_json = output_dir / "kakaotalk_macos_summary.json"
+    write_dict_csv(messages_csv, messages, message_csv_fields(include_message_text=include_message_text))
+    write_dict_csv(rooms_csv, rooms, room_csv_fields(include_text=include_message_text))
+    write_dict_csv(media_csv, media, media_csv_fields(include_text=include_message_text))
+    render_kakaotalk_macos_viewer(
+        viewer_html,
+        messages=messages,
+        rooms=rooms,
+        media=media,
+        include_message_text=include_message_text,
+        root=root,
+        max_messages=max_messages,
+    )
+
+    payload: dict[str, object] = {
+        "parser": "kakaotalk-macos-report",
+        "parser_version": MACOS_REPORT_VERSION,
+        "source_root": str(root),
+        "generated_at": dt.datetime.now(dt.timezone.utc).isoformat(),
+        "privacy": {
+            "message_text_exported": include_message_text,
+            "raw_user_id_exported": False,
+            "sqlcipher_key_exported": False,
+            "sqlcipher_invocation": "read-only",
+        },
+        "summary": {
+            "database_count": len(database_paths),
+            "processed_database_count": len(databases),
+            "sqlcipher_opened_count": sum(1 for item in databases if item.get("sqlcipher_opened")),
+            "plain_sqlite_opened_count": sum(1 for item in databases if item.get("plain_sqlite_opened")),
+            "message_count": len(messages),
+            "room_context_row_count": len(rooms),
+            "media_reference_count": len(media),
+            "max_messages": max_messages,
+            "message_limit_reached": bool(max_messages > 0 and len(messages) >= max_messages),
+            "candidate_root_count": len(candidate_roots),
+        },
+        "databases": databases,
+        "outputs": {
+            "report_json": str(report_json),
+            "summary_json": str(summary_json),
+            "messages_csv": str(messages_csv),
+            "rooms_csv": str(rooms_csv),
+            "media_csv": str(media_csv),
+            "viewer_html": str(viewer_html),
+        },
+        "validation_required": True,
+        "validation_guidance": (
+            "Message bodies are exported only when explicitly requested. Validate row semantics and "
+            "known-answer counts before using as court-ready message testimony."
+        ),
+    }
+    report_json.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    summary_json.write_text(json.dumps(payload["summary"], ensure_ascii=False, indent=2), encoding="utf-8")
+    return payload
+
+
+def resolve_sqlcipher_tool(sqlcipher_bin: str) -> str:
+    resolved = shutil.which(sqlcipher_bin)
+    if resolved:
+        return resolved
+    candidate = Path(sqlcipher_bin).expanduser()
+    return str(candidate) if candidate.is_file() else ""
+
+
+def safe_file_size(path: Path) -> int:
+    try:
+        return path.stat().st_size
+    except OSError:
+        return 0
+
+
+def open_kakaotalk_macos_sqlcipher_context(
+    path: Path,
+    identity_context: Mapping[str, object],
+    *,
+    tool: str,
+) -> dict[str, object] | None:
+    for candidate in sqlcipher_key_candidates(path, identity_context):
+        for compatibility in (3, 4):
+            table_names = sqlcipher_table_names(tool, path, candidate["key"], compatibility)
+            if table_names is None:
+                continue
+            return {
+                "key": candidate["key"],
+                "user_id_sha256": candidate["user_id_sha256"],
+                "compatibility": compatibility,
+                "table_names": table_names,
+            }
+    return None
+
+
+def read_kakaotalk_macos_sqlcipher_messages(
+    path: Path,
+    *,
+    key: str,
+    compatibility: int,
+    table_names: Sequence[str],
+    max_rows: int,
+    include_message_text: bool,
+    tool: str,
+    source_hash: str,
+) -> tuple[list[dict[str, object]], str]:
+    table_name = select_kakaotalk_macos_message_table(table_names)
+    if not table_name:
+        return [], ""
+    columns = sqlcipher_table_columns(tool, path, key, compatibility, table_name)
+    if not columns:
+        return [], table_name
+    rows = run_sqlcipher_select_dicts(
+        tool,
+        path,
+        key=key,
+        compatibility=compatibility,
+        table_name=table_name,
+        columns=columns,
+        order_columns=message_order_columns(columns),
+        max_rows=max_rows,
+    )
+    return [
+        normalize_kakaotalk_macos_message_row(
+            row,
+            source_path=path,
+            source_hash=source_hash,
+            table_name=table_name,
+            row_index=index,
+            include_message_text=include_message_text,
+        )
+        for index, row in enumerate(rows, start=1)
+    ], table_name
+
+
+def read_kakaotalk_macos_plain_messages(
+    path: Path,
+    *,
+    max_rows: int,
+    include_message_text: bool,
+    source_hash: str,
+) -> tuple[list[dict[str, object]], str]:
+    try:
+        with open_sqlite_snapshot(path) as connection:
+            table_names = [
+                str(row[0])
+                for row in connection.execute("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name").fetchall()
+            ]
+            table_name = select_kakaotalk_macos_message_table(table_names)
+            if not table_name:
+                return [], ""
+            columns = sqlite_columns(connection, table_name)
+            order_clause = sqlite_order_clause(message_order_columns(columns))
+            limit_clause = f" LIMIT {int(max_rows)}" if max_rows > 0 else ""
+            selected = ", ".join(f'"{column}"' for column in columns if SAFE_SQL_NAME_RE.fullmatch(column))
+            if not selected:
+                return [], table_name
+            rows = [
+                dict(zip([column for column in columns if SAFE_SQL_NAME_RE.fullmatch(column)], row))
+                for row in connection.execute(f'SELECT {selected} FROM "{table_name}"{order_clause}{limit_clause}').fetchall()
+            ]
+    except (sqlite3.DatabaseError, OSError):
+        return [], ""
+    return [
+        normalize_kakaotalk_macos_message_row(
+            row,
+            source_path=path,
+            source_hash=source_hash,
+            table_name=table_name,
+            row_index=index,
+            include_message_text=include_message_text,
+        )
+        for index, row in enumerate(rows, start=1)
+    ], table_name
+
+
+def read_kakaotalk_macos_sqlcipher_context_rows(
+    path: Path,
+    *,
+    key: str,
+    compatibility: int,
+    table_names: Sequence[str],
+    tool: str,
+    include_text: bool,
+    source_hash: str,
+) -> list[dict[str, object]]:
+    rows: list[dict[str, object]] = []
+    for table_name in ("NTChatRoom", "NTUser"):
+        if table_name not in table_names:
+            continue
+        columns = sqlcipher_table_columns(tool, path, key, compatibility, table_name)
+        for index, row in enumerate(
+            run_sqlcipher_select_dicts(
+                tool,
+                path,
+                key=key,
+                compatibility=compatibility,
+                table_name=table_name,
+                columns=columns,
+                order_columns=message_order_columns(columns),
+                max_rows=5_000,
+            ),
+            start=1,
+        ):
+            rows.append(normalize_kakaotalk_macos_context_row(row, table_name, index, path, source_hash, include_text))
+    return rows
+
+
+def read_kakaotalk_macos_plain_context_rows(
+    path: Path,
+    *,
+    include_text: bool,
+    source_hash: str,
+) -> list[dict[str, object]]:
+    rows: list[dict[str, object]] = []
+    try:
+        with open_sqlite_snapshot(path) as connection:
+            table_names = [
+                str(row[0])
+                for row in connection.execute("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name").fetchall()
+            ]
+            for table_name in ("rooms", "chat_rooms", "NTChatRoom", "users", "NTUser"):
+                if table_name not in table_names or not SAFE_SQL_NAME_RE.fullmatch(table_name):
+                    continue
+                columns = sqlite_columns(connection, table_name)
+                selected_columns = [column for column in columns if SAFE_SQL_NAME_RE.fullmatch(column)]
+                if not selected_columns:
+                    continue
+                selected = ", ".join(f'"{column}"' for column in selected_columns)
+                for index, row in enumerate(connection.execute(f'SELECT {selected} FROM "{table_name}" LIMIT 5000').fetchall(), start=1):
+                    rows.append(
+                        normalize_kakaotalk_macos_context_row(
+                            dict(zip(selected_columns, row)),
+                            table_name,
+                            index,
+                            path,
+                            source_hash,
+                            include_text,
+                        )
+                    )
+    except (sqlite3.DatabaseError, OSError):
+        return rows
+    return rows
+
+
+def select_kakaotalk_macos_message_table(table_names: Sequence[str]) -> str:
+    for preferred in ("NTChatMessage", "messages", "chatLogs", "chat_messages"):
+        if preferred in table_names:
+            return preferred
+    for table_name in table_names:
+        if KAKAO_MAC_CHAT_TABLE_RE.search(table_name):
+            return table_name
+    return ""
+
+
+def message_order_columns(columns: Sequence[str]) -> list[str]:
+    ordered: list[str] = []
+    for column in ("sentAt", "created_at", "createdAt", "sendAt", "timestamp", "logId", "id"):
+        if column in columns:
+            ordered.append(column)
+    return ordered
+
+
+def sqlite_order_clause(order_columns: Sequence[str]) -> str:
+    safe = [column for column in order_columns if SAFE_SQL_NAME_RE.fullmatch(column)]
+    return " ORDER BY " + ", ".join(f'"{column}"' for column in safe) if safe else ""
+
+
+def run_sqlcipher_select_dicts(
+    tool: str,
+    path: Path,
+    *,
+    key: str,
+    compatibility: int,
+    table_name: str,
+    columns: Sequence[str],
+    order_columns: Sequence[str],
+    max_rows: int,
+) -> list[dict[str, object]]:
+    if not SAFE_SQL_NAME_RE.fullmatch(table_name):
+        return []
+    selected_columns = [column for column in columns if SAFE_SQL_NAME_RE.fullmatch(column)]
+    if not selected_columns:
+        return []
+    selected = ", ".join(f'"{column}"' for column in selected_columns)
+    order_clause = sqlite_order_clause(order_columns)
+    limit_clause = f" LIMIT {int(max_rows)}" if max_rows > 0 else ""
+    sql = (
+        f"PRAGMA cipher_default_compatibility = {compatibility};\n"
+        f"PRAGMA key = '{key}';\n"
+        f'SELECT {selected} FROM "{table_name}"{order_clause}{limit_clause};\n'
+    )
+    completed = run_sqlcipher_csv(tool, path, sql)
+    if completed is None or completed.returncode != 0 or not completed.stdout.strip():
+        return []
+    reader = csv.DictReader(io.StringIO(completed.stdout))
+    return [dict(row) for row in reader]
+
+
+def run_sqlcipher_csv(tool: str, path: Path, sql: str) -> subprocess.CompletedProcess[str] | None:
+    if not path.exists():
+        return None
+    try:
+        completed = subprocess.run(
+            [tool, "-readonly", "-ifexists", "-batch", "-header", "-csv", str(path)],
+            input=sql.encode("utf-8"),
+            capture_output=True,
+            timeout=SQLCIPHER_TIMEOUT_SECONDS,
+            check=False,
+        )
+        return subprocess.CompletedProcess(
+            completed.args,
+            completed.returncode,
+            completed.stdout.decode("utf-8", errors="replace"),
+            completed.stderr.decode("utf-8", errors="replace"),
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+
+
+def normalize_kakaotalk_macos_message_row(
+    row: Mapping[str, object],
+    *,
+    source_path: Path,
+    source_hash: str,
+    table_name: str,
+    row_index: int,
+    include_message_text: bool,
+) -> dict[str, object]:
+    message_text = first_text(row, "message", "msg", "text", "content")
+    attachment = first_text(row, "attachment")
+    local_path = first_text(row, "localFilePath", "local_file_path", "path")
+    normalized: dict[str, object] = {
+        "row_index": row_index,
+        "source_database": str(source_path.resolve()),
+        "source_database_sha256": source_hash,
+        "source_table": table_name,
+        "chat_id": first_text(row, "chatId", "chat_id", "roomId", "room_id"),
+        "log_id": first_text(row, "logId", "id"),
+        "message_id": first_text(row, "msgId", "message_id"),
+        "author_id": first_text(row, "authorId", "sender", "sender_id", "user_id"),
+        "message_type": first_text(row, "type"),
+        "status": first_text(row, "status"),
+        "sent_at_raw": first_text(row, "sentAt", "sendAt", "created_at", "createdAt", "timestamp"),
+        "sent_at_iso_guess": timestamp_iso_guess(first_text(row, "sentAt", "sendAt", "created_at", "createdAt", "timestamp")),
+        "message_text_sha256": hash_text(message_text) if message_text else "",
+        "message_text_length": len(message_text),
+        "message_text_redacted": not include_message_text,
+        "attachment_sha256": hash_text(attachment) if attachment else "",
+        "attachment_length": len(attachment),
+        "local_file_path": local_path,
+        "local_file_path_sha256": hash_text(local_path) if local_path else "",
+        "content_exported": include_message_text,
+    }
+    if include_message_text:
+        normalized["message_text"] = message_text
+        normalized["attachment"] = attachment
+    else:
+        normalized["message_text"] = ""
+        normalized["attachment"] = ""
+    return normalized
+
+
+def normalize_kakaotalk_macos_context_row(
+    row: Mapping[str, object],
+    table_name: str,
+    row_index: int,
+    source_path: Path,
+    source_hash: str,
+    include_text: bool,
+) -> dict[str, object]:
+    display = first_text(row, "title", "name", "nickName", "displayName", "member", "members")
+    row_json = json.dumps({str(k): stringify_scalar(v) for k, v in row.items()}, ensure_ascii=False, sort_keys=True)
+    item: dict[str, object] = {
+        "row_index": row_index,
+        "source_database": str(source_path.resolve()),
+        "source_database_sha256": source_hash,
+        "source_table": table_name,
+        "entity_id": first_text(row, "chatId", "userId", "id", "roomId"),
+        "display_text_sha256": hash_text(display) if display else "",
+        "display_text_length": len(display),
+        "row_json_sha256": hash_text(row_json),
+        "content_exported": include_text,
+    }
+    item["display_text"] = display if include_text else ""
+    item["row_json"] = row_json if include_text else ""
+    return item
+
+
+def first_text(row: Mapping[str, object], *keys: str) -> str:
+    lowered = {str(key).lower(): value for key, value in row.items()}
+    for key in keys:
+        value = row.get(key)
+        if value in (None, ""):
+            value = lowered.get(key.lower())
+        if value not in (None, ""):
+            return stringify_scalar(value)
+    return ""
+
+
+def stringify_scalar(value: object) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, bytes):
+        return value.hex()
+    return str(value)
+
+
+def timestamp_iso_guess(value: str) -> str:
+    if not value:
+        return ""
+    try:
+        numeric = float(value)
+    except ValueError:
+        return ""
+    candidates = [numeric]
+    if numeric > 10_000_000_000:
+        candidates.append(numeric / 1000.0)
+    for candidate in candidates:
+        if 946684800 <= candidate <= 4102444800:
+            return dt.datetime.fromtimestamp(candidate, tz=dt.timezone.utc).isoformat()
+    return ""
+
+
+def extract_kakaotalk_macos_media_rows(messages: Sequence[Mapping[str, object]], *, source_hash: str) -> list[dict[str, object]]:
+    media_rows: list[dict[str, object]] = []
+    for message in messages:
+        attachment = str(message.get("attachment") or "")
+        local_path = str(message.get("local_file_path") or "")
+        if not attachment and not local_path:
+            continue
+        parsed = parse_attachment_summary(attachment)
+        media_rows.append(
+            {
+                "message_row_index": message.get("row_index"),
+                "chat_id": message.get("chat_id"),
+                "log_id": message.get("log_id"),
+                "source_database_sha256": source_hash,
+                "local_file_path": local_path,
+                "local_file_path_sha256": hash_text(local_path) if local_path else "",
+                "attachment_sha256": hash_text(attachment) if attachment else "",
+                "attachment_length": len(attachment),
+                "attachment_kind": parsed.get("kind", ""),
+                "attachment_name": parsed.get("name", ""),
+                "attachment_url_present": parsed.get("url_present", False),
+            }
+        )
+    return media_rows
+
+
+def parse_attachment_summary(attachment: str) -> dict[str, object]:
+    if not attachment:
+        return {}
+    try:
+        parsed = json.loads(attachment)
+    except json.JSONDecodeError:
+        return {"kind": "raw-text", "name": "", "url_present": "http" in attachment.lower()}
+    if not isinstance(parsed, Mapping):
+        return {"kind": type(parsed).__name__, "name": "", "url_present": False}
+    name = ""
+    for key in ("name", "fileName", "filename", "title"):
+        if parsed.get(key):
+            name = str(parsed[key])
+            break
+    return {
+        "kind": str(parsed.get("type") or parsed.get("kind") or "json-object"),
+        "name": name,
+        "url_present": any("url" in str(key).lower() and bool(value) for key, value in parsed.items()),
+    }
+
+
+def message_csv_fields(*, include_message_text: bool) -> list[str]:
+    fields = [
+        "row_index",
+        "chat_id",
+        "log_id",
+        "message_id",
+        "author_id",
+        "message_type",
+        "status",
+        "sent_at_raw",
+        "sent_at_iso_guess",
+        "message_text_sha256",
+        "message_text_length",
+        "message_text_redacted",
+        "attachment_sha256",
+        "attachment_length",
+        "local_file_path",
+        "local_file_path_sha256",
+        "source_table",
+        "source_database_sha256",
+        "content_exported",
+    ]
+    if include_message_text:
+        fields.insert(9, "message_text")
+        fields.insert(15, "attachment")
+    return fields
+
+
+def room_csv_fields(*, include_text: bool) -> list[str]:
+    fields = [
+        "row_index",
+        "source_table",
+        "entity_id",
+        "display_text_sha256",
+        "display_text_length",
+        "row_json_sha256",
+        "source_database_sha256",
+        "content_exported",
+    ]
+    if include_text:
+        fields.insert(3, "display_text")
+        fields.insert(7, "row_json")
+    return fields
+
+
+def media_csv_fields(*, include_text: bool) -> list[str]:
+    return [
+        "message_row_index",
+        "chat_id",
+        "log_id",
+        "local_file_path",
+        "local_file_path_sha256",
+        "attachment_sha256",
+        "attachment_length",
+        "attachment_kind",
+        "attachment_name",
+        "attachment_url_present",
+        "source_database_sha256",
+    ]
+
+
+def write_dict_csv(path: Path, rows: Sequence[Mapping[str, object]], fieldnames: Sequence[str]) -> None:
+    with path.open("w", encoding="utf-8-sig", newline="") as handle:
+        writer = csv.DictWriter(handle, fieldnames=list(fieldnames), extrasaction="ignore")
+        writer.writeheader()
+        for row in rows:
+            writer.writerow({field: row.get(field, "") for field in fieldnames})
+
+
+def render_kakaotalk_macos_viewer(
+    path: Path,
+    *,
+    messages: Sequence[Mapping[str, object]],
+    rooms: Sequence[Mapping[str, object]],
+    media: Sequence[Mapping[str, object]],
+    include_message_text: bool,
+    root: Path,
+    max_messages: int,
+) -> None:
+    rendered_messages = []
+    for message in messages[:5_000]:
+        text = str(message.get("message_text") or "")
+        if not include_message_text:
+            text = f"[redacted] sha256={message.get('message_text_sha256', '')}"
+        rendered_messages.append(
+            "\n".join(
+                [
+                    '<article class="bubble">',
+                    f'<div class="meta">chat {escape_html(message.get("chat_id"))} · author {escape_html(message.get("author_id"))} · {escape_html(message.get("sent_at_raw"))}</div>',
+                    f'<div class="body">{escape_html(text)}</div>',
+                    f'<div class="cite">table {escape_html(message.get("source_table"))} · row {escape_html(message.get("row_index"))} · db {escape_html(str(message.get("source_database_sha256", ""))[:16])}</div>',
+                    "</article>",
+                ]
+            )
+        )
+    html_text = "\n".join(
+        [
+            "<!doctype html>",
+            '<html lang="ko">',
+            "<head>",
+            '<meta charset="utf-8">',
+            "<title>RapidTriage macOS KakaoTalk Viewer</title>",
+            "<style>",
+            "body{margin:0;background:#f3efe7;color:#1f2933;font-family:-apple-system,BlinkMacSystemFont,'Apple SD Gothic Neo','Malgun Gothic',sans-serif}",
+            "header{position:sticky;top:0;background:#2f2518;color:#fff;padding:16px 22px;box-shadow:0 2px 12px #0002}",
+            "main{display:grid;grid-template-columns:280px minmax(0,1fr);gap:20px;padding:20px}",
+            ".panel{background:#fffdf9;border:1px solid #e5d8c2;border-radius:18px;padding:16px;box-shadow:0 8px 28px #8b6f4733}",
+            ".stat{display:flex;justify-content:space-between;border-bottom:1px solid #eee0cc;padding:9px 0;font-size:14px}",
+            ".timeline{max-width:920px;margin:0 auto;display:flex;flex-direction:column;gap:12px}",
+            ".bubble{background:#fff;border:1px solid #eadcc8;border-radius:18px 18px 18px 4px;padding:12px 14px;box-shadow:0 4px 18px #8b6f4722}",
+            ".meta,.cite{color:#7c6b5a;font-size:12px}.body{white-space:pre-wrap;line-height:1.55;margin:8px 0;font-size:15px}",
+            ".warning{background:#fff2cc;border-color:#f0c36a}",
+            "</style>",
+            "</head><body>",
+            "<header><strong>RapidTriage macOS KakaoTalk Viewer</strong><br><small>정적 HTML 뷰어 · 외부 네트워크/스크립트 없음</small></header>",
+            "<main>",
+            '<aside class="panel">',
+            "<h2>Case Summary</h2>",
+            f'<div class="stat"><span>Source</span><span>{escape_html(root)}</span></div>',
+            f'<div class="stat"><span>Messages</span><span>{len(messages)}</span></div>',
+            f'<div class="stat"><span>Rooms/users</span><span>{len(rooms)}</span></div>',
+            f'<div class="stat"><span>Media refs</span><span>{len(media)}</span></div>',
+            f'<div class="stat"><span>Text exported</span><span>{include_message_text}</span></div>',
+            f'<div class="stat"><span>Max messages</span><span>{max_messages}</span></div>',
+            '<section class="panel warning"><strong>주의</strong><br>본문은 명시적으로 요청한 경우에만 포함됩니다. 법정 제출 전 known-answer 검증이 필요합니다.</section>',
+            "</aside>",
+            '<section class="timeline">',
+            *rendered_messages,
+            "</section>",
+            "</main></body></html>",
+        ]
+    )
+    path.write_text(html_text, encoding="utf-8")
+
+
+def escape_html(value: object) -> str:
+    return html.escape(str(value or ""), quote=True)
 
 
 def kakaotalk_macos_confidence(

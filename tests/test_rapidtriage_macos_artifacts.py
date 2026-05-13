@@ -15,6 +15,7 @@ from rapidtriage.artifacts.kakaotalk_macos import (
     derive_kakaotalk_macos_database_name,
     derive_kakaotalk_macos_secure_key,
     extract_kakaotalk_macos_user_id_candidates,
+    env_user_id_overrides,
     hashed_macos_device_uuid,
     recover_user_id_from_sha512_directory_hash,
 )
@@ -57,6 +58,14 @@ class RapidTriageMacOsArtifactsTests(unittest.TestCase):
             self.assertIsNone(recover_user_id_from_sha512_directory_hash(directory_hash))
         with patch.dict(os.environ, {"RAPIDTRIAGE_KAKAO_MAC_SHA512_BRUTE_MAX": "5000"}):
             self.assertEqual(recover_user_id_from_sha512_directory_hash(directory_hash), user_id)
+
+    def test_kakaotalk_macos_user_id_file_is_read_without_serializing_raw_id(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            user_id_file = Path(tmp_dir) / "uid.txt"
+            user_id_file.write_text("12345\n", encoding="utf-8")
+
+            with patch.dict(os.environ, {"RAPIDTRIAGE_KAKAO_MAC_USER_ID_FILE": str(user_id_file)}, clear=False):
+                self.assertIn(12345, env_user_id_overrides())
 
     def test_macos_system_collector_imports_user_browser_quarantine_and_launch_agent(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -187,6 +196,83 @@ class RapidTriageMacOsArtifactsTests(unittest.TestCase):
             self.assertEqual(summary["details"]["encrypted_or_custom_store_count"], 1)
             self.assertEqual(summary["details"]["message_row_count_estimate"], 2)
             self.assertTrue(summary["details"]["db_analysis_supported"])
+
+    def test_kakaotalk_macos_report_exports_review_package_with_opt_in_text(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            build_macos_fixture(root)
+            output_dir = root / "kakaotalk-macos-report"
+
+            self.assertEqual(
+                main(
+                    [
+                        "kakaotalk-macos-report",
+                        str(root),
+                        "--output-dir",
+                        str(output_dir),
+                        "--include-message-text",
+                        "--max-messages",
+                        "10",
+                    ]
+                ),
+                0,
+            )
+
+            report_path = output_dir / "kakaotalk_macos_report.json"
+            summary_path = output_dir / "kakaotalk_macos_summary.json"
+            messages_csv = output_dir / "kakaotalk_macos_messages.csv"
+            rooms_csv = output_dir / "kakaotalk_macos_rooms.csv"
+            media_csv = output_dir / "kakaotalk_macos_media.csv"
+            viewer_html = output_dir / "kakaotalk_macos_viewer.html"
+            audit_path = output_dir / "kakaotalk_macos_report.audit.json"
+
+            for path in (report_path, summary_path, messages_csv, rooms_csv, media_csv, viewer_html, audit_path):
+                self.assertTrue(path.is_file(), path)
+
+            payload = json.loads(report_path.read_text(encoding="utf-8"))
+            self.assertEqual(payload["parser"], "kakaotalk-macos-report")
+            self.assertEqual(payload["summary"]["message_count"], 2)
+            self.assertEqual(payload["summary"]["plain_sqlite_opened_count"], 1)
+            self.assertTrue(payload["privacy"]["message_text_exported"])
+            self.assertFalse(payload["privacy"]["raw_user_id_exported"])
+            self.assertFalse(payload["privacy"]["sqlcipher_key_exported"])
+
+            csv_text = messages_csv.read_text(encoding="utf-8-sig")
+            self.assertIn("hello", csv_text)
+            self.assertIn("world", csv_text)
+            self.assertIn(hashlib.sha256("hello".encode("utf-8")).hexdigest(), csv_text)
+
+            html_text = viewer_html.read_text(encoding="utf-8")
+            self.assertIn("RapidTriage macOS KakaoTalk Viewer", html_text)
+            self.assertIn("hello", html_text)
+            self.assertNotIn("sqlcipher_key", html_text)
+
+            audit = json.loads(audit_path.read_text(encoding="utf-8"))
+            self.assertEqual(audit["command"], "kakaotalk-macos-report")
+            self.assertFalse(audit["provenance"]["options"]["raw_user_id_exported"])
+            self.assertFalse(audit["provenance"]["options"]["sqlcipher_key_exported"])
+
+    def test_kakaotalk_macos_report_redacts_message_text_by_default(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            build_macos_fixture(root)
+            output_dir = root / "kakaotalk-macos-report"
+
+            self.assertEqual(
+                main(["kakaotalk-macos-report", str(root), "--output-dir", str(output_dir), "--max-messages", "10"]),
+                0,
+            )
+
+            payload = json.loads((output_dir / "kakaotalk_macos_report.json").read_text(encoding="utf-8"))
+            csv_text = (output_dir / "kakaotalk_macos_messages.csv").read_text(encoding="utf-8-sig")
+            html_text = (output_dir / "kakaotalk_macos_viewer.html").read_text(encoding="utf-8")
+
+            self.assertEqual(payload["summary"]["message_count"], 2)
+            self.assertFalse(payload["privacy"]["message_text_exported"])
+            self.assertNotIn("hello", csv_text)
+            self.assertNotIn("world", csv_text)
+            self.assertIn(hashlib.sha256("hello".encode("utf-8")).hexdigest(), csv_text)
+            self.assertIn("[redacted]", html_text)
 
 
 def build_macos_fixture(root: Path) -> None:
