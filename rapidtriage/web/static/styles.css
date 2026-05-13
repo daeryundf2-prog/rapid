@@ -797,6 +797,190 @@ button:disabled {
   padding-top: 18px;
 }
 
+.lazyweb-command-center {
+  display: grid;
+  grid-template-columns: minmax(220px, 0.82fr) minmax(340px, 1.38fr) minmax(180px, 0.62fr);
+  gap: 12px;
+  align-items: stretch;
+  margin: 14px 0;
+  border: 1px solid rgba(38, 217, 208, 0.22);
+  border-radius: 24px;
+  background:
+    radial-gradient(circle at 18% 8%, rgba(38, 217, 208, 0.18), transparent 26%),
+    radial-gradient(circle at 88% 0%, rgba(240, 184, 75, 0.2), transparent 24%),
+    linear-gradient(135deg, rgba(19, 32, 43, 0.98), rgba(22, 49, 55, 0.94));
+  box-shadow: var(--shadow-command);
+  color: #f8fffc;
+  padding: 12px;
+}
+
+.lazyweb-model-card,
+.lazyweb-command-panel,
+.lazyweb-metric-stack {
+  min-width: 0;
+}
+
+.lazyweb-model-card {
+  display: grid;
+  align-content: space-between;
+  gap: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.07);
+  padding: 14px;
+}
+
+.lazyweb-model-card .eyebrow {
+  color: var(--cyan);
+}
+
+.lazyweb-model-card h3,
+.lazyweb-model-card p {
+  margin: 0;
+}
+
+.lazyweb-model-card p {
+  color: rgba(248, 255, 252, 0.76);
+  line-height: 1.45;
+}
+
+.lazyweb-model-card strong {
+  color: #fff;
+}
+
+.lazyweb-reference-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+}
+
+.lazyweb-reference-row a {
+  border: 1px solid rgba(38, 217, 208, 0.24);
+  border-radius: 999px;
+  background: rgba(38, 217, 208, 0.1);
+  color: #bffdf6;
+  padding: 5px 9px;
+  text-decoration: none;
+  font-size: 0.72rem;
+  font-weight: 900;
+}
+
+.lazyweb-command-panel {
+  display: grid;
+  gap: 10px;
+}
+
+.lazyweb-search-command {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+  min-height: 54px;
+  border: 1px solid rgba(38, 217, 208, 0.32);
+  border-radius: 18px;
+  background:
+    linear-gradient(135deg, rgba(255, 255, 255, 0.16), rgba(255, 255, 255, 0.08));
+  color: #fff;
+  text-align: left;
+}
+
+.lazyweb-search-command span {
+  border-radius: 999px;
+  background: rgba(38, 217, 208, 0.18);
+  color: #cafffb;
+  padding: 5px 8px;
+  font-size: 0.72rem;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.lazyweb-search-command strong {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.lazyweb-command-grid {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.lazyweb-command-chip {
+  display: grid;
+  gap: 4px;
+  align-content: start;
+  min-height: 102px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.08);
+  color: rgba(248, 255, 252, 0.86);
+  padding: 10px;
+  text-align: left;
+}
+
+.lazyweb-command-chip.active,
+.lazyweb-command-chip:hover,
+.lazyweb-command-chip:focus-visible {
+  border-color: rgba(38, 217, 208, 0.72);
+  background:
+    linear-gradient(135deg, rgba(38, 217, 208, 0.18), rgba(255, 255, 255, 0.1));
+  box-shadow: 0 16px 34px rgba(5, 12, 18, 0.26);
+}
+
+.lazyweb-command-chip span {
+  width: fit-content;
+  border-radius: 999px;
+  background: rgba(240, 184, 75, 0.18);
+  color: #ffe0a1;
+  padding: 3px 7px;
+  font-size: 0.7rem;
+  font-weight: 900;
+}
+
+.lazyweb-command-chip strong {
+  color: #fff;
+}
+
+.lazyweb-command-chip em {
+  color: rgba(248, 255, 252, 0.64);
+  font-size: 0.72rem;
+  font-style: normal;
+  line-height: 1.3;
+}
+
+.lazyweb-metric-stack {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 8px;
+}
+
+.lazyweb-metric {
+  display: grid;
+  gap: 2px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.08);
+  padding: 10px;
+}
+
+.lazyweb-metric strong {
+  color: #fff;
+  font-size: 1.05rem;
+}
+
+.lazyweb-metric span {
+  color: rgba(248, 255, 252, 0.78);
+  font-weight: 900;
+}
+
+.lazyweb-metric em {
+  color: rgba(248, 255, 252, 0.54);
+  font-size: 0.72rem;
+  font-style: normal;
+}
+
 .case-workbench-layout {
   display: grid;
   grid-template-columns: minmax(210px, 260px) minmax(0, 1fr) minmax(230px, 300px);
@@ -4175,7 +4359,9 @@ body::before {
   .analysis-grid,
   .analyst-workflow-map,
   .search-workbench,
-  .review-decision-rail {
+  .review-decision-rail,
+  .lazyweb-command-center,
+  .lazyweb-command-grid {
     grid-template-columns: 1fr;
   }
 
@@ -4309,6 +4495,37 @@ body.analysis-active .run-item::before {
 
 body.analysis-active .case-workbench-layout {
   grid-template-columns: 278px minmax(0, 1fr) 380px;
+}
+
+body.analysis-active .lazyweb-command-center {
+  grid-template-columns: 260px minmax(0, 1fr) 250px;
+  gap: 6px;
+  margin: 0 0 6px;
+  border-color: #3a4d60;
+  border-radius: 2px;
+  background: #172330;
+  box-shadow: none;
+  padding: 6px;
+}
+
+body.analysis-active .lazyweb-model-card,
+body.analysis-active .lazyweb-command-chip,
+body.analysis-active .lazyweb-metric,
+body.analysis-active .lazyweb-search-command {
+  border-color: #3a4d60;
+  border-radius: 2px;
+  background: #243241;
+  box-shadow: none;
+}
+
+body.analysis-active .lazyweb-command-grid {
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 4px;
+}
+
+body.analysis-active .lazyweb-command-chip {
+  min-height: 72px;
+  padding: 6px;
 }
 
 .run-panel,
@@ -4700,6 +4917,18 @@ button:hover,
 }
 
 @media (max-width: 1180px) {
+  .lazyweb-command-center {
+    grid-template-columns: 1fr;
+  }
+
+  .lazyweb-command-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .lazyweb-metric-stack {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+
   .case-workbench-layout,
   .search-workbench {
     grid-template-columns: 1fr;
@@ -4710,5 +4939,13 @@ button:hover,
   .viewer-dock {
     position: static;
     max-height: none;
+  }
+}
+
+@media (max-width: 880px) {
+  .lazyweb-command-grid,
+  .lazyweb-metric-stack,
+  .lazyweb-search-command {
+    grid-template-columns: 1fr;
   }
 }

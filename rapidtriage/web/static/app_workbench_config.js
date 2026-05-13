@@ -58,6 +58,69 @@ const SHORTCUTS = [
   { keys: ["/"], label: "Jump to global case search" },
   { keys: ["?"], label: "Show or hide this shortcut guide" },
 ];
+const LAZYWEB_WORKBENCH_MODEL = {
+  profile_version: "lazyweb-command-center-model-v1",
+  checklist_item: 18,
+  reference_patterns: [
+    {
+      label: "Lazyweb Raycast manage models",
+      url: "https://www.lazyweb.com/canvas/flows/raycast/manage-models",
+      pattern: "command-first model switcher",
+    },
+    {
+      label: "Lazyweb flow gallery",
+      url: "https://www.lazyweb.com/canvas/flows",
+      pattern: "flow-backed screen references",
+    },
+  ],
+  principles: [
+    "case actions stay in one command center instead of separate screens",
+    "artifact tree, virtual table, source preview, review, and report remain connected",
+    "search opens the same source viewer before any report decision",
+  ],
+  commands: [
+    {
+      id: "intake",
+      label: "Evidence intake",
+      tab: "summary",
+      shortcut: "1",
+      hint: "E01, folder, mounted image, or imported run",
+      filter: "case",
+    },
+    {
+      id: "search",
+      label: "Unified search",
+      tab: "search",
+      shortcut: "/",
+      hint: "files, documents, web, AI, EVTX, Registry, OCR, mail, messenger",
+      filter: "search",
+    },
+    {
+      id: "verify",
+      label: "Source verify",
+      tab: "artifacts",
+      shortcut: "Enter",
+      hint: "open the source viewer, hash, offset, parser, limitation",
+      filter: "windows",
+    },
+    {
+      id: "review",
+      label: "Review board",
+      tab: "review",
+      shortcut: "Alt R",
+      hint: "relevant, needs-review, excluded, include-in-report",
+      filter: "review",
+    },
+    {
+      id: "deliver",
+      label: "Report bundle",
+      tab: "report",
+      shortcut: "4",
+      hint: "citations, hash manifest, exhibit-ready output",
+      filter: "report",
+    },
+  ],
+};
 const FORENSIC_RIBBON_GROUPS = [
   {
     id: "case",

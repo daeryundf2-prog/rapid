@@ -244,6 +244,7 @@ function renderDetailShell(run, tab) {
       </div>
     </div>
     ${renderCaseHero(run)}
+    ${renderLazywebCommandCenter(run, tab)}
     ${renderWorkbenchSmokePanel(run)}
     ${renderCaseCommandBar(run)}
     ${renderForensicRibbon(run)}
@@ -256,6 +257,75 @@ function renderDetailShell(run, tab) {
     </div>
     ${renderTableControlBar(tab)}
     ${renderWorkbenchLayoutFrame(run, tab)}
+  `;
+}
+
+function renderLazywebCommandCenter(run, tab) {
+  const model = typeof LAZYWEB_WORKBENCH_MODEL !== "undefined"
+    ? LAZYWEB_WORKBENCH_MODEL
+    : { profile_version: "local-command-center-model", commands: [] };
+  const commands = model.commands || [];
+  const activeCommand = commands.find((command) => command.tab === tab) || commands[0] || {};
+  const summary = run.summary?.summary || {};
+  const processing = run.summary?.processing || {};
+  const outputs = Object.keys(run.summary?.outputs || {});
+  const signalCount = artifactGroupCount(run, [
+    "evtx",
+    "eventlog",
+    "registry",
+    "mft",
+    "usn",
+    "browser",
+    "ai",
+    "kakao",
+    "email",
+    "ocr",
+    "timeline",
+  ]);
+  const metrics = [
+    { label: "Forensic signals", value: signalCount, hint: "artifact/search tree" },
+    { label: "Report candidates", value: Number(summary.report_item_count || 0), hint: "review-selected" },
+    { label: "Output pointers", value: outputs.length, hint: "sourceable files" },
+    { label: "Warnings", value: Number(processing.warning_count || 0), hint: "limitations" },
+  ];
+  return `
+    <section class="lazyweb-command-center" aria-label="Lazyweb connected command center" data-testid="lazyweb-command-center" data-model-contract="${escapeHtml(model.profile_version || "unknown")}">
+      <div class="lazyweb-model-card">
+        <p class="eyebrow">lazyweb connected model</p>
+        <h3>One forensic command center</h3>
+        <p>입력, 검색, 원본 검증, 리뷰, 보고서를 따로 띄우지 않고 같은 케이스 화면에서 이어갑니다. 지금 초점은 <strong>${escapeHtml(activeCommand.label || tabLabel(tab))}</strong> 입니다.</p>
+        <div class="lazyweb-reference-row" aria-label="Lazyweb references">
+          ${(model.reference_patterns || []).map((ref) => `
+            <a href="${escapeHtml(ref.url)}" target="_blank" rel="noreferrer">${escapeHtml(ref.label)}</a>
+          `).join("")}
+        </div>
+      </div>
+      <div class="lazyweb-command-panel">
+        <button class="lazyweb-search-command" type="button" data-open-tab="search" data-artifact-filter="search" aria-label="Open unified case search">
+          <span>Command</span>
+          <strong>Search whole case, current file, OCR, AI, mail, messenger...</strong>
+          <kbd>/</kbd>
+        </button>
+        <div class="lazyweb-command-grid" role="list" aria-label="Connected forensic workflow commands">
+          ${commands.map((command) => `
+            <button class="lazyweb-command-chip ${command.tab === tab ? "active" : ""}" type="button" role="listitem" data-open-tab="${escapeHtml(command.tab)}" data-artifact-filter="${escapeHtml(command.filter || "")}">
+              <span>${escapeHtml(command.shortcut || "")}</span>
+              <strong>${escapeHtml(command.label)}</strong>
+              <em>${escapeHtml(command.hint)}</em>
+            </button>
+          `).join("")}
+        </div>
+      </div>
+      <div class="lazyweb-metric-stack" aria-label="Case model signals">
+        ${metrics.map((metric) => `
+          <div class="lazyweb-metric">
+            <strong>${formatNumber(metric.value)}</strong>
+            <span>${escapeHtml(metric.label)}</span>
+            <em>${escapeHtml(metric.hint)}</em>
+          </div>
+        `).join("")}
+      </div>
+    </section>
   `;
 }
 

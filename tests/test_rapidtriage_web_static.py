@@ -108,6 +108,27 @@ class RapidTriageWebStaticTests(unittest.TestCase):
         self.assertIn("sqlite-schema-panel", styles)
         self.assertIn("sqlite-column-chip", styles)
 
+    def test_lazyweb_command_center_is_connected_to_workbench_tabs(self) -> None:
+        app_js = (REPO_ROOT / "rapidtriage" / "web" / "static" / "app.js").read_text(encoding="utf-8")
+        config_js = (REPO_ROOT / "rapidtriage" / "web" / "static" / "app_workbench_config.js").read_text(encoding="utf-8")
+        styles = (REPO_ROOT / "rapidtriage" / "web" / "static" / "styles.css").read_text(encoding="utf-8")
+
+        self.assertIn("LAZYWEB_WORKBENCH_MODEL", config_js)
+        self.assertIn("lazyweb-command-center-model-v1", config_js)
+        self.assertIn("https://www.lazyweb.com/canvas/flows/raycast/manage-models", config_js)
+        self.assertIn("Evidence intake", config_js)
+        self.assertIn("Unified search", config_js)
+        self.assertIn("Source verify", config_js)
+        self.assertIn("Review board", config_js)
+        self.assertIn("Report bundle", config_js)
+        self.assertIn("renderLazywebCommandCenter", app_js)
+        self.assertIn("data-testid=\"lazyweb-command-center\"", app_js)
+        self.assertIn("data-open-tab=\"search\"", app_js)
+        self.assertIn("data-artifact-filter=\"${escapeHtml(command.filter || \"\")}\"", app_js)
+        self.assertIn(".lazyweb-command-center", styles)
+        self.assertIn(".lazyweb-command-grid", styles)
+        self.assertIn("body.analysis-active .lazyweb-command-center", styles)
+
     def test_row_filter_text_is_bounded_for_large_records(self) -> None:
         app_js = (REPO_ROOT / "rapidtriage" / "web" / "static" / "app.js").read_text(encoding="utf-8")
 
