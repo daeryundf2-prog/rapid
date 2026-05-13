@@ -268,6 +268,8 @@ function renderForensicFeatureCatalog(run, tab) {
   const catalog = typeof FORENSIC_FEATURE_CATALOG !== "undefined" ? FORENSIC_FEATURE_CATALOG : [];
   if (!catalog.length) return "";
   const totalModules = catalog.reduce((sum, item) => sum + (item.modules || []).length, 0);
+  const capabilityGroups = typeof VISIBLE_FORENSIC_CAPABILITY_GROUPS !== "undefined" ? VISIBLE_FORENSIC_CAPABILITY_GROUPS : [];
+  const totalCapabilities = capabilityGroups.reduce((sum, group) => sum + (group.capabilities || []).length, 0);
   const activeModules = catalog.filter((item) => item.tab === tab);
   const visibleCards = [
     ...activeModules,
@@ -284,6 +286,7 @@ function renderForensicFeatureCatalog(run, tab) {
         <div class="feature-catalog-stats" aria-label="Feature catalog totals">
           <span><strong>${formatNumber(catalog.length)}</strong> groups</span>
           <span><strong>${formatNumber(totalModules)}</strong> functions</span>
+          <span><strong>${formatNumber(totalCapabilities)}</strong> visible steps</span>
         </div>
       </div>
       <div class="feature-catalog-grid">
@@ -300,11 +303,47 @@ function renderForensicFeatureCatalog(run, tab) {
               <span class="feature-module-strip">
                 ${(item.modules || []).slice(0, 5).map((module) => `<i>${escapeHtml(module)}</i>`).join("")}
               </span>
+              ${renderVisibleCapabilityGroups(item)}
             </button>
           `;
         }).join("")}
       </div>
     </section>
+  `;
+}
+
+function renderVisibleCapabilityGroups(item) {
+  const allGroups = typeof VISIBLE_FORENSIC_CAPABILITY_GROUPS !== "undefined" ? VISIBLE_FORENSIC_CAPABILITY_GROUPS : [];
+  const groups = allGroups.filter((group) => group.catalogId === item.id);
+  if (!groups.length) return "";
+  const statusLabels = typeof VISIBLE_CAPABILITY_STATUS_LABELS !== "undefined" ? VISIBLE_CAPABILITY_STATUS_LABELS : {};
+  return `
+    <span class="feature-capability-groups" aria-label="${escapeHtml(item.label)} visible capabilities">
+      ${groups.map((group) => {
+        const capabilities = group.capabilities || [];
+        return `
+          <span class="feature-capability-group">
+            <span class="feature-capability-group-head">
+              <b>${escapeHtml(group.label)}</b>
+              <small>${formatNumber(capabilities.length)} 단계</small>
+            </span>
+            <span class="feature-capability-summary">${escapeHtml(group.summary || "")}</span>
+            <span class="feature-capability-chip-row">
+              ${capabilities.slice(0, 6).map((capability) => {
+                const status = capability.status || "partial";
+                const statusClassName = safeCssToken(status);
+                return `
+                  <i class="feature-capability-chip status-${statusClassName}" title="${escapeHtml(capability.nextAction || capability.viewer || "")}">
+                    <span>${escapeHtml(capability.label)}</span>
+                    <em>${escapeHtml(statusLabels[status] || status)}</em>
+                  </i>
+                `;
+              }).join("")}
+            </span>
+          </span>
+        `;
+      }).join("")}
+    </span>
   `;
 }
 
@@ -4636,6 +4675,13 @@ function tabLabel(value) {
 
 function formatNumber(value) {
   return Number(value || 0).toLocaleString();
+}
+
+function safeCssToken(value) {
+  return String(value || "")
+    .toLowerCase()
+    .replace(/[^a-z0-9_-]+/g, "-")
+    .replace(/^-+|-+$/g, "") || "unknown";
 }
 
 const ROW_FILTER_TEXT_LIMIT = 900;

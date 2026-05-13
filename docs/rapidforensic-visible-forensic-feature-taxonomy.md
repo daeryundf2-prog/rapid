@@ -666,3 +666,46 @@ GUI 표시 권장:
 전용 파서가 적은 것이 아니라, 현재 기능 표시 단위가 너무 굵다. 특히 `browser`, `mobile-export`, `windows-execution`, `windows-system`, `windows-registry`, `macos-system`, `media-image`는 내부 기능을 반드시 분리해서 보여줘야 한다.
 
 다음 구현 우선순위는 GUI와 API summary에서 위 사용자 노출 기능명을 별도 capability card로 보여주는 것이다. 그렇게 해야 분석자가 "인터넷 사용기록이 되는지", "AI 사용기록이 되는지", "메신저가 어디까지 되는지"를 한눈에 확인할 수 있다.
+
+## 22. 2026-05-14 구현 반영: GUI capability model 1차 연결
+
+이번 라운드에서 단순 문서 분류를 실제 GUI 설정으로 옮겼다. `rapidtriage/web/static/app_workbench_config.js`에 `VISIBLE_FORENSIC_CAPABILITY_GROUPS`와 `VISIBLE_CAPABILITY_STATUS_LABELS`를 추가했고, `rapidtriage/web/static/app.js`의 기능 지도 카드가 각 대분류 아래의 세부 기능 단계와 상태를 같이 보여주도록 연결했다.
+
+완료된 점:
+
+| 영역 | 추가 노출 capability |
+| --- | --- |
+| 증거 입력 | E01/Ex01, RAW/split, VM disk, AD1/L01/AFF/XVA export workflow |
+| EVTX | chunk/record, provider message rendering, corrupt/deleted recovery |
+| Registry/계정 | hive tree, NTUSER/UsrClass 사용자 활동, deleted key/value 후보, SAM/SECURITY/SYSTEM |
+| 실행/파일시스템 | Amcache, ShimCache, BAM/DAM, Windows.edb row 후보, MFT/USN 경로 재구성 |
+| 인터넷 사용기록 | 방문 기록, 다운로드 기록, cache/session/extension/cookie, LocalStorage/IndexedDB, 통합 타임라인 |
+| AI 사용기록 | AI 서비스 방문 기록, AI 질문/답변 후보, AI export parser |
+| 문서/메일/DB | PDF/Office/text 검색, SQLite viewer, EML/MBOX, PST/OST import 제한 |
+| 메신저/모바일 | PC KakaoTalk Windows DB, macOS KakaoTalk inventory, 모바일 메시지/SMS/통화, WhatsApp/Telegram/Signal/LINE |
+| 클라우드 | Google Takeout, iCloud export, M365/Teams/OneDrive |
+| 미디어/OCR | 이미지 gallery, 영상 preview, 음성 transcript, OCR Queue/번역 |
+| DFIR/메모리 | memory dump indicators, PowerShell/LoL/Fileless, WebShell/웹서버 로그 |
+| 리뷰/보고서 | 통합 검색/source viewer, evidence tray, citation bundle, audit hash chain |
+
+GUI 표기 방식:
+
+1. 각 기능 카드에는 기존의 큰 모듈명 외에 하위 capability chip이 표시된다.
+2. capability에는 `사용 가능`, `부분 구현`, `목록화`, `검증 필요`, `외부 자료 필요` 상태가 붙는다.
+3. 분석 모드의 dense UI에서도 chip이 너무 길게 화면을 밀지 않도록 요약 설명은 숨기고 상태 chip만 남긴다.
+4. 기능 지도의 통계에는 대분류 수, 기존 function 수, 새 visible step 수가 함께 나온다.
+
+이번에 해결한 부족점:
+
+1. "인터넷 사용기록이 되냐"는 질문이 `browser` 하나로 뭉개지지 않고 방문/다운로드/저장소/캐시/타임라인으로 보인다.
+2. "AI 사용기록이 되냐"는 질문이 브라우저 방문 흔적과 질문/답변 후보, export parser로 분리된다.
+3. 메신저/모바일/클라우드가 단순 import가 아니라 제품/자료 종류별 capability로 보인다.
+4. Windows.edb, SRUM, MFT/USN처럼 아직 깊이 보강이 필요한 항목은 `목록화` 또는 `검증 필요`로 표시되어 과장되지 않는다.
+
+아직 남은 보강:
+
+1. API summary에도 동일한 capability status를 내려서 프론트가 실제 run별 카운트와 readiness를 표시해야 한다.
+2. 각 capability chip을 누르면 해당 artifact tree/filter/source viewer가 정확히 열리도록 딥링크를 붙여야 한다.
+3. capability별 trusted-tool diff 결과와 known-answer fixture 통과 여부를 상태 계산에 반영해야 한다.
+4. Lucene/Elasticsearch/DuckDB 등 대용량 검색 backend 후보는 아직 GUI 표기만 있고, 실제 benchmark 후 선택해야 한다.
+5. 메신저/클라우드/AI export는 버전별 fixture가 부족하므로 `부분 구현` 이상으로 올리려면 실제 샘플 검증이 필요하다.

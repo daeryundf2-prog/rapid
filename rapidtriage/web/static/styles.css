@@ -1232,6 +1232,98 @@ button:disabled {
   font-weight: 800;
 }
 
+.feature-capability-groups {
+  display: grid;
+  gap: 7px;
+  min-width: 0;
+}
+
+.feature-capability-group {
+  display: grid;
+  gap: 5px;
+  border: 1px solid rgba(28, 48, 59, 0.08);
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.62);
+  padding: 8px;
+}
+
+.feature-capability-group-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.feature-capability-group-head b {
+  color: var(--ink);
+  font-size: 0.78rem;
+}
+
+.feature-capability-group-head small {
+  border-radius: 999px;
+  background: rgba(19, 32, 43, 0.08);
+  color: var(--muted);
+  padding: 2px 6px;
+  font-size: 0.64rem;
+  font-weight: 900;
+  white-space: nowrap;
+}
+
+.feature-capability-summary {
+  color: var(--muted);
+  font-size: 0.68rem;
+  line-height: 1.28;
+}
+
+.feature-capability-chip-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.feature-capability-chip {
+  display: inline-flex;
+  max-width: 100%;
+  align-items: center;
+  gap: 5px;
+  border: 1px solid rgba(15, 116, 107, 0.13);
+  border-radius: 999px;
+  background: rgba(15, 116, 107, 0.08);
+  color: var(--ink);
+  padding: 3px 6px;
+  font-size: 0.64rem;
+  font-style: normal;
+  font-weight: 850;
+}
+
+.feature-capability-chip span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.feature-capability-chip em {
+  flex: 0 0 auto;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.7);
+  color: var(--accent-strong);
+  padding: 1px 5px;
+  font-size: 0.58rem;
+  font-style: normal;
+  font-weight: 900;
+}
+
+.feature-capability-chip.status-validation-required,
+.feature-capability-chip.status-external-required {
+  border-color: rgba(197, 126, 42, 0.28);
+  background: rgba(255, 244, 225, 0.72);
+}
+
+.feature-capability-chip.status-inventory {
+  border-color: rgba(91, 114, 130, 0.22);
+  background: rgba(232, 238, 242, 0.78);
+}
+
 .case-workbench-layout {
   display: grid;
   grid-template-columns: minmax(210px, 260px) minmax(0, 1fr) minmax(230px, 300px);
@@ -5006,6 +5098,29 @@ body.analysis-active .feature-module-strip i {
   border-color: #3a4d60;
   border-radius: 2px;
   background: #1c2835;
+}
+
+body.analysis-active .feature-capability-group {
+  border-color: #3a4d60;
+  border-radius: 2px;
+  background: #1c2835;
+  padding: 5px;
+}
+
+body.analysis-active .feature-capability-summary {
+  display: none;
+}
+
+body.analysis-active .feature-capability-chip {
+  border-color: #3a4d60;
+  border-radius: 2px;
+  background: #263444;
+  color: var(--ink);
+}
+
+body.analysis-active .feature-capability-chip em {
+  border-radius: 2px;
+  background: #172330;
 }
 
 body.analysis-active .command-palette-shell {
