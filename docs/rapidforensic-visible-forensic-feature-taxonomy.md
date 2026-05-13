@@ -808,3 +808,39 @@ GUI 표기 방식:
 2. `file-signature-mismatch`는 “위장/은닉 의심”이지 의도 입증이 아니다. 정상적인 무확장 파일, 캐시, 임시 파일에서 오탐이 가능하다.
 3. `print-spooler-job`은 현재 bounded string inventory다. 실제 출력된 문서명/소유자/프린터를 구조적으로 확정하려면 SPL/SHD decoder가 필요하다.
 4. `third-party-remote-control-artifact`는 파일 존재와 string pivot이다. 실제 접속 세션, 원격 ID, 파일 전송 여부는 제품별 로그 decoder가 필요하다.
+
+## 25. 2026-05-14 구현 반영: 앱/클라우드/디스크 메모리 triage 2차 보강
+
+이번 라운드는 GUI에만 보이던 일부 capability를 실제 수집 결과로 연결했다. 목표는 Windows/macOS 단일 케이스에서 "파일이 있으면 분석관에게 숨지 않고 보이는 것"이다. 아직 상용급 확정 decoder가 아니라 triage-normalized row이며, 각 row에는 `validation_required` 또는 commercial blocker를 남긴다.
+
+부분 구현으로 승격한 capability:
+
+| capability | 새 artifact row | 구현 내용 | 남은 상용급 보강 |
+| --- | --- | --- | --- |
+| Sticky Notes plum.sqlite | `sticky-note`, `sticky-note-db-unreadable` | `plum.sqlite`를 read-only SQLite로 열고 note text, deleted flag, account hint, created/updated 후보, text hash를 추출한다. | Sticky Notes 버전별 schema fixture, deleted row recovery, 계정/기기 attribution 교차검증 |
+| Ollama/LM Studio/GPT4All | `local-llm-artifact` | `.ollama`, LM Studio, GPT4All 경로와 `.gguf/.ggml/.safetensors` 모델 파일, config/log/db 파일을 inventory row로 노출한다. | 제품별 prompt/history DB parser, 모델 provenance, 앱 버전별 fixture |
+| AWS CloudTrail | `cloud-iaas-audit` | `Records` CloudTrail JSON에서 eventTime, eventSource, eventName, principal, source IP, account, region, request preview를 정규화한다. | AWS organization/account scope, CloudTrail digest/log integrity, provider console/SIEM diff |
+| Azure Activity Log | `cloud-iaas-audit` | Azure/Entra path 또는 `operationName`, `callerIpAddress`, `subscriptionId`, `resourceId` 기반 감사 row를 IaaS audit으로 분류한다. | tenant/subscription scope, Entra/M365 상관, provider-native diff |
+| GCP Audit Logs | `cloud-iaas-audit` | `protoPayload.methodName`, principalEmail, callerIp, project label 후보를 GCP audit row로 정규화한다. | project/folder/org scope, service account key abuse fixture, provider-native diff |
+| hiberfil/pagefile 통합 카빙 | `disk-memory-file-indicators` | `hiberfil.sys`, `pagefile.sys`, `swapfile.sys`를 메모리 후보로 스캔해 URL/IP/프로세스/BitLocker pivot을 생성한다. | hiberfil decompression, pagefile structure-aware carving, disk offset citation 강화 |
+| MEMORY.DMP/Minidump | `crash-dump-indicators` | `MEMORY.DMP`와 `.dmp`를 crash dump 후보로 분리하고 bounded pivot scan 결과를 표시한다. | minidump 구조 parser, Volatility profile handoff, dump type별 fixture |
+
+대용량 보호:
+
+1. 로컬 LLM 모델 파일과 디스크 메모리 파일은 크기가 큰 경우 전체 해시를 즉시 계산하지 않고 `hash_status=deferred-large-file` 또는 `deferred-large-memory-file`로 표시한다.
+2. 메모리 파일은 기존 bounded scan range를 유지해 pagefile/hiberfil이 커도 전체를 무제한 읽지 않는다.
+3. Sticky Notes는 row limit을 두고 추출하며, 본문 원문과 별도로 `text_sha256`을 남겨 리뷰/보고서 citation에 쓸 수 있게 했다.
+
+검증 포인트:
+
+1. `tests/test_rapidtriage_generic_documents.py`가 `generic-documents` collector 노출, Sticky Notes row, 로컬 LLM 모델 inventory를 검증한다.
+2. `tests/test_rapidtriage_cloud_export.py`가 AWS CloudTrail `Records` JSON을 `cloud-iaas-audit`로 정규화하는지 검증한다.
+3. `tests/test_rapidtriage_memory_volatility.py`가 `pagefile.sys`와 `MEMORY.DMP`를 각각 disk-memory/crash-dump artifact로 분리하는지 검증한다.
+4. Python/JS capability taxonomy는 해당 capability들을 `목록화`에서 `부분 구현`으로 올리고, 실제 artifact type term을 추가했다.
+
+중요한 제한:
+
+1. `sticky-note`는 SQLite live row 중심이다. 삭제된 free page 복원은 아직 아니다.
+2. `local-llm-artifact`는 모델/앱 파일 존재와 역할 분류다. 프롬프트/대화 복원은 제품별 DB schema가 필요하다.
+3. `cloud-iaas-audit`는 provider export row 정규화다. 클라우드 계정 전체 범위나 로그 무결성을 증명하지 않는다.
+4. `disk-memory-file-indicators`는 bounded string pivot이다. hiberfil 압축 해제나 pagefile 구조 복원은 다음 단계다.

@@ -17,6 +17,48 @@ class RapidTriageCloudExportTests(unittest.TestCase):
 
         self.assertIn("cloud-export", help_text)
 
+    def test_cloud_export_collects_iaas_audit_rows(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            cloudtrail = root / "AWS" / "CloudTrail" / "cloudtrail.json"
+            cloudtrail.parent.mkdir(parents=True)
+            cloudtrail.write_text(
+                json.dumps(
+                    {
+                        "Records": [
+                            {
+                                "eventTime": "2026-05-01T01:02:03Z",
+                                "eventSource": "iam.amazonaws.com",
+                                "eventName": "CreateAccessKey",
+                                "awsRegion": "us-east-1",
+                                "sourceIPAddress": "198.51.100.10",
+                                "recipientAccountId": "123456789012",
+                                "userIdentity": {"arn": "arn:aws:iam::123456789012:user/alice"},
+                                "requestParameters": {"userName": "alice"},
+                            }
+                        ]
+                    }
+                ),
+                encoding="utf-8",
+            )
+            output = root / "iaas-cloud-artifacts.json"
+
+            exit_code = main(["artifacts", str(root), "--kind", "cloud-export", "--output", str(output)])
+
+            self.assertEqual(exit_code, 0)
+            payload = json.loads(output.read_text(encoding="utf-8"))
+            self.assertEqual(payload["summary"]["artifact_count"], 1)
+            artifact = payload["artifacts"][0]
+            self.assertEqual(artifact["artifact_type"], "cloud-iaas-audit")
+            details = artifact["details"]
+            self.assertEqual(details["service"], "aws-cloudtrail")
+            self.assertEqual(details["operation"], "CreateAccessKey")
+            self.assertEqual(details["principal"], "arn:aws:iam::123456789012:user/alice")
+            self.assertEqual(details["ip_address"], "198.51.100.10")
+            self.assertIn("identity-privilege-action", details["risk_flags"])
+            self.assertIn("#40", details["commercial_gap_ids"])
+            self.assertEqual(details["cloud_family"], "iaas-cloud")
+
     def test_cloud_export_collects_google_location_activity_and_account_rows(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             root = Path(tmp_dir)

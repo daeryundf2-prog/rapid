@@ -201,7 +201,7 @@ CAPABILITY_GROUPS: tuple[dict[str, Any], ...] = (
         "catalog_id": "web-ai",
         "label": "로컬/데스크톱 AI",
         "capabilities": (
-            {"id": "local-llm-ollama-lmstudio-gpt4all", "label": "Ollama/LM Studio/GPT4All", "status": "inventory", "terms": ("ollama", "lm studio", "gpt4all", "local llm", "model")},
+            {"id": "local-llm-ollama-lmstudio-gpt4all", "label": "Ollama/LM Studio/GPT4All", "status": "partial", "terms": ("ollama", "lm studio", "gpt4all", "local llm", "model", "local-llm-artifact")},
             {"id": "ai-desktop-app-db", "label": "ChatGPT/Copilot 데스크톱 앱 DB", "status": "inventory", "terms": ("chatgpt desktop", "copilot", "desktop app", "sqlite")},
             {"id": "windows-copilot-recall", "label": "Windows Copilot Recall", "status": "inventory", "terms": ("recall", "copilot recall", "screenray", "windows 11 24h2")},
         ),
@@ -213,7 +213,7 @@ CAPABILITY_GROUPS: tuple[dict[str, Any], ...] = (
         "capabilities": (
             {"id": "print-spooler-spl-shd", "label": "Print Spooler SPL/SHD", "status": "partial", "terms": ("print spooler", "print-spooler-job", ".spl", ".shd", "printed", "printer")},
             {"id": "document-metadata-macro-risk", "label": "문서 메타데이터/매크로 위험", "status": "partial", "terms": ("metadata", "vba", "macro", "ole", "ooxml", "author")},
-            {"id": "sticky-notes-plum", "label": "Sticky Notes plum.sqlite", "status": "inventory", "terms": ("sticky notes", "plum.sqlite", "stickynotes", "note")},
+            {"id": "sticky-notes-plum", "label": "Sticky Notes plum.sqlite", "status": "partial", "terms": ("sticky notes", "plum.sqlite", "stickynotes", "note", "sticky-note")},
         ),
     },
     {
@@ -231,9 +231,9 @@ CAPABILITY_GROUPS: tuple[dict[str, Any], ...] = (
         "catalog_id": "mobile-cloud",
         "label": "IaaS 보안 로그",
         "capabilities": (
-            {"id": "aws-cloudtrail-parser", "label": "AWS CloudTrail", "status": "inventory", "terms": ("cloudtrail", "aws", "iam", "s3", "ec2")},
-            {"id": "azure-activity-log-parser", "label": "Azure Activity Log", "status": "inventory", "terms": ("azure activity", "entra", "azuread", "microsoft graph")},
-            {"id": "gcp-audit-log-parser", "label": "GCP Audit Logs", "status": "inventory", "terms": ("gcp", "google cloud", "audit log", "iam")},
+            {"id": "aws-cloudtrail-parser", "label": "AWS CloudTrail", "status": "partial", "terms": ("cloudtrail", "aws", "iam", "s3", "ec2", "cloud-iaas-audit")},
+            {"id": "azure-activity-log-parser", "label": "Azure Activity Log", "status": "partial", "terms": ("azure activity", "entra", "azuread", "microsoft graph", "cloud-iaas-audit")},
+            {"id": "gcp-audit-log-parser", "label": "GCP Audit Logs", "status": "partial", "terms": ("gcp", "google cloud", "audit log", "iam", "cloud-iaas-audit")},
         ),
     },
     {
@@ -251,8 +251,8 @@ CAPABILITY_GROUPS: tuple[dict[str, Any], ...] = (
         "catalog_id": "timeline-ioc",
         "label": "디스크 내 메모리 파일",
         "capabilities": (
-            {"id": "hiberfil-pagefile-carving", "label": "hiberfil/pagefile 통합 카빙", "status": "inventory", "terms": ("hiberfil.sys", "pagefile.sys", "swapfile.sys", "memory carving")},
-            {"id": "crash-dump-minidump-analysis", "label": "MEMORY.DMP/Minidump", "status": "inventory", "terms": ("memory.dmp", "minidump", "crash dump", ".dmp")},
+            {"id": "hiberfil-pagefile-carving", "label": "hiberfil/pagefile 통합 카빙", "status": "partial", "terms": ("hiberfil.sys", "pagefile.sys", "swapfile.sys", "memory carving", "disk-memory-file-indicators")},
+            {"id": "crash-dump-minidump-analysis", "label": "MEMORY.DMP/Minidump", "status": "partial", "terms": ("memory.dmp", "minidump", "crash dump", ".dmp", "crash-dump-indicators")},
         ),
     },
     {

@@ -4,7 +4,7 @@ import datetime as dt
 import hashlib
 import json
 from pathlib import Path
-from typing import Iterable, Mapping
+from typing import Iterable, Mapping, Sequence
 
 from ..core.forensic_accuracy import build_accuracy_gate
 from ..core.models import ArtifactRecord
@@ -124,6 +124,16 @@ CLOUD_QC_PREP_CONTRACTS = {
     },
 }
 CLOUD_PROVIDER_PROFILES = {
+    "iaas-cloud": {
+        "services": ("aws-cloudtrail", "azure-activity-log", "gcp-audit-log"),
+        "collection_modes": ("provider audit export", "SIEM export", "cloud API collector"),
+        "known_gaps": (
+            "organization-or-subscription-scope-not-verified",
+            "retention-window-and-log-integrity-not-attached",
+            "cross-account-resource-graph-not-complete",
+            "provider-native-console-diff-required",
+        ),
+    },
     "google": {
         "services": ("google-takeout", "gmail-takeout", "google-drive", "google-photos", "google-activity"),
         "collection_modes": ("Takeout archive", "provider API", "admin export"),
@@ -256,6 +266,16 @@ def collect_cloud_json(path: Path) -> Iterable[ArtifactRecord]:
                 source_index=index,
                 source_hashes=source_hashes,
                 details=normalize_cloud_audit(row, source_path=source_path),
+            )
+        return
+    if detected == "cloud-iaas-audit":
+        for index, row in enumerate(extract_list_or_single_rows(payload)):
+            yield build_record(
+                path,
+                artifact_type="cloud-iaas-audit",
+                source_index=index,
+                source_hashes=source_hashes,
+                details=normalize_cloud_iaas_audit(row, source_path=source_path),
             )
 
 
@@ -481,6 +501,8 @@ def detect_export_type(path: Path, payload: object) -> str:
 
 def detect_row_export_type(source_hint: str, row: Mapping[str, object]) -> str:
     keys = {normalize_key(key) for key in row}
+    if is_iaas_audit_row(source_hint, keys, row):
+        return "cloud-iaas-audit"
     if any(token in source_hint for token in ("teams", "chat", "messages")) or keys.intersection(
         {"chatid", "channelid", "teamid", "messagetext", "bodycontent"}
     ):
@@ -514,7 +536,7 @@ def extract_list_or_single_rows(payload: object) -> list[Mapping[str, object]]:
     if isinstance(payload, list):
         return [item for item in payload if isinstance(item, Mapping)]
     if isinstance(payload, Mapping):
-        for key in ("messages", "mail", "files", "items", "events", "auditRecords", "records", "value"):
+        for key in ("messages", "mail", "files", "items", "events", "auditRecords", "records", "Records", "value"):
             value = payload.get(key)
             if isinstance(value, list):
                 return [item for item in value if isinstance(item, Mapping)]
@@ -667,6 +689,143 @@ def normalize_cloud_audit(row: Mapping[str, object], *, source_path: str) -> dic
     }
 
 
+def normalize_cloud_iaas_audit(row: Mapping[str, object], *, source_path: str) -> dict[str, object]:
+    provider = infer_iaas_provider(source_path, row)
+    operation = optional_text(
+        first_value(row, ("eventName", "operationName", "methodName", "protoPayload.methodName", "action", "operation"))
+        or nested_value(row, ("protoPayload", "methodName"))
+    )
+    principal = optional_text(
+        nested_value(row, ("userIdentity", "arn"))
+        or nested_value(row, ("userIdentity", "principalId"))
+        or nested_value(row, ("protoPayload", "authenticationInfo", "principalEmail"))
+        or first_value(row, ("caller", "callerIpAddress", "identity", "principal", "user", "actor"))
+    )
+    ip_address = optional_text(
+        first_value(row, ("sourceIPAddress", "callerIpAddress", "ipAddress", "clientIP", "clientIp"))
+        or nested_value(row, ("protoPayload", "requestMetadata", "callerIp"))
+    )
+    resource_id = optional_text(
+        first_value(row, ("resourceId", "resourceName", "resource", "objectId"))
+        or nested_value(row, ("resource", "labels", "project_id"))
+        or nested_value(row, ("responseElements", "instancesSet"))
+    )
+    return {
+        "service": provider,
+        "event_type": "iaas-audit",
+        "timestamp": normalize_timestamp(
+            first_value(row, ("eventTime", "time", "timestamp", "creationTime", "eventTimestamp"))
+            or nested_value(row, ("protoPayload", "metadata", "eventTimestamp"))
+        ),
+        "operation": operation,
+        "principal": principal,
+        "actor": principal,
+        "ip_address": ip_address,
+        "region": optional_text(first_value(row, ("awsRegion", "region", "location"))),
+        "event_source": optional_text(first_value(row, ("eventSource", "category", "serviceName"))),
+        "account_id": optional_text(
+            first_value(row, ("recipientAccountId", "accountId", "subscriptionId"))
+            or nested_value(row, ("userIdentity", "accountId"))
+            or nested_value(row, ("resource", "labels", "project_id"))
+        ),
+        "resource_id": resource_id,
+        "request_parameters_preview": preview_json(
+            first_value(row, ("requestParameters", "authorization", "properties"))
+            or nested_value(row, ("protoPayload", "request"))
+        ),
+        "response_preview": preview_json(
+            first_value(row, ("responseElements", "status", "properties"))
+            or nested_value(row, ("protoPayload", "response"))
+        ),
+        "risk_flags": cloud_iaas_risk_flags(provider, operation, row),
+        "validation_checks": {
+            **cloud_validation_checks(row, required=("eventName", "operationName", "methodName", "eventTime", "time")),
+            "iaas_provider_inferred": bool(provider),
+            "provider_scope_verified": False,
+            "provider_known_answer_validated": False,
+        },
+        "commercial_grade_blockers": [
+            "provider-audit-export-scope-not-verified",
+            "organization-subscription-project-scope-not-attached",
+            "provider-native-console-or-siem-diff-required",
+            "retention-log-integrity-chain-not-validated",
+        ],
+        "raw": dict(row),
+    }
+
+
+def is_iaas_audit_row(source_hint: str, keys: set[str], row: Mapping[str, object]) -> bool:
+    if any(token in source_hint for token in ("cloudtrail", "aws", "azure", "entra", "gcp", "googlecloud", "google cloud")):
+        return True
+    if keys.intersection({"eventsource", "eventname", "eventtime", "awsregion", "sourceipaddress", "recipientaccountid"}):
+        return True
+    if keys.intersection({"operationname", "calleripaddress", "subscriptionid", "resourceid"}):
+        return True
+    if "protopayload" in keys or nested_value(row, ("protoPayload", "methodName")):
+        return True
+    return False
+
+
+def infer_iaas_provider(source_path: str, row: Mapping[str, object]) -> str:
+    lowered = source_path.lower().replace("_", "-")
+    if "cloudtrail" in lowered or "/aws" in lowered or "\\aws" in lowered or "aws-" in lowered:
+        return "aws-cloudtrail"
+    if "azure" in lowered or "entra" in lowered or "operationname" in {normalize_key(key) for key in row}:
+        return "azure-activity-log"
+    if (
+        "gcp" in lowered
+        or "googlecloud" in lowered
+        or "google cloud" in lowered
+        or "google-cloud" in lowered
+        or nested_value(row, ("protoPayload", "methodName"))
+    ):
+        return "gcp-audit-log"
+    keys = {normalize_key(key) for key in row}
+    if keys.intersection({"eventsource", "awsregion", "recipientaccountid"}):
+        return "aws-cloudtrail"
+    return "iaas-cloud-audit"
+
+
+def nested_value(row: Mapping[str, object], path: Sequence[str]) -> object:
+    current: object = row
+    for key in path:
+        if not isinstance(current, Mapping):
+            return ""
+        if key in current:
+            current = current[key]
+            continue
+        normalized_key = normalize_key(key)
+        match = next((value for candidate, value in current.items() if normalize_key(candidate) == normalized_key), "")
+        current = match
+    return current
+
+
+def preview_json(value: object, *, limit: int = 1000) -> str:
+    if value in (None, ""):
+        return ""
+    if isinstance(value, str):
+        return value[:limit]
+    try:
+        return json.dumps(value, ensure_ascii=False, sort_keys=True, default=str)[:limit]
+    except TypeError:
+        return str(value)[:limit]
+
+
+def cloud_iaas_risk_flags(provider: str, operation: str, row: Mapping[str, object]) -> list[str]:
+    lowered_operation = operation.lower()
+    lowered_row = json.dumps(row, ensure_ascii=False, default=str).lower()
+    flags = ["iaas-audit-row"]
+    if any(term in lowered_operation for term in ("delete", "disable", "detach", "revoke", "remove")):
+        flags.append("destructive-cloud-action")
+    if any(term in lowered_operation for term in ("createaccesskey", "putuserpolicy", "assumerole", "setiampolicy")):
+        flags.append("identity-privilege-action")
+    if any(term in lowered_row for term in ("accessdenied", "unauthorized", "denied")):
+        flags.append("failed-or-denied-cloud-action")
+    if provider == "aws-cloudtrail" and "root" in lowered_row:
+        flags.append("aws-root-identity-reference")
+    return flags
+
+
 def first_value(row: Mapping[str, object], keys: Iterable[str]) -> object:
     normalized = {normalize_key(key): value for key, value in row.items()}
     for key in keys:
@@ -684,6 +843,12 @@ def normalize_key(value: object) -> str:
 
 def service_from_path(source_path: str, *, default: str) -> str:
     lowered = source_path.lower()
+    if "cloudtrail" in lowered or "/aws" in lowered or "\\aws" in lowered or "aws-" in lowered:
+        return "aws-cloudtrail"
+    if "azure" in lowered or "entra" in lowered:
+        return "azure-activity-log"
+    if "gcp" in lowered or "google cloud" in lowered or "googlecloud" in lowered:
+        return "gcp-audit-log"
     if "slack" in lowered:
         return "slack"
     if "dropbox" in lowered:
@@ -709,6 +874,8 @@ def service_from_path(source_path: str, *, default: str) -> str:
 
 def cloud_gap_ids(service: str, artifact_type: str) -> CloudGap:
     lowered = f"{service} {artifact_type}".lower()
+    if any(token in lowered for token in ("iaas", "cloudtrail", "aws", "azure", "entra", "gcp-audit", "google cloud")):
+        return ["#40"], "iaas-cloud"
     if any(token in lowered for token in ("slack", "dropbox", "box", "zoom", "notion", "atlassian", "github")):
         return ["#37", "#38", "#39"], "collaboration-saas"
     if any(token in lowered for token in ("microsoft", "m365", "office", "onedrive", "teams")):

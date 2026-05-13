@@ -15,7 +15,10 @@ MEMORY_OUTPUT_SUFFIXES = {".json", ".jsonl", ".ndjson"}
 MEMORY_DUMP_SUFFIXES = {".dmp", ".hpak", ".mem", ".raw", ".vmem", ".vmsn", ".vmss"}
 MEMORY_DUMP_GENERIC_SUFFIXES = {".bin"}
 MEMORY_DUMP_NAME_HINTS = ("memory", "memdump", "ram", "ramdump", "dump")
+DISK_MEMORY_FILE_NAMES = {"hiberfil.sys", "pagefile.sys", "swapfile.sys"}
+CRASH_DUMP_FILE_NAMES = {"memory.dmp"}
 MEMORY_DUMP_SCAN_LIMIT = 256 * 1024 * 1024
+MEMORY_DUMP_HASH_DEFER_BYTES = 512 * 1024 * 1024
 MEMORY_DUMP_RANGE_COUNT = 4
 MEMORY_DUMP_CHUNK_SIZE = 1024 * 1024
 MEMORY_DUMP_OVERLAP = 512
@@ -122,23 +125,25 @@ def collect_volatility_output(path: Path, *, plugin: str) -> Iterable[ArtifactRe
 
 
 def collect_memory_dump_indicators(path: Path) -> ArtifactRecord:
-    source_hashes = compute_hashes(path)
     try:
         file_size = path.stat().st_size
     except OSError:
         file_size = 0
+    source_hashes = safe_memory_source_hashes(path, file_size=file_size)
     scan_ranges = build_scan_ranges(file_size)
     pivots = scan_memory_dump(path, scan_ranges)
     flags = build_memory_dump_flags(pivots=pivots, file_size=file_size, scan_ranges=scan_ranges)
+    memory_file_kind = classify_memory_file(path)
     return ArtifactRecord(
         provider=MemoryVolatilityProvider.name,
-        artifact_type="memory-dump-indicators",
+        artifact_type=memory_artifact_type(memory_file_kind),
         path=str(path.resolve()),
         supported=True,
         details={
             "parser": "memory-dump-bounded-scan",
             "parser_version": PARSER_VERSION,
             "coverage_status": "bounded-direct-memory-scan",
+            "memory_file_kind": memory_file_kind,
             "source_path": str(path.resolve()),
             "source_format": path.suffix.lower().lstrip("."),
             "source_size": file_size,
@@ -155,6 +160,8 @@ def collect_memory_dump_indicators(path: Path) -> ArtifactRecord:
 
 
 def is_memory_dump_candidate(path: Path) -> bool:
+    if path.name.lower() in DISK_MEMORY_FILE_NAMES or path.name.lower() in CRASH_DUMP_FILE_NAMES:
+        return True
     suffix = path.suffix.lower()
     if suffix in MEMORY_DUMP_SUFFIXES:
         return True
@@ -162,6 +169,42 @@ def is_memory_dump_candidate(path: Path) -> bool:
         return False
     lowered_name = path.name.lower()
     return any(hint in lowered_name for hint in MEMORY_DUMP_NAME_HINTS)
+
+
+def classify_memory_file(path: Path) -> str:
+    lowered_name = path.name.lower()
+    if lowered_name in DISK_MEMORY_FILE_NAMES:
+        if lowered_name.startswith("hiberfil"):
+            return "hibernation-file"
+        if lowered_name.startswith("pagefile"):
+            return "pagefile"
+        return "swapfile"
+    if lowered_name in CRASH_DUMP_FILE_NAMES or path.suffix.lower() == ".dmp":
+        return "crash-dump"
+    return "memory-dump"
+
+
+def memory_artifact_type(memory_file_kind: str) -> str:
+    if memory_file_kind in {"hibernation-file", "pagefile", "swapfile"}:
+        return "disk-memory-file-indicators"
+    if memory_file_kind == "crash-dump":
+        return "crash-dump-indicators"
+    return "memory-dump-indicators"
+
+
+def safe_memory_source_hashes(path: Path, *, file_size: int) -> dict[str, str]:
+    if 0 <= file_size <= MEMORY_DUMP_HASH_DEFER_BYTES:
+        try:
+            return compute_hashes(path)
+        except OSError:
+            pass
+    return {
+        "md5": "",
+        "sha1": "",
+        "sha256": "",
+        "hash_status": "deferred-large-memory-file" if file_size > MEMORY_DUMP_HASH_DEFER_BYTES else "unavailable",
+        "path_sha256": compute_text_sha256(str(path.resolve())),
+    }
 
 
 def infer_plugin(path: Path) -> str:

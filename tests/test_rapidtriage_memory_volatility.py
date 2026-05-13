@@ -85,6 +85,32 @@ class RapidTriageMemoryVolatilityTests(unittest.TestCase):
             self.assertIn("encoded-command", process_pivot["value"]["command_line_indicators"])
             self.assertNotIn(key, json.dumps(payload))
 
+    def test_disk_memory_files_and_crash_dumps_are_scanned_as_visible_artifacts(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            (root / "pagefile.sys").write_bytes(b"page cache https://incident.example.test/path powershell.exe -enc AAAA")
+            (root / "MEMORY.DMP").write_bytes(b"crash dump cmd.exe /c whoami 203.0.113.77")
+            output = root / "memory-disk-artifacts.json"
+
+            exit_code = main(["artifacts", str(root), "--kind", "memory-volatility", "--output", str(output)])
+
+            self.assertEqual(exit_code, 0)
+            payload = json.loads(output.read_text(encoding="utf-8"))
+            artifact_types = {artifact["artifact_type"] for artifact in payload["artifacts"]}
+            self.assertIn("disk-memory-file-indicators", artifact_types)
+            self.assertIn("crash-dump-indicators", artifact_types)
+
+            pagefile = next(
+                artifact for artifact in payload["artifacts"] if artifact["artifact_type"] == "disk-memory-file-indicators"
+            )
+            self.assertEqual(pagefile["details"]["memory_file_kind"], "pagefile")
+            self.assertIn("network-indicator", pagefile["details"]["risk_flags"])
+            self.assertTrue(any(pivot.get("value") == "https://incident.example.test/path" for pivot in pagefile["details"]["indicator_pivots"]))
+
+            crash = next(artifact for artifact in payload["artifacts"] if artifact["artifact_type"] == "crash-dump-indicators")
+            self.assertEqual(crash["details"]["memory_file_kind"], "crash-dump")
+            self.assertIn("process-string-candidate", crash["details"]["risk_flags"])
+
 
 def write_volatility_fixtures(root: Path) -> None:
     (root / "windows.pslist.json").write_text(
