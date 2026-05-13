@@ -706,7 +706,8 @@ function renderCoreEvidenceWorkflow(run) {
       ${steps.map((step) => {
         const status = statuses[step.id] || {};
         return `
-          <button class="core-workflow-step ${status.ready ? "done" : "pending"}" type="button" data-open-tab="${escapeHtml(step.tab || "summary")}" data-core-workflow-step="${escapeHtml(step.id)}">
+          <button class="core-workflow-step ${status.ready ? "done" : "pending"}" type="button" data-open-tab="${escapeHtml(step.tab || "summary")}" data-core-workflow-step="${escapeHtml(step.id)}" data-testid="core-workflow-step-${escapeHtml(step.id)}">
+            <span class="sr-only">${escapeHtml(`${step.label || ""} ${status.state || ""}`)}</span>
             <span class="core-workflow-number">${escapeHtml(step.number || "")}</span>
             <span class="core-workflow-body">
               <span class="core-workflow-topline">
@@ -734,23 +735,24 @@ function coreEvidenceWorkflowStatuses(payload) {
   const extracted = Number(summary.docs_extracted_count || 0) + Number(summary.files_extracted_count || 0);
   const outputCount = Object.keys(outputs).length;
   const searchable = docs + files + timeline;
+  const extractManifestReady = Boolean(outputs.docs_extract_manifest || outputs.files_extract_manifest);
   return {
     analyze: {
       ready: outputCount > 0 || searchable > 0 || artifactKinds.length > 0,
-      state: outputCount > 0 ? "ready" : "check",
-      detail: `${formatNumber(docs)} docs · ${formatNumber(files)} files · ${formatNumber(artifactKinds.length)} artifact groups`,
+      state: outputCount > 0 ? "분석 완료" : "확인 필요",
+      detail: `${formatNumber(docs)} 문서 · ${formatNumber(files)} 파일 · ${formatNumber(timeline)} 타임라인 · ${formatNumber(artifactKinds.length)} 아티팩트 그룹`,
     },
     extract: {
-      ready: extracted > 0 || Boolean(outputs.docs_extract_manifest || outputs.files_extract_manifest),
-      state: extracted > 0 ? "extracted" : (outputs.docs_extract_manifest || outputs.files_extract_manifest ? "manifest" : "optional"),
+      ready: extracted > 0 || extractManifestReady,
+      state: extracted > 0 ? "추출 완료" : (extractManifestReady ? "추출 가능" : "설정 필요"),
       detail: extracted > 0
-        ? `${formatNumber(extracted)} extracted file(s) with manifest/hash records`
+        ? `${formatNumber(extracted)}개 파일 추출 · manifest/SHA256 기록 있음`
         : "추출 manifest를 보고 필요한 후보만 output 폴더로 꺼냅니다.",
     },
     search: {
       ready: searchable > 0,
-      state: searchable > 0 ? "searchable" : "pending",
-      detail: `${formatNumber(searchable)} searchable row(s) across docs/files/timeline`,
+      state: searchable > 0 ? "검색 가능" : "검색 대기",
+      detail: `${formatNumber(searchable)}개 문서/파일/타임라인 row를 전체 검색 대상으로 사용`,
     },
   };
 }

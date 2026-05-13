@@ -168,10 +168,15 @@ class RapidTriageWebStaticTests(unittest.TestCase):
         self.assertIn("renderCoreEvidenceWorkflow", app_js)
         self.assertIn("coreEvidenceWorkflowStatuses", app_js)
         self.assertIn("data-core-workflow-step", app_js)
+        self.assertIn("data-testid=\"core-workflow-step-${escapeHtml(step.id)}\"", app_js)
+        self.assertIn("분석 완료", app_js)
+        self.assertIn("추출 완료", app_js)
+        self.assertIn("검색 가능", app_js)
         self.assertIn("docs_extracted_count", app_js)
         self.assertIn("files_extracted_count", app_js)
         self.assertIn(".core-evidence-workflow", styles)
         self.assertIn(".core-workflow-step", styles)
+        self.assertIn(".sr-only", styles)
         self.assertIn("body.analysis-active .completed-core-workflow", styles)
 
     def test_command_palette_connects_lazyweb_actions_to_forensic_workbench(self) -> None:
