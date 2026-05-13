@@ -88,6 +88,53 @@ class RapidTriageMacOsArtifactsTests(unittest.TestCase):
             self.assertTrue(Path(summary["outputs"]["artifacts_macos-system"]).is_file())
             self.assertGreaterEqual(summary["summary"]["artifacts"]["macos-system"]["artifact_count"], 1)
 
+    def test_kakaotalk_macos_collector_reports_db_openability_and_message_tables(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            build_macos_fixture(root)
+            output = root / "kakaotalk-macos.json"
+
+            self.assertEqual(main(["artifacts", str(root), "--kind", "kakaotalk-macos", "--output", str(output)]), 0)
+
+            payload = json.loads(output.read_text(encoding="utf-8"))
+            artifact_types = {item["artifact_type"] for item in payload["artifacts"]}
+            self.assertEqual(payload["kind"], "kakaotalk-macos")
+            self.assertIn("kakaotalk-macos-database", artifact_types)
+            self.assertIn("kakaotalk-macos-summary", artifact_types)
+
+            opened = next(
+                item
+                for item in payload["artifacts"]
+                if item["artifact_type"] == "kakaotalk-macos-database"
+                and item["details"]["sqlite_access"]["open_status"] == "opened-read-only"
+            )
+            analysis = opened["details"]["kakaotalk_macos_db_analysis"]
+            self.assertTrue(analysis["db_opened"])
+            self.assertEqual(analysis["db_access_status"], "plain-sqlite-opened")
+            self.assertEqual(analysis["message_row_count_estimate"], 2)
+            self.assertEqual(analysis["message_table_candidates"][0]["table"], "messages")
+            self.assertIn("message", analysis["message_table_candidates"][0]["content_columns_detected"])
+            self.assertFalse(analysis["content_exported"])
+            self.assertIn("plain-sqlite-opened", opened["details"]["risk_flags"])
+            self.assertFalse(opened["details"]["commercial_grade_ready"])
+
+            encrypted = next(
+                item
+                for item in payload["artifacts"]
+                if item["artifact_type"] == "kakaotalk-macos-database"
+                and item["details"]["kakaotalk_macos_db_analysis"]["requires_sqlcipher_or_custom_decoder"]
+            )
+            self.assertEqual(
+                encrypted["details"]["kakaotalk_macos_db_analysis"]["db_access_status"],
+                "encrypted-or-custom-store-validation-required",
+            )
+
+            summary = next(item for item in payload["artifacts"] if item["artifact_type"] == "kakaotalk-macos-summary")
+            self.assertEqual(summary["details"]["plain_sqlite_opened_count"], 1)
+            self.assertEqual(summary["details"]["encrypted_or_custom_store_count"], 1)
+            self.assertEqual(summary["details"]["message_row_count_estimate"], 2)
+            self.assertTrue(summary["details"]["db_analysis_supported"])
+
 
 def build_macos_fixture(root: Path) -> None:
     user_root = root / "Users" / "alice"
@@ -126,6 +173,7 @@ def build_macos_fixture(root: Path) -> None:
     (fsevents_dir / "0000000000000001.fseventsd").write_bytes(
         b"\x00/Users/alice/Documents/mac-report.txt\x00/Applications/Safari.app\x00"
     )
+    create_kakaotalk_macos_fixture(user_root)
 
 
 def create_safari_history(path: Path) -> None:
@@ -234,6 +282,49 @@ def create_quarantine_db(path: Path) -> None:
         connection.commit()
     finally:
         connection.close()
+
+
+def create_kakaotalk_macos_fixture(user_root: Path) -> None:
+    kakao_root = (
+        user_root
+        / "Library"
+        / "Containers"
+        / "com.kakao.KakaoTalkMac"
+        / "Data"
+        / "Library"
+        / "Application Support"
+        / "KakaoTalk"
+        / "users"
+        / "profile-001"
+    )
+    kakao_root.mkdir(parents=True, exist_ok=True)
+    db_path = kakao_root / "chat_messages.db"
+    connection = sqlite3.connect(db_path)
+    try:
+        connection.execute(
+            """
+            CREATE TABLE messages (
+                id INTEGER PRIMARY KEY,
+                chat_id TEXT,
+                sender TEXT,
+                message TEXT,
+                created_at INTEGER
+            )
+            """
+        )
+        connection.execute(
+            "INSERT INTO messages (chat_id, sender, message, created_at) VALUES (?, ?, ?, ?)",
+            ("room-1", "alice", "hello", 1_700_000_100),
+        )
+        connection.execute(
+            "INSERT INTO messages (chat_id, sender, message, created_at) VALUES (?, ?, ?, ?)",
+            ("room-1", "bob", "world", 1_700_000_200),
+        )
+        connection.commit()
+    finally:
+        connection.close()
+    (kakao_root / "chat_messages.db-wal").write_bytes(b"fixture wal companion")
+    (kakao_root / "chatLogs_1.edb").write_bytes(b"\x01\x02encrypted-or-custom-kakao-macos-db")
 
 
 if __name__ == "__main__":

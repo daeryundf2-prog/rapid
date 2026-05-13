@@ -40,6 +40,8 @@ def run_email_external_parse(
     if suffix not in {"pst", "ost", "msg"}:
         raise EmailExternalParserError("external parser wrapper currently targets PST/OST/MSG files")
 
+    source_header = read_email_source_header(source_path)
+    source_header_profile = email_source_header_profile(suffix, source_header)
     selected = select_email_external_tool(suffix, preferred_tool=preferred_tool, tool_resolver=tool_resolver)
     json_path = output_dir / "email-external-parser.json"
     markdown_path = output_dir / "email-external-parser.md"
@@ -52,7 +54,10 @@ def run_email_external_parse(
     completed: subprocess.CompletedProcess[str] | None = None
     status = "blocked"
     error = ""
-    if selected["available"]:
+    if not source_header_profile["compatible"] and not preferred_tool:
+        status = "blocked"
+        error = str(source_header_profile["reason"])
+    elif selected["available"]:
         command = build_email_external_command(str(selected["tool"]), source_path, export_dir, suffix)
         try:
             completed = command_runner(command, text=True, capture_output=True, timeout=timeout_seconds, check=False)
@@ -71,6 +76,7 @@ def run_email_external_parse(
             "format": suffix,
             "hashes": source_hashes,
             "format_profile": EMAIL_FORMAT_PROFILES.get(suffix, {}),
+            "header_profile": source_header_profile,
         },
         "selected_tool": selected,
         "required_tools": EMAIL_REQUIRED_TOOLS_BY_FORMAT.get(suffix, []),
@@ -122,6 +128,32 @@ def select_email_external_tool(
         if resolved:
             return {"tool": candidate, "path": resolved, "available": True, "candidates": seen}
     return {"tool": preferred_tool or "", "path": "", "available": False, "candidates": seen}
+
+
+def read_email_source_header(path: Path) -> bytes:
+    try:
+        with path.open("rb") as handle:
+            return handle.read(8)
+    except OSError:
+        return b""
+
+
+def email_source_header_profile(suffix: str, header: bytes) -> dict[str, object]:
+    if suffix in {"pst", "ost"}:
+        compatible = header.startswith(b"!BDN")
+        expected = "PST/OST !BDN header"
+    elif suffix == "msg":
+        compatible = header.startswith(bytes.fromhex("d0cf11e0a1b11ae1"))
+        expected = "OLE Compound File header"
+    else:
+        compatible = False
+        expected = "supported email container header"
+    return {
+        "compatible": compatible,
+        "expected": expected,
+        "observed_hex": header.hex(),
+        "reason": "" if compatible else f"source header does not match {expected}",
+    }
 
 
 def build_email_external_command(tool: str, source_path: Path, export_dir: Path, suffix: str) -> list[str]:

@@ -7,11 +7,33 @@ from pathlib import Path
 
 from rapidtriage.cli import main
 from rapidtriage.core.run import run_triage_mode
-from rapidtriage.core.audit import audit_path_for
+from rapidtriage.core.audit import audit_path_for, write_audit_record
 from tests.test_rapidtriage_run import build_run_fixture
 
 
 class RapidTriageAuditTests(unittest.TestCase):
+    def test_audit_input_root_inventory_is_bounded_for_large_roots(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir) / "case-root"
+            root.mkdir(parents=True, exist_ok=True)
+            for index in range(6):
+                (root / f"item-{index}.txt").write_text(f"artifact {index}", encoding="utf-8")
+
+            audit_path = Path(tmp_dir) / "bounded-audit.json"
+            payload = write_audit_record(
+                audit_path,
+                command="artifacts",
+                input_root=root,
+                input_root_inventory_max_files=3,
+                input_root_inventory_max_dirs=20,
+            )
+
+            input_root = payload["provenance"]["input_root"]
+            self.assertEqual(input_root["file_count"], 3)
+            self.assertEqual(input_root["inventory_scope"], "bounded")
+            self.assertTrue(input_root["inventory_truncated"])
+            self.assertEqual(input_root["inventory_limits"]["max_files"], 3)
+
     def test_standalone_commands_write_audit_sidecars(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             root = Path(tmp_dir) / "case-root"

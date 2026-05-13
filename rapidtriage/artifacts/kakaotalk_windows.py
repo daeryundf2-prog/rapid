@@ -1013,7 +1013,8 @@ def classify_kakaotalk_db_role(path: Path) -> dict[str, str]:
 
 def inspect_sqlite_database(path: Path) -> dict[str, object]:
     try:
-        header = path.read_bytes()[:16]
+        with path.open("rb") as handle:
+            header = handle.read(16)
     except OSError:
         header = b""
     sqlite_header = header.startswith(b"SQLite format 3")

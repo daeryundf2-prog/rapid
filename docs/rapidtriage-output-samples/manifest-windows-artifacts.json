@@ -96,6 +96,13 @@
       "artifacts": []
     },
     {
+      "artifacts": [],
+      "description": "macOS KakaoTalk container and database inventory with SQLite openability checks",
+      "name": "kakaotalk-macos-database-inventory",
+      "supported": true,
+      "target_platform": "macos"
+    },
+    {
       "name": "kakaotalk-windows-correlation",
       "description": "KakaoTalk Windows correlation across Windows.edb, Registry, and memory dumps",
       "target_platform": "windows",

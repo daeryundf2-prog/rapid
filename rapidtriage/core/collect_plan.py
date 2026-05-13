@@ -345,6 +345,15 @@ MACOS_TARGETS: tuple[CollectTarget, ...] = (
         "scan",
         "iCloud Drive and Mobile Documents can contain synchronized user evidence.",
     ),
+    CollectTarget(
+        "Messenger",
+        "macOS KakaoTalk containers",
+        "Users/*/Library/Containers/com.kakao.KakaoTalkMac*/Data",
+        "glob",
+        "kakaotalk-macos",
+        "inventory",
+        "Inventories KakaoTalk Mac DB candidates, SQLite openability, table/count metadata, WAL/SHM companions, and encrypted/custom-store blockers without exporting message content.",
+    ),
 )
 
 PROFILE_TARGETS: Mapping[str, tuple[CollectTarget, ...]] = {

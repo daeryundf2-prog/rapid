@@ -8,6 +8,9 @@ from typing import Iterable, Mapping, Sequence
 
 from .input_root import InputRoot, resolve_input_root
 
+DEFAULT_AUDIT_ROOT_FILE_LIMIT = 5_000
+DEFAULT_AUDIT_ROOT_DIR_LIMIT = 2_000
+
 
 def compute_sha256(path: Path) -> str:
     digest = hashlib.sha256()
@@ -23,13 +26,22 @@ def audit_path_for(output_path: Path) -> Path:
     return output_path.with_name(f"{output_path.name}.audit.json")
 
 
-def build_input_root_record(root: InputRoot | Path) -> dict[str, object]:
+def build_input_root_record(
+    root: InputRoot | Path,
+    *,
+    max_files: int | None = DEFAULT_AUDIT_ROOT_FILE_LIMIT,
+    max_dirs: int | None = DEFAULT_AUDIT_ROOT_DIR_LIMIT,
+) -> dict[str, object]:
     input_root = resolve_input_root(root)
     digest = hashlib.sha256()
     file_count = 0
     total_size = 0
+    truncated = False
 
-    for path in sorted(iter_regular_files(input_root.root_path)):
+    for path in iter_regular_files(input_root.root_path, max_dirs=max_dirs):
+        if max_files is not None and file_count >= max_files:
+            truncated = True
+            break
         try:
             stat_result = path.stat()
         except (FileNotFoundError, PermissionError, OSError):
@@ -51,13 +63,23 @@ def build_input_root_record(root: InputRoot | Path) -> dict[str, object]:
         "inventory_sha256": digest.hexdigest(),
         "file_count": file_count,
         "total_size": total_size,
+        "inventory_scope": "bounded" if truncated or max_files is not None or max_dirs is not None else "complete",
+        "inventory_truncated": truncated,
+        "inventory_limits": {
+            "max_files": max_files,
+            "max_dirs": max_dirs,
+        },
     }
 
 
-def iter_regular_files(root: Path) -> Iterable[Path]:
+def iter_regular_files(root: Path, *, max_dirs: int | None = None) -> Iterable[Path]:
     pending = [root]
+    visited_dirs = 0
     while pending:
         current = pending.pop()
+        visited_dirs += 1
+        if max_dirs is not None and visited_dirs > max_dirs:
+            return
         try:
             entries = sorted(current.iterdir(), key=lambda item: item.name)
         except (FileNotFoundError, NotADirectoryError, PermissionError, OSError):
@@ -94,13 +116,23 @@ def write_audit_record(
     input_files: Sequence[tuple[str, Path]] | None = None,
     output_files: Sequence[tuple[str, Path]] | None = None,
     notes: Sequence[str] | None = None,
+    input_root_inventory_max_files: int | None = DEFAULT_AUDIT_ROOT_FILE_LIMIT,
+    input_root_inventory_max_dirs: int | None = DEFAULT_AUDIT_ROOT_DIR_LIMIT,
 ) -> dict[str, object]:
     payload = {
         "command": command,
         "generated_at": dt.datetime.now().isoformat(),
         "provenance": {
             "options": dict(options or {}),
-            "input_root": build_input_root_record(input_root) if input_root is not None else None,
+            "input_root": (
+                build_input_root_record(
+                    input_root,
+                    max_files=input_root_inventory_max_files,
+                    max_dirs=input_root_inventory_max_dirs,
+                )
+                if input_root is not None
+                else None
+            ),
             "input_files": [
                 describe_file(path, label=label)
                 for label, path in dedupe_records(input_files or [])
