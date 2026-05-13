@@ -129,6 +129,29 @@ class RapidTriageWebStaticTests(unittest.TestCase):
         self.assertIn(".lazyweb-command-grid", styles)
         self.assertIn("body.analysis-active .lazyweb-command-center", styles)
 
+    def test_command_palette_connects_lazyweb_actions_to_forensic_workbench(self) -> None:
+        app_js = (REPO_ROOT / "rapidtriage" / "web" / "static" / "app.js").read_text(encoding="utf-8")
+        config_js = (REPO_ROOT / "rapidtriage" / "web" / "static" / "app_workbench_config.js").read_text(encoding="utf-8")
+        styles = (REPO_ROOT / "rapidtriage" / "web" / "static" / "styles.css").read_text(encoding="utf-8")
+
+        self.assertIn("quick_actions", config_js)
+        self.assertIn("Filter visible rows", config_js)
+        self.assertIn("Search current file", config_js)
+        self.assertIn("renderCommandPalette", app_js)
+        self.assertIn("data-testid=\"command-palette\"", app_js)
+        self.assertIn("data-command-palette-open", app_js)
+        self.assertIn("bindCommandPaletteActions", app_js)
+        self.assertIn("openCommandPalette", app_js)
+        self.assertIn("executeCommandPaletteButton", app_js)
+        self.assertIn("COMMAND_PALETTE_RESULT_LIMIT", app_js)
+        self.assertIn("data-command-tab", app_js)
+        self.assertIn("data-command-filter", app_js)
+        self.assertIn("data-command-action", app_js)
+        self.assertIn("Open command palette", config_js)
+        self.assertIn(".command-palette", styles)
+        self.assertIn(".command-palette-command", styles)
+        self.assertIn("body.analysis-active .command-palette-shell", styles)
+
     def test_row_filter_text_is_bounded_for_large_records(self) -> None:
         app_js = (REPO_ROOT / "rapidtriage" / "web" / "static" / "app.js").read_text(encoding="utf-8")
 

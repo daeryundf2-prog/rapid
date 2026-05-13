@@ -1667,6 +1667,161 @@ button:disabled {
   font-size: 0.8rem;
 }
 
+.command-palette[hidden] {
+  display: none;
+}
+
+.command-palette {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  display: grid;
+  place-items: start center;
+  padding: 7vh 20px 24px;
+}
+
+.command-palette-backdrop {
+  position: absolute;
+  inset: 0;
+  background:
+    radial-gradient(circle at 50% 8%, rgba(38, 217, 208, 0.18), transparent 36%),
+    rgba(6, 12, 18, 0.72);
+  backdrop-filter: blur(10px);
+}
+
+.command-palette-shell {
+  position: relative;
+  display: grid;
+  width: min(920px, calc(100vw - 32px));
+  max-height: min(760px, calc(100vh - 80px));
+  overflow: hidden;
+  border: 1px solid rgba(38, 217, 208, 0.28);
+  border-radius: 24px;
+  background:
+    linear-gradient(135deg, rgba(23, 32, 43, 0.98), rgba(30, 45, 55, 0.98));
+  box-shadow: 0 26px 90px rgba(0, 0, 0, 0.44);
+  color: #f8fffc;
+}
+
+.command-palette-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+  padding: 18px 20px 14px;
+}
+
+.command-palette-header strong {
+  display: block;
+  color: #fff;
+  font-size: 1.05rem;
+}
+
+.command-palette-header span {
+  display: block;
+  color: rgba(248, 255, 252, 0.66);
+  margin-top: 4px;
+}
+
+.command-palette-search {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: center;
+  margin: 16px 20px 10px;
+  border: 1px solid rgba(38, 217, 208, 0.34);
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.08);
+  padding: 10px 12px;
+}
+
+.command-palette-search span {
+  border-radius: 999px;
+  background: rgba(38, 217, 208, 0.14);
+  color: #cafffb;
+  padding: 5px 8px;
+  font-size: 0.72rem;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.command-palette-search input {
+  min-width: 0;
+  border: 0;
+  background: transparent;
+  color: #fff;
+  font-size: 1rem;
+  outline: 0;
+}
+
+.command-palette-search input::placeholder {
+  color: rgba(248, 255, 252, 0.48);
+}
+
+.command-palette-list {
+  display: grid;
+  gap: 7px;
+  overflow: auto;
+  padding: 0 20px 18px;
+}
+
+.command-palette-command {
+  display: grid;
+  grid-template-columns: 96px minmax(140px, 0.7fr) minmax(0, 1.3fr) auto;
+  gap: 10px;
+  align-items: center;
+  min-height: 54px;
+  border: 1px solid rgba(255, 255, 255, 0.11);
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.07);
+  color: rgba(248, 255, 252, 0.82);
+  padding: 10px 12px;
+  text-align: left;
+}
+
+.command-palette-command.active,
+.command-palette-command:hover,
+.command-palette-command:focus-visible {
+  border-color: rgba(38, 217, 208, 0.68);
+  background:
+    linear-gradient(135deg, rgba(38, 217, 208, 0.18), rgba(255, 255, 255, 0.1));
+}
+
+.command-palette-command span {
+  color: #8fe4dc;
+  font-size: 0.72rem;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.command-palette-command strong {
+  color: #fff;
+}
+
+.command-palette-command em {
+  min-width: 0;
+  overflow: hidden;
+  color: rgba(248, 255, 252, 0.62);
+  font-style: normal;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.command-palette-footnote {
+  margin: 0;
+  border-top: 1px solid rgba(255, 255, 255, 0.1);
+  color: rgba(248, 255, 252, 0.58);
+  padding: 12px 20px 16px;
+}
+
+.command-palette.empty .command-palette-list::after {
+  content: "No matching command. Try search, review, report, EVTX, Registry, Kakao, or timeline.";
+  border: 1px dashed rgba(255, 255, 255, 0.2);
+  border-radius: 16px;
+  color: rgba(248, 255, 252, 0.62);
+  padding: 18px;
+}
+
 .compare-tray {
   display: grid;
   gap: 12px;
@@ -4528,6 +4683,19 @@ body.analysis-active .lazyweb-command-chip {
   padding: 6px;
 }
 
+body.analysis-active .command-palette-shell {
+  border-radius: 2px;
+  background: #1c2835;
+  box-shadow: 0 24px 70px rgba(0, 0, 0, 0.46);
+}
+
+body.analysis-active .command-palette-command,
+body.analysis-active .command-palette-search {
+  border-color: #3a4d60;
+  border-radius: 2px;
+  background: #243241;
+}
+
 .run-panel,
 .results-panel,
 .case-workbench-layout > aside,
@@ -4947,5 +5115,29 @@ button:hover,
   .lazyweb-metric-stack,
   .lazyweb-search-command {
     grid-template-columns: 1fr;
+  }
+
+  .command-palette {
+    padding: 10px;
+  }
+
+  .command-palette-shell {
+    width: 100%;
+    max-height: calc(100vh - 20px);
+    border-radius: 14px;
+  }
+
+  .command-palette-header,
+  .command-palette-search,
+  .command-palette-command {
+    grid-template-columns: 1fr;
+  }
+
+  .command-palette-header {
+    flex-direction: column;
+  }
+
+  .command-palette-command em {
+    white-space: normal;
   }
 }

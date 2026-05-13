@@ -65,6 +65,7 @@ const VIRTUALIZATION_ASSESSMENT = {
 };
 const COMPARE_LIMIT = 6;
 const VIEWER_NAVIGATION_LIMIT = 30;
+const COMMAND_PALETTE_RESULT_LIMIT = 12;
 let selectedRunId = null;
 let selectedRun = null;
 let activeTab = "summary";
@@ -251,6 +252,7 @@ function renderDetailShell(run, tab) {
     ${renderForensicViewModeBar(run, tab)}
     <p class="view-helper compact-view-helper">${escapeHtml(group.summary)}</p>
     ${renderShortcutHelp()}
+    ${renderCommandPalette(run, tab)}
     ${renderCompareTray()}
     <div class="tab-row">
       ${tabs.map((item) => `<button class="tab-button ${item === tab ? "active" : ""}" data-tab="${item}" data-testid="tab-${escapeHtml(item)}" type="button">${escapeHtml(tabLabel(item))}</button>`).join("")}
@@ -301,10 +303,10 @@ function renderLazywebCommandCenter(run, tab) {
         </div>
       </div>
       <div class="lazyweb-command-panel">
-        <button class="lazyweb-search-command" type="button" data-open-tab="search" data-artifact-filter="search" aria-label="Open unified case search">
+        <button class="lazyweb-search-command" type="button" data-command-palette-open aria-controls="commandPalette" aria-label="Open forensic command palette">
           <span>Command</span>
-          <strong>Search whole case, current file, OCR, AI, mail, messenger...</strong>
-          <kbd>/</kbd>
+          <strong>Go to evidence, search, source verify, review, or report...</strong>
+          <kbd>⌘K</kbd>
         </button>
         <div class="lazyweb-command-grid" role="list" aria-label="Connected forensic workflow commands">
           ${commands.map((command) => `
@@ -820,6 +822,78 @@ function renderShortcutHelp() {
         `).join("")}
       </div>
     </details>
+  `;
+}
+
+function renderCommandPalette(run, tab) {
+  const model = typeof LAZYWEB_WORKBENCH_MODEL !== "undefined"
+    ? LAZYWEB_WORKBENCH_MODEL
+    : { commands: [], quick_actions: [] };
+  const workflowCommands = (model.commands || []).map((command) => ({
+    id: command.id,
+    label: command.label,
+    hint: command.hint,
+    shortcut: command.shortcut,
+    category: "Workflow",
+    tab: command.tab,
+    filter: command.filter,
+  }));
+  const quickActions = (model.quick_actions || []).map((action) => ({
+    id: action.id,
+    label: action.label,
+    hint: action.hint,
+    shortcut: action.shortcut,
+    category: action.category || "Action",
+    action: action.action,
+  }));
+  const artifactCommands = WORKBENCH_ARTIFACT_TREE_GROUPS.map((group) => ({
+    id: `artifact-${group.label}`,
+    label: group.label,
+    hint: `${group.hint} · ${formatNumber(artifactGroupCount(run, group.terms))} signal(s)`,
+    shortcut: "",
+    category: "Artifact",
+    tab: group.tab,
+    filter: group.terms?.[0] || group.label,
+  }));
+  const commands = [...workflowCommands, ...quickActions, ...artifactCommands].slice(0, 32);
+  return `
+    <section id="commandPalette" class="command-palette" role="dialog" aria-modal="true" aria-hidden="true" aria-label="Forensic command palette" data-testid="command-palette" data-active-tab="${escapeHtml(tab)}" hidden>
+      <div class="command-palette-backdrop" data-command-palette-close></div>
+      <div class="command-palette-shell">
+        <div class="command-palette-header">
+          <div>
+            <p class="eyebrow">go to anything</p>
+            <strong>RapidForensic command palette</strong>
+            <span>케이스 이동, 아티팩트 필터, 검색, 리뷰, 보고서를 한 번에 호출합니다.</span>
+          </div>
+          <button class="icon-action" type="button" data-command-palette-close aria-label="Close command palette">Esc</button>
+        </div>
+        <label class="command-palette-search">
+          <span>Command</span>
+          <input id="commandPaletteInput" type="search" placeholder="Search commands, artifacts, workflow..." autocomplete="off" />
+          <kbd>Enter</kbd>
+        </label>
+        <div class="command-palette-list" role="listbox" aria-label="Available forensic commands" data-result-limit="${COMMAND_PALETTE_RESULT_LIMIT}">
+          ${commands.map((command, index) => `
+            <button
+              class="command-palette-command ${index === 0 ? "active" : ""}"
+              type="button"
+              role="option"
+              data-command-text="${escapeHtml([command.category, command.label, command.hint, command.shortcut, command.filter].filter(Boolean).join(" ").toLowerCase())}"
+              data-command-tab="${escapeHtml(command.tab || "")}"
+              data-command-filter="${escapeHtml(command.filter || "")}"
+              data-command-action="${escapeHtml(command.action || "")}"
+            >
+              <span>${escapeHtml(command.category || "Command")}</span>
+              <strong>${escapeHtml(command.label || "")}</strong>
+              <em>${escapeHtml(command.hint || "")}</em>
+              ${command.shortcut ? `<kbd>${escapeHtml(command.shortcut)}</kbd>` : ""}
+            </button>
+          `).join("")}
+        </div>
+        <p class="command-palette-footnote">Tip: ${kbd("/")}는 바로 전체 검색, ${kbd("Ctrl/Cmd K")}는 이 팔레트, ${kbd("[")}${kbd("]")}는 대용량 결과 페이지 이동입니다.</p>
+      </div>
+    </section>
   `;
 }
 
@@ -4889,6 +4963,7 @@ async function previewCompareItem(path) {
 }
 
 function bindPanelActions() {
+  bindCommandPaletteActions();
   const globalSearchForm = detailPanel.querySelector("#globalCaseSearchForm");
   if (globalSearchForm && !globalSearchForm.dataset.bound) {
     globalSearchForm.dataset.bound = "1";
@@ -4933,6 +5008,117 @@ function bindPanelActions() {
   bindCompareActions();
   bindReviewSelectionActions();
   bindVirtualWindowButtons();
+}
+
+function bindCommandPaletteActions() {
+  const palette = detailPanel.querySelector("#commandPalette");
+  if (!palette || palette.dataset.paletteBound) return;
+  palette.dataset.paletteBound = "1";
+  for (const trigger of detailPanel.querySelectorAll("[data-command-palette-open]")) {
+    trigger.addEventListener("click", () => openCommandPalette());
+  }
+  for (const closer of palette.querySelectorAll("[data-command-palette-close]")) {
+    closer.addEventListener("click", closeCommandPalette);
+  }
+  const input = palette.querySelector("#commandPaletteInput");
+  input?.addEventListener("input", () => filterCommandPalette(input.value));
+  input?.addEventListener("keydown", async (event) => {
+    if (event.key === "Enter") {
+      event.preventDefault();
+      const command = firstVisibleCommandPaletteButton();
+      if (command) await executeCommandPaletteButton(command);
+    }
+    if (event.key === "Escape") {
+      event.preventDefault();
+      closeCommandPalette();
+    }
+  });
+  for (const command of palette.querySelectorAll(".command-palette-command")) {
+    command.addEventListener("click", async () => executeCommandPaletteButton(command));
+  }
+}
+
+function commandPaletteElement() {
+  return detailPanel.querySelector("#commandPalette");
+}
+
+function commandPaletteIsOpen() {
+  const palette = commandPaletteElement();
+  return Boolean(palette && !palette.hidden);
+}
+
+function openCommandPalette(prefill = "") {
+  if (!selectedRunId) return false;
+  const palette = commandPaletteElement();
+  if (!palette) return false;
+  palette.hidden = false;
+  palette.classList.add("open");
+  palette.setAttribute("aria-hidden", "false");
+  const input = palette.querySelector("#commandPaletteInput");
+  if (input) {
+    input.value = prefill;
+    filterCommandPalette(prefill);
+    requestAnimationFrame(() => {
+      input.focus();
+      input.select();
+    });
+  }
+  return true;
+}
+
+function closeCommandPalette() {
+  const palette = commandPaletteElement();
+  if (!palette) return;
+  palette.classList.remove("open");
+  palette.setAttribute("aria-hidden", "true");
+  palette.hidden = true;
+}
+
+function filterCommandPalette(query) {
+  const palette = commandPaletteElement();
+  if (!palette) return;
+  const terms = String(query || "").trim().toLowerCase().split(/\s+/).filter(Boolean);
+  let visibleCount = 0;
+  for (const command of palette.querySelectorAll(".command-palette-command")) {
+    const haystack = command.dataset.commandText || "";
+    const visible = !terms.length || terms.every((term) => haystack.includes(term));
+    command.hidden = !visible || visibleCount >= COMMAND_PALETTE_RESULT_LIMIT;
+    command.classList.remove("active");
+    if (!command.hidden) visibleCount += 1;
+  }
+  firstVisibleCommandPaletteButton()?.classList.add("active");
+  palette.classList.toggle("empty", visibleCount === 0);
+}
+
+function firstVisibleCommandPaletteButton() {
+  return Array.from(detailPanel.querySelectorAll(".command-palette-command")).find((button) => !button.hidden);
+}
+
+async function executeCommandPaletteButton(button) {
+  const tab = button.dataset.commandTab || "";
+  const filter = button.dataset.commandFilter || "";
+  const action = button.dataset.commandAction || "";
+  closeCommandPalette();
+  if (tab) {
+    await switchTab(tab);
+    applyArtifactTreeFilter(filter);
+    return;
+  }
+  if (action === "focus-visible-filter") {
+    detailPanel.querySelector("#tableFilter")?.focus();
+    return;
+  }
+  if (action === "focus-current-file-search") {
+    focusContextSearch();
+    return;
+  }
+  if (action === "page-next") {
+    await pageCurrentTable("next");
+    return;
+  }
+  if (action === "toggle-shortcuts") {
+    toggleShortcutHelp(true);
+  }
 }
 
 function applyArtifactTreeFilter(filterTerm) {
@@ -5464,6 +5650,11 @@ function bindReviewSelectionActions() {
 function bindKeyboardShortcuts() {
   document.addEventListener("keydown", async (event) => {
     const commandShortcut = event.metaKey || event.ctrlKey;
+    if (commandPaletteIsOpen() && event.key === "Escape") {
+      event.preventDefault();
+      closeCommandPalette();
+      return;
+    }
     if (isTypingTarget(event.target) && !commandShortcut) return;
     if (event.key === "?") {
       event.preventDefault();
@@ -5472,7 +5663,7 @@ function bindKeyboardShortcuts() {
     }
     if (commandShortcut && event.key.toLowerCase() === "k") {
       event.preventDefault();
-      await openCaseSearch();
+      openCommandPalette();
       return;
     }
     if (commandShortcut && event.key.toLowerCase() === "f") {
@@ -5519,10 +5710,10 @@ function isTypingTarget(target) {
   return tag === "input" || tag === "textarea" || tag === "select" || target.isContentEditable;
 }
 
-function toggleShortcutHelp() {
+function toggleShortcutHelp(forceOpen = null) {
   const help = detailPanel.querySelector("#shortcutHelp");
   if (!help) return;
-  help.open = !help.open;
+  help.open = forceOpen === null ? !help.open : Boolean(forceOpen);
 }
 
 async function openCaseSearch() {

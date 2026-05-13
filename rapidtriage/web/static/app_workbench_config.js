@@ -48,7 +48,7 @@ const FORENSIC_VIEW_MODES = [
 ];
 const SHORTCUTS = [
   { keys: ["1", "2", "3", "4"], label: "Switch Triage / Find / Review / Deliver" },
-  { keys: ["Ctrl K", "Cmd K"], label: "Open entire case search" },
+  { keys: ["Ctrl K", "Cmd K"], label: "Open command palette" },
   { keys: ["Ctrl F", "Cmd F"], label: "Search current file, or filter visible rows" },
   { keys: ["[", "]"], label: "Previous / next page in heavy tables" },
   { keys: ["Alt [", "Alt ]"], label: "Previous / next opened search hit" },
@@ -118,6 +118,40 @@ const LAZYWEB_WORKBENCH_MODEL = {
       shortcut: "4",
       hint: "citations, hash manifest, exhibit-ready output",
       filter: "report",
+    },
+  ],
+  quick_actions: [
+    {
+      id: "visible-filter",
+      label: "Filter visible rows",
+      action: "focus-visible-filter",
+      shortcut: "Ctrl F",
+      hint: "narrow the current virtualized table without leaving context",
+      category: "Table",
+    },
+    {
+      id: "current-file-search",
+      label: "Search current file",
+      action: "focus-current-file-search",
+      shortcut: "Ctrl F",
+      hint: "when a source viewer is open, jump into file-level search",
+      category: "Viewer",
+    },
+    {
+      id: "next-heavy-page",
+      label: "Next heavy-table page",
+      action: "page-next",
+      shortcut: "]",
+      hint: "advance paged or virtualized result windows safely",
+      category: "Large data",
+    },
+    {
+      id: "shortcut-guide",
+      label: "Shortcut guide",
+      action: "toggle-shortcuts",
+      shortcut: "?",
+      hint: "show the analyst keyboard map",
+      category: "Help",
     },
   ],
 };
