@@ -696,6 +696,7 @@ GUI 표기 방식:
 4. 기능 지도의 통계에는 대분류 수, 기존 function 수, 새 visible step 수가 함께 나온다.
 5. capability chip에는 `data-capability-filter`와 `data-capability-tab`이 붙어, chip을 누르면 대분류 필터가 아니라 해당 세부 기능의 대표 키워드로 바로 이동한다.
 6. 완료된 run을 열 때 GUI가 `/api/runs/{run_id}/capabilities`를 읽어 capability별 `signal_count`를 chip에 표시한다. 신호가 있는 chip은 `has-signals` 스타일로 강조된다.
+7. Python API taxonomy와 JS GUI taxonomy가 어긋나지 않도록, 모든 Python capability id가 `app_workbench_config.js`에도 존재하는지 정적 테스트로 고정했다.
 
 이번에 해결한 부족점:
 
@@ -710,6 +711,7 @@ GUI 표기 방식:
 
 1. API와 프론트는 capability status와 signal count를 연결했다. 다음 단계는 signal count 계산을 단순 대표 키워드가 아니라 parser output schema와 trusted-tool diff 결과로 보정하는 것이다.
 2. 각 capability chip은 현재 대표 키워드 필터까지 연결됐다. 다음 단계는 source viewer anchor와 대표 artifact row까지 이어지는 딥링크다.
-3. capability별 trusted-tool diff 결과와 known-answer fixture 통과 여부를 상태 계산에 반영해야 한다.
-4. Lucene/Elasticsearch/DuckDB 등 대용량 검색 backend 후보는 아직 GUI 표기만 있고, 실제 benchmark 후 선택해야 한다.
-5. 메신저/클라우드/AI export는 버전별 fixture가 부족하므로 `부분 구현` 이상으로 올리려면 실제 샘플 검증이 필요하다.
+3. 현재는 Python/JS 양쪽에 taxonomy가 중복된다. 완성형은 JSON 단일 원본 또는 build-time 생성으로 옮기는 것이다.
+4. capability별 trusted-tool diff 결과와 known-answer fixture 통과 여부를 상태 계산에 반영해야 한다.
+5. Lucene/Elasticsearch/DuckDB 등 대용량 검색 backend 후보는 아직 GUI 표기만 있고, 실제 benchmark 후 선택해야 한다.
+6. 메신저/클라우드/AI export는 버전별 fixture가 부족하므로 `부분 구현` 이상으로 올리려면 실제 샘플 검증이 필요하다.

@@ -3,6 +3,8 @@ from __future__ import annotations
 import unittest
 from pathlib import Path
 
+from rapidtriage.core.visible_capabilities import CAPABILITY_GROUPS
+
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
@@ -191,6 +193,18 @@ class RapidTriageWebStaticTests(unittest.TestCase):
         self.assertIn(".feature-capability-chip.has-signals", styles)
         self.assertIn(".feature-capability-chip.status-validation-required", styles)
         self.assertIn("body.analysis-active .feature-capability-group", styles)
+
+    def test_visible_forensic_capability_ids_stay_synced_between_api_and_gui(self) -> None:
+        config_js = (REPO_ROOT / "rapidtriage" / "web" / "static" / "app_workbench_config.js").read_text(encoding="utf-8")
+
+        python_ids = [
+            capability["id"]
+            for group in CAPABILITY_GROUPS
+            for capability in group["capabilities"]
+        ]
+        self.assertGreaterEqual(len(python_ids), 40)
+        for capability_id in python_ids:
+            self.assertIn(capability_id, config_js)
 
     def test_core_three_step_evidence_workflow_is_visually_primary(self) -> None:
         app_js = (REPO_ROOT / "rapidtriage" / "web" / "static" / "app.js").read_text(encoding="utf-8")
