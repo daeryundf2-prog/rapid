@@ -192,6 +192,113 @@ h3 {
   margin-top: 18px;
 }
 
+.core-evidence-workflow {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  margin: 18px 0 0;
+}
+
+.completed-core-workflow {
+  margin: 14px 0;
+}
+
+.core-workflow-step {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 12px;
+  min-height: 132px;
+  border: 1px solid rgba(15, 116, 107, 0.18);
+  border-radius: 20px;
+  background:
+    linear-gradient(145deg, rgba(255, 255, 255, 0.95), rgba(15, 116, 107, 0.07)),
+    #fff;
+  color: var(--ink);
+  padding: 14px;
+  text-align: left;
+  box-shadow: var(--shadow-soft);
+}
+
+button.core-workflow-step {
+  cursor: pointer;
+}
+
+.core-workflow-step.done {
+  border-color: rgba(15, 116, 107, 0.42);
+  background:
+    radial-gradient(circle at 0% 0%, rgba(38, 217, 208, 0.16), transparent 34%),
+    linear-gradient(145deg, rgba(255, 255, 255, 0.98), rgba(15, 116, 107, 0.1));
+}
+
+.core-workflow-step.pending {
+  border-style: dashed;
+}
+
+.core-workflow-step:hover,
+.core-workflow-step:focus-visible {
+  border-color: var(--accent);
+  transform: translateY(-1px);
+}
+
+.core-workflow-number {
+  display: inline-flex;
+  width: 34px;
+  height: 34px;
+  align-items: center;
+  justify-content: center;
+  border-radius: 12px;
+  background: var(--ink);
+  color: #fff;
+  font-weight: 950;
+}
+
+.core-workflow-body {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+}
+
+.core-workflow-topline {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.core-workflow-topline em {
+  color: var(--accent-strong);
+  font-size: 0.72rem;
+  font-style: normal;
+  font-weight: 950;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.core-workflow-topline i {
+  border-radius: 999px;
+  background: rgba(15, 116, 107, 0.1);
+  color: var(--accent-strong);
+  padding: 3px 7px;
+  font-size: 0.66rem;
+  font-style: normal;
+  font-weight: 900;
+}
+
+.core-workflow-step strong {
+  line-height: 1.28;
+}
+
+.core-workflow-step small {
+  color: var(--muted);
+  font-size: 0.76rem;
+  line-height: 1.4;
+}
+
+.core-workflow-step b {
+  color: var(--accent-strong);
+  font-size: 0.72rem;
+}
+
 .intake-choice-card {
   display: grid;
   gap: 4px;
@@ -4631,6 +4738,7 @@ body::before {
   .review-grid,
   .report-grid,
   .case-workbench-layout,
+  .core-evidence-workflow,
   .feature-catalog-grid,
   .table-control-bar,
   .search-form,
@@ -4819,6 +4927,30 @@ body.analysis-active .lazyweb-command-grid {
 body.analysis-active .lazyweb-command-chip {
   min-height: 72px;
   padding: 6px;
+}
+
+body.analysis-active .completed-core-workflow {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 4px;
+  margin: 0 0 6px;
+}
+
+body.analysis-active .core-workflow-step {
+  min-height: 0;
+  border-color: #3a4d60;
+  border-radius: 2px;
+  background: #243241;
+  box-shadow: none;
+  padding: 7px;
+}
+
+body.analysis-active .core-workflow-number,
+body.analysis-active .core-workflow-topline i {
+  border-radius: 2px;
+}
+
+body.analysis-active .core-workflow-step small {
+  font-size: 0.68rem;
 }
 
 body.analysis-active .forensic-feature-catalog {

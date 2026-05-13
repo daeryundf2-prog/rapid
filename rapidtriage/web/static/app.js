@@ -245,6 +245,7 @@ function renderDetailShell(run, tab) {
       </div>
     </div>
     ${renderCaseHero(run)}
+    ${renderCoreEvidenceWorkflow(run)}
     ${renderLazywebCommandCenter(run, tab)}
     ${renderForensicFeatureCatalog(run, tab)}
     ${renderWorkbenchSmokePanel(run)}
@@ -693,6 +694,65 @@ function caseHeroMetric(label, value) {
       <em>${escapeHtml(label)}</em>
     </span>
   `;
+}
+
+function renderCoreEvidenceWorkflow(run) {
+  const payload = run.summary || {};
+  const steps = typeof CORE_EVIDENCE_WORKFLOW !== "undefined" ? CORE_EVIDENCE_WORKFLOW : [];
+  if (!steps.length) return "";
+  const statuses = coreEvidenceWorkflowStatuses(payload);
+  return `
+    <section class="core-evidence-workflow completed-core-workflow" aria-label="Core evidence workflow" data-testid="core-evidence-workflow">
+      ${steps.map((step) => {
+        const status = statuses[step.id] || {};
+        return `
+          <button class="core-workflow-step ${status.ready ? "done" : "pending"}" type="button" data-open-tab="${escapeHtml(step.tab || "summary")}" data-core-workflow-step="${escapeHtml(step.id)}">
+            <span class="core-workflow-number">${escapeHtml(step.number || "")}</span>
+            <span class="core-workflow-body">
+              <span class="core-workflow-topline">
+                <em>${escapeHtml(step.label || "")}</em>
+                <i>${escapeHtml(status.state || "pending")}</i>
+              </span>
+              <strong>${escapeHtml(step.title || "")}</strong>
+              <small>${escapeHtml(status.detail || step.text || "")}</small>
+              <b>${escapeHtml(step.action || "Open")}</b>
+            </span>
+          </button>
+        `;
+      }).join("")}
+    </section>
+  `;
+}
+
+function coreEvidenceWorkflowStatuses(payload) {
+  const summary = payload.summary || {};
+  const outputs = payload.outputs || {};
+  const artifactKinds = Object.keys(payload.artifacts || {});
+  const docs = Number(summary.document_match_count || 0);
+  const files = Number(summary.file_candidate_count || 0);
+  const timeline = Number(summary.timeline_event_count || 0);
+  const extracted = Number(summary.docs_extracted_count || 0) + Number(summary.files_extracted_count || 0);
+  const outputCount = Object.keys(outputs).length;
+  const searchable = docs + files + timeline;
+  return {
+    analyze: {
+      ready: outputCount > 0 || searchable > 0 || artifactKinds.length > 0,
+      state: outputCount > 0 ? "ready" : "check",
+      detail: `${formatNumber(docs)} docs · ${formatNumber(files)} files · ${formatNumber(artifactKinds.length)} artifact groups`,
+    },
+    extract: {
+      ready: extracted > 0 || Boolean(outputs.docs_extract_manifest || outputs.files_extract_manifest),
+      state: extracted > 0 ? "extracted" : (outputs.docs_extract_manifest || outputs.files_extract_manifest ? "manifest" : "optional"),
+      detail: extracted > 0
+        ? `${formatNumber(extracted)} extracted file(s) with manifest/hash records`
+        : "추출 manifest를 보고 필요한 후보만 output 폴더로 꺼냅니다.",
+    },
+    search: {
+      ready: searchable > 0,
+      state: searchable > 0 ? "searchable" : "pending",
+      detail: `${formatNumber(searchable)} searchable row(s) across docs/files/timeline`,
+    },
+  };
 }
 
 function normalizeRunPayload(source) {

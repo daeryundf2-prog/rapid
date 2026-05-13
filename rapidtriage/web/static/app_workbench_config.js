@@ -388,6 +388,35 @@ const USER_WORKFLOW_STEPS = [
     text: "relevant와 include-in-report만 제출 묶음으로 빼고 나머지는 제외 사유를 남깁니다.",
   },
 ];
+const CORE_EVIDENCE_WORKFLOW = [
+  {
+    id: "analyze",
+    number: "1",
+    label: "분석",
+    title: "이미지/E01 안을 읽고 분류",
+    text: "증거 지원 여부, 파티션/추출 상태, 문서·파일·아티팩트·타임라인 생성 여부를 먼저 확인합니다.",
+    tab: "summary",
+    action: "분석 상태 보기",
+  },
+  {
+    id: "extract",
+    number: "2",
+    label: "추출",
+    title: "필요한 파일을 해시와 함께 꺼내기",
+    text: "문서/파일 후보를 안전한 output 폴더로 복사하고 원본 경로, 크기, SHA256을 manifest에 남깁니다.",
+    tab: "files",
+    action: "추출 후보 보기",
+  },
+  {
+    id: "search",
+    number: "3",
+    label: "검색",
+    title: "키워드로 찾고 원본에서 재확인",
+    text: "문서, 웹/AI, 로그, 아티팩트, OCR, 타임라인 결과를 통합 검색하고 source viewer에서 검증합니다.",
+    tab: "search",
+    action: "전체 검색 시작",
+  },
+];
 const WORKBENCH_SMOKE_CHECKPOINTS = [
   { id: "open-workbench", selector: "[data-testid='workbench-shell']", label: "Open analyst console" },
   { id: "create-or-import-run", selector: "[data-testid='sample-run-button']", label: "Create or import run" },

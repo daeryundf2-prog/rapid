@@ -26,6 +26,32 @@
           <span>Mass data aware</span>
           <span>Review-ready</span>
         </div>
+        <section class="core-evidence-workflow intake-core-workflow" aria-label="Core evidence workflow" data-testid="core-evidence-workflow">
+          <article class="core-workflow-step">
+            <span class="core-workflow-number">1</span>
+            <div>
+              <p class="eyebrow">분석</p>
+              <strong>이미지/E01 안을 읽고 분류</strong>
+              <small>E01, RAW, folder/export를 넣으면 지원 여부와 분석 산출물을 먼저 확인합니다.</small>
+            </div>
+          </article>
+          <article class="core-workflow-step">
+            <span class="core-workflow-number">2</span>
+            <div>
+              <p class="eyebrow">추출</p>
+              <strong>필요한 파일을 해시와 함께 꺼내기</strong>
+              <small>문서/파일 후보를 output 폴더로 복사하고 원본 경로와 SHA256을 남깁니다.</small>
+            </div>
+          </article>
+          <article class="core-workflow-step">
+            <span class="core-workflow-number">3</span>
+            <div>
+              <p class="eyebrow">검색</p>
+              <strong>키워드로 찾고 원본에서 재확인</strong>
+              <small>문서, 웹/AI, 로그, OCR, 타임라인을 통합 검색하고 viewer로 검증합니다.</small>
+            </div>
+          </article>
+        </section>
         <section class="intake-choice-grid" aria-label="Start workflow choices" data-testid="start-choice-grid">
           <button type="button" class="intake-choice-card primary" data-intake-action="e01" data-testid="start-choice-e01">
             <strong>E01 / Ex01</strong>

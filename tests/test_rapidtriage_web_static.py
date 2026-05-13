@@ -154,6 +154,26 @@ class RapidTriageWebStaticTests(unittest.TestCase):
         self.assertIn(".feature-catalog-grid", styles)
         self.assertIn("body.analysis-active .forensic-feature-catalog", styles)
 
+    def test_core_three_step_evidence_workflow_is_visually_primary(self) -> None:
+        app_js = (REPO_ROOT / "rapidtriage" / "web" / "static" / "app.js").read_text(encoding="utf-8")
+        config_js = (REPO_ROOT / "rapidtriage" / "web" / "static" / "app_workbench_config.js").read_text(encoding="utf-8")
+        index_html = (REPO_ROOT / "rapidtriage" / "web" / "static" / "index.html").read_text(encoding="utf-8")
+        styles = (REPO_ROOT / "rapidtriage" / "web" / "static" / "styles.css").read_text(encoding="utf-8")
+
+        self.assertIn("CORE_EVIDENCE_WORKFLOW", config_js)
+        self.assertIn("이미지/E01 안을 읽고 분류", config_js)
+        self.assertIn("필요한 파일을 해시와 함께 꺼내기", config_js)
+        self.assertIn("키워드로 찾고 원본에서 재확인", config_js)
+        self.assertIn("data-testid=\"core-evidence-workflow\"", index_html)
+        self.assertIn("renderCoreEvidenceWorkflow", app_js)
+        self.assertIn("coreEvidenceWorkflowStatuses", app_js)
+        self.assertIn("data-core-workflow-step", app_js)
+        self.assertIn("docs_extracted_count", app_js)
+        self.assertIn("files_extracted_count", app_js)
+        self.assertIn(".core-evidence-workflow", styles)
+        self.assertIn(".core-workflow-step", styles)
+        self.assertIn("body.analysis-active .completed-core-workflow", styles)
+
     def test_command_palette_connects_lazyweb_actions_to_forensic_workbench(self) -> None:
         app_js = (REPO_ROOT / "rapidtriage" / "web" / "static" / "app.js").read_text(encoding="utf-8")
         config_js = (REPO_ROOT / "rapidtriage" / "web" / "static" / "app_workbench_config.js").read_text(encoding="utf-8")
