@@ -27,6 +27,71 @@ from tests.windows_artifact_fixtures import (
 
 
 class RapidTriageWindowsArtifactsTests(unittest.TestCase):
+    def test_windows_system_collector_maps_bits_qmgr_transfer_candidates(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            qmgr = root / "ProgramData" / "Microsoft" / "Network" / "Downloader" / "qmgr0.dat"
+            qmgr.parent.mkdir(parents=True)
+            qmgr.write_bytes(
+                b"BITS job fixture https://exfil.example.test/upload C:\\Users\\alice\\Documents\\case.zip"
+            )
+            output = root / "windows-system-artifacts.json"
+
+            exit_code = main(["artifacts", str(root), "--kind", "windows-system", "--output", str(output)])
+
+            self.assertEqual(exit_code, 0)
+            payload = json.loads(output.read_text(encoding="utf-8"))
+            bits = next(
+                artifact
+                for artifact in payload["artifacts"]
+                if artifact["artifact_type"] == "bits-qmgr-transfer-candidate"
+            )
+            self.assertIn("https://exfil.example.test/upload", bits["details"]["url_candidates"])
+            self.assertIn("bits-url-candidate", bits["details"]["risk_flags"])
+            self.assertFalse(bits["details"]["commercial_grade_ready"])
+
+    def test_windows_browser_collector_maps_webcache_and_cloud_sync_db_candidates(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            webcache = root / "Users" / "alice" / "AppData" / "Local" / "Microsoft" / "Windows" / "WebCache" / "WebCacheV01.dat"
+            webcache.parent.mkdir(parents=True)
+            webcache_blob = bytearray(8192)
+            webcache_blob[4:8] = bytes.fromhex("efcdab89")
+            webcache_blob[0xEC : 0xF0] = (4096).to_bytes(4, "little")
+            webcache_blob.extend(b"https://webview.example.test/cache C:\\Users\\alice\\AppData\\Local\\Microsoft")
+            webcache.write_bytes(bytes(webcache_blob))
+
+            sync_db = root / "Users" / "alice" / "AppData" / "Local" / "Microsoft" / "OneDrive" / "settings" / "Personal" / "sync_engine.db"
+            sync_db.parent.mkdir(parents=True)
+            create_sqlite_fixture(
+                sync_db,
+                "FileMetadata",
+                ["resource_id", "local_path", "sync_status", "owner_email", "deleted"],
+                ("file-1", "C:\\Users\\alice\\Documents\\secret.docx", "uploaded", "alice@example.com", "0"),
+            )
+            output = root / "browser-artifacts.json"
+
+            exit_code = main(["artifacts", str(root), "--kind", "browser", "--output", str(output)])
+
+            self.assertEqual(exit_code, 0)
+            payload = json.loads(output.read_text(encoding="utf-8"))
+            artifact_types = {artifact["artifact_type"] for artifact in payload["artifacts"]}
+            self.assertIn("webcachev01-ese-file", artifact_types)
+            self.assertIn("desktop-cloud-sync-db", artifact_types)
+
+            webcache_artifact = next(
+                artifact for artifact in payload["artifacts"] if artifact["artifact_type"] == "webcachev01-ese-file"
+            )
+            self.assertTrue(webcache_artifact["details"]["ese_header"]["signature_valid"])
+            self.assertIn("https://webview.example.test/cache", webcache_artifact["details"]["url_candidates"])
+
+            sync_artifact = next(
+                artifact for artifact in payload["artifacts"] if artifact["artifact_type"] == "desktop-cloud-sync-db"
+            )
+            self.assertEqual(sync_artifact["details"]["sync_provider"], "onedrive")
+            self.assertTrue(sync_artifact["details"]["sqlite_schema_inventory"]["opened_readonly"])
+            self.assertIn("sync-db-sqlite-opened", sync_artifact["details"]["risk_flags"])
+
     def test_windows_system_collector_inventories_thumbnail_activities_uwp_and_webshell_artifacts(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             root = Path(tmp_dir)

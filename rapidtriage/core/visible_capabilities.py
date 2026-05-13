@@ -181,8 +181,8 @@ CAPABILITY_GROUPS: tuple[dict[str, Any], ...] = (
         "label": "사용자 실행 / 활동",
         "capabilities": (
             {"id": "lnk-jumplist-analysis", "label": "LNK 및 JumpList", "status": "partial", "terms": ("lnk", "jumplist", "destlist", "automaticdestinations", "customdestinations")},
-            {"id": "windows-timeline-activities", "label": "Windows Timeline ActivitiesCache", "status": "inventory", "terms": ("activitiescache.db", "windows timeline", "activity", "app activity")},
-            {"id": "bits-qmgr-transfer", "label": "BITS qmgr.dat 전송", "status": "inventory", "terms": ("bits", "qmgr", "background transfer", "download", "exfil")},
+            {"id": "windows-timeline-activities", "label": "Windows Timeline ActivitiesCache", "status": "partial", "terms": ("activitiescache.db", "activities-cache-db", "windows timeline", "activity", "app activity")},
+            {"id": "bits-qmgr-transfer", "label": "BITS qmgr.dat 전송", "status": "partial", "terms": ("bits", "qmgr", "bits-qmgr-transfer-candidate", "background transfer", "download", "exfil")},
             {"id": "recentdocs-clipboard-muicache", "label": "RecentDocs/Clipboard/MUICache", "status": "inventory", "terms": ("recentfilecache", "recentdocs", "clipboard", "muicache")},
         ),
     },
@@ -192,8 +192,8 @@ CAPABILITY_GROUPS: tuple[dict[str, Any], ...] = (
         "label": "브라우저 심화 복원",
         "capabilities": (
             {"id": "incognito-memory-pagefile-carving", "label": "시크릿 모드 URL 카빙", "status": "inventory", "terms": ("incognito", "inprivate", "pagefile", "hiberfil", "url carving")},
-            {"id": "webcachev01-ese-parser", "label": "WebCacheV01.dat", "status": "inventory", "terms": ("webcachev01.dat", "ese", "webcache", "wininet", "webview")},
-            {"id": "desktop-cloud-sync-db", "label": "OneDrive/Google Drive sync DB", "status": "inventory", "terms": ("onedrive", "sync_engine.db", "google drive", "drivefs", "sync")},
+            {"id": "webcachev01-ese-parser", "label": "WebCacheV01.dat", "status": "partial", "terms": ("webcachev01.dat", "webcachev01-ese-file", "ese", "webcache", "wininet", "webview")},
+            {"id": "desktop-cloud-sync-db", "label": "OneDrive/Google Drive sync DB", "status": "partial", "terms": ("onedrive", "sync_engine.db", "desktop-cloud-sync-db", "google drive", "drivefs", "sync")},
         ),
     },
     {

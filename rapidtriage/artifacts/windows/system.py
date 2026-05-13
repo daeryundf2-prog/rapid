@@ -65,6 +65,7 @@ WMI_REPOSITORY_SUFFIXES = {".MAP", ".BTR", ".DATA"}
 WMI_SCAN_LIMIT = 8 * 1024 * 1024
 SPOOLER_SCAN_LIMIT = 2 * 1024 * 1024
 REMOTE_CONTROL_SCAN_LIMIT = 2 * 1024 * 1024
+BITS_QMGR_SCAN_LIMIT = 2 * 1024 * 1024
 WMI_PERSISTENCE_TERMS = (
     "__eventfilter",
     "commandlineeventconsumer",
@@ -135,6 +136,7 @@ REMOTE_CONTROL_PRODUCTS = {
     "rustdesk": ("rustdesk", "rustdesk.toml", "config/rustdesk"),
     "chrome-remote-desktop": ("chrome remote desktop", "chromoting", "remoting_host"),
 }
+BITS_QMGR_NAMES = {"qmgr0.dat", "qmgr1.dat", "qmgr.db", "qmgr.dat"}
 
 
 class WindowsSystemArtifactsProvider:
@@ -153,6 +155,7 @@ class WindowsSystemArtifactsProvider:
         yield from collect_wer_reports(root)
         yield from collect_wmi_repository(root)
         yield from collect_print_spooler_artifacts(root)
+        yield from collect_bits_qmgr_artifacts(root)
         yield from collect_third_party_remote_control_artifacts(root)
         yield from collect_zone_identifier_ads(root)
         yield from collect_explorer_cache_artifacts(root)
@@ -257,6 +260,68 @@ def remote_control_product_for_path(path: Path) -> str:
         if any(term in lower for term in terms):
             return product
     return ""
+
+
+def collect_bits_qmgr_artifacts(root: Path) -> Iterable[ArtifactRecord]:
+    for path in sorted(root.rglob("*"), key=lambda item: str(item).lower()):
+        if not path.is_file():
+            continue
+        lower = str(path).lower().replace("\\", "/")
+        if path.name.lower() not in BITS_QMGR_NAMES and not (
+            "network/downloader" in lower and path.suffix.lower() in {".dat", ".db"}
+        ):
+            continue
+        stat_result = path.stat()
+        blob = read_prefix(path, BITS_QMGR_SCAN_LIMIT)
+        strings = unique_strings([*extract_ascii_strings(blob), *extract_utf16_strings(blob)])
+        urls = regex_candidates(strings, URL_RE)[:30]
+        paths = regex_candidates(strings, WINDOWS_PATH_RE)[:30]
+        yield ArtifactRecord(
+            provider=WindowsSystemArtifactsProvider.name,
+            artifact_type="bits-qmgr-transfer-candidate",
+            path=str(path.resolve()),
+            supported=True,
+            details={
+                **source_details(path, "bits-qmgr-file"),
+                "source_hashes": {"sha256": compute_sha256(path)},
+                "size": stat_result.st_size,
+                "modified_at": isoformat_from_timestamp(stat_result.st_mtime),
+                "timestamp": isoformat_from_timestamp(stat_result.st_mtime),
+                "timestamp_source": "qmgr_file_modified_at",
+                "scan_bytes": len(blob),
+                "url_candidates": urls,
+                "path_candidates": paths,
+                "extracted_string_count": len(strings),
+                "string_samples": strings[:50],
+                "coverage_status": "bits-qmgr-bounded-string-inventory",
+                "reportability": "triage",
+                "parser_confidence": "medium" if urls or paths else "low",
+                "risk_flags": bits_qmgr_risk_flags(urls, paths),
+                "validation_required": True,
+                "validation_guidance": (
+                    "BITS qmgr file is scanned for transfer pivots. Validate job IDs, owners, retry state, and "
+                    "complete URL/path fields with a BITS structure decoder before report-grade exfil/download claims."
+                ),
+                "commercial_grade_ready": False,
+                "commercial_grade_blockers": [
+                    "bits-qmgr-structure-decoder-not-implemented",
+                    "job-owner-and-state-validation-required",
+                    "trusted-bits-parser-diff-required",
+                ],
+            },
+        )
+
+
+def bits_qmgr_risk_flags(urls: Sequence[str], paths: Sequence[str]) -> list[str]:
+    flags = ["bits-qmgr-file"]
+    if urls:
+        flags.append("bits-url-candidate")
+    if paths:
+        flags.append("bits-local-path-candidate")
+    lowered_urls = " ".join(urls).lower()
+    if any(term in lowered_urls for term in ("http://", "pastebin", "discord", "mega.", "anonfiles", "transfer")):
+        flags.append("possible-suspicious-bits-transfer")
+    return flags
 
 
 def collect_explorer_cache_artifacts(root: Path) -> Iterable[ArtifactRecord]:

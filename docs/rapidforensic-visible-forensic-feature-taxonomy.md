@@ -844,3 +844,35 @@ GUI 표기 방식:
 2. `local-llm-artifact`는 모델/앱 파일 존재와 역할 분류다. 프롬프트/대화 복원은 제품별 DB schema가 필요하다.
 3. `cloud-iaas-audit`는 provider export row 정규화다. 클라우드 계정 전체 범위나 로그 무결성을 증명하지 않는다.
 4. `disk-memory-file-indicators`는 bounded string pivot이다. hiberfil 압축 해제나 pagefile 구조 복원은 다음 단계다.
+
+## 26. 2026-05-14 구현 반영: Windows 활동/웹캐시/동기화 DB triage 3차 보강
+
+이번 라운드는 사용자 행위 입증과 정보유출 조사에서 자주 보는 Windows 활동/전송/웹뷰/클라우드 동기화 흔적을 실제 artifact row로 연결했다. 목표는 "분석 메뉴에만 있고 결과에는 안 보이는 기능"을 줄이는 것이다.
+
+부분 구현으로 승격한 capability:
+
+| capability | 새 artifact row | 구현 내용 | 남은 상용급 보강 |
+| --- | --- | --- | --- |
+| Windows Timeline ActivitiesCache | `activities-cache-db` | 기존 Windows system collector의 `ActivitiesCache.db` read-only SQLite schema/timeline sample inventory를 visible capability와 연결했다. | ActivitiesCache 테이블별 row semantics, app/document/URL attribution, deleted state 검증 |
+| BITS qmgr.dat 전송 | `bits-qmgr-transfer-candidate` | `qmgr0.dat/qmgr1.dat/qmgr.dat/qmgr.db`와 `Network/Downloader` DB 후보를 bounded string scan하여 URL/path pivot, mtime, hash, risk flag를 만든다. | BITS job 구조 decoder, owner/state/retry/transfer time, trusted BitsParser/Velociraptor diff |
+| WebCacheV01.dat | `webcachev01-ese-file` | `WebCacheV01.dat`의 ESE header, page size 후보, bounded URL/path/string pivot을 추출한다. | ESE catalog/table/long value decoder, container별 history/cache/cookie row 복원, deleted record recovery |
+| OneDrive/Google Drive sync DB | `desktop-cloud-sync-db` | OneDrive/Google Drive/DriveFS 경로의 sync DB 후보를 read-only SQLite schema inventory로 열고 file/sync/delete/share/account semantic hint를 만든다. | provider/version별 sync DB parser, upload/delete/share timestamp semantics, account scope 검증 |
+
+대용량/안전 설계:
+
+1. `WebCacheV01.dat`는 ESE 전체 row decode가 아니라 header와 bounded string pivot만 수행한다.
+2. `desktop-cloud-sync-db`는 SQLite schema와 row count만 읽고, 원문 값은 기본적으로 노출하지 않는다.
+3. 브라우저/클라우드 sync 대형 DB는 `safe_browser_file_hashes` 정책으로 일정 크기 이상이면 전체 해시를 지연한다.
+4. BITS qmgr 파일은 2MB prefix scan으로 제한해 대형/손상 파일에서도 collector가 멈추지 않게 했다.
+
+검증 포인트:
+
+1. `tests/test_rapidtriage_windows_artifacts.py::test_windows_system_collector_maps_bits_qmgr_transfer_candidates`가 BITS URL/path pivot과 reportability blocker를 검증한다.
+2. `tests/test_rapidtriage_windows_artifacts.py::test_windows_browser_collector_maps_webcache_and_cloud_sync_db_candidates`가 WebCache ESE signature와 OneDrive sync DB SQLite inventory를 검증한다.
+3. Python/JS visible capability status는 ActivitiesCache, BITS, WebCacheV01, desktop cloud sync DB를 `부분 구현`으로 올리고 실제 artifact type terms를 추가했다.
+
+중요한 제한:
+
+1. `bits-qmgr-transfer-candidate`는 URL/path string 후보이지 완성된 BITS job record가 아니다.
+2. `webcachev01-ese-file`은 ESE header/string pivot이다. 방문 시각, container, cache entry, 삭제 상태를 아직 확정하지 않는다.
+3. `desktop-cloud-sync-db`는 schema inventory다. 파일이 업로드/삭제/공유됐다는 최종 결론은 provider-specific parser와 계정 scope 자료가 필요하다.

@@ -10,6 +10,7 @@ from urllib.parse import parse_qs, unquote_plus, urlparse
 
 from ...core.forensic_accuracy import build_accuracy_gate
 from ...core.models import ArtifactRecord
+from .ese import build_ese_string_pivots, probe_ese_database
 from .common import (
     build_forensic_review,
     isoformat_from_unix_micros,
@@ -107,6 +108,10 @@ MAX_BROWSER_INVENTORY_FILES = 5000
 MAX_BROWSER_INVENTORY_SAMPLE_FILES = 6
 MAX_BROWSER_INVENTORY_HASH_BYTES = 16 * 1024 * 1024
 MAX_BROWSER_TIMELINE_ROWS = 1000
+MAX_BROWSER_DEEP_FILE_HASH_BYTES = 64 * 1024 * 1024
+WEBCACHE_NAMES = {"webcachev01.dat"}
+CLOUD_SYNC_DB_NAMES = {"sync_engine.db", "metadata_sqlite_db", "sync_config.db", "snapshot.db", "sync.db"}
+CLOUD_SYNC_PATH_TERMS = ("onedrive", "drivefs", "google drive", "googledrive")
 
 AI_SERVICE_DOMAINS: Tuple[Tuple[str, str], ...] = (
     ("chatgpt.com", "ChatGPT"),
@@ -296,6 +301,262 @@ class WindowsBrowserArtifactsProvider:
                     history_rows=history_rows,
                     download_rows=[],
                 )
+        yield from collect_webcachev01_artifacts(root)
+        yield from collect_desktop_cloud_sync_db_artifacts(root)
+
+
+def collect_webcachev01_artifacts(root: Path) -> Iterable[ArtifactRecord]:
+    for path in sorted(root.rglob("*"), key=lambda item: str(item).lower()):
+        if not path.is_file() or path.name.lower() not in WEBCACHE_NAMES:
+            continue
+        stat_result = path.stat()
+        ese_probe = probe_ese_database(path)
+        string_pivots = build_ese_string_pivots(path, max_strings=180)
+        profile = windows_browser_user_profile(path, root=root)
+        yield ArtifactRecord(
+            provider=WindowsBrowserArtifactsProvider.name,
+            artifact_type="webcachev01-ese-file",
+            path=str(path.resolve()),
+            supported=True,
+            details={
+                "parser": "windows-webcachev01-ese",
+                "parser_version": PARSER_VERSION,
+                "source_path": str(path.resolve()),
+                "source_format": "ese-webcachev01",
+                "source_hashes": safe_browser_file_hashes(path),
+                "source_profile": profile,
+                "size": stat_result.st_size,
+                "modified_at": isoformat_from_timestamp(stat_result.st_mtime),
+                "timestamp": isoformat_from_timestamp(stat_result.st_mtime),
+                "timestamp_source": "webcache_file_modified_at",
+                "ese_header": ese_probe,
+                "ese_string_pivots": string_pivots,
+                "url_candidates": string_pivots.get("url_candidates", []),
+                "path_candidates": string_pivots.get("path_candidates", []),
+                "coverage_status": "ese-header-and-string-pivot-inventory",
+                "reportability": "triage",
+                "parser_confidence": "medium" if ese_probe.get("header_readable") else "low",
+                "risk_flags": ["webcachev01-ese-file", *list(string_pivots.get("risk_flags", []))],
+                "validation_required": True,
+                "validation_guidance": (
+                    "WebCacheV01.dat is an ESE database. This row preserves ESE header and bounded string pivots; "
+                    "validate containers/records, timestamps, and deleted state with a WebCache ESE decoder before reporting."
+                ),
+                "commercial_grade_ready": False,
+                "commercial_grade_blockers": [
+                    "webcachev01-ese-catalog-row-decoder-required",
+                    "wininet-container-schema-fixture-required",
+                    "trusted-webcache-parser-diff-required",
+                ],
+            },
+        )
+
+
+def collect_desktop_cloud_sync_db_artifacts(root: Path) -> Iterable[ArtifactRecord]:
+    for path in sorted(root.rglob("*"), key=lambda item: str(item).lower()):
+        if not path.is_file() or not is_cloud_sync_db_candidate(path):
+            continue
+        stat_result = path.stat()
+        schema_inventory = sqlite_sync_schema_inventory(path)
+        profile = windows_browser_user_profile(path, root=root)
+        yield ArtifactRecord(
+            provider=WindowsBrowserArtifactsProvider.name,
+            artifact_type="desktop-cloud-sync-db",
+            path=str(path.resolve()),
+            supported=True,
+            details={
+                "parser": "desktop-cloud-sync-db-inventory",
+                "parser_version": PARSER_VERSION,
+                "source_path": str(path.resolve()),
+                "source_format": "sqlite-or-sync-db",
+                "source_hashes": safe_browser_file_hashes(path),
+                "source_profile": profile,
+                "sync_provider": infer_cloud_sync_provider(path),
+                "sync_db_name": path.name,
+                "size": stat_result.st_size,
+                "modified_at": isoformat_from_timestamp(stat_result.st_mtime),
+                "timestamp": isoformat_from_timestamp(stat_result.st_mtime),
+                "timestamp_source": "sync_db_file_modified_at",
+                "sqlite_schema_inventory": schema_inventory,
+                "table_count": schema_inventory.get("table_count", 0),
+                "total_row_count": schema_inventory.get("total_row_count", 0),
+                "coverage_status": "desktop-cloud-sync-db-schema-inventory",
+                "reportability": "triage",
+                "parser_confidence": "medium" if schema_inventory.get("opened_readonly") else "low",
+                "risk_flags": cloud_sync_risk_flags(path, schema_inventory),
+                "validation_required": True,
+                "validation_guidance": (
+                    "Desktop cloud sync DB is inventoried for upload/download/delete pivots. Validate provider version, "
+                    "schema semantics, deleted-state, sharing state, and account scope before report-grade leakage claims."
+                ),
+                "commercial_grade_ready": False,
+                "commercial_grade_blockers": [
+                    "provider-specific-sync-db-parser-required",
+                    "account-scope-and-deleted-state-validation-required",
+                    "onedrive-google-drive-known-answer-fixture-required",
+                ],
+            },
+        )
+
+
+def is_cloud_sync_db_candidate(path: Path) -> bool:
+    lowered = str(path).lower().replace("\\", "/")
+    if not any(term in lowered for term in CLOUD_SYNC_PATH_TERMS):
+        return False
+    return path.name.lower() in CLOUD_SYNC_DB_NAMES or path.suffix.lower() in {".db", ".sqlite", ".sqlite3"}
+
+
+def infer_cloud_sync_provider(path: Path) -> str:
+    lowered = str(path).lower()
+    if "onedrive" in lowered:
+        return "onedrive"
+    if "drivefs" in lowered or "google drive" in lowered or "googledrive" in lowered:
+        return "google-drive"
+    return "cloud-sync"
+
+
+def cloud_sync_risk_flags(path: Path, schema_inventory: Mapping[str, object]) -> list[str]:
+    flags = [f"desktop-cloud-sync:{infer_cloud_sync_provider(path)}"]
+    summary = schema_inventory.get("semantic_summary")
+    lowered = json.dumps(summary, ensure_ascii=False, default=str).lower() if summary else ""
+    if any(term in lowered for term in ("delete", "removed", "trash")):
+        flags.append("possible-sync-delete-state")
+    if any(term in lowered for term in ("share", "permission", "owner")):
+        flags.append("possible-sharing-state")
+    if schema_inventory.get("opened_readonly"):
+        flags.append("sync-db-sqlite-opened")
+    return flags
+
+
+def sqlite_sync_schema_inventory(path: Path, *, max_tables: int = 30, max_columns: int = 80) -> dict[str, object]:
+    inventory: dict[str, object] = {
+        "profile_version": "desktop-cloud-sync-schema-inventory-v1",
+        "opened_readonly": False,
+        "open_status": "not-sqlite-header",
+        "table_count": 0,
+        "total_row_count": 0,
+        "tables": [],
+        "values_redacted": True,
+    }
+    try:
+        with path.open("rb") as handle:
+            if handle.read(16) != b"SQLite format 3\x00":
+                return inventory
+    except OSError:
+        inventory["open_status"] = "read-failed"
+        return inventory
+    try:
+        with open_sqlite_snapshot(path) as connection:
+            table_names = [
+                str(row[0])
+                for row in connection.execute(
+                    "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name"
+                ).fetchall()
+            ][:max_tables]
+            tables: list[dict[str, object]] = []
+            total_rows = 0
+            for table_name in table_names:
+                columns = sorted(sqlite_table_columns(connection, table_name))[:max_columns]
+                row_count = sqlite_row_count_safe(connection, table_name)
+                if isinstance(row_count, int):
+                    total_rows += row_count
+                tables.append(
+                    {
+                        "name": table_name,
+                        "columns": columns,
+                        "row_count": row_count,
+                        "semantic_hints": sync_table_semantic_hints(table_name, columns),
+                    }
+                )
+            inventory.update(
+                {
+                    "opened_readonly": True,
+                    "open_status": "opened",
+                    "table_count": len(table_names),
+                    "total_row_count": total_rows,
+                    "tables": tables,
+                    "semantic_summary": summarize_sync_tables(tables),
+                }
+            )
+    except (sqlite3.Error, OSError) as exc:
+        inventory["open_status"] = "sqlite-open-failed"
+        inventory["sqlite_error"] = str(exc)[:240]
+    return inventory
+
+
+def sqlite_row_count_safe(connection: sqlite3.Connection, table_name: str) -> int | None:
+    if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]{0,127}", table_name):
+        return None
+    try:
+        row = connection.execute(f'SELECT COUNT(*) FROM "{table_name}"').fetchone()
+    except sqlite3.Error:
+        return None
+    return int(row[0]) if row else None
+
+
+def sync_table_semantic_hints(table_name: str, columns: Sequence[str]) -> list[str]:
+    lowered = " ".join([table_name, *columns]).lower()
+    hints = []
+    for hint, terms in {
+        "file-metadata": ("file", "path", "name", "size", "hash"),
+        "sync-state": ("sync", "dirty", "upload", "download", "status"),
+        "delete-state": ("delete", "trash", "removed"),
+        "sharing-state": ("share", "permission", "owner", "acl"),
+        "account-state": ("account", "email", "user", "tenant"),
+    }.items():
+        if any(term in lowered for term in terms):
+            hints.append(hint)
+    return hints
+
+
+def summarize_sync_tables(tables: Sequence[Mapping[str, object]]) -> list[dict[str, object]]:
+    counts: dict[str, int] = {}
+    for table in tables:
+        for hint in table.get("semantic_hints", []) if isinstance(table.get("semantic_hints"), list) else []:
+            counts[str(hint)] = counts.get(str(hint), 0) + 1
+    return [{"value": value, "count": count} for value, count in sorted(counts.items())]
+
+
+def windows_browser_user_profile(path: Path, *, root: Path | None = None) -> dict[str, object]:
+    parts = list(path.resolve().parts)
+    lowered = [part.lower() for part in parts]
+    for index, part in enumerate(lowered):
+        if part == "users" and index + 1 < len(parts):
+            return {
+                "profile_name": parts[index + 1],
+                "profile_root": str(Path(*parts[: index + 2])) if index + 2 > 0 else "",
+                "relative_path": str(Path(*parts[index + 2 :])) if index + 2 < len(parts) else "",
+                "attribution_basis": "path-under-users-profile",
+                "root": str(root.resolve()) if root else "",
+                "validation_required": True,
+            }
+    return {
+        "profile_name": "",
+        "profile_root": "",
+        "relative_path": str(path),
+        "attribution_basis": "not-under-users-profile",
+        "root": str(root.resolve()) if root else "",
+        "validation_required": True,
+    }
+
+
+def safe_browser_file_hashes(path: Path) -> dict[str, str]:
+    try:
+        size = path.stat().st_size
+    except OSError:
+        size = 0
+    if size <= MAX_BROWSER_DEEP_FILE_HASH_BYTES:
+        try:
+            return file_hashes(path)
+        except OSError:
+            pass
+    return {
+        "md5": "",
+        "sha1": "",
+        "sha256": "",
+        "hash_status": "deferred-large-browser-file" if size > MAX_BROWSER_DEEP_FILE_HASH_BYTES else "unavailable",
+        "path_sha256": hashlib.sha256(str(path.resolve()).encode("utf-8")).hexdigest(),
+    }
 
 
 def build_browser_storage_only_artifacts(
