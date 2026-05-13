@@ -178,6 +178,33 @@ class RapidTriageWebStaticTests(unittest.TestCase):
         self.assertIn("cloud-message", config_js)
         self.assertIn("media-audio", config_js)
         self.assertIn("memory-dump-indicators", config_js)
+        for capability_id in (
+            "evidence-vss-apfs-snapshot",
+            "evidence-fde-unlock",
+            "evidence-unallocated-carving",
+            "ntfs-logfile-transactions",
+            "timestamp-stomping-detection",
+            "signature-mismatch-detection",
+            "etl-trace-parser",
+            "eventlog-clearing-alert",
+            "usb-external-device-history",
+            "autoruns-persistence-view",
+            "lnk-jumplist-analysis",
+            "windows-timeline-activities",
+            "webcachev01-ese-parser",
+            "local-llm-ollama-lmstudio-gpt4all",
+            "windows-copilot-recall",
+            "print-spooler-spl-shd",
+            "geo-location-map-viewer",
+            "aws-cloudtrail-parser",
+            "exif-gps-map",
+            "hiberfil-pagefile-carving",
+            "remote-control-anydesk-teamviewer-rustdesk",
+            "super-timeline-plaso-style",
+            "denisting-nsrl-whitelist",
+            "yara-ioc-scanner",
+        ):
+            self.assertIn(capability_id, config_js)
         self.assertIn("renderVisibleCapabilityGroups", app_js)
         self.assertIn("loadRunCapabilities", app_js)
         self.assertIn("/capabilities", app_js)
@@ -202,7 +229,7 @@ class RapidTriageWebStaticTests(unittest.TestCase):
             for group in CAPABILITY_GROUPS
             for capability in group["capabilities"]
         ]
-        self.assertGreaterEqual(len(python_ids), 40)
+        self.assertGreaterEqual(len(python_ids), 80)
         for capability_id in python_ids:
             self.assertIn(capability_id, config_js)
 

@@ -135,6 +135,146 @@ CAPABILITY_GROUPS: tuple[dict[str, Any], ...] = (
         ),
     },
     {
+        "id": "evidence-recovery-unlock",
+        "catalog_id": "evidence-input",
+        "label": "복원 / 암호화 해제",
+        "capabilities": (
+            {"id": "evidence-vss-apfs-snapshot", "label": "VSS/APFS 스냅샷", "status": "inventory", "terms": ("vss", "shadow copy", "apfs snapshot", "snapshot")},
+            {"id": "evidence-fde-unlock", "label": "BitLocker/FileVault/LUKS unlock", "status": "external-required", "terms": ("bitlocker", "filevault", "luks", "fde", "unlock")},
+            {"id": "evidence-unallocated-carving", "label": "비할당 영역 카빙", "status": "inventory", "terms": ("unallocated", "carving", "deleted file", "sqlite carving")},
+        ),
+    },
+    {
+        "id": "filesystem-antiforensics",
+        "catalog_id": "windows-core",
+        "label": "파일시스템 / 안티포렌식",
+        "capabilities": (
+            {"id": "ntfs-logfile-transactions", "label": "$LogFile transaction", "status": "inventory", "terms": ("$logfile", "transaction", "ntfs log", "redo", "undo")},
+            {"id": "recycle-bin-ir-map", "label": "Recycle Bin $I/$R 매핑", "status": "inventory", "terms": ("recycle bin", "$i", "$r", "deleted time", "original path")},
+            {"id": "timestamp-stomping-detection", "label": "Time stomping 탐지", "status": "inventory", "terms": ("timestamp", "stomping", "$sia", "$fna", "time mismatch")},
+            {"id": "signature-mismatch-detection", "label": "확장자 변조 탐지", "status": "inventory", "terms": ("signature mismatch", "magic", "extension mismatch", "file header")},
+        ),
+    },
+    {
+        "id": "windows-eventlog-dfir",
+        "catalog_id": "windows-core",
+        "label": "이벤트 로그 DFIR",
+        "capabilities": (
+            {"id": "etl-trace-parser", "label": "ETW/ETL trace", "status": "inventory", "terms": ("etl", "etw", "trace", "wmi trace", "usb trace")},
+            {"id": "eventlog-clearing-alert", "label": "로그 삭제 High-Risk", "status": "partial", "terms": ("event id 1102", "event id 104", "log clear", "audit log cleared")},
+            {"id": "logon-session-timeline", "label": "로그온 세션 통합 뷰", "status": "inventory", "terms": ("4624", "4634", "4647", "logon session", "logoff")},
+        ),
+    },
+    {
+        "id": "usb-persistence-network",
+        "catalog_id": "windows-core",
+        "label": "USB / 지속성 / 네트워크",
+        "capabilities": (
+            {"id": "usb-external-device-history", "label": "USB 및 외장매체 연결 이력", "status": "inventory", "terms": ("usbstor", "mounteddevices", "setupapi.dev.log", "usb serial", "drive letter")},
+            {"id": "autoruns-persistence-view", "label": "Persistence/Autoruns 통합 뷰", "status": "partial", "terms": ("autoruns", "run key", "service", "scheduled task", "wmi consumer")},
+            {"id": "wifi-network-profile-history", "label": "Wi-Fi/네트워크 프로필", "status": "inventory", "terms": ("wifi", "ssid", "wlan", "network profile", "connection")},
+        ),
+    },
+    {
+        "id": "execution-user-activity",
+        "catalog_id": "windows-core",
+        "label": "사용자 실행 / 활동",
+        "capabilities": (
+            {"id": "lnk-jumplist-analysis", "label": "LNK 및 JumpList", "status": "partial", "terms": ("lnk", "jumplist", "destlist", "automaticdestinations", "customdestinations")},
+            {"id": "windows-timeline-activities", "label": "Windows Timeline ActivitiesCache", "status": "inventory", "terms": ("activitiescache.db", "windows timeline", "activity", "app activity")},
+            {"id": "bits-qmgr-transfer", "label": "BITS qmgr.dat 전송", "status": "inventory", "terms": ("bits", "qmgr", "background transfer", "download", "exfil")},
+            {"id": "recentdocs-clipboard-muicache", "label": "RecentDocs/Clipboard/MUICache", "status": "inventory", "terms": ("recentfilecache", "recentdocs", "clipboard", "muicache")},
+        ),
+    },
+    {
+        "id": "browser-deep-recovery",
+        "catalog_id": "web-ai",
+        "label": "브라우저 심화 복원",
+        "capabilities": (
+            {"id": "incognito-memory-pagefile-carving", "label": "시크릿 모드 URL 카빙", "status": "inventory", "terms": ("incognito", "inprivate", "pagefile", "hiberfil", "url carving")},
+            {"id": "webcachev01-ese-parser", "label": "WebCacheV01.dat", "status": "inventory", "terms": ("webcachev01.dat", "ese", "webcache", "wininet", "webview")},
+            {"id": "desktop-cloud-sync-db", "label": "OneDrive/Google Drive sync DB", "status": "inventory", "terms": ("onedrive", "sync_engine.db", "google drive", "drivefs", "sync")},
+        ),
+    },
+    {
+        "id": "ai-local-desktop-recall",
+        "catalog_id": "web-ai",
+        "label": "로컬/데스크톱 AI",
+        "capabilities": (
+            {"id": "local-llm-ollama-lmstudio-gpt4all", "label": "Ollama/LM Studio/GPT4All", "status": "inventory", "terms": ("ollama", "lm studio", "gpt4all", "local llm", "model")},
+            {"id": "ai-desktop-app-db", "label": "ChatGPT/Copilot 데스크톱 앱 DB", "status": "inventory", "terms": ("chatgpt desktop", "copilot", "desktop app", "sqlite")},
+            {"id": "windows-copilot-recall", "label": "Windows Copilot Recall", "status": "inventory", "terms": ("recall", "copilot recall", "screenray", "windows 11 24h2")},
+        ),
+    },
+    {
+        "id": "docs-leakage-artifacts",
+        "catalog_id": "documents-db",
+        "label": "문서 유출 보조 아티팩트",
+        "capabilities": (
+            {"id": "print-spooler-spl-shd", "label": "Print Spooler SPL/SHD", "status": "inventory", "terms": ("print spooler", ".spl", ".shd", "printed", "printer")},
+            {"id": "document-metadata-macro-risk", "label": "문서 메타데이터/매크로 위험", "status": "partial", "terms": ("metadata", "vba", "macro", "ole", "ooxml", "author")},
+            {"id": "sticky-notes-plum", "label": "Sticky Notes plum.sqlite", "status": "inventory", "terms": ("sticky notes", "plum.sqlite", "stickynotes", "note")},
+        ),
+    },
+    {
+        "id": "mobile-location-behavior",
+        "catalog_id": "communications",
+        "label": "모바일 위치 / 생활 패턴",
+        "capabilities": (
+            {"id": "geo-location-map-viewer", "label": "위치 정보/동선 지도", "status": "inventory", "terms": ("gps", "latitude", "longitude", "cell tower", "wifi location", "map")},
+            {"id": "health-fitness-activity", "label": "Health/Fitness 활동", "status": "inventory", "terms": ("health", "fitness", "steps", "heart rate", "sleep")},
+            {"id": "screen-time-digital-wellbeing", "label": "Screen Time/Digital Wellbeing", "status": "inventory", "terms": ("screen time", "digital wellbeing", "app usage", "screen on")},
+        ),
+    },
+    {
+        "id": "cloud-iaas-audit",
+        "catalog_id": "mobile-cloud",
+        "label": "IaaS 보안 로그",
+        "capabilities": (
+            {"id": "aws-cloudtrail-parser", "label": "AWS CloudTrail", "status": "inventory", "terms": ("cloudtrail", "aws", "iam", "s3", "ec2")},
+            {"id": "azure-activity-log-parser", "label": "Azure Activity Log", "status": "inventory", "terms": ("azure activity", "entra", "azuread", "microsoft graph")},
+            {"id": "gcp-audit-log-parser", "label": "GCP Audit Logs", "status": "inventory", "terms": ("gcp", "google cloud", "audit log", "iam")},
+        ),
+    },
+    {
+        "id": "media-advanced-forensics",
+        "catalog_id": "media-ocr",
+        "label": "미디어 심화 포렌식",
+        "capabilities": (
+            {"id": "exif-gps-map", "label": "사진 EXIF GPS 지도", "status": "partial", "terms": ("exif", "gps", "geotag", "map", "photo location")},
+            {"id": "steganography-suspicion-scan", "label": "Steganography 의심 스캔", "status": "inventory", "terms": ("steganography", "hidden data", "lsb", "entropy")},
+            {"id": "deepfake-manipulation-scan", "label": "Deepfake/조작 의심", "status": "inventory", "terms": ("deepfake", "ai generated", "manipulated", "media authenticity")},
+        ),
+    },
+    {
+        "id": "memory-disk-artifacts",
+        "catalog_id": "timeline-ioc",
+        "label": "디스크 내 메모리 파일",
+        "capabilities": (
+            {"id": "hiberfil-pagefile-carving", "label": "hiberfil/pagefile 통합 카빙", "status": "inventory", "terms": ("hiberfil.sys", "pagefile.sys", "swapfile.sys", "memory carving")},
+            {"id": "crash-dump-minidump-analysis", "label": "MEMORY.DMP/Minidump", "status": "inventory", "terms": ("memory.dmp", "minidump", "crash dump", ".dmp")},
+        ),
+    },
+    {
+        "id": "incident-remote-tampering",
+        "catalog_id": "timeline-ioc",
+        "label": "원격접속 / Tampering",
+        "capabilities": (
+            {"id": "remote-control-anydesk-teamviewer-rustdesk", "label": "AnyDesk/TeamViewer/RustDesk", "status": "inventory", "terms": ("anydesk", "teamviewer", "rustdesk", "chrome remote desktop", "remote control")},
+            {"id": "defender-edr-tampering", "label": "Defender/EDR 무력화", "status": "partial", "terms": ("defender", "tamper", "exclusion", "edr", "service stopped")},
+        ),
+    },
+    {
+        "id": "review-search-advanced",
+        "catalog_id": "review-report",
+        "label": "검색 / 타임라인 고급",
+        "capabilities": (
+            {"id": "super-timeline-plaso-style", "label": "Super Timeline", "status": "partial", "terms": ("super timeline", "plaso", "log2timeline", "timeline correlation")},
+            {"id": "denisting-nsrl-whitelist", "label": "De-NISTing/Whitelisting", "status": "inventory", "terms": ("nsrl", "denist", "whitelist", "known file")},
+            {"id": "yara-ioc-scanner", "label": "YARA / IOC 스캐너", "status": "inventory", "terms": ("yara", "ioc", "hash list", "malware scan")},
+        ),
+    },
+    {
         "id": "review-report-citation",
         "catalog_id": "review-report",
         "label": "리뷰 / 보고서",

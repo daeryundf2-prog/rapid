@@ -308,6 +308,21 @@ class RapidTriageApiTests(unittest.TestCase):
                                 "path": "users/123/chatLogs_1.edb",
                                 "details": {"service": "KakaoTalk"},
                             },
+                            {
+                                "artifact_type": "remote-control-log",
+                                "path": "ProgramData/AnyDesk/service.trace",
+                                "details": {"tool": "AnyDesk", "remote_id": "redacted"},
+                            },
+                            {
+                                "artifact_type": "usb-device",
+                                "path": "Windows/inf/setupapi.dev.log",
+                                "details": {"registry": "USBSTOR", "serial": "redacted"},
+                            },
+                            {
+                                "artifact_type": "print-spooler",
+                                "path": "Windows/System32/spool/PRINTERS/job.SHD",
+                                "details": {"printer": "Office Printer"},
+                            },
                         ]
                     }
                 ),
@@ -341,7 +356,7 @@ class RapidTriageApiTests(unittest.TestCase):
         static_payload = static_response.json()
         self.assertEqual(static_payload["profile_version"], "visible-forensic-capabilities-v1")
         self.assertIn("validation-required", static_payload["status_labels"])
-        self.assertGreaterEqual(static_payload["summary"]["capability_count"], 40)
+        self.assertGreaterEqual(static_payload["summary"]["capability_count"], 80)
 
         self.assertEqual(run_response.status_code, 200, run_response.text)
         run_payload = run_response.json()
@@ -352,6 +367,12 @@ class RapidTriageApiTests(unittest.TestCase):
         }
         self.assertGreater(capabilities["browser-ai-usage"]["signal_count"], 0)
         self.assertGreater(capabilities["kakaotalk-windows-app-database"]["signal_count"], 0)
+        self.assertGreater(capabilities["remote-control-anydesk-teamviewer-rustdesk"]["signal_count"], 0)
+        self.assertGreater(capabilities["usb-external-device-history"]["signal_count"], 0)
+        self.assertGreater(capabilities["print-spooler-spl-shd"]["signal_count"], 0)
+        self.assertIn("windows-copilot-recall", capabilities)
+        self.assertIn("super-timeline-plaso-style", capabilities)
+        self.assertIn("yara-ioc-scanner", capabilities)
         self.assertTrue(capabilities["browser-ai-usage"]["has_signals"])
         self.assertTrue(run_payload["summary"]["run_bound"])
 

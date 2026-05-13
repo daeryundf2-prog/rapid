@@ -715,3 +715,69 @@ GUI 표기 방식:
 4. capability별 trusted-tool diff 결과와 known-answer fixture 통과 여부를 상태 계산에 반영해야 한다.
 5. Lucene/Elasticsearch/DuckDB 등 대용량 검색 backend 후보는 아직 GUI 표기만 있고, 실제 benchmark 후 선택해야 한다.
 6. 메신저/클라우드/AI export는 버전별 fixture가 부족하므로 `부분 구현` 이상으로 올리려면 실제 샘플 검증이 필요하다.
+
+## 23. 2026-05-14 외부 평가 반영: 전통 핵심 아티팩트와 안티포렌식 보강
+
+추가 평가에서 지적된 핵심은 맞다. 기존 taxonomy는 최신 브라우저/AI 사용기록을 잘 끌어올렸지만, 실제 DFIR/정보유출 현장에서 먼저 확인하는 전통 핵심 아티팩트와 안티포렌식 탐지 항목이 일부 큰 범주 안에 묻혀 있었다. 이번 라운드에서는 해당 항목들을 GUI/API capability card로 별도 노출하여 분석관이 "지원 여부", "현재 구현 상태", "남은 검증"을 바로 확인할 수 있게 했다.
+
+이번에 추가한 사용자 노출 capability:
+
+| 기능 그룹 | 신규 capability | 현재 상태 | 보강 맥락 |
+| --- | --- | --- | --- |
+| 복원 / 암호화 해제 | VSS/APFS 스냅샷 | 목록화 | 삭제 파일 복구, 랜섬웨어 이전 시점 확인을 위한 이미지 단계 핵심 기능 |
+| 복원 / 암호화 해제 | BitLocker/FileVault/LUKS unlock | 외부 자료 필요 | 복구키/패스워드를 받은 합법 unlock workflow와 provenance 필요 |
+| 복원 / 암호화 해제 | 비할당 영역 카빙 | 목록화 | 파일시스템 메타데이터가 사라진 삭제 파일/SQLite row 복원 |
+| 파일시스템 / 안티포렌식 | $LogFile transaction | 목록화 | $UsnJrnl을 보완하는 create/rename/delete transaction 분석 |
+| 파일시스템 / 안티포렌식 | Recycle Bin $I/$R 매핑 | 목록화 | 원래 경로와 삭제 시각을 직관적으로 보여주는 휴지통 전용 뷰 |
+| 파일시스템 / 안티포렌식 | Time stomping 탐지 | 목록화 | MFT $SIA/$FNA 불일치 기반 시간 조작 의심 표시 |
+| 파일시스템 / 안티포렌식 | 확장자 변조 탐지 | 목록화 | 파일 헤더와 확장자 mismatch를 은닉 위험으로 표시 |
+| 이벤트 로그 DFIR | ETW/ETL trace | 목록화 | EVTX 외 ETL 기반 USB/WMI/network 행위 추적 |
+| 이벤트 로그 DFIR | 로그 삭제 High-Risk | 부분 구현 | Event ID 1102/104 등 로그 삭제 시도 표시 |
+| 이벤트 로그 DFIR | 로그온 세션 통합 뷰 | 목록화 | 4624/4634/4647 등 인증 이벤트를 세션으로 재구성 |
+| USB / 지속성 / 네트워크 | USB 및 외장매체 연결 이력 | 목록화 | USBSTOR, MountedDevices, setupapi.dev.log 종합 |
+| USB / 지속성 / 네트워크 | Persistence/Autoruns 통합 뷰 | 부분 구현 | Run key, 서비스, 스케줄러, WMI persistence를 한 화면에 통합 |
+| USB / 지속성 / 네트워크 | Wi-Fi/네트워크 프로필 | 목록화 | 과거 SSID, 접속 시간, 네트워크 프로필 추적 |
+| 사용자 실행 / 활동 | LNK 및 JumpList | 부분 구현 | USB 파일 실행, 문서 열람, AppID mapping 확인 |
+| 사용자 실행 / 활동 | Windows Timeline ActivitiesCache | 목록화 | Win10/11 사용자 활동과 문서/앱 실행 증거 |
+| 사용자 실행 / 활동 | BITS qmgr.dat 전송 | 목록화 | 백그라운드 다운로드/유출 job 추적 |
+| 사용자 실행 / 활동 | RecentDocs/Clipboard/MUICache | 목록화 | 사용자 활동 보조 증거를 실행 흔적과 연결 |
+| 브라우저 심화 복원 | 시크릿 모드 URL 카빙 | 목록화 | pagefile/hiberfil/memory 잔재에서 URL/검색어 후보 복원 |
+| 브라우저 심화 복원 | WebCacheV01.dat | 목록화 | ESE 기반 legacy/webview 통신 흔적 분석 |
+| 브라우저 심화 복원 | OneDrive/Google Drive sync DB | 목록화 | 데스크톱 클라우드 sync DB 기반 파일 유출 시점 확인 |
+| 로컬/데스크톱 AI | Ollama/LM Studio/GPT4All | 목록화 | 로컬 LLM 모델/프롬프트/로그 흔적 |
+| 로컬/데스크톱 AI | ChatGPT/Copilot 데스크톱 앱 DB | 목록화 | 브라우저 밖 AI 앱 로컬 SQLite/cache 분석 |
+| 로컬/데스크톱 AI | Windows Copilot Recall | 목록화 | Windows 11 Recall snapshot/OCR DB 조사 항목 |
+| 문서 유출 보조 아티팩트 | Print Spooler SPL/SHD | 목록화 | 출력 문서, 사용자, 프린터, 인쇄 시각 확인 |
+| 문서 유출 보조 아티팩트 | 문서 메타데이터/매크로 위험 | 부분 구현 | 작성자/수정 이력/인쇄 시각/VBA 위험 플래그 |
+| 문서 유출 보조 아티팩트 | Sticky Notes plum.sqlite | 목록화 | 메모장 텍스트/삭제 row/account attribution |
+| 모바일 위치 / 생활 패턴 | 위치 정보/동선 지도 | 목록화 | GPS, Wi-Fi, 기지국, 앱 DB 위경도 통합 |
+| 모바일 위치 / 생활 패턴 | Health/Fitness 활동 | 목록화 | 걸음 수, 심박, 수면, 기기 조작 가능성 |
+| 모바일 위치 / 생활 패턴 | Screen Time/Digital Wellbeing | 목록화 | 앱별 사용 시간과 화면 켜짐/꺼짐 |
+| IaaS 보안 로그 | AWS CloudTrail | 목록화 | 클라우드 인프라 침해사고 감사 로그 |
+| IaaS 보안 로그 | Azure Activity Log | 목록화 | Azure/Entra/M365 감사 로그 상관 |
+| IaaS 보안 로그 | GCP Audit Logs | 목록화 | GCP IAM/service account 감사 로그 |
+| 미디어 심화 포렌식 | 사진 EXIF GPS 지도 | 부분 구현 | 이미지 갤러리와 지도/타임라인 연결 |
+| 미디어 심화 포렌식 | Steganography 의심 스캔 | 목록화 | entropy/trailing data/known signature 기반 의심 큐 |
+| 미디어 심화 포렌식 | Deepfake/조작 의심 | 목록화 | 모델/버전/오탐 경고가 붙은 조작 의심 점수 |
+| 디스크 내 메모리 파일 | hiberfil/pagefile 통합 카빙 | 목록화 | 디스크 이미지 내부 메모리 파일 문자열/URL/secret carving |
+| 디스크 내 메모리 파일 | MEMORY.DMP/Minidump | 목록화 | crash dump inventory와 의심 문자열 추출 |
+| 원격접속 / Tampering | AnyDesk/TeamViewer/RustDesk | 목록화 | 랜섬웨어/유출 사고에서 흔한 상용 원격제어 흔적 |
+| 원격접속 / Tampering | Defender/EDR 무력화 | 부분 구현 | Defender 예외, 서비스 중지, policy 변경, 로그 삭제 상관 |
+| 검색 / 타임라인 고급 | Super Timeline | 부분 구현 | MFT/USN/EVTX/Registry/Web/Execution 단일 시간축 |
+| 검색 / 타임라인 고급 | De-NISTing/Whitelisting | 목록화 | NSRL/known-good DB로 정상 파일 suppress |
+| 검색 / 타임라인 고급 | YARA / IOC 스캐너 | 목록화 | YARA rule, hash/IP/domain IOC pack 기반 전체 증거 scan |
+
+구현 반영:
+
+1. `rapidtriage/web/static/app_workbench_config.js`에 위 capability group과 chip을 추가했다.
+2. `rapidtriage/core/visible_capabilities.py`에도 동일 capability를 추가해 `/api/forensic-capabilities`와 `/api/runs/{run_id}/capabilities`에서 같은 taxonomy가 보인다.
+3. 정적 테스트는 대표 capability ID가 GUI 설정에 반드시 노출되는지 확인한다.
+4. API 테스트는 AnyDesk, USBSTOR/setupapi, Print Spooler 같은 샘플 artifact row가 capability signal로 잡히는지 확인한다.
+
+아직 남은 보강:
+
+1. 이번 반영은 “사용자에게 숨기지 않는 capability 노출” 단계다. 상용급 parser 완료를 의미하지 않는다.
+2. `목록화` 항목은 parser 구현, fixture, trusted-tool diff, FP/FN 문서가 있어야 `부분 구현` 또는 `사용 가능`으로 올릴 수 있다.
+3. VSS/APFS snapshot, FDE unlock, ETL, $LogFile, WebCacheV01, Recall, BITS, SPL/SHD, AnyDesk/TeamViewer/RustDesk는 실제 Windows/macOS 샘플 기반 검증이 필요하다.
+4. YARA/IOC, De-NISTing, Super Timeline은 대용량 성능과 UI cursor pagination이 같이 검증돼야 한다.
+5. Deepfake/steganography는 법정 표현이 특히 민감하므로 “탐지”가 아니라 “의심 후보” wording, 모델 버전, 오탐 경고를 강제해야 한다.
