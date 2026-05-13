@@ -694,6 +694,7 @@ GUI 표기 방식:
 2. capability에는 `사용 가능`, `부분 구현`, `목록화`, `검증 필요`, `외부 자료 필요` 상태가 붙는다.
 3. 분석 모드의 dense UI에서도 chip이 너무 길게 화면을 밀지 않도록 요약 설명은 숨기고 상태 chip만 남긴다.
 4. 기능 지도의 통계에는 대분류 수, 기존 function 수, 새 visible step 수가 함께 나온다.
+5. capability chip에는 `data-capability-filter`와 `data-capability-tab`이 붙어, chip을 누르면 대분류 필터가 아니라 해당 세부 기능의 대표 키워드로 바로 이동한다.
 
 이번에 해결한 부족점:
 
@@ -705,7 +706,7 @@ GUI 표기 방식:
 아직 남은 보강:
 
 1. API summary에도 동일한 capability status를 내려서 프론트가 실제 run별 카운트와 readiness를 표시해야 한다.
-2. 각 capability chip을 누르면 해당 artifact tree/filter/source viewer가 정확히 열리도록 딥링크를 붙여야 한다.
+2. 각 capability chip은 현재 대표 키워드 필터까지 연결됐다. 다음 단계는 source viewer anchor까지 이어지는 딥링크다.
 3. capability별 trusted-tool diff 결과와 known-answer fixture 통과 여부를 상태 계산에 반영해야 한다.
 4. Lucene/Elasticsearch/DuckDB 등 대용량 검색 backend 후보는 아직 GUI 표기만 있고, 실제 benchmark 후 선택해야 한다.
 5. 메신저/클라우드/AI export는 버전별 fixture가 부족하므로 `부분 구현` 이상으로 올리려면 실제 샘플 검증이 필요하다.

@@ -332,8 +332,9 @@ function renderVisibleCapabilityGroups(item) {
               ${capabilities.slice(0, 6).map((capability) => {
                 const status = capability.status || "partial";
                 const statusClassName = safeCssToken(status);
+                const filterTerm = capability.terms?.[0] || capability.id || capability.label;
                 return `
-                  <i class="feature-capability-chip status-${statusClassName}" title="${escapeHtml(capability.nextAction || capability.viewer || "")}">
+                  <i class="feature-capability-chip status-${statusClassName}" data-capability-id="${escapeHtml(capability.id || "")}" data-capability-filter="${escapeHtml(filterTerm)}" data-capability-tab="${escapeHtml(item.tab || "artifacts")}" title="${escapeHtml(capability.nextAction || capability.viewer || "")}">
                     <span>${escapeHtml(capability.label)}</span>
                     <em>${escapeHtml(statusLabels[status] || status)}</em>
                   </i>
@@ -5123,9 +5124,12 @@ function bindPanelActions() {
     globalSearchForm.addEventListener("submit", runGlobalCommandSearch);
   }
   for (const button of detailPanel.querySelectorAll("[data-open-tab]")) {
-    button.addEventListener("click", async () => {
-      await switchTab(button.dataset.openTab);
-      applyArtifactTreeFilter(button.dataset.artifactFilter || "");
+    button.addEventListener("click", async (event) => {
+      const capability = event.target.closest("[data-capability-filter]");
+      const targetTab = capability?.dataset.capabilityTab || button.dataset.openTab;
+      const filter = capability?.dataset.capabilityFilter || button.dataset.artifactFilter || "";
+      await switchTab(targetTab);
+      applyArtifactTreeFilter(filter);
     });
   }
   for (const button of detailPanel.querySelectorAll("[data-start-configured-e01-run]")) {

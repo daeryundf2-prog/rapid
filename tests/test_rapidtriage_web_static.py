@@ -179,6 +179,8 @@ class RapidTriageWebStaticTests(unittest.TestCase):
         self.assertIn("renderVisibleCapabilityGroups", app_js)
         self.assertIn("visible steps", app_js)
         self.assertIn("feature-capability-chip", app_js)
+        self.assertIn("data-capability-filter", app_js)
+        self.assertIn("capability?.dataset.capabilityFilter", app_js)
         self.assertIn("safeCssToken", app_js)
         self.assertIn(".feature-capability-groups", styles)
         self.assertIn(".feature-capability-chip.status-validation-required", styles)
