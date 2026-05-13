@@ -184,16 +184,26 @@ async function loadRunDetail(runId, tab = "summary") {
   activeViewGroup = groupForTab(tab);
   selectedRun = await api(`/api/runs/${runId}`);
   if (selectedRun.status !== "completed" || !selectedRun.summary) {
+    selectedRun.capabilities = null;
     detailPanel.innerHTML = renderPendingRun(selectedRun);
     persistWorkbenchSession();
     return;
   }
+  selectedRun.capabilities = await loadRunCapabilities(runId);
   detailPanel.innerHTML = renderDetailShell(selectedRun, activeTab);
   bindTabButtons();
   restoreWorkbenchControls();
   persistWorkbenchSession();
   loadRunValidationPackageSummary(runId);
   await renderActiveTab();
+}
+
+async function loadRunCapabilities(runId) {
+  try {
+    return await api(`/api/runs/${encodeURIComponent(runId)}/capabilities`);
+  } catch {
+    return null;
+  }
 }
 
 function renderPendingRun(run) {
@@ -270,6 +280,8 @@ function renderForensicFeatureCatalog(run, tab) {
   const totalModules = catalog.reduce((sum, item) => sum + (item.modules || []).length, 0);
   const capabilityGroups = typeof VISIBLE_FORENSIC_CAPABILITY_GROUPS !== "undefined" ? VISIBLE_FORENSIC_CAPABILITY_GROUPS : [];
   const totalCapabilities = capabilityGroups.reduce((sum, group) => sum + (group.capabilities || []).length, 0);
+  const capabilitySignals = capabilitySignalLookup(run.capabilities);
+  const matchedSignals = run.capabilities?.summary?.signal_count;
   const activeModules = catalog.filter((item) => item.tab === tab);
   const visibleCards = [
     ...activeModules,
@@ -287,6 +299,7 @@ function renderForensicFeatureCatalog(run, tab) {
           <span><strong>${formatNumber(catalog.length)}</strong> groups</span>
           <span><strong>${formatNumber(totalModules)}</strong> functions</span>
           <span><strong>${formatNumber(totalCapabilities)}</strong> visible steps</span>
+          ${matchedSignals !== undefined ? `<span><strong>${formatNumber(matchedSignals)}</strong> matched signals</span>` : ""}
         </div>
       </div>
       <div class="feature-catalog-grid">
@@ -303,7 +316,7 @@ function renderForensicFeatureCatalog(run, tab) {
               <span class="feature-module-strip">
                 ${(item.modules || []).slice(0, 5).map((module) => `<i>${escapeHtml(module)}</i>`).join("")}
               </span>
-              ${renderVisibleCapabilityGroups(item)}
+              ${renderVisibleCapabilityGroups(item, capabilitySignals)}
             </button>
           `;
         }).join("")}
@@ -312,7 +325,7 @@ function renderForensicFeatureCatalog(run, tab) {
   `;
 }
 
-function renderVisibleCapabilityGroups(item) {
+function renderVisibleCapabilityGroups(item, capabilitySignals = new Map()) {
   const allGroups = typeof VISIBLE_FORENSIC_CAPABILITY_GROUPS !== "undefined" ? VISIBLE_FORENSIC_CAPABILITY_GROUPS : [];
   const groups = allGroups.filter((group) => group.catalogId === item.id);
   if (!groups.length) return "";
@@ -333,10 +346,14 @@ function renderVisibleCapabilityGroups(item) {
                 const status = capability.status || "partial";
                 const statusClassName = safeCssToken(status);
                 const filterTerm = capability.terms?.[0] || capability.id || capability.label;
+                const signal = capabilitySignals.get(capability.id);
+                const signalCount = signal?.signal_count;
+                const signalClass = Number(signalCount || 0) > 0 ? " has-signals" : "";
                 return `
-                  <i class="feature-capability-chip status-${statusClassName}" data-capability-id="${escapeHtml(capability.id || "")}" data-capability-filter="${escapeHtml(filterTerm)}" data-capability-tab="${escapeHtml(item.tab || "artifacts")}" title="${escapeHtml(capability.nextAction || capability.viewer || "")}">
+                  <i class="feature-capability-chip status-${statusClassName}${signalClass}" data-capability-id="${escapeHtml(capability.id || "")}" data-capability-filter="${escapeHtml(filterTerm)}" data-capability-tab="${escapeHtml(item.tab || "artifacts")}" data-signal-count="${escapeHtml(signalCount ?? "")}" title="${escapeHtml(capability.nextAction || capability.viewer || "")}">
                     <span>${escapeHtml(capability.label)}</span>
                     <em>${escapeHtml(statusLabels[status] || status)}</em>
+                    ${signalCount !== undefined ? `<strong>${formatNumber(signalCount)}</strong>` : ""}
                   </i>
                 `;
               }).join("")}
@@ -346,6 +363,16 @@ function renderVisibleCapabilityGroups(item) {
       }).join("")}
     </span>
   `;
+}
+
+function capabilitySignalLookup(payload) {
+  const lookup = new Map();
+  for (const group of payload?.groups || []) {
+    for (const capability of group.capabilities || []) {
+      if (capability?.id) lookup.set(capability.id, capability);
+    }
+  }
+  return lookup;
 }
 
 function renderLazywebCommandCenter(run, tab) {

@@ -1313,6 +1313,21 @@ button:disabled {
   font-weight: 900;
 }
 
+.feature-capability-chip strong {
+  flex: 0 0 auto;
+  border-radius: 999px;
+  background: rgba(15, 116, 107, 0.14);
+  color: var(--accent-strong);
+  padding: 1px 5px;
+  font-size: 0.58rem;
+  font-weight: 950;
+}
+
+.feature-capability-chip.has-signals {
+  border-color: rgba(15, 116, 107, 0.32);
+  background: rgba(15, 116, 107, 0.14);
+}
+
 .feature-capability-chip.status-validation-required,
 .feature-capability-chip.status-external-required {
   border-color: rgba(197, 126, 42, 0.28);
@@ -5119,6 +5134,11 @@ body.analysis-active .feature-capability-chip {
 }
 
 body.analysis-active .feature-capability-chip em {
+  border-radius: 2px;
+  background: #172330;
+}
+
+body.analysis-active .feature-capability-chip strong {
   border-radius: 2px;
   background: #172330;
 }
