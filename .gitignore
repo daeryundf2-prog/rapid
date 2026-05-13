@@ -2,6 +2,7 @@
 .omx/logs/
 .omx/reports/
 .omx/team/
+.omx/tmux-hook.json
 .venv/
 .rapidtriage-smoke-venv/
 rapidtriage-windows-smoke/
