@@ -702,10 +702,12 @@ GUI 표기 방식:
 2. "AI 사용기록이 되냐"는 질문이 브라우저 방문 흔적과 질문/답변 후보, export parser로 분리된다.
 3. 메신저/모바일/클라우드가 단순 import가 아니라 제품/자료 종류별 capability로 보인다.
 4. Windows.edb, SRUM, MFT/USN처럼 아직 깊이 보강이 필요한 항목은 `목록화` 또는 `검증 필요`로 표시되어 과장되지 않는다.
+5. `/api/forensic-capabilities`와 `/api/runs/{run_id}/capabilities`가 추가되어, 동일한 capability taxonomy를 API에서도 확인할 수 있다.
+6. run별 capability API는 artifact 출력과 summary를 대표 키워드로 스캔해 `signal_count`와 `has_signals`를 붙인다. 이제 GUI가 다음 단계에서 케이스별 readiness를 실제 값으로 덮어쓸 수 있다.
 
 아직 남은 보강:
 
-1. API summary에도 동일한 capability status를 내려서 프론트가 실제 run별 카운트와 readiness를 표시해야 한다.
+1. API는 capability status와 signal count를 제공한다. 다음 단계는 프론트가 `/api/runs/{run_id}/capabilities`를 fetch해 카드 chip의 카운트/상태를 실제 run 값으로 갱신하는 것이다.
 2. 각 capability chip은 현재 대표 키워드 필터까지 연결됐다. 다음 단계는 source viewer anchor까지 이어지는 딥링크다.
 3. capability별 trusted-tool diff 결과와 known-answer fixture 통과 여부를 상태 계산에 반영해야 한다.
 4. Lucene/Elasticsearch/DuckDB 등 대용량 검색 backend 후보는 아직 GUI 표기만 있고, 실제 benchmark 후 선택해야 한다.

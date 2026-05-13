@@ -52,6 +52,7 @@ from ..core.search import SearchError, run_unified_search
 from ..core.source_paths import candidate_source_paths, source_path_resolution_diagnostics
 from ..core.submission import compute_hashes, build_submission_manifest
 from ..core.ocr_queue import OcrQueueError, build_ocr_queue
+from ..core.visible_capabilities import build_visible_capability_response
 
 
 SQLITE_PREVIEW_EXTS = {".sqlite", ".sqlite3", ".db", ".db3"}
@@ -737,6 +738,10 @@ def create_app(job_store: RunJobStore | None = None, auth_token: str | None = No
     def list_runs() -> Dict[str, Any]:
         return {"runs": [job.to_dict() for job in store.list()]}
 
+    @api.get("/api/forensic-capabilities")
+    def get_forensic_capabilities() -> Dict[str, object]:
+        return build_visible_capability_response()
+
     @api.get("/api/runs/{run_id}")
     def get_run(run_id: str) -> Dict[str, Any]:
         return get_job_payload(store, run_id, include_summary=True)
@@ -770,6 +775,16 @@ def create_app(job_store: RunJobStore | None = None, auth_token: str | None = No
         if job.summary is None:
             raise HTTPException(status_code=409, detail="run is not completed")
         return job.summary
+
+    @api.get("/api/runs/{run_id}/capabilities")
+    def get_run_capabilities(run_id: str) -> Dict[str, object]:
+        job = get_job(store, run_id)
+        if job.summary is None:
+            raise HTTPException(status_code=409, detail="run is not completed")
+        return build_visible_capability_response(
+            run_summary=job.summary,
+            artifacts=read_run_artifacts_for_capabilities(store, run_id, job.summary),
+        )
 
     @api.get("/api/runs/{run_id}/outputs/{output_name}")
     def get_run_output(run_id: str, output_name: str) -> Dict[str, object]:
@@ -1333,6 +1348,29 @@ def get_named_output(store: RunJobStore, run_id: str, output_name: str) -> Dict[
         raise HTTPException(status_code=403, detail=str(exc))
     except FileNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc))
+
+
+def read_run_artifacts_for_capabilities(
+    store: RunJobStore,
+    run_id: str,
+    summary: Mapping[str, object],
+) -> Dict[str, object]:
+    outputs = summary.get("outputs")
+    if not isinstance(outputs, Mapping):
+        return {}
+    artifacts: Dict[str, object] = {}
+    for output_name in outputs:
+        name = str(output_name)
+        if not name.startswith("artifacts_"):
+            continue
+        try:
+            artifacts[name.removeprefix("artifacts_")] = store.read_output(run_id, name)
+        except (KeyError, RuntimeError, PermissionError, FileNotFoundError, OSError):
+            artifacts[name.removeprefix("artifacts_")] = {
+                "artifacts": [],
+                "capability_load_error": True,
+            }
+    return artifacts
 
 
 def paginate_payload(

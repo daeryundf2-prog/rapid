@@ -228,6 +228,7 @@ class RapidTriageApiTests(unittest.TestCase):
         self.assertEqual(keyword_packs["keyword_pack_library_assessment"]["core_accuracy_gates"][0]["gap_id"], "#62")
         library_manifest = keyword_packs["keyword_pack_library_assessment"]["keyword_pack_library_manifest"]
         self.assertEqual(library_manifest["manifest_version"], "keyword-pack-library-manifest-v1")
+
         self.assertEqual(
             keyword_packs["keyword_pack_library_assessment"]["keyword_pack_library_manifest_hash"],
             library_manifest["manifest_hash"],
@@ -287,6 +288,72 @@ class RapidTriageApiTests(unittest.TestCase):
             asset_response = client.get(f"/assets/{asset_name}")
             self.assertEqual(asset_response.status_code, 200)
             self.assertIn("javascript", asset_response.headers["content-type"])
+
+    def test_visible_forensic_capabilities_api_exposes_hidden_feature_status_and_run_signals(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            run_dir = Path(tmp_dir) / "run-out"
+            run_dir.mkdir()
+            artifacts_path = run_dir / "artifacts_browser.json"
+            artifacts_path.write_text(
+                json.dumps(
+                    {
+                        "artifacts": [
+                            {
+                                "artifact_type": "browser-history",
+                                "url": "https://chatgpt.com/c/example",
+                                "provider": "Chrome",
+                            },
+                            {
+                                "artifact_type": "kakaotalk-message",
+                                "path": "users/123/chatLogs_1.edb",
+                                "details": {"service": "KakaoTalk"},
+                            },
+                        ]
+                    }
+                ),
+                encoding="utf-8",
+            )
+            summary_path = run_dir / "rapidtriage-run-summary.json"
+            summary_path.write_text(
+                json.dumps(
+                    {
+                        "profile_version": "rapidtriage-run-summary-v1",
+                        "mode": "fraud",
+                        "root": str(run_dir),
+                        "output_dir": str(run_dir),
+                        "summary": {"browser_history_count": 1},
+                        "outputs": {
+                            "summary": str(summary_path),
+                            "artifacts_browser": str(artifacts_path),
+                        },
+                    }
+                ),
+                encoding="utf-8",
+            )
+            store = RunJobStore()
+            job = store.import_completed_run(run_dir)
+            client = TestClient(create_app(store))
+
+            static_response = client.get("/api/forensic-capabilities")
+            run_response = client.get(f"/api/runs/{job.run_id}/capabilities")
+
+        self.assertEqual(static_response.status_code, 200, static_response.text)
+        static_payload = static_response.json()
+        self.assertEqual(static_payload["profile_version"], "visible-forensic-capabilities-v1")
+        self.assertIn("validation-required", static_payload["status_labels"])
+        self.assertGreaterEqual(static_payload["summary"]["capability_count"], 40)
+
+        self.assertEqual(run_response.status_code, 200, run_response.text)
+        run_payload = run_response.json()
+        capabilities = {
+            capability["id"]: capability
+            for group in run_payload["groups"]
+            for capability in group["capabilities"]
+        }
+        self.assertGreater(capabilities["browser-ai-usage"]["signal_count"], 0)
+        self.assertGreater(capabilities["kakaotalk-windows-app-database"]["signal_count"], 0)
+        self.assertTrue(capabilities["browser-ai-usage"]["has_signals"])
+        self.assertTrue(run_payload["summary"]["run_bound"])
 
     def test_web_console_exposes_maestro_style_artifact_workbench(self) -> None:
         app_js = (REPO_ROOT / "rapidtriage" / "web" / "static" / "app.js").read_text(encoding="utf-8")
