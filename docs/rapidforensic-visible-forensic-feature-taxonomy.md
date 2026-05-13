@@ -781,3 +781,30 @@ GUI 표기 방식:
 3. VSS/APFS snapshot, FDE unlock, ETL, $LogFile, WebCacheV01, Recall, BITS, SPL/SHD, AnyDesk/TeamViewer/RustDesk는 실제 Windows/macOS 샘플 기반 검증이 필요하다.
 4. YARA/IOC, De-NISTing, Super Timeline은 대용량 성능과 UI cursor pagination이 같이 검증돼야 한다.
 5. Deepfake/steganography는 법정 표현이 특히 민감하므로 “탐지”가 아니라 “의심 후보” wording, 모델 버전, 오탐 경고를 강제해야 한다.
+
+## 24. 2026-05-14 구현 반영: 빠른 triage 파서 1차 보강
+
+이번 라운드는 단순 기능명 추가가 아니라 실제 artifact row가 생성되는 항목을 먼저 올렸다. 상용급 최종 decoder는 아니지만, Windows E01 또는 추출 폴더 안에 관련 파일이 있으면 분석관이 GUI/API/검색에서 바로 볼 수 있는 triage row가 생긴다.
+
+부분 구현으로 승격한 capability:
+
+| capability | 새 artifact row | 구현 내용 | 남은 상용급 보강 |
+| --- | --- | --- | --- |
+| Recycle Bin $I/$R 매핑 | `recycle-bin-entry` | `$Recycle.Bin` 아래 `$I*` metadata에서 원래 경로, 삭제 시각, 삭제 파일 크기를 읽고 sibling `$R*` payload hash를 연결한다. | MFT/USN delete timeline 상관, Windows 버전별 fixture, trusted parser diff |
+| 확장자 변조 탐지 | `file-signature-mismatch` | PE/PDF/PNG/JPEG/GIF/ZIP/OLE/RAR/7z/SQLite magic header와 확장자를 비교해 mismatch 파일을 위험 후보로 표시한다. | 전체 파일타입 parser, 오탐 정책, archive 내부 파일 검사 |
+| Print Spooler SPL/SHD | `print-spooler-job` | `spool/PRINTERS`의 `.SPL`/`.SHD` 파일을 찾아 hash, mtime, bounded strings, 문서 경로 후보를 추출한다. | SPL/SHD 구조 decoder, printer eventlog 상관, driver별 spool fixture |
+| AnyDesk/TeamViewer/RustDesk | `third-party-remote-control-artifact` | AnyDesk, TeamViewer, RustDesk, Chrome Remote Desktop 경로/파일을 찾아 URL/IP/string pivot과 product tag를 생성한다. | 제품별 session decoder, peer ID/IP/파일전송 로그 검증, 계정 attribution |
+
+검증 포인트:
+
+1. `tests/test_rapidtriage_windows_artifacts.py`에 Recycle Bin + signature mismatch fixture를 추가했다.
+2. 같은 테스트 파일에 Print Spooler + AnyDesk fixture를 추가했다.
+3. visible capability status는 위 4개 항목을 `목록화`에서 `부분 구현`으로 올렸다.
+4. API signal matching이 실제 새 artifact type 이름으로도 잡히도록 capability terms를 보강했다.
+
+중요한 제한:
+
+1. `recycle-bin-entry`의 삭제 시각은 `$I` metadata 기반이다. 보고서 확정 증거로 쓰려면 MFT/USN과 교차검증해야 한다.
+2. `file-signature-mismatch`는 “위장/은닉 의심”이지 의도 입증이 아니다. 정상적인 무확장 파일, 캐시, 임시 파일에서 오탐이 가능하다.
+3. `print-spooler-job`은 현재 bounded string inventory다. 실제 출력된 문서명/소유자/프린터를 구조적으로 확정하려면 SPL/SHD decoder가 필요하다.
+4. `third-party-remote-control-artifact`는 파일 존재와 string pivot이다. 실제 접속 세션, 원격 ID, 파일 전송 여부는 제품별 로그 decoder가 필요하다.

@@ -63,6 +63,8 @@ WMI_REPOSITORY_ROOT = ("Windows", "System32", "wbem", "Repository")
 WMI_REPOSITORY_NAMES = {"OBJECTS.DATA", "INDEX.BTR", "MAPPING.VER"}
 WMI_REPOSITORY_SUFFIXES = {".MAP", ".BTR", ".DATA"}
 WMI_SCAN_LIMIT = 8 * 1024 * 1024
+SPOOLER_SCAN_LIMIT = 2 * 1024 * 1024
+REMOTE_CONTROL_SCAN_LIMIT = 2 * 1024 * 1024
 WMI_PERSISTENCE_TERMS = (
     "__eventfilter",
     "commandlineeventconsumer",
@@ -127,6 +129,12 @@ SYSTEM_TRUSTED_TOOLS = {
     "wmi explorer",
 }
 ZONE_IDENTIFIER_PATTERN = re.compile(r"(?i)(?P<target>.+)(?::Zone\.Identifier|\.Zone\.Identifier)$")
+REMOTE_CONTROL_PRODUCTS = {
+    "anydesk": ("anydesk", "ad_svc.trace"),
+    "teamviewer": ("teamviewer", "connections_incoming", "tvnetwork"),
+    "rustdesk": ("rustdesk", "rustdesk.toml", "config/rustdesk"),
+    "chrome-remote-desktop": ("chrome remote desktop", "chromoting", "remoting_host"),
+}
 
 
 class WindowsSystemArtifactsProvider:
@@ -144,10 +152,111 @@ class WindowsSystemArtifactsProvider:
         yield from collect_firewall_logs(root)
         yield from collect_wer_reports(root)
         yield from collect_wmi_repository(root)
+        yield from collect_print_spooler_artifacts(root)
+        yield from collect_third_party_remote_control_artifacts(root)
         yield from collect_zone_identifier_ads(root)
         yield from collect_explorer_cache_artifacts(root)
         yield from collect_activity_notification_uwp_artifacts(root)
         yield from collect_webshell_and_server_log_artifacts(root)
+
+
+def collect_print_spooler_artifacts(root: Path) -> Iterable[ArtifactRecord]:
+    for path in sorted(root.rglob("*"), key=lambda item: str(item).lower()):
+        if not path.is_file() or path.suffix.lower() not in {".spl", ".shd"}:
+            continue
+        lower = str(path).lower()
+        if "spool" not in lower and "printer" not in lower:
+            continue
+        stat_result = path.stat()
+        blob = read_prefix(path, SPOOLER_SCAN_LIMIT)
+        strings = unique_strings([*extract_ascii_strings(blob), *extract_utf16_strings(blob)])
+        path_candidates = regex_candidates(strings, WINDOWS_PATH_RE)[:20]
+        yield ArtifactRecord(
+            provider=WindowsSystemArtifactsProvider.name,
+            artifact_type="print-spooler-job",
+            path=str(path.resolve()),
+            supported=True,
+            details={
+                **source_details(path, "print-spooler-file"),
+                "source_hashes": {"sha256": compute_sha256(path)},
+                "spooler_file_kind": path.suffix.lower().lstrip("."),
+                "job_name_hint": path.stem,
+                "size": stat_result.st_size,
+                "modified_at": isoformat_from_timestamp(stat_result.st_mtime),
+                "timestamp": isoformat_from_timestamp(stat_result.st_mtime),
+                "timestamp_source": "spooler_file_modified_at",
+                "scan_bytes": len(blob),
+                "extracted_string_count": len(strings),
+                "string_samples": strings[:40],
+                "path_candidates": path_candidates,
+                "coverage_status": "spooler-file-string-inventory",
+                "reportability": "triage",
+                "parser_confidence": "medium" if strings else "low",
+                "risk_flags": ["possible-printed-document"],
+                "validation_required": True,
+                "validation_guidance": "SPL/SHD file is inventoried with bounded strings and timestamps. Validate printed document identity with a spool parser, printer logs, and source document metadata before report-grade claims.",
+                "commercial_grade_ready": False,
+                "commercial_grade_blockers": [
+                    "spl-shd-structure-decoder-not-implemented",
+                    "printer-driver-spool-fixture-required",
+                    "print-eventlog-correlation-required",
+                ],
+            },
+        )
+
+
+def collect_third_party_remote_control_artifacts(root: Path) -> Iterable[ArtifactRecord]:
+    for path in sorted(root.rglob("*"), key=lambda item: str(item).lower()):
+        if not path.is_file():
+            continue
+        product = remote_control_product_for_path(path)
+        if not product:
+            continue
+        stat_result = path.stat()
+        blob = read_prefix(path, REMOTE_CONTROL_SCAN_LIMIT)
+        strings = unique_strings([*extract_ascii_strings(blob), *extract_utf16_strings(blob)])
+        urls = regex_candidates(strings, URL_RE)[:20]
+        ips = sorted(set(re.findall(r"(?<!\d)(?:\d{1,3}\.){3}\d{1,3}(?!\d)", " ".join(strings))))[:20]
+        yield ArtifactRecord(
+            provider=WindowsSystemArtifactsProvider.name,
+            artifact_type="third-party-remote-control-artifact",
+            path=str(path.resolve()),
+            supported=True,
+            details={
+                **source_details(path, "third-party-remote-control"),
+                "source_hashes": {"sha256": compute_sha256(path)},
+                "product": product,
+                "size": stat_result.st_size,
+                "modified_at": isoformat_from_timestamp(stat_result.st_mtime),
+                "timestamp": isoformat_from_timestamp(stat_result.st_mtime),
+                "timestamp_source": "remote_control_file_modified_at",
+                "scan_bytes": len(blob),
+                "extracted_string_count": len(strings),
+                "string_samples": strings[:40],
+                "url_candidates": urls,
+                "ip_candidates": ips,
+                "coverage_status": "remote-control-file-inventory",
+                "reportability": "triage",
+                "parser_confidence": "medium",
+                "risk_flags": [f"remote-control:{product}"],
+                "validation_required": True,
+                "validation_guidance": "Third-party remote-control file is a triage pivot. Validate session time, peer ID/IP, transfer logs, and account attribution with product-specific parsers before report-grade use.",
+                "commercial_grade_ready": False,
+                "commercial_grade_blockers": [
+                    "product-specific-session-decoder-required",
+                    "remote-peer-attribution-validation-required",
+                    "file-transfer-log-validation-required",
+                ],
+            },
+        )
+
+
+def remote_control_product_for_path(path: Path) -> str:
+    lower = str(path).lower().replace("\\", "/")
+    for product, terms in REMOTE_CONTROL_PRODUCTS.items():
+        if any(term in lower for term in terms):
+            return product
+    return ""
 
 
 def collect_explorer_cache_artifacts(root: Path) -> Iterable[ArtifactRecord]:

@@ -150,9 +150,9 @@ CAPABILITY_GROUPS: tuple[dict[str, Any], ...] = (
         "label": "파일시스템 / 안티포렌식",
         "capabilities": (
             {"id": "ntfs-logfile-transactions", "label": "$LogFile transaction", "status": "inventory", "terms": ("$logfile", "transaction", "ntfs log", "redo", "undo")},
-            {"id": "recycle-bin-ir-map", "label": "Recycle Bin $I/$R 매핑", "status": "inventory", "terms": ("recycle bin", "$i", "$r", "deleted time", "original path")},
+            {"id": "recycle-bin-ir-map", "label": "Recycle Bin $I/$R 매핑", "status": "partial", "terms": ("recycle bin", "recycle-bin-entry", "$i", "$r", "deleted time", "original path")},
             {"id": "timestamp-stomping-detection", "label": "Time stomping 탐지", "status": "inventory", "terms": ("timestamp", "stomping", "$sia", "$fna", "time mismatch")},
-            {"id": "signature-mismatch-detection", "label": "확장자 변조 탐지", "status": "inventory", "terms": ("signature mismatch", "magic", "extension mismatch", "file header")},
+            {"id": "signature-mismatch-detection", "label": "확장자 변조 탐지", "status": "partial", "terms": ("signature mismatch", "file-signature-mismatch", "magic", "extension mismatch", "file header")},
         ),
     },
     {
@@ -211,7 +211,7 @@ CAPABILITY_GROUPS: tuple[dict[str, Any], ...] = (
         "catalog_id": "documents-db",
         "label": "문서 유출 보조 아티팩트",
         "capabilities": (
-            {"id": "print-spooler-spl-shd", "label": "Print Spooler SPL/SHD", "status": "inventory", "terms": ("print spooler", ".spl", ".shd", "printed", "printer")},
+            {"id": "print-spooler-spl-shd", "label": "Print Spooler SPL/SHD", "status": "partial", "terms": ("print spooler", "print-spooler-job", ".spl", ".shd", "printed", "printer")},
             {"id": "document-metadata-macro-risk", "label": "문서 메타데이터/매크로 위험", "status": "partial", "terms": ("metadata", "vba", "macro", "ole", "ooxml", "author")},
             {"id": "sticky-notes-plum", "label": "Sticky Notes plum.sqlite", "status": "inventory", "terms": ("sticky notes", "plum.sqlite", "stickynotes", "note")},
         ),
@@ -260,7 +260,7 @@ CAPABILITY_GROUPS: tuple[dict[str, Any], ...] = (
         "catalog_id": "timeline-ioc",
         "label": "원격접속 / Tampering",
         "capabilities": (
-            {"id": "remote-control-anydesk-teamviewer-rustdesk", "label": "AnyDesk/TeamViewer/RustDesk", "status": "inventory", "terms": ("anydesk", "teamviewer", "rustdesk", "chrome remote desktop", "remote control")},
+            {"id": "remote-control-anydesk-teamviewer-rustdesk", "label": "AnyDesk/TeamViewer/RustDesk", "status": "partial", "terms": ("anydesk", "teamviewer", "rustdesk", "chrome remote desktop", "remote control", "third-party-remote-control-artifact")},
             {"id": "defender-edr-tampering", "label": "Defender/EDR 무력화", "status": "partial", "terms": ("defender", "tamper", "exclusion", "edr", "service stopped")},
         ),
     },

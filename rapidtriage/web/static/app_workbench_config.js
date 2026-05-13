@@ -823,8 +823,8 @@ const VISIBLE_FORENSIC_CAPABILITY_GROUPS = [
       {
         id: "recycle-bin-ir-map",
         label: "Recycle Bin $I/$R 매핑",
-        status: "inventory",
-        terms: ["recycle bin", "$i", "$r", "deleted time", "original path"],
+        status: "partial",
+        terms: ["recycle bin", "recycle-bin-entry", "$i", "$r", "deleted time", "original path"],
         nextAction: "$I metadata와 $R payload를 자동 매핑해 원래 경로/삭제 시각 viewer 제공",
       },
       {
@@ -837,8 +837,8 @@ const VISIBLE_FORENSIC_CAPABILITY_GROUPS = [
       {
         id: "signature-mismatch-detection",
         label: "확장자 변조 탐지",
-        status: "inventory",
-        terms: ["signature mismatch", "magic", "extension mismatch", "file header"],
+        status: "partial",
+        terms: ["signature mismatch", "file-signature-mismatch", "magic", "extension mismatch", "file header"],
         nextAction: "파일 헤더와 확장자 mismatch를 파일 테이블/보고서 위험 플래그로 노출",
       },
     ],
@@ -1004,8 +1004,8 @@ const VISIBLE_FORENSIC_CAPABILITY_GROUPS = [
       {
         id: "print-spooler-spl-shd",
         label: "Print Spooler SPL/SHD",
-        status: "inventory",
-        terms: ["print spooler", ".spl", ".shd", "printed", "printer"],
+        status: "partial",
+        terms: ["print spooler", "print-spooler-job", ".spl", ".shd", "printed", "printer"],
         nextAction: "SPL/SHD parser로 문서명, 사용자, 프린터, 출력 시간을 보고서 후보로 노출",
       },
       {
@@ -1142,8 +1142,8 @@ const VISIBLE_FORENSIC_CAPABILITY_GROUPS = [
       {
         id: "remote-control-anydesk-teamviewer-rustdesk",
         label: "AnyDesk/TeamViewer/RustDesk",
-        status: "inventory",
-        terms: ["anydesk", "teamviewer", "rustdesk", "chrome remote desktop", "remote control"],
+        status: "partial",
+        terms: ["anydesk", "teamviewer", "rustdesk", "chrome remote desktop", "remote control", "third-party-remote-control-artifact"],
         nextAction: "접속 시간, remote ID/IP, file transfer log, config/account attribution parser 추가",
       },
       {

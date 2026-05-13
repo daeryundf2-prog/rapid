@@ -17,12 +17,26 @@ SUPPORTED_SUFFIXES = {".csv", ".json", ".jsonl", ".ndjson"}
 MFT_HINTS = ("mft", "mftexcmd", "$mft")
 USN_HINTS = ("usn", "usnjrnl", "$j")
 NATIVE_SCAN_LIMIT = 16 * 1024 * 1024
+SIGNATURE_SCAN_LIMIT = 4096
+SIGNATURE_SCAN_FILE_LIMIT = 5000
 USN_RECORD_SCAN_LIMIT = 5000
 USN_LARGE_RECORD_THRESHOLD = 512
 USN_V4_EXTENT_PREVIEW_LIMIT = 64
 MFT_RUNLIST_PREVIEW_BYTE_LIMIT = 256
 MFT_RUNLIST_PREVIEW_RUN_LIMIT = 64
 WINDOWS_PATH_RE = re.compile(r"(?i)(?:[a-z]:\\|\\\\|\\device\\)[^\x00\r\n\t\"'<>|]{4,260}")
+FILE_SIGNATURES: tuple[dict[str, object], ...] = (
+    {"kind": "windows-pe", "signature": b"MZ", "expected_extensions": {".exe", ".dll", ".sys", ".scr", ".cpl", ".ocx"}},
+    {"kind": "pdf", "signature": b"%PDF", "expected_extensions": {".pdf"}},
+    {"kind": "png", "signature": b"\x89PNG\r\n\x1a\n", "expected_extensions": {".png"}},
+    {"kind": "jpeg", "signature": b"\xff\xd8\xff", "expected_extensions": {".jpg", ".jpeg", ".jpe"}},
+    {"kind": "gif", "signature": (b"GIF87a", b"GIF89a"), "expected_extensions": {".gif"}},
+    {"kind": "zip-ooxml", "signature": b"PK\x03\x04", "expected_extensions": {".zip", ".docx", ".xlsx", ".pptx", ".jar", ".odt", ".ods", ".odp"}},
+    {"kind": "ole-cfb", "signature": b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1", "expected_extensions": {".doc", ".xls", ".ppt", ".msg", ".msi"}},
+    {"kind": "rar", "signature": (b"Rar!\x1a\x07\x00", b"Rar!\x1a\x07\x01\x00"), "expected_extensions": {".rar"}},
+    {"kind": "7zip", "signature": b"7z\xbc\xaf\x27\x1c", "expected_extensions": {".7z"}},
+    {"kind": "sqlite", "signature": b"SQLite format 3\x00", "expected_extensions": {".sqlite", ".sqlite3", ".db"}},
+)
 USN_REASON_FLAGS = {
     0x00000001: "DATA_OVERWRITE",
     0x00000002: "DATA_EXTEND",
@@ -139,6 +153,8 @@ class WindowsFilesystemProvider:
 
     def collect(self, root: Path) -> Iterable[ArtifactRecord]:
         yield from collect_native_ntfs_artifacts(root)
+        yield from collect_recycle_bin_artifacts(root)
+        yield from collect_signature_mismatch_artifacts(root)
         for path in sorted(root.rglob("*"), key=lambda item: str(item).lower()):
             if not path.is_file() or path.suffix.lower() not in SUPPORTED_SUFFIXES:
                 continue
@@ -150,6 +166,146 @@ class WindowsFilesystemProvider:
                 if not isinstance(row, Mapping):
                     continue
                 yield build_filesystem_record(path, family, row, index)
+
+
+def collect_recycle_bin_artifacts(root: Path) -> Iterable[ArtifactRecord]:
+    recycle_roots = [path for path in root.rglob("$Recycle.Bin") if path.is_dir()]
+    for recycle_root in sorted(recycle_roots, key=lambda item: str(item).lower()):
+        for metadata_path in sorted(recycle_root.rglob("$I*"), key=lambda item: str(item).lower()):
+            if not metadata_path.is_file():
+                continue
+            parsed = parse_recycle_bin_i_file(metadata_path)
+            suffix = metadata_path.name[2:]
+            payload_candidates = [
+                metadata_path.with_name(f"$R{suffix}"),
+                metadata_path.with_name(f"$R{suffix}{metadata_path.suffix}"),
+            ]
+            paired_payload = next((candidate for candidate in payload_candidates if candidate.is_file()), None)
+            stat_result = metadata_path.stat()
+            yield ArtifactRecord(
+                provider=WindowsFilesystemProvider.name,
+                artifact_type="recycle-bin-entry",
+                path=str(metadata_path.resolve()),
+                supported=True,
+                details={
+                    "parser": "windows-recycle-bin",
+                    "parser_version": PARSER_VERSION,
+                    "coverage_status": "i-r-pair-mapped" if paired_payload else "i-file-only",
+                    "reportability": "triage",
+                    "source_path": str(metadata_path.resolve()),
+                    "source_format": "recycle-bin-i-file",
+                    "source_hashes": file_hashes(metadata_path),
+                    "source_size": stat_result.st_size,
+                    "modified_at": dt.datetime.fromtimestamp(stat_result.st_mtime, dt.timezone.utc).isoformat(),
+                    "recycle_id": suffix,
+                    "sid_hint": metadata_path.parent.name,
+                    "original_path": parsed.get("original_path", ""),
+                    "deleted_at": parsed.get("deleted_at", ""),
+                    "deleted_file_size": parsed.get("deleted_file_size", 0),
+                    "format_version": parsed.get("format_version", 0),
+                    "paired_payload_path": str(paired_payload.resolve()) if paired_payload else "",
+                    "paired_payload_hashes": file_hashes(paired_payload) if paired_payload else {},
+                    "validation_required": True,
+                    "validation_guidance": "Recycle Bin $I metadata is mapped to the sibling $R payload when present; validate high-value deletion timelines with MFT/USN and shell activity.",
+                    "risk_flags": ["deleted-file-recycle-bin"],
+                    "commercial_grade_ready": False,
+                    "commercial_grade_blockers": [
+                        "recycle-bin-known-answer-fixture-required",
+                        "mft-usn-delete-correlation-required",
+                    ],
+                },
+            )
+
+
+def parse_recycle_bin_i_file(path: Path) -> dict[str, object]:
+    blob = read_prefix(path, 4096)
+    if len(blob) < 24:
+        return {"format_version": 0, "deleted_file_size": 0, "deleted_at": "", "original_path": ""}
+    version = int.from_bytes(blob[0:8], "little", signed=False)
+    deleted_file_size = int.from_bytes(blob[8:16], "little", signed=False)
+    deleted_at = filetime_to_iso(int.from_bytes(blob[16:24], "little", signed=False))
+    original_path = decode_recycle_original_path(blob)
+    return {
+        "format_version": version,
+        "deleted_file_size": deleted_file_size,
+        "deleted_at": deleted_at,
+        "original_path": original_path,
+    }
+
+
+def decode_recycle_original_path(blob: bytes) -> str:
+    candidates = []
+    if len(blob) >= 28:
+        name_len = int.from_bytes(blob[24:28], "little", signed=False)
+        if 0 < name_len < 2048 and 28 + name_len * 2 <= len(blob):
+            candidates.append(blob[28 : 28 + name_len * 2])
+    candidates.append(blob[24:])
+    for candidate in candidates:
+        text = candidate.decode("utf-16le", errors="ignore").split("\x00", 1)[0].strip()
+        if text:
+            return text
+    return ""
+
+
+def collect_signature_mismatch_artifacts(root: Path) -> Iterable[ArtifactRecord]:
+    scanned = 0
+    for path in sorted((item for item in root.rglob("*") if item.is_file()), key=lambda item: str(item).lower()):
+        if path.name.startswith("$I") or path.name.startswith("$R"):
+            continue
+        scanned += 1
+        if scanned > SIGNATURE_SCAN_FILE_LIMIT:
+            break
+        detected = detect_file_signature(read_prefix(path, SIGNATURE_SCAN_LIMIT))
+        if not detected:
+            continue
+        expected_extensions = set(detected["expected_extensions"])
+        actual_extension = path.suffix.lower()
+        if actual_extension in expected_extensions:
+            continue
+        stat_result = path.stat()
+        yield ArtifactRecord(
+            provider=WindowsFilesystemProvider.name,
+            artifact_type="file-signature-mismatch",
+            path=str(path.resolve()),
+            supported=True,
+            details={
+                "parser": "windows-file-signature-mismatch",
+                "parser_version": PARSER_VERSION,
+                "coverage_status": "bounded-magic-header-check",
+                "reportability": "triage",
+                "source_path": str(path.resolve()),
+                "source_format": "filesystem-file",
+                "source_hashes": file_hashes(path),
+                "source_size": stat_result.st_size,
+                "modified_at": dt.datetime.fromtimestamp(stat_result.st_mtime, dt.timezone.utc).isoformat(),
+                "actual_extension": actual_extension,
+                "detected_signature_kind": detected["kind"],
+                "signature_hex": detected["signature_hex"],
+                "expected_extensions": sorted(expected_extensions),
+                "risk_flags": ["signature-extension-mismatch"],
+                "validation_required": True,
+                "validation_guidance": "Magic-header mismatch is a triage lead. Validate with a full file-type parser and user/action timeline before reporting concealment intent.",
+                "commercial_grade_ready": False,
+                "commercial_grade_blockers": [
+                    "full-file-type-parser-validation-required",
+                    "false-positive-extension-policy-required",
+                ],
+            },
+        )
+
+
+def detect_file_signature(blob: bytes) -> dict[str, object] | None:
+    for entry in FILE_SIGNATURES:
+        signatures = entry["signature"]
+        signature_list = signatures if isinstance(signatures, tuple) else (signatures,)
+        for signature in signature_list:
+            if blob.startswith(signature):
+                return {
+                    "kind": entry["kind"],
+                    "signature_hex": signature.hex(),
+                    "expected_extensions": entry["expected_extensions"],
+                }
+    return None
 
 
 def collect_native_ntfs_artifacts(root: Path) -> Iterable[ArtifactRecord]:

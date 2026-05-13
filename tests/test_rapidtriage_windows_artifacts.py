@@ -3227,6 +3227,43 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
             self.assertIn("DATA_EXTEND", native_usn[2]["details"]["reason_flags"])
             self.assertIn("CLOSE", native_usn[2]["details"]["reason_flags"])
 
+    def test_windows_filesystem_collector_maps_recycle_bin_and_signature_mismatch(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            recycle_dir = root / "$Recycle.Bin" / "S-1-5-21-111-222-333-1001"
+            recycle_dir.mkdir(parents=True)
+            original_path = r"C:\Users\alice\Desktop\SecretPlan.docx"
+            deleted_at = datetime(2024, 5, 6, 7, 8, 9, tzinfo=timezone.utc)
+            i_blob = (
+                (2).to_bytes(8, "little")
+                + (12345).to_bytes(8, "little")
+                + datetime_to_filetime(deleted_at).to_bytes(8, "little")
+                + len(original_path).to_bytes(4, "little")
+                + original_path.encode("utf-16le")
+            )
+            (recycle_dir / "$IABC123").write_bytes(i_blob)
+            (recycle_dir / "$RABC123").write_bytes(b"recovered document bytes")
+            disguised = root / "Users" / "alice" / "Pictures" / "holiday.jpg"
+            disguised.parent.mkdir(parents=True)
+            disguised.write_bytes(b"MZ" + b"\x00" * 64 + b"hidden pe payload")
+            output = root / "filesystem.json"
+
+            self.assertEqual(main(["artifacts", str(root), "--kind", "windows-filesystem", "--output", str(output)]), 0)
+            payload = json.loads(output.read_text(encoding="utf-8"))
+            artifacts = payload["artifacts"]
+            recycle = next(item for item in artifacts if item["artifact_type"] == "recycle-bin-entry")
+            mismatch = next(item for item in artifacts if item["artifact_type"] == "file-signature-mismatch")
+
+            self.assertEqual(recycle["details"]["original_path"], original_path)
+            self.assertEqual(recycle["details"]["deleted_file_size"], 12345)
+            self.assertEqual(recycle["details"]["deleted_at"], deleted_at.isoformat())
+            self.assertEqual(recycle["details"]["coverage_status"], "i-r-pair-mapped")
+            self.assertTrue(recycle["details"]["paired_payload_path"].endswith("$RABC123"))
+            self.assertEqual(len(recycle["details"]["paired_payload_hashes"]["sha256"]), 64)
+            self.assertEqual(mismatch["details"]["actual_extension"], ".jpg")
+            self.assertEqual(mismatch["details"]["detected_signature_kind"], "windows-pe")
+            self.assertIn("signature-extension-mismatch", mismatch["details"]["risk_flags"])
+
     def test_windows_search_index_collector_imports_exports_and_inventories_edb(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             root = Path(tmp_dir)
@@ -3431,6 +3468,32 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
             self.assertEqual(cache["details"]["thumbnail_candidates"][0]["height"], 200)
             self.assertTrue(any(item["details"]["destination"] == "10.0.0.50" for item in destinations))
             self.assertTrue(any(item["details"]["destination"] == "rdp-target.example" for item in destinations))
+
+    def test_windows_system_collector_maps_print_spooler_and_remote_control_artifacts(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            spool = root / "Windows" / "System32" / "spool" / "PRINTERS" / "00001.SHD"
+            spool.parent.mkdir(parents=True)
+            spool.write_bytes("SecretPlan.docx\x00Office Printer\x00C:\\Users\\alice\\SecretPlan.docx".encode("utf-16le"))
+            anydesk = root / "ProgramData" / "AnyDesk" / "service.trace"
+            anydesk.parent.mkdir(parents=True)
+            anydesk.write_text("2026-05-14 AnyDesk session from 203.0.113.10 https://relay.anydesk.com", encoding="utf-8")
+            output = root / "windows-system.json"
+
+            self.assertEqual(main(["artifacts", str(root), "--kind", "windows-system", "--output", str(output)]), 0)
+            payload = json.loads(output.read_text(encoding="utf-8"))
+            artifacts = payload["artifacts"]
+            spooler = next(item for item in artifacts if item["artifact_type"] == "print-spooler-job")
+            remote = next(item for item in artifacts if item["artifact_type"] == "third-party-remote-control-artifact")
+
+            self.assertEqual(spooler["details"]["spooler_file_kind"], "shd")
+            self.assertEqual(spooler["details"]["coverage_status"], "spooler-file-string-inventory")
+            self.assertIn(r"C:\Users\alice\SecretPlan.docx", spooler["details"]["path_candidates"])
+            self.assertIn("possible-printed-document", spooler["details"]["risk_flags"])
+            self.assertEqual(remote["details"]["product"], "anydesk")
+            self.assertEqual(remote["details"]["ip_candidates"], ["203.0.113.10"])
+            self.assertIn("https://relay.anydesk.com", remote["details"]["url_candidates"])
+            self.assertIn("remote-control:anydesk", remote["details"]["risk_flags"])
 
     def test_windows_system_collector_inventories_wmi_repository_files(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
