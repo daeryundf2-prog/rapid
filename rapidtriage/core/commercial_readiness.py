@@ -537,6 +537,11 @@ def build_commercial_readiness_report(
     maturity_gate_summary = build_maturity_gate_summary(items)
     commercial_blocker_matrix = build_commercial_blocker_matrix(items)
     blocker_separation_profile = build_blocker_separation_profile(commercial_blocker_matrix)
+    platform_uplift_actionability = build_platform_uplift_actionability(
+        items,
+        readiness_score=readiness_score,
+        commercial_claim_allowed=commercial_claim_allowed,
+    )
     commercial_uplift_plan = build_commercial_uplift_plan(
         items,
         readiness_score=readiness_score,
@@ -639,6 +644,7 @@ def build_commercial_readiness_report(
         "maturity_gate_summary": maturity_gate_summary,
         "commercial_blocker_matrix": commercial_blocker_matrix,
         "blocker_separation_profile": blocker_separation_profile,
+        "platform_uplift_actionability": platform_uplift_actionability,
         "commercial_uplift_plan": commercial_uplift_plan,
         "functional_defensibility_progress": functional_defensibility_progress,
         "review_scale_resilience_progress": review_scale_resilience_progress,
@@ -1257,6 +1263,156 @@ def build_blocker_separation_profile(blocker_matrix: Mapping[str, object]) -> di
             "Do internal implementation/fixture/reporting work first, but keep commercial_grade=false until "
             "the paired trusted-tool, independent-review, signed-platform, large-hardware, or staffed-support evidence is attached."
         ),
+    }
+
+
+def build_platform_uplift_actionability(
+    items: Iterable[dict[str, object]],
+    *,
+    readiness_score: int,
+    commercial_claim_allowed: bool,
+) -> dict[str, object]:
+    """Separate 90->100 work into Mac-local prep, Windows evidence, and external authority."""
+    blocked_rows = [
+        commercial_blocker_row(item)
+        for item in sorted(items, key=priority_sort_key)
+        if not bool(item.get("commercial_grade_ready"))
+    ]
+    windows_rows = [
+        row for row in blocked_rows
+        if row_requires_windows_or_windows_evidence(row)
+    ]
+    external_rows = [
+        row for row in blocked_rows
+        if bool(row.get("external_or_trusted_evidence_required"))
+    ]
+    mac_prep_rows = [
+        row for row in blocked_rows
+        if row_allows_mac_local_preparation(row)
+    ]
+    mac_commands = [
+        {
+            "id": "macos-live-smoke",
+            "command": "rapidtriage macos-live-smoke --output-dir ./qc/macos-live --overwrite --json",
+            "purpose": "Generate redacted local macOS smoke, small triage benchmark, SQLite FTS benchmark, and validation-tool availability evidence.",
+            "commercial_grade_effect": "preparatory-evidence-only",
+        },
+        {
+            "id": "validation-diff-runners",
+            "command": "rapidtriage validation-diff-runners --output ./qc/runner-matrix.json --probe-versions --json",
+            "purpose": "Record trusted-tool runner matrix and version probe readiness where tools are installed.",
+            "commercial_grade_effect": "preparatory-evidence-only",
+        },
+        {
+            "id": "sample-workflow",
+            "command": "rapidtriage sample --output-dir ./qc/sample --run --overwrite --json",
+            "purpose": "Exercise end-to-end ingest/search/artifact/report plumbing with a synthetic case.",
+            "commercial_grade_effect": "internal-smoke-only",
+        },
+        {
+            "id": "submission-bundle",
+            "command": "rapidtriage bundle ./case.json --allowed-root ./qc/sample --output-dir ./qc/submission-bundle --include-all --json",
+            "purpose": "Generate reviewer, report, court-exhibit, selected-evidence, and tamper-bundle artifacts from reviewed case bookmarks.",
+            "commercial_grade_effect": "workflow-proof-only-unless-real-case-and-reviewer-signoff",
+        },
+        {
+            "id": "final-qc-report",
+            "command": "rapidtriage final-qc-report --validation-package ./validation.json --runner-matrix ./qc/runner-matrix.json --chain-of-custody ./custody.json --audit-bundle ./audit.json --exhibit-bundle ./exhibit.zip --performance-run ./benchmark.json --browser-trace ./trace.json --reviewer-signoff ./review.md --output ./qc/final-qc.json --json",
+            "purpose": "Hash QC evidence into one wrapper and make missing operator-owned evidence explicit.",
+            "commercial_grade_effect": "qc-wrapper-only",
+        },
+        {
+            "id": "commercial-readiness",
+            "command": "rapidtriage commercial-readiness --validation-package docs/validation/rapidtriage-core-forensics-001-120-known-answer.json --output-dir ./qc/commercial-readiness --json",
+            "purpose": "Recalculate the readiness gate after every internal or external evidence batch.",
+            "commercial_grade_effect": "score-report-only",
+        },
+    ]
+    return {
+        "profile_version": "platform-uplift-actionability-v1",
+        "readiness_score": readiness_score,
+        "target_score": 100,
+        "remaining_score_points": max(100 - readiness_score, 0),
+        "commercial_claim_allowed": commercial_claim_allowed,
+        "can_reach_100_on_mac_alone": False,
+        "mac_can_generate_preparatory_evidence": True,
+        "reason_mac_alone_is_not_enough": (
+            "The remaining score is the commercial-grade band. It requires real source evidence, "
+            "trusted-tool diffs, large-corpus/hardware proof, independent reviewer signoff, and platform release evidence; "
+            "Mac-local smoke outputs can prepare and verify workflow plumbing but cannot replace those operator-owned artifacts."
+        ),
+        "counts": {
+            "blocked_item_count": len(blocked_rows),
+            "mac_preparable_item_count": len(mac_prep_rows),
+            "windows_or_windows_evidence_item_count": len(windows_rows),
+            "external_or_trusted_evidence_item_count": len(external_rows),
+        },
+        "mac_executable_commands": mac_commands,
+        "mac_preparable_samples": [platform_actionability_row(row) for row in mac_prep_rows[:10]],
+        "windows_or_windows_evidence_samples": [platform_actionability_row(row) for row in windows_rows[:10]],
+        "external_or_trusted_evidence_samples": [platform_actionability_row(row) for row in external_rows[:10]],
+        "operator_rule": (
+            "Run Mac-local QC whenever possible, but do not mark commercial_grade true until the Windows/E01/trusted-tool/large-case/"
+            "independent-review evidence is attached and passes."
+        ),
+    }
+
+
+def row_allows_mac_local_preparation(row: Mapping[str, object]) -> bool:
+    lanes = {str(lane) for lane in row.get("blocker_lanes", []) if lane}
+    category = str(row.get("category") or "")
+    return bool(
+        lanes.intersection(
+            {
+                "known-answer-validation",
+                "large-scale-performance",
+                "security-legal-assurance",
+                "platform-release-evidence",
+                "external-operator-evidence",
+            }
+        )
+        or category in {"search-analysis-ux", "performance-large-scale", "validation-legal", "deployment-operations"}
+    )
+
+
+def row_requires_windows_or_windows_evidence(row: Mapping[str, object]) -> bool:
+    number = int(row.get("number") or 0)
+    title = str(row.get("title") or "").lower()
+    category = str(row.get("category") or "")
+    windows_terms = (
+        "evtx",
+        "registry",
+        "sam/security/system",
+        "amcache",
+        "shimcache",
+        "bam/dam",
+        "srum",
+        "windows.edb",
+        "mft",
+        "usn",
+        "prefetch",
+        "lnk",
+        "wer/defender/firewall/task/wmi",
+        "e01",
+        "ex01",
+        "windows installer",
+    )
+    return bool(
+        (category == "core-forensics" and number <= 25)
+        or number == 101
+        or any(term in title for term in windows_terms)
+    )
+
+
+def platform_actionability_row(row: Mapping[str, object]) -> dict[str, object]:
+    return {
+        "number": int(row.get("number") or 0),
+        "title": str(row.get("title") or ""),
+        "category": str(row.get("category") or ""),
+        "severity": str(row.get("severity") or ""),
+        "blocker_lanes": list(row.get("blocker_lanes") or []),
+        "next_action": str(row.get("next_internal_or_evidence_action") or ""),
+        "commercial_claim_allowed_after_action": False,
     }
 
 
@@ -3244,6 +3400,42 @@ def render_commercial_readiness_markdown(payload: dict[str, object]) -> str:
         for row in separation_profile.get("next_external_evidence_batch", []):
             if isinstance(row, dict):
                 lines.append(f"- `#{row.get('number')}` {row.get('title', '')}: {row.get('next_action', '')}")
+    platform_actionability = (
+        payload.get("platform_uplift_actionability")
+        if isinstance(payload.get("platform_uplift_actionability"), dict)
+        else {}
+    )
+    if platform_actionability:
+        counts = (
+            platform_actionability.get("counts")
+            if isinstance(platform_actionability.get("counts"), dict)
+            else {}
+        )
+        lines.extend(
+            [
+                "",
+                "## Platform Uplift Actionability",
+                "",
+                f"- Profile: `{platform_actionability.get('profile_version', '')}`",
+                f"- Can reach 100 on Mac alone: `{platform_actionability.get('can_reach_100_on_mac_alone', False)}`",
+                f"- Mac preparatory evidence available: `{platform_actionability.get('mac_can_generate_preparatory_evidence', False)}`",
+                f"- Remaining score points: `{platform_actionability.get('remaining_score_points', 0)}`",
+                f"- Mac-preparable blocked items: `{counts.get('mac_preparable_item_count', 0)}`",
+                f"- Windows/Windows-evidence blocked items: `{counts.get('windows_or_windows_evidence_item_count', 0)}`",
+                f"- External/trusted-evidence blocked items: `{counts.get('external_or_trusted_evidence_item_count', 0)}`",
+                f"- Rule: {platform_actionability.get('operator_rule', '')}",
+                "",
+                "### Mac-Executable Commands",
+                "",
+            ]
+        )
+        for command in platform_actionability.get("mac_executable_commands", []):
+            if isinstance(command, dict):
+                lines.append(f"- `{command.get('id', '')}`: `{command.get('command', '')}`")
+        lines.extend(["", "### Windows Or External Evidence Samples", ""])
+        for row in platform_actionability.get("windows_or_windows_evidence_samples", [])[:5]:
+            if isinstance(row, dict):
+                lines.append(f"- `#{row.get('number')}` {row.get('title', '')}")
     functional_progress = (
         payload.get("functional_defensibility_progress")
         if isinstance(payload.get("functional_defensibility_progress"), dict)

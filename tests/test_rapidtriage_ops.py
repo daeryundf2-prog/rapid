@@ -1247,6 +1247,25 @@ class RapidTriageOpsTests(unittest.TestCase):
             self.assertLessEqual(len(separation["next_internal_batch"]), 5)
             self.assertLessEqual(len(separation["next_external_evidence_batch"]), 5)
             self.assertFalse(separation["next_internal_batch"][0]["commercial_claim_allowed_after_this_action"])
+            platform_uplift = payload["platform_uplift_actionability"]
+            self.assertEqual(platform_uplift["profile_version"], "platform-uplift-actionability-v1")
+            self.assertEqual(platform_uplift["remaining_score_points"], 100 - payload["readiness_score"])
+            self.assertFalse(platform_uplift["can_reach_100_on_mac_alone"])
+            self.assertTrue(platform_uplift["mac_can_generate_preparatory_evidence"])
+            self.assertFalse(platform_uplift["commercial_claim_allowed"])
+            self.assertGreater(platform_uplift["counts"]["mac_preparable_item_count"], 0)
+            self.assertGreater(platform_uplift["counts"]["windows_or_windows_evidence_item_count"], 0)
+            self.assertGreater(platform_uplift["counts"]["external_or_trusted_evidence_item_count"], 0)
+            command_ids = {command["id"] for command in platform_uplift["mac_executable_commands"]}
+            self.assertIn("macos-live-smoke", command_ids)
+            self.assertIn("final-qc-report", command_ids)
+            self.assertIn("commercial-readiness", command_ids)
+            self.assertEqual(platform_uplift["windows_or_windows_evidence_samples"][0]["number"], 1)
+            self.assertFalse(
+                platform_uplift["external_or_trusted_evidence_samples"][0][
+                    "commercial_claim_allowed_after_action"
+                ]
+            )
             self.assertIn("priority_work_plan", payload)
             self.assertGreater(len(payload["priority_work_plan"]), 0)
             self.assertIn("required_action", payload["priority_work_plan"][0])
@@ -1447,6 +1466,8 @@ class RapidTriageOpsTests(unittest.TestCase):
             self.assertTrue((Path(tmp_dir) / "rapidtriage-commercial-readiness.md").is_file())
             markdown = (Path(tmp_dir) / "rapidtriage-commercial-readiness.md").read_text(encoding="utf-8")
             self.assertIn("Internal vs External Blockers", markdown)
+            self.assertIn("Platform Uplift Actionability", markdown)
+            self.assertIn("Can reach 100 on Mac alone: `False`", markdown)
             critical_numbers = {item["number"] for item in payload["critical_non_commercial_items"]}
             self.assertIn(1, critical_numbers)
             self.assertIn(25, critical_numbers)
