@@ -1,0 +1,668 @@
+# RapidForensic 사용자 노출 포렌식 기능 세분화
+
+이 문서는 `artifact collector` 개수만 보면 실제 기능이 적어 보이는 문제를 줄이기 위해 작성한다. 현재 코드는 여러 기능을 하나의 collector 안에 묶어 둔 경우가 많다. 예를 들어 `browser` collector 하나 안에는 인터넷 사용기록, 다운로드, 브라우저 저장소, AI 서비스 방문, AI 대화 후보 복원, citation manifest, 검증 gate가 같이 들어 있다.
+
+목표는 GUI와 QC 문서에서 "22개 collector"가 아니라 "분석자가 실제로 선택하고 확인할 수 있는 기능 단위"로 보여주는 것이다.
+
+## 1. 현재 집계 방식의 문제
+
+현재 `artifact_collectors()` 기준 collector는 22개다.
+
+하지만 사용자 관점 기능은 다음처럼 더 잘게 나뉜다.
+
+| 층위 | 의미 | 예시 |
+| --- | --- | --- |
+| Collector | 실행 단위 또는 코드 모듈 | `browser`, `windows-execution`, `mobile-export` |
+| Artifact type | 결과 row/type 단위 | `browser-ai-usage`, `srum-row-candidate`, `mobile-message` |
+| Parser stage | 내부 파싱 단계 | Chromium History SQLite, AI Q/A pairing, Registry free-cell recovery |
+| Viewer task | 사용자가 실제로 하는 일 | URL 확인, 원본 DB row 열기, 리뷰 표시, 보고서 포함 |
+| Validation gate | 법정 제출 전 검증 조건 | trusted-tool diff, known-answer corpus, large-case benchmark |
+
+따라서 GUI에는 collector 22개만 보여주면 안 된다. 최소한 artifact type과 parser stage까지 펼쳐야 한다.
+
+## 2. 최상위 사용자 기능 그룹
+
+GUI에서는 다음 14개 상위 그룹으로 보여주는 것이 적절하다.
+
+1. 증거 이미지 입력 및 추출
+2. 파일 시스템 분석
+3. Windows 이벤트 로그
+4. Windows 레지스트리 및 계정
+5. 실행 흔적
+6. 인터넷/브라우저 사용기록
+7. AI 서비스 사용기록
+8. 문서/이메일/검색 인덱스
+9. 메신저/모바일/카카오톡
+10. 클라우드/계정 Export
+11. 이미지/영상/음성/OCR
+12. 메모리 포렌식
+13. 침해사고/웹쉘/원격접속
+14. 리뷰/검색/보고서/검증
+
+## 3. 증거 이미지 입력 및 추출
+
+현재 이 영역은 단일 collector보다 `e01`, `input_root`, `run`, `extract`, `image` workflow에 흩어져 있다. GUI에서는 독립 기능처럼 보여야 한다.
+
+| 사용자 노출 기능 | 현재 내부 단계 | 현재 상태 | Windows QC 확인 |
+| --- | --- | --- | --- |
+| E01/Ex01 선택 | E01/Ex01 입력 탐지, ewf/tsk/export workflow | 부분 구현 | 실제 Windows 11 E01 선택 후 의존성/파티션/추출 진행 여부 |
+| E01 의존성 검사 | libewf/ewfmount/tsk/qemu-img 등 외부 도구 확인 | 부분 구현 | 누락 도구가 한글로 명확히 표시되는지 |
+| 파티션 선택 | 파티션 목록/추천/수동 start sector | 부분 구현 | 여러 파티션 이미지에서 선택 UI 동작 |
+| 파일 추출 | 추출 manifest, hash, source provenance | 부분 구현 | 추출 파일과 원본 hash/provenance 연결 |
+| RAW/split image | `.dd`, `.raw`, `.img`, `.001` 등 | 부분 구현 | split gap, 순서, 누락 segment 경고 |
+| ISO/DMG/WIM/SWM | archive/container scan | 부분 구현 | Windows에서 DMG/ISO/WIM 입력 시 오류 메시지와 fallback |
+| VHD/VHDX/VMDK/VDI/QCOW | qemu-img 기반 변환/scan | 부분 구현 | 변환 hash/provenance 보존 |
+| AD1/L01/Lx01/AFF/AFF4/XVA | native보다 verified export 중심 | 감지/부분 | 네이티브 불가 시 export workflow 안내 |
+
+숨은 기능으로 빼서 보여줄 항목:
+
+- 이미지 형식 자동 인식
+- 의존성/권한 진단
+- 파티션 브라우저
+- 파일 시스템 추출
+- 추출 manifest
+- 추출물 hash 검증
+- 중단/재개 checkpoint
+- unsupported image fallback 안내
+
+## 4. 파일 시스템 분석
+
+관련 collector:
+
+- `windows-filesystem`
+- `generic-documents`
+- `media-image`
+
+| 사용자 노출 기능 | artifact type | 현재 상태 | 남은 보강 |
+| --- | --- | --- | --- |
+| 파일 목록/메타데이터 | run file inventory | baseline | 대형 NTFS 직접 row 추출 검증 |
+| `$MFT` 파일 감지 | `mft-file` | partial+ | 전체 attribute-list/runlist/parent path |
+| `$MFT` record 후보 | `mft-record` | partial+ | 100만~1000만 record path reconstruction |
+| `$UsnJrnl` 감지 | `usn-journal-file` | partial+ | v2/v3/v4 full replay |
+| USN record 후보 | `usn-record` | partial+ | rename/delete replay, FRN cache |
+| 문서 후보 | `document-pattern` | implemented | legacy Office/deleted doc coverage |
+| 이미지 파일 | `media-image` | partial+ | 대량 gallery, perceptual validation |
+| 영상 파일 | `media-video` | partial | sandboxed playback, thumbnail |
+| 음성 파일 | `media-audio` | partial | waveform, transcript alignment |
+
+숨은 기능으로 빼서 보여줄 항목:
+
+- MFT source row 보기
+- MFT record detail 보기
+- USN 변경 이력 보기
+- 파일 경로 재구성 confidence
+- 삭제/복구 후보 표시
+- 파일 hash cache
+- 중복 파일 그룹
+- 파일 내부 검색
+
+## 5. Windows 이벤트 로그
+
+관련 collector:
+
+- `eventlog`
+
+| 사용자 노출 기능 | artifact type | 현재 상태 | 남은 보강 |
+| --- | --- | --- | --- |
+| EVTX 파일 inventory | `eventlog-file` | partial+ | corrupt/deleted corpus |
+| XML/JSON/CSV event import | `eventlog-event` | baseline+ | source tool diff |
+| native EVTX record 후보 | `eventlog-record-candidate` | partial+ | BinXML full grammar |
+| EVTX chunk 구조 | `eventlog-chunk` / Rust sidecar | partial | chunk checksum, slack/recovery validation |
+| 이벤트 탐지/위험 분류 | `eventlog-detection` | partial+ | rule coverage, FP/FN |
+| 이벤트 요약 | `eventlog-summary` | baseline | channel/provider completeness |
+| message rendering | details field | partial | provider DLL/resource message |
+| recovery context | details field | partial | slack/deleted 검증 |
+
+숨은 기능으로 빼서 보여줄 항목:
+
+- 이벤트 채널별 보기
+- EventRecordID gap 보기
+- provider/message rendering 상태
+- high-risk event만 보기
+- Sysmon/Defender/RDP/WMI pivots
+- corrupt/deleted record 후보
+- Hayabusa/EvtxECmd diff 상태
+
+추가 숨은 sidecar:
+
+- `engines/rust/crates/rapidcore`에는 대용량 처리용 `file-inventory-record`, `eventlog-file`, `eventlog-chunk`, `eventlog-event` 산출이 있다.
+- GUI/문서에서는 이 Rust sidecar 결과도 Python collector 결과와 같은 `File System`, `Windows Event Logs` 그룹 아래로 합쳐서 보여야 한다.
+- 사용자는 "Python 파서 결과"와 "Rust sidecar 결과"를 구분할 필요가 없다. 다만 보고서에는 parser/version/provenance가 남아야 한다.
+
+## 6. Windows 레지스트리 및 계정
+
+관련 collector:
+
+- `windows-registry`
+- `windows-os-account`
+- `windows-shellbags`
+
+| 사용자 노출 기능 | artifact type | 현재 상태 | 남은 보강 |
+| --- | --- | --- | --- |
+| Hive inventory | `registry-hive` | partial+ | LOG1/LOG2 replay |
+| Hive string pivots | `registry-hive-strings` | partial | false positive control |
+| Hive cell 후보 | `registry-hive-cell` | partial+ | full regf/hbin tree |
+| deleted cell 후보 | `registry-deleted-cell-candidate` | partial+ | allocator validation |
+| key tree node | `registry-key-tree-node` | partial+ | full parent/subkey/value list |
+| deleted key recovery | `registry-key-recovery-candidate` | partial+ | RECmd diff |
+| deleted value recovery | `registry-value-recovery-candidate` | partial+ | transaction replay |
+| user activity | `registry-user-activity` | partial+ | UserAssist binary decode 등 |
+| OS/account summary | `windows-os-account-summary` | partial+ | native SAM/SECURITY full parser |
+| user profile | `windows-user-profile` | partial+ | profile lifecycle diff |
+| SAM account 후보 | `windows-sam-account-candidate` | partial+ | F/V full decode |
+| SAM group 후보 | `windows-sam-group-candidate` | partial+ | alias membership |
+| group membership | `windows-group-membership` | partial+ | nested group handling |
+| privilege assignment | `windows-privilege-assignment` | partial+ | SECURITY policy validation |
+| mounted devices | `windows-mounted-device` | partial+ | volume serial correlation |
+| service config | `windows-service-config` | partial+ | service binary path validation |
+| ShellBags export | `shellbag-key` | partial+ | binary shell item decode |
+| ShellBags native 후보 | `shellbag-native-candidate` | partial+ | BagMRU/Bags relationship |
+
+숨은 기능으로 빼서 보여줄 항목:
+
+- NTUSER.DAT 사용자 활동
+- UsrClass.dat ShellBags
+- RecentDocs/TypedURLs/TypedPaths
+- Run/RunOnce persistence
+- MountPoints2/USB 흔적
+- SAM 사용자/그룹/권한
+- deleted registry 후보
+- transaction log 준비 상태
+
+## 7. 실행 흔적
+
+관련 collector:
+
+- `windows-execution`
+- `windows-prefetch`
+- `windows-system`
+
+| 사용자 노출 기능 | artifact type | 현재 상태 | 남은 보강 |
+| --- | --- | --- | --- |
+| Amcache hive | `amcache-hive` | partial+ | version별 schema map |
+| Amcache entry | `amcache-entry` | partial+ | timestamp semantics 검증 |
+| ShimCache entry | `shimcache-entry` | partial+ | OS build별 binary layout |
+| BAM/DAM entry | `bam-entry` | partial+ | binary value full decode |
+| SRUM DB file | `srum-database-file` | partial+ | ESE row parser |
+| SRUM table 후보 | `srum-table-candidate` | partial+ | table schema mapping |
+| SRUM row 후보 | `srum-row-candidate` | partial+ | counter/timestamp validation |
+| PowerShell history | `powershell-history-command` | implemented baseline | multiline/context correlation |
+| Prefetch file | `prefetch-file` | partial+ | compressed/version corpus |
+| Prefetch reference | `prefetch-reference` | partial+ | volume/file metric validation |
+| Task Scheduler | `task-scheduler-task` | partial+ | TaskCache/EVTX correlation |
+| Defender log | `defender-support-log` | partial+ | Defender EVTX/quarantine linkage |
+| Firewall log | `firewall-log` | partial+ | process/SRUM/browser correlation |
+| WER report | `wer-report` | partial+ | dump/cab validation |
+| WMI repository | `wmi-repository-file` | partial+ | permanent event consumer decode |
+| UWP package | `uwp-package` | partial | app package metadata depth |
+
+숨은 기능으로 빼서 보여줄 항목:
+
+- 실행 흔적 통합 보기
+- "실행 증거 아님" caveat 표시
+- Prefetch run count/last run
+- PowerShell 명령 검색
+- LotL 의심 명령 pivot
+- SRUM network/app usage
+- Defender/Firewall/WER/Task/WMI 위험 rule
+
+## 8. 인터넷/브라우저 사용기록
+
+관련 collector:
+
+- `browser`
+- `macos-system`
+- `mobile-export` 일부
+
+이 영역은 특히 숨겨진 기능이 많다. GUI에서는 반드시 별도 메뉴로 보여야 한다.
+
+| 사용자 노출 기능 | 내부 단계/artifact | 현재 상태 | 남은 보강 |
+| --- | --- | --- | --- |
+| Chromium History | `extract_chromium_history_and_downloads` | implemented baseline+ | browser version별 schema drift |
+| Chrome/Edge/Brave history | `browser-history-downloads` | baseline+ | deleted history validation |
+| Chromium downloads | `downloads` details | baseline+ | interrupted/chain semantics |
+| Firefox Places | `extract_firefox_history` / `browser-history` | baseline+ | downloads/session parity |
+| macOS Safari history | `extract_safari_history` / `macos-browser-history-downloads` | baseline | downloads/cache/session parity |
+| 통합 browser timeline | `unified_timeline` | baseline+ | timestamp/transition full validation |
+| internet usage summary | `internet_usage` details | baseline+ | category rule tuning |
+| top domains | `top_domains` details | baseline+ | domain normalization validation |
+| 검색어 추출 | `query_hint` | baseline | URL parameter false positive |
+| browser source hash | `source_hashes` | implemented | raw DB row viewer E2E |
+| browser citation manifest | `browser-history-download-citation-manifest-v1` | partial+ | trusted-tool diff |
+| browser storage inventory | `browser-storage-inventory` | partial++ | full cache/session schema decode |
+| cache inventory | `browser-cache-inventory` | partial | request/response reconstruction |
+| session storage | `browser-session-storage-inventory` | partial | browser version schema |
+| extensions | `browser-extension-inventory` | partial | extension-specific parsers |
+| sync/Web Data | `browser-sync-inventory` | partial | account/sync scope semantics |
+| cookie store inventory | `browser-cookie-store-inventory` | partial | lawful decrypt gate validation |
+| credential store inventory | `browser-credential-store-inventory` | partial | DPAPI/keychain validation |
+
+숨은 기능으로 빼서 보여줄 항목:
+
+- 브라우저 통합 타임라인
+- URL 방문 기록
+- 다운로드 기록
+- 검색어/쿼리 힌트
+- 도메인/카테고리 요약
+- 브라우저 프로필별 보기
+- 쿠키/세션/확장프로그램 inventory
+- 민감 저장소 legal warning
+- 원본 SQLite row 열기
+- Hindsight/BrowserHistoryView diff 상태
+
+## 9. AI 서비스 사용기록
+
+관련 collector:
+
+- `browser`
+- `macos-system`
+- `mobile-export`
+
+지원 서비스 감지 목록:
+
+- ChatGPT
+- OpenAI
+- Claude
+- Gemini/Bard/Google AI Studio
+- Perplexity
+- Microsoft Copilot/Bing Chat
+- Poe
+- Hugging Face Chat
+- Grok/xAI
+- You.com
+- Phind
+- Mistral Le Chat
+- DeepSeek
+- Meta AI
+- Character.AI
+- Notion AI
+
+| 사용자 노출 기능 | 내부 단계/artifact | 현재 상태 | 남은 보강 |
+| --- | --- | --- | --- |
+| AI 서비스 방문 감지 | `browser-ai-usage`, `macos-browser-ai-usage` | partial+ | service export diff |
+| URL/title 기반 서비스 분류 | `detect_ai_service` | partial+ | 최신 서비스/도메인 업데이트 |
+| URL query 기반 prompt hint | `query_hint`, `prompt_hint` | baseline | query에 질문이 없는 서비스 한계 |
+| browser storage scan | Local Storage, Session Storage, IndexedDB, Cache | partial+ | deleted fragment recovery |
+| Q/A fragment 추출 | role/content, prompt/question/answer/response/completion | partial+ | provider schema별 parser |
+| Q/A pairing | transcript pair confidence/orphan count | partial+ | official export diff |
+| source offset/hash | candidate manifest | partial+ | browser source viewer E2E |
+| AI 대화 후보 보기 | `browser-ai-conversation`, `macos-browser-ai-conversation` | partial+ | chat-like viewer polish |
+| mobile AI usage | `mobile-browser`, `mobile-app`, risk flags | partial | app-specific local DB parser |
+
+중요한 한계:
+
+- 브라우저 history는 "AI 서비스를 방문했다"는 증거이지, 항상 질문/답변 본문을 의미하지 않는다.
+- 질문/답변 본문은 browser storage/cache에 남은 조각을 후보로 복원하는 방식이다.
+- ChatGPT/Claude/Gemini/Perplexity 공식 export와 diff되지 않으면 "완전한 대화 복원"으로 쓰면 안 된다.
+
+GUI 표시 권장:
+
+- `AI 방문 기록`
+- `AI 질문 후보`
+- `AI 답변 후보`
+- `Q/A pair`
+- `출처 storage`
+- `confidence`
+- `원본 offset`
+- `서비스 export 검증 필요`
+
+## 10. 문서, 이메일, Windows Search
+
+관련 collector:
+
+- `generic-documents`
+- `email`
+- `windows-search-index`
+
+| 사용자 노출 기능 | artifact type | 현재 상태 | 남은 보강 |
+| --- | --- | --- | --- |
+| 일반 문서 후보 | `document-pattern` | implemented | file-type specific parser expansion |
+| EML/EMLX | `email-message` | partial+ | attachment/deleted validation |
+| MBOX/Maildir | `email-mailbox`, `email-message` | partial+ | threading validation |
+| PST/OST/MSG | `email-mailbox` inventory | partial | libpff/native MAPI decode |
+| Windows.edb file | `windows-search-edb-file` | partial+ | full ESE catalog/page parser |
+| Windows.edb pivot | `windows-search-edb-pivot` | partial+ | row timestamp/deleted state |
+| EDB page 후보 | `windows-search-edb-page-candidate` | partial+ | table/page semantics validation |
+| EDB table 후보 | `windows-search-edb-table-candidate` | partial+ | full table decode |
+| EDB row 후보 | `windows-search-edb-row-candidate` | partial+ | row-level known-answer |
+| Search index export | `windows-search-index-entry` | baseline+ | trusted export mapping |
+| Search index summary | `windows-search-index-summary` | baseline | large corpus validation |
+
+숨은 기능으로 빼서 보여줄 항목:
+
+- 문서 본문 검색
+- 이메일 conversation 보기
+- 첨부파일 추출
+- PST/OST inventory 경고
+- Windows.edb path/url/content pivot
+- ESE page/row 후보 보기
+- source viewer/citation
+
+## 11. 메신저, 모바일, 카카오톡
+
+관련 collector:
+
+- `mobile-export`
+- `android-apk`
+- `kakaotalk-windows`
+- `kakaotalk-macos`
+
+| 사용자 노출 기능 | artifact type | 현재 상태 | 남은 보강 |
+| --- | --- | --- | --- |
+| Vendor export source | `mobile-export-source` | partial+ | Cellebrite/XRY/GrayKey/AXIOM fixture diff |
+| 모바일 메시지 | `mobile-message` | partial+ | per-service schema corpus |
+| 모바일 연락처 | `mobile-contact` | partial+ | merge/split entity UI |
+| 통화 기록 | `mobile-call` | partial+ | timezone/device validation |
+| 설치 앱 | `mobile-app` | partial+ | package risk model validation |
+| 모바일 파일 | `mobile-file` | partial+ | media/file hash provenance |
+| 계정 | `mobile-account` | partial+ | service identity validation |
+| 모바일 미디어 | `mobile-media` | partial+ | attachment linking |
+| 모바일 브라우저 | `mobile-browser` | partial+ | browser schema별 parser |
+| 모바일 correlation | `mobile-correlation-summary` | partial++ | device-wide timeline |
+| 모바일 채팅 DB 후보 | `mobile-chat-database` | partial+ | native DB/decryption/deleted recovery |
+| iOS backup source | `ios-backup-source` | partial+ | encrypted backup unlock workflow |
+| iOS backup metadata | `ios-backup-metadata` | partial+ | protected data class |
+| iOS backup file | `ios-backup-file` | partial+ | app DB parser |
+| iOS keychain inventory | `ios-keychain-inventory` | partial+ | lawful decrypt gate |
+| Android APK | `android-apk` | partial+ | binary manifest/signature chain |
+| Android app data | `android-app-data` | partial+ | app-specific schema |
+| PC KakaoTalk DB | `kakaotalk-windows-app-database` | triage+ | post-BigBang independent validation |
+| PC KakaoTalk crypto 후보 | `kakaotalk-windows-crypto-material-candidate` | triage+ | legal authority and version matrix |
+| PC KakaoTalk user ID 후보 | `kakaotalk-windows-user-id-candidate` | triage+ | UID/userDir validation |
+| PC KakaoTalk source 후보 | `kakaotalk-windows-source-candidate` | triage+ | memory/edb/registry correlation |
+| PC KakaoTalk summary | `kakaotalk-windows-correlation-summary` | triage+ | trusted tool comparison |
+| macOS KakaoTalk DB | `kakaotalk-macos-database` | inventory | message decode research |
+| macOS KakaoTalk summary | `kakaotalk-macos-summary` | inventory | live user data validation |
+
+메신저 서비스별로 GUI에 드러낼 항목:
+
+- KakaoTalk
+- WhatsApp
+- Telegram
+- Signal
+- WeChat
+- LINE
+- Discord
+- Instagram
+- iMessage
+- Facebook Messenger
+- Viber
+- Skype
+- Slack
+- Microsoft Teams
+- Reddit
+- X/Twitter
+- TikTok
+- Snapchat
+- Matrix/Element
+- Wire
+- Threema
+- Session
+- Wickr
+
+각 서비스마다 필요한 표시:
+
+- export 기반인지 native DB 기반인지
+- 암호화/키/권한 필요 여부
+- 메시지/참여자/첨부/반응/읽음/삭제 상태
+- schema version
+- trusted tool diff 여부
+
+## 12. 클라우드 및 SaaS Export
+
+관련 collector:
+
+- `cloud-export`
+
+| 사용자 노출 기능 | artifact type | 현재 상태 | 남은 보강 |
+| --- | --- | --- | --- |
+| 클라우드 계정 | `cloud-account` | partial+ | provider scope validation |
+| 위치 기록 | `cloud-location` | partial+ | timezone/deleted retention |
+| 활동 기록 | `cloud-activity` | partial+ | product-specific schema |
+| Gmail/메일 | `cloud-mail` | partial+ | MBOX/threading validation |
+| Drive/파일 | `cloud-file` | partial+ | version/deleted/share state |
+| Teams/메시지 | `cloud-message` | partial+ | Purview/Graph diff |
+| Audit log | `cloud-audit` | partial+ | provider-native export diff |
+| Google Takeout | profile details | partial+ | product matrix completeness |
+| iCloud | profile details | partial+ | ADP/shared album |
+| M365/Teams/OneDrive | profile details | partial+ | permissions graph |
+| Cloud API collect | separate workflow | partial | OAuth/device flow and vault |
+
+숨은 기능으로 빼서 보여줄 항목:
+
+- Google Takeout
+- Gmail
+- Drive
+- Photos
+- Location
+- My Activity
+- iCloud Photos/Drive/Mail
+- Microsoft 365
+- Teams
+- OneDrive
+- SharePoint
+- Audit/eDiscovery
+- Slack/Dropbox/Box style exports
+
+## 13. 이미지, 영상, 음성, OCR
+
+관련 collector:
+
+- `media-image`
+
+| 사용자 노출 기능 | artifact type | 현재 상태 | 남은 보강 |
+| --- | --- | --- | --- |
+| 이미지 inventory | `media-image` | partial+ | gallery E2E |
+| 이미지 hash | details hashes | implemented | hash cache scale |
+| perceptual hash | details | partial+ | similarity validation |
+| OCR queue hint | details | partial+ | native OCR worker |
+| 이미지 thumbnail | details | partial | UI large gallery |
+| 영상 inventory | `media-video` | partial | safe playback |
+| 영상 transcript sidecar | details | partial | transcript cue validation |
+| 오디오 inventory | `media-audio` | partial | waveform generation |
+| 오디오 transcript sidecar | details | partial | diarization/transcript validation |
+
+숨은 기능으로 빼서 보여줄 항목:
+
+- 이미지 갤러리
+- 유사 이미지 그룹
+- OCR 대기열
+- OCR 결과 보기
+- 번역 sidecar
+- 영상/음성 미리보기
+- transcript cue citation
+
+## 14. 메모리 포렌식
+
+관련 collector:
+
+- `memory-volatility`
+
+| 사용자 노출 기능 | artifact type | 현재 상태 | 남은 보강 |
+| --- | --- | --- | --- |
+| Volatility JSON import | plugin별 artifact type | partial+ | plugin schema matrix |
+| process list import | dynamic | partial+ | process tree/risk scoring |
+| network import | dynamic | partial+ | socket/process correlation |
+| malfind import | dynamic | partial+ | memory region viewer |
+| direct dump indicator scan | `memory-dump-indicators` | partial+ | full memory parser |
+| BitLocker candidate scan | details | partial | key validation |
+| URL/IP/string scan | details | partial | false-positive control |
+
+숨은 기능으로 빼서 보여줄 항목:
+
+- 메모리 덤프 감지
+- Volatility 결과 import
+- 프로세스/네트워크/명령줄 보기
+- BitLocker 후보
+- 악성 문자열/URL/IP 후보
+- 메모리 원본 offset citation
+
+## 15. 침해사고, 웹쉘, 원격접속
+
+관련 collector:
+
+- `windows-system`
+- `windows-remote-access`
+- `linux-system`
+
+| 사용자 노출 기능 | artifact type | 현재 상태 | 남은 보강 |
+| --- | --- | --- | --- |
+| RDP config | `rdp-config` | partial | registry/event correlation |
+| RDP cache | `rdp-cache-file` | partial | bitmap viewer |
+| RDP destination | `rdp-destination` | partial | MRU validation |
+| Zone.Identifier | `zone-identifier` | partial | download/browser correlation |
+| Webshell source 후보 | `webshell-source-candidate` | partial+ | YARA/rule pack validation |
+| Web server log | `web-server-log` | partial+ | IIS/Apache/Nginx full fields |
+| Linux shell history | `linux-shell-history` | baseline | timestamp/session correlation |
+| Linux auth log | `linux-auth-log-event` | baseline | distro-specific parsing |
+| Linux auditd | `linux-auditd-event` | baseline | rule interpretation |
+| SSH authorized keys | `linux-ssh-authorized-key` | baseline | key owner/history |
+| SSH known hosts | `linux-ssh-known-host` | baseline | hashed-host handling |
+| Cron | `linux-cron-entry` | baseline | user/system coverage |
+| systemd | `linux-systemd-service` | baseline | persistence scoring |
+| container config | `linux-container-config` | baseline | runtime-specific parsing |
+
+숨은 기능으로 빼서 보여줄 항목:
+
+- 원격접속 흔적
+- 웹쉘 후보
+- 서버 로그 상관
+- 다운로드 파일 provenance
+- Linux persistence
+- SSH 접근 흔적
+
+## 16. 리뷰, 검색, 보고서 연결 기능
+
+관련 영역:
+
+- Case DB
+- Search
+- Source viewer
+- Review workflow
+- Report/export
+
+| 사용자 노출 기능 | 현재 상태 | GUI 노출 필요 |
+| --- | --- | --- |
+| 전체 키워드 검색 | baseline+ | 항상 상단 고정 |
+| 현재 파일 내부 검색 | baseline+ | source viewer 안에서 노출 |
+| Artifact metadata 검색 | baseline+ | 결과 family filter |
+| SQLite row search | baseline+ | table/rowid locator |
+| OCR text 검색 | partial | sidecar 여부 표시 |
+| AI/브라우저/메신저 검색 | partial+ | family tabs |
+| 결과 dedup | partial+ | duplicate collapse |
+| fuzzy/regex/proximity | partial+ | advanced search panel |
+| source viewer | partial+ | 원본 hash/offset/row locator |
+| evidence tray | partial+ | 선택/제외/보고서 포함 |
+| review status | partial+ | relevant/needs-review/excluded |
+| note/tag | partial+ | keyboard-first |
+| 비교 보기 | partial | A/B/C compare |
+| citation manager | partial+ | source hash/parser/offset |
+| report draft | partial+ | limitation 자동 포함 |
+| validation package | partial+ | known-answer/trusted diff 상태 |
+
+## 17. GUI에서 숨은 기능을 보여주는 방식
+
+권장 좌측 tree:
+
+1. Case Overview
+2. Evidence Images
+3. File System
+4. Timeline
+5. Windows Artifacts
+6. Browser / Internet
+7. AI Usage
+8. Search Index / Documents
+9. Email
+10. Messenger / Mobile
+11. Cloud
+12. Media / OCR
+13. Memory
+14. Incident Response
+15. Review / Report
+
+각 tree node 아래에는 다음을 표시한다.
+
+- 결과 수
+- 처리 상태
+- 검증 상태
+- 상용급 blocker 수
+- source viewer 가능 여부
+- report 포함 가능 여부
+
+## 18. Windows QC에서 확인할 항목
+
+실제 Windows 테스트 시 "기능이 숨어서 안 보이는 문제"를 확인하려면 다음을 체크한다.
+
+- [ ] E01을 넣었을 때 `Browser / Internet` 그룹이 별도 표시되는가.
+- [ ] Chrome/Edge/Firefox history row 수가 프로필별로 보이는가.
+- [ ] 다운로드 기록과 방문 기록이 분리되어 보이는가.
+- [ ] AI Usage 그룹이 별도로 보이는가.
+- [ ] ChatGPT/Claude/Gemini/Perplexity/Copilot 방문이 AI 서비스별로 집계되는가.
+- [ ] AI 대화 후보가 방문 기록과 분리되어 보이는가.
+- [ ] AI 대화 후보에 source storage, offset, hash, confidence가 보이는가.
+- [ ] browser storage inventory가 cache/session/extension/cookie/credential로 분리되는가.
+- [ ] 민감 저장소는 법적 경고와 함께 기본 비공개로 표시되는가.
+- [ ] 검색 결과에서 browser/AI/message/email/document family filter가 되는가.
+- [ ] 검색 결과를 누르면 source viewer에서 원본 DB row 또는 파일 offset으로 이동하는가.
+- [ ] review tray에 선택 후 보고서에 citation이 들어가는가.
+- [ ] 각 artifact에 "상용급 blocker"가 숨지 않고 보이는가.
+
+## 19. 지금 부족한 표시 방식
+
+현재 부족한 점은 기능 자체보다 "보이는 구조" 쪽이 크다.
+
+1. `browser` collector 아래의 기능이 너무 많이 숨겨져 있다.
+2. AI 방문과 AI 대화 후보가 사용자에게 같은 기능처럼 보일 위험이 있다.
+3. `mobile-export` 안에 메신저, 연락처, 통화, 앱, 파일, 브라우저가 같이 묶여 있다.
+4. `windows-execution` 안에 Amcache, ShimCache, BAM/DAM, SRUM, PowerShell이 같이 묶여 있다.
+5. `windows-system` 안에 Task, Defender, Firewall, WER, WMI, Zone.Identifier, 웹쉘, 서버 로그가 같이 묶여 있다.
+6. `windows-registry` 안에 hive inventory, key tree, deleted recovery, user activity가 같이 묶여 있다.
+7. `media-image` 이름 때문에 영상/음성/OCR 기능이 숨는다.
+8. `macos-system` 안에 macOS 브라우저와 AI 사용기록이 숨어 있다.
+
+## 20. 우선 UI/문서에 반영할 새 기능명
+
+다음 이름을 GUI/문서/체크리스트의 사용자 노출 기능명으로 사용한다.
+
+| 내부 collector | 사용자 노출 기능명 |
+| --- | --- |
+| `browser` | 브라우저 방문 기록 |
+| `browser` | 브라우저 다운로드 기록 |
+| `browser` | 브라우저 통합 타임라인 |
+| `browser` | 브라우저 캐시/세션/확장/쿠키 저장소 |
+| `browser` | AI 서비스 방문 기록 |
+| `browser` | AI 대화 후보 |
+| `macos-system` | macOS Safari/Chrome/Firefox 기록 |
+| `mobile-export` | 모바일 메시지 |
+| `mobile-export` | 모바일 연락처/통화 |
+| `mobile-export` | 모바일 앱/파일/미디어 |
+| `mobile-export` | 모바일 브라우저 기록 |
+| `cloud-export` | Google Takeout |
+| `cloud-export` | iCloud Export |
+| `cloud-export` | Microsoft 365/Teams/OneDrive |
+| `windows-execution` | Amcache |
+| `windows-execution` | ShimCache |
+| `windows-execution` | BAM/DAM |
+| `windows-execution` | SRUM |
+| `windows-execution` | PowerShell 기록 |
+| `windows-system` | Task Scheduler |
+| `windows-system` | Defender |
+| `windows-system` | Firewall |
+| `windows-system` | WER |
+| `windows-system` | WMI |
+| `windows-system` | Zone.Identifier |
+| `windows-system` | 웹쉘/웹서버 로그 |
+| `windows-registry` | Registry Hive |
+| `windows-registry` | Registry Deleted Recovery |
+| `windows-registry` | NTUSER/UsrClass 사용자 활동 |
+| `windows-os-account` | SAM/SECURITY/SYSTEM 계정/권한 |
+| `media-image` | 이미지 분석 |
+| `media-image` | 영상 분석 |
+| `media-image` | 음성/Transcript |
+| `media-image` | OCR Queue |
+
+## 21. 결론
+
+전용 파서가 적은 것이 아니라, 현재 기능 표시 단위가 너무 굵다. 특히 `browser`, `mobile-export`, `windows-execution`, `windows-system`, `windows-registry`, `macos-system`, `media-image`는 내부 기능을 반드시 분리해서 보여줘야 한다.
+
+다음 구현 우선순위는 GUI와 API summary에서 위 사용자 노출 기능명을 별도 capability card로 보여주는 것이다. 그렇게 해야 분석자가 "인터넷 사용기록이 되는지", "AI 사용기록이 되는지", "메신저가 어디까지 되는지"를 한눈에 확인할 수 있다.
