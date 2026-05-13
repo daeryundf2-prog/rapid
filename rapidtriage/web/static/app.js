@@ -246,6 +246,7 @@ function renderDetailShell(run, tab) {
     </div>
     ${renderCaseHero(run)}
     ${renderLazywebCommandCenter(run, tab)}
+    ${renderForensicFeatureCatalog(run, tab)}
     ${renderWorkbenchSmokePanel(run)}
     ${renderCaseCommandBar(run)}
     ${renderForensicRibbon(run)}
@@ -259,6 +260,50 @@ function renderDetailShell(run, tab) {
     </div>
     ${renderTableControlBar(tab)}
     ${renderWorkbenchLayoutFrame(run, tab)}
+  `;
+}
+
+function renderForensicFeatureCatalog(run, tab) {
+  const catalog = typeof FORENSIC_FEATURE_CATALOG !== "undefined" ? FORENSIC_FEATURE_CATALOG : [];
+  if (!catalog.length) return "";
+  const totalModules = catalog.reduce((sum, item) => sum + (item.modules || []).length, 0);
+  const activeModules = catalog.filter((item) => item.tab === tab);
+  const visibleCards = [
+    ...activeModules,
+    ...catalog.filter((item) => item.tab !== tab),
+  ];
+  return `
+    <section class="forensic-feature-catalog" aria-label="Forensic feature catalog" data-testid="forensic-feature-catalog">
+      <div class="feature-catalog-head">
+        <div>
+          <p class="eyebrow">기능 지도</p>
+          <h3>지원 기능을 먼저 보고 시작하세요</h3>
+          <p>어떤 버튼을 눌러야 할지 헷갈리지 않게, RapidForensic의 분석 기능을 사용자 작업 기준으로 묶었습니다. 각 카드를 누르면 해당 화면과 필터로 이동합니다.</p>
+        </div>
+        <div class="feature-catalog-stats" aria-label="Feature catalog totals">
+          <span><strong>${formatNumber(catalog.length)}</strong> groups</span>
+          <span><strong>${formatNumber(totalModules)}</strong> functions</span>
+        </div>
+      </div>
+      <div class="feature-catalog-grid">
+        ${visibleCards.map((item) => {
+          const count = artifactGroupCount(run, item.terms || []);
+          const filterTerm = item.terms?.[0] || item.id || item.label;
+          return `
+            <button class="feature-catalog-card ${item.tab === tab ? "active" : ""}" type="button" data-open-tab="${escapeHtml(item.tab)}" data-artifact-filter="${escapeHtml(filterTerm)}">
+              <span class="feature-catalog-card-top">
+                <strong>${escapeHtml(item.label)}</strong>
+                <em>${formatNumber(count)} signal(s)</em>
+              </span>
+              <span class="feature-catalog-purpose">${escapeHtml(item.purpose || "")}</span>
+              <span class="feature-module-strip">
+                ${(item.modules || []).slice(0, 5).map((module) => `<i>${escapeHtml(module)}</i>`).join("")}
+              </span>
+            </button>
+          `;
+        }).join("")}
+      </div>
+    </section>
   `;
 }
 

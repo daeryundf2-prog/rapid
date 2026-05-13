@@ -129,6 +129,31 @@ class RapidTriageWebStaticTests(unittest.TestCase):
         self.assertIn(".lazyweb-command-grid", styles)
         self.assertIn("body.analysis-active .lazyweb-command-center", styles)
 
+    def test_forensic_feature_catalog_makes_available_functions_discoverable(self) -> None:
+        app_js = (REPO_ROOT / "rapidtriage" / "web" / "static" / "app.js").read_text(encoding="utf-8")
+        config_js = (REPO_ROOT / "rapidtriage" / "web" / "static" / "app_workbench_config.js").read_text(encoding="utf-8")
+        styles = (REPO_ROOT / "rapidtriage" / "web" / "static" / "styles.css").read_text(encoding="utf-8")
+
+        self.assertIn("FORENSIC_FEATURE_CATALOG", config_js)
+        self.assertIn("증거 입력 / 케이스", config_js)
+        self.assertIn("Windows 핵심 아티팩트", config_js)
+        self.assertIn("웹 / AI 사용 기록", config_js)
+        self.assertIn("메신저 / 이메일", config_js)
+        self.assertIn("문서 / DB / 본문 검색", config_js)
+        self.assertIn("이미지 / 영상 / OCR", config_js)
+        self.assertIn("타임라인 / IOC / DFIR", config_js)
+        self.assertIn("모바일 / 클라우드", config_js)
+        self.assertIn("리뷰 / 보고서 / 제출", config_js)
+        self.assertIn("renderForensicFeatureCatalog", app_js)
+        self.assertIn("data-testid=\"forensic-feature-catalog\"", app_js)
+        self.assertIn("지원 기능을 먼저 보고 시작하세요", app_js)
+        self.assertIn("feature-catalog-card", app_js)
+        self.assertIn("data-open-tab=\"${escapeHtml(item.tab)}\"", app_js)
+        self.assertIn("data-artifact-filter=\"${escapeHtml(filterTerm)}\"", app_js)
+        self.assertIn(".forensic-feature-catalog", styles)
+        self.assertIn(".feature-catalog-grid", styles)
+        self.assertIn("body.analysis-active .forensic-feature-catalog", styles)
+
     def test_command_palette_connects_lazyweb_actions_to_forensic_workbench(self) -> None:
         app_js = (REPO_ROOT / "rapidtriage" / "web" / "static" / "app.js").read_text(encoding="utf-8")
         config_js = (REPO_ROOT / "rapidtriage" / "web" / "static" / "app_workbench_config.js").read_text(encoding="utf-8")
