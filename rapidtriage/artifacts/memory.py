@@ -5,7 +5,8 @@ import ipaddress
 import json
 import re
 from pathlib import Path
-from typing import Iterable, Mapping
+from typing import Iterable, Mapping, Sequence
+from urllib.parse import parse_qsl, unquote_plus, urlparse
 
 from ..core.models import ArtifactRecord
 from ..core.submission import compute_hashes
@@ -24,6 +25,7 @@ MEMORY_DUMP_CHUNK_SIZE = 1024 * 1024
 MEMORY_DUMP_OVERLAP = 512
 MEMORY_DUMP_PIVOT_LIMIT = 80
 MEMORY_DUMP_PROCESS_CANDIDATE_LIMIT = 40
+MEMORY_URL_CONTEXT_CHARS = 180
 PLUGIN_HINTS = (
     "pslist",
     "pstree",
@@ -61,6 +63,33 @@ MEMORY_SUSPICIOUS_TERMS = (
     "bitsadmin",
     "vssadmin delete shadows",
     "bcdedit /set",
+)
+PRIVATE_BROWSING_TERMS = (
+    "incognito",
+    "inprivate",
+    "private browsing",
+    "off the record",
+    "guest profile",
+)
+AI_SERVICE_DOMAINS = {
+    "chatgpt.com": "ChatGPT",
+    "chat.openai.com": "ChatGPT",
+    "claude.ai": "Claude",
+    "gemini.google.com": "Gemini",
+    "bard.google.com": "Gemini",
+    "perplexity.ai": "Perplexity",
+    "copilot.microsoft.com": "Microsoft Copilot",
+    "poe.com": "Poe",
+}
+SEARCH_QUERY_PARAM_NAMES = {"q", "query", "search", "search_query", "text", "prompt", "p"}
+SEARCH_ENGINE_DOMAINS = (
+    "google.",
+    "bing.com",
+    "duckduckgo.com",
+    "naver.com",
+    "daum.net",
+    "yahoo.com",
+    "baidu.com",
 )
 BITLOCKER_RECOVERY_KEY_RE = re.compile(rb"\b(?:\d{6}-){7}\d{6}\b")
 BITLOCKER_RECOVERY_KEY_TEXT_RE = re.compile(r"\b(?:\d{6}-){7}\d{6}\b")
@@ -132,8 +161,9 @@ def collect_memory_dump_indicators(path: Path) -> ArtifactRecord:
     source_hashes = safe_memory_source_hashes(path, file_size=file_size)
     scan_ranges = build_scan_ranges(file_size)
     pivots = scan_memory_dump(path, scan_ranges)
-    flags = build_memory_dump_flags(pivots=pivots, file_size=file_size, scan_ranges=scan_ranges)
     memory_file_kind = classify_memory_file(path)
+    web_recovery_profile = build_memory_web_recovery_profile(pivots, memory_file_kind=memory_file_kind)
+    flags = build_memory_dump_flags(pivots=pivots, file_size=file_size, scan_ranges=scan_ranges)
     return ArtifactRecord(
         provider=MemoryVolatilityProvider.name,
         artifact_type=memory_artifact_type(memory_file_kind),
@@ -152,6 +182,7 @@ def collect_memory_dump_indicators(path: Path) -> ArtifactRecord:
             "scan_ranges": [{"start": start, "end": end} for start, end in scan_ranges],
             "scan_truncated": scanned_bytes(scan_ranges) < file_size,
             "indicator_pivots": pivots,
+            "web_recovery_profile": web_recovery_profile,
             "risk_flags": flags,
             "risk_score": score_memory_dump_risk(flags, pivots),
             "triage_recommendation": memory_dump_recommendation(flags),
@@ -540,6 +571,7 @@ def collect_memory_pivots(
             )
     for match in URL_RE.finditer(data):
         value = trim_indicator(match.group(0)).decode("latin-1", errors="ignore")
+        context = byte_context_preview(data, match.start(), match.end())
         add_memory_pivot(
             pivots,
             seen,
@@ -548,6 +580,8 @@ def collect_memory_pivots(
             offset=data_offset + match.start(),
             evidence_strength="triage",
             sensitive=False,
+            context_preview=context,
+            classification=classify_memory_url(value, context),
         )
     for match in IP_RE.finditer(data):
         value = match.group(0).decode("ascii", errors="ignore")
@@ -595,6 +629,7 @@ def collect_utf16_memory_pivots(
                 sensitive=False,
             )
     for match in URL_TEXT_RE.finditer(text):
+        context = text_context_preview(text, match.start(), match.end())
         add_memory_pivot(
             pivots,
             seen,
@@ -603,6 +638,8 @@ def collect_utf16_memory_pivots(
             offset=data_offset + (match.start() * 2),
             evidence_strength="triage",
             sensitive=False,
+            context_preview=context,
+            classification=classify_memory_url(match.group(0).rstrip(".,);]"), context),
         )
     for match in IP_TEXT_RE.finditer(text):
         value = match.group(0)
@@ -627,6 +664,8 @@ def add_memory_pivot(
     offset: int,
     evidence_strength: str,
     sensitive: bool,
+    context_preview: str = "",
+    classification: Mapping[str, object] | None = None,
 ) -> None:
     if len(pivots) >= MEMORY_DUMP_PIVOT_LIMIT:
         return
@@ -652,6 +691,10 @@ def add_memory_pivot(
         pivot["value_sha256"] = compute_text_sha256(normalized_value)
     else:
         pivot["value"] = decode_process_candidate_value(pivot_type, normalized_value)
+    if context_preview:
+        pivot["context_preview"] = context_preview
+    if classification:
+        pivot["classification"] = dict(classification)
     pivots.append(pivot)
 
 
@@ -726,6 +769,129 @@ def valid_ipv4(value: str) -> bool:
     return address.version == 4
 
 
+def byte_context_preview(data: bytes, start: int, end: int) -> str:
+    context_start = max(0, start - MEMORY_URL_CONTEXT_CHARS)
+    context_end = min(len(data), end + MEMORY_URL_CONTEXT_CHARS)
+    return printable_preview(data[context_start:context_end].decode("latin-1", errors="ignore"))
+
+
+def text_context_preview(text: str, start: int, end: int) -> str:
+    context_start = max(0, start - MEMORY_URL_CONTEXT_CHARS)
+    context_end = min(len(text), end + MEMORY_URL_CONTEXT_CHARS)
+    return printable_preview(text[context_start:context_end])
+
+
+def classify_memory_url(url: str, context_preview: str = "") -> dict[str, object]:
+    parsed = urlparse(url)
+    host = (parsed.hostname or "").lower()
+    context_lower = context_preview.lower()
+    categories = ["web-url"]
+    service = ""
+    service_family = ""
+    for domain, label in AI_SERVICE_DOMAINS.items():
+        if host == domain or host.endswith("." + domain):
+            service = label
+            service_family = "ai-service"
+            categories.append("ai-service")
+            break
+    if not service and not host and any(token in context_lower for token in ("chatgpt", "claude", "gemini", "perplexity", "copilot")):
+        service_family = "ai-service-context"
+        categories.append("ai-service-context")
+    if any(term in context_lower for term in PRIVATE_BROWSING_TERMS):
+        categories.append("private-browsing-context")
+    if any(token in host for token in SEARCH_ENGINE_DOMAINS):
+        categories.append("search-engine")
+    query_terms = extract_url_query_terms(parsed.query)
+    if query_terms:
+        categories.append("search-query")
+    categories = sorted(set(categories))
+    confidence = 0.48
+    if "private-browsing-context" in categories:
+        confidence += 0.22
+    if "ai-service" in categories or "search-query" in categories:
+        confidence += 0.16
+    if "search-engine" in categories:
+        confidence += 0.08
+    return {
+        "profile_version": "memory-url-classification-v1",
+        "host": host,
+        "scheme": parsed.scheme,
+        "service": service,
+        "service_family": service_family,
+        "categories": categories,
+        "query_terms": query_terms,
+        "confidence": min(round(confidence, 2), 0.94),
+        "reportability": "triage",
+        "validation_guidance": "Memory/pagefile URL candidates can be stale or fragmented. Correlate with browser history, WebCacheV01, DNS, process context, and acquisition time before reporting.",
+    }
+
+
+def extract_url_query_terms(query: str) -> list[dict[str, str]]:
+    terms: list[dict[str, str]] = []
+    for key, value in parse_qsl(query, keep_blank_values=False):
+        normalized_key = key.lower()
+        if normalized_key not in SEARCH_QUERY_PARAM_NAMES:
+            continue
+        decoded = unquote_plus(value).strip()
+        if not decoded:
+            continue
+        terms.append(
+            {
+                "parameter": normalized_key,
+                "value_preview": decoded[:160],
+                "value_sha256": compute_text_sha256(decoded),
+            }
+        )
+        if len(terms) >= 5:
+            break
+    return terms
+
+
+def build_memory_web_recovery_profile(pivots: Sequence[Mapping[str, object]], *, memory_file_kind: str) -> dict[str, object]:
+    url_pivots = [pivot for pivot in pivots if pivot.get("type") == "url"]
+    classified = [pivot.get("classification") for pivot in url_pivots if isinstance(pivot.get("classification"), Mapping)]
+    category_counts: dict[str, int] = {}
+    query_terms: list[dict[str, str]] = []
+    ai_services: set[str] = set()
+    private_count = 0
+    for classification in classified:
+        categories = [str(category) for category in classification.get("categories", [])]
+        for category in categories:
+            category_counts[category] = category_counts.get(category, 0) + 1
+        if "private-browsing-context" in categories:
+            private_count += 1
+        service = str(classification.get("service") or "")
+        if service:
+            ai_services.add(service)
+        for term in classification.get("query_terms", []):
+            if isinstance(term, Mapping):
+                query_terms.append(
+                    {
+                        "parameter": str(term.get("parameter") or ""),
+                        "value_preview": str(term.get("value_preview") or ""),
+                        "value_sha256": str(term.get("value_sha256") or ""),
+                    }
+                )
+    return {
+        "profile_version": "memory-web-recovery-profile-v1",
+        "memory_file_kind": memory_file_kind,
+        "url_candidate_count": len(url_pivots),
+        "private_browsing_candidate_count": private_count,
+        "ai_service_candidate_count": category_counts.get("ai-service", 0),
+        "search_query_candidate_count": category_counts.get("search-query", 0),
+        "category_counts": [{"category": key, "count": value} for key, value in sorted(category_counts.items())],
+        "ai_services": sorted(ai_services),
+        "query_term_samples": query_terms[:10],
+        "coverage_status": "url-classification-present" if url_pivots else "no-url-candidates",
+        "commercial_grade_ready": False,
+        "commercial_grade_blockers": [
+            "browser-history-webcache-dns-correlation-required",
+            "fragmented-memory-url-false-positive-corpus-required",
+        ],
+        "validation_guidance": "Use this profile as a triage lead for private browsing, AI service, and search query residues. It is not proof of user navigation without corroborating browser/process/network evidence.",
+    }
+
+
 def build_memory_dump_flags(
     *,
     pivots: list[dict[str, object]],
@@ -733,6 +899,12 @@ def build_memory_dump_flags(
     scan_ranges: list[tuple[int, int]],
 ) -> list[str]:
     pivot_types = {str(pivot.get("type", "")) for pivot in pivots}
+    url_categories = {
+        str(category)
+        for pivot in pivots
+        if pivot.get("type") == "url" and isinstance(pivot.get("classification"), Mapping)
+        for category in pivot["classification"].get("categories", [])
+    }
     flags: list[str] = []
     if "bitlocker-recovery-key" in pivot_types:
         if any(
@@ -749,6 +921,12 @@ def build_memory_dump_flags(
         flags.append("suspicious-memory-string")
     if "url" in pivot_types or "ip" in pivot_types:
         flags.append("network-indicator")
+    if "private-browsing-context" in url_categories:
+        flags.append("private-browsing-url-candidate")
+    if "ai-service" in url_categories:
+        flags.append("ai-service-url-candidate")
+    if "search-query" in url_categories:
+        flags.append("search-query-url-candidate")
     if scanned_bytes(scan_ranges) < file_size:
         flags.append("bounded-scan-truncated")
     return flags
@@ -761,6 +939,9 @@ def score_memory_dump_risk(flags: list[str], pivots: list[dict[str, object]]) ->
         "process-string-candidate": 15,
         "suspicious-memory-string": 20,
         "network-indicator": 15,
+        "private-browsing-url-candidate": 18,
+        "ai-service-url-candidate": 16,
+        "search-query-url-candidate": 12,
         "bounded-scan-truncated": 0,
     }
     return min(sum(weights.get(flag, 5) for flag in flags) + min(20, len(pivots)), 100)
@@ -773,6 +954,8 @@ def memory_dump_recommendation(flags: list[str]) -> str:
         return "Preserve the memory dump, validate the redacted BitLocker recovery-key candidate in a controlled evidence workflow, and correlate with disk encryption state."
     if "process-string-candidate" in flags:
         return "Review direct process string candidates alongside Volatility process, command-line, network, and malfind output before reporting."
+    if "private-browsing-url-candidate" in flags or "ai-service-url-candidate" in flags or "search-query-url-candidate" in flags:
+        return "Review memory/pagefile URL classifications as browser/AI/search residues, then correlate with browser history, WebCacheV01, DNS, and process context before reporting."
     if "suspicious-memory-string" in flags or "network-indicator" in flags:
         return "Review memory string pivots with Volatility process/network output before reporting."
     return "No high-value bounded memory indicators were found; run Volatility/Volatility3 for full process, handle, network, and malfind analysis."

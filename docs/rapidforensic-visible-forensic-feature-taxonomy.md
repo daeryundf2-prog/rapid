@@ -974,3 +974,25 @@ RecentDocs와 file dialog MRU는 이미 `registry-user-activity`로 정규화되
 1. MUICache는 표시 이름/cache 성격이 강해 단독 실행 증거가 아니다.
 2. Clipboard 관련 값은 민감정보를 포함할 수 있으므로 보고서 포함 전 범위/권한/최소 공개 원칙이 필요하다.
 3. Clipboard history의 실제 content store는 Windows 버전과 CloudStore 구조에 따라 달라질 수 있어 추가 fixture가 필요하다.
+
+## 31. 2026-05-14 구현 반영: pagefile/hiberfil/memory URL 카빙 실사용 보강
+
+이전 메모리 collector는 `pagefile.sys`, `hiberfil.sys`, `MEMORY.DMP`, `.raw/.vmem` 등에서 URL/IP/프로세스/BitLocker 문자열을 bounded scan으로 뽑았지만, URL이 어떤 의미인지 구분하지 못했다. 이번 라운드에서는 URL pivot마다 private browsing context, AI 서비스, 검색엔진/검색어 후보를 분류하고 `web_recovery_profile`로 요약한다.
+
+부분 구현으로 승격한 capability:
+
+| capability | 새 필드 / risk flag | 구현 내용 | 남은 상용급 보강 |
+| --- | --- | --- | --- |
+| Memory dump indicators | `web_recovery_profile`, URL `classification` | memory/pagefile/hiberfil/crash dump URL pivot에 host, service, category, query term hash/preview, confidence를 붙인다. | Volatility process ownership, full memory parser, fragmented URL FP/FN corpus |
+| 시크릿 모드 URL 카빙 | `private-browsing-url-candidate`, `search-query-url-candidate`, `ai-service-url-candidate` | URL 주변 문자열에서 `Incognito/InPrivate/private browsing` context를 잡고, ChatGPT/Claude/Gemini/Perplexity 등 AI 서비스 URL과 검색어 query parameter를 분류한다. | Browser history/WebCacheV01/DNS/process 상관, stale memory 판단, acquisition-time correlation |
+
+검증 포인트:
+
+1. `tests/test_rapidtriage_memory_volatility.py::test_disk_memory_files_and_crash_dumps_are_scanned_as_visible_artifacts`가 `pagefile.sys` fixture에서 Incognito context, Google 검색어, ChatGPT URL을 분류하고 risk flag를 검증한다.
+2. visible capability status는 `memory-dump-indicators`와 `incognito-memory-pagefile-carving`을 `부분 구현`으로 올리고 실제 output field/risk flag term을 추가했다.
+
+중요한 제한:
+
+1. pagefile/hiberfil/memory 문자열은 stale, fragmented, copied cache일 수 있어 단독 방문 증거가 아니다.
+2. URL query preview는 분석 편의상 제한 길이로 노출되며, 원문 검색어는 report inclusion 전에 민감정보 검토가 필요하다.
+3. 상용급 판정에는 process owner, browser DB, DNS/cache, WebCacheV01, acquisition timestamp와의 상관분석이 필요하다.

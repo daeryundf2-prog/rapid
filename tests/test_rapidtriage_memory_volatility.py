@@ -88,7 +88,11 @@ class RapidTriageMemoryVolatilityTests(unittest.TestCase):
     def test_disk_memory_files_and_crash_dumps_are_scanned_as_visible_artifacts(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             root = Path(tmp_dir)
-            (root / "pagefile.sys").write_bytes(b"page cache https://incident.example.test/path powershell.exe -enc AAAA")
+            (root / "pagefile.sys").write_bytes(
+                b"Chrome Incognito page cache "
+                b"https://www.google.com/search?q=secret+plan "
+                b"https://chatgpt.com/c/abc123 powershell.exe -enc AAAA"
+            )
             (root / "MEMORY.DMP").write_bytes(b"crash dump cmd.exe /c whoami 203.0.113.77")
             output = root / "memory-disk-artifacts.json"
 
@@ -105,7 +109,24 @@ class RapidTriageMemoryVolatilityTests(unittest.TestCase):
             )
             self.assertEqual(pagefile["details"]["memory_file_kind"], "pagefile")
             self.assertIn("network-indicator", pagefile["details"]["risk_flags"])
-            self.assertTrue(any(pivot.get("value") == "https://incident.example.test/path" for pivot in pagefile["details"]["indicator_pivots"]))
+            self.assertIn("private-browsing-url-candidate", pagefile["details"]["risk_flags"])
+            self.assertIn("ai-service-url-candidate", pagefile["details"]["risk_flags"])
+            self.assertIn("search-query-url-candidate", pagefile["details"]["risk_flags"])
+            self.assertTrue(
+                any(pivot.get("value") == "https://www.google.com/search?q=secret+plan" for pivot in pagefile["details"]["indicator_pivots"])
+            )
+            web_profile = pagefile["details"]["web_recovery_profile"]
+            self.assertEqual(web_profile["profile_version"], "memory-web-recovery-profile-v1")
+            self.assertEqual(web_profile["private_browsing_candidate_count"], 2)
+            self.assertEqual(web_profile["ai_service_candidate_count"], 1)
+            self.assertEqual(web_profile["search_query_candidate_count"], 1)
+            self.assertIn("ChatGPT", web_profile["ai_services"])
+            self.assertEqual(web_profile["query_term_samples"][0]["value_preview"], "secret plan")
+            google_pivot = next(
+                pivot for pivot in pagefile["details"]["indicator_pivots"] if "google.com/search" in str(pivot.get("value"))
+            )
+            self.assertIn("private-browsing-context", google_pivot["classification"]["categories"])
+            self.assertIn("search-query", google_pivot["classification"]["categories"])
 
             crash = next(artifact for artifact in payload["artifacts"] if artifact["artifact_type"] == "crash-dump-indicators")
             self.assertEqual(crash["details"]["memory_file_kind"], "crash-dump")

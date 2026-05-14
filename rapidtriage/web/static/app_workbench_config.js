@@ -752,11 +752,11 @@ const VISIBLE_FORENSIC_CAPABILITY_GROUPS = [
       {
         id: "memory-dump-indicators",
         label: "Memory dump indicators",
-        status: "inventory",
+        status: "partial",
         viewer: "Memory indicator viewer",
         artifactTypes: ["memory-indicator", "process-tree"],
-        terms: ["memory", "ram", "process", "bitlocker"],
-        nextAction: "Volatility/Rekall-style plugin import와 malicious pattern fixture 필요",
+        terms: ["memory", "ram", "process", "bitlocker", "memory-dump-indicators", "web_recovery_profile"],
+        nextAction: "직접 dump bounded scan과 URL/BitLocker/process pivot은 제공, Volatility process ownership과 full memory parser 필요",
       },
       {
         id: "dfir-powershell-lol",
@@ -946,9 +946,9 @@ const VISIBLE_FORENSIC_CAPABILITY_GROUPS = [
       {
         id: "incognito-memory-pagefile-carving",
         label: "시크릿 모드 URL 카빙",
-        status: "inventory",
-        terms: ["incognito", "inprivate", "pagefile", "hiberfil", "url carving"],
-        nextAction: "pagefile/hiberfil/memory URL regex carving과 false-positive confidence 표시",
+        status: "partial",
+        terms: ["incognito", "inprivate", "pagefile", "hiberfil", "url carving", "private-browsing-url-candidate", "search-query-url-candidate"],
+        nextAction: "pagefile/hiberfil/memory URL 분류는 제공, browser/WebCache/DNS/process 상관과 false-positive corpus 필요",
       },
       {
         id: "webcachev01-ese-parser",

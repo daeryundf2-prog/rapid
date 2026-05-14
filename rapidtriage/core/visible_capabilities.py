@@ -129,7 +129,7 @@ CAPABILITY_GROUPS: tuple[dict[str, Any], ...] = (
         "catalog_id": "timeline-ioc",
         "label": "DFIR / 메모리 / 위협",
         "capabilities": (
-            {"id": "memory-dump-indicators", "label": "Memory dump indicators", "status": "inventory", "terms": ("memory", "ram", "process", "bitlocker")},
+            {"id": "memory-dump-indicators", "label": "Memory dump indicators", "status": "partial", "terms": ("memory", "ram", "process", "bitlocker", "memory-dump-indicators", "web_recovery_profile")},
             {"id": "dfir-powershell-lol", "label": "PowerShell/LoL/Fileless", "status": "partial", "terms": ("powershell", "wmi", "wmic", "lol", "fileless")},
             {"id": "dfir-webshell-log", "label": "WebShell/웹서버 로그", "status": "inventory", "terms": ("webshell", "iis", "apache", "nginx", "domain")},
         ),
@@ -191,7 +191,7 @@ CAPABILITY_GROUPS: tuple[dict[str, Any], ...] = (
         "catalog_id": "web-ai",
         "label": "브라우저 심화 복원",
         "capabilities": (
-            {"id": "incognito-memory-pagefile-carving", "label": "시크릿 모드 URL 카빙", "status": "inventory", "terms": ("incognito", "inprivate", "pagefile", "hiberfil", "url carving")},
+            {"id": "incognito-memory-pagefile-carving", "label": "시크릿 모드 URL 카빙", "status": "partial", "terms": ("incognito", "inprivate", "pagefile", "hiberfil", "url carving", "private-browsing-url-candidate", "search-query-url-candidate")},
             {"id": "webcachev01-ese-parser", "label": "WebCacheV01.dat", "status": "partial", "terms": ("webcachev01.dat", "webcachev01-ese-file", "ese", "webcache", "wininet", "webview")},
             {"id": "desktop-cloud-sync-db", "label": "OneDrive/Google Drive sync DB", "status": "partial", "terms": ("onedrive", "sync_engine.db", "desktop-cloud-sync-db", "google drive", "drivefs", "sync")},
         ),
