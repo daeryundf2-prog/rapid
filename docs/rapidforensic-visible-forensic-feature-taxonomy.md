@@ -393,8 +393,8 @@ GUI 표시 권장:
 | PC KakaoTalk user ID 후보 | `kakaotalk-windows-user-id-candidate` | triage+ | UID/userDir validation |
 | PC KakaoTalk source 후보 | `kakaotalk-windows-source-candidate` | triage+ | memory/edb/registry correlation |
 | PC KakaoTalk summary | `kakaotalk-windows-correlation-summary` | triage+ | trusted tool comparison |
-| macOS KakaoTalk DB | `kakaotalk-macos-database` | inventory | message decode research |
-| macOS KakaoTalk summary | `kakaotalk-macos-summary` | inventory | live user data validation |
+| macOS KakaoTalk DB | `kakaotalk-macos-database` | partial / GUI visible | message decode research, known-answer corpus |
+| macOS KakaoTalk summary | `kakaotalk-macos-summary` | partial / GUI visible | live user data validation |
 
 메신저 서비스별로 GUI에 드러낼 항목:
 
@@ -725,7 +725,7 @@ GUI 표기 방식:
 1. "인터넷 사용기록이 되냐"는 질문이 `browser` 하나로 뭉개지지 않고 방문/다운로드/저장소/캐시/타임라인으로 보인다.
 2. "AI 사용기록이 되냐"는 질문이 브라우저 방문 흔적과 질문/답변 후보, export parser로 분리된다.
 3. 메신저/모바일/클라우드가 단순 import가 아니라 제품/자료 종류별 capability로 보인다.
-4. Windows.edb, SRUM, MFT/USN처럼 아직 깊이 보강이 필요한 항목은 `목록화` 또는 `검증 필요`로 표시되어 과장되지 않는다.
+4. Windows.edb, SRUM, MFT/USN처럼 아직 깊이 보강이 필요한 항목은 `부분 구현` 또는 `검증 필요`로 표시되어 과장되지 않는다.
 5. `/api/forensic-capabilities`와 `/api/runs/{run_id}/capabilities`가 추가되어, 동일한 capability taxonomy를 API에서도 확인할 수 있다.
 6. run별 capability API는 artifact 출력과 summary를 대표 키워드로 스캔해 `signal_count`와 `has_signals`를 붙인다. 이제 GUI가 다음 단계에서 케이스별 readiness를 실제 값으로 덮어쓸 수 있다.
 

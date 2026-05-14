@@ -173,9 +173,18 @@ class RapidTriageWebStaticTests(unittest.TestCase):
         self.assertIn("eventlog-chunk", config_js)
         self.assertIn("registry-user-activity", config_js)
         self.assertIn("windows-search-edb-row-candidate", config_js)
+        self.assertIn("windows-search-edb-page-candidate", config_js)
+        self.assertIn("browser_analyst_review_profile", config_js)
         self.assertIn("mobile-message", config_js)
         self.assertIn("kakaotalk-windows-app-database", config_js)
+        self.assertIn("kakaotalk-macos-database", config_js)
+        self.assertIn("chat_app_forensic_review", config_js)
+        self.assertIn("messenger-export-framework-manifest", config_js)
         self.assertIn("cloud-message", config_js)
+        self.assertIn("icloud_export_review_profile", config_js)
+        self.assertIn("icloud_export_parser_manifest", config_js)
+        self.assertIn("m365_export_review_profile", config_js)
+        self.assertIn("m365_export_parser_manifest", config_js)
         self.assertIn("media-audio", config_js)
         self.assertIn("waveform_preview", config_js)
         self.assertIn("transcript_sidecars", config_js)
@@ -265,6 +274,15 @@ class RapidTriageWebStaticTests(unittest.TestCase):
         self.assertEqual(capabilities["dfir-webshell-log"]["status"], "partial")
         self.assertIn("webshell-source-candidate", capabilities["dfir-webshell-log"]["artifact_types"])
         self.assertIn("web-server-log", capabilities["dfir-webshell-log"]["artifact_types"])
+        for capability_id in (
+            "windows-search-edb-row-candidate",
+            "browser-storage-inventory",
+            "kakaotalk-macos-inventory",
+            "messenger-whatsapp-telegram-signal-line",
+            "cloud-icloud-export",
+            "cloud-message",
+        ):
+            self.assertEqual(capabilities[capability_id]["status"], "partial")
         for group in payload["groups"]:
             self.assertIn("tab", group)
             self.assertIn("workflow_stage", group)
