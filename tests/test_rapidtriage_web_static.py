@@ -3,7 +3,7 @@ from __future__ import annotations
 import unittest
 from pathlib import Path
 
-from rapidtriage.core.visible_capabilities import CAPABILITY_GROUPS
+from rapidtriage.core.visible_capabilities import CAPABILITY_GROUPS, build_visible_capability_response, validate_visible_capability_contract
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -206,8 +206,14 @@ class RapidTriageWebStaticTests(unittest.TestCase):
         ):
             self.assertIn(capability_id, config_js)
         self.assertIn("renderVisibleCapabilityGroups", app_js)
+        self.assertIn("visibleCapabilityGroupsForRun", app_js)
         self.assertIn("loadRunCapabilities", app_js)
         self.assertIn("/capabilities", app_js)
+        self.assertIn("group.catalogId || group.catalog_id", app_js)
+        self.assertIn("capability.artifactTypes || capability.artifact_types", app_js)
+        self.assertIn("capability.nextAction || capability.next_action", app_js)
+        self.assertIn("data-workflow-stage", app_js)
+        self.assertIn("data-viewer", app_js)
         self.assertIn("capabilitySignalLookup", app_js)
         self.assertIn("matched signals", app_js)
         self.assertIn("visible steps", app_js)
@@ -232,6 +238,25 @@ class RapidTriageWebStaticTests(unittest.TestCase):
         self.assertGreaterEqual(len(python_ids), 80)
         for capability_id in python_ids:
             self.assertIn(capability_id, config_js)
+
+    def test_visible_capability_registry_has_gui_contract_for_every_feature(self) -> None:
+        issues = validate_visible_capability_contract()
+        payload = build_visible_capability_response()
+
+        self.assertEqual(issues, [])
+        self.assertTrue(payload["summary"]["gui_contract_pass"])
+        self.assertEqual(payload["gui_contract"]["issue_count"], 0)
+        for group in payload["groups"]:
+            self.assertIn("tab", group)
+            self.assertIn("workflow_stage", group)
+            for capability in group["capabilities"]:
+                self.assertTrue(capability["id"])
+                self.assertTrue(capability["tab"])
+                self.assertTrue(capability["viewer"])
+                self.assertTrue(capability["artifact_types"])
+                self.assertTrue(capability["workflow_stage"])
+                self.assertTrue(capability["next_action"])
+                self.assertTrue(capability["gui_surfaces"])
 
     def test_core_three_step_evidence_workflow_is_visually_primary(self) -> None:
         app_js = (REPO_ROOT / "rapidtriage" / "web" / "static" / "app.js").read_text(encoding="utf-8")

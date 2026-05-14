@@ -357,9 +357,19 @@ class RapidTriageApiTests(unittest.TestCase):
         self.assertEqual(static_payload["profile_version"], "visible-forensic-capabilities-v1")
         self.assertIn("validation-required", static_payload["status_labels"])
         self.assertGreaterEqual(static_payload["summary"]["capability_count"], 80)
+        self.assertTrue(static_payload["summary"]["gui_contract_pass"])
+        self.assertEqual(static_payload["gui_contract"]["issue_count"], 0)
+        first_capability = static_payload["groups"][0]["capabilities"][0]
+        self.assertIn("tab", first_capability)
+        self.assertIn("viewer", first_capability)
+        self.assertIn("artifact_types", first_capability)
+        self.assertIn("workflow_stage", first_capability)
+        self.assertIn("next_action", first_capability)
+        self.assertIn("gui_surfaces", first_capability)
 
         self.assertEqual(run_response.status_code, 200, run_response.text)
         run_payload = run_response.json()
+        self.assertTrue(run_payload["summary"]["gui_contract_pass"])
         capabilities = {
             capability["id"]: capability
             for group in run_payload["groups"]

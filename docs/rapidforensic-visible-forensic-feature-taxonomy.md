@@ -4,6 +4,24 @@
 
 목표는 GUI와 QC 문서에서 "22개 collector"가 아니라 "분석자가 실제로 선택하고 확인할 수 있는 기능 단위"로 보여주는 것이다.
 
+## 0. 구조 정리 원칙
+
+앞으로 새 포렌식 기능은 "파서가 존재한다"만으로 완료 처리하지 않는다. 모든 기능은 `visible capability registry`를 통과해야 하며, 다음 필드가 비어 있으면 GUI 사용 가능 기능으로 보지 않는다.
+
+| 필드 | 의미 |
+| --- | --- |
+| `id` / `label` | 사용자가 기능 목록에서 볼 수 있는 고유 기능명 |
+| `status` | 사용 가능, 부분 구현, 목록화, 검증 필요, 외부 자료 필요 중 하나 |
+| `terms` | 검색/필터/신호 매칭에 쓰는 키워드 |
+| `tab` | GUI에서 열릴 기본 탭 |
+| `viewer` | 사용자가 결과를 확인할 기본 viewer |
+| `artifact_types` | 이 기능이 만들어내거나 확인하는 결과 row/type |
+| `workflow_stage` | ingest, extract, parse, search, review, report 중 어느 흐름에 속하는지 |
+| `next_action` | 분석관이 다음에 해야 할 검증/리뷰 행동 |
+| `gui_surfaces` | feature catalog, capability chip, viewer 등 실제 노출 위치 |
+
+현재 `/api/forensic-capabilities`와 `/api/runs/{run_id}/capabilities`는 위 계약을 포함한다. GUI는 완료된 run에서는 API에서 내려온 capability 계약을 우선 사용하고, 정적 설정은 API가 없을 때의 fallback으로만 사용한다. 이 원칙 때문에 앞으로 기능을 추가할 때는 `파서 구현 -> ArtifactRecord/산출물 저장 -> capability registry 등록 -> GUI 노출 -> 테스트` 순서를 지켜야 한다.
+
 ## 1. 현재 집계 방식의 문제
 
 현재 `artifact_collectors()` 기준 collector는 22개다.

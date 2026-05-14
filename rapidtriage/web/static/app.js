@@ -278,7 +278,7 @@ function renderForensicFeatureCatalog(run, tab) {
   const catalog = typeof FORENSIC_FEATURE_CATALOG !== "undefined" ? FORENSIC_FEATURE_CATALOG : [];
   if (!catalog.length) return "";
   const totalModules = catalog.reduce((sum, item) => sum + (item.modules || []).length, 0);
-  const capabilityGroups = typeof VISIBLE_FORENSIC_CAPABILITY_GROUPS !== "undefined" ? VISIBLE_FORENSIC_CAPABILITY_GROUPS : [];
+  const capabilityGroups = visibleCapabilityGroupsForRun(run);
   const totalCapabilities = capabilityGroups.reduce((sum, group) => sum + (group.capabilities || []).length, 0);
   const capabilitySignals = capabilitySignalLookup(run.capabilities);
   const matchedSignals = run.capabilities?.summary?.signal_count;
@@ -316,7 +316,7 @@ function renderForensicFeatureCatalog(run, tab) {
               <span class="feature-module-strip">
                 ${(item.modules || []).slice(0, 5).map((module) => `<i>${escapeHtml(module)}</i>`).join("")}
               </span>
-              ${renderVisibleCapabilityGroups(item, capabilitySignals)}
+              ${renderVisibleCapabilityGroups(item, capabilitySignals, capabilityGroups)}
             </button>
           `;
         }).join("")}
@@ -325,9 +325,28 @@ function renderForensicFeatureCatalog(run, tab) {
   `;
 }
 
-function renderVisibleCapabilityGroups(item, capabilitySignals = new Map()) {
-  const allGroups = typeof VISIBLE_FORENSIC_CAPABILITY_GROUPS !== "undefined" ? VISIBLE_FORENSIC_CAPABILITY_GROUPS : [];
-  const groups = allGroups.filter((group) => group.catalogId === item.id);
+function visibleCapabilityGroupsForRun(run) {
+  const apiGroups = run?.capabilities?.groups;
+  if (Array.isArray(apiGroups) && apiGroups.length) {
+    return apiGroups.map((group) => ({
+      ...group,
+      catalogId: group.catalogId || group.catalog_id,
+      workflowStage: group.workflowStage || group.workflow_stage,
+      capabilities: (group.capabilities || []).map((capability) => ({
+        ...capability,
+        artifactTypes: capability.artifactTypes || capability.artifact_types || [],
+        guiSurfaces: capability.guiSurfaces || capability.gui_surfaces || [],
+        nextAction: capability.nextAction || capability.next_action || "",
+        workflowStage: capability.workflowStage || capability.workflow_stage || group.workflow_stage || group.workflowStage || "",
+      })),
+    }));
+  }
+  return typeof VISIBLE_FORENSIC_CAPABILITY_GROUPS !== "undefined" ? VISIBLE_FORENSIC_CAPABILITY_GROUPS : [];
+}
+
+function renderVisibleCapabilityGroups(item, capabilitySignals = new Map(), sourceGroups = null) {
+  const allGroups = Array.isArray(sourceGroups) ? sourceGroups : visibleCapabilityGroupsForRun(null);
+  const groups = allGroups.filter((group) => (group.catalogId || group.catalog_id) === item.id);
   if (!groups.length) return "";
   const statusLabels = typeof VISIBLE_CAPABILITY_STATUS_LABELS !== "undefined" ? VISIBLE_CAPABILITY_STATUS_LABELS : {};
   return `
@@ -347,10 +366,13 @@ function renderVisibleCapabilityGroups(item, capabilitySignals = new Map()) {
                 const statusClassName = safeCssToken(status);
                 const filterTerm = capability.terms?.[0] || capability.id || capability.label;
                 const signal = capabilitySignals.get(capability.id);
-                const signalCount = signal?.signal_count;
+                const signalCount = capability.signal_count ?? signal?.signal_count;
                 const signalClass = Number(signalCount || 0) > 0 ? " has-signals" : "";
+                const viewer = capability.viewer || "";
+                const nextAction = capability.nextAction || capability.next_action || viewer;
+                const workflowStage = capability.workflowStage || capability.workflow_stage || "";
                 return `
-                  <i class="feature-capability-chip status-${statusClassName}${signalClass}" data-capability-id="${escapeHtml(capability.id || "")}" data-capability-filter="${escapeHtml(filterTerm)}" data-capability-tab="${escapeHtml(item.tab || "artifacts")}" data-signal-count="${escapeHtml(signalCount ?? "")}" title="${escapeHtml(capability.nextAction || capability.viewer || "")}">
+                  <i class="feature-capability-chip status-${statusClassName}${signalClass}" data-capability-id="${escapeHtml(capability.id || "")}" data-capability-filter="${escapeHtml(filterTerm)}" data-capability-tab="${escapeHtml(capability.tab || item.tab || "artifacts")}" data-signal-count="${escapeHtml(signalCount ?? "")}" data-workflow-stage="${escapeHtml(workflowStage)}" data-viewer="${escapeHtml(viewer)}" title="${escapeHtml(nextAction)}">
                     <span>${escapeHtml(capability.label)}</span>
                     <em>${escapeHtml(statusLabels[status] || status)}</em>
                     ${signalCount !== undefined ? `<strong>${formatNumber(signalCount)}</strong>` : ""}

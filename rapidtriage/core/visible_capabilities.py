@@ -13,6 +13,46 @@ STATUS_LABELS = {
     "validation-required": "검증 필요",
     "external-required": "외부 자료 필요",
 }
+CATALOG_TABS = {
+    "evidence-input": "summary",
+    "windows-core": "artifacts",
+    "web-ai": "artifacts",
+    "communications": "artifacts",
+    "documents-db": "docs",
+    "media-ocr": "files",
+    "timeline-ioc": "timeline",
+    "mobile-cloud": "artifacts",
+    "review-report": "review",
+}
+CATALOG_WORKFLOW_STAGES = {
+    "evidence-input": "ingest-extract",
+    "windows-core": "parse-review",
+    "web-ai": "parse-search",
+    "communications": "parse-search",
+    "documents-db": "parse-search-view",
+    "media-ocr": "preview-ocr-review",
+    "timeline-ioc": "correlate-detect",
+    "mobile-cloud": "import-parse",
+    "review-report": "review-report",
+}
+CATALOG_VIEWERS = {
+    "evidence-input": "Evidence intake",
+    "windows-core": "Artifact workbench",
+    "web-ai": "Web and AI timeline",
+    "communications": "Messenger and mail viewer",
+    "documents-db": "Document and database viewer",
+    "media-ocr": "Media and OCR viewer",
+    "timeline-ioc": "Timeline and IOC viewer",
+    "mobile-cloud": "Mobile and cloud import viewer",
+    "review-report": "Review and report workspace",
+}
+STATUS_NEXT_ACTIONS = {
+    "usable": "Open the mapped tab, filter matching evidence, verify source provenance, then review or report.",
+    "partial": "Use as triage evidence only until source viewer, correlation, and validation blockers are checked.",
+    "inventory": "Use to locate candidate sources; deeper row parsing or validation is still required.",
+    "validation-required": "Do not report as fact until trusted-tool diff, fixture, or known-answer validation is attached.",
+    "external-required": "Requires authorized external data, tool output, credential, or lab evidence before full use.",
+}
 
 CAPABILITY_GROUPS: tuple[dict[str, Any], ...] = (
     {
@@ -302,31 +342,27 @@ def build_visible_capability_response(
         rendered_capabilities: list[dict[str, Any]] = []
         for capability in group["capabilities"]:
             signal_count = capability_signal_count(capability["terms"], run_summary=run_summary, artifacts=artifacts)
-            status = str(capability["status"])
+            rendered = render_capability(group, capability)
+            status = str(rendered["status"])
             status_counts[status] += 1
             total_signals += signal_count
             capability_count += 1
-            rendered_capabilities.append(
-                {
-                    "id": capability["id"],
-                    "label": capability["label"],
-                    "status": status,
-                    "status_label": STATUS_LABELS.get(status, status),
-                    "terms": list(capability["terms"]),
-                    "signal_count": signal_count,
-                    "has_signals": signal_count > 0,
-                }
-            )
+            rendered["signal_count"] = signal_count
+            rendered["has_signals"] = signal_count > 0
+            rendered_capabilities.append(rendered)
         rendered_groups.append(
             {
                 "id": group["id"],
                 "catalog_id": group["catalog_id"],
+                "tab": CATALOG_TABS.get(str(group["catalog_id"]), "artifacts"),
+                "workflow_stage": CATALOG_WORKFLOW_STAGES.get(str(group["catalog_id"]), "parse-review"),
                 "label": group["label"],
                 "capability_count": len(rendered_capabilities),
                 "signal_count": sum(int(item["signal_count"]) for item in rendered_capabilities),
                 "capabilities": rendered_capabilities,
             }
         )
+    contract_issues = validate_visible_capability_contract()
     return {
         "profile_version": PROFILE_VERSION,
         "status_labels": STATUS_LABELS,
@@ -336,9 +372,136 @@ def build_visible_capability_response(
             "signal_count": total_signals,
             "status_counts": dict(status_counts),
             "run_bound": run_summary is not None or artifacts is not None,
+            "gui_contract_pass": not contract_issues,
+            "gui_contract_issue_count": len(contract_issues),
+        },
+        "gui_contract": {
+            "profile_version": "visible-capability-gui-contract-v1",
+            "required_fields": [
+                "id",
+                "label",
+                "status",
+                "terms",
+                "tab",
+                "viewer",
+                "artifact_types",
+                "workflow_stage",
+                "next_action",
+                "gui_surfaces",
+            ],
+            "issue_count": len(contract_issues),
+            "issues": contract_issues,
         },
         "groups": rendered_groups,
     }
+
+
+def render_capability(group: Mapping[str, Any], capability: Mapping[str, Any]) -> dict[str, Any]:
+    catalog_id = str(group.get("catalog_id") or "")
+    status = str(capability.get("status") or "partial")
+    terms = tuple(str(term) for term in capability.get("terms") or ())
+    tab = str(capability.get("tab") or CATALOG_TABS.get(catalog_id, "artifacts"))
+    viewer = str(capability.get("viewer") or CATALOG_VIEWERS.get(catalog_id, "Artifact workbench"))
+    workflow_stage = str(
+        capability.get("workflow_stage") or CATALOG_WORKFLOW_STAGES.get(catalog_id, "parse-review")
+    )
+    artifact_types = tuple(
+        str(item)
+        for item in (
+            capability.get("artifact_types")
+            or capability.get("artifactTypes")
+            or infer_artifact_types(str(capability.get("id") or ""), terms)
+        )
+        if str(item)
+    )
+    gui_surfaces = tuple(
+        str(item)
+        for item in (
+            capability.get("gui_surfaces")
+            or capability.get("guiSurfaces")
+            or ("feature-catalog", "capability-chip", tab, viewer)
+        )
+        if str(item)
+    )
+    next_action = str(
+        capability.get("next_action")
+        or capability.get("nextAction")
+        or STATUS_NEXT_ACTIONS.get(status, "Review source evidence before reporting.")
+    )
+    return {
+        "id": str(capability.get("id") or ""),
+        "label": str(capability.get("label") or ""),
+        "status": status,
+        "status_label": STATUS_LABELS.get(status, status),
+        "terms": list(terms),
+        "tab": tab,
+        "viewer": viewer,
+        "artifact_types": list(artifact_types),
+        "workflow_stage": workflow_stage,
+        "next_action": next_action,
+        "gui_surfaces": list(gui_surfaces),
+        "gui_contract": {
+            "exposed": True,
+            "primary_tab": tab,
+            "primary_viewer": viewer,
+            "required_surfaces": list(gui_surfaces),
+        },
+    }
+
+
+def infer_artifact_types(capability_id: str, terms: Sequence[str]) -> tuple[str, ...]:
+    normalized_terms = tuple(term.replace(" ", "-").lower() for term in terms if term)
+    candidates = [capability_id]
+    candidates.extend(term for term in normalized_terms[:3] if term not in candidates)
+    return tuple(item for item in candidates if item)
+
+
+def validate_visible_capability_contract(
+    groups: Sequence[Mapping[str, Any]] = CAPABILITY_GROUPS,
+) -> list[dict[str, str]]:
+    issues: list[dict[str, str]] = []
+    seen_ids: set[str] = set()
+    required = (
+        "id",
+        "label",
+        "status",
+        "terms",
+        "tab",
+        "viewer",
+        "artifact_types",
+        "workflow_stage",
+        "next_action",
+        "gui_surfaces",
+    )
+    for group in groups:
+        group_id = str(group.get("id") or "")
+        catalog_id = str(group.get("catalog_id") or "")
+        if not group_id:
+            issues.append({"scope": "group", "id": "<missing>", "field": "id", "reason": "group id is required"})
+        if catalog_id not in CATALOG_TABS:
+            issues.append({"scope": "group", "id": group_id, "field": "catalog_id", "reason": "catalog must map to a GUI tab"})
+        for capability in group.get("capabilities") or ():
+            rendered = render_capability(group, capability)
+            capability_id = str(rendered["id"])
+            if capability_id in seen_ids:
+                issues.append(
+                    {"scope": "capability", "id": capability_id, "field": "id", "reason": "duplicate capability id"}
+                )
+            seen_ids.add(capability_id)
+            if rendered["status"] not in STATUS_LABELS:
+                issues.append({"scope": "capability", "id": capability_id, "field": "status", "reason": "unknown status"})
+            for field in required:
+                value = rendered.get(field)
+                if value is None or value == "" or value == []:
+                    issues.append(
+                        {
+                            "scope": "capability",
+                            "id": capability_id or "<missing>",
+                            "field": field,
+                            "reason": "required GUI contract field is empty",
+                        }
+                    )
+    return issues
 
 
 def capability_signal_count(
