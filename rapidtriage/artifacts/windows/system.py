@@ -1431,6 +1431,8 @@ def collect_explorer_cache_artifacts(root: Path) -> Iterable[ArtifactRecord]:
             continue
         artifact_type = "thumbnail-cache-file" if name.startswith("thumbcache_") else "icon-cache-file"
         stat_result = path.stat()
+        source_sha256 = compute_sha256(path)
+        signature_profile = explorer_cache_signature_profile(path)
         yield ArtifactRecord(
             provider=WindowsSystemArtifactsProvider.name,
             artifact_type=artifact_type,
@@ -1438,8 +1440,8 @@ def collect_explorer_cache_artifacts(root: Path) -> Iterable[ArtifactRecord]:
             supported=True,
             details={
                 **source_details(path, "windows-explorer-cache"),
-                "source_hashes": {"sha256": compute_sha256(path)},
-                "cache_signature_profile": explorer_cache_signature_profile(path),
+                "source_hashes": {"sha256": source_sha256},
+                "cache_signature_profile": signature_profile,
                 "cache_family": "thumbnail" if artifact_type == "thumbnail-cache-file" else "icon",
                 "cache_name": path.name,
                 "size": stat_result.st_size,
@@ -1461,6 +1463,172 @@ def collect_explorer_cache_artifacts(root: Path) -> Iterable[ArtifactRecord]:
                 ],
             },
         )
+        yield from build_explorer_cache_candidate_records(
+            path,
+            parent_artifact_type=artifact_type,
+            signature_profile=signature_profile,
+            source_sha256=source_sha256,
+        )
+
+
+def build_explorer_cache_candidate_records(
+    path: Path,
+    *,
+    parent_artifact_type: str,
+    signature_profile: Mapping[str, object],
+    source_sha256: str,
+) -> Iterable[ArtifactRecord]:
+    cache_family = "thumbnail" if parent_artifact_type == "thumbnail-cache-file" else "icon"
+    source_path = str(path.resolve())
+    entries = signature_profile.get("cache_entry_candidates")
+    if isinstance(entries, list):
+        for entry in entries:
+            if not isinstance(entry, Mapping):
+                continue
+            offset = explorer_cache_candidate_int(entry.get("offset"))
+            length = explorer_cache_candidate_int(entry.get("candidate_length"))
+            nearest_media = entry.get("nearest_embedded_media") if isinstance(entry.get("nearest_embedded_media"), Mapping) else {}
+            row_hash = explorer_cache_candidate_hash(source_sha256, "entry", entry)
+            yield ArtifactRecord(
+                provider=WindowsSystemArtifactsProvider.name,
+                artifact_type=f"{cache_family}-cache-entry-candidate",
+                path=source_path,
+                supported=True,
+                details={
+                    **source_details(path, "windows-explorer-cache-entry"),
+                    "source_hashes": {"sha256": source_sha256},
+                    "parent_artifact_type": parent_artifact_type,
+                    "cache_family": cache_family,
+                    "cache_name": path.name,
+                    "entry_index": explorer_cache_candidate_int(entry.get("entry_index")),
+                    "signature": str(entry.get("signature") or ""),
+                    "offset": offset,
+                    "candidate_end_offset": explorer_cache_candidate_int(entry.get("candidate_end_offset")),
+                    "candidate_length": length,
+                    "context_sha256": str(entry.get("context_sha256") or ""),
+                    "context_preview_hex": str(entry.get("context_preview_hex") or ""),
+                    "nearest_embedded_media": dict(nearest_media) if nearest_media else {},
+                    "row_hash": row_hash,
+                    "source_locator": {
+                        "viewer": "hex",
+                        "source_path": source_path,
+                        "parent_artifact_type": parent_artifact_type,
+                        "offset": offset,
+                        "length": length,
+                        "source_sha256": source_sha256,
+                        "row_hash": row_hash,
+                    },
+                    "cache_entry_review_profile": {
+                        "profile_version": "explorer-cache-entry-review-v1",
+                        "decode_status": str(entry.get("decode_status") or "signature-window-candidate"),
+                        "embedded_media_nearby": bool(nearest_media),
+                        "nearest_media_type": str(nearest_media.get("type") or "") if nearest_media else "",
+                        "nearest_media_offset": nearest_media.get("offset") if nearest_media else None,
+                        "nearest_media_sha256": str(nearest_media.get("sha256") or "") if nearest_media else "",
+                        "reportability": "triage-cache-entry-candidate",
+                        "next_validation": [
+                            "validate with a dedicated thumbnail/icon cache decoder",
+                            "correlate with file open evidence such as LNK, JumpList, ShellBags, MFT, and USN",
+                        ],
+                    },
+                    "risk_flags": unique_preserve_order(
+                        [
+                            "explorer-cache-entry-candidate",
+                            f"{cache_family}-cache-entry-candidate",
+                            "embedded-media-near-entry" if nearest_media else "",
+                        ]
+                    ),
+                    "validation_required": True,
+                    "validation_guidance": "CMMM signature windows are review pivots, not full thumbnail-cache entry decoding.",
+                    "commercial_grade_ready": False,
+                    "commercial_grade_blockers": [
+                        "thumbnail-cache-entry-structure-decoder-required",
+                        "thumbnail-cache-trusted-tool-diff-required",
+                    ],
+                },
+            )
+    media_candidates = signature_profile.get("embedded_media_candidates")
+    if isinstance(media_candidates, list):
+        for index, media in enumerate(media_candidates):
+            if not isinstance(media, Mapping):
+                continue
+            offset = explorer_cache_candidate_int(media.get("offset"))
+            length = explorer_cache_candidate_int(media.get("length"))
+            row_hash = explorer_cache_candidate_hash(source_sha256, "embedded-media", media)
+            yield ArtifactRecord(
+                provider=WindowsSystemArtifactsProvider.name,
+                artifact_type=f"{cache_family}-cache-media-candidate",
+                path=source_path,
+                supported=True,
+                details={
+                    **source_details(path, "windows-explorer-cache-embedded-media"),
+                    "source_hashes": {"sha256": source_sha256},
+                    "parent_artifact_type": parent_artifact_type,
+                    "cache_family": cache_family,
+                    "cache_name": path.name,
+                    "media_index": index,
+                    "media_type": str(media.get("type") or ""),
+                    "offset": offset,
+                    "end_offset": explorer_cache_candidate_int(media.get("end_offset")),
+                    "length": length,
+                    "media_sha256": str(media.get("sha256") or ""),
+                    "header_hex": str(media.get("header_hex") or ""),
+                    "footer_hex": str(media.get("footer_hex") or ""),
+                    "extraction_status": str(media.get("extraction_status") or "bounded-candidate"),
+                    "row_hash": row_hash,
+                    "source_locator": {
+                        "viewer": "embedded-media-range",
+                        "source_path": source_path,
+                        "parent_artifact_type": parent_artifact_type,
+                        "offset": offset,
+                        "length": length,
+                        "media_type": str(media.get("type") or ""),
+                        "source_sha256": source_sha256,
+                        "row_hash": row_hash,
+                    },
+                    "cache_media_review_profile": {
+                        "profile_version": "explorer-cache-media-review-v1",
+                        "bounded_extraction_available": True,
+                        "image_content_not_rendered_inline": True,
+                        "reportability": "triage-embedded-media-candidate",
+                        "next_validation": [
+                            "export and hash the candidate range before report inclusion",
+                            "correlate with source file path evidence and user activity artifacts",
+                        ],
+                    },
+                    "risk_flags": unique_preserve_order(
+                        [
+                            "explorer-cache-embedded-media-candidate",
+                            f"{cache_family}-cache-media-candidate",
+                        ]
+                    ),
+                    "validation_required": True,
+                    "validation_guidance": "Embedded media signatures inside Explorer cache are bounded candidates; confirm with a full cache decoder and source-file correlation.",
+                    "commercial_grade_ready": False,
+                    "commercial_grade_blockers": [
+                        "thumbnail-cache-media-extraction-validation-required",
+                        "thumbnail-cache-source-file-correlation-required",
+                    ],
+                },
+            )
+
+
+def explorer_cache_candidate_int(value: object) -> int:
+    try:
+        return int(value or 0)
+    except (TypeError, ValueError):
+        return 0
+
+
+def explorer_cache_candidate_hash(source_sha256: str, candidate_kind: str, candidate: Mapping[str, object]) -> str:
+    payload = {
+        "source_sha256": source_sha256,
+        "candidate_kind": candidate_kind,
+        "offset": candidate.get("offset"),
+        "length": candidate.get("candidate_length") or candidate.get("length"),
+        "sha256": candidate.get("sha256") or candidate.get("context_sha256"),
+    }
+    return hashlib.sha256(json.dumps(payload, sort_keys=True, default=str).encode("utf-8")).hexdigest()
 
 
 def collect_activity_notification_uwp_artifacts(root: Path) -> Iterable[ArtifactRecord]:

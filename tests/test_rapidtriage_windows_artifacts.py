@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import contextlib
 import json
 import sqlite3
 import tempfile
@@ -585,7 +586,10 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
             payload = json.loads(output.read_text(encoding="utf-8"))
             type_counts = payload["summary"]["artifact_type_counts"]
             self.assertGreaterEqual(type_counts.get("thumbnail-cache-file", 0), 1)
+            self.assertGreaterEqual(type_counts.get("thumbnail-cache-entry-candidate", 0), 1)
+            self.assertGreaterEqual(type_counts.get("thumbnail-cache-media-candidate", 0), 1)
             self.assertGreaterEqual(type_counts.get("icon-cache-file", 0), 1)
+            self.assertGreaterEqual(type_counts.get("icon-cache-entry-candidate", 0), 1)
             self.assertGreaterEqual(type_counts.get("activities-cache-db", 0), 1)
             self.assertGreaterEqual(type_counts.get("activities-cache-row-candidate", 0), 1)
             self.assertGreaterEqual(type_counts.get("notification-database", 0), 1)
@@ -755,6 +759,27 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
                 "jpeg",
             )
             self.assertEqual(thumbnail["details"]["cache_signature_profile"]["entry_decode_status"], "cmmm-entry-candidates")
+            thumbnail_entry = next(
+                artifact for artifact in payload["artifacts"] if artifact["artifact_type"] == "thumbnail-cache-entry-candidate"
+            )
+            self.assertEqual(thumbnail_entry["details"]["signature"], "CMMM")
+            self.assertEqual(thumbnail_entry["details"]["source_locator"]["viewer"], "hex")
+            self.assertEqual(thumbnail_entry["details"]["source_locator"]["offset"], 0)
+            self.assertEqual(thumbnail_entry["details"]["cache_entry_review_profile"]["nearest_media_type"], "jpeg")
+            self.assertIn("embedded-media-near-entry", thumbnail_entry["details"]["risk_flags"])
+            self.assertFalse(thumbnail_entry["details"]["commercial_grade_ready"])
+            thumbnail_media = next(
+                artifact for artifact in payload["artifacts"] if artifact["artifact_type"] == "thumbnail-cache-media-candidate"
+            )
+            self.assertEqual(thumbnail_media["details"]["media_type"], "jpeg")
+            self.assertEqual(thumbnail_media["details"]["source_locator"]["viewer"], "embedded-media-range")
+            self.assertEqual(len(thumbnail_media["details"]["media_sha256"]), 64)
+            self.assertFalse(thumbnail_media["details"]["commercial_grade_ready"])
+            icon_entry = next(
+                artifact for artifact in payload["artifacts"] if artifact["artifact_type"] == "icon-cache-entry-candidate"
+            )
+            self.assertEqual(icon_entry["details"]["cache_family"], "icon")
+            self.assertEqual(icon_entry["details"]["cache_entry_review_profile"]["embedded_media_nearby"], False)
             web_log = next(
                 artifact
                 for artifact in payload["artifacts"]
@@ -4193,7 +4218,7 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
             )
             recall_root.mkdir(parents=True)
             db_path = recall_root / "ukg.db"
-            with sqlite3.connect(db_path) as connection:
+            with contextlib.closing(sqlite3.connect(db_path)) as connection:
                 connection.execute(
                     "CREATE TABLE WindowCaptureText (AppName TEXT, WindowTitle TEXT, OCRText TEXT, Timestamp INTEGER)"
                 )

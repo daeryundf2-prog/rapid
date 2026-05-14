@@ -240,6 +240,27 @@ CAPABILITY_GROUPS: tuple[dict[str, Any], ...] = (
                 "terms": ("windows.edb", "edb", "ese", "search index", "windows-search-edb-row-candidate"),
             },
             {"id": "ntfs-mft-usn-path-replay", "label": "MFT/USN 경로 재구성", "status": "partial", "terms": ("mft", "usn", "frn", "rename", "delete")},
+            {
+                "id": "explorer-thumbnail-icon-cache",
+                "label": "Explorer thumbnail/icon cache",
+                "status": "partial",
+                "artifact_types": (
+                    "thumbnail-cache-file",
+                    "thumbnail-cache-entry-candidate",
+                    "thumbnail-cache-media-candidate",
+                    "icon-cache-file",
+                    "icon-cache-entry-candidate",
+                    "icon-cache-media-candidate",
+                ),
+                "terms": (
+                    "thumbcache",
+                    "iconcache",
+                    "thumbnail-cache-entry-candidate",
+                    "thumbnail-cache-media-candidate",
+                    "icon-cache-entry-candidate",
+                    "explorer-cache-entry-candidate",
+                ),
+            },
         ),
     },
     {
