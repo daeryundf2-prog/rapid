@@ -5978,6 +5978,33 @@ button:hover,
   gap: 5px;
 }
 
+.docs-index-sidecar-search {
+  border: 1px solid rgba(64, 213, 255, 0.35);
+  background:
+    linear-gradient(135deg, rgba(14, 116, 144, 0.18), rgba(15, 23, 42, 0.78)),
+    #142231;
+  margin: 10px 0;
+}
+
+.docs-index-sidecar-results {
+  display: grid;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.docs-index-sidecar-table td span,
+.docs-index-sidecar-table td small {
+  color: #9db2c6;
+  display: block;
+  font-size: 0.7rem;
+  margin-top: 2px;
+  overflow-wrap: anywhere;
+}
+
+.docs-index-sidecar-metrics {
+  flex-wrap: wrap;
+}
+
 @media (max-width: 1180px) {
   .lazyweb-command-center {
     grid-template-columns: 1fr;

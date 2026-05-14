@@ -75,6 +75,7 @@ let workbenchFilterTimer = null;
 const pageOffsets = { timeline: 0, artifacts: 0, files: 0, docs: 0, indicators: 0 };
 const virtualWindowOffsets = { search: 0, caseDb: 0 };
 let currentSearchPayload = null;
+let currentDocsIndexSearchPayload = null;
 let currentCaseDbSearchPayload = null;
 
 async function api(path, options = {}) {
@@ -177,6 +178,10 @@ function renderEmptyRunList() {
 }
 
 async function loadRunDetail(runId, tab = "summary") {
+  if (selectedRunId !== runId) {
+    currentSearchPayload = null;
+    currentDocsIndexSearchPayload = null;
+  }
   selectedRunId = runId;
   document.body.classList.add("analysis-active");
   loadVirtualWindowOffsets();
@@ -3026,6 +3031,7 @@ function renderSearch(payload = null) {
       <button id="unifiedSearchButton" type="submit">Search evidence</button>
     </form>
     ${renderRecentSearchChips()}
+    ${renderDocsIndexSidecarSearch(currentDocsIndexSearchPayload, draft)}
     <div class="preset-row" aria-label="Keyword presets">
       ${SEARCH_PRESETS.map((preset) => `<button class="preset-chip" type="button" data-keywords="${escapeHtml(preset.keywords.join(", "))}">${escapeHtml(preset.label)}</button>`).join("")}
     </div>
@@ -3040,6 +3046,72 @@ function renderSearch(payload = null) {
         ${payload ? renderSearchResults(payload, rows) : '<p class="empty-state">Enter one or more keywords. Separate multiple terms with commas.</p>'}
       </div>
     </section>
+  `;
+}
+
+function renderDocsIndexSidecarSearch(payload = null, draft = {}) {
+  const terms = (payload?.query?.terms || draft.keywords || []).join(", ");
+  return `
+    <section class="docs-index-sidecar-search search-verification-card compact" data-testid="docs-index-sidecar-search">
+      <div>
+        <p class="eyebrow">fast document index</p>
+        <h3>Search saved docs-index sidecar</h3>
+        <p>PDF/Office/mail text extraction 결과를 다시 열지 않고 <code>rapidtriage-docs-index.json</code> postings를 빠르게 조회합니다. 본문은 저장하지 않으므로 source viewer로 문맥 검증이 필요합니다.</p>
+      </div>
+      <div class="mini-stat-row">
+        <span>command: docs-index-search</span>
+        <span>stores_full_text=false</span>
+        <span>limit cap 5000</span>
+      </div>
+      <button id="docsIndexSearchButton" class="secondary-button" type="button">Search docs-index with current keywords</button>
+      <div id="docsIndexSearchResults" class="docs-index-sidecar-results" aria-live="polite">
+        ${payload ? renderDocsIndexSidecarResults(payload) : `<p class="help-text">Current keywords: ${escapeHtml(terms || "none yet")}</p>`}
+      </div>
+    </section>
+  `;
+}
+
+function renderDocsIndexSidecarResults(payload) {
+  const summary = payload.summary || {};
+  const rows = payload.results || [];
+  const warning = payload.api_profile?.reportability_warning || "Open source viewer before reporting docs-index hits.";
+  if (!rows.length) {
+    return `
+      <p class="help-text">${escapeHtml(warning)}</p>
+      <p class="empty-state">No docs-index sidecar hits for ${escapeHtml((payload.query?.terms || []).join(", ") || "current keywords")}.</p>
+    `;
+  }
+  return `
+    <div class="mini-stat-row docs-index-sidecar-metrics">
+      <span>${formatNumber(summary.matched_document_count || 0)} matched document(s)</span>
+      <span>${formatNumber(summary.returned_result_count || 0)} returned</span>
+      <span>${summary.truncated ? "truncated; narrow or re-run" : "not truncated"}</span>
+      <span>${summary.stores_full_text === false ? "no full text stored" : "text storage unknown"}</span>
+    </div>
+    <p class="help-text">${escapeHtml(warning)}</p>
+    <table class="data-table compact docs-index-sidecar-table">
+      <thead><tr><th>Document</th><th>Matched terms</th><th>Score</th><th>Verify</th></tr></thead>
+      <tbody>
+        ${rows.slice(0, 50).map((result, index) => {
+          const match = {
+            path: result.path,
+            title: fileName(result.path),
+            source: "documents",
+            kind: result.kind || "docs-index",
+            matched_keywords: (result.matched_terms || []).map((item) => item.term),
+            preview: `docs-index score ${result.score || 0}; source viewer verification required`,
+          };
+          return `
+            <tr data-viewer-row-path="${escapeHtml(result.path || "")}" data-search-result-index="docs-index-${escapeHtml(index)}">
+              <td><strong>${escapeHtml(fileName(result.path) || result.path || "document")}</strong><span>${escapeHtml(result.path || "")}</span><small>${escapeHtml(result.source_locator || "")}</small></td>
+              <td>${escapeHtml((result.matched_terms || []).map((item) => `${item.term}:${item.count}`).join(", "))}</td>
+              <td>${escapeHtml(result.score || 0)}</td>
+              <td class="action-stack">${result.path ? reviewActionButtons(match, `docs-index-${index}`) : ""}</td>
+            </tr>
+          `;
+        }).join("")}
+      </tbody>
+    </table>
   `;
 }
 
@@ -3466,7 +3538,43 @@ function bindSearchForm() {
   });
   bindSearchResultButtons();
   bindSearchPresetButtons(form);
+  bindDocsIndexSidecarSearch();
   bindVirtualWindowButtons();
+}
+
+function bindDocsIndexSidecarSearch() {
+  const button = detailPanel.querySelector("#docsIndexSearchButton");
+  const output = detailPanel.querySelector("#docsIndexSearchResults");
+  const input = detailPanel.querySelector("#unifiedSearchInput");
+  if (!button || !output || !input || button.dataset.docsIndexBound) return;
+  button.dataset.docsIndexBound = "1";
+  button.addEventListener("click", async () => {
+    const keywords = String(input.value || "")
+      .split(",")
+      .map((item) => item.trim())
+      .filter(Boolean);
+    if (!keywords.length || !selectedRunId) {
+      output.innerHTML = '<p class="empty-state">Enter one or more keywords first.</p>';
+      return;
+    }
+    button.disabled = true;
+    button.textContent = "Searching docs-index...";
+    output.innerHTML = '<p class="help-text">Querying processed-text sidecar...</p>';
+    try {
+      const params = new URLSearchParams();
+      for (const keyword of keywords) params.append("keyword", keyword);
+      params.set("limit", "500");
+      const payload = await api(`/api/runs/${selectedRunId}/docs-index-search?${params.toString()}`);
+      currentDocsIndexSearchPayload = payload;
+      output.innerHTML = renderDocsIndexSidecarResults(payload);
+      bindSearchResultButtons();
+    } catch (error) {
+      output.innerHTML = `<p class="empty-state">${escapeHtml(error.message)}. If this run has no docs-index sidecar, run a new case scan or use normal search.</p>`;
+    } finally {
+      button.disabled = false;
+      button.textContent = "Search docs-index with current keywords";
+    }
+  });
 }
 
 function bindSearchResultButtons() {

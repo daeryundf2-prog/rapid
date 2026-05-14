@@ -32,7 +32,7 @@ from ..core.case_report import build_case_report_markdown, case_report_export_pa
 from ..core.case_db import CaseDatabaseError, open_case_database
 from ..core.collect_plan import CollectPlanError, build_collect_plan, supported_collect_profiles
 from ..core.crash import export_crash_report_bundle, list_crash_reports, read_crash_report, write_crash_report
-from ..core.docs import SUPPORTED_DOC_EXTS, TEXT_EXTS, extract_text
+from ..core.docs import SUPPORTED_DOC_EXTS, TEXT_EXTS, extract_text, query_docs_index
 from ..core.doctor import run_doctor
 from ..core.enterprise import build_enterprise_policy
 from ..core.evidence import identify_evidence, supported_evidence_formats
@@ -1091,6 +1091,38 @@ def create_app(job_store: RunJobStore | None = None, auth_token: str | None = No
     ) -> Dict[str, object]:
         payload = get_named_output(store, run_id, "docs")
         return paginate_payload(payload, "results", offset=offset, limit=limit, cursor=cursor, omit_fields=("candidates", "manifest"))
+
+    @api.get("/api/runs/{run_id}/docs-index-search")
+    def search_run_docs_index(
+        run_id: str,
+        keyword: list[str] = Query(..., min_length=1),
+        limit: int = Query(500, ge=1, le=5000),
+    ) -> Dict[str, object]:
+        index_path = get_output_path(store, run_id, "docs_index")
+        try:
+            payload = query_docs_index(index_path, keyword, limit=limit)
+        except (OSError, json.JSONDecodeError, ValueError) as exc:
+            raise HTTPException(status_code=409, detail=str(exc))
+        for result in payload.get("results", []):
+            if not isinstance(result, dict) or not result.get("path"):
+                continue
+            result["source_viewer_url"] = (
+                f"/api/runs/{run_id}/source-preview?path={quote(str(result['path']))}"
+            )
+            result["source_search_url"] = (
+                f"/api/runs/{run_id}/source-search?path={quote(str(result['path']))}"
+            )
+        payload["run_id"] = run_id
+        payload["api_profile"] = {
+            "profile_version": "docs-index-search-api-v1",
+            "output_name": "docs_index",
+            "gui_binding": "docs-index-sidecar-search",
+            "source_verification_required": True,
+            "reportability_warning": (
+                "Docs-index hits are fast leads only; open the source viewer or source-search hit context before reporting."
+            ),
+        }
+        return payload
 
     @api.get("/api/runs/{run_id}/search")
     def search_run(

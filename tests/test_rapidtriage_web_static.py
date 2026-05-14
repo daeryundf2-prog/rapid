@@ -114,6 +114,11 @@ class RapidTriageWebStaticTests(unittest.TestCase):
         self.assertIn("renderEmailParseDiagnostics", app_js)
         self.assertIn("data-testid=\"email-parse-diagnostics\"", app_js)
         self.assertIn("Do not conclude the mailbox is complete", app_js)
+        self.assertIn("renderDocsIndexSidecarSearch", app_js)
+        self.assertIn("data-testid=\"docs-index-sidecar-search\"", app_js)
+        self.assertIn("docs-index-search", app_js)
+        self.assertIn("/docs-index-search?", app_js)
+        self.assertIn("stores_full_text=false", app_js)
         self.assertIn("artifact-tree-lane", styles)
         self.assertIn("review-bulk-toolbar", styles)
         self.assertIn("sqlite-schema-panel", styles)
@@ -121,6 +126,7 @@ class RapidTriageWebStaticTests(unittest.TestCase):
         self.assertIn("sqlite-sidecar-card", styles)
         self.assertIn("sqlite-sidecar-chip", styles)
         self.assertIn("email-diagnostics-card", styles)
+        self.assertIn("docs-index-sidecar-search", styles)
 
     def test_lazyweb_command_center_is_connected_to_workbench_tabs(self) -> None:
         app_js = (REPO_ROOT / "rapidtriage" / "web" / "static" / "app.js").read_text(encoding="utf-8")
