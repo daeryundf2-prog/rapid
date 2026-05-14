@@ -29,7 +29,7 @@ Current state when the internal `#1-#120` known-answer validation package is att
 Current user-visible taxonomy gate:
 
 - `taxonomy-audit --strict`: pass
-- User-visible forensic targets: `48/48` covered
+- User-visible forensic targets: `51/51` covered
 - Artifact collector count: `23`
 - Artifact type literals/dynamic registrations: `171`
 

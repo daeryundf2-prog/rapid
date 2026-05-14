@@ -9,7 +9,7 @@ Status baseline from the latest local review:
 - Readiness score: `79`
 - Commercial claim allowed: `false`
 - Maturity gates: implemented `120/120`, usable `120/120`, validated `0/120`, commercial-grade `0/120`
-- Taxonomy audit: `48/48` covered, partial `0`, missing `0`, strict pass `true`, artifact type literals `146`
+- Taxonomy audit: `51/51` covered, partial `0`, missing `0`, strict pass `true`, artifact type literals `191`
 
 ## Completion Categories
 

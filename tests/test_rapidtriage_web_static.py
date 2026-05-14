@@ -105,10 +105,18 @@ class RapidTriageWebStaticTests(unittest.TestCase):
         self.assertIn("renderSqliteSchemaPanel", app_js)
         self.assertIn("data-testid=\"sqlite-schema-panel\"", app_js)
         self.assertIn("Schema visibility", app_js)
+        self.assertIn("renderSqliteSidecarState", app_js)
+        self.assertIn("data-testid=\"sqlite-sidecar-state\"", app_js)
+        self.assertIn("requires_wal_review", app_js)
+        self.assertIn("sqlite-sidecar-warning", app_js)
+        self.assertIn("sqlite-wal-preview", app_js)
+        self.assertIn("estimated_frame_count", app_js)
         self.assertIn("artifact-tree-lane", styles)
         self.assertIn("review-bulk-toolbar", styles)
         self.assertIn("sqlite-schema-panel", styles)
         self.assertIn("sqlite-column-chip", styles)
+        self.assertIn("sqlite-sidecar-card", styles)
+        self.assertIn("sqlite-sidecar-chip", styles)
 
     def test_lazyweb_command_center_is_connected_to_workbench_tabs(self) -> None:
         app_js = (REPO_ROOT / "rapidtriage" / "web" / "static" / "app.js").read_text(encoding="utf-8")

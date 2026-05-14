@@ -3723,6 +3723,87 @@ mark {
   color: var(--muted);
 }
 
+.sqlite-sidecar-card {
+  display: grid;
+  gap: 10px;
+  margin: 10px 0;
+  padding: 12px;
+  border: 1px solid rgba(15, 116, 107, 0.18);
+  border-radius: 12px;
+  background: #f7fbfa;
+}
+
+.sqlite-sidecar-card.warning {
+  border-color: rgba(178, 87, 44, 0.32);
+  background: #fff6ec;
+}
+
+.sqlite-sidecar-card.ok {
+  border-color: rgba(43, 118, 82, 0.25);
+  background: #f3fbf6;
+}
+
+.sqlite-sidecar-warning {
+  margin: 0;
+}
+
+.sqlite-sidecar-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 8px;
+}
+
+.sqlite-sidecar-chip {
+  display: grid;
+  gap: 2px;
+  border: 1px solid rgba(31, 111, 104, 0.16);
+  border-radius: 10px;
+  background: #fff;
+  padding: 8px;
+}
+
+.sqlite-sidecar-chip.detected {
+  border-color: rgba(178, 87, 44, 0.28);
+  background: #fffaf4;
+}
+
+.sqlite-sidecar-chip strong {
+  color: var(--ink);
+}
+
+.sqlite-sidecar-chip span {
+  color: var(--accent-strong);
+  font-weight: 800;
+}
+
+.sqlite-sidecar-chip.missing span {
+  color: var(--muted);
+}
+
+.sqlite-sidecar-chip small,
+.sqlite-sidecar-action small {
+  color: var(--muted);
+}
+
+.sqlite-wal-header {
+  margin: 0;
+}
+
+.sqlite-sidecar-action {
+  display: grid;
+  gap: 4px;
+  padding: 8px;
+  border: 1px dashed rgba(15, 116, 107, 0.22);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.72);
+}
+
+.sqlite-sidecar-action code {
+  overflow-wrap: anywhere;
+  color: var(--accent-strong);
+  font-size: 0.78rem;
+}
+
 .sqlite-schema-panel {
   margin: 10px 0;
   border: 1px solid rgba(15, 116, 107, 0.16);
@@ -5765,6 +5846,7 @@ button:hover,
 .file-search-form,
 .file-search-results,
 .sqlite-page-card,
+.sqlite-sidecar-card,
 .sqlite-schema-panel {
   margin: 5px 0;
   border-radius: 2px;
@@ -5781,7 +5863,9 @@ button:hover,
 .viewer-evidence-card,
 .viewer-action-card,
 .metric,
-.sqlite-column-chip {
+.sqlite-column-chip,
+.sqlite-sidecar-chip,
+.sqlite-sidecar-action {
   border-radius: 2px;
   background: #1d2834;
   padding: 5px;

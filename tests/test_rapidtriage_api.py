@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import sqlite3
+import struct
 import tempfile
 import unittest
 import wave
@@ -34,6 +35,7 @@ if HAS_FASTAPI:
         build_source_search,
         encode_source_search_file_resume_token,
         encode_source_search_resume_token,
+        sqlite_wal_sidecar_info,
         build_sqlite_viewer_trusted_diff,
         build_ui_virtualization_trusted_diff,
         build_ui_virtualization_manifest,
@@ -338,6 +340,52 @@ class RapidTriageApiTests(unittest.TestCase):
         self.assertTrue(diagnostics["source_truncated"])
         self.assertEqual(diagnostics["message_size_truncated_count"], 1)
         self.assertEqual(payload["email"]["messages"][0]["subject"], "Large bounded EML")
+
+    def test_source_preview_sqlite_discloses_sidecar_review_state(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            db_path = Path(temp) / "chat.db"
+            connection = sqlite3.connect(db_path)
+            try:
+                connection.execute("CREATE TABLE messages(id INTEGER PRIMARY KEY, body TEXT)")
+                connection.execute("INSERT INTO messages(body) VALUES ('sidecar visible')")
+                connection.commit()
+            finally:
+                connection.close()
+            db_path.with_name(db_path.name + "-shm").write_bytes(b"rapidtriage-shm-present")
+
+            payload = build_source_preview("run-1", db_path)
+
+        self.assertEqual(payload["preview_type"], "sqlite")
+        profile = payload["sqlite"]["sidecar_state_profile"]
+        self.assertTrue(profile["shm_detected"])
+        self.assertTrue(profile["requires_wal_review"])
+        self.assertFalse(profile["wal_detected"])
+        self.assertIn("sqlite-wal-preview", profile["recommended_cli"])
+        self.assertIn("sidecar", profile["source_viewer_warning"].lower())
+        self.assertEqual(
+            payload["sqlite"]["sqlite_preview_manifest"]["database"]["sidecar_state_profile_hash"],
+            profile["profile_hash"],
+        )
+        self.assertIn("wal-shm-journal-sidecar-status", payload["sqlite"]["review_features"])
+        controls = payload["sqlite"]["commercial_uplift_evidence"]["reportability_decision"]["control_snapshot"]
+        self.assertTrue(controls["sqlite_sidecar_review_required"])
+
+    def test_sqlite_wal_sidecar_header_profile_counts_frames(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            wal_path = Path(temp) / "chat.db-wal"
+            wal_path.write_bytes(
+                struct.pack(">IIIIIIII", 0x377F0683, 3007000, 1024, 7, 1, 2, 3, 4)
+                + struct.pack(">IIIIII", 1, 0, 1, 2, 3, 4)
+                + (b"\0" * 1024)
+            )
+
+            info = sqlite_wal_sidecar_info(wal_path)
+
+        self.assertTrue(info["exists"])
+        self.assertEqual(info["header"]["status"], "parsed")
+        self.assertEqual(info["header"]["magic_hex"], "0x377f0683")
+        self.assertEqual(info["header"]["page_size"], 1024)
+        self.assertEqual(info["header"]["estimated_frame_count"], 1)
 
     def test_source_search_rejects_oversized_docx_member_before_expanding(self) -> None:
         with tempfile.TemporaryDirectory() as temp:

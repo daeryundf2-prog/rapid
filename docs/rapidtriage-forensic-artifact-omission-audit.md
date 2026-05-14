@@ -131,8 +131,8 @@ non-zero exit code while any taxonomy target remains incomplete.
 
 Current guardrail status after the first closure pass:
 
-- Taxonomy targets: 48.
-- Covered bindings: 48.
+- Taxonomy targets: 51.
+- Covered bindings: 51.
 - Partial bindings: 0.
 - Missing bindings: 0.
 - Collector families: 21.

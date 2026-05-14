@@ -9,7 +9,7 @@ Last updated: 2026-05-11
 - Commercial readiness score: `79`
 - Commercial claim allowed: `false`
 - Maturity gates: implemented `120/120`, usable `120/120`, validated `0/120`, commercial-grade `0/120`
-- Taxonomy audit: `48/48` targets covered, partial `0`, missing `0`, strict pass `true`, artifact type literals `146`
+- Taxonomy audit: `51/51` targets covered, partial `0`, missing `0`, strict pass `true`, artifact type literals `191`
 
 Interpretation: RapidForensic has broad internal feature coverage and a usable single-case scaffold, but QC should not be treated as final acceptance yet. The next work must turn broad coverage into source-verifiable, large-case-tolerant, trusted-diff-ready workflows.
 

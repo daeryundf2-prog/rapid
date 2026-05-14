@@ -40,7 +40,7 @@
 
 따라서 GUI에는 collector 23개만 보여주면 안 된다. 최소한 artifact type과 parser stage까지 펼쳐야 한다.
 
-현재 `taxonomy-audit` 기준 사용자 노출 forensic target은 48개이며, 동적 artifact type까지 포함해 48/48개가 GUI/QC 바인딩을 가진다. 이 수치는 "상용급 검증 완료"가 아니라 "사용자가 기능을 찾고 실행/검토할 수 있는 노출 계약이 빠지지 않는다"는 의미다.
+현재 `taxonomy-audit` 기준 사용자 노출 forensic target은 51개이며, 동적 artifact type까지 포함해 51/51개가 GUI/QC 바인딩을 가진다. 이 수치는 "상용급 검증 완료"가 아니라 "사용자가 기능을 찾고 실행/검토할 수 있는 노출 계약이 빠지지 않는다"는 의미다.
 
 ## 2. 최상위 사용자 기능 그룹
 
@@ -1252,3 +1252,28 @@ USB, Wi-Fi, 인쇄, BITS는 이전까지 별도 파일/레지스트리/프로필
 1. provider/channel 기반 분류는 triage-grade다. 실제 “USB 연결됨”, “Wi-Fi 접속됨”, “문서 출력됨”, “BITS 유출됨” 결론은 provider-rendered message, source event ID semantics, 독립 아티팩트 상관 후에만 가능하다.
 2. 현재 내장 message template은 분석 편의용 fallback이며 Windows provider DLL/resource table renderer가 아니다.
 3. BITS/PrintService는 이벤트와 파일 아티팩트가 모두 존재할 때 강해진다. 단일 EventLog row만으로 전송/출력 사실을 최종 단정하지 않는다.
+
+## 40. 2026-05-14 구현 반영: SQLite WAL/SHM/journal sidecar review 노출
+
+SQLite 기반 아티팩트는 브라우저 History, 카카오톡, Sticky Notes, BITS/클라우드 sync DB, desktop AI 앱 DB처럼 포렌식에서 자주 등장한다. 기존 source viewer는 read-only table preview와 pagination API를 제공했지만, 같은 폴더의 `-wal`, `-shm`, `-journal` sidecar 존재를 UI에서 충분히 강하게 보여주지 못했다. 이 상태에서는 분석자가 preview row만 보고 "DB에 없다"고 오판할 위험이 있다.
+
+이번 라운드에서는 SQLite viewer에 sidecar 상태 프로필을 추가하고 GUI에 독립 카드로 노출했다.
+
+| 사용자 노출 기능 | 연결 field/UI | 구현 내용 | 남은 상용급 보강 |
+| --- | --- | --- | --- |
+| SQLite sidecar 상태 감지 | `sqlite.sidecar_state_profile` | DB 옆의 `-wal`, `-shm`, `-journal` 존재, 크기, mtime, hash policy, 검토 필요 여부를 source viewer payload에 포함한다. | sidecar 전체 해시/복사본 보존, checkpoint 전후 DB diff, deleted row recovery |
+| WAL header triage | `sidecars.wal.header` | WAL magic/version/page size/checkpoint sequence/salt/checksum/estimated frame count를 bounded header read로 계산한다. | frame checksum validation, page-level row mapping, trusted SQLite/WAL parser diff |
+| GUI review 경고 | `renderSqliteSidecarState`, `sqlite-sidecar-card` | SQLite preview 상단에 WAL/SHM/journal 감지 여부와 `rapidtriage sqlite-wal-preview` 후속 명령을 보여준다. | browser E2E, WAL preview output을 같은 viewer에서 바로 여는 workflow |
+| 보고서 제한 근거 | `sqlite_preview_manifest.database.sidecar_state_profile_hash` | preview manifest에 sidecar profile hash를 넣어 "sidecar 검토 전 preview는 완전하지 않다"는 제한을 citation에 남길 수 있게 했다. | 법정 제출용 sidecar acquisition manifest, 외부 도구 diff package |
+
+검증 포인트:
+
+1. `tests/test_rapidtriage_api.py::test_source_preview_sqlite_discloses_sidecar_review_state`가 SQLite source preview에서 SHM sidecar를 감지하고 `requires_wal_review`, manifest hash, GUI review feature가 노출되는지 검증한다.
+2. `tests/test_rapidtriage_api.py::test_sqlite_wal_sidecar_header_profile_counts_frames`가 WAL header magic/page size/estimated frame count parser를 검증한다.
+3. `tests/test_rapidtriage_web_static.py::test_workbench_review_queue_and_schema_visibility_contracts`가 `renderSqliteSidecarState`, `sqlite-sidecar-card`, `sqlite-wal-preview`, `estimated_frame_count`가 GUI 정적 계약에 포함되는지 확인한다.
+
+중요한 제한:
+
+1. 이 변경은 sidecar 존재와 WAL header를 보여주는 triage 기능이다. WAL frame replay나 deleted row recovery를 완료했다는 뜻이 아니다.
+2. GUI preview row는 sidecar 검토 전까지 "현재 read-only snapshot의 제한된 미리보기"로만 표현해야 한다.
+3. 상용급으로 올리려면 실제 브라우저/카카오톡/Sticky Notes WAL fixture, checkpoint 전후 known-answer, SQLite CLI 또는 검증된 WAL parser와 row 단위 diff가 필요하다.

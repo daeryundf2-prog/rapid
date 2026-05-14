@@ -12,6 +12,7 @@ import datetime as dt
 import wave
 import base64
 import binascii
+import struct
 from email import policy
 from pathlib import Path
 from typing import Any, Dict, Mapping, MutableMapping, Optional, Sequence
@@ -64,6 +65,9 @@ SQLITE_PREVIEW_ROW_LIMIT = 10
 SQLITE_PREVIEW_COLUMN_LIMIT = 12
 SQLITE_TABLE_PAGE_MAX_ROWS = 500
 SQLITE_SOURCE_SEARCH_ROW_SCAN_LIMIT = 100_000
+SQLITE_WAL_HEADER_SIZE = 32
+SQLITE_WAL_FRAME_HEADER_SIZE = 24
+SQLITE_WAL_MAGIC_VALUES = {0x377F0682: "big-endian", 0x377F0683: "little-endian"}
 STRUCTURED_PREVIEW_MAX_BYTES = 5 * 1024 * 1024
 JSON_PREVIEW_ITEM_LIMIT = 50
 XML_PREVIEW_NODE_LIMIT = 80
@@ -4370,6 +4374,7 @@ def build_sqlite_preview(source_path: Path, *, run_id: str | None = None) -> Dic
         "sqlite": {
             "table_count": len(tables),
             "database_metadata": database_metadata,
+            "sidecar_state_profile": database_metadata.get("sidecar_state_profile", {}),
             "tables": previews,
             "table_profiles": build_sqlite_table_profiles(previews),
             "table_page_profile": table_page_profile,
@@ -4430,6 +4435,11 @@ def build_sqlite_preview(source_path: Path, *, run_id: str | None = None) -> Dic
                     "sqlite_preview_manifest_hash": sqlite_manifest["manifest_hash"],
                     "sqlite_preview_table_hash_count": sqlite_manifest["table_hash_count"],
                     "sqlite_preview_row_hash_count": sqlite_manifest["row_hash_count"],
+                    "sqlite_sidecar_state_profile": database_metadata.get("sidecar_state_profile", {}),
+                    "sqlite_sidecar_review_required": bool(
+                        isinstance(database_metadata.get("sidecar_state_profile"), Mapping)
+                        and database_metadata["sidecar_state_profile"].get("requires_wal_review")
+                    ),
                 },
             ),
             "sqlite_fts_optimization_assessment": source_viewer_component_assessment(
@@ -4450,6 +4460,7 @@ def build_sqlite_preview(source_path: Path, *, run_id: str | None = None) -> Dic
                 "restricted-where-contains-filter",
                 "text-column-keyword-search",
                 "table-profile-summary",
+                "wal-shm-journal-sidecar-status",
                 "large-sqlite-optimization-metadata",
             ],
         },
@@ -7328,6 +7339,7 @@ def sqlite_database_metadata(connection: sqlite3.Connection, source_path: Path) 
         "freelist_count": None,
         "encoding": "",
         "database_list": [],
+        "sidecar_state_profile": sqlite_sidecar_state_profile(source_path),
     }
     pragma_names = {
         "journal_mode": "journal_mode",
@@ -7357,6 +7369,87 @@ def sqlite_database_metadata(connection: sqlite3.Connection, source_path: Path) 
     except sqlite3.DatabaseError:
         metadata["database_list"] = []
     return metadata
+
+
+def sqlite_sidecar_state_profile(source_path: Path) -> dict[str, object]:
+    wal_path = source_path.with_name(source_path.name + "-wal")
+    shm_path = source_path.with_name(source_path.name + "-shm")
+    journal_path = source_path.with_name(source_path.name + "-journal")
+    wal_info = sqlite_wal_sidecar_info(wal_path)
+    sidecars = {
+        "wal": wal_info,
+        "shm": sqlite_basic_sidecar_info(shm_path, "shm"),
+        "rollback_journal": sqlite_basic_sidecar_info(journal_path, "rollback-journal"),
+    }
+    detected = [name for name, info in sidecars.items() if bool(info.get("exists"))]
+    profile_core = {
+        "profile_version": "sqlite-sidecar-state-profile-v1",
+        "source_path": str(source_path),
+        "sidecars": sidecars,
+        "detected_sidecars": detected,
+        "wal_detected": bool(wal_info.get("exists")),
+        "rollback_journal_detected": bool(sidecars["rollback_journal"].get("exists")),
+        "shm_detected": bool(sidecars["shm"].get("exists")),
+        "requires_wal_review": bool(detected),
+        "hash_policy": "metadata-only-in-source-preview-use-sqlite-wal-preview-for-hashed-working-copy",
+        "recommended_cli": "rapidtriage sqlite-wal-preview <database> --output-dir <case-output>/sqlite-wal-review --json",
+        "source_viewer_warning": (
+            "SQLite sidecar files are present. Preview rows may not represent all committed or recoverable evidence until WAL/journal review is completed."
+            if detected
+            else "No SQLite sidecar files were detected next to this database at preview time."
+        ),
+    }
+    return {**profile_core, "profile_hash": stable_payload_sha256(profile_core)}
+
+
+def sqlite_basic_sidecar_info(path: Path, kind: str) -> dict[str, object]:
+    if not path.is_file():
+        return {"kind": kind, "path": str(path), "exists": False, "size_bytes": 0, "hash_status": "missing"}
+    stat = path.stat()
+    return {
+        "kind": kind,
+        "path": str(path),
+        "exists": True,
+        "size_bytes": stat.st_size,
+        "modified_at": dt.datetime.fromtimestamp(stat.st_mtime, tz=dt.timezone.utc).isoformat(),
+        "hash_status": "not-computed-in-source-preview",
+    }
+
+
+def sqlite_wal_sidecar_info(path: Path) -> dict[str, object]:
+    info = sqlite_basic_sidecar_info(path, "wal")
+    if not info.get("exists"):
+        return info
+    header: dict[str, object] = {"status": "not-read"}
+    try:
+        with path.open("rb") as handle:
+            raw = handle.read(SQLITE_WAL_HEADER_SIZE)
+        if len(raw) < SQLITE_WAL_HEADER_SIZE:
+            header = {"status": "invalid-short-header", "bytes_read": len(raw)}
+        else:
+            magic, version, page_size, checkpoint_sequence, salt1, salt2, checksum1, checksum2 = struct.unpack(">IIIIIIII", raw)
+            endian = SQLITE_WAL_MAGIC_VALUES.get(magic, "unknown")
+            normalized_page_size = 1024 if page_size == 0 else page_size
+            frame_size = SQLITE_WAL_FRAME_HEADER_SIZE + normalized_page_size if normalized_page_size > 0 else 0
+            size_bytes = int(info.get("size_bytes") or 0)
+            estimated_frames = max(0, (size_bytes - SQLITE_WAL_HEADER_SIZE) // frame_size) if frame_size else 0
+            header = {
+                "status": "parsed" if endian != "unknown" else "unknown-magic",
+                "magic_hex": f"0x{magic:08x}",
+                "endian": endian,
+                "version": version,
+                "page_size": normalized_page_size,
+                "checkpoint_sequence": checkpoint_sequence,
+                "salt1": salt1,
+                "salt2": salt2,
+                "checksum1": checksum1,
+                "checksum2": checksum2,
+                "estimated_frame_count": estimated_frames,
+                "frame_count_is_estimate": True,
+            }
+    except OSError as exc:
+        header = {"status": "read-error", "error": str(exc)}
+    return {**info, "header": header}
 
 
 def preview_sqlite_table(connection: sqlite3.Connection, table: str, *, source_path: Path | None = None) -> dict[str, object]:
@@ -7692,6 +7785,11 @@ def build_sqlite_preview_manifest(
             "freelist_count": database_metadata.get("freelist_count"),
             "journal_mode": str(database_metadata.get("journal_mode") or ""),
             "estimated_database_bytes": database_metadata.get("estimated_database_bytes"),
+            "sidecar_state_profile_hash": str(
+                database_metadata.get("sidecar_state_profile", {}).get("profile_hash")
+                if isinstance(database_metadata.get("sidecar_state_profile"), Mapping)
+                else ""
+            ),
         },
         "table_count": len(tables),
         "bounded_table_count": len(table_entries),

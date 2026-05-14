@@ -3759,10 +3759,14 @@ function renderViewerMetadata(metadata) {
 
 function renderSqlitePreview(sqlite) {
   const tables = sqlite.tables || [];
-  if (!tables.length) {
-    return `<p class="empty-state">${escapeHtml(sqlite.error || "No user tables were found in this SQLite database.")}</p>`;
-  }
   const metadata = sqlite.database_metadata || {};
+  const sidecarProfile = sqlite.sidecar_state_profile || metadata.sidecar_state_profile || {};
+  if (!tables.length) {
+    return `
+      ${renderSqliteSidecarState(sidecarProfile)}
+      <p class="empty-state">${escapeHtml(sqlite.error || "No user tables were found in this SQLite database.")}</p>
+    `;
+  }
   const pageProfile = sqlite.table_page_profile || {};
   const pageLinks = pageProfile.table_links || [];
   return `
@@ -3774,6 +3778,7 @@ function renderSqlitePreview(sqlite) {
         ${metric("Page size", metadata.page_size || "n/a")}
       </div>
       <p class="help-text">SQLite viewer is read-only and capped for performance. It shows schema, indexes, bounded rows, API-backed table pages, and restricted contains filters without executing arbitrary SQL.</p>
+      ${renderSqliteSidecarState(sidecarProfile)}
       ${tables.map((table) => `
         <article class="viewer-panel sqlite-table-card">
           <div class="viewer-header compact">
@@ -3814,6 +3819,55 @@ function renderSqlitePreview(sqlite) {
       `).join("")}
       ${sqlite.truncated ? '<p class="help-text">Additional tables are hidden to keep the viewer responsive.</p>' : ""}
     </section>
+  `;
+}
+
+function renderSqliteSidecarState(profile) {
+  if (!profile || !Object.keys(profile).length) return "";
+  const sidecars = profile.sidecars || {};
+  const detected = Array.isArray(profile.detected_sidecars) ? profile.detected_sidecars : [];
+  const requiresReview = Boolean(profile.requires_wal_review);
+  const walHeader = sidecars.wal?.header || {};
+  const sidecarRows = [
+    ["WAL", sidecars.wal],
+    ["SHM", sidecars.shm],
+    ["Rollback journal", sidecars.rollback_journal],
+  ];
+  return `
+    <article class="sqlite-sidecar-card ${requiresReview ? "warning" : "ok"}" data-testid="sqlite-sidecar-state">
+      <div class="viewer-header compact">
+        <div>
+          <p class="eyebrow">sqlite sidecar state</p>
+          <h3>WAL / SHM / rollback journal review</h3>
+        </div>
+        <span class="status-pill ${requiresReview ? "warning" : "ok"}">${requiresReview ? "review required" : "none detected"}</span>
+      </div>
+      <p class="help-text sqlite-sidecar-warning">
+        ${escapeHtml(profile.source_viewer_warning || "Check SQLite sidecar files before treating preview rows as complete.")}
+      </p>
+      <div class="sqlite-sidecar-grid">
+        ${sidecarRows.map(([label, info]) => `
+          <div class="sqlite-sidecar-chip ${info?.exists ? "detected" : "missing"}">
+            <strong>${escapeHtml(label)}</strong>
+            <span>${info?.exists ? "detected" : "missing"}</span>
+            <small>${info?.exists ? formatBytes(info.size_bytes || 0) : "0 B"}</small>
+          </div>
+        `).join("")}
+      </div>
+      ${sidecars.wal?.exists ? `
+        <dl class="compact-dl sqlite-wal-header">
+          <div><dt>WAL header</dt><dd>${escapeHtml(walHeader.status || "unparsed")}</dd></div>
+          <div><dt>Magic</dt><dd>${escapeHtml(walHeader.magic_hex || "n/a")}</dd></div>
+          <div><dt>Page size</dt><dd>${escapeHtml(walHeader.page_size || "n/a")}</dd></div>
+          <div><dt>Estimated frames</dt><dd>${escapeHtml(walHeader.estimated_frame_count ?? "n/a")}</dd></div>
+        </dl>
+      ` : ""}
+      <div class="sqlite-sidecar-action">
+        <strong>Next step</strong>
+        <code>${escapeHtml(profile.recommended_cli || "rapidtriage sqlite-wal-preview <database> --json")}</code>
+        <small>Detected sidecars: ${escapeHtml(detected.length ? detected.join(", ") : "none")}</small>
+      </div>
+    </article>
   `;
 }
 
