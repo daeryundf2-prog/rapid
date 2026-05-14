@@ -51,6 +51,49 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
             self.assertIn("bits-url-candidate", bits["details"]["risk_flags"])
             self.assertFalse(bits["details"]["commercial_grade_ready"])
 
+    def test_windows_system_collector_maps_bits_sqlite_job_rows(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            qmgr = root / "ProgramData" / "Microsoft" / "Network" / "Downloader" / "qmgr.db"
+            qmgr.parent.mkdir(parents=True)
+            create_sqlite_fixture(
+                qmgr,
+                "Jobs",
+                ["job_id", "remote_url", "local_path", "owner_sid", "state"],
+                (
+                    "{job-1}",
+                    "https://transfer.example.test/drop.zip",
+                    r"C:\Users\alice\AppData\Local\Temp\drop.zip",
+                    "S-1-5-21-111-222-333-1001",
+                    "TRANSFERRING",
+                ),
+            )
+            output = root / "windows-system-artifacts.json"
+
+            exit_code = main(["artifacts", str(root), "--kind", "windows-system", "--output", str(output)])
+
+            self.assertEqual(exit_code, 0)
+            payload = json.loads(output.read_text(encoding="utf-8"))
+            aggregate = next(
+                artifact
+                for artifact in payload["artifacts"]
+                if artifact["artifact_type"] == "bits-qmgr-transfer-candidate"
+            )
+            row = next(
+                artifact
+                for artifact in payload["artifacts"]
+                if artifact["artifact_type"] == "bits-qmgr-sqlite-job-candidate"
+            )
+            self.assertTrue(aggregate["details"]["bits_qmgr_sqlite_profile"]["opened_readonly"])
+            self.assertEqual(aggregate["details"]["coverage_status"], "bits-qmgr-sqlite-row-inventory")
+            self.assertIn("bits-sqlite-transfer-row-candidate", aggregate["details"]["risk_flags"])
+            self.assertIn("https://transfer.example.test/drop.zip", row["details"]["url_candidates"])
+            self.assertIn(r"C:\Users\alice\AppData\Local\Temp\drop.zip", row["details"]["path_candidates"])
+            self.assertIn("S-1-5-21-111-222-333-1001", row["details"]["owner_candidates"])
+            self.assertIn("TRANSFERRING", row["details"]["state_candidates"])
+            self.assertEqual(row["details"]["bits_qmgr_sqlite_row"]["source_locator"]["table"], "Jobs")
+            self.assertFalse(row["details"]["commercial_grade_ready"])
+
     def test_windows_browser_collector_maps_webcache_and_cloud_sync_db_candidates(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             root = Path(tmp_dir)
@@ -3809,6 +3852,7 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
             spool.write_bytes(
                 "SecretPlan.docx\x00Office Printer\x00alice\x00C:\\Users\\alice\\SecretPlan.docx".encode("utf-16le")
             )
+            spool.with_suffix(".SPL").write_bytes(b"\x1b%-12345X SecretPlan payload")
             anydesk = root / "ProgramData" / "AnyDesk" / "service.trace"
             anydesk.parent.mkdir(parents=True)
             anydesk.write_text(
@@ -3832,6 +3876,11 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
             self.assertIn("alice", spooler["details"]["user_name_candidates"])
             self.assertIn("possible-printed-document", spooler["details"]["risk_flags"])
             self.assertIn("printed-document-name-candidate", spooler["details"]["risk_flags"])
+            self.assertEqual(
+                spooler["details"]["print_spooler_companion_profile"]["pair_status"],
+                "complete-shd-spl-pair",
+            )
+            self.assertIn("complete-shd-spl-pair", spooler["details"]["risk_flags"])
             self.assertEqual(remote["details"]["product"], "anydesk")
             self.assertEqual(remote["details"]["ip_candidates"], ["203.0.113.10"])
             self.assertIn("https://relay.anydesk.com", remote["details"]["url_candidates"])

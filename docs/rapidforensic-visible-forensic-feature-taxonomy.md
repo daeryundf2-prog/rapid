@@ -816,7 +816,7 @@ GUI 표기 방식:
 | --- | --- | --- | --- |
 | Recycle Bin $I/$R 매핑 | `recycle-bin-entry` | `$Recycle.Bin` 아래 `$I*` metadata에서 원래 경로, 삭제 시각, 삭제 파일 크기를 읽고 sibling `$R*` payload hash를 연결한다. | MFT/USN delete timeline 상관, Windows 버전별 fixture, trusted parser diff |
 | 확장자 변조 탐지 | `file-signature-mismatch`, `file_signature_profile`, `signature_mismatch_candidates` | Windows artifact scan과 일반 파일 스캔 모두 PE/PDF/PNG/JPEG/GIF/ZIP/OLE/RAR/7z/SQLite magic header와 확장자를 비교해 mismatch 파일을 위험 후보로 표시한다. | 전체 파일타입 parser, 오탐 정책, archive 내부 파일 검사 |
-| Print Spooler SPL/SHD | `print-spooler-job`, `print_spooler_job_profile` | `spool/PRINTERS`의 `.SPL`/`.SHD` 파일을 찾아 hash, mtime, document/printer/user/source path 후보를 분리한다. | SPL/SHD full binary decoder, PrintService EVTX 상관, driver별 spool fixture |
+| Print Spooler SPL/SHD | `print-spooler-job`, `print_spooler_job_profile`, `print_spooler_companion_profile` | `spool/PRINTERS`의 `.SPL`/`.SHD` 파일을 찾아 hash, mtime, document/printer/user/source path 후보를 분리하고 같은 job id의 SHD metadata/SPL payload 짝 존재 여부를 표시한다. | SPL/SHD full binary decoder, PrintService EVTX 상관, driver별 spool fixture |
 | AnyDesk/TeamViewer/RustDesk | `third-party-remote-control-artifact`, `remote_control_session_profile` | AnyDesk, TeamViewer, RustDesk, Chrome Remote Desktop 경로/파일을 찾아 product tag, URL/IP, session 후보, remote ID 후보, 파일전송 후보를 생성한다. | 제품별 full session state decoder, peer ID/IP/파일전송 검증, 계정 attribution |
 
 검증 포인트:
@@ -830,7 +830,7 @@ GUI 표기 방식:
 
 1. `recycle-bin-entry`의 삭제 시각은 `$I` metadata 기반이다. 보고서 확정 증거로 쓰려면 MFT/USN과 교차검증해야 한다.
 2. `file-signature-mismatch`는 “위장/은닉 의심”이지 의도 입증이 아니다. 정상적인 무확장 파일, 캐시, 임시 파일에서 오탐이 가능하다.
-3. `print-spooler-job`은 document/printer/user 후보를 분리하지만 아직 full SPL/SHD binary structure decoder는 아니다. 실제 출력된 문서명/소유자/프린터 확정에는 PrintService EVTX와 source document metadata 상관이 필요하다.
+3. `print-spooler-job`은 document/printer/user 후보와 SHD/SPL companion pair 상태를 분리하지만 아직 full SPL/SHD binary structure decoder는 아니다. 실제 출력된 문서명/소유자/프린터 확정에는 PrintService EVTX와 source document metadata 상관이 필요하다.
 4. `third-party-remote-control-artifact`는 session/remote ID/file-transfer 후보를 분리하지만 실제 접속 세션, 원격 ID, 파일 전송 여부 확정에는 제품별 로그 format validation과 계정 attribution이 필요하다.
 
 ## 25. 2026-05-14 구현 반영: 앱/클라우드/디스크 메모리 triage 2차 보강
@@ -883,7 +883,7 @@ GUI 표기 방식:
 | capability | 새 artifact row | 구현 내용 | 남은 상용급 보강 |
 | --- | --- | --- | --- |
 | Windows Timeline ActivitiesCache | `activities-cache-db` | 기존 Windows system collector의 `ActivitiesCache.db` read-only SQLite schema/timeline sample inventory를 visible capability와 연결했다. | ActivitiesCache 테이블별 row semantics, app/document/URL attribution, deleted state 검증 |
-| BITS qmgr.dat 전송 | `bits-qmgr-transfer-candidate` | `qmgr0.dat/qmgr1.dat/qmgr.dat/qmgr.db`와 `Network/Downloader` DB 후보를 bounded string scan하여 URL/path pivot, mtime, hash, risk flag를 만든다. | BITS job 구조 decoder, owner/state/retry/transfer time, trusted BitsParser/Velociraptor diff |
+| BITS qmgr.dat 전송 | `bits-qmgr-transfer-candidate`, `bits-qmgr-sqlite-job-candidate`, `bits_qmgr_sqlite_profile` | `qmgr0.dat/qmgr1.dat/qmgr.dat/qmgr.db`와 `Network/Downloader` DB 후보를 bounded string scan하여 URL/path pivot, mtime, hash, risk flag를 만들고, SQLite-like `qmgr.db`는 table/rowid locator가 있는 URL/path/owner/state/job 후보 row를 추가 생성한다. | BITS binary job 구조 decoder, SQLite schema version validation, owner/state/retry/transfer time, trusted BitsParser/Velociraptor diff |
 | WebCacheV01.dat | `webcachev01-ese-file`, `webcachev01_review_profile`, `ese_page_map` | `WebCacheV01.dat`의 ESE header, page size, bounded URL/domain/path/string pivot, page-local marker family 후보를 추출한다. | ESE catalog/table/long value decoder, container별 history/cache/cookie row 복원, deleted record recovery |
 | OneDrive/Google Drive sync DB | `desktop-cloud-sync-db`, `desktop-cloud-sync-row-candidate` | OneDrive/Google Drive/DriveFS 경로의 sync DB 후보를 read-only SQLite schema inventory로 열고 file/sync/delete/share/account semantic hint를 만든다. 관련 table에서는 bounded row 후보를 생성해 local path, remote id, sync status, owner/account, deleted state, timestamp 후보와 `cloud_sync_row_review_profile`을 보여준다. | provider/version별 sync DB parser, upload/delete/share timestamp semantics, account scope 검증, provider export diff |
 
@@ -892,17 +892,18 @@ GUI 표기 방식:
 1. `WebCacheV01.dat`는 ESE 전체 row decode가 아니라 header, bounded string, page-local marker family pivot만 수행한다.
 2. `desktop-cloud-sync-db`는 SQLite schema와 row count를 읽고, `desktop-cloud-sync-row-candidate`는 선택된 file/sync/delete/share/account column 값만 bounded preview로 노출한다.
 3. 브라우저/클라우드 sync 대형 DB는 `safe_browser_file_hashes` 정책으로 일정 크기 이상이면 전체 해시를 지연한다.
-4. BITS qmgr 파일은 2MB prefix scan으로 제한해 대형/손상 파일에서도 collector가 멈추지 않게 했다.
+4. BITS qmgr 파일은 2MB prefix scan으로 제한해 대형/손상 파일에서도 collector가 멈추지 않게 했다. SQLite-like `qmgr.db` row 후보도 table 20개/row 100개로 제한한다.
 
 검증 포인트:
 
 1. `tests/test_rapidtriage_windows_artifacts.py::test_windows_system_collector_maps_bits_qmgr_transfer_candidates`가 BITS URL/path pivot과 reportability blocker를 검증한다.
-2. `tests/test_rapidtriage_windows_artifacts.py::test_windows_browser_collector_maps_webcache_and_cloud_sync_db_candidates`가 WebCache ESE signature, URL/domain 후보, page map 후보와 OneDrive sync DB SQLite inventory를 검증한다.
-3. Python/JS visible capability status는 ActivitiesCache, BITS, WebCacheV01, desktop cloud sync DB를 `부분 구현`으로 올리고 실제 artifact type terms를 추가했다.
+2. `tests/test_rapidtriage_windows_artifacts.py::test_windows_system_collector_maps_bits_sqlite_job_rows`가 SQLite-like `qmgr.db`에서 URL/path/owner/state/job 후보 row와 source locator가 생성되는지 검증한다.
+3. `tests/test_rapidtriage_windows_artifacts.py::test_windows_browser_collector_maps_webcache_and_cloud_sync_db_candidates`가 WebCache ESE signature, URL/domain 후보, page map 후보와 OneDrive sync DB SQLite inventory를 검증한다.
+4. Python/JS visible capability status는 ActivitiesCache, BITS, WebCacheV01, desktop cloud sync DB를 `부분 구현`으로 올리고 실제 artifact type terms를 추가했다.
 
 중요한 제한:
 
-1. `bits-qmgr-transfer-candidate`는 URL/path string 후보이지 완성된 BITS job record가 아니다.
+1. `bits-qmgr-transfer-candidate`는 URL/path string 후보이고 `bits-qmgr-sqlite-job-candidate`도 schema-guided row 후보이다. 둘 다 완성된 BITS job record가 아니다.
 2. `webcachev01-ese-file`은 ESE header/string/page pivot이다. 방문 시각, container, cache entry, 삭제 상태를 아직 확정하지 않는다.
 3. `desktop-cloud-sync-row-candidate`는 파일/상태 후보를 보여주지만, 파일이 업로드/삭제/공유됐다는 최종 결론은 provider-specific parser와 계정 scope 자료가 필요하다.
 

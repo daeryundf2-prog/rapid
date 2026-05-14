@@ -431,7 +431,7 @@ CAPABILITY_GROUPS: tuple[dict[str, Any], ...] = (
         "capabilities": (
             {"id": "lnk-jumplist-analysis", "label": "LNK 및 JumpList", "status": "partial", "terms": ("lnk", "jumplist", "destlist", "automaticdestinations", "customdestinations")},
             {"id": "windows-timeline-activities", "label": "Windows Timeline ActivitiesCache", "status": "partial", "terms": ("activitiescache.db", "activities-cache-db", "windows timeline", "activity", "app activity")},
-            {"id": "bits-qmgr-transfer", "label": "BITS qmgr.dat 전송", "status": "partial", "terms": ("bits", "qmgr", "bits-qmgr-transfer-candidate", "background transfer", "download", "exfil")},
+            {"id": "bits-qmgr-transfer", "label": "BITS qmgr.dat 전송", "status": "partial", "terms": ("bits", "qmgr", "bits-qmgr-transfer-candidate", "bits-qmgr-sqlite-job-candidate", "bits_qmgr_sqlite_profile", "background transfer", "download", "exfil")},
             {"id": "recentdocs-clipboard-muicache", "label": "RecentDocs/Clipboard/MUICache", "status": "partial", "terms": ("recentfilecache", "recentdocs", "clipboard", "muicache", "registry-user-activity", "clipboard-history")},
         ),
     },
@@ -460,7 +460,7 @@ CAPABILITY_GROUPS: tuple[dict[str, Any], ...] = (
         "catalog_id": "documents-db",
         "label": "문서 유출 보조 아티팩트",
         "capabilities": (
-            {"id": "print-spooler-spl-shd", "label": "Print Spooler SPL/SHD", "status": "partial", "terms": ("print spooler", "print-spooler-job", "print_spooler_job_profile", ".spl", ".shd", "printed", "printer")},
+            {"id": "print-spooler-spl-shd", "label": "Print Spooler SPL/SHD", "status": "partial", "terms": ("print spooler", "print-spooler-job", "print_spooler_job_profile", "print_spooler_companion_profile", "complete-shd-spl-pair", ".spl", ".shd", "printed", "printer")},
             {"id": "document-metadata-macro-risk", "label": "문서 메타데이터/매크로 위험", "status": "partial", "terms": ("metadata", "vba", "macro", "ole", "ooxml", "author", "document-metadata-risk", "metadata_profile", "macro_profile", "external_reference_candidates")},
             {"id": "sticky-notes-plum", "label": "Sticky Notes plum.sqlite", "status": "partial", "terms": ("sticky notes", "plum.sqlite", "stickynotes", "note", "sticky-note", "sticky-note-recovery-candidate", "sticky_note_schema_profile", "sticky_note_review_profile")},
         ),

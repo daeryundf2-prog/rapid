@@ -66,6 +66,8 @@ WMI_SCAN_LIMIT = 8 * 1024 * 1024
 SPOOLER_SCAN_LIMIT = 2 * 1024 * 1024
 REMOTE_CONTROL_SCAN_LIMIT = 2 * 1024 * 1024
 BITS_QMGR_SCAN_LIMIT = 2 * 1024 * 1024
+BITS_QMGR_SQLITE_TABLE_LIMIT = 20
+BITS_QMGR_SQLITE_ROW_LIMIT = 100
 SETUPAPI_SCAN_LIMIT = 4 * 1024 * 1024
 RECALL_SCAN_LIMIT = 2 * 1024 * 1024
 WIFI_PROFILE_ROOT_MARKER = "programdata/microsoft/wlansvc/profiles/interfaces"
@@ -210,6 +212,7 @@ def collect_print_spooler_artifacts(root: Path) -> Iterable[ArtifactRecord]:
         strings = unique_strings([*extract_ascii_strings(blob), *extract_utf16_strings(blob)])
         path_candidates = regex_candidates(strings, WINDOWS_PATH_RE)[:20]
         spooler_profile = print_spooler_job_profile(path, strings, path_candidates)
+        companion_profile = print_spooler_companion_profile(path)
         yield ArtifactRecord(
             provider=WindowsSystemArtifactsProvider.name,
             artifact_type="print-spooler-job",
@@ -229,6 +232,7 @@ def collect_print_spooler_artifacts(root: Path) -> Iterable[ArtifactRecord]:
                 "string_samples": strings[:40],
                 "path_candidates": path_candidates,
                 "print_spooler_job_profile": spooler_profile,
+                "print_spooler_companion_profile": companion_profile,
                 "document_name_candidates": spooler_profile["document_name_candidates"],
                 "printer_name_candidates": spooler_profile["printer_name_candidates"],
                 "user_name_candidates": spooler_profile["user_name_candidates"],
@@ -237,7 +241,7 @@ def collect_print_spooler_artifacts(root: Path) -> Iterable[ArtifactRecord]:
                 else "spooler-file-string-inventory",
                 "reportability": "triage",
                 "parser_confidence": spooler_profile["parser_confidence"],
-                "risk_flags": print_spooler_risk_flags(spooler_profile),
+                "risk_flags": print_spooler_risk_flags(spooler_profile, companion_profile),
                 "validation_required": True,
                 "validation_guidance": "SPL/SHD file is inventoried with bounded metadata pivots and timestamps. Validate printed document identity, owner, and printer using spool structures, print EVTX, and source document metadata before report-grade claims.",
                 "commercial_grade_ready": False,
@@ -325,6 +329,45 @@ def print_spooler_job_profile(path: Path, strings: Sequence[str], path_candidate
     }
 
 
+def print_spooler_companion_profile(path: Path) -> dict[str, object]:
+    base = path.with_suffix("")
+    sibling_exts = (".shd", ".spl")
+    siblings = []
+    present_exts = set()
+    for suffix in sibling_exts:
+        sibling = base.with_suffix(suffix)
+        if not sibling.exists() or not sibling.is_file():
+            continue
+        present_exts.add(suffix)
+        stat_result = sibling.stat()
+        siblings.append(
+            {
+                "path": str(sibling.resolve()),
+                "kind": suffix.lstrip("."),
+                "size": stat_result.st_size,
+                "modified_at": isoformat_from_timestamp(stat_result.st_mtime),
+                "sha256": compute_sha256(sibling),
+            }
+        )
+    if present_exts == {".shd", ".spl"}:
+        pair_status = "complete-shd-spl-pair"
+    elif present_exts == {".shd"}:
+        pair_status = "metadata-only-shd"
+    elif present_exts == {".spl"}:
+        pair_status = "payload-only-spl"
+    else:
+        pair_status = "orphan-spool-file"
+    return {
+        "profile_version": "print-spooler-companion-profile-v1",
+        "job_id_hint": path.stem,
+        "pair_status": pair_status,
+        "present_kinds": sorted(ext.lstrip(".") for ext in present_exts),
+        "missing_kinds": [ext.lstrip(".") for ext in sibling_exts if ext not in present_exts],
+        "siblings": siblings,
+        "validation_hint": "Complete print attribution usually needs both SHD metadata and SPL payload plus PrintService EVTX.",
+    }
+
+
 def print_document_name_candidates(strings: Sequence[str], path_candidates: Sequence[str]) -> list[str]:
     candidates: list[str] = []
     for source in [*path_candidates, *strings]:
@@ -378,7 +421,10 @@ def print_user_name_candidates(strings: Sequence[str], path_candidates: Sequence
     return candidates[:12]
 
 
-def print_spooler_risk_flags(profile: Mapping[str, object]) -> list[str]:
+def print_spooler_risk_flags(
+    profile: Mapping[str, object],
+    companion_profile: Mapping[str, object] | None = None,
+) -> list[str]:
     flags = ["possible-printed-document"]
     if profile.get("document_name_candidates"):
         flags.append("printed-document-name-candidate")
@@ -386,6 +432,9 @@ def print_spooler_risk_flags(profile: Mapping[str, object]) -> list[str]:
         flags.append("printer-name-candidate")
     if profile.get("user_name_candidates"):
         flags.append("print-owner-candidate")
+    pair_status = str((companion_profile or {}).get("pair_status") or "")
+    if pair_status:
+        flags.append(pair_status)
     return unique_preserve_order(flags)
 
 
@@ -730,6 +779,7 @@ def collect_bits_qmgr_artifacts(root: Path) -> Iterable[ArtifactRecord]:
         strings = unique_strings([*extract_ascii_strings(blob), *extract_utf16_strings(blob)])
         urls = regex_candidates(strings, URL_RE)[:30]
         paths = regex_candidates(strings, WINDOWS_PATH_RE)[:30]
+        sqlite_profile = bits_qmgr_sqlite_profile(path)
         yield ArtifactRecord(
             provider=WindowsSystemArtifactsProvider.name,
             artifact_type="bits-qmgr-transfer-candidate",
@@ -747,10 +797,15 @@ def collect_bits_qmgr_artifacts(root: Path) -> Iterable[ArtifactRecord]:
                 "path_candidates": paths,
                 "extracted_string_count": len(strings),
                 "string_samples": strings[:50],
-                "coverage_status": "bits-qmgr-bounded-string-inventory",
+                "bits_qmgr_sqlite_profile": sqlite_profile,
+                "coverage_status": "bits-qmgr-sqlite-row-inventory"
+                if sqlite_profile.get("opened_readonly")
+                else "bits-qmgr-bounded-string-inventory",
                 "reportability": "triage",
-                "parser_confidence": "medium" if urls or paths else "low",
-                "risk_flags": bits_qmgr_risk_flags(urls, paths),
+                "parser_confidence": "high"
+                if sqlite_profile.get("row_candidate_count")
+                else ("medium" if urls or paths else "low"),
+                "risk_flags": bits_qmgr_risk_flags(urls, paths, sqlite_profile),
                 "validation_required": True,
                 "validation_guidance": (
                     "BITS qmgr file is scanned for transfer pivots. Validate job IDs, owners, retry state, and "
@@ -764,14 +819,226 @@ def collect_bits_qmgr_artifacts(root: Path) -> Iterable[ArtifactRecord]:
                 ],
             },
         )
+        row_candidates = sqlite_profile.get("row_candidates")
+        for candidate in row_candidates if isinstance(row_candidates, list) else []:
+            yield ArtifactRecord(
+                provider=WindowsSystemArtifactsProvider.name,
+                artifact_type="bits-qmgr-sqlite-job-candidate",
+                path=str(path.resolve()),
+                supported=True,
+                details={
+                    **source_details(path, "bits-qmgr-sqlite-row"),
+                    "source_hashes": {"sha256": compute_sha256(path)},
+                    "timestamp": isoformat_from_timestamp(stat_result.st_mtime),
+                    "timestamp_source": "qmgr_file_modified_at",
+                    "bits_qmgr_sqlite_row": candidate,
+                    "table": candidate.get("table"),
+                    "rowid": candidate.get("rowid"),
+                    "url_candidates": candidate.get("url_candidates", []),
+                    "path_candidates": candidate.get("path_candidates", []),
+                    "owner_candidates": candidate.get("owner_candidates", []),
+                    "state_candidates": candidate.get("state_candidates", []),
+                    "job_id_candidates": candidate.get("job_id_candidates", []),
+                    "row_hash": candidate.get("row_hash"),
+                    "coverage_status": "bits-qmgr-sqlite-row-candidate",
+                    "reportability": "triage",
+                    "parser_confidence": "medium",
+                    "risk_flags": bits_qmgr_risk_flags(
+                        candidate.get("url_candidates", []),
+                        candidate.get("path_candidates", []),
+                        sqlite_profile,
+                    )
+                    + ["bits-sqlite-row-candidate"],
+                    "validation_required": True,
+                    "validation_guidance": (
+                        "SQLite-style BITS row is a schema-guided transfer candidate. Validate schema version, job state, "
+                        "owner SID/account, retry history, and transfer timestamps with a trusted BITS parser before reporting."
+                    ),
+                    "commercial_grade_ready": False,
+                    "commercial_grade_blockers": [
+                        "bits-qmgr-sqlite-schema-version-validation-required",
+                        "job-owner-and-state-validation-required",
+                        "trusted-bits-parser-diff-required",
+                    ],
+                },
+            )
 
 
-def bits_qmgr_risk_flags(urls: Sequence[str], paths: Sequence[str]) -> list[str]:
+def bits_qmgr_sqlite_profile(path: Path) -> dict[str, object]:
+    profile: dict[str, object] = {
+        "profile_version": "bits-qmgr-sqlite-profile-v1",
+        "opened_readonly": False,
+        "open_status": "not-sqlite-header",
+        "table_count": 0,
+        "row_candidate_count": 0,
+        "row_candidates": [],
+        "row_limit": BITS_QMGR_SQLITE_ROW_LIMIT,
+        "table_limit": BITS_QMGR_SQLITE_TABLE_LIMIT,
+        "values_are_candidates": True,
+    }
+    if read_prefix(path, 16) != b"SQLite format 3\x00":
+        return profile
+    try:
+        with open_sqlite_snapshot(path) as connection:
+            table_names = [
+                str(row[0])
+                for row in connection.execute(
+                    "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name"
+                ).fetchall()
+                if safe_sqlite_identifier(str(row[0]))
+            ][:BITS_QMGR_SQLITE_TABLE_LIMIT]
+            candidates: list[dict[str, object]] = []
+            table_profiles = []
+            for table_name in table_names:
+                columns = sqlite_table_columns(connection, table_name)
+                selected = bits_qmgr_candidate_columns(columns)
+                table_profiles.append(
+                    {
+                        "name": table_name,
+                        "columns": columns[:80],
+                        "candidate_columns": selected,
+                        "row_count": sqlite_row_count(connection, table_name),
+                    }
+                )
+                if not selected:
+                    continue
+                selected_clause = ", ".join(f'"{column}"' for column in selected)
+                try:
+                    rows = connection.execute(
+                        f'SELECT rowid, {selected_clause} FROM "{table_name}" LIMIT ?',
+                        (BITS_QMGR_SQLITE_ROW_LIMIT - len(candidates),),
+                    ).fetchall()
+                except sqlite3.Error:
+                    continue
+                for row in rows:
+                    row_values = {column: stringify_sqlite_value(row[column]) for column in selected}
+                    row_text = " ".join(value for value in row_values.values() if value)
+                    url_columns = bits_column_values(row_values, ("url", "uri", "remote"))
+                    path_columns = bits_column_values(row_values, ("local", "path", "file"))
+                    urls = unique_preserve_order([*url_columns, *regex_candidates([row_text], URL_RE)])[:10]
+                    paths = unique_preserve_order([*path_columns, *regex_candidates([row_text], WINDOWS_PATH_RE)])[:10]
+                    owner_candidates = bits_column_values(row_values, ("owner", "user", "account", "sid"))
+                    state_candidates = bits_column_values(row_values, ("state", "status", "priority", "type"))
+                    job_id_candidates = bits_column_values(row_values, ("job", "id", "name", "display"))
+                    row_hash = hashlib.sha256(
+                        json.dumps(
+                            {"table": table_name, "rowid": row["rowid"], "values": row_values},
+                            ensure_ascii=False,
+                            sort_keys=True,
+                        ).encode("utf-8")
+                    ).hexdigest()
+                    candidates.append(
+                        {
+                            "table": table_name,
+                            "rowid": int(row["rowid"]),
+                            "columns": selected,
+                            "values": row_values,
+                            "url_candidates": urls,
+                            "path_candidates": paths,
+                            "owner_candidates": owner_candidates,
+                            "state_candidates": state_candidates,
+                            "job_id_candidates": job_id_candidates,
+                            "row_hash": row_hash,
+                            "citation_text": f"SQLite table {table_name} rowid {row['rowid']}",
+                            "source_locator": {
+                                "locator_type": "sqlite-table-row",
+                                "table": table_name,
+                                "rowid": int(row["rowid"]),
+                                "columns": selected,
+                            },
+                        }
+                    )
+                    if len(candidates) >= BITS_QMGR_SQLITE_ROW_LIMIT:
+                        break
+                if len(candidates) >= BITS_QMGR_SQLITE_ROW_LIMIT:
+                    break
+            profile.update(
+                {
+                    "opened_readonly": True,
+                    "open_status": "opened",
+                    "table_count": len(table_names),
+                    "tables": table_profiles,
+                    "row_candidate_count": len(candidates),
+                    "row_candidates": candidates,
+                    "scan_truncated": len(candidates) >= BITS_QMGR_SQLITE_ROW_LIMIT,
+                    "review_profile": {
+                        "profile_version": "bits-qmgr-sqlite-review-profile-v1",
+                        "review_priority": "high" if any(item.get("url_candidates") for item in candidates) else "normal",
+                        "source_viewer_hint": "Open the source DB with the SQLite viewer and jump to table/rowid locators.",
+                        "report_use_warning": "BITS SQLite rows are schema-guided candidates until validated against the BITS job format.",
+                    },
+                }
+            )
+    except (sqlite3.Error, OSError) as exc:
+        profile["open_status"] = "sqlite-open-failed"
+        profile["sqlite_error"] = str(exc)[:240]
+    return profile
+
+
+def bits_qmgr_candidate_columns(columns: Sequence[str]) -> list[str]:
+    selected: list[str] = []
+    priority_terms = (
+        "url",
+        "uri",
+        "remote",
+        "local",
+        "path",
+        "file",
+        "job",
+        "display",
+        "name",
+        "owner",
+        "user",
+        "sid",
+        "state",
+        "status",
+        "priority",
+        "time",
+        "date",
+    )
+    for column in columns:
+        lowered = column.lower()
+        if any(term in lowered for term in priority_terms) and safe_sqlite_identifier(column):
+            selected.append(column)
+        if len(selected) >= 12:
+            break
+    return selected
+
+
+def bits_column_values(row_values: Mapping[str, str], terms: Sequence[str]) -> list[str]:
+    values: list[str] = []
+    for column, value in row_values.items():
+        if not value or not any(term in column.lower() for term in terms):
+            continue
+        if value not in values:
+            values.append(value)
+        if len(values) >= 12:
+            break
+    return values
+
+
+def stringify_sqlite_value(value: object) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, bytes):
+        return " ".join(extract_ascii_strings(value)[:5])[:500]
+    return " ".join(str(value).split())[:500]
+
+
+def bits_qmgr_risk_flags(
+    urls: Sequence[str],
+    paths: Sequence[str],
+    sqlite_profile: Mapping[str, object] | None = None,
+) -> list[str]:
     flags = ["bits-qmgr-file"]
     if urls:
         flags.append("bits-url-candidate")
     if paths:
         flags.append("bits-local-path-candidate")
+    if sqlite_profile and sqlite_profile.get("opened_readonly"):
+        flags.append("bits-sqlite-opened")
+    if sqlite_profile and sqlite_profile.get("row_candidate_count"):
+        flags.append("bits-sqlite-transfer-row-candidate")
     lowered_urls = " ".join(urls).lower()
     if any(term in lowered_urls for term in ("http://", "pastebin", "discord", "mega.", "anonfiles", "transfer")):
         flags.append("possible-suspicious-bits-transfer")
