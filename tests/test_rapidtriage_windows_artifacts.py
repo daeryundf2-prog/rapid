@@ -92,6 +92,99 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
             self.assertTrue(sync_artifact["details"]["sqlite_schema_inventory"]["opened_readonly"])
             self.assertIn("sync-db-sqlite-opened", sync_artifact["details"]["risk_flags"])
 
+    def test_windows_filesystem_collector_maps_ntfs_logfile_transaction_candidates(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            logfile = root / "$LogFile"
+            logfile.write_bytes(
+                b"RSTR" + b"\x00" * 512 + b"RCRD transaction C:\\Users\\alice\\Documents\\secret.docx"
+            )
+            output = root / "filesystem.json"
+
+            self.assertEqual(main(["artifacts", str(root), "--kind", "windows-filesystem", "--output", str(output)]), 0)
+
+            payload = json.loads(output.read_text(encoding="utf-8"))
+            artifact = next(
+                item
+                for item in payload["artifacts"]
+                if item["artifact_type"] == "ntfs-logfile-transaction-candidate"
+            )
+            self.assertEqual(artifact["details"]["source_format"], "ntfs-logfile")
+            self.assertIn("ntfs-logfile-signatures-present", artifact["details"]["risk_flags"])
+            self.assertIn("C:\\Users\\alice\\Documents\\secret.docx", artifact["details"]["path_candidates"])
+            self.assertFalse(artifact["details"]["commercial_grade_ready"])
+
+    def test_windows_eventlog_collector_maps_etl_trace_files(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            etl = root / "Windows" / "System32" / "winevt" / "Logs" / "usb_trace.etl"
+            etl.parent.mkdir(parents=True)
+            etl.write_bytes(
+                b"TRACE Microsoft-Windows-Kernel-PnP USBSTOR C:\\Windows\\System32 https://example.test 10.0.0.5"
+            )
+            output = root / "eventlog.json"
+
+            self.assertEqual(main(["artifacts", str(root), "--kind", "eventlog", "--output", str(output)]), 0)
+
+            payload = json.loads(output.read_text(encoding="utf-8"))
+            artifact = next(item for item in payload["artifacts"] if item["artifact_type"] == "etl-trace-file")
+            self.assertIn("Microsoft-Windows-Kernel-PnP", artifact["details"]["provider_hints"])
+            self.assertIn("usb", artifact["details"]["trace_families"])
+            self.assertIn("https://example.test", artifact["details"]["url_candidates"])
+            self.assertFalse(artifact["details"]["commercial_grade_ready"])
+
+    def test_windows_system_collector_maps_setupapi_usb_and_wifi_profiles(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            setupapi = root / "Windows" / "inf" / "setupapi.dev.log"
+            setupapi.parent.mkdir(parents=True)
+            setupapi.write_text(
+                ">>>  Section start 2026/05/01 10:00:00.123\n"
+                ">>>  [Device Install - USBSTOR\\Disk&Ven_Samsung&Prod_Flash_Drive\\123456]\n",
+                encoding="utf-8",
+            )
+            wifi = (
+                root
+                / "ProgramData"
+                / "Microsoft"
+                / "Wlansvc"
+                / "Profiles"
+                / "Interfaces"
+                / "{GUID}"
+                / "corp-wifi.xml"
+            )
+            wifi.parent.mkdir(parents=True)
+            wifi.write_text(
+                """<?xml version="1.0"?>
+<WLANProfile xmlns="http://www.microsoft.com/networking/WLAN/profile/v1">
+  <name>CorpWiFi</name>
+  <SSIDConfig><SSID><name>CorpWiFi</name></SSID></SSIDConfig>
+  <connectionType>ESS</connectionType>
+  <connectionMode>auto</connectionMode>
+  <MSM><security><authEncryption><authentication>WPA2PSK</authentication><encryption>AES</encryption></authEncryption></security></MSM>
+  <MacRandomization><enableRandomization>true</enableRandomization></MacRandomization>
+</WLANProfile>
+""",
+                encoding="utf-8",
+            )
+            output = root / "system.json"
+
+            self.assertEqual(main(["artifacts", str(root), "--kind", "windows-system", "--output", str(output)]), 0)
+
+            payload = json.loads(output.read_text(encoding="utf-8"))
+            setup_artifact = next(
+                item
+                for item in payload["artifacts"]
+                if item["artifact_type"] == "usb-setupapi-device-install-candidate"
+            )
+            self.assertIn("USBSTOR\\Disk&Ven_Samsung&Prod_Flash_Drive\\123456", setup_artifact["details"]["device_id_candidates"])
+            self.assertEqual(setup_artifact["details"]["install_entries"][0]["timestamp_hint"], "2026-05-01T10:00:00.123")
+
+            wifi_artifact = next(item for item in payload["artifacts"] if item["artifact_type"] == "wifi-profile")
+            self.assertEqual(wifi_artifact["details"]["ssid"], "CorpWiFi")
+            self.assertEqual(wifi_artifact["details"]["authentication"], "WPA2PSK")
+            self.assertIn("wifi-mac-randomization-enabled", wifi_artifact["details"]["risk_flags"])
+
     def test_windows_system_collector_inventories_thumbnail_activities_uwp_and_webshell_artifacts(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             root = Path(tmp_dir)

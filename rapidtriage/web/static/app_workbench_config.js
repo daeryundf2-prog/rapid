@@ -816,9 +816,9 @@ const VISIBLE_FORENSIC_CAPABILITY_GROUPS = [
       {
         id: "ntfs-logfile-transactions",
         label: "$LogFile transaction",
-        status: "inventory",
-        terms: ["$logfile", "transaction", "ntfs log", "redo", "undo"],
-        nextAction: "$UsnJrnl을 보완하는 create/rename/delete transaction parser와 timeline join",
+        status: "partial",
+        terms: ["$logfile", "transaction", "ntfs log", "redo", "undo", "ntfs-logfile-transaction-candidate"],
+        nextAction: "bounded $LogFile signature/string pivot은 가능, create/rename/delete redo/undo decoder와 timeline join 필요",
       },
       {
         id: "recycle-bin-ir-map",
@@ -852,9 +852,9 @@ const VISIBLE_FORENSIC_CAPABILITY_GROUPS = [
       {
         id: "etl-trace-parser",
         label: "ETW/ETL trace",
-        status: "inventory",
-        terms: ["etl", "etw", "trace", "wmi trace", "usb trace"],
-        nextAction: ".etl provider/event decoder와 USB/WMI/network 행위 timeline 연결",
+        status: "partial",
+        terms: ["etl", "etw", "trace", "wmi trace", "usb trace", "etl-trace-file"],
+        nextAction: ".etl provider/string pivot은 가능, provider manifest event decoder와 USB/WMI/network 행위 timeline 연결 필요",
       },
       {
         id: "eventlog-clearing-alert",
@@ -881,9 +881,9 @@ const VISIBLE_FORENSIC_CAPABILITY_GROUPS = [
       {
         id: "usb-external-device-history",
         label: "USB 및 외장매체 연결 이력",
-        status: "inventory",
-        terms: ["usbstor", "mounteddevices", "setupapi.dev.log", "usb serial", "drive letter"],
-        nextAction: "USBSTOR/Enum USB/MountedDevices/setupapi.dev.log를 serial-first 테이블로 상관",
+        status: "partial",
+        terms: ["usbstor", "mounteddevices", "setupapi.dev.log", "usb serial", "drive letter", "usb-setupapi-device-install-candidate"],
+        nextAction: "setupapi.dev.log USB install pivot은 가능, USBSTOR/Enum USB/MountedDevices를 serial-first 테이블로 상관 필요",
       },
       {
         id: "autoruns-persistence-view",
@@ -895,9 +895,9 @@ const VISIBLE_FORENSIC_CAPABILITY_GROUPS = [
       {
         id: "wifi-network-profile-history",
         label: "Wi-Fi/네트워크 프로필",
-        status: "inventory",
-        terms: ["wifi", "ssid", "wlan", "network profile", "connection"],
-        nextAction: "과거 SSID, 최초/최근 연결 시간, profile source를 timeline과 entity view에 연결",
+        status: "partial",
+        terms: ["wifi", "ssid", "wlan", "network profile", "connection", "wifi-profile"],
+        nextAction: "WLAN profile XML 정규화는 가능, 연결 시각은 WLAN AutoConfig EVTX/ETL과 NetworkList 상관 필요",
       },
     ],
   },

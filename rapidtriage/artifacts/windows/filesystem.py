@@ -17,6 +17,12 @@ SUPPORTED_SUFFIXES = {".csv", ".json", ".jsonl", ".ndjson"}
 MFT_HINTS = ("mft", "mftexcmd", "$mft")
 USN_HINTS = ("usn", "usnjrnl", "$j")
 NATIVE_SCAN_LIMIT = 16 * 1024 * 1024
+NTFS_LOGFILE_SCAN_LIMIT = 8 * 1024 * 1024
+NTFS_LOGFILE_SIGNATURES = {
+    "restart_page": b"RSTR",
+    "log_record_page": b"RCRD",
+    "checkpoint_page": b"CHKD",
+}
 SIGNATURE_SCAN_LIMIT = 4096
 SIGNATURE_SCAN_FILE_LIMIT = 5000
 USN_RECORD_SCAN_LIMIT = 5000
@@ -153,6 +159,7 @@ class WindowsFilesystemProvider:
 
     def collect(self, root: Path) -> Iterable[ArtifactRecord]:
         yield from collect_native_ntfs_artifacts(root)
+        yield from collect_ntfs_logfile_artifacts(root)
         yield from collect_recycle_bin_artifacts(root)
         yield from collect_signature_mismatch_artifacts(root)
         for path in sorted(root.rglob("*"), key=lambda item: str(item).lower()):
@@ -341,6 +348,13 @@ def collect_native_ntfs_artifacts(root: Path) -> Iterable[ArtifactRecord]:
             seen.add(resolved)
 
 
+def collect_ntfs_logfile_artifacts(root: Path) -> Iterable[ArtifactRecord]:
+    for path in sorted((item for item in root.rglob("*") if item.is_file()), key=lambda item: str(item).lower()):
+        if not is_native_logfile_path(path):
+            continue
+        yield build_ntfs_logfile_inventory_record(path)
+
+
 def is_native_mft_path(path: Path) -> bool:
     return path.name.lower() == "$mft"
 
@@ -349,6 +363,84 @@ def is_native_usn_path(path: Path) -> bool:
     name = path.name.lower()
     parent_blob = str(path.parent).lower()
     return name in {"$j", "$usnjrnl"} or (name.endswith(".usn") and "usn" in parent_blob)
+
+
+def is_native_logfile_path(path: Path) -> bool:
+    return path.name.lower() == "$logfile"
+
+
+def build_ntfs_logfile_inventory_record(path: Path) -> ArtifactRecord:
+    stat_result = path.stat()
+    blob = read_prefix(path, NTFS_LOGFILE_SCAN_LIMIT)
+    signature_scan = ntfs_logfile_signature_scan(blob)
+    strings = extract_mixed_strings(blob)
+    path_candidates = extract_path_candidates(strings)
+    has_log_signatures = bool(signature_scan["signature_counts"])
+    validation_checks = {
+        "source_file_readable": bool(blob),
+        "has_logfile_name": is_native_logfile_path(path),
+        "has_ntfs_log_signatures": has_log_signatures,
+        "bounded_scan_completed": len(blob) <= NTFS_LOGFILE_SCAN_LIMIT,
+        "transaction_redo_undo_decoded": False,
+        "trusted_logfile_parser_diff_available": False,
+    }
+    return ArtifactRecord(
+        provider=WindowsFilesystemProvider.name,
+        artifact_type="ntfs-logfile-transaction-candidate",
+        path=str(path.resolve()),
+        supported=True,
+        details={
+            "parser": "windows-ntfs-logfile-bounded-inventory",
+            "parser_version": PARSER_VERSION,
+            "coverage_status": "ntfs-logfile-signature-and-string-pivot",
+            "reportability": "triage",
+            "source_path": str(path.resolve()),
+            "source_format": "ntfs-logfile",
+            "source_hashes": file_hashes(path),
+            "size": stat_result.st_size,
+            "modified_at": dt.datetime.fromtimestamp(stat_result.st_mtime, dt.timezone.utc).isoformat(),
+            "timestamp": dt.datetime.fromtimestamp(stat_result.st_mtime, dt.timezone.utc).isoformat(),
+            "timestamp_source": "ntfs_logfile_modified_at",
+            "scan_bytes": len(blob),
+            "signature_counts": signature_scan["signature_counts"],
+            "signature_offsets": signature_scan["signature_offsets"],
+            "path_candidates": path_candidates[:50],
+            "string_samples": strings[:50],
+            "risk_flags": ["ntfs-logfile-present"] + (["ntfs-logfile-signatures-present"] if has_log_signatures else []),
+            "validation_required": True,
+            "validation_checks": validation_checks,
+            "validation_guidance": (
+                "$LogFile is currently exposed as a bounded transaction candidate. Validate create/rename/delete "
+                "claims with a full redo/undo decoder and correlate with $MFT/$UsnJrnl before report-grade use."
+            ),
+            "commercial_grade_ready": False,
+            "commercial_grade_blockers": [
+                "ntfs-logfile-redo-undo-decoder-not-implemented",
+                "mft-usn-logfile-timeline-correlation-required",
+                "trusted-logfile-parser-diff-required",
+            ],
+            "recommended_parsers": ["LogFileParser", "MFTECmd", "The Sleuth Kit"],
+        },
+    )
+
+
+def ntfs_logfile_signature_scan(blob: bytes) -> dict[str, object]:
+    signature_offsets: dict[str, list[int]] = {}
+    for label, signature in NTFS_LOGFILE_SIGNATURES.items():
+        offsets: list[int] = []
+        cursor = 0
+        while len(offsets) < 50:
+            found = blob.find(signature, cursor)
+            if found < 0:
+                break
+            offsets.append(found)
+            cursor = found + 1
+        if offsets:
+            signature_offsets[label] = offsets
+    return {
+        "signature_counts": [{"value": key, "count": len(value)} for key, value in sorted(signature_offsets.items())],
+        "signature_offsets": signature_offsets,
+    }
 
 
 def nearest_mft_path_cache(
@@ -5012,6 +5104,41 @@ def int_from(blob: bytes, offset: int, size: int) -> int:
     if offset + size > len(blob):
         return 0
     return int.from_bytes(blob[offset : offset + size], "little", signed=False)
+
+
+def extract_mixed_strings(blob: bytes, *, limit: int = 250) -> list[str]:
+    strings: list[str] = []
+    seen: set[str] = set()
+    for value in [*extract_ascii_strings(blob), *extract_utf16_strings(blob)]:
+        cleaned = " ".join(value.split()).strip()
+        if not cleaned or cleaned in seen:
+            continue
+        seen.add(cleaned)
+        strings.append(cleaned)
+        if len(strings) >= limit:
+            break
+    return strings
+
+
+def extract_ascii_strings(blob: bytes, *, min_chars: int = 5, limit: int = 250) -> list[str]:
+    strings: list[str] = []
+    current = bytearray()
+    for byte in blob:
+        if 32 <= byte <= 126:
+            current.append(byte)
+            continue
+        if len(current) >= min_chars:
+            decoded = current.decode("ascii", errors="ignore").strip()
+            if decoded and decoded not in strings:
+                strings.append(decoded)
+                if len(strings) >= limit:
+                    return strings
+        current.clear()
+    if len(current) >= min_chars:
+        decoded = current.decode("ascii", errors="ignore").strip()
+        if decoded and decoded not in strings:
+            strings.append(decoded)
+    return strings
 
 
 def extract_utf16_strings(blob: bytes, *, min_chars: int = 4, limit: int = 250) -> list[str]:

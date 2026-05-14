@@ -66,6 +66,10 @@ WMI_SCAN_LIMIT = 8 * 1024 * 1024
 SPOOLER_SCAN_LIMIT = 2 * 1024 * 1024
 REMOTE_CONTROL_SCAN_LIMIT = 2 * 1024 * 1024
 BITS_QMGR_SCAN_LIMIT = 2 * 1024 * 1024
+SETUPAPI_SCAN_LIMIT = 4 * 1024 * 1024
+WIFI_PROFILE_ROOT_MARKER = "programdata/microsoft/wlansvc/profiles/interfaces"
+USB_DEVICE_RE = re.compile(r"(?i)(USBSTOR\\[^\s\]]+|USB\\VID_[0-9A-F]{4}&PID_[0-9A-F]{4}[^\s\]]*)")
+SETUPAPI_TIMESTAMP_RE = re.compile(r"(?P<date>\d{4}[/-]\d{2}[/-]\d{2})\s+(?P<time>\d{2}:\d{2}:\d{2}(?:\.\d+)?)")
 WMI_PERSISTENCE_TERMS = (
     "__eventfilter",
     "commandlineeventconsumer",
@@ -156,6 +160,8 @@ class WindowsSystemArtifactsProvider:
         yield from collect_wmi_repository(root)
         yield from collect_print_spooler_artifacts(root)
         yield from collect_bits_qmgr_artifacts(root)
+        yield from collect_setupapi_usb_artifacts(root)
+        yield from collect_wifi_profile_artifacts(root)
         yield from collect_third_party_remote_control_artifacts(root)
         yield from collect_zone_identifier_ads(root)
         yield from collect_explorer_cache_artifacts(root)
@@ -322,6 +328,187 @@ def bits_qmgr_risk_flags(urls: Sequence[str], paths: Sequence[str]) -> list[str]
     if any(term in lowered_urls for term in ("http://", "pastebin", "discord", "mega.", "anonfiles", "transfer")):
         flags.append("possible-suspicious-bits-transfer")
     return flags
+
+
+def collect_setupapi_usb_artifacts(root: Path) -> Iterable[ArtifactRecord]:
+    for path in sorted(root.rglob("*"), key=lambda item: str(item).lower()):
+        if not path.is_file() or path.name.lower() != "setupapi.dev.log":
+            continue
+        stat_result = path.stat()
+        entries = parse_setupapi_usb_entries(path)
+        if not entries:
+            continue
+        device_ids = sorted({str(entry["device_id"]) for entry in entries if entry.get("device_id")})
+        validation_checks = {
+            "setupapi_log_readable": True,
+            "usb_device_ids_present": bool(device_ids),
+            "install_context_lines_present": bool(entries),
+            "registry_usbstor_mounteddevices_correlated": False,
+        }
+        yield ArtifactRecord(
+            provider=WindowsSystemArtifactsProvider.name,
+            artifact_type="usb-setupapi-device-install-candidate",
+            path=str(path.resolve()),
+            supported=True,
+            details={
+                **source_details(path, "setupapi-dev-log"),
+                "source_hashes": {"sha256": compute_sha256(path)},
+                "size": stat_result.st_size,
+                "modified_at": isoformat_from_timestamp(stat_result.st_mtime),
+                "timestamp": entries[0].get("timestamp_hint") or isoformat_from_timestamp(stat_result.st_mtime),
+                "timestamp_source": "setupapi_context_timestamp" if entries[0].get("timestamp_hint") else "setupapi_log_modified_at",
+                "coverage_status": "setupapi-usb-bounded-context-scan",
+                "reportability": "triage",
+                "device_id_candidates": device_ids[:100],
+                "install_entries": entries[:100],
+                "install_entry_count": len(entries),
+                "risk_flags": ["setupapi-usb-device-install"] + (["multiple-usb-device-candidates"] if len(device_ids) > 1 else []),
+                "parser_confidence": "medium" if device_ids else "low",
+                "validation_required": True,
+                "validation_checks": validation_checks,
+                "validation_guidance": (
+                    "SetupAPI USB rows identify install-context device IDs. Correlate with USBSTOR, Enum USB, "
+                    "MountedDevices, and MFT/USN for first/last connection and drive-letter conclusions."
+                ),
+                "commercial_grade_ready": False,
+                "commercial_grade_blockers": [
+                    "usbstor-enum-mounteddevices-correlation-required",
+                    "first-last-connect-timestamp-validation-required",
+                    "trusted-usb-forensics-diff-required",
+                ],
+            },
+        )
+
+
+def parse_setupapi_usb_entries(path: Path) -> list[dict[str, object]]:
+    blob = read_prefix(path, SETUPAPI_SCAN_LIMIT)
+    text = decode_best_effort(blob)
+    entries: list[dict[str, object]] = []
+    current_timestamp = ""
+    for line_number, line in enumerate(text.splitlines(), start=1):
+        timestamp_match = SETUPAPI_TIMESTAMP_RE.search(line)
+        if timestamp_match:
+            current_timestamp = f"{timestamp_match.group('date').replace('/', '-')}T{timestamp_match.group('time')}"
+        device_match = USB_DEVICE_RE.search(line)
+        if not device_match:
+            continue
+        entries.append(
+            {
+                "line_number": line_number,
+                "device_id": device_match.group(0).rstrip(".,);]"),
+                "timestamp_hint": current_timestamp,
+                "context": line.strip()[:400],
+            }
+        )
+        if len(entries) >= 500:
+            break
+    return entries
+
+
+def collect_wifi_profile_artifacts(root: Path) -> Iterable[ArtifactRecord]:
+    for path in sorted(root.rglob("*"), key=lambda item: str(item).lower()):
+        if not path.is_file() or path.suffix.lower() != ".xml":
+            continue
+        normalized = str(path).lower().replace("\\", "/")
+        if WIFI_PROFILE_ROOT_MARKER not in normalized and "wlan" not in path.name.lower():
+            continue
+        profile = parse_wifi_profile(path)
+        if not profile:
+            continue
+        stat_result = path.stat()
+        validation_checks = {
+            "profile_xml_parsed": True,
+            "ssid_or_profile_name_present": bool(profile.get("ssid") or profile.get("profile_name")),
+            "security_fields_present": bool(profile.get("authentication") or profile.get("encryption")),
+            "connection_time_from_eventlog_correlated": False,
+        }
+        yield ArtifactRecord(
+            provider=WindowsSystemArtifactsProvider.name,
+            artifact_type="wifi-profile",
+            path=str(path.resolve()),
+            supported=True,
+            details={
+                **source_details(path, "wlan-profile-xml"),
+                "source_hashes": {"sha256": compute_sha256(path)},
+                "size": stat_result.st_size,
+                "modified_at": isoformat_from_timestamp(stat_result.st_mtime),
+                "timestamp": isoformat_from_timestamp(stat_result.st_mtime),
+                "timestamp_source": "wlan_profile_modified_at",
+                "coverage_status": "wlan-profile-xml-normalized",
+                "reportability": "triage",
+                **profile,
+                "risk_flags": wifi_profile_risk_flags(profile),
+                "parser_confidence": "medium" if validation_checks["ssid_or_profile_name_present"] else "low",
+                "validation_required": True,
+                "validation_checks": validation_checks,
+                "validation_guidance": (
+                    "WLAN profile XML shows configured networks and security settings. Correlate with WLAN-AutoConfig "
+                    "EVTX/ETL and registry/network list artifacts before claiming connection time or physical presence."
+                ),
+                "commercial_grade_ready": False,
+                "commercial_grade_blockers": [
+                    "wlan-eventlog-connection-correlation-required",
+                    "networklist-registry-correlation-required",
+                    "trusted-wifi-profile-diff-required",
+                ],
+            },
+        )
+
+
+def parse_wifi_profile(path: Path) -> dict[str, object]:
+    try:
+        tree = ET.parse(path)
+    except (ET.ParseError, OSError):
+        return {}
+    root = tree.getroot()
+    if local_name(root.tag).lower() != "wlanprofile" and not any(local_name(element.tag).lower() == "ssidconfig" for element in root.iter()):
+        return {}
+    profile_name = first_text(root, "name")
+    ssid = wifi_ssid_name(root) or profile_name
+    return {
+        "profile_name": profile_name,
+        "ssid": ssid,
+        "connection_type": first_text(root, "connectionType"),
+        "connection_mode": first_text(root, "connectionMode"),
+        "authentication": first_text(root, "authentication"),
+        "encryption": first_text(root, "encryption"),
+        "mac_randomization": {
+            "enabled": first_text(root, "enableRandomization"),
+            "randomization_seed": first_text(root, "randomizationSeed"),
+        },
+    }
+
+
+def wifi_ssid_name(root: ET.Element) -> str:
+    for element in root.iter():
+        if local_name(element.tag).lower() != "ssid":
+            continue
+        for child in list(element):
+            if local_name(child.tag).lower() == "name" and child.text:
+                return child.text.strip()
+    return ""
+
+
+def wifi_profile_risk_flags(profile: Mapping[str, object]) -> list[str]:
+    flags = ["wifi-profile"]
+    authentication = str(profile.get("authentication") or "").lower()
+    encryption = str(profile.get("encryption") or "").lower()
+    if authentication in {"open", "none"} or encryption in {"none", "wep"}:
+        flags.append("weak-or-open-wifi-profile")
+    if str((profile.get("mac_randomization") or {}).get("enabled") if isinstance(profile.get("mac_randomization"), Mapping) else "").lower() == "true":
+        flags.append("wifi-mac-randomization-enabled")
+    return flags
+
+
+def decode_best_effort(blob: bytes) -> str:
+    for encoding in ("utf-8-sig", "utf-16le", "cp949", "latin-1"):
+        try:
+            text = blob.decode(encoding, errors="ignore")
+        except LookupError:
+            continue
+        if text.strip():
+            return text
+    return ""
 
 
 def collect_explorer_cache_artifacts(root: Path) -> Iterable[ArtifactRecord]:

@@ -149,7 +149,7 @@ CAPABILITY_GROUPS: tuple[dict[str, Any], ...] = (
         "catalog_id": "windows-core",
         "label": "파일시스템 / 안티포렌식",
         "capabilities": (
-            {"id": "ntfs-logfile-transactions", "label": "$LogFile transaction", "status": "inventory", "terms": ("$logfile", "transaction", "ntfs log", "redo", "undo")},
+            {"id": "ntfs-logfile-transactions", "label": "$LogFile transaction", "status": "partial", "terms": ("$logfile", "transaction", "ntfs log", "redo", "undo", "ntfs-logfile-transaction-candidate")},
             {"id": "recycle-bin-ir-map", "label": "Recycle Bin $I/$R 매핑", "status": "partial", "terms": ("recycle bin", "recycle-bin-entry", "$i", "$r", "deleted time", "original path")},
             {"id": "timestamp-stomping-detection", "label": "Time stomping 탐지", "status": "inventory", "terms": ("timestamp", "stomping", "$sia", "$fna", "time mismatch")},
             {"id": "signature-mismatch-detection", "label": "확장자 변조 탐지", "status": "partial", "terms": ("signature mismatch", "file-signature-mismatch", "magic", "extension mismatch", "file header")},
@@ -160,7 +160,7 @@ CAPABILITY_GROUPS: tuple[dict[str, Any], ...] = (
         "catalog_id": "windows-core",
         "label": "이벤트 로그 DFIR",
         "capabilities": (
-            {"id": "etl-trace-parser", "label": "ETW/ETL trace", "status": "inventory", "terms": ("etl", "etw", "trace", "wmi trace", "usb trace")},
+            {"id": "etl-trace-parser", "label": "ETW/ETL trace", "status": "partial", "terms": ("etl", "etw", "trace", "wmi trace", "usb trace", "etl-trace-file")},
             {"id": "eventlog-clearing-alert", "label": "로그 삭제 High-Risk", "status": "partial", "terms": ("event id 1102", "event id 104", "log clear", "audit log cleared")},
             {"id": "logon-session-timeline", "label": "로그온 세션 통합 뷰", "status": "inventory", "terms": ("4624", "4634", "4647", "logon session", "logoff")},
         ),
@@ -170,9 +170,9 @@ CAPABILITY_GROUPS: tuple[dict[str, Any], ...] = (
         "catalog_id": "windows-core",
         "label": "USB / 지속성 / 네트워크",
         "capabilities": (
-            {"id": "usb-external-device-history", "label": "USB 및 외장매체 연결 이력", "status": "inventory", "terms": ("usbstor", "mounteddevices", "setupapi.dev.log", "usb serial", "drive letter")},
+            {"id": "usb-external-device-history", "label": "USB 및 외장매체 연결 이력", "status": "partial", "terms": ("usbstor", "mounteddevices", "setupapi.dev.log", "usb serial", "drive letter", "usb-setupapi-device-install-candidate")},
             {"id": "autoruns-persistence-view", "label": "Persistence/Autoruns 통합 뷰", "status": "partial", "terms": ("autoruns", "run key", "service", "scheduled task", "wmi consumer")},
-            {"id": "wifi-network-profile-history", "label": "Wi-Fi/네트워크 프로필", "status": "inventory", "terms": ("wifi", "ssid", "wlan", "network profile", "connection")},
+            {"id": "wifi-network-profile-history", "label": "Wi-Fi/네트워크 프로필", "status": "partial", "terms": ("wifi", "ssid", "wlan", "network profile", "connection", "wifi-profile")},
         ),
     },
     {

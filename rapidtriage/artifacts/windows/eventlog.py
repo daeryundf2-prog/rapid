@@ -22,6 +22,25 @@ EVENT_LOG_ROOT = ("Windows", "System32", "winevt", "Logs")
 PARSER_VERSION = "eventlog-normalized-v16"
 BUILTIN_RULEPACK_VERSION = "eventlog-builtin-rules-v1"
 EVENT_EXPORT_SUFFIXES = {".xml", ".json", ".jsonl", ".ndjson", ".csv"}
+ETL_SUFFIXES = {".etl"}
+ETL_SCAN_LIMIT = 4 * 1024 * 1024
+ETL_PROVIDER_HINTS = (
+    "Microsoft-Windows-Kernel-PnP",
+    "Microsoft-Windows-WMI-Activity",
+    "Microsoft-Windows-WLAN-AutoConfig",
+    "Microsoft-Windows-TCPIP",
+    "Microsoft-Windows-DNS-Client",
+    "Microsoft-Windows-PowerShell",
+    "Microsoft-Windows-TaskScheduler",
+    "USBSTOR",
+    "WMI",
+    "WLAN",
+    "TCPIP",
+    "DNS",
+)
+ETL_URL_RE = re.compile(r"(?i)https?://[^\s\x00\"'<>]{4,300}")
+ETL_WINDOWS_PATH_RE = re.compile(r"(?i)(?:[a-z]:\\|\\\\|\\device\\)[^\x00\r\n\t\"'<>|]{4,260}")
+ETL_IP_RE = re.compile(r"\b(?:\d{1,3}\.){3}\d{1,3}\b")
 EVENT_EXPORT_HINTS = ("event", "evtx", "hayabusa", "chainsaw", "winevt", "winlog")
 EVTX_FILE_SIGNATURE = b"ElfFile\x00"
 EVTX_CHUNK_SIGNATURE = b"ElfChnk\x00"
@@ -1067,6 +1086,8 @@ class WindowsEventLogProvider:
                         native_record_candidate_count=native_candidate_count,
                     )
                 )
+            elif suffix in ETL_SUFFIXES:
+                records.append(build_etl_trace_inventory_record(path))
         records.extend(build_builtin_detection_records(records))
         yield from records
         summary = build_eventlog_summary(root, records)
@@ -1078,15 +1099,19 @@ def candidate_eventlog_paths(root: Path) -> Iterable[Path]:
     logs_root = root.joinpath(*EVENT_LOG_ROOT)
     if logs_root.is_dir():
         yield from sorted(
-            (path for path in logs_root.rglob("*") if path.is_file() and path.suffix.lower() in EVENT_EXPORT_SUFFIXES | {".evtx"}),
+            (
+                path
+                for path in logs_root.rglob("*")
+                if path.is_file() and path.suffix.lower() in EVENT_EXPORT_SUFFIXES | {".evtx"} | ETL_SUFFIXES
+            ),
             key=lambda item: str(item).lower(),
         )
 
     for path in sorted(root.rglob("*"), key=lambda item: str(item).lower()):
-        if not path.is_file() or path.suffix.lower() not in EVENT_EXPORT_SUFFIXES | {".evtx"}:
+        if not path.is_file() or path.suffix.lower() not in EVENT_EXPORT_SUFFIXES | {".evtx"} | ETL_SUFFIXES:
             continue
         lowered = str(path.relative_to(root)).lower()
-        if any(hint in lowered for hint in EVENT_EXPORT_HINTS):
+        if path.suffix.lower() in ETL_SUFFIXES or any(hint in lowered for hint in EVENT_EXPORT_HINTS):
             yield path
 
 
@@ -5321,6 +5346,63 @@ def build_eventlog_file_record(
     )
 
 
+def build_etl_trace_inventory_record(path: Path) -> ArtifactRecord:
+    stat_result = path.stat()
+    blob = read_prefix(path, ETL_SCAN_LIMIT)
+    strings = unique_texts([*extract_ascii_strings(blob), *extract_utf16le_strings(blob)])
+    provider_hints = [hint for hint in ETL_PROVIDER_HINTS if any(hint.lower() in value.lower() for value in strings)]
+    url_candidates = regex_text_candidates(strings, ETL_URL_RE)[:50]
+    path_candidates = regex_text_candidates(strings, ETL_WINDOWS_PATH_RE)[:50]
+    ip_candidates = regex_text_candidates(strings, ETL_IP_RE)[:50]
+    trace_families = etl_trace_families(provider_hints, strings)
+    validation_checks = {
+        "source_file_readable": bool(blob),
+        "bounded_scan_completed": len(blob) <= ETL_SCAN_LIMIT,
+        "provider_hints_present": bool(provider_hints),
+        "trace_decoder_available": False,
+        "trusted_etl_parser_diff_available": False,
+    }
+    return event_record(
+        path,
+        "etl-trace-file",
+        {
+            "parser": "windows-etl-bounded-inventory",
+            "parser_version": PARSER_VERSION,
+            "coverage_status": "etl-provider-string-pivot",
+            "reportability": "triage",
+            "source_path": str(path.resolve()),
+            "source_format": "etl",
+            "source_hashes": file_hashes(path),
+            "size": stat_result.st_size,
+            "modified_at": dt.datetime.fromtimestamp(stat_result.st_mtime, dt.timezone.utc).isoformat(),
+            "timestamp": dt.datetime.fromtimestamp(stat_result.st_mtime, dt.timezone.utc).isoformat(),
+            "timestamp_source": "etl_file_modified_at",
+            "channel_hint": channel_hint_from_path(path),
+            "scan_bytes": len(blob),
+            "provider_hints": provider_hints[:50],
+            "trace_families": trace_families,
+            "url_candidates": url_candidates,
+            "path_candidates": path_candidates,
+            "ip_candidates": ip_candidates,
+            "string_samples": strings[:50],
+            "risk_flags": ["etl-trace-file"] + [f"etl-family:{family}" for family in trace_families],
+            "validation_required": True,
+            "validation_checks": validation_checks,
+            "validation_guidance": (
+                "ETL is inventoried with bounded provider/string pivots. Decode ETW headers/events with tracerpt, "
+                "Windows Performance Toolkit, or a dedicated ETL parser before report-grade USB/WMI/network claims."
+            ),
+            "commercial_grade_ready": False,
+            "commercial_grade_blockers": [
+                "etl-event-record-decoder-not-implemented",
+                "provider-manifest-field-rendering-required",
+                "trusted-etl-parser-diff-required",
+            ],
+            "recommended_parsers": ["tracerpt", "Windows Performance Toolkit", "Velociraptor Windows ETW artifacts"],
+        },
+    )
+
+
 def build_builtin_detection_records(records: Sequence[ArtifactRecord]) -> list[ArtifactRecord]:
     detections: list[ArtifactRecord] = []
     for record in records:
@@ -5815,6 +5897,23 @@ def decode_utf16le_string(blob: bytes) -> str:
         return ""
 
 
+def extract_ascii_strings(blob: bytes, *, min_chars: int = 5, limit: int = 250) -> list[str]:
+    strings: list[str] = []
+    current = bytearray()
+    for byte in blob:
+        if 32 <= byte <= 126:
+            current.append(byte)
+            continue
+        if len(current) >= min_chars:
+            strings.append(current.decode("ascii", errors="ignore").strip())
+            if len(strings) >= limit:
+                return strings
+        current.clear()
+    if len(current) >= min_chars:
+        strings.append(current.decode("ascii", errors="ignore").strip())
+    return strings
+
+
 def unique_texts(values: Sequence[str]) -> list[str]:
     seen: set[str] = set()
     output: list[str] = []
@@ -5825,6 +5924,31 @@ def unique_texts(values: Sequence[str]) -> list[str]:
         seen.add(text)
         output.append(text)
     return output
+
+
+def regex_text_candidates(strings: Sequence[str], pattern: re.Pattern[str]) -> list[str]:
+    candidates: list[str] = []
+    for value in strings:
+        for match in pattern.finditer(value):
+            candidate = match.group(0).rstrip(".,);]")
+            if candidate not in candidates:
+                candidates.append(candidate)
+    return candidates
+
+
+def etl_trace_families(provider_hints: Sequence[str], strings: Sequence[str]) -> list[str]:
+    haystack = " ".join([*provider_hints, *strings]).lower()
+    families: list[str] = []
+    family_terms = {
+        "usb": ("usb", "usbstor", "kernel-pnp"),
+        "wmi": ("wmi", "wmic", "wmi-activity"),
+        "network": ("tcpip", "dns", "http://", "https://", "wlan", "wifi"),
+        "execution": ("powershell", "taskscheduler", "process"),
+    }
+    for family, terms in family_terms.items():
+        if any(term in haystack for term in terms):
+            families.append(family)
+    return families
 
 
 def first_matching_string(values: Sequence[str], *needles: str) -> str:
@@ -6059,3 +6183,11 @@ def file_hashes(path: Path) -> dict[str, str]:
     except OSError:
         return {}
     return {"sha256": digest.hexdigest()}
+
+
+def read_prefix(path: Path, limit: int) -> bytes:
+    try:
+        with path.open("rb") as handle:
+            return handle.read(limit)
+    except OSError:
+        return b""

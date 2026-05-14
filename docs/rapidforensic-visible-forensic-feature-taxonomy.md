@@ -876,3 +876,37 @@ GUI 표기 방식:
 1. `bits-qmgr-transfer-candidate`는 URL/path string 후보이지 완성된 BITS job record가 아니다.
 2. `webcachev01-ese-file`은 ESE header/string pivot이다. 방문 시각, container, cache entry, 삭제 상태를 아직 확정하지 않는다.
 3. `desktop-cloud-sync-db`는 schema inventory다. 파일이 업로드/삭제/공유됐다는 최종 결론은 provider-specific parser와 계정 scope 자료가 필요하다.
+
+## 27. 2026-05-14 구현 반영: NTFS 로그/ETL/USB/Wi-Fi triage 4차 보강
+
+이번 라운드는 정보유출/침해사고 조사에서 “있으면 반드시 보여야 하는데 아직 메뉴 수준에 가까웠던” Windows 저수준 흔적을 실제 artifact row로 연결했다. 모두 상용급 최종 판정 parser가 아니라 bounded triage row이며, 보고서 확정 전 검증 요구사항을 row 내부에 남긴다.
+
+부분 구현으로 승격한 capability:
+
+| capability | 새 artifact row | 구현 내용 | 남은 상용급 보강 |
+| --- | --- | --- | --- |
+| `$LogFile` transaction | `ntfs-logfile-transaction-candidate` | `$LogFile` 파일을 찾아 `RSTR/RCRD/CHKD` signature, path string pivot, source hash, scan byte, mtime을 기록한다. | redo/undo record decoder, `$MFT/$UsnJrnl` timeline join, LogFileParser/MFTECmd diff |
+| ETW/ETL trace | `etl-trace-file` | `.etl` 파일을 이벤트 로그 collector에서 노출하고 provider hint, USB/WMI/network/execution family, URL/path/IP pivot을 bounded scan한다. | ETW event header decoder, provider manifest field rendering, tracerpt/WPT/Velociraptor diff |
+| USB 및 외장매체 연결 이력 | `usb-setupapi-device-install-candidate` | `setupapi.dev.log`에서 `USBSTOR`/`USB\\VID...` install-context line과 timestamp hint를 추출한다. | USBSTOR/Enum USB/MountedDevices/drive-letter 상관, first/last connect 검증 |
+| Wi-Fi/네트워크 프로필 | `wifi-profile` | `ProgramData/Microsoft/Wlansvc/Profiles/Interfaces` XML에서 profile name, SSID, connection mode, auth/encryption, MAC randomization을 정규화한다. | WLAN AutoConfig EVTX/ETL 연결 시각, NetworkList registry 상관, trusted parser diff |
+
+대용량/안전 설계:
+
+1. `$LogFile`은 8MB prefix scan으로 제한해 대형 파일에서 수집기가 멈추지 않도록 했다.
+2. `.etl`은 4MB prefix scan으로 provider/string pivot만 추출한다. 구조 decode를 가장하지 않는다.
+3. `setupapi.dev.log`는 4MB scan과 최대 500개 install context entry 제한을 둔다.
+4. Wi-Fi profile은 XML 파일 단위 정규화라 대용량 부담이 작고, 연결 여부 판정은 하지 않는다.
+
+검증 포인트:
+
+1. `tests/test_rapidtriage_windows_artifacts.py::test_windows_filesystem_collector_maps_ntfs_logfile_transaction_candidates`가 `$LogFile` signature/path pivot row를 검증한다.
+2. `tests/test_rapidtriage_windows_artifacts.py::test_windows_eventlog_collector_maps_etl_trace_files`가 `.etl` provider hint와 USB/network pivot을 검증한다.
+3. `tests/test_rapidtriage_windows_artifacts.py::test_windows_system_collector_maps_setupapi_usb_and_wifi_profiles`가 SetupAPI USB install 후보와 WLAN profile XML 정규화를 검증한다.
+4. Python/JS visible capability status는 `$LogFile`, ETL, USB, Wi-Fi를 `부분 구현`으로 올리고 실제 artifact type terms를 추가했다.
+
+중요한 제한:
+
+1. `ntfs-logfile-transaction-candidate`는 transaction page 후보와 string pivot이다. 파일 생성/삭제/rename 결론을 단독으로 내리면 안 된다.
+2. `etl-trace-file`은 provider/string inventory다. ETW event payload를 구조적으로 해석하지 않는다.
+3. `usb-setupapi-device-install-candidate`는 설치 흔적이다. 실제 연결 시각/드라이브 문자/파일 복사 여부는 registry와 파일시스템 timeline 상관이 필요하다.
+4. `wifi-profile`은 저장된 네트워크 설정이다. 실제 접속 여부나 위치/물리적 존재 입증은 EventLog/ETL/NetworkList와 결합해야 한다.
