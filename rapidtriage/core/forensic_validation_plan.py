@@ -14,7 +14,7 @@ from .forensic_accuracy import CORE_FORENSIC_ACCURACY_ITEMS, accuracy_profile_fo
 FORENSIC_VALIDATION_PLAN_VERSION = "forensic-validation-plan-v1"
 FORENSIC_VALIDATION_PACK_VERSION = "forensic-validation-pack-v1"
 FORENSIC_VALIDATION_BATCHES_VERSION = "forensic-validation-batches-v1"
-DEFAULT_FORENSIC_VALIDATION_ITEMS = "1-65"
+DEFAULT_FORENSIC_VALIDATION_ITEMS = "1-120"
 DEFAULT_FORENSIC_VALIDATION_PACK_ITEMS = "1-5"
 
 
@@ -238,7 +238,7 @@ def assess_forensic_validation_batches(root_dir: Path, *, output: Path | None = 
 def populate_forensic_validation_smoke_fixtures(root_dir: Path, *, output: Path | None = None) -> dict[str, object]:
     """Populate validation packs with deterministic internal smoke evidence.
 
-    This proves that all generated #1~#65 pack contracts can be populated and
+    This proves that all generated pack contracts can be populated and
     assessed end-to-end. It intentionally does not create commercial-grade
     evidence because the source/reference rows are synthetic fixtures.
     """
@@ -901,15 +901,21 @@ def forensic_lane_for_number(number: int) -> str:
         return "mobile-messenger-mail-cloud"
     if 46 <= number <= 65:
         return "search-viewer-review-report"
+    if 66 <= number <= 80:
+        return "performance-large-scale"
+    if 81 <= number <= 100:
+        return "validation-legal-defensibility"
+    if 101 <= number <= 120:
+        return "release-operations-governance"
     return "other"
 
 
 def forensic_priority_for_number(number: int) -> int:
-    if number in {1, 2, 3, 4, 5, 12, 13, 22}:
+    if number in {1, 2, 3, 4, 5, 12, 13, 22, 81, 82, 85}:
         return 1
-    if number in {6, 7, 8, 9, 10, 11, 16, 17, 18, 49, 54, 64, 65}:
+    if number in {6, 7, 8, 9, 10, 11, 16, 17, 18, 49, 54, 64, 65, 66, 67, 68, 69, 70, 86, 87, 88, 89, 90}:
         return 2
-    if 19 <= number <= 21 or 46 <= number <= 63:
+    if 19 <= number <= 21 or 46 <= number <= 63 or 71 <= number <= 80 or 91 <= number <= 100:
         return 3
     if 26 <= number <= 45:
         return 4
@@ -918,7 +924,14 @@ def forensic_priority_for_number(number: int) -> int:
 
 def implementation_order_for_number(number: int) -> int:
     priority = forensic_priority_for_number(number)
-    lane_bias = {"core-windows-forensics": 0, "search-viewer-review-report": 100, "mobile-messenger-mail-cloud": 200}
+    lane_bias = {
+        "core-windows-forensics": 0,
+        "search-viewer-review-report": 100,
+        "performance-large-scale": 150,
+        "validation-legal-defensibility": 180,
+        "mobile-messenger-mail-cloud": 200,
+        "release-operations-governance": 300,
+    }
     return priority * 1000 + lane_bias.get(forensic_lane_for_number(number), 300) + number
 
 
@@ -933,6 +946,12 @@ def next_internal_work_for_number(number: int) -> str:
         return "Add NTFS MFT/USN known-answer fixtures for path reconstruction, rename/delete replay, and cursor determinism."
     if 46 <= number <= 65:
         return "Add source citation, reviewer state, large-result, and report evidence fixtures with stable manifest hashes."
+    if 66 <= number <= 80:
+        return "Add repeatable benchmark/stress/checkpoint/cursor fixtures with run logs, resource caps, and regression thresholds."
+    if 81 <= number <= 100:
+        return "Add validation/legal/integrity manifests with known-answer coverage, hash-chain evidence, provenance, and trusted diff gates."
+    if 101 <= number <= 120:
+        return "Add release-operation evidence slots, signed artifact checks, local-only proofs, security review hooks, and deployment smoke manifests."
     if 26 <= number <= 45:
         return "Add versioned export schema fixtures and legal/secret redaction gates for the service/app family."
     return "Attach known-answer fixtures, trusted reference output, and row-level diff evidence."
@@ -946,6 +965,12 @@ def external_evidence_for_number(number: int) -> list[str]:
         evidence.append("authorized export/acquisition scope record")
     if 46 <= number <= 65:
         evidence.append("analyst workflow replay or UI/source-citation oracle")
+    if 66 <= number <= 80:
+        evidence.append("repeatable performance run log with hardware/profile metadata")
+    if 81 <= number <= 100:
+        evidence.append("validation/legal reviewer sign-off and manifest hash")
+    if 101 <= number <= 120:
+        evidence.append("release/build/security/operations evidence artifact")
     return evidence
 
 
@@ -972,6 +997,12 @@ def trusted_reference_tools_for_number(number: int) -> list[str]:
         return ["MFTECmd", "analyzeMFT", "The Sleuth Kit"]
     if number in {14, 15}:
         return ["JLECmd", "ShellBagsExplorer", "RECmd"]
+    if 66 <= number <= 80:
+        return ["RapidTriage benchmark output", "system resource telemetry", "case-scale regression oracle"]
+    if 81 <= number <= 100:
+        return ["NIST CFReDS/CFTT or equivalent known-answer corpus", "independent reviewer manifest", "trusted report/audit manifest"]
+    if 101 <= number <= 120:
+        return ["platform signing/notarization tools", "CI advisory/SBOM scanner", "independent AppSec or operations evidence"]
     return ["trusted external parser", "hand-labeled known-answer fixture"]
 
 
@@ -980,6 +1011,12 @@ def rapidtriage_command_hint_for_number(number: int) -> str:
         return "rapidtriage artifacts <case-root> --windows-event-logs --json --output <rapid-evtx.json>"
     if number in {4, 5}:
         return "rapidtriage artifacts <case-root> --windows-registry --json --output <rapid-registry.json>"
+    if 66 <= number <= 80:
+        return "rapidtriage benchmark <case-root> --output <rapid-performance.json> plus the item-specific run/checkpoint command"
+    if 81 <= number <= 100:
+        return "rapidtriage validation --output-dir <validation-dir> --known-answer-manifest <manifest.json> --json"
+    if 101 <= number <= 120:
+        return "rapidtriage validation-diff-runners --output <runner-matrix.json> --json plus release evidence verifier commands"
     return "rapidtriage artifacts <case-root> --json --output <rapid-output.json>"
 
 
@@ -994,6 +1031,12 @@ def trusted_reference_command_hint_for_number(number: int) -> str:
         return "RECmd -f <hive> --nl plus Registry Explorer export for full key/value tree comparison"
     if number == 5:
         return "Registry Explorer deleted-cell export or hand-labeled free-cell fixture with key/value offsets"
+    if 66 <= number <= 80:
+        return "Run the matching benchmark/stress/checkpoint scenario twice and preserve resource telemetry, thresholds, and failure logs"
+    if 81 <= number <= 100:
+        return "Attach NIST/CFReDS/CFTT-style manifest, independent reviewer sign-off, and trusted report/audit/exhibit diff outputs"
+    if 101 <= number <= 120:
+        return "Attach signed build/notarization/CI/SBOM/AppSec/support evidence from the release environment"
     return "Run the item-specific trusted parser listed in trusted_reference_tools and export JSON/CSV"
 
 
@@ -1022,6 +1065,39 @@ def required_output_fields_for_number(number: int) -> list[str]:
             "cell_offset",
             "allocation_state",
             "transaction_replay_status",
+        ]
+    if 66 <= number <= 80:
+        return [
+            "scenario_id",
+            "input_scale",
+            "record_count",
+            "duration_ms",
+            "peak_rss_bytes",
+            "p95_latency_ms",
+            "resume_or_retry_status",
+            "threshold_status",
+        ]
+    if 81 <= number <= 100:
+        return [
+            "evidence_id",
+            "source_hash",
+            "manifest_hash",
+            "reviewer_status",
+            "provenance_status",
+            "limitation_status",
+            "audit_chain_head",
+            "validation_status",
+        ]
+    if 101 <= number <= 120:
+        return [
+            "release_artifact",
+            "platform",
+            "version",
+            "evidence_hash",
+            "signoff_status",
+            "smoke_status",
+            "security_status",
+            "blocker_status",
         ]
     return ["source_path", "artifact_type", "normalized_identity", "timestamp", "source_offset", "parser_confidence"]
 

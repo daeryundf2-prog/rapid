@@ -1530,13 +1530,13 @@ def build_parser() -> argparse.ArgumentParser:
     forensic_validation_plan = sub.add_parser(
         "forensic-validation-plan",
         help="Build a focused validation execution plan for forensic items",
-        description="Build a machine-readable execution plan for forensic validation items, defaulting to #1-#65",
+        description="Build a machine-readable execution plan for forensic validation items, defaulting to #1-#120",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=textwrap.dedent(
             """\
             Examples:
               rapidtriage forensic-validation-plan --json
-              rapidtriage forensic-validation-plan --items 1-65 --output-dir ./forensic-validation-plan
+              rapidtriage forensic-validation-plan --items 1-120 --output-dir ./forensic-validation-plan
             """
         ),
     )
@@ -1581,7 +1581,7 @@ def build_parser() -> argparse.ArgumentParser:
     forensic_validation_batches = sub.add_parser(
         "forensic-validation-batches",
         help="Write five-item validation packs for a full forensic item range",
-        description="Create plan output plus one executable validation pack per five-item batch, defaulting to #1-#65",
+        description="Create plan output plus one executable validation pack per five-item batch, defaulting to #1-#120",
     )
     forensic_validation_batches.add_argument(
         "--items",
