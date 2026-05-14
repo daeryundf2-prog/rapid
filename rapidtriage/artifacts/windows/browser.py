@@ -10,7 +10,7 @@ from urllib.parse import parse_qs, unquote_plus, urlparse
 
 from ...core.forensic_accuracy import build_accuracy_gate
 from ...core.models import ArtifactRecord
-from .ese import build_ese_string_pivots, probe_ese_database
+from .ese import build_ese_page_map, build_ese_string_pivots, probe_ese_database
 from .common import (
     build_forensic_review,
     isoformat_from_unix_micros,
@@ -110,6 +110,13 @@ MAX_BROWSER_INVENTORY_HASH_BYTES = 16 * 1024 * 1024
 MAX_BROWSER_TIMELINE_ROWS = 1000
 MAX_BROWSER_DEEP_FILE_HASH_BYTES = 64 * 1024 * 1024
 WEBCACHE_NAMES = {"webcachev01.dat"}
+WEBCACHE_TABLE_MARKERS = {
+    "history": ("container_1", "history", "visited", "visit", "typedurl"),
+    "cache": ("cache", "response", "request", "contenttype", "etag"),
+    "cookie": ("cookie", "cookies", "expires", "httponly"),
+    "download": ("download", "filename", "targetpath"),
+    "webview": ("webcache", "wininet", "webview", "iedownloadhistory"),
+}
 CLOUD_SYNC_DB_NAMES = {"sync_engine.db", "metadata_sqlite_db", "sync_config.db", "snapshot.db", "sync.db"}
 CLOUD_SYNC_PATH_TERMS = ("onedrive", "drivefs", "google drive", "googledrive")
 
@@ -312,6 +319,13 @@ def collect_webcachev01_artifacts(root: Path) -> Iterable[ArtifactRecord]:
         stat_result = path.stat()
         ese_probe = probe_ese_database(path)
         string_pivots = build_ese_string_pivots(path, max_strings=180)
+        page_map = build_ese_page_map(
+            path,
+            table_markers=WEBCACHE_TABLE_MARKERS,
+            max_pages=512,
+            max_strings_per_page=24,
+        )
+        review_profile = webcachev01_review_profile(string_pivots, page_map)
         profile = windows_browser_user_profile(path, root=root)
         yield ArtifactRecord(
             provider=WindowsBrowserArtifactsProvider.name,
@@ -331,16 +345,23 @@ def collect_webcachev01_artifacts(root: Path) -> Iterable[ArtifactRecord]:
                 "timestamp_source": "webcache_file_modified_at",
                 "ese_header": ese_probe,
                 "ese_string_pivots": string_pivots,
+                "ese_page_map": page_map,
+                "webcachev01_review_profile": review_profile,
                 "url_candidates": string_pivots.get("url_candidates", []),
                 "path_candidates": string_pivots.get("path_candidates", []),
-                "coverage_status": "ese-header-and-string-pivot-inventory",
+                "domain_candidates": review_profile["domain_candidates"],
+                "webcache_family_candidates": review_profile["family_candidates"],
+                "coverage_status": "ese-header-string-and-page-map-inventory"
+                if page_map.get("page_map_available")
+                else "ese-header-and-string-pivot-inventory",
                 "reportability": "triage",
                 "parser_confidence": "medium" if ese_probe.get("header_readable") else "low",
-                "risk_flags": ["webcachev01-ese-file", *list(string_pivots.get("risk_flags", []))],
+                "risk_flags": webcachev01_risk_flags(string_pivots, page_map),
                 "validation_required": True,
                 "validation_guidance": (
-                    "WebCacheV01.dat is an ESE database. This row preserves ESE header and bounded string pivots; "
-                    "validate containers/records, timestamps, and deleted state with a WebCache ESE decoder before reporting."
+                    "WebCacheV01.dat is an ESE database. This row preserves ESE header, bounded strings, page-local "
+                    "marker families, URLs, domains, and paths; validate containers/records, timestamps, and deleted "
+                    "state with a WebCache ESE decoder before reporting."
                 ),
                 "commercial_grade_ready": False,
                 "commercial_grade_blockers": [
@@ -350,6 +371,76 @@ def collect_webcachev01_artifacts(root: Path) -> Iterable[ArtifactRecord]:
                 ],
             },
         )
+
+
+def webcachev01_review_profile(
+    string_pivots: Mapping[str, object],
+    page_map: Mapping[str, object],
+) -> dict[str, object]:
+    urls = [str(value) for value in string_pivots.get("url_candidates") or []]
+    paths = [str(value) for value in string_pivots.get("path_candidates") or []]
+    domains = sorted(
+        {
+            parsed.netloc.lower()
+            for parsed in (urlparse(url) for url in urls)
+            if parsed.scheme and parsed.netloc
+        }
+    )
+    page_marker_counts = page_map.get("page_marker_family_counts")
+    family_counts = page_marker_counts if isinstance(page_marker_counts, list) else []
+    families = [
+        str(item.get("value"))
+        for item in family_counts
+        if isinstance(item, Mapping) and item.get("value")
+    ]
+    return {
+        "profile_version": "webcachev01-review-profile-v1",
+        "url_candidate_count": len(urls),
+        "domain_candidates": domains[:50],
+        "path_candidate_count": len(paths),
+        "family_candidates": families[:20],
+        "page_map_available": bool(page_map.get("page_map_available")),
+        "candidate_page_count": int(page_map.get("candidate_page_count") or 0),
+        "page_count_scanned": int(page_map.get("page_count_scanned") or 0),
+        "values_are_candidates": True,
+        "source_viewer_hint": (
+            "Open the WebCacheV01.dat source with the ESE page map, "
+            "then validate URLs/domains against a real ESE row decoder."
+        ),
+        "validation_required": True,
+        "validation_guidance": (
+            "URL/domain/path/page-family values are bounded ESE pivots. Confirm container table, access time, "
+            "cache/cookie/history semantics, and deleted state with WebCache fixtures and a trusted parser before reporting."
+        ),
+    }
+
+
+def webcachev01_risk_flags(
+    string_pivots: Mapping[str, object],
+    page_map: Mapping[str, object],
+) -> list[str]:
+    flags = ["webcachev01-ese-file", *list(string_pivots.get("risk_flags", []))]
+    if string_pivots.get("url_candidates"):
+        flags.append("webcache-url-candidate")
+    if string_pivots.get("path_candidates"):
+        flags.append("webcache-path-candidate")
+    if page_map.get("candidate_page_count"):
+        flags.append("webcache-page-map-candidate")
+    for item in page_map.get("page_marker_family_counts") or []:
+        if isinstance(item, Mapping) and item.get("value"):
+            flags.append(f"webcache-family:{item['value']}")
+    return browser_unique_preserve_order([str(flag) for flag in flags])
+
+
+def browser_unique_preserve_order(values: Sequence[str]) -> list[str]:
+    seen: set[str] = set()
+    unique: list[str] = []
+    for value in values:
+        if not value or value in seen:
+            continue
+        seen.add(value)
+        unique.append(value)
+    return unique
 
 
 def collect_desktop_cloud_sync_db_artifacts(root: Path) -> Iterable[ArtifactRecord]:

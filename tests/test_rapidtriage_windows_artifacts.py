@@ -85,6 +85,11 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
             )
             self.assertTrue(webcache_artifact["details"]["ese_header"]["signature_valid"])
             self.assertIn("https://webview.example.test/cache", webcache_artifact["details"]["url_candidates"])
+            self.assertEqual(webcache_artifact["details"]["coverage_status"], "ese-header-string-and-page-map-inventory")
+            self.assertIn("webview.example.test", webcache_artifact["details"]["domain_candidates"])
+            self.assertTrue(webcache_artifact["details"]["ese_page_map"]["page_map_available"])
+            self.assertGreaterEqual(webcache_artifact["details"]["webcachev01_review_profile"]["candidate_page_count"], 1)
+            self.assertIn("webcache-url-candidate", webcache_artifact["details"]["risk_flags"])
 
             sync_artifact = next(
                 artifact for artifact in payload["artifacts"] if artifact["artifact_type"] == "desktop-cloud-sync-db"

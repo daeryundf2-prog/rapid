@@ -954,8 +954,8 @@ const VISIBLE_FORENSIC_CAPABILITY_GROUPS = [
         id: "webcachev01-ese-parser",
         label: "WebCacheV01.dat",
         status: "partial",
-        terms: ["webcachev01.dat", "webcachev01-ese-file", "ese", "webcache", "wininet", "webview"],
-        nextAction: "ESE header/string pivot은 가능, container/record/timestamp decoder와 deleted state recovery 필요",
+        terms: ["webcachev01.dat", "webcachev01-ese-file", "webcachev01_review_profile", "ese_page_map", "url candidate", "domain candidate", "ese", "webcache", "wininet", "webview"],
+        nextAction: "ESE header/string/page-map 후보는 가능, container/record/timestamp decoder와 deleted state recovery 필요",
       },
       {
         id: "desktop-cloud-sync-db",

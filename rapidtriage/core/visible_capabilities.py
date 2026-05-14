@@ -232,7 +232,7 @@ CAPABILITY_GROUPS: tuple[dict[str, Any], ...] = (
         "label": "브라우저 심화 복원",
         "capabilities": (
             {"id": "incognito-memory-pagefile-carving", "label": "시크릿 모드 URL 카빙", "status": "partial", "terms": ("incognito", "inprivate", "pagefile", "hiberfil", "url carving", "private-browsing-url-candidate", "search-query-url-candidate")},
-            {"id": "webcachev01-ese-parser", "label": "WebCacheV01.dat", "status": "partial", "terms": ("webcachev01.dat", "webcachev01-ese-file", "ese", "webcache", "wininet", "webview")},
+            {"id": "webcachev01-ese-parser", "label": "WebCacheV01.dat", "status": "partial", "terms": ("webcachev01.dat", "webcachev01-ese-file", "webcachev01_review_profile", "ese_page_map", "url candidate", "domain candidate", "ese", "webcache", "wininet", "webview")},
             {"id": "desktop-cloud-sync-db", "label": "OneDrive/Google Drive sync DB", "status": "partial", "terms": ("onedrive", "sync_engine.db", "desktop-cloud-sync-db", "google drive", "drivefs", "sync")},
         ),
     },
