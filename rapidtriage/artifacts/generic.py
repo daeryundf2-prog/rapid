@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import datetime as dt
 import hashlib
+import re
 import sqlite3
 from pathlib import Path
 from typing import Iterable, Mapping, Sequence
@@ -9,10 +10,14 @@ from typing import Iterable, Mapping, Sequence
 from ..core.models import ArtifactRecord
 from ..core.submission import compute_hashes
 
-PARSER_VERSION = "generic-documents-v3"
+PARSER_VERSION = "generic-documents-v4"
 STICKY_NOTE_ROW_LIMIT = 5000
+STICKY_NOTE_RECOVERY_SCAN_BYTES = 8 * 1024 * 1024
+STICKY_NOTE_RECOVERY_LIMIT = 40
 LARGE_FILE_HASH_DEFER_BYTES = 64 * 1024 * 1024
 DESKTOP_AI_TABLE_LIMIT = 20
+EMAIL_RE = re.compile(r"(?i)\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b")
+URL_RE = re.compile(r"(?i)https?://[^\s\x00\"'<>]{4,300}")
 LOCAL_LLM_PATH_TERMS = {
     "ollama": "Ollama",
     "lm studio": "LM Studio",
@@ -108,7 +113,9 @@ def collect_sticky_notes_sqlite(path: Path) -> Iterable[ArtifactRecord]:
         return
     with connection:
         tables = sticky_note_candidate_tables(connection)
+        schema_profile = sticky_notes_schema_profile(connection, tables)
         emitted = 0
+        live_note_hashes: set[str] = set()
         for table_name, columns in tables:
             if emitted >= STICKY_NOTE_ROW_LIMIT:
                 break
@@ -129,7 +136,11 @@ def collect_sticky_notes_sqlite(path: Path) -> Iterable[ArtifactRecord]:
                 text = optional_text(row[text_column])
                 if not text.strip():
                     continue
+                text_hash = sha256_text(text)
+                live_note_hashes.add(text_hash)
                 emitted += 1
+                is_deleted = boolish(row[deleted_column]) if deleted_column else False
+                account_hint = optional_text(row[account_column]) if account_column else ""
                 yield ArtifactRecord(
                     provider=GenericDocumentArtifactProvider.name,
                     artifact_type="sticky-note",
@@ -145,19 +156,65 @@ def collect_sticky_notes_sqlite(path: Path) -> Iterable[ArtifactRecord]:
                         "rowid": row["rowid"],
                         "created_at": normalize_sqlite_time(row[created_column]) if created_column else "",
                         "updated_at": normalize_sqlite_time(row[updated_column]) if updated_column else "",
-                        "is_deleted": boolish(row[deleted_column]) if deleted_column else False,
-                        "account_hint": optional_text(row[account_column]) if account_column else "",
+                        "is_deleted": is_deleted,
+                        "account_hint": account_hint,
                         "color_hint": optional_text(row[color_column]) if color_column else "",
                         "text_preview": redact_note_preview(text),
-                        "text_sha256": sha256_text(text),
+                        "text_sha256": text_hash,
                         "text_length": len(text),
+                        "sticky_note_schema_profile": schema_profile,
+                        "sticky_note_review_profile": sticky_note_review_profile(
+                            text=text,
+                            is_deleted=is_deleted,
+                            account_hint=account_hint,
+                            source_table=table_name,
+                            recovered=False,
+                        ),
                         "coverage_status": "plum-sqlite-row-normalized",
                         "validation_required": True,
                         "commercial_grade_ready": False,
                         "commercial_grade_blockers": sticky_notes_blockers(),
-                        "risk_flags": sticky_note_risk_flags(text, boolish(row[deleted_column]) if deleted_column else False),
+                        "risk_flags": sticky_note_risk_flags(text, is_deleted, account_hint=account_hint),
                     },
                 )
+        for candidate_index, candidate in enumerate(sticky_note_recovery_candidates(path, live_note_hashes)):
+            yield ArtifactRecord(
+                provider=GenericDocumentArtifactProvider.name,
+                artifact_type="sticky-note-recovery-candidate",
+                path=str(path.resolve()),
+                supported=True,
+                details={
+                    "parser": "sticky-notes-plum",
+                    "parser_version": PARSER_VERSION,
+                    "source_path": str(path.resolve()),
+                    "source_hashes": source_hashes,
+                    "source_index": candidate_index,
+                    "source_offset": candidate["source_offset"],
+                    "encoding": candidate["encoding"],
+                    "recovery_method": candidate["recovery_method"],
+                    "recovery_reason": candidate["recovery_reason"],
+                    "text_preview": redact_note_preview(str(candidate["text"])),
+                    "text_sha256": sha256_text(str(candidate["text"])),
+                    "text_length": len(str(candidate["text"])),
+                    "sticky_note_schema_profile": schema_profile,
+                    "sticky_note_review_profile": sticky_note_review_profile(
+                        text=str(candidate["text"]),
+                        is_deleted=True,
+                        account_hint=str(candidate.get("account_hint", "")),
+                        source_table="bounded-string-scan",
+                        recovered=True,
+                    ),
+                    "coverage_status": "plum-sqlite-bounded-string-recovery-candidate",
+                    "validation_required": True,
+                    "commercial_grade_ready": False,
+                    "commercial_grade_blockers": sticky_notes_blockers(),
+                    "risk_flags": sticky_note_risk_flags(
+                        str(candidate["text"]),
+                        True,
+                        account_hint=str(candidate.get("account_hint", "")),
+                    ),
+                },
+            )
 
 
 def sticky_note_candidate_tables(connection: sqlite3.Connection) -> list[tuple[str, list[str]]]:
@@ -171,13 +228,192 @@ def sticky_note_candidate_tables(connection: sqlite3.Connection) -> list[tuple[s
     for table_row in table_rows:
         table_name = str(table_row[0])
         try:
-            columns = [str(row[1]) for row in connection.execute(f'PRAGMA table_info("{table_name}")').fetchall()]
+            columns = [
+                str(row[1])
+                for row in connection.execute(f"PRAGMA table_info({quote_sqlite_identifier(table_name)})").fetchall()
+            ]
         except sqlite3.Error:
             continue
         normalized = {normalize_column(column) for column in columns}
         if normalized.intersection({"text", "content", "body", "note", "plain", "payload"}):
             candidates.append((table_name, columns))
     return candidates
+
+
+def sticky_notes_schema_profile(
+    connection: sqlite3.Connection,
+    candidate_tables: Sequence[tuple[str, list[str]]],
+) -> dict[str, object]:
+    candidate_names = {table_name for table_name, _columns in candidate_tables}
+    try:
+        table_rows = connection.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name"
+        ).fetchall()
+    except sqlite3.Error:
+        table_rows = []
+    table_profiles: list[dict[str, object]] = []
+    for table_row in table_rows[:30]:
+        table_name = str(table_row[0])
+        try:
+            columns = [
+                str(row[1])
+                for row in connection.execute(f"PRAGMA table_info({quote_sqlite_identifier(table_name)})").fetchall()
+            ]
+        except sqlite3.Error:
+            columns = []
+        table_profiles.append(
+            {
+                "name": table_name,
+                "columns": columns,
+                "row_count": sqlite_count_rows(connection, table_name),
+                "is_note_candidate": table_name in candidate_names,
+                "has_text_column": bool(
+                    first_matching_column(columns, ("text", "content", "body", "note", "plain", "payload"))
+                ),
+                "has_deleted_column": bool(first_matching_column(columns, ("isdeleted", "deleted", "trashed"))),
+                "has_account_column": bool(first_matching_column(columns, ("account", "user", "userid", "email"))),
+                "has_timestamp_column": bool(
+                    first_matching_column(
+                        columns,
+                        ("createdat", "created", "createtime", "creationtime", "updatedat", "modified", "lastmodified"),
+                    )
+                ),
+            }
+        )
+    return {
+        "profile_version": "sticky-notes-schema-profile-v1",
+        "database_open_status": "opened",
+        "table_count": len(table_rows),
+        "bounded_table_count": len(table_profiles),
+        "candidate_note_table_count": len(candidate_tables),
+        "candidate_note_tables": [table_name for table_name, _columns in candidate_tables],
+        "tables": table_profiles,
+        "truncated_tables": len(table_rows) > len(table_profiles),
+        "validation_required": True,
+        "validation_guidance": (
+            "Schema profile identifies plausible Sticky Notes tables and columns. Confirm app version, account/device "
+            "attribution, deleted state, and row semantics against a known-answer plum.sqlite fixture before reporting."
+        ),
+    }
+
+
+def sticky_note_recovery_candidates(path: Path, live_text_hashes: set[str]) -> list[dict[str, object]]:
+    blob = read_prefix(path, STICKY_NOTE_RECOVERY_SCAN_BYTES)
+    candidates: list[dict[str, object]] = []
+    seen_hashes: set[str] = set(live_text_hashes)
+    for encoding, iterator in (
+        ("ascii", iter_ascii_strings_with_offsets(blob, minimum=14)),
+        ("utf-16le", iter_utf16le_strings_with_offsets(blob, minimum=14)),
+    ):
+        for offset, text in iterator:
+            cleaned = " ".join(text.split())
+            text_hash = sha256_text(cleaned)
+            if text_hash in seen_hashes or not looks_like_sticky_note_recovery_text(cleaned):
+                continue
+            seen_hashes.add(text_hash)
+            candidates.append(
+                {
+                    "source_offset": offset,
+                    "encoding": encoding,
+                    "text": cleaned,
+                    "account_hint": first_regex_match(cleaned, EMAIL_RE),
+                    "recovery_method": "bounded-sqlite-string-scan",
+                    "recovery_reason": "string-fragment-not-present-in-live-note-rows",
+                }
+            )
+            if len(candidates) >= STICKY_NOTE_RECOVERY_LIMIT:
+                return candidates
+    return candidates
+
+
+def sticky_note_review_profile(
+    *,
+    text: str,
+    is_deleted: bool,
+    account_hint: str,
+    source_table: str,
+    recovered: bool,
+) -> dict[str, object]:
+    lowered = text.lower()
+    sensitive_terms = [
+        term
+        for term in ("password", "passwd", "otp", "secret", "token", "api key", "apikey", "seed", "recovery")
+        if term in lowered
+    ]
+    urls = [match.group(0) for match in URL_RE.finditer(text)][:10]
+    emails = [match.group(0) for match in EMAIL_RE.finditer(text)][:10]
+    return {
+        "profile_version": "sticky-note-review-profile-v1",
+        "source_table": source_table,
+        "source_kind": "bounded-recovery-candidate" if recovered else "sqlite-live-row",
+        "deleted_state": "deleted-or-recovered-candidate" if is_deleted else "live-row",
+        "text_length": len(text),
+        "sensitive_term_hits": sensitive_terms,
+        "url_candidates": urls,
+        "email_candidates": emails,
+        "account_hint_present": bool(account_hint),
+        "values_are_candidates": recovered,
+        "source_viewer_hint": "Open plum.sqlite with the SQLite/hex viewer and verify the row or source offset before reporting.",
+        "report_blockers": [
+            "app-version-schema-fixture-required",
+            "deleted-state-trusted-diff-required" if is_deleted or recovered else "row-semantics-trusted-diff-required",
+            "account-device-attribution-corroboration-required",
+        ],
+    }
+
+
+def looks_like_sticky_note_recovery_text(text: str) -> bool:
+    if len(text) < 14 or len(text) > 2000:
+        return False
+    lowered = text.lower()
+    if any(term in lowered for term in ("create table", "sqlite_", "pragma ", "index ", "microsoft.msn", "http://schemas")):
+        return False
+    if not any(character.isalpha() for character in text):
+        return False
+    if any(term in lowered for term in ("password", "passwd", "otp", "secret", "token", "api key", "apikey", "seed")):
+        return True
+    if first_regex_match(text, EMAIL_RE) or first_regex_match(text, URL_RE):
+        return True
+    return " " in text and len(text.split()) >= 3
+
+
+def iter_ascii_strings_with_offsets(blob: bytes, *, minimum: int) -> Iterable[tuple[int, str]]:
+    start: int | None = None
+    current = bytearray()
+    for index, value in enumerate(blob):
+        if 32 <= value <= 126:
+            if start is None:
+                start = index
+            current.append(value)
+            continue
+        if start is not None and len(current) >= minimum:
+            yield start, current.decode("utf-8", errors="replace")
+        start = None
+        current = bytearray()
+    if start is not None and len(current) >= minimum:
+        yield start, current.decode("utf-8", errors="replace")
+
+
+def iter_utf16le_strings_with_offsets(blob: bytes, *, minimum: int) -> Iterable[tuple[int, str]]:
+    start: int | None = None
+    chars: list[str] = []
+    index = 0
+    while index + 1 < len(blob):
+        value = blob[index]
+        null = blob[index + 1]
+        if 32 <= value <= 126 and null == 0:
+            if start is None:
+                start = index
+            chars.append(chr(value))
+            index += 2
+            continue
+        if start is not None and len(chars) >= minimum:
+            yield start, "".join(chars)
+        start = None
+        chars = []
+        index += 1
+    if start is not None and len(chars) >= minimum:
+        yield start, "".join(chars)
 
 
 def collect_local_llm_inventory(root: Path) -> Iterable[ArtifactRecord]:
@@ -416,6 +652,19 @@ def safe_stat(path: Path) -> dict[str, object]:
     }
 
 
+def read_prefix(path: Path, limit: int) -> bytes:
+    try:
+        with path.open("rb") as handle:
+            return handle.read(limit)
+    except OSError:
+        return b""
+
+
+def first_regex_match(value: str, pattern: re.Pattern[str]) -> str:
+    match = pattern.search(value)
+    return match.group(0) if match else ""
+
+
 def first_matching_column(columns: Sequence[str], names: Sequence[str]) -> str:
     by_normalized = {normalize_column(column): column for column in columns}
     for name in names:
@@ -475,12 +724,16 @@ def sha256_text(value: str) -> str:
     return hashlib.sha256(value.encode("utf-8", errors="replace")).hexdigest()
 
 
-def sticky_note_risk_flags(text: str, is_deleted: bool) -> list[str]:
+def sticky_note_risk_flags(text: str, is_deleted: bool, *, account_hint: str = "") -> list[str]:
     lowered = text.lower()
     flags = ["sticky-note-text"]
     if is_deleted:
         flags.append("deleted-note-row")
-    if any(term in lowered for term in ("password", "passwd", "otp", "secret", "token", "api key", "apikey")):
+    if account_hint or first_regex_match(text, EMAIL_RE):
+        flags.append("sticky-note-account-or-email-candidate")
+    if first_regex_match(text, URL_RE):
+        flags.append("sticky-note-url-candidate")
+    if any(term in lowered for term in ("password", "passwd", "otp", "secret", "token", "api key", "apikey", "seed")):
         flags.append("possible-sensitive-note")
     return flags
 

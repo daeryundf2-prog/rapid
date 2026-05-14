@@ -32,6 +32,11 @@ class RapidTriageGenericDocumentsTests(unittest.TestCase):
                     "INSERT INTO Note VALUES (?, ?, ?, ?, ?)",
                     ("VPN password review with OTP token", 1, 1710000000, 1710000060, "alice@example.com"),
                 )
+                connection.execute("CREATE TABLE Fragments (BlobValue BLOB)")
+                connection.execute(
+                    "INSERT INTO Fragments VALUES (?)",
+                    (b"Archived sticky note: deleted seed phrase review for bob@example.com",),
+                )
 
             llm_dir = root / "Users" / "Alice" / ".ollama" / "models"
             llm_dir.mkdir(parents=True)
@@ -51,6 +56,7 @@ class RapidTriageGenericDocumentsTests(unittest.TestCase):
             payload = json.loads(output.read_text(encoding="utf-8"))
             artifact_types = {artifact["artifact_type"] for artifact in payload["artifacts"]}
             self.assertIn("sticky-note", artifact_types)
+            self.assertIn("sticky-note-recovery-candidate", artifact_types)
             self.assertIn("local-llm-artifact", artifact_types)
             self.assertIn("desktop-ai-app-artifact", artifact_types)
 
@@ -58,8 +64,25 @@ class RapidTriageGenericDocumentsTests(unittest.TestCase):
             self.assertEqual(sticky["details"]["source_table"], "Note")
             self.assertTrue(sticky["details"]["is_deleted"])
             self.assertIn("possible-sensitive-note", sticky["details"]["risk_flags"])
+            self.assertEqual(sticky["details"]["sticky_note_schema_profile"]["candidate_note_table_count"], 1)
+            self.assertEqual(sticky["details"]["sticky_note_review_profile"]["deleted_state"], "deleted-or-recovered-candidate")
+            self.assertIn("sticky-note-account-or-email-candidate", sticky["details"]["risk_flags"])
             self.assertIn("sha256", sticky["details"]["source_hashes"])
             self.assertNotIn("VPN password review", json.dumps(sticky["details"]["text_sha256"]))
+
+            recovery_candidates = [
+                artifact
+                for artifact in payload["artifacts"]
+                if artifact["artifact_type"] == "sticky-note-recovery-candidate"
+            ]
+            recovered = next(
+                artifact
+                for artifact in recovery_candidates
+                if "bob@example.com" in json.dumps(artifact["details"], ensure_ascii=False)
+            )
+            self.assertEqual(recovered["details"]["recovery_method"], "bounded-sqlite-string-scan")
+            self.assertIn("bob@example.com", recovered["details"]["sticky_note_review_profile"]["email_candidates"])
+            self.assertIn("possible-sensitive-note", recovered["details"]["risk_flags"])
 
             llm = next(artifact for artifact in payload["artifacts"] if artifact["artifact_type"] == "local-llm-artifact")
             self.assertEqual(llm["details"]["product_hint"], "Ollama")

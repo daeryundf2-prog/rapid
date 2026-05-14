@@ -771,7 +771,7 @@ GUI 표기 방식:
 | 로컬/데스크톱 AI | Windows Copilot Recall | `windows-recall-database`, `windows-recall-snapshot-file` | CoreAIPlatform/UKP DB schema inventory, snapshot hash/signature, OCR/app/window table 후보와 privacy warning |
 | 문서 유출 보조 아티팩트 | Print Spooler SPL/SHD | 목록화 | 출력 문서, 사용자, 프린터, 인쇄 시각 확인 |
 | 문서 유출 보조 아티팩트 | 문서 메타데이터/매크로 위험 | 부분 구현 | 작성자/수정 이력/인쇄 시각/VBA 위험 플래그 |
-| 문서 유출 보조 아티팩트 | Sticky Notes plum.sqlite | 목록화 | 메모장 텍스트/삭제 row/account attribution |
+| 문서 유출 보조 아티팩트 | Sticky Notes plum.sqlite | 부분 구현 | 메모장 live row, schema/review profile, bounded recovery 후보, account/email attribution pivot |
 | 모바일 위치 / 생활 패턴 | 위치 정보/동선 지도 | 목록화 | GPS, Wi-Fi, 기지국, 앱 DB 위경도 통합 |
 | 모바일 위치 / 생활 패턴 | Health/Fitness 활동 | 목록화 | 걸음 수, 심박, 수면, 기기 조작 가능성 |
 | 모바일 위치 / 생활 패턴 | Screen Time/Digital Wellbeing | 목록화 | 앱별 사용 시간과 화면 켜짐/꺼짐 |
@@ -839,7 +839,7 @@ GUI 표기 방식:
 
 | capability | 새 artifact row | 구현 내용 | 남은 상용급 보강 |
 | --- | --- | --- | --- |
-| Sticky Notes plum.sqlite | `sticky-note`, `sticky-note-db-unreadable` | `plum.sqlite`를 read-only SQLite로 열고 note text, deleted flag, account hint, created/updated 후보, text hash를 추출한다. | Sticky Notes 버전별 schema fixture, deleted row recovery, 계정/기기 attribution 교차검증 |
+| Sticky Notes plum.sqlite | `sticky-note`, `sticky-note-recovery-candidate`, `sticky-note-db-unreadable` | `plum.sqlite`를 read-only SQLite로 열고 note text, deleted flag, account hint, created/updated 후보, text hash, `sticky_note_schema_profile`, `sticky_note_review_profile`을 추출한다. Live note row에 없는 bounded string fragment는 복원 후보로 분리한다. | Sticky Notes 버전별 schema fixture, free-page deleted row 구조 복원, 계정/기기 attribution 교차검증 |
 | Ollama/LM Studio/GPT4All | `local-llm-artifact` | `.ollama`, LM Studio, GPT4All 경로와 `.gguf/.ggml/.safetensors` 모델 파일, config/log/db 파일을 inventory row로 노출한다. | 제품별 prompt/history DB parser, 모델 provenance, 앱 버전별 fixture |
 | AWS CloudTrail | `cloud-iaas-audit` | `Records` CloudTrail JSON에서 eventTime, eventSource, eventName, principal, source IP, account, region, request preview를 정규화한다. | AWS organization/account scope, CloudTrail digest/log integrity, provider console/SIEM diff |
 | Azure Activity Log | `cloud-iaas-audit` | Azure/Entra path 또는 `operationName`, `callerIpAddress`, `subscriptionId`, `resourceId` 기반 감사 row를 IaaS audit으로 분류한다. | tenant/subscription scope, Entra/M365 상관, provider-native diff |
@@ -851,18 +851,18 @@ GUI 표기 방식:
 
 1. 로컬 LLM 모델 파일과 디스크 메모리 파일은 크기가 큰 경우 전체 해시를 즉시 계산하지 않고 `hash_status=deferred-large-file` 또는 `deferred-large-memory-file`로 표시한다.
 2. 메모리 파일은 기존 bounded scan range를 유지해 pagefile/hiberfil이 커도 전체를 무제한 읽지 않는다.
-3. Sticky Notes는 row limit을 두고 추출하며, 본문 원문과 별도로 `text_sha256`을 남겨 리뷰/보고서 citation에 쓸 수 있게 했다.
+3. Sticky Notes는 row limit과 bounded SQLite string scan limit을 두고 추출하며, 본문 원문과 별도로 `text_sha256`, schema profile, review profile을 남겨 리뷰/보고서 citation에 쓸 수 있게 했다.
 
 검증 포인트:
 
-1. `tests/test_rapidtriage_generic_documents.py`가 `generic-documents` collector 노출, Sticky Notes row, 로컬 LLM 모델 inventory를 검증한다.
+1. `tests/test_rapidtriage_generic_documents.py`가 `generic-documents` collector 노출, Sticky Notes live row/schema profile/recovery candidate, 로컬 LLM 모델 inventory를 검증한다.
 2. `tests/test_rapidtriage_cloud_export.py`가 AWS CloudTrail `Records` JSON을 `cloud-iaas-audit`로 정규화하는지 검증한다.
 3. `tests/test_rapidtriage_memory_volatility.py`가 `pagefile.sys`와 `MEMORY.DMP`를 각각 disk-memory/crash-dump artifact로 분리하는지 검증한다.
 4. Python/JS capability taxonomy는 해당 capability들을 `목록화`에서 `부분 구현`으로 올리고, 실제 artifact type term을 추가했다.
 
 중요한 제한:
 
-1. `sticky-note`는 SQLite live row 중심이다. 삭제된 free page 복원은 아직 아니다.
+1. `sticky-note-recovery-candidate`는 bounded string fragment다. 실제 삭제 row/free-page 구조 복원이나 삭제 시각 확정은 아직 아니다.
 2. `local-llm-artifact`는 모델/앱 파일 존재와 역할 분류다. 프롬프트/대화 복원은 제품별 DB schema가 필요하다.
 3. `cloud-iaas-audit`는 provider export row 정규화다. 클라우드 계정 전체 범위나 로그 무결성을 증명하지 않는다.
 4. `disk-memory-file-indicators`는 bounded string pivot이다. hiberfil 압축 해제나 pagefile 구조 복원은 다음 단계다.
