@@ -123,7 +123,20 @@ class RapidTriageIndicatorsTests(unittest.TestCase):
             )
             self.assertGreaterEqual(manual_payload["ti_feed_sources"][0]["ti_feed_manifest"]["feed_row_hash_count"], 1)
             self.assertGreaterEqual(manual_payload["summary"]["indicator_count"], 3)
+            self.assertGreaterEqual(manual_payload["summary"]["ioc_scanner_hit_count"], 3)
+            self.assertGreaterEqual(manual_payload["summary"]["ioc_scanner_rule_count"], 2)
             self.assertGreaterEqual(manual_payload["summary"]["enriched_indicator_count"], 1)
+            self.assertTrue(manual_payload["indicator_native_capabilities"]["rule_based_ioc_scanner"])
+            self.assertTrue(manual_payload["indicator_native_capabilities"]["bounded_file_content_keyword_scanning"])
+            self.assertFalse(manual_payload["indicator_native_capabilities"]["yara_compatible_full_grammar"])
+            self.assertIocScannerHit(manual_payload, "credential-url-hit", "domain", "malicious.example")
+            self.assertIocScannerHit(manual_payload, "payload-sha256", "hash", sha256_hex(payload_installer))
+            self.assertEqual(manual_payload["ioc_scanner_manifest"]["manifest_version"], "ioc-scanner-manifest-v1")
+            self.assertEqual(
+                manual_payload["ioc_scanner_manifest_hash"],
+                manual_payload["ioc_scanner_manifest"]["manifest_hash"],
+            )
+            self.assertIn("native-yara-full-grammar-engine", manual_payload["ioc_scanner_manifest"]["blockers"])
             enriched_indicator = next(item for item in manual_payload["indicators"] if item.get("ti_enrichment"))
             self.assertEqual(enriched_indicator["ioc_ti_indicator_manifest"]["manifest_version"], "ioc-ti-indicator-manifest-v1")
             self.assertEqual(
@@ -176,6 +189,16 @@ class RapidTriageIndicatorsTests(unittest.TestCase):
                 any(match["source"] == "indicators" for match in search_payload["matches"]),
                 "unified search should include indicator pivot hits",
             )
+            scanner_search_output = Path(tmp_dir) / "scanner-search.json"
+            self.assertEqual(
+                main(["search", str(output_dir), "-k", "payload-sha256", "--no-ocr", "--output", str(scanner_search_output)]),
+                0,
+            )
+            scanner_search_payload = json.loads(scanner_search_output.read_text(encoding="utf-8"))
+            self.assertTrue(
+                any(match["source"] == "indicators" and match["kind"] == "ioc-scanner-hit" for match in scanner_search_payload["matches"]),
+                "unified search should include local IOC scanner hits",
+            )
 
             database = open_case_database(Path(tmp_dir) / "case.db")
             import_payload = database.import_run_output(output_dir, case_id="CASE-IOC", case_name="IOC Case")
@@ -187,6 +210,12 @@ class RapidTriageIndicatorsTests(unittest.TestCase):
             )
             self.assertGreaterEqual(case_search["summary"]["match_count"], 1)
             self.assertTrue(all(match["source"] == "indicators" for match in case_search["matches"]))
+            case_scanner_search = database.search_case(
+                case_id="CASE-IOC",
+                keywords=["payload-sha256"],
+                sources=["indicators"],
+            )
+            self.assertGreaterEqual(case_scanner_search["summary"]["match_count"], 1)
 
     def assertIndicatorPresent(self, payload: dict[str, object], indicator_type: str, value: str) -> None:
         for indicator in payload["indicators"]:
@@ -212,6 +241,15 @@ class RapidTriageIndicatorsTests(unittest.TestCase):
                 self.assertEqual(enrichment["validation_status"], "analyst-feed-provenance-review-required")
                 return
         self.fail(f"expected indicator {value!r} to be enriched by {source!r}")
+
+    def assertIocScannerHit(self, payload: dict[str, object], rule_id: str, hit_type: str, value: str) -> None:
+        for hit in payload["ioc_scanner_hits"]:
+            if hit["rule_id"] == rule_id and hit["type"] == hit_type and hit["value"] == value:
+                self.assertGreaterEqual(hit["count"], 1)
+                self.assertTrue(hit["sources"])
+                self.assertEqual(hit["source_viewer_locator"]["viewer"], "ioc-scanner-source-review")
+                return
+        self.fail(f"expected IOC scanner hit {rule_id}:{hit_type}:{value}")
 
 
 def add_indicator_fixture_content(root: Path) -> Path:

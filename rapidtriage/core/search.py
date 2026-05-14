@@ -880,6 +880,56 @@ def search_indicators(
         )
         if limit and len(matches) >= limit:
             break
+    if not limit or len(matches) < limit:
+        remaining_limit = 0 if not limit else limit - len(matches)
+        matches.extend(
+            search_ioc_scanner_hits(
+                payload,
+                keywords,
+                limit=remaining_limit,
+                search_options=search_options,
+            )
+        )
+    return matches
+
+
+def search_ioc_scanner_hits(
+    payload: Mapping[str, object],
+    keywords: Sequence[str],
+    *,
+    limit: int,
+    search_options: Mapping[str, object] | None = None,
+) -> list[dict[str, object]]:
+    matches = []
+    for index, hit in enumerate(payload.get("ioc_scanner_hits", [])):
+        if not isinstance(hit, Mapping):
+            continue
+        haystack = json.dumps(hit, ensure_ascii=False, sort_keys=True)
+        matched = match_keywords(haystack, keywords, search_options=search_options)
+        if not matched:
+            continue
+        sources = hit.get("sources")
+        first_source = sources[0] if isinstance(sources, list) and sources and isinstance(sources[0], Mapping) else {}
+        path = str(first_source.get("path") or first_source.get("source_path") or "")
+        hit_type = str(hit.get("type") or "ioc")
+        hit_value = str(hit.get("value") or "")
+        rule_id = str(hit.get("rule_id") or "")
+        title = f"IOC scanner: {rule_id} {hit_type}:{hit_value}".strip()
+        matches.append(
+            {
+                "source": "indicators",
+                "kind": "ioc-scanner-hit",
+                "path": path,
+                "title": title,
+                "matched_keywords": matched,
+                "preview": compact_json_preview(hit),
+                "search_match": build_search_match_metadata(haystack, keywords, search_options=search_options),
+                "pointer": f"/ioc_scanner_hits/{index}",
+                "metadata": dict(hit),
+            }
+        )
+        if limit and len(matches) >= limit:
+            break
     return matches
 
 

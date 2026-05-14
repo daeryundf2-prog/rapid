@@ -24,7 +24,11 @@ IOC_TI_GAP_ID = "#63"
 INDICATOR_NATIVE_CAPABILITIES = {
     "url_domain_ip_hash_extraction": True,
     "local_rule_matching": True,
+    "rule_based_ioc_scanner": True,
+    "bounded_file_content_keyword_scanning": True,
     "offline_ti_feed_enrichment": True,
+    "yara_compatible_full_grammar": False,
+    "native_yara_engine_integration": False,
     "external_ti_api_calls": False,
     "malware_sandbox_enrichment": False,
 }
@@ -59,12 +63,22 @@ def build_indicator_summary(
         raise IndicatorSummaryError("run summary does not include outputs")
 
     accumulator: dict[tuple[str, str], dict[str, object]] = {}
+    scanner_accumulator: dict[tuple[str, str, str], dict[str, object]] = {}
     source_counts: Counter[str] = Counter()
     for output_name, output_path in iter_run_json_outputs(outputs):
         payload = read_json_path(output_path)
         if not payload:
             continue
         source_counts[output_name] += 1
+        collect_ioc_scanner_hits_from_payload(
+            payload,
+            scanner_accumulator,
+            source={
+                "output": output_name,
+                "output_path": str(output_path),
+            },
+            max_sources_per_hit=max_sources_per_indicator,
+        )
         for pointer, value, context in iter_scalar_contexts(payload):
             collect_indicators_from_text(
                 value,
@@ -87,6 +101,12 @@ def build_indicator_summary(
     if max_indicators:
         indicators = indicators[:max_indicators]
     indicators = attach_ioc_ti_indicator_manifests(indicators)
+    ioc_scanner_hits = finalize_ioc_scanner_hits(scanner_accumulator, limit=max_indicators)
+    ioc_scanner_manifest = build_ioc_scanner_manifest(
+        hits=ioc_scanner_hits,
+        source_output_counts=source_counts,
+        rule_set=rule_set,
+    )
     enrichment_manifest = build_ioc_ti_enrichment_manifest(
         indicators=indicators,
         ti_feed_sources=ti_feed_sources,
@@ -96,6 +116,7 @@ def build_indicator_summary(
 
     type_counts = Counter(str(item["type"]) for item in indicators)
     rule_counts = Counter(rule for item in indicators for rule in item.get("matched_rules", []))
+    scanner_rule_counts = Counter(str(item.get("rule_id") or "") for item in ioc_scanner_hits if item.get("rule_id"))
     core_accuracy_gates = ioc_ti_core_accuracy_gates(
         indicators=indicators,
         ti_feed_sources=ti_feed_sources,
@@ -118,6 +139,9 @@ def build_indicator_summary(
             "source_output_counts": dict(source_counts),
             "matched_rule_counts": dict(rule_counts),
             "matched_indicator_count": sum(1 for item in indicators if item.get("matched_rules")),
+            "ioc_scanner_hit_count": sum(int(item.get("count") or 0) for item in ioc_scanner_hits),
+            "ioc_scanner_row_count": len(ioc_scanner_hits),
+            "ioc_scanner_rule_count": len(scanner_rule_counts),
             "enriched_indicator_count": sum(1 for item in indicators if item.get("ti_enrichment")),
             "ti_feed_count": len(ti_feed_sources),
             "commercial_gap_ids": [IOC_TI_GAP_ID],
@@ -125,6 +149,9 @@ def build_indicator_summary(
         },
         "ti_feed_sources": ti_feed_sources,
         "indicator_native_capabilities": dict(INDICATOR_NATIVE_CAPABILITIES),
+        "ioc_scanner_hits": ioc_scanner_hits,
+        "ioc_scanner_manifest": ioc_scanner_manifest,
+        "ioc_scanner_manifest_hash": ioc_scanner_manifest["manifest_hash"],
         "ioc_ti_enrichment_manifest": enrichment_manifest,
         "ioc_ti_enrichment_manifest_hash": enrichment_manifest["manifest_hash"],
         "ti_enrichment_assessment": assessment,
@@ -256,6 +283,225 @@ def add_indicator(
         compact_source = {key: val for key, val in source.items() if val}
         if compact_source not in sources:
             sources.append(compact_source)
+
+
+def collect_ioc_scanner_hits_from_payload(
+    payload: Mapping[str, object],
+    accumulator: MutableMapping[tuple[str, str, str], dict[str, object]],
+    *,
+    source: Mapping[str, str],
+    max_sources_per_hit: int,
+) -> None:
+    """Collect rule-engine IOC hits that were attached to run component outputs."""
+
+    nested_hits = list(iter_ioc_hit_contexts(payload, pointer="", include_root=False))
+    hit_contexts = nested_hits or list(iter_ioc_hit_contexts(payload, pointer="", include_root=True))
+    for pointer, hit, context in hit_contexts:
+        rule_id = str(hit.get("rule_id") or "").strip()
+        hit_type = str(hit.get("type") or "").strip().lower()
+        value = normalize_ioc_scanner_value(hit_type, str(hit.get("value") or ""))
+        if not rule_id or not hit_type or not value:
+            continue
+        count = safe_positive_int(hit.get("count"), default=1)
+        add_ioc_scanner_hit(
+            accumulator,
+            rule_id=rule_id,
+            hit_type=hit_type,
+            value=value,
+            count=count,
+            source={**source, "pointer": pointer, **context},
+            max_sources_per_hit=max_sources_per_hit,
+        )
+
+
+def iter_ioc_hit_contexts(
+    value: object,
+    *,
+    pointer: str,
+    include_root: bool,
+) -> Iterable[tuple[str, Mapping[str, object], dict[str, str]]]:
+    if isinstance(value, Mapping):
+        raw_hits = value.get("ioc_hits")
+        if (include_root or pointer) and isinstance(raw_hits, list):
+            context = context_from_mapping(value)
+            for index, hit in enumerate(raw_hits):
+                if isinstance(hit, Mapping):
+                    yield f"{pointer}/ioc_hits/{index}" if pointer else f"/ioc_hits/{index}", hit, context
+        for key, item in value.items():
+            if key == "ioc_hits":
+                continue
+            if isinstance(item, (Mapping, list)):
+                yield from iter_ioc_hit_contexts(
+                    item,
+                    pointer=f"{pointer}/{escape_pointer(str(key))}",
+                    include_root=include_root,
+                )
+        return
+    if isinstance(value, list):
+        for index, item in enumerate(value):
+            if isinstance(item, (Mapping, list)):
+                yield from iter_ioc_hit_contexts(item, pointer=f"{pointer}/{index}", include_root=include_root)
+
+
+def add_ioc_scanner_hit(
+    accumulator: MutableMapping[tuple[str, str, str], dict[str, object]],
+    *,
+    rule_id: str,
+    hit_type: str,
+    value: str,
+    count: int,
+    source: Mapping[str, str],
+    max_sources_per_hit: int,
+) -> None:
+    key = (rule_id, hit_type, value)
+    if key not in accumulator:
+        accumulator[key] = {
+            "rule_id": rule_id,
+            "type": hit_type,
+            "value": value,
+            "count": 0,
+            "sources": [],
+        }
+    record = accumulator[key]
+    record["count"] = int(record["count"]) + max(count, 1)
+    sources = record["sources"]
+    if isinstance(sources, list) and len(sources) < max_sources_per_hit:
+        compact_source = {key: val for key, val in source.items() if val}
+        if compact_source not in sources:
+            sources.append(compact_source)
+
+
+def finalize_ioc_scanner_hits(
+    accumulator: Mapping[tuple[str, str, str], Mapping[str, object]],
+    *,
+    limit: int,
+) -> list[dict[str, object]]:
+    hits: list[dict[str, object]] = []
+    for record in accumulator.values():
+        hit = {
+            "rule_id": str(record.get("rule_id") or ""),
+            "type": str(record.get("type") or ""),
+            "value": str(record.get("value") or ""),
+            "count": int(record.get("count") or 0),
+            "classification": classify_ioc_scanner_hit(str(record.get("type") or ""), str(record.get("value") or "")),
+            "risk_flags": ioc_scanner_risk_flags(str(record.get("type") or ""), str(record.get("value") or "")),
+            "sources": list(record.get("sources", [])) if isinstance(record.get("sources"), list) else [],
+            "commercial_gap_ids": [IOC_TI_GAP_ID],
+            "ready_for_court_report": False,
+            "report_use_boundary": "local IOC/rule hit is a triage pivot; verify source artifact before reporting maliciousness",
+        }
+        hit["ioc_scanner_row_hash"] = stable_ioc_ti_sha256(
+            {
+                "rule_id": hit["rule_id"],
+                "type": hit["type"],
+                "value": hit["value"],
+                "count": hit["count"],
+                "sources": hit["sources"],
+            }
+        )
+        hit["source_viewer_locator"] = build_ioc_scanner_source_viewer_locator(hit)
+        hits.append(hit)
+    hits.sort(key=lambda item: (-int(item.get("count") or 0), str(item.get("rule_id") or ""), str(item.get("type") or ""), str(item.get("value") or "")))
+    return hits[:limit] if limit else hits
+
+
+def normalize_ioc_scanner_value(hit_type: str, value: str) -> str:
+    text = value.strip()
+    if hit_type in {"hash", "md5", "sha1", "sha256"}:
+        return text.lower()
+    if hit_type in {"domain", "url", "ip", "keyword"}:
+        return text.lower()
+    return text
+
+
+def safe_positive_int(value: object, *, default: int) -> int:
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return default
+    return parsed if parsed > 0 else default
+
+
+def classify_ioc_scanner_hit(hit_type: str, value: str) -> str:
+    if hit_type == "keyword":
+        return "content-keyword-rule-hit"
+    if hit_type == "domain":
+        return "network-domain-rule-hit"
+    if hit_type == "url":
+        return "network-url-rule-hit"
+    if hit_type == "ip":
+        return "network-ip-rule-hit"
+    if hit_type in {"hash", "md5", "sha1", "sha256"} or HASH_RE.fullmatch(value):
+        return "file-hash-rule-hit"
+    return "local-rule-hit"
+
+
+def ioc_scanner_risk_flags(hit_type: str, value: str) -> list[str]:
+    flags = {"local-ioc-rule-hit"}
+    if hit_type in {"domain", "url", "ip"}:
+        flags.add("network-ioc-hit")
+    if hit_type in {"hash", "md5", "sha1", "sha256"} or HASH_RE.fullmatch(value):
+        flags.add("file-hash-ioc-hit")
+    if hit_type == "keyword":
+        flags.add("content-keyword-ioc-hit")
+    return sorted(flags)
+
+
+def build_ioc_scanner_source_viewer_locator(hit: Mapping[str, object]) -> dict[str, object]:
+    sources = hit.get("sources") if isinstance(hit.get("sources"), list) else []
+    first_source = sources[0] if sources and isinstance(sources[0], Mapping) else {}
+    return {
+        "viewer": "ioc-scanner-source-review",
+        "open_action": "open-ioc-scanner-source",
+        "output": str(first_source.get("output") or ""),
+        "output_path": str(first_source.get("output_path") or ""),
+        "pointer": str(first_source.get("pointer") or ""),
+        "value_hash": stable_ioc_ti_sha256(
+            {
+                "rule_id": str(hit.get("rule_id") or ""),
+                "type": str(hit.get("type") or ""),
+                "value": str(hit.get("value") or ""),
+            }
+        ),
+    }
+
+
+def build_ioc_scanner_manifest(
+    *,
+    hits: Sequence[Mapping[str, object]],
+    source_output_counts: Mapping[str, int],
+    rule_set: RuleSet | None,
+) -> dict[str, object]:
+    hit_row_hashes = [str(hit.get("ioc_scanner_row_hash") or "") for hit in hits if hit.get("ioc_scanner_row_hash")]
+    rule_ids = sorted({str(hit.get("rule_id") or "") for hit in hits if hit.get("rule_id")})
+    manifest_core: dict[str, object] = {
+        "manifest_version": "ioc-scanner-manifest-v1",
+        "item_number": 63,
+        "commercial_gap_ids": [IOC_TI_GAP_ID],
+        "hit_row_count": len(hits),
+        "hit_total_count": sum(int(hit.get("count") or 0) for hit in hits),
+        "rule_count": len(rule_ids),
+        "matched_rule_ids": rule_ids,
+        "hit_row_hash_count": len(hit_row_hashes),
+        "hit_row_hashes_head_hash": stable_ioc_ti_sha256(hit_row_hashes),
+        "source_output_counts": dict(source_output_counts),
+        "rule_set_path": rule_set.path if rule_set else "",
+        "rule_set_format": rule_set.format if rule_set else "",
+        "native_ioc_rule_engine": True,
+        "bounded_file_content_keyword_scanning": True,
+        "local_only": True,
+        "no_external_calls": True,
+        "yara_compatible_full_grammar": False,
+        "commercial_claim_allowed": False,
+        "validation_status": "local-rule-hit-review-required",
+        "blockers": [
+            "native-yara-full-grammar-engine",
+            "trusted-yara-ioc-corpus-diff",
+            "malware-corpus-false-positive-negative-report",
+            "scanner-scale-benchmark",
+        ],
+    }
+    return {**manifest_core, "manifest_hash": stable_ioc_ti_sha256(manifest_core)}
 
 
 def finalize_indicator(

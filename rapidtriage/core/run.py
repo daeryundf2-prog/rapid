@@ -70,6 +70,7 @@ GENERAL_FORENSIC_ARTIFACT_KINDS = (
     "kakaotalk-windows",
     "android-apk",
     "media-image",
+    "generic-documents",
     "memory-volatility",
 )
 WINDOWS_FORENSIC_ARTIFACT_KINDS = (
@@ -202,6 +203,7 @@ RUN_PROFILES: Dict[str, RunProfile] = {
             "kakaotalk-windows",
             "android-apk",
             "media-image",
+            "generic-documents",
             "memory-volatility",
             "windows-os-account",
             "eventlog",

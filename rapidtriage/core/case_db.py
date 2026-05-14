@@ -1470,12 +1470,13 @@ class CaseDatabase:
 
     def _import_indicators(self, case_id: str, evidence_source_id: int, outputs: Mapping[str, object]) -> int:
         payload = read_output(outputs, "indicators")
-        rows = payload.get("indicators") if isinstance(payload, Mapping) else None
-        if not isinstance(rows, list):
+        indicator_rows = payload.get("indicators") if isinstance(payload, Mapping) else None
+        scanner_rows = payload.get("ioc_scanner_hits") if isinstance(payload, Mapping) else None
+        if not isinstance(indicator_rows, list) and not isinstance(scanner_rows, list):
             return 0
         count = 0
         with self.connect() as connection:
-            for index, row in enumerate(rows):
+            for index, row in enumerate(indicator_rows if isinstance(indicator_rows, list) else []):
                 if not isinstance(row, Mapping):
                     continue
                 artifact = indicator_artifact_row(row, index=index)
@@ -1495,6 +1496,40 @@ class CaseDatabase:
                         case_id,
                         evidence_source_id,
                         str(artifact.get("artifact_type") or "indicator"),
+                        str(details.get("parser") or "rapidtriage-indicators"),
+                        str(details.get("parser_version") or "1"),
+                        title,
+                        summary,
+                        json.dumps(artifact, ensure_ascii=False, sort_keys=True),
+                        None,
+                        now_iso(),
+                    ),
+                )
+                connection.execute(
+                    "INSERT INTO artifact_fts(rowid, title, summary, metadata) VALUES (?, ?, ?, ?)",
+                    (int(cursor.lastrowid), title, summary, artifact_index_text(artifact)),
+                )
+                count += 1
+            for index, row in enumerate(scanner_rows if isinstance(scanner_rows, list) else []):
+                if not isinstance(row, Mapping):
+                    continue
+                artifact = ioc_scanner_artifact_row(row, index=index)
+                details = artifact_details(artifact)
+                title = artifact_title(artifact)
+                summary = artifact_summary(artifact)
+                cursor = connection.execute(
+                    """
+                    INSERT INTO artifact (
+                        citation_id, case_id, evidence_source_id, artifact_type, parser_name,
+                        parser_version, title, summary, data_json, confidence, created_at
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        next_citation_id_for_connection(connection, case_id, "artifact"),
+                        case_id,
+                        evidence_source_id,
+                        str(artifact.get("artifact_type") or "indicator-ioc-scanner-hit"),
                         str(details.get("parser") or "rapidtriage-indicators"),
                         str(details.get("parser_version") or "1"),
                         title,
@@ -2419,6 +2454,47 @@ def indicator_artifact_row(row: Mapping[str, object], *, index: int) -> dict[str
         "provider": "rapidtriage-indicators",
         "artifact_type": f"indicator-{indicator_type}",
         "path": source_path or output_path,
+        "supported": True,
+        "details": details,
+    }
+
+
+def ioc_scanner_artifact_row(row: Mapping[str, object], *, index: int) -> dict[str, object]:
+    hit_type = str(row.get("type") or "ioc")
+    hit_value = str(row.get("value") or "")
+    rule_id = str(row.get("rule_id") or "")
+    sources = row.get("sources") if isinstance(row.get("sources"), list) else []
+    first_source = sources[0] if sources and isinstance(sources[0], Mapping) else {}
+    source_path = str(first_source.get("path") or first_source.get("source_path") or "")
+    output_path = str(first_source.get("output_path") or "")
+    title = f"IOC scanner hit: {rule_id} {hit_type}:{hit_value}".strip()
+    details = {
+        "parser": "rapidtriage-indicators",
+        "parser_version": "1",
+        "coverage_status": "local-rule-ioc-scanner",
+        "reportability": "triage",
+        "source_format": "rapidtriage-indicators-json",
+        "source_index": index,
+        "source_path": source_path,
+        "output_path": output_path,
+        "rule_id": rule_id,
+        "ioc_type": hit_type,
+        "ioc_value": hit_value,
+        "count": optional_int(row.get("count")) or 0,
+        "classification": str(row.get("classification") or ""),
+        "risk_flags": list(row.get("risk_flags", [])) if isinstance(row.get("risk_flags"), list) else [],
+        "sources": sources,
+        "source_viewer_locator": dict(row.get("source_viewer_locator", {})) if isinstance(row.get("source_viewer_locator"), Mapping) else {},
+        "evidence_strength": "local-rule-ioc-hit",
+        "report_use_boundary": str(row.get("report_use_boundary") or ""),
+        "raw": dict(row),
+    }
+    return {
+        "provider": "rapidtriage-indicators",
+        "artifact_type": "indicator-ioc-scanner-hit",
+        "path": source_path or output_path,
+        "title": title,
+        "summary": f"{rule_id} matched {hit_type}:{hit_value}" if rule_id or hit_value else "IOC scanner hit",
         "supported": True,
         "details": details,
     }

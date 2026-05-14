@@ -271,7 +271,7 @@ CAPABILITY_GROUPS: tuple[dict[str, Any], ...] = (
         "capabilities": (
             {"id": "super-timeline-plaso-style", "label": "Super Timeline", "status": "partial", "terms": ("super timeline", "plaso", "log2timeline", "timeline correlation")},
             {"id": "denisting-nsrl-whitelist", "label": "De-NISTing/Whitelisting", "status": "inventory", "terms": ("nsrl", "denist", "whitelist", "known file")},
-            {"id": "yara-ioc-scanner", "label": "YARA / IOC 스캐너", "status": "inventory", "terms": ("yara", "ioc", "hash list", "malware scan")},
+            {"id": "yara-ioc-scanner", "label": "YARA / IOC 스캐너", "status": "partial", "terms": ("yara", "ioc", "hash list", "malware scan", "ioc_scanner_hits", "local-rule-ioc-hit")},
         ),
     },
     {

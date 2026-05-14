@@ -1178,9 +1178,9 @@ const VISIBLE_FORENSIC_CAPABILITY_GROUPS = [
       {
         id: "yara-ioc-scanner",
         label: "YARA / IOC 스캐너",
-        status: "inventory",
-        terms: ["yara", "ioc", "hash list", "malware scan"],
-        nextAction: "YARA rule, hash/IP/domain IOC pack을 전체 증거 대상으로 bounded scan",
+        status: "partial",
+        terms: ["yara", "ioc", "hash list", "malware scan", "ioc_scanner_hits", "local-rule-ioc-hit"],
+        nextAction: "현재는 로컬 IOC/rule hit를 source pointer와 함께 표시한다. 다음은 native YARA grammar와 trusted corpus diff",
       },
     ],
   },

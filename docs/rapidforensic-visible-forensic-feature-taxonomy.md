@@ -765,7 +765,7 @@ GUI 표기 방식:
 | 원격접속 / Tampering | Defender/EDR 무력화 | 부분 구현 | Defender 예외, 서비스 중지, policy 변경, 로그 삭제 상관 |
 | 검색 / 타임라인 고급 | Super Timeline | 부분 구현 | MFT/USN/EVTX/Registry/Web/Execution 단일 시간축 |
 | 검색 / 타임라인 고급 | De-NISTing/Whitelisting | 목록화 | NSRL/known-good DB로 정상 파일 suppress |
-| 검색 / 타임라인 고급 | YARA / IOC 스캐너 | 목록화 | YARA rule, hash/IP/domain IOC pack 기반 전체 증거 scan |
+| 검색 / 타임라인 고급 | YARA / IOC 스캐너 | 부분 구현 | 로컬 rule/IOC hit를 `ioc_scanner_hits`로 모아 source pointer와 manifest를 제공. Native YARA grammar/신뢰 corpus diff는 남음 |
 
 구현 반영:
 

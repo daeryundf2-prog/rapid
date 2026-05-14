@@ -85,6 +85,15 @@
         "matched_indicator_count": {
           "type": "integer"
         },
+        "ioc_scanner_hit_count": {
+          "type": "integer"
+        },
+        "ioc_scanner_row_count": {
+          "type": "integer"
+        },
+        "ioc_scanner_rule_count": {
+          "type": "integer"
+        },
         "enriched_indicator_count": {
           "type": "integer"
         },
@@ -164,6 +173,80 @@
       "additionalProperties": {
         "type": "boolean"
       }
+    },
+    "ioc_scanner_hits": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "rule_id",
+          "type",
+          "value",
+          "count",
+          "classification",
+          "risk_flags",
+          "sources"
+        ],
+        "properties": {
+          "rule_id": {
+            "type": "string"
+          },
+          "type": {
+            "type": "string"
+          },
+          "value": {
+            "type": "string"
+          },
+          "count": {
+            "type": "integer"
+          },
+          "classification": {
+            "type": "string"
+          },
+          "risk_flags": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "sources": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "string"
+              }
+            }
+          },
+          "commercial_gap_ids": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "ready_for_court_report": {
+            "type": "boolean"
+          },
+          "report_use_boundary": {
+            "type": "string"
+          },
+          "ioc_scanner_row_hash": {
+            "type": "string"
+          },
+          "source_viewer_locator": {
+            "type": "object",
+            "additionalProperties": true
+          }
+        }
+      }
+    },
+    "ioc_scanner_manifest": {
+      "type": "object",
+      "additionalProperties": true
+    },
+    "ioc_scanner_manifest_hash": {
+      "type": "string"
     },
     "ioc_ti_enrichment_manifest": {
       "type": "object",
