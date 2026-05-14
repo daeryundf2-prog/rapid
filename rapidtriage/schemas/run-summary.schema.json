@@ -332,6 +332,7 @@
         "resume",
         "stage_hash",
         "stage_lookup",
+        "analyst_checklist_summary",
         "stages"
       ],
       "properties": {
@@ -398,6 +399,78 @@
             ]
           }
         },
+        "analyst_checklist_summary": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "profile_version",
+            "item_count",
+            "ready_count",
+            "warning_count",
+            "blocked_count",
+            "pending_count",
+            "severity_counts",
+            "next_actions"
+          ],
+          "properties": {
+            "profile_version": {
+              "const": "run-workflow-analyst-checklist-summary-v1"
+            },
+            "item_count": {
+              "type": "integer"
+            },
+            "ready_count": {
+              "type": "integer"
+            },
+            "warning_count": {
+              "type": "integer"
+            },
+            "blocked_count": {
+              "type": "integer"
+            },
+            "pending_count": {
+              "type": "integer"
+            },
+            "severity_counts": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "integer"
+              }
+            },
+            "next_actions": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "stage",
+                  "status",
+                  "severity",
+                  "action"
+                ],
+                "properties": {
+                  "stage": {
+                    "type": "string"
+                  },
+                  "status": {
+                    "enum": [
+                      "ready",
+                      "warning",
+                      "blocked",
+                      "pending"
+                    ]
+                  },
+                  "severity": {
+                    "type": "string"
+                  },
+                  "action": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
         "stages": {
           "type": "array",
           "items": {
@@ -412,6 +485,7 @@
               "step_names",
               "output_keys",
               "handoff_outputs",
+              "analyst_checklist",
               "reused",
               "warning_count",
               "warning_messages",
@@ -483,6 +557,56 @@
                       "type": "string"
                     },
                     "reportability_note": {
+                      "type": "string"
+                    }
+                  }
+                }
+              },
+              "analyst_checklist": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "id",
+                    "label",
+                    "status",
+                    "severity",
+                    "expected_outputs",
+                    "matched_outputs",
+                    "action"
+                  ],
+                  "properties": {
+                    "id": {
+                      "type": "string"
+                    },
+                    "label": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "enum": [
+                        "ready",
+                        "warning",
+                        "blocked",
+                        "pending"
+                      ]
+                    },
+                    "severity": {
+                      "type": "string"
+                    },
+                    "expected_outputs": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "matched_outputs": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "action": {
                       "type": "string"
                     }
                   }

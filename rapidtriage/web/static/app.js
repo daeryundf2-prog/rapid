@@ -877,6 +877,13 @@ function runWorkflowStatusLabel(status) {
   return "대기";
 }
 
+function runWorkflowChecklistStatusLabel(status) {
+  if (status === "ready") return "확인 준비";
+  if (status === "warning") return "주의 필요";
+  if (status === "blocked") return "차단";
+  return "대기";
+}
+
 function normalizeRunPayload(source) {
   if (!source) return {};
   if (source.summary?.summary) return source.summary;
@@ -1473,6 +1480,7 @@ function renderRunWorkflowContract(payload) {
         <h3>${escapeHtml(workflow.source_type || "evidence")} · ${formatNumber(workflow.completed_stage_count || 0)}/${formatNumber(workflow.stage_count || stages.length)} stage(s) ready</h3>
         <p>입력, 추출, 파싱, 인덱싱, 리뷰, 보고서가 같은 산출물 계약으로 연결됩니다.</p>
       </div>
+      ${renderRunWorkflowChecklistSummary(workflow.analyst_checklist_summary || {})}
       <div class="run-workflow-stage-grid">
         ${stages.map((stage) => `
           <article class="run-workflow-stage ${escapeHtml(stage.status || "pending")}">
@@ -1483,10 +1491,64 @@ function renderRunWorkflowContract(payload) {
               <em>${formatNumber((stage.step_names || []).length)} step(s) · ${formatNumber((stage.output_keys || []).length)} output(s)</em>
             </button>
             ${renderRunWorkflowOutputLinks(stage)}
+            ${renderRunWorkflowChecklist(stage)}
           </article>
         `).join("")}
       </div>
     </section>
+  `;
+}
+
+function renderRunWorkflowChecklistSummary(summary) {
+  if (!summary || !summary.profile_version) return "";
+  const nextActions = Array.isArray(summary.next_actions) ? summary.next_actions : [];
+  const riskCount = Number(summary.warning_count || 0) + Number(summary.blocked_count || 0) + Number(summary.pending_count || 0);
+  return `
+    <div class="run-workflow-checklist-summary ${riskCount ? "needs-attention" : "ready"}" data-testid="run-workflow-checklist-summary">
+      <div>
+        <strong>분석관 확인 항목</strong>
+        <span>${formatNumber(summary.ready_count || 0)} ready · ${formatNumber(summary.warning_count || 0)} warning · ${formatNumber(summary.blocked_count || 0)} blocked · ${formatNumber(summary.pending_count || 0)} pending</span>
+      </div>
+      ${nextActions.length ? `
+        <ul>
+          ${nextActions.slice(0, 4).map((item) => `
+            <li>
+              <b>${escapeHtml(item.stage || "stage")} · ${escapeHtml(runWorkflowChecklistStatusLabel(item.status || "pending"))}</b>
+              <span>${escapeHtml(item.action || "")}</span>
+            </li>
+          `).join("")}
+        </ul>
+      ` : '<p>모든 필수 확인 항목이 분석관 검토 준비 상태입니다.</p>'}
+    </div>
+  `;
+}
+
+function renderRunWorkflowChecklist(stage) {
+  const items = Array.isArray(stage.analyst_checklist) ? stage.analyst_checklist : [];
+  if (!items.length) return "";
+  return `
+    <details class="run-workflow-checklist" data-testid="run-workflow-checklist">
+      <summary>분석관 체크리스트 · ${formatNumber(items.length)}</summary>
+      <div class="run-workflow-checklist-list">
+        ${items.map((item) => {
+          const matched = Array.isArray(item.matched_outputs) ? item.matched_outputs : [];
+          const expected = Array.isArray(item.expected_outputs) ? item.expected_outputs : [];
+          const evidenceText = matched.length
+            ? `linked: ${matched.map((name) => escapeHtml(name)).join(", ")}`
+            : `expected: ${expected.length ? expected.map((name) => escapeHtml(name)).join(", ") : "stage evidence"}`;
+          return `
+            <div class="run-workflow-checklist-row ${escapeHtml(item.status || "pending")}">
+              <div>
+                <strong>${escapeHtml(item.label || item.id || "Checklist item")}</strong>
+                <span>${escapeHtml(runWorkflowChecklistStatusLabel(item.status || "pending"))} · ${escapeHtml(item.severity || "unknown")}</span>
+              </div>
+              <p>${escapeHtml(item.action || "")}</p>
+              <small>${evidenceText}</small>
+            </div>
+          `;
+        }).join("")}
+      </div>
+    </details>
   `;
 }
 

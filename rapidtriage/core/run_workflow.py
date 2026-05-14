@@ -248,6 +248,66 @@ OUTPUT_HANDOFF_ROLES: Mapping[str, tuple[str, str, str, str]] = {
 }
 
 
+STAGE_CHECKLIST_DEFINITIONS: Mapping[str, tuple[tuple[str, str, str, tuple[str, ...]], ...]] = {
+    "ingest": (
+        (
+            "source-provenance",
+            "Confirm source path, analysis root, and read-only posture.",
+            "critical",
+            ("fingerprint", "e01", "disk_image", "archive_image", "virtual_disk"),
+        ),
+        (
+            "image-handoff",
+            "For image inputs, confirm dependency/partition/extraction provenance.",
+            "high",
+            ("e01", "disk_image", "archive_image", "virtual_disk"),
+        ),
+    ),
+    "extract": (
+        (
+            "extract-manifest",
+            "Open extraction manifests and review extracted/skipped/capped rows.",
+            "high",
+            ("docs_extract_manifest", "files_extract_manifest"),
+        ),
+    ),
+    "parse": (
+        ("artifact-rows", "Open artifact outputs and verify parser warnings before search/review.", "critical", ()),
+        (
+            "file-doc-rows",
+            "Confirm manifest, document rows, and file candidate rows exist.",
+            "high",
+            ("manifest", "docs", "files"),
+        ),
+    ),
+    "index": (
+        (
+            "search-index",
+            "Confirm docs index, timeline, indicators, and search diagnostics are ready.",
+            "critical",
+            ("docs_index", "timeline", "indicators", "sqlite_fts_optimization"),
+        ),
+    ),
+    "review": (
+        (
+            "review-safety",
+            "Check silent-failure, parser-crash, memory-cap, and preview-sandbox evidence.",
+            "critical",
+            ("parser_crash_isolation", "memory_cap_enforcement", "preview_sandbox_policy"),
+        ),
+        ("warning-review", "Resolve warning messages before treating absence as evidence.", "high", ()),
+    ),
+    "report": (
+        (
+            "report-export",
+            "Open report outputs and confirm reviewed evidence/citations before export.",
+            "critical",
+            ("report", "summary", "timeline_report"),
+        ),
+    ),
+}
+
+
 def stage_for_step_name(name: str) -> str | None:
     if name.startswith("artifacts-"):
         return "parse"
@@ -286,6 +346,115 @@ def output_handoff_for_key(name: str) -> dict[str, str]:
         "recommended_viewer": viewer,
         "gui_action": action,
         "reportability_note": note,
+    }
+
+
+def checklist_status_for_outputs(
+    *,
+    checklist_id: str,
+    output_keys: set[str],
+    expected_outputs: tuple[str, ...],
+    source: Mapping[str, object],
+    warning_messages: Sequence[str],
+    status: str,
+) -> str:
+    if status == "blocked":
+        return "blocked"
+    if checklist_id == "source-provenance":
+        return "ready" if source or output_keys.intersection(expected_outputs) else "pending"
+    if checklist_id == "image-handoff":
+        source_type = str(source.get("type") or "directory")
+        if source_type not in {"e01", "raw-image", "virtual-disk", "archive-image"}:
+            return "ready"
+        return "ready" if output_keys.intersection(expected_outputs) else "warning"
+    if checklist_id == "artifact-rows":
+        return "ready" if any(key.startswith("artifacts_") for key in output_keys) else "warning"
+    if checklist_id == "warning-review":
+        return "warning" if warning_messages else "ready"
+    if not expected_outputs:
+        return "ready" if output_keys else "pending"
+    return "ready" if output_keys.intersection(expected_outputs) else "pending"
+
+
+def build_stage_analyst_checklist(
+    *,
+    stage_id: str,
+    output_keys: Sequence[str],
+    source: Mapping[str, object],
+    warning_messages: Sequence[str],
+    status: str,
+) -> list[dict[str, object]]:
+    output_key_set = set(output_keys)
+    checklist: list[dict[str, object]] = []
+    for checklist_id, label, severity, expected_outputs in STAGE_CHECKLIST_DEFINITIONS.get(stage_id, ()):
+        item_status = checklist_status_for_outputs(
+            checklist_id=checklist_id,
+            output_keys=output_key_set,
+            expected_outputs=expected_outputs,
+            source=source,
+            warning_messages=warning_messages,
+            status=status,
+        )
+        matched_outputs = [name for name in output_keys if (not expected_outputs and name) or name in expected_outputs]
+        if checklist_id == "artifact-rows":
+            matched_outputs = [name for name in output_keys if name.startswith("artifacts_")]
+        checklist.append(
+            {
+                "id": f"{stage_id}:{checklist_id}",
+                "label": label,
+                "status": item_status,
+                "severity": severity,
+                "expected_outputs": list(expected_outputs),
+                "matched_outputs": matched_outputs[:12],
+                "action": analyst_checklist_action(item_status=item_status, stage_id=stage_id, label=label),
+            }
+        )
+    return checklist
+
+
+def analyst_checklist_action(*, item_status: str, stage_id: str, label: str) -> str:
+    if item_status == "ready":
+        return "Ready for analyst verification."
+    if item_status == "warning":
+        return f"Review {stage_id} warnings and open related outputs before relying on this stage."
+    if item_status == "blocked":
+        return f"Fix blocked {stage_id} step or rerun this stage before continuing."
+    return f"Run or import the missing {stage_id} output, then verify: {label}"
+
+
+def workflow_checklist_summary(stages: Sequence[Mapping[str, object]]) -> dict[str, object]:
+    items: list[Mapping[str, object]] = []
+    for stage in stages:
+        checklist = stage.get("analyst_checklist")
+        if isinstance(checklist, list):
+            items.extend(item for item in checklist if isinstance(item, Mapping))
+    status_counts = {
+        status: sum(1 for item in items if str(item.get("status") or "") == status)
+        for status in ("ready", "warning", "blocked", "pending")
+    }
+    severity_counts: dict[str, int] = {}
+    for item in items:
+        severity = str(item.get("severity") or "unknown")
+        severity_counts[severity] = severity_counts.get(severity, 0) + 1
+    next_actions = [
+        {
+            "stage": str(item.get("id") or "").split(":", 1)[0],
+            "status": str(item.get("status") or "pending"),
+            "severity": str(item.get("severity") or "unknown"),
+            "action": str(item.get("action") or item.get("label") or ""),
+        }
+        for item in items
+        if str(item.get("status") or "") in {"blocked", "warning", "pending"}
+    ]
+    return {
+        "profile_version": "run-workflow-analyst-checklist-summary-v1",
+        "item_count": len(items),
+        "ready_count": status_counts["ready"],
+        "warning_count": status_counts["warning"],
+        "blocked_count": status_counts["blocked"],
+        "pending_count": status_counts["pending"],
+        "severity_counts": severity_counts,
+        "next_actions": next_actions[:8],
     }
 
 
@@ -334,6 +503,13 @@ def build_run_workflow_contract(
                     "step_names": stage["step_names"],
                     "output_keys": stage["output_keys"],
                     "warning_count": stage["warning_count"],
+                    "checklist": [
+                        {
+                            "id": item["id"],
+                            "status": item["status"],
+                        }
+                        for item in stage["analyst_checklist"]
+                    ],
                 }
                 for stage in stages
             ],
@@ -358,6 +534,7 @@ def build_run_workflow_contract(
         "resume": bool(safety.get("resume")),
         "stage_hash": stage_hash,
         "stage_lookup": {str(stage["id"]): str(stage["status"]) for stage in stages},
+        "analyst_checklist_summary": workflow_checklist_summary(stages),
         "stages": stages,
     }
 
@@ -398,6 +575,14 @@ def build_run_workflow_stage(
     else:
         next_action = definition.next_action
 
+    checklist = build_stage_analyst_checklist(
+        stage_id=definition.id,
+        output_keys=output_keys,
+        source=source,
+        warning_messages=warning_messages,
+        status=status,
+    )
+
     return {
         "id": definition.id,
         "label": definition.label,
@@ -407,6 +592,7 @@ def build_run_workflow_stage(
         "step_names": [str(step.get("name", "")) for step in steps if step.get("name")],
         "output_keys": list(output_keys),
         "handoff_outputs": [output_handoff_for_key(output_key) for output_key in output_keys],
+        "analyst_checklist": checklist,
         "reused": reused,
         "warning_count": len(warning_messages),
         "warning_messages": warning_messages[:8],

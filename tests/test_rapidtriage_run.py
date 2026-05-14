@@ -355,6 +355,13 @@ class RapidTriageRunTests(unittest.TestCase):
         self.assertEqual(contract["stage_order"], list(RUN_WORKFLOW_STAGE_ORDER))
         self.assertEqual(contract["stage_lookup"]["ingest"], "completed")
         self.assertEqual(contract["stage_lookup"]["review"], "warning")
+        self.assertEqual(
+            contract["analyst_checklist_summary"]["profile_version"],
+            "run-workflow-analyst-checklist-summary-v1",
+        )
+        self.assertGreaterEqual(contract["analyst_checklist_summary"]["item_count"], 8)
+        self.assertGreaterEqual(contract["analyst_checklist_summary"]["warning_count"], 1)
+        self.assertTrue(contract["analyst_checklist_summary"]["next_actions"])
         self.assertEqual(stage_for_step_name("artifacts-eventlog"), "parse")
         self.assertEqual(stage_for_output_name("artifacts_eventlog"), "parse")
         artifact_handoff = output_handoff_for_key("artifacts_eventlog")
@@ -365,11 +372,18 @@ class RapidTriageRunTests(unittest.TestCase):
         parse_handoff_names = {handoff["name"] for handoff in parse_stage["handoff_outputs"]}
         self.assertIn("artifacts_eventlog", parse_handoff_names)
         self.assertIn("manifest", parse_handoff_names)
+        parse_checklist = {item["id"]: item for item in parse_stage["analyst_checklist"]}
+        self.assertEqual(parse_checklist["parse:artifact-rows"]["status"], "ready")
+        self.assertIn("artifacts_eventlog", parse_checklist["parse:artifact-rows"]["matched_outputs"])
         review_stage = next(stage for stage in contract["stages"] if stage["id"] == "review")
         self.assertIn("silent-failure-detection", review_stage["step_names"])
         self.assertGreaterEqual(review_stage["warning_count"], 1)
+        review_checklist = {item["id"]: item for item in review_stage["analyst_checklist"]}
+        self.assertEqual(review_checklist["review:warning-review"]["status"], "warning")
+        self.assertIn("Review review warnings", review_checklist["review:warning-review"]["action"])
         report_stage = next(stage for stage in contract["stages"] if stage["id"] == "report")
         self.assertEqual(report_stage["handoff_outputs"][0]["recommended_viewer"], "report-viewer")
+        self.assertEqual(report_stage["analyst_checklist"][0]["status"], "ready")
 
     def test_silent_failure_detector_flags_target_files_without_artifacts(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -1289,10 +1303,17 @@ class RapidTriageRunTests(unittest.TestCase):
             self.assertEqual(summary_payload["workflow"]["stage_count"], 6)
             self.assertIn("parse", summary_payload["workflow"]["stage_lookup"])
             self.assertIn("report", summary_payload["workflow"]["stage_lookup"])
+            self.assertEqual(
+                summary_payload["workflow"]["analyst_checklist_summary"]["profile_version"],
+                "run-workflow-analyst-checklist-summary-v1",
+            )
+            self.assertGreaterEqual(summary_payload["workflow"]["analyst_checklist_summary"]["item_count"], 8)
             workflow_stage_ids = {stage["id"] for stage in summary_payload["workflow"]["stages"]}
             self.assertEqual(workflow_stage_ids, set(RUN_WORKFLOW_STAGE_ORDER))
             for workflow_stage in summary_payload["workflow"]["stages"]:
                 self.assertIn("handoff_outputs", workflow_stage)
+                self.assertIn("analyst_checklist", workflow_stage)
+                self.assertTrue(workflow_stage["analyst_checklist"])
                 self.assertEqual(
                     [handoff["name"] for handoff in workflow_stage["handoff_outputs"]],
                     workflow_stage["output_keys"],

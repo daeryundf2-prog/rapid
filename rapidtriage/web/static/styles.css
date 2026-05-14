@@ -2945,6 +2945,92 @@ mark {
   background: rgba(15, 116, 107, 0.08);
 }
 
+.run-workflow-checklist-summary {
+  display: grid;
+  gap: 8px;
+  border: 1px solid rgba(15, 116, 107, 0.18);
+  border-radius: 12px;
+  background: rgba(15, 116, 107, 0.06);
+  padding: 10px;
+}
+
+.run-workflow-checklist-summary.needs-attention {
+  border-color: rgba(178, 87, 44, 0.34);
+  background: rgba(178, 87, 44, 0.07);
+}
+
+.run-workflow-checklist-summary div,
+.run-workflow-checklist-row div {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.run-workflow-checklist-summary span,
+.run-workflow-checklist-summary p,
+.run-workflow-checklist-summary li,
+.run-workflow-checklist-row span,
+.run-workflow-checklist-row p,
+.run-workflow-checklist-row small {
+  color: var(--muted);
+  font-size: 0.72rem;
+}
+
+.run-workflow-checklist-summary ul {
+  display: grid;
+  gap: 5px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.run-workflow-checklist-summary p,
+.run-workflow-checklist-row p {
+  margin: 0;
+}
+
+.run-workflow-checklist {
+  border: 1px solid rgba(30, 37, 40, 0.08);
+  border-radius: 9px;
+  background: rgba(255, 255, 255, 0.72);
+  padding: 7px;
+}
+
+.run-workflow-checklist summary {
+  color: var(--accent);
+  cursor: pointer;
+  font-size: 0.72rem;
+  font-weight: 900;
+}
+
+.run-workflow-checklist-list {
+  display: grid;
+  gap: 6px;
+  margin-top: 7px;
+}
+
+.run-workflow-checklist-row {
+  display: grid;
+  gap: 4px;
+  border-left: 3px solid rgba(77, 88, 96, 0.24);
+  border-radius: 7px;
+  background: rgba(255, 255, 255, 0.78);
+  padding: 7px;
+}
+
+.run-workflow-checklist-row.ready {
+  border-left-color: rgba(43, 118, 82, 0.72);
+}
+
+.run-workflow-checklist-row.warning {
+  border-left-color: rgba(178, 87, 44, 0.8);
+}
+
+.run-workflow-checklist-row.blocked {
+  border-left-color: rgba(159, 37, 37, 0.8);
+}
+
 .run-workflow-no-output {
   margin: 0;
 }
