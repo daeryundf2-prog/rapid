@@ -13,7 +13,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, List, Mapping, Sequence, Union
 
-from .audit import write_audit_record
+from .audit import compute_sha256, write_audit_record
 from .archive_image import (
     ArchiveImageExtractionError,
     ArchiveImageExtractionResult,
@@ -1163,7 +1163,7 @@ def build_sqlite_fts_run_optimization_manifest(*, outputs: Mapping[str, Path]) -
                 sqlite_fts_tracked_output_row(
                     name=name,
                     path=str(path),
-                    sha256=hashlib.sha256(path.read_bytes()).hexdigest(),
+                    sha256=compute_sha256(path),
                     size_bytes=path.stat().st_size,
                 )
             )

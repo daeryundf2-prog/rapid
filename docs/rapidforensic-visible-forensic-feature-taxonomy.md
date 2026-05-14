@@ -400,8 +400,8 @@ GUI 표시 권장:
 | PC KakaoTalk user ID 후보 | `kakaotalk-windows-user-id-candidate` | triage+ | UID/userDir validation |
 | PC KakaoTalk source 후보 | `kakaotalk-windows-source-candidate` | triage+ | memory/edb/registry correlation |
 | PC KakaoTalk summary | `kakaotalk-windows-correlation-summary` | triage+ | trusted tool comparison |
-| macOS KakaoTalk DB | `kakaotalk-macos-database` | partial / GUI visible | message decode research, known-answer corpus |
-| macOS KakaoTalk summary | `kakaotalk-macos-summary` | partial / GUI visible | live user data validation |
+| macOS KakaoTalk DB | `kakaotalk-macos-database` | partial+ / GUI visible | SQLCipher/plain inventory, context cap warning, known-answer corpus |
+| macOS KakaoTalk summary | `kakaotalk-macos-summary` | partial+ / GUI visible | live user data validation, context coverage warning |
 
 메신저 서비스별로 GUI에 드러낼 항목:
 

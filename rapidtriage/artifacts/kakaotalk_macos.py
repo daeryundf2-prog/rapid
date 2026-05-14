@@ -63,6 +63,7 @@ EMPTY_ACCOUNT_SHA512 = (
 )
 SQLCIPHER_TIMEOUT_SECONDS = 6
 DEFAULT_MACOS_REPORT_MAX_MESSAGES = 100_000
+DEFAULT_MACOS_REPORT_MAX_CONTEXT_ROWS = 100_000
 MACOS_REPORT_VERSION = "kakaotalk-macos-report-v1"
 
 
@@ -1076,6 +1077,7 @@ def run_kakaotalk_macos_report(
     output_dir: Path,
     include_message_text: bool = False,
     max_messages: int = DEFAULT_MACOS_REPORT_MAX_MESSAGES,
+    max_context_rows: int = DEFAULT_MACOS_REPORT_MAX_CONTEXT_ROWS,
     sqlcipher_bin: str = "sqlcipher",
 ) -> dict[str, object]:
     """Write a reviewable macOS KakaoTalk report package.
@@ -1096,6 +1098,7 @@ def run_kakaotalk_macos_report(
     rooms: list[dict[str, object]] = []
     media: list[dict[str, object]] = []
     databases: list[dict[str, object]] = []
+    context_row_coverage: list[dict[str, object]] = []
     remaining = max_messages if max_messages > 0 else 0
 
     for db_path in database_paths:
@@ -1141,17 +1144,18 @@ def run_kakaotalk_macos_report(
                         tool=sqlcipher_tool,
                         source_hash=str(source_hashes.get("sha256", "")),
                     )
-                    rooms.extend(
-                        read_kakaotalk_macos_sqlcipher_context_rows(
-                            db_path,
-                            key=str(context["key"]),
-                            compatibility=int(context["compatibility"]),
-                            table_names=list(context["table_names"]),
-                            tool=sqlcipher_tool,
-                            include_text=include_message_text,
-                            source_hash=str(source_hashes.get("sha256", "")),
-                        )
+                    context_rows, context_coverage = read_kakaotalk_macos_sqlcipher_context_rows(
+                        db_path,
+                        key=str(context["key"]),
+                        compatibility=int(context["compatibility"]),
+                        table_names=list(context["table_names"]),
+                        tool=sqlcipher_tool,
+                        include_text=include_message_text,
+                        source_hash=str(source_hashes.get("sha256", "")),
+                        max_rows=max_context_rows,
                     )
+                    rooms.extend(context_rows)
+                    context_row_coverage.extend(context_coverage)
         elif db_access_status == "plain-sqlite-opened":
             exported_rows, table_name = read_kakaotalk_macos_plain_messages(
                 db_path,
@@ -1159,13 +1163,14 @@ def run_kakaotalk_macos_report(
                 include_message_text=include_message_text,
                 source_hash=str(source_hashes.get("sha256", "")),
             )
-            rooms.extend(
-                read_kakaotalk_macos_plain_context_rows(
-                    db_path,
-                    include_text=include_message_text,
-                    source_hash=str(source_hashes.get("sha256", "")),
-                )
+            context_rows, context_coverage = read_kakaotalk_macos_plain_context_rows(
+                db_path,
+                include_text=include_message_text,
+                source_hash=str(source_hashes.get("sha256", "")),
+                max_rows=max_context_rows,
             )
+            rooms.extend(context_rows)
+            context_row_coverage.extend(context_coverage)
 
         if exported_rows:
             db_entry["message_export_status"] = "exported"
@@ -1194,10 +1199,13 @@ def run_kakaotalk_macos_report(
         messages=messages,
         rooms=rooms,
         media=media,
+        context_row_coverage=context_row_coverage,
         include_message_text=include_message_text,
         root=root,
         max_messages=max_messages,
+        max_context_rows=max_context_rows,
     )
+    context_truncated_tables = [item for item in context_row_coverage if item.get("truncated")]
 
     payload: dict[str, object] = {
         "parser": "kakaotalk-macos-report",
@@ -1217,12 +1225,17 @@ def run_kakaotalk_macos_report(
             "plain_sqlite_opened_count": sum(1 for item in databases if item.get("plain_sqlite_opened")),
             "message_count": len(messages),
             "room_context_row_count": len(rooms),
+            "room_context_row_estimate": sum(int(item.get("row_count") or 0) for item in context_row_coverage),
+            "context_row_limit": max_context_rows,
+            "context_limit_reached": bool(context_truncated_tables),
+            "context_truncated_table_count": len(context_truncated_tables),
             "media_reference_count": len(media),
             "max_messages": max_messages,
             "message_limit_reached": bool(max_messages > 0 and len(messages) >= max_messages),
             "candidate_root_count": len(candidate_roots),
         },
         "databases": databases,
+        "context_row_coverage": context_row_coverage,
         "outputs": {
             "report_json": str(report_json),
             "summary_json": str(summary_json),
@@ -1367,27 +1380,29 @@ def read_kakaotalk_macos_sqlcipher_context_rows(
     tool: str,
     include_text: bool,
     source_hash: str,
-) -> list[dict[str, object]]:
+    max_rows: int,
+) -> tuple[list[dict[str, object]], list[dict[str, object]]]:
     rows: list[dict[str, object]] = []
+    coverage: list[dict[str, object]] = []
     for table_name in ("NTChatRoom", "NTUser"):
         if table_name not in table_names:
             continue
         columns = sqlcipher_table_columns(tool, path, key, compatibility, table_name)
-        for index, row in enumerate(
-            run_sqlcipher_select_dicts(
-                tool,
-                path,
-                key=key,
-                compatibility=compatibility,
-                table_name=table_name,
-                columns=columns,
-                order_columns=message_order_columns(columns),
-                max_rows=5_000,
-            ),
-            start=1,
-        ):
+        table_rows = run_sqlcipher_select_dicts(
+            tool,
+            path,
+            key=key,
+            compatibility=compatibility,
+            table_name=table_name,
+            columns=columns,
+            order_columns=message_order_columns(columns),
+            max_rows=max_rows,
+        )
+        row_count = sqlcipher_count_rows(tool, path, key, compatibility, table_name)
+        for index, row in enumerate(table_rows, start=1):
             rows.append(normalize_kakaotalk_macos_context_row(row, table_name, index, path, source_hash, include_text))
-    return rows
+        coverage.append(build_kakaotalk_macos_context_coverage(path, source_hash, table_name, row_count, len(table_rows), max_rows))
+    return rows, coverage
 
 
 def read_kakaotalk_macos_plain_context_rows(
@@ -1395,8 +1410,10 @@ def read_kakaotalk_macos_plain_context_rows(
     *,
     include_text: bool,
     source_hash: str,
-) -> list[dict[str, object]]:
+    max_rows: int,
+) -> tuple[list[dict[str, object]], list[dict[str, object]]]:
     rows: list[dict[str, object]] = []
+    coverage: list[dict[str, object]] = []
     try:
         with open_sqlite_snapshot(path) as connection:
             table_names = [
@@ -1411,7 +1428,11 @@ def read_kakaotalk_macos_plain_context_rows(
                 if not selected_columns:
                     continue
                 selected = ", ".join(f'"{column}"' for column in selected_columns)
-                for index, row in enumerate(connection.execute(f'SELECT {selected} FROM "{table_name}" LIMIT 5000').fetchall(), start=1):
+                row_count = sqlite_count(connection, table_name)
+                limit_clause = f" LIMIT {int(max_rows)}" if max_rows > 0 else ""
+                exported_for_table = 0
+                for index, row in enumerate(connection.execute(f'SELECT {selected} FROM "{table_name}"{limit_clause}'), start=1):
+                    exported_for_table += 1
                     rows.append(
                         normalize_kakaotalk_macos_context_row(
                             dict(zip(selected_columns, row)),
@@ -1422,9 +1443,40 @@ def read_kakaotalk_macos_plain_context_rows(
                             include_text,
                         )
                     )
+                coverage.append(
+                    build_kakaotalk_macos_context_coverage(
+                        path,
+                        source_hash,
+                        table_name,
+                        row_count,
+                        exported_for_table,
+                        max_rows,
+                    )
+                )
     except (sqlite3.DatabaseError, OSError):
-        return rows
-    return rows
+        return rows, coverage
+    return rows, coverage
+
+
+def build_kakaotalk_macos_context_coverage(
+    path: Path,
+    source_hash: str,
+    table_name: str,
+    row_count: int,
+    exported_rows: int,
+    max_rows: int,
+) -> dict[str, object]:
+    truncated = bool(max_rows > 0 and row_count > exported_rows)
+    return {
+        "source_database": str(path.resolve()),
+        "source_database_sha256": source_hash,
+        "source_table": table_name,
+        "row_count": row_count,
+        "exported_rows": exported_rows,
+        "row_limit": max_rows,
+        "truncated": truncated,
+        "status": "truncated-context-export" if truncated else "complete",
+    }
 
 
 def select_kakaotalk_macos_message_table(table_names: Sequence[str]) -> str:
@@ -1728,9 +1780,11 @@ def render_kakaotalk_macos_viewer(
     messages: Sequence[Mapping[str, object]],
     rooms: Sequence[Mapping[str, object]],
     media: Sequence[Mapping[str, object]],
+    context_row_coverage: Sequence[Mapping[str, object]],
     include_message_text: bool,
     root: Path,
     max_messages: int,
+    max_context_rows: int,
 ) -> None:
     rendered_messages = []
     for message in messages[:5_000]:
@@ -1745,6 +1799,24 @@ def render_kakaotalk_macos_viewer(
                     f'<div class="body">{escape_html(text)}</div>',
                     f'<div class="cite">table {escape_html(message.get("source_table"))} · row {escape_html(message.get("row_index"))} · db {escape_html(str(message.get("source_database_sha256", ""))[:16])}</div>',
                     "</article>",
+                ]
+            )
+        )
+    context_warnings = [item for item in context_row_coverage if item.get("truncated")]
+    rendered_context_warnings = []
+    for item in context_warnings[:20]:
+        rendered_context_warnings.append(
+            "\n".join(
+                [
+                    '<div class="context-warning">',
+                    f'<strong>{escape_html(item.get("source_table"))}</strong>',
+                    (
+                        f' exported {escape_html(item.get("exported_rows"))}/'
+                        f'{escape_html(item.get("row_count"))} rows '
+                        f'(limit {escape_html(item.get("row_limit"))})'
+                    ),
+                    f'<br><small>db {escape_html(str(item.get("source_database_sha256", ""))[:16])}</small>',
+                    "</div>",
                 ]
             )
         )
@@ -1765,6 +1837,7 @@ def render_kakaotalk_macos_viewer(
             ".bubble{background:#fff;border:1px solid #eadcc8;border-radius:18px 18px 18px 4px;padding:12px 14px;box-shadow:0 4px 18px #8b6f4722}",
             ".meta,.cite{color:#7c6b5a;font-size:12px}.body{white-space:pre-wrap;line-height:1.55;margin:8px 0;font-size:15px}",
             ".warning{background:#fff2cc;border-color:#f0c36a}",
+            ".context-warning{margin-top:10px;padding:10px;border-radius:12px;background:#fff7ed;border:1px solid #fed7aa;font-size:13px;line-height:1.45}",
             "</style>",
             "</head><body>",
             "<header><strong>RapidTriage macOS KakaoTalk Viewer</strong><br><small>정적 HTML 뷰어 · 외부 네트워크/스크립트 없음</small></header>",
@@ -1774,10 +1847,19 @@ def render_kakaotalk_macos_viewer(
             f'<div class="stat"><span>Source</span><span>{escape_html(root)}</span></div>',
             f'<div class="stat"><span>Messages</span><span>{len(messages)}</span></div>',
             f'<div class="stat"><span>Rooms/users</span><span>{len(rooms)}</span></div>',
+            f'<div class="stat"><span>Context row limit</span><span>{max_context_rows}</span></div>',
             f'<div class="stat"><span>Media refs</span><span>{len(media)}</span></div>',
             f'<div class="stat"><span>Text exported</span><span>{include_message_text}</span></div>',
             f'<div class="stat"><span>Max messages</span><span>{max_messages}</span></div>',
             '<section class="panel warning"><strong>주의</strong><br>본문은 명시적으로 요청한 경우에만 포함됩니다. 법정 제출 전 known-answer 검증이 필요합니다.</section>',
+            (
+                '<section class="panel warning"><strong>Context export warning</strong>'
+                '<br>대화방/사용자 context가 제한값을 넘어 일부만 CSV/HTML에 포함됐습니다.'
+                + "".join(rendered_context_warnings)
+                + "</section>"
+                if context_warnings
+                else ""
+            ),
             "</aside>",
             '<section class="timeline">',
             *rendered_messages,

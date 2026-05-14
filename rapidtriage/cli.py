@@ -122,6 +122,7 @@ from .core.kakaotalk import (
     run_kakaotalk_userdir_bruteforce,
 )
 from .artifacts.kakaotalk_macos import (
+    DEFAULT_MACOS_REPORT_MAX_CONTEXT_ROWS,
     DEFAULT_MACOS_REPORT_MAX_MESSAGES,
     KakaoTalkMacOsReportError,
     run_kakaotalk_macos_report,
@@ -442,6 +443,15 @@ def build_parser() -> argparse.ArgumentParser:
         type=int,
         default=DEFAULT_MACOS_REPORT_MAX_MESSAGES,
         help=f"Maximum message rows to export ({DEFAULT_MACOS_REPORT_MAX_MESSAGES} default, 0 means all)",
+    )
+    kakao_macos_report.add_argument(
+        "--max-context-rows",
+        type=int,
+        default=DEFAULT_MACOS_REPORT_MAX_CONTEXT_ROWS,
+        help=(
+            "Maximum room/user context rows to export per context table "
+            f"({DEFAULT_MACOS_REPORT_MAX_CONTEXT_ROWS} default, 0 means all)"
+        ),
     )
     kakao_macos_report.add_argument(
         "--user-id-file",
@@ -4264,6 +4274,7 @@ def main(argv=None) -> int:
                 output_dir=output_dir,
                 include_message_text=args.include_message_text,
                 max_messages=args.max_messages,
+                max_context_rows=args.max_context_rows,
                 sqlcipher_bin=args.sqlcipher_bin,
             )
         except (KakaoTalkMacOsReportError, OSError, ValueError) as exc:
@@ -4289,6 +4300,7 @@ def main(argv=None) -> int:
                 "output_dir": str(output_dir),
                 "include_message_text": args.include_message_text,
                 "max_messages": args.max_messages,
+                "max_context_rows": args.max_context_rows,
                 "user_id_file": str(Path(args.user_id_file).expanduser().resolve()) if args.user_id_file else None,
                 "sqlcipher_bin": args.sqlcipher_bin,
                 "raw_user_id_exported": False,
@@ -4315,7 +4327,8 @@ def main(argv=None) -> int:
                 f"SQLCipher opened: {summary['sqlcipher_opened_count']}  "
                 f"Plain SQLite opened: {summary['plain_sqlite_opened_count']}  "
                 f"Messages: {summary['message_count']}  "
-                f"Media refs: {summary['media_reference_count']}"
+                f"Media refs: {summary['media_reference_count']}  "
+                f"Context truncated: {summary.get('context_truncated_table_count', 0)}"
             )
         return 0
 

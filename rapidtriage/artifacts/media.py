@@ -1789,21 +1789,23 @@ def load_ocr_sidecar(path: Path) -> dict[str, object]:
         if not candidate.is_file():
             continue
         try:
-            text = candidate.read_text(encoding="utf-8", errors="replace")[:OCR_SIDECAR_MAX_CHARS]
+            raw = candidate.read_text(encoding="utf-8", errors="replace")
+            stat = candidate.stat()
         except OSError:
             continue
+        text = raw[:OCR_SIDECAR_MAX_CHARS]
         return {
             "source_path": str(candidate.resolve()),
             "source_format": "text",
-            "source_size": candidate.stat().st_size,
-            "source_sha256": hashlib.sha256(candidate.read_bytes()).hexdigest(),
+            "source_size": stat.st_size,
+            "source_sha256": compute_hashes(candidate).get("sha256", ""),
             "text": text,
             "text_sha256": hashlib.sha256(text.encode("utf-8", errors="replace")).hexdigest(),
             "character_count": len(text),
             "contains_hangul": contains_hangul(text),
             "language_hint": language_hint_for_text(text),
             "quality_metrics": ocr_quality_metrics(text),
-            "truncated": len(text) >= OCR_SIDECAR_MAX_CHARS,
+            "truncated": len(raw) > OCR_SIDECAR_MAX_CHARS,
         }
     return {}
 
@@ -1830,7 +1832,7 @@ def load_translation_sidecar(path: Path) -> dict[str, object]:
             "source_path": str(candidate.resolve()),
             "source_format": "text",
             "source_size": stat.st_size,
-            "source_sha256": hashlib.sha256(candidate.read_bytes()).hexdigest(),
+            "source_sha256": compute_hashes(candidate).get("sha256", ""),
             "text": text,
             "text_sha256": hashlib.sha256(text.encode("utf-8", errors="replace")).hexdigest(),
             "character_count": len(text),

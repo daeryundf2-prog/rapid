@@ -274,6 +274,55 @@ class RapidTriageMacOsArtifactsTests(unittest.TestCase):
             self.assertIn(hashlib.sha256("hello".encode("utf-8")).hexdigest(), csv_text)
             self.assertIn("[redacted]", html_text)
 
+    def test_kakaotalk_macos_report_warns_when_context_rows_are_capped(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            build_macos_fixture(root)
+            db_path = next(root.rglob("chat_messages.db"))
+            connection = sqlite3.connect(db_path)
+            try:
+                connection.execute("CREATE TABLE chat_rooms (id INTEGER PRIMARY KEY, name TEXT)")
+                for index in range(7):
+                    connection.execute(
+                        "INSERT INTO chat_rooms (name) VALUES (?)",
+                        (f"room-{index}",),
+                    )
+                connection.commit()
+            finally:
+                connection.close()
+            output_dir = root / "kakaotalk-macos-report"
+
+            self.assertEqual(
+                main(
+                    [
+                        "kakaotalk-macos-report",
+                        str(root),
+                        "--output-dir",
+                        str(output_dir),
+                        "--max-messages",
+                        "10",
+                        "--max-context-rows",
+                        "5",
+                    ]
+                ),
+                0,
+            )
+
+            payload = json.loads((output_dir / "kakaotalk_macos_report.json").read_text(encoding="utf-8"))
+            html_text = (output_dir / "kakaotalk_macos_viewer.html").read_text(encoding="utf-8")
+            coverage = payload["context_row_coverage"][0]
+
+            self.assertTrue(payload["summary"]["context_limit_reached"])
+            self.assertEqual(payload["summary"]["context_truncated_table_count"], 1)
+            self.assertEqual(payload["summary"]["room_context_row_count"], 5)
+            self.assertEqual(payload["summary"]["room_context_row_estimate"], 7)
+            self.assertEqual(coverage["source_table"], "chat_rooms")
+            self.assertEqual(coverage["row_count"], 7)
+            self.assertEqual(coverage["exported_rows"], 5)
+            self.assertEqual(coverage["row_limit"], 5)
+            self.assertTrue(coverage["truncated"])
+            self.assertIn("Context export warning", html_text)
+
 
 def build_macos_fixture(root: Path) -> None:
     user_root = root / "Users" / "alice"
