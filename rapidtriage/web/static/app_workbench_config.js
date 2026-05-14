@@ -931,9 +931,9 @@ const VISIBLE_FORENSIC_CAPABILITY_GROUPS = [
       {
         id: "recentdocs-clipboard-muicache",
         label: "RecentDocs/Clipboard/MUICache",
-        status: "inventory",
-        terms: ["recentfilecache", "recentdocs", "clipboard", "muicache"],
-        nextAction: "최근 문서, clipboard, MUICache를 사용자 활동 viewer의 보조 증거로 노출",
+        status: "partial",
+        terms: ["recentfilecache", "recentdocs", "clipboard", "muicache", "registry-user-activity", "clipboard-history"],
+        nextAction: "RecentDocs/MUICache/Clipboard registry activity row는 제공, RecentFileCache.bcf와 CloudClipboard 구조 parser 필요",
       },
     ],
   },

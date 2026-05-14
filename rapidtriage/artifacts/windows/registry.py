@@ -59,6 +59,8 @@ USER_ACTIVITY_KEY_PATTERNS: tuple[tuple[str, str, str], ...] = (
     ("\\explorer\\comdlg32\\lastvisitedpidlmru", "file-dialog-mru", "LastVisitedPidlMRU file dialog history"),
     ("\\explorer\\runmru", "run-dialog-mru", "Run dialog MRU"),
     ("\\explorer\\recentdocs", "recent-document", "Explorer RecentDocs"),
+    ("\\shell\\muicache", "muicache", "MUICache application display cache"),
+    ("clipboard", "clipboard-history", "Clipboard history/settings"),
     ("\\shell\\bagmru", "shellbag", "ShellBags BagMRU"),
     ("\\shell\\bags", "shellbag", "ShellBags Bags"),
     ("mountpoints2", "mounted-device", "MountPoints2 device history"),
@@ -140,6 +142,30 @@ REGISTRY_ANALYST_REVIEW_CATALOG = {
             "Does MRU order align with the case timeline?",
         ],
         "risk_tags": ["user-activity", "file-dialog"],
+    },
+    "muicache": {
+        "severity": "info",
+        "summary": "MUICache application display cache; useful as a weak application presence/user activity pivot.",
+        "primary_pivots": ["decoded_values", "normalized_activity_rows", "key_path"],
+        "correlation_targets": ["prefetch", "amcache", "shimcache", "bam-dam", "mft-usn", "lnk"],
+        "analyst_questions": [
+            "Which executable path or app display name is represented?",
+            "Can Prefetch, Amcache, ShimCache, BAM/DAM, or filesystem evidence corroborate execution?",
+            "Is this only a display cache entry without run-count or timestamp semantics?",
+        ],
+        "risk_tags": ["user-activity", "application-presence"],
+    },
+    "clipboard-history": {
+        "severity": "medium",
+        "summary": "Clipboard-related registry artifact; may contain sensitive copied text or Cloud Clipboard settings.",
+        "primary_pivots": ["decoded_values", "normalized_activity_rows", "key_path"],
+        "correlation_targets": ["cloudstore", "timeline", "recent-documents", "browser", "mft-usn"],
+        "analyst_questions": [
+            "Does the value represent clipboard content, sync settings, or only feature state?",
+            "Is sensitive content minimized and authority documented before report inclusion?",
+            "Can application, document, or browser evidence explain the copied value?",
+        ],
+        "risk_tags": ["user-activity", "sensitive-content-review"],
     },
     "browser-typed-url": {
         "severity": "info",
@@ -2760,6 +2786,16 @@ def decode_user_activity_values(key: str, values: Mapping[str, str]) -> dict[str
         elif "opensavepidlmru" in lowered_key or "lastvisitedpidlmru" in lowered_key:
             item["file_dialog_hint"] = payload_strings[0] if payload_strings else cleaned
             item["activity_value"] = item["file_dialog_hint"]
+        elif "muicache" in lowered_key:
+            item["application_path_hint"] = name
+            item["application_display_name_hint"] = cleaned
+            item["activity_value"] = f"{name} -> {cleaned}" if cleaned else name
+            item["note"] = "MUICache is an application display cache and is not standalone proof of execution."
+        elif "clipboard" in lowered_key:
+            item["clipboard_value_preview"] = payload_strings[0] if payload_strings else cleaned[:240]
+            item["activity_value"] = item["clipboard_value_preview"]
+            item["sensitive_content_warning"] = True
+            item["note"] = "Clipboard-related values may contain sensitive content or sync settings; review authority and minimize disclosure."
         elif "mountpoints2" in lowered_key:
             item["mount_point_hint"] = name.strip("#")
             item["activity_value"] = item["mount_point_hint"]
@@ -2858,6 +2894,8 @@ def registry_user_activity_profile(
             "TypedPaths",
             "OpenSavePidlMRU",
             "LastVisitedPidlMRU",
+            "MUICache",
+            "Clipboard",
             "ShellBags",
             "MountPoints2",
             "Network",
@@ -3058,6 +3096,8 @@ def user_activity_target_coverage(
         "TypedPaths": category == "typed-path" or "typedpaths" in combined,
         "OpenSavePidlMRU": category == "file-dialog-mru" or "opensavepidlmru" in combined,
         "LastVisitedPidlMRU": category == "file-dialog-mru" or "lastvisitedpidlmru" in combined,
+        "MUICache": category == "muicache" or "muicache" in combined,
+        "Clipboard": category == "clipboard-history" or "clipboard" in combined,
         "ShellBags": category == "shellbag" or "bagmru" in combined or "\\bags" in combined,
         "MountPoints2": category == "mounted-device" or "mountpoints2" in combined,
         "Network": category == "network-share" or "\\network\\" in combined,
@@ -3075,8 +3115,10 @@ def user_activity_risk_flags(category: object, key: str, decoded_values: Mapping
     lowered = " ".join([key, " ".join(str(value) for value in decoded_values.values())]).lower()
     if category == "persistence":
         flags.append("user-hive-persistence")
-    if category in {"browser-typed-url", "typed-path", "recent-document", "file-dialog-mru", "run-dialog-mru"}:
+    if category in {"browser-typed-url", "typed-path", "recent-document", "file-dialog-mru", "run-dialog-mru", "muicache", "clipboard-history"}:
         flags.append("user-interaction-history")
+    if category == "clipboard-history":
+        flags.append("sensitive-content-review")
     if category == "shellbag":
         flags.append("folder-view-history")
     if category == "mounted-device":

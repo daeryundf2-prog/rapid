@@ -183,7 +183,7 @@ CAPABILITY_GROUPS: tuple[dict[str, Any], ...] = (
             {"id": "lnk-jumplist-analysis", "label": "LNK 및 JumpList", "status": "partial", "terms": ("lnk", "jumplist", "destlist", "automaticdestinations", "customdestinations")},
             {"id": "windows-timeline-activities", "label": "Windows Timeline ActivitiesCache", "status": "partial", "terms": ("activitiescache.db", "activities-cache-db", "windows timeline", "activity", "app activity")},
             {"id": "bits-qmgr-transfer", "label": "BITS qmgr.dat 전송", "status": "partial", "terms": ("bits", "qmgr", "bits-qmgr-transfer-candidate", "background transfer", "download", "exfil")},
-            {"id": "recentdocs-clipboard-muicache", "label": "RecentDocs/Clipboard/MUICache", "status": "inventory", "terms": ("recentfilecache", "recentdocs", "clipboard", "muicache")},
+            {"id": "recentdocs-clipboard-muicache", "label": "RecentDocs/Clipboard/MUICache", "status": "partial", "terms": ("recentfilecache", "recentdocs", "clipboard", "muicache", "registry-user-activity", "clipboard-history")},
         ),
     },
     {

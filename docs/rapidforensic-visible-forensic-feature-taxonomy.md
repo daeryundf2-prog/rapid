@@ -953,3 +953,24 @@ GUI 표기 방식:
 1. `$SIA/$FNA` 불일치는 강한 단서지만 단독으로 “의도적 시간 조작”을 확정하지 않는다.
 2. NTFS 정상 동작, copy/move, archive extraction, legacy timestamp propagation으로도 일부 divergence가 생길 수 있다.
 3. 보고서 확정에는 USN/$LogFile/execution artifact와 신뢰 도구 diff가 필요하다.
+
+## 30. 2026-05-14 구현 반영: RecentDocs/Clipboard/MUICache 사용자 활동 보강
+
+RecentDocs와 file dialog MRU는 이미 `registry-user-activity`로 정규화되고 있었지만, 사용자 노출 capability 이름에 포함된 `MUICache`와 `Clipboard`가 별도 category로 분류되지 않았다. 이번 라운드에서는 registry activity classifier에 `muicache`와 `clipboard-history` category를 추가하고, 민감한 clipboard 값은 `sensitive-content-review` 플래그를 붙인다.
+
+부분 구현으로 승격한 capability:
+
+| capability | 새 category / risk flag | 구현 내용 | 남은 상용급 보강 |
+| --- | --- | --- | --- |
+| RecentDocs/Clipboard/MUICache | `muicache`, `clipboard-history`, `sensitive-content-review` | Reg export/native hive string pivot에서 RecentDocs, RunMRU, OpenSavePidlMRU 외에 Shell MUICache와 Clipboard 관련 key를 `registry-user-activity` row로 정규화한다. | `RecentFileCache.bcf` parser, CloudClipboard store decoder, value timestamp semantics, trusted RECmd/RegistryExplorer diff |
+
+검증 포인트:
+
+1. `tests/test_rapidtriage_windows_artifacts_collectors.py::test_registry_user_activity_normalizes_mru_dialog_network_and_device_rows`가 RecentDocs, OpenSavePidlMRU, MUICache, Clipboard, MountPoints2, Network share를 한 fixture에서 검증한다.
+2. visible capability status는 `recentdocs-clipboard-muicache`를 `부분 구현`으로 올리고 실제 row type인 `registry-user-activity`와 category term을 추가했다.
+
+중요한 제한:
+
+1. MUICache는 표시 이름/cache 성격이 강해 단독 실행 증거가 아니다.
+2. Clipboard 관련 값은 민감정보를 포함할 수 있으므로 보고서 포함 전 범위/권한/최소 공개 원칙이 필요하다.
+3. Clipboard history의 실제 content store는 Windows 버전과 CloudStore 구조에 따라 달라질 수 있어 추가 fixture가 필요하다.

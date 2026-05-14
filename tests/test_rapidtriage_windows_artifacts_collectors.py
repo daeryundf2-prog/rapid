@@ -4120,6 +4120,12 @@ class RapidTriageWindowsArtifactsCollectorTests(unittest.TestCase):
 [HKEY_CURRENT_USER\\Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\ComDlg32\\OpenSavePidlMRU\\docx]
 "0"=hex:{recent_doc}
 
+[HKEY_CURRENT_USER\\Software\\Classes\\Local Settings\\Software\\Microsoft\\Windows\\Shell\\MuiCache]
+"C:\\\\Program Files\\\\Acme\\\\viewer.exe.FriendlyAppName"="Acme Viewer"
+
+[HKEY_CURRENT_USER\\Software\\Microsoft\\Clipboard]
+"LastClipboardText"="confidential case phrase"
+
 [HKEY_CURRENT_USER\\Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\MountPoints2\\##USBSTOR#Disk&Ven_Test&Prod_Flash#123456]
 "LabelFromReg"="CASEUSB"
 
@@ -4135,6 +4141,8 @@ class RapidTriageWindowsArtifactsCollectorTests(unittest.TestCase):
             self.assertIn("run-dialog-mru", categories)
             self.assertIn("recent-document", categories)
             self.assertIn("file-dialog-mru", categories)
+            self.assertIn("muicache", categories)
+            self.assertIn("clipboard-history", categories)
             self.assertIn("mounted-device", categories)
             self.assertIn("network-share", categories)
             run_mru = next(record for record in records if record.details["user_activity_category"] == "run-dialog-mru")
@@ -4147,6 +4155,15 @@ class RapidTriageWindowsArtifactsCollectorTests(unittest.TestCase):
             self.assertEqual(len(recent_row["binary_payload_sha256"]), 64)
             file_dialog = next(record for record in records if record.details["user_activity_category"] == "file-dialog-mru")
             self.assertIn("OpenSavePidlMRU", file_dialog.details["registry_user_activity_profile"]["target_artifact_coverage"]["matched_targets"])
+            muicache = next(record for record in records if record.details["user_activity_category"] == "muicache")
+            muicache_row = next(row for row in muicache.details["normalized_activity_rows"] if "viewer.exe" in row["display_value"].lower())
+            self.assertIn("Acme Viewer", muicache_row["display_value"])
+            self.assertIn("MUICache", muicache.details["registry_user_activity_profile"]["target_artifact_coverage"]["matched_targets"])
+            clipboard = next(record for record in records if record.details["user_activity_category"] == "clipboard-history")
+            clipboard_row = clipboard.details["normalized_activity_rows"][0]
+            self.assertIn("confidential case phrase", clipboard_row["display_value"])
+            self.assertIn("sensitive-content-review", clipboard.details["risk_flags"])
+            self.assertIn("Clipboard", clipboard.details["registry_user_activity_profile"]["target_artifact_coverage"]["matched_targets"])
             mounted = next(record for record in records if record.details["user_activity_category"] == "mounted-device")
             self.assertIn("MountPoints2", mounted.details["registry_user_activity_profile"]["target_artifact_coverage"]["matched_targets"])
             network = next(record for record in records if record.details["user_activity_category"] == "network-share")
