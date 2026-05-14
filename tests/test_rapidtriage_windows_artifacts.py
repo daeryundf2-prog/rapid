@@ -3752,6 +3752,9 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp_dir:
             root = Path(tmp_dir)
             fixture = build_windows_artifact_fixture(root)
+            anydesk = root / "ProgramData" / "AnyDesk" / "service.trace"
+            anydesk.parent.mkdir(parents=True, exist_ok=True)
+            anydesk.write_text("2026-05-14 AnyDesk session from 203.0.113.10 https://relay.anydesk.com", encoding="utf-8")
             output = root / "remote-access.json"
 
             self.assertEqual(main(["artifacts", str(root), "--kind", "windows-remote-access", "--output", str(output)]), 0)
@@ -3760,6 +3763,7 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
             config = next(item for item in artifacts if item["artifact_type"] == "rdp-config")
             cache = next(item for item in artifacts if item["artifact_type"] == "rdp-cache-file")
             destinations = [item for item in artifacts if item["artifact_type"] == "rdp-destination"]
+            remote = next(item for item in artifacts if item["artifact_type"] == "third-party-remote-control-artifact")
 
             self.assertEqual(config["details"]["destination"], "10.0.0.50")
             self.assertEqual(config["details"]["username_hint"], r"CORP\alice")
@@ -3773,6 +3777,11 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
             self.assertEqual(cache["details"]["thumbnail_candidates"][0]["height"], 200)
             self.assertTrue(any(item["details"]["destination"] == "10.0.0.50" for item in destinations))
             self.assertTrue(any(item["details"]["destination"] == "rdp-target.example" for item in destinations))
+            self.assertEqual(remote["provider"], "windows-remote-access")
+            self.assertEqual(remote["details"]["product"], "anydesk")
+            self.assertEqual(remote["details"]["ip_candidates"], ["203.0.113.10"])
+            self.assertIn("https://relay.anydesk.com", remote["details"]["url_candidates"])
+            self.assertIn("remote-control:anydesk", remote["details"]["risk_flags"])
 
     def test_windows_system_collector_maps_print_spooler_and_remote_control_artifacts(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:

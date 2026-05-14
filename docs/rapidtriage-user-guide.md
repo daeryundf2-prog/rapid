@@ -253,6 +253,7 @@ Remote access workflow:
 - `windows-remote-access` extracts RDP connection files, including full address, username hint, gateway host, and modified time.
 - Terminal Server Client cache files are inventoried with hashes, timestamps, and bounded PNG/JPEG/BMP/DIB thumbnail signature pivots so analysts can preserve and review RDP thumbnail/cache evidence without forcing heavy decoding up front.
 - Exported Terminal Server Client registry keys are normalized into `rdp-destination` rows for quick destination pivots.
+- Third-party remote-control traces for AnyDesk, TeamViewer, RustDesk, and Chrome Remote Desktop are also surfaced in the remote-access workflow as `third-party-remote-control-artifact` rows with product tags, bounded string samples, URL/IP pivots, risk flags, hashes, and explicit report-grade blockers for missing product-specific session/transfer validation.
 
 Execution and filesystem workflow:
 
