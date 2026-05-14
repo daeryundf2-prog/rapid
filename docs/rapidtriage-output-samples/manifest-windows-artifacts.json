@@ -44,7 +44,7 @@
           "supported": true,
           "details": {
             "parser": "local-llm-inventory",
-            "parser_version": "generic-documents-v2",
+            "parser_version": "generic-documents-v4",
             "source_path": "<ROOT>/Users/alice/AppData/Local/Microsoft/Terminal Server Client/Cache/Cache0000.bin",
             "source_hashes": {
               "md5": "da7f6376c1c3652e03ce7c57aed2cda0",
@@ -11523,6 +11523,7 @@
               "template_instance_header": true,
               "template_substitution_values": true,
               "curated_provider_message_catalog": true,
+              "case_local_message_catalog_auto_discovery": true,
               "provider_resource_message_rendering": false,
               "full_binxml_dom": false,
               "report_grade_deleted_record_validation": false,
@@ -12570,7 +12571,7 @@
           "supported": true,
           "details": {
             "parser": "windows-remote-access",
-            "parser_version": "windows-remote-access-v2",
+            "parser_version": "windows-remote-access-v3",
             "coverage_status": "mapped",
             "reportability": "triage",
             "source_path": "<ROOT>/Users/alice/AppData/Local/Microsoft/Terminal Server Client/Cache/Cache0000.bin",
@@ -12597,7 +12598,7 @@
           "supported": true,
           "details": {
             "parser": "windows-remote-access",
-            "parser_version": "windows-remote-access-v2",
+            "parser_version": "windows-remote-access-v3",
             "coverage_status": "mapped",
             "reportability": "triage",
             "source_path": "<ROOT>/Users/alice/Documents/Default.rdp",
@@ -12627,7 +12628,7 @@
           "supported": true,
           "details": {
             "parser": "windows-remote-access",
-            "parser_version": "windows-remote-access-v2",
+            "parser_version": "windows-remote-access-v3",
             "coverage_status": "mapped",
             "reportability": "triage",
             "source_path": "<ROOT>/Windows/System32/config/rdp.reg",

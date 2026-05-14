@@ -585,6 +585,7 @@ The `manifest-windows-artifacts.json` sample also fixes the current artifact row
   - `eventlog-detection`
   - `eventlog-file`
   - `eventlog-chunk`
+  - `eventlog-record-candidate`
   - `eventlog-summary`
 - `windows-registry`
   - `registry-hive`

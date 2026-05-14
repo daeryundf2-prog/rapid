@@ -5,7 +5,7 @@ import shutil
 import sys
 from dataclasses import asdict, dataclass, replace
 from pathlib import Path
-from typing import Protocol
+from typing import Mapping, Protocol
 
 from .audit import compute_sha256
 from .archive_image import ARCHIVE_IMAGE_SUFFIXES, ARCHIVE_IMAGE_TOOLS, missing_archive_image_tools
@@ -219,13 +219,20 @@ def detect_fde_indicators(source: Path, *, scan_limit: int = 4 * 1024 * 1024) ->
             with source.open("rb") as handle:
                 blob = handle.read(scan_limit)
         except OSError as exc:
-            return {
+            profile = {
                 "status": "scan-failed",
                 "error": str(exc)[:160],
                 "indicators": [],
                 "lawful_unlock_supported": False,
+                "on_the_fly_decryption_supported": False,
+                "report_blockers": [
+                    "fde-indicator-scan-failed",
+                    "trusted-decryption-workflow-log-required",
+                ],
                 "validation_required": True,
             }
+            profile["operator_runbook"] = build_fde_operator_runbook(profile)
+            return profile
         for signature, indicator_id, product in FDE_SIGNATURES:
             offset = blob.find(signature)
             if offset < 0:
@@ -239,7 +246,7 @@ def detect_fde_indicators(source: Path, *, scan_limit: int = 4 * 1024 * 1024) ->
                 }
             )
     status = "indicator-found" if any(item["product_hint"] in {"BitLocker", "LUKS"} for item in indicators) else scan_status
-    return {
+    profile: dict[str, object] = {
         "status": status,
         "scan_limit_bytes": scan_limit if source.is_file() else 0,
         "indicators": indicators,
@@ -256,6 +263,71 @@ def detect_fde_indicators(source: Path, *, scan_limit: int = 4 * 1024 * 1024) ->
             "no-key-material-handling-vault",
             "trusted-decryption-workflow-log-required",
         ],
+        "validation_required": True,
+    }
+    profile["operator_runbook"] = build_fde_operator_runbook(profile)
+    return profile
+
+
+def build_fde_operator_runbook(fde_profile: Mapping[str, object]) -> dict[str, object]:
+    indicators = [
+        item for item in fde_profile.get("indicators", []) if isinstance(item, Mapping)
+    ]
+    product_hints = sorted(
+        {
+            str(item.get("product_hint"))
+            for item in indicators
+            if str(item.get("product_hint") or "") in {"BitLocker", "FileVault", "LUKS"}
+        }
+    )
+    status = "unlock-material-required" if product_hints else "standby-no-indicator"
+    return {
+        "profile_version": "fde-operator-runbook-v1",
+        "status": status,
+        "product_hints": product_hints,
+        "authority_required": True,
+        "rapidtriage_unlock_engine": "not-implemented",
+        "supported_rapidtriage_role": "detect-required-materials-and-verify-decrypted-export",
+        "accepted_inputs": [
+            "operator-provided decrypted mounted folder",
+            "operator-provided decrypted raw/export image",
+            "vendor/tool export manifest with source/decrypted hashes",
+            "case authority note and unlock command log",
+        ],
+        "unlock_tracks": [
+            {
+                "product": "BitLocker",
+                "required_material": "48-digit recovery key, BEK file, TPM/key protector evidence, or decrypted export",
+                "operator_tool_examples": ["manage-bde", "dislocker", "libbde/bdemount", "FTK/AXIOM/EnCase export"],
+                "proof_to_attach": ["source image hash", "unlock command log", "decrypted volume hash or exported-root manifest"],
+            },
+            {
+                "product": "FileVault",
+                "required_material": "password/recovery key/keychain-derived authority or decrypted APFS export",
+                "operator_tool_examples": ["diskutil apfs unlockVolume", "APFS-aware forensic suite export"],
+                "proof_to_attach": ["source container hash", "unlock command log", "decrypted APFS export manifest"],
+            },
+            {
+                "product": "LUKS",
+                "required_material": "passphrase, key file, header/keyslot evidence, or decrypted export",
+                "operator_tool_examples": ["cryptsetup luksOpen", "libguestfs/qemu-nbd with authorized key material"],
+                "proof_to_attach": ["source image hash", "cryptsetup log", "decrypted mapper/export hash manifest"],
+            },
+        ],
+        "post_unlock_next_steps": [
+            "Run rapidtriage evidence on the decrypted export or mounted folder.",
+            "Run rapidtriage run on the decrypted root so artifacts/search/review/report stages use decrypted content.",
+            "Attach source/decrypted hash manifest and operator authority note to the report bundle.",
+        ],
+        "qc_checklist": [
+            {"id": "authority-note-attached", "label": "Case authority/audit note attached", "required": True},
+            {"id": "source-hash-recorded", "label": "Original encrypted source hash recorded", "required": True},
+            {"id": "unlock-log-attached", "label": "External unlock command/tool log attached", "required": True},
+            {"id": "decrypted-export-hash-recorded", "label": "Decrypted export or mounted-root manifest hash recorded", "required": True},
+            {"id": "rapidtriage-rerun-on-decrypted-root", "label": "RapidTriage rerun on decrypted content", "required": True},
+        ],
+        "report_blockers": list(fde_profile.get("report_blockers") or ()),
+        "commercial_grade_ready": False,
         "validation_required": True,
     }
 

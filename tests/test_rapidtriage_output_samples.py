@@ -24,9 +24,15 @@ def write_minimal_docx(path: Path, text: str) -> None:
         '<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">'
         f"<w:body><w:p><w:r><w:t>{text}</w:t></w:r></w:p></w:body></w:document>"
     )
+    fixed_time = (2024, 1, 2, 3, 4, 5)
     with zipfile.ZipFile(path, "w") as archive:
-        archive.writestr("[Content_Types].xml", "")
-        archive.writestr("word/document.xml", xml)
+        for name, content in (
+            ("[Content_Types].xml", ""),
+            ("word/document.xml", xml),
+        ):
+            info = zipfile.ZipInfo(name, fixed_time)
+            info.compress_type = zipfile.ZIP_STORED
+            archive.writestr(info, content)
 
 
 def write_minimal_pdf(path: Path, text: str) -> None:

@@ -32,6 +32,61 @@
       {
         "artifacts": [
           {
+            "artifact_type": "document-metadata-risk",
+            "details": {
+              "author_candidates": [],
+              "commercial_grade_blockers": [
+                "office-version-metadata-fixture-required",
+                "macro-static-analysis-not-complete",
+                "trusted-document-parser-diff-required"
+              ],
+              "commercial_grade_ready": false,
+              "coverage_status": "document-metadata-and-risk-profile",
+              "document_family": "docx",
+              "external_reference_candidates": [],
+              "macro_profile": {
+                "macro_paths": [],
+                "macro_present": false,
+                "macro_scan_status": "not-detected"
+              },
+              "metadata_profile": {
+                "analysis_status": "parsed",
+                "author_candidates": [],
+                "document_family": "docx",
+                "external_reference_candidates": [],
+                "macro_profile": {
+                  "macro_paths": [],
+                  "macro_present": false,
+                  "macro_scan_status": "not-detected"
+                },
+                "profile_version": "document-metadata-risk-profile-v1",
+                "properties": {},
+                "risk_flags": [
+                  "document-metadata-profile"
+                ],
+                "timestamp_candidates": {},
+                "validation_guidance": "Document metadata and VBA presence are triage pivots. Confirm author/timestamp semantics and macro behavior with a dedicated Office/ODF parser or sandbox before reporting intent or malware conclusions.",
+                "values_are_candidates": true
+              },
+              "parser": "document-metadata-risk",
+              "parser_version": "generic-documents-v4",
+              "risk_flags": [
+                "document-metadata-profile"
+              ],
+              "source_hashes": {
+                "md5": "b95555de96ac97f41dbb04ab82398800",
+                "sha1": "1fcbb0a6aba697ebd42d3b4c74e214031dc274e3",
+                "sha256": "eb054447adf11f487f65c7f0851679ca9b0bb1ce3328fed7b011b151f7967e89"
+              },
+              "source_path": "<ROOT>/report.docx",
+              "timestamp_candidates": {},
+              "validation_required": true
+            },
+            "path": "<ROOT>/report.docx",
+            "provider": "generic-documents",
+            "supported": true
+          },
+          {
             "artifact_type": "document-pattern",
             "details": {
               "extension": ".docx"

@@ -171,12 +171,21 @@ class RapidTriageWebStaticTests(unittest.TestCase):
         self.assertIn("AI 질문/답변 후보", config_js)
         self.assertIn("browser-storage-inventory", config_js)
         self.assertIn("eventlog-chunk", config_js)
+        self.assertIn("eventlog-record-candidate", config_js)
+        self.assertIn("evtx_recovery_report_citation_manifest", config_js)
+        self.assertIn("evtx_message_rendering_profile", config_js)
         self.assertIn("registry-user-activity", config_js)
+        self.assertIn("registry-key-recovery-candidate", config_js)
+        self.assertIn("registry-value-recovery-candidate", config_js)
+        self.assertIn("registry_report_citation_manifest", config_js)
         self.assertIn("windows-search-edb-row-candidate", config_js)
         self.assertIn("windows-search-edb-page-candidate", config_js)
         self.assertIn("virtual-disk-workflow", config_js)
         self.assertIn("qemu_img_info_profile", config_js)
         self.assertIn("virtual_disk_chain_profile", config_js)
+        self.assertIn("forensic-container-workflow", config_js)
+        self.assertIn("verified_export_manifest_profile", config_js)
+        self.assertIn("forensic_container_workflow_manifest", config_js)
         self.assertIn("browser_analyst_review_profile", config_js)
         self.assertIn("mobile-message", config_js)
         self.assertIn("kakaotalk-windows-app-database", config_js)
@@ -201,6 +210,10 @@ class RapidTriageWebStaticTests(unittest.TestCase):
         self.assertIn("webshell_report_citation_package", config_js)
         self.assertIn("ai-service-export-conversation", config_js)
         self.assertIn("ai_service_export_parser_manifest", config_js)
+        self.assertIn("mapi_container_review_profile", config_js)
+        self.assertIn("email_mailbox_parser_manifest", config_js)
+        self.assertIn("fde_operator_runbook", config_js)
+        self.assertIn("trusted-decryption-workflow-log-required", config_js)
         for capability_id in (
             "evidence-vss-apfs-snapshot",
             "evidence-fde-unlock",
@@ -287,11 +300,25 @@ class RapidTriageWebStaticTests(unittest.TestCase):
             "cloud-icloud-export",
             "cloud-message",
             "image-vm-disk",
+            "image-export-only",
             "browser-ai-export-parser",
+            "eventlog-provider-message-rendering",
+            "eventlog-corrupt-recovery",
+            "registry-deleted-candidate",
+            "email-pst-ost-import",
         ):
             self.assertEqual(capabilities[capability_id]["status"], "partial")
         self.assertIn("virtual-disk-workflow", capabilities["image-vm-disk"]["artifact_types"])
+        self.assertIn("forensic-container-workflow", capabilities["image-export-only"]["artifact_types"])
         self.assertIn("ai-service-export-conversation", capabilities["browser-ai-export-parser"]["artifact_types"])
+        self.assertIn("eventlog-event", capabilities["eventlog-provider-message-rendering"]["artifact_types"])
+        self.assertIn("eventlog-record-candidate", capabilities["eventlog-corrupt-recovery"]["artifact_types"])
+        self.assertIn("registry-deleted-cell-candidate", capabilities["registry-deleted-candidate"]["artifact_types"])
+        self.assertIn("registry-value-recovery-candidate", capabilities["registry-deleted-candidate"]["artifact_types"])
+        self.assertIn("email-mailbox", capabilities["email-pst-ost-import"]["artifact_types"])
+        self.assertEqual(capabilities["evidence-fde-unlock"]["status"], "external-required")
+        self.assertIn("fde_operator_runbook", capabilities["evidence-fde-unlock"]["terms"])
+        self.assertIn("decrypted root", capabilities["evidence-fde-unlock"]["next_action"].lower())
         for group in payload["groups"]:
             self.assertIn("tab", group)
             self.assertIn("workflow_stage", group)

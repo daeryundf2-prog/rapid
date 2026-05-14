@@ -303,6 +303,11 @@ DOS Partition Table
             self.assertFalse(recovery["snapshot_workflow"]["direct_image_level_mount_supported"])
             self.assertEqual(recovery["fde_unlock_workflow"]["status"], "completed")
             self.assertFalse(recovery["fde_unlock_workflow"]["lawful_unlock_supported"])
+            fde_runbook = recovery["fde_unlock_workflow"]["operator_runbook"]
+            self.assertEqual(fde_runbook["profile_version"], "fde-operator-runbook-v1")
+            self.assertEqual(fde_runbook["rapidtriage_unlock_engine"], "not-implemented")
+            self.assertIn("operator-provided decrypted mounted folder", fde_runbook["accepted_inputs"])
+            self.assertIn("rapidtriage run", fde_runbook["post_unlock_next_steps"][1])
             self.assertTrue(recovery["unallocated_carving_workflow"]["bounded_signature_carving_available"])
             self.assertIn("rapidtriage carve", recovery["unallocated_carving_workflow"]["recommended_command"])
 
@@ -338,6 +343,13 @@ DOS Partition Table
             self.assertEqual(fde["status"], "indicator-found")
             self.assertEqual(fde["indicators"][0]["product_hint"], "BitLocker")
             self.assertFalse(fde["on_the_fly_decryption_supported"])
+            runbook = fde["operator_runbook"]
+            self.assertEqual(runbook["status"], "unlock-material-required")
+            self.assertIn("BitLocker", runbook["product_hints"])
+            self.assertTrue(runbook["authority_required"])
+            self.assertIn("source-hash-recorded", {item["id"] for item in runbook["qc_checklist"]})
+            bitlocker_track = next(item for item in runbook["unlock_tracks"] if item["product"] == "BitLocker")
+            self.assertIn("manage-bde", bitlocker_track["operator_tool_examples"])
 
     def test_e01_tool_preflight_records_roles_versions_and_remediation(self) -> None:
         calls: list[list[str]] = []

@@ -1134,3 +1134,77 @@ GUI 노출 계약:
 1. FDE unlock 자체는 아직 외부 workflow다. RapidTriage는 키를 보관하거나 on-the-fly decryption을 수행하지 않는다.
 2. Snapshot 후보는 mounted/exported folder 기준이며, E01 내부 VSS/APFS snapshot을 직접 mount하는 기능은 아직 아니다.
 3. Carving은 bounded signature 후보 탐지이며 전체 비할당 영역 구조 분석이나 SQLite deleted-row 복원과 동일하지 않다.
+
+## 36. 2026-05-14 구현 반영: EVTX/Registry 검증대기 기능의 GUI 사용 가능화
+
+EVTX provider message rendering, EVTX corrupt/deleted recovery, Registry deleted key/value 후보는 이미 row와 검증 manifest가 있었지만 visible capability registry에서는 `검증 필요` 단계로만 남아 있어 분석관이 실제 기능 카드에서 결과 row를 찾기 어려웠다. 이번 라운드에서는 세 항목을 `부분 구현`으로 정정하고, 실제 생성되는 artifact type과 manifest term을 GUI 필터에 연결했다.
+
+부분 구현으로 승격한 capability:
+
+| capability | 연결 artifact/field | 구현 내용 | 남은 상용급 보강 |
+| --- | --- | --- | --- |
+| Provider message rendering | `eventlog-event`, `eventlog-summary`, `event_message`, `message_rendering`, `evtx_message_rendering_profile` | 가져온 Event Viewer/EvtxECmd 계열 message field, built-in fallback template, case-local manifest/message catalog 후보, rendering provenance/confidence/limitation을 detail rail에서 찾을 수 있게 한다. | Windows provider DLL/resource table 직접 추출, OS별 manifest corpus, EvtxECmd/Hayabusa/Event Viewer message wording diff |
+| Corrupt/deleted record recovery | `eventlog-record-candidate`, `eventlog-chunk`, `evtx_recovery_context`, `evtx_recovery_report_citation_manifest` | invalid/slack/corrupt record header 후보의 offset, size/hash, chunk/free-space context, confidence, caution label, citation manifest를 기능 카드와 source viewer 흐름에 노출한다. | hand-labeled deleted/corrupt EVTX corpus, slack/corrupt FP/FN 측정, trusted recovery export와 record 단위 diff |
+| Deleted key/value 후보 | `registry-deleted-cell-candidate`, `registry-key-recovery-candidate`, `registry-value-recovery-candidate`, `registry_recovery_evidence`, `registry_report_citation_manifest` | positive-size free cell, allocator/neighbor context, key/value recovery 후보, reportability decision, citation manifest를 Registry recovery evidence viewer에서 찾을 수 있게 한다. | LOG1/LOG2 replay 적용, RECmd/Registry Explorer/hand-labeled fixture diff, deleted-cell false-positive corpus |
+
+검증 포인트:
+
+1. `tests/test_rapidtriage_web_static.py::test_visible_capability_registry_has_gui_contract_for_every_feature`가 세 capability의 상태를 `partial`로 확인하고 실제 artifact type을 검증한다.
+2. `tests/test_rapidtriage_web_static.py::test_hidden_forensic_capabilities_are_exposed_as_visible_steps`가 EVTX recovery manifest와 Registry recovery manifest term이 GUI 설정에 노출되는지 확인한다.
+3. `docs/rapidtriage-output-schemas.md`의 artifact type 목록에 `eventlog-record-candidate`를 명시해 source-search/review/report 쪽 산출물 계약과 맞췄다.
+
+중요한 제한:
+
+1. 이 변경은 기능을 숨겨진 validation-only 상태에서 usable triage surface로 올린 것이지, 상용급 증언 가능 상태로 올린 것이 아니다.
+2. EVTX message rendering은 provider DLL/resource table resolver와 외부 trusted message diff가 붙기 전까지 `partial`이다.
+3. Registry deleted key/value 후보는 allocator와 citation evidence가 있더라도 independent fixture/diff 전에는 "복구된 사실"이 아니라 "복구 후보"로만 표현해야 한다.
+
+## 37. 2026-05-14 구현 반영: proprietary container/mailbox workflow 노출 정정
+
+AD1/L01/Lx01/AFF/AFF4/XVA와 PST/OST/MSG는 "외부 도구 없이는 완전 네이티브 파싱 불가"라는 이유로 GUI에서 외부필요처럼 보였지만, 실제로는 RapidTriage가 source hash, export-first workflow, sidecar manifest, bounded candidate inventory, citation manifest를 이미 만든다. 따라서 사용자는 기능 카드에서 이 결과를 찾아야 하며, 상태는 `외부 자료 필요`가 아니라 `부분 구현`이 정확하다.
+
+부분 구현으로 승격한 capability:
+
+| capability | 연결 artifact/field | 구현 내용 | 남은 상용급 보강 |
+| --- | --- | --- | --- |
+| AD1/L01/AFF/XVA export workflow | `forensic-container-workflow`, `container_export_profile`, `verified_export_manifest_profile`, `forensic_container_workflow_manifest` | proprietary container 입력을 format별로 식별하고 source hash, export-first guidance, vendor manifest sidecar 검증 상태, reportability decision, stable workflow manifest를 제공한다. | native AD1/L01/Lx01/AFF/AFF4/XVA parser, encrypted/compressed container handling, vendor export known-answer corpus |
+| PST/OST mailbox | `email-mailbox`, `mapi_container_review_profile`, `email_mailbox_parser_manifest` | PST/OST/MSG를 bounded MAPI container 후보로 스캔해 이메일/subject/folder/message-class/attachment/deleted hint와 source viewer locator, mailbox parser manifest를 제공한다. | libpff/Outlook/Purview trusted export diff, folder/message/deleted item native decode, attachment extraction validation |
+
+검증 포인트:
+
+1. `tests/test_rapidtriage_evidence.py::test_identifies_common_image_formats_as_planned_adapters`가 AD1/L01/Lx01/AFF/AFF4 source integrity, export-first workflow, verified manifest profile, commercial blockers를 검증한다.
+2. `tests/test_rapidtriage_email_artifacts.py`가 PST/OST bounded inventory, `mapi_container_review_profile`, `email_mailbox_parser_manifest`, native MAPI blocker를 검증한다.
+3. `tests/test_rapidtriage_web_static.py`가 두 capability를 `partial`로 노출하고 실제 artifact/manifest term을 GUI 설정과 API registry에 연결한다.
+
+중요한 제한:
+
+1. `partial`은 "분석관이 후보와 workflow manifest를 볼 수 있다"는 의미이지 proprietary container나 mailbox를 완전 native decode한다는 뜻이 아니다.
+2. AD1/L01/AFF/XVA는 vendor export와 hash manifest가 없으면 파일 목록/삭제 항목을 자체적으로 확정하지 않는다.
+3. PST/OST/MSG는 bounded string inventory와 citation manifest만 제공하며, 메시지 thread/deleted item/attachment 원문 결론은 trusted mailbox parser diff 전까지 금지한다.
+
+## 38. 2026-05-14 구현 반영: FDE unlock operator runbook
+
+BitLocker, FileVault, LUKS는 포렌식 입력 단계에서 매우 중요하지만 RapidTriage가 임의로 키를 추출하거나 암호화 볼륨을 on-the-fly로 해제하는 기능은 아직 없다. 이번 라운드에서는 이 항목을 `외부 자료 필요`로 정직하게 유지하되, 분석자가 GUI/API preflight에서 바로 다음 행동을 알 수 있도록 `fde_operator_runbook`을 `recovery_unlock_profile.fde_unlock_workflow`에 추가했다.
+
+추가된 산출물:
+
+| field | 의미 |
+| --- | --- |
+| `fde_operator_runbook.profile_version` | runbook schema version. 현재 `fde-operator-runbook-v1`이다. |
+| `fde_operator_runbook.product_hints` | bounded prefix scan에서 탐지한 BitLocker/FileVault/LUKS 후보. |
+| `fde_operator_runbook.accepted_inputs` | RapidTriage가 후속 분석에 받을 수 있는 decrypted mounted folder, decrypted raw/export image, vendor/tool manifest, authority note/unlock log 목록. |
+| `fde_operator_runbook.unlock_tracks` | BitLocker/FileVault/LUKS별 필요한 자료, operator tool 예시, 보고서에 붙일 proof checklist. |
+| `fde_operator_runbook.qc_checklist` | source hash, authority note, unlock log, decrypted export hash, decrypted root 재분석 여부를 확인하는 QC 항목. |
+| `fde_operator_runbook.report_blockers` | 법정 제출 전 반드시 해소해야 할 blocker. |
+
+검증 포인트:
+
+1. `tests/test_rapidtriage_e01.py::test_e01_evidence_preflight_writes_operator_runbook`가 E01 preflight에서 FDE runbook 필드와 decrypted root 재실행 안내를 검증한다.
+2. `tests/test_rapidtriage_e01.py::test_evidence_recovery_unlock_profile_surfaces_snapshot_and_fde_candidates`가 BitLocker magic 후보를 감지했을 때 authority-required runbook과 QC checklist가 생성되는지 검증한다.
+3. `tests/test_rapidtriage_web_static.py`가 GUI capability config에 `fde_operator_runbook`과 `trusted-decryption-workflow-log-required`가 노출되고, capability 상태가 계속 `external-required`로 남는지 확인한다.
+
+중요한 제한:
+
+1. 이 변경은 FDE unlock 자체를 구현한 것이 아니다. 키/패스워드/복구키, 외부 unlock log, decrypted export는 운영자가 제공해야 한다.
+2. RapidTriage는 현재 키 vault, BitLocker protector decode, FileVault/APFS encrypted volume direct unlock, LUKS header deep unlock을 수행하지 않는다.
+3. 상용급으로 올리려면 실제 BitLocker/FileVault/LUKS fixture, lawful key workflow, 외부 도구 버전/명령 로그, source/decrypted hash chain, decrypted root 재분석 결과가 필요하다.

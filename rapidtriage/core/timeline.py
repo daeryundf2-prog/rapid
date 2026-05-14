@@ -461,7 +461,10 @@ def timestamp_to_epoch(value: str) -> float:
     if not value:
         return float("-inf")
     try:
-        return dt.datetime.fromisoformat(value).timestamp()
+        parsed = dt.datetime.fromisoformat(value)
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=dt.timezone.utc)
+        return parsed.timestamp()
     except ValueError:
         return float("-inf")
 
