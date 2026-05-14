@@ -1,5 +1,7 @@
 # RapidForensic 사용자 노출 포렌식 기능 세분화
 
+최신화 기준: 2026-05-15, branch `codex/rapidforensic-complete`, remote `origin/codex/rapidforensic-complete`.
+
 이 문서는 `artifact collector` 개수만 보면 실제 기능이 적어 보이는 문제를 줄이기 위해 작성한다. 현재 코드는 여러 기능을 하나의 collector 안에 묶어 둔 경우가 많다. 예를 들어 `browser` collector 하나 안에는 인터넷 사용기록, 다운로드, 브라우저 저장소, AI 서비스 방문, AI 대화 후보 복원, citation manifest, 검증 gate가 같이 들어 있다.
 
 목표는 GUI와 QC 문서에서 "23개 collector"가 아니라 "분석자가 실제로 선택하고 확인할 수 있는 기능 단위"로 보여주는 것이다.
@@ -40,7 +42,7 @@
 
 따라서 GUI에는 collector 23개만 보여주면 안 된다. 최소한 artifact type과 parser stage까지 펼쳐야 한다.
 
-현재 `taxonomy-audit` 기준 사용자 노출 forensic target은 51개이며, 동적 artifact type까지 포함해 51/51개가 GUI/QC 바인딩을 가진다. 이 수치는 "상용급 검증 완료"가 아니라 "사용자가 기능을 찾고 실행/검토할 수 있는 노출 계약이 빠지지 않는다"는 의미다.
+현재 `taxonomy-audit` 기준 사용자 노출 forensic target은 51개이며, 동적 artifact type까지 포함해 51/51개가 GUI/QC 바인딩을 가진다. 최근 검증 기준으로 collector는 23개, artifact type literal은 191개 수준이다. 이 수치는 "상용급 검증 완료"가 아니라 "사용자가 기능을 찾고 실행/검토할 수 있는 노출 계약이 빠지지 않는다"는 의미다.
 
 ## 2. 최상위 사용자 기능 그룹
 
@@ -1368,7 +1370,7 @@ SQLite 기반 아티팩트는 브라우저 History, 카카오톡, Sticky Notes, 
 1. `tests/test_rapidtriage_api.py::test_commercial_readiness_api_returns_compact_gui_gate`가 compact API가 claim allowed=false, gate counts, focused validated items를 반환하는지 검증한다.
 2. `tests/test_rapidtriage_api.py::test_commercial_readiness_api_can_attach_internal_validation_package`가 내부 1~120 known-answer package를 붙였을 때 validated 120/120과 commercial 0/120이 분리 표시되는지 검증한다.
 3. `tests/test_rapidtriage_api.py::test_web_console_exposes_maestro_style_artifact_workbench`가 GUI JS/CSS에 readiness panel과 internal validation API 호출이 남아 있는지 검증한다.
-3. 이 기능은 상용급 달성을 의미하지 않는다. 오히려 현재 상용급이 아님을 사용자가 GUI에서 빠르게 확인하도록 하는 안전장치다.
+4. 이 기능은 상용급 달성을 의미하지 않는다. 오히려 현재 상용급이 아님을 사용자가 GUI에서 빠르게 확인하도록 하는 안전장치다.
 
 ## 46. 2026-05-14 구현 반영: PDF compressed stream 대용량 방어
 
@@ -1385,3 +1387,83 @@ SQLite 기반 아티팩트는 브라우저 History, 카카오톡, Sticky Notes, 
 
 1. 이 변경은 DoS/메모리 위험 방어다. PDF 렌더링이나 모든 PDF text extraction 정확도를 보장하지 않는다.
 2. PDF text hit가 필요하면 bounded extractor 결과를 source viewer와 교차 확인하고, 법정 제출 전에는 trusted PDF parser와 hit parity를 확인해야 한다.
+
+## 47. 2026-05-15 최신화: 현재 pushed 상태와 남은 상용급 gate 분리
+
+2026-05-15 기준 최근 기능 기준 커밋은 remote `origin/codex/rapidforensic-complete`에 push 완료된 상태다. 최근 반영된 핵심은 "기능이 보임"과 "상용급 검증 완료"를 UI/API/문서에서 분리하는 것이다. 즉, 분석관이 GUI에서 기능을 찾고 실행할 수 있더라도, 외부 E01 실증이나 trusted-tool diff가 없는 항목은 계속 `commercial_grade=false`로 유지한다.
+
+최신 상태 요약:
+
+| 항목 | 현재 값 | 의미 |
+| --- | --- | --- |
+| Branch | `codex/rapidforensic-complete` | remote push 완료 |
+| 최근 기능 기준 커밋 | `01ba21f Expose source search extraction caps in the UI` | source-search 문서/PDF cap을 UI에 노출 |
+| 직전 커밋 | `e1b0e48 Separate internal validation from commercial claims` | 내부 known-answer 검증과 commercial claim을 분리 |
+| Readiness score | `90/100` | 내부 validation package를 붙인 기준 |
+| Internal validated | `120/120` | `docs/validation/rapidtriage-core-forensics-001-120-known-answer.json` 연결 기준 |
+| Commercial-grade | `0/120` | 외부 E01/trusted diff/독립 검증 증거가 아직 부족 |
+| Commercial claim allowed | `false` | AXIOM/WISDOM급 또는 법정 제출 완성 표현 금지 |
+
+최근 추가/정정된 사용자 노출 기능:
+
+| 사용자 노출 기능 | 연결 API/UI/field | 구현 내용 | 남은 상용급 보강 |
+| --- | --- | --- | --- |
+| Internal validation package 표시 | `/api/commercial-readiness?include_internal_validation=true`, `validation_package.mode=internal-known-answer` | GUI가 내부 1~120 known-answer package를 붙인 validated 상태를 표시한다. | 외부 검증 package, 실제 E01 known-answer, trusted-tool diff |
+| Commercial-grade gate 분리 | `focused_next_gate=commercial_grade`, `commercial_grade.passed=0` | validated 120/120이어도 commercial-grade 0/120을 별도 표시해 과장 주장 위험을 줄인다. | item별 external blocker 해소 및 독립 signoff |
+| Source-search 추출 cap 표시 | `document_extraction_limits`, `doc cap`, `PDF stream cap` | source viewer의 current-file search profile에서 문서/PDF 추출 제한을 분석관이 직접 확인한다. | 대형 정상/악성 PDF/Office corpus, timeout/cancel E2E |
+| 대형 검색 오판 방지 | `sqlite_resume_token`, `file_resume_token`, continue button | 검색 결과가 0개라도 truncated/cursor 상태면 "없다"가 아니라 "계속 검색 필요"로 표시한다. | 100k/1M/10M row 반복 resume trace |
+
+최신 검증 명령:
+
+```bash
+.venv/bin/python -m py_compile \
+  rapidtriage/api/app.py \
+  rapidtriage/core/visible_capabilities.py \
+  tests/test_rapidtriage_api.py \
+  tests/test_rapidtriage_web_static.py
+
+node --check rapidtriage/web/static/app.js
+node --check rapidtriage/web/static/app_workbench_config.js
+
+.venv/bin/python -m unittest \
+  tests.test_rapidtriage_api.RapidTriageApiTests.test_commercial_readiness_api_returns_compact_gui_gate \
+  tests.test_rapidtriage_api.RapidTriageApiTests.test_commercial_readiness_api_can_attach_internal_validation_package \
+  tests.test_rapidtriage_api.RapidTriageApiTests.test_web_console_exposes_maestro_style_artifact_workbench \
+  tests.test_rapidtriage_api.RapidTriageApiTests.test_source_search_rejects_oversized_docx_member_before_expanding \
+  tests.test_rapidtriage_api.RapidTriageApiTests.test_source_search_rejects_pdf_stream_that_expands_past_limit \
+  tests.test_rapidtriage_web_static
+
+.venv/bin/python -m unittest \
+  tests.test_rapidtriage_web_static \
+  tests.test_rapidtriage_artifact_taxonomy
+
+.venv/bin/python -m rapidtriage commercial-readiness \
+  --validation-package docs/validation/rapidtriage-core-forensics-001-120-known-answer.json \
+  --next-gate commercial_grade \
+  --limit 5 \
+  --json
+```
+
+최신 검증 결과:
+
+| 검증 | 결과 |
+| --- | --- |
+| Python compile | 통과 |
+| JS syntax check | 통과 |
+| Taxonomy/web unittest | `20 tests OK` |
+| Readiness score | `90` |
+| Validated gate | `120 passed / 0 failed` |
+| Commercial-grade gate | `0 passed / 120 failed` |
+| Claim allowed | `false` |
+
+계속 남는 핵심 보강:
+
+1. 실제 Windows 11 E01 단일 케이스에서 ingest, 추출, 분석, 검색, 리뷰, 보고서까지 브라우저 trace와 산출물 hash를 남겨야 한다.
+2. EVTX는 EvtxECmd/Hayabusa record diff, provider message rendering, corrupt/deleted recovery fixture가 더 필요하다.
+3. Registry는 RECmd/ShellBagsExplorer diff, LOG1/LOG2 transaction replay, deleted cell allocator corpus가 필요하다.
+4. MFT/USN은 100만~1000만 row급 path reconstruction, rename/delete replay, cursor pagination runtime evidence가 필요하다.
+5. Browser/AI/메신저/메일/클라우드는 schema version별 fixture와 실제 export/import known-answer가 더 필요하다.
+6. GUI는 large-case browser trace, keyboard review loop, source viewer citation E2E를 실제 케이스로 증명해야 한다.
+7. 보고서는 selected evidence, source hash, parser version, offset/index, reviewer state, limitation, exhibit bundle을 실제 case output으로 묶는 검증이 필요하다.
+
+정리하면, 현재 문서상 `visible capability`는 빠지는 기능을 찾기 위한 지도 역할을 한다. 이 문서에서 `usable`로 표기된 기능은 "분석관이 접근 가능하다"는 뜻이고, `commercial_grade`나 "법정 제출 완성"을 뜻하지 않는다. 상용급 표현은 `commercial_claim_allowed=true`가 되는 외부 증거 package가 붙기 전까지 금지한다.
