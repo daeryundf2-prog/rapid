@@ -292,6 +292,8 @@ The HTML export is intended for browser review and printing. The DOCX export is 
 
 The independent `artifacts` command exposes one collector per invocation.
 
+Artifact rows preserve the legacy shape (`provider`, `artifact_type`, `path`, `supported`, `details`) for compatibility, and also attach `artifact_record` to every emitted row. `artifact_record` follows `ArtifactRecordV1` so GUI, search, review, report, JSONL, and future columnar stores can share one row contract while individual collectors are still being deepened. The payload-level `artifact_record_contract` records adapter version, valid/invalid row counts, and whether the output is GUI-usable.
+
 Top-level keys:
 
 - `command`
@@ -301,6 +303,7 @@ Top-level keys:
 - `provider`
 - `summary`
 - `artifacts`
+- `artifact_record_contract`
 
 Current CLI kinds:
 

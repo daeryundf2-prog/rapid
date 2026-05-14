@@ -97,19 +97,23 @@ def normalize_artifacts(outputs: Mapping[str, object]) -> list[dict[str, object]
             if not isinstance(row, Mapping):
                 continue
             index += 1
+            artifact_record = row.get("artifact_record") if isinstance(row.get("artifact_record"), Mapping) else {}
             artifact_type = str(row.get("artifact_type") or str(name).removeprefix("artifacts_"))
             details = row.get("details") if isinstance(row.get("details"), Mapping) else {}
             output.append(
                 {
-                    "id": stable_id("artifact", artifact_type, index),
+                    "id": str(artifact_record.get("artifact_id") or stable_id("artifact", artifact_type, index)),
                     "model": "Artifact",
                     "artifact_type": artifact_type,
                     "title": artifact_type,
                     "summary": artifact_summary(row),
                     "source": str(name),
-                    "parser": str(details.get("parser") or row.get("provider") or name),
-                    "parser_version": str(details.get("parser_version") or "1"),
+                    "parser": str(artifact_record.get("parser") or details.get("parser") or row.get("provider") or name),
+                    "parser_version": str(artifact_record.get("parser_version") or details.get("parser_version") or "1"),
                     "confidence": normalized_artifact_confidence(row),
+                    "artifact_record_schema": str(artifact_record.get("schema") or ""),
+                    "validation_required": artifact_record.get("validation_required"),
+                    "commercial_grade_ready": artifact_record.get("commercial_grade_ready"),
                     "data": dict(row),
                 }
             )
@@ -171,6 +175,9 @@ def artifact_summary(row: Mapping[str, object]) -> str:
 
 
 def normalized_artifact_confidence(row: Mapping[str, object]) -> float | None:
+    artifact_record = row.get("artifact_record") if isinstance(row.get("artifact_record"), Mapping) else {}
+    if isinstance(artifact_record.get("confidence"), (int, float)):
+        return float(artifact_record["confidence"])
     if isinstance(row.get("confidence"), (int, float)):
         return float(row["confidence"])
     details = row.get("details") if isinstance(row.get("details"), Mapping) else {}

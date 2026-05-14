@@ -22,6 +22,8 @@
 
 현재 `/api/forensic-capabilities`와 `/api/runs/{run_id}/capabilities`는 위 계약을 포함한다. GUI는 완료된 run에서는 API에서 내려온 capability 계약을 우선 사용하고, 정적 설정은 API가 없을 때의 fallback으로만 사용한다. 이 원칙 때문에 앞으로 기능을 추가할 때는 `파서 구현 -> ArtifactRecord/산출물 저장 -> capability registry 등록 -> GUI 노출 -> 테스트` 순서를 지켜야 한다.
 
+또한 `artifacts` 출력은 각 레거시 row 안에 `artifact_record` 필드를 함께 싣는다. 이 필드는 `ArtifactRecordV1` 계약이며 `artifact_id`, `artifact_family`, `artifact_type`, `parser`, `parser_version`, `source`, `confidence`, `validation_required`, `commercial_grade_ready`, `commercial_grade_blockers`, `legal_limitations`, `fields`를 가진다. 기존 collector가 아직 레거시 row를 만들더라도, 실행 결과는 검색/리뷰/보고서/columnar store가 공통으로 사용할 수 있는 표준 row를 같이 제공해야 한다.
+
 ## 1. 현재 집계 방식의 문제
 
 현재 `artifact_collectors()` 기준 collector는 22개다.

@@ -77,6 +77,12 @@
         },
         "ioc_hit_count": {
           "type": "integer"
+        },
+        "artifact_record_contract_valid_count": {
+          "type": "integer"
+        },
+        "artifact_record_contract_invalid_count": {
+          "type": "integer"
         }
       }
     },
@@ -106,6 +112,10 @@
             "type": "boolean"
           },
           "details": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "artifact_record": {
             "type": "object",
             "additionalProperties": true
           },
@@ -140,6 +150,50 @@
                 }
               }
             }
+          }
+        }
+      }
+    },
+    "artifact_record_contract": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "profile_version",
+        "schema",
+        "adapter_version",
+        "record_count",
+        "valid_count",
+        "invalid_count",
+        "gui_usable",
+        "errors"
+      ],
+      "properties": {
+        "profile_version": {
+          "const": "artifact-output-contract-v1"
+        },
+        "schema": {
+          "const": "ArtifactRecordV1"
+        },
+        "adapter_version": {
+          "type": "string"
+        },
+        "record_count": {
+          "type": "integer"
+        },
+        "valid_count": {
+          "type": "integer"
+        },
+        "invalid_count": {
+          "type": "integer"
+        },
+        "gui_usable": {
+          "type": "boolean"
+        },
+        "errors": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": true
           }
         }
       }

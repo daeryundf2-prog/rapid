@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Dict, Union
 
 from ..artifacts import artifact_collectors, get_artifact_collector
+from .artifact_store import attach_artifact_record_contracts
 from .input_root import InputRoot, resolve_input_root
 from .rules import RuleSet, annotate_artifacts_payload
 
@@ -73,6 +74,11 @@ def run_artifact_collection(
         "parser_errors": parser_errors,
         "artifacts": artifacts,
     }
+    payload = attach_artifact_record_contracts(
+        payload,
+        kind=str(getattr(collector, "collector_kind", kind)),
+        root=input_root.root_path,
+    )
     if rule_set is not None:
         annotate_artifacts_payload(payload, rule_set)
     return payload

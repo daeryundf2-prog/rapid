@@ -37,6 +37,14 @@ class RapidTriageArtifactsCliTests(unittest.TestCase):
             self.assertEqual(payload["summary"]["artifact_type_counts"]["browser-history-downloads"], 2)
             self.assertEqual(payload["summary"]["artifact_type_counts"]["browser-history"], 1)
             self.assertEqual(len(payload["artifacts"]), 3)
+            self.assertEqual(payload["artifact_record_contract"]["schema"], "ArtifactRecordV1")
+            self.assertEqual(payload["artifact_record_contract"]["valid_count"], 3)
+            self.assertEqual(payload["artifact_record_contract"]["invalid_count"], 0)
+            self.assertTrue(payload["artifact_record_contract"]["gui_usable"])
+            first_record = payload["artifacts"][0]["artifact_record"]
+            self.assertEqual(first_record["schema"], "ArtifactRecordV1")
+            self.assertEqual(first_record["artifact_family"], "browser")
+            self.assertEqual(first_record["fields"]["gui_contract"]["primary_tab"], "artifacts")
 
     def test_recent_files_artifacts_command_writes_expected_payload(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
