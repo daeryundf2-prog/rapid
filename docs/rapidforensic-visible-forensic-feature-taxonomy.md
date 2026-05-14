@@ -772,9 +772,9 @@ GUI 표기 방식:
 | 문서 유출 보조 아티팩트 | Print Spooler SPL/SHD | 목록화 | 출력 문서, 사용자, 프린터, 인쇄 시각 확인 |
 | 문서 유출 보조 아티팩트 | 문서 메타데이터/매크로 위험 | `document-metadata-risk` | OOXML/ODF 작성자/수정자/시간 후보, VBA/script 존재, 외부 relationship 후보 |
 | 문서 유출 보조 아티팩트 | Sticky Notes plum.sqlite | 부분 구현 | 메모장 live row, schema/review profile, bounded recovery 후보, account/email attribution pivot |
-| 모바일 위치 / 생활 패턴 | 위치 정보/동선 지도 | 목록화 | GPS, Wi-Fi, 기지국, 앱 DB 위경도 통합 |
-| 모바일 위치 / 생활 패턴 | Health/Fitness 활동 | 목록화 | 걸음 수, 심박, 수면, 기기 조작 가능성 |
-| 모바일 위치 / 생활 패턴 | Screen Time/Digital Wellbeing | 목록화 | 앱별 사용 시간과 화면 켜짐/꺼짐 |
+| 모바일 위치 / 생활 패턴 | 위치 정보/동선 지도 | `mobile-location` | 모바일 export 위경도/정확도/source device 후보와 map review profile |
+| 모바일 위치 / 생활 패턴 | Health/Fitness 활동 | `mobile-health` | 모바일 export 걸음 수/심박/수면/운동 metric 후보와 review profile |
+| 모바일 위치 / 생활 패턴 | Screen Time/Digital Wellbeing | `mobile-screen-time` | 모바일 export 앱 사용시간/화면 이벤트 후보와 review profile |
 | IaaS 보안 로그 | AWS CloudTrail | 목록화 | 클라우드 인프라 침해사고 감사 로그 |
 | IaaS 보안 로그 | Azure Activity Log | 목록화 | Azure/Entra/M365 감사 로그 상관 |
 | IaaS 보안 로그 | GCP Audit Logs | 목록화 | GCP IAM/service account 감사 로그 |
@@ -1061,3 +1061,27 @@ GUI 노출 계약:
 1. 이 구조는 workflow visibility contract이며, 각 parser의 상용급 정확도를 자동으로 보장하지 않는다.
 2. E01/RAW/VM 입력의 dependency preflight와 실제 mount/extract 성공 여부는 기존 image workflow manifest와 함께 봐야 한다.
 3. 대용량 검증은 stage contract만으로 충분하지 않고 cursor API, fixture corpus, trusted-tool diff 결과가 별도로 필요하다.
+
+## 33. 2026-05-14 구현 반영: 모바일 위치/건강/스크린타임 export row 보강
+
+모바일 vendor export는 메시지/파일/브라우저 중심으로 잘 보였지만, 위치/건강/스크린타임 row가 별도 artifact로 분리되지 않아 알리바이와 기기 조작 가능성 검토가 GUI에서 묻혔다. 이번 라운드에서는 vendor CSV/JSON/JSONL import mapper에 위치, 건강/피트니스, 스크린타임/디지털 웰빙 row를 추가했다.
+
+부분 구현으로 승격한 capability:
+
+| capability | 새 artifact row | 구현 내용 | 남은 상용급 보강 |
+| --- | --- | --- | --- |
+| 위치 정보/동선 지도 | `mobile-location` | latitude/longitude 또는 E7 좌표, 정확도, altitude, label, source device 후보를 정규화하고 `map_review_profile`을 생성한다. | 오프라인 지도 UI, 기지국/Wi-Fi/app DB native parser, timezone/clock skew 검증 |
+| Health/Fitness 활동 | `mobile-health` | steps, heart rate, sleep, workout, calories, distance 계열 metric 후보를 정규화하고 `health_review_profile`을 생성한다. | Apple Health/Samsung Health native DB parser, device attribution, medical-grade limitation 문구 |
+| Screen Time/Digital Wellbeing | `mobile-screen-time` | app usage, screen time, foreground duration, unlock/notification event 후보를 정규화하고 `screen_time_review_profile`을 생성한다. | iOS Screen Time/Android Digital Wellbeing DB parser, foreground semantics, app identity 검증 |
+
+검증 포인트:
+
+1. `tests/test_rapidtriage_mobile_export.py::test_mobile_export_collects_vendor_csv_and_json_rows`가 위치 E7 좌표, 걸음 수, 앱 사용시간 fixture를 `mobile-location`, `mobile-health`, `mobile-screen-time`으로 정규화하는지 검증한다.
+2. Python/JS visible capability는 세 항목을 `목록화`에서 `부분 구현`으로 올리고 실제 artifact type 및 review profile term을 추가했다.
+3. 사용자 가이드와 parser coverage는 위치/생활 패턴 row가 report-grade가 아니라 review/correlation pivot임을 명시한다.
+
+중요한 제한:
+
+1. 위치 row는 기기가 그 좌표를 기록했다는 후보이지, 사용자가 실제로 그 장소에 있었다는 단독 증거가 아니다.
+2. 건강/피트니스 row는 wearable sync, time zone, sensor source, 앱 schema에 따라 의미가 달라진다.
+3. 스크린타임 row는 앱 foreground 또는 화면 이벤트 후보이며, 실제 화면 내용을 봤다는 증거가 아니다.

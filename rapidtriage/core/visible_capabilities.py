@@ -261,9 +261,9 @@ CAPABILITY_GROUPS: tuple[dict[str, Any], ...] = (
         "catalog_id": "communications",
         "label": "모바일 위치 / 생활 패턴",
         "capabilities": (
-            {"id": "geo-location-map-viewer", "label": "위치 정보/동선 지도", "status": "inventory", "terms": ("gps", "latitude", "longitude", "cell tower", "wifi location", "map")},
-            {"id": "health-fitness-activity", "label": "Health/Fitness 활동", "status": "inventory", "terms": ("health", "fitness", "steps", "heart rate", "sleep")},
-            {"id": "screen-time-digital-wellbeing", "label": "Screen Time/Digital Wellbeing", "status": "inventory", "terms": ("screen time", "digital wellbeing", "app usage", "screen on")},
+            {"id": "geo-location-map-viewer", "label": "위치 정보/동선 지도", "status": "partial", "terms": ("gps", "latitude", "longitude", "cell tower", "wifi location", "map", "mobile-location", "map_review_profile")},
+            {"id": "health-fitness-activity", "label": "Health/Fitness 활동", "status": "partial", "terms": ("health", "fitness", "steps", "heart rate", "sleep", "mobile-health", "health_review_profile")},
+            {"id": "screen-time-digital-wellbeing", "label": "Screen Time/Digital Wellbeing", "status": "partial", "terms": ("screen time", "digital wellbeing", "app usage", "screen on", "mobile-screen-time", "screen_time_review_profile")},
         ),
     },
     {

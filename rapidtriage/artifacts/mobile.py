@@ -38,6 +38,7 @@ MOBILE_NATIVE_CAPABILITIES = {
     "media_message_correlation": True,
     "contact_call_sms_unified_view": True,
     "app_schema_version_registry": True,
+    "mobile_location_health_screen_time_import": True,
     "proprietary_vendor_package_decode": False,
     "ios_protected_file_decryption": False,
     "ios_keychain_secret_decryption": False,
@@ -178,6 +179,44 @@ MEDIA_KEYS = {
     "width",
 }
 BROWSER_KEYS = {"url", "uri", "title", "visitcount", "lastvisited", "browser", "domain", "downloadurl"}
+LOCATION_KEYS = {
+    "latitude",
+    "longitude",
+    "latitudee7",
+    "longitudee7",
+    "lat",
+    "lon",
+    "lng",
+    "accuracy",
+    "altitude",
+    "location",
+    "placename",
+    "address",
+}
+HEALTH_KEYS = {
+    "steps",
+    "stepcount",
+    "heartrate",
+    "heartbeatsperminute",
+    "sleep",
+    "sleepstart",
+    "sleepend",
+    "calories",
+    "distance",
+    "workout",
+    "activitytype",
+}
+SCREEN_TIME_KEYS = {
+    "screentime",
+    "digitalwellbeing",
+    "appusage",
+    "foregroundtime",
+    "duration",
+    "screenon",
+    "screenoff",
+    "unlockcount",
+    "notificationcount",
+}
 CHAT_KEYS = {
     "chatid",
     "chatname",
@@ -228,6 +267,21 @@ VENDOR_ARTIFACT_MAPPER_KEYS = {
         "output_artifact_type": "mobile-browser",
         "required_key_sets": (BROWSER_KEYS,),
         "semantic_fields": ("url", "title", "timestamp", "browser", "domain"),
+    },
+    "location": {
+        "output_artifact_type": "mobile-location",
+        "required_key_sets": (LOCATION_KEYS,),
+        "semantic_fields": ("timestamp", "latitude", "longitude", "accuracy", "source_device", "location_label"),
+    },
+    "health": {
+        "output_artifact_type": "mobile-health",
+        "required_key_sets": (HEALTH_KEYS,),
+        "semantic_fields": ("timestamp", "metric_type", "metric_value", "unit", "source_device"),
+    },
+    "screen_time": {
+        "output_artifact_type": "mobile-screen-time",
+        "required_key_sets": (SCREEN_TIME_KEYS,),
+        "semantic_fields": ("timestamp", "app_name", "duration_seconds", "screen_event", "source_device"),
     },
 }
 MESSAGE_ID_KEYS = {"guid", "id", "messageid", "msgid", "rowid", "serverid"}
@@ -1620,6 +1674,19 @@ def detect_artifact_type(row: Mapping[str, object], path: Path) -> str:
         or any(token in source_hint for token in ("browser", "history", "safari", "chrome", "edge", "firefox"))
     ):
         return "mobile-browser"
+    if keys.intersection(LOCATION_KEYS) and (
+        keys.intersection({"latitude", "longitude", "latitudee7", "longitudee7", "lat", "lon", "lng"})
+        or any(token in source_hint for token in ("location", "gps", "geofence", "map"))
+    ):
+        return "mobile-location"
+    if keys.intersection(HEALTH_KEYS) and any(
+        token in source_hint for token in ("health", "fitness", "steps", "workout", "activity", "sleep")
+    ):
+        return "mobile-health"
+    if keys.intersection(SCREEN_TIME_KEYS) and any(
+        token in source_hint for token in ("screentime", "screen_time", "digital", "wellbeing", "appusage", "app_usage")
+    ):
+        return "mobile-screen-time"
     if keys.intersection(CALL_KEYS):
         return "mobile-call"
     if keys.intersection(CONTACT_KEYS) and any(key in keys for key in ("phone", "phonenumber", "email", "displayname", "fullname")):
@@ -1657,6 +1724,12 @@ def normalize_mobile_row(artifact_type: str, row: Mapping[str, object], path: Pa
         return normalize_media(row)
     if artifact_type == "mobile-browser":
         return normalize_browser(row)
+    if artifact_type == "mobile-location":
+        return normalize_location(row)
+    if artifact_type == "mobile-health":
+        return normalize_health(row)
+    if artifact_type == "mobile-screen-time":
+        return normalize_screen_time(row)
     return {"event_type": "mobile-row", "timestamp": normalize_timestamp(first_value(row, TIMESTAMP_KEYS)), "raw": dict(row)}
 
 
@@ -3488,6 +3561,180 @@ def normalize_browser(row: Mapping[str, object]) -> dict[str, object]:
         "risk_flags": browser_risk_flags(url, title),
         "validation_checks": row_validation_checks(row, required=("url", "uri", "timestamp", "lastvisited")),
         "commercial_grade_blockers": mobile_export_blockers("vendor-browser-export"),
+        "raw": dict(row),
+    }
+
+
+def mobile_decimal_location(value: object) -> float | None:
+    text = optional_text(value).strip()
+    if not text:
+        return None
+    try:
+        number = float(text)
+    except ValueError:
+        return None
+    if abs(number) > 180 and number.is_integer():
+        number = number / 10_000_000
+    if -180 <= number <= 180:
+        return number
+    return None
+
+
+def mobile_location_review_profile(
+    latitude: float | None,
+    longitude: float | None,
+    label: str,
+    source_device: str,
+) -> dict[str, object]:
+    return {
+        "profile_version": "mobile-location-map-review-profile-v1",
+        "coordinate_pair_present": latitude is not None and longitude is not None,
+        "latitude": latitude,
+        "longitude": longitude,
+        "label_present": bool(label),
+        "source_device_present": bool(source_device),
+        "values_are_candidates": True,
+        "source_viewer_hint": "Use the map/timeline view to correlate this coordinate with media EXIF, Wi-Fi, app, and cloud location rows.",
+        "not_proof_of": [
+            "person-physically-present",
+            "device-owner-present",
+            "continuous-route",
+        ],
+        "report_blockers": [
+            "source-app-schema-fixture-required",
+            "timezone-and-clock-skew-validation-required",
+            "map-provider-independent-review-required",
+        ],
+    }
+
+
+def mobile_location_risk_flags(latitude: float | None, longitude: float | None) -> list[str]:
+    flags = ["mobile-location-candidate"]
+    if latitude is not None and longitude is not None:
+        flags.extend(["precise-location", "map-review-candidate"])
+    return flags
+
+
+def first_present_health_metric(row: Mapping[str, object]) -> str:
+    for key in ("steps", "stepcount", "heartrate", "sleep", "sleepstart", "workout", "calories", "distance"):
+        if optional_text(first_value(row, (key,))):
+            return key
+    return ""
+
+
+def mobile_health_review_profile(metric_type: str, metric_value: str) -> dict[str, object]:
+    return {
+        "profile_version": "mobile-health-review-profile-v1",
+        "metric_type": metric_type,
+        "metric_value_present": bool(metric_value),
+        "values_are_candidates": True,
+        "source_viewer_hint": "Correlate health/fitness rows with device unlocks, app usage, location, and acquisition timestamps.",
+        "not_proof_of": [
+            "device-holder-identity",
+            "medical-grade-measurement",
+            "continuous-activity",
+        ],
+        "report_blockers": [
+            "health-app-schema-version-required",
+            "device-timezone-validation-required",
+            "source-device-attribution-required",
+        ],
+    }
+
+
+def mobile_screen_time_review_profile(app_name: str, duration: str, screen_event: str) -> dict[str, object]:
+    return {
+        "profile_version": "mobile-screen-time-review-profile-v1",
+        "app_name_present": bool(app_name),
+        "duration_present": bool(duration),
+        "screen_event_present": bool(screen_event),
+        "values_are_candidates": True,
+        "source_viewer_hint": "Correlate screen/app usage with notifications, app databases, and device lock/unlock events.",
+        "not_proof_of": [
+            "specific-person-using-device",
+            "foreground-app-content-viewed",
+            "complete-screen-time-history",
+        ],
+        "report_blockers": [
+            "digital-wellbeing-screen-time-schema-fixture-required",
+            "timezone-and-device-clock-validation-required",
+            "app-identity-corroboration-required",
+        ],
+    }
+
+
+def normalize_location(row: Mapping[str, object]) -> dict[str, object]:
+    latitude = mobile_decimal_location(first_value(row, ("latitude", "lat", "latitudee7")))
+    longitude = mobile_decimal_location(first_value(row, ("longitude", "lon", "lng", "longitudee7")))
+    label = optional_text(first_value(row, ("placename", "address", "location", "name", "label")))
+    source_device = optional_text(first_value(row, ("sourcedevice", "device", "devicename", "account", "source")))
+    return {
+        "event_type": "mobile-location",
+        "timestamp": normalize_timestamp(first_value(row, TIMESTAMP_KEYS)),
+        "latitude": latitude,
+        "longitude": longitude,
+        "accuracy_meters": optional_text(first_value(row, ("accuracy", "horizontalaccuracy", "radius"))),
+        "altitude": optional_text(first_value(row, ("altitude", "elevation"))),
+        "location_label": label,
+        "source_device": source_device,
+        "map_review_profile": mobile_location_review_profile(latitude, longitude, label, source_device),
+        "risk_flags": mobile_location_risk_flags(latitude, longitude),
+        "validation_checks": {
+            **row_validation_checks(row, required=("latitude", "longitude", "latitudee7", "longitudee7")),
+            "coordinate_pair_present": latitude is not None and longitude is not None,
+            "map_review_profile_emitted": True,
+        },
+        "commercial_grade_blockers": mobile_export_blockers("vendor-location-export"),
+        "raw": dict(row),
+    }
+
+
+def normalize_health(row: Mapping[str, object]) -> dict[str, object]:
+    metric_type = optional_text(first_value(row, ("metric", "type", "activitytype", "workout", "category")))
+    metric_value = optional_text(first_value(row, ("value", "steps", "stepcount", "heartrate", "calories", "distance", "duration")))
+    if not metric_type:
+        metric_type = first_present_health_metric(row)
+    return {
+        "event_type": "mobile-health",
+        "timestamp": normalize_timestamp(first_value(row, TIMESTAMP_KEYS)),
+        "metric_type": metric_type,
+        "metric_value": metric_value,
+        "unit": optional_text(first_value(row, ("unit", "units"))),
+        "source_device": optional_text(first_value(row, ("sourcedevice", "device", "devicename", "source"))),
+        "start_time": normalize_timestamp(first_value(row, ("start", "starttime", "sleepstart"))),
+        "end_time": normalize_timestamp(first_value(row, ("end", "endtime", "sleepend"))),
+        "health_review_profile": mobile_health_review_profile(metric_type, metric_value),
+        "risk_flags": ["mobile-health-fitness-candidate"] + ([f"health-metric:{normalize_key(metric_type)}"] if metric_type else []),
+        "validation_checks": {
+            **row_validation_checks(row, required=("steps", "stepcount", "heartrate", "sleep", "workout")),
+            "metric_present": bool(metric_type or metric_value),
+            "health_review_profile_emitted": True,
+        },
+        "commercial_grade_blockers": mobile_export_blockers("vendor-health-export"),
+        "raw": dict(row),
+    }
+
+
+def normalize_screen_time(row: Mapping[str, object]) -> dict[str, object]:
+    app_name = optional_text(first_value(row, ("app", "appname", "application", "bundleid", "package", "name")))
+    duration = optional_text(first_value(row, ("duration", "durationseconds", "foregroundtime", "screentime", "appusage")))
+    screen_event = optional_text(first_value(row, ("event", "screenon", "screenoff", "unlockcount", "notificationcount")))
+    return {
+        "event_type": "mobile-screen-time",
+        "timestamp": normalize_timestamp(first_value(row, TIMESTAMP_KEYS)),
+        "app_name": app_name,
+        "duration_seconds": duration,
+        "screen_event": screen_event,
+        "source_device": optional_text(first_value(row, ("sourcedevice", "device", "devicename", "source"))),
+        "screen_time_review_profile": mobile_screen_time_review_profile(app_name, duration, screen_event),
+        "risk_flags": ["mobile-screen-time-candidate"] + (["app-usage-duration-candidate"] if duration else []),
+        "validation_checks": {
+            **row_validation_checks(row, required=("screentime", "digitalwellbeing", "appusage", "duration")),
+            "app_or_event_present": bool(app_name or screen_event),
+            "duration_present": bool(duration),
+            "screen_time_review_profile_emitted": True,
+        },
+        "commercial_grade_blockers": mobile_export_blockers("vendor-screen-time-export"),
         "raw": dict(row),
     }
 

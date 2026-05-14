@@ -52,6 +52,9 @@ class RapidTriageMobileExportTests(unittest.TestCase):
                     "mobile-account",
                     "mobile-media",
                     "mobile-browser",
+                    "mobile-location",
+                    "mobile-health",
+                    "mobile-screen-time",
                     "mobile-chat-database",
                     "mobile-correlation-summary",
                     "mobile-export-source",
@@ -82,6 +85,24 @@ class RapidTriageMobileExportTests(unittest.TestCase):
             self.assertIn("vendor/mobile tool row diff", mobile_review["correlation_targets"])
             self.assertIn("complete device extraction", mobile_review["not_proof_of"])
             self.assertFalse(mobile_review["report_grade_ready"])
+
+            location = next(artifact for artifact in payload["artifacts"] if artifact["artifact_type"] == "mobile-location")
+            self.assertEqual(location["details"]["latitude"], 37.422)
+            self.assertEqual(location["details"]["longitude"], -122.0840575)
+            self.assertTrue(location["details"]["map_review_profile"]["coordinate_pair_present"])
+            self.assertIn("precise-location", location["details"]["risk_flags"])
+
+            health = next(artifact for artifact in payload["artifacts"] if artifact["artifact_type"] == "mobile-health")
+            self.assertEqual(health["details"]["metric_type"], "steps")
+            self.assertEqual(health["details"]["metric_value"], "1234")
+            self.assertTrue(health["details"]["health_review_profile"]["metric_value_present"])
+
+            screen_time = next(
+                artifact for artifact in payload["artifacts"] if artifact["artifact_type"] == "mobile-screen-time"
+            )
+            self.assertEqual(screen_time["details"]["app_name"], "KakaoTalk")
+            self.assertEqual(screen_time["details"]["duration_seconds"], "600")
+            self.assertTrue(screen_time["details"]["screen_time_review_profile"]["duration_present"])
             self.assertFalse(message["details"]["mobile_native_capabilities"]["proprietary_vendor_package_decode"])
             message_gate = message["details"]["core_accuracy_gates"][0]
             self.assertEqual(message_gate["gap_id"], "#26")
@@ -1625,6 +1646,34 @@ def write_mobile_export_fixtures(root: Path) -> None:
                     "Width": "3024",
                     "Height": "4032",
                     "SHA256": "b" * 64,
+                },
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    behavior = root / "AXIOM" / "location_health_screen_time.json"
+    behavior.write_text(
+        json.dumps(
+            [
+                {
+                    "Timestamp": "2026-04-26T04:00:00Z",
+                    "LatitudeE7": 374220000,
+                    "LongitudeE7": -1220840575,
+                    "Accuracy": "12",
+                    "Source Device": "Alice iPhone",
+                },
+                {
+                    "Timestamp": "2026-04-26T05:00:00Z",
+                    "Steps": "1234",
+                    "Unit": "count",
+                    "Source Device": "Alice Watch",
+                },
+                {
+                    "Timestamp": "2026-04-26T06:00:00Z",
+                    "App Name": "KakaoTalk",
+                    "Screen Time": "600",
+                    "Source Device": "Alice iPhone",
                 },
             ]
         ),
