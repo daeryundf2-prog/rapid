@@ -36,6 +36,13 @@ class RapidTriageGenericDocumentsTests(unittest.TestCase):
             llm_dir = root / "Users" / "Alice" / ".ollama" / "models"
             llm_dir.mkdir(parents=True)
             (llm_dir / "mistral.gguf").write_bytes(b"GGUF test model bytes")
+            chatgpt_dir = root / "Users" / "Alice" / "AppData" / "Roaming" / "OpenAI" / "ChatGPT"
+            chatgpt_dir.mkdir(parents=True)
+            chatgpt_db = chatgpt_dir / "conversations.sqlite"
+            ai_connection = sqlite3.connect(chatgpt_db)
+            with ai_connection:
+                ai_connection.execute("CREATE TABLE messages (role TEXT, content TEXT, created_at INTEGER)")
+                ai_connection.execute("INSERT INTO messages VALUES ('user', 'Summarize incident timeline', 1710000000)")
             output = root / "generic-artifacts.json"
 
             exit_code = main(["artifacts", str(root), "--kind", "generic-documents", "--output", str(output)])
@@ -45,6 +52,7 @@ class RapidTriageGenericDocumentsTests(unittest.TestCase):
             artifact_types = {artifact["artifact_type"] for artifact in payload["artifacts"]}
             self.assertIn("sticky-note", artifact_types)
             self.assertIn("local-llm-artifact", artifact_types)
+            self.assertIn("desktop-ai-app-artifact", artifact_types)
 
             sticky = next(artifact for artifact in payload["artifacts"] if artifact["artifact_type"] == "sticky-note")
             self.assertEqual(sticky["details"]["source_table"], "Note")
@@ -57,6 +65,16 @@ class RapidTriageGenericDocumentsTests(unittest.TestCase):
             self.assertEqual(llm["details"]["product_hint"], "Ollama")
             self.assertEqual(llm["details"]["artifact_role"], "model-file")
             self.assertIn("local-model-file", llm["details"]["risk_flags"])
+
+            desktop_ai = next(
+                artifact for artifact in payload["artifacts"] if artifact["artifact_type"] == "desktop-ai-app-artifact"
+            )
+            self.assertEqual(desktop_ai["details"]["product_hint"], "ChatGPT Desktop")
+            self.assertEqual(desktop_ai["details"]["artifact_role"], "application-database")
+            self.assertEqual(desktop_ai["details"]["database_profile"]["database_open_status"], "opened")
+            self.assertEqual(desktop_ai["details"]["database_profile"]["tables"][0]["name"], "messages")
+            self.assertEqual(desktop_ai["details"]["message_table_candidates"][0]["row_count"], 1)
+            self.assertIn("ai-message-table-candidate", desktop_ai["details"]["risk_flags"])
 
 
 if __name__ == "__main__":

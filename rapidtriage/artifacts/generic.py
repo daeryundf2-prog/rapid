@@ -9,17 +9,48 @@ from typing import Iterable, Mapping, Sequence
 from ..core.models import ArtifactRecord
 from ..core.submission import compute_hashes
 
-PARSER_VERSION = "generic-documents-v2"
+PARSER_VERSION = "generic-documents-v3"
 STICKY_NOTE_ROW_LIMIT = 5000
 LARGE_FILE_HASH_DEFER_BYTES = 64 * 1024 * 1024
+DESKTOP_AI_TABLE_LIMIT = 20
 LOCAL_LLM_PATH_TERMS = {
     "ollama": "Ollama",
     "lm studio": "LM Studio",
     "lmstudio": "LM Studio",
     "gpt4all": "GPT4All",
 }
+DESKTOP_AI_APP_PATH_TERMS = {
+    "chatgpt": "ChatGPT Desktop",
+    "openai": "OpenAI/ChatGPT Desktop",
+    "copilot": "Microsoft Copilot Desktop",
+    "claude": "Claude Desktop",
+    "anthropic": "Claude Desktop",
+    "gemini": "Gemini Desktop/WebView",
+    "perplexity": "Perplexity Desktop/WebView",
+}
 LOCAL_LLM_MODEL_SUFFIXES = {".gguf", ".ggml", ".bin", ".safetensors"}
 LOCAL_LLM_CONFIG_SUFFIXES = {".json", ".yaml", ".yml", ".toml", ".log", ".txt", ".sqlite", ".db"}
+DESKTOP_AI_APP_SUFFIXES = {
+    ".sqlite",
+    ".sqlite3",
+    ".db",
+    ".json",
+    ".log",
+    ".ldb",
+    ".localstorage",
+    ".dat",
+    ".txt",
+}
+DESKTOP_AI_APP_STORAGE_MARKERS = (
+    "appdata",
+    "application support",
+    "containers",
+    "packages",
+    "local storage",
+    "indexeddb",
+    "leveldb",
+    "session storage",
+)
 
 
 class GenericDocumentArtifactProvider:
@@ -42,6 +73,7 @@ class GenericDocumentArtifactProvider:
             )
         yield from collect_sticky_notes(root)
         yield from collect_local_llm_inventory(root)
+        yield from collect_desktop_ai_app_inventory(root)
 
 
 def collect_sticky_notes(root: Path) -> Iterable[ArtifactRecord]:
@@ -187,6 +219,135 @@ def collect_local_llm_inventory(root: Path) -> Iterable[ArtifactRecord]:
                 "risk_flags": local_llm_risk_flags(path),
             },
         )
+
+
+def collect_desktop_ai_app_inventory(root: Path) -> Iterable[ArtifactRecord]:
+    for path in sorted(root.rglob("*"), key=lambda item: str(item).lower()):
+        if not path.is_file() or path.suffix.lower() not in DESKTOP_AI_APP_SUFFIXES:
+            continue
+        product = infer_desktop_ai_product(path)
+        if not product:
+            continue
+        stat_result = safe_stat(path)
+        sqlite_profile = desktop_ai_sqlite_profile(path)
+        message_tables = sqlite_profile.get("message_table_candidates", []) if isinstance(sqlite_profile, Mapping) else []
+        yield ArtifactRecord(
+            provider=GenericDocumentArtifactProvider.name,
+            artifact_type="desktop-ai-app-artifact",
+            path=str(path.resolve()),
+            supported=True,
+            details={
+                "parser": "desktop-ai-app-inventory",
+                "parser_version": PARSER_VERSION,
+                "source_path": str(path.resolve()),
+                "source_hashes": safe_source_hashes(path),
+                "product_hint": product,
+                "artifact_role": desktop_ai_app_role(path),
+                "source_size": stat_result.get("size", 0),
+                "modified_at": stat_result.get("modified_at", ""),
+                "database_profile": sqlite_profile,
+                "message_table_candidates": message_tables,
+                "coverage_status": "desktop-ai-app-file-inventory",
+                "validation_required": True,
+                "commercial_grade_ready": False,
+                "commercial_grade_blockers": [
+                    "desktop-ai-app-schema-version-not-validated",
+                    "prompt-history-db-parser-not-complete",
+                    "service-export-diff-required",
+                ],
+                "risk_flags": desktop_ai_app_risk_flags(path, sqlite_profile),
+            },
+        )
+
+
+def infer_desktop_ai_product(path: Path) -> str:
+    lowered = str(path).lower().replace("\\", "/").replace("_", " ")
+    if not any(marker in lowered for marker in DESKTOP_AI_APP_STORAGE_MARKERS):
+        return ""
+    for term, product in DESKTOP_AI_APP_PATH_TERMS.items():
+        if term in lowered:
+            return product
+    return ""
+
+
+def desktop_ai_app_role(path: Path) -> str:
+    suffix = path.suffix.lower()
+    lowered_name = path.name.lower()
+    if suffix in {".sqlite", ".sqlite3", ".db"}:
+        return "application-database"
+    if suffix in {".ldb", ".localstorage"} or "leveldb" in str(path).lower():
+        return "browser-engine-storage"
+    if suffix == ".log":
+        return "application-log"
+    if suffix == ".json":
+        return "configuration-or-export-fragment"
+    if "conversation" in lowered_name or "chat" in lowered_name or "message" in lowered_name:
+        return "possible-prompt-history"
+    return "application-cache-or-metadata"
+
+
+def desktop_ai_sqlite_profile(path: Path) -> dict[str, object]:
+    if path.suffix.lower() not in {".sqlite", ".sqlite3", ".db"}:
+        return {"database_open_status": "not-sqlite-extension"}
+    try:
+        connection = sqlite3.connect(f"file:{path.resolve()}?mode=ro", uri=True)
+        connection.row_factory = sqlite3.Row
+    except sqlite3.Error as exc:
+        return {"database_open_status": "open-failed", "error": str(exc)}
+    tables: list[dict[str, object]] = []
+    message_candidates: list[dict[str, object]] = []
+    with connection:
+        try:
+            table_rows = connection.execute(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name"
+            ).fetchall()
+        except sqlite3.Error as exc:
+            return {"database_open_status": "schema-read-failed", "error": str(exc)}
+        for table_row in table_rows[:DESKTOP_AI_TABLE_LIMIT]:
+            table_name = str(table_row["name"])
+            try:
+                columns = [
+                    str(row["name"])
+                    for row in connection.execute(f"PRAGMA table_info({quote_sqlite_identifier(table_name)})").fetchall()
+                ]
+            except sqlite3.Error:
+                columns = []
+            row_count = sqlite_count_rows(connection, table_name)
+            table_profile = {"name": table_name, "columns": columns, "row_count": row_count}
+            tables.append(table_profile)
+            normalized_columns = {normalize_column(column) for column in columns}
+            if normalized_columns.intersection({"role", "author", "sender", "content", "text", "message", "prompt", "answer", "response"}):
+                message_candidates.append(table_profile)
+    return {
+        "database_open_status": "opened",
+        "table_count": len(table_rows),
+        "bounded_table_count": len(tables),
+        "tables": tables,
+        "message_table_candidates": message_candidates,
+        "truncated_tables": len(table_rows) > DESKTOP_AI_TABLE_LIMIT,
+    }
+
+
+def sqlite_count_rows(connection: sqlite3.Connection, table_name: str) -> int | None:
+    try:
+        row = connection.execute(f"SELECT COUNT(*) AS count FROM {quote_sqlite_identifier(table_name)}").fetchone()
+    except sqlite3.Error:
+        return None
+    return int(row["count"] or 0) if row is not None else None
+
+
+def quote_sqlite_identifier(value: str) -> str:
+    return '"' + value.replace('"', '""') + '"'
+
+
+def desktop_ai_app_risk_flags(path: Path, sqlite_profile: Mapping[str, object]) -> list[str]:
+    flags = ["desktop-ai-app-artifact", "ai-service-usage"]
+    role = desktop_ai_app_role(path)
+    if role in {"application-database", "possible-prompt-history"}:
+        flags.append("possible-ai-prompt-history")
+    if sqlite_profile.get("message_table_candidates"):
+        flags.append("ai-message-table-candidate")
+    return flags
 
 
 def infer_local_llm_product(path: Path) -> str:

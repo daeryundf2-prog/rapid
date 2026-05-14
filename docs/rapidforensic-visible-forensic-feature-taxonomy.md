@@ -767,7 +767,7 @@ GUI 표기 방식:
 | 브라우저 심화 복원 | WebCacheV01.dat | 목록화 | ESE 기반 legacy/webview 통신 흔적 분석 |
 | 브라우저 심화 복원 | OneDrive/Google Drive sync DB | 목록화 | 데스크톱 클라우드 sync DB 기반 파일 유출 시점 확인 |
 | 로컬/데스크톱 AI | Ollama/LM Studio/GPT4All | 목록화 | 로컬 LLM 모델/프롬프트/로그 흔적 |
-| 로컬/데스크톱 AI | ChatGPT/Copilot 데스크톱 앱 DB | 목록화 | 브라우저 밖 AI 앱 로컬 SQLite/cache 분석 |
+| 로컬/데스크톱 AI | ChatGPT/Copilot 데스크톱 앱 DB | `desktop-ai-app-artifact` | 브라우저 밖 AI 앱 로컬 SQLite/cache 분석 |
 | 로컬/데스크톱 AI | Windows Copilot Recall | 목록화 | Windows 11 Recall snapshot/OCR DB 조사 항목 |
 | 문서 유출 보조 아티팩트 | Print Spooler SPL/SHD | 목록화 | 출력 문서, 사용자, 프린터, 인쇄 시각 확인 |
 | 문서 유출 보조 아티팩트 | 문서 메타데이터/매크로 위험 | 부분 구현 | 작성자/수정 이력/인쇄 시각/VBA 위험 플래그 |
