@@ -1367,3 +1367,18 @@ SQLite 기반 아티팩트는 브라우저 History, 카카오톡, Sticky Notes, 
 1. `tests/test_rapidtriage_api.py::test_commercial_readiness_api_returns_compact_gui_gate`가 compact API가 claim allowed=false, gate counts, focused validated items를 반환하는지 검증한다.
 2. `tests/test_rapidtriage_api.py::test_web_console_exposes_maestro_style_artifact_workbench`가 GUI JS/CSS에 readiness panel과 API 호출이 남아 있는지 검증한다.
 3. 이 기능은 상용급 달성을 의미하지 않는다. 오히려 현재 상용급이 아님을 사용자가 GUI에서 빠르게 확인하도록 하는 안전장치다.
+
+## 46. 2026-05-14 구현 반영: PDF compressed stream 대용량 방어
+
+문서 검색은 PDF/Office/메일을 직접 열기 때문에 대형 증거 파일이나 압축폭탄성 문서가 source-search를 멈추게 만들 수 있다. Office ZIP member/total cap은 이미 있었지만, PDF 내부 `FlateDecode` stream은 원본 PDF 크기보다 훨씬 크게 풀릴 수 있으므로 별도 decompress cap을 추가했다.
+
+| 사용자 노출 기능 | 연결 field/code | 구현 내용 | 남은 상용급 보강 |
+| --- | --- | --- | --- |
+| PDF stream 압축 해제 제한 | `MAX_PDF_STREAM_DECOMPRESSED_BYTES`, `_decompress_pdf_stream` | PDF stream을 zlib로 풀 때 cap+1까지만 해제하고, 초과 시 `TextExtractionTooLarge`로 안전하게 중단한다. | PDF object stream/xref stream 전체 grammar, pdfium/poppler trusted diff |
+| current-file search 방어 | `build_source_search(... max_pdf_stream_decompressed_bytes=max_plain_text_bytes)` | source viewer의 현재 파일 검색에서도 사용자가 지정한 byte cap을 PDF stream 해제 cap에 같이 적용한다. | 대형 PDF corpus, timeout/cancel 연동 |
+| 회귀 테스트 | `test_source_search_rejects_pdf_stream_that_expands_past_limit` | 작은 PDF가 거대한 stream으로 풀리는 경우 keyword가 있어도 searchable=false와 명확한 size-limit message를 반환한다. | GUI error card와 user-facing remediation copy |
+
+중요한 제한:
+
+1. 이 변경은 DoS/메모리 위험 방어다. PDF 렌더링이나 모든 PDF text extraction 정확도를 보장하지 않는다.
+2. PDF text hit가 필요하면 bounded extractor 결과를 source viewer와 교차 확인하고, 법정 제출 전에는 trusted PDF parser와 hit parity를 확인해야 한다.

@@ -8,6 +8,7 @@ import tempfile
 import unittest
 import wave
 import zipfile
+import zlib
 from pathlib import Path
 from unittest.mock import patch
 
@@ -451,6 +452,26 @@ class RapidTriageApiTests(unittest.TestCase):
         self.assertFalse(payload["searchable"])
         self.assertEqual(payload["summary"]["match_count"], 0)
         self.assertIn("size limit", payload["message"])
+
+    def test_source_search_rejects_pdf_stream_that_expands_past_limit(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            pdf_path = Path(temp) / "compressed-stream.pdf"
+            expanded = b"(" + (b"A" * 2048) + b"needle" + b")"
+            compressed = zlib.compress(expanded)
+            pdf_path.write_bytes(
+                b"%PDF-1.4\n"
+                + b"1 0 obj << /Length "
+                + str(len(compressed)).encode("ascii")
+                + b" /Filter /FlateDecode >> stream\n"
+                + compressed
+                + b"\nendstream endobj\n%%EOF\n"
+            )
+
+            payload = build_source_search(pdf_path, ["needle"], max_plain_text_bytes=1024)
+
+        self.assertFalse(payload["searchable"])
+        self.assertEqual(payload["summary"]["match_count"], 0)
+        self.assertIn("pdf stream expands beyond text extraction size limit", payload["message"])
 
     def test_large_case_resilience_contract_covers_items_56_to_60(self) -> None:
         contract = build_large_case_resilience_contract(requested_cap_bytes=512 * 1024 * 1024)

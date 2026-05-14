@@ -74,6 +74,7 @@ DOCS_INDEX_VERSION = 1
 MAX_EXTRACT_TEXT_BYTES = 50_000_000
 MAX_ZIP_TEXT_MEMBER_BYTES = 10_000_000
 MAX_ZIP_TEXT_TOTAL_BYTES = 50_000_000
+MAX_PDF_STREAM_DECOMPRESSED_BYTES = 10_000_000
 
 
 class TextExtractionTooLarge(ValueError):
@@ -459,6 +460,7 @@ def extract_text(
     max_input_bytes: int = MAX_EXTRACT_TEXT_BYTES,
     max_archive_member_bytes: int = MAX_ZIP_TEXT_MEMBER_BYTES,
     max_archive_total_bytes: int = MAX_ZIP_TEXT_TOTAL_BYTES,
+    max_pdf_stream_decompressed_bytes: int = MAX_PDF_STREAM_DECOMPRESSED_BYTES,
 ) -> str:
     if max_input_bytes > 0 and path.stat().st_size > max_input_bytes:
         raise TextExtractionTooLarge(f"{kind} file exceeds text extraction size limit")
@@ -488,7 +490,7 @@ def extract_text(
             max_total_bytes=max_archive_total_bytes,
         )
     if kind == "pdf":
-        return _extract_pdf_text(path)
+        return _extract_pdf_text(path, max_stream_decompressed_bytes=max_pdf_stream_decompressed_bytes)
     if kind == "rtf":
         return _extract_rtf_text(path)
     return ""
@@ -570,13 +572,22 @@ def _extract_xml_text(xml_data: bytes) -> List[str]:
     return texts
 
 
-def _extract_pdf_text(path: Path) -> str:
+def _extract_pdf_text(
+    path: Path,
+    *,
+    max_stream_decompressed_bytes: int = MAX_PDF_STREAM_DECOMPRESSED_BYTES,
+) -> str:
     data = path.read_bytes()
     snippets: List[str] = []
     for stream in re.findall(rb"stream\r?\n(.*?)\r?\nendstream", data, re.S):
         candidates = [stream]
         try:
-            candidates.append(zlib.decompress(stream))
+            candidates.append(
+                _decompress_pdf_stream(
+                    stream,
+                    max_decompressed_bytes=max_stream_decompressed_bytes,
+                )
+            )
         except zlib.error:
             pass
         for item in candidates:
@@ -584,6 +595,19 @@ def _extract_pdf_text(path: Path) -> str:
     if not snippets:
         snippets.extend(_extract_pdf_literal_strings(data))
     return " ".join(snippets)
+
+
+def _decompress_pdf_stream(stream: bytes, *, max_decompressed_bytes: int) -> bytes:
+    if max_decompressed_bytes <= 0:
+        return zlib.decompress(stream)
+    decompressor = zlib.decompressobj()
+    data = decompressor.decompress(stream, max_decompressed_bytes + 1)
+    if len(data) > max_decompressed_bytes or decompressor.unconsumed_tail:
+        raise TextExtractionTooLarge("pdf stream expands beyond text extraction size limit")
+    tail = decompressor.flush()
+    if len(data) + len(tail) > max_decompressed_bytes:
+        raise TextExtractionTooLarge("pdf stream expands beyond text extraction size limit")
+    return data + tail
 
 
 def _extract_pdf_literal_strings(blob: bytes) -> List[str]:

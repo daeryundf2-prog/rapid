@@ -8741,6 +8741,7 @@ def build_source_search(
                     max_input_bytes=max_plain_text_bytes,
                     max_archive_member_bytes=max_plain_text_bytes,
                     max_archive_total_bytes=max_plain_text_bytes,
+                    max_pdf_stream_decompressed_bytes=max_plain_text_bytes,
                 )
                 matches = search_text_content(text, normalized, limit=limit, context=context)
         except HTTPException:
