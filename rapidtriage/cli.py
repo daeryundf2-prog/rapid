@@ -91,7 +91,7 @@ from .core.e01 import build_windows11_e01_known_answer_manifest
 from .core.e01_hash import E01StreamingHashError, run_e01_streaming_hash
 from .core.e01_smoke import run_windows11_e01_smoke
 from .core.extract import DEFAULT_EXTRACT_MANIFEST_NAME, ExtractError, SUPPORTED_DOC_KINDS, run_extract
-from .core.files import ALL_FILE_CATEGORIES, FileScanError, run_files_scan
+from .core.files import ALL_FILE_CATEGORIES, FileScanError, build_known_good_index_payload, run_files_scan
 from .core.indicators import IndicatorSummaryError, build_indicator_summary
 from .core.input_root import SUPPORTED_INPUT_ROOT_KINDS, resolve_input_root
 from .core.keyword_packs import (
@@ -651,6 +651,24 @@ def build_parser() -> argparse.ArgumentParser:
         help="Maximum file size to hash for known-good checks (default: 67108864)",
     )
     add_rules_argument(files)
+
+    known_good_index = sub.add_parser(
+        "known-good-index",
+        help="Build a reusable local known-good/NSRL hash index JSON",
+        description="Build a reusable local known-good/NSRL hash index JSON from TXT/CSV/JSON feeds or feed directories",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=textwrap.dedent(
+            """\
+            Examples:
+              rapidtriage known-good-index ./NSRLFile.txt --output known-good-index.json
+              rapidtriage known-good-index ./feeds-dir --output case-known-good-index.json --json
+              rapidtriage files ./case --known-good-hash-feed ./known-good-index.json --hide-known-good
+            """
+        ),
+    )
+    known_good_index.add_argument("feed", nargs="+", help="Known-good feed file or directory (TXT/CSV/JSON; repeatable)")
+    known_good_index.add_argument("--output", default="known-good-index.json", help="Normalized index JSON output path")
+    known_good_index.add_argument("--json", action="store_true", help="Print index JSON after saving it")
 
     collect_plan = sub.add_parser(
         "collect-plan",
@@ -3579,6 +3597,39 @@ def main(argv=None) -> int:
         else:
             for pack in payload["packs"]:
                 print(f"- {pack['name']}: {pack['keyword_count']} keywords")
+        return 0
+
+    if args.command == "known-good-index":
+        output = Path(args.output).expanduser().resolve()
+        try:
+            payload = build_known_good_index_payload([Path(feed) for feed in args.feed])
+        except FileScanError as exc:
+            parser.error(str(exc))
+        write_result(payload, output)
+        audit_output = audit_path_for(output)
+        write_audit_record(
+            audit_output,
+            command="known-good-index",
+            options={
+                "feeds": [str(Path(feed).expanduser().resolve()) for feed in args.feed],
+                "output": str(output),
+            },
+            output_files=[("known-good-index-json", output)],
+            notes=[
+                "Local known-good index generation does not download or update NSRL by itself.",
+                "Use an organization-approved NSRL/RDS source and preserve this JSON with the validation bundle.",
+            ],
+        )
+        if args.json:
+            print(json.dumps(payload, ensure_ascii=False, indent=2))
+        else:
+            summary = payload["summary"]
+            print(f"Saved known-good index JSON: {output}")
+            print(f"Saved audit JSON: {audit_output}")
+            print(
+                f"Feeds: {summary['feed_count']}  Records: {summary['record_count']}  "
+                f"NSRL feeds: {summary['nsrl_rds_feed_count']}  Rejected tokens: {summary['rejected_feed_token_count']}"
+            )
         return 0
 
     if args.command == "search":

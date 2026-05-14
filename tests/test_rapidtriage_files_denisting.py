@@ -154,6 +154,77 @@ class FileKnownGoodSuppressionTests(unittest.TestCase):
         self.assertTrue(profile["feed_summaries"][0]["nsrl_rds_header_detected"])
         self.assertEqual(profile["feed_summaries"][0]["row_count"], 1)
 
+    def test_nsrl_rds_txt_feed_is_parsed_as_structured_csv(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "case"
+            root.mkdir()
+            known_good = root / "windows-help.txt"
+            known_good.write_text("standard windows help payload\n", encoding="utf-8")
+            body = known_good.read_bytes()
+            feed = Path(tmp) / "NSRLFile.txt"
+            feed.write_text(
+                "\n".join(
+                    [
+                        "SHA-1,MD5,CRC32,FileName,FileSize,ProductCode,OpSystemCode,SpecialCode",
+                        ",".join(
+                            [
+                                hashlib.sha1(body).hexdigest(),
+                                hashlib.md5(body).hexdigest(),
+                                "00000000",
+                                "windows-help.txt",
+                                str(len(body)),
+                                "12345",
+                                "362",
+                                "",
+                            ]
+                        ),
+                    ]
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            reset_hash_cache()
+            payload = run_files_scan(root, categories=["documents"], known_good_hash_feeds=[feed])
+
+        known_row = payload["candidates"][0]
+        self.assertEqual(known_row["known_good_status"], "known-good-feed-match")
+        self.assertEqual(known_row["known_good_match"]["feed_format"], "nsrl-rds-csv")
+        self.assertEqual(known_row["known_good_match"]["source_detail"]["nsrl_file_name"], "windows-help.txt")
+        self.assertEqual(payload["summary"]["known_good_nsrl_rds_feed_count"], 1)
+        self.assertEqual(payload["summary"]["known_good_nsrl_rds_row_count"], 1)
+
+    def test_known_good_index_cli_builds_reusable_feed(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "case"
+            feed_dir = Path(tmp) / "feeds"
+            root.mkdir()
+            feed_dir.mkdir()
+            known_good = root / "known-good-note.txt"
+            known_good.write_text("standard operating system help text\n", encoding="utf-8")
+            feed = feed_dir / "known-good.sha256"
+            feed.write_text(hashlib.sha256(known_good.read_bytes()).hexdigest() + "\n", encoding="utf-8")
+            index_output = Path(tmp) / "known-good-index.json"
+
+            exit_code = main(
+                [
+                    "known-good-index",
+                    str(feed_dir),
+                    "--output",
+                    str(index_output),
+                ]
+            )
+            reset_hash_cache()
+            payload = run_files_scan(root, categories=["documents"], known_good_hash_feeds=[index_output])
+            index_payload = json.loads(index_output.read_text(encoding="utf-8"))
+
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(index_payload["profile_version"], "known-good-index-v1")
+        self.assertEqual(index_payload["summary"]["record_count"], 1)
+        self.assertEqual(index_payload["records"][0]["algorithm"], "sha256")
+        self.assertEqual(payload["summary"]["known_good_match_count"], 1)
+        self.assertEqual(payload["known_good_suppression_profile"]["feed_format_counts"]["json-index"], 1)
+
     def test_unified_search_can_hide_known_good_file_hits(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp) / "case"

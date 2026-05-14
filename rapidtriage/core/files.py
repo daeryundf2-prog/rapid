@@ -39,6 +39,7 @@ EXECUTABLE_BITS = stat_module.S_IXUSR | stat_module.S_IXGRP | stat_module.S_IXOT
 DEFAULT_KNOWN_GOOD_MAX_HASH_BYTES = 64 * 1024 * 1024
 KNOWN_GOOD_HASH_ALGORITHMS = ("md5", "sha1", "sha256")
 HASH_TOKEN_RE = re.compile(r"\b[a-fA-F0-9]{32}\b|\b[a-fA-F0-9]{40}\b|\b[a-fA-F0-9]{64}\b")
+KNOWN_GOOD_FEED_FILE_SUFFIXES = {".txt", ".hash", ".hashes", ".md5", ".sha1", ".sha256", ".csv", ".json"}
 KNOWN_GOOD_CSV_HASH_FIELDS = {
     "md5": "md5",
     "sha1": "sha1",
@@ -533,8 +534,7 @@ def load_known_good_hash_feeds(paths: Sequence[Union[str, Path]]) -> dict[str, o
     duplicate_count = 0
     rejected_token_count = 0
 
-    for raw_path in paths:
-        feed_path = Path(raw_path).expanduser().resolve()
+    for feed_path in expand_known_good_hash_feed_paths(paths):
         if not feed_path.exists():
             raise FileScanError(f"known-good hash feed not found: {feed_path}")
         if not feed_path.is_file():
@@ -592,6 +592,80 @@ def load_known_good_hash_feeds(paths: Sequence[Union[str, Path]]) -> dict[str, o
     }
 
 
+def expand_known_good_hash_feed_paths(paths: Sequence[Union[str, Path]]) -> list[Path]:
+    expanded: list[Path] = []
+    for raw_path in paths:
+        feed_path = Path(raw_path).expanduser().resolve()
+        if feed_path.is_dir():
+            for child in sorted(feed_path.rglob("*")):
+                if child.is_file() and child.suffix.lower() in KNOWN_GOOD_FEED_FILE_SUFFIXES:
+                    expanded.append(child)
+        else:
+            expanded.append(feed_path)
+    return expanded
+
+
+def build_known_good_index_payload(paths: Sequence[Union[str, Path]]) -> dict[str, object]:
+    known_good_index = load_known_good_hash_feeds(paths)
+    records: list[dict[str, object]] = []
+    raw_hashes = known_good_index.get("hashes", {})
+    raw_sources = known_good_index.get("hash_sources", {})
+    hashes = raw_hashes if isinstance(raw_hashes, Mapping) else {}
+    sources = raw_sources if isinstance(raw_sources, Mapping) else {}
+    hash_counts: dict[str, int] = {}
+    for algorithm in KNOWN_GOOD_HASH_ALGORITHMS:
+        values = sorted(str(value) for value in hashes.get(algorithm, set()))
+        hash_counts[algorithm] = len(values)
+        source_for_algorithm = sources.get(algorithm, {}) if isinstance(sources.get(algorithm, {}), Mapping) else {}
+        for value in values:
+            source_detail = source_for_algorithm.get(value, {}) if isinstance(source_for_algorithm, Mapping) else {}
+            record: dict[str, object] = {
+                "algorithm": algorithm,
+                "token": value,
+                "hash": value,
+            }
+            if isinstance(source_detail, Mapping) and source_detail:
+                record["source_detail"] = dict(source_detail)
+            records.append(record)
+    summary = {
+        "feed_count": len(known_good_index.get("feed_paths", [])),
+        "record_count": len(records),
+        "known_good_hash_counts_by_algorithm": hash_counts,
+        "duplicate_feed_hash_count": int(known_good_index.get("duplicate_count", 0)),
+        "rejected_feed_token_count": int(known_good_index.get("rejected_token_count", 0)),
+        "nsrl_rds_feed_count": sum(
+            1
+            for item in known_good_index.get("feed_summaries", [])
+            if isinstance(item, Mapping) and item.get("format") == "nsrl-rds-csv"
+        ),
+        "nsrl_rds_row_count": sum(
+            int(item.get("row_count") or 0)
+            for item in known_good_index.get("feed_summaries", [])
+            if isinstance(item, Mapping) and item.get("format") == "nsrl-rds-csv"
+        ),
+    }
+    core = {
+        "command": "known-good-index",
+        "profile_version": "known-good-index-v1",
+        "generated_at": dt.datetime.now().isoformat(),
+        "summary": summary,
+        "feed_paths": [str(path) for path in known_good_index.get("feed_paths", [])],
+        "feed_summaries": known_good_index.get("feed_summaries", []),
+        "records": records,
+        "usage": {
+            "files": "rapidtriage files <case-root> --known-good-hash-feed <known-good-index.json>",
+            "run": "rapidtriage run <case-root> --known-good-hash-feed <known-good-index.json>",
+            "search": "rapidtriage search <run-output> -k <keyword> --hide-known-good",
+        },
+        "limitations": [
+            "This is a local normalized index builder; it does not download or update the full NSRL database.",
+            "Use organization-approved NSRL/RDS source files and preserve this index with the case validation bundle.",
+            "Large public NSRL releases should be benchmarked on release hardware before claiming commercial-scale performance.",
+        ],
+    }
+    return {**core, "manifest_hash": hashlib.sha256(json.dumps(core, sort_keys=True).encode("utf-8")).hexdigest()}
+
+
 def extract_hash_feed_tokens(path: Path) -> list[str]:
     parsed = parse_known_good_hash_feed(path)
     return [str(record.get("token") or "") for record in parsed["records"] if isinstance(record, Mapping)]
@@ -605,63 +679,38 @@ def parse_known_good_hash_feed(path: Path) -> dict[str, object]:
         except UnicodeDecodeError:
             data = json.loads(path.read_text(encoding="utf-8-sig"))
         records: list[dict[str, object]] = []
-        collect_hash_records_from_json(
-            data,
-            records,
-            source=known_good_feed_source(path, feed_format="json"),
-        )
+        if isinstance(data, Mapping) and data.get("profile_version") == "known-good-index-v1" and isinstance(data.get("records"), list):
+            for item in data.get("records", []):
+                if not isinstance(item, Mapping):
+                    continue
+                token = str(item.get("token") or item.get("hash") or item.get("value") or "")
+                source_detail = item.get("source_detail")
+                source = dict(source_detail) if isinstance(source_detail, Mapping) else known_good_feed_source(path, feed_format="json-index")
+                records.append({"token": token, "source": source})
+        else:
+            collect_hash_records_from_json(
+                data,
+                records,
+                source=known_good_feed_source(path, feed_format="json"),
+            )
         return {
             "records": records,
-            "format": "json",
+            "format": "json-index" if isinstance(data, Mapping) and data.get("profile_version") == "known-good-index-v1" else "json",
             "header_fields": [],
             "hash_column_fields": [],
-            "row_count": 0,
+            "row_count": len(records) if isinstance(data, Mapping) and data.get("profile_version") == "known-good-index-v1" else 0,
             "nsrl_rds_header_detected": False,
         }
     if suffix == ".csv":
         text = path.read_text(encoding="utf-8-sig", errors="replace")
-        records = []
-        reader = csv.DictReader(text.splitlines())
-        header_fields = [str(field or "") for field in (reader.fieldnames or [])]
-        hash_column_fields: list[str] = []
-        row_count = 0
-        feed_format = "nsrl-rds-csv" if is_nsrl_rds_csv_headers(header_fields) else "csv"
-        for row_number, row in enumerate(reader, start=2):
-            row_count += 1
-            for key, value in row.items():
-                algorithm_hint = known_good_csv_hash_algorithm(key)
-                if algorithm_hint is None:
-                    continue
-                field_name = str(key or "")
-                if field_name and field_name not in hash_column_fields:
-                    hash_column_fields.append(field_name)
-                for token in HASH_TOKEN_RE.findall(value or ""):
-                    records.append(
-                        {
-                            "token": token,
-                            "source": known_good_feed_source(
-                                path,
-                                feed_format=feed_format,
-                                row=row,
-                                row_number=row_number,
-                                hash_column=field_name,
-                            ),
-                        }
-                    )
-        if not records:
-            for token in HASH_TOKEN_RE.findall(text):
-                records.append({"token": token, "source": known_good_feed_source(path, feed_format="csv")})
-        return {
-            "records": records,
-            "format": feed_format,
-            "header_fields": header_fields,
-            "hash_column_fields": hash_column_fields,
-            "row_count": row_count,
-            "nsrl_rds_header_detected": feed_format == "nsrl-rds-csv",
-        }
+        return parse_known_good_csv_text(path, text)
+    text = path.read_text(encoding="utf-8", errors="replace")
+    header = next(csv.reader(text.splitlines()), [])
+    if is_nsrl_rds_csv_headers(header):
+        return parse_known_good_csv_text(path, text)
     records = [
         {"token": token, "source": known_good_feed_source(path, feed_format="text")}
-        for token in HASH_TOKEN_RE.findall(path.read_text(encoding="utf-8", errors="replace"))
+        for token in HASH_TOKEN_RE.findall(text)
     ]
     return {
         "records": records,
@@ -670,6 +719,48 @@ def parse_known_good_hash_feed(path: Path) -> dict[str, object]:
         "hash_column_fields": [],
         "row_count": 0,
         "nsrl_rds_header_detected": False,
+    }
+
+
+def parse_known_good_csv_text(path: Path, text: str) -> dict[str, object]:
+    records = []
+    reader = csv.DictReader(text.splitlines())
+    header_fields = [str(field or "") for field in (reader.fieldnames or [])]
+    hash_column_fields: list[str] = []
+    row_count = 0
+    feed_format = "nsrl-rds-csv" if is_nsrl_rds_csv_headers(header_fields) else "csv"
+    for row_number, row in enumerate(reader, start=2):
+        row_count += 1
+        for key, value in row.items():
+            algorithm_hint = known_good_csv_hash_algorithm(key)
+            if algorithm_hint is None:
+                continue
+            field_name = str(key or "")
+            if field_name and field_name not in hash_column_fields:
+                hash_column_fields.append(field_name)
+            for token in HASH_TOKEN_RE.findall(value or ""):
+                records.append(
+                    {
+                        "token": token,
+                        "source": known_good_feed_source(
+                            path,
+                            feed_format=feed_format,
+                            row=row,
+                            row_number=row_number,
+                            hash_column=field_name,
+                        ),
+                    }
+                )
+    if not records:
+        for token in HASH_TOKEN_RE.findall(text):
+            records.append({"token": token, "source": known_good_feed_source(path, feed_format="csv")})
+    return {
+        "records": records,
+        "format": feed_format,
+        "header_fields": header_fields,
+        "hash_column_fields": hash_column_fields,
+        "row_count": row_count,
+        "nsrl_rds_header_detected": feed_format == "nsrl-rds-csv",
     }
 
 

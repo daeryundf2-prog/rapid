@@ -393,6 +393,7 @@ class RapidTriageWebStaticTests(unittest.TestCase):
     def test_file_triage_controls_are_exposed_in_gui_and_files_tab(self) -> None:
         app_js = (REPO_ROOT / "rapidtriage" / "web" / "static" / "app.js").read_text(encoding="utf-8")
         index_html = (REPO_ROOT / "rapidtriage" / "web" / "static" / "index.html").read_text(encoding="utf-8")
+        workbench_config = (REPO_ROOT / "rapidtriage" / "web" / "static" / "app_workbench_config.js").read_text(encoding="utf-8")
         styles = (REPO_ROOT / "rapidtriage" / "web" / "static" / "styles.css").read_text(encoding="utf-8")
 
         self.assertIn("knownGoodHashFeedInput", index_html)
@@ -409,6 +410,7 @@ class RapidTriageWebStaticTests(unittest.TestCase):
         self.assertIn("known_good_search_suppression_profile", app_js)
         self.assertIn("data-testid=\"known-good-search-suppression\"", app_js)
         self.assertIn("signature_mismatch_candidates", app_js)
+        self.assertIn("known-good-index", workbench_config)
         self.assertIn("data-testid=\"file-triage-summary\"", app_js)
         self.assertIn(".file-triage-summary", styles)
         self.assertIn(".file-triage-badge", styles)
