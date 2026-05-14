@@ -6099,10 +6099,16 @@ function renderCaseDbSearchResult(payload) {
   const visibleRows = virtualizedRows(rows, "caseDb");
   const saved = payload.saved_search;
   const reviewWorkflow = payload.review_workflow_summary || {};
+  const documentErrors = payload.documents?.errors || [];
   if (!rows.length) {
     return `
       ${saved ? `<p class="help-text">Saved search: ${escapeHtml(saved.name)} (${escapeHtml(saved.citation_id)})</p>` : ""}
+      <div class="metric-grid">
+        ${metric("DB matches", payload.summary?.match_count)}
+        ${metric("Document errors", payload.summary?.document_error_count)}
+      </div>
       <p class="empty-state">No Case DB matches found.</p>
+      ${renderDocumentErrors(documentErrors)}
     `;
   }
   return `
@@ -6110,9 +6116,11 @@ function renderCaseDbSearchResult(payload) {
     <div class="metric-grid">
       ${metric("DB matches", payload.summary?.match_count)}
       ${metric("Sources", Object.keys(payload.summary?.source_counts || {}).length)}
+      ${metric("Document errors", payload.summary?.document_error_count)}
       ${metric("Keywords", (payload.keywords || []).length)}
       ${metric("High priority", payload.summary?.priority_counts?.high)}
     </div>
+    ${renderDocumentErrors(documentErrors)}
     ${renderCaseDbReviewWorkflowSummary(reviewWorkflow)}
     <section class="review-selection-tray">
       <div class="review-group-header">

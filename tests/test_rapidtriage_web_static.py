@@ -412,6 +412,13 @@ class RapidTriageWebStaticTests(unittest.TestCase):
         self.assertIn("Document extraction skipped/failed", app_js)
         self.assertIn("Search coverage is partial for these documents", app_js)
 
+    def test_case_db_search_discloses_document_extraction_errors(self) -> None:
+        app_js = (REPO_ROOT / "rapidtriage" / "web" / "static" / "app.js").read_text(encoding="utf-8")
+
+        self.assertIn("const documentErrors = payload.documents?.errors || [];", app_js)
+        self.assertIn("metric(\"Document errors\", payload.summary?.document_error_count)", app_js)
+        self.assertIn("renderDocumentErrors(documentErrors)", app_js)
+
     def test_file_triage_controls_are_exposed_in_gui_and_files_tab(self) -> None:
         app_js = (REPO_ROOT / "rapidtriage" / "web" / "static" / "app.js").read_text(encoding="utf-8")
         index_html = (REPO_ROOT / "rapidtriage" / "web" / "static" / "index.html").read_text(encoding="utf-8")
