@@ -1040,11 +1040,14 @@ GUI 노출 계약:
 
 각 stage는 이제 `analyst_checklist`도 가진다. 체크리스트는 stage별 필수 확인 항목, severity, ready/warning/blocked/pending 상태, 기대 output, 실제 연결 output, 다음 행동을 담는다. 상단 `analyst_checklist_summary`는 전체 확인 항목의 상태를 요약해 GUI에서 “어떤 단계가 아직 신뢰 가능한 결론으로 가기 전에 열람/해결되어야 하는가”를 바로 보여준다. 이 기능은 상용 도구처럼 복잡한 버튼을 많이 늘리는 대신, 분석관이 누락하기 쉬운 검증 행위를 workflow 카드 안에 고정시키는 목적이다.
 
+동일한 체크리스트는 `rapidtriage-run-report.md`의 `Workflow analyst checklist` 섹션에도 반영된다. 즉 GUI에서 보던 stage verification item과 ready/warning/blocked/pending 요약이 markdown 보고서에도 남아, 후속 리뷰자가 어떤 확인 의무가 남았는지 재현할 수 있다.
+
 검증 포인트:
 
 1. `tests/test_rapidtriage_run.py::test_run_workflow_contract_maps_internal_steps_to_analyst_flow`가 내부 step/output을 6개 사용자 stage로 매핑하고 warning stage를 검증한다.
 2. `tests/test_rapidtriage_run.py::assert_run_mode_outputs`가 모든 run mode의 summary에 workflow contract와 stage lookup이 포함되는지 확인한다.
 3. GUI는 `renderCoreEvidenceWorkflow`, `renderRunWorkflowContract`, `renderRunWorkflowOutputLinks`, `renderRunWorkflowChecklist`, `renderRunWorkflowOutputViewer`에서 이 계약을 읽어 단일 케이스 흐름, stage별 산출물 링크/미리보기, 분석관 체크리스트를 표시한다.
+4. `rapidtriage-run-report.md`는 `Workflow analyst checklist` 섹션에 같은 체크리스트를 기록해 GUI와 보고서의 검토 기준을 맞춘다.
 
 중요한 제한:
 

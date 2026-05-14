@@ -76,6 +76,7 @@ def build_run_report_context(
             "warnings": list(processing.get("warnings", [])) if isinstance(processing, Mapping) and isinstance(processing.get("warnings", []), list) else [],
             "decisions": build_processing_decision_rows(steps, processing if isinstance(processing, Mapping) else {}),
         },
+        "workflow": build_workflow_report_context(summary_payload.get("workflow", {})),
         "silent_failure_detection": build_silent_failure_context(
             silent_failure if isinstance(silent_failure, Mapping) else {}
         ),
@@ -202,6 +203,75 @@ def build_silent_failure_context(payload: Mapping[str, object]) -> dict[str, obj
     }
 
 
+def build_workflow_report_context(payload: object) -> dict[str, object]:
+    if not isinstance(payload, Mapping):
+        return {"available": False, "stages": [], "summary": {}}
+
+    summary = payload.get("analyst_checklist_summary", {})
+    if not isinstance(summary, Mapping):
+        summary = {}
+
+    stages: list[dict[str, object]] = []
+    raw_stages = payload.get("stages", [])
+    if isinstance(raw_stages, list):
+        for stage in raw_stages:
+            if not isinstance(stage, Mapping):
+                continue
+            raw_checklist = stage.get("analyst_checklist", [])
+            checklist: list[dict[str, object]] = []
+            if isinstance(raw_checklist, list):
+                for item in raw_checklist:
+                    if not isinstance(item, Mapping):
+                        continue
+                    checklist.append(
+                        {
+                            "id": str(item.get("id") or ""),
+                            "label": str(item.get("label") or ""),
+                            "status": str(item.get("status") or "pending"),
+                            "severity": str(item.get("severity") or "unknown"),
+                            "matched_outputs": [
+                                str(name)
+                                for name in item.get("matched_outputs", [])
+                            ]
+                            if isinstance(item.get("matched_outputs", []), list)
+                            else [],
+                            "action": str(item.get("action") or ""),
+                        }
+                    )
+            stages.append(
+                {
+                    "id": str(stage.get("id") or ""),
+                    "label": str(stage.get("label") or stage.get("id") or ""),
+                    "status": str(stage.get("status") or "pending"),
+                    "warning_count": int(stage.get("warning_count") or 0),
+                    "output_keys": [
+                        str(name)
+                        for name in stage.get("output_keys", [])
+                    ]
+                    if isinstance(stage.get("output_keys", []), list)
+                    else [],
+                    "checklist": checklist,
+                }
+            )
+
+    return {
+        "available": True,
+        "profile_version": str(payload.get("profile_version") or ""),
+        "source_type": str(payload.get("source_type") or ""),
+        "source_path": str(payload.get("source_path") or ""),
+        "stage_count": int(payload.get("stage_count") or len(stages)),
+        "completed_stage_count": int(payload.get("completed_stage_count") or 0),
+        "summary": {
+            "item_count": int(summary.get("item_count") or 0),
+            "ready_count": int(summary.get("ready_count") or 0),
+            "warning_count": int(summary.get("warning_count") or 0),
+            "blocked_count": int(summary.get("blocked_count") or 0),
+            "pending_count": int(summary.get("pending_count") or 0),
+        },
+        "stages": stages,
+    }
+
+
 def render_run_markdown_report(report_context: Mapping[str, object]) -> str:
     overview = report_context["overview"]
     profile = report_context["profile"]
@@ -284,6 +354,8 @@ def render_run_markdown_report(report_context: Mapping[str, object]) -> str:
             lines.append(f"- {item}")
     else:
         lines.append("- No skipped, capped, or reused processing decisions were recorded.")
+
+    append_workflow_checklist_section(lines, report_context.get("workflow", {}))
 
     lines.extend(
         [
@@ -413,6 +485,71 @@ def render_run_markdown_report(report_context: Mapping[str, object]) -> str:
     for item in report_context["outputs"]:
         lines.append(f"- `{item['name']}`: `{item['path']}`")
     return "\n".join(lines) + "\n"
+
+
+def append_workflow_checklist_section(lines: list[str], workflow: object) -> None:
+    if not isinstance(workflow, Mapping) or not workflow.get("available"):
+        return
+
+    summary = workflow.get("summary", {})
+    if not isinstance(summary, Mapping):
+        summary = {}
+
+    lines.extend(
+        [
+            "",
+            "## Workflow analyst checklist",
+            "",
+            f"- Profile: `{workflow.get('profile_version', '')}`",
+            f"- Source type: `{workflow.get('source_type', '')}`",
+            f"- Stages ready: {workflow.get('completed_stage_count', 0)} / {workflow.get('stage_count', 0)}",
+            (
+                "- Checklist status: "
+                f"ready={summary.get('ready_count', 0)}, "
+                f"warning={summary.get('warning_count', 0)}, "
+                f"blocked={summary.get('blocked_count', 0)}, "
+                f"pending={summary.get('pending_count', 0)}"
+            ),
+            "",
+            "### Stage verification items",
+            "",
+        ]
+    )
+
+    stages = workflow.get("stages", [])
+    if not isinstance(stages, list) or not stages:
+        lines.append("- No workflow stage checklist was recorded.")
+        return
+
+    for stage in stages:
+        if not isinstance(stage, Mapping):
+            continue
+        outputs = format_bounded_names(stage.get("output_keys", []), limit=8)
+        lines.append(
+            f"- `{stage.get('label') or stage.get('id')}` status=`{stage.get('status')}`"
+            f" warnings={stage.get('warning_count', 0)} outputs={outputs}"
+        )
+        checklist = stage.get("checklist", [])
+        if not isinstance(checklist, list) or not checklist:
+            lines.append("  - no checklist items")
+            continue
+        for item in checklist:
+            if not isinstance(item, Mapping):
+                continue
+            linked = format_bounded_names(item.get("matched_outputs", []), limit=6)
+            lines.append(
+                f"  - `{item.get('id')}` [{item.get('status')}/{item.get('severity')}] {item.get('label')}"
+                f" — {item.get('action')} linked={linked}"
+            )
+
+
+def format_bounded_names(value: object, *, limit: int) -> str:
+    if not isinstance(value, list) or not value:
+        return "none"
+    names = [str(item) for item in value if str(item)]
+    visible = names[:limit]
+    suffix = f", +{len(names) - limit} more" if len(names) > limit else ""
+    return ", ".join(visible) + suffix if visible else "none"
 
 
 def build_processing_decision_rows(steps: object, processing: Mapping[str, object]) -> List[str]:

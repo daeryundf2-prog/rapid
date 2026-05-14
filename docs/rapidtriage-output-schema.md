@@ -402,6 +402,7 @@ Current run modes:
 - per-step warning messages for empty outputs, read-only skips, capped extraction, or missing source paths
 
 `workflow` records the GUI-facing single-case pipeline contract (`run-workflow-contract-v1`). It maps low-level run steps into six analyst stages: `ingest`, `extract`, `parse`, `index`, `review`, and `report`. Each stage records status (`completed`, `warning`, `blocked`, or `pending`), contributing step names, output keys, warning messages, primary GUI tab/action, `handoff_outputs`, and `analyst_checklist`. The handoff rows name the exact output file, its user-facing role, recommended viewer, GUI action, and reportability note; checklist rows name the analyst verification item, severity, status, linked outputs, and next action. The top-level `analyst_checklist_summary` aggregates ready/warning/blocked/pending counts so the web workbench can show what must be opened or resolved before trusting the stage.
+`rapidtriage-run-report.md` also includes a "Workflow analyst checklist" section derived from the same contract. It records checklist status counts and stage verification items so exported markdown keeps the same verification obligations that the GUI shows.
 
 The web API also exposes `/api/runs/{run_id}/outputs/{output_name}/preview` (`run-output-preview-v1`) for bounded read-only output review. This preview route reuses the same safe renderer as source preview, rewrites the action URLs to run-output download routes, and marks the preview as a review aid rather than standalone proof.
 
