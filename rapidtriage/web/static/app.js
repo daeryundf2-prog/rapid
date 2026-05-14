@@ -4219,8 +4219,50 @@ async function searchCurrentFile(event) {
   }
 }
 
+async function resumeCurrentFileSearch(button) {
+  const output = detailPanel.querySelector("#fileSearchResults");
+  const status = detailPanel.querySelector("#fileSearchStatus");
+  const path = button.dataset.fileSearchPath || "";
+  const token = button.dataset.fileSearchResume || "";
+  const keywords = String(button.dataset.fileSearchKeywords || "")
+    .split(",")
+    .map((item) => item.trim())
+    .filter(Boolean);
+  if (!path || !token || !keywords.length || !output) return;
+  button.disabled = true;
+  if (status) status.textContent = "Continuing SQLite search from cursor...";
+  try {
+    const params = new URLSearchParams();
+    params.set("path", path);
+    params.set("sqlite_resume_token", token);
+    for (const keyword of keywords) params.append("keyword", keyword);
+    const payload = await api(`/api/runs/${selectedRunId}/source-search?${params.toString()}`);
+    output.innerHTML = renderFileSearchResults(payload);
+    bindCopyButtons();
+    bindCompareActions();
+    bindFileSearchHitActions();
+  } catch (error) {
+    output.insertAdjacentHTML("afterbegin", `<p class="empty-state">${escapeHtml(error.message)}</p>`);
+  } finally {
+    if (status) status.textContent = "";
+    button.disabled = false;
+  }
+}
+
 function renderFileSearchResults(payload) {
   const rows = payload.matches || [];
+  const resumeToken = payload.summary?.sqlite_resume_token || payload.source_search_profile?.large_data_controls?.sqlite_resume_token || "";
+  const resumeAction = resumeToken ? `
+    <button
+      class="secondary-button"
+      type="button"
+      data-file-search-resume="${escapeHtml(resumeToken)}"
+      data-file-search-path="${escapeHtml(payload.path || "")}"
+      data-file-search-keywords="${escapeHtml((payload.keywords || []).join(","))}"
+    >
+      Continue SQLite search
+    </button>
+  ` : "";
   if (!payload.searchable) {
     return `<p class="empty-state">${escapeHtml(payload.message || "This file is not searchable.")}</p>`;
   }
@@ -4231,6 +4273,7 @@ function renderFileSearchResults(payload) {
         ${metric("Keywords", (payload.keywords || []).length)}
       </div>
       <p class="empty-state">No matches in this file.</p>
+      ${resumeAction}
     `;
   }
   return `
@@ -4254,7 +4297,8 @@ function renderFileSearchResults(payload) {
         </article>
       `).join("")}
     </div>
-    ${payload.truncated ? '<p class="help-text">Results were capped for performance. Narrow the keyword if needed.</p>' : ""}
+    ${payload.truncated ? '<p class="help-text">Results were capped for performance. Continue from the SQLite cursor or narrow the keyword if needed.</p>' : ""}
+    ${resumeAction}
   `;
 }
 
@@ -4274,6 +4318,8 @@ function renderCurrentFileSearchProfile(payload) {
         <span>${controls.truncated ? "truncated" : "not truncated"}</span>
         <span>SQLite rows ${escapeHtml(controls.sqlite_scanned_row_count ?? "n/a")}</span>
         <span>${controls.sqlite_scan_truncated ? "SQLite scan capped" : "SQLite scan not capped"}</span>
+        ${controls.sqlite_resume_requested ? "<span>resumed from cursor</span>" : ""}
+        ${controls.sqlite_resume_token ? "<span>resume token ready</span>" : ""}
       </div>
       <p class="help-text">${escapeHtml((profile.reportability_decision?.required_before_report || []).join(" · ") || "Copy locator/citation and verify hashes before report use.")}</p>
     </section>
@@ -4308,6 +4354,11 @@ function bindFileSearchHitActions() {
     if (button.dataset.reviewNoteBound) continue;
     button.dataset.reviewNoteBound = "1";
     button.addEventListener("click", () => appendViewerReviewNote(button.dataset.reviewNoteText || "", button));
+  }
+  for (const button of detailPanel.querySelectorAll("[data-file-search-resume]")) {
+    if (button.dataset.fileSearchResumeBound) continue;
+    button.dataset.fileSearchResumeBound = "1";
+    button.addEventListener("click", () => resumeCurrentFileSearch(button));
   }
 }
 

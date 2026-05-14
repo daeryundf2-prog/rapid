@@ -107,12 +107,19 @@ class RapidTriageApiTests(unittest.TestCase):
                 connection.close()
 
             payload = build_source_search(db_path, ["needle"], limit=2, context=10)
+            resume_token = payload["summary"]["sqlite_resume_token"]
+            resumed = build_source_search(db_path, ["needle"], limit=2, context=10, sqlite_resume_token=resume_token)
 
         self.assertEqual(payload["summary"]["match_count"], 2)
         self.assertTrue(payload["summary"]["sqlite_result_limit_reached"])
         self.assertEqual(payload["summary"]["sqlite_resume_state"]["reason"], "result-limit")
+        self.assertTrue(payload["summary"]["sqlite_resume_token"])
+        self.assertEqual(len(payload["summary"]["sqlite_resume_token_hash"]), 64)
         self.assertFalse(payload["summary"]["sqlite_full_cursor_scan"])
         self.assertTrue(payload["truncated"])
+        self.assertEqual(resumed["summary"]["match_count"], 2)
+        self.assertTrue(resumed["summary"]["sqlite_resume_requested"])
+        self.assertEqual([match["row_number"] for match in resumed["matches"]], [3, 4])
 
     def test_source_search_sqlite_default_row_scan_limit_prevents_full_db_sweep(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
@@ -144,10 +151,8 @@ class RapidTriageApiTests(unittest.TestCase):
             connection = sqlite3.connect(db_path)
             try:
                 connection.execute("CREATE TABLE notes(id INTEGER PRIMARY KEY, body TEXT)")
-                connection.executemany(
-                    "INSERT INTO notes(body) VALUES (?)",
-                    [(f"ordinary row {index}",) for index in range(100_001)],
-                )
+                connection.executemany("INSERT INTO notes(body) VALUES (?)", [(f"ordinary row {index}",) for index in range(100_000)])
+                connection.execute("INSERT INTO notes(body) VALUES (?)", ("needle after row cap",))
                 connection.commit()
             finally:
                 connection.close()
@@ -172,6 +177,17 @@ class RapidTriageApiTests(unittest.TestCase):
                 f"/api/runs/{job.run_id}/source-search",
                 params={"path": str(db_path), "keyword": "needle", "limit": 10, "context": 40},
             )
+            resume_token = response.json()["summary"]["sqlite_resume_token"]
+            resumed_response = client.get(
+                f"/api/runs/{job.run_id}/source-search",
+                params={
+                    "path": str(db_path),
+                    "keyword": "needle",
+                    "limit": 10,
+                    "context": 40,
+                    "sqlite_resume_token": resume_token,
+                },
+            )
 
         self.assertEqual(response.status_code, 200, response.text)
         payload = response.json()
@@ -189,6 +205,14 @@ class RapidTriageApiTests(unittest.TestCase):
             payload["source_search_profile"]["large_data_controls"]["sqlite_resume_state"]["reason"],
             "sqlite-row-scan-limit",
         )
+        self.assertTrue(payload["summary"]["sqlite_resume_token"])
+        self.assertEqual(payload["source_search_profile"]["large_data_controls"]["sqlite_resume_token"], payload["summary"]["sqlite_resume_token"])
+        self.assertEqual(resumed_response.status_code, 200, resumed_response.text)
+        resumed_payload = resumed_response.json()
+        self.assertEqual(resumed_payload["summary"]["match_count"], 1)
+        self.assertTrue(resumed_payload["summary"]["sqlite_resume_requested"])
+        self.assertEqual(resumed_payload["matches"][0]["row_number"], 100_001)
+        self.assertEqual(resumed_payload["matches"][0]["source_viewer_locator"]["offset"], 100_000)
 
     def test_source_search_rejects_oversized_docx_member_before_expanding(self) -> None:
         with tempfile.TemporaryDirectory() as temp:

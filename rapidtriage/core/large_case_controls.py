@@ -27,12 +27,12 @@ def build_source_search_full_cursor_contract() -> dict[str, object]:
             "limit_results_not_rows": True,
             "must_disclose_result_limit": True,
             "must_emit_resume_state_when_limit_reached": True,
+            "api_resume_token_round_trip_supported": True,
         },
         "commercial_claim_allowed": False,
         "commercial_blockers": [
             "source-search-trusted-locator-diff-required",
             "large-sqlite-current-file-search-benchmark-required",
-            "api-resume-token-e2e-required",
         ],
     }
     return {**contract_core, "contract_hash": stable_large_case_sha256(contract_core)}

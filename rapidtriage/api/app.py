@@ -980,9 +980,10 @@ def create_app(job_store: RunJobStore | None = None, auth_token: str | None = No
         keyword: list[str] = Query(..., min_length=1),
         limit: int = Query(100, ge=1, le=500),
         context: int = Query(120, ge=20, le=500),
+        sqlite_resume_token: Optional[str] = Query(default=None),
     ) -> Dict[str, object]:
         source_path = resolve_allowed_source_file(store, run_id, path)
-        return build_source_search(source_path, keyword, limit=limit, context=context)
+        return build_source_search(source_path, keyword, limit=limit, context=context, sqlite_resume_token=sqlite_resume_token)
 
     @api.get("/api/runs/{run_id}/timeline")
     def get_run_timeline(
@@ -8234,6 +8235,7 @@ def build_source_search(
     context: int = 120,
     max_plain_text_bytes: int = 50_000_000,
     sqlite_row_scan_limit: int | None = SQLITE_SOURCE_SEARCH_ROW_SCAN_LIMIT,
+    sqlite_resume_token: str | None = None,
 ) -> Dict[str, object]:
     normalized = [item.strip().lower() for item in keywords if item.strip()]
     if not normalized:
@@ -8253,13 +8255,27 @@ def build_source_search(
         message = "Image files are not text-searchable in the file viewer. Use OCR from the full evidence search."
     elif is_sqlite_candidate(source_path, suffix):
         try:
+            sqlite_resume_state = decode_source_search_resume_token(
+                sqlite_resume_token,
+                source_path=source_path,
+                keywords=normalized,
+            ) if sqlite_resume_token else None
             matches, sqlite_truncated, search_diagnostics = search_sqlite_file(
                 source_path,
                 normalized,
                 limit=limit,
                 context=context,
                 row_scan_limit=sqlite_row_scan_limit,
+                resume_state=sqlite_resume_state,
             )
+            if search_diagnostics.get("sqlite_resume_state"):
+                token = encode_source_search_resume_token(
+                    source_path=source_path,
+                    keywords=normalized,
+                    state=search_diagnostics["sqlite_resume_state"],
+                )
+                search_diagnostics["sqlite_resume_token"] = token
+                search_diagnostics["sqlite_resume_token_hash"] = hashlib.sha256(token.encode("utf-8")).hexdigest()
             truncated = sqlite_truncated or len(matches) >= limit
             message = "SQLite text search completed."
         except sqlite3.DatabaseError as exc:
@@ -8356,6 +8372,9 @@ def source_search_profile(
             "sqlite_full_cursor_scan": diagnostics.get("sqlite_full_cursor_scan"),
             "sqlite_result_limit_reached": diagnostics.get("sqlite_result_limit_reached"),
             "sqlite_resume_state": diagnostics.get("sqlite_resume_state"),
+            "sqlite_resume_requested": diagnostics.get("sqlite_resume_requested"),
+            "sqlite_resume_token": diagnostics.get("sqlite_resume_token"),
+            "sqlite_resume_token_hash": diagnostics.get("sqlite_resume_token_hash"),
             "full_case_reindex_not_required": True,
             "sqlite_table_search_uses_limit": bool(diagnostics.get("sqlite_row_scan_limit")),
             "binary_search_is_bounded": True,
@@ -8539,19 +8558,29 @@ def search_sqlite_file(
     limit: int,
     context: int,
     row_scan_limit: int | None = None,
+    resume_state: Mapping[str, object] | None = None,
 ) -> tuple[list[dict[str, object]], bool, dict[str, object]]:
     matches: list[dict[str, object]] = []
     scanned_rows = 0
     scanned_tables = 0
     truncated_tables: list[str] = []
     result_limit_reached = False
-    resume_state: dict[str, object] | None = None
+    next_resume_state: dict[str, object] | None = None
     effective_row_scan_limit = int(row_scan_limit or 0)
+    resume_table = str((resume_state or {}).get("table") or "")
+    resume_next_row_number = max(1, optional_int_for_api((resume_state or {}).get("next_row_number")) or 1)
+    resume_consumed = not bool(resume_table)
     with contextlib.closing(sqlite3.connect(f"{source_path.as_uri()}?mode=ro", uri=True)) as connection:
         connection.row_factory = sqlite3.Row
         for table in list_sqlite_tables(connection):
             if len(matches) >= limit:
                 break
+            table_start_row_number = 1
+            if resume_table and not resume_consumed:
+                if table != resume_table:
+                    continue
+                table_start_row_number = resume_next_row_number
+                resume_consumed = True
             quoted = quote_sqlite_identifier(table)
             column_rows = connection.execute(f"PRAGMA table_info({quoted})").fetchall()
             text_columns = [
@@ -8569,28 +8598,42 @@ def search_sqlite_file(
             scanned_tables += 1
             scan_columns = [*text_columns, *[column for column in primary_key_columns if column not in text_columns]]
             select_clause = ", ".join(quote_sqlite_identifier(column) for column in scan_columns)
+            table_offset = max(0, table_start_row_number - 1)
             rowid_available = True
             try:
                 query = f"SELECT rowid AS __rapid_source_rowid, {select_clause} FROM {quoted}"
-                params: tuple[object, ...] = ()
+                params_list: list[object] = []
                 if effective_row_scan_limit > 0:
                     query += " LIMIT ?"
-                    params = (effective_row_scan_limit + 1,)
+                    params_list.append(effective_row_scan_limit + 1)
+                elif table_offset:
+                    query += " LIMIT -1"
+                if table_offset:
+                    query += " OFFSET ?"
+                    params_list.append(table_offset)
+                params = tuple(params_list)
                 row_cursor = connection.execute(query, params)
             except sqlite3.DatabaseError:
                 rowid_available = False
                 query = f"SELECT {select_clause} FROM {quoted}"
-                params = ()
+                params_list = []
                 if effective_row_scan_limit > 0:
                     query += " LIMIT ?"
-                    params = (effective_row_scan_limit + 1,)
+                    params_list.append(effective_row_scan_limit + 1)
+                elif table_offset:
+                    query += " LIMIT -1"
+                if table_offset:
+                    query += " OFFSET ?"
+                    params_list.append(table_offset)
+                params = tuple(params_list)
                 row_cursor = connection.execute(query, params)
-            for row_index, row in enumerate(row_cursor, start=1):
-                if effective_row_scan_limit > 0 and row_index > effective_row_scan_limit:
+            for page_row_index, row in enumerate(row_cursor, start=0):
+                row_number = table_start_row_number + page_row_index
+                if effective_row_scan_limit > 0 and page_row_index >= effective_row_scan_limit:
                     truncated_tables.append(table)
-                    resume_state = {
+                    next_resume_state = {
                         "table": table,
-                        "next_row_number": row_index,
+                        "next_row_number": row_number,
                         "reason": "sqlite-row-scan-limit",
                         "scanned_row_count": scanned_rows,
                         "match_count": len(matches),
@@ -8615,16 +8658,17 @@ def search_sqlite_file(
                                     "mode": "source-search",
                                     "keyword": keyword,
                                     "row_scan_limit": effective_row_scan_limit or "unbounded",
+                                    "row_start_number": table_start_row_number,
                                 }
                             )
                             sqlite_locator = sqlite_row_source_viewer_locator(
                                 source_path=source_path,
                                 table=table,
-                                row_number=row_index,
+                                row_number=row_number,
                                 rowid=row["__rapid_source_rowid"] if rowid_available else "",
                                 primary_key_values=primary_key_values,
                                 column=column,
-                                offset=0,
+                                offset=max(row_number - 1, 0),
                                 limit=row_scan_limit,
                                 query_hash=query_hash,
                                 source_context="source-search",
@@ -8632,12 +8676,12 @@ def search_sqlite_file(
                             matches.append(
                                 {
                                     "keyword": keyword,
-                                    "line": f"{table}:{row_index}",
+                                    "line": f"{table}:{row_number}",
                                     "offset": offset,
                                     "snippet": snippet_around(text, offset, len(keyword), context=context),
                                     "table": table,
                                     "column": column,
-                                    "row_number": row_index,
+                                    "row_number": row_number,
                                     "rowid": row["__rapid_source_rowid"] if rowid_available else "",
                                     "primary_key_values": primary_key_values,
                                     "source_viewer_locator": sqlite_locator,
@@ -8647,9 +8691,9 @@ def search_sqlite_file(
                             )
                             if len(matches) >= limit:
                                 result_limit_reached = True
-                                resume_state = {
+                                next_resume_state = {
                                     "table": table,
-                                    "next_row_number": row_index + 1,
+                                    "next_row_number": row_number + 1,
                                     "reason": "result-limit",
                                     "scanned_row_count": scanned_rows,
                                     "match_count": len(matches),
@@ -8663,7 +8707,9 @@ def search_sqlite_file(
                                     "sqlite_truncated_tables": truncated_tables[:10],
                                     "sqlite_full_cursor_scan": False,
                                     "sqlite_result_limit_reached": result_limit_reached,
-                                    "sqlite_resume_state": resume_state,
+                                    "sqlite_resume_state": next_resume_state,
+                                    "sqlite_resume_requested": bool(resume_state),
+                                    "sqlite_resume_consumed": resume_consumed,
                                 }
                             break
     truncated = bool(truncated_tables)
@@ -8675,8 +8721,69 @@ def search_sqlite_file(
         "sqlite_truncated_tables": truncated_tables[:10],
         "sqlite_full_cursor_scan": not truncated,
         "sqlite_result_limit_reached": result_limit_reached,
-        "sqlite_resume_state": resume_state,
+        "sqlite_resume_state": next_resume_state,
+        "sqlite_resume_requested": bool(resume_state),
+        "sqlite_resume_consumed": resume_consumed,
     }
+
+
+def encode_source_search_resume_token(*, source_path: Path, keywords: Sequence[str], state: Mapping[str, object]) -> str:
+    safe_state = {
+        key: state[key]
+        for key in ("table", "next_row_number", "reason", "scanned_row_count", "match_count", "rowid")
+        if key in state
+    }
+    payload = {
+        "profile_version": "source-search-sqlite-resume-v1",
+        "source_path_sha256": source_search_source_digest(source_path),
+        "keywords_sha256": source_search_keywords_digest(keywords),
+        "state": safe_state,
+    }
+    raw = json.dumps(payload, ensure_ascii=False, sort_keys=True).encode("utf-8")
+    return base64.urlsafe_b64encode(raw).decode("ascii").rstrip("=")
+
+
+def decode_source_search_resume_token(
+    token: str,
+    *,
+    source_path: Path,
+    keywords: Sequence[str],
+) -> dict[str, object]:
+    try:
+        padded = token + ("=" * (-len(token) % 4))
+        payload = json.loads(base64.urlsafe_b64decode(padded.encode("ascii")).decode("utf-8"))
+    except (ValueError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise HTTPException(status_code=400, detail="invalid sqlite_resume_token") from exc
+    if not isinstance(payload, Mapping) or payload.get("profile_version") != "source-search-sqlite-resume-v1":
+        raise HTTPException(status_code=400, detail="invalid sqlite_resume_token profile")
+    if payload.get("source_path_sha256") != source_search_source_digest(source_path):
+        raise HTTPException(status_code=400, detail="sqlite_resume_token does not match source file")
+    if payload.get("keywords_sha256") != source_search_keywords_digest(keywords):
+        raise HTTPException(status_code=400, detail="sqlite_resume_token does not match keywords")
+    state = payload.get("state")
+    if not isinstance(state, Mapping) or not state.get("table"):
+        raise HTTPException(status_code=400, detail="sqlite_resume_token is missing resume state")
+    return {
+        "table": str(state.get("table") or ""),
+        "next_row_number": max(1, optional_int_for_api(state.get("next_row_number")) or 1),
+        "reason": str(state.get("reason") or "resume-token"),
+        "scanned_row_count": optional_int_for_api(state.get("scanned_row_count")) or 0,
+        "match_count": optional_int_for_api(state.get("match_count")) or 0,
+        "rowid": state.get("rowid", ""),
+    }
+
+
+def source_search_source_digest(source_path: Path) -> str:
+    try:
+        normalized = str(source_path.resolve())
+    except OSError:
+        normalized = str(source_path)
+    return hashlib.sha256(normalized.encode("utf-8", errors="replace")).hexdigest()
+
+
+def source_search_keywords_digest(keywords: Sequence[str]) -> str:
+    normalized = sorted(str(item).strip().lower() for item in keywords if str(item).strip())
+    return hashlib.sha256(json.dumps(normalized, ensure_ascii=False).encode("utf-8")).hexdigest()
 
 
 def search_text_content(text: str, keywords: Sequence[str], *, limit: int, context: int) -> list[dict[str, object]]:

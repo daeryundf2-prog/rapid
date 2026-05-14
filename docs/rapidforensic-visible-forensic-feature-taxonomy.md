@@ -575,7 +575,7 @@ GUI 표시 권장:
 | 전체 키워드 검색 | baseline+ | 항상 상단 고정 |
 | 현재 파일 내부 검색 | baseline+ | source viewer 안에서 노출 |
 | Artifact metadata 검색 | baseline+ | 결과 family filter |
-| SQLite row search | baseline+ | table/rowid locator |
+| SQLite row search | baseline++ | table/rowid locator, row-cap/result-limit resume token, GUI continue button |
 | OCR text 검색 | partial | sidecar 여부 표시 |
 | AI/브라우저/메신저 검색 | partial+ | family tabs |
 | 결과 dedup | partial+ | duplicate collapse |

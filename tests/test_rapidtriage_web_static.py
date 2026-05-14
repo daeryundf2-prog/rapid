@@ -246,6 +246,10 @@ class RapidTriageWebStaticTests(unittest.TestCase):
         ):
             self.assertIn(capability_id, config_js)
         self.assertIn("renderVisibleCapabilityGroups", app_js)
+        self.assertIn("sqlite_resume_token", app_js)
+        self.assertIn("data-file-search-resume", app_js)
+        self.assertIn("Continue SQLite search", app_js)
+        self.assertIn("resumeCurrentFileSearch", app_js)
         self.assertIn("visibleCapabilityGroupsForRun", app_js)
         self.assertIn("loadRunCapabilities", app_js)
         self.assertIn("/capabilities", app_js)
