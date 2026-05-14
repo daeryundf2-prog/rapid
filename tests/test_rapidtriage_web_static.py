@@ -177,7 +177,16 @@ class RapidTriageWebStaticTests(unittest.TestCase):
         self.assertIn("kakaotalk-windows-app-database", config_js)
         self.assertIn("cloud-message", config_js)
         self.assertIn("media-audio", config_js)
+        self.assertIn("waveform_preview", config_js)
+        self.assertIn("transcript_sidecars", config_js)
+        self.assertIn("media-cue-proof-manifest", config_js)
         self.assertIn("memory-dump-indicators", config_js)
+        self.assertIn("dfir-webshell-log", config_js)
+        self.assertIn("webshell-source-candidate", config_js)
+        self.assertIn("web-server-log", config_js)
+        self.assertIn("webshell_semantic_profile", config_js)
+        self.assertIn("webshell_log_correlation", config_js)
+        self.assertIn("webshell_report_citation_package", config_js)
         for capability_id in (
             "evidence-vss-apfs-snapshot",
             "evidence-fde-unlock",
@@ -242,10 +251,20 @@ class RapidTriageWebStaticTests(unittest.TestCase):
     def test_visible_capability_registry_has_gui_contract_for_every_feature(self) -> None:
         issues = validate_visible_capability_contract()
         payload = build_visible_capability_response()
+        capabilities = {
+            capability["id"]: capability
+            for group in payload["groups"]
+            for capability in group["capabilities"]
+        }
 
         self.assertEqual(issues, [])
         self.assertTrue(payload["summary"]["gui_contract_pass"])
         self.assertEqual(payload["gui_contract"]["issue_count"], 0)
+        self.assertEqual(capabilities["media-audio"]["status"], "partial")
+        self.assertIn("media-audio", capabilities["media-audio"]["artifact_types"])
+        self.assertEqual(capabilities["dfir-webshell-log"]["status"], "partial")
+        self.assertIn("webshell-source-candidate", capabilities["dfir-webshell-log"]["artifact_types"])
+        self.assertIn("web-server-log", capabilities["dfir-webshell-log"]["artifact_types"])
         for group in payload["groups"]:
             self.assertIn("tab", group)
             self.assertIn("workflow_stage", group)

@@ -533,8 +533,8 @@ GUI 표시 권장:
 | RDP cache | `rdp-cache-file` | partial | bitmap viewer |
 | RDP destination | `rdp-destination` | partial | MRU validation |
 | Zone.Identifier | `zone-identifier` | partial | download/browser correlation |
-| Webshell source 후보 | `webshell-source-candidate` | partial+ | YARA/rule pack validation |
-| Web server log | `web-server-log` | partial+ | IIS/Apache/Nginx full fields |
+| Webshell source 후보 | `webshell-source-candidate` | partial+ / GUI visible | trusted YARA/rule pack validation |
+| Web server log | `web-server-log` | partial+ / GUI visible | IIS/Apache/Nginx full corpus diff |
 | Linux shell history | `linux-shell-history` | baseline | timestamp/session correlation |
 | Linux auth log | `linux-auth-log-event` | baseline | distro-specific parsing |
 | Linux auditd | `linux-auditd-event` | baseline | rule interpretation |
@@ -547,7 +547,7 @@ GUI 표시 권장:
 숨은 기능으로 빼서 보여줄 항목:
 
 - 원격접속 흔적
-- 웹쉘 후보
+- 웹쉘 후보, 웹서버 로그, IIS/site 상관, source span citation
 - 서버 로그 상관
 - 다운로드 파일 provenance
 - Linux persistence
