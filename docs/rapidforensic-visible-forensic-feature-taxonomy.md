@@ -619,6 +619,7 @@ GUI 표시 권장:
 - source viewer 가능 여부
 - report 포함 가능 여부
 - 문서/메일/로그 추출 실패 또는 대용량 cap으로 인한 partial-search 경고
+- 전역 검색의 `documents.errors[]` 경고와 OCR 오류 경고
 
 ## 18. Windows QC에서 확인할 항목
 

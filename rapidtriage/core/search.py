@@ -73,7 +73,7 @@ def run_unified_search(
         raise SearchError("run summary does not include outputs")
 
     matches: list[dict[str, object]] = []
-    document_errors: list[dict[str, str]] = []
+    document_errors: list[dict[str, object]] = []
     ocr_errors: list[dict[str, str]] = []
     search_options = {
         "search_mode": normalized_search_mode,
@@ -701,12 +701,17 @@ def search_docs(
     *,
     limit: int,
     search_options: Mapping[str, object] | None = None,
-) -> tuple[list[dict[str, object]], list[dict[str, str]]]:
+) -> tuple[list[dict[str, object]], list[dict[str, object]]]:
     payload = read_json_output(outputs, "docs")
     if not payload:
         return [], []
     matches = []
-    errors: list[dict[str, str]] = []
+    errors: list[dict[str, object]] = []
+    for item in payload.get("extraction_errors", []):
+        normalized_error = normalize_document_extraction_error(item)
+        if normalized_error:
+            errors.append(normalized_error)
+    skipped_paths = {str(error.get("path", "")) for error in errors if error.get("path")}
     result_index_by_path = {
         str(item.get("path")): index
         for index, item in enumerate(payload.get("results", []))
@@ -716,11 +721,24 @@ def search_docs(
         if not isinstance(candidate, Mapping):
             continue
         path = Path(str(candidate.get("path", "")))
+        if str(path) in skipped_paths:
+            continue
         kind = str(candidate.get("kind", ""))
         try:
             text = extract_text(path, kind)
         except Exception as exc:
-            errors.append({"path": str(path), "kind": kind, "error": f"{type(exc).__name__}: {exc}"})
+            errors.append(
+                {
+                    "path": str(path),
+                    "kind": kind,
+                    "error": f"{type(exc).__name__}: {exc}",
+                    "reason": "text-extraction-failed",
+                    "error_type": type(exc).__name__,
+                    "message": str(exc),
+                    "recoverable": True,
+                    "effect": "document-skipped-search-continues",
+                }
+            )
             text = ""
         matched = match_keywords(text, keywords, search_options=search_options)
         if not matched:
@@ -741,6 +759,26 @@ def search_docs(
         if limit and len(matches) >= limit:
             break
     return matches, errors
+
+
+def normalize_document_extraction_error(item: object) -> dict[str, object] | None:
+    if not isinstance(item, Mapping):
+        return None
+    error_type = str(item.get("error_type") or item.get("type") or "DocumentExtractionError")
+    message = str(item.get("message") or item.get("error") or "document extraction skipped")
+    normalized: dict[str, object] = {
+        "path": str(item.get("path", "")),
+        "kind": str(item.get("kind", "")),
+        "error": f"{error_type}: {message}",
+        "reason": str(item.get("reason", "document-extraction-skipped")),
+        "error_type": error_type,
+        "message": message,
+        "recoverable": bool(item.get("recoverable", True)),
+        "effect": str(item.get("effect", "document-skipped-search-continues")),
+    }
+    if "size" in item:
+        normalized["size"] = item.get("size")
+    return normalized
 
 
 def search_files(

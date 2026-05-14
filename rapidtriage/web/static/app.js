@@ -3048,15 +3048,18 @@ function renderSearchResults(payload, rows) {
   const advancedProfile = payload.advanced_search_profile || {};
   const keywordPackProfile = payload.keyword_pack_selection_profile || {};
   const visibleRows = virtualizedRows(rows, "search");
+  const documentErrors = payload.documents?.errors || [];
   if (!rows.length) {
     const ocrErrors = payload.ocr?.errors || [];
     return `
       <div class="metric-grid search-metrics">
         ${metric("Matches", summary.match_count)}
+        ${metric("Document errors", summary.document_error_count)}
         ${metric("OCR errors", summary.ocr_error_count)}
       </div>
       ${renderKnownGoodSearchSuppression(payload)}
       <p class="empty-state">No matches found.</p>
+      ${renderDocumentErrors(documentErrors)}
       ${renderOcrErrors(ocrErrors)}
     `;
   }
@@ -3064,6 +3067,7 @@ function renderSearchResults(payload, rows) {
     <div class="metric-grid search-metrics">
       ${metric("Matches", summary.match_count)}
       ${metric("Sources", Object.keys(summary.source_counts || {}).length)}
+      ${metric("Document errors", summary.document_error_count)}
       ${metric("OCR errors", summary.ocr_error_count)}
       ${metric("Keywords", (payload.keywords || []).length)}
     </div>
@@ -3096,6 +3100,7 @@ function renderSearchResults(payload, rows) {
         }).join("")}
       </tbody>
     </table>
+    ${renderDocumentErrors(documentErrors)}
     ${renderOcrErrors(payload.ocr?.errors || [])}
   `;
 }
@@ -3345,6 +3350,19 @@ function renderOcrErrors(errors) {
       <summary>OCR skipped/failed for ${errors.length} item(s)</summary>
       <div class="dense-list">
         ${errors.slice(0, 20).map((item) => `<div class="dense-row"><strong>${escapeHtml(item.path || "OCR")}</strong><span>${escapeHtml(item.error)}</span></div>`).join("")}
+      </div>
+    </details>
+  `;
+}
+
+function renderDocumentErrors(errors) {
+  if (!errors.length) return "";
+  return `
+    <details class="ocr-errors document-errors search-verification-card warning">
+      <summary>Document extraction skipped/failed for ${errors.length} item(s)</summary>
+      <p>Search coverage is partial for these documents. Review the skipped list before concluding that a keyword is absent.</p>
+      <div class="dense-list">
+        ${errors.slice(0, 20).map((item) => `<div class="dense-row"><strong>${escapeHtml(item.path || "Document")}</strong><span>${escapeHtml(item.error || item.message || item.reason || "extraction skipped")}</span></div>`).join("")}
       </div>
     </details>
   `;

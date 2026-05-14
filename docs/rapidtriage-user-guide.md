@@ -192,7 +192,7 @@ Treat missing targets as a review cue, not automatically as absence of activity.
 
 After a run, the Summary tab and generated Markdown report include a processing transparency section. Check warning badges for zero-row parsers, read-only extraction skips, missing source paths, existing destinations, and max-file or max-size caps before treating the run as complete.
 
-The Documents tab now also shows skipped extraction warnings. If a very large PDF/log/mailbox or corrupt Office/PDF file cannot be safely converted to text, RapidTriage keeps searching the remaining documents and records `extraction_errors[]` plus a GUI warning. Treat those warnings as "search was partial for these files" and use source-viewer byte-window search or a dedicated parser before concluding that a keyword is absent.
+The Documents tab now also shows skipped extraction warnings. If a very large PDF/log/mailbox or corrupt Office/PDF file cannot be safely converted to text, RapidTriage keeps searching the remaining documents and records `extraction_errors[]` plus a GUI warning. Completed-run Search imports those same warnings into `documents.errors[]` and shows a document-error card next to OCR warnings. Treat either warning as "search was partial for these files" and use source-viewer byte-window search or a dedicated parser before concluding that a keyword is absent.
 
 ## Windows System Artifacts
 

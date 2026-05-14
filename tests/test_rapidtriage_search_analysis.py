@@ -94,6 +94,45 @@ class RapidTriageSearchAnalysisTests(unittest.TestCase):
             self.assertEqual(errors[0]["kind"], "pdf")
             self.assertIn("OSError: cannot read pdf", errors[0]["error"])
 
+    def test_search_docs_uses_recorded_extraction_errors_as_partial_coverage(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            docs_path = root / "rapidtriage-docs.json"
+            skipped_path = root / "huge.mbox"
+            searchable_path = root / "notes.txt"
+            searchable_path.write_text("secret remains searchable after skipped mailbox", encoding="utf-8")
+            write_json(
+                docs_path,
+                {
+                    "candidates": [
+                        {"path": str(skipped_path), "kind": "mbox"},
+                        {"path": str(searchable_path), "kind": "txt"},
+                    ],
+                    "results": [{"path": str(searchable_path)}],
+                    "extraction_errors": [
+                        {
+                            "path": str(skipped_path),
+                            "kind": "mbox",
+                            "size": 9000000000,
+                            "reason": "input-too-large",
+                            "error_type": "TextExtractionTooLarge",
+                            "message": "document extraction input is capped",
+                            "recoverable": True,
+                            "effect": "document-skipped-search-continues",
+                        }
+                    ],
+                },
+            )
+
+            matches, errors = search_docs({"docs": str(docs_path)}, ["secret"], limit=10)
+
+            self.assertEqual(len(matches), 1)
+            self.assertEqual(matches[0]["path"], str(searchable_path))
+            self.assertEqual(len(errors), 1)
+            self.assertEqual(errors[0]["path"], str(skipped_path))
+            self.assertEqual(errors[0]["reason"], "input-too-large")
+            self.assertEqual(errors[0]["effect"], "document-skipped-search-continues")
+
     def test_filter_matches_fast_path_preserves_copy_semantics(self) -> None:
         matches = self.make_matches()
 
@@ -140,6 +179,40 @@ class RapidTriageSearchAnalysisTests(unittest.TestCase):
             self.assertEqual(payload["summary"]["document_error_count"], 1)
             self.assertEqual(payload["documents"]["errors"][0]["kind"], "docx")
             self.assertIn("ValueError: corrupt document", payload["documents"]["errors"][0]["error"])
+
+    def test_run_unified_search_reports_recorded_document_extraction_errors(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            docs_path = root / "rapidtriage-docs.json"
+            summary_path = root / "summary.json"
+            skipped_path = root / "huge.pdf"
+            write_json(
+                docs_path,
+                {
+                    "candidates": [{"path": str(skipped_path), "kind": "pdf"}],
+                    "results": [],
+                    "extraction_errors": [
+                        {
+                            "path": str(skipped_path),
+                            "kind": "pdf",
+                            "size": 7000000000,
+                            "reason": "input-too-large",
+                            "error_type": "TextExtractionTooLarge",
+                            "message": "document extraction input is capped",
+                            "recoverable": True,
+                            "effect": "document-skipped-search-continues",
+                        }
+                    ],
+                },
+            )
+            write_json(summary_path, {"outputs": {"summary": str(summary_path), "docs": str(docs_path)}})
+
+            payload = run_unified_search(summary_path, ["secret"], include_analysis=False)
+
+            self.assertEqual(payload["summary"]["match_count"], 0)
+            self.assertEqual(payload["summary"]["document_error_count"], 1)
+            self.assertEqual(payload["documents"]["errors"][0]["reason"], "input-too-large")
+            self.assertEqual(payload["documents"]["errors"][0]["effect"], "document-skipped-search-continues")
 
     def test_build_search_analysis_adds_clusters_entities_graph_timeline_and_workbook(self) -> None:
         analysis = build_search_analysis(self.make_matches(), ["password", "powershell"])
