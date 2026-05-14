@@ -4358,12 +4358,16 @@ function renderFileSearchResults(payload) {
     return `<p class="empty-state">${escapeHtml(payload.message || "This file is not searchable.")}</p>`;
   }
   if (!rows.length) {
+    const noMatchMessage = payload.truncated
+      ? "No matches in the searched window yet. Continue from the cursor before concluding the keyword is absent."
+      : "No matches in this file.";
     return `
       <div class="file-search-summary">
         ${metric("File matches", 0)}
         ${metric("Keywords", (payload.keywords || []).length)}
       </div>
-      <p class="empty-state">No matches in this file.</p>
+      ${renderCurrentFileSearchProfile(payload)}
+      <p class="empty-state ${payload.truncated ? "warning" : ""}">${escapeHtml(noMatchMessage)}</p>
       ${resumeAction}
     `;
   }

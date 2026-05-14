@@ -166,6 +166,9 @@ class RapidTriageApiTests(unittest.TestCase):
         self.assertTrue(payload["summary"]["sqlite_scan_truncated"])
         self.assertFalse(payload["summary"]["sqlite_full_cursor_scan"])
         self.assertEqual(payload["summary"]["sqlite_resume_state"]["reason"], "sqlite-row-scan-limit")
+        self.assertTrue(payload["summary"]["sqlite_resume_token"])
+        self.assertTrue(payload["source_search_profile"]["large_data_controls"]["sqlite_resume_token"])
+        self.assertTrue(payload["source_search_profile"]["large_data_controls"]["sqlite_scan_truncated"])
 
     def test_source_search_api_preserves_sqlite_scan_limit_contract(self) -> None:
         with tempfile.TemporaryDirectory() as temp:

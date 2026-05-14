@@ -1637,6 +1637,11 @@ button:disabled {
   color: var(--muted);
 }
 
+.empty-state.warning {
+  color: var(--warn);
+  font-weight: 800;
+}
+
 .detail-topline {
   display: flex;
   align-items: center;

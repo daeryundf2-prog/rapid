@@ -1277,3 +1277,14 @@ SQLite 기반 아티팩트는 브라우저 History, 카카오톡, Sticky Notes, 
 1. 이 변경은 sidecar 존재와 WAL header를 보여주는 triage 기능이다. WAL frame replay나 deleted row recovery를 완료했다는 뜻이 아니다.
 2. GUI preview row는 sidecar 검토 전까지 "현재 read-only snapshot의 제한된 미리보기"로만 표현해야 한다.
 3. 상용급으로 올리려면 실제 브라우저/카카오톡/Sticky Notes WAL fixture, checkpoint 전후 known-answer, SQLite CLI 또는 검증된 WAL parser와 row 단위 diff가 필요하다.
+
+## 41. 2026-05-14 구현 반영: current-file search 무결과/부분검색 경고 강화
+
+대용량 파일이나 SQLite DB에서 현재 파일 검색이 cursor 단위로 잘리면, 첫 검색 창에서 hit가 0개여도 전체 파일에 hit가 없다는 뜻이 아니다. 기존 UI는 resume button은 보여주더라도 "No matches in this file" 문구가 먼저 보여 분석자가 부재 결론을 내릴 위험이 있었다.
+
+이번 라운드에서는 결과가 0개이면서 `payload.truncated=true`인 경우 GUI가 "searched window에는 아직 없음"과 "cursor로 계속 검색해야 함"을 명시하고, current-file search profile과 continue button을 함께 보여주도록 수정했다. API 측 테스트도 row-scan cap으로 hit가 0개인 SQLite 검색에서 `sqlite_resume_token`, `sqlite_scan_truncated`, source-search profile control이 생성되는지 검증한다.
+
+중요한 제한:
+
+1. 이 변경은 UI 오판 방지다. 모든 파일을 자동 완전 스캔하도록 바꾼 것이 아니다.
+2. 포렌식 결론에서 "키워드 없음"을 쓰려면 resume cursor를 끝까지 소비했거나, full-case index/reindex 결과와 교차 확인해야 한다.
