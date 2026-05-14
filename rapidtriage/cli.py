@@ -83,7 +83,7 @@ from .core.cross_tool import (
     build_cross_tool_validation_report,
     write_usn_state_replay_known_answer_template,
 )
-from .core.docs import build_manifest, run_docs_search, write_result
+from .core.docs import build_manifest, query_docs_index, run_docs_search, write_result
 from .core.doctor import format_doctor_text, run_doctor
 from .core.enterprise import build_enterprise_policy
 from .core.evidence import identify_evidence
@@ -234,6 +234,7 @@ def build_parser() -> argparse.ArgumentParser:
               rapidtriage manifest . --output rapidtriage-manifest.json
               rapidtriage docs . -k incident -k registry --output rapidtriage-docs.json
               rapidtriage docs . -k incident --index-output rapidtriage-docs-index.json
+              rapidtriage docs-index-search rapidtriage-docs-index.json -k incident
               rapidtriage files . --output rapidtriage-files.json
               rapidtriage collect-plan /Volumes/case-mount --profile intrusion --output rapidtriage-collect-plan.json
               rapidtriage collect-export /Volumes/case-mount ./collect-export --profile intrusion --copy
@@ -297,6 +298,26 @@ def build_parser() -> argparse.ArgumentParser:
     docs.add_argument("--index-output", help="Optional processed-text inverted index JSON sidecar")
     docs.add_argument("--limit", type=int, default=0, help="Stop after scanning N candidates (0 means all)")
     add_rules_argument(docs)
+
+    docs_index_search = sub.add_parser(
+        "docs-index-search",
+        help="Query a processed-text docs-index sidecar without re-extracting document text",
+        description="Query a processed-text docs-index sidecar without re-extracting document text",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=textwrap.dedent(
+            """\
+            Examples:
+              rapidtriage docs-index-search rapidtriage-docs-index.json -k password
+              rapidtriage docs-index-search rapidtriage-docs-index.json incident credential --limit 100 --json
+            """
+        ),
+    )
+    docs_index_search.add_argument("index", help="Path to a docs-index JSON sidecar")
+    docs_index_search.add_argument("terms", nargs="*", help="Optional positional query terms")
+    docs_index_search.add_argument("-k", "--keyword", action="append", help="Keyword or term to search")
+    docs_index_search.add_argument("--limit", type=int, default=500, help="Maximum result rows to return (capped at 5000)")
+    docs_index_search.add_argument("--output", default="rapidtriage-docs-index-search.json", help="JSON output path")
+    docs_index_search.add_argument("--json", action="store_true", help="Print JSON payload to stdout")
 
     manifest = sub.add_parser(
         "manifest",
@@ -4670,6 +4691,45 @@ def main(argv=None) -> int:
             print(f"Saved email external parser report: {payload['outputs']['markdown']}")
             print(f"Status: {payload['status']}  Export files: {payload['summary']['export_file_count']}")
         return 1 if payload["status"] == "failed" else 0
+
+    if args.command == "docs-index-search":
+        keywords = list(args.keyword or []) + list(args.terms or [])
+        if not keywords:
+            parser.error("docs-index-search requires at least one -k/--keyword or positional term")
+        index_path = Path(args.index).expanduser().resolve()
+        output = Path(args.output).expanduser().resolve()
+        try:
+            payload = query_docs_index(index_path, keywords, limit=args.limit)
+        except (FileNotFoundError, OSError, json.JSONDecodeError, ValueError) as exc:
+            parser.error(str(exc))
+        write_result(payload, output)
+        audit_output = audit_path_for(output)
+        write_audit_record(
+            audit_output,
+            command="docs-index-search",
+            options={
+                "keywords": keywords,
+                "limit": args.limit,
+                "output": str(output),
+            },
+            input_files=[("docs-index", index_path)],
+            output_files=[("docs-index-search-json", output)],
+            notes=[
+                "docs-index-search does not store or return full extracted text; verify hits with the source viewer before reporting.",
+            ],
+        )
+        if args.json:
+            print(json.dumps(payload, ensure_ascii=False, indent=2))
+        else:
+            summary = payload["summary"]
+            print(f"Saved docs index search JSON: {output}")
+            print(f"Saved audit JSON: {audit_output}")
+            print(
+                f"Matched documents: {summary['matched_document_count']}  "
+                f"Returned: {summary['returned_result_count']}  "
+                f"Truncated: {summary['truncated']}"
+            )
+        return 0
 
     root = Path(args.root).expanduser().resolve()
     input_root = resolve_input_root(root, kind=getattr(args, "input_kind", None))

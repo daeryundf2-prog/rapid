@@ -166,6 +166,7 @@ The sample JSON uses a few placeholders so the examples stay stable across machi
 - Supported document extensions include text/config/log/data, HTML/RTF, PDF, Office/OpenDocument files, EML/MBOX email, and bounded Outlook MSG/PST/OST string extraction.
 - `extraction_errors[]` records path, kind, size, reason, error type, and `document-skipped-search-continues` effect so analysts can see that a missing hit is a partial-search condition, not proof that the keyword is absent.
 - Optional `docs-index` sidecars use a processed-text inverted index and do not store full extracted text.
+- `rapidtriage docs-index-search <docs-index.json> -k <keyword>` queries that sidecar without re-extracting document text. Output command `docs-index-search` includes matched document locators, text hashes, score, matched terms, result hashes, limit/truncation state, and an explicit `source-viewer-hit-context-validation-required` blocker because analysts must open the source document for context before reporting.
 
 ### `files`
 

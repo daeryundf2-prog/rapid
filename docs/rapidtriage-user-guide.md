@@ -25,6 +25,15 @@ Run output can be searched directly:
 rapidtriage search ./case-run -k password -k powershell --no-ocr
 ```
 
+For document-heavy cases, you can preserve a processed-text sidecar and query it later without re-extracting every PDF/Office/mail document:
+
+```bash
+rapidtriage docs ./mounted-case-folder -k password --index-output ./docs-index.json
+rapidtriage docs-index-search ./docs-index.json -k password --output ./docs-index-password-hits.json
+```
+
+The sidecar stores token postings, document metadata, and text hashes, not full extracted text. Treat `docs-index-search` as a fast lead finder: open the source document or source viewer hit context before reporting a finding.
+
 For repeat review work, import the run into the SQLite Case DB:
 
 ```bash

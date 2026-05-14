@@ -928,6 +928,15 @@ class RapidTriageSearchAnalysisTests(unittest.TestCase):
         self.assertTrue(contract["sqlite_fts_default_plan"]["cursor_pagination_required"])
         self.assertEqual(contract["local_inverted_candidate_evaluation"]["target_rows"], 1_000_000)
         self.assertFalse(contract["local_inverted_candidate_evaluation"]["prototype_dependency_added"])
+        self.assertTrue(contract["local_inverted_candidate_evaluation"]["prototype_runtime_available"])
+        self.assertEqual(
+            contract["local_inverted_candidate_evaluation"]["sidecar_query_command"],
+            "rapidtriage docs-index-search <docs-index.json> -k <keyword>",
+        )
+        self.assertEqual(
+            contract["local_inverted_candidate_evaluation"]["enablement_scope"],
+            "processed-document-text-sidecar-only",
+        )
         self.assertEqual(contract["external_search_adapter_contract"]["backend_id"], "elasticsearch-opensearch-optional")
         self.assertFalse(contract["external_search_adapter_contract"]["privacy_controls"]["export_evidence_text_to_external_service_by_default"])
         self.assertIn("messenger", contract["normalized_index_schema_contract"]["artifact_families"])

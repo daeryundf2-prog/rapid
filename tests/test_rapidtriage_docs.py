@@ -228,6 +228,60 @@ class RapidTriageDocsTests(unittest.TestCase):
             self.assertEqual(index_payload["terms"]["alpha"][0]["count"], 2)
             self.assertIn("https://example.test/login", index_payload["terms"])
 
+    def test_docs_index_search_queries_sidecar_without_storing_full_text(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            (root / "alpha.txt").write_text("incident credential credential", encoding="utf-8")
+            (root / "beta.txt").write_text("incident timeline only", encoding="utf-8")
+            docs_output = root / "docs.json"
+            index_output = root / "docs-index.json"
+            search_output = root / "docs-index-search.json"
+
+            self.assertEqual(
+                main(
+                    [
+                        "docs",
+                        str(root),
+                        "-k",
+                        "incident",
+                        "--output",
+                        str(docs_output),
+                        "--index-output",
+                        str(index_output),
+                    ]
+                ),
+                0,
+            )
+
+            exit_code = main(
+                [
+                    "docs-index-search",
+                    str(index_output),
+                    "-k",
+                    "credential",
+                    "--limit",
+                    "1",
+                    "--output",
+                    str(search_output),
+                ]
+            )
+
+            self.assertEqual(exit_code, 0)
+            payload = json.loads(search_output.read_text(encoding="utf-8"))
+            self.assertEqual(payload["command"], "docs-index-search")
+            self.assertEqual(payload["profile_version"], "docs-index-query-v1")
+            self.assertEqual(payload["query"]["terms"], ["credential"])
+            self.assertEqual(payload["summary"]["matched_document_count"], 1)
+            self.assertEqual(payload["summary"]["returned_result_count"], 1)
+            self.assertFalse(payload["summary"]["stores_full_text"])
+            self.assertFalse(payload["results"][0]["preview_available"])
+            self.assertEqual(Path(payload["results"][0]["path"]).name, "alpha.txt")
+            self.assertEqual(payload["results"][0]["matched_terms"][0]["count"], 2)
+            self.assertTrue(payload["results"][0]["source_locator"].startswith("docs-index://document/"))
+            self.assertIn("source-viewer-hit-context-validation-required", payload["commercial_blockers"])
+            self.assertEqual(payload["index_file"]["path"], str(index_output.resolve()))
+            self.assertTrue((root / "docs-index-search.audit.json").exists())
+
     def test_manifest_reports_windows_modules_as_separate_providers(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             root = Path(tmp_dir)

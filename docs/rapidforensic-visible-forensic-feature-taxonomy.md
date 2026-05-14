@@ -1304,3 +1304,27 @@ SQLite 기반 아티팩트는 브라우저 History, 카카오톡, Sticky Notes, 
 
 1. 이 변경은 EML/MBOX preview의 bounded parse 상태를 드러내는 UI 보강이다. PST/OST native folder/message/deleted item parser를 완성한 것이 아니다.
 2. 대형 mailbox에서 “없다”는 결론은 bounded preview가 아니라 mailbox pagination/export, source hash, trusted parser diff를 통해 내려야 한다.
+
+## 43. 2026-05-14 구현 반영: docs-index sidecar 검색 명령 추가
+
+문서 본문 검색은 대용량 사건에서 매번 PDF/Office/메일을 다시 열면 느려지고, 반대로 인덱스가 있어도 실제 질의 기능이 없으면 분석자가 GUI/CLI에서 활용하기 어렵다. 이번 라운드에서는 기존 `docs --index-output`이 생성하던 `processed-text-inverted-index` sidecar를 `rapidtriage docs-index-search`로 직접 검색할 수 있게 했다.
+
+추가된 사용자 노출 기능:
+
+| 사용자 노출 기능 | 연결 command/field | 구현 내용 | 남은 상용급 보강 |
+| --- | --- | --- | --- |
+| 문서 인덱스 재검색 | `docs-index-search`, `docs-index://document/<id>` | 기존 `docs-index.json`을 다시 열어 키워드 term postings를 조회하고 matched document/source locator/score를 반환한다. | SQLite FTS 결과와 hit parity diff, GUI 검색 패널 직접 연결 |
+| 보고 가능한 hit 증거 | `text_sha256`, `result_hash`, `matched_terms` | full text를 저장하지 않고도 결과 row hash와 원본 문서 text hash를 남겨 재현성과 source viewer 검증을 돕는다. | source viewer에서 hit context deep-link, report citation 자동 연결 |
+| 대용량 오판 방지 | `effective_limit`, `truncated`, `stores_full_text=false` | 기본 interactive limit와 5000행 cap을 명시하고, truncated이면 “없는 것”이 아니라 “계속 조회 필요”로 표현한다. | million-row/10M-row runtime benchmark, resume cursor |
+| backend readiness 반영 | `local-inverted-index-candidate-evaluation-v1` | local inverted candidate가 contract-only에서 sidecar prototype usable 상태로 올라갔지만 default backend는 여전히 SQLite FTS로 유지한다. | Tantivy/Lucene 계열 실제 segment index 도입 여부 결정, corruption recovery test |
+
+검증 포인트:
+
+1. `tests/test_rapidtriage_docs.py::test_docs_index_search_queries_sidecar_without_storing_full_text`가 sidecar 생성 후 재검색, source locator, matched term count, audit file, blocker를 검증한다.
+2. `tests/test_rapidtriage_search_analysis.py::test_search_backend_contract_exposes_default_and_candidate_engines`가 search backend contract에 sidecar query command와 runtime availability가 반영됐는지 확인한다.
+
+중요한 제한:
+
+1. `docs-index-search`는 인덱스에 저장된 term postings만 검색한다. 문맥 preview, phrase/proximity, OCR/EVTX/Registry/artifact 통합 검색을 완성했다는 의미가 아니다.
+2. sidecar는 full extracted text를 저장하지 않는다. 보고서에 넣기 전에는 반드시 source viewer나 원본 문서 재검색으로 hit context를 확인해야 한다.
+3. 상용급 검색엔진으로 주장하려면 SQLite FTS/외부 기준도구와의 known-answer hit parity, million-row runtime, corruption recovery, GUI cursor resume 검증이 필요하다.

@@ -13,7 +13,7 @@ from collections import Counter
 from email import policy
 from email.message import EmailMessage
 from pathlib import Path
-from typing import Dict, Iterable, List, Sequence, Union
+from typing import Dict, Iterable, List, Mapping, Sequence, Union
 from xml.etree import ElementTree as ET
 
 from ..artifacts import all_providers
@@ -273,6 +273,178 @@ def build_docs_index(
 
 def tokenize_index_terms(text: str) -> List[str]:
     return [match.group(0).lower()[:256] for match in DOCS_INDEX_TOKEN_PATTERN.finditer(text)]
+
+
+def normalize_index_query_terms(keywords: Sequence[str]) -> list[str]:
+    terms: list[str] = []
+    seen: set[str] = set()
+    for keyword in keywords:
+        raw = str(keyword).strip()
+        if not raw:
+            continue
+        tokens = tokenize_index_terms(raw)
+        if not tokens:
+            tokens = [raw.lower()[:256]]
+        for token in tokens:
+            if token in seen:
+                continue
+            seen.add(token)
+            terms.append(token)
+    return terms
+
+
+def load_docs_index(path: Path) -> dict[str, object]:
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(payload, dict):
+        raise ValueError("docs-index payload must be a JSON object")
+    if payload.get("command") != "docs-index":
+        raise ValueError("input is not a docs-index payload")
+    if payload.get("strategy") != "processed-text-inverted-index":
+        raise ValueError("unsupported docs-index strategy")
+    if not isinstance(payload.get("documents"), list) or not isinstance(payload.get("terms"), dict):
+        raise ValueError("docs-index payload is missing documents or terms")
+    return payload
+
+
+def query_docs_index(index_path: Path, keywords: Sequence[str], *, limit: int = 500) -> dict[str, object]:
+    resolved = index_path.expanduser().resolve()
+    payload = load_docs_index(resolved)
+    index_sha256 = hashlib.sha256(resolved.read_bytes()).hexdigest()
+    result = search_docs_index_payload(payload, keywords, limit=limit)
+    result["index_file"] = {
+        "path": str(resolved),
+        "sha256": index_sha256,
+        "size": resolved.stat().st_size,
+    }
+    result["query_hash"] = hashlib.sha256(
+        json.dumps(
+            {
+                "index_sha256": index_sha256,
+                "terms": result["query"]["terms"],
+                "limit": result["query"]["effective_limit"],
+            },
+            ensure_ascii=False,
+            sort_keys=True,
+        ).encode("utf-8", errors="ignore")
+    ).hexdigest()
+    return result
+
+
+def search_docs_index_payload(
+    index_payload: Mapping[str, object],
+    keywords: Sequence[str],
+    *,
+    limit: int = 500,
+) -> dict[str, object]:
+    query_terms = normalize_index_query_terms(keywords)
+    effective_limit = max(1, min(int(limit or 500), 5000))
+    documents = {
+        int(document["id"]): document
+        for document in index_payload.get("documents", [])
+        if isinstance(document, dict) and "id" in document
+    }
+    terms = index_payload.get("terms") if isinstance(index_payload.get("terms"), dict) else {}
+    scored: dict[int, dict[str, object]] = {}
+    for term in query_terms:
+        posting_rows = terms.get(term, []) if isinstance(terms, dict) else []
+        if not isinstance(posting_rows, list):
+            continue
+        for posting in posting_rows:
+            if not isinstance(posting, dict):
+                continue
+            document_id = int(posting.get("document_id", -1))
+            if document_id not in documents:
+                continue
+            count = max(0, int(posting.get("count") or 0))
+            row = scored.setdefault(
+                document_id,
+                {
+                    "document_id": document_id,
+                    "score": 0,
+                    "matched_terms": [],
+                },
+            )
+            row["score"] = int(row["score"]) + count
+            row["matched_terms"].append({"term": term, "count": count})
+
+    ranked = sorted(
+        scored.values(),
+        key=lambda item: (
+            -int(item["score"]),
+            str(documents[int(item["document_id"])].get("path", "")),
+            int(item["document_id"]),
+        ),
+    )
+    results = []
+    for item in ranked[:effective_limit]:
+        document = documents[int(item["document_id"])]
+        result_core = {
+            "document_id": int(item["document_id"]),
+            "source_locator": f"docs-index://document/{int(item['document_id'])}",
+            "path": document.get("path"),
+            "kind": document.get("kind"),
+            "size": document.get("size"),
+            "modified_at": document.get("modified_at"),
+            "text_sha256": document.get("text_sha256"),
+            "text_length": document.get("text_length"),
+            "token_count": document.get("token_count"),
+            "unique_token_count": document.get("unique_token_count"),
+            "score": int(item["score"]),
+            "matched_terms": item["matched_terms"],
+            "preview_available": False,
+            "verification_hint": "Open the source document or run source-search/docs for hit context; docs-index stores no full extracted text.",
+        }
+        results.append(
+            {
+                **result_core,
+                "result_hash": hashlib.sha256(
+                    json.dumps(result_core, ensure_ascii=False, sort_keys=True).encode("utf-8", errors="ignore")
+                ).hexdigest(),
+            }
+        )
+
+    found_terms = {match["term"] for result in results for match in result["matched_terms"]}
+    query_core = {
+        "keywords": list(keywords),
+        "terms": query_terms,
+        "requested_limit": int(limit or 0),
+        "effective_limit": effective_limit,
+        "term_count": len(query_terms),
+    }
+    summary = {
+        "document_count": len(documents),
+        "term_count": len(terms) if isinstance(terms, dict) else 0,
+        "query_term_count": len(query_terms),
+        "matched_document_count": len(ranked),
+        "returned_result_count": len(results),
+        "truncated": len(ranked) > len(results),
+        "missing_terms": [term for term in query_terms if term not in found_terms],
+        "stores_full_text": False,
+    }
+    output_core = {
+        "command": "docs-index-search",
+        "profile_version": "docs-index-query-v1",
+        "generated_at": dt.datetime.now().isoformat(),
+        "root": index_payload.get("root"),
+        "index_strategy": index_payload.get("strategy"),
+        "index_version": index_payload.get("version"),
+        "query": query_core,
+        "summary": summary,
+        "results": results,
+        "result_hashes": [item["result_hash"] for item in results],
+        "commercial_claim_allowed": False,
+        "commercial_blockers": [
+            "source-viewer-hit-context-validation-required",
+            "sqlite-fts-parity-diff-required",
+            "million-row-runtime-evidence-required",
+        ],
+    }
+    return {
+        **output_core,
+        "payload_hash": hashlib.sha256(
+            json.dumps(output_core, ensure_ascii=False, sort_keys=True).encode("utf-8", errors="ignore")
+        ).hexdigest(),
+    }
 
 
 def write_result(payload: Dict[str, object], output: Path) -> None:

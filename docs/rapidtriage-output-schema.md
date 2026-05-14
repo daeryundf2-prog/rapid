@@ -156,7 +156,7 @@ Current supported document kinds include:
 - `match_count`
 - `supported_extensions`
 
-When indexing is enabled, `rapidtriage` writes a sidecar such as `rapidtriage-docs-index.json` with command `docs-index`, strategy `processed-text-inverted-index`, per-document text hashes/lengths, and a lower-cased inverted token map. The sidecar intentionally stores no full extracted text.
+When indexing is enabled, `rapidtriage` writes a sidecar such as `rapidtriage-docs-index.json` with command `docs-index`, strategy `processed-text-inverted-index`, per-document text hashes/lengths, and a lower-cased inverted token map. The sidecar intentionally stores no full extracted text. `rapidtriage docs-index-search <docs-index.json> -k <keyword>` can query that sidecar later and returns source locators, matched terms, text hashes, result hashes, and truncation state; it still requires source viewer verification before a report claim because context previews are not stored in the index.
 
 `results[]` contains:
 
