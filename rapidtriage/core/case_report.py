@@ -170,10 +170,16 @@ def build_case_report_markdown(
                 lines.append("- Source-search cited hits:")
                 for hit in source_hits:
                     lines.append(f"  - Citation: {hit.get('citation', '')}")
+                    if hit.get("source_type"):
+                        lines.append(f"    - Source type: `{hit.get('source_type')}`")
                     if hit.get("structured_citation"):
                         lines.append(f"    - Structured citation: {hit.get('structured_citation')}")
                     if hit.get("source_locator"):
                         lines.append(f"    - Source locator: `{hit.get('source_locator')}`")
+                    if hit.get("matched_terms"):
+                        lines.append(f"    - Matched terms: {hit.get('matched_terms')}")
+                    if hit.get("result_hash"):
+                        lines.append(f"    - Result hash: `{hit.get('result_hash')}`")
                     if hit.get("snippet"):
                         lines.append(f"    - Snippet: {hit.get('snippet')}")
                     if hit.get("review_hint"):
@@ -259,10 +265,12 @@ def extract_source_hit_notes(note: str) -> list[dict[str, str]]:
     current: dict[str, str] | None = None
     for line in note.splitlines():
         cleaned = line.strip()
-        if cleaned.lower().startswith("current-file hit:"):
-            hit = re.sub(r"^current-file hit:\s*", "", cleaned, flags=re.IGNORECASE)
+        if cleaned.lower().startswith("current-file hit:") or cleaned.lower().startswith("docs-index hit:"):
+            is_docs_index = cleaned.lower().startswith("docs-index hit:")
+            prefix = r"^docs-index hit:\s*" if is_docs_index else r"^current-file hit:\s*"
+            hit = re.sub(prefix, "", cleaned, flags=re.IGNORECASE)
             if hit:
-                current = {"citation": hit}
+                current = {"citation": hit, "source_type": "docs-index" if is_docs_index else "source-search"}
                 hits.append(current)
             continue
         if not current or not cleaned:
@@ -281,6 +289,18 @@ def extract_source_hit_notes(note: str) -> list[dict[str, str]]:
         if cleaned.lower().startswith("source locator:"):
             current["source_locator"] = trim_report_inline_text(
                 re.sub(r"^source locator:\s*", "", cleaned, flags=re.IGNORECASE),
+                limit=96,
+            )
+            continue
+        if cleaned.lower().startswith("matched terms:"):
+            current["matched_terms"] = trim_report_inline_text(
+                re.sub(r"^matched terms:\s*", "", cleaned, flags=re.IGNORECASE),
+                limit=180,
+            )
+            continue
+        if cleaned.lower().startswith("result hash:"):
+            current["result_hash"] = trim_report_inline_text(
+                re.sub(r"^result hash:\s*", "", cleaned, flags=re.IGNORECASE),
                 limit=96,
             )
             continue

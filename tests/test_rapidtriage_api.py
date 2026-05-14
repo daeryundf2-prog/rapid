@@ -1312,18 +1312,29 @@ class RapidTriageApiTests(unittest.TestCase):
             self.assertFalse(docs_index_payload["summary"]["stores_full_text"])
             self.assertIn("source_viewer_url", docs_index_payload["results"][0])
             self.assertIn("keyword=password", docs_index_payload["results"][0]["source_search_url"])
-            self.assertEqual(docs_index_payload["results"][0]["source"], "documents")
+            self.assertEqual(docs_index_payload["results"][0]["source"], "docs-index")
             self.assertTrue(docs_index_payload["results"][0]["pointer"].startswith("docs-index://document/"))
             self.assertEqual(
                 docs_index_payload["results"][0]["source_viewer_action_profile"]["profile_version"],
                 "search-result-source-viewer-actions-v1",
             )
+            self.assertEqual(
+                docs_index_payload["results"][0]["review_note_citation"]["profile_version"],
+                "docs-index-review-note-citation-v1",
+            )
+            self.assertIn("Docs-index hit:", docs_index_payload["results"][0]["review_note_citation"]["text"])
+            self.assertIn("Result hash:", docs_index_payload["results"][0]["review_note_citation"]["text"])
             docs_index_actions = {
                 action["id"]: action
                 for action in docs_index_payload["results"][0]["source_viewer_action_profile"]["actions"]
             }
             self.assertIn("keyword=password", docs_index_actions["search-inside-source"]["url"])
             self.assertEqual(docs_index_actions["search-inside-source"]["keywords"], ["password"])
+            self.assertFalse(docs_index_actions["save-review"]["enabled"])
+            self.assertIn(
+                "bookmark-source-mapping-required",
+                docs_index_payload["results"][0]["source_viewer_action_profile"]["blockers"],
+            )
             output_preview_response = client.get(f"/api/runs/{run_id}/outputs/report/preview")
             self.assertEqual(output_preview_response.status_code, 200, output_preview_response.text)
             output_preview = output_preview_response.json()
@@ -2682,7 +2693,11 @@ class RapidTriageApiTests(unittest.TestCase):
                         "Structured citation: SQLite row citation: viewer.sqlite table=notes row=1 rowid=1 locator=abc123\n"
                         "Source locator: abc123\n"
                         "Snippet: admin password found\n"
-                        "Review hint: verify source hashes before report inclusion"
+                        "Review hint: verify source hashes before report inclusion\n\n"
+                        "Docs-index hit: docs-index://document/7 path=/evidence/docs/report.txt\n"
+                        "Matched terms: password:2, admin:1\n"
+                        "Result hash: deadbeef1234\n"
+                        "Review hint: open source viewer and current-file source-search before report inclusion"
                     ),
                     "review_status": "relevant",
                     "include_in_report": True,
@@ -2766,10 +2781,15 @@ class RapidTriageApiTests(unittest.TestCase):
             self.assertIn("Review this indicator pivot.", report_payload["markdown"])
             self.assertIn("Source-search cited hits", report_payload["markdown"])
             self.assertIn("credentials.txt line 3 offset 12 keyword password", report_payload["markdown"])
+            self.assertIn("Source type: `source-search`", report_payload["markdown"])
             self.assertIn("Structured citation: SQLite row citation", report_payload["markdown"])
             self.assertIn("Source locator: `abc123`", report_payload["markdown"])
             self.assertIn("Snippet: admin password found", report_payload["markdown"])
             self.assertIn("Review hint: verify source hashes before report inclusion", report_payload["markdown"])
+            self.assertIn("docs-index://document/7", report_payload["markdown"])
+            self.assertIn("Source type: `docs-index`", report_payload["markdown"])
+            self.assertIn("Matched terms: password:2, admin:1", report_payload["markdown"])
+            self.assertIn("Result hash: `deadbeef1234`", report_payload["markdown"])
             self.assertIn("CASE-001", report_payload["markdown"])
             self.assertIn(evidence["hashes"]["sha256"], report_payload["markdown"])
             self.assertIn("html", report_payload["exports"])

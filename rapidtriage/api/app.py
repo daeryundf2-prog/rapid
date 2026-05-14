@@ -1138,12 +1138,31 @@ def create_app(job_store: RunJobStore | None = None, auth_token: str | None = No
             if not isinstance(result, dict) or not result.get("path"):
                 continue
             result["pointer"] = str(result.get("source_locator") or f"docs-index:/results/{index}")
-            result["source"] = "documents"
+            result["source"] = "docs-index"
             result["matched_keywords"] = [
                 item["term"]
                 for item in result.get("matched_terms", [])
                 if isinstance(item, dict) and item.get("term")
             ]
+            matched_term_text = ", ".join(
+                f"{item.get('term')}:{item.get('count')}"
+                for item in result.get("matched_terms", [])
+                if isinstance(item, dict) and item.get("term")
+            )
+            review_note_text = (
+                f"Docs-index hit: {result.get('source_locator')} path={result.get('path')}\n"
+                f"Matched terms: {matched_term_text or ', '.join(query_terms)}\n"
+                f"Result hash: {result.get('result_hash') or ''}\n"
+                "Review hint: open source viewer and current-file source-search before report inclusion"
+            )
+            result["review_note_citation"] = {
+                "profile_version": "docs-index-review-note-citation-v1",
+                "source_locator": result.get("source_locator"),
+                "result_hash": result.get("result_hash"),
+                "text": review_note_text,
+                "ready_for_review_note": True,
+                "report_use_rule": "Docs-index hits are leads until source-search confirms hit context in the original source.",
+            }
             result["source_viewer_url"] = (
                 f"/api/runs/{run_id}/source-preview?path={quote(str(result['path']))}"
             )
@@ -1155,10 +1174,10 @@ def create_app(job_store: RunJobStore | None = None, auth_token: str | None = No
                 {
                     "path": result.get("path"),
                     "pointer": result.get("pointer"),
-                    "source": "documents",
+                    "source": "docs-index",
                     "kind": result.get("kind") or "docs-index",
                     "title": Path(str(result.get("path") or "")).name,
-                    "preview": result.get("verification_hint") or "",
+                    "preview": review_note_text,
                     "matched_keywords": result.get("matched_keywords") or query_terms,
                     "search_result_id": result.get("result_hash") or result.get("source_locator") or "",
                 },

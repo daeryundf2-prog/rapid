@@ -3096,19 +3096,22 @@ function renderDocsIndexSidecarResults(payload) {
           const match = {
             path: result.path,
             title: fileName(result.path),
-            source: "documents",
+            source: result.source || "docs-index",
             kind: result.kind || "docs-index",
             pointer: result.pointer || result.source_locator || `docs-index:/results/${index}`,
             source_viewer_action_profile: result.source_viewer_action_profile,
             matched_keywords: (result.matched_terms || []).map((item) => item.term),
-            preview: `docs-index score ${result.score || 0}; source viewer verification required`,
+            preview: result.review_note_citation?.text || `docs-index score ${result.score || 0}; source viewer verification required`,
           };
           return `
             <tr data-viewer-row-path="${escapeHtml(result.path || "")}" data-search-result-index="docs-index-${escapeHtml(index)}">
               <td><strong>${escapeHtml(fileName(result.path) || result.path || "document")}</strong><span>${escapeHtml(result.path || "")}</span><small>${escapeHtml(result.source_locator || "")}</small></td>
               <td>${escapeHtml((result.matched_terms || []).map((item) => `${item.term}:${item.count}`).join(", "))}</td>
               <td>${escapeHtml(result.score || 0)}</td>
-              <td class="action-stack">${result.path ? reviewActionButtons(match, `docs-index-${index}`) : ""}</td>
+              <td class="action-stack">
+                ${result.path ? reviewActionButtons(match, `docs-index-${index}`) : ""}
+                ${result.review_note_citation?.text ? `<button class="icon-action" type="button" data-copy-path="${escapeHtml(result.review_note_citation.text)}">Copy citation</button>` : ""}
+              </td>
             </tr>
           `;
         }).join("")}
@@ -3569,6 +3572,7 @@ function bindDocsIndexSidecarSearch() {
       const payload = await api(`/api/runs/${selectedRunId}/docs-index-search?${params.toString()}`);
       currentDocsIndexSearchPayload = payload;
       output.innerHTML = renderDocsIndexSidecarResults(payload);
+      bindCopyButtons();
       bindSearchResultButtons();
     } catch (error) {
       output.innerHTML = `<p class="empty-state">${escapeHtml(error.message)}. If this run has no docs-index sidecar, run a new case scan or use normal search.</p>`;

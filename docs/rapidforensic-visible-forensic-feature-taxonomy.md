@@ -1315,7 +1315,7 @@ SQLite 기반 아티팩트는 브라우저 History, 카카오톡, Sticky Notes, 
 | 사용자 노출 기능 | 연결 command/field | 구현 내용 | 남은 상용급 보강 |
 | --- | --- | --- | --- |
 | 문서 인덱스 재검색 | `docs-index-search`, `/api/runs/{run_id}/docs-index-search`, `docs-index://document/<id>` | 기존 `docs-index.json`을 다시 열어 키워드 term postings를 조회하고 CLI/API/GUI 검색 패널에서 matched document/source locator/score를 반환한다. | SQLite FTS 결과와 hit parity diff, 100k/1M/10M runtime 검증 |
-| 보고 가능한 hit 증거 | `text_sha256`, `result_hash`, `matched_terms`, `source_viewer_action_profile` | full text를 저장하지 않고도 결과 row hash와 원본 문서 text hash를 남기고, GUI에서 source viewer/current-file search/review action으로 바로 이어지게 한다. | report citation 자동 연결, browser E2E clickthrough 증거 |
+| 보고 가능한 hit 증거 | `text_sha256`, `result_hash`, `matched_terms`, `source_viewer_action_profile`, `docs-index-review-note-citation-v1` | full text를 저장하지 않고도 결과 row hash와 원본 문서 text hash를 남기고, GUI에서 citation 복사와 source viewer/current-file search action 및 보고서 cited-hit 섹션으로 이어지게 한다. docs-index 자체는 원본 결과 JSON pointer가 아니므로 direct save-review는 막고 source 검증 후 저장하게 한다. | browser E2E clickthrough 증거, 대규모 hit parity |
 | 대용량 오판 방지 | `effective_limit`, `truncated`, `stores_full_text=false` | 기본 interactive limit와 5000행 cap을 명시하고, truncated이면 “없는 것”이 아니라 “계속 조회 필요”로 표현한다. | million-row/10M-row runtime benchmark, resume cursor |
 | backend readiness 반영 | `local-inverted-index-candidate-evaluation-v1` | local inverted candidate가 contract-only에서 sidecar prototype usable 상태로 올라갔지만 default backend는 여전히 SQLite FTS로 유지한다. | Tantivy/Lucene 계열 실제 segment index 도입 여부 결정, corruption recovery test |
 
@@ -1326,6 +1326,7 @@ SQLite 기반 아티팩트는 브라우저 History, 카카오톡, Sticky Notes, 
 3. `tests/test_rapidtriage_api.py::RapidTriageApiTests::test_create_run_waits_and_exposes_outputs`가 run output의 docs-index를 API 검색 패널로 연결하고 source viewer/search URL을 반환하는지 검증한다.
 4. `tests/test_rapidtriage_web_static.py::RapidTriageWebStaticTests::test_workbench_review_queue_and_schema_visibility_contracts`와 `test_forensic_feature_catalog_makes_available_functions_discoverable`가 GUI 검색 패널과 기능 카탈로그에서 docs-index sidecar가 숨지 않는지 검증한다.
 5. docs-index API 결과는 `source_viewer_action_profile`과 keyword가 포함된 `source_search_url`을 반환하고, GUI의 `Search inside`는 같은 키워드를 current-file search form에 주입해 source hit context 검증으로 연결한다.
+6. docs-index API 결과는 `docs-index-review-note-citation-v1`을 반환하고, case report는 `Docs-index hit:`, `Matched terms:`, `Result hash:` review note line을 cited-hit evidence로 렌더링한다. direct `save-review`는 JSON pointer 불일치 오판을 막기 위해 disabled 상태로 남기고 `bookmark-source-mapping-required` blocker를 표시한다.
 
 중요한 제한:
 

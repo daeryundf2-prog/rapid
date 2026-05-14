@@ -126,6 +126,8 @@ class RapidTriageWebStaticTests(unittest.TestCase):
         self.assertIn("data-focus-file-search-keywords", app_js)
         self.assertIn("source_viewer_action_profile: result.source_viewer_action_profile", app_js)
         self.assertIn("input.form?.requestSubmit()", app_js)
+        self.assertIn("Copy citation", app_js)
+        self.assertIn("review_note_citation.text", app_js)
         self.assertIn("artifact-tree-lane", styles)
         self.assertIn("review-bulk-toolbar", styles)
         self.assertIn("sqlite-schema-panel", styles)
