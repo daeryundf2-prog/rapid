@@ -1103,14 +1103,41 @@ def create_app(job_store: RunJobStore | None = None, auth_token: str | None = No
             payload = query_docs_index(index_path, keyword, limit=limit)
         except (OSError, json.JSONDecodeError, ValueError) as exc:
             raise HTTPException(status_code=409, detail=str(exc))
-        for result in payload.get("results", []):
+        query_terms = [
+            str(term)
+            for term in ((payload.get("query") or {}).get("terms") if isinstance(payload.get("query"), dict) else keyword)
+            if str(term).strip()
+        ]
+        keyword_query = "".join(f"&keyword={quote(term)}" for term in query_terms)
+        for index, result in enumerate(payload.get("results", [])):
             if not isinstance(result, dict) or not result.get("path"):
                 continue
+            result["pointer"] = str(result.get("source_locator") or f"docs-index:/results/{index}")
+            result["source"] = "documents"
+            result["matched_keywords"] = [
+                item["term"]
+                for item in result.get("matched_terms", [])
+                if isinstance(item, dict) and item.get("term")
+            ]
             result["source_viewer_url"] = (
                 f"/api/runs/{run_id}/source-preview?path={quote(str(result['path']))}"
             )
             result["source_search_url"] = (
-                f"/api/runs/{run_id}/source-search?path={quote(str(result['path']))}"
+                f"/api/runs/{run_id}/source-search?path={quote(str(result['path']))}{keyword_query}"
+            )
+            result["source_viewer_action_profile"] = build_search_result_source_action_profile(
+                run_id,
+                {
+                    "path": result.get("path"),
+                    "pointer": result.get("pointer"),
+                    "source": "documents",
+                    "kind": result.get("kind") or "docs-index",
+                    "title": Path(str(result.get("path") or "")).name,
+                    "preview": result.get("verification_hint") or "",
+                    "matched_keywords": result.get("matched_keywords") or query_terms,
+                    "search_result_id": result.get("result_hash") or result.get("source_locator") or "",
+                },
+                index=index,
             )
         payload["run_id"] = run_id
         payload["api_profile"] = {
@@ -3571,6 +3598,12 @@ def build_search_result_source_action_profile(
     source = str(match.get("source") or "")
     quoted_path = quote(path)
     viewer_supported = bool(path)
+    matched_keywords = [
+        str(item)
+        for item in (match.get("matched_keywords") or [])
+        if str(item).strip()
+    ]
+    keyword_query = "".join(f"&keyword={quote(item)}" for item in matched_keywords)
     review_source = review_source_for_search_match(match)
     review_context = {
         "source": review_source,
@@ -3603,10 +3636,11 @@ def build_search_result_source_action_profile(
             "id": "search-inside-source",
             "label": "Search inside",
             "method": "GET",
-            "url": f"/api/runs/{quote(run_id)}/source-search?path={quoted_path}" if path else "",
+            "url": f"/api/runs/{quote(run_id)}/source-search?path={quoted_path}{keyword_query}" if path else "",
             "enabled": viewer_supported,
             "gui_binding": "viewer-current-file-search",
             "must_precede_report": True,
+            "keywords": matched_keywords,
         },
         {
             "id": "pin-compare",

@@ -3098,6 +3098,8 @@ function renderDocsIndexSidecarResults(payload) {
             title: fileName(result.path),
             source: "documents",
             kind: result.kind || "docs-index",
+            pointer: result.pointer || result.source_locator || `docs-index:/results/${index}`,
+            source_viewer_action_profile: result.source_viewer_action_profile,
             matched_keywords: (result.matched_terms || []).map((item) => item.term),
             preview: `docs-index score ${result.score || 0}; source viewer verification required`,
           };
@@ -3596,7 +3598,12 @@ function bindSearchResultButtons() {
         button.dataset.searchResultIndex,
       );
       if (button.dataset.focusFileSearch === "1") {
-        detailPanel.querySelector("#fileSearchForm input[name='keyword']")?.focus();
+        const input = detailPanel.querySelector("#fileSearchForm input[name='keyword']");
+        if (input && button.dataset.focusFileSearchKeywords) {
+          input.value = button.dataset.focusFileSearchKeywords;
+          input.form?.requestSubmit();
+        }
+        input?.focus();
       }
     });
   }
@@ -5206,7 +5213,8 @@ function renderSearchResultSourceActionControl(action, match, context, searchRes
     return sourceFileLink(match);
   }
   if (action.id === "search-inside-source") {
-    return `<button class="icon-action subtle" type="button" data-view-source-path="${escapeHtml(match.path || "")}" data-review-context="${escapeHtml(JSON.stringify(context || {}))}" data-search-result-index="${escapeHtml(searchResultIndex ?? "")}" data-focus-file-search="1">Search inside</button>`;
+    const keywords = (action.keywords || match.matched_keywords || []).join(", ");
+    return `<button class="icon-action subtle" type="button" data-view-source-path="${escapeHtml(match.path || "")}" data-review-context="${escapeHtml(JSON.stringify(context || {}))}" data-search-result-index="${escapeHtml(searchResultIndex ?? "")}" data-focus-file-search="1" data-focus-file-search-keywords="${escapeHtml(keywords)}">Search inside</button>`;
   }
   if (action.id === "pin-compare") {
     return compareButton(compareItemFromMatch(match, context));

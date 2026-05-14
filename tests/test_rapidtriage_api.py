@@ -1261,6 +1261,19 @@ class RapidTriageApiTests(unittest.TestCase):
             self.assertGreaterEqual(docs_index_payload["summary"]["matched_document_count"], 1)
             self.assertFalse(docs_index_payload["summary"]["stores_full_text"])
             self.assertIn("source_viewer_url", docs_index_payload["results"][0])
+            self.assertIn("keyword=password", docs_index_payload["results"][0]["source_search_url"])
+            self.assertEqual(docs_index_payload["results"][0]["source"], "documents")
+            self.assertTrue(docs_index_payload["results"][0]["pointer"].startswith("docs-index://document/"))
+            self.assertEqual(
+                docs_index_payload["results"][0]["source_viewer_action_profile"]["profile_version"],
+                "search-result-source-viewer-actions-v1",
+            )
+            docs_index_actions = {
+                action["id"]: action
+                for action in docs_index_payload["results"][0]["source_viewer_action_profile"]["actions"]
+            }
+            self.assertIn("keyword=password", docs_index_actions["search-inside-source"]["url"])
+            self.assertEqual(docs_index_actions["search-inside-source"]["keywords"], ["password"])
             output_preview_response = client.get(f"/api/runs/{run_id}/outputs/report/preview")
             self.assertEqual(output_preview_response.status_code, 200, output_preview_response.text)
             output_preview = output_preview_response.json()
