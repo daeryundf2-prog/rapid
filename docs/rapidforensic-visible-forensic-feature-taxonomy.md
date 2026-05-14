@@ -1343,7 +1343,7 @@ SQLite 기반 아티팩트는 브라우저 History, 카카오톡, Sticky Notes, 
 | 사용자 노출 기능 | capability id | 구현 내용 | 남은 상용급 보강 |
 | --- | --- | --- | --- |
 | Docs-index hit citation/review 연결 | `docs-index-citation-review` | `docs-index-review-note-citation-v1`, matched terms, result hash, `bookmark-source-mapping-required` blocker를 capability registry와 GUI catalog에서 검색 가능하게 했다. | source viewer E2E clickthrough, 원본 문서 재검색 hit parity |
-| 현재 파일 검색 cursor/resume | `current-file-search-resume` | `source-search-full-cursor-scan-contract-v1`, SQLite/file resume token, GUI continue 버튼을 기능 목록에서 직접 찾을 수 있게 했다. | 100k/1M/10M row runtime, resume cursor 반복 E2E |
+| 현재 파일 검색 cursor/resume | `current-file-search-resume` | `source-search-full-cursor-scan-contract-v1`, SQLite/file resume token, GUI continue 버튼, `document_extraction_limits`를 기능 목록에서 직접 찾을 수 있게 했다. | 100k/1M/10M row runtime, resume cursor 반복 E2E |
 | SQLite WAL/SHM sidecar preview | `sqlite-sidecar-wal-preview` | `/source-sqlite-wal-preview`, `sqlite-sidecar-preview`, `wal-shm-journal-sidecar-status`를 SQLite viewer 기능으로 독립 노출했다. | trusted WAL parser diff, deleted-row recovery, checkpoint 전후 fixture |
 
 검증 포인트:
@@ -1358,14 +1358,16 @@ SQLite 기반 아티팩트는 브라우저 History, 카카오톡, Sticky Notes, 
 
 | 사용자 노출 기능 | 연결 API/UI | 구현 내용 | 남은 상용급 보강 |
 | --- | --- | --- | --- |
-| 상용급 readiness gate | `/api/commercial-readiness`, `commercial-readiness-panel` | readiness score, validated/commercial gate pass/fail, claim allowed 여부, 다음 validated gate 항목을 GUI에서 표시한다. | validation package attachment flow와 per-run evidence diff를 더 깊게 연결 |
+| 상용급 readiness gate | `/api/commercial-readiness`, `commercial-readiness-panel` | readiness score, validated/commercial gate pass/fail, claim allowed 여부, 다음 validated/commercial gate 항목을 GUI에서 표시한다. | validation package attachment flow와 per-run evidence diff를 더 깊게 연결 |
 | Overclaim 방지 | `commercial_claim_allowed=false`, `release_claim` | GUI 패널이 상용급 claim 금지 문구를 그대로 보여주고, focused item의 남은 검증 gap을 표시한다. | 독립 검증/외부 trusted diff 증거가 들어왔을 때 자동 재산출 E2E |
 | Capability registry 노출 | `commercial-readiness-gate`, `commercial-readiness-gui-gate-v1` | feature catalog/capability chip에서 readiness gate 자체를 검색 가능한 기능으로 등록했다. | release dashboard와 CI artifact upload 연동 |
+| 내부 검증 패키지 분리 표시 | `internal-known-answer`, `validation_package`, `mapped evidence` | GUI가 `include_internal_validation=true`로 1~120 내부 known-answer package를 붙여 validated maturity를 표시하되, commercial-grade gate는 별도 0/120 상태로 유지한다. | 외부 E01/trusted-tool diff/독립 검증 package를 붙인 실제 commercial gate 검증 |
 
 검증 포인트:
 
 1. `tests/test_rapidtriage_api.py::test_commercial_readiness_api_returns_compact_gui_gate`가 compact API가 claim allowed=false, gate counts, focused validated items를 반환하는지 검증한다.
-2. `tests/test_rapidtriage_api.py::test_web_console_exposes_maestro_style_artifact_workbench`가 GUI JS/CSS에 readiness panel과 API 호출이 남아 있는지 검증한다.
+2. `tests/test_rapidtriage_api.py::test_commercial_readiness_api_can_attach_internal_validation_package`가 내부 1~120 known-answer package를 붙였을 때 validated 120/120과 commercial 0/120이 분리 표시되는지 검증한다.
+3. `tests/test_rapidtriage_api.py::test_web_console_exposes_maestro_style_artifact_workbench`가 GUI JS/CSS에 readiness panel과 internal validation API 호출이 남아 있는지 검증한다.
 3. 이 기능은 상용급 달성을 의미하지 않는다. 오히려 현재 상용급이 아님을 사용자가 GUI에서 빠르게 확인하도록 하는 안전장치다.
 
 ## 46. 2026-05-14 구현 반영: PDF compressed stream 대용량 방어

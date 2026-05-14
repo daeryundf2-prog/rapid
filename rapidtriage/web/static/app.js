@@ -716,7 +716,7 @@ async function loadCommercialReadinessSummary() {
   if (!panel) return;
   panel.innerHTML = '<p class="empty-state">Loading commercial readiness gate...</p>';
   try {
-    const payload = await api("/api/commercial-readiness?next_gate=validated&limit=8");
+    const payload = await api("/api/commercial-readiness?next_gate=commercial_grade&limit=8&include_internal_validation=true");
     panel.innerHTML = renderCommercialReadinessSummary(payload);
   } catch (error) {
     panel.innerHTML = `<p class="empty-state">${escapeHtml(error.message)}</p>`;
@@ -728,6 +728,8 @@ function renderCommercialReadinessSummary(payload) {
   const validated = gates.validated || {};
   const commercial = gates.commercial_grade || {};
   const focused = Array.isArray(payload?.focused_items) ? payload.focused_items : [];
+  const validationPackage = payload?.validation_package || {};
+  const evidenceSummary = payload?.validation_evidence_summary || {};
   const claimClass = payload?.commercial_claim_allowed ? "commercial-ready" : "not-commercial-ready";
   return `
     <div class="commercial-readiness-card ${claimClass}">
@@ -744,6 +746,10 @@ function renderCommercialReadinessSummary(payload) {
         <dd>${escapeHtml(commercial.passed || 0)} passed / ${escapeHtml(commercial.failed || 0)} remaining</dd>
         <dt>Claim allowed</dt>
         <dd>${escapeHtml(payload?.commercial_claim_allowed ? "yes" : "no")}</dd>
+        <dt>Validation package</dt>
+        <dd>${escapeHtml(validationPackage.attached ? validationPackage.mode || "attached" : "not attached")}</dd>
+        <dt>Mapped evidence</dt>
+        <dd>${escapeHtml(evidenceSummary.items_with_passed_validation_evidence || 0)} / ${escapeHtml(payload?.item_count || 0)}</dd>
       </dl>
       ${focused.length ? `
         <ul class="commercial-readiness-list">
@@ -755,7 +761,8 @@ function renderCommercialReadinessSummary(payload) {
           `).join("")}
         </ul>
       ` : `<p class="help-text">No focused gate items returned. Re-run the CLI gate when validation evidence changes.</p>`}
-      <p class="help-text">GUI 기능이 보이더라도 trusted diff, known-answer fixture, independent validation이 없으면 상용급 완료로 표시하지 않습니다.</p>
+      <p class="help-text">${escapeHtml(validationPackage.warning || "GUI 기능이 보이더라도 trusted diff, known-answer fixture, independent validation이 없으면 상용급 완료로 표시하지 않습니다.")}</p>
+      <p class="help-text">현재 패널은 내부 fixture 검증과 commercial-grade gate를 분리해서 보여줍니다. validated가 통과되어도 commercial이 0이면 상용급 완료가 아닙니다.</p>
     </div>
   `;
 }

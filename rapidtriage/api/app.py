@@ -60,6 +60,12 @@ from ..core.sqlite_wal import SqliteWalPreviewError, build_sqlite_wal_preview
 from ..core.visible_capabilities import build_visible_capability_response
 
 
+DEFAULT_INTERNAL_VALIDATION_PACKAGE = (
+    Path(__file__).resolve().parents[2]
+    / "docs"
+    / "validation"
+    / "rapidtriage-core-forensics-001-120-known-answer.json"
+)
 SQLITE_PREVIEW_EXTS = {".sqlite", ".sqlite3", ".db", ".db3"}
 SQLITE_HEADER = b"SQLite format 3\x00"
 SQLITE_PREVIEW_TABLE_LIMIT = 8
@@ -460,14 +466,30 @@ def create_app(job_store: RunJobStore | None = None, auth_token: str | None = No
 
     @api.get("/api/commercial-readiness")
     def commercial_readiness(
-        next_gate: str = Query("validated", min_length=1, max_length=64),
+        next_gate: str = Query("commercial_grade", min_length=1, max_length=64),
         limit: int = Query(8, ge=1, le=50),
+        validation_package: Optional[str] = Query(default=None, max_length=4096),
+        include_internal_validation: bool = Query(False),
     ) -> Dict[str, object]:
         try:
-            report = build_commercial_readiness_report(uplift_targets=limit, uplift_batch_size=5)
+            validation_package_path = resolve_commercial_readiness_validation_package(
+                validation_package,
+                include_internal_validation=include_internal_validation,
+            )
+            report = build_commercial_readiness_report(
+                validation_package_path=validation_package_path,
+                uplift_targets=limit,
+                uplift_batch_size=5,
+            )
         except CommercialReadinessError as exc:
             raise HTTPException(status_code=500, detail=str(exc))
-        return build_commercial_readiness_api_payload(report, next_gate=next_gate, limit=limit)
+        return build_commercial_readiness_api_payload(
+            report,
+            next_gate=next_gate,
+            limit=limit,
+            validation_package_path=validation_package_path,
+            include_internal_validation=include_internal_validation,
+        )
 
     @api.get("/api/doctor")
     def doctor() -> Dict[str, object]:
@@ -2479,6 +2501,8 @@ def build_commercial_readiness_api_payload(
     *,
     next_gate: str,
     limit: int,
+    validation_package_path: Path | None = None,
+    include_internal_validation: bool = False,
 ) -> Dict[str, object]:
     maturity_summary = report.get("maturity_gate_summary") if isinstance(report.get("maturity_gate_summary"), Mapping) else {}
     gate_counts = maturity_summary.get("gate_counts") if isinstance(maturity_summary.get("gate_counts"), Mapping) else {}
@@ -2512,7 +2536,12 @@ def build_commercial_readiness_api_payload(
             "profile_version": "commercial-readiness-gui-gate-v1",
             "gui_binding": "commercial-readiness-gate",
             "claim_policy": "do-not-claim-commercial-parity-when-commercial_claim_allowed-is-false",
-            "default_next_gate": "validated",
+            "default_next_gate": "commercial_grade",
+            "validation_package_mode": commercial_readiness_validation_package_mode(
+                validation_package_path,
+                include_internal_validation=include_internal_validation,
+            ),
+            "internal_validation_package_available": DEFAULT_INTERNAL_VALIDATION_PACKAGE.is_file(),
         },
         "generated_at": report.get("generated_at"),
         "status": report.get("status"),
@@ -2525,6 +2554,7 @@ def build_commercial_readiness_api_payload(
         "maturity_gate_summary": maturity_summary,
         "gate_counts": gate_counts,
         "validation_evidence_summary": report.get("validation_evidence_summary", {}),
+        "validation_package": commercial_readiness_validation_package_profile(validation_package_path),
         "blocker_separation_summary": blocker_summary,
         "focused_next_gate": normalized_next_gate,
         "focused_limit": limit,
@@ -2551,6 +2581,84 @@ def build_commercial_readiness_api_payload(
             },
         ],
     }
+
+
+def resolve_commercial_readiness_validation_package(
+    value: str | None,
+    *,
+    include_internal_validation: bool,
+) -> Path | None:
+    raw = str(value or "").strip()
+    if include_internal_validation and not raw:
+        if DEFAULT_INTERNAL_VALIDATION_PACKAGE.is_file():
+            return DEFAULT_INTERNAL_VALIDATION_PACKAGE
+        raise CommercialReadinessError(
+            f"internal validation package is not present: {DEFAULT_INTERNAL_VALIDATION_PACKAGE}"
+        )
+    if not raw:
+        return None
+    if raw in {"internal", "default", "known-answer-001-120"}:
+        if DEFAULT_INTERNAL_VALIDATION_PACKAGE.is_file():
+            return DEFAULT_INTERNAL_VALIDATION_PACKAGE
+        raise CommercialReadinessError(
+            f"internal validation package is not present: {DEFAULT_INTERNAL_VALIDATION_PACKAGE}"
+        )
+    candidate = Path(raw).expanduser().resolve()
+    if candidate.suffix.lower() != ".json":
+        raise CommercialReadinessError("validation package must be a JSON file")
+    if not candidate.is_file():
+        raise CommercialReadinessError(f"validation package not found: {candidate}")
+    return candidate
+
+
+def commercial_readiness_validation_package_profile(path: Path | None) -> dict[str, object]:
+    if path is None:
+        return {
+            "attached": False,
+            "mode": "none",
+            "path": "",
+            "sha256": "",
+            "warning": "No validation package is attached; validated maturity remains open.",
+        }
+    try:
+        stat = path.stat()
+        with path.open("rb") as handle:
+            digest = hashlib.sha256(handle.read()).hexdigest()
+    except OSError as exc:
+        return {
+            "attached": False,
+            "mode": "unreadable",
+            "path": str(path),
+            "sha256": "",
+            "warning": f"Validation package could not be read: {exc}",
+        }
+    return {
+        "attached": True,
+        "mode": "internal-known-answer" if path == DEFAULT_INTERNAL_VALIDATION_PACKAGE else "custom",
+        "path": str(path),
+        "name": path.name,
+        "size_bytes": stat.st_size,
+        "sha256": digest,
+        "warning": (
+            "Internal fixture validation can satisfy validated maturity only; it does not allow commercial-grade claims."
+            if path == DEFAULT_INTERNAL_VALIDATION_PACKAGE
+            else "Custom validation package is attached; commercial-grade still depends on trusted diffs and blocker removal."
+        ),
+    }
+
+
+def commercial_readiness_validation_package_mode(
+    path: Path | None,
+    *,
+    include_internal_validation: bool,
+) -> str:
+    if path == DEFAULT_INTERNAL_VALIDATION_PACKAGE:
+        return "internal-known-answer"
+    if path is not None:
+        return "custom"
+    if include_internal_validation:
+        return "internal-requested-missing"
+    return "none"
 
 
 def commercial_readiness_focus_item(item: Mapping[str, object]) -> Dict[str, object]:
@@ -8673,7 +8781,7 @@ def build_source_search(
     mime_type = mimetypes.guess_type(source_path.name)[0] or "application/octet-stream"
     matches: list[dict[str, object]] = []
     truncated = False
-    search_diagnostics: dict[str, object] = {}
+    search_diagnostics: dict[str, object] = {"max_plain_text_bytes": max_plain_text_bytes}
     searchable = True
     message = "File search completed."
 
@@ -8790,6 +8898,7 @@ def build_source_search(
             searchable = False
             message = f"Large file search failed: {exc}"
 
+    search_diagnostics.setdefault("max_plain_text_bytes", max_plain_text_bytes)
     return {
         "command": "source-search",
         "path": str(source_path),
@@ -8845,6 +8954,13 @@ def source_search_profile(
         "large_data_controls": {
             "result_limit": limit,
             "truncated": truncated,
+            "document_extraction_limits": {
+                "max_plain_text_bytes": max_plain_text_bytes_for_profile(diagnostics),
+                "max_archive_member_bytes": max_plain_text_bytes_for_profile(diagnostics),
+                "max_archive_total_bytes": max_plain_text_bytes_for_profile(diagnostics),
+                "max_pdf_stream_decompressed_bytes": max_plain_text_bytes_for_profile(diagnostics),
+                "limits_visible_to_gui": True,
+            },
             "sqlite_row_scan_limit": diagnostics.get("sqlite_row_scan_limit"),
             "sqlite_scanned_row_count": diagnostics.get("sqlite_scanned_row_count"),
             "sqlite_scan_truncated": diagnostics.get("sqlite_scan_truncated"),
@@ -8883,6 +8999,11 @@ def source_search_profile(
             "source-search-trusted-locator-diff-required",
         ],
     }
+
+
+def max_plain_text_bytes_for_profile(diagnostics: Mapping[str, object]) -> int:
+    value = diagnostics.get("max_plain_text_bytes")
+    return optional_int_for_api(value) or 50_000_000
 
 
 def enrich_source_search_matches(source_path: Path, matches: Sequence[dict[str, object]]) -> list[dict[str, object]]:

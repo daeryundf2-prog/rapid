@@ -452,6 +452,10 @@ class RapidTriageApiTests(unittest.TestCase):
         self.assertFalse(payload["searchable"])
         self.assertEqual(payload["summary"]["match_count"], 0)
         self.assertIn("size limit", payload["message"])
+        limits = payload["source_search_profile"]["large_data_controls"]["document_extraction_limits"]
+        self.assertEqual(limits["max_archive_member_bytes"], 1024)
+        self.assertEqual(limits["max_archive_total_bytes"], 1024)
+        self.assertTrue(limits["limits_visible_to_gui"])
 
     def test_source_search_rejects_pdf_stream_that_expands_past_limit(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
@@ -685,7 +689,9 @@ class RapidTriageApiTests(unittest.TestCase):
         self.assertIn("renderCaseReadinessDashboard(payload)", app_js)
         self.assertIn("case-readiness-dashboard", app_js)
         self.assertIn("loadCommercialReadinessSummary", app_js)
-        self.assertIn("/api/commercial-readiness?next_gate=validated&limit=8", app_js)
+        self.assertIn("/api/commercial-readiness?next_gate=commercial_grade&limit=8&include_internal_validation=true", app_js)
+        self.assertIn("Validation package", app_js)
+        self.assertIn("Mapped evidence", app_js)
         self.assertIn("commercial-readiness-panel", app_js)
         self.assertIn("Commercial readiness gate", app_js)
         self.assertIn("globalCaseSearchForm", app_js)
@@ -882,6 +888,26 @@ class RapidTriageApiTests(unittest.TestCase):
         self.assertTrue(payload["focused_items"])
         self.assertEqual(payload["focused_next_gate"], "validated")
         self.assertIn("workbench_actions", payload)
+        self.assertFalse(payload["validation_package"]["attached"])
+
+    def test_commercial_readiness_api_can_attach_internal_validation_package(self) -> None:
+        client = TestClient(create_app(RunJobStore()))
+
+        response = client.get(
+            "/api/commercial-readiness?next_gate=commercial_grade&limit=4&include_internal_validation=true"
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertFalse(payload["commercial_claim_allowed"])
+        self.assertEqual(payload["api_profile"]["validation_package_mode"], "internal-known-answer")
+        self.assertTrue(payload["validation_package"]["attached"])
+        self.assertEqual(payload["validation_package"]["mode"], "internal-known-answer")
+        self.assertEqual(payload["validation_evidence_summary"]["items_with_passed_validation_evidence"], 120)
+        self.assertEqual(payload["gate_counts"]["validated"]["passed"], 120)
+        self.assertEqual(payload["gate_counts"]["commercial_grade"]["passed"], 0)
+        self.assertEqual(payload["focused_next_gate"], "commercial_grade")
+        self.assertTrue(payload["focused_items"])
 
     def test_crash_report_api_lists_details_and_exports_local_bundle(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
