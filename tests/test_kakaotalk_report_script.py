@@ -27,8 +27,12 @@ ALGORITHM_SPEC.loader.exec_module(kakao_algorithm)
 class KakaoTalkReportScriptTests(unittest.TestCase):
     def test_raw_key_output_requires_lab_disclosure_gate(self) -> None:
         with patch.dict(os.environ, {}, clear=True):
-            with self.assertRaises(SystemExit):
+            with self.assertRaises(SystemExit) as raised:
                 kakao_algorithm.require_raw_key_disclosure_gate(True)
+            self.assertIn(kakao_algorithm.RAW_KEY_DISCLOSURE_ENV, str(raised.exception))
+            redacted_manifest = kakao_algorithm.raw_key_disclosure_manifest(False)
+            self.assertFalse(redacted_manifest["raw_keys_included"])
+            self.assertTrue(redacted_manifest["default_redaction"])
 
         with patch.dict(
             os.environ,
@@ -38,6 +42,10 @@ class KakaoTalkReportScriptTests(unittest.TestCase):
             clear=True,
         ):
             kakao_algorithm.require_raw_key_disclosure_gate(True)
+            disclosure_manifest = kakao_algorithm.raw_key_disclosure_manifest(True)
+            self.assertTrue(disclosure_manifest["gate_satisfied"])
+            self.assertTrue(disclosure_manifest["raw_keys_included"])
+            self.assertIn("lab-only", disclosure_manifest["warning"])
 
     def test_detect_source_kind_and_operator_notes_cover_common_inputs(self) -> None:
         self.assertEqual(kakao_report.detect_source_kind(Path("case.zip")), "zip")

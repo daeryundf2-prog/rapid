@@ -27,6 +27,10 @@ from rapidtriage.core.kakaotalk_algorithms import (  # noqa: E402
 
 RAW_KEY_DISCLOSURE_ENV = "RAPIDTRIAGE_KAKAO_ALLOW_RAW_KEYS"
 RAW_KEY_DISCLOSURE_VALUE = "I_UNDERSTAND_RAW_KEY_DISCLOSURE"
+RAW_KEY_DISCLOSURE_WARNING = (
+    "Raw KakaoTalk database keys are lab-only material. Keep default redaction on for support packages, "
+    "reports, and customer-facing logs."
+)
 
 
 def require_raw_key_disclosure_gate(include_raw: bool) -> None:
@@ -40,9 +44,27 @@ def require_raw_key_disclosure_gate(include_raw: bool) -> None:
     )
 
 
+def raw_key_disclosure_manifest(include_raw: bool) -> dict[str, object]:
+    gate_satisfied = os.environ.get(RAW_KEY_DISCLOSURE_ENV) == RAW_KEY_DISCLOSURE_VALUE
+    return {
+        "profile_version": "kakaotalk-raw-key-disclosure-gate-v1",
+        "include_raw_requested": bool(include_raw),
+        "raw_keys_included": bool(include_raw and gate_satisfied),
+        "gate_env_var": RAW_KEY_DISCLOSURE_ENV,
+        "gate_required_value": RAW_KEY_DISCLOSURE_VALUE if include_raw else None,
+        "gate_satisfied": bool(gate_satisfied) if include_raw else False,
+        "default_redaction": not bool(include_raw),
+        "warning": RAW_KEY_DISCLOSURE_WARNING,
+    }
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(
-        description="Standalone reference runner for the two KakaoTalk PC algorithms observed in the test samples."
+        description="Standalone reference runner for the two KakaoTalk PC algorithms observed in the test samples.",
+        epilog=(
+            f"Raw key output is disabled unless {RAW_KEY_DISCLOSURE_ENV}={RAW_KEY_DISCLOSURE_VALUE}. "
+            "Prefer redacted output for support and reports."
+        ),
     )
     sub = parser.add_subparsers(dest="command", required=True)
 
@@ -91,6 +113,7 @@ def main() -> int:
             "derived_key_count": len(candidates),
             "chatlog_key_count": sum(1 for item in candidates if item.get("role") == "chatlog"),
             "raw_keys_included": bool(args.include_raw),
+            "raw_key_disclosure": raw_key_disclosure_manifest(args.include_raw),
             "candidates": candidates if args.include_raw else [redact_postpatch_v2_derived_key(item) for item in candidates],
         }
         print(json.dumps(payload, ensure_ascii=False, indent=2))
@@ -115,6 +138,7 @@ def main() -> int:
             "profile_material": material.redacted_summary(),
             "database_key_sha256": __import__("hashlib").sha256(raw_key).hexdigest(),
             "database_key_length": len(raw_key),
+            "raw_key_disclosure": raw_key_disclosure_manifest(args.include_raw),
         }
         if args.edb_salt_hex:
             payload["sqlcipher_raw_key_with_salt_length"] = 48
