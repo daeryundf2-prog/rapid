@@ -920,14 +920,14 @@ GUI 표기 방식:
 
 | capability | 새 artifact row | 구현 내용 | 남은 상용급 보강 |
 | --- | --- | --- | --- |
-| `$LogFile` transaction | `ntfs-logfile-transaction-candidate` | `$LogFile` 파일을 찾아 `RSTR/RCRD/CHKD` signature, path string pivot, source hash, scan byte, mtime을 기록한다. | redo/undo record decoder, `$MFT/$UsnJrnl` timeline join, LogFileParser/MFTECmd diff |
+| `$LogFile` transaction | `ntfs-logfile-transaction-candidate` | `$LogFile` 파일을 찾아 `RSTR/RCRD/CHKD` signature, page 후보, path-centered create/rename/delete/security/write 힌트, timeline join 대상, source hash, scan byte, mtime을 기록한다. | full redo/undo record decoder, `$MFT/$UsnJrnl` timeline join 자동화, LogFileParser/MFTECmd diff |
 | ETW/ETL trace | `etl-trace-file` | `.etl` 파일을 이벤트 로그 collector에서 노출하고 provider hint, USB/WMI/network/execution family, URL/path/IP pivot을 bounded scan한다. | ETW event header decoder, provider manifest field rendering, tracerpt/WPT/Velociraptor diff |
 | USB 및 외장매체 연결 이력 | `usb-setupapi-device-install-candidate` | `setupapi.dev.log`에서 `USBSTOR`/`USB\\VID...` install-context line, timestamp hint, `usb_device_review_profile`의 family/vendor/product/revision/serial/hash/first-last timestamp hint를 추출한다. | USBSTOR/Enum USB/MountedDevices/drive-letter 상관, first/last connect 검증 |
 | Wi-Fi/네트워크 프로필 | `wifi-profile` | `ProgramData/Microsoft/Wlansvc/Profiles/Interfaces` XML에서 profile name, SSID, connection mode, auth/encryption, MAC randomization, hidden network, redacted credential-material presence, `wifi_profile_review_profile`을 정규화한다. | WLAN AutoConfig EVTX/ETL 연결 시각, NetworkList registry 상관, trusted parser diff |
 
 대용량/안전 설계:
 
-1. `$LogFile`은 8MB prefix scan으로 제한해 대형 파일에서 수집기가 멈추지 않도록 했다.
+1. `$LogFile`은 8MB prefix scan으로 제한해 대형 파일에서 수집기가 멈추지 않도록 했고, `ntfs_logfile_page_profile`과 `transaction_operation_hints`는 GUI에서 바로 필터링할 수 있는 bounded triage profile로만 제공한다.
 2. `.etl`은 4MB prefix scan으로 provider/string pivot만 추출한다. 구조 decode를 가장하지 않는다.
 3. `setupapi.dev.log`는 4MB scan과 최대 500개 install context entry 제한을 두고, device profile은 SetupAPI line에서 보이는 ID만 구조화한다.
 4. Wi-Fi profile은 XML 파일 단위 정규화라 대용량 부담이 작고, keyMaterial 원문은 노출하지 않으며 연결 여부 판정은 하지 않는다.
@@ -941,7 +941,7 @@ GUI 표기 방식:
 
 중요한 제한:
 
-1. `ntfs-logfile-transaction-candidate`는 transaction page 후보와 string pivot이다. 파일 생성/삭제/rename 결론을 단독으로 내리면 안 된다.
+1. `ntfs-logfile-transaction-candidate`는 transaction page 후보와 path-centered operation hint이다. 파일 생성/삭제/rename 결론을 단독으로 내리면 안 된다.
 2. `etl-trace-file`은 provider/string inventory다. ETW event payload를 구조적으로 해석하지 않는다.
 3. `usb-setupapi-device-install-candidate`는 설치 흔적이다. 실제 연결 시각/드라이브 문자/파일 복사 여부는 registry와 파일시스템 timeline 상관이 필요하다.
 4. `wifi-profile`은 저장된 네트워크 설정이다. 실제 접속 여부나 위치/물리적 존재 입증은 EventLog/ETL/NetworkList와 결합해야 한다.

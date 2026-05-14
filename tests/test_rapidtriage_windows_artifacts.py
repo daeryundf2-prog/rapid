@@ -159,7 +159,9 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
             root = Path(tmp_dir)
             logfile = root / "$LogFile"
             logfile.write_bytes(
-                b"RSTR" + b"\x00" * 512 + b"RCRD transaction C:\\Users\\alice\\Documents\\secret.docx"
+                b"RSTR"
+                + b"\x00" * 512
+                + b"RCRD FileDelete transaction C:\\Users\\alice\\Documents\\secret.docx"
             )
             output = root / "filesystem.json"
 
@@ -173,7 +175,23 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
             )
             self.assertEqual(artifact["details"]["source_format"], "ntfs-logfile")
             self.assertIn("ntfs-logfile-signatures-present", artifact["details"]["risk_flags"])
+            self.assertIn("ntfs-logfile-page-map-present", artifact["details"]["risk_flags"])
+            self.assertIn("ntfs-logfile-operation-hints-present", artifact["details"]["risk_flags"])
             self.assertIn("C:\\Users\\alice\\Documents\\secret.docx", artifact["details"]["path_candidates"])
+            self.assertEqual(
+                artifact["details"]["ntfs_logfile_page_profile"]["profile_version"],
+                "ntfs-logfile-page-profile-v1",
+            )
+            self.assertTrue(artifact["details"]["ntfs_logfile_page_profile"]["page_candidates"])
+            self.assertEqual(
+                artifact["details"]["transaction_operation_profile"]["profile_version"],
+                "ntfs-logfile-operation-profile-v1",
+            )
+            operation_hint = artifact["details"]["transaction_operation_hints"][0]
+            self.assertEqual(operation_hint["operation_candidate"], "delete")
+            self.assertEqual(operation_hint["path_candidates"], ["C:\\Users\\alice\\Documents\\secret.docx"])
+            self.assertEqual(operation_hint["nearest_log_signature"]["signature"], "log_record_page")
+            self.assertTrue(artifact["details"]["timeline_join_hints"]["join_ready"])
             self.assertFalse(artifact["details"]["commercial_grade_ready"])
 
     def test_windows_eventlog_collector_maps_etl_trace_files(self) -> None:

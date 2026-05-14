@@ -454,7 +454,22 @@ CAPABILITY_GROUPS: tuple[dict[str, Any], ...] = (
         "catalog_id": "windows-core",
         "label": "파일시스템 / 안티포렌식",
         "capabilities": (
-            {"id": "ntfs-logfile-transactions", "label": "$LogFile transaction", "status": "partial", "terms": ("$logfile", "transaction", "ntfs log", "redo", "undo", "ntfs-logfile-transaction-candidate")},
+            {
+                "id": "ntfs-logfile-transactions",
+                "label": "$LogFile transaction",
+                "status": "partial",
+                "terms": (
+                    "$logfile",
+                    "transaction",
+                    "ntfs log",
+                    "redo",
+                    "undo",
+                    "ntfs-logfile-transaction-candidate",
+                    "ntfs_logfile_page_profile",
+                    "transaction_operation_hints",
+                    "timeline_join_hints",
+                ),
+            },
             {"id": "recycle-bin-ir-map", "label": "Recycle Bin $I/$R 매핑", "status": "partial", "terms": ("recycle bin", "recycle-bin-entry", "$i", "$r", "deleted time", "original path")},
             {"id": "timestamp-stomping-detection", "label": "Time stomping 탐지", "status": "partial", "terms": ("timestamp", "stomping", "$sia", "$fna", "time mismatch", "timestamp_stomping_analysis", "mft-sia-fna-timestamp-mismatch")},
             {"id": "signature-mismatch-detection", "label": "확장자 변조 탐지", "status": "partial", "terms": ("signature mismatch", "file-signature-mismatch", "magic", "extension mismatch", "file header", "file_signature_profile")},

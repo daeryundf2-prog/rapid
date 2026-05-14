@@ -23,6 +23,16 @@ NTFS_LOGFILE_SIGNATURES = {
     "log_record_page": b"RCRD",
     "checkpoint_page": b"CHKD",
 }
+NTFS_LOGFILE_PAGE_SIZE_ASSUMPTION = 4096
+NTFS_LOGFILE_CONTEXT_WINDOW = 384
+NTFS_LOGFILE_HINT_LIMIT = 100
+NTFS_LOGFILE_OPERATION_KEYWORDS = {
+    "delete": ("filedelete", "file_delete", "delete", "unlink", "remove"),
+    "rename": ("filerename", "file_rename", "rename", "old_name", "new_name", "rename_old_name", "rename_new_name"),
+    "create": ("filecreate", "file_create", "create", "add_file", "allocate"),
+    "write": ("write", "overwrite", "extend", "truncate", "data_extend", "data_overwrite", "data_truncation"),
+    "security": ("security", "acl", "sacl", "dacl", "owner", "permission"),
+}
 SIGNATURE_SCAN_LIMIT = 4096
 SIGNATURE_SCAN_FILE_LIMIT = 5000
 USN_RECORD_SCAN_LIMIT = 5000
@@ -375,12 +385,18 @@ def build_ntfs_logfile_inventory_record(path: Path) -> ArtifactRecord:
     signature_scan = ntfs_logfile_signature_scan(blob)
     strings = extract_mixed_strings(blob)
     path_candidates = extract_path_candidates(strings)
+    page_profile = ntfs_logfile_page_profile(blob, signature_scan)
+    operation_hints = ntfs_logfile_operation_hints(blob, path_candidates, signature_scan)
+    operation_profile = ntfs_logfile_operation_profile(operation_hints, path_candidates)
     has_log_signatures = bool(signature_scan["signature_counts"])
     validation_checks = {
         "source_file_readable": bool(blob),
         "has_logfile_name": is_native_logfile_path(path),
         "has_ntfs_log_signatures": has_log_signatures,
         "bounded_scan_completed": len(blob) <= NTFS_LOGFILE_SCAN_LIMIT,
+        "transaction_page_profile_available": bool(page_profile["page_candidates"]),
+        "path_operation_hints_available": bool(operation_hints),
+        "timeline_join_hints_available": bool(path_candidates or operation_hints),
         "transaction_redo_undo_decoded": False,
         "trusted_logfile_parser_diff_available": False,
     }
@@ -404,9 +420,29 @@ def build_ntfs_logfile_inventory_record(path: Path) -> ArtifactRecord:
             "scan_bytes": len(blob),
             "signature_counts": signature_scan["signature_counts"],
             "signature_offsets": signature_scan["signature_offsets"],
+            "ntfs_logfile_page_profile": page_profile,
             "path_candidates": path_candidates[:50],
+            "transaction_operation_hints": operation_hints[:50],
+            "transaction_operation_profile": operation_profile,
+            "timeline_join_hints": {
+                "profile_version": "ntfs-logfile-timeline-join-hints-v1",
+                "candidate_sources": ["$MFT", "$UsnJrnl", "Recycle Bin", "LNK/JumpList", "ShellBags"],
+                "path_candidate_count": len(path_candidates),
+                "operation_hint_count": len(operation_hints),
+                "join_ready": bool(path_candidates or operation_hints),
+                "required_validation": [
+                    "mft-record-number-or-path-correlation",
+                    "usn-rename-delete-replay-correlation",
+                    "trusted-logfile-parser-diff",
+                ],
+            },
             "string_samples": strings[:50],
-            "risk_flags": ["ntfs-logfile-present"] + (["ntfs-logfile-signatures-present"] if has_log_signatures else []),
+            "risk_flags": [
+                "ntfs-logfile-present",
+                *(["ntfs-logfile-signatures-present"] if has_log_signatures else []),
+                *(["ntfs-logfile-page-map-present"] if page_profile["page_candidates"] else []),
+                *(["ntfs-logfile-operation-hints-present"] if operation_hints else []),
+            ],
             "validation_required": True,
             "validation_checks": validation_checks,
             "validation_guidance": (
@@ -440,6 +476,196 @@ def ntfs_logfile_signature_scan(blob: bytes) -> dict[str, object]:
     return {
         "signature_counts": [{"value": key, "count": len(value)} for key, value in sorted(signature_offsets.items())],
         "signature_offsets": signature_offsets,
+    }
+
+
+def ntfs_logfile_page_profile(blob: bytes, signature_scan: Mapping[str, object]) -> dict[str, object]:
+    signature_offsets = signature_scan.get("signature_offsets")
+    if not isinstance(signature_offsets, Mapping):
+        signature_offsets = {}
+    page_candidates: list[dict[str, object]] = []
+    seen_pages: set[tuple[str, int, int]] = set()
+    for signature_name, offsets in signature_offsets.items():
+        if not isinstance(offsets, Sequence) or isinstance(offsets, (str, bytes)):
+            continue
+        for offset_value in offsets:
+            try:
+                signature_offset = int(offset_value)
+            except (TypeError, ValueError):
+                continue
+            page_index = signature_offset // NTFS_LOGFILE_PAGE_SIZE_ASSUMPTION
+            page_offset = page_index * NTFS_LOGFILE_PAGE_SIZE_ASSUMPTION
+            seen_key = (str(signature_name), signature_offset, page_offset)
+            if seen_key in seen_pages:
+                continue
+            seen_pages.add(seen_key)
+            page_blob = blob[page_offset : page_offset + NTFS_LOGFILE_PAGE_SIZE_ASSUMPTION]
+            page_candidates.append(
+                {
+                    "signature": str(signature_name),
+                    "signature_offset": signature_offset,
+                    "page_index": page_index,
+                    "page_offset": page_offset,
+                    "page_local_offset": signature_offset - page_offset,
+                    "bounded_page_bytes": len(page_blob),
+                    "page_sha256": hashlib.sha256(page_blob).hexdigest() if page_blob else "",
+                    "page_header_hex": page_blob[:16].hex(),
+                }
+            )
+            if len(page_candidates) >= NTFS_LOGFILE_HINT_LIMIT:
+                break
+        if len(page_candidates) >= NTFS_LOGFILE_HINT_LIMIT:
+            break
+    page_candidates.sort(key=lambda item: int(item.get("signature_offset") or 0))
+    return {
+        "profile_version": "ntfs-logfile-page-profile-v1",
+        "page_size_assumption": NTFS_LOGFILE_PAGE_SIZE_ASSUMPTION,
+        "scan_bytes": len(blob),
+        "bounded_scan_limit": NTFS_LOGFILE_SCAN_LIMIT,
+        "page_count_scanned": (len(blob) + NTFS_LOGFILE_PAGE_SIZE_ASSUMPTION - 1) // NTFS_LOGFILE_PAGE_SIZE_ASSUMPTION,
+        "page_signature_counts": signature_scan.get("signature_counts", []),
+        "page_candidates": page_candidates[:50],
+        "limitations": [
+            "page-size-is-assumed-for-triage",
+            "restart-area-and-log-record-redo-undo-fields-not-decoded",
+            "validate-with-dedicated-logfile-parser-before-reporting",
+        ],
+    }
+
+
+def ntfs_logfile_operation_hints(
+    blob: bytes,
+    path_candidates: Sequence[str],
+    signature_scan: Mapping[str, object],
+) -> list[dict[str, object]]:
+    hints: list[dict[str, object]] = []
+    seen: set[tuple[int, str, str]] = set()
+    for candidate_path in path_candidates[:50]:
+        for encoding_name, needle in ntfs_logfile_path_needles(candidate_path):
+            cursor = 0
+            matches_for_path = 0
+            while len(hints) < NTFS_LOGFILE_HINT_LIMIT and matches_for_path < 5:
+                found = blob.find(needle, cursor)
+                if found < 0:
+                    break
+                cursor = found + max(1, len(needle))
+                matches_for_path += 1
+                context_blob = blob[
+                    max(0, found - NTFS_LOGFILE_CONTEXT_WINDOW) : min(
+                        len(blob), found + len(needle) + NTFS_LOGFILE_CONTEXT_WINDOW
+                    )
+                ]
+                context_preview = ntfs_logfile_context_preview(context_blob)
+                operation_candidate, keyword_hits = ntfs_logfile_classify_operation_context(context_preview)
+                seen_key = (found, candidate_path, operation_candidate)
+                if seen_key in seen:
+                    continue
+                seen.add(seen_key)
+                nearest_signature = nearest_ntfs_logfile_signature(signature_scan, found)
+                hints.append(
+                    {
+                        "hint_type": "path-centered-operation-context",
+                        "source_offset": found,
+                        "encoding": encoding_name,
+                        "operation_candidate": operation_candidate,
+                        "operation_keyword_hits": keyword_hits,
+                        "path_candidates": [candidate_path],
+                        "nearest_log_signature": nearest_signature,
+                        "page_index": found // NTFS_LOGFILE_PAGE_SIZE_ASSUMPTION,
+                        "page_offset": (found // NTFS_LOGFILE_PAGE_SIZE_ASSUMPTION)
+                        * NTFS_LOGFILE_PAGE_SIZE_ASSUMPTION,
+                        "confidence": ntfs_logfile_hint_confidence(operation_candidate, nearest_signature),
+                        "context_preview": context_preview[:500],
+                        "reportability": "triage",
+                    }
+                )
+    hints.sort(key=lambda item: int(item.get("source_offset") or 0))
+    return hints
+
+
+def ntfs_logfile_path_needles(path_value: str) -> list[tuple[str, bytes]]:
+    needles: list[tuple[str, bytes]] = []
+    ascii_needle = path_value.encode("ascii", errors="ignore")
+    if ascii_needle:
+        needles.append(("ascii", ascii_needle))
+    utf16_needle = path_value.encode("utf-16le", errors="ignore")
+    if utf16_needle:
+        needles.append(("utf-16le", utf16_needle))
+    return needles
+
+
+def ntfs_logfile_context_preview(blob: bytes) -> str:
+    strings = extract_mixed_strings(blob, limit=20)
+    if strings:
+        return " | ".join(strings)
+    return blob[:160].hex()
+
+
+def ntfs_logfile_classify_operation_context(context: str) -> tuple[str, list[str]]:
+    normalized = context.lower().replace("-", "_").replace(" ", "_")
+    hits: list[str] = []
+    selected = "unknown"
+    for operation, keywords in NTFS_LOGFILE_OPERATION_KEYWORDS.items():
+        matched = [keyword for keyword in keywords if keyword in normalized]
+        if not matched:
+            continue
+        hits.extend(f"{operation}:{keyword}" for keyword in matched)
+        if selected == "unknown":
+            selected = operation
+    return selected, hits[:20]
+
+
+def nearest_ntfs_logfile_signature(signature_scan: Mapping[str, object], offset: int) -> dict[str, object]:
+    signature_offsets = signature_scan.get("signature_offsets")
+    if not isinstance(signature_offsets, Mapping):
+        return {}
+    nearest: dict[str, object] = {}
+    nearest_distance: int | None = None
+    for signature_name, offsets in signature_offsets.items():
+        if not isinstance(offsets, Sequence) or isinstance(offsets, (str, bytes)):
+            continue
+        for offset_value in offsets:
+            try:
+                signature_offset = int(offset_value)
+            except (TypeError, ValueError):
+                continue
+            distance = abs(offset - signature_offset)
+            if nearest_distance is None or distance < nearest_distance:
+                nearest_distance = distance
+                nearest = {
+                    "signature": str(signature_name),
+                    "signature_offset": signature_offset,
+                    "distance_bytes": distance,
+                }
+    return nearest
+
+
+def ntfs_logfile_hint_confidence(operation_candidate: str, nearest_signature: Mapping[str, object]) -> str:
+    if operation_candidate != "unknown" and nearest_signature and int(nearest_signature.get("distance_bytes") or 0) <= 4096:
+        return "medium"
+    if operation_candidate != "unknown":
+        return "low-medium"
+    if nearest_signature:
+        return "low"
+    return "very-low"
+
+
+def ntfs_logfile_operation_profile(
+    operation_hints: Sequence[Mapping[str, object]],
+    path_candidates: Sequence[str],
+) -> dict[str, object]:
+    operation_counts = count_values(hint.get("operation_candidate") for hint in operation_hints)
+    confidence_counts = count_values(hint.get("confidence") for hint in operation_hints)
+    return {
+        "profile_version": "ntfs-logfile-operation-profile-v1",
+        "hint_count": len(operation_hints),
+        "operation_counts": operation_counts,
+        "confidence_counts": confidence_counts,
+        "path_candidate_count": len(path_candidates),
+        "has_path_correlated_operation_hints": bool(operation_hints),
+        "analysis_boundary": (
+            "Hints are derived from bounded path-centered context strings. They are not decoded NTFS redo/undo records."
+        ),
     }
 
 
