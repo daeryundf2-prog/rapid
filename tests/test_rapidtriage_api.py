@@ -32,6 +32,8 @@ if HAS_FASTAPI:
         build_preview_sandbox_trusted_diff,
         build_source_preview,
         build_source_search,
+        encode_source_search_file_resume_token,
+        encode_source_search_resume_token,
         build_sqlite_viewer_trusted_diff,
         build_ui_virtualization_trusted_diff,
         build_ui_virtualization_manifest,
@@ -120,6 +122,28 @@ class RapidTriageApiTests(unittest.TestCase):
         self.assertEqual(resumed["summary"]["match_count"], 2)
         self.assertTrue(resumed["summary"]["sqlite_resume_requested"])
         self.assertEqual([match["row_number"] for match in resumed["matches"]], [3, 4])
+
+    def test_source_search_sqlite_resume_token_requires_next_row_state(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            db_path = Path(temp) / "bad-resume.db"
+            connection = sqlite3.connect(db_path)
+            try:
+                connection.execute("CREATE TABLE notes(id INTEGER PRIMARY KEY, body TEXT)")
+                connection.execute("INSERT INTO notes(body) VALUES (?)", ("needle",))
+                connection.commit()
+            finally:
+                connection.close()
+            token = encode_source_search_resume_token(
+                source_path=db_path,
+                keywords=["needle"],
+                state={"table": "notes", "reason": "bad-test-token"},
+            )
+
+            with self.assertRaises(Exception) as raised:
+                build_source_search(db_path, ["needle"], sqlite_resume_token=token)
+
+        self.assertEqual(getattr(raised.exception, "status_code", None), 400)
+        self.assertEqual(getattr(raised.exception, "detail", ""), "sqlite_resume_token is missing resume state")
 
     def test_source_search_sqlite_default_row_scan_limit_prevents_full_db_sweep(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
@@ -239,6 +263,22 @@ class RapidTriageApiTests(unittest.TestCase):
         self.assertTrue(resumed["summary"]["file_resume_requested"])
         self.assertEqual(resumed["matches"][0]["offset_hex"], "0x00000033")
         self.assertIn("needle-after", resumed["matches"][0]["snippet"])
+
+    def test_source_search_file_resume_token_requires_next_offset_state(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            log_path = Path(temp) / "huge.log"
+            log_path.write_bytes(b"header\nneedle\n")
+            token = encode_source_search_file_resume_token(
+                source_path=log_path,
+                keywords=["needle"],
+                state={"reason": "bad-test-token"},
+            )
+
+            with self.assertRaises(Exception) as raised:
+                build_source_search(log_path, ["needle"], max_plain_text_bytes=4, file_resume_token=token)
+
+        self.assertEqual(getattr(raised.exception, "status_code", None), 400)
+        self.assertEqual(getattr(raised.exception, "detail", ""), "file_resume_token is missing resume state")
 
     def test_source_search_rejects_oversized_docx_member_before_expanding(self) -> None:
         with tempfile.TemporaryDirectory() as temp:

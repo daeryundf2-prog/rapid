@@ -11,6 +11,7 @@ import sqlite3
 import datetime as dt
 import wave
 import base64
+import binascii
 from email import policy
 from pathlib import Path
 from typing import Any, Dict, Mapping, MutableMapping, Optional, Sequence
@@ -8822,7 +8823,7 @@ def decode_source_search_resume_token(
     try:
         padded = token + ("=" * (-len(token) % 4))
         payload = json.loads(base64.urlsafe_b64decode(padded.encode("ascii")).decode("utf-8"))
-    except (ValueError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+    except (binascii.Error, ValueError, UnicodeDecodeError, json.JSONDecodeError) as exc:
         raise HTTPException(status_code=400, detail="invalid sqlite_resume_token") from exc
     if not isinstance(payload, Mapping) or payload.get("profile_version") != "source-search-sqlite-resume-v1":
         raise HTTPException(status_code=400, detail="invalid sqlite_resume_token profile")
@@ -8831,7 +8832,7 @@ def decode_source_search_resume_token(
     if payload.get("keywords_sha256") != source_search_keywords_digest(keywords):
         raise HTTPException(status_code=400, detail="sqlite_resume_token does not match keywords")
     state = payload.get("state")
-    if not isinstance(state, Mapping) or not state.get("table"):
+    if not isinstance(state, Mapping) or not state.get("table") or "next_row_number" not in state:
         raise HTTPException(status_code=400, detail="sqlite_resume_token is missing resume state")
     return {
         "table": str(state.get("table") or ""),
@@ -8881,7 +8882,7 @@ def decode_source_search_file_resume_token(
     try:
         padded = token + ("=" * (-len(token) % 4))
         payload = json.loads(base64.urlsafe_b64decode(padded.encode("ascii")).decode("utf-8"))
-    except (ValueError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+    except (binascii.Error, ValueError, UnicodeDecodeError, json.JSONDecodeError) as exc:
         raise HTTPException(status_code=400, detail="invalid file_resume_token") from exc
     if not isinstance(payload, Mapping) or payload.get("profile_version") != "source-search-file-resume-v1":
         raise HTTPException(status_code=400, detail="invalid file_resume_token profile")
@@ -8890,7 +8891,7 @@ def decode_source_search_file_resume_token(
     if payload.get("keywords_sha256") != source_search_keywords_digest(keywords):
         raise HTTPException(status_code=400, detail="file_resume_token does not match keywords")
     state = payload.get("state")
-    if not isinstance(state, Mapping):
+    if not isinstance(state, Mapping) or "next_offset" not in state:
         raise HTTPException(status_code=400, detail="file_resume_token is missing resume state")
     return {
         "next_offset": max(0, optional_int_for_api(state.get("next_offset")) or 0),
