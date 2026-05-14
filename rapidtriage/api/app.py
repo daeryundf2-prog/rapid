@@ -30,7 +30,7 @@ from ..core.case_report import build_case_report_markdown, case_report_export_pa
 from ..core.case_db import CaseDatabaseError, open_case_database
 from ..core.collect_plan import CollectPlanError, build_collect_plan, supported_collect_profiles
 from ..core.crash import export_crash_report_bundle, list_crash_reports, read_crash_report, write_crash_report
-from ..core.docs import SUPPORTED_DOC_EXTS, extract_text
+from ..core.docs import SUPPORTED_DOC_EXTS, TEXT_EXTS, extract_text
 from ..core.doctor import run_doctor
 from ..core.enterprise import build_enterprise_policy
 from ..core.evidence import identify_evidence, supported_evidence_formats
@@ -981,9 +981,17 @@ def create_app(job_store: RunJobStore | None = None, auth_token: str | None = No
         limit: int = Query(100, ge=1, le=500),
         context: int = Query(120, ge=20, le=500),
         sqlite_resume_token: Optional[str] = Query(default=None),
+        file_resume_token: Optional[str] = Query(default=None),
     ) -> Dict[str, object]:
         source_path = resolve_allowed_source_file(store, run_id, path)
-        return build_source_search(source_path, keyword, limit=limit, context=context, sqlite_resume_token=sqlite_resume_token)
+        return build_source_search(
+            source_path,
+            keyword,
+            limit=limit,
+            context=context,
+            sqlite_resume_token=sqlite_resume_token,
+            file_resume_token=file_resume_token,
+        )
 
     @api.get("/api/runs/{run_id}/timeline")
     def get_run_timeline(
@@ -8236,6 +8244,7 @@ def build_source_search(
     max_plain_text_bytes: int = 50_000_000,
     sqlite_row_scan_limit: int | None = SQLITE_SOURCE_SEARCH_ROW_SCAN_LIMIT,
     sqlite_resume_token: str | None = None,
+    file_resume_token: str | None = None,
 ) -> Dict[str, object]:
     normalized = [item.strip().lower() for item in keywords if item.strip()]
     if not normalized:
@@ -8283,14 +8292,41 @@ def build_source_search(
             message = f"SQLite search failed: {exc}"
     elif suffix in SUPPORTED_DOC_EXTS:
         try:
-            text = extract_text(
-                source_path,
-                suffix.lstrip("."),
-                max_input_bytes=max_plain_text_bytes,
-                max_archive_member_bytes=max_plain_text_bytes,
-                max_archive_total_bytes=max_plain_text_bytes,
-            )
-            matches = search_text_content(text, normalized, limit=limit, context=context)
+            kind = suffix.lstrip(".")
+            if file_resume_token or (stat.st_size > max_plain_text_bytes and kind in TEXT_EXTS):
+                file_resume_state = decode_source_search_file_resume_token(
+                    file_resume_token,
+                    source_path=source_path,
+                    keywords=normalized,
+                ) if file_resume_token else None
+                matches, truncated, search_diagnostics = search_large_byte_window_file(
+                    source_path,
+                    normalized,
+                    limit=limit,
+                    context=context,
+                    max_scan_bytes=max_plain_text_bytes,
+                    resume_state=file_resume_state,
+                )
+                if search_diagnostics.get("file_resume_state"):
+                    token = encode_source_search_file_resume_token(
+                        source_path=source_path,
+                        keywords=normalized,
+                        state=search_diagnostics["file_resume_state"],
+                    )
+                    search_diagnostics["file_resume_token"] = token
+                    search_diagnostics["file_resume_token_hash"] = hashlib.sha256(token.encode("utf-8")).hexdigest()
+                message = "Large text file byte-window search completed."
+            else:
+                text = extract_text(
+                    source_path,
+                    kind,
+                    max_input_bytes=max_plain_text_bytes,
+                    max_archive_member_bytes=max_plain_text_bytes,
+                    max_archive_total_bytes=max_plain_text_bytes,
+                )
+                matches = search_text_content(text, normalized, limit=limit, context=context)
+        except HTTPException:
+            raise
         except Exception as exc:
             searchable = False
             message = f"Text extraction failed: {exc}"
@@ -8308,8 +8344,32 @@ def build_source_search(
             searchable = False
             message = f"Text decoding failed: {exc}"
     else:
-        searchable = False
-        message = f"File is larger than the {max_plain_text_bytes} byte inline search limit."
+        try:
+            file_resume_state = decode_source_search_file_resume_token(
+                file_resume_token,
+                source_path=source_path,
+                keywords=normalized,
+            ) if file_resume_token else None
+            matches, truncated, search_diagnostics = search_large_byte_window_file(
+                source_path,
+                normalized,
+                limit=limit,
+                context=context,
+                max_scan_bytes=max_plain_text_bytes,
+                resume_state=file_resume_state,
+            )
+            if search_diagnostics.get("file_resume_state"):
+                token = encode_source_search_file_resume_token(
+                    source_path=source_path,
+                    keywords=normalized,
+                    state=search_diagnostics["file_resume_state"],
+                )
+                search_diagnostics["file_resume_token"] = token
+                search_diagnostics["file_resume_token_hash"] = hashlib.sha256(token.encode("utf-8")).hexdigest()
+            message = "Large file byte-window search completed."
+        except OSError as exc:
+            searchable = False
+            message = f"Large file search failed: {exc}"
 
     return {
         "command": "source-search",
@@ -8375,6 +8435,16 @@ def source_search_profile(
             "sqlite_resume_requested": diagnostics.get("sqlite_resume_requested"),
             "sqlite_resume_token": diagnostics.get("sqlite_resume_token"),
             "sqlite_resume_token_hash": diagnostics.get("sqlite_resume_token_hash"),
+            "file_search_mode": diagnostics.get("file_search_mode"),
+            "file_scan_start_offset": diagnostics.get("file_scan_start_offset"),
+            "file_scan_end_offset": diagnostics.get("file_scan_end_offset"),
+            "file_scanned_bytes": diagnostics.get("file_scanned_bytes"),
+            "file_scan_truncated": diagnostics.get("file_scan_truncated"),
+            "file_result_limit_reached": diagnostics.get("file_result_limit_reached"),
+            "file_resume_state": diagnostics.get("file_resume_state"),
+            "file_resume_requested": diagnostics.get("file_resume_requested"),
+            "file_resume_token": diagnostics.get("file_resume_token"),
+            "file_resume_token_hash": diagnostics.get("file_resume_token_hash"),
             "full_case_reindex_not_required": True,
             "sqlite_table_search_uses_limit": bool(diagnostics.get("sqlite_row_scan_limit")),
             "binary_search_is_bounded": True,
@@ -8786,6 +8856,51 @@ def source_search_keywords_digest(keywords: Sequence[str]) -> str:
     return hashlib.sha256(json.dumps(normalized, ensure_ascii=False).encode("utf-8")).hexdigest()
 
 
+def encode_source_search_file_resume_token(*, source_path: Path, keywords: Sequence[str], state: Mapping[str, object]) -> str:
+    safe_state = {
+        key: state[key]
+        for key in ("next_offset", "reason", "scanned_bytes", "match_count", "last_match_offset")
+        if key in state
+    }
+    payload = {
+        "profile_version": "source-search-file-resume-v1",
+        "source_path_sha256": source_search_source_digest(source_path),
+        "keywords_sha256": source_search_keywords_digest(keywords),
+        "state": safe_state,
+    }
+    raw = json.dumps(payload, ensure_ascii=False, sort_keys=True).encode("utf-8")
+    return base64.urlsafe_b64encode(raw).decode("ascii").rstrip("=")
+
+
+def decode_source_search_file_resume_token(
+    token: str,
+    *,
+    source_path: Path,
+    keywords: Sequence[str],
+) -> dict[str, object]:
+    try:
+        padded = token + ("=" * (-len(token) % 4))
+        payload = json.loads(base64.urlsafe_b64decode(padded.encode("ascii")).decode("utf-8"))
+    except (ValueError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise HTTPException(status_code=400, detail="invalid file_resume_token") from exc
+    if not isinstance(payload, Mapping) or payload.get("profile_version") != "source-search-file-resume-v1":
+        raise HTTPException(status_code=400, detail="invalid file_resume_token profile")
+    if payload.get("source_path_sha256") != source_search_source_digest(source_path):
+        raise HTTPException(status_code=400, detail="file_resume_token does not match source file")
+    if payload.get("keywords_sha256") != source_search_keywords_digest(keywords):
+        raise HTTPException(status_code=400, detail="file_resume_token does not match keywords")
+    state = payload.get("state")
+    if not isinstance(state, Mapping):
+        raise HTTPException(status_code=400, detail="file_resume_token is missing resume state")
+    return {
+        "next_offset": max(0, optional_int_for_api(state.get("next_offset")) or 0),
+        "reason": str(state.get("reason") or "resume-token"),
+        "scanned_bytes": optional_int_for_api(state.get("scanned_bytes")) or 0,
+        "match_count": optional_int_for_api(state.get("match_count")) or 0,
+        "last_match_offset": optional_int_for_api(state.get("last_match_offset")),
+    }
+
+
 def search_text_content(text: str, keywords: Sequence[str], *, limit: int, context: int) -> list[dict[str, object]]:
     matches: list[dict[str, object]] = []
     lowered = text.lower()
@@ -8875,6 +8990,96 @@ def search_binary_file(
             start = index + max(len(needle), 1)
     matches.sort(key=lambda item: int(item["offset"]))
     return matches[:limit], len(matches) >= limit
+
+
+def search_large_byte_window_file(
+    source_path: Path,
+    keywords: Sequence[str],
+    *,
+    limit: int,
+    context: int,
+    max_scan_bytes: int,
+    resume_state: Mapping[str, object] | None = None,
+) -> tuple[list[dict[str, object]], bool, dict[str, object]]:
+    stat = source_path.stat()
+    file_size = stat.st_size
+    start_offset = min(max(0, optional_int_for_api((resume_state or {}).get("next_offset")) or 0), file_size)
+    needles = [(keyword, keyword.encode("utf-8", errors="ignore").lower()) for keyword in keywords if keyword]
+    needles = [(keyword, needle) for keyword, needle in needles if needle]
+    overlap = min(max((len(needle) for _, needle in needles), default=1) + context, 1_048_576)
+    scan_bytes = max(1, int(max_scan_bytes))
+    scan_end_offset = min(file_size, start_offset + scan_bytes)
+    read_end_offset = min(file_size, scan_end_offset + overlap)
+    read_length = max(0, read_end_offset - start_offset)
+    matches: list[dict[str, object]] = []
+    result_limit_reached = False
+    last_match_offset: int | None = None
+    if read_length:
+        with source_path.open("rb") as handle:
+            handle.seek(start_offset)
+            data = handle.read(read_length)
+        lowered = data.lower()
+        local_start = 0
+        while len(matches) < limit:
+            found: tuple[int, str, bytes] | None = None
+            for keyword, needle in needles:
+                index = lowered.find(needle, local_start)
+                if index >= 0 and (found is None or index < found[0]):
+                    found = (index, keyword, needle)
+            if found is None:
+                break
+            index, keyword, needle = found
+            absolute_offset = start_offset + index
+            if absolute_offset >= scan_end_offset:
+                break
+            snippet_start = max(0, index - context)
+            snippet_end = min(len(data), index + len(needle) + context)
+            snippet = data[snippet_start:snippet_end]
+            matches.append(
+                {
+                    "keyword": keyword,
+                    "line": f"byte:{absolute_offset}",
+                    "offset": absolute_offset,
+                    "offset_hex": f"0x{absolute_offset:08x}",
+                    "byte_length": len(needle),
+                    "snippet": "".join(chr(byte) if 32 <= byte < 127 else "." for byte in snippet),
+                    "hex_snippet": " ".join(f"{byte:02x}" for byte in snippet[:256]),
+                }
+            )
+            last_match_offset = absolute_offset
+            local_start = index + max(len(needle), 1)
+        if len(matches) >= limit:
+            result_limit_reached = True
+    matches.sort(key=lambda item: int(item["offset"]))
+    next_resume_state: dict[str, object] | None = None
+    if result_limit_reached and last_match_offset is not None:
+        next_resume_state = {
+            "next_offset": min(file_size, last_match_offset + 1),
+            "reason": "result-limit",
+            "scanned_bytes": max(0, scan_end_offset - start_offset),
+            "match_count": len(matches),
+            "last_match_offset": last_match_offset,
+        }
+    elif scan_end_offset < file_size:
+        next_resume_state = {
+            "next_offset": scan_end_offset,
+            "reason": "byte-scan-limit",
+            "scanned_bytes": max(0, scan_end_offset - start_offset),
+            "match_count": len(matches),
+        }
+    truncated = bool(next_resume_state)
+    return matches[:limit], truncated, {
+        "file_search_mode": "bounded-byte-window",
+        "file_scan_start_offset": start_offset,
+        "file_scan_end_offset": scan_end_offset,
+        "file_scanned_bytes": max(0, scan_end_offset - start_offset),
+        "file_read_ahead_bytes": max(0, read_end_offset - scan_end_offset),
+        "file_size": file_size,
+        "file_scan_truncated": truncated,
+        "file_result_limit_reached": result_limit_reached,
+        "file_resume_state": next_resume_state,
+        "file_resume_requested": bool(resume_state),
+    }
 
 
 def snippet_around(text: str, index: int, length: int, *, context: int) -> str:

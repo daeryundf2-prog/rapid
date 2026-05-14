@@ -4224,17 +4224,18 @@ async function resumeCurrentFileSearch(button) {
   const status = detailPanel.querySelector("#fileSearchStatus");
   const path = button.dataset.fileSearchPath || "";
   const token = button.dataset.fileSearchResume || "";
+  const kind = button.dataset.fileSearchResumeKind || "sqlite";
   const keywords = String(button.dataset.fileSearchKeywords || "")
     .split(",")
     .map((item) => item.trim())
     .filter(Boolean);
   if (!path || !token || !keywords.length || !output) return;
   button.disabled = true;
-  if (status) status.textContent = "Continuing SQLite search from cursor...";
+  if (status) status.textContent = kind === "file" ? "Continuing large file search from byte cursor..." : "Continuing SQLite search from cursor...";
   try {
     const params = new URLSearchParams();
     params.set("path", path);
-    params.set("sqlite_resume_token", token);
+    params.set(kind === "file" ? "file_resume_token" : "sqlite_resume_token", token);
     for (const keyword of keywords) params.append("keyword", keyword);
     const payload = await api(`/api/runs/${selectedRunId}/source-search?${params.toString()}`);
     output.innerHTML = renderFileSearchResults(payload);
@@ -4251,16 +4252,22 @@ async function resumeCurrentFileSearch(button) {
 
 function renderFileSearchResults(payload) {
   const rows = payload.matches || [];
-  const resumeToken = payload.summary?.sqlite_resume_token || payload.source_search_profile?.large_data_controls?.sqlite_resume_token || "";
+  const controls = payload.source_search_profile?.large_data_controls || {};
+  const sqliteResumeToken = payload.summary?.sqlite_resume_token || controls.sqlite_resume_token || "";
+  const fileResumeToken = payload.summary?.file_resume_token || controls.file_resume_token || "";
+  const resumeKind = sqliteResumeToken ? "sqlite" : fileResumeToken ? "file" : "";
+  const resumeToken = sqliteResumeToken || fileResumeToken;
+  const resumeLabel = resumeKind === "file" ? "Continue large file search" : "Continue SQLite search";
   const resumeAction = resumeToken ? `
     <button
       class="secondary-button"
       type="button"
       data-file-search-resume="${escapeHtml(resumeToken)}"
+      data-file-search-resume-kind="${escapeHtml(resumeKind)}"
       data-file-search-path="${escapeHtml(payload.path || "")}"
       data-file-search-keywords="${escapeHtml((payload.keywords || []).join(","))}"
     >
-      Continue SQLite search
+      ${resumeLabel}
     </button>
   ` : "";
   if (!payload.searchable) {
@@ -4297,7 +4304,7 @@ function renderFileSearchResults(payload) {
         </article>
       `).join("")}
     </div>
-    ${payload.truncated ? '<p class="help-text">Results were capped for performance. Continue from the SQLite cursor or narrow the keyword if needed.</p>' : ""}
+    ${payload.truncated ? '<p class="help-text">Results were capped for performance. Continue from the available cursor or narrow the keyword if needed.</p>' : ""}
     ${resumeAction}
   `;
 }
@@ -4320,6 +4327,9 @@ function renderCurrentFileSearchProfile(payload) {
         <span>${controls.sqlite_scan_truncated ? "SQLite scan capped" : "SQLite scan not capped"}</span>
         ${controls.sqlite_resume_requested ? "<span>resumed from cursor</span>" : ""}
         ${controls.sqlite_resume_token ? "<span>resume token ready</span>" : ""}
+        ${controls.file_scan_truncated ? "<span>large file scan capped</span>" : ""}
+        ${controls.file_resume_requested ? "<span>file cursor resumed</span>" : ""}
+        ${controls.file_resume_token ? "<span>file resume token ready</span>" : ""}
       </div>
       <p class="help-text">${escapeHtml((profile.reportability_decision?.required_before_report || []).join(" · ") || "Copy locator/citation and verify hashes before report use.")}</p>
     </section>

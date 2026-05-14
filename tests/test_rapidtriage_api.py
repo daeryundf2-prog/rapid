@@ -214,6 +214,32 @@ class RapidTriageApiTests(unittest.TestCase):
         self.assertEqual(resumed_payload["matches"][0]["row_number"], 100_001)
         self.assertEqual(resumed_payload["matches"][0]["source_viewer_locator"]["offset"], 100_000)
 
+    def test_source_search_large_file_emits_resume_token_and_continues(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            log_path = Path(temp) / "huge.log"
+            log_path.write_bytes(b"header\n" + (b"x" * 44) + b"needle-after-window\n")
+
+            payload = build_source_search(log_path, ["needle"], limit=10, context=10, max_plain_text_bytes=32)
+            resume_token = payload["summary"]["file_resume_token"]
+            resumed = build_source_search(
+                log_path,
+                ["needle"],
+                limit=10,
+                context=10,
+                max_plain_text_bytes=32,
+                file_resume_token=resume_token,
+            )
+
+        self.assertEqual(payload["summary"]["match_count"], 0)
+        self.assertEqual(payload["summary"]["file_resume_state"]["reason"], "byte-scan-limit")
+        self.assertTrue(payload["summary"]["file_resume_token"])
+        self.assertEqual(len(payload["summary"]["file_resume_token_hash"]), 64)
+        self.assertTrue(payload["truncated"])
+        self.assertEqual(resumed["summary"]["match_count"], 1)
+        self.assertTrue(resumed["summary"]["file_resume_requested"])
+        self.assertEqual(resumed["matches"][0]["offset_hex"], "0x00000033")
+        self.assertIn("needle-after", resumed["matches"][0]["snippet"])
+
     def test_source_search_rejects_oversized_docx_member_before_expanding(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
             docx_path = Path(temp) / "oversized.docx"

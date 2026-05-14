@@ -576,6 +576,7 @@ GUI 표시 권장:
 | 현재 파일 내부 검색 | baseline+ | source viewer 안에서 노출 |
 | Artifact metadata 검색 | baseline+ | 결과 family filter |
 | SQLite row search | baseline++ | table/rowid locator, row-cap/result-limit resume token, GUI continue button |
+| 대용량 로그/바이너리 현재 파일 검색 | baseline+ | bounded byte-window search, byte-offset citation, `file_resume_token`, GUI continue button |
 | OCR text 검색 | partial | sidecar 여부 표시 |
 | AI/브라우저/메신저 검색 | partial+ | family tabs |
 | 결과 dedup | partial+ | duplicate collapse |

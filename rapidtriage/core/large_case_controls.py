@@ -15,6 +15,7 @@ def build_source_search_full_cursor_contract() -> dict[str, object]:
         "profile_version": "source-search-full-cursor-scan-contract-v1",
         "qc_prep_item_number": 56,
         "sqlite_row_cap_policy": "no-silent-fixed-row-cap",
+        "large_file_byte_window_policy": "bounded-read-with-resume-token",
         "required_diagnostics": [
             "sqlite_scanned_table_count",
             "sqlite_scanned_row_count",
@@ -22,12 +23,16 @@ def build_source_search_full_cursor_contract() -> dict[str, object]:
             "sqlite_result_limit_reached",
             "sqlite_resume_state",
             "sqlite_truncated_tables",
+            "file_scan_start_offset",
+            "file_scan_end_offset",
+            "file_resume_state",
         ],
         "result_limit_policy": {
             "limit_results_not_rows": True,
             "must_disclose_result_limit": True,
             "must_emit_resume_state_when_limit_reached": True,
             "api_resume_token_round_trip_supported": True,
+            "large_file_resume_token_round_trip_supported": True,
         },
         "commercial_claim_allowed": False,
         "commercial_blockers": [
