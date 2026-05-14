@@ -162,7 +162,7 @@ CAPABILITY_GROUPS: tuple[dict[str, Any], ...] = (
         "capabilities": (
             {"id": "etl-trace-parser", "label": "ETW/ETL trace", "status": "partial", "terms": ("etl", "etw", "trace", "wmi trace", "usb trace", "etl-trace-file")},
             {"id": "eventlog-clearing-alert", "label": "로그 삭제 High-Risk", "status": "partial", "terms": ("event id 1102", "event id 104", "log clear", "audit log cleared")},
-            {"id": "logon-session-timeline", "label": "로그온 세션 통합 뷰", "status": "inventory", "terms": ("4624", "4634", "4647", "logon session", "logoff")},
+            {"id": "logon-session-timeline", "label": "로그온 세션 통합 뷰", "status": "partial", "terms": ("4624", "4634", "4647", "logon session", "logoff", "eventlog-logon-session")},
         ),
     },
     {

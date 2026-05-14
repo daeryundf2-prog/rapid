@@ -42,6 +42,7 @@ ETL_URL_RE = re.compile(r"(?i)https?://[^\s\x00\"'<>]{4,300}")
 ETL_WINDOWS_PATH_RE = re.compile(r"(?i)(?:[a-z]:\\|\\\\|\\device\\)[^\x00\r\n\t\"'<>|]{4,260}")
 ETL_IP_RE = re.compile(r"\b(?:\d{1,3}\.){3}\d{1,3}\b")
 EVENT_EXPORT_HINTS = ("event", "evtx", "hayabusa", "chainsaw", "winevt", "winlog")
+LOGON_SESSION_EVENT_IDS = {"4624", "4634", "4647", "4672", "4778", "4779"}
 EVTX_FILE_SIGNATURE = b"ElfFile\x00"
 EVTX_CHUNK_SIGNATURE = b"ElfChnk\x00"
 EVTX_FILE_HEADER_SIZE = 4096
@@ -1088,6 +1089,7 @@ class WindowsEventLogProvider:
                 )
             elif suffix in ETL_SUFFIXES:
                 records.append(build_etl_trace_inventory_record(path))
+        records.extend(build_logon_session_records(root, records))
         records.extend(build_builtin_detection_records(records))
         yield from records
         summary = build_eventlog_summary(root, records)
@@ -5401,6 +5403,195 @@ def build_etl_trace_inventory_record(path: Path) -> ArtifactRecord:
             "recommended_parsers": ["tracerpt", "Windows Performance Toolkit", "Velociraptor Windows ETW artifacts"],
         },
     )
+
+
+def build_logon_session_records(root: Path, records: Sequence[ArtifactRecord]) -> list[ArtifactRecord]:
+    sessions: dict[str, dict[str, object]] = {}
+    for record in records:
+        if record.artifact_type != "eventlog-event" or not isinstance(record.details, Mapping):
+            continue
+        details = record.details
+        event_id = str(details.get("event_id") or "")
+        if event_id not in LOGON_SESSION_EVENT_IDS:
+            continue
+        key = logon_session_key(details)
+        if not key:
+            continue
+        session = sessions.setdefault(
+            key,
+            {
+                "session_key": key,
+                "events": [],
+                "source_files": set(),
+                "source_hashes": {},
+            },
+        )
+        events = session["events"]
+        if isinstance(events, list):
+            events.append(logon_session_event_ref(details))
+        source_files = session["source_files"]
+        if isinstance(source_files, set):
+            source_files.add(str(details.get("source_path") or record.path))
+        source_hashes = session["source_hashes"]
+        hashes = details.get("source_hashes") if isinstance(details.get("source_hashes"), Mapping) else {}
+        if isinstance(source_hashes, dict) and hashes.get("sha256"):
+            source_hashes[str(details.get("source_path") or record.path)] = str(hashes.get("sha256"))
+
+    session_records: list[ArtifactRecord] = []
+    for index, session in enumerate(sessions.values()):
+        events = sorted(
+            [event for event in session.get("events", []) if isinstance(event, Mapping)],
+            key=lambda item: str(item.get("timestamp") or ""),
+        )
+        if not events:
+            continue
+        first = events[0]
+        last = events[-1]
+        event_ids = [str(event.get("event_id") or "") for event in events]
+        started = any(event_id == "4624" for event_id in event_ids)
+        ended = any(event_id in {"4634", "4647"} for event_id in event_ids)
+        duration_seconds = logon_session_duration_seconds(first.get("timestamp"), last.get("timestamp")) if started and ended else None
+        user_name = first_nonempty(event.get("user_name") for event in events)
+        logon_type = first_nonempty(event.get("logon_type") for event in events)
+        source_ip = first_nonempty(event.get("source_ip") for event in events)
+        risk_flags = logon_session_risk_flags(logon_type, source_ip, event_ids)
+        validation_checks = {
+            "has_logon_event": started,
+            "has_logoff_event": ended,
+            "has_logon_id_or_fallback_key": bool(session.get("session_key")),
+            "session_duration_available": duration_seconds is not None,
+            "cross_artifact_correlation_available": False,
+        }
+        session_records.append(
+            ArtifactRecord(
+                provider=WindowsEventLogProvider.name,
+                artifact_type="eventlog-logon-session",
+                path=str(root.resolve()),
+                supported=True,
+                details={
+                    "parser": "windows-eventlog-logon-session-builder",
+                    "parser_version": PARSER_VERSION,
+                    "coverage_status": "logon-events-correlated-by-logon-id-or-pivots",
+                    "reportability": "triage",
+                    "source_path": str(root.resolve()),
+                    "source_format": "eventlog-session-correlation",
+                    "source_index": index,
+                    "source_files": sorted(session.get("source_files") or []),
+                    "source_hashes_by_file": dict(session.get("source_hashes") or {}),
+                    "session_key": session.get("session_key"),
+                    "session_status": "closed" if started and ended else ("open-or-not-observed" if started else "logoff-without-observed-logon"),
+                    "user_name": user_name,
+                    "target_domain_name": first_nonempty(event.get("target_domain_name") for event in events),
+                    "logon_type": logon_type,
+                    "source_ip": source_ip,
+                    "workstation_name": first_nonempty(event.get("workstation_name") for event in events),
+                    "computer": first_nonempty(event.get("computer") for event in events),
+                    "started_at": first.get("timestamp") if started else "",
+                    "ended_at": last.get("timestamp") if ended else "",
+                    "duration_seconds": duration_seconds,
+                    "event_ids": event_ids,
+                    "event_count": len(events),
+                    "events": events[:100],
+                    "timestamp": first.get("timestamp") or "",
+                    "timestamp_source": "first_correlated_logon_event",
+                    "risk_flags": risk_flags,
+                    "validation_required": True,
+                    "validation_checks": validation_checks,
+                    "validation_guidance": (
+                        "Logon sessions are correlated from observed authentication events. Validate missing logoff, "
+                        "filtered exports, reused logon IDs, and RDP/network context before final timeline conclusions."
+                    ),
+                    "commercial_grade_ready": False,
+                    "commercial_grade_blockers": [
+                        "complete-security-channel-export-required",
+                        "session-reuse-and-filtered-export-validation-required",
+                        "rdp-network-process-correlation-required",
+                    ],
+                },
+            )
+        )
+    return session_records
+
+
+def logon_session_key(details: Mapping[str, object]) -> str:
+    data = details.get("data") if isinstance(details.get("data"), Mapping) else {}
+    logon_id = first_data_text(data, "TargetLogonId", "LogonId", "SubjectLogonId")
+    computer = str(details.get("computer") or "")
+    if logon_id:
+        return f"{computer}|{logon_id}".strip("|")
+    return "|".join(
+        item
+        for item in (
+            computer,
+            str(details.get("user_name") or details.get("target_user_name") or details.get("subject_user_name") or ""),
+            str(details.get("source_ip") or ""),
+            str(details.get("logon_type") or ""),
+        )
+        if item
+    )
+
+
+def logon_session_event_ref(details: Mapping[str, object]) -> dict[str, object]:
+    data = details.get("data") if isinstance(details.get("data"), Mapping) else {}
+    return {
+        "timestamp": details.get("timestamp") or details.get("event_created_at") or "",
+        "event_id": details.get("event_id") or "",
+        "event_category": details.get("event_category") or "",
+        "record_id": details.get("record_id") or "",
+        "channel": details.get("channel") or "",
+        "computer": details.get("computer") or "",
+        "user_name": details.get("user_name") or details.get("target_user_name") or details.get("subject_user_name") or "",
+        "target_domain_name": details.get("target_domain_name") or "",
+        "logon_type": details.get("logon_type") or "",
+        "logon_id": first_data_text(data, "TargetLogonId", "LogonId", "SubjectLogonId"),
+        "source_ip": details.get("source_ip") or "",
+        "workstation_name": details.get("workstation_name") or "",
+        "source_path": details.get("source_path") or "",
+        "source_index": details.get("source_index") or 0,
+    }
+
+
+def logon_session_duration_seconds(start: object, end: object) -> int | None:
+    start_dt = parse_event_timestamp(start)
+    end_dt = parse_event_timestamp(end)
+    if start_dt is None or end_dt is None or end_dt < start_dt:
+        return None
+    return int((end_dt - start_dt).total_seconds())
+
+
+def parse_event_timestamp(value: object) -> dt.datetime | None:
+    text = str(value or "").strip()
+    if not text:
+        return None
+    if text.endswith("Z"):
+        text = f"{text[:-1]}+00:00"
+    try:
+        return dt.datetime.fromisoformat(text)
+    except ValueError:
+        return None
+
+
+def logon_session_risk_flags(logon_type: str, source_ip: str, event_ids: Sequence[str]) -> list[str]:
+    flags = ["logon-session"]
+    if logon_type == "10":
+        flags.append("rdp-logon-session")
+    elif logon_type == "3":
+        flags.append("network-logon-session")
+    if source_ip and source_ip not in {"-", "::1", "127.0.0.1"}:
+        flags.append("remote-source-ip")
+    if "4672" in event_ids:
+        flags.append("privileged-logon-session")
+    if "4778" in event_ids or "4779" in event_ids:
+        flags.append("rdp-reconnect-disconnect")
+    return flags
+
+
+def first_nonempty(values: Iterable[object]) -> str:
+    for value in values:
+        text = str(value or "").strip()
+        if text:
+            return text
+    return ""
 
 
 def build_builtin_detection_records(records: Sequence[ArtifactRecord]) -> list[ArtifactRecord]:

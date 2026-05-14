@@ -133,6 +133,65 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
             self.assertIn("https://example.test", artifact["details"]["url_candidates"])
             self.assertFalse(artifact["details"]["commercial_grade_ready"])
 
+    def test_windows_eventlog_collector_builds_logon_session_rows(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            security = root / "Windows" / "System32" / "winevt" / "Logs" / "Security.xml"
+            security.parent.mkdir(parents=True)
+            security.write_text(
+                """<Events>
+  <Event xmlns="http://schemas.microsoft.com/win/2004/08/events/event">
+    <System>
+      <Provider Name="Microsoft-Windows-Security-Auditing"/>
+      <EventID>4624</EventID>
+      <TimeCreated SystemTime="2026-05-01T10:00:00.0000000Z"/>
+      <EventRecordID>10</EventRecordID>
+      <Channel>Security</Channel>
+      <Computer>WIN11-CASE</Computer>
+    </System>
+    <EventData>
+      <Data Name="TargetUserName">alice</Data>
+      <Data Name="TargetDomainName">WORKGROUP</Data>
+      <Data Name="TargetLogonId">0x12345</Data>
+      <Data Name="LogonType">10</Data>
+      <Data Name="IpAddress">192.0.2.10</Data>
+      <Data Name="WorkstationName">LAPTOP-A</Data>
+    </EventData>
+  </Event>
+  <Event xmlns="http://schemas.microsoft.com/win/2004/08/events/event">
+    <System>
+      <Provider Name="Microsoft-Windows-Security-Auditing"/>
+      <EventID>4634</EventID>
+      <TimeCreated SystemTime="2026-05-01T10:30:00.0000000Z"/>
+      <EventRecordID>11</EventRecordID>
+      <Channel>Security</Channel>
+      <Computer>WIN11-CASE</Computer>
+    </System>
+    <EventData>
+      <Data Name="TargetUserName">alice</Data>
+      <Data Name="TargetDomainName">WORKGROUP</Data>
+      <Data Name="TargetLogonId">0x12345</Data>
+      <Data Name="LogonType">10</Data>
+    </EventData>
+  </Event>
+</Events>
+""",
+                encoding="utf-8",
+            )
+            output = root / "eventlog.json"
+
+            self.assertEqual(main(["artifacts", str(root), "--kind", "eventlog", "--output", str(output)]), 0)
+
+            payload = json.loads(output.read_text(encoding="utf-8"))
+            session = next(item for item in payload["artifacts"] if item["artifact_type"] == "eventlog-logon-session")
+            self.assertEqual(session["details"]["session_key"], "WIN11-CASE|0x12345")
+            self.assertEqual(session["details"]["session_status"], "closed")
+            self.assertEqual(session["details"]["user_name"], "alice")
+            self.assertEqual(session["details"]["logon_type"], "10")
+            self.assertEqual(session["details"]["duration_seconds"], 1800)
+            self.assertIn("rdp-logon-session", session["details"]["risk_flags"])
+            self.assertFalse(session["details"]["commercial_grade_ready"])
+
     def test_windows_system_collector_maps_setupapi_usb_and_wifi_profiles(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             root = Path(tmp_dir)

@@ -910,3 +910,24 @@ GUI 표기 방식:
 2. `etl-trace-file`은 provider/string inventory다. ETW event payload를 구조적으로 해석하지 않는다.
 3. `usb-setupapi-device-install-candidate`는 설치 흔적이다. 실제 연결 시각/드라이브 문자/파일 복사 여부는 registry와 파일시스템 timeline 상관이 필요하다.
 4. `wifi-profile`은 저장된 네트워크 설정이다. 실제 접속 여부나 위치/물리적 존재 입증은 EventLog/ETL/NetworkList와 결합해야 한다.
+
+## 28. 2026-05-14 구현 반영: 로그온 세션 통합 row 보강
+
+이전까지는 4624/4634/4647 이벤트가 각각의 이벤트 row로만 보였고, 분석관이 계정별 세션을 직접 머릿속에서 묶어야 했다. 이번 라운드에서는 EventLog collector가 인증 이벤트를 `TargetLogonId`/`LogonId` 또는 계정·소스 IP pivot 기준으로 묶어 `eventlog-logon-session` row를 추가한다.
+
+부분 구현으로 승격한 capability:
+
+| capability | 새 artifact row | 구현 내용 | 남은 상용급 보강 |
+| --- | --- | --- | --- |
+| 로그온 세션 통합 뷰 | `eventlog-logon-session` | 4624, 4634, 4647, 4672, 4778, 4779를 세션 key로 묶어 시작/종료, duration, 계정, logon type, source IP, risk flag를 만든다. | Security channel 전체 export 완전성 검증, logon ID 재사용 처리, RDP/network/process 상관 |
+
+검증 포인트:
+
+1. `tests/test_rapidtriage_windows_artifacts.py::test_windows_eventlog_collector_builds_logon_session_rows`가 4624/4634 fixture를 같은 세션으로 묶고 duration/risk flag를 검증한다.
+2. visible capability status는 `logon-session-timeline`을 `부분 구현`으로 올리고 실제 artifact type term인 `eventlog-logon-session`을 추가했다.
+
+중요한 제한:
+
+1. Security 로그가 필터링되었거나 일부만 export된 경우 `open-or-not-observed` 상태가 정상적으로 나올 수 있다.
+2. Windows의 LogonId는 재사용될 수 있으므로 장시간/다중 부팅 분석에서는 boot/session boundary와 함께 검증해야 한다.
+3. RDP 여부는 LogonType 10과 4778/4779 등 이벤트 기반 triage이며, 최종 판단은 TerminalServices 로그와 네트워크 흔적을 함께 봐야 한다.

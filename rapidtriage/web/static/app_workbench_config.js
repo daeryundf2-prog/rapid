@@ -866,9 +866,9 @@ const VISIBLE_FORENSIC_CAPABILITY_GROUPS = [
       {
         id: "logon-session-timeline",
         label: "로그온 세션 통합 뷰",
-        status: "inventory",
-        terms: ["4624", "4634", "4647", "logon session", "logoff"],
-        nextAction: "4624/4634/4647/4672를 logon ID 기준으로 묶어 계정별 세션 timeline 생성",
+        status: "partial",
+        terms: ["4624", "4634", "4647", "logon session", "logoff", "eventlog-logon-session"],
+        nextAction: "4624/4634/4647/4672를 logon ID 또는 pivot 기준으로 묶는다. 완전성 검증은 Security 전체 export와 RDP/network 상관 필요",
       },
     ],
   },
