@@ -655,18 +655,19 @@ def build_parser() -> argparse.ArgumentParser:
     known_good_index = sub.add_parser(
         "known-good-index",
         help="Build a reusable local known-good/NSRL hash index JSON",
-        description="Build a reusable local known-good/NSRL hash index JSON from TXT/CSV/JSON feeds or feed directories",
+        description="Build a reusable local known-good/NSRL hash index JSON from TXT/CSV/JSON/ZIP feeds or feed directories",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=textwrap.dedent(
             """\
             Examples:
               rapidtriage known-good-index ./NSRLFile.txt --output known-good-index.json
+              rapidtriage known-good-index ./NSRL-RDS.zip --output known-good-index.json
               rapidtriage known-good-index ./feeds-dir --output case-known-good-index.json --json
               rapidtriage files ./case --known-good-hash-feed ./known-good-index.json --hide-known-good
             """
         ),
     )
-    known_good_index.add_argument("feed", nargs="+", help="Known-good feed file or directory (TXT/CSV/JSON; repeatable)")
+    known_good_index.add_argument("feed", nargs="+", help="Known-good feed file or directory (TXT/CSV/JSON/ZIP; repeatable)")
     known_good_index.add_argument("--output", default="known-good-index.json", help="Normalized index JSON output path")
     known_good_index.add_argument("--json", action="store_true", help="Print index JSON after saving it")
 

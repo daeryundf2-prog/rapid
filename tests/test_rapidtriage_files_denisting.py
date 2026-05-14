@@ -4,6 +4,7 @@ import hashlib
 import json
 import tempfile
 import unittest
+import zipfile
 from pathlib import Path
 
 from rapidtriage.cli import main
@@ -224,6 +225,52 @@ class FileKnownGoodSuppressionTests(unittest.TestCase):
         self.assertEqual(index_payload["records"][0]["algorithm"], "sha256")
         self.assertEqual(payload["summary"]["known_good_match_count"], 1)
         self.assertEqual(payload["known_good_suppression_profile"]["feed_format_counts"]["json-index"], 1)
+
+    def test_known_good_index_cli_accepts_zipped_nsrl_rds_feed(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "case"
+            root.mkdir()
+            known_good = root / "windows-calc.exe"
+            known_good.write_bytes(b"MZstandard windows executable fixture\n")
+            body = known_good.read_bytes()
+            nsrl_text = (
+                "SHA-1,MD5,CRC32,FileName,FileSize,ProductCode,OpSystemCode,SpecialCode\n"
+                + ",".join(
+                    [
+                        hashlib.sha1(body).hexdigest(),
+                        hashlib.md5(body).hexdigest(),
+                        "00000000",
+                        "windows-calc.exe",
+                        str(len(body)),
+                        "12345",
+                        "362",
+                        "",
+                    ]
+                )
+                + "\n"
+            )
+            zip_feed = Path(tmp) / "NSRL-RDS.zip"
+            with zipfile.ZipFile(zip_feed, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+                archive.writestr("RDS/NSRLFile.txt", nsrl_text)
+            index_output = Path(tmp) / "known-good-index.json"
+
+            exit_code = main(["known-good-index", str(zip_feed), "--output", str(index_output)])
+            reset_hash_cache()
+            payload = run_files_scan(root, categories=["executables"], known_good_hash_feeds=[index_output])
+            index_payload = json.loads(index_output.read_text(encoding="utf-8"))
+
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(index_payload["summary"]["zip_feed_count"], 1)
+        self.assertEqual(index_payload["summary"]["zip_parsed_member_count"], 1)
+        self.assertEqual(index_payload["summary"]["nsrl_rds_feed_count"], 1)
+        self.assertEqual(index_payload["summary"]["nsrl_rds_row_count"], 1)
+        self.assertEqual(index_payload["feed_summaries"][0]["format"], "zip")
+        self.assertEqual(index_payload["feed_summaries"][0]["archive_members"][0]["member"], "RDS/NSRLFile.txt")
+        self.assertEqual(payload["summary"]["known_good_match_count"], 1)
+        match = payload["candidates"][0]["known_good_match"]
+        self.assertEqual(match["source_detail"]["archive_member"], "RDS/NSRLFile.txt")
+        self.assertEqual(match["source_detail"]["feed_container_format"], "zip")
+        self.assertEqual(match["source_detail"]["nsrl_file_name"], "windows-calc.exe")
 
     def test_unified_search_can_hide_known_good_file_hits(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

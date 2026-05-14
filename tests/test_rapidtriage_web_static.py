@@ -411,6 +411,7 @@ class RapidTriageWebStaticTests(unittest.TestCase):
         self.assertIn("data-testid=\"known-good-search-suppression\"", app_js)
         self.assertIn("signature_mismatch_candidates", app_js)
         self.assertIn("known-good-index", workbench_config)
+        self.assertIn("nsrl-rds.zip", workbench_config)
         self.assertIn("data-testid=\"file-triage-summary\"", app_js)
         self.assertIn(".file-triage-summary", styles)
         self.assertIn(".file-triage-badge", styles)

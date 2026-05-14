@@ -8,7 +8,8 @@ import json
 import os
 import re
 import stat as stat_module
-from pathlib import Path
+import zipfile
+from pathlib import Path, PurePosixPath
 from typing import Dict, Iterable, List, Mapping, Optional, Sequence, Tuple, Union
 
 from .input_root import InputRoot, resolve_input_root
@@ -39,7 +40,12 @@ EXECUTABLE_BITS = stat_module.S_IXUSR | stat_module.S_IXGRP | stat_module.S_IXOT
 DEFAULT_KNOWN_GOOD_MAX_HASH_BYTES = 64 * 1024 * 1024
 KNOWN_GOOD_HASH_ALGORITHMS = ("md5", "sha1", "sha256")
 HASH_TOKEN_RE = re.compile(r"\b[a-fA-F0-9]{32}\b|\b[a-fA-F0-9]{40}\b|\b[a-fA-F0-9]{64}\b")
-KNOWN_GOOD_FEED_FILE_SUFFIXES = {".txt", ".hash", ".hashes", ".md5", ".sha1", ".sha256", ".csv", ".json"}
+KNOWN_GOOD_FEED_TEXT_SUFFIXES = {".txt", ".hash", ".hashes", ".md5", ".sha1", ".sha256", ".csv", ".json"}
+KNOWN_GOOD_FEED_FILE_SUFFIXES = {*KNOWN_GOOD_FEED_TEXT_SUFFIXES, ".zip"}
+KNOWN_GOOD_ZIP_MAX_MEMBERS = 128
+KNOWN_GOOD_ZIP_MAX_MEMBER_BYTES = DEFAULT_KNOWN_GOOD_MAX_HASH_BYTES
+KNOWN_GOOD_ZIP_MAX_TOTAL_BYTES = DEFAULT_KNOWN_GOOD_MAX_HASH_BYTES * 4
+KNOWN_GOOD_ZIP_MAX_COMPRESSION_RATIO = 200
 KNOWN_GOOD_CSV_HASH_FIELDS = {
     "md5": "md5",
     "sha1": "sha1",
@@ -566,21 +572,29 @@ def load_known_good_hash_feeds(paths: Sequence[Union[str, Path]]) -> dict[str, o
         after_count = sum(len(values) for values in index.values())
         duplicate_count += duplicates_for_feed
         rejected_token_count += rejected_for_feed
-        feed_summaries.append(
-            {
-                "path": str(feed_path),
-                "format": parsed_feed["format"],
-                "header_fields": parsed_feed["header_fields"],
-                "hash_column_fields": parsed_feed["hash_column_fields"],
-                "row_count": parsed_feed["row_count"],
-                "nsrl_rds_header_detected": parsed_feed["nsrl_rds_header_detected"],
-                "accepted_hash_count": accepted_for_feed,
-                "duplicate_hash_count": duplicates_for_feed,
-                "rejected_token_count": rejected_for_feed,
-                "cumulative_hash_count_before": before_count,
-                "cumulative_hash_count_after": after_count,
-            }
-        )
+        feed_summary = {
+            "path": str(feed_path),
+            "format": parsed_feed["format"],
+            "header_fields": parsed_feed["header_fields"],
+            "hash_column_fields": parsed_feed["hash_column_fields"],
+            "row_count": parsed_feed["row_count"],
+            "nsrl_rds_header_detected": parsed_feed["nsrl_rds_header_detected"],
+            "accepted_hash_count": accepted_for_feed,
+            "duplicate_hash_count": duplicates_for_feed,
+            "rejected_token_count": rejected_for_feed,
+            "cumulative_hash_count_before": before_count,
+            "cumulative_hash_count_after": after_count,
+        }
+        for extra_key in (
+            "archive_member_count",
+            "parsed_archive_member_count",
+            "skipped_archive_member_count",
+            "archive_members",
+            "skipped_archive_members",
+        ):
+            if extra_key in parsed_feed:
+                feed_summary[extra_key] = parsed_feed[extra_key]
+        feed_summaries.append(feed_summary)
 
     return {
         "hashes": index,
@@ -636,12 +650,27 @@ def build_known_good_index_payload(paths: Sequence[Union[str, Path]]) -> dict[st
         "nsrl_rds_feed_count": sum(
             1
             for item in known_good_index.get("feed_summaries", [])
-            if isinstance(item, Mapping) and item.get("format") == "nsrl-rds-csv"
+            if isinstance(item, Mapping)
+            and (item.get("format") == "nsrl-rds-csv" or (item.get("format") == "zip" and item.get("nsrl_rds_header_detected")))
         ),
         "nsrl_rds_row_count": sum(
             int(item.get("row_count") or 0)
             for item in known_good_index.get("feed_summaries", [])
-            if isinstance(item, Mapping) and item.get("format") == "nsrl-rds-csv"
+            if isinstance(item, Mapping)
+            and (item.get("format") == "nsrl-rds-csv" or (item.get("format") == "zip" and item.get("nsrl_rds_header_detected")))
+        ),
+        "zip_feed_count": sum(
+            1 for item in known_good_index.get("feed_summaries", []) if isinstance(item, Mapping) and item.get("format") == "zip"
+        ),
+        "zip_parsed_member_count": sum(
+            int(item.get("parsed_archive_member_count") or 0)
+            for item in known_good_index.get("feed_summaries", [])
+            if isinstance(item, Mapping) and item.get("format") == "zip"
+        ),
+        "zip_skipped_member_count": sum(
+            int(item.get("skipped_archive_member_count") or 0)
+            for item in known_good_index.get("feed_summaries", [])
+            if isinstance(item, Mapping) and item.get("format") == "zip"
         ),
     }
     core = {
@@ -673,6 +702,8 @@ def extract_hash_feed_tokens(path: Path) -> list[str]:
 
 def parse_known_good_hash_feed(path: Path) -> dict[str, object]:
     suffix = path.suffix.lower()
+    if suffix == ".zip":
+        return parse_known_good_zip_feed(path)
     if suffix == ".json":
         try:
             data = json.loads(path.read_text(encoding="utf-8"))
@@ -722,7 +753,151 @@ def parse_known_good_hash_feed(path: Path) -> dict[str, object]:
     }
 
 
-def parse_known_good_csv_text(path: Path, text: str) -> dict[str, object]:
+def parse_known_good_zip_feed(path: Path) -> dict[str, object]:
+    records: list[dict[str, object]] = []
+    header_fields: list[str] = []
+    hash_column_fields: list[str] = []
+    row_count = 0
+    nsrl_detected = False
+    archive_members: list[dict[str, object]] = []
+    skipped_members: list[dict[str, object]] = []
+    total_uncompressed = 0
+    parsed_count = 0
+
+    try:
+        with zipfile.ZipFile(path) as archive:
+            for index, info in enumerate(archive.infolist()):
+                if index >= KNOWN_GOOD_ZIP_MAX_MEMBERS:
+                    skipped_members.append(
+                        {
+                            "member": info.filename,
+                            "reason": "member-count-limit",
+                            "max_members": KNOWN_GOOD_ZIP_MAX_MEMBERS,
+                        }
+                    )
+                    continue
+                if info.is_dir():
+                    continue
+                member_name = info.filename
+                member_path = PurePosixPath(member_name)
+                suffix = member_path.suffix.lower()
+                if suffix not in KNOWN_GOOD_FEED_TEXT_SUFFIXES:
+                    skipped_members.append({"member": member_name, "reason": "unsupported-member-suffix"})
+                    continue
+                if member_path.is_absolute() or ".." in member_path.parts or "\\" in member_name:
+                    skipped_members.append({"member": member_name, "reason": "unsafe-member-path"})
+                    continue
+                if info.file_size > KNOWN_GOOD_ZIP_MAX_MEMBER_BYTES:
+                    skipped_members.append(
+                        {
+                            "member": member_name,
+                            "reason": "member-size-limit",
+                            "size": info.file_size,
+                            "max_member_bytes": KNOWN_GOOD_ZIP_MAX_MEMBER_BYTES,
+                        }
+                    )
+                    continue
+                if total_uncompressed + info.file_size > KNOWN_GOOD_ZIP_MAX_TOTAL_BYTES:
+                    skipped_members.append(
+                        {
+                            "member": member_name,
+                            "reason": "archive-total-size-limit",
+                            "size": info.file_size,
+                            "max_total_bytes": KNOWN_GOOD_ZIP_MAX_TOTAL_BYTES,
+                        }
+                    )
+                    continue
+                compression_ratio = info.file_size / max(info.compress_size, 1)
+                if compression_ratio > KNOWN_GOOD_ZIP_MAX_COMPRESSION_RATIO:
+                    skipped_members.append(
+                        {
+                            "member": member_name,
+                            "reason": "compression-ratio-limit",
+                            "compression_ratio": round(compression_ratio, 2),
+                            "max_compression_ratio": KNOWN_GOOD_ZIP_MAX_COMPRESSION_RATIO,
+                        }
+                    )
+                    continue
+                raw = archive.read(info)
+                total_uncompressed += info.file_size
+                text = raw.decode("utf-8-sig", errors="replace")
+                parsed = parse_known_good_member_text(path, member_name, suffix, text)
+                records.extend(parsed["records"])
+                row_count += int(parsed.get("row_count") or 0)
+                nsrl_detected = nsrl_detected or bool(parsed.get("nsrl_rds_header_detected"))
+                for field in parsed.get("header_fields", []):
+                    if str(field) not in header_fields:
+                        header_fields.append(str(field))
+                for field in parsed.get("hash_column_fields", []):
+                    if str(field) not in hash_column_fields:
+                        hash_column_fields.append(str(field))
+                parsed_count += 1
+                archive_members.append(
+                    {
+                        "member": member_name,
+                        "format": parsed["format"],
+                        "size": info.file_size,
+                        "row_count": parsed.get("row_count", 0),
+                        "record_count": len(parsed["records"]),
+                        "nsrl_rds_header_detected": parsed.get("nsrl_rds_header_detected", False),
+                    }
+                )
+    except zipfile.BadZipFile as exc:
+        raise FileScanError(f"known-good ZIP feed is not readable: {path}: {exc}") from exc
+
+    return {
+        "records": records,
+        "format": "zip",
+        "header_fields": header_fields,
+        "hash_column_fields": hash_column_fields,
+        "row_count": row_count,
+        "nsrl_rds_header_detected": nsrl_detected,
+        "archive_member_count": len(archive_members) + len(skipped_members),
+        "parsed_archive_member_count": parsed_count,
+        "skipped_archive_member_count": len(skipped_members),
+        "archive_members": archive_members[:20],
+        "skipped_archive_members": skipped_members[:20],
+    }
+
+
+def parse_known_good_member_text(path: Path, archive_member: str, suffix: str, text: str) -> dict[str, object]:
+    if suffix == ".json":
+        try:
+            data = json.loads(text)
+        except json.JSONDecodeError:
+            data = {}
+        records: list[dict[str, object]] = []
+        collect_hash_records_from_json(
+            data,
+            records,
+            source=known_good_feed_source(path, feed_format="json", archive_member=archive_member),
+        )
+        return {
+            "records": records,
+            "format": "json",
+            "header_fields": [],
+            "hash_column_fields": [],
+            "row_count": 0,
+            "nsrl_rds_header_detected": False,
+        }
+    header = next(csv.reader(text.splitlines()), [])
+    if suffix == ".csv" or is_nsrl_rds_csv_headers(header):
+        return parse_known_good_csv_text(path, text, archive_member=archive_member)
+    records = [
+        {"token": token, "source": known_good_feed_source(path, feed_format="text", archive_member=archive_member)}
+        for token in HASH_TOKEN_RE.findall(text)
+    ]
+    return {
+        "records": records,
+        "format": "text",
+        "header_fields": [],
+        "hash_column_fields": [],
+        "row_count": 0,
+        "nsrl_rds_header_detected": False,
+    }
+
+
+def parse_known_good_csv_text(path: Path, text: str, *, archive_member: str | None = None) -> dict[str, object]:
     records = []
     reader = csv.DictReader(text.splitlines())
     header_fields = [str(field or "") for field in (reader.fieldnames or [])]
@@ -748,12 +923,18 @@ def parse_known_good_csv_text(path: Path, text: str) -> dict[str, object]:
                             row=row,
                             row_number=row_number,
                             hash_column=field_name,
+                            archive_member=archive_member,
                         ),
                     }
                 )
     if not records:
         for token in HASH_TOKEN_RE.findall(text):
-            records.append({"token": token, "source": known_good_feed_source(path, feed_format="csv")})
+            records.append(
+                {
+                    "token": token,
+                    "source": known_good_feed_source(path, feed_format="csv", archive_member=archive_member),
+                }
+            )
     return {
         "records": records,
         "format": feed_format,
@@ -829,6 +1010,7 @@ def known_good_feed_source(
     row: Mapping[str, str] | None = None,
     row_number: int | None = None,
     hash_column: str | None = None,
+    archive_member: str | None = None,
 ) -> dict[str, object]:
     source: dict[str, object] = {
         "source": "analyst-known-good-feed",
@@ -836,6 +1018,9 @@ def known_good_feed_source(
         "feed_path": str(path),
         "feed_format": feed_format,
     }
+    if archive_member:
+        source["archive_member"] = archive_member
+        source["feed_container_format"] = "zip"
     if row_number is not None:
         source["row_number"] = row_number
     if hash_column:
