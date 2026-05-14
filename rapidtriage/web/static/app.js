@@ -2840,6 +2840,7 @@ function renderFileTriageSummary(payload) {
       </div>
       <div class="processing-caps file-triage-caps">
         <span>Known-good feed: ${knownGood.configured ? `${formatNumber(knownGood.feed_count || 0)} feed(s)` : "not configured"}</span>
+        <span>NSRL RDS: ${formatNumber(knownGood.nsrl_rds_feed_count || 0)} feed(s) / ${formatNumber(knownGood.nsrl_rds_row_count || 0)} row(s)</span>
         <span>Hash count: ${formatNumber(knownGood.known_good_hash_count || 0)}</span>
         <span>Suppression: ${knownGood.hide_known_good ? "hidden from candidate table" : "reviewable in table"}</span>
         <span>Signature checked: ${formatNumber(signature.checked_count || summary.signature_checked_count || 0)}</span>
@@ -2853,6 +2854,7 @@ function renderFileTriageSummary(payload) {
               <strong>${escapeHtml(item.name || fileName(item.path))}</strong>
               <span>${escapeHtml(item.path || "")}</span>
               <span>${escapeHtml(item.known_good_match?.algorithm || "hash")} match · ${escapeHtml(item.known_good_match?.value || "")}</span>
+              <span>${escapeHtml(item.known_good_match?.feed_format || item.known_good_match?.source_detail?.feed_format || "feed")} · ${escapeHtml(item.known_good_match?.feed_name || item.known_good_match?.source_detail?.feed_name || "")}</span>
             </div>
           `).join("")}
         </details>
@@ -2880,12 +2882,16 @@ function renderFileTriageBadges(file) {
   const knownLabel = knownStatus === "known-good-feed-match"
     ? `Known-good ${knownMatch.algorithm || ""}`.trim()
     : knownStatus.replace(/-/g, " ");
+  const knownSource = knownMatch.feed_format
+    ? `${knownMatch.feed_format}${knownMatch.feed_name ? ` · ${knownMatch.feed_name}` : ""}`
+    : "";
   const signatureLabel = signature.status
     ? signature.status.replace(/-/g, " ")
     : "signature not checked";
   return `
     <div class="file-triage-badges">
       <span class="file-triage-badge ${knownStatus === "known-good-feed-match" ? "ok" : ""}">${escapeHtml(knownLabel)}</span>
+      ${knownSource ? `<span class="file-triage-badge ok">${escapeHtml(knownSource)}</span>` : ""}
       <span class="file-triage-badge ${signature.mismatch ? "warning" : ""}">${escapeHtml(signatureLabel)}</span>
       ${signature.detected ? `<span class="file-triage-badge">detected: ${escapeHtml(signature.detected)}</span>` : ""}
     </div>

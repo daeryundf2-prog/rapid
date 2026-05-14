@@ -39,6 +39,17 @@ EXECUTABLE_BITS = stat_module.S_IXUSR | stat_module.S_IXGRP | stat_module.S_IXOT
 DEFAULT_KNOWN_GOOD_MAX_HASH_BYTES = 64 * 1024 * 1024
 KNOWN_GOOD_HASH_ALGORITHMS = ("md5", "sha1", "sha256")
 HASH_TOKEN_RE = re.compile(r"\b[a-fA-F0-9]{32}\b|\b[a-fA-F0-9]{40}\b|\b[a-fA-F0-9]{64}\b")
+KNOWN_GOOD_CSV_HASH_FIELDS = {
+    "md5": "md5",
+    "sha1": "sha1",
+    "sha": "sha1",
+    "sha256": "sha256",
+    "hash": "",
+    "digest": "",
+    "value": "",
+}
+NSRL_RDS_HEADER_FIELDS = {"sha1", "md5", "crc32", "filename", "filesize", "productcode", "opsystemcode", "specialcode"}
+KNOWN_GOOD_SOURCE_FIELD_LIMIT = 160
 MAX_SIGNATURE_HEADER_BYTES = 64
 SIGNATURE_RULES: tuple[dict[str, object], ...] = (
     {"id": "windows-pe", "extensions": (".exe", ".dll", ".sys", ".scr", ".com"), "magics": (b"MZ",)},
@@ -416,6 +427,8 @@ def run_files_scan(
             "known_good_match_count": known_good_profile["match_count"],
             "known_good_suppressed_count": known_good_profile["suppressed_count"],
             "known_good_hash_skipped_large_count": known_good_profile["skipped_large_count"],
+            "known_good_nsrl_rds_feed_count": known_good_profile["nsrl_rds_feed_count"],
+            "known_good_nsrl_rds_row_count": known_good_profile["nsrl_rds_row_count"],
             "signature_checked_count": signature_profile["checked_count"],
             "signature_mismatch_count": signature_profile["mismatch_count"],
             "signature_unrecognized_known_extension_count": signature_profile["unrecognized_known_extension_count"],
@@ -514,6 +527,7 @@ def load_known_good_hash_feeds(paths: Sequence[Union[str, Path]]) -> dict[str, o
     """Load analyst-provided known-good hash feeds without requiring a full NSRL install."""
 
     index: dict[str, set[str]] = {algorithm: set() for algorithm in KNOWN_GOOD_HASH_ALGORITHMS}
+    source_index: dict[str, dict[str, dict[str, object]]] = {algorithm: {} for algorithm in KNOWN_GOOD_HASH_ALGORITHMS}
     feed_paths: list[Path] = []
     feed_summaries: list[dict[str, object]] = []
     duplicate_count = 0
@@ -527,12 +541,16 @@ def load_known_good_hash_feeds(paths: Sequence[Union[str, Path]]) -> dict[str, o
             raise FileScanError(f"known-good hash feed is not a file: {feed_path}")
         feed_paths.append(feed_path)
         before_count = sum(len(values) for values in index.values())
-        raw_tokens = extract_hash_feed_tokens(feed_path)
+        parsed_feed = parse_known_good_hash_feed(feed_path)
+        raw_records = parsed_feed["records"]
         accepted_for_feed = 0
         rejected_for_feed = 0
         duplicates_for_feed = 0
-        for token in raw_tokens:
-            normalized = normalize_known_good_hash(token)
+        for record in raw_records:
+            if not isinstance(record, Mapping):
+                rejected_for_feed += 1
+                continue
+            normalized = normalize_known_good_hash(str(record.get("token") or ""))
             if normalized is None:
                 rejected_for_feed += 1
                 continue
@@ -541,6 +559,9 @@ def load_known_good_hash_feeds(paths: Sequence[Union[str, Path]]) -> dict[str, o
                 duplicates_for_feed += 1
                 continue
             index[algorithm].add(value)
+            source = record.get("source")
+            if isinstance(source, Mapping):
+                source_index[algorithm][value] = dict(source)
             accepted_for_feed += 1
         after_count = sum(len(values) for values in index.values())
         duplicate_count += duplicates_for_feed
@@ -548,7 +569,11 @@ def load_known_good_hash_feeds(paths: Sequence[Union[str, Path]]) -> dict[str, o
         feed_summaries.append(
             {
                 "path": str(feed_path),
-                "format": guess_known_good_feed_format(feed_path),
+                "format": parsed_feed["format"],
+                "header_fields": parsed_feed["header_fields"],
+                "hash_column_fields": parsed_feed["hash_column_fields"],
+                "row_count": parsed_feed["row_count"],
+                "nsrl_rds_header_detected": parsed_feed["nsrl_rds_header_detected"],
                 "accepted_hash_count": accepted_for_feed,
                 "duplicate_hash_count": duplicates_for_feed,
                 "rejected_token_count": rejected_for_feed,
@@ -559,6 +584,7 @@ def load_known_good_hash_feeds(paths: Sequence[Union[str, Path]]) -> dict[str, o
 
     return {
         "hashes": index,
+        "hash_sources": source_index,
         "feed_paths": feed_paths,
         "feed_summaries": feed_summaries,
         "duplicate_count": duplicate_count,
@@ -567,27 +593,84 @@ def load_known_good_hash_feeds(paths: Sequence[Union[str, Path]]) -> dict[str, o
 
 
 def extract_hash_feed_tokens(path: Path) -> list[str]:
+    parsed = parse_known_good_hash_feed(path)
+    return [str(record.get("token") or "") for record in parsed["records"] if isinstance(record, Mapping)]
+
+
+def parse_known_good_hash_feed(path: Path) -> dict[str, object]:
     suffix = path.suffix.lower()
     if suffix == ".json":
         try:
             data = json.loads(path.read_text(encoding="utf-8"))
         except UnicodeDecodeError:
             data = json.loads(path.read_text(encoding="utf-8-sig"))
-        tokens: list[str] = []
-        collect_hash_tokens_from_json(data, tokens)
-        return tokens
+        records: list[dict[str, object]] = []
+        collect_hash_records_from_json(
+            data,
+            records,
+            source=known_good_feed_source(path, feed_format="json"),
+        )
+        return {
+            "records": records,
+            "format": "json",
+            "header_fields": [],
+            "hash_column_fields": [],
+            "row_count": 0,
+            "nsrl_rds_header_detected": False,
+        }
     if suffix == ".csv":
         text = path.read_text(encoding="utf-8-sig", errors="replace")
-        tokens = []
-        for row in csv.DictReader(text.splitlines()):
+        records = []
+        reader = csv.DictReader(text.splitlines())
+        header_fields = [str(field or "") for field in (reader.fieldnames or [])]
+        hash_column_fields: list[str] = []
+        row_count = 0
+        feed_format = "nsrl-rds-csv" if is_nsrl_rds_csv_headers(header_fields) else "csv"
+        for row_number, row in enumerate(reader, start=2):
+            row_count += 1
             for key, value in row.items():
-                lowered_key = (key or "").strip().lower()
-                if lowered_key in {"md5", "sha1", "sha256", "hash", "value", "digest"}:
-                    tokens.extend(HASH_TOKEN_RE.findall(value or ""))
-        if tokens:
-            return tokens
-        return HASH_TOKEN_RE.findall(text)
-    return HASH_TOKEN_RE.findall(path.read_text(encoding="utf-8", errors="replace"))
+                algorithm_hint = known_good_csv_hash_algorithm(key)
+                if algorithm_hint is None:
+                    continue
+                field_name = str(key or "")
+                if field_name and field_name not in hash_column_fields:
+                    hash_column_fields.append(field_name)
+                for token in HASH_TOKEN_RE.findall(value or ""):
+                    records.append(
+                        {
+                            "token": token,
+                            "source": known_good_feed_source(
+                                path,
+                                feed_format=feed_format,
+                                row=row,
+                                row_number=row_number,
+                                hash_column=field_name,
+                            ),
+                        }
+                    )
+        if not records:
+            for token in HASH_TOKEN_RE.findall(text):
+                records.append({"token": token, "source": known_good_feed_source(path, feed_format="csv")})
+        return {
+            "records": records,
+            "format": feed_format,
+            "header_fields": header_fields,
+            "hash_column_fields": hash_column_fields,
+            "row_count": row_count,
+            "nsrl_rds_header_detected": feed_format == "nsrl-rds-csv",
+        }
+    records = [
+        {"token": token, "source": known_good_feed_source(path, feed_format="text")}
+        for token in HASH_TOKEN_RE.findall(path.read_text(encoding="utf-8", errors="replace"))
+    ]
+    return {
+        "records": records,
+        "format": "text",
+        "header_fields": [],
+        "hash_column_fields": [],
+        "row_count": 0,
+        "nsrl_rds_header_detected": False,
+    }
 
 
 def collect_hash_tokens_from_json(value: object, tokens: list[str]) -> None:
@@ -603,11 +686,96 @@ def collect_hash_tokens_from_json(value: object, tokens: list[str]) -> None:
             collect_hash_tokens_from_json(item, tokens)
 
 
+def collect_hash_records_from_json(value: object, records: list[dict[str, object]], *, source: Mapping[str, object]) -> None:
+    if isinstance(value, str):
+        for token in HASH_TOKEN_RE.findall(value):
+            records.append({"token": token, "source": dict(source)})
+        return
+    if isinstance(value, Mapping):
+        for item in value.values():
+            collect_hash_records_from_json(item, records, source=source)
+        return
+    if isinstance(value, list):
+        for item in value:
+            collect_hash_records_from_json(item, records, source=source)
+
+
 def guess_known_good_feed_format(path: Path) -> str:
+    if path.suffix.lower() == ".csv":
+        try:
+            text = path.read_text(encoding="utf-8-sig", errors="replace")
+            header = next(csv.reader(text.splitlines()), [])
+        except (OSError, StopIteration, csv.Error):
+            header = []
+        if is_nsrl_rds_csv_headers(header):
+            return "nsrl-rds-csv"
     suffix = path.suffix.lower()
     if suffix in {".json", ".csv"}:
         return suffix[1:]
     return "text"
+
+
+def normalize_known_good_csv_header(value: object) -> str:
+    return re.sub(r"[^a-z0-9]", "", str(value or "").lower())
+
+
+def known_good_csv_hash_algorithm(header: object) -> Optional[str]:
+    normalized = normalize_known_good_csv_header(header)
+    if normalized in KNOWN_GOOD_CSV_HASH_FIELDS:
+        return KNOWN_GOOD_CSV_HASH_FIELDS[normalized]
+    return None
+
+
+def is_nsrl_rds_csv_headers(header_fields: Sequence[object]) -> bool:
+    normalized = {normalize_known_good_csv_header(field) for field in header_fields}
+    return {"sha1", "md5", "filename", "productcode"}.issubset(normalized) or len(normalized & NSRL_RDS_HEADER_FIELDS) >= 6
+
+
+def known_good_feed_source(
+    path: Path,
+    *,
+    feed_format: str,
+    row: Mapping[str, str] | None = None,
+    row_number: int | None = None,
+    hash_column: str | None = None,
+) -> dict[str, object]:
+    source: dict[str, object] = {
+        "source": "analyst-known-good-feed",
+        "feed_name": path.name,
+        "feed_path": str(path),
+        "feed_format": feed_format,
+    }
+    if row_number is not None:
+        source["row_number"] = row_number
+    if hash_column:
+        source["hash_column"] = hash_column
+    if row and feed_format == "nsrl-rds-csv":
+        nsrl_fields = {
+            "nsrl_file_name": csv_row_value(row, "FileName"),
+            "nsrl_file_size": csv_row_value(row, "FileSize"),
+            "nsrl_product_code": csv_row_value(row, "ProductCode"),
+            "nsrl_os_code": csv_row_value(row, "OpSystemCode"),
+            "nsrl_special_code": csv_row_value(row, "SpecialCode"),
+        }
+        for key, value in nsrl_fields.items():
+            if value:
+                source[key] = bounded_source_value(value)
+    return source
+
+
+def csv_row_value(row: Mapping[str, str], wanted_header: str) -> str:
+    wanted = normalize_known_good_csv_header(wanted_header)
+    for key, value in row.items():
+        if normalize_known_good_csv_header(key) == wanted:
+            return value or ""
+    return ""
+
+
+def bounded_source_value(value: object) -> str:
+    text = str(value or "").strip()
+    if len(text) <= KNOWN_GOOD_SOURCE_FIELD_LIMIT:
+        return text
+    return text[:KNOWN_GOOD_SOURCE_FIELD_LIMIT] + "...[truncated]"
 
 
 def normalize_known_good_hash(value: str) -> Optional[tuple[str, str]]:
@@ -634,7 +802,14 @@ def apply_known_good_hash_profile(
     raw_hash_index = known_good_index.get("hashes", {})
     if not isinstance(raw_hash_index, Mapping):
         raw_hash_index = {}
+    raw_source_index = known_good_index.get("hash_sources", {})
+    if not isinstance(raw_source_index, Mapping):
+        raw_source_index = {}
     known_good_hashes = {algorithm: set(raw_hash_index.get(algorithm, set())) for algorithm in KNOWN_GOOD_HASH_ALGORITHMS}
+    known_good_sources = {
+        algorithm: dict(raw_source_index.get(algorithm, {})) if isinstance(raw_source_index.get(algorithm, {}), Mapping) else {}
+        for algorithm in KNOWN_GOOD_HASH_ALGORITHMS
+    }
     configured = any(known_good_hashes.values())
     visible_candidates: list[FileCandidate] = []
     candidate_payloads: list[dict[str, object]] = []
@@ -658,7 +833,11 @@ def apply_known_good_hash_profile(
                     candidate_payload["known_good_error"] = exc.__class__.__name__
                 else:
                     hashed_candidate_count += 1
-                    known_good_match = first_known_good_hash_match(hashes, known_good_hashes)
+                    known_good_match = first_known_good_hash_match(
+                        hashes,
+                        known_good_hashes,
+                        known_good_sources=known_good_sources,
+                    )
                     if known_good_match:
                         match_count += 1
                         candidate_payload["known_good_status"] = "known-good-feed-match"
@@ -694,6 +873,18 @@ def apply_known_good_hash_profile(
 
     suppressed_candidates_truncated = len(suppressed_candidates) > 200
     suppressed_head = suppressed_candidates[:200]
+    feed_summaries = list(known_good_index.get("feed_summaries", []))
+    feed_format_counts: dict[str, int] = {}
+    nsrl_rds_feed_count = 0
+    nsrl_rds_row_count = 0
+    for summary in feed_summaries:
+        if not isinstance(summary, Mapping):
+            continue
+        feed_format = str(summary.get("format") or "unknown")
+        feed_format_counts[feed_format] = feed_format_counts.get(feed_format, 0) + 1
+        if feed_format == "nsrl-rds-csv":
+            nsrl_rds_feed_count += 1
+            nsrl_rds_row_count += int(summary.get("row_count") or 0)
     profile_core = {
         "profile": "known-good-hash-suppression-v1",
         "profile_version": "known-good-hash-suppression-v1",
@@ -710,7 +901,10 @@ def apply_known_good_hash_profile(
             algorithm: len(known_good_hashes[algorithm]) for algorithm in KNOWN_GOOD_HASH_ALGORITHMS
         },
         "feed_count": len(known_good_index.get("feed_paths", [])),
-        "feed_summaries": list(known_good_index.get("feed_summaries", [])),
+        "feed_format_counts": feed_format_counts,
+        "nsrl_rds_feed_count": nsrl_rds_feed_count,
+        "nsrl_rds_row_count": nsrl_rds_row_count,
+        "feed_summaries": feed_summaries,
         "duplicate_feed_hash_count": int(known_good_index.get("duplicate_count", 0)),
         "rejected_feed_token_count": int(known_good_index.get("rejected_token_count", 0)),
         "match_count": match_count,
@@ -720,11 +914,11 @@ def apply_known_good_hash_profile(
         "policy": {
             "default_behavior": "mark-known-good-without-hiding",
             "hide_behavior": "hide only when --hide-known-good is explicitly provided",
-            "scope": "analyst-supplied MD5/SHA1/SHA256 feeds; full NSRL RDS ingestion is not bundled",
+            "scope": "analyst-supplied TXT/CSV/JSON MD5/SHA1/SHA256 feeds plus NSRL RDS CSV hash columns",
             "legal_review_note": "Known-good suppression reduces triage noise but does not prove irrelevance by itself.",
         },
         "limitations": [
-            "Full NSRL RDS database ingestion/update workflow is not implemented.",
+            "Bundled NSRL database download/update workflow is not implemented; analysts must supply a trusted local feed.",
             "Files larger than max_hash_bytes are skipped to avoid surprise long-running scans.",
             "Hash-based known-good checks cannot identify modified-but-benign files without a trusted feed match.",
         ],
@@ -732,6 +926,7 @@ def apply_known_good_hash_profile(
             "candidate_field": "known_good_match",
             "suppressed_list": "known_good_suppressed_candidates",
             "review_action": "toggle --hide-known-good off when the analyst needs to inspect suppressed rows",
+            "source_traceability": "known_good_match.source_detail records feed, row, hash column, and NSRL metadata when available",
         },
         "commercial_claim_allowed": False,
     }
@@ -747,17 +942,26 @@ def apply_known_good_hash_profile(
 def first_known_good_hash_match(
     hashes: Mapping[str, str],
     known_good_hashes: Mapping[str, set[str]],
+    *,
+    known_good_sources: Mapping[str, Mapping[str, Mapping[str, object]]] | None = None,
 ) -> Optional[dict[str, object]]:
+    source_index = known_good_sources or {}
     for algorithm in KNOWN_GOOD_HASH_ALGORITHMS:
         value = hashes.get(algorithm, "").lower()
         if value and value in known_good_hashes.get(algorithm, set()):
-            return {
+            source_detail = source_index.get(algorithm, {}).get(value, {})
+            match: dict[str, object] = {
                 "algorithm": algorithm,
                 "value": value,
                 "source": "analyst-known-good-feed",
                 "classification": "known-good",
                 "confidence": "hash-exact",
             }
+            if source_detail:
+                match["source_detail"] = dict(source_detail)
+                match["feed_name"] = str(source_detail.get("feed_name") or "")
+                match["feed_format"] = str(source_detail.get("feed_format") or "")
+            return match
     return None
 
 

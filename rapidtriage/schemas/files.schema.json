@@ -155,6 +155,12 @@
         "known_good_hash_skipped_large_count": {
           "type": "integer"
         },
+        "known_good_nsrl_rds_feed_count": {
+          "type": "integer"
+        },
+        "known_good_nsrl_rds_row_count": {
+          "type": "integer"
+        },
         "signature_checked_count": {
           "type": "integer"
         },

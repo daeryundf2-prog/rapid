@@ -52,6 +52,8 @@
     "known_good_match_count": 0,
     "known_good_suppressed_count": 0,
     "known_good_hash_skipped_large_count": 0,
+    "known_good_nsrl_rds_feed_count": 0,
+    "known_good_nsrl_rds_row_count": 0,
     "signature_checked_count": 3,
     "signature_mismatch_count": 0,
     "signature_unrecognized_known_extension_count": 1,
@@ -82,6 +84,9 @@
       "sha256": 0
     },
     "feed_count": 0,
+    "feed_format_counts": {},
+    "nsrl_rds_feed_count": 0,
+    "nsrl_rds_row_count": 0,
     "feed_summaries": [],
     "duplicate_feed_hash_count": 0,
     "rejected_feed_token_count": 0,
@@ -92,21 +97,22 @@
     "policy": {
       "default_behavior": "mark-known-good-without-hiding",
       "hide_behavior": "hide only when --hide-known-good is explicitly provided",
-      "scope": "analyst-supplied MD5/SHA1/SHA256 feeds; full NSRL RDS ingestion is not bundled",
+      "scope": "analyst-supplied TXT/CSV/JSON MD5/SHA1/SHA256 feeds plus NSRL RDS CSV hash columns",
       "legal_review_note": "Known-good suppression reduces triage noise but does not prove irrelevance by itself."
     },
     "limitations": [
-      "Full NSRL RDS database ingestion/update workflow is not implemented.",
+      "Bundled NSRL database download/update workflow is not implemented; analysts must supply a trusted local feed.",
       "Files larger than max_hash_bytes are skipped to avoid surprise long-running scans.",
       "Hash-based known-good checks cannot identify modified-but-benign files without a trusted feed match."
     ],
     "source_viewer_contract": {
       "candidate_field": "known_good_match",
       "suppressed_list": "known_good_suppressed_candidates",
-      "review_action": "toggle --hide-known-good off when the analyst needs to inspect suppressed rows"
+      "review_action": "toggle --hide-known-good off when the analyst needs to inspect suppressed rows",
+      "source_traceability": "known_good_match.source_detail records feed, row, hash column, and NSRL metadata when available"
     },
     "commercial_claim_allowed": false,
-    "profile_hash": "a44dfba33acb126627081a039e6d173c8a6f107ae5a8d8386608a3ebc63234de"
+    "profile_hash": "7bdca8bba7aa65a4f36d74279b689fcb5217886c4aa6a57675a4aa0c7e8ca896"
   },
   "known_good_suppressed_candidates": [],
   "file_signature_profile": {
