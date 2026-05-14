@@ -404,6 +404,21 @@ class RapidTriageCaseDatabaseTests(unittest.TestCase):
             self.assertIn("FileNotFoundError", row["error"])
             self.assertEqual(json.loads(row["params_json"])["path"], str(missing_document))
 
+            search_payload = database.search_case(
+                case_id="CASE-DOC-ERROR",
+                keywords=["definitely-not-present"],
+                sources=["documents"],
+                limit=10,
+            )
+
+            self.assertEqual(search_payload["summary"]["match_count"], 0)
+            self.assertEqual(search_payload["summary"]["document_error_count"], 1)
+            self.assertEqual(search_payload["documents"]["errors"][0]["path"], str(missing_document))
+            self.assertEqual(
+                search_payload["documents"]["errors"][0]["effect"],
+                "case-search-documents-partial-coverage",
+            )
+
     def test_case_search_caps_scan_candidates_before_materializing_large_tables(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             db_path = Path(tmp_dir) / "case.db"

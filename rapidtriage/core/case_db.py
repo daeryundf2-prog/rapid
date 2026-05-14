@@ -486,8 +486,10 @@ class CaseDatabase:
             if connection.execute("SELECT 1 FROM case_record WHERE case_id = ?", (normalized_case_id,)).fetchone() is None:
                 raise CaseDatabaseError(f"case not found: {normalized_case_id}")
             matches: list[dict[str, object]] = []
+            document_errors: list[dict[str, object]] = []
             if case_search_source_requested(source_filter, "documents"):
                 matches.extend(search_indexed_documents(connection, normalized_case_id, normalized_keywords, limit))
+                document_errors = case_document_extraction_errors(connection, normalized_case_id)
             if case_search_source_requested(source_filter, "files"):
                 matches.extend(search_file_records(connection, normalized_case_id, normalized_keywords, limit, scan_candidate_limit))
             if case_search_source_requested(source_filter, "artifacts", "indicators"):
@@ -549,6 +551,10 @@ class CaseDatabase:
                 "source_counts": source_counts,
                 "keyword_counts": keyword_counts,
                 "priority_counts": priority_counts,
+                "document_error_count": len(document_errors),
+            },
+            "documents": {
+                "errors": document_errors,
             },
             "review_workflow_summary": review_workflow_summary,
             "matches": matches,
@@ -2631,6 +2637,47 @@ def search_indexed_documents(
         }
         for row in rows
     ]
+
+
+def case_document_extraction_errors(
+    connection: sqlite3.Connection,
+    case_id: str,
+    *,
+    limit: int = 100,
+) -> list[dict[str, object]]:
+    rows = connection.execute(
+        """
+        SELECT citation_id, target_id, timestamp, params_json, error
+        FROM audit_event
+        WHERE case_id = ?
+          AND action = 'document-text-extraction'
+          AND result = 'failed'
+        ORDER BY id DESC
+        LIMIT ?
+        """,
+        (case_id, max(1, int(limit))),
+    ).fetchall()
+    errors: list[dict[str, object]] = []
+    for row in rows:
+        params = parse_json_object(str(row["params_json"] or "{}"))
+        error = str(row["error"] or "document extraction failed")
+        error_type = error.split(":", 1)[0] if ":" in error else "DocumentExtractionError"
+        errors.append(
+            {
+                "citation_id": str(row["citation_id"]),
+                "target_id": str(row["target_id"] or ""),
+                "timestamp": str(row["timestamp"] or ""),
+                "path": str(params.get("path") or ""),
+                "kind": str(params.get("kind") or ""),
+                "error": error,
+                "reason": "case-db-document-text-extraction-failed",
+                "error_type": error_type,
+                "message": error.split(":", 1)[1].strip() if ":" in error else error,
+                "recoverable": True,
+                "effect": "case-search-documents-partial-coverage",
+            }
+        )
+    return errors
 
 
 def attach_review_marks(

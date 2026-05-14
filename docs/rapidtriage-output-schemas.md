@@ -89,6 +89,12 @@ The sample JSON uses a few placeholders so the examples stay stable across machi
   - `supported`
   - `artifacts`
 
+### `case-search`
+
+- Output: JSON from `rapidtriage case-search`.
+- Top-level keys include `summary`, `documents`, `review_workflow_summary`, and `matches`.
+- `summary.document_error_count` and `documents.errors[]` surface document text extraction failures recorded while importing a completed run into the Case DB. These rows include path, kind, audit citation, target document id, error type/message, and `case-search-documents-partial-coverage` effect. Treat them the same way as completed-run `documents.errors[]`: the Case DB search continued, but the listed documents were not text-indexed and need source-viewer byte-window search, a dedicated parser, or a trusted external extractor before absence can be asserted.
+
 ### `vsc-compare`
 
 - Output: `rapidtriage-vsc-compare.json`
