@@ -4,22 +4,34 @@ Last checked with:
 
 ```bash
 python -m rapidtriage commercial-readiness --output-dir /tmp/rapidforensic-readiness-current --json
+python -m rapidtriage commercial-readiness --validation-package docs/validation/rapidtriage-core-forensics-001-120-known-answer.json --json
+python -m rapidtriage taxonomy-audit --repo-root /Users/shinyoohag/rapidforensic/repo --strict --json
 ```
 
 Current baseline state without attaching a validation package:
 
-- Readiness score: `81/100`
+- Readiness score: `88/100`
 - Implemented gate: `120/120`
 - Usable gate: `120/120`
 - Validated gate: `0/120`
 - Commercial-grade gate: `0/120`
 - Commercial claim: not allowed
 
-Current state when the internal `#1-#5` known-answer validation package is generated and attached:
+Current state when the internal `#1-#120` known-answer validation package is attached:
 
-- Validated gate: `5/120`
+- Readiness score: `90/100`
+- Implemented gate: `120/120`
+- Usable gate: `120/120`
+- Validated gate: `120/120`
 - Commercial-grade gate: `0/120`
 - Commercial claim: not allowed
+
+Current user-visible taxonomy gate:
+
+- `taxonomy-audit --strict`: pass
+- User-visible forensic targets: `48/48` covered
+- Artifact collector count: `23`
+- Artifact type literals/dynamic registrations: `171`
 
 This means RapidForensic has broad analyst-facing triage functionality, but it must not be described as AXIOM/WISDOM-class or court-ready commercial parity yet. The remaining work is mostly proof depth, native parser completeness, large-evidence performance proof, platform packaging proof, and independent validation.
 
@@ -36,11 +48,12 @@ This means RapidForensic has broad analyst-facing triage functionality, but it m
 
 The next tasks should keep reducing real blockers, not just wording:
 
-1. `#2` EVTX event template/message rendering: support Windows Event Manifest XML catalogs and preserve provider resource provenance.
-2. `#1` EVTX BinXML: expand token/value grammar and compare record-level output against trusted EVTX exports.
-3. `#3` EVTX recovery: add more corrupt/slack/deleted fixtures with offset, confidence, and non-reportable defaults.
-4. `#4` Registry tree: implement transaction-log replay evidence paths and malformed hive tests.
-5. `#5` Registry deleted recovery: validate deleted key/value candidates against allocator state and second-parser fixtures.
+1. `#1~#5` EVTX/Registry native depth: raise BinXML, message rendering, recovery, registry transaction replay, and deleted allocator validation beyond triage pivots.
+2. `#6~#15` Windows core artifacts: deepen SAM/SECURITY/SYSTEM, Amcache/ShimCache/BAM, SRUM/Windows.edb/ESE, MFT/USN, JumpList, and ShellBags native decoders.
+3. `#16~#25` execution/browser/image workflows: harden Prefetch/LNK/System artifacts, browser/AI transcripts, E01/RAW/VM image workflows, and export-only image-family gates.
+4. `#66~#80` 대용량: attach repeatable local benchmark/stress evidence, cursor/drop-row checks, memory/cancel/retry proofs, and hardware profile logs.
+5. `#81~#100` 법정성: attach NIST-style corpus evidence, trusted-tool diffs, provenance completeness, chain-of-custody, audit hash chain, and exhibit bundle proofs.
+6. `#101~#120` 배포/운영: attach real platform build/signing/smoke/security evidence where possible and keep impossible items as external blockers.
 
 ## External Evidence Blockers
 
