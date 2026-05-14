@@ -1514,14 +1514,82 @@ function renderRunWorkflowOutputLinks(stage) {
           ? `/api/runs/${encodeURIComponent(selectedRunId)}/outputs/${encodeURIComponent(name)}/file`
           : "#";
         return `
-          <a href="${href}" title="${escapeHtml(output.gui_action || output.reportability_note || "")}">
+          <div class="run-workflow-output-card">
             <strong>${escapeHtml(name)}</strong>
             <span>${escapeHtml(output.role || "run output")} · ${escapeHtml(output.recommended_viewer || "viewer")}</span>
-          </a>
+            <div class="run-workflow-output-actions">
+              <button type="button" data-preview-output-name="${escapeHtml(name)}" title="${escapeHtml(output.gui_action || output.reportability_note || "")}">Preview</button>
+              <a href="${href}" title="${escapeHtml(output.reportability_note || output.gui_action || "")}">Download</a>
+            </div>
+          </div>
         `;
       }).join("")}
       ${moreCount ? `<small>+ ${formatNumber(moreCount)} more output(s)</small>` : ""}
     </div>
+  `;
+}
+
+async function loadRunOutputPreview(outputName) {
+  const viewer = detailPanel.querySelector("#evidenceViewer");
+  if (!viewer || !selectedRunId || !outputName) return;
+  viewer.setAttribute("aria-busy", "true");
+  viewer.innerHTML = '<p class="empty-state">Loading run output preview...</p>';
+  try {
+    const payload = await api(`/api/runs/${selectedRunId}/outputs/${encodeURIComponent(outputName)}/preview`);
+    viewer.innerHTML = renderRunOutputViewer(payload);
+    bindViewerButtons();
+  } catch (error) {
+    viewer.innerHTML = `<p class="empty-state">${escapeHtml(error.message)}</p>`;
+  } finally {
+    viewer.setAttribute("aria-busy", "false");
+  }
+}
+
+function renderRunOutputViewer(payload) {
+  let body = `<p class="empty-state">${escapeHtml(payload.message || "No preview available.")}</p>`;
+  if (payload.preview_type === "text") {
+    body = `
+      <pre class="viewer-text">${escapeHtml(payload.text || "")}</pre>
+      ${payload.truncated ? '<p class="empty-state">Preview truncated for performance.</p>' : ""}
+    `;
+  }
+  if (payload.preview_type === "json") {
+    body = renderJsonPreview(payload.json || {}, payload);
+  }
+  if (payload.preview_type === "xml") {
+    body = renderXmlPreview(payload.xml || {}, payload);
+  }
+  if (payload.preview_type === "hex") {
+    body = renderHexPreview(payload.hex || {}, payload);
+  }
+  if (payload.preview_type === "sqlite") {
+    body = renderSqlitePreview(payload.sqlite || {});
+  }
+  const profile = payload.output_preview_profile || {};
+  return `
+    <div class="viewer-header" data-testid="run-output-viewer-header">
+      <div>
+        <p class="eyebrow">run output viewer</p>
+        <h3>${escapeHtml(payload.output_name || payload.name || "output")}</h3>
+      </div>
+      <div class="detail-actions">
+        <a class="mini-link" href="${escapeHtml(payload.download_url || "#")}" target="_blank" rel="noreferrer">Download</a>
+      </div>
+    </div>
+    <div class="viewer-meta viewer-meta-compact">
+      <span>${escapeHtml(payload.preview_type || "preview")}</span>
+      <span>${formatBytes(payload.size || 0)}</span>
+      <span>${profile.bounded ? "bounded preview" : "preview"}</span>
+    </div>
+    ${body}
+    <details class="source-verification">
+      <summary>Output provenance and reportability</summary>
+      <dl class="eventlog-fields">
+        <dt>Output path</dt><dd>${escapeHtml(payload.path || "")}</dd>
+        <dt>Decision</dt><dd>${escapeHtml(profile.reportability_decision?.decision || "review-required")}</dd>
+        <dt>Required before report</dt><dd>${(profile.reportability_decision?.required_before_report || []).map((item) => escapeHtml(item)).join("<br>") || "source verification required"}</dd>
+      </dl>
+    </details>
   `;
 }
 
@@ -5355,6 +5423,13 @@ function bindPanelActions() {
       const filter = capability?.dataset.capabilityFilter || button.dataset.artifactFilter || "";
       await switchTab(targetTab);
       applyArtifactTreeFilter(filter);
+    });
+  }
+  for (const button of detailPanel.querySelectorAll("[data-preview-output-name]")) {
+    if (button.dataset.outputPreviewBound) continue;
+    button.dataset.outputPreviewBound = "1";
+    button.addEventListener("click", async () => {
+      await loadRunOutputPreview(button.dataset.previewOutputName || "");
     });
   }
   for (const button of detailPanel.querySelectorAll("[data-start-configured-e01-run]")) {

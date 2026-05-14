@@ -806,6 +806,11 @@ def create_app(job_store: RunJobStore | None = None, auth_token: str | None = No
         except FileNotFoundError as exc:
             raise HTTPException(status_code=404, detail=str(exc))
 
+    @api.get("/api/runs/{run_id}/outputs/{output_name}/preview")
+    def preview_run_output(run_id: str, output_name: str) -> Dict[str, object]:
+        path = get_output_path(store, run_id, output_name)
+        return build_run_output_preview(run_id=run_id, output_name=output_name, output_path=path)
+
     @api.get("/api/runs/{run_id}/output-files")
     def get_run_output_files(run_id: str) -> Dict[str, object]:
         try:
@@ -2024,6 +2029,60 @@ def get_output_path(store: RunJobStore, run_id: str, output_name: str) -> Path:
         raise HTTPException(status_code=403, detail=str(exc))
     except FileNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc))
+
+
+def build_run_output_preview(*, run_id: str, output_name: str, output_path: Path) -> Dict[str, object]:
+    payload = build_source_preview(run_id, output_path)
+    preview_limit = int(payload.get("viewer_sandbox", {}).get("max_inline_text_chars") or 20000)
+    payload.update(
+        {
+            "command": "run-output-preview",
+            "output_name": output_name,
+            "download_url": f"/api/runs/{run_id}/outputs/{quote(output_name)}/file",
+            "metadata_url": f"/api/runs/{run_id}/outputs/{quote(output_name)}/preview",
+            "search_url": "",
+            "viewer_actions": [
+                {
+                    "id": "download-output",
+                    "label": "Download output",
+                    "url": f"/api/runs/{run_id}/outputs/{quote(output_name)}/file",
+                    "purpose": "Open the run output file that backs this workflow stage.",
+                    "heavy": False,
+                },
+                {
+                    "id": "open-run-summary",
+                    "label": "Open run summary",
+                    "url": f"/api/runs/{run_id}/summary",
+                    "purpose": "Check workflow stage status and output provenance before citing this output.",
+                    "heavy": False,
+                },
+            ],
+            "output_preview_profile": {
+                "profile_version": "run-output-preview-v1",
+                "output_name": output_name,
+                "output_path": str(output_path),
+                "preview_type": payload.get("preview_type") or "binary",
+                "bounded": True,
+                "max_inline_text_chars": preview_limit,
+                "download_url": f"/api/runs/{run_id}/outputs/{quote(output_name)}/file",
+                "reportability_decision": {
+                    "decision": "run-output-preview-is-review-aid",
+                    "allowed_use": "analyst-output-verification-and-workflow-handoff",
+                    "required_before_report": [
+                        "verify source row or artifact provenance inside the output",
+                        "check workflow stage warning_messages and parser limitations",
+                        "cite source evidence rather than this preview when possible",
+                    ],
+                },
+            },
+        }
+    )
+    payload["viewer_limitations"] = [
+        "Run output preview is bounded and read-only.",
+        "Download or open the full output when the preview is truncated.",
+        "Report citations should point to source rows/provenance, not only this preview.",
+    ]
+    return payload
 
 
 def resolve_allowed_source_file(store: RunJobStore, run_id: str, raw_path: str) -> Path:

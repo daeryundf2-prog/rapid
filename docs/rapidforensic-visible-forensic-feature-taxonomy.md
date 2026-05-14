@@ -1036,11 +1036,13 @@ GUI 노출 계약:
 
 각 stage는 이제 `handoff_outputs`를 함께 가진다. 이 배열은 output 이름, 사용자 관점 역할, 권장 viewer, GUI action, reportability note를 담는다. GUI는 이 값을 사용해 stage 카드에서 `/api/runs/{run_id}/outputs/{output_name}/file` 링크를 바로 노출한다. 즉 분석관은 “단계가 완료됨”이라는 추상 상태에서 멈추지 않고, 해당 단계를 신뢰하기 전에 열어봐야 할 산출물로 즉시 이동할 수 있다.
 
+또한 stage output은 `/api/runs/{run_id}/outputs/{output_name}/preview`로 bounded preview를 열 수 있다. GUI의 `Preview` 버튼은 이 API를 사용해 report, summary, timeline, artifact JSON 같은 run output을 source viewer rail 안에서 바로 확인하게 한다. 이 preview는 `run-output-preview-v1`로 표시되며, source evidence citation을 대체하지 않는 review aid로 명시된다.
+
 검증 포인트:
 
 1. `tests/test_rapidtriage_run.py::test_run_workflow_contract_maps_internal_steps_to_analyst_flow`가 내부 step/output을 6개 사용자 stage로 매핑하고 warning stage를 검증한다.
 2. `tests/test_rapidtriage_run.py::assert_run_mode_outputs`가 모든 run mode의 summary에 workflow contract와 stage lookup이 포함되는지 확인한다.
-3. GUI는 `renderCoreEvidenceWorkflow`, `renderRunWorkflowContract`, `renderRunWorkflowOutputLinks`에서 이 계약을 읽어 단일 케이스 흐름과 stage별 산출물 링크를 표시한다.
+3. GUI는 `renderCoreEvidenceWorkflow`, `renderRunWorkflowContract`, `renderRunWorkflowOutputLinks`, `renderRunOutputViewer`에서 이 계약을 읽어 단일 케이스 흐름과 stage별 산출물 링크/미리보기를 표시한다.
 
 중요한 제한:
 

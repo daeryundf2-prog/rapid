@@ -1041,6 +1041,20 @@ class RapidTriageApiTests(unittest.TestCase):
             self.assertEqual(timeline_response.status_code, 200)
             self.assertEqual(indicators_response.status_code, 200)
             self.assertEqual(search_response.status_code, 200)
+            output_preview_response = client.get(f"/api/runs/{run_id}/outputs/report/preview")
+            self.assertEqual(output_preview_response.status_code, 200, output_preview_response.text)
+            output_preview = output_preview_response.json()
+            self.assertEqual(output_preview["command"], "run-output-preview")
+            self.assertEqual(output_preview["output_name"], "report")
+            self.assertEqual(output_preview["preview_type"], "text")
+            self.assertIn("rapidtriage-run-report", output_preview["path"])
+            self.assertIn("/outputs/report/file", output_preview["download_url"])
+            self.assertEqual(output_preview["output_preview_profile"]["profile_version"], "run-output-preview-v1")
+            self.assertTrue(output_preview["output_preview_profile"]["bounded"])
+            self.assertEqual(
+                output_preview["output_preview_profile"]["reportability_decision"]["allowed_use"],
+                "analyst-output-verification-and-workflow-handoff",
+            )
             self.assertEqual(files_response.json()["command"], "files")
             self.assertEqual(timeline_response.json()["command"], "timeline")
             self.assertEqual(indicators_response.json()["command"], "indicators")

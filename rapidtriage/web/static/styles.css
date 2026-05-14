@@ -2890,33 +2890,59 @@ mark {
   margin-top: 4px;
 }
 
-.run-workflow-output-links a {
+.run-workflow-output-card {
   display: grid;
-  gap: 2px;
+  gap: 5px;
   border: 1px solid rgba(15, 116, 107, 0.14);
   border-radius: 9px;
   background: rgba(15, 116, 107, 0.05);
   color: var(--ink);
   padding: 7px;
-  text-decoration: none;
 }
 
-.run-workflow-output-links a:hover,
-.run-workflow-output-links a:focus-visible {
+.run-workflow-output-card:hover,
+.run-workflow-output-card:focus-within {
   border-color: rgba(15, 116, 107, 0.35);
   background: rgba(15, 116, 107, 0.1);
 }
 
-.run-workflow-output-links a strong {
+.run-workflow-output-card strong {
   font-size: 0.77rem;
 }
 
-.run-workflow-output-links a span,
+.run-workflow-output-card span,
 .run-workflow-output-links small,
 .run-workflow-no-output {
   color: var(--muted);
   font-size: 0.72rem;
   font-style: normal;
+}
+
+.run-workflow-output-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+
+.run-workflow-output-actions a,
+.run-workflow-output-actions button {
+  border: 1px solid rgba(15, 116, 107, 0.2);
+  border-radius: 999px;
+  background: #fff;
+  color: var(--accent);
+  padding: 4px 8px;
+  font-size: 0.7rem;
+  font-weight: 900;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.run-workflow-output-actions a:hover,
+.run-workflow-output-actions button:hover,
+.run-workflow-output-actions a:focus-visible,
+.run-workflow-output-actions button:focus-visible {
+  border-color: rgba(15, 116, 107, 0.45);
+  background: rgba(15, 116, 107, 0.08);
 }
 
 .run-workflow-no-output {
