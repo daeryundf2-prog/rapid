@@ -657,7 +657,7 @@ CAPABILITY_GROUPS: tuple[dict[str, Any], ...] = (
         "label": "검색 / 타임라인 고급",
         "capabilities": (
             {"id": "super-timeline-plaso-style", "label": "Super Timeline", "status": "partial", "terms": ("super timeline", "plaso", "log2timeline", "timeline correlation")},
-            {"id": "denisting-nsrl-whitelist", "label": "De-NISTing/Whitelisting", "status": "partial", "terms": ("nsrl", "nsrl-rds-csv", "denist", "whitelist", "known file", "known_good_suppression_profile")},
+            {"id": "denisting-nsrl-whitelist", "label": "De-NISTing/Whitelisting", "status": "partial", "terms": ("nsrl", "nsrl-rds-csv", "denist", "whitelist", "known file", "known_good_suppression_profile", "known_good_search_suppression_profile")},
             {"id": "yara-ioc-scanner", "label": "YARA / IOC 스캐너", "status": "partial", "terms": ("yara", "yara-lite", ".yar", ".yara", "ioc", "hash list", "malware scan", "ioc_scanner_hits", "local-rule-ioc-hit")},
         ),
     },

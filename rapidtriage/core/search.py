@@ -55,6 +55,7 @@ def run_unified_search(
     search_mode: str = "exact",
     fuzzy_distance: int = 1,
     proximity_window: int = 0,
+    hide_known_good: bool = False,
 ) -> Dict[str, object]:
     summary = load_run_summary(run_summary)
     normalized = normalize_keywords(keywords, search_mode=search_mode)
@@ -93,6 +94,10 @@ def run_unified_search(
         sources=normalized_sources,
         extensions=normalized_extensions,
         path_fragment=normalized_path_fragment,
+    )
+    matches, known_good_search_profile = apply_known_good_search_suppression(
+        matches,
+        hide_known_good=hide_known_good,
     )
 
     if limit:
@@ -147,12 +152,15 @@ def run_unified_search(
             "sources": sorted(normalized_sources),
             "extensions": sorted(normalized_extensions),
             "path_contains": normalized_path_fragment,
+            "hide_known_good": bool(hide_known_good),
             **search_options,
         },
             "summary": {
                 "match_count": len(matches),
                 "source_counts": source_counts,
                 "keyword_counts": keyword_counts,
+                "known_good_match_count": known_good_search_profile["known_good_match_count"],
+                "known_good_suppressed_count": known_good_search_profile["suppressed_match_count"],
                 "document_error_count": len(document_errors),
                 "ocr_error_count": len(ocr_errors),
                 "commercial_gap_ids": [SEARCH_FEATURE_GAP_ID],
@@ -166,6 +174,7 @@ def run_unified_search(
                 "enabled": include_ocr,
                 "errors": ocr_errors,
         },
+        "known_good_search_suppression_profile": known_good_search_profile,
         "advanced_search_profile": advanced_profile,
         "advanced_search_query_hit_manifest": query_hit_manifest,
         "advanced_search_query_hit_manifest_hash": query_hit_manifest["manifest_hash"],
@@ -179,6 +188,7 @@ def run_unified_search(
             include_analysis=include_analysis,
             limit=limit,
             options=search_options,
+            known_good_search_profile=known_good_search_profile,
         ),
         "search_report_grade_assessment": report_grade,
         "core_accuracy_gates": core_accuracy_gates,
@@ -204,6 +214,7 @@ def workbench_search_profile(
     include_analysis: bool,
     limit: int,
     options: Mapping[str, object],
+    known_good_search_profile: Mapping[str, object] | None = None,
 ) -> dict[str, object]:
     covered_sources = sorted(source for source, count in source_counts.items() if count)
     target_sources = ["documents", "files", "web", "artifacts", "timeline", "indicators", "ocr"]
@@ -240,6 +251,13 @@ def workbench_search_profile(
             "ocr_enabled": include_ocr,
             "analysis_optional": True,
             "analysis_enabled": include_analysis,
+            "known_good_suppression_available": True,
+            "known_good_suppression_enabled": bool(
+                (known_good_search_profile or {}).get("hide_known_good")
+            ),
+            "known_good_suppressed_match_count": int(
+                (known_good_search_profile or {}).get("suppressed_match_count") or 0
+            ),
         },
         "reportability_decision": {
             "decision": "do-not-report-search-hit-without-source-viewer-verification",
@@ -1372,6 +1390,73 @@ def filter_matches(
             continue
         filtered.append(dict(match))
     return filtered
+
+
+def apply_known_good_search_suppression(
+    matches: Sequence[Mapping[str, object]],
+    *,
+    hide_known_good: bool,
+) -> tuple[list[dict[str, object]], dict[str, object]]:
+    known_good_matches: list[Mapping[str, object]] = []
+    visible: list[dict[str, object]] = []
+    suppressed_previews: list[dict[str, object]] = []
+    known_good_sources: set[str] = set()
+    for match in matches:
+        item = dict(match)
+        if not is_known_good_search_match(item):
+            visible.append(item)
+            continue
+        known_good_matches.append(item)
+        known_good_sources.add(str(item.get("source") or "unknown"))
+        if hide_known_good:
+            suppressed_previews.append(search_suppressed_known_good_preview(item))
+        else:
+            item["known_good_search_status"] = "known-good-reviewable"
+            visible.append(item)
+    profile = {
+        "profile_version": "known-good-search-suppression-v1",
+        "configured": bool(known_good_matches) or bool(hide_known_good),
+        "hide_known_good": bool(hide_known_good),
+        "known_good_match_count": len(known_good_matches),
+        "suppressed_match_count": len(suppressed_previews),
+        "reviewable_match_count": len(visible),
+        "applies_to_sources": sorted(known_good_sources),
+        "suppressed_previews": suppressed_previews[:50],
+        "source_traceability": (
+            "known-good status is inherited from file metadata known_good_status/"
+            "known_good_match and preserves feed source_detail where present"
+        ),
+        "reportability_note": (
+            "suppressed known-good hits are hidden from triage review only; source files remain "
+            "recoverable from the original run outputs and should be disclosed if relied on."
+        ),
+    }
+    return visible, profile
+
+
+def is_known_good_search_match(match: Mapping[str, object]) -> bool:
+    metadata = match.get("metadata")
+    if not isinstance(metadata, Mapping):
+        return False
+    status = str(metadata.get("known_good_status") or "").lower()
+    if status in {"known-good-feed-match", "known-good", "known_good"}:
+        return True
+    known_good_match = metadata.get("known_good_match")
+    return isinstance(known_good_match, Mapping) and bool(known_good_match)
+
+
+def search_suppressed_known_good_preview(match: Mapping[str, object]) -> dict[str, object]:
+    metadata = match.get("metadata") if isinstance(match.get("metadata"), Mapping) else {}
+    known_good_match = metadata.get("known_good_match") if isinstance(metadata.get("known_good_match"), Mapping) else {}
+    return {
+        "source": str(match.get("source") or ""),
+        "kind": str(match.get("kind") or ""),
+        "title": str(match.get("title") or ""),
+        "path": str(match.get("path") or ""),
+        "pointer": str(match.get("pointer") or ""),
+        "known_good_status": str(metadata.get("known_good_status") or ""),
+        "known_good_match": dict(known_good_match),
+    }
 
 
 def read_json_output(outputs: Mapping[str, object], name: str) -> Mapping[str, object] | None:

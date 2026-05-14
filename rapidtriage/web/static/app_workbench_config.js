@@ -1404,8 +1404,8 @@ const VISIBLE_FORENSIC_CAPABILITY_GROUPS = [
         id: "denisting-nsrl-whitelist",
         label: "De-NISTing/Whitelisting",
         status: "partial",
-        terms: ["nsrl", "nsrl-rds-csv", "denist", "whitelist", "known file", "known_good_suppression_profile"],
-        nextAction: "파일 스캔 known-good 표시/숨김과 NSRL RDS CSV source trace는 가능; 다음은 NSRL updater와 검색 결과 suppression UI",
+        terms: ["nsrl", "nsrl-rds-csv", "denist", "whitelist", "known file", "known_good_suppression_profile", "known_good_search_suppression_profile"],
+        nextAction: "파일 스캔과 통합 검색에서 known-good 표시/숨김 및 NSRL RDS CSV source trace 가능; 다음은 NSRL updater/full database management",
       },
       {
         id: "yara-ioc-scanner",

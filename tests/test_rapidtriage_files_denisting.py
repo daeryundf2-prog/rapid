@@ -9,6 +9,7 @@ from pathlib import Path
 from rapidtriage.cli import main
 from rapidtriage.core.files import run_files_scan
 from rapidtriage.core.hash_cache import reset_hash_cache
+from rapidtriage.core.search import run_unified_search
 
 
 class FileKnownGoodSuppressionTests(unittest.TestCase):
@@ -152,6 +153,48 @@ class FileKnownGoodSuppressionTests(unittest.TestCase):
         self.assertEqual(profile["feed_summaries"][0]["format"], "nsrl-rds-csv")
         self.assertTrue(profile["feed_summaries"][0]["nsrl_rds_header_detected"])
         self.assertEqual(profile["feed_summaries"][0]["row_count"], 1)
+
+    def test_unified_search_can_hide_known_good_file_hits(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "case"
+            root.mkdir()
+            known_good = root / "known-good-note.txt"
+            suspicious = root / "suspicious-note.txt"
+            known_good.write_text("standard operating system help text\n", encoding="utf-8")
+            suspicious.write_text("needle exfil staging note\n", encoding="utf-8")
+            feed = Path(tmp) / "known-good.txt"
+            feed.write_text(hashlib.sha256(known_good.read_bytes()).hexdigest() + "\n", encoding="utf-8")
+
+            reset_hash_cache()
+            files_payload = run_files_scan(root, categories=["documents"], known_good_hash_feeds=[feed])
+            files_output = Path(tmp) / "rapidtriage-files.json"
+            files_output.write_text(json.dumps(files_payload), encoding="utf-8")
+            run_summary = {"outputs": {"files": str(files_output)}}
+
+            reviewable = run_unified_search(
+                run_summary,
+                ["known-good-note"],
+                include_ocr=False,
+                include_analysis=False,
+            )
+            hidden = run_unified_search(
+                run_summary,
+                ["known-good-note"],
+                include_ocr=False,
+                include_analysis=False,
+                hide_known_good=True,
+            )
+
+        self.assertEqual(reviewable["summary"]["match_count"], 1)
+        self.assertEqual(reviewable["summary"]["known_good_match_count"], 1)
+        self.assertEqual(reviewable["summary"]["known_good_suppressed_count"], 0)
+        self.assertEqual(reviewable["matches"][0]["known_good_search_status"], "known-good-reviewable")
+        self.assertEqual(hidden["summary"]["match_count"], 0)
+        self.assertEqual(hidden["summary"]["known_good_match_count"], 1)
+        self.assertEqual(hidden["summary"]["known_good_suppressed_count"], 1)
+        profile = hidden["known_good_search_suppression_profile"]
+        self.assertTrue(profile["hide_known_good"])
+        self.assertEqual(profile["suppressed_previews"][0]["title"], "known-good-note.txt")
 
 
 if __name__ == "__main__":

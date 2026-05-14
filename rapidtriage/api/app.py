@@ -1088,6 +1088,7 @@ def create_app(job_store: RunJobStore | None = None, auth_token: str | None = No
         search_mode: str = Query("exact", pattern="^(exact|fuzzy|regex)$"),
         fuzzy_distance: int = Query(1, ge=0, le=2),
         proximity_window: int = Query(0, ge=0, le=100),
+        hide_known_good: bool = False,
         keyword_pack: list[str] = Query(default=[]),
     ) -> Dict[str, object]:
         job = get_job(store, run_id)
@@ -1108,6 +1109,7 @@ def create_app(job_store: RunJobStore | None = None, auth_token: str | None = No
                 search_mode=search_mode,
                 fuzzy_distance=fuzzy_distance,
                 proximity_window=proximity_window,
+                hide_known_good=hide_known_good,
             )
             payload["keyword_pack_selection_profile"] = keyword_pack_selection_profile(
                 pack_names=selected_pack_names,

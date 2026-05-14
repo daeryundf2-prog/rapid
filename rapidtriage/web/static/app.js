@@ -2939,6 +2939,7 @@ function renderSearch(payload = null) {
         search_mode: payload.options?.search_mode || "exact",
         fuzzy_distance: payload.options?.fuzzy_distance ?? 1,
         proximity_window: payload.options?.proximity_window ?? 0,
+        hide_known_good: payload.options?.hide_known_good === true,
         keyword_packs: payload.keyword_pack_selection_profile?.selected_pack_names || [],
       }
     : getSearchDraft();
@@ -3003,6 +3004,7 @@ function renderSearch(payload = null) {
         </label>
       </div>
       <label class="check-label"><input id="unifiedSearchOcr" type="checkbox" ${draft.ocr === false ? "" : "checked"} /> Include OCR on image candidates</label>
+      <label class="check-label"><input id="unifiedSearchHideKnownGood" type="checkbox" ${draft.hide_known_good ? "checked" : ""} /> Hide known-good / NSRL file hits</label>
       <fieldset class="keyword-pack-fieldset">
         <legend>Keyword packs</legend>
         ${["credentials", "execution", "network", "browser-ai", "windows-ir", "exfiltration"].map((pack) => `
@@ -3041,6 +3043,7 @@ function renderSearchResults(payload, rows) {
         ${metric("Matches", summary.match_count)}
         ${metric("OCR errors", summary.ocr_error_count)}
       </div>
+      ${renderKnownGoodSearchSuppression(payload)}
       <p class="empty-state">No matches found.</p>
       ${renderOcrErrors(ocrErrors)}
     `;
@@ -3052,6 +3055,7 @@ function renderSearchResults(payload, rows) {
       ${metric("OCR errors", summary.ocr_error_count)}
       ${metric("Keywords", (payload.keywords || []).length)}
     </div>
+    ${renderKnownGoodSearchSuppression(payload)}
     ${renderSearchSourceVerification(payload)}
     ${renderSearchFacets(payload, rows)}
     ${renderAdvancedSearchProfile(advancedProfile)}
@@ -3344,6 +3348,28 @@ function renderSearchMetadata(match) {
   `;
 }
 
+function renderKnownGoodSearchSuppression(payload) {
+  const profile = payload.known_good_search_suppression_profile || {};
+  if (!profile.profile_version) return "";
+  const suppressed = Number(profile.suppressed_match_count || 0);
+  const known = Number(profile.known_good_match_count || 0);
+  if (!known && !profile.hide_known_good) return "";
+  return `
+    <section class="search-verification-card compact known-good-search-suppression" data-testid="known-good-search-suppression">
+      <div>
+        <p class="eyebrow">known-good suppression</p>
+        <h3>${profile.hide_known_good ? `${formatNumber(suppressed)} hidden` : `${formatNumber(known)} reviewable`} known-good / NSRL hit(s)</h3>
+        <p>${escapeHtml(profile.reportability_note || "Known-good hits are triage noise controls, not evidence deletion.")}</p>
+      </div>
+      <div class="mini-stat-row">
+        <span>${profile.hide_known_good ? "hidden from results" : "visible for review"}</span>
+        <span>${formatNumber(profile.reviewable_match_count || 0)} reviewable hit(s)</span>
+        <span>${escapeHtml((profile.applies_to_sources || []).join(", ") || "no known-good source")}</span>
+      </div>
+    </section>
+  `;
+}
+
 function bindSearchForm() {
   const form = detailPanel.querySelector("#unifiedSearchForm");
   if (!form) return;
@@ -3358,6 +3384,7 @@ function bindSearchForm() {
     const searchMode = detailPanel.querySelector("#unifiedSearchMode")?.value || "exact";
     const fuzzyDistance = detailPanel.querySelector("#unifiedSearchFuzzyDistance")?.value || "1";
     const proximityWindow = detailPanel.querySelector("#unifiedSearchProximity")?.value || "0";
+    const hideKnownGood = detailPanel.querySelector("#unifiedSearchHideKnownGood")?.checked ?? false;
     const keywordPacks = Array.from(detailPanel.querySelectorAll(".keyword-pack-option:checked")).map((item) => item.value);
     const keywords = String(input.value || "")
       .split(",")
@@ -3373,6 +3400,7 @@ function bindSearchForm() {
       search_mode: searchMode,
       fuzzy_distance: Number(fuzzyDistance),
       proximity_window: Number(proximityWindow),
+      hide_known_good: hideKnownGood,
       keyword_packs: keywordPacks,
     });
     rememberSearchKeywords({ keywords, source, extension, path_contains: pathContains });
@@ -3388,6 +3416,7 @@ function bindSearchForm() {
       params.set("search_mode", searchMode);
       params.set("fuzzy_distance", fuzzyDistance);
       params.set("proximity_window", proximityWindow);
+      params.set("hide_known_good", hideKnownGood ? "true" : "false");
       for (const pack of keywordPacks) params.append("keyword_pack", pack);
       const payload = await api(`/api/runs/${selectedRunId}/search?${params.toString()}`);
       virtualWindowOffsets.search = 0;
@@ -5136,6 +5165,95 @@ function formatBytes(value) {
   if (size < 1024) return `${size} B`;
   if (size < 1024 * 1024) return `${(size / 1024).toFixed(1)} KB`;
   return `${(size / 1024 / 1024).toFixed(1)} MB`;
+}
+
+function storageAvailable() {
+  try {
+    const key = "rapidtriage.storage.check";
+    window.localStorage.setItem(key, "1");
+    window.localStorage.removeItem(key);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function searchStorageKey() {
+  return `${SEARCH_STORAGE_PREFIX}${selectedRunId || "default"}`;
+}
+
+function searchHistoryStorageKey() {
+  return `${SEARCH_HISTORY_PREFIX}${selectedRunId || "default"}`;
+}
+
+function getSearchDraft() {
+  const defaults = {
+    keywords: [],
+    ocr: true,
+    source: "",
+    extension: "",
+    path_contains: "",
+    search_mode: "exact",
+    fuzzy_distance: 1,
+    proximity_window: 0,
+    hide_known_good: false,
+    keyword_packs: [],
+  };
+  if (!storageAvailable()) return defaults;
+  try {
+    const payload = JSON.parse(window.localStorage.getItem(searchStorageKey()) || "{}");
+    return {
+      ...defaults,
+      ...payload,
+      keywords: Array.isArray(payload.keywords) ? payload.keywords.map(String).filter(Boolean) : [],
+      keyword_packs: Array.isArray(payload.keyword_packs) ? payload.keyword_packs.map(String).filter(Boolean) : [],
+      hide_known_good: Boolean(payload.hide_known_good),
+    };
+  } catch {
+    return defaults;
+  }
+}
+
+function setSearchDraft(payload) {
+  if (!storageAvailable()) return;
+  try {
+    window.localStorage.setItem(searchStorageKey(), JSON.stringify(payload || {}));
+  } catch {
+    // Search drafts are convenience state only; failure should not block review.
+  }
+}
+
+function getSearchHistory() {
+  if (!storageAvailable()) return [];
+  try {
+    const payload = JSON.parse(window.localStorage.getItem(searchHistoryStorageKey()) || "[]");
+    return Array.isArray(payload) ? payload : [];
+  } catch {
+    return [];
+  }
+}
+
+function rememberSearchKeywords(entry) {
+  if (!storageAvailable()) return;
+  const keywords = Array.isArray(entry?.keywords) ? entry.keywords.map(String).filter(Boolean) : [];
+  if (!keywords.length) return;
+  const key = keywords.join("\u0000").toLowerCase();
+  const history = getSearchHistory().filter((item) => {
+    const itemKey = (item.keywords || []).join("\u0000").toLowerCase();
+    return itemKey !== key;
+  });
+  history.unshift({
+    keywords,
+    source: entry.source || "",
+    extension: entry.extension || "",
+    path_contains: entry.path_contains || "",
+    saved_at: new Date().toISOString(),
+  });
+  try {
+    window.localStorage.setItem(searchHistoryStorageKey(), JSON.stringify(history.slice(0, 12)));
+  } catch {
+    // Recent search chips are optional UI state.
+  }
 }
 
 function compareStorageKey() {

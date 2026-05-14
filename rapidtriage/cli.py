@@ -905,6 +905,7 @@ def build_parser() -> argparse.ArgumentParser:
     search.add_argument("--search-mode", choices=["exact", "fuzzy", "regex"], default="exact", help="Keyword matching mode")
     search.add_argument("--fuzzy-distance", type=int, default=1, help="Maximum edit distance for --search-mode fuzzy (0-2)")
     search.add_argument("--proximity-window", type=int, default=0, help="Annotate hits where multiple keywords occur within N word tokens")
+    search.add_argument("--hide-known-good", action="store_true", help="Hide search hits inherited from known-good/NSRL file matches")
     search.add_argument("--keyword-pack", action="append", help="Add a built-in keyword pack such as credentials, execution, network, browser-ai, windows-ir")
     search.add_argument("--keyword-pack-file", action="append", help="JSON keyword pack file containing a keywords list")
 
@@ -3601,6 +3602,7 @@ def main(argv=None) -> int:
                 search_mode=args.search_mode,
                 fuzzy_distance=args.fuzzy_distance,
                 proximity_window=args.proximity_window,
+                hide_known_good=args.hide_known_good,
             )
             if args.keyword_pack or args.keyword_pack_file:
                 payload["keyword_pack_selection_profile"] = keyword_pack_selection_profile(
@@ -3626,6 +3628,7 @@ def main(argv=None) -> int:
                 "search_mode": args.search_mode,
                 "fuzzy_distance": args.fuzzy_distance,
                 "proximity_window": args.proximity_window,
+                "hide_known_good": args.hide_known_good,
                 "keyword_pack": args.keyword_pack or [],
                 "keyword_pack_file": args.keyword_pack_file or [],
             },
