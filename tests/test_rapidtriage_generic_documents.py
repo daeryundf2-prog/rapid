@@ -42,6 +42,13 @@ class RapidTriageGenericDocumentsTests(unittest.TestCase):
             llm_dir = root / "Users" / "Alice" / ".ollama" / "models"
             llm_dir.mkdir(parents=True)
             (llm_dir / "mistral.gguf").write_bytes(b"GGUF test model bytes")
+            llm_log = root / "Users" / "Alice" / ".ollama" / "logs" / "chat-history.log"
+            llm_log.parent.mkdir(parents=True)
+            llm_log.write_text(
+                "User: explain source code upload risk for alice@example.com\n"
+                "Assistant: review local-only evidence before reporting the finding\n",
+                encoding="utf-8",
+            )
             chatgpt_dir = root / "Users" / "Alice" / "AppData" / "Roaming" / "OpenAI" / "ChatGPT"
             chatgpt_dir.mkdir(parents=True)
             chatgpt_db = chatgpt_dir / "conversations.sqlite"
@@ -65,6 +72,7 @@ class RapidTriageGenericDocumentsTests(unittest.TestCase):
             self.assertIn("desktop-ai-app-artifact", artifact_types)
             self.assertIn("desktop-ai-conversation-candidate", artifact_types)
             self.assertIn("document-metadata-risk", artifact_types)
+            self.assertIn("local-llm-prompt-candidate", artifact_types)
 
             doc_risk = next(
                 artifact for artifact in payload["artifacts"] if artifact["artifact_type"] == "document-metadata-risk"
@@ -104,10 +112,26 @@ class RapidTriageGenericDocumentsTests(unittest.TestCase):
             self.assertIn("bob@example.com", recovered["details"]["sticky_note_review_profile"]["email_candidates"])
             self.assertIn("possible-sensitive-note", recovered["details"]["risk_flags"])
 
-            llm = next(artifact for artifact in payload["artifacts"] if artifact["artifact_type"] == "local-llm-artifact")
+            llm = next(
+                artifact
+                for artifact in payload["artifacts"]
+                if artifact["artifact_type"] == "local-llm-artifact"
+                and artifact["details"]["artifact_role"] == "model-file"
+            )
             self.assertEqual(llm["details"]["product_hint"], "Ollama")
             self.assertEqual(llm["details"]["artifact_role"], "model-file")
             self.assertIn("local-model-file", llm["details"]["risk_flags"])
+
+            llm_prompt = next(
+                artifact
+                for artifact in payload["artifacts"]
+                if artifact["artifact_type"] == "local-llm-prompt-candidate"
+                and artifact["details"]["direction"] == "user-prompt-candidate"
+            )
+            self.assertEqual(llm_prompt["details"]["product_hint"], "Ollama")
+            self.assertEqual(llm_prompt["details"]["source_kind"], "bounded-text-fragment")
+            self.assertIn("alice@example.com", llm_prompt["details"]["local_llm_review_profile"]["email_candidates"])
+            self.assertIn("local-llm-user-prompt-candidate", llm_prompt["details"]["risk_flags"])
 
             desktop_ai = next(
                 artifact for artifact in payload["artifacts"] if artifact["artifact_type"] == "desktop-ai-app-artifact"

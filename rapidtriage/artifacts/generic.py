@@ -39,6 +39,19 @@ DESKTOP_AI_APP_PATH_TERMS = {
 }
 LOCAL_LLM_MODEL_SUFFIXES = {".gguf", ".ggml", ".bin", ".safetensors"}
 LOCAL_LLM_CONFIG_SUFFIXES = {".json", ".yaml", ".yml", ".toml", ".log", ".txt", ".sqlite", ".db"}
+LOCAL_LLM_PROMPT_SCAN_BYTES = 2 * 1024 * 1024
+LOCAL_LLM_PROMPT_ROW_LIMIT = 200
+LOCAL_LLM_TEXT_PROMPT_TERMS = (
+    "prompt",
+    "user:",
+    "assistant:",
+    "human:",
+    "system:",
+    "response",
+    "completion",
+    "conversation",
+    "chat",
+)
 DOCUMENT_METADATA_SUFFIXES = {".docx", ".xlsx", ".pptx", ".odt", ".ods", ".odp"}
 OOXML_VBA_PATHS = {"word/vbaProject.bin", "xl/vbaProject.bin", "ppt/vbaProject.bin"}
 OOXML_PROPS_PATHS = {"docProps/core.xml", "docProps/app.xml", "docProps/custom.xml"}
@@ -612,6 +625,7 @@ def collect_local_llm_inventory(root: Path) -> Iterable[ArtifactRecord]:
         if suffix not in LOCAL_LLM_MODEL_SUFFIXES and suffix not in LOCAL_LLM_CONFIG_SUFFIXES:
             continue
         stat_result = safe_stat(path)
+        source_hashes = safe_source_hashes(path)
         yield ArtifactRecord(
             provider=GenericDocumentArtifactProvider.name,
             artifact_type="local-llm-artifact",
@@ -621,7 +635,7 @@ def collect_local_llm_inventory(root: Path) -> Iterable[ArtifactRecord]:
                 "parser": "local-llm-inventory",
                 "parser_version": PARSER_VERSION,
                 "source_path": str(path.resolve()),
-                "source_hashes": safe_source_hashes(path),
+                "source_hashes": source_hashes,
                 "product_hint": product,
                 "artifact_role": local_llm_role(path),
                 "model_name_hint": local_llm_model_name_hint(path),
@@ -638,6 +652,169 @@ def collect_local_llm_inventory(root: Path) -> Iterable[ArtifactRecord]:
                 "risk_flags": local_llm_risk_flags(path),
             },
         )
+        yield from collect_local_llm_prompt_candidates(path=path, product=product, source_hashes=source_hashes)
+
+
+def collect_local_llm_prompt_candidates(
+    *,
+    path: Path,
+    product: str,
+    source_hashes: Mapping[str, str],
+) -> Iterable[ArtifactRecord]:
+    suffix = path.suffix.lower()
+    if suffix in LOCAL_LLM_MODEL_SUFFIXES:
+        return
+    if suffix in {".sqlite", ".db"}:
+        yield from collect_local_llm_sqlite_prompt_candidates(path=path, product=product, source_hashes=source_hashes)
+        return
+    if suffix not in {".json", ".yaml", ".yml", ".toml", ".log", ".txt"}:
+        return
+    data = read_prefix(path, LOCAL_LLM_PROMPT_SCAN_BYTES)
+    if not data:
+        return
+    text = data.decode("utf-8", errors="replace")
+    emitted = 0
+    for offset, fragment in local_llm_text_prompt_fragments(text):
+        if emitted >= LOCAL_LLM_PROMPT_ROW_LIMIT:
+            break
+        emitted += 1
+        direction = local_llm_prompt_direction(fragment)
+        yield ArtifactRecord(
+            provider=GenericDocumentArtifactProvider.name,
+            artifact_type="local-llm-prompt-candidate",
+            path=str(path.resolve()),
+            supported=True,
+            details={
+                "parser": "local-llm-inventory",
+                "parser_version": PARSER_VERSION,
+                "source_path": str(path.resolve()),
+                "source_hashes": dict(source_hashes),
+                "product_hint": product,
+                "source_index": emitted - 1,
+                "source_offset": offset,
+                "source_kind": "bounded-text-fragment",
+                "direction": direction,
+                "content_preview": redact_note_preview(fragment),
+                "content_sha256": sha256_text(fragment),
+                "content_length": len(fragment),
+                "local_llm_review_profile": local_llm_review_profile(
+                    product=product,
+                    direction=direction,
+                    content=fragment,
+                    source_kind="bounded-text-fragment",
+                ),
+                "coverage_status": "local-llm-prompt-fragment-candidate",
+                "validation_required": True,
+                "commercial_grade_ready": False,
+                "commercial_grade_blockers": [
+                    "local-llm-app-schema-version-not-validated",
+                    "prompt-history-format-not-confirmed",
+                    "conversation-thread-pairing-not-complete",
+                ],
+                "risk_flags": local_llm_prompt_risk_flags(direction, fragment),
+            },
+        )
+
+
+def collect_local_llm_sqlite_prompt_candidates(
+    *,
+    path: Path,
+    product: str,
+    source_hashes: Mapping[str, str],
+) -> Iterable[ArtifactRecord]:
+    try:
+        connection = sqlite3.connect(f"file:{path.resolve()}?mode=ro", uri=True)
+        connection.row_factory = sqlite3.Row
+    except sqlite3.Error:
+        return
+    emitted = 0
+    with connection:
+        try:
+            table_rows = connection.execute(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name"
+            ).fetchall()
+        except sqlite3.Error:
+            return
+        for table_row in table_rows[:DESKTOP_AI_TABLE_LIMIT]:
+            if emitted >= LOCAL_LLM_PROMPT_ROW_LIMIT:
+                break
+            table_name = str(table_row["name"])
+            try:
+                columns = [
+                    str(row["name"])
+                    for row in connection.execute(f"PRAGMA table_info({quote_sqlite_identifier(table_name)})").fetchall()
+                ]
+            except sqlite3.Error:
+                continue
+            content_column = first_matching_column(
+                columns,
+                ("prompt", "content", "text", "message", "input", "output", "response", "completion"),
+            )
+            if not content_column:
+                continue
+            role_column = first_matching_column(columns, ("role", "sender", "speaker", "type"))
+            created_column = first_matching_column(
+                columns,
+                ("createdat", "created_at", "created", "timestamp", "time", "date", "updatedat", "updated_at"),
+            )
+            selected_columns = ["rowid", content_column]
+            for optional_column in (role_column, created_column):
+                if optional_column and optional_column not in selected_columns:
+                    selected_columns.append(optional_column)
+            sql = (
+                "SELECT "
+                + ", ".join("rowid" if column == "rowid" else quote_sqlite_identifier(column) for column in selected_columns)
+                + f" FROM {quote_sqlite_identifier(table_name)} LIMIT ?"
+            )
+            try:
+                rows = connection.execute(sql, (LOCAL_LLM_PROMPT_ROW_LIMIT - emitted,)).fetchall()
+            except sqlite3.Error:
+                continue
+            for row in rows:
+                content = optional_text(row[content_column])
+                if not content.strip():
+                    continue
+                role_hint = optional_text(row[role_column]) if role_column else ""
+                direction = local_llm_prompt_direction(role_hint or content_column)
+                emitted += 1
+                yield ArtifactRecord(
+                    provider=GenericDocumentArtifactProvider.name,
+                    artifact_type="local-llm-prompt-candidate",
+                    path=str(path.resolve()),
+                    supported=True,
+                    details={
+                        "parser": "local-llm-inventory",
+                        "parser_version": PARSER_VERSION,
+                        "source_path": str(path.resolve()),
+                        "source_hashes": dict(source_hashes),
+                        "product_hint": product,
+                        "source_table": table_name,
+                        "source_index": emitted - 1,
+                        "rowid": row["rowid"],
+                        "source_kind": "sqlite-row",
+                        "role_hint": role_hint,
+                        "direction": direction,
+                        "created_at": normalize_sqlite_time(row[created_column]) if created_column else "",
+                        "content_preview": redact_note_preview(content),
+                        "content_sha256": sha256_text(content),
+                        "content_length": len(content),
+                        "local_llm_review_profile": local_llm_review_profile(
+                            product=product,
+                            direction=direction,
+                            content=content,
+                            source_kind="sqlite-row",
+                        ),
+                        "coverage_status": "local-llm-sqlite-prompt-row-candidate",
+                        "validation_required": True,
+                        "commercial_grade_ready": False,
+                        "commercial_grade_blockers": [
+                            "local-llm-app-schema-version-not-validated",
+                            "service-or-app-export-diff-required",
+                            "conversation-thread-pairing-not-complete",
+                        ],
+                        "risk_flags": local_llm_prompt_risk_flags(direction, content),
+                    },
+                )
 
 
 def collect_desktop_ai_app_inventory(root: Path) -> Iterable[ArtifactRecord]:
@@ -985,6 +1162,81 @@ def local_llm_risk_flags(path: Path) -> list[str]:
     lowered = str(path).lower()
     if any(term in lowered for term in ("history", "prompt", "chat", "conversation")):
         flags.append("possible-prompt-history")
+    return flags
+
+
+def local_llm_text_prompt_fragments(text: str) -> list[tuple[int, str]]:
+    fragments: list[tuple[int, str]] = []
+    offset = 0
+    for line in text.splitlines(keepends=True):
+        cleaned = " ".join(line.split()).strip()
+        lowered = cleaned.lower()
+        if 12 <= len(cleaned) <= 4000 and any(term in lowered for term in LOCAL_LLM_TEXT_PROMPT_TERMS):
+            fragments.append((offset, cleaned[:2000]))
+        offset += len(line.encode("utf-8", errors="replace"))
+    if fragments:
+        return fragments[:LOCAL_LLM_PROMPT_ROW_LIMIT]
+    for match in re.finditer(r"(?is)(prompt|response|completion|conversation|chat)[\"'\s:=]{1,12}.{20,800}", text):
+        fragments.append((match.start(), " ".join(match.group(0).split())[:2000]))
+        if len(fragments) >= LOCAL_LLM_PROMPT_ROW_LIMIT:
+            break
+    return fragments
+
+
+def local_llm_prompt_direction(value: str) -> str:
+    normalized = normalize_column(value)
+    lowered = value.lower()
+    if normalized in {"user", "human", "prompt", "input"} or "user:" in lowered or "human:" in lowered:
+        return "user-prompt-candidate"
+    if normalized in {"assistant", "model", "bot", "response", "completion", "output"} or "assistant:" in lowered:
+        return "assistant-response-candidate"
+    if normalized == "system" or "system:" in lowered:
+        return "system-message-candidate"
+    return "local-llm-message-candidate"
+
+
+def local_llm_review_profile(*, product: str, direction: str, content: str, source_kind: str) -> dict[str, object]:
+    return {
+        "profile_version": "local-llm-review-profile-v1",
+        "product_hint": product,
+        "source_kind": source_kind,
+        "direction": direction,
+        "content_length": len(content),
+        "url_candidates": [match.group(0) for match in URL_RE.finditer(content)][:10],
+        "email_candidates": [match.group(0) for match in EMAIL_RE.finditer(content)][:10],
+        "sensitive_term_hits": [
+            term
+            for term in ("password", "passwd", "otp", "secret", "token", "api key", "apikey", "seed", "credential")
+            if term in content.lower()
+        ],
+        "values_are_candidates": True,
+        "source_viewer_hint": "Open the local LLM log/database source before using this prompt candidate in a report.",
+        "not_proof_of": [
+            "complete-conversation-thread",
+            "message-delivery",
+            "model-output-authenticity",
+        ],
+        "report_blockers": [
+            "local-llm-version-fixture-required",
+            "prompt-history-schema-diff-required",
+            "thread-pairing-validation-required",
+        ],
+    }
+
+
+def local_llm_prompt_risk_flags(direction: str, content: str) -> list[str]:
+    flags = ["local-llm-prompt-candidate", "local-ai-artifact"]
+    lowered = content.lower()
+    if direction == "user-prompt-candidate":
+        flags.append("local-llm-user-prompt-candidate")
+    elif direction == "assistant-response-candidate":
+        flags.append("local-llm-assistant-response-candidate")
+    if first_regex_match(content, URL_RE):
+        flags.append("local-llm-url-candidate")
+    if first_regex_match(content, EMAIL_RE):
+        flags.append("local-llm-email-candidate")
+    if any(term in lowered for term in ("password", "passwd", "otp", "secret", "token", "api key", "apikey", "seed")):
+        flags.append("possible-sensitive-local-llm-content")
     return flags
 
 

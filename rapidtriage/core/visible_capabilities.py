@@ -241,7 +241,7 @@ CAPABILITY_GROUPS: tuple[dict[str, Any], ...] = (
         "catalog_id": "web-ai",
         "label": "로컬/데스크톱 AI",
         "capabilities": (
-            {"id": "local-llm-ollama-lmstudio-gpt4all", "label": "Ollama/LM Studio/GPT4All", "status": "partial", "terms": ("ollama", "lm studio", "gpt4all", "local llm", "model", "local-llm-artifact")},
+            {"id": "local-llm-ollama-lmstudio-gpt4all", "label": "Ollama/LM Studio/GPT4All", "status": "partial", "terms": ("ollama", "lm studio", "gpt4all", "local llm", "model", "local-llm-artifact", "local-llm-prompt-candidate", "local_llm_review_profile")},
             {"id": "ai-desktop-app-db", "label": "ChatGPT/Copilot 데스크톱 앱 DB", "status": "partial", "terms": ("chatgpt desktop", "copilot", "desktop app", "sqlite", "desktop-ai-app-artifact", "desktop-ai-conversation-candidate", "desktop_ai_conversation_review_profile")},
             {"id": "windows-copilot-recall", "label": "Windows Copilot Recall", "status": "partial", "terms": ("recall", "copilot recall", "screenray", "windows 11 24h2", "ukg.db", "coreaiplatform", "windows-recall-database", "windows-recall-snapshot-file")},
         ),

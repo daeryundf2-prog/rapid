@@ -976,8 +976,8 @@ const VISIBLE_FORENSIC_CAPABILITY_GROUPS = [
         id: "local-llm-ollama-lmstudio-gpt4all",
         label: "Ollama/LM Studio/GPT4All",
         status: "partial",
-        terms: ["ollama", "lm studio", "gpt4all", "local llm", "model", "local-llm-artifact"],
-        nextAction: "로컬 모델/설정/로그 inventory는 가능, prompt DB schema와 앱 버전 fixture 검증 필요",
+        terms: ["ollama", "lm studio", "gpt4all", "local llm", "model", "local-llm-artifact", "local-llm-prompt-candidate", "local_llm_review_profile"],
+        nextAction: "로컬 모델/설정/로그 inventory와 bounded prompt 후보는 가능, prompt DB schema와 앱 버전 fixture 검증 필요",
       },
       {
         id: "ai-desktop-app-db",

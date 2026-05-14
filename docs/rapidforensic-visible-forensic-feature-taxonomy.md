@@ -766,7 +766,7 @@ GUI 표기 방식:
 | 브라우저 심화 복원 | 시크릿 모드 URL 카빙 | 목록화 | pagefile/hiberfil/memory 잔재에서 URL/검색어 후보 복원 |
 | 브라우저 심화 복원 | WebCacheV01.dat | 목록화 | ESE 기반 legacy/webview 통신 흔적 분석 |
 | 브라우저 심화 복원 | OneDrive/Google Drive sync DB | 목록화 | 데스크톱 클라우드 sync DB 기반 파일 유출 시점 확인 |
-| 로컬/데스크톱 AI | Ollama/LM Studio/GPT4All | 목록화 | 로컬 LLM 모델/프롬프트/로그 흔적 |
+| 로컬/데스크톱 AI | Ollama/LM Studio/GPT4All | `local-llm-artifact`, `local-llm-prompt-candidate` | 로컬 LLM 모델/설정/로그/SQLite 프롬프트 후보와 review profile |
 | 로컬/데스크톱 AI | ChatGPT/Copilot 데스크톱 앱 DB | `desktop-ai-app-artifact`, `desktop-ai-conversation-candidate` | 브라우저 밖 AI 앱 로컬 SQLite/cache 분석, 메시지 후보 row 및 리뷰 프로필 |
 | 로컬/데스크톱 AI | Windows Copilot Recall | `windows-recall-database`, `windows-recall-snapshot-file` | CoreAIPlatform/UKP DB schema inventory, snapshot hash/signature, OCR/app/window table 후보와 privacy warning |
 | 문서 유출 보조 아티팩트 | Print Spooler SPL/SHD | 목록화 | 출력 문서, 사용자, 프린터, 인쇄 시각 확인 |
@@ -840,7 +840,7 @@ GUI 표기 방식:
 | capability | 새 artifact row | 구현 내용 | 남은 상용급 보강 |
 | --- | --- | --- | --- |
 | Sticky Notes plum.sqlite | `sticky-note`, `sticky-note-recovery-candidate`, `sticky-note-db-unreadable` | `plum.sqlite`를 read-only SQLite로 열고 note text, deleted flag, account hint, created/updated 후보, text hash, `sticky_note_schema_profile`, `sticky_note_review_profile`을 추출한다. Live note row에 없는 bounded string fragment는 복원 후보로 분리한다. | Sticky Notes 버전별 schema fixture, free-page deleted row 구조 복원, 계정/기기 attribution 교차검증 |
-| Ollama/LM Studio/GPT4All | `local-llm-artifact` | `.ollama`, LM Studio, GPT4All 경로와 `.gguf/.ggml/.safetensors` 모델 파일, config/log/db 파일을 inventory row로 노출한다. | 제품별 prompt/history DB parser, 모델 provenance, 앱 버전별 fixture |
+| Ollama/LM Studio/GPT4All | `local-llm-artifact`, `local-llm-prompt-candidate` | `.ollama`, LM Studio, GPT4All 경로와 `.gguf/.ggml/.safetensors` 모델 파일, config/log/db 파일을 inventory row로 노출하고, 텍스트/로그/config 및 SQLite prompt-like table에서 bounded 프롬프트/응답 후보와 `local_llm_review_profile`을 생성한다. | 제품별 prompt/history DB parser, 모델 provenance, 앱 버전별 fixture, thread pairing |
 | ChatGPT/Copilot/Claude/Gemini/Perplexity Desktop | `desktop-ai-app-artifact`, `desktop-ai-conversation-candidate` | desktop AI 앱의 SQLite/cache 파일을 inventory하고, message/prompt/content 계열 테이블에서 bounded 메시지 후보 row, role/direction, timestamp, conversation id 후보, `desktop_ai_conversation_review_profile`을 추출한다. | 서비스 export diff, thread pairing, 앱 버전별 schema fixture, 삭제 row/LevelDB content decoder |
 | 문서 메타데이터/매크로 위험 | `document-metadata-risk` | OOXML/ODF ZIP 문서에서 `docProps/*.xml`/`meta.xml` 작성자·수정자·시간 후보, `vbaProject.bin`/script 존재, 외부 relationship target 후보, `metadata_profile`, `macro_profile`을 추출한다. | legacy OLE `.doc/.xls`, macro static analysis, sandbox behavior, trusted parser diff, Office 버전별 fixture |
 | AWS CloudTrail | `cloud-iaas-audit` | `Records` CloudTrail JSON에서 eventTime, eventSource, eventName, principal, source IP, account, region, request preview를 정규화한다. | AWS organization/account scope, CloudTrail digest/log integrity, provider console/SIEM diff |
@@ -866,10 +866,11 @@ GUI 표기 방식:
 
 1. `document-metadata-risk`는 문서 metadata/VBA/external-link triage다. macro intent, maliciousness, legacy OLE 내부 구조는 아직 확정하지 않는다.
 2. `sticky-note-recovery-candidate`는 bounded string fragment다. 실제 삭제 row/free-page 구조 복원이나 삭제 시각 확정은 아직 아니다.
-3. `desktop-ai-conversation-candidate`는 로컬 DB row 후보이며, 완전한 서비스 측 대화 내역·질문/답변 pairing·삭제 메시지 복원은 서비스 export diff와 앱 버전별 schema 검증이 필요하다.
-4. `local-llm-artifact`는 모델/앱 파일 존재와 역할 분류다. 프롬프트/대화 복원은 제품별 DB schema가 필요하다.
-5. `cloud-iaas-audit`는 provider export row 정규화다. 클라우드 계정 전체 범위나 로그 무결성을 증명하지 않는다.
-6. `disk-memory-file-indicators`는 bounded string pivot이다. hiberfil 압축 해제나 pagefile 구조 복원은 다음 단계다.
+3. `local-llm-prompt-candidate`는 로그/설정/SQLite에서 찾은 bounded 후보다. 완전한 thread, 실제 모델 출력 여부, app-version semantics는 아직 확정하지 않는다.
+4. `desktop-ai-conversation-candidate`는 로컬 DB row 후보이며, 완전한 서비스 측 대화 내역·질문/답변 pairing·삭제 메시지 복원은 서비스 export diff와 앱 버전별 schema 검증이 필요하다.
+5. `local-llm-artifact`는 모델/앱 파일 존재와 역할 분류다. 프롬프트/대화 복원은 제품별 DB schema가 필요하다.
+6. `cloud-iaas-audit`는 provider export row 정규화다. 클라우드 계정 전체 범위나 로그 무결성을 증명하지 않는다.
+7. `disk-memory-file-indicators`는 bounded string pivot이다. hiberfil 압축 해제나 pagefile 구조 복원은 다음 단계다.
 
 ## 26. 2026-05-14 구현 반영: Windows 활동/웹캐시/동기화 DB triage 3차 보강
 
