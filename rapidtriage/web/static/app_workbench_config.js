@@ -830,9 +830,9 @@ const VISIBLE_FORENSIC_CAPABILITY_GROUPS = [
       {
         id: "timestamp-stomping-detection",
         label: "Time stomping 탐지",
-        status: "inventory",
-        terms: ["timestamp", "stomping", "$sia", "$fna", "time mismatch"],
-        nextAction: "MFT $SIA/$FNA 불일치와 컴파일/서명/USN 교차검증 risk flag 추가",
+        status: "partial",
+        terms: ["timestamp", "stomping", "$sia", "$fna", "time mismatch", "timestamp_stomping_analysis", "mft-sia-fna-timestamp-mismatch"],
+        nextAction: "MFT $SIA/$FNA 불일치 risk flag는 제공, 컴파일/서명/USN/$LogFile 교차검증 자동화 필요",
       },
       {
         id: "signature-mismatch-detection",

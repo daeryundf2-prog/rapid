@@ -931,3 +931,25 @@ GUI 표기 방식:
 1. Security 로그가 필터링되었거나 일부만 export된 경우 `open-or-not-observed` 상태가 정상적으로 나올 수 있다.
 2. Windows의 LogonId는 재사용될 수 있으므로 장시간/다중 부팅 분석에서는 boot/session boundary와 함께 검증해야 한다.
 3. RDP 여부는 LogonType 10과 4778/4779 등 이벤트 기반 triage이며, 최종 판단은 TerminalServices 로그와 네트워크 흔적을 함께 봐야 한다.
+
+## 29. 2026-05-14 구현 반영: MFT Time Stomping triage 보강
+
+이전까지 Time Stomping은 사용자 노출 taxonomy에만 있었고, 실제 MFT row에는 위험 플래그가 없었다. 이번 라운드에서는 native `$MFT` FILE record에서 `$STANDARD_INFORMATION`과 `$FILE_NAME` attribute의 FILETIME 4종을 비교해 불일치가 있으면 `timestamp_stomping_analysis`와 `mft-sia-fna-timestamp-mismatch` risk flag를 남긴다.
+
+부분 구현으로 승격한 capability:
+
+| capability | 새 필드 / risk flag | 구현 내용 | 남은 상용급 보강 |
+| --- | --- | --- | --- |
+| Time stomping 탐지 | `timestamp_stomping_analysis`, `time_stomping_suspected`, `mft-sia-fna-timestamp-mismatch` | MFT row별 `$SIA/$FNA`의 created/modified/MFT modified/accessed time을 비교하고 mismatch field, 값, file name namespace를 기록한다. | `$UsnJrnl`, `$LogFile`, Prefetch, LNK/JumpList와 자동 상관하고 MFTECmd/analyzeMFT diff corpus로 FP/FN 검증 |
+
+검증 포인트:
+
+1. `tests/test_rapidtriage_windows_artifacts.py::test_windows_filesystem_collector_imports_mft_and_usn_rows`가 정상 MFT fixture에서 `sia-fna-compared`와 `time_stomping_suspected=False`를 검증한다.
+2. `tests/test_rapidtriage_windows_artifacts.py::test_windows_filesystem_collector_flags_mft_sia_fna_timestamp_mismatch`가 `$FILE_NAME` timestamp를 다르게 만든 fixture에서 mismatch 4건과 risk flag를 검증한다.
+3. Python/JS visible capability status는 `timestamp-stomping-detection`을 `부분 구현`으로 올리고 실제 row 필드명을 검색 term으로 추가했다.
+
+중요한 제한:
+
+1. `$SIA/$FNA` 불일치는 강한 단서지만 단독으로 “의도적 시간 조작”을 확정하지 않는다.
+2. NTFS 정상 동작, copy/move, archive extraction, legacy timestamp propagation으로도 일부 divergence가 생길 수 있다.
+3. 보고서 확정에는 USN/$LogFile/execution artifact와 신뢰 도구 diff가 필요하다.

@@ -1294,7 +1294,7 @@ def _write_filesystem_fixtures(mft_csv: Path, usn_jsonl: Path, mft_native: Path,
     )
 
 
-def build_minimal_mft() -> bytes:
+def build_minimal_mft(*, file_name_timestamp: datetime | None = None) -> bytes:
     record = bytearray(1024)
     record[0:4] = b"FILE"
     record[0x04:0x06] = (0x30).to_bytes(2, "little")
@@ -1311,6 +1311,7 @@ def build_minimal_mft() -> bytes:
     record[0x34:0x36] = b"\x33\x44"
     timestamp = datetime(2024, 4, 1, 4, 5, 6, tzinfo=timezone.utc)
     timestamp_filetime = datetime_to_filetime(timestamp)
+    file_name_timestamp_filetime = datetime_to_filetime(file_name_timestamp or timestamp)
     standard_information = bytearray(48)
     for offset in (0, 8, 16, 24):
         standard_information[offset : offset + 8] = timestamp_filetime.to_bytes(8, "little")
@@ -1321,7 +1322,7 @@ def build_minimal_mft() -> bytes:
     file_name_value = bytearray(66 + len(encoded_name))
     file_name_value[0:8] = ((1 << 48) | 5).to_bytes(8, "little")
     for offset in (8, 16, 24, 32):
-        file_name_value[offset : offset + 8] = timestamp_filetime.to_bytes(8, "little")
+        file_name_value[offset : offset + 8] = file_name_timestamp_filetime.to_bytes(8, "little")
     file_name_value[40:48] = (128).to_bytes(8, "little")
     file_name_value[48:56] = (32).to_bytes(8, "little")
     file_name_value[56:60] = (0x20).to_bytes(4, "little")

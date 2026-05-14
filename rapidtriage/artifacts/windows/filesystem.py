@@ -695,6 +695,8 @@ def build_native_mft_record(
     bounded_parent_path = dict((bounded_path_cache or {}).get(record_number_int) or {})
     if not file_path and bounded_parent_path.get("path"):
         file_path = str(bounded_parent_path.get("path"))
+    timestamp_stomping = mft_timestamp_stomping_analysis(standard_information, file_name_entries)
+    risk_flags = list(timestamp_stomping.get("risk_flags") or [])
     details = {
         "parser": "windows-mft-native",
         "parser_version": PARSER_VERSION,
@@ -735,6 +737,9 @@ def build_native_mft_record(
         "file_name_entries": file_name_entries[:10],
         "data_attributes": list(record.get("data_attributes") or [])[:10],
         "timestamp_validation": dict(record.get("timestamp_validation") or {}),
+        "timestamp_stomping_analysis": timestamp_stomping,
+        "time_stomping_suspected": bool(timestamp_stomping.get("suspected")),
+        "risk_flags": risk_flags,
         "validation_status": str(record.get("validation_status") or "unknown"),
         "validation_warnings": list(record.get("validation_warnings") or []),
         "validation_checks": dict(record.get("validation_checks") or {}),
@@ -4667,6 +4672,79 @@ def mft_timestamp_validation(attributes: Mapping[str, object]) -> dict[str, obje
         "invalid_sources": invalid_sources[:32],
         "earliest": values[0] if values else "",
         "latest": values[-1] if values else "",
+    }
+
+
+MFT_TIMESTAMP_STOMPING_FIELDS = ("created_at", "modified_at", "mft_modified_at", "accessed_at")
+
+
+def mft_timestamp_stomping_analysis(
+    standard_information: Mapping[str, object],
+    file_name_entries: Sequence[object],
+) -> dict[str, object]:
+    """Compare NTFS $STANDARD_INFORMATION and $FILE_NAME times as a triage anti-forensics signal."""
+
+    si_timestamps = (
+        standard_information.get("timestamps") if isinstance(standard_information.get("timestamps"), Mapping) else {}
+    )
+    file_name_samples: list[dict[str, object]] = []
+    mismatches: list[dict[str, object]] = []
+    for index, entry in enumerate(file_name_entries[:10]):
+        if not isinstance(entry, Mapping):
+            continue
+        fn_timestamps = entry.get("timestamps") if isinstance(entry.get("timestamps"), Mapping) else {}
+        sample = {
+            "index": index,
+            "file_name": str(entry.get("file_name") or ""),
+            "namespace": str(entry.get("namespace") or ""),
+            "timestamps": dict(fn_timestamps),
+        }
+        file_name_samples.append(sample)
+        for field in MFT_TIMESTAMP_STOMPING_FIELDS:
+            si_value = str(si_timestamps.get(field) or "")
+            fn_value = str(fn_timestamps.get(field) or "")
+            if si_value and fn_value and si_value != fn_value:
+                mismatches.append(
+                    {
+                        "field": field,
+                        "standard_information": si_value,
+                        "file_name": fn_value,
+                        "file_name_index": index,
+                        "file_name_value": sample["file_name"],
+                        "file_name_namespace": sample["namespace"],
+                    }
+                )
+    suspected = bool(mismatches)
+    coverage_status = (
+        "sia-fna-mismatch-detected"
+        if suspected
+        else "sia-fna-compared"
+        if si_timestamps and file_name_samples
+        else "insufficient-sia-fna-timestamps"
+    )
+    risk_flags = ["mft-sia-fna-timestamp-mismatch", "time-stomping-suspected"] if suspected else []
+    return {
+        "profile_version": "mft-timestamp-stomping-analysis-v1",
+        "coverage_status": coverage_status,
+        "suspected": suspected,
+        "mismatch_count": len(mismatches),
+        "mismatches": mismatches[:50],
+        "standard_information_timestamps": dict(si_timestamps),
+        "file_name_timestamp_samples": file_name_samples,
+        "risk_flags": risk_flags,
+        "validation_required": suspected,
+        "reportability": "triage",
+        "not_proof_of": [
+            "intentional timestamp manipulation without corroborating timeline evidence",
+            "file content creation time",
+        ],
+        "correlation_targets": ["$UsnJrnl", "$LogFile", "Prefetch", "LNK", "JumpList"],
+        "validation_guidance": "Treat $STANDARD_INFORMATION/$FILE_NAME timestamp divergence as an anti-forensics lead. Corroborate with USN, $LogFile, execution artifacts, and trusted tools before final reporting.",
+        "commercial_grade_ready": False,
+        "commercial_grade_blockers": [
+            "usn-logfile-execution-artifact-correlation-required",
+            "trusted-mft-parser-diff-required",
+        ],
     }
 
 

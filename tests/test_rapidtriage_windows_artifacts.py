@@ -19,6 +19,7 @@ from tests.windows_artifact_fixtures import (
     build_evtx_with_checked_chunk,
     build_evtx_with_slack_record,
     build_minimal_evtx,
+    build_minimal_mft,
     build_minimal_registry_hive,
     build_template_evtx,
     build_windows_artifact_fixture,
@@ -3135,6 +3136,11 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
             self.assertEqual(native_mft[0]["details"]["sequence_validation"]["status"], "valid")
             self.assertEqual(native_mft[0]["details"]["timestamp_validation"]["status"], "valid")
             self.assertEqual(native_mft[0]["details"]["timestamp"], "2024-04-01T04:05:06+00:00")
+            self.assertFalse(native_mft[0]["details"]["time_stomping_suspected"])
+            self.assertEqual(
+                native_mft[0]["details"]["timestamp_stomping_analysis"]["coverage_status"],
+                "sia-fna-compared",
+            )
             self.assertIn("$STANDARD_INFORMATION", native_mft[0]["details"]["attribute_types"])
             self.assertIn("$FILE_NAME", native_mft[0]["details"]["attribute_types"])
             self.assertIn("$DATA", native_mft[0]["details"]["attribute_types"])
@@ -3443,6 +3449,27 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
             self.assertTrue(native_usn[2]["details"]["validation_checks"]["large_record"])
             self.assertIn("DATA_EXTEND", native_usn[2]["details"]["reason_flags"])
             self.assertIn("CLOSE", native_usn[2]["details"]["reason_flags"])
+
+    def test_windows_filesystem_collector_flags_mft_sia_fna_timestamp_mismatch(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            mft = root / "$MFT"
+            mft.write_bytes(
+                build_minimal_mft(file_name_timestamp=datetime(2024, 3, 31, 1, 2, 3, tzinfo=timezone.utc))
+            )
+            output = root / "filesystem.json"
+
+            self.assertEqual(main(["artifacts", str(root), "--kind", "windows-filesystem", "--output", str(output)]), 0)
+            payload = json.loads(output.read_text(encoding="utf-8"))
+            artifact = next(item for item in payload["artifacts"] if item["artifact_type"] == "mft-record")
+            analysis = artifact["details"]["timestamp_stomping_analysis"]
+
+            self.assertTrue(artifact["details"]["time_stomping_suspected"])
+            self.assertEqual(analysis["coverage_status"], "sia-fna-mismatch-detected")
+            self.assertEqual(analysis["mismatch_count"], 4)
+            self.assertIn("mft-sia-fna-timestamp-mismatch", artifact["details"]["risk_flags"])
+            self.assertEqual(analysis["mismatches"][0]["field"], "created_at")
+            self.assertEqual(analysis["mismatches"][0]["file_name_value"], "deleted.txt")
 
     def test_windows_filesystem_collector_maps_recycle_bin_and_signature_mismatch(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
