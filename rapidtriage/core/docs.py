@@ -74,6 +74,7 @@ DOCS_INDEX_VERSION = 1
 MAX_EXTRACT_TEXT_BYTES = 50_000_000
 MAX_ZIP_TEXT_MEMBER_BYTES = 10_000_000
 MAX_ZIP_TEXT_TOTAL_BYTES = 50_000_000
+MAX_ZIP_TEXT_MEMBER_COUNT = 2_000
 MAX_PDF_STREAM_DECOMPRESSED_BYTES = 10_000_000
 
 
@@ -460,6 +461,7 @@ def extract_text(
     max_input_bytes: int = MAX_EXTRACT_TEXT_BYTES,
     max_archive_member_bytes: int = MAX_ZIP_TEXT_MEMBER_BYTES,
     max_archive_total_bytes: int = MAX_ZIP_TEXT_TOTAL_BYTES,
+    max_archive_member_count: int = MAX_ZIP_TEXT_MEMBER_COUNT,
     max_pdf_stream_decompressed_bytes: int = MAX_PDF_STREAM_DECOMPRESSED_BYTES,
 ) -> str:
     if max_input_bytes > 0 and path.stat().st_size > max_input_bytes:
@@ -482,12 +484,14 @@ def extract_text(
             kind,
             max_member_bytes=max_archive_member_bytes,
             max_total_bytes=max_archive_total_bytes,
+            max_member_count=max_archive_member_count,
         )
     if kind in OPEN_DOCUMENT_EXTS:
         return _extract_open_document_text(
             path,
             max_member_bytes=max_archive_member_bytes,
             max_total_bytes=max_archive_total_bytes,
+            max_member_count=max_archive_member_count,
         )
     if kind == "pdf":
         return _extract_pdf_text(path, max_stream_decompressed_bytes=max_pdf_stream_decompressed_bytes)
@@ -502,7 +506,10 @@ def _check_zip_member_limits(
     *,
     max_member_bytes: int,
     max_total_bytes: int,
+    max_member_count: int,
 ) -> None:
+    if max_member_count > 0 and len(names) > max_member_count:
+        raise TextExtractionTooLarge("archive contains too many text extraction members")
     total = 0
     for name in names:
         info = archive.getinfo(name)
@@ -519,6 +526,7 @@ def _extract_office_open_xml_text(
     *,
     max_member_bytes: int = MAX_ZIP_TEXT_MEMBER_BYTES,
     max_total_bytes: int = MAX_ZIP_TEXT_TOTAL_BYTES,
+    max_member_count: int = MAX_ZIP_TEXT_MEMBER_COUNT,
 ) -> str:
     prefixes = {
         "docx": ("word/document.xml",),
@@ -537,6 +545,7 @@ def _extract_office_open_xml_text(
             names,
             max_member_bytes=max_member_bytes,
             max_total_bytes=max_total_bytes,
+            max_member_count=max_member_count,
         )
         for name in names:
             with archive.open(name) as handle:
@@ -549,6 +558,7 @@ def _extract_open_document_text(
     *,
     max_member_bytes: int = MAX_ZIP_TEXT_MEMBER_BYTES,
     max_total_bytes: int = MAX_ZIP_TEXT_TOTAL_BYTES,
+    max_member_count: int = MAX_ZIP_TEXT_MEMBER_COUNT,
 ) -> str:
     with zipfile.ZipFile(path) as archive:
         if "content.xml" not in archive.namelist():
@@ -558,6 +568,7 @@ def _extract_open_document_text(
             ["content.xml"],
             max_member_bytes=max_member_bytes,
             max_total_bytes=max_total_bytes,
+            max_member_count=max_member_count,
         )
         with archive.open("content.xml") as handle:
             return " ".join(_extract_xml_text(handle.read()))

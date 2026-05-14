@@ -1375,8 +1375,9 @@ SQLite 기반 아티팩트는 브라우저 History, 카카오톡, Sticky Notes, 
 | 사용자 노출 기능 | 연결 field/code | 구현 내용 | 남은 상용급 보강 |
 | --- | --- | --- | --- |
 | PDF stream 압축 해제 제한 | `MAX_PDF_STREAM_DECOMPRESSED_BYTES`, `_decompress_pdf_stream` | PDF stream을 zlib로 풀 때 cap+1까지만 해제하고, 초과 시 `TextExtractionTooLarge`로 안전하게 중단한다. | PDF object stream/xref stream 전체 grammar, pdfium/poppler trusted diff |
+| Office/OpenDocument XML member 개수 제한 | `MAX_ZIP_TEXT_MEMBER_COUNT`, `_check_zip_member_limits` | OOXML/ODF 내부에서 텍스트 추출 대상 XML entry가 과도하게 많은 경우 추출을 중단한다. | 대형 정상 문서 기준 threshold 튜닝, ZIP bomb corpus |
 | current-file search 방어 | `build_source_search(... max_pdf_stream_decompressed_bytes=max_plain_text_bytes)` | source viewer의 현재 파일 검색에서도 사용자가 지정한 byte cap을 PDF stream 해제 cap에 같이 적용한다. | 대형 PDF corpus, timeout/cancel 연동 |
-| 회귀 테스트 | `test_source_search_rejects_pdf_stream_that_expands_past_limit` | 작은 PDF가 거대한 stream으로 풀리는 경우 keyword가 있어도 searchable=false와 명확한 size-limit message를 반환한다. | GUI error card와 user-facing remediation copy |
+| 회귀 테스트 | `test_source_search_rejects_pdf_stream_that_expands_past_limit`, `test_office_extraction_rejects_too_many_text_members` | 작은 PDF가 거대한 stream으로 풀리는 경우와 Office XML member가 과도한 경우를 안전하게 중단한다. | GUI error card와 user-facing remediation copy |
 
 중요한 제한:
 

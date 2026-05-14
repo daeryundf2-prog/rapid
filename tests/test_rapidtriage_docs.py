@@ -7,7 +7,7 @@ import zipfile
 from pathlib import Path
 
 from rapidtriage.cli import main
-from rapidtriage.core.docs import MAX_EXTRACT_TEXT_BYTES, run_docs_search
+from rapidtriage.core.docs import MAX_EXTRACT_TEXT_BYTES, TextExtractionTooLarge, extract_text, run_docs_search
 
 
 def write_minimal_docx(path: Path, text: str) -> None:
@@ -115,6 +115,19 @@ class RapidTriageDocsTests(unittest.TestCase):
             self.assertEqual(Path(error["path"]).name, "huge.log")
             self.assertEqual(error["reason"], "input-too-large")
             self.assertEqual(error["effect"], "document-skipped-search-continues")
+
+    def test_office_extraction_rejects_too_many_text_members(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            deck = Path(tmp_dir) / "too-many-slides.pptx"
+            with zipfile.ZipFile(deck, "w") as archive:
+                archive.writestr("ppt/slides/slide1.xml", "<p:sld><a:t>needle</a:t></p:sld>")
+                archive.writestr("ppt/slides/slide2.xml", "<p:sld><a:t>needle</a:t></p:sld>")
+                archive.writestr("ppt/slides/slide3.xml", "<p:sld><a:t>needle</a:t></p:sld>")
+
+            with self.assertRaises(TextExtractionTooLarge) as context:
+                extract_text(deck, "pptx", max_archive_member_count=2)
+
+        self.assertIn("too many text extraction members", str(context.exception))
 
     def test_docs_command_scans_supported_document_extensions_and_writes_json(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
