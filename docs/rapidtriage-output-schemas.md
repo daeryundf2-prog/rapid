@@ -169,6 +169,8 @@ The sample JSON uses a few placeholders so the examples stay stable across machi
   - `summary`
   - `known_good_suppression_profile`
   - `known_good_suppressed_candidates`
+  - `file_signature_profile`
+  - `signature_mismatch_candidates`
   - `candidates`
 - Each candidate row currently includes:
   - `path`
@@ -182,6 +184,7 @@ The sample JSON uses a few placeholders so the examples stay stable across machi
 - Default categories include documents, archives, databases, executables, emails, AXIOM-aligned disk/mobile images, memory dumps, vehicle exports, and image/OCR candidates.
 - File scan summaries include #76 hash-cache, #77 duplicate-detection metadata, and analyst-supplied known-good suppression metadata. `hash_cache_manifest` records `hash-cache-manifest-v1` with hashed paths, basename, path/size/mtime/inode/device cache metadata, hit/miss/invalidation counters, recent cache events, and a manifest hash. `duplicate_group_count` and `duplicate_file_count` summarize `duplicate_content_groups`, while `duplicate_content_manifest` records `duplicate-content-manifest-v1` with stable duplicate group IDs/fingerprints, representative paths, not-suppressed analyst-review policy, and a manifest hash.
 - `--known-good-hash-feed` accepts TXT/CSV/JSON MD5/SHA1/SHA256 feeds. Matching candidates get `known_good_status`, `known_good_match`, and `report_suppression_status`; `--hide-known-good` removes those rows from `candidates` while preserving bounded `known_good_suppressed_candidates`. This is practical De-NISTing/whitelisting support for local feeds, not a bundled full NSRL RDS updater.
+- File candidates with known extensions also get bounded header checks in `file_signature`. PE/PDF/ZIP/SQLite/PNG/JPEG/GIF/OLE/RAR/7z/GZIP magic mismatches are summarized in `file_signature_profile` and bounded `signature_mismatch_candidates`; the row remains visible and marked for analyst review.
 
 ### `extract`
 

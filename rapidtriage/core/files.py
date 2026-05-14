@@ -31,6 +31,7 @@ DEFAULT_FILE_CATEGORIES: Tuple[str, ...] = (
 )
 DEDUPLICATE_CONTENT_GAP_ID = "#77"
 DENISTING_GAP_ID = "visible-denisting"
+SIGNATURE_MISMATCH_GAP_ID = "visible-file-signature-mismatch"
 FUNCTIONAL_SCALE_BATCH_ID = "commercial-uplift-031-035"
 DUPLICATE_CONTENT_TRUSTED_DIFF_BLOCKER_77 = "trusted-duplicate-file-manifest-diff-missing"
 DUPLICATE_CONTENT_TRUSTED_TOOLS = {"duplicate-file-manifest", "known-answer-duplicate-group-export", "content-hash-oracle"}
@@ -38,6 +39,25 @@ EXECUTABLE_BITS = stat_module.S_IXUSR | stat_module.S_IXGRP | stat_module.S_IXOT
 DEFAULT_KNOWN_GOOD_MAX_HASH_BYTES = 64 * 1024 * 1024
 KNOWN_GOOD_HASH_ALGORITHMS = ("md5", "sha1", "sha256")
 HASH_TOKEN_RE = re.compile(r"\b[a-fA-F0-9]{32}\b|\b[a-fA-F0-9]{40}\b|\b[a-fA-F0-9]{64}\b")
+MAX_SIGNATURE_HEADER_BYTES = 64
+SIGNATURE_RULES: tuple[dict[str, object], ...] = (
+    {"id": "windows-pe", "extensions": (".exe", ".dll", ".sys", ".scr", ".com"), "magics": (b"MZ",)},
+    {"id": "pdf", "extensions": (".pdf",), "magics": (b"%PDF-",)},
+    {"id": "zip-container", "extensions": (".zip", ".docx", ".xlsx", ".pptx", ".jar", ".apk"), "magics": (b"PK\x03\x04", b"PK\x05\x06", b"PK\x07\x08")},
+    {"id": "sqlite", "extensions": (".db", ".sqlite", ".sqlite3"), "magics": (b"SQLite format 3\x00",)},
+    {"id": "png", "extensions": (".png",), "magics": (b"\x89PNG\r\n\x1a\n",)},
+    {"id": "jpeg", "extensions": (".jpg", ".jpeg"), "magics": (b"\xff\xd8\xff",)},
+    {"id": "gif", "extensions": (".gif",), "magics": (b"GIF87a", b"GIF89a")},
+    {"id": "ole-cfb", "extensions": (".doc", ".xls", ".ppt", ".msg"), "magics": (b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1",)},
+    {"id": "7z", "extensions": (".7z",), "magics": (b"7z\xbc\xaf\x27\x1c",)},
+    {"id": "rar", "extensions": (".rar",), "magics": (b"Rar!\x1a\x07\x00", b"Rar!\x1a\x07\x01\x00")},
+    {"id": "gzip", "extensions": (".gz", ".gzip", ".tgz"), "magics": (b"\x1f\x8b",)},
+)
+EXPECTED_SIGNATURES_BY_EXTENSION: dict[str, set[str]] = {
+    extension: {str(rule["id"])}
+    for rule in SIGNATURE_RULES
+    for extension in rule["extensions"]  # type: ignore[union-attr]
+}
 FUZZY_TEXT_EXTENSIONS = {
     ".txt",
     ".md",
@@ -347,6 +367,8 @@ def run_files_scan(
     visible_candidates = known_good_result["visible_candidates"]
     candidate_payloads = known_good_result["candidate_payloads"]
     known_good_profile = known_good_result["profile"]
+    signature_result = apply_file_signature_profile(visible_candidates, candidate_payloads)
+    signature_profile = signature_result["profile"]
 
     category_counts = {category: 0 for category in selected_categories}
     for candidate in visible_candidates:
@@ -394,10 +416,20 @@ def run_files_scan(
             "known_good_match_count": known_good_profile["match_count"],
             "known_good_suppressed_count": known_good_profile["suppressed_count"],
             "known_good_hash_skipped_large_count": known_good_profile["skipped_large_count"],
-            "commercial_gap_ids": [HASH_CACHE_GAP_ID, DEDUPLICATE_CONTENT_GAP_ID, DENISTING_GAP_ID],
+            "signature_checked_count": signature_profile["checked_count"],
+            "signature_mismatch_count": signature_profile["mismatch_count"],
+            "signature_unrecognized_known_extension_count": signature_profile["unrecognized_known_extension_count"],
+            "commercial_gap_ids": [
+                HASH_CACHE_GAP_ID,
+                DEDUPLICATE_CONTENT_GAP_ID,
+                DENISTING_GAP_ID,
+                SIGNATURE_MISMATCH_GAP_ID,
+            ],
         },
         "known_good_suppression_profile": known_good_profile,
         "known_good_suppressed_candidates": known_good_result["suppressed_candidates"],
+        "file_signature_profile": signature_profile,
+        "signature_mismatch_candidates": signature_result["mismatch_candidates"],
         "hash_cache_manifest": hash_cache_manifest,
         "hash_cache_assessment": hash_cache_profile,
         "duplicate_content_manifest": duplicate_content_manifest,
@@ -726,6 +758,124 @@ def first_known_good_hash_match(
                 "classification": "known-good",
                 "confidence": "hash-exact",
             }
+    return None
+
+
+def apply_file_signature_profile(
+    candidates: Sequence[FileCandidate],
+    candidate_payloads: Sequence[dict[str, object]],
+) -> dict[str, object]:
+    checked_count = 0
+    mismatch_candidates: list[dict[str, object]] = []
+    unrecognized_known_extension_count = 0
+    read_error_count = 0
+
+    for candidate, payload in zip(candidates, candidate_payloads):
+        expected = sorted(EXPECTED_SIGNATURES_BY_EXTENSION.get(candidate.extension, set()))
+        signature = {
+            "status": "not-applicable",
+            "detected": None,
+            "expected": expected,
+            "mismatch": False,
+            "risk_flags": [],
+        }
+        if not expected:
+            payload["file_signature"] = signature
+            continue
+        checked_count += 1
+        try:
+            with Path(candidate.path).open("rb") as handle:
+                header = handle.read(MAX_SIGNATURE_HEADER_BYTES)
+        except OSError as exc:
+            read_error_count += 1
+            payload["file_signature"] = {
+                **signature,
+                "status": "read-error",
+                "error": exc.__class__.__name__,
+            }
+            continue
+        detected = detect_file_signature(header)
+        if detected is None:
+            unrecognized_known_extension_count += 1
+            payload["file_signature"] = {
+                **signature,
+                "status": "unrecognized-header-for-known-extension",
+                "risk_flags": ["signature-unrecognized"],
+            }
+            continue
+        mismatch = detected not in expected
+        status = "extension-signature-mismatch" if mismatch else "signature-matches-extension"
+        risk_flags = ["extension-signature-mismatch"] if mismatch else []
+        payload["file_signature"] = {
+            **signature,
+            "status": status,
+            "detected": detected,
+            "mismatch": mismatch,
+            "risk_flags": risk_flags,
+        }
+        if mismatch:
+            mismatch_candidates.append(
+                {
+                    "path": candidate.path,
+                    "name": candidate.name,
+                    "extension": candidate.extension,
+                    "size": candidate.size,
+                    "modified_at": candidate.modified_at,
+                    "expected": expected,
+                    "detected": detected,
+                    "risk_flags": risk_flags,
+                    "source_viewer_locator": {
+                        "source": "files",
+                        "path": candidate.path,
+                        "viewer": "file-header",
+                    },
+                    "forensic_review": {
+                        "status": "needs-review",
+                        "reason": "file extension does not match detected header signature",
+                        "report_use_warning": "Confirm with a second parser or manual hex review before report-grade use.",
+                    },
+                }
+            )
+
+    mismatch_candidates_truncated = len(mismatch_candidates) > 200
+    mismatch_head = mismatch_candidates[:200]
+    profile_core = {
+        "profile": "file-signature-mismatch-v1",
+        "profile_version": "file-signature-mismatch-v1",
+        "capability_id": "file-system-signature-mismatch",
+        "commercial_gap_ids": [SIGNATURE_MISMATCH_GAP_ID],
+        "checked_count": checked_count,
+        "mismatch_count": len(mismatch_candidates),
+        "unrecognized_known_extension_count": unrecognized_known_extension_count,
+        "read_error_count": read_error_count,
+        "mismatch_candidates_truncated": mismatch_candidates_truncated,
+        "max_header_bytes": MAX_SIGNATURE_HEADER_BYTES,
+        "known_signature_count": len(SIGNATURE_RULES),
+        "known_extensions": sorted(EXPECTED_SIGNATURES_BY_EXTENSION),
+        "policy": {
+            "scope": "bounded first-bytes magic signature check during file inventory",
+            "default_behavior": "flag mismatch but keep the file visible",
+            "legal_review_note": "Signature mismatch is an anti-forensic indicator, not standalone proof of malicious intent.",
+        },
+        "limitations": [
+            "Container formats can share ZIP/OLE signatures, so deeper file-format validation still matters.",
+            "Header-only checks do not validate full file integrity or embedded payloads.",
+            "Known extension coverage is intentionally conservative to avoid noisy false positives.",
+        ],
+        "commercial_claim_allowed": False,
+    }
+    profile_hash = hashlib.sha256(json.dumps(profile_core, sort_keys=True).encode("utf-8")).hexdigest()
+    return {
+        "profile": {**profile_core, "profile_hash": profile_hash},
+        "mismatch_candidates": mismatch_head,
+    }
+
+
+def detect_file_signature(header: bytes) -> Optional[str]:
+    for rule in SIGNATURE_RULES:
+        for magic in rule["magics"]:  # type: ignore[union-attr]
+            if header.startswith(magic):
+                return str(rule["id"])
     return None
 
 

@@ -52,10 +52,14 @@
     "known_good_match_count": 0,
     "known_good_suppressed_count": 0,
     "known_good_hash_skipped_large_count": 0,
+    "signature_checked_count": 3,
+    "signature_mismatch_count": 0,
+    "signature_unrecognized_known_extension_count": 1,
     "commercial_gap_ids": [
       "#76",
       "#77",
-      "visible-denisting"
+      "visible-denisting",
+      "visible-file-signature-mismatch"
     ]
   },
   "known_good_suppression_profile": {
@@ -105,6 +109,64 @@
     "profile_hash": "a44dfba33acb126627081a039e6d173c8a6f107ae5a8d8386608a3ebc63234de"
   },
   "known_good_suppressed_candidates": [],
+  "file_signature_profile": {
+    "profile": "file-signature-mismatch-v1",
+    "profile_version": "file-signature-mismatch-v1",
+    "capability_id": "file-system-signature-mismatch",
+    "commercial_gap_ids": [
+      "visible-file-signature-mismatch"
+    ],
+    "checked_count": 3,
+    "mismatch_count": 0,
+    "unrecognized_known_extension_count": 1,
+    "read_error_count": 0,
+    "mismatch_candidates_truncated": false,
+    "max_header_bytes": 64,
+    "known_signature_count": 11,
+    "known_extensions": [
+      ".7z",
+      ".apk",
+      ".com",
+      ".db",
+      ".dll",
+      ".doc",
+      ".docx",
+      ".exe",
+      ".gif",
+      ".gz",
+      ".gzip",
+      ".jar",
+      ".jpeg",
+      ".jpg",
+      ".msg",
+      ".pdf",
+      ".png",
+      ".ppt",
+      ".pptx",
+      ".rar",
+      ".scr",
+      ".sqlite",
+      ".sqlite3",
+      ".sys",
+      ".tgz",
+      ".xls",
+      ".xlsx",
+      ".zip"
+    ],
+    "policy": {
+      "scope": "bounded first-bytes magic signature check during file inventory",
+      "default_behavior": "flag mismatch but keep the file visible",
+      "legal_review_note": "Signature mismatch is an anti-forensic indicator, not standalone proof of malicious intent."
+    },
+    "limitations": [
+      "Container formats can share ZIP/OLE signatures, so deeper file-format validation still matters.",
+      "Header-only checks do not validate full file integrity or embedded payloads.",
+      "Known extension coverage is intentionally conservative to avoid noisy false positives."
+    ],
+    "commercial_claim_allowed": false,
+    "profile_hash": "cc6c59e69a121ccb23e80ec24ce90197146e19a231e9915ed739749dd5ea1fe2"
+  },
+  "signature_mismatch_candidates": [],
   "hash_cache_manifest": {
     "profile": "hash-cache-manifest-v1",
     "profile_version": "hash-cache-manifest-v1",
@@ -675,7 +737,16 @@
           "name:bundle"
         ]
       },
-      "known_good_status": "not-configured"
+      "known_good_status": "not-configured",
+      "file_signature": {
+        "status": "signature-matches-extension",
+        "detected": "zip-container",
+        "expected": [
+          "zip-container"
+        ],
+        "mismatch": false,
+        "risk_flags": []
+      }
     },
     {
       "path": "<ROOT>/notes.txt",
@@ -693,7 +764,14 @@
           "name:note"
         ]
       },
-      "known_good_status": "not-configured"
+      "known_good_status": "not-configured",
+      "file_signature": {
+        "status": "not-applicable",
+        "detected": null,
+        "expected": [],
+        "mismatch": false,
+        "risk_flags": []
+      }
     },
     {
       "path": "<ROOT>/records.sqlite",
@@ -712,7 +790,18 @@
           "path:sqlite"
         ]
       },
-      "known_good_status": "not-configured"
+      "known_good_status": "not-configured",
+      "file_signature": {
+        "status": "unrecognized-header-for-known-extension",
+        "detected": null,
+        "expected": [
+          "sqlite"
+        ],
+        "mismatch": false,
+        "risk_flags": [
+          "signature-unrecognized"
+        ]
+      }
     },
     {
       "path": "<ROOT>/tool.exe",
@@ -729,7 +818,16 @@
           "extension:.exe"
         ]
       },
-      "known_good_status": "not-configured"
+      "known_good_status": "not-configured",
+      "file_signature": {
+        "status": "signature-matches-extension",
+        "detected": "windows-pe",
+        "expected": [
+          "windows-pe"
+        ],
+        "mismatch": false,
+        "risk_flags": []
+      }
     }
   ]
 }

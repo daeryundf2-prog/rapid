@@ -155,6 +155,15 @@
         "known_good_hash_skipped_large_count": {
           "type": "integer"
         },
+        "signature_checked_count": {
+          "type": "integer"
+        },
+        "signature_mismatch_count": {
+          "type": "integer"
+        },
+        "signature_unrecognized_known_extension_count": {
+          "type": "integer"
+        },
         "commercial_gap_ids": {
           "type": "array",
           "items": {
@@ -266,6 +275,10 @@
           },
           "analyst_review_required": {
             "type": "boolean"
+          },
+          "file_signature": {
+            "type": "object",
+            "additionalProperties": true
           }
         }
       }
@@ -275,6 +288,17 @@
       "additionalProperties": true
     },
     "known_good_suppressed_candidates": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": true
+      }
+    },
+    "file_signature_profile": {
+      "type": "object",
+      "additionalProperties": true
+    },
+    "signature_mismatch_candidates": {
       "type": "array",
       "items": {
         "type": "object",

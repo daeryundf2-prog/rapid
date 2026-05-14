@@ -730,7 +730,7 @@ GUI 표기 방식:
 | 파일시스템 / 안티포렌식 | $LogFile transaction | 목록화 | $UsnJrnl을 보완하는 create/rename/delete transaction 분석 |
 | 파일시스템 / 안티포렌식 | Recycle Bin $I/$R 매핑 | 목록화 | 원래 경로와 삭제 시각을 직관적으로 보여주는 휴지통 전용 뷰 |
 | 파일시스템 / 안티포렌식 | Time stomping 탐지 | 목록화 | MFT $SIA/$FNA 불일치 기반 시간 조작 의심 표시 |
-| 파일시스템 / 안티포렌식 | 확장자 변조 탐지 | 목록화 | 파일 헤더와 확장자 mismatch를 은닉 위험으로 표시 |
+| 파일시스템 / 안티포렌식 | 확장자 변조 탐지 | 부분 구현 | 파일 스캔에서 PE/PDF/ZIP/SQLite/이미지 등 magic header와 확장자 mismatch를 `file_signature_profile` / `signature_mismatch_candidates`로 표시 |
 | 이벤트 로그 DFIR | ETW/ETL trace | 목록화 | EVTX 외 ETL 기반 USB/WMI/network 행위 추적 |
 | 이벤트 로그 DFIR | 로그 삭제 High-Risk | 부분 구현 | Event ID 1102/104 등 로그 삭제 시도 표시 |
 | 이벤트 로그 DFIR | 로그온 세션 통합 뷰 | 목록화 | 4624/4634/4647 등 인증 이벤트를 세션으로 재구성 |
@@ -791,7 +791,7 @@ GUI 표기 방식:
 | capability | 새 artifact row | 구현 내용 | 남은 상용급 보강 |
 | --- | --- | --- | --- |
 | Recycle Bin $I/$R 매핑 | `recycle-bin-entry` | `$Recycle.Bin` 아래 `$I*` metadata에서 원래 경로, 삭제 시각, 삭제 파일 크기를 읽고 sibling `$R*` payload hash를 연결한다. | MFT/USN delete timeline 상관, Windows 버전별 fixture, trusted parser diff |
-| 확장자 변조 탐지 | `file-signature-mismatch` | PE/PDF/PNG/JPEG/GIF/ZIP/OLE/RAR/7z/SQLite magic header와 확장자를 비교해 mismatch 파일을 위험 후보로 표시한다. | 전체 파일타입 parser, 오탐 정책, archive 내부 파일 검사 |
+| 확장자 변조 탐지 | `file-signature-mismatch`, `file_signature_profile`, `signature_mismatch_candidates` | Windows artifact scan과 일반 파일 스캔 모두 PE/PDF/PNG/JPEG/GIF/ZIP/OLE/RAR/7z/SQLite magic header와 확장자를 비교해 mismatch 파일을 위험 후보로 표시한다. | 전체 파일타입 parser, 오탐 정책, archive 내부 파일 검사 |
 | Print Spooler SPL/SHD | `print-spooler-job` | `spool/PRINTERS`의 `.SPL`/`.SHD` 파일을 찾아 hash, mtime, bounded strings, 문서 경로 후보를 추출한다. | SPL/SHD 구조 decoder, printer eventlog 상관, driver별 spool fixture |
 | AnyDesk/TeamViewer/RustDesk | `third-party-remote-control-artifact` | AnyDesk, TeamViewer, RustDesk, Chrome Remote Desktop 경로/파일을 찾아 URL/IP/string pivot과 product tag를 생성한다. | 제품별 session decoder, peer ID/IP/파일전송 로그 검증, 계정 attribution |
 
