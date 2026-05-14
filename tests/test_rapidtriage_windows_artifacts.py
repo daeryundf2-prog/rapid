@@ -195,6 +195,124 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
             self.assertIn("https://example.test", artifact["details"]["url_candidates"])
             self.assertFalse(artifact["details"]["commercial_grade_ready"])
 
+    def test_windows_eventlog_collector_maps_usb_wlan_print_and_bits_events(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            events = root / "Windows" / "System32" / "winevt" / "Logs" / "Operational.xml"
+            events.parent.mkdir(parents=True)
+            events.write_text(
+                """<Events>
+  <Event xmlns="http://schemas.microsoft.com/win/2004/08/events/event">
+    <System>
+      <Provider Name="Microsoft-Windows-Kernel-PnP"/>
+      <EventID>410</EventID>
+      <TimeCreated SystemTime="2026-05-01T08:00:00.0000000Z"/>
+      <EventRecordID>4100</EventRecordID>
+      <Channel>Microsoft-Windows-Kernel-PnP/Configuration</Channel>
+      <Computer>WIN11-CASE</Computer>
+    </System>
+    <EventData>
+      <Data Name="DeviceInstanceId">USBSTOR\\Disk&amp;Ven_Samsung&amp;Prod_Flash_Drive\\123456</Data>
+      <Data Name="DriverName">disk.inf</Data>
+    </EventData>
+  </Event>
+  <Event xmlns="http://schemas.microsoft.com/win/2004/08/events/event">
+    <System>
+      <Provider Name="Microsoft-Windows-WLAN-AutoConfig"/>
+      <EventID>8001</EventID>
+      <TimeCreated SystemTime="2026-05-01T09:00:00.0000000Z"/>
+      <EventRecordID>8001</EventRecordID>
+      <Channel>Microsoft-Windows-WLAN-AutoConfig/Operational</Channel>
+      <Computer>WIN11-CASE</Computer>
+    </System>
+    <EventData>
+      <Data Name="SSID">CorpWiFi</Data>
+      <Data Name="InterfaceGuid">{11111111-2222-3333-4444-555555555555}</Data>
+      <Data Name="Reason">connected</Data>
+    </EventData>
+  </Event>
+  <Event xmlns="http://schemas.microsoft.com/win/2004/08/events/event">
+    <System>
+      <Provider Name="Microsoft-Windows-PrintService"/>
+      <EventID>307</EventID>
+      <TimeCreated SystemTime="2026-05-01T10:00:00.0000000Z"/>
+      <EventRecordID>307</EventRecordID>
+      <Channel>Microsoft-Windows-PrintService/Operational</Channel>
+      <Computer>WIN11-CASE</Computer>
+    </System>
+    <EventData>
+      <Data Name="DocumentName">secret.docx</Data>
+      <Data Name="PrinterName">HP LaserJet</Data>
+      <Data Name="UserName">alice</Data>
+      <Data Name="Pages">2</Data>
+    </EventData>
+  </Event>
+  <Event xmlns="http://schemas.microsoft.com/win/2004/08/events/event">
+    <System>
+      <Provider Name="Microsoft-Windows-Bits-Client"/>
+      <EventID>59</EventID>
+      <TimeCreated SystemTime="2026-05-01T11:00:00.0000000Z"/>
+      <EventRecordID>59</EventRecordID>
+      <Channel>Microsoft-Windows-Bits-Client/Operational</Channel>
+      <Computer>WIN11-CASE</Computer>
+    </System>
+    <EventData>
+      <Data Name="JobId">{aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee}</Data>
+      <Data Name="RemoteName">https://example.test/payload.bin</Data>
+      <Data Name="LocalFile">C:\\Users\\alice\\AppData\\Local\\Temp\\payload.bin</Data>
+      <Data Name="Owner">alice</Data>
+      <Data Name="State">Transferred</Data>
+    </EventData>
+  </Event>
+</Events>
+""",
+                encoding="utf-8",
+            )
+            output = root / "eventlog.json"
+
+            self.assertEqual(main(["artifacts", str(root), "--kind", "eventlog", "--output", str(output)]), 0)
+
+            payload = json.loads(output.read_text(encoding="utf-8"))
+            event_rows = [item for item in payload["artifacts"] if item["artifact_type"] == "eventlog-event"]
+            detection_rows = [item for item in payload["artifacts"] if item["artifact_type"] == "eventlog-detection"]
+            events_by_category = {item["details"]["event_category"]: item["details"] for item in event_rows}
+            rules_by_id = {item["details"]["rule"]["id"]: item["details"] for item in detection_rows}
+
+            usb = events_by_category["usb-device-event"]
+            self.assertEqual(usb["channel_family"], "device")
+            self.assertIn("USBSTOR", usb["device_instance_id"])
+            self.assertEqual(usb["event_semantics_profile"]["catalog_key"], "usb-device-event")
+            self.assertIn("mounteddevices", usb["event_semantics_profile"]["correlation_targets"])
+            self.assertIn("Kernel-PnP recorded device activity", usb["event_message"])
+
+            wlan = events_by_category["wlan-autoconfig-event"]
+            self.assertEqual(wlan["channel_family"], "wlan")
+            self.assertEqual(wlan["ssid"], "CorpWiFi")
+            self.assertEqual(
+                wlan["event_semantics_profile"]["source_field_values"]["ssid"],
+                "CorpWiFi",
+            )
+            self.assertIn("WLAN AutoConfig recorded wireless activity", wlan["event_message"])
+
+            printed = events_by_category["print-service-event"]
+            self.assertEqual(printed["channel_family"], "print")
+            self.assertEqual(printed["document_name"], "secret.docx")
+            self.assertEqual(printed["printer_name"], "HP LaserJet")
+            self.assertEqual(printed["user_name"], "alice")
+            self.assertIn("PrintService recorded document activity", printed["event_message"])
+
+            bits = events_by_category["bits-client-event"]
+            self.assertEqual(bits["channel_family"], "bits")
+            self.assertEqual(bits["remote_name"], "https://example.test/payload.bin")
+            self.assertEqual(bits["local_file"], "C:\\Users\\alice\\AppData\\Local\\Temp\\payload.bin")
+            self.assertEqual(bits["event_semantics_profile"]["severity"], "medium")
+            self.assertIn("BITS Client recorded transfer activity", bits["event_message"])
+
+            self.assertEqual(rules_by_id["RT-EVTX-USB-PROVIDER"]["device_instance_id"], usb["device_instance_id"])
+            self.assertEqual(rules_by_id["RT-EVTX-WLAN-AUTOCONFIG"]["ssid"], "CorpWiFi")
+            self.assertEqual(rules_by_id["RT-EVTX-PRINTSERVICE"]["document_name"], "secret.docx")
+            self.assertEqual(rules_by_id["RT-EVTX-BITS-CLIENT"]["remote_name"], "https://example.test/payload.bin")
+
     def test_windows_eventlog_collector_builds_logon_session_rows(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             root = Path(tmp_dir)

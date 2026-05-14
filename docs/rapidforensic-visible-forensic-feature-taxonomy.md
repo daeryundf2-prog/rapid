@@ -134,6 +134,10 @@ GUI에서는 다음 14개 상위 그룹으로 보여주는 것이 적절하다.
 | 이벤트 요약 | `eventlog-summary` | baseline | channel/provider completeness |
 | message rendering | details field | partial | provider DLL/resource message |
 | recovery context | details field | partial | slack/deleted 검증 |
+| USB/PnP 이벤트 피벗 | `eventlog-event`, `eventlog-detection` | partial | USBSTOR/MountedDevices/SetupAPI 상관 검증 |
+| WLAN AutoConfig 이벤트 | `eventlog-event`, `eventlog-detection` | partial | WLAN profile/NetworkList/trusted EVTX diff |
+| PrintService 이벤트 | `eventlog-event`, `eventlog-detection` | partial | SPL/SHD/source document 상관 검증 |
+| BITS Client 이벤트 | `eventlog-event`, `eventlog-detection` | partial | qmgr/process/network 상관 검증 |
 
 숨은 기능으로 빼서 보여줄 항목:
 
@@ -142,6 +146,7 @@ GUI에서는 다음 14개 상위 그룹으로 보여주는 것이 적절하다.
 - provider/message rendering 상태
 - high-risk event만 보기
 - Sysmon/Defender/RDP/WMI pivots
+- USB/WLAN/PrintService/BITS provider pivots
 - corrupt/deleted record 후보
 - Hayabusa/EvtxECmd diff 상태
 
@@ -1209,3 +1214,28 @@ BitLocker, FileVault, LUKS는 포렌식 입력 단계에서 매우 중요하지�
 1. 이 변경은 FDE unlock 자체를 구현한 것이 아니다. 키/패스워드/복구키, 외부 unlock log, decrypted export는 운영자가 제공해야 한다.
 2. RapidTriage는 현재 키 vault, BitLocker protector decode, FileVault/APFS encrypted volume direct unlock, LUKS header deep unlock을 수행하지 않는다.
 3. 상용급으로 올리려면 실제 BitLocker/FileVault/LUKS fixture, lawful key workflow, 외부 도구 버전/명령 로그, source/decrypted hash chain, decrypted root 재분석 결과가 필요하다.
+
+## 39. 2026-05-14 구현 반영: EventLog USB/WLAN/Print/BITS provider 피벗
+
+USB, Wi-Fi, 인쇄, BITS는 이전까지 별도 파일/레지스트리/프로필 row가 있어도 EventLog에서 같은 행위를 바로 이어 보는 UX가 약했다. 이번 라운드에서는 EventLog collector가 provider/channel을 보고 `Kernel-PnP`/`USBSTOR`, `WLAN-AutoConfig`, `PrintService`, `Bits-Client` 계열을 분류하고, 검색/GUI/리뷰에서 바로 필터 가능한 category와 detection row로 노출한다.
+
+추가된 사용자 노출 기능:
+
+| capability | 연결 artifact/field | 구현 내용 | 남은 상용급 보강 |
+| --- | --- | --- | --- |
+| USB/PnP 이벤트 피벗 | `eventlog-event`, `eventlog-detection`, `usb-device-event`, `device_instance_id` | USB/PnP provider activity를 device family로 분류하고 Kernel-PnP built-in message, USBSTOR/SetupAPI/MountedDevices/MFT/USN correlation target을 제공한다. | 실제 Windows 10/11 USB corpus, drive-letter/session correlation, EvtxECmd/Hayabusa record diff |
+| WLAN AutoConfig 이벤트 | `wlan-autoconfig-event`, `ssid`, `interface_guid` | SSID/interface GUID를 row-level pivot으로 올리고 WLAN profile XML, NetworkList registry, DNS/browser/cloud-sync 상관 대상을 노출한다. | OS/version별 WLAN event semantics, provider resource rendering, NetworkList trusted diff |
+| PrintService 이벤트 | `print-service-event`, `document_name`, `printer_name` | PrintService event에서 document/printer/user 후보를 추출하고 SPL/SHD spool pair 및 source document metadata와 연결할 수 있게 한다. | PrintService provider message diff, SPL/SHD full binary decoder, driver별 spool fixture |
+| BITS Client 이벤트 | `bits-client-event`, `job_id`, `remote_name`, `local_file` | BITS event에서 job/url/local file/owner state 후보를 추출하고 qmgr/process/DNS/proxy/firewall/browser-download 상관 target을 제공한다. | BitsParser/Velociraptor diff, qmgr binary job decoder, retry/owner/state timestamp 검증 |
+
+검증 포인트:
+
+1. `tests/test_rapidtriage_windows_artifacts.py::test_windows_eventlog_collector_maps_usb_wlan_print_and_bits_events`가 XML EventLog export에서 4개 provider family를 category/detection/message/semantics까지 검증한다.
+2. `tests/test_rapidtriage_web_static.py::test_visible_capability_registry_has_gui_contract_for_every_feature`가 새 capability들이 실제 `eventlog-event`/`eventlog-detection` artifact term으로 노출되는지 확인한다.
+3. `docs/rapidtriage-parser-coverage.md`와 `docs/rapidtriage-user-guide.md`가 GUI 사용자가 어떤 필드를 보고 무엇과 상관해야 하는지 설명한다.
+
+중요한 제한:
+
+1. provider/channel 기반 분류는 triage-grade다. 실제 “USB 연결됨”, “Wi-Fi 접속됨”, “문서 출력됨”, “BITS 유출됨” 결론은 provider-rendered message, source event ID semantics, 독립 아티팩트 상관 후에만 가능하다.
+2. 현재 내장 message template은 분석 편의용 fallback이며 Windows provider DLL/resource table renderer가 아니다.
+3. BITS/PrintService는 이벤트와 파일 아티팩트가 모두 존재할 때 강해진다. 단일 EventLog row만으로 전송/출력 사실을 최종 단정하지 않는다.

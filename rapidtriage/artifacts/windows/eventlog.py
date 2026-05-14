@@ -19,8 +19,8 @@ from ...core.forensic_accuracy import build_accuracy_gate
 from ...core.models import ArtifactRecord
 
 EVENT_LOG_ROOT = ("Windows", "System32", "winevt", "Logs")
-PARSER_VERSION = "eventlog-normalized-v16"
-BUILTIN_RULEPACK_VERSION = "eventlog-builtin-rules-v1"
+PARSER_VERSION = "eventlog-normalized-v17"
+BUILTIN_RULEPACK_VERSION = "eventlog-builtin-rules-v2"
 EVENT_EXPORT_SUFFIXES = {".xml", ".json", ".jsonl", ".ndjson", ".csv"}
 ETL_SUFFIXES = {".etl"}
 MESSAGE_CATALOG_AUTO_SUFFIXES = {".man"}
@@ -266,6 +266,10 @@ EVENT_FAMILY_BY_CATEGORY = {
     "network-share-accessed": "file-share",
     "network-share-detailed-access": "file-share",
     "external-device-recognized": "device",
+    "usb-device-event": "device",
+    "wlan-autoconfig-event": "network",
+    "print-service-event": "print",
+    "bits-client-event": "network-transfer",
     "defender-malware-detected": "malware",
     "defender-remediation-action": "malware",
     "wmi-activity": "wmi",
@@ -277,6 +281,12 @@ EVENT_FAMILY_BY_CATEGORY = {
 CHANNEL_FAMILY_HINTS = (
     ("powershell", "powershell"),
     ("sysmon", "sysmon"),
+    ("kernelpnp", "device"),
+    ("usbstor", "device"),
+    ("wlanautoconfig", "wlan"),
+    ("wlan", "wlan"),
+    ("printservice", "print"),
+    ("bitsclient", "bits"),
     ("terminalservices", "remote-access"),
     ("remoteconnectionmanager", "remote-access"),
     ("localsessionmanager", "remote-access"),
@@ -558,10 +568,46 @@ BUILTIN_EVENT_RULES = (
         "title": "External device recognized",
         "level": "info",
         "event_ids": {"6416"},
-        "categories": {"external-device-recognized"},
+        "categories": {"external-device-recognized", "usb-device-event"},
         "mitre_tags": ["attack.exfiltration"],
         "risk_flags": ["external-device"],
         "description": "An external device was recognized; correlate with USB registry and file access artifacts.",
+    },
+    {
+        "id": "RT-EVTX-USB-PROVIDER",
+        "title": "USB or Plug-and-Play device event",
+        "level": "info",
+        "categories": {"usb-device-event"},
+        "mitre_tags": ["attack.exfiltration"],
+        "risk_flags": ["usb-provider-event"],
+        "description": "USB/PnP provider activity was observed; correlate with USBSTOR, MountedDevices, SetupAPI, MFT, and USN.",
+    },
+    {
+        "id": "RT-EVTX-WLAN-AUTOCONFIG",
+        "title": "WLAN AutoConfig event",
+        "level": "info",
+        "categories": {"wlan-autoconfig-event"},
+        "mitre_tags": ["attack.discovery"],
+        "risk_flags": ["wlan-autoconfig-event"],
+        "description": "Wireless profile/connection event was observed; correlate SSID/interface with WLAN profile XML and NetworkList registry.",
+    },
+    {
+        "id": "RT-EVTX-PRINTSERVICE",
+        "title": "PrintService document or queue event",
+        "level": "info",
+        "categories": {"print-service-event"},
+        "mitre_tags": ["attack.collection", "attack.exfiltration"],
+        "risk_flags": ["printservice-event"],
+        "description": "PrintService activity was observed; correlate with SPL/SHD spool files, source documents, and user activity.",
+    },
+    {
+        "id": "RT-EVTX-BITS-CLIENT",
+        "title": "BITS Client transfer event",
+        "level": "medium",
+        "categories": {"bits-client-event"},
+        "mitre_tags": ["attack.command-and-control", "attack.exfiltration"],
+        "risk_flags": ["bits-client-event"],
+        "description": "BITS transfer activity was observed; correlate with qmgr stores, URLs, process creation, and network artifacts.",
     },
     {
         "id": "RT-EVTX-SHARE-ACCESS",
@@ -659,6 +705,23 @@ PROVIDER_EVENT_MESSAGE_TEMPLATES = {
         "2004": "Windows Firewall rule was added. Rule={RuleName|Name}; application={ApplicationPath|AppPath}; action={Action}.",
         "2005": "Windows Firewall rule was modified. Rule={RuleName|Name}; application={ApplicationPath|AppPath}; action={Action}.",
         "2006": "Windows Firewall rule was deleted. Rule={RuleName|Name}; application={ApplicationPath|AppPath}; action={Action}.",
+    },
+    "kernelpnp": {
+        "410": "Kernel-PnP recorded device activity. Device={DeviceInstanceId|DeviceInstanceID|DeviceId|DeviceID}; status={Status|ProblemCode}.",
+        "400": "Kernel-PnP recorded device configuration. Device={DeviceInstanceId|DeviceInstanceID|DeviceId|DeviceID}; driver={DriverName|ServiceName}.",
+    },
+    "wlanautoconfig": {
+        "8001": "WLAN AutoConfig recorded wireless activity. SSID={SSID|Ssid|ProfileName}; interface={InterfaceGuid|InterfaceGUID}; reason={Reason|FailureReason|ReasonCode}.",
+        "8002": "WLAN AutoConfig recorded wireless activity. SSID={SSID|Ssid|ProfileName}; interface={InterfaceGuid|InterfaceGUID}; reason={Reason|FailureReason|ReasonCode}.",
+        "8003": "WLAN AutoConfig recorded wireless activity. SSID={SSID|Ssid|ProfileName}; interface={InterfaceGuid|InterfaceGUID}; reason={Reason|FailureReason|ReasonCode}.",
+    },
+    "printservice": {
+        "307": "PrintService recorded document activity. Document={DocumentName|Param1}; printer={PrinterName|Param2}; user={UserName|Param3}; pages={Pages|Param4}.",
+        "805": "PrintService recorded queue or render activity. Document={DocumentName|Param1}; printer={PrinterName|Param2}; user={UserName|Param3}; status={Status|ErrorCode}.",
+    },
+    "bitsclient": {
+        "59": "BITS Client recorded transfer activity. Job={JobId|JobID|DisplayName}; URL={RemoteName|Url|URL}; owner={Owner|UserName}; state={State|JobState}.",
+        "60": "BITS Client recorded transfer activity. Job={JobId|JobID|DisplayName}; URL={RemoteName|Url|URL}; owner={Owner|UserName}; state={State|JobState}.",
     },
 }
 
@@ -831,6 +894,54 @@ EVENT_SEMANTICS_CATALOG = {
         "correlation_targets": ["dns", "process-creation", "browser-history", "ioc-ti"],
         "risk_tags": ["network"],
     },
+    "usb-device-event": {
+        "severity": "info",
+        "summary": "USB or Plug-and-Play device event; treat as a connection/configuration lead and corroborate with registry and filesystem timelines.",
+        "analyst_questions": [
+            "Which device instance, vendor/product, serial, or class is present?",
+            "Does USBSTOR, Enum USB, MountedDevices, and SetupAPI agree on the device identity?",
+            "Did file copy, shortcut, JumpList, MFT, or USN activity occur near this timestamp?",
+        ],
+        "primary_pivots": ["device_instance_id", "device_id", "user_name", "computer", "event_created_at"],
+        "correlation_targets": ["usbstor-registry", "mounteddevices", "setupapi.dev.log", "mft-usn", "lnk-jumplist"],
+        "risk_tags": ["device", "usb-review"],
+    },
+    "wlan-autoconfig-event": {
+        "severity": "info",
+        "summary": "WLAN AutoConfig event; use SSID/interface pivots to connect network profile evidence with actual connection events.",
+        "analyst_questions": [
+            "Which SSID/profile/interface was involved?",
+            "Is this a connection, disconnection, failure, or profile/configuration event in the provider-rendered message?",
+            "Does NetworkList registry, WLAN profile XML, browser, VPN, or cloud-sync activity corroborate presence on that network?",
+        ],
+        "primary_pivots": ["ssid", "interface_guid", "user_name", "computer", "event_created_at"],
+        "correlation_targets": ["wlan-profile-xml", "networklist-registry", "dns", "browser-history", "cloud-sync"],
+        "risk_tags": ["network", "wireless-review"],
+    },
+    "print-service-event": {
+        "severity": "info",
+        "summary": "PrintService event; use document/printer/user pivots to validate printed-output or print-queue activity.",
+        "analyst_questions": [
+            "Which document, printer, and user are recorded?",
+            "Is there a matching SPL/SHD spool file pair and source document metadata?",
+            "Does filesystem, email, cloud-sync, or USB activity explain where the printed file came from?",
+        ],
+        "primary_pivots": ["document_name", "printer_name", "user_name", "computer", "event_created_at"],
+        "correlation_targets": ["print-spooler", "source-document", "mft-usn", "email-attachments", "cloud-sync"],
+        "risk_tags": ["print", "data-exfil-review"],
+    },
+    "bits-client-event": {
+        "severity": "medium",
+        "summary": "BITS Client transfer event; inspect job, URL/path, owner, state, and neighboring process/network activity.",
+        "analyst_questions": [
+            "Which URL, remote name, local file, owner, and job state are present?",
+            "Is the transfer expected software update behavior or suspicious background transfer?",
+            "Do qmgr stores, process creation, DNS, proxy, firewall, or browser artifacts corroborate the transfer?",
+        ],
+        "primary_pivots": ["url", "remote_name", "local_file", "job_id", "user_name"],
+        "correlation_targets": ["bits-qmgr", "process-creation", "dns", "proxy-logs", "firewall", "browser-downloads"],
+        "risk_tags": ["network-transfer", "bits-review"],
+    },
 }
 
 EVENT_SEMANTICS_ALIASES = {
@@ -845,6 +956,7 @@ EVENT_SEMANTICS_ALIASES = {
     "firewall-rule-deleted": "firewall-rule-added",
     "wmi-activity": "wmi-permanent-event",
     "wmi-activity-error": "wmi-permanent-event",
+    "external-device-recognized": "usb-device-event",
 }
 
 
@@ -4918,8 +5030,10 @@ def event_message_positional_values(data: Mapping[str, object]) -> list[str]:
 
 def event_message_template(provider_name: str, event_id: str) -> str:
     provider_key = provider_name.lower()
+    provider_normalized = normalize_provider_catalog_key(provider_name)
     for marker, templates in PROVIDER_EVENT_MESSAGE_TEMPLATES.items():
-        if marker in provider_key and event_id in templates:
+        marker_normalized = normalize_provider_catalog_key(marker)
+        if (marker in provider_key or marker_normalized in provider_normalized) and event_id in templates:
             return templates[event_id]
     return EVENT_MESSAGE_TEMPLATES.get(event_id, "")
 
@@ -5147,15 +5261,24 @@ def normalize_event_details(
     failure_reason = first_data_text(data, "FailureReason")
     share_name = first_data_text(data, "ShareName")
     relative_target_name = first_data_text(data, "RelativeTargetName", "FileName")
+    device_instance_id = first_data_text(data, "DeviceInstanceId", "DeviceInstanceID", "DeviceId", "DeviceID")
+    ssid = first_data_text(data, "SSID", "Ssid", "ProfileName", "ConnectionName")
+    interface_guid = first_data_text(data, "InterfaceGuid", "InterfaceGUID", "InterfaceGuidString")
+    document_name = first_data_text(data, "DocumentName", "Param1")
+    printer_name = first_data_text(data, "PrinterName", "Param2")
+    job_id = first_data_text(data, "JobId", "JobID", "TransferId", "TransferID", "DisplayName")
+    url = first_data_text(data, "URL", "Url", "RemoteName", "OwnerUrl")
+    remote_name = first_data_text(data, "RemoteName", "RemoteFileName", "RemoteUrl", "URL", "Url")
+    local_file = first_data_text(data, "LocalFile", "LocalName", "FileName", "Path")
     if not user_sid:
         user_sid = first_data_text(data, "TargetUserSid", "SubjectUserSid", "UserSid")
     if not user_name:
-        user_name = target_user_name or subject_user_name
+        user_name = target_user_name or subject_user_name or first_data_text(data, "UserName", "User", "Owner")
     if not process_name:
         process_name = new_process_name
     if not command_line:
         command_line = first_data_text(data, "CommandLine", "ProcessCommandLine") or script_block_text
-    category, description = event_category_for(normalized_event_id, channel)
+    category, description = event_category_for(normalized_event_id, channel, provider_name, data)
     channel_family_value = channel_family(channel)
     event_family = inferred_event_family(category, channel_family_value)
     detected_terms = suspicious_terms(data, command_line)
@@ -5225,6 +5348,16 @@ def normalize_event_details(
         "failure_reason": failure_reason,
         "share_name": share_name,
         "relative_target_name": relative_target_name,
+        "device_instance_id": device_instance_id,
+        "device_id": device_instance_id,
+        "ssid": ssid,
+        "interface_guid": interface_guid,
+        "document_name": document_name,
+        "printer_name": printer_name,
+        "job_id": job_id,
+        "url": url,
+        "remote_name": remote_name,
+        "local_file": local_file,
     }
     semantics_profile = event_semantics_profile(
         event_id=normalized_event_id,
@@ -5298,6 +5431,16 @@ def normalize_event_details(
         "failure_reason": failure_reason,
         "share_name": share_name,
         "relative_target_name": relative_target_name,
+        "device_instance_id": device_instance_id,
+        "device_id": device_instance_id,
+        "ssid": ssid,
+        "interface_guid": interface_guid,
+        "document_name": document_name,
+        "printer_name": printer_name,
+        "job_id": job_id,
+        "url": url,
+        "remote_name": remote_name,
+        "local_file": local_file,
         "task": task,
         "opcode": opcode,
         "keywords": keywords,
@@ -5754,6 +5897,16 @@ def build_builtin_detection_record(source_record: ArtifactRecord, rule: Mapping[
         "failure_reason": details.get("failure_reason") or "",
         "share_name": details.get("share_name") or "",
         "relative_target_name": details.get("relative_target_name") or "",
+        "device_instance_id": details.get("device_instance_id") or "",
+        "device_id": details.get("device_id") or "",
+        "ssid": details.get("ssid") or "",
+        "interface_guid": details.get("interface_guid") or "",
+        "document_name": details.get("document_name") or "",
+        "printer_name": details.get("printer_name") or "",
+        "job_id": details.get("job_id") or "",
+        "url": details.get("url") or "",
+        "remote_name": details.get("remote_name") or "",
+        "local_file": details.get("local_file") or "",
         "event_created_at": details.get("event_created_at") or "",
         "timestamp": details.get("timestamp") or "",
         "rule": {
@@ -6255,7 +6408,21 @@ def event_risk_score(event_id: str, terms: list[str], has_rule: bool) -> int:
     return min(100, score)
 
 
-def event_category_for(event_id: str, channel: str) -> tuple[str, str]:
+def event_category_for(
+    event_id: str,
+    channel: str,
+    provider_name: str = "",
+    data: Mapping[str, object] | None = None,
+) -> tuple[str, str]:
+    provider_or_channel = f"{normalize_key(provider_name)} {normalize_key(channel)}"
+    if "kernelpnp" in provider_or_channel or "usbstor" in provider_or_channel:
+        return "usb-device-event", "USB or Plug-and-Play device event"
+    if "wlanautoconfig" in provider_or_channel:
+        return "wlan-autoconfig-event", "WLAN AutoConfig wireless event"
+    if "printservice" in provider_or_channel:
+        return "print-service-event", "PrintService document or queue event"
+    if "bitsclient" in provider_or_channel:
+        return "bits-client-event", "BITS Client transfer event"
     if event_id == "22" and "terminalservices" in normalize_key(channel):
         return "rdp-session-logon", "Terminal Services session logon"
     return EVENT_ID_CATEGORIES.get(event_id, ("event", "Windows event log record"))
