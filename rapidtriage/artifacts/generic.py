@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import contextlib
 import datetime as dt
 import hashlib
 import re
@@ -307,7 +308,7 @@ def collect_sticky_notes_sqlite(path: Path) -> Iterable[ArtifactRecord]:
             },
         )
         return
-    with connection:
+    with contextlib.closing(connection):
         tables = sticky_note_candidate_tables(connection)
         schema_profile = sticky_notes_schema_profile(connection, tables)
         emitted = 0
@@ -728,7 +729,7 @@ def collect_local_llm_sqlite_prompt_candidates(
     except sqlite3.Error:
         return
     emitted = 0
-    with connection:
+    with contextlib.closing(connection):
         try:
             table_rows = connection.execute(
                 "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name"
@@ -880,7 +881,7 @@ def collect_desktop_ai_conversation_candidates(
     except sqlite3.Error:
         return
     emitted = 0
-    with connection:
+    with contextlib.closing(connection):
         for table_profile in message_tables[:DESKTOP_AI_MESSAGE_TABLE_LIMIT]:
             if emitted >= DESKTOP_AI_MESSAGE_ROW_LIMIT or not isinstance(table_profile, Mapping):
                 break
@@ -1004,7 +1005,7 @@ def desktop_ai_sqlite_profile(path: Path) -> dict[str, object]:
         return {"database_open_status": "open-failed", "error": str(exc)}
     tables: list[dict[str, object]] = []
     message_candidates: list[dict[str, object]] = []
-    with connection:
+    with contextlib.closing(connection):
         try:
             table_rows = connection.execute(
                 "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name"

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import contextlib
 import json
 import sqlite3
 import tempfile
@@ -961,16 +962,17 @@ class RapidTriageRunTests(unittest.TestCase):
             root.mkdir(parents=True, exist_ok=True)
             build_run_fixture(root)
             db_path = root / "Users" / "alice" / "Databases" / "chat.sqlite"
-            with sqlite3.connect(db_path) as connection:
-                connection.execute("CREATE TABLE messages(id INTEGER PRIMARY KEY, sender TEXT, body TEXT)")
-                connection.executemany(
-                    "INSERT INTO messages(sender, body) VALUES (?, ?)",
-                    [
-                        ("alice", "normal hello"),
-                        ("bob", "wire transfer password appears here"),
-                        ("carol", "later message"),
-                    ],
-                )
+            with contextlib.closing(sqlite3.connect(db_path)) as connection:
+                with connection:
+                    connection.execute("CREATE TABLE messages(id INTEGER PRIMARY KEY, sender TEXT, body TEXT)")
+                    connection.executemany(
+                        "INSERT INTO messages(sender, body) VALUES (?, ?)",
+                        [
+                            ("alice", "normal hello"),
+                            ("bob", "wire transfer password appears here"),
+                            ("carol", "later message"),
+                        ],
+                    )
 
             self.assertEqual(main(["run", str(root), "--mode", "fraud", "--output-dir", str(output_dir)]), 0)
             self.assertEqual(

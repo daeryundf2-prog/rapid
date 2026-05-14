@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import contextlib
 import datetime as dt
 import hashlib
 import json
@@ -173,7 +174,7 @@ def build_sqlite_table_preview(
     limit = normalize_limit(limit, default=DEFAULT_SQLITE_ROW_LIMIT, maximum=MAX_SQLITE_ROW_LIMIT)
     offset = max(0, int(offset or 0))
     try:
-        with sqlite3.connect(f"{source_path.as_uri()}?mode=ro", uri=True) as connection:
+        with contextlib.closing(sqlite3.connect(f"{source_path.as_uri()}?mode=ro", uri=True)) as connection:
             connection.row_factory = sqlite3.Row
             tables = list_sqlite_tables(connection)
             if table not in tables:

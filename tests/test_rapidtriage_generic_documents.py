@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import contextlib
 import json
 import sqlite3
 import tempfile
@@ -24,20 +25,20 @@ class RapidTriageGenericDocumentsTests(unittest.TestCase):
             sticky_dir = root / "Users" / "Alice" / "Packages" / "Microsoft.MicrosoftStickyNotes_8wekyb3d8bbwe"
             sticky_dir.mkdir(parents=True)
             sticky_db = sticky_dir / "plum.sqlite"
-            connection = sqlite3.connect(sticky_db)
-            with connection:
-                connection.execute(
-                    "CREATE TABLE Note (Text TEXT, IsDeleted INTEGER, CreatedAt INTEGER, UpdatedAt INTEGER, Account TEXT)"
-                )
-                connection.execute(
-                    "INSERT INTO Note VALUES (?, ?, ?, ?, ?)",
-                    ("VPN password review with OTP token", 1, 1710000000, 1710000060, "alice@example.com"),
-                )
-                connection.execute("CREATE TABLE Fragments (BlobValue BLOB)")
-                connection.execute(
-                    "INSERT INTO Fragments VALUES (?)",
-                    (b"Archived sticky note: deleted seed phrase review for bob@example.com",),
-                )
+            with contextlib.closing(sqlite3.connect(sticky_db)) as connection:
+                with connection:
+                    connection.execute(
+                        "CREATE TABLE Note (Text TEXT, IsDeleted INTEGER, CreatedAt INTEGER, UpdatedAt INTEGER, Account TEXT)"
+                    )
+                    connection.execute(
+                        "INSERT INTO Note VALUES (?, ?, ?, ?, ?)",
+                        ("VPN password review with OTP token", 1, 1710000000, 1710000060, "alice@example.com"),
+                    )
+                    connection.execute("CREATE TABLE Fragments (BlobValue BLOB)")
+                    connection.execute(
+                        "INSERT INTO Fragments VALUES (?)",
+                        (b"Archived sticky note: deleted seed phrase review for bob@example.com",),
+                    )
 
             llm_dir = root / "Users" / "Alice" / ".ollama" / "models"
             llm_dir.mkdir(parents=True)
@@ -52,10 +53,12 @@ class RapidTriageGenericDocumentsTests(unittest.TestCase):
             chatgpt_dir = root / "Users" / "Alice" / "AppData" / "Roaming" / "OpenAI" / "ChatGPT"
             chatgpt_dir.mkdir(parents=True)
             chatgpt_db = chatgpt_dir / "conversations.sqlite"
-            ai_connection = sqlite3.connect(chatgpt_db)
-            with ai_connection:
-                ai_connection.execute("CREATE TABLE messages (role TEXT, content TEXT, created_at INTEGER)")
-                ai_connection.execute("INSERT INTO messages VALUES ('user', 'Summarize incident timeline', 1710000000)")
+            with contextlib.closing(sqlite3.connect(chatgpt_db)) as ai_connection:
+                with ai_connection:
+                    ai_connection.execute("CREATE TABLE messages (role TEXT, content TEXT, created_at INTEGER)")
+                    ai_connection.execute(
+                        "INSERT INTO messages VALUES ('user', 'Summarize incident timeline', 1710000000)"
+                    )
             suspicious_doc = root / "Users" / "Alice" / "Documents" / "macro-template-report.docx"
             suspicious_doc.parent.mkdir(parents=True)
             write_suspicious_ooxml_document(suspicious_doc)
