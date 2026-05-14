@@ -282,7 +282,8 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
   <SSIDConfig><SSID><name>CorpWiFi</name></SSID></SSIDConfig>
   <connectionType>ESS</connectionType>
   <connectionMode>auto</connectionMode>
-  <MSM><security><authEncryption><authentication>WPA2PSK</authentication><encryption>AES</encryption></authEncryption></security></MSM>
+  <nonBroadcast>true</nonBroadcast>
+  <MSM><security><authEncryption><authentication>WPA2PSK</authentication><encryption>AES</encryption></authEncryption><sharedKey><protected>true</protected><keyMaterial>super-secret-password</keyMaterial></sharedKey></security></MSM>
   <MacRandomization><enableRandomization>true</enableRandomization></MacRandomization>
 </WLANProfile>
 """,
@@ -300,11 +301,28 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
             )
             self.assertIn("USBSTOR\\Disk&Ven_Samsung&Prod_Flash_Drive\\123456", setup_artifact["details"]["device_id_candidates"])
             self.assertEqual(setup_artifact["details"]["install_entries"][0]["timestamp_hint"], "2026-05-01T10:00:00.123")
+            self.assertEqual(setup_artifact["details"]["usb_device_review_profile"]["storage_device_count"], 1)
+            self.assertEqual(
+                setup_artifact["details"]["usb_device_review_profile"]["devices"][0]["storage_vendor"],
+                "Samsung",
+            )
+            self.assertEqual(
+                setup_artifact["details"]["usb_device_review_profile"]["devices"][0]["serial_number_candidate"],
+                "123456",
+            )
+            self.assertIn("usb-storage-device-candidate", setup_artifact["details"]["risk_flags"])
 
             wifi_artifact = next(item for item in payload["artifacts"] if item["artifact_type"] == "wifi-profile")
             self.assertEqual(wifi_artifact["details"]["ssid"], "CorpWiFi")
             self.assertEqual(wifi_artifact["details"]["authentication"], "WPA2PSK")
+            self.assertTrue(wifi_artifact["details"]["key_material_present"])
+            self.assertTrue(wifi_artifact["details"]["key_material_redacted"])
+            self.assertNotIn("super-secret-password", json.dumps(wifi_artifact, ensure_ascii=False))
+            self.assertEqual(wifi_artifact["details"]["wifi_profile_review_profile"]["interface_guid"], "{GUID}")
+            self.assertEqual(wifi_artifact["details"]["wifi_profile_review_profile"]["security_level"], "secured")
             self.assertIn("wifi-mac-randomization-enabled", wifi_artifact["details"]["risk_flags"])
+            self.assertIn("hidden-wifi-profile", wifi_artifact["details"]["risk_flags"])
+            self.assertIn("wifi-credential-material-present-redacted", wifi_artifact["details"]["risk_flags"])
 
     def test_windows_system_collector_inventories_thumbnail_activities_uwp_and_webshell_artifacts(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:

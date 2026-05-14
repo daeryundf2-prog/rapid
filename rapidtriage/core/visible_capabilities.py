@@ -419,9 +419,9 @@ CAPABILITY_GROUPS: tuple[dict[str, Any], ...] = (
         "catalog_id": "windows-core",
         "label": "USB / 지속성 / 네트워크",
         "capabilities": (
-            {"id": "usb-external-device-history", "label": "USB 및 외장매체 연결 이력", "status": "partial", "terms": ("usbstor", "mounteddevices", "setupapi.dev.log", "usb serial", "drive letter", "usb-setupapi-device-install-candidate")},
+            {"id": "usb-external-device-history", "label": "USB 및 외장매체 연결 이력", "status": "partial", "terms": ("usbstor", "mounteddevices", "setupapi.dev.log", "usb serial", "drive letter", "usb-setupapi-device-install-candidate", "usb_device_review_profile", "storage_vendor", "serial_number_hash")},
             {"id": "autoruns-persistence-view", "label": "Persistence/Autoruns 통합 뷰", "status": "partial", "terms": ("autoruns", "run key", "service", "scheduled task", "wmi consumer")},
-            {"id": "wifi-network-profile-history", "label": "Wi-Fi/네트워크 프로필", "status": "partial", "terms": ("wifi", "ssid", "wlan", "network profile", "connection", "wifi-profile")},
+            {"id": "wifi-network-profile-history", "label": "Wi-Fi/네트워크 프로필", "status": "partial", "terms": ("wifi", "ssid", "wlan", "network profile", "connection", "wifi-profile", "wifi_profile_review_profile", "credential_material_redacted", "hidden-wifi-profile")},
         ),
     },
     {

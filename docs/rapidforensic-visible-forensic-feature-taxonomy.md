@@ -917,21 +917,21 @@ GUI 표기 방식:
 | --- | --- | --- | --- |
 | `$LogFile` transaction | `ntfs-logfile-transaction-candidate` | `$LogFile` 파일을 찾아 `RSTR/RCRD/CHKD` signature, path string pivot, source hash, scan byte, mtime을 기록한다. | redo/undo record decoder, `$MFT/$UsnJrnl` timeline join, LogFileParser/MFTECmd diff |
 | ETW/ETL trace | `etl-trace-file` | `.etl` 파일을 이벤트 로그 collector에서 노출하고 provider hint, USB/WMI/network/execution family, URL/path/IP pivot을 bounded scan한다. | ETW event header decoder, provider manifest field rendering, tracerpt/WPT/Velociraptor diff |
-| USB 및 외장매체 연결 이력 | `usb-setupapi-device-install-candidate` | `setupapi.dev.log`에서 `USBSTOR`/`USB\\VID...` install-context line과 timestamp hint를 추출한다. | USBSTOR/Enum USB/MountedDevices/drive-letter 상관, first/last connect 검증 |
-| Wi-Fi/네트워크 프로필 | `wifi-profile` | `ProgramData/Microsoft/Wlansvc/Profiles/Interfaces` XML에서 profile name, SSID, connection mode, auth/encryption, MAC randomization을 정규화한다. | WLAN AutoConfig EVTX/ETL 연결 시각, NetworkList registry 상관, trusted parser diff |
+| USB 및 외장매체 연결 이력 | `usb-setupapi-device-install-candidate` | `setupapi.dev.log`에서 `USBSTOR`/`USB\\VID...` install-context line, timestamp hint, `usb_device_review_profile`의 family/vendor/product/revision/serial/hash/first-last timestamp hint를 추출한다. | USBSTOR/Enum USB/MountedDevices/drive-letter 상관, first/last connect 검증 |
+| Wi-Fi/네트워크 프로필 | `wifi-profile` | `ProgramData/Microsoft/Wlansvc/Profiles/Interfaces` XML에서 profile name, SSID, connection mode, auth/encryption, MAC randomization, hidden network, redacted credential-material presence, `wifi_profile_review_profile`을 정규화한다. | WLAN AutoConfig EVTX/ETL 연결 시각, NetworkList registry 상관, trusted parser diff |
 
 대용량/안전 설계:
 
 1. `$LogFile`은 8MB prefix scan으로 제한해 대형 파일에서 수집기가 멈추지 않도록 했다.
 2. `.etl`은 4MB prefix scan으로 provider/string pivot만 추출한다. 구조 decode를 가장하지 않는다.
-3. `setupapi.dev.log`는 4MB scan과 최대 500개 install context entry 제한을 둔다.
-4. Wi-Fi profile은 XML 파일 단위 정규화라 대용량 부담이 작고, 연결 여부 판정은 하지 않는다.
+3. `setupapi.dev.log`는 4MB scan과 최대 500개 install context entry 제한을 두고, device profile은 SetupAPI line에서 보이는 ID만 구조화한다.
+4. Wi-Fi profile은 XML 파일 단위 정규화라 대용량 부담이 작고, keyMaterial 원문은 노출하지 않으며 연결 여부 판정은 하지 않는다.
 
 검증 포인트:
 
 1. `tests/test_rapidtriage_windows_artifacts.py::test_windows_filesystem_collector_maps_ntfs_logfile_transaction_candidates`가 `$LogFile` signature/path pivot row를 검증한다.
 2. `tests/test_rapidtriage_windows_artifacts.py::test_windows_eventlog_collector_maps_etl_trace_files`가 `.etl` provider hint와 USB/network pivot을 검증한다.
-3. `tests/test_rapidtriage_windows_artifacts.py::test_windows_system_collector_maps_setupapi_usb_and_wifi_profiles`가 SetupAPI USB install 후보와 WLAN profile XML 정규화를 검증한다.
+3. `tests/test_rapidtriage_windows_artifacts.py::test_windows_system_collector_maps_setupapi_usb_and_wifi_profiles`가 SetupAPI USB install 후보, USBSTOR vendor/product/serial profile, WLAN profile XML 정규화, hidden/credential-redaction flags를 검증한다.
 4. Python/JS visible capability status는 `$LogFile`, ETL, USB, Wi-Fi를 `부분 구현`으로 올리고 실제 artifact type terms를 추가했다.
 
 중요한 제한:

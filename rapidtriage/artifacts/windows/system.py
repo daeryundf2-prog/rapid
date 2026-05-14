@@ -72,6 +72,7 @@ SETUPAPI_SCAN_LIMIT = 4 * 1024 * 1024
 RECALL_SCAN_LIMIT = 2 * 1024 * 1024
 WIFI_PROFILE_ROOT_MARKER = "programdata/microsoft/wlansvc/profiles/interfaces"
 USB_DEVICE_RE = re.compile(r"(?i)(USBSTOR\\[^\s\]]+|USB\\VID_[0-9A-F]{4}&PID_[0-9A-F]{4}[^\s\]]*)")
+USB_VID_PID_RE = re.compile(r"(?i)VID_([0-9A-F]{4})&PID_([0-9A-F]{4})")
 SETUPAPI_TIMESTAMP_RE = re.compile(r"(?P<date>\d{4}[/-]\d{2}[/-]\d{2})\s+(?P<time>\d{2}:\d{2}:\d{2}(?:\.\d+)?)")
 REMOTE_CONTROL_TIMESTAMP_RE = re.compile(
     r"(?P<timestamp>\d{4}[/-]\d{2}[/-]\d{2}[ T]\d{2}:\d{2}:\d{2}(?:\.\d+)?)"
@@ -1054,10 +1055,12 @@ def collect_setupapi_usb_artifacts(root: Path) -> Iterable[ArtifactRecord]:
         if not entries:
             continue
         device_ids = sorted({str(entry["device_id"]) for entry in entries if entry.get("device_id")})
+        usb_review_profile = setupapi_usb_review_profile(entries)
         validation_checks = {
             "setupapi_log_readable": True,
             "usb_device_ids_present": bool(device_ids),
             "install_context_lines_present": bool(entries),
+            "device_profile_built": bool(usb_review_profile.get("device_count")),
             "registry_usbstor_mounteddevices_correlated": False,
         }
         yield ArtifactRecord(
@@ -1075,10 +1078,13 @@ def collect_setupapi_usb_artifacts(root: Path) -> Iterable[ArtifactRecord]:
                 "coverage_status": "setupapi-usb-bounded-context-scan",
                 "reportability": "triage",
                 "device_id_candidates": device_ids[:100],
+                "usb_device_review_profile": usb_review_profile,
                 "install_entries": entries[:100],
                 "install_entry_count": len(entries),
-                "risk_flags": ["setupapi-usb-device-install"] + (["multiple-usb-device-candidates"] if len(device_ids) > 1 else []),
-                "parser_confidence": "medium" if device_ids else "low",
+                "risk_flags": setupapi_usb_risk_flags(usb_review_profile),
+                "parser_confidence": "high"
+                if usb_review_profile.get("serial_number_count")
+                else ("medium" if device_ids else "low"),
                 "validation_required": True,
                 "validation_checks": validation_checks,
                 "validation_guidance": (
@@ -1111,6 +1117,7 @@ def parse_setupapi_usb_entries(path: Path) -> list[dict[str, object]]:
             {
                 "line_number": line_number,
                 "device_id": device_match.group(0).rstrip(".,);]"),
+                "device_profile": parse_usb_device_id(device_match.group(0).rstrip(".,);]")),
                 "timestamp_hint": current_timestamp,
                 "context": line.strip()[:400],
             }
@@ -1118,6 +1125,102 @@ def parse_setupapi_usb_entries(path: Path) -> list[dict[str, object]]:
         if len(entries) >= 500:
             break
     return entries
+
+
+def parse_usb_device_id(device_id: str) -> dict[str, object]:
+    normalized = device_id.strip().strip("[]").rstrip(".,);]")
+    parts = [part for part in normalized.split("\\") if part]
+    lower = normalized.lower()
+    vid_pid_match = USB_VID_PID_RE.search(normalized)
+    serial_number = parts[-1] if len(parts) >= 3 else ""
+    profile: dict[str, object] = {
+        "profile_version": "usb-device-id-profile-v1",
+        "normalized_device_id": normalized,
+        "device_family": parts[0] if parts else "",
+        "device_class": "usb-storage" if lower.startswith("usbstor\\") else "usb-device",
+        "vendor_id": vid_pid_match.group(1).upper() if vid_pid_match else "",
+        "product_id": vid_pid_match.group(2).upper() if vid_pid_match else "",
+        "serial_number_candidate": serial_number,
+        "serial_number_hash": hashlib.sha256(serial_number.encode("utf-8", errors="ignore")).hexdigest()
+        if serial_number
+        else "",
+        "contains_vid_pid": bool(vid_pid_match),
+        "contains_storage_hint": lower.startswith("usbstor\\") or "disk&ven_" in lower,
+    }
+    if lower.startswith("usbstor\\") and len(parts) >= 2:
+        profile.update(parse_usbstor_descriptor(parts[1]))
+    return profile
+
+
+def parse_usbstor_descriptor(descriptor: str) -> dict[str, object]:
+    values: dict[str, str] = {}
+    for token in descriptor.split("&"):
+        if "_" not in token:
+            continue
+        key, value = token.split("_", 1)
+        values[key.lower()] = value.replace("_", " ").strip()
+    return {
+        "storage_vendor": values.get("ven", ""),
+        "storage_product": values.get("prod", ""),
+        "storage_revision": values.get("rev", ""),
+    }
+
+
+def setupapi_usb_review_profile(entries: Sequence[Mapping[str, object]]) -> dict[str, object]:
+    device_profiles: dict[str, dict[str, object]] = {}
+    timestamps: list[str] = []
+    for entry in entries:
+        timestamp = str(entry.get("timestamp_hint") or "")
+        if timestamp:
+            timestamps.append(timestamp)
+        profile = entry.get("device_profile") if isinstance(entry.get("device_profile"), Mapping) else {}
+        device_id = str(entry.get("device_id") or profile.get("normalized_device_id") or "")
+        if not device_id:
+            continue
+        existing = device_profiles.setdefault(
+            device_id,
+            {
+                **profile,
+                "device_id": device_id,
+                "first_timestamp_hint": timestamp,
+                "last_timestamp_hint": timestamp,
+                "line_numbers": [],
+                "install_context_count": 0,
+            },
+        )
+        existing["install_context_count"] = int(existing.get("install_context_count") or 0) + 1
+        if isinstance(existing.get("line_numbers"), list):
+            existing["line_numbers"].append(entry.get("line_number"))
+        if timestamp:
+            if not existing.get("first_timestamp_hint") or timestamp < str(existing.get("first_timestamp_hint")):
+                existing["first_timestamp_hint"] = timestamp
+            if not existing.get("last_timestamp_hint") or timestamp > str(existing.get("last_timestamp_hint")):
+                existing["last_timestamp_hint"] = timestamp
+    devices = sorted(device_profiles.values(), key=lambda item: str(item.get("device_id") or "").lower())[:100]
+    serial_count = sum(1 for device in devices if device.get("serial_number_candidate"))
+    storage_count = sum(1 for device in devices if device.get("contains_storage_hint"))
+    return {
+        "profile_version": "setupapi-usb-review-profile-v1",
+        "device_count": len(devices),
+        "storage_device_count": storage_count,
+        "serial_number_count": serial_count,
+        "first_timestamp_hint": min(timestamps) if timestamps else "",
+        "last_timestamp_hint": max(timestamps) if timestamps else "",
+        "devices": devices,
+        "correlation_targets": ["USBSTOR", "Enum\\\\USB", "MountedDevices", "setupapi.dev.log", "$MFT", "$UsnJrnl"],
+        "reportability_warning": "SetupAPI proves install-context evidence only; drive-letter and first/last use require registry and timeline correlation.",
+    }
+
+
+def setupapi_usb_risk_flags(profile: Mapping[str, object]) -> list[str]:
+    flags = ["setupapi-usb-device-install"]
+    if int(profile.get("device_count") or 0) > 1:
+        flags.append("multiple-usb-device-candidates")
+    if int(profile.get("storage_device_count") or 0) > 0:
+        flags.append("usb-storage-device-candidate")
+    if int(profile.get("serial_number_count") or 0) > 0:
+        flags.append("usb-serial-number-candidate")
+    return flags
 
 
 def collect_wifi_profile_artifacts(root: Path) -> Iterable[ArtifactRecord]:
@@ -1131,10 +1234,12 @@ def collect_wifi_profile_artifacts(root: Path) -> Iterable[ArtifactRecord]:
         if not profile:
             continue
         stat_result = path.stat()
+        review_profile = wifi_profile_review_profile(path, profile)
         validation_checks = {
             "profile_xml_parsed": True,
             "ssid_or_profile_name_present": bool(profile.get("ssid") or profile.get("profile_name")),
             "security_fields_present": bool(profile.get("authentication") or profile.get("encryption")),
+            "credential_material_redacted": bool(review_profile.get("credential_material_redacted")),
             "connection_time_from_eventlog_correlated": False,
         }
         yield ArtifactRecord(
@@ -1152,8 +1257,11 @@ def collect_wifi_profile_artifacts(root: Path) -> Iterable[ArtifactRecord]:
                 "coverage_status": "wlan-profile-xml-normalized",
                 "reportability": "triage",
                 **profile,
-                "risk_flags": wifi_profile_risk_flags(profile),
-                "parser_confidence": "medium" if validation_checks["ssid_or_profile_name_present"] else "low",
+                "wifi_profile_review_profile": review_profile,
+                "risk_flags": wifi_profile_risk_flags(profile, review_profile),
+                "parser_confidence": "high"
+                if review_profile.get("security_level")
+                else ("medium" if validation_checks["ssid_or_profile_name_present"] else "low"),
                 "validation_required": True,
                 "validation_checks": validation_checks,
                 "validation_guidance": (
@@ -1180,13 +1288,22 @@ def parse_wifi_profile(path: Path) -> dict[str, object]:
         return {}
     profile_name = first_text(root, "name")
     ssid = wifi_ssid_name(root) or profile_name
+    key_material = first_text(root, "keyMaterial")
+    non_broadcast = first_text(root, "nonBroadcast")
     return {
         "profile_name": profile_name,
         "ssid": ssid,
+        "ssid_hex": first_text(root, "hex"),
         "connection_type": first_text(root, "connectionType"),
         "connection_mode": first_text(root, "connectionMode"),
         "authentication": first_text(root, "authentication"),
         "encryption": first_text(root, "encryption"),
+        "use_one_x": first_text(root, "useOneX"),
+        "protected": first_text(root, "protected"),
+        "hidden_network": str(non_broadcast).lower() == "true",
+        "key_material_present": bool(key_material),
+        "key_material_length": len(key_material) if key_material else 0,
+        "key_material_redacted": bool(key_material),
         "mac_randomization": {
             "enabled": first_text(root, "enableRandomization"),
             "randomization_seed": first_text(root, "randomizationSeed"),
@@ -1204,15 +1321,57 @@ def wifi_ssid_name(root: ET.Element) -> str:
     return ""
 
 
-def wifi_profile_risk_flags(profile: Mapping[str, object]) -> list[str]:
+def wifi_profile_review_profile(path: Path, profile: Mapping[str, object]) -> dict[str, object]:
+    auth = str(profile.get("authentication") or "").lower()
+    encryption = str(profile.get("encryption") or "").lower()
+    if auth in {"open", "none"} or encryption in {"none", "wep"}:
+        security_level = "weak-or-open"
+    elif "wpa3" in auth or "wpa2" in auth or "wpa" in auth:
+        security_level = "secured"
+    elif auth:
+        security_level = "configured"
+    else:
+        security_level = ""
+    interface_guid = ""
+    for part in path.parts:
+        if part.startswith("{") and part.endswith("}"):
+            interface_guid = part
+            break
+    key_present = bool(profile.get("key_material_present"))
+    return {
+        "profile_version": "wifi-profile-review-profile-v1",
+        "interface_guid": interface_guid,
+        "security_level": security_level,
+        "credential_material_present": key_present,
+        "credential_material_redacted": key_present,
+        "credential_material_length": int(profile.get("key_material_length") or 0),
+        "enterprise_authentication_candidate": bool(profile.get("use_one_x")) or "802.1x" in auth or "eap" in auth,
+        "hidden_network": bool(profile.get("hidden_network")),
+        "auto_connect": str(profile.get("connection_mode") or "").lower() == "auto",
+        "mac_randomization_enabled": str((profile.get("mac_randomization") or {}).get("enabled") if isinstance(profile.get("mac_randomization"), Mapping) else "").lower() == "true",
+        "correlation_targets": ["WLAN-AutoConfig EVTX", "NetworkList registry", "SRUM network rows", "DNS cache", "browser/network artifacts"],
+        "reportability_warning": "Profile configuration is not proof of actual connection time without WLAN event/log correlation.",
+    }
+
+
+def wifi_profile_risk_flags(profile: Mapping[str, object], review_profile: Mapping[str, object] | None = None) -> list[str]:
     flags = ["wifi-profile"]
+    review_profile = review_profile or {}
     authentication = str(profile.get("authentication") or "").lower()
     encryption = str(profile.get("encryption") or "").lower()
     if authentication in {"open", "none"} or encryption in {"none", "wep"}:
         flags.append("weak-or-open-wifi-profile")
+    if review_profile.get("enterprise_authentication_candidate"):
+        flags.append("wifi-enterprise-profile")
+    elif authentication:
+        flags.append("wifi-personal-or-shared-profile")
+    if review_profile.get("credential_material_present"):
+        flags.append("wifi-credential-material-present-redacted")
+    if review_profile.get("hidden_network"):
+        flags.append("hidden-wifi-profile")
     if str((profile.get("mac_randomization") or {}).get("enabled") if isinstance(profile.get("mac_randomization"), Mapping) else "").lower() == "true":
         flags.append("wifi-mac-randomization-enabled")
-    return flags
+    return unique_preserve_order(flags)
 
 
 def decode_best_effort(blob: bytes) -> str:
