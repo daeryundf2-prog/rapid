@@ -41,6 +41,8 @@ class RapidTriageArtifactTaxonomyTests(unittest.TestCase):
         self.assertEqual(targets["memory-volatility"]["status"], "covered")
         self.assertEqual(targets["memory-volatility"]["missing_bindings"]["artifact_types"], [])
         self.assertIn("missing_bindings", targets["browser-cache-session-extension"])
+        self.assertEqual(targets["registry-transaction-replay"]["present_bindings"]["viewer_markers"], ["registry"])
+        self.assertEqual(targets["registry-deleted-recovery"]["present_bindings"]["doc_markers"], ["deleted key"])
 
     def test_taxonomy_audit_command_writes_json_and_strict_fails_when_incomplete(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:

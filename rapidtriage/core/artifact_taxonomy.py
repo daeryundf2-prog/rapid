@@ -49,8 +49,27 @@ class TaxonomyTarget:
     required_doc_markers: tuple[str, ...] = ()
     external_blockers: tuple[str, ...] = ()
 
+    def __post_init__(self) -> None:
+        for field_name in (
+            "required_collectors",
+            "expected_artifact_types",
+            "required_viewer_markers",
+            "required_test_markers",
+            "required_doc_markers",
+            "external_blockers",
+        ):
+            object.__setattr__(self, field_name, normalize_marker_tuple(getattr(self, field_name)))
+
     def to_dict(self) -> dict[str, object]:
         return asdict(self)
+
+
+def normalize_marker_tuple(value: object) -> tuple[str, ...]:
+    if isinstance(value, str):
+        return (value,)
+    if isinstance(value, Iterable):
+        return tuple(str(item) for item in value)
+    return ()
 
 
 TAXONOMY_TARGETS: tuple[TaxonomyTarget, ...] = (
@@ -117,7 +136,7 @@ TAXONOMY_TARGETS: tuple[TaxonomyTarget, ...] = (
         expectation="Reconstruct hives with LOG1/LOG2 replay, full key tree, user activity pivots, and source offsets.",
         required_collectors=("windows-registry",),
         expected_artifact_types=("registry-hive", "registry-key", "registry-key-tree-node", "registry-user-activity"),
-        required_viewer_markers=("registry"),
+        required_viewer_markers=("registry",),
         required_test_markers=("registry",),
         required_doc_markers=("Registry",),
     ),
@@ -129,7 +148,7 @@ TAXONOMY_TARGETS: tuple[TaxonomyTarget, ...] = (
         required_collectors=("windows-registry",),
         expected_artifact_types=("registry-key-recovery-candidate", "registry-value-recovery-candidate"),
         required_test_markers=("deleted", "registry"),
-        required_doc_markers=("deleted key"),
+        required_doc_markers=("deleted key",),
     ),
     TaxonomyTarget(
         id="sam-security-system",
