@@ -746,9 +746,9 @@ GUI 표기 방식:
 
 | 기능 그룹 | 신규 capability | 현재 상태 | 보강 맥락 |
 | --- | --- | --- | --- |
-| 복원 / 암호화 해제 | VSS/APFS 스냅샷 | 목록화 | 삭제 파일 복구, 랜섬웨어 이전 시점 확인을 위한 이미지 단계 핵심 기능 |
-| 복원 / 암호화 해제 | BitLocker/FileVault/LUKS unlock | 외부 자료 필요 | 복구키/패스워드를 받은 합법 unlock workflow와 provenance 필요 |
-| 복원 / 암호화 해제 | 비할당 영역 카빙 | 목록화 | 파일시스템 메타데이터가 사라진 삭제 파일/SQLite row 복원 |
+| 복원 / 암호화 해제 | VSS/APFS 스냅샷 | 부분 구현 | `recovery_unlock_profile.snapshot_workflow`로 mounted/exported snapshot 후보와 post-extraction VSC handoff를 노출 |
+| 복원 / 암호화 해제 | BitLocker/FileVault/LUKS unlock | 외부 자료 필요 | `fde_unlock_workflow`로 BitLocker/LUKS signature 후보와 필요한 lawful key/decrypted-export 자료를 표시. 실제 unlock은 외부 workflow |
+| 복원 / 암호화 해제 | 비할당 영역 카빙 | 부분 구현 | `unallocated_carving_workflow`로 bounded JPEG/PNG/PDF/ZIP carving command, cap, blocker를 GUI에 노출 |
 | 파일시스템 / 안티포렌식 | $LogFile transaction | 목록화 | $UsnJrnl을 보완하는 create/rename/delete transaction 분석 |
 | 파일시스템 / 안티포렌식 | Recycle Bin $I/$R 매핑 | 목록화 | 원래 경로와 삭제 시각을 직관적으로 보여주는 휴지통 전용 뷰 |
 | 파일시스템 / 안티포렌식 | Time stomping 탐지 | 목록화 | MFT $SIA/$FNA 불일치 기반 시간 조작 의심 표시 |
@@ -1108,3 +1108,27 @@ GUI 노출 계약:
 1. trailing data는 hidden payload의 후보일 뿐이며, 정상 metadata/도구 잔여물일 수도 있다.
 2. AI/편집 도구 metadata 문자열은 생성/조작 가능성의 단서이지 deepfake 판정이 아니다.
 3. 보고서에 쓰려면 원본 hash, offset, 수동 확인, 외부 검증 도구 결과, 오탐 검토가 함께 있어야 한다.
+
+## 35. 2026-05-14 구현 반영: 증거 입력 단계 복원/암호화/카빙 프로필
+
+이미지 입력 단계에서 분석관이 가장 먼저 판단해야 하는 것은 “그냥 추출하면 되는가, 암호화/스냅샷/카빙을 먼저 고려해야 하는가”이다. 이번 라운드에서는 `rapidtriage evidence`와 GUI preflight가 공통으로 읽는 `recovery_unlock_profile`을 추가했다.
+
+부분 구현으로 승격한 capability:
+
+| capability | 새 필드 | 구현 내용 | 남은 상용급 보강 |
+| --- | --- | --- | --- |
+| VSS/APFS 스냅샷 | `recovery_unlock_profile.snapshot_workflow` | 폴더 입력에서는 `System Volume Information`, `vss`, `shadow`, `.snapshots`, Time Machine local snapshot 경로 후보를 목록화하고, E01/RAW/VM container 입력에서는 추출 후 VSC/APFS handoff를 고정 표시한다. | E01 내부 VSS 직접 mount, APFS snapshot native mount, snapshot별 삭제 파일 diff 자동화 |
+| BitLocker/FileVault/LUKS unlock | `recovery_unlock_profile.fde_unlock_workflow` | 파일 입력 prefix에서 BitLocker `-FVE-FS-`, LUKS magic 후보를 bounded scan하고 필요한 복구키/패스워드/decrypted export/권한 기록을 사용자에게 표시한다. | 키 vault, lawful unlock UI, on-the-fly decryption, FileVault/APFS encrypted volume deep detection |
+| 비할당 영역 카빙 | `recovery_unlock_profile.unallocated_carving_workflow` | 내장 bounded carving 엔진의 JPEG/PNG/PDF/ZIP signature, cap, 추천 CLI command, report blocker를 preflight에서 보여준다. | filesystem unallocated map, SQLite record carving, 대용량 checkpoint queue, trusted carving tool diff |
+
+검증 포인트:
+
+1. `tests/test_rapidtriage_e01.py::test_e01_evidence_preflight_writes_operator_runbook`가 E01 preflight JSON에 `recovery_unlock_profile`이 포함되고 snapshot/FDE/carving guidance가 표시되는지 검증한다.
+2. `tests/test_rapidtriage_e01.py::test_evidence_recovery_unlock_profile_surfaces_snapshot_and_fde_candidates`가 mounted folder snapshot 후보와 BitLocker raw signature 후보를 검증한다.
+3. visible capability와 workbench config는 VSS/APFS와 carving을 `부분 구현`으로 올리고 실제 field term을 추가했다.
+
+중요한 제한:
+
+1. FDE unlock 자체는 아직 외부 workflow다. RapidTriage는 키를 보관하거나 on-the-fly decryption을 수행하지 않는다.
+2. Snapshot 후보는 mounted/exported folder 기준이며, E01 내부 VSS/APFS snapshot을 직접 mount하는 기능은 아직 아니다.
+3. Carving은 bounded signature 후보 탐지이며 전체 비할당 영역 구조 분석이나 SQLite deleted-row 복원과 동일하지 않다.

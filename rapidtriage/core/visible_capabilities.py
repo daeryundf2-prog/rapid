@@ -179,9 +179,9 @@ CAPABILITY_GROUPS: tuple[dict[str, Any], ...] = (
         "catalog_id": "evidence-input",
         "label": "복원 / 암호화 해제",
         "capabilities": (
-            {"id": "evidence-vss-apfs-snapshot", "label": "VSS/APFS 스냅샷", "status": "inventory", "terms": ("vss", "shadow copy", "apfs snapshot", "snapshot")},
-            {"id": "evidence-fde-unlock", "label": "BitLocker/FileVault/LUKS unlock", "status": "external-required", "terms": ("bitlocker", "filevault", "luks", "fde", "unlock")},
-            {"id": "evidence-unallocated-carving", "label": "비할당 영역 카빙", "status": "inventory", "terms": ("unallocated", "carving", "deleted file", "sqlite carving")},
+            {"id": "evidence-vss-apfs-snapshot", "label": "VSS/APFS 스냅샷", "status": "partial", "terms": ("vss", "shadow copy", "apfs snapshot", "snapshot", "recovery_unlock_profile", "snapshot_workflow")},
+            {"id": "evidence-fde-unlock", "label": "BitLocker/FileVault/LUKS unlock", "status": "external-required", "terms": ("bitlocker", "filevault", "luks", "fde", "unlock", "fde_unlock_workflow")},
+            {"id": "evidence-unallocated-carving", "label": "비할당 영역 카빙", "status": "partial", "terms": ("unallocated", "carving", "deleted file", "sqlite carving", "unallocated_carving_workflow", "rapidtriage carve")},
         ),
     },
     {

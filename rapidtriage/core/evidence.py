@@ -9,6 +9,7 @@ from typing import Protocol
 
 from .audit import compute_sha256
 from .archive_image import ARCHIVE_IMAGE_SUFFIXES, ARCHIVE_IMAGE_TOOLS, missing_archive_image_tools
+from .carving import DEFAULT_MAX_CANDIDATES, DEFAULT_MAX_SCAN_BYTES, SIGNATURES
 from .disk_image import RAW_IMAGE_REQUIRED_TOOLS, RAW_IMAGE_SUFFIXES, build_split_set_profile, discover_split_image_parts, missing_raw_image_tools
 from .e01 import (
     E01_REPORT_GRADE_BLOCKERS,
@@ -79,6 +80,7 @@ class EvidenceAdapterResult:
     ingest_workflow: dict[str, object] | None = None
     image_analyst_review_profile: dict[str, object] | None = None
     e01_intake_profile: dict[str, object] | None = None
+    recovery_unlock_profile: dict[str, object] | None = None
 
     def to_dict(self) -> dict[str, object]:
         return asdict(self)
@@ -102,6 +104,159 @@ def evidence_forensic_review(
         "primary_evidence": [item for item in primary_evidence if item],
         "blockers": list(blockers) if isinstance(blockers, list) else [],
         "caveats": caveats,
+    }
+
+
+FDE_SIGNATURES: tuple[tuple[bytes, str, str], ...] = (
+    (b"-FVE-FS-", "bitlocker-fve-signature", "BitLocker"),
+    (b"LUKS\xba\xbe", "luks-signature", "LUKS"),
+    (b"EFI PART", "gpt-partition-table", "partition-table-not-encryption"),
+)
+SNAPSHOT_NAME_PATTERNS: tuple[tuple[str, str], ...] = (
+    ("com.apple.timemachine.localsnapshots", "apfs-time-machine-local-snapshot"),
+    (".snapshots", "apfs-or-time-machine-snapshot"),
+    ("system volume information", "windows-system-volume-information"),
+    ("vss", "volume-shadow-copy-export"),
+    ("shadow", "volume-shadow-copy-export"),
+    ("snapshot", "snapshot-export"),
+)
+
+
+def build_recovery_unlock_profile(source: Path, *, source_kind: str, support_level: str) -> dict[str, object]:
+    snapshot_candidates = discover_snapshot_candidates(source) if source.is_dir() else []
+    fde_profile = detect_fde_indicators(source)
+    carving_signatures = [
+        {
+            "kind": signature.kind,
+            "extension": signature.extension,
+            "has_footer": signature.end is not None,
+        }
+        for signature in SIGNATURES
+    ]
+    source_is_container = source.is_file() and source.suffix.lower() in {
+        *E01_SUFFIXES,
+        *RAW_IMAGE_SUFFIXES,
+        *ARCHIVE_IMAGE_SUFFIXES,
+        *VIRTUAL_DISK_SUFFIXES,
+    }
+    return {
+        "profile_version": "evidence-recovery-unlock-profile-v1",
+        "source_path": str(source),
+        "source_kind": source_kind,
+        "support_level": support_level,
+        "snapshot_workflow": {
+            "status": "candidates-found"
+            if snapshot_candidates
+            else ("post-extraction-handoff" if source_is_container else "not-detected"),
+            "candidate_count": len(snapshot_candidates),
+            "candidates": snapshot_candidates[:25],
+            "direct_image_level_mount_supported": False,
+            "supported_user_action": "run-vsc-discover-compare-extract-after-mount-or-extraction",
+            "gui_terms": ["VSS", "APFS snapshot", "Volume Shadow Copy", "Time Machine local snapshot"],
+        },
+        "fde_unlock_workflow": fde_profile,
+        "unallocated_carving_workflow": {
+            "status": "available-on-mounted-or-recovered-root",
+            "native_unallocated_space_parser": False,
+            "bounded_signature_carving_available": True,
+            "default_max_scan_bytes_per_file": DEFAULT_MAX_SCAN_BYTES,
+            "default_max_candidates": DEFAULT_MAX_CANDIDATES,
+            "supported_signatures": carving_signatures,
+            "recommended_command": "rapidtriage carve <mounted-or-recovered-root> --output-dir <case-output>/carving",
+            "report_blockers": [
+                "full-filesystem-unallocated-map-not-implemented",
+                "sqlite-record-carving-known-answer-corpus-required",
+                "trusted-carving-tool-diff-required",
+            ],
+        },
+        "gui_actions": [
+            "Show this profile in the evidence preflight panel before extraction.",
+            "Offer VSC/APFS snapshot discovery after the image is mounted or recovered.",
+            "Offer bounded carving as an explicit analyst-started queued job, not a default scan.",
+            "If FDE indicators are present, require lawful key/password workflow outside RapidTriage before reporting filesystem absence.",
+        ],
+        "commercial_grade_ready": False,
+        "validation_required": True,
+    }
+
+
+def discover_snapshot_candidates(root: Path, *, limit: int = 50) -> list[dict[str, object]]:
+    candidates: list[dict[str, object]] = []
+    try:
+        iterator = root.rglob("*")
+        for path in iterator:
+            if len(candidates) >= limit:
+                break
+            name = path.name.lower()
+            full = str(path).lower()
+            for pattern, snapshot_kind in SNAPSHOT_NAME_PATTERNS:
+                if pattern in name or pattern in full:
+                    try:
+                        relative_path = str(path.relative_to(root))
+                    except ValueError:
+                        relative_path = str(path)
+                    candidates.append(
+                        {
+                            "path": str(path),
+                            "relative_path": relative_path,
+                            "snapshot_kind": snapshot_kind,
+                            "is_directory": path.is_dir(),
+                            "review_status": "candidate-needs-manual-confirmation",
+                        }
+                    )
+                    break
+    except OSError:
+        return candidates
+    return candidates
+
+
+def detect_fde_indicators(source: Path, *, scan_limit: int = 4 * 1024 * 1024) -> dict[str, object]:
+    indicators: list[dict[str, object]] = []
+    scan_status = "not-inspected"
+    if source.is_file():
+        scan_status = "completed"
+        try:
+            with source.open("rb") as handle:
+                blob = handle.read(scan_limit)
+        except OSError as exc:
+            return {
+                "status": "scan-failed",
+                "error": str(exc)[:160],
+                "indicators": [],
+                "lawful_unlock_supported": False,
+                "validation_required": True,
+            }
+        for signature, indicator_id, product in FDE_SIGNATURES:
+            offset = blob.find(signature)
+            if offset < 0:
+                continue
+            indicators.append(
+                {
+                    "indicator": indicator_id,
+                    "product_hint": product,
+                    "offset": offset,
+                    "confidence": "medium" if product in {"BitLocker", "LUKS"} else "low",
+                }
+            )
+    status = "indicator-found" if any(item["product_hint"] in {"BitLocker", "LUKS"} for item in indicators) else scan_status
+    return {
+        "status": status,
+        "scan_limit_bytes": scan_limit if source.is_file() else 0,
+        "indicators": indicators,
+        "lawful_unlock_supported": False,
+        "on_the_fly_decryption_supported": False,
+        "required_user_materials": [
+            "BitLocker recovery key or decrypted export",
+            "FileVault password/recovery key or decrypted APFS export",
+            "LUKS passphrase/header/key material or decrypted export",
+            "case authority/audit note for any unlock attempt",
+        ],
+        "report_blockers": [
+            "no-built-in-fde-unlock-engine",
+            "no-key-material-handling-vault",
+            "trusted-decryption-workflow-log-required",
+        ],
+        "validation_required": True,
     }
 
 
@@ -1267,12 +1422,25 @@ ADAPTERS: tuple[EvidenceAdapter, ...] = (
 def identify_evidence(source: Path) -> EvidenceAdapterResult:
     resolved = source.expanduser().resolve()
     if resolved.is_dir():
-        return add_source_name_warnings(FolderAdapter().identify(resolved))
+        return with_recovery_unlock_profile(add_source_name_warnings(FolderAdapter().identify(resolved)))
     suffix = resolved.suffix.lower()
     for adapter in ADAPTERS:
         if suffix in adapter.supported_suffixes:
-            return add_source_name_warnings(adapter.identify(resolved))
-    return add_source_name_warnings(UnsupportedAdapter().identify(resolved))
+            return with_recovery_unlock_profile(add_source_name_warnings(adapter.identify(resolved)))
+    return with_recovery_unlock_profile(add_source_name_warnings(UnsupportedAdapter().identify(resolved)))
+
+
+def with_recovery_unlock_profile(result: EvidenceAdapterResult) -> EvidenceAdapterResult:
+    if result.recovery_unlock_profile is not None:
+        return result
+    return replace(
+        result,
+        recovery_unlock_profile=build_recovery_unlock_profile(
+            Path(result.source_path),
+            source_kind=result.detected_format,
+            support_level=result.support_level,
+        ),
+    )
 
 
 def add_source_name_warnings(result: EvidenceAdapterResult) -> EvidenceAdapterResult:

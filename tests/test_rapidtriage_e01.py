@@ -297,6 +297,47 @@ DOS Partition Table
             self.assertIn("rapidtriage run", runbook["recommended_commands"]["run"])
             self.assertEqual(runbook["gui_flow"][0]["label"], "Select E01/Ex01")
             self.assertIn("rapidtriage-e01.json", runbook["expected_outputs"])
+            recovery = payload["recovery_unlock_profile"]
+            self.assertEqual(recovery["profile_version"], "evidence-recovery-unlock-profile-v1")
+            self.assertEqual(recovery["snapshot_workflow"]["status"], "post-extraction-handoff")
+            self.assertFalse(recovery["snapshot_workflow"]["direct_image_level_mount_supported"])
+            self.assertEqual(recovery["fde_unlock_workflow"]["status"], "completed")
+            self.assertFalse(recovery["fde_unlock_workflow"]["lawful_unlock_supported"])
+            self.assertTrue(recovery["unallocated_carving_workflow"]["bounded_signature_carving_available"])
+            self.assertIn("rapidtriage carve", recovery["unallocated_carving_workflow"]["recommended_command"])
+
+    def test_evidence_recovery_unlock_profile_surfaces_snapshot_and_fde_candidates(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            evidence_root = root / "mounted-evidence"
+            (evidence_root / "System Volume Information" / "VSS-1").mkdir(parents=True)
+            (evidence_root / ".snapshots" / "com.apple.TimeMachine.localsnapshots" / "2024-01-01-010101").mkdir(parents=True)
+            folder_output = root / "folder-evidence.json"
+
+            self.assertEqual(main(["evidence", str(evidence_root), "--output", str(folder_output)]), 0)
+
+            folder_payload = json.loads(folder_output.read_text(encoding="utf-8"))
+            recovery = folder_payload["recovery_unlock_profile"]
+            self.assertEqual(recovery["snapshot_workflow"]["status"], "candidates-found")
+            self.assertGreaterEqual(recovery["snapshot_workflow"]["candidate_count"], 2)
+            kinds = {candidate["snapshot_kind"] for candidate in recovery["snapshot_workflow"]["candidates"]}
+            self.assertIn("windows-system-volume-information", kinds)
+            self.assertIn("apfs-or-time-machine-snapshot", kinds)
+            signature_kinds = {row["kind"] for row in recovery["unallocated_carving_workflow"]["supported_signatures"]}
+            self.assertIn("jpeg", signature_kinds)
+            self.assertIn("zip", signature_kinds)
+
+            locked_raw = root / "locked.raw"
+            locked_raw.write_bytes(b"\x00" * 1024 + b"-FVE-FS-" + b"\x00" * 1024)
+            raw_output = root / "raw-evidence.json"
+
+            self.assertEqual(main(["evidence", str(locked_raw), "--output", str(raw_output)]), 0)
+
+            raw_payload = json.loads(raw_output.read_text(encoding="utf-8"))
+            fde = raw_payload["recovery_unlock_profile"]["fde_unlock_workflow"]
+            self.assertEqual(fde["status"], "indicator-found")
+            self.assertEqual(fde["indicators"][0]["product_hint"], "BitLocker")
+            self.assertFalse(fde["on_the_fly_decryption_supported"])
 
     def test_e01_tool_preflight_records_roles_versions_and_remediation(self) -> None:
         calls: list[list[str]] = []
