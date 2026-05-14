@@ -300,6 +300,8 @@ class RapidTriageWebStaticTests(unittest.TestCase):
         self.assertIn("data-file-search-resume-kind", app_js)
         self.assertIn("Continue SQLite search", app_js)
         self.assertIn("Continue large file search", app_js)
+        self.assertIn("doc cap", app_js)
+        self.assertIn("PDF stream cap", app_js)
         self.assertIn("No matches in the searched window yet", app_js)
         self.assertIn("Continue from the cursor before concluding the keyword is absent", app_js)
         self.assertIn("resumeCurrentFileSearch", app_js)

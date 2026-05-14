@@ -4677,6 +4677,7 @@ function renderFileSearchResults(payload) {
 function renderCurrentFileSearchProfile(payload) {
   const profile = payload.source_search_profile || {};
   const controls = profile.large_data_controls || {};
+  const extractionLimits = controls.document_extraction_limits || {};
   if (!profile.profile_version) return "";
   return `
     <section class="current-file-search-profile ${controls.truncated ? "warning" : ""}" data-testid="current-file-search-profile" data-current-file-search-contract="${escapeHtml(CURRENT_FILE_SEARCH_CONTRACT.profile_version)}">
@@ -4695,6 +4696,8 @@ function renderCurrentFileSearchProfile(payload) {
         ${controls.file_scan_truncated ? "<span>large file scan capped</span>" : ""}
         ${controls.file_resume_requested ? "<span>file cursor resumed</span>" : ""}
         ${controls.file_resume_token ? "<span>file resume token ready</span>" : ""}
+        ${extractionLimits.limits_visible_to_gui ? `<span>doc cap ${escapeHtml(formatBytes(extractionLimits.max_plain_text_bytes || 0))}</span>` : ""}
+        ${extractionLimits.max_pdf_stream_decompressed_bytes ? `<span>PDF stream cap ${escapeHtml(formatBytes(extractionLimits.max_pdf_stream_decompressed_bytes))}</span>` : ""}
       </div>
       <p class="help-text">${escapeHtml((profile.reportability_decision?.required_before_report || []).join(" · ") || "Copy locator/citation and verify hashes before report use.")}</p>
     </section>
