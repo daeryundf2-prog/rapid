@@ -23,6 +23,18 @@ PARSER_VERSION = "eventlog-normalized-v16"
 BUILTIN_RULEPACK_VERSION = "eventlog-builtin-rules-v1"
 EVENT_EXPORT_SUFFIXES = {".xml", ".json", ".jsonl", ".ndjson", ".csv"}
 ETL_SUFFIXES = {".etl"}
+MESSAGE_CATALOG_AUTO_SUFFIXES = {".man"}
+MESSAGE_CATALOG_AUTO_NAME_HINTS = (
+    "message-catalog",
+    "message_catalog",
+    "provider-manifest",
+    "provider_manifest",
+    "event-manifest",
+    "event_manifest",
+    "eventmessage",
+)
+MAX_AUTO_MESSAGE_CATALOGS = 20
+MAX_AUTO_MESSAGE_CATALOG_BYTES = 5 * 1024 * 1024
 ETL_SCAN_LIMIT = 4 * 1024 * 1024
 ETL_PROVIDER_HINTS = (
     "Microsoft-Windows-Kernel-PnP",
@@ -88,6 +100,7 @@ NATIVE_EVTX_CAPABILITIES = {
     "template_instance_header": True,
     "template_substitution_values": True,
     "curated_provider_message_catalog": True,
+    "case_local_message_catalog_auto_discovery": True,
     "provider_resource_message_rendering": False,
     "full_binxml_dom": False,
     "report_grade_deleted_record_validation": False,
@@ -905,6 +918,51 @@ def load_event_message_catalog(path: Path) -> dict[str, dict[str, dict[str, obje
     return catalog
 
 
+def discover_event_message_catalogs(root: Path) -> dict[str, dict[str, dict[str, object]]]:
+    """Find bounded provider message catalogs that travel with a case folder."""
+
+    catalogs: list[dict[str, dict[str, dict[str, object]]]] = []
+    for path in sorted(root.rglob("*"), key=lambda item: str(item).lower()):
+        if len(catalogs) >= MAX_AUTO_MESSAGE_CATALOGS:
+            break
+        if not path.is_file() or not looks_like_event_message_catalog(path):
+            continue
+        try:
+            if path.stat().st_size > MAX_AUTO_MESSAGE_CATALOG_BYTES:
+                continue
+        except OSError:
+            continue
+        catalog = load_event_message_catalog(path)
+        if catalog:
+            catalogs.append(catalog)
+    return merge_event_message_catalogs(*catalogs)
+
+
+def looks_like_event_message_catalog(path: Path) -> bool:
+    suffix = path.suffix.lower()
+    lowered_name = path.name.lower()
+    if suffix in MESSAGE_CATALOG_AUTO_SUFFIXES:
+        return True
+    if suffix not in {".json", ".xml"}:
+        return False
+    return any(hint in lowered_name for hint in MESSAGE_CATALOG_AUTO_NAME_HINTS)
+
+
+def merge_event_message_catalogs(
+    *catalogs: Mapping[str, Mapping[str, Mapping[str, object]]],
+) -> dict[str, dict[str, dict[str, object]]]:
+    merged: dict[str, dict[str, dict[str, object]]] = {}
+    for catalog in catalogs:
+        for provider, events in catalog.items():
+            if not isinstance(events, Mapping):
+                continue
+            provider_catalog = merged.setdefault(str(provider), {})
+            for event_id, entry in events.items():
+                if isinstance(entry, Mapping):
+                    provider_catalog[str(event_id)] = dict(entry)
+    return merged
+
+
 def event_message_manifest_entries(path: Path, text: str) -> list[tuple[str, str, dict[str, object]]]:
     """Extract provider/event message templates from a Windows Event Manifest XML file."""
 
@@ -1059,10 +1117,15 @@ class WindowsEventLogProvider:
             self._message_catalog = load_event_message_catalog(self.message_catalog_path) if self.message_catalog_path else {}
         return self._message_catalog
 
+    def message_catalog_for_root(self, root: Path) -> dict[str, dict[str, dict[str, object]]]:
+        auto_catalog = discover_event_message_catalogs(root)
+        explicit_catalog = self.message_catalog()
+        return merge_event_message_catalogs(auto_catalog, explicit_catalog)
+
     def collect(self, root: Path) -> Iterable[ArtifactRecord]:
         records: list[ArtifactRecord] = []
         seen: set[Path] = set()
-        message_catalog = self.message_catalog()
+        message_catalog = self.message_catalog_for_root(root)
         for path in candidate_eventlog_paths(root):
             resolved = path.resolve()
             if resolved in seen or not path.is_file():

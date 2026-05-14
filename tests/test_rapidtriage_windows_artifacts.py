@@ -1469,6 +1469,67 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
             self.assertEqual(len(source["template_sha256"]), 64)
             self.assertFalse(native_evtx["commercial_grade_ready"])
 
+    def test_eventlog_auto_discovers_case_local_message_manifest_catalog(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            evtx_path = root / "Windows" / "System32" / "winevt" / "Logs" / "PowerShell.evtx"
+            evtx_path.parent.mkdir(parents=True, exist_ok=True)
+            evtx_path.write_bytes(
+                build_template_evtx(
+                    record_id=903,
+                    timestamp=datetime(2024, 4, 4, 1, 2, 3, tzinfo=timezone.utc),
+                    command="powershell -enc AutoManifest",
+                )
+            )
+            manifest = root / "ProviderManifests" / "powershell-provider.man"
+            manifest.parent.mkdir(parents=True, exist_ok=True)
+            manifest.write_text(
+                """<instrumentationManifest xmlns="http://schemas.microsoft.com/win/2004/08/events">
+  <instrumentation>
+    <events>
+      <provider name="Microsoft-Windows-PowerShell">
+        <templates>
+          <template tid="PowerShellScriptBlockTemplate">
+            <data name="CommandLine" inType="win:UnicodeString" />
+          </template>
+        </templates>
+        <events>
+          <event value="4104" template="PowerShellScriptBlockTemplate" message="$(string.PS.4104.message)" />
+        </events>
+      </provider>
+    </events>
+  </instrumentation>
+  <localization>
+    <resources culture="en-US">
+      <stringTable>
+        <string id="PS.4104.message" value="Auto-discovered manifest rendered: %1." />
+      </stringTable>
+    </resources>
+  </localization>
+</instrumentationManifest>""",
+                encoding="utf-8",
+            )
+            output = root / "eventlog.json"
+
+            self.assertEqual(main(["artifacts", str(root), "--kind", "eventlog", "--output", str(output)]), 0)
+
+            artifacts = json.loads(output.read_text(encoding="utf-8"))["artifacts"]
+            native_evtx = next(
+                item
+                for item in artifacts
+                if item["artifact_type"] == "eventlog-event"
+                and item["details"]["parser"] == "windows-eventlog-evtx-native"
+            )["details"]
+            rendering = native_evtx["message_rendering"]
+            source = rendering["provenance"]["provider_message_resource_source"]
+
+            self.assertEqual(rendering["status"], "rendered-provider-catalog-template")
+            self.assertEqual(native_evtx["event_message"], "Auto-discovered manifest rendered: powershell -enc AutoManifest.")
+            self.assertTrue(rendering["provenance"]["provider_message_resource_resolved"])
+            self.assertEqual(source["source_type"], "windows-event-manifest")
+            self.assertEqual(source["manifest_template_fields"], ["CommandLine"])
+            self.assertTrue(source["catalog_path"].endswith("powershell-provider.man"))
+
     def test_eventlog_collector_normalizes_exports_detections_and_evtx_inventory(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             root = Path(tmp_dir)
