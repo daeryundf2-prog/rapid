@@ -26,6 +26,8 @@ class RapidTriageMediaImageTests(unittest.TestCase):
             image_path = root / "Pictures" / "screen.png"
             image_path.parent.mkdir()
             write_image_fixture(image_path)
+            with image_path.open("ab") as handle:
+                handle.write(b"PK\x03\x04hidden-review-payload")
             (image_path.parent / "screen.ocr.txt").write_text("한글 OCR test password", encoding="utf-8")
             (image_path.parent / "screen.translation.txt").write_text("Korean OCR test password", encoding="utf-8")
             output = root / "media-artifacts.json"
@@ -99,6 +101,20 @@ class RapidTriageMediaImageTests(unittest.TestCase):
             self.assertGreater(details["ocr_sidecar"]["quality_metrics"]["hangul_count"], 0)
             self.assertEqual(details["visual_classification"]["validation_status"], "triage-hint")
             self.assertEqual(details["classifier_validation"]["deepfake_detection_status"], "not-run")
+            self.assertTrue(details["media_native_capabilities"]["steganography_suspicion_scan"])
+            self.assertTrue(details["media_native_capabilities"]["media_authenticity_metadata_scan"])
+            stego_profile = details["steganography_suspicion_profile"]
+            self.assertEqual(stego_profile["status"], "completed")
+            self.assertTrue(stego_profile["trailing_data_present"])
+            self.assertGreater(stego_profile["trailing_data_bytes"], 0)
+            self.assertIn("embedded-signature-after-image-end", stego_profile["suspicion_reasons"])
+            self.assertEqual(stego_profile["embedded_signature_candidates"][0]["signature"], "zip-local-file-header")
+            self.assertIn("steganography-suspicion-candidate", details["risk_flags"])
+            self.assertIn("embedded-payload-signature-candidate", details["risk_flags"])
+            authenticity_profile = details["media_authenticity_profile"]
+            self.assertEqual(authenticity_profile["classifier_status"], "heuristic-metadata-only")
+            self.assertEqual(authenticity_profile["deepfake_detection_status"], "not-run")
+            self.assertEqual(authenticity_profile["suspicion_level"], "none")
             self.assertEqual(details["media_trusted_diffs"]["56"]["status"], "missing")
             self.assertIn(
                 "#56:image-gallery-trusted-manifest-diff-required",

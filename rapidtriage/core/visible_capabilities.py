@@ -282,8 +282,8 @@ CAPABILITY_GROUPS: tuple[dict[str, Any], ...] = (
         "label": "미디어 심화 포렌식",
         "capabilities": (
             {"id": "exif-gps-map", "label": "사진 EXIF GPS 지도", "status": "partial", "terms": ("exif", "gps", "geotag", "map", "photo location")},
-            {"id": "steganography-suspicion-scan", "label": "Steganography 의심 스캔", "status": "inventory", "terms": ("steganography", "hidden data", "lsb", "entropy")},
-            {"id": "deepfake-manipulation-scan", "label": "Deepfake/조작 의심", "status": "inventory", "terms": ("deepfake", "ai generated", "manipulated", "media authenticity")},
+            {"id": "steganography-suspicion-scan", "label": "Steganography 의심 스캔", "status": "partial", "terms": ("steganography", "hidden data", "lsb", "entropy", "steganography_suspicion_profile", "steganography-suspicion-candidate", "trailing-data-after-image-end")},
+            {"id": "deepfake-manipulation-scan", "label": "Deepfake/조작 의심", "status": "partial", "terms": ("deepfake", "ai generated", "manipulated", "media authenticity", "media_authenticity_profile", "ai-generation-metadata-candidate", "editing-tool-metadata-candidate")},
         ),
     },
     {
