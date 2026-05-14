@@ -16,6 +16,8 @@ STICKY_NOTE_RECOVERY_SCAN_BYTES = 8 * 1024 * 1024
 STICKY_NOTE_RECOVERY_LIMIT = 40
 LARGE_FILE_HASH_DEFER_BYTES = 64 * 1024 * 1024
 DESKTOP_AI_TABLE_LIMIT = 20
+DESKTOP_AI_MESSAGE_ROW_LIMIT = 200
+DESKTOP_AI_MESSAGE_TABLE_LIMIT = 5
 EMAIL_RE = re.compile(r"(?i)\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b")
 URL_RE = re.compile(r"(?i)https?://[^\s\x00\"'<>]{4,300}")
 LOCAL_LLM_PATH_TERMS = {
@@ -494,6 +496,118 @@ def collect_desktop_ai_app_inventory(root: Path) -> Iterable[ArtifactRecord]:
                 "risk_flags": desktop_ai_app_risk_flags(path, sqlite_profile),
             },
         )
+        yield from collect_desktop_ai_conversation_candidates(
+            path=path,
+            product=product,
+            sqlite_profile=sqlite_profile,
+            source_hashes=safe_source_hashes(path),
+        )
+
+
+def collect_desktop_ai_conversation_candidates(
+    *,
+    path: Path,
+    product: str,
+    sqlite_profile: Mapping[str, object],
+    source_hashes: Mapping[str, str],
+) -> Iterable[ArtifactRecord]:
+    if path.suffix.lower() not in {".sqlite", ".sqlite3", ".db"}:
+        return
+    message_tables = sqlite_profile.get("message_table_candidates")
+    if not isinstance(message_tables, list) or not message_tables:
+        return
+    try:
+        connection = sqlite3.connect(f"file:{path.resolve()}?mode=ro", uri=True)
+        connection.row_factory = sqlite3.Row
+    except sqlite3.Error:
+        return
+    emitted = 0
+    with connection:
+        for table_profile in message_tables[:DESKTOP_AI_MESSAGE_TABLE_LIMIT]:
+            if emitted >= DESKTOP_AI_MESSAGE_ROW_LIMIT or not isinstance(table_profile, Mapping):
+                break
+            table_name = str(table_profile.get("name") or "")
+            columns = [str(column) for column in table_profile.get("columns") or []]
+            if not table_name or not columns:
+                continue
+            content_column = first_matching_column(
+                columns,
+                ("content", "text", "message", "body", "prompt", "answer", "response", "completion"),
+            )
+            if not content_column:
+                continue
+            role_column = first_matching_column(columns, ("role", "author", "sender", "speaker", "type"))
+            created_column = first_matching_column(
+                columns,
+                ("createdat", "created_at", "created", "timestamp", "time", "date", "updatedat", "updated_at"),
+            )
+            conversation_column = first_matching_column(
+                columns,
+                ("conversationid", "conversation_id", "chatid", "chat_id", "threadid", "thread_id", "sessionid"),
+            )
+            selected_columns = ["rowid", content_column]
+            for optional_column in (role_column, created_column, conversation_column):
+                if optional_column and optional_column not in selected_columns:
+                    selected_columns.append(optional_column)
+            sql = (
+                "SELECT "
+                + ", ".join("rowid" if column == "rowid" else quote_sqlite_identifier(column) for column in selected_columns)
+                + f" FROM {quote_sqlite_identifier(table_name)} LIMIT ?"
+            )
+            try:
+                rows = connection.execute(sql, (DESKTOP_AI_MESSAGE_ROW_LIMIT - emitted,)).fetchall()
+            except sqlite3.Error:
+                continue
+            for row in rows:
+                content = optional_text(row[content_column])
+                if not content.strip():
+                    continue
+                role_hint = optional_text(row[role_column]) if role_column else ""
+                conversation_hint = optional_text(row[conversation_column]) if conversation_column else ""
+                created_at = normalize_sqlite_time(row[created_column]) if created_column else ""
+                direction = desktop_ai_message_direction(role_hint, content_column)
+                emitted += 1
+                yield ArtifactRecord(
+                    provider=GenericDocumentArtifactProvider.name,
+                    artifact_type="desktop-ai-conversation-candidate",
+                    path=str(path.resolve()),
+                    supported=True,
+                    details={
+                        "parser": "desktop-ai-app-inventory",
+                        "parser_version": PARSER_VERSION,
+                        "source_path": str(path.resolve()),
+                        "source_hashes": dict(source_hashes),
+                        "product_hint": product,
+                        "source_table": table_name,
+                        "source_index": emitted - 1,
+                        "rowid": row["rowid"],
+                        "role_hint": role_hint,
+                        "direction": direction,
+                        "conversation_id_hint": conversation_hint,
+                        "created_at": created_at,
+                        "content_preview": redact_note_preview(content),
+                        "content_sha256": sha256_text(content),
+                        "content_length": len(content),
+                        "desktop_ai_conversation_review_profile": desktop_ai_conversation_review_profile(
+                            product=product,
+                            table_name=table_name,
+                            direction=direction,
+                            role_hint=role_hint,
+                            created_at=created_at,
+                            conversation_hint=conversation_hint,
+                            content=content,
+                        ),
+                        "coverage_status": "desktop-ai-sqlite-message-row-candidate",
+                        "validation_required": True,
+                        "commercial_grade_ready": False,
+                        "commercial_grade_blockers": [
+                            "desktop-ai-app-schema-version-not-validated",
+                            "service-export-diff-required",
+                            "conversation-thread-pairing-not-complete",
+                        ],
+                        "risk_flags": desktop_ai_conversation_risk_flags(direction, content),
+                    },
+                )
 
 
 def infer_desktop_ai_product(path: Path) -> str:
@@ -583,6 +697,77 @@ def desktop_ai_app_risk_flags(path: Path, sqlite_profile: Mapping[str, object]) 
         flags.append("possible-ai-prompt-history")
     if sqlite_profile.get("message_table_candidates"):
         flags.append("ai-message-table-candidate")
+    return flags
+
+
+def desktop_ai_message_direction(role_hint: str, content_column: str) -> str:
+    normalized_role = normalize_column(role_hint)
+    normalized_column = normalize_column(content_column)
+    if normalized_role in {"user", "human", "client", "prompt"} or normalized_column == "prompt":
+        return "user-prompt-candidate"
+    if normalized_role in {"assistant", "ai", "bot", "model", "system"}:
+        return "assistant-response-candidate" if normalized_role != "system" else "system-message-candidate"
+    if normalized_column in {"answer", "response", "completion"}:
+        return "assistant-response-candidate"
+    return "message-candidate"
+
+
+def desktop_ai_conversation_review_profile(
+    *,
+    product: str,
+    table_name: str,
+    direction: str,
+    role_hint: str,
+    created_at: str,
+    conversation_hint: str,
+    content: str,
+) -> dict[str, object]:
+    return {
+        "profile_version": "desktop-ai-conversation-review-profile-v1",
+        "product_hint": product,
+        "source_table": table_name,
+        "direction": direction,
+        "role_hint": role_hint,
+        "created_at_present": bool(created_at),
+        "conversation_id_present": bool(conversation_hint),
+        "content_length": len(content),
+        "url_candidates": [match.group(0) for match in URL_RE.finditer(content)][:10],
+        "email_candidates": [match.group(0) for match in EMAIL_RE.finditer(content)][:10],
+        "sensitive_term_hits": [
+            term
+            for term in ("password", "passwd", "otp", "secret", "token", "api key", "apikey", "seed", "credential")
+            if term in content.lower()
+        ],
+        "values_are_candidates": True,
+        "source_viewer_hint": (
+            "Open the desktop AI SQLite row and compare it with a service export before reporting prompt/answer content."
+        ),
+        "not_proof_of": [
+            "complete-service-side-transcript",
+            "message-delivery-or-read-state",
+            "conversation-thread-completeness",
+        ],
+        "report_blockers": [
+            "desktop-app-version-schema-fixture-required",
+            "service-export-diff-required",
+            "thread-pairing-validation-required",
+        ],
+    }
+
+
+def desktop_ai_conversation_risk_flags(direction: str, content: str) -> list[str]:
+    lowered = content.lower()
+    flags = ["desktop-ai-conversation-candidate", "ai-service-usage"]
+    if direction == "user-prompt-candidate":
+        flags.append("ai-user-prompt-candidate")
+    elif direction == "assistant-response-candidate":
+        flags.append("ai-assistant-response-candidate")
+    if first_regex_match(content, URL_RE):
+        flags.append("ai-message-url-candidate")
+    if first_regex_match(content, EMAIL_RE):
+        flags.append("ai-message-email-candidate")
+    if any(term in lowered for term in ("password", "passwd", "otp", "secret", "token", "api key", "apikey", "seed")):
+        flags.append("possible-sensitive-ai-content")
     return flags
 
 

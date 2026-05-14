@@ -982,9 +982,9 @@ const VISIBLE_FORENSIC_CAPABILITY_GROUPS = [
       {
         id: "ai-desktop-app-db",
         label: "ChatGPT/Copilot 데스크톱 앱 DB",
-        status: "inventory",
-        terms: ["chatgpt desktop", "copilot", "desktop app", "sqlite"],
-        nextAction: "Windows/macOS 데스크톱 AI 앱의 local SQLite/cache/export schema fixture 확보",
+        status: "partial",
+        terms: ["chatgpt desktop", "copilot", "desktop app", "sqlite", "desktop-ai-app-artifact", "desktop-ai-conversation-candidate", "desktop_ai_conversation_review_profile"],
+        nextAction: "local SQLite 메시지 후보 row는 제공, 서비스 export diff와 thread pairing fixture 필요",
       },
       {
         id: "windows-copilot-recall",

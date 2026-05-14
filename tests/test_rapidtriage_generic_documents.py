@@ -59,6 +59,7 @@ class RapidTriageGenericDocumentsTests(unittest.TestCase):
             self.assertIn("sticky-note-recovery-candidate", artifact_types)
             self.assertIn("local-llm-artifact", artifact_types)
             self.assertIn("desktop-ai-app-artifact", artifact_types)
+            self.assertIn("desktop-ai-conversation-candidate", artifact_types)
 
             sticky = next(artifact for artifact in payload["artifacts"] if artifact["artifact_type"] == "sticky-note")
             self.assertEqual(sticky["details"]["source_table"], "Note")
@@ -98,6 +99,19 @@ class RapidTriageGenericDocumentsTests(unittest.TestCase):
             self.assertEqual(desktop_ai["details"]["database_profile"]["tables"][0]["name"], "messages")
             self.assertEqual(desktop_ai["details"]["message_table_candidates"][0]["row_count"], 1)
             self.assertIn("ai-message-table-candidate", desktop_ai["details"]["risk_flags"])
+
+            ai_message = next(
+                artifact
+                for artifact in payload["artifacts"]
+                if artifact["artifact_type"] == "desktop-ai-conversation-candidate"
+            )
+            self.assertEqual(ai_message["details"]["direction"], "user-prompt-candidate")
+            self.assertEqual(ai_message["details"]["source_table"], "messages")
+            self.assertEqual(
+                ai_message["details"]["desktop_ai_conversation_review_profile"]["product_hint"],
+                "ChatGPT Desktop",
+            )
+            self.assertIn("ai-user-prompt-candidate", ai_message["details"]["risk_flags"])
 
 
 if __name__ == "__main__":
