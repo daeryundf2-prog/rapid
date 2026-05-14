@@ -4,6 +4,16 @@
 rapidtriage-windows-smoke/
 rapidtriage-macos-linux-smoke/
 qc-runs/
+rapidtriage-taxonomy-audit.json
+commercial-readiness/
+rapidtriage-validation/
+rapidtriage-benchmark/
+rapidtriage-sample/
+rapidtriage-run*/
+submission-bundle/
+release/
+release-validation/
+release-benchmark/
 __pycache__/
 *.pyc
 *.pyo
