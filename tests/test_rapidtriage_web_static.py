@@ -174,6 +174,9 @@ class RapidTriageWebStaticTests(unittest.TestCase):
         self.assertIn("registry-user-activity", config_js)
         self.assertIn("windows-search-edb-row-candidate", config_js)
         self.assertIn("windows-search-edb-page-candidate", config_js)
+        self.assertIn("virtual-disk-workflow", config_js)
+        self.assertIn("qemu_img_info_profile", config_js)
+        self.assertIn("virtual_disk_chain_profile", config_js)
         self.assertIn("browser_analyst_review_profile", config_js)
         self.assertIn("mobile-message", config_js)
         self.assertIn("kakaotalk-windows-app-database", config_js)
@@ -196,6 +199,8 @@ class RapidTriageWebStaticTests(unittest.TestCase):
         self.assertIn("webshell_semantic_profile", config_js)
         self.assertIn("webshell_log_correlation", config_js)
         self.assertIn("webshell_report_citation_package", config_js)
+        self.assertIn("ai-service-export-conversation", config_js)
+        self.assertIn("ai_service_export_parser_manifest", config_js)
         for capability_id in (
             "evidence-vss-apfs-snapshot",
             "evidence-fde-unlock",
@@ -281,8 +286,12 @@ class RapidTriageWebStaticTests(unittest.TestCase):
             "messenger-whatsapp-telegram-signal-line",
             "cloud-icloud-export",
             "cloud-message",
+            "image-vm-disk",
+            "browser-ai-export-parser",
         ):
             self.assertEqual(capabilities[capability_id]["status"], "partial")
+        self.assertIn("virtual-disk-workflow", capabilities["image-vm-disk"]["artifact_types"])
+        self.assertIn("ai-service-export-conversation", capabilities["browser-ai-export-parser"]["artifact_types"])
         for group in payload["groups"]:
             self.assertIn("tab", group)
             self.assertIn("workflow_stage", group)

@@ -307,6 +307,7 @@ GUI에서는 다음 14개 상위 그룹으로 보여주는 것이 적절하다.
 | browser storage scan | Local Storage, Session Storage, IndexedDB, Cache | partial+ | deleted fragment recovery |
 | Q/A fragment 추출 | role/content, prompt/question/answer/response/completion | partial+ | provider schema별 parser |
 | Q/A pairing | transcript pair confidence/orphan count | partial+ | official export diff |
+| 공식 export JSON parser | `ai-service-export-conversation`, `ai_service_export_parser_manifest` | partial | provider schema/version fixture, trusted export diff |
 | source offset/hash | candidate manifest | partial+ | browser source viewer E2E |
 | AI 대화 후보 보기 | `browser-ai-conversation`, `macos-browser-ai-conversation` | partial+ | chat-like viewer polish |
 | mobile AI usage | `mobile-browser`, `mobile-app`, risk flags | partial | app-specific local DB parser |
@@ -315,7 +316,7 @@ GUI에서는 다음 14개 상위 그룹으로 보여주는 것이 적절하다.
 
 - 브라우저 history는 "AI 서비스를 방문했다"는 증거이지, 항상 질문/답변 본문을 의미하지 않는다.
 - 질문/답변 본문은 browser storage/cache에 남은 조각을 후보로 복원하는 방식이다.
-- ChatGPT/Claude/Gemini/Perplexity 공식 export와 diff되지 않으면 "완전한 대화 복원"으로 쓰면 안 된다.
+- ChatGPT/Claude/Gemini/Perplexity 계열 공식 export JSON/JSONL은 `ai-service-export-conversation`으로 Q/A 후보를 만들 수 있지만, provider schema/version과 계정 scope를 검증하고 trusted export diff가 붙기 전에는 "완전한 대화 복원"으로 쓰면 안 된다.
 
 GUI 표시 권장:
 
@@ -327,6 +328,7 @@ GUI 표시 권장:
 - `confidence`
 - `원본 offset`
 - `서비스 export 검증 필요`
+- `공식 export JSON parser`
 
 ## 10. 문서, 이메일, Windows Search
 
@@ -736,7 +738,7 @@ GUI 표기 방식:
 3. 현재는 Python/JS 양쪽에 taxonomy가 중복된다. 완성형은 JSON 단일 원본 또는 build-time 생성으로 옮기는 것이다.
 4. capability별 trusted-tool diff 결과와 known-answer fixture 통과 여부를 상태 계산에 반영해야 한다.
 5. Lucene/Elasticsearch/DuckDB 등 대용량 검색 backend 후보는 아직 GUI 표기만 있고, 실제 benchmark 후 선택해야 한다.
-6. 메신저/클라우드/AI export는 버전별 fixture가 부족하므로 `부분 구현` 이상으로 올리려면 실제 샘플 검증이 필요하다.
+6. 메신저/클라우드/AI export는 일부 parser가 GUI-visible partial로 올라왔지만, 버전별 fixture와 trusted diff가 부족하므로 `상용급`으로 올리려면 실제 샘플 검증이 필요하다.
 
 ## 23. 2026-05-14 외부 평가 반영: 전통 핵심 아티팩트와 안티포렌식 보강
 

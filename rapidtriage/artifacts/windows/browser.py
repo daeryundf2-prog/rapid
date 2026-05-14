@@ -5,7 +5,7 @@ import json
 import re
 import sqlite3
 from pathlib import Path
-from typing import Dict, Iterable, List, Mapping, Sequence, Tuple
+from typing import Any, Dict, Iterable, List, Mapping, Sequence, Tuple
 from urllib.parse import parse_qs, unquote_plus, urlparse
 
 from ...core.forensic_accuracy import build_accuracy_gate
@@ -104,6 +104,8 @@ MAX_USAGE_ROWS = 500
 MAX_AI_STORAGE_FILES = 80
 MAX_AI_STORAGE_FILE_BYTES = 5 * 1024 * 1024
 MAX_AI_CONVERSATION_ROWS = 200
+MAX_AI_EXPORT_FILES = 120
+MAX_AI_EXPORT_FILE_BYTES = 20 * 1024 * 1024
 MAX_BROWSER_INVENTORY_FILES = 5000
 MAX_BROWSER_INVENTORY_SAMPLE_FILES = 6
 MAX_BROWSER_INVENTORY_HASH_BYTES = 16 * 1024 * 1024
@@ -158,6 +160,20 @@ AI_STORAGE_DIRS: Tuple[Tuple[str, ...], ...] = (
     ("Cache",),
 )
 AI_STORAGE_SUFFIXES = {".log", ".ldb", ".sqlite", ".sqlite3", ".db", ".json", ".txt"}
+AI_EXPORT_SUFFIXES = {".json", ".jsonl"}
+AI_EXPORT_PATH_TERMS = (
+    "chatgpt",
+    "openai",
+    "claude",
+    "anthropic",
+    "gemini",
+    "bard",
+    "perplexity",
+    "copilot",
+    "conversations",
+    "conversation",
+    "export",
+)
 BROWSER_STORAGE_LOCATIONS: Tuple[Tuple[str, str, Tuple[str, ...], str, bool], ...] = (
     ("cache", "cache-data", ("Cache", "Cache_Data"), "browser-cache-inventory", False),
     ("cache", "legacy-cache", ("Cache",), "browser-cache-inventory", False),
@@ -312,6 +328,7 @@ class WindowsBrowserArtifactsProvider:
                 )
         yield from collect_webcachev01_artifacts(root)
         yield from collect_desktop_cloud_sync_db_artifacts(root)
+        yield from collect_ai_service_export_artifacts(root)
 
 
 def collect_webcachev01_artifacts(root: Path) -> Iterable[ArtifactRecord]:
@@ -499,6 +516,645 @@ def collect_desktop_cloud_sync_db_artifacts(root: Path) -> Iterable[ArtifactReco
             profile=profile,
             sync_provider=sync_provider,
         )
+
+
+def collect_ai_service_export_artifacts(root: Path) -> Iterable[ArtifactRecord]:
+    scanned = 0
+    for path in sorted(root.rglob("*"), key=lambda item: str(item).lower()):
+        if scanned >= MAX_AI_EXPORT_FILES:
+            break
+        if not path.is_file() or path.suffix.lower() not in AI_EXPORT_SUFFIXES:
+            continue
+        if not is_ai_export_candidate_path(path):
+            continue
+        scanned += 1
+        record = build_ai_service_export_artifact(path, root=root)
+        if record:
+            yield record
+
+
+def is_ai_export_candidate_path(path: Path) -> bool:
+    lowered = str(path).lower()
+    return any(term in lowered for term in AI_EXPORT_PATH_TERMS)
+
+
+def build_ai_service_export_artifact(path: Path, *, root: Path) -> ArtifactRecord | None:
+    try:
+        stat_result = path.stat()
+    except OSError:
+        return None
+    if stat_result.st_size <= 0 or stat_result.st_size > MAX_AI_EXPORT_FILE_BYTES:
+        return None
+    try:
+        data = path.read_bytes()
+    except OSError:
+        return None
+    text = decode_storage_blob(data)
+    if not text:
+        return None
+    payloads = parse_ai_export_payloads(text, suffix=path.suffix.lower())
+    if not payloads:
+        return None
+    service_hint = infer_ai_service_from_path(path) or detect_ai_service(text[:16000], "")
+    rows: List[Dict[str, object]] = []
+    for payload in payloads:
+        rows.extend(
+            extract_ai_export_rows(
+                payload,
+                source=path,
+                root=root,
+                source_text=text,
+                source_sha256=hashlib.sha256(data).hexdigest(),
+                source_size=stat_result.st_size,
+                source_modified_at=isoformat_from_timestamp(stat_result.st_mtime),
+                service_hint=service_hint,
+            )
+        )
+        if len(rows) >= MAX_AI_CONVERSATION_ROWS:
+            break
+    rows = deduplicate_conversation_rows(rows)[:MAX_AI_CONVERSATION_ROWS]
+    if not rows:
+        return None
+    return build_ai_service_export_record(
+        provider=WindowsBrowserArtifactsProvider.name,
+        source=path,
+        root=root,
+        conversation_rows=rows,
+        parser_version=PARSER_VERSION,
+        source_size=stat_result.st_size,
+        modified_at=isoformat_from_timestamp(stat_result.st_mtime),
+    )
+
+
+def parse_ai_export_payloads(text: str, *, suffix: str) -> List[Any]:
+    if suffix == ".jsonl":
+        payloads: List[Any] = []
+        for line in text.splitlines()[:MAX_AI_CONVERSATION_ROWS]:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                payloads.append(json.loads(line))
+            except json.JSONDecodeError:
+                continue
+        return payloads
+    try:
+        return [json.loads(text)]
+    except json.JSONDecodeError:
+        return []
+
+
+def extract_ai_export_rows(
+    payload: Any,
+    *,
+    source: Path,
+    root: Path,
+    source_text: str,
+    source_sha256: str,
+    source_size: int,
+    source_modified_at: str | None,
+    service_hint: str,
+) -> List[Dict[str, object]]:
+    context = {
+        "service_hint": service_hint or infer_ai_service_from_payload(payload) or "AI service",
+        "conversation_id": "",
+        "conversation_title": "",
+        "timestamp": None,
+    }
+    rows: List[Dict[str, object]] = []
+    walk_ai_export_payload(
+        payload,
+        source=source,
+        root=root,
+        source_text=source_text,
+        source_sha256=source_sha256,
+        source_size=source_size,
+        source_modified_at=source_modified_at,
+        context=context,
+        rows=rows,
+        depth=0,
+    )
+    return rows
+
+
+def walk_ai_export_payload(
+    value: Any,
+    *,
+    source: Path,
+    root: Path,
+    source_text: str,
+    source_sha256: str,
+    source_size: int,
+    source_modified_at: str | None,
+    context: Mapping[str, object],
+    rows: List[Dict[str, object]],
+    depth: int,
+) -> None:
+    if len(rows) >= MAX_AI_CONVERSATION_ROWS or depth > 14:
+        return
+    if isinstance(value, list):
+        for item in value:
+            if len(rows) >= MAX_AI_CONVERSATION_ROWS:
+                break
+            walk_ai_export_payload(
+                item,
+                source=source,
+                root=root,
+                source_text=source_text,
+                source_sha256=source_sha256,
+                source_size=source_size,
+                source_modified_at=source_modified_at,
+                context=context,
+                rows=rows,
+                depth=depth + 1,
+            )
+        return
+    if not isinstance(value, Mapping):
+        return
+
+    next_context = ai_export_context_for(value, context)
+    pair_rows = ai_export_prompt_answer_rows(
+        value,
+        source=source,
+        root=root,
+        source_text=source_text,
+        source_sha256=source_sha256,
+        source_size=source_size,
+        source_modified_at=source_modified_at,
+        context=next_context,
+    )
+    rows.extend(pair_rows[: max(0, MAX_AI_CONVERSATION_ROWS - len(rows))])
+    if len(rows) >= MAX_AI_CONVERSATION_ROWS:
+        return
+
+    message = value.get("message")
+    if isinstance(message, Mapping):
+        maybe_row = ai_export_message_row(
+            message,
+            source=source,
+            root=root,
+            source_text=source_text,
+            source_sha256=source_sha256,
+            source_size=source_size,
+            source_modified_at=source_modified_at,
+            context=ai_export_context_for(message, next_context),
+        )
+        if maybe_row:
+            rows.append(maybe_row)
+
+    maybe_row = ai_export_message_row(
+        value,
+        source=source,
+        root=root,
+        source_text=source_text,
+        source_sha256=source_sha256,
+        source_size=source_size,
+        source_modified_at=source_modified_at,
+        context=next_context,
+    )
+    if maybe_row and len(rows) < MAX_AI_CONVERSATION_ROWS:
+        rows.append(maybe_row)
+
+    selected_child_keys = ("mapping", "messages", "chat_messages", "turns", "items", "conversations", "conversation")
+    for key in selected_child_keys:
+        child = value.get(key)
+        if isinstance(child, Mapping):
+            iterable: Iterable[Any] = child.values()
+        elif isinstance(child, list):
+            iterable = child
+        else:
+            continue
+        for item in iterable:
+            if len(rows) >= MAX_AI_CONVERSATION_ROWS:
+                return
+            walk_ai_export_payload(
+                item,
+                source=source,
+                root=root,
+                source_text=source_text,
+                source_sha256=source_sha256,
+                source_size=source_size,
+                source_modified_at=source_modified_at,
+                context=next_context,
+                rows=rows,
+                depth=depth + 1,
+            )
+    for key, child in value.items():
+        if key in selected_child_keys or not isinstance(child, (Mapping, list)):
+            continue
+        if len(rows) >= MAX_AI_CONVERSATION_ROWS:
+            return
+        walk_ai_export_payload(
+            child,
+            source=source,
+            root=root,
+            source_text=source_text,
+            source_sha256=source_sha256,
+            source_size=source_size,
+            source_modified_at=source_modified_at,
+            context=next_context,
+            rows=rows,
+            depth=depth + 1,
+        )
+
+
+def ai_export_context_for(value: Mapping[str, object], context: Mapping[str, object]) -> Dict[str, object]:
+    updated = dict(context)
+    for key in ("id", "conversation_id", "thread_id", "uuid"):
+        if value.get(key):
+            updated["conversation_id"] = str(value[key])
+            break
+    for key in ("title", "name", "conversation_title", "thread_title"):
+        if value.get(key):
+            text = normalize_ai_export_text(value[key])
+            if text:
+                updated["conversation_title"] = text[:240]
+                break
+    timestamp = ai_export_timestamp(value)
+    if timestamp:
+        updated["timestamp"] = timestamp
+    service = infer_ai_service_from_payload(value)
+    if service:
+        updated["service_hint"] = service
+    return updated
+
+
+def ai_export_prompt_answer_rows(
+    value: Mapping[str, object],
+    *,
+    source: Path,
+    root: Path,
+    source_text: str,
+    source_sha256: str,
+    source_size: int,
+    source_modified_at: str | None,
+    context: Mapping[str, object],
+) -> List[Dict[str, object]]:
+    question = first_ai_export_text(value, ("prompt", "question", "query", "user_prompt", "input"))
+    answer = first_ai_export_text(value, ("answer", "response", "completion", "assistant_response", "output"))
+    rows: List[Dict[str, object]] = []
+    for role, direction, text in (("user", "question", question), ("assistant", "answer", answer)):
+        if not useful_conversation_text(text):
+            continue
+        rows.append(
+            build_ai_export_row(
+                source=source,
+                root=root,
+                source_text=source_text,
+                source_sha256=source_sha256,
+                source_size=source_size,
+                source_modified_at=source_modified_at,
+                context=context,
+                role=role,
+                direction=direction,
+                text=text,
+                confidence=0.9,
+            )
+        )
+    return rows
+
+
+def ai_export_message_row(
+    value: Mapping[str, object],
+    *,
+    source: Path,
+    root: Path,
+    source_text: str,
+    source_sha256: str,
+    source_size: int,
+    source_modified_at: str | None,
+    context: Mapping[str, object],
+) -> Dict[str, object] | None:
+    role = normalize_ai_export_role(value)
+    if not role:
+        return None
+    text = first_ai_export_text(value, ("content", "text", "message", "body", "parts"))
+    if not useful_conversation_text(text):
+        return None
+    return build_ai_export_row(
+        source=source,
+        root=root,
+        source_text=source_text,
+        source_sha256=source_sha256,
+        source_size=source_size,
+        source_modified_at=source_modified_at,
+        context=context,
+        role=role,
+        direction=role_to_direction(role),
+        text=text,
+        confidence=0.92 if role in {"user", "assistant"} else 0.7,
+    )
+
+
+def build_ai_export_row(
+    *,
+    source: Path,
+    root: Path,
+    source_text: str,
+    source_sha256: str,
+    source_size: int,
+    source_modified_at: str | None,
+    context: Mapping[str, object],
+    role: str,
+    direction: str,
+    text: str,
+    confidence: float,
+) -> Dict[str, object]:
+    try:
+        source_relative_path = str(source.resolve().relative_to(root.resolve()))
+    except ValueError:
+        source_relative_path = source.name
+    offset = source_text.find(text[:120]) if text else -1
+    return {
+        "ai_service": str(context.get("service_hint") or "AI service"),
+        "direction": direction,
+        "role": role,
+        "text": text[:1500],
+        "confidence": confidence,
+        "storage_area": "service-export",
+        "source_storage_kind": "service-export-json",
+        "source_relative_path": source_relative_path,
+        "source_size": source_size,
+        "source_modified_at": source_modified_at,
+        "source_offset": offset if offset >= 0 else None,
+        "service_detection_source": "service-export-json",
+        "source_path": str(source.resolve()),
+        "source_sha256": source_sha256,
+        "conversation_id": str(context.get("conversation_id") or ""),
+        "conversation_title": str(context.get("conversation_title") or ""),
+        "timestamp": context.get("timestamp"),
+        "export_schema": "service-export-json",
+        "evidence_note": "Recovered from a service export JSON/JSONL file; verify provider schema/version and account scope before reporting completeness.",
+    }
+
+
+def build_ai_service_export_record(
+    *,
+    provider: str,
+    source: Path,
+    root: Path,
+    conversation_rows: List[Dict[str, object]],
+    parser_version: str,
+    source_size: int,
+    modified_at: str | None,
+) -> ArtifactRecord:
+    profile = windows_browser_user_profile(source, root=root)
+    service = str(conversation_rows[0].get("ai_service") or infer_ai_service_from_path(source) or "AI service")
+    transcript = build_ai_transcript_summary(conversation_rows)
+    source_summary = summarize_ai_conversation_sources(conversation_rows)
+    candidate_manifest = build_ai_transcript_candidate_manifest(
+        browser="service-export",
+        profile=service,
+        user=str(profile.get("profile_name") or ""),
+        profile_dir=source.parent,
+        conversation_rows=conversation_rows,
+        transcript=transcript,
+        source_summary=source_summary,
+    )
+    schema_manifest = build_ai_transcript_schema_validation_manifest(
+        browser="service-export",
+        profile=service,
+        user=str(profile.get("profile_name") or ""),
+        profile_dir=source.parent,
+        conversation_rows=conversation_rows,
+        transcript=transcript,
+        source_summary=source_summary,
+        candidate_manifest=candidate_manifest,
+    )
+    export_manifest = build_ai_service_export_parser_manifest(
+        source=source,
+        service=service,
+        source_summary=source_summary,
+        transcript=transcript,
+        source_size=source_size,
+        modified_at=modified_at,
+    )
+    validation_checks = {
+        "has_candidate_transcript_rows": bool(conversation_rows),
+        "has_service_label": bool(count_field(conversation_rows, "ai_service")),
+        "has_question_answer_pair": bool(transcript["complete_pair_count"]),
+        "has_source_hashes": all(bool(row.get("source_sha256")) for row in conversation_rows),
+        "has_source_storage_area": all(bool(row.get("storage_area")) for row in conversation_rows),
+        "service_side_export_parsed": True,
+        "service_side_export_validated": True,
+        "trusted_export_diff_attached": False,
+        "schema_validation_manifest_present": True,
+    }
+    details: Dict[str, object] = {
+        "parser": "ai-service-export-parser",
+        "parser_version": parser_version,
+        "coverage_status": "service-export-json-candidate",
+        "reportability": "review",
+        "source_path": str(source.resolve()),
+        "source_format": source.suffix.lower().lstrip(".") or "json",
+        "source_hashes": safe_browser_file_hashes(source),
+        "source_profile": profile,
+        "size": source_size,
+        "modified_at": modified_at,
+        "timestamp": modified_at,
+        "timestamp_source": "export_file_modified_at",
+        "user": str(profile.get("profile_name") or ""),
+        "browser": "service-export",
+        "profile": service,
+        "ai_conversation_candidate_count": len(conversation_rows),
+        "question_count": sum(1 for row in conversation_rows if row.get("direction") == "question"),
+        "answer_count": sum(1 for row in conversation_rows if row.get("direction") == "answer"),
+        "ai_service_counts": count_field(conversation_rows, "ai_service"),
+        "transcript_pair_count": transcript["pair_count"],
+        "complete_pair_count": transcript["complete_pair_count"],
+        "orphan_question_count": transcript["orphan_question_count"],
+        "orphan_answer_count": transcript["orphan_answer_count"],
+        "transcript_completeness_score": transcript["completeness_score"],
+        "transcript_validation_status": transcript["validation_status"],
+        "pairing_confidence_summary": transcript["pairing_confidence_summary"],
+        "source_storage_summary": source_summary,
+        "ai_transcript_candidate_manifest": candidate_manifest,
+        "ai_transcript_candidate_manifest_hash": candidate_manifest["manifest_sha256"],
+        "ai_transcript_schema_validation_manifest": schema_manifest,
+        "ai_transcript_schema_validation_manifest_hash": schema_manifest["manifest_sha256"],
+        "ai_service_export_parser_manifest": export_manifest,
+        "ai_service_export_parser_manifest_hash": export_manifest["manifest_sha256"],
+        "transcript_validation_checks": validation_checks,
+        "ai_transcript_analyst_review_profile": ai_transcript_analyst_review_profile(
+            {
+                "source_path": str(source.resolve()),
+                "browser": "service-export",
+                "profile": service,
+                "conversation_rows": conversation_rows,
+                "transcript": transcript,
+                "source_summary": source_summary,
+                "ai_transcript_candidate_manifest": candidate_manifest,
+                "ai_transcript_schema_validation_manifest": schema_manifest,
+            }
+        ),
+        "commercial_uplift_evidence": ai_transcript_commercial_uplift_evidence(
+            {
+                "source_path": str(source.resolve()),
+                "browser": "service-export",
+                "profile": service,
+                "conversation_rows": conversation_rows,
+                "transcript": transcript,
+                "source_summary": source_summary,
+                "ai_transcript_candidate_manifest": candidate_manifest,
+                "ai_transcript_schema_validation_manifest": schema_manifest,
+                "transcript_validation_checks": validation_checks,
+            }
+        ),
+        "core_accuracy_gates": ai_transcript_core_accuracy_gates(
+            {
+                "source_path": str(source.resolve()),
+                "browser": "service-export",
+                "profile": service,
+                "conversation_rows": conversation_rows,
+                "transcript": transcript,
+                "source_summary": source_summary,
+                "ai_transcript_candidate_manifest": candidate_manifest,
+            }
+        ),
+        "conversation_candidates": conversation_rows,
+        "transcript_pairs": transcript["pairs"],
+        "privacy_legal_warning": BROWSER_PRIVACY_WARNING,
+        "validation_required": True,
+        "validation_guidance": (
+            "Service export rows are parsed from JSON/JSONL and preserve source hashes/citations. "
+            "Provider schema version, account scope, export completeness, and trusted export diffs are still required."
+        ),
+        "commercial_grade_ready": False,
+        "commercial_grade_blockers": [
+            "provider-specific-export-schema-version-fixtures-required",
+            "trusted-ai-export-diff-required",
+            "export-account-scope-and-completeness-validation-required",
+            "deleted-fragment-recovery-and-fp-fn-corpus-required",
+        ],
+    }
+    return ArtifactRecord(
+        provider=provider,
+        artifact_type="ai-service-export-conversation",
+        path=str(source.resolve()),
+        supported=True,
+        details=details,
+    )
+
+
+def build_ai_service_export_parser_manifest(
+    *,
+    source: Path,
+    service: str,
+    source_summary: Mapping[str, object],
+    transcript: Mapping[str, object],
+    source_size: int,
+    modified_at: str | None,
+) -> Dict[str, object]:
+    manifest: Dict[str, object] = {
+        "manifest_version": "ai-service-export-parser-manifest-v1",
+        "parser_version": PARSER_VERSION,
+        "source_path": str(source.resolve()),
+        "source_file_name": source.name,
+        "source_format": source.suffix.lower().lstrip(".") or "json",
+        "source_size": source_size,
+        "source_modified_at": modified_at,
+        "detected_service": service,
+        "service_side_export_parsed": True,
+        "schema_version_known": False,
+        "candidate_row_count": int(transcript.get("question_count") or 0) + int(transcript.get("answer_count") or 0),
+        "detected_service_counts": source_summary.get("service_counts") or [],
+        "pair_count": int(transcript.get("pair_count") or 0),
+        "complete_pair_count": int(transcript.get("complete_pair_count") or 0),
+        "large_data_controls": {
+            "max_ai_export_files": MAX_AI_EXPORT_FILES,
+            "max_ai_export_file_bytes": MAX_AI_EXPORT_FILE_BYTES,
+            "max_ai_conversation_rows": MAX_AI_CONVERSATION_ROWS,
+        },
+        "review_workflow": {
+            "default_view": "chat-like-export-review",
+            "metadata_collapsed_by_default": True,
+            "source_viewer": "json-source-file",
+            "required_before_report": [
+                "confirm provider and account scope for this export",
+                "record provider export schema/version or export date",
+                "diff rows against trusted provider export or vendor parser output",
+                "document missing/deleted/orphan conversation limitations",
+            ],
+        },
+        "validation_status": "service-export-parsed-validation-required",
+    }
+    manifest["manifest_sha256"] = stable_browser_sha256(
+        {key: value for key, value in manifest.items() if key != "manifest_sha256"}
+    )
+    return manifest
+
+
+def normalize_ai_export_role(value: Mapping[str, object]) -> str:
+    role_value: object = value.get("role") or value.get("sender") or value.get("from")
+    author = value.get("author")
+    if isinstance(author, Mapping):
+        role_value = author.get("role") or author.get("name") or role_value
+    elif author:
+        role_value = author
+    role = str(role_value or "").strip().lower()
+    if role in {"user", "human", "requester", "customer"}:
+        return "user"
+    if role in {"assistant", "model", "bot", "agent", "ai", "claude", "chatgpt", "gemini", "perplexity"}:
+        return "assistant"
+    if role == "system":
+        return "system"
+    return ""
+
+
+def first_ai_export_text(value: Mapping[str, object], keys: Sequence[str]) -> str:
+    for key in keys:
+        if key not in value:
+            continue
+        text = normalize_ai_export_text(value[key])
+        if useful_conversation_text(text):
+            return text
+    return ""
+
+
+def normalize_ai_export_text(value: object) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, str):
+        return re.sub(r"\s+", " ", value).strip()[:1500]
+    if isinstance(value, (int, float, bool)):
+        return str(value)
+    if isinstance(value, list):
+        parts = [normalize_ai_export_text(item) for item in value]
+        return re.sub(r"\s+", " ", " ".join(part for part in parts if part)).strip()[:1500]
+    if isinstance(value, Mapping):
+        if isinstance(value.get("parts"), list):
+            return normalize_ai_export_text(value["parts"])
+        for key in ("text", "content", "value", "message", "body"):
+            if key in value:
+                text = normalize_ai_export_text(value[key])
+                if text:
+                    return text
+    return ""
+
+
+def ai_export_timestamp(value: Mapping[str, object]) -> str | None:
+    for key in ("create_time", "update_time", "created_at", "updated_at", "timestamp", "time", "created"):
+        raw = value.get(key)
+        if raw in (None, ""):
+            continue
+        if isinstance(raw, (int, float)):
+            return isoformat_from_timestamp(raw)
+        text = str(raw).strip()
+        if re.fullmatch(r"\d+(?:\.\d+)?", text):
+            return isoformat_from_timestamp(float(text))
+        return text[:80]
+    return None
+
+
+def infer_ai_service_from_payload(value: Any) -> str:
+    if not isinstance(value, Mapping):
+        return ""
+    for key in ("service", "provider", "source", "product", "model", "model_slug"):
+        service = detect_ai_service(str(value.get(key) or ""), "")
+        if service:
+            return service
+    title = str(value.get("title") or value.get("name") or "")
+    return detect_ai_service(title, "")
 
 
 def collect_desktop_cloud_sync_row_candidates(
@@ -3861,6 +4517,8 @@ def build_ai_transcript_summary(conversation_rows: Sequence[Mapping[str, object]
     else:
         validation_status = "none"
     return {
+        "question_count": question_count,
+        "answer_count": answer_count,
         "pair_count": len(pairs),
         "complete_pair_count": complete_pair_count,
         "orphan_question_count": orphan_questions,
@@ -4509,6 +5167,14 @@ def infer_ai_service_from_path(path: Path) -> str:
     for domain, service in AI_SERVICE_DOMAINS:
         if domain in lowered:
             return service
+    if "chatgpt" in lowered:
+        return "ChatGPT"
+    if "openai" in lowered:
+        return "OpenAI"
+    if "gemini" in lowered or "bard" in lowered:
+        return "Gemini"
+    if "anthropic" in lowered:
+        return "Claude"
     return ""
 
 

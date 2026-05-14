@@ -58,6 +58,7 @@ from rapidtriage.artifacts.windows.filesystem import (
     usn_timeline_review_candidates,
 )
 from rapidtriage.artifacts.windows.browser import (
+    WindowsBrowserArtifactsProvider,
     ai_transcript_core_accuracy_gates,
     ai_transcript_commercial_uplift_evidence,
     browser_core_accuracy_gates,
@@ -2483,6 +2484,62 @@ class RapidTriageWindowsArtifactsCollectorTests(unittest.TestCase):
             "service-side-ai-export-not-validated",
             uplift["functional_priority_profile"]["failed_validation_check_ids"],
         )
+
+    def test_ai_service_export_json_is_parsed_as_gui_visible_conversation_artifact(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            export_dir = root / "Users" / "alice" / "Downloads"
+            export_dir.mkdir(parents=True)
+            export_file = export_dir / "ChatGPT-conversations.json"
+            export_file.write_text(
+                json.dumps(
+                    [
+                        {
+                            "id": "conv-1",
+                            "title": "Incident response checklist",
+                            "mapping": {
+                                "node-1": {
+                                    "message": {
+                                        "author": {"role": "user"},
+                                        "create_time": 1711962611,
+                                        "content": {"parts": ["What happened before the suspicious download?"]},
+                                    }
+                                },
+                                "node-2": {
+                                    "message": {
+                                        "author": {"role": "assistant"},
+                                        "create_time": 1711962622,
+                                        "content": {"parts": ["The interactive logon happened first."]},
+                                    }
+                                },
+                            },
+                        }
+                    ]
+                ),
+                encoding="utf-8",
+            )
+
+            records = [
+                record
+                for record in WindowsBrowserArtifactsProvider().collect(root)
+                if record.artifact_type == "ai-service-export-conversation"
+            ]
+
+        self.assertEqual(len(records), 1)
+        details = records[0].details
+        self.assertEqual(details["parser"], "ai-service-export-parser")
+        self.assertEqual(details["complete_pair_count"], 1)
+        self.assertEqual(details["question_count"], 1)
+        self.assertEqual(details["answer_count"], 1)
+        self.assertEqual(details["transcript_validation_checks"]["service_side_export_parsed"], True)
+        self.assertEqual(details["transcript_validation_checks"]["service_side_export_validated"], True)
+        self.assertIn("ai_service_export_parser_manifest", details)
+        self.assertEqual(
+            details["ai_service_export_parser_manifest"]["manifest_version"],
+            "ai-service-export-parser-manifest-v1",
+        )
+        self.assertEqual(details["conversation_candidates"][0]["source_storage_kind"], "service-export-json")
+        self.assertEqual(details["transcript_pairs"][0]["ai_service"], "ChatGPT")
 
     def test_ai_transcript_trusted_diff_accepts_nested_transcript_pairs(self) -> None:
         rapid_rows = [

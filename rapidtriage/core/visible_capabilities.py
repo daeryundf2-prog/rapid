@@ -62,7 +62,22 @@ CAPABILITY_GROUPS: tuple[dict[str, Any], ...] = (
         "capabilities": (
             {"id": "image-e01-ex01", "label": "E01/Ex01 선택", "status": "usable", "terms": ("e01", "ex01", "ewf", "image")},
             {"id": "image-raw-split", "label": "RAW/split image", "status": "partial", "terms": ("raw", "dd", "001", "split")},
-            {"id": "image-vm-disk", "label": "VHD/VHDX/VMDK/VDI/QCOW", "status": "inventory", "terms": ("vhd", "vhdx", "vmdk", "vdi", "qcow")},
+            {
+                "id": "image-vm-disk",
+                "label": "VHD/VHDX/VMDK/VDI/QCOW",
+                "status": "partial",
+                "artifact_types": ("virtual-disk-workflow",),
+                "terms": (
+                    "vhd",
+                    "vhdx",
+                    "vmdk",
+                    "vdi",
+                    "qcow",
+                    "virtual-disk-workflow",
+                    "qemu_img_info_profile",
+                    "virtual_disk_chain_profile",
+                ),
+            },
             {"id": "image-export-only", "label": "AD1/L01/AFF/XVA export workflow", "status": "external-required", "terms": ("ad1", "l01", "aff", "aff4", "xva")},
         ),
     },
@@ -140,7 +155,22 @@ CAPABILITY_GROUPS: tuple[dict[str, Any], ...] = (
         "capabilities": (
             {"id": "browser-ai-usage", "label": "AI 서비스 방문 기록", "status": "usable", "terms": ("chatgpt", "claude", "gemini", "perplexity", "copilot")},
             {"id": "browser-ai-conversation", "label": "AI 질문/답변 후보", "status": "partial", "terms": ("prompt", "answer", "conversation", "transcript")},
-            {"id": "browser-ai-export-parser", "label": "AI export parser", "status": "inventory", "terms": ("export", "json", "chatgpt", "claude")},
+            {
+                "id": "browser-ai-export-parser",
+                "label": "AI export parser",
+                "status": "partial",
+                "artifact_types": ("ai-service-export-conversation",),
+                "terms": (
+                    "export",
+                    "json",
+                    "chatgpt",
+                    "claude",
+                    "gemini",
+                    "perplexity",
+                    "ai-service-export-conversation",
+                    "ai_service_export_parser_manifest",
+                ),
+            },
         ),
     },
     {
