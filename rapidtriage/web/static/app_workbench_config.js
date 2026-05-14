@@ -1308,8 +1308,8 @@ const VISIBLE_FORENSIC_CAPABILITY_GROUPS = [
         id: "exif-gps-map",
         label: "사진 EXIF GPS 지도",
         status: "partial",
-        terms: ["exif", "gps", "geotag", "map", "photo location"],
-        nextAction: "이미지 gallery에서 EXIF GPS marker와 촬영 시간 timeline 연결",
+        terms: ["exif", "gps", "geotag", "map", "photo location", "exif_gps_profile", "exif_map_review_profile", "exif-gps-location-candidate", "source-map"],
+        nextAction: "이미지 row의 EXIF GPS marker, source-map locator, 촬영 시간 후보를 timeline/동선 리뷰에 연결",
       },
       {
         id: "steganography-suspicion-scan",

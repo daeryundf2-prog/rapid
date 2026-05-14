@@ -58,6 +58,8 @@ MEDIA_NATIVE_CAPABILITIES = {
     "image_gallery_review_metadata": True,
     "perceptual_hash_similarity_bucket": True,
     "bounded_thumbnail_preview": True,
+    "exif_gps_location_profile": True,
+    "exif_gps_map_pivot": True,
     "steganography_suspicion_scan": True,
     "media_authenticity_metadata_scan": True,
     "ocr_sidecar_import": True,
@@ -92,6 +94,8 @@ MEDIA_TRUSTED_DIFF_CHECKS = {
 MEDIA_TRUSTED_TOOLS = {
     "image-gallery-ground-truth",
     "perceptual-hash-manifest",
+    "exiftool-json",
+    "exiftool-csv",
     "ocr-engine-log",
     "ocr-sidecar-ground-truth",
     "korean-ocr-review",
@@ -625,6 +629,237 @@ def parse_float(value: object) -> float | None:
         return None
 
 
+def exif_text(value: object) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, bytes):
+        return value.decode("utf-8", errors="replace").strip("\x00 ")
+    return str(value).strip("\x00 ")
+
+
+def exif_mapping_get(mapping: Mapping[object, object], *keys: object) -> object | None:
+    for key in keys:
+        if key in mapping:
+            return mapping[key]
+    return None
+
+
+def rational_to_float(value: object) -> float | None:
+    if isinstance(value, bool) or value is None:
+        return None
+    if isinstance(value, (int, float)):
+        return float(value)
+    numerator = getattr(value, "numerator", None)
+    denominator = getattr(value, "denominator", None)
+    if isinstance(numerator, (int, float)) and isinstance(denominator, (int, float)) and denominator:
+        return float(numerator) / float(denominator)
+    if isinstance(value, Sequence) and not isinstance(value, (str, bytes, bytearray)) and len(value) >= 2:
+        left = rational_to_float(value[0])
+        right = rational_to_float(value[1])
+        if left is not None and right not in {None, 0}:
+            return left / float(right)
+    try:
+        return float(str(value).strip())
+    except (TypeError, ValueError):
+        return None
+
+
+def gps_coordinate_to_decimal(value: object, ref: object, *, axis: str) -> float | None:
+    if not isinstance(value, Sequence) or isinstance(value, (str, bytes, bytearray)) or len(value) < 3:
+        return None
+    degrees = rational_to_float(value[0])
+    minutes = rational_to_float(value[1])
+    seconds = rational_to_float(value[2])
+    if degrees is None or minutes is None or seconds is None:
+        return None
+    decimal = degrees + (minutes / 60.0) + (seconds / 3600.0)
+    ref_text = exif_text(ref).upper()
+    if ref_text in {"S", "W"}:
+        decimal *= -1
+    limit = 90 if axis == "latitude" else 180
+    if abs(decimal) > limit:
+        return None
+    return round(decimal, 7)
+
+
+def gps_altitude_to_meters(value: object, ref: object) -> float | None:
+    altitude = rational_to_float(value)
+    if altitude is None:
+        return None
+    ref_value = rational_to_float(ref)
+    if ref_value == 1:
+        altitude *= -1
+    return round(altitude, 3)
+
+
+def gps_timestamp_to_text(value: object) -> str:
+    if not isinstance(value, Sequence) or isinstance(value, (str, bytes, bytearray)) or len(value) < 3:
+        return ""
+    hour = rational_to_float(value[0])
+    minute = rational_to_float(value[1])
+    second = rational_to_float(value[2])
+    if hour is None or minute is None or second is None:
+        return ""
+    return f"{int(hour):02d}:{int(minute):02d}:{second:06.3f}".rstrip("0").rstrip(".")
+
+
+def extract_exif_gps_profile(path: Path) -> dict[str, object]:
+    profile: dict[str, object] = {
+        "profile_version": "exif-gps-profile-v1",
+        "status": "pillow-unavailable" if Image is None else "not-run",
+        "has_exif": False,
+        "has_gps": False,
+        "candidate_only": True,
+        "validation_status": "exif-metadata-unvalidated",
+        "not_proof_of": [
+            "user physical location",
+            "image authenticity",
+            "device clock accuracy",
+        ],
+        "report_blockers": [
+            "exiftool-or-native-tool-diff-required",
+            "device-clock-and-timezone-correlation-required",
+            "image-editing-and-metadata-tampering-review-required",
+            "offline-map-viewer-validation-required",
+        ],
+    }
+    if Image is None:
+        return profile
+    try:
+        with Image.open(path) as image:
+            exif = image.getexif() if hasattr(image, "getexif") else {}
+            if not exif:
+                profile.update({"status": "no-exif", "field_presence": {}})
+                return profile
+            profile["has_exif"] = True
+            datetime_original = exif_mapping_get(exif, 36867, "DateTimeOriginal")
+            datetime_digitized = exif_mapping_get(exif, 36868, "DateTimeDigitized")
+            datetime_file = exif_mapping_get(exif, 306, "DateTime")
+            gps_ifd: Mapping[object, object] = {}
+            try:
+                if hasattr(exif, "get_ifd"):
+                    gps_candidate = exif.get_ifd(34853)
+                    if isinstance(gps_candidate, Mapping):
+                        gps_ifd = gps_candidate
+            except (KeyError, TypeError, ValueError, OSError):
+                gps_ifd = {}
+            if not gps_ifd:
+                gps_raw = exif_mapping_get(exif, 34853, "GPSInfo")
+                if isinstance(gps_raw, Mapping):
+                    gps_ifd = gps_raw
+            if not gps_ifd:
+                profile.update(
+                    {
+                        "status": "no-gps-ifd",
+                        "image_datetime_original": exif_text(datetime_original),
+                        "image_datetime_digitized": exif_text(datetime_digitized),
+                        "image_datetime": exif_text(datetime_file),
+                        "field_presence": {"datetime": bool(datetime_original or datetime_digitized or datetime_file), "gps": False},
+                    }
+                )
+                return profile
+            lat_ref = exif_mapping_get(gps_ifd, 1, "GPSLatitudeRef")
+            lat_value = exif_mapping_get(gps_ifd, 2, "GPSLatitude")
+            lon_ref = exif_mapping_get(gps_ifd, 3, "GPSLongitudeRef")
+            lon_value = exif_mapping_get(gps_ifd, 4, "GPSLongitude")
+            altitude_ref = exif_mapping_get(gps_ifd, 5, "GPSAltitudeRef")
+            altitude_value = exif_mapping_get(gps_ifd, 6, "GPSAltitude")
+            direction_ref = exif_mapping_get(gps_ifd, 16, "GPSImgDirectionRef")
+            direction_value = exif_mapping_get(gps_ifd, 17, "GPSImgDirection")
+            map_datum = exif_mapping_get(gps_ifd, 18, "GPSMapDatum")
+            gps_datestamp = exif_mapping_get(gps_ifd, 29, "GPSDateStamp")
+            gps_timestamp = exif_mapping_get(gps_ifd, 7, "GPSTimeStamp")
+            latitude = gps_coordinate_to_decimal(lat_value, lat_ref, axis="latitude")
+            longitude = gps_coordinate_to_decimal(lon_value, lon_ref, axis="longitude")
+            altitude = gps_altitude_to_meters(altitude_value, altitude_ref)
+            direction = rational_to_float(direction_value)
+            gps_time_text = gps_timestamp_to_text(gps_timestamp)
+            gps_date_text = exif_text(gps_datestamp)
+            gps_datetime_utc = f"{gps_date_text} {gps_time_text}Z" if gps_date_text and gps_time_text else ""
+            has_gps = latitude is not None and longitude is not None
+            profile.update(
+                {
+                    "status": "parsed" if has_gps else "gps-ifd-without-complete-coordinate",
+                    "has_gps": has_gps,
+                    "latitude": latitude,
+                    "longitude": longitude,
+                    "altitude_meters": altitude,
+                    "coordinate_ref": {
+                        "latitude_ref": exif_text(lat_ref),
+                        "longitude_ref": exif_text(lon_ref),
+                    },
+                    "gps_datestamp": gps_date_text,
+                    "gps_timestamp": gps_time_text,
+                    "gps_datetime_utc_candidate": gps_datetime_utc,
+                    "gps_img_direction_degrees": round(float(direction), 3) if direction is not None else None,
+                    "gps_img_direction_ref": exif_text(direction_ref),
+                    "gps_map_datum": exif_text(map_datum),
+                    "image_datetime_original": exif_text(datetime_original),
+                    "image_datetime_digitized": exif_text(datetime_digitized),
+                    "image_datetime": exif_text(datetime_file),
+                    "field_presence": {
+                        "gps_ifd": True,
+                        "latitude": latitude is not None,
+                        "longitude": longitude is not None,
+                        "altitude": altitude is not None,
+                        "gps_datetime": bool(gps_datetime_utc),
+                        "image_datetime": bool(datetime_original or datetime_digitized or datetime_file),
+                        "direction": direction is not None,
+                    },
+                    "map_marker": {
+                        "status": "ready" if has_gps else "not-ready",
+                        "latitude": latitude,
+                        "longitude": longitude,
+                        "label": path.name,
+                        "source": "exif-gps",
+                        "precision_status": "device-reported-unvalidated",
+                    },
+                }
+            )
+            return profile
+    except (OSError, AttributeError, TypeError, ValueError) as exc:
+        profile.update({"status": "parse-failed", "error": str(exc)[:160]})
+        return profile
+
+
+def exif_gps_map_review_profile(profile: Mapping[str, object], *, source_path: Path) -> dict[str, object]:
+    has_gps = bool(profile.get("has_gps"))
+    return {
+        "profile_version": "exif-gps-map-review-profile-v1",
+        "status": "map-marker-ready" if has_gps else "no-gps-marker",
+        "viewer": "source-map",
+        "source_path": str(source_path),
+        "primary_pivots": {
+            "latitude": profile.get("latitude"),
+            "longitude": profile.get("longitude"),
+            "gps_datetime_utc_candidate": profile.get("gps_datetime_utc_candidate"),
+            "image_datetime_original": profile.get("image_datetime_original"),
+            "altitude_meters": profile.get("altitude_meters"),
+        },
+        "source_viewer_locator": {
+            "viewer": "source-map",
+            "path": str(source_path),
+            "open_action": "open-map-at-exif-marker" if has_gps else "open-image-details",
+            "latitude": profile.get("latitude"),
+            "longitude": profile.get("longitude"),
+        },
+        "timeline_join_hints": [
+            "camera-roll-created-modified-times",
+            "mobile-location-rows",
+            "browser-cloud-photo-upload-rows",
+            "filesystem-mft-usn-path-times",
+        ],
+        "report_citation_requirements": [
+            "source-file-sha256",
+            "exif-gps-field-presence",
+            "timezone-and-clock-correlation",
+            "metadata-tampering-review",
+        ],
+        "not_proof_of": list(profile.get("not_proof_of") or []),
+        "blockers": list(profile.get("report_blockers") or []),
+    }
+
+
 def read_prefix_tail(path: Path, *, prefix_limit: int, tail_limit: int) -> tuple[int, bytes, bytes, int]:
     try:
         size = path.stat().st_size
@@ -838,10 +1073,15 @@ def media_review_risk_flags(
     decoded: bool,
     steganography_profile: Mapping[str, object],
     authenticity_profile: Mapping[str, object],
+    exif_gps_profile: Mapping[str, object],
 ) -> list[str]:
     flags: list[str] = []
     if not decoded:
         flags.append("media-decode-warning")
+    if exif_gps_profile.get("has_gps"):
+        flags.append("exif-gps-location-candidate")
+    if exif_gps_profile.get("gps_datetime_utc_candidate") or exif_gps_profile.get("image_datetime_original"):
+        flags.append("exif-datetime-candidate")
     if steganography_profile.get("suspicion_level") in {"medium", "high"}:
         flags.append("steganography-suspicion-candidate")
     if steganography_profile.get("trailing_data_present"):
@@ -962,12 +1202,16 @@ def build_image_record(path: Path) -> ArtifactRecord:
         height=parse_int(details.get("height")),
     )
     authenticity_profile = media_authenticity_profile(resolved, classification=classification)
+    exif_gps_profile = extract_exif_gps_profile(resolved)
     details["steganography_suspicion_profile"] = steganography_profile
     details["media_authenticity_profile"] = authenticity_profile
+    details["exif_gps_profile"] = exif_gps_profile
+    details["exif_map_review_profile"] = exif_gps_map_review_profile(exif_gps_profile, source_path=resolved)
     details["risk_flags"] = media_review_risk_flags(
         decoded=bool(details.get("decoded")),
         steganography_profile=steganography_profile,
         authenticity_profile=authenticity_profile,
+        exif_gps_profile=exif_gps_profile,
     )
     details["image_gallery_manifest"] = build_image_gallery_manifest(details=details, source_path=resolved)
     details["image_gallery_manifest_hash"] = details["image_gallery_manifest"]["manifest_hash"]
@@ -1153,6 +1397,10 @@ def build_image_gallery_manifest(*, details: Mapping[str, object], source_path: 
         details.get("steganography_suspicion_profile") if isinstance(details.get("steganography_suspicion_profile"), Mapping) else {}
     )
     authenticity_profile = details.get("media_authenticity_profile") if isinstance(details.get("media_authenticity_profile"), Mapping) else {}
+    exif_gps_profile = details.get("exif_gps_profile") if isinstance(details.get("exif_gps_profile"), Mapping) else {}
+    exif_map_review_profile = (
+        details.get("exif_map_review_profile") if isinstance(details.get("exif_map_review_profile"), Mapping) else {}
+    )
     row_core = {
         "source_path": str(source_path),
         "entry_name": str(details.get("entry_name") or source_path.name),
@@ -1168,6 +1416,10 @@ def build_image_gallery_manifest(*, details: Mapping[str, object], source_path: 
         "thumbnail_sha256": str(thumbnail.get("sha256") or ""),
         "classification_label": str(classification.get("label") or ""),
         "classification_status": str(classification.get("validation_status") or ""),
+        "exif_gps_present": bool(exif_gps_profile.get("has_gps")),
+        "exif_gps_latitude": exif_gps_profile.get("latitude"),
+        "exif_gps_longitude": exif_gps_profile.get("longitude"),
+        "exif_gps_datetime_utc_candidate": str(exif_gps_profile.get("gps_datetime_utc_candidate") or ""),
         "steganography_suspicion_level": str(steganography_profile.get("suspicion_level") or ""),
         "steganography_trailing_data_bytes": str(steganography_profile.get("trailing_data_bytes") or ""),
         "media_authenticity_suspicion_level": str(authenticity_profile.get("suspicion_level") or ""),
@@ -1183,6 +1435,7 @@ def build_image_gallery_manifest(*, details: Mapping[str, object], source_path: 
             "similarity_bucket": row_core["similarity_bucket"],
             "open_action": "open-image-gallery-at-anchor",
         },
+        "map_source_viewer_locator": exif_map_review_profile.get("source_viewer_locator", {}),
         "image_row": row_core,
         "image_row_hash": stable_payload_sha256(row_core),
         "tag_suggestions": image_tag_suggestions(details),
@@ -1207,6 +1460,9 @@ def image_tag_suggestions(details: Mapping[str, object]) -> list[str]:
         tags.append("ocr-sidecar")
     if details.get("similarity_bucket"):
         tags.append("similarity-bucketed")
+    exif_gps_profile = details.get("exif_gps_profile") if isinstance(details.get("exif_gps_profile"), Mapping) else {}
+    if exif_gps_profile.get("has_gps"):
+        tags.append("geotagged")
     if not details.get("decoded"):
         tags.append("decode-warning")
     risk_flags = details.get("risk_flags") if isinstance(details.get("risk_flags"), list) else []
@@ -1264,6 +1520,10 @@ def media_core_accuracy_gates(*, details: dict[str, object], source_path: Path) 
         item56.append("steganography suspicion triage profile")
     if details.get("media_authenticity_profile"):
         item56.append("media authenticity metadata profile")
+    exif_gps_profile = details.get("exif_gps_profile") if isinstance(details.get("exif_gps_profile"), Mapping) else {}
+    if exif_gps_profile.get("has_gps"):
+        item56.append("EXIF GPS map pivot")
+        evidence_refs.append(f"exif_gps:{exif_gps_profile.get('latitude')},{exif_gps_profile.get('longitude')}")
     if not MEDIA_NATIVE_CAPABILITIES["deepfake_detection"]:
         item56.append("visual-classifier limitation warning")
     if trusted_media_diff_passed(trusted_diffs, 56):
@@ -1317,6 +1577,10 @@ def media_image_commercial_uplift_evidence(*, details: Mapping[str, object], sou
     translation_sidecar = details.get("translation_sidecar") if isinstance(details.get("translation_sidecar"), Mapping) else {}
     trusted_diffs = details.get("media_trusted_diffs") if isinstance(details.get("media_trusted_diffs"), Mapping) else {}
     gallery_manifest = details.get("image_gallery_manifest") if isinstance(details.get("image_gallery_manifest"), Mapping) else {}
+    exif_gps_profile = details.get("exif_gps_profile") if isinstance(details.get("exif_gps_profile"), Mapping) else {}
+    exif_map_review_profile = (
+        details.get("exif_map_review_profile") if isinstance(details.get("exif_map_review_profile"), Mapping) else {}
+    )
     return {
         "batch_id": "commercial-uplift-056-060",
         "item_numbers": [56, 58, 59],
@@ -1325,6 +1589,7 @@ def media_image_commercial_uplift_evidence(*, details: Mapping[str, object], sou
             f"source_path:{source_path}",
             f"source_sha256:{details.get('hashes', {}).get('sha256', '') if isinstance(details.get('hashes'), Mapping) else ''}",
             f"image_gallery_manifest_hash:{gallery_manifest.get('manifest_hash', '')}",
+            f"exif_gps:{exif_gps_profile.get('latitude')},{exif_gps_profile.get('longitude')}" if exif_gps_profile.get("has_gps") else "exif_gps:not-present",
             f"ocr_sidecar:{ocr_sidecar.get('source_path', '')}",
             f"translation_sidecar:{translation_sidecar.get('source_path', '')}",
         ],
@@ -1387,6 +1652,8 @@ def media_image_commercial_uplift_evidence(*, details: Mapping[str, object], sou
             "image_gallery_manifest_present": bool(gallery_manifest.get("manifest_hash")),
             "image_gallery_manifest_hash": str(gallery_manifest.get("manifest_hash") or ""),
             "image_gallery_row_hash": str(gallery_manifest.get("image_row_hash") or ""),
+            "exif_gps_profile_present": bool(exif_gps_profile.get("has_gps")),
+            "exif_map_review_status": str(exif_map_review_profile.get("status") or "no-gps-marker"),
             "ocr_sidecar_imported": bool(ocr_sidecar),
             "translation_sidecar_imported": bool(translation_sidecar),
             "native_ocr_execution": False,

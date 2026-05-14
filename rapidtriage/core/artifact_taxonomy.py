@@ -423,6 +423,17 @@ TAXONOMY_TARGETS: tuple[TaxonomyTarget, ...] = (
         required_test_markers=("media",),
     ),
     TaxonomyTarget(
+        id="media-exif-gps-map",
+        category="media-ocr-docdb",
+        title="EXIF GPS map review",
+        expectation="Surface photo EXIF GPS, image datetime, map markers, source hashes, and citation blockers for map/timeline review.",
+        required_collectors=("media-image",),
+        expected_artifact_types=("media-image",),
+        required_viewer_markers=("exif-gps", "source-map"),
+        required_test_markers=("exif_gps", "media"),
+        required_doc_markers=("EXIF GPS",),
+    ),
+    TaxonomyTarget(
         id="media-video-audio-transcript",
         category="media-ocr-docdb",
         title="Video/audio preview and transcript",

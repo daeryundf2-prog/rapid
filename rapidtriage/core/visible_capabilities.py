@@ -628,7 +628,7 @@ CAPABILITY_GROUPS: tuple[dict[str, Any], ...] = (
         "catalog_id": "media-ocr",
         "label": "미디어 심화 포렌식",
         "capabilities": (
-            {"id": "exif-gps-map", "label": "사진 EXIF GPS 지도", "status": "partial", "terms": ("exif", "gps", "geotag", "map", "photo location")},
+            {"id": "exif-gps-map", "label": "사진 EXIF GPS 지도", "status": "partial", "terms": ("exif", "gps", "geotag", "map", "photo location", "exif_gps_profile", "exif_map_review_profile", "exif-gps-location-candidate", "source-map")},
             {"id": "steganography-suspicion-scan", "label": "Steganography 의심 스캔", "status": "partial", "terms": ("steganography", "hidden data", "lsb", "entropy", "steganography_suspicion_profile", "steganography-suspicion-candidate", "trailing-data-after-image-end")},
             {"id": "deepfake-manipulation-scan", "label": "Deepfake/조작 의심", "status": "partial", "terms": ("deepfake", "ai generated", "manipulated", "media authenticity", "media_authenticity_profile", "ai-generation-metadata-candidate", "editing-tool-metadata-candidate")},
         ),

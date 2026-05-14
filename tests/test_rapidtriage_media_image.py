@@ -15,8 +15,86 @@ except ModuleNotFoundError as exc:
     else:
         raise
 
-from rapidtriage.artifacts.media import build_image_gallery_manifest, build_media_trusted_diff, average_hash, media_core_accuracy_gates
+from rapidtriage.artifacts.media import (
+    average_hash,
+    build_image_gallery_manifest,
+    build_media_trusted_diff,
+    exif_gps_map_review_profile,
+    extract_exif_gps_profile,
+    media_core_accuracy_gates,
+    media_review_risk_flags,
+)
 from rapidtriage.cli import build_parser, main
+
+
+class RapidTriageExifGpsProfileTests(unittest.TestCase):
+    def test_exif_gps_profile_decodes_map_marker_with_fake_pillow(self) -> None:
+        class FakeExif(dict):
+            def get_ifd(self, tag: int) -> dict[object, object]:
+                return self[tag]
+
+        class FakeImageHandle:
+            def __enter__(self) -> "FakeImageHandle":
+                return self
+
+            def __exit__(self, exc_type: object, exc: object, traceback: object) -> None:
+                return None
+
+            def getexif(self) -> FakeExif:
+                return FakeExif(
+                    {
+                        306: "2026:05:14 10:20:30",
+                        36867: "2026:05:14 10:20:30",
+                        34853: {
+                            1: "N",
+                            2: ((37, 1), (33, 1), (30, 1)),
+                            3: "E",
+                            4: ((127, 1), (0, 1), (0, 1)),
+                            5: 0,
+                            6: (25, 1),
+                            7: ((10, 1), (20, 1), (30, 1)),
+                            16: "T",
+                            17: (90, 1),
+                            18: "WGS-84",
+                            29: "2026:05:14",
+                        },
+                    }
+                )
+
+        class FakeImageModule:
+            @staticmethod
+            def open(path: Path) -> FakeImageHandle:  # noqa: ARG004
+                return FakeImageHandle()
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            path = Path(tmp_dir) / "gps.jpg"
+            path.write_bytes(b"\xff\xd8\xff\xd9")
+
+            with patch("rapidtriage.artifacts.media.Image", FakeImageModule):
+                profile = extract_exif_gps_profile(path)
+
+            self.assertEqual(profile["status"], "parsed")
+            self.assertTrue(profile["has_gps"])
+            self.assertAlmostEqual(profile["latitude"], 37.5583333)
+            self.assertAlmostEqual(profile["longitude"], 127.0)
+            self.assertEqual(profile["altitude_meters"], 25.0)
+            self.assertEqual(profile["gps_datetime_utc_candidate"], "2026:05:14 10:20:30Z")
+            self.assertEqual(profile["map_marker"]["status"], "ready")
+            self.assertEqual(profile["field_presence"]["direction"], True)
+
+            map_profile = exif_gps_map_review_profile(profile, source_path=path)
+            self.assertEqual(map_profile["status"], "map-marker-ready")
+            self.assertEqual(map_profile["source_viewer_locator"]["viewer"], "source-map")
+            self.assertEqual(map_profile["source_viewer_locator"]["open_action"], "open-map-at-exif-marker")
+
+            flags = media_review_risk_flags(
+                decoded=True,
+                steganography_profile={},
+                authenticity_profile={},
+                exif_gps_profile=profile,
+            )
+            self.assertIn("exif-gps-location-candidate", flags)
+            self.assertIn("exif-datetime-candidate", flags)
 
 
 @unittest.skipUnless(HAS_PILLOW, "Pillow is required for RapidTriage media image fixture tests")
@@ -111,6 +189,9 @@ class RapidTriageMediaImageTests(unittest.TestCase):
             self.assertEqual(details["classifier_validation"]["deepfake_detection_status"], "not-run")
             self.assertTrue(details["media_native_capabilities"]["steganography_suspicion_scan"])
             self.assertTrue(details["media_native_capabilities"]["media_authenticity_metadata_scan"])
+            self.assertTrue(details["media_native_capabilities"]["exif_gps_location_profile"])
+            self.assertIn("exif_gps_profile", details)
+            self.assertIn("exif_map_review_profile", details)
             stego_profile = details["steganography_suspicion_profile"]
             self.assertEqual(stego_profile["status"], "completed")
             self.assertTrue(stego_profile["trailing_data_present"])
@@ -327,6 +408,21 @@ class RapidTriageMediaImageTests(unittest.TestCase):
             "similarity_bucket": "f0f0f0f0",
             "thumbnail_preview": {"sha256": "thumb-hash"},
             "visual_classification": {"label": "image", "validation_status": "triage-hint"},
+            "exif_gps_profile": {
+                "has_gps": True,
+                "latitude": 37.5583333,
+                "longitude": 127.0,
+                "gps_datetime_utc_candidate": "2026:05:14 10:20:30Z",
+            },
+            "exif_map_review_profile": {
+                "source_viewer_locator": {
+                    "viewer": "source-map",
+                    "path": "/case/screen.png",
+                    "open_action": "open-map-at-exif-marker",
+                    "latitude": 37.5583333,
+                    "longitude": 127.0,
+                }
+            },
         }
         manifest = build_image_gallery_manifest(details=details, source_path=Path("/case/screen.png"))
 
@@ -334,6 +430,9 @@ class RapidTriageMediaImageTests(unittest.TestCase):
         self.assertEqual(manifest["source_viewer_locator"]["viewer"], "source-image-gallery")
         self.assertEqual(manifest["image_row"]["sha256"], "image-hash")
         self.assertEqual(manifest["image_row"]["similarity_bucket"], "f0f0f0f0")
+        self.assertTrue(manifest["image_row"]["exif_gps_present"])
+        self.assertEqual(manifest["image_row"]["exif_gps_latitude"], 37.5583333)
+        self.assertEqual(manifest["map_source_viewer_locator"]["viewer"], "source-map")
         self.assertRegex(manifest["image_row_hash"], r"^[0-9a-f]{64}$")
         self.assertRegex(manifest["manifest_hash"], r"^[0-9a-f]{64}$")
 

@@ -1101,28 +1101,31 @@ GUI 노출 계약:
 2. 건강/피트니스 row는 wearable sync, time zone, sensor source, 앱 schema에 따라 의미가 달라진다.
 3. 스크린타임 row는 앱 foreground 또는 화면 이벤트 후보이며, 실제 화면 내용을 봤다는 증거가 아니다.
 
-## 34. 2026-05-14 구현 반영: 미디어 스테가노그래피/조작 의심 프로필
+## 34. 2026-05-14 구현 반영: 미디어 EXIF 지도/스테가노그래피/조작 의심 프로필
 
-이미지 갤러리 기능은 해시, 썸네일, perceptual hash, OCR sidecar 중심이라 “숨은 데이터나 조작 의심”이 GUI에서 별도 queue로 드러나지 않았다. 이번 라운드에서는 이미지 row에 bounded triage 프로필을 추가해 분석관이 원본 파일을 열기 전에 의심 후보를 빠르게 선별할 수 있게 했다.
+이미지 갤러리 기능은 해시, 썸네일, perceptual hash, OCR sidecar 중심이라 “위치, 숨은 데이터, 조작 의심”이 GUI에서 별도 queue로 드러나지 않았다. 이번 라운드에서는 이미지 row에 EXIF GPS map pivot과 bounded triage 프로필을 추가해 분석관이 원본 파일을 열기 전에 위치/의심 후보를 빠르게 선별할 수 있게 했다.
 
 부분 구현으로 승격한 capability:
 
 | capability | 새 필드 / risk flag | 구현 내용 | 남은 상용급 보강 |
 | --- | --- | --- | --- |
+| 사진 EXIF GPS 지도 | `exif_gps_profile`, `exif_map_review_profile`, `exif-gps-location-candidate`, `exif-datetime-candidate` | 이미지 EXIF GPS IFD에서 latitude/longitude/altitude/datetime/direction/map datum 후보를 정규화하고 `source-map` locator, timeline join hint, report citation blocker를 생성한다. | EXIFTool/native-tool diff, metadata tamper 검증, device clock/timezone 검증, offline map UI E2E |
 | Steganography 의심 스캔 | `steganography_suspicion_profile`, `steganography-suspicion-candidate`, `trailing-data-after-image-end`, `embedded-payload-signature-candidate` | 이미지 prefix/tail만 제한적으로 읽어 PNG/JPEG/WebP/BMP 종료 offset, 종료 이후 trailing data, archive/PDF/SQLite/PE signature 후보, entropy를 기록한다. | 실제 stego extraction, LSB/statistical 분석, validated stego corpus, trusted tool diff |
 | Deepfake/조작 의심 | `media_authenticity_profile`, `ai-generation-metadata-candidate`, `editing-tool-metadata-candidate` | Stable Diffusion, ComfyUI, Midjourney, DALL-E, Photoshop, Lightroom, GIMP 같은 metadata 문자열 후보를 bounded scan으로 찾고 deepfake detection은 `not-run`으로 고정한다. | 검증된 ML 모델, threshold/model version, deepfake/manipulation corpus, EXIFTool/MediaInfo diff |
 
 검증 포인트:
 
-1. `tests/test_rapidtriage_media_image.py::test_media_image_artifacts_collect_dimensions_hashes_and_similarity_bucket`가 trailing ZIP signature가 붙은 PNG fixture를 정상 이미지로 decode하면서도 `steganography_suspicion_profile`과 risk flag가 생성되는지 검증한다.
-2. visible capability와 workbench config는 두 capability를 `목록화`에서 `부분 구현`으로 올리고 실제 output field/risk flag term을 검색 가능한 기능 카드에 추가했다.
-3. 사용자 가이드와 parser coverage는 이 기능이 “탐지 확정”이 아니라 review pivot임을 명시한다.
+1. `tests/test_rapidtriage_media_image.py::RapidTriageExifGpsProfileTests::test_exif_gps_profile_decodes_map_marker_with_fake_pillow`가 EXIF GPS 좌표/고도/시간을 map marker와 risk flag로 정규화하는지 검증한다.
+2. `tests/test_rapidtriage_media_image.py::test_media_image_artifacts_collect_dimensions_hashes_and_similarity_bucket`가 trailing ZIP signature가 붙은 PNG fixture를 정상 이미지로 decode하면서도 `steganography_suspicion_profile`과 risk flag가 생성되는지 검증한다.
+3. visible capability와 workbench config는 세 capability를 `목록화`에서 `부분 구현`으로 올리고 실제 output field/risk flag term을 검색 가능한 기능 카드에 추가했다.
+4. 사용자 가이드와 parser coverage는 이 기능이 “탐지 확정”이 아니라 review pivot임을 명시한다.
 
 중요한 제한:
 
-1. trailing data는 hidden payload의 후보일 뿐이며, 정상 metadata/도구 잔여물일 수도 있다.
-2. AI/편집 도구 metadata 문자열은 생성/조작 가능성의 단서이지 deepfake 판정이 아니다.
-3. 보고서에 쓰려면 원본 hash, offset, 수동 확인, 외부 검증 도구 결과, 오탐 검토가 함께 있어야 한다.
+1. EXIF GPS는 파일에 기록된 metadata 후보일 뿐이며, 사용자가 실제 위치에 있었다는 단독 증거가 아니다.
+2. trailing data는 hidden payload의 후보일 뿐이며, 정상 metadata/도구 잔여물일 수도 있다.
+3. AI/편집 도구 metadata 문자열은 생성/조작 가능성의 단서이지 deepfake 판정이 아니다.
+4. 보고서에 쓰려면 원본 hash, offset, 수동 확인, 외부 검증 도구 결과, 오탐 검토가 함께 있어야 한다.
 
 ## 35. 2026-05-14 구현 반영: 증거 입력 단계 복원/암호화/카빙 프로필
 
