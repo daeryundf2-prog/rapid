@@ -411,6 +411,7 @@
               "ready",
               "step_names",
               "output_keys",
+              "handoff_outputs",
               "reused",
               "warning_count",
               "warning_messages",
@@ -454,6 +455,37 @@
                 "type": "array",
                 "items": {
                   "type": "string"
+                }
+              },
+              "handoff_outputs": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "name",
+                    "role",
+                    "recommended_viewer",
+                    "gui_action",
+                    "reportability_note"
+                  ],
+                  "properties": {
+                    "name": {
+                      "type": "string"
+                    },
+                    "role": {
+                      "type": "string"
+                    },
+                    "recommended_viewer": {
+                      "type": "string"
+                    },
+                    "gui_action": {
+                      "type": "string"
+                    },
+                    "reportability_note": {
+                      "type": "string"
+                    }
+                  }
                 }
               },
               "reused": {

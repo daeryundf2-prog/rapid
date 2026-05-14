@@ -401,7 +401,7 @@ Current run modes:
 - warning count and highest warning level
 - per-step warning messages for empty outputs, read-only skips, capped extraction, or missing source paths
 
-`workflow` records the GUI-facing single-case pipeline contract (`run-workflow-contract-v1`). It maps low-level run steps into six analyst stages: `ingest`, `extract`, `parse`, `index`, `review`, and `report`. Each stage records status (`completed`, `warning`, `blocked`, or `pending`), contributing step names, output keys, warning messages, and the primary GUI tab/action. The web workbench uses this field to show whether evidence selection, extraction, artifact parsing, keyword/search indexing, review handoff, and report export are actually connected instead of inferring readiness from scattered counters.
+`workflow` records the GUI-facing single-case pipeline contract (`run-workflow-contract-v1`). It maps low-level run steps into six analyst stages: `ingest`, `extract`, `parse`, `index`, `review`, and `report`. Each stage records status (`completed`, `warning`, `blocked`, or `pending`), contributing step names, output keys, warning messages, primary GUI tab/action, and `handoff_outputs`. The handoff rows name the exact output file, its user-facing role, recommended viewer, GUI action, and reportability note, so the web workbench can link each stage directly to the files an analyst must open before trusting the stage.
 
 `summary` contains aggregated counters for:
 

@@ -32,6 +32,7 @@ from rapidtriage.core.run import (
 from rapidtriage.core.run_workflow import (
     RUN_WORKFLOW_STAGE_ORDER,
     build_run_workflow_contract,
+    output_handoff_for_key,
     stage_for_output_name,
     stage_for_step_name,
 )
@@ -337,6 +338,7 @@ class RapidTriageRunTests(unittest.TestCase):
         outputs = {
             "fingerprint": Path("/case/fingerprint.json"),
             "docs_extract_manifest": Path("/case/docs-extract.json"),
+            "manifest": Path("/case/manifest.json"),
             "artifacts_eventlog": Path("/case/eventlog.json"),
             "timeline": Path("/case/timeline.json"),
             "report": Path("/case/report.md"),
@@ -355,10 +357,19 @@ class RapidTriageRunTests(unittest.TestCase):
         self.assertEqual(contract["stage_lookup"]["review"], "warning")
         self.assertEqual(stage_for_step_name("artifacts-eventlog"), "parse")
         self.assertEqual(stage_for_output_name("artifacts_eventlog"), "parse")
+        artifact_handoff = output_handoff_for_key("artifacts_eventlog")
+        self.assertEqual(artifact_handoff["recommended_viewer"], "artifact-table-viewer")
+        self.assertIn("artifact rows", artifact_handoff["role"])
         self.assertRegex(str(contract["stage_hash"]), r"^[0-9a-f]{64}$")
+        parse_stage = next(stage for stage in contract["stages"] if stage["id"] == "parse")
+        parse_handoff_names = {handoff["name"] for handoff in parse_stage["handoff_outputs"]}
+        self.assertIn("artifacts_eventlog", parse_handoff_names)
+        self.assertIn("manifest", parse_handoff_names)
         review_stage = next(stage for stage in contract["stages"] if stage["id"] == "review")
         self.assertIn("silent-failure-detection", review_stage["step_names"])
         self.assertGreaterEqual(review_stage["warning_count"], 1)
+        report_stage = next(stage for stage in contract["stages"] if stage["id"] == "report")
+        self.assertEqual(report_stage["handoff_outputs"][0]["recommended_viewer"], "report-viewer")
 
     def test_silent_failure_detector_flags_target_files_without_artifacts(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -1280,6 +1291,12 @@ class RapidTriageRunTests(unittest.TestCase):
             self.assertIn("report", summary_payload["workflow"]["stage_lookup"])
             workflow_stage_ids = {stage["id"] for stage in summary_payload["workflow"]["stages"]}
             self.assertEqual(workflow_stage_ids, set(RUN_WORKFLOW_STAGE_ORDER))
+            for workflow_stage in summary_payload["workflow"]["stages"]:
+                self.assertIn("handoff_outputs", workflow_stage)
+                self.assertEqual(
+                    [handoff["name"] for handoff in workflow_stage["handoff_outputs"]],
+                    workflow_stage["output_keys"],
+                )
             self.assertGreaterEqual(timeline_payload["summary"]["event_count"], 1)
             self.assertIn("recent_file_candidates", summary_payload["highlights"])
             self.assertIn("large_file_candidates", summary_payload["highlights"])

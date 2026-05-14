@@ -1475,15 +1475,53 @@ function renderRunWorkflowContract(payload) {
       </div>
       <div class="run-workflow-stage-grid">
         ${stages.map((stage) => `
-          <button class="run-workflow-stage ${escapeHtml(stage.status || "pending")}" type="button" data-open-tab="${escapeHtml(stage.gui?.primary_tab || "summary")}" data-workflow-stage="${escapeHtml(stage.id || "")}">
-            <strong>${escapeHtml(stage.label || stage.id || "stage")}</strong>
-            <span>${escapeHtml(runWorkflowStatusLabel(stage.status || "pending"))}</span>
-            <small>${escapeHtml(stage.title || "")}</small>
-            <em>${formatNumber((stage.step_names || []).length)} step(s) · ${formatNumber((stage.output_keys || []).length)} output(s)</em>
-          </button>
+          <article class="run-workflow-stage ${escapeHtml(stage.status || "pending")}">
+            <button class="run-workflow-stage-main" type="button" data-open-tab="${escapeHtml(stage.gui?.primary_tab || "summary")}" data-workflow-stage="${escapeHtml(stage.id || "")}">
+              <strong>${escapeHtml(stage.label || stage.id || "stage")}</strong>
+              <span>${escapeHtml(runWorkflowStatusLabel(stage.status || "pending"))}</span>
+              <small>${escapeHtml(stage.title || "")}</small>
+              <em>${formatNumber((stage.step_names || []).length)} step(s) · ${formatNumber((stage.output_keys || []).length)} output(s)</em>
+            </button>
+            ${renderRunWorkflowOutputLinks(stage)}
+          </article>
         `).join("")}
       </div>
     </section>
+  `;
+}
+
+function renderRunWorkflowOutputLinks(stage) {
+  const rawHandoffs = Array.isArray(stage.handoff_outputs) && stage.handoff_outputs.length
+    ? stage.handoff_outputs
+    : (Array.isArray(stage.output_keys) ? stage.output_keys.map((name) => ({
+      name,
+      role: "run output",
+      recommended_viewer: "json-viewer",
+      gui_action: "Open and verify this stage output.",
+      reportability_note: "Check source/provenance fields before reporting.",
+    })) : []);
+  const handoffs = rawHandoffs.filter((item) => item?.name);
+  if (!handoffs.length) {
+    return '<p class="run-workflow-no-output">No direct output yet</p>';
+  }
+  const visible = handoffs.slice(0, 4);
+  const moreCount = Math.max(0, handoffs.length - visible.length);
+  return `
+    <div class="run-workflow-output-links" data-testid="run-workflow-output-links">
+      ${visible.map((output) => {
+        const name = String(output.name || "");
+        const href = selectedRunId
+          ? `/api/runs/${encodeURIComponent(selectedRunId)}/outputs/${encodeURIComponent(name)}/file`
+          : "#";
+        return `
+          <a href="${href}" title="${escapeHtml(output.gui_action || output.reportability_note || "")}">
+            <strong>${escapeHtml(name)}</strong>
+            <span>${escapeHtml(output.role || "run output")} · ${escapeHtml(output.recommended_viewer || "viewer")}</span>
+          </a>
+        `;
+      }).join("")}
+      ${moreCount ? `<small>+ ${formatNumber(moreCount)} more output(s)</small>` : ""}
+    </div>
   `;
 }
 

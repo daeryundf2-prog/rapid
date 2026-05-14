@@ -112,6 +112,142 @@ OUTPUT_STAGE_MAP: Mapping[str, str] = {
 }
 
 
+OUTPUT_HANDOFF_ROLES: Mapping[str, tuple[str, str, str, str]] = {
+    "fingerprint": (
+        "source fingerprint",
+        "provenance-viewer",
+        "Verify source hash and read-only input identity.",
+        "Use as the first citation for source integrity.",
+    ),
+    "e01": (
+        "image workflow evidence",
+        "image-workflow-viewer",
+        "Verify E01/Ex01 dependency, partition, extraction, and provenance rows.",
+        "Report only with source segment/hash and selected partition evidence.",
+    ),
+    "disk_image": (
+        "raw/split image workflow evidence",
+        "image-workflow-viewer",
+        "Verify split-set order, selected partition, extraction, and recovered root.",
+        "Report only with split-set/hash and extraction provenance.",
+    ),
+    "archive_image": (
+        "archive image extraction evidence",
+        "image-workflow-viewer",
+        "Verify mounted/exported archive image extraction details.",
+        "Report with tool/version and extracted-root provenance.",
+    ),
+    "virtual_disk": (
+        "virtual disk workflow evidence",
+        "image-workflow-viewer",
+        "Verify qemu/chain handling, conversion hash, and recovered root.",
+        "Report with source and converted RAW hash provenance.",
+    ),
+    "checkpoints": (
+        "checkpoint/resume state",
+        "json-viewer",
+        "Confirm which stages can resume without reprocessing evidence.",
+        "Use to explain interrupted or resumed large-case processing.",
+    ),
+    "docs_extract_manifest": (
+        "document extraction manifest",
+        "manifest-viewer",
+        "Review extracted/skipped/capped document candidates.",
+        "Absence findings require checking skipped and capped rows.",
+    ),
+    "files_extract_manifest": (
+        "file extraction manifest",
+        "manifest-viewer",
+        "Review extracted/skipped/capped file candidates.",
+        "Absence findings require checking skipped and capped rows.",
+    ),
+    "manifest": (
+        "run manifest",
+        "json-viewer",
+        "Review source scan inventory and parser inputs.",
+        "Use as a high-level inventory citation, not proof of artifact semantics.",
+    ),
+    "docs": (
+        "document text rows",
+        "document-viewer",
+        "Open matched document text and pivot into source preview.",
+        "Report only after source viewer verification.",
+    ),
+    "files": (
+        "file candidate rows",
+        "file-table-viewer",
+        "Review file metadata, hashes, signatures, and path evidence.",
+        "Use source hash/path/timestamp fields for citations.",
+    ),
+    "parser_scheduler": (
+        "parser scheduler manifest",
+        "json-viewer",
+        "Check parser ordering, quotas, and deterministic scheduling evidence.",
+        "Use to explain large-case processing behavior.",
+    ),
+    "parser_crash_isolation": (
+        "parser crash isolation evidence",
+        "review-safety-viewer",
+        "Confirm parser failures were isolated and downstream stages continued safely.",
+        "Report parser gaps as limitations, not negative evidence.",
+    ),
+    "memory_cap_enforcement": (
+        "memory cap evidence",
+        "review-safety-viewer",
+        "Confirm bounded-memory stage telemetry and cap warnings.",
+        "Use to document large-case safety constraints.",
+    ),
+    "preview_sandbox_policy": (
+        "preview sandbox policy",
+        "review-safety-viewer",
+        "Confirm active content blocking and preview safety controls.",
+        "Use to document safe review handling of hostile evidence.",
+    ),
+    "docs_index": (
+        "document search index",
+        "search-viewer",
+        "Run keyword search and verify hit counts/source handoffs.",
+        "A keyword miss is reliable only after index scope and truncation checks.",
+    ),
+    "timeline": (
+        "unified timeline rows",
+        "timeline-viewer",
+        "Review chronological pivots across files, artifacts, docs, and indicators.",
+        "Use row source/provenance fields for timeline citations.",
+    ),
+    "indicators": (
+        "indicator rows",
+        "indicator-viewer",
+        "Review IOC/domain/IP/hash findings and source locations.",
+        "Report only with confidence and source location.",
+    ),
+    "sqlite_fts_optimization": (
+        "FTS optimization manifest",
+        "search-diagnostics-viewer",
+        "Check FTS/cursor configuration and large-table search safety.",
+        "Use to document search completeness limits.",
+    ),
+    "summary": (
+        "run summary contract",
+        "json-viewer",
+        "Review workflow, warnings, outputs, and readiness fields.",
+        "Use as the top-level machine-readable run record.",
+    ),
+    "report": (
+        "analyst report",
+        "report-viewer",
+        "Open reviewed evidence and limitations for export.",
+        "Report is only final after evidence tray/source citation review.",
+    ),
+    "timeline_report": (
+        "timeline report",
+        "timeline-report-viewer",
+        "Open timeline-focused narrative for time-sequence review.",
+        "Use alongside source timeline rows for court-ready citations.",
+    ),
+}
+
+
 def stage_for_step_name(name: str) -> str | None:
     if name.startswith("artifacts-"):
         return "parse"
@@ -122,6 +258,35 @@ def stage_for_output_name(name: str) -> str | None:
     if name.startswith("artifacts_"):
         return "parse"
     return OUTPUT_STAGE_MAP.get(name)
+
+
+def output_handoff_for_key(name: str) -> dict[str, str]:
+    if name.startswith("artifacts_"):
+        artifact_kind = name.removeprefix("artifacts_").replace("_", "-")
+        return {
+            "name": name,
+            "role": f"{artifact_kind} artifact rows",
+            "recommended_viewer": "artifact-table-viewer",
+            "gui_action": "Open artifact rows, then pivot each finding to the source viewer.",
+            "reportability_note": "Report only after row-level source/provenance and validation warnings are checked.",
+        }
+
+    role, viewer, action, note = OUTPUT_HANDOFF_ROLES.get(
+        name,
+        (
+            "run output",
+            "json-viewer",
+            "Open this output and verify contents before relying on stage status.",
+            "Reportability depends on source/provenance fields inside the output.",
+        ),
+    )
+    return {
+        "name": name,
+        "role": role,
+        "recommended_viewer": viewer,
+        "gui_action": action,
+        "reportability_note": note,
+    }
 
 
 def build_run_workflow_contract(
@@ -241,6 +406,7 @@ def build_run_workflow_stage(
         "ready": status in {"completed", "warning"},
         "step_names": [str(step.get("name", "")) for step in steps if step.get("name")],
         "output_keys": list(output_keys),
+        "handoff_outputs": [output_handoff_for_key(output_key) for output_key in output_keys],
         "reused": reused,
         "warning_count": len(warning_messages),
         "warning_messages": warning_messages[:8],
