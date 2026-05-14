@@ -254,7 +254,7 @@ Remote access workflow:
 - `windows-remote-access` extracts RDP connection files, including full address, username hint, gateway host, and modified time.
 - Terminal Server Client cache files are inventoried with hashes, timestamps, and bounded PNG/JPEG/BMP/DIB thumbnail signature pivots so analysts can preserve and review RDP thumbnail/cache evidence without forcing heavy decoding up front.
 - Exported Terminal Server Client registry keys are normalized into `rdp-destination` rows for quick destination pivots.
-- Third-party remote-control traces for AnyDesk, TeamViewer, RustDesk, and Chrome Remote Desktop are also surfaced in the remote-access workflow as `third-party-remote-control-artifact` rows with product tags, bounded string samples, URL/IP pivots, risk flags, hashes, and explicit report-grade blockers for missing product-specific session/transfer validation.
+- Third-party remote-control traces for AnyDesk, TeamViewer, RustDesk, and Chrome Remote Desktop are also surfaced in the remote-access workflow as `third-party-remote-control-artifact` rows with product tags, bounded string samples, URL/IP pivots, `remote_control_session_profile`, session candidates, remote ID candidates, file-transfer indicators, risk flags, hashes, and explicit report-grade blockers for missing product-specific state validation.
 
 Execution and filesystem workflow:
 
@@ -290,6 +290,7 @@ Other Windows system artifacts:
 - Windows Firewall W3C logs, including blocked connection counts, sample rows, and `system_analyst_review_profile` pivots for Firewall policy store, event log, SRUM, browser, and socket/process correlation.
 - Windows Error Reporting `Report.wer` files, including normalized crashed app/module paths, exception code, report ID, event time, problem signature values, source hashes, validation checks, `system_analyst_review_profile`, and explicit blockers when dump/cab/ReportQueue validation is not available.
 - WMI repository files such as `OBJECTS.DATA` are inventoried with hashes plus bounded string pivots for permanent event consumer/filter names, suspicious commands, paths, URLs, WMI persistence risk flags, and `system_analyst_review_profile` warnings that native WMI binding reconstruction is still required for report-grade persistence claims.
+- Print Spooler `.SPL`/`.SHD` rows include `print_spooler_job_profile` with bounded document-name, printer-name, owner/user, and source-path candidates. They remain triage-grade until correlated with PrintService EVTX, `$MFT`/`$UsnJrnl`, and source document metadata.
 - Windows Recall/CoreAIPlatform candidates are exposed as `windows-recall-database` and `windows-recall-snapshot-file` rows. SQLite-like Recall DB candidates are opened read-only for bounded table, row-count, and semantic table-role metadata; snapshot files are inventoried by path, hash, signature, and profile attribution. Recall rows always carry legal/privacy warnings and remain triage-grade until real Windows 11 Recall corpus validation, protected-store authority, and snapshot-to-DB linkage are attached.
 - Zone.Identifier sidecar exports, including ZoneId, referrer URL, and host URL.
 

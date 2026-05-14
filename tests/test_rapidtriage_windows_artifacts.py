@@ -3788,10 +3788,16 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
             root = Path(tmp_dir)
             spool = root / "Windows" / "System32" / "spool" / "PRINTERS" / "00001.SHD"
             spool.parent.mkdir(parents=True)
-            spool.write_bytes("SecretPlan.docx\x00Office Printer\x00C:\\Users\\alice\\SecretPlan.docx".encode("utf-16le"))
+            spool.write_bytes(
+                "SecretPlan.docx\x00Office Printer\x00alice\x00C:\\Users\\alice\\SecretPlan.docx".encode("utf-16le")
+            )
             anydesk = root / "ProgramData" / "AnyDesk" / "service.trace"
             anydesk.parent.mkdir(parents=True)
-            anydesk.write_text("2026-05-14 AnyDesk session from 203.0.113.10 https://relay.anydesk.com", encoding="utf-8")
+            anydesk.write_text(
+                "2026-05-14 10:15:20 AnyDesk session remote id 123 456 789 from 203.0.113.10 "
+                "https://relay.anydesk.com file transfer upload SecretPlan.docx",
+                encoding="utf-8",
+            )
             output = root / "windows-system.json"
 
             self.assertEqual(main(["artifacts", str(root), "--kind", "windows-system", "--output", str(output)]), 0)
@@ -3801,13 +3807,22 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
             remote = next(item for item in artifacts if item["artifact_type"] == "third-party-remote-control-artifact")
 
             self.assertEqual(spooler["details"]["spooler_file_kind"], "shd")
-            self.assertEqual(spooler["details"]["coverage_status"], "spooler-file-string-inventory")
+            self.assertEqual(spooler["details"]["coverage_status"], "spooler-metadata-pivot-inventory")
             self.assertIn(r"C:\Users\alice\SecretPlan.docx", spooler["details"]["path_candidates"])
+            self.assertIn("SecretPlan.docx", spooler["details"]["document_name_candidates"])
+            self.assertIn("Office Printer", spooler["details"]["printer_name_candidates"])
+            self.assertIn("alice", spooler["details"]["user_name_candidates"])
             self.assertIn("possible-printed-document", spooler["details"]["risk_flags"])
+            self.assertIn("printed-document-name-candidate", spooler["details"]["risk_flags"])
             self.assertEqual(remote["details"]["product"], "anydesk")
             self.assertEqual(remote["details"]["ip_candidates"], ["203.0.113.10"])
             self.assertIn("https://relay.anydesk.com", remote["details"]["url_candidates"])
+            self.assertEqual(remote["details"]["coverage_status"], "remote-control-session-pivot-inventory")
+            self.assertTrue(remote["details"]["session_candidates"])
+            self.assertIn("123 456 789", remote["details"]["remote_id_candidates"])
+            self.assertTrue(remote["details"]["file_transfer_indicators"])
             self.assertIn("remote-control:anydesk", remote["details"]["risk_flags"])
+            self.assertIn("remote-control-file-transfer-candidate", remote["details"]["risk_flags"])
 
     def test_windows_system_collector_inventories_windows_recall_pivots(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:

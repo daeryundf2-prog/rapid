@@ -1006,8 +1006,8 @@ const VISIBLE_FORENSIC_CAPABILITY_GROUPS = [
         id: "print-spooler-spl-shd",
         label: "Print Spooler SPL/SHD",
         status: "partial",
-        terms: ["print spooler", "print-spooler-job", ".spl", ".shd", "printed", "printer"],
-        nextAction: "SPL/SHD parser로 문서명, 사용자, 프린터, 출력 시간을 보고서 후보로 노출",
+        terms: ["print spooler", "print-spooler-job", "print_spooler_job_profile", ".spl", ".shd", "printed", "printer"],
+        nextAction: "문서명/프린터/사용자 후보 분리는 가능, full SPL/SHD 구조 decoding과 PrintService eventlog 상관 필요",
       },
       {
         id: "document-metadata-macro-risk",
@@ -1144,8 +1144,8 @@ const VISIBLE_FORENSIC_CAPABILITY_GROUPS = [
         id: "remote-control-anydesk-teamviewer-rustdesk",
         label: "AnyDesk/TeamViewer/RustDesk",
         status: "partial",
-        terms: ["anydesk", "teamviewer", "rustdesk", "chrome remote desktop", "remote control", "third-party-remote-control-artifact"],
-        nextAction: "접속 시간, remote ID/IP, file transfer log, config/account attribution parser 추가",
+        terms: ["anydesk", "teamviewer", "rustdesk", "chrome remote desktop", "remote control", "third-party-remote-control-artifact", "remote_control_session_profile"],
+        nextAction: "세션/remote ID/파일전송 후보 분리는 가능, 제품별 full log format validation과 계정 attribution 필요",
       },
       {
         id: "defender-edr-tampering",

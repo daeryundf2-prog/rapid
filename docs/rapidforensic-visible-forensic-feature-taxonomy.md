@@ -814,8 +814,8 @@ GUI 표기 방식:
 | --- | --- | --- | --- |
 | Recycle Bin $I/$R 매핑 | `recycle-bin-entry` | `$Recycle.Bin` 아래 `$I*` metadata에서 원래 경로, 삭제 시각, 삭제 파일 크기를 읽고 sibling `$R*` payload hash를 연결한다. | MFT/USN delete timeline 상관, Windows 버전별 fixture, trusted parser diff |
 | 확장자 변조 탐지 | `file-signature-mismatch`, `file_signature_profile`, `signature_mismatch_candidates` | Windows artifact scan과 일반 파일 스캔 모두 PE/PDF/PNG/JPEG/GIF/ZIP/OLE/RAR/7z/SQLite magic header와 확장자를 비교해 mismatch 파일을 위험 후보로 표시한다. | 전체 파일타입 parser, 오탐 정책, archive 내부 파일 검사 |
-| Print Spooler SPL/SHD | `print-spooler-job` | `spool/PRINTERS`의 `.SPL`/`.SHD` 파일을 찾아 hash, mtime, bounded strings, 문서 경로 후보를 추출한다. | SPL/SHD 구조 decoder, printer eventlog 상관, driver별 spool fixture |
-| AnyDesk/TeamViewer/RustDesk | `third-party-remote-control-artifact` | AnyDesk, TeamViewer, RustDesk, Chrome Remote Desktop 경로/파일을 찾아 URL/IP/string pivot과 product tag를 생성한다. | 제품별 session decoder, peer ID/IP/파일전송 로그 검증, 계정 attribution |
+| Print Spooler SPL/SHD | `print-spooler-job`, `print_spooler_job_profile` | `spool/PRINTERS`의 `.SPL`/`.SHD` 파일을 찾아 hash, mtime, document/printer/user/source path 후보를 분리한다. | SPL/SHD full binary decoder, PrintService EVTX 상관, driver별 spool fixture |
+| AnyDesk/TeamViewer/RustDesk | `third-party-remote-control-artifact`, `remote_control_session_profile` | AnyDesk, TeamViewer, RustDesk, Chrome Remote Desktop 경로/파일을 찾아 product tag, URL/IP, session 후보, remote ID 후보, 파일전송 후보를 생성한다. | 제품별 full session state decoder, peer ID/IP/파일전송 검증, 계정 attribution |
 
 검증 포인트:
 
@@ -828,8 +828,8 @@ GUI 표기 방식:
 
 1. `recycle-bin-entry`의 삭제 시각은 `$I` metadata 기반이다. 보고서 확정 증거로 쓰려면 MFT/USN과 교차검증해야 한다.
 2. `file-signature-mismatch`는 “위장/은닉 의심”이지 의도 입증이 아니다. 정상적인 무확장 파일, 캐시, 임시 파일에서 오탐이 가능하다.
-3. `print-spooler-job`은 현재 bounded string inventory다. 실제 출력된 문서명/소유자/프린터를 구조적으로 확정하려면 SPL/SHD decoder가 필요하다.
-4. `third-party-remote-control-artifact`는 파일 존재와 string pivot이다. 실제 접속 세션, 원격 ID, 파일 전송 여부는 제품별 로그 decoder가 필요하다.
+3. `print-spooler-job`은 document/printer/user 후보를 분리하지만 아직 full SPL/SHD binary structure decoder는 아니다. 실제 출력된 문서명/소유자/프린터 확정에는 PrintService EVTX와 source document metadata 상관이 필요하다.
+4. `third-party-remote-control-artifact`는 session/remote ID/file-transfer 후보를 분리하지만 실제 접속 세션, 원격 ID, 파일 전송 여부 확정에는 제품별 로그 format validation과 계정 attribution이 필요하다.
 
 ## 25. 2026-05-14 구현 반영: 앱/클라우드/디스크 메모리 triage 2차 보강
 

@@ -71,6 +71,28 @@ RECALL_SCAN_LIMIT = 2 * 1024 * 1024
 WIFI_PROFILE_ROOT_MARKER = "programdata/microsoft/wlansvc/profiles/interfaces"
 USB_DEVICE_RE = re.compile(r"(?i)(USBSTOR\\[^\s\]]+|USB\\VID_[0-9A-F]{4}&PID_[0-9A-F]{4}[^\s\]]*)")
 SETUPAPI_TIMESTAMP_RE = re.compile(r"(?P<date>\d{4}[/-]\d{2}[/-]\d{2})\s+(?P<time>\d{2}:\d{2}:\d{2}(?:\.\d+)?)")
+REMOTE_CONTROL_TIMESTAMP_RE = re.compile(
+    r"(?P<timestamp>\d{4}[/-]\d{2}[/-]\d{2}[ T]\d{2}:\d{2}:\d{2}(?:\.\d+)?)"
+)
+REMOTE_CONTROL_ID_RE = re.compile(
+    r"(?i)(?:remote\s*id|client\s*id|peer\s*id|desk\s*id|alias|id)\s*[:=#-]?\s*([A-Z0-9][A-Z0-9 _.-]{4,40})"
+)
+PRINT_DOCUMENT_SUFFIXES = {
+    ".doc",
+    ".docx",
+    ".xls",
+    ".xlsx",
+    ".ppt",
+    ".pptx",
+    ".pdf",
+    ".hwp",
+    ".hwpx",
+    ".txt",
+    ".rtf",
+    ".csv",
+    ".dwg",
+}
+PRINT_PRINTER_TERMS = ("printer", "laserjet", "officejet", "canon", "epson", "brother", "xerox", "pdf", "xps", "fax")
 WMI_PERSISTENCE_TERMS = (
     "__eventfilter",
     "commandlineeventconsumer",
@@ -85,6 +107,7 @@ WMI_PERSISTENCE_TERMS = (
 )
 WINDOWS_PATH_RE = re.compile(r"(?i)(?:[a-z]:\\|\\\\|\\device\\)[^\x00\r\n\t\"'<>|]{4,260}")
 URL_RE = re.compile(r"(?i)https?://[^\s\x00\"'<>]{4,300}")
+IP_RE = re.compile(r"(?<!\d)(?:\d{1,3}\.){3}\d{1,3}(?!\d)")
 FIREWALL_LOG_PATHS = (
     ("Windows", "System32", "LogFiles", "Firewall", "pfirewall.log"),
     ("Windows", "System32", "LogFiles", "Firewall", "pfirewall.log.old"),
@@ -186,6 +209,7 @@ def collect_print_spooler_artifacts(root: Path) -> Iterable[ArtifactRecord]:
         blob = read_prefix(path, SPOOLER_SCAN_LIMIT)
         strings = unique_strings([*extract_ascii_strings(blob), *extract_utf16_strings(blob)])
         path_candidates = regex_candidates(strings, WINDOWS_PATH_RE)[:20]
+        spooler_profile = print_spooler_job_profile(path, strings, path_candidates)
         yield ArtifactRecord(
             provider=WindowsSystemArtifactsProvider.name,
             artifact_type="print-spooler-job",
@@ -204,15 +228,21 @@ def collect_print_spooler_artifacts(root: Path) -> Iterable[ArtifactRecord]:
                 "extracted_string_count": len(strings),
                 "string_samples": strings[:40],
                 "path_candidates": path_candidates,
-                "coverage_status": "spooler-file-string-inventory",
+                "print_spooler_job_profile": spooler_profile,
+                "document_name_candidates": spooler_profile["document_name_candidates"],
+                "printer_name_candidates": spooler_profile["printer_name_candidates"],
+                "user_name_candidates": spooler_profile["user_name_candidates"],
+                "coverage_status": "spooler-metadata-pivot-inventory"
+                if spooler_profile["document_name_candidates"] or spooler_profile["printer_name_candidates"]
+                else "spooler-file-string-inventory",
                 "reportability": "triage",
-                "parser_confidence": "medium" if strings else "low",
-                "risk_flags": ["possible-printed-document"],
+                "parser_confidence": spooler_profile["parser_confidence"],
+                "risk_flags": print_spooler_risk_flags(spooler_profile),
                 "validation_required": True,
-                "validation_guidance": "SPL/SHD file is inventoried with bounded strings and timestamps. Validate printed document identity with a spool parser, printer logs, and source document metadata before report-grade claims.",
+                "validation_guidance": "SPL/SHD file is inventoried with bounded metadata pivots and timestamps. Validate printed document identity, owner, and printer using spool structures, print EVTX, and source document metadata before report-grade claims.",
                 "commercial_grade_ready": False,
                 "commercial_grade_blockers": [
-                    "spl-shd-structure-decoder-not-implemented",
+                    "spl-shd-full-binary-structure-decoder-required",
                     "printer-driver-spool-fixture-required",
                     "print-eventlog-correlation-required",
                 ],
@@ -231,7 +261,8 @@ def collect_third_party_remote_control_artifacts(root: Path) -> Iterable[Artifac
         blob = read_prefix(path, REMOTE_CONTROL_SCAN_LIMIT)
         strings = unique_strings([*extract_ascii_strings(blob), *extract_utf16_strings(blob)])
         urls = regex_candidates(strings, URL_RE)[:20]
-        ips = sorted(set(re.findall(r"(?<!\d)(?:\d{1,3}\.){3}\d{1,3}(?!\d)", " ".join(strings))))[:20]
+        ips = sorted(set(IP_RE.findall(" ".join(strings))))[:20]
+        session_profile = remote_control_session_profile(product, strings, urls, ips)
         yield ArtifactRecord(
             provider=WindowsSystemArtifactsProvider.name,
             artifact_type="third-party-remote-control-artifact",
@@ -250,20 +281,194 @@ def collect_third_party_remote_control_artifacts(root: Path) -> Iterable[Artifac
                 "string_samples": strings[:40],
                 "url_candidates": urls,
                 "ip_candidates": ips,
-                "coverage_status": "remote-control-file-inventory",
+                "remote_control_session_profile": session_profile,
+                "session_candidates": session_profile["session_candidates"],
+                "remote_id_candidates": session_profile["remote_id_candidates"],
+                "file_transfer_indicators": session_profile["file_transfer_indicators"],
+                "coverage_status": "remote-control-session-pivot-inventory"
+                if session_profile["session_candidates"]
+                else "remote-control-file-inventory",
                 "reportability": "triage",
                 "parser_confidence": "medium",
-                "risk_flags": [f"remote-control:{product}"],
+                "risk_flags": remote_control_risk_flags(product, session_profile),
                 "validation_required": True,
-                "validation_guidance": "Third-party remote-control file is a triage pivot. Validate session time, peer ID/IP, transfer logs, and account attribution with product-specific parsers before report-grade use.",
+                "validation_guidance": "Third-party remote-control file is parsed for bounded session, peer, IP/URL, and transfer pivots. Validate session start/end, peer identity, file transfer logs, and account attribution with product-specific parsers before report-grade use.",
                 "commercial_grade_ready": False,
                 "commercial_grade_blockers": [
-                    "product-specific-session-decoder-required",
+                    "full-product-specific-session-state-decoder-required",
                     "remote-peer-attribution-validation-required",
                     "file-transfer-log-validation-required",
                 ],
             },
         )
+
+
+def print_spooler_job_profile(path: Path, strings: Sequence[str], path_candidates: Sequence[str]) -> dict[str, object]:
+    document_names = print_document_name_candidates(strings, path_candidates)
+    printer_names = print_printer_name_candidates(strings)
+    user_names = print_user_name_candidates(strings, path_candidates)
+    return {
+        "profile_version": "print-spooler-job-profile-v1",
+        "spooler_file_kind": path.suffix.lower().lstrip("."),
+        "job_id_hint": path.stem,
+        "document_name_candidates": document_names,
+        "printer_name_candidates": printer_names,
+        "user_name_candidates": user_names,
+        "source_path_candidates": list(path_candidates)[:20],
+        "values_are_candidates": True,
+        "parser_confidence": "medium" if document_names or printer_names else ("low" if strings else "none"),
+        "validation_required": True,
+        "validation_guidance": (
+            "Document, user, and printer values are bounded spool-file pivots. Correlate with PrintService EVTX, "
+            "$MFT/$UsnJrnl, source document metadata, and printer driver spool structures before testimony."
+        ),
+    }
+
+
+def print_document_name_candidates(strings: Sequence[str], path_candidates: Sequence[str]) -> list[str]:
+    candidates: list[str] = []
+    for source in [*path_candidates, *strings]:
+        value = source.strip().strip("\x00")
+        suffix = Path(value.replace("\\", "/")).suffix.lower()
+        if suffix not in PRINT_DOCUMENT_SUFFIXES:
+            continue
+        name = value.rsplit("\\", 1)[-1].rsplit("/", 1)[-1]
+        if name and name not in candidates:
+            candidates.append(name)
+        if len(candidates) >= 12:
+            break
+    return candidates
+
+
+def print_printer_name_candidates(strings: Sequence[str]) -> list[str]:
+    candidates: list[str] = []
+    for value in strings:
+        lowered = value.lower()
+        if "\\" in value or "/" in value or len(value) > 160:
+            continue
+        if any(term in lowered for term in PRINT_PRINTER_TERMS):
+            cleaned = value.strip()
+            if cleaned and cleaned not in candidates:
+                candidates.append(cleaned)
+        if len(candidates) >= 12:
+            break
+    return candidates
+
+
+def print_user_name_candidates(strings: Sequence[str], path_candidates: Sequence[str]) -> list[str]:
+    candidates: list[str] = []
+    for path_value in path_candidates:
+        match = re.search(r"(?i)\\users\\([^\\/:*?\"<>|]+)", path_value)
+        if match:
+            candidate = match.group(1)
+            if candidate and candidate not in candidates:
+                candidates.append(candidate)
+    for value in strings:
+        if len(candidates) >= 12:
+            break
+        if "\\" in value or "/" in value or " " in value or not (2 <= len(value) <= 64):
+            continue
+        if not re.fullmatch(r"[A-Za-z0-9._-]+", value):
+            continue
+        lowered = value.lower()
+        if lowered in {"print", "printer", "spool", "document", "owner"}:
+            continue
+        if value not in candidates:
+            candidates.append(value)
+    return candidates[:12]
+
+
+def print_spooler_risk_flags(profile: Mapping[str, object]) -> list[str]:
+    flags = ["possible-printed-document"]
+    if profile.get("document_name_candidates"):
+        flags.append("printed-document-name-candidate")
+    if profile.get("printer_name_candidates"):
+        flags.append("printer-name-candidate")
+    if profile.get("user_name_candidates"):
+        flags.append("print-owner-candidate")
+    return unique_preserve_order(flags)
+
+
+def remote_control_session_profile(
+    product: str,
+    strings: Sequence[str],
+    urls: Sequence[str],
+    ips: Sequence[str],
+) -> dict[str, object]:
+    session_candidates: list[dict[str, object]] = []
+    remote_ids: list[str] = []
+    transfer_indicators: list[dict[str, object]] = []
+    timestamp_candidates: list[str] = []
+    product_terms = tuple(term.lower() for term in REMOTE_CONTROL_PRODUCTS.get(product, (product,)))
+    transfer_terms = ("file transfer", "download", "upload", "transferred", "sent file", "received file", "clipboard")
+    for value in strings[:300]:
+        lowered = value.lower()
+        timestamps = [match.group("timestamp") for match in REMOTE_CONTROL_TIMESTAMP_RE.finditer(value)]
+        for timestamp in timestamps:
+            if timestamp not in timestamp_candidates:
+                timestamp_candidates.append(timestamp)
+        for match in REMOTE_CONTROL_ID_RE.finditer(value):
+            candidate = " ".join(match.group(1).split()).strip(" .:-")
+            candidate = re.split(r"(?i)\s+(?:from|to|via|https?|session|connected|file|transfer)\b", candidate, maxsplit=1)[0]
+            if candidate and candidate.lower() not in {"session", "client", "remote", "peer"} and candidate not in remote_ids:
+                remote_ids.append(candidate)
+        line_ips = sorted(set(IP_RE.findall(value)))
+        line_urls = [url for url in urls if url in value][:5]
+        line_has_product = product in lowered or any(term and term in lowered for term in product_terms)
+        line_has_session = any(term in lowered for term in ("session", "connect", "connected", "incoming", "outgoing", "accept", "relay", "remote"))
+        line_has_transfer = any(term in lowered for term in transfer_terms)
+        if line_has_transfer:
+            transfer_indicators.append(
+                {
+                    "timestamp": timestamps[0] if timestamps else "",
+                    "text_preview": value[:240],
+                    "ip_candidates": line_ips[:5],
+                    "url_candidates": line_urls,
+                }
+            )
+        if line_has_product or line_has_session or timestamps or line_ips:
+            session_candidates.append(
+                {
+                    "timestamp": timestamps[0] if timestamps else "",
+                    "text_preview": value[:240],
+                    "ip_candidates": line_ips[:5],
+                    "url_candidates": line_urls,
+                    "has_transfer_terms": line_has_transfer,
+                    "confidence": "medium" if timestamps or line_ips else "low",
+                }
+            )
+        if len(session_candidates) >= 40:
+            break
+    return {
+        "profile_version": "third-party-remote-control-session-profile-v1",
+        "product": product,
+        "session_candidate_count": len(session_candidates),
+        "session_candidates": session_candidates,
+        "remote_id_candidates": remote_ids[:20],
+        "timestamp_candidates": timestamp_candidates[:40],
+        "ip_candidates": list(ips)[:50],
+        "url_candidates": list(urls)[:50],
+        "file_transfer_indicators": transfer_indicators[:20],
+        "values_are_candidates": True,
+        "validation_required": True,
+        "validation_guidance": (
+            "Session rows are string/log pivots. Validate product-specific log format, peer identity, transfer state, "
+            "and account attribution before reporting remote-control activity."
+        ),
+    }
+
+
+def remote_control_risk_flags(product: str, profile: Mapping[str, object]) -> list[str]:
+    flags = [f"remote-control:{product}"]
+    if profile.get("session_candidates"):
+        flags.append("remote-control-session-candidate")
+    if profile.get("remote_id_candidates"):
+        flags.append("remote-peer-id-candidate")
+    if profile.get("file_transfer_indicators"):
+        flags.append("remote-control-file-transfer-candidate")
+    if profile.get("ip_candidates"):
+        flags.append("remote-control-ip-candidate")
+    return unique_preserve_order(flags)
 
 
 def collect_windows_recall_artifacts(root: Path) -> Iterable[ArtifactRecord]:

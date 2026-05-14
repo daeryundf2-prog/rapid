@@ -251,7 +251,7 @@ CAPABILITY_GROUPS: tuple[dict[str, Any], ...] = (
         "catalog_id": "documents-db",
         "label": "문서 유출 보조 아티팩트",
         "capabilities": (
-            {"id": "print-spooler-spl-shd", "label": "Print Spooler SPL/SHD", "status": "partial", "terms": ("print spooler", "print-spooler-job", ".spl", ".shd", "printed", "printer")},
+            {"id": "print-spooler-spl-shd", "label": "Print Spooler SPL/SHD", "status": "partial", "terms": ("print spooler", "print-spooler-job", "print_spooler_job_profile", ".spl", ".shd", "printed", "printer")},
             {"id": "document-metadata-macro-risk", "label": "문서 메타데이터/매크로 위험", "status": "partial", "terms": ("metadata", "vba", "macro", "ole", "ooxml", "author")},
             {"id": "sticky-notes-plum", "label": "Sticky Notes plum.sqlite", "status": "partial", "terms": ("sticky notes", "plum.sqlite", "stickynotes", "note", "sticky-note")},
         ),
@@ -300,7 +300,7 @@ CAPABILITY_GROUPS: tuple[dict[str, Any], ...] = (
         "catalog_id": "timeline-ioc",
         "label": "원격접속 / Tampering",
         "capabilities": (
-            {"id": "remote-control-anydesk-teamviewer-rustdesk", "label": "AnyDesk/TeamViewer/RustDesk", "status": "partial", "terms": ("anydesk", "teamviewer", "rustdesk", "chrome remote desktop", "remote control", "third-party-remote-control-artifact")},
+            {"id": "remote-control-anydesk-teamviewer-rustdesk", "label": "AnyDesk/TeamViewer/RustDesk", "status": "partial", "terms": ("anydesk", "teamviewer", "rustdesk", "chrome remote desktop", "remote control", "third-party-remote-control-artifact", "remote_control_session_profile")},
             {"id": "defender-edr-tampering", "label": "Defender/EDR 무력화", "status": "partial", "terms": ("defender", "tamper", "exclusion", "edr", "service stopped")},
         ),
     },
