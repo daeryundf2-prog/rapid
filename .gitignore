@@ -1,8 +1,4 @@
-.omx/state/
-.omx/logs/
-.omx/reports/
-.omx/team/
-.omx/tmux-hook.json
+.omx/
 .venv/
 .rapidtriage-smoke-venv/
 rapidtriage-windows-smoke/
@@ -10,4 +6,14 @@ rapidtriage-macos-linux-smoke/
 qc-runs/
 __pycache__/
 *.pyc
+*.pyo
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+build/
+dist/
+.DS_Store
 engines/rust/target/

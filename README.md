@@ -1,372 +1,295 @@
-# dashcam-tools + rapidtriage
+# RapidForensic / RapidTriage
 
-This repository contains two tool families:
+RapidForensic은 단일 케이스 기반 디지털 포렌식 triage 도구입니다. 현재 구현체 이름은 `rapidtriage`이며, 폴더, 마운트된 이미지, E01/Ex01 계열 입력, RAW/가상 디스크/아카이브 계열 입력을 받아 파일 목록화, 아티팩트 분석, 키워드 검색, 리뷰, 보고서 후보 생성을 하나의 로컬 GUI와 CLI 흐름으로 연결하는 것을 목표로 합니다.
 
-- `dashcam-tools`: dashcam ingest, OCR timestamp detection, and file renaming utilities.
-- `rapidtriage`: a lightweight, cross-platform forensic triage toolkit with both CLI and local web UI workflows.
+이 저장소에는 과거 dashcam 유틸리티도 함께 남아 있습니다. 포렌식 제품 본체는 `rapidtriage/`, `rapidtriage/web/static/`, `docs/rapidforensic-*`, `docs/rapidtriage-*`, `scripts/`를 중심으로 봐야 합니다.
 
-## Install
+## 현재 상태 한 줄 요약
+
+분석관이 로컬에서 케이스를 열고, 증거 폴더나 이미지 기반 추출물을 넣고, 아티팩트와 파일을 검색/리뷰/보고서 후보로 정리하는 데는 사용할 수 있습니다. 다만 AXIOM, EnCase, Maestro WISDOM 같은 상용급 완성품이라고 주장할 단계는 아닙니다. 내부 known-answer 기준 검증은 확장되어 있지만, 실제 Windows 11 E01 대형 케이스, trusted-tool record diff, 독립 검증, 장기 성능 증거가 아직 더 필요합니다.
+
+현재 문서 기준:
+
+| 항목 | 상태 |
+| --- | --- |
+| 사용자 노출 forensic target | 51개 |
+| collector | 23개 |
+| artifact type literal | 약 191개 |
+| 내부 validation package | 120/120 연결 |
+| commercial-grade gate | 0/120 |
+| readiness score | 90/100 내부 기준 |
+| 상용급 claim | 금지, `commercial_claim_allowed=false` |
+
+## 핵심 사용자 흐름
+
+RapidForensic은 아래 3가지 질문에 답하도록 설계되어 있습니다.
+
+1. E01, 이미지, 폴더, ZIP, DB, 로그 같은 입력을 넣으면 내부 데이터를 분석할 수 있는가?
+2. 입력된 증거에서 필요한 파일과 아티팩트를 추출하고 원본 근거까지 확인할 수 있는가?
+3. 파일명, 본문, 문서, 브라우저, AI 사용 흔적, EVTX, Registry, 메신저, 메일, OCR 후보를 한 UX에서 검색하고 리뷰할 수 있는가?
+
+GUI 기준 작업 순서는 다음과 같습니다.
+
+1. 케이스 생성 또는 기존 케이스 열기
+2. 증거 입력 선택
+3. 의존성 검사
+4. 파티션/마운트/추출 경로 확인
+5. 파일 시스템 및 아티팩트 분석 실행
+6. 키워드 검색, 필터, timeline 확인
+7. source viewer에서 원본 근거 확인
+8. relevant, needs-review, excluded, include-in-report 등 리뷰 상태 부여
+9. evidence tray와 보고서 후보 생성
+10. QC checklist와 validation package 확인
+
+## 설치
+
+### 공통 요구사항
+
+- Python 3.9 이상
+- pip
+- 로컬 분석용 충분한 디스크 공간
+- 대용량 케이스의 경우 SSD 권장
+
+### macOS / Linux
 
 ```bash
 python -m venv .venv
 source .venv/bin/activate
 python -m pip install -U pip build
-python -m pip install -e '.[web,test]'
+python -m pip install -e '.[web,test,kakaotalk,columnar]'
 ```
 
-Windows PowerShell:
+### Windows PowerShell
 
 ```powershell
 py -m venv .venv
 .\.venv\Scripts\Activate.ps1
 python -m pip install -U pip build
-python -m pip install -e ".[web,test]"
+python -m pip install -e ".[web,test,kakaotalk,columnar]"
 ```
 
-Windows one-command launcher:
+### 선택 의존성
 
-```powershell
-.\scripts\windows\start-rapidtriage.ps1
-```
+| 기능 | 권장 도구 |
+| --- | --- |
+| E01/Ex01 직접 처리 | `libewf`, `ewfmount`, Sleuth Kit `mmls`, `tsk_recover` |
+| 가상 디스크 변환 | `qemu-img` |
+| OCR | `tesseract`, 필요 시 PaddleOCR 계열 외부 파이프라인 |
+| 영상/오디오 메타데이터 | `ffprobe` |
+| Windows 실제 E01 QC | Windows VM 또는 실제 Windows 11 분석 장비 |
 
-Windows release smoke test:
+Windows에서는 E01을 직접 열기보다 FTK Imager, Arsenal Image Mounter, OSFMount, libewf/WSL 등으로 읽기 전용 마운트하거나 안전하게 export한 폴더를 입력하는 흐름이 더 안정적입니다.
 
-```powershell
-.\scripts\windows\smoke-test-rapidtriage.ps1
-```
+## 실행
 
-macOS/Linux one-command launcher:
+### GUI 실행
+
+macOS/Linux:
 
 ```bash
 sh scripts/start-rapidtriage.sh
 ```
 
-macOS/Linux release smoke test:
+Windows:
 
-```bash
-sh scripts/smoke-test-rapidtriage.sh
+```powershell
+.\scripts\windows\start-rapidtriage.ps1
 ```
 
-Verify release checksums:
-
-```bash
-python scripts/build-release.py --output-dir release --verify
-```
-
-Verify the collected release evidence:
-
-```bash
-python scripts/verify-release-evidence.py --release-dir release --validation-dir release-validation --benchmark-dir release-benchmark --smoke-dir rapidtriage-windows-smoke --smoke-dir rapidtriage-macos-linux-smoke --require-smoke-platform windows --require-smoke-platform macos-linux
-```
-
-See [docs/rapidtriage-windows-quickstart.md](docs/rapidtriage-windows-quickstart.md) for the Windows launcher, diagnostics, and E01 fallback guidance.
-See [docs/rapidtriage-macos-linux-quickstart.md](docs/rapidtriage-macos-linux-quickstart.md) for the macOS/Linux launcher and first-run flow.
-See [docs/rapidtriage-e01-workflow.md](docs/rapidtriage-e01-workflow.md) for what direct E01/Ex01 input does today and when to mount/export first.
-See [docs/rapidtriage-fresh-machine-smoke-test.md](docs/rapidtriage-fresh-machine-smoke-test.md) for the Windows/macOS release usability smoke test.
-See [docs/rapidtriage-maestro-wisdom-intake.md](docs/rapidtriage-maestro-wisdom-intake.md) for the Maestro WISDOM-inspired competitive intake and follow-up parser/viewer backlog.
-See [docs/rapidtriage-user-convenience-principles.md](docs/rapidtriage-user-convenience-principles.md) for the analyst convenience rules that guide UI and workflow decisions.
-See [docs/rapidtriage-community-feedback-intake.md](docs/rapidtriage-community-feedback-intake.md) for public Reddit/Forensic Focus practitioner feedback translated into product requirements.
-
-System dependencies:
-
-- Required for dashcam OCR/video workflows: `ffprobe` from ffmpeg and the `tesseract` binary.
-- Optional rapidtriage E01 direct-input workflows: `ewfmount`, `mmls`, and `tsk_recover`; these are primarily Unix/macOS/Linux oriented.
-- `rapidtriage` folder-based triage and the local web UI work without those E01 tools.
-
-## Quick Start
-
-Run the local web UI:
+직접 실행:
 
 ```bash
 rapidtriage web --host 127.0.0.1 --port 8765
 ```
 
-Check the local runtime before starting:
-
-```bash
-rapidtriage doctor
-```
-
-Or use the dedicated entrypoint:
-
-```bash
-rapidtriage-web --host 127.0.0.1 --port 8765
-```
-
-Then open:
+브라우저에서 아래 주소를 엽니다.
 
 ```text
 http://127.0.0.1:8765
 ```
 
-Run the CLI workflow directly:
+### 환경 점검
 
 ```bash
-rapidtriage run . --mode fraud --output-dir ./rapidtriage-run-fraud --read-only
+rapidtriage doctor
 ```
 
-Create and run a synthetic sample case:
+확인 항목은 Python 버전, web extra, optional forensic tool, 포트 사용 여부, static asset 존재 여부, 쓰기 가능한 output 경로입니다.
+
+### 샘플 케이스 실행
 
 ```bash
 rapidtriage sample --run --overwrite
 ```
 
-See [docs/rapidtriage-sample-case.md](docs/rapidtriage-sample-case.md) for expected sample outputs and smoke-search examples.
+샘플 결과는 `rapidtriage-sample/` 아래에 생성됩니다. GUI에서 이 run output을 열어 검색, 리뷰, 보고서 후보 흐름을 빠르게 확인할 수 있습니다.
 
-Initialize the experimental SQLite case database:
+## CLI 주요 명령
 
-```bash
-rapidtriage case-db ./rapidtriage-case.db --create-case CASE-001 --name "Case 001" --list
-```
+| 목적 | 명령 |
+| --- | --- |
+| 전체 워크플로우 실행 | `rapidtriage run <source> --output-dir <out>` |
+| 입력 adapter 판정 | `rapidtriage evidence <source> --json` |
+| 파일 manifest 생성 | `rapidtriage manifest <source> --output manifest.json` |
+| 문서/본문 후보 검색 | `rapidtriage docs <source> -k <keyword> --output docs.json` |
+| 파일 후보 분류 | `rapidtriage files <source> --output files.json` |
+| 아티팩트 수집 | `rapidtriage artifacts <source> --kind browser --output browser.json` |
+| 추출 후보 복사 | `rapidtriage extract <input-json> <out-dir>` |
+| timeline 생성 | `rapidtriage timeline <run-output> --output timeline.json` |
+| case DB 생성/가져오기 | `rapidtriage case-db <case.db> --create-case CASE-001` |
+| case 검색 | `rapidtriage case-search <case.db> --case-id CASE-001 -k password` |
+| 리뷰 상태 부여 | `rapidtriage case-review <case.db> --case-id CASE-001 --target-type indexed_document --target-id 1 --status relevant` |
+| 보고서 후보 | `rapidtriage case-db-report <case.db> --case-id CASE-001 --output report-candidates.json` |
+| taxonomy 검증 | `rapidtriage taxonomy-audit --strict` |
+| commercial readiness | `rapidtriage commercial-readiness --json` |
+| validation package | `rapidtriage validation --output-dir ./rapidtriage-validation --overwrite` |
 
-Import a completed run and search the SQLite case DB:
+## 지원 입력 범위
 
-```bash
-rapidtriage case-db ./rapidtriage-case.db --import-run ./rapidtriage-sample/run-output --case-id CASE-001
-rapidtriage case-search ./rapidtriage-case.db --case-id CASE-001 -k password --source documents
-rapidtriage case-review ./rapidtriage-case.db --case-id CASE-001 --target-type indexed_document --target-id 1 --status relevant --verification-status source_opened --include-in-report
-rapidtriage case-search ./rapidtriage-case.db --case-id CASE-001 -k password --verification-status source_opened
-rapidtriage case-db-report ./rapidtriage-case.db --case-id CASE-001 --output rapidtriage-case-db-report-candidates.json
-```
+| 입력 종류 | 현재 처리 방식 | 주의사항 |
+| --- | --- | --- |
+| 일반 폴더 | 직접 scan, manifest, artifact collector 실행 | 가장 안정적 |
+| 마운트 이미지 | 폴더처럼 처리 | 읽기 전용 마운트 권장 |
+| E01/Ex01 | optional libewf/Sleuth Kit 경로 또는 export/mount workflow | Windows 직접 처리보다 mount/export 권장 |
+| RAW/split image | adapter 판정, 외부 도구 기반 처리 계획 | split gap 검증 필요 |
+| ISO/DMG/WIM/SWM | archive image adapter, 추출 workflow | 암호화/손상 이미지는 제한 |
+| VHD/VHDX/VMDK/VDI/QCOW | virtual disk adapter, qemu-img 기반 workflow | snapshot/differencing chain은 QC 필요 |
+| ZIP/TAR 등 archive | bounded extraction/search | 압축폭탄 방어 cap 적용 필요 |
+| SQLite/DB 파일 | source viewer, table/search, WAL/SHM sidecar 표시 | 대형 DB는 cursor/resume 확인 |
+| 메신저/메일 export | parser/import workflow | 서비스별 schema version 검증 필요 |
 
-Check which evidence adapter will handle a source path:
+## 주요 포렌식 기능
 
-```bash
-rapidtriage evidence ./case.E01 --json
-rapidtriage evidence ./mounted-folder
-```
+### 파일 시스템 및 이미지
 
-Track performance with a synthetic benchmark:
+- 파일 manifest와 hash 산출
+- 파일 카테고리 분류
+- 확장자/시그니처 mismatch 후보
+- timestamp anomaly 후보
+- MFT, USN, LogFile 관련 triage 및 검증대기 workflow
+- VSS/APFS snapshot, FDE unlock, unallocated carving은 기능 노출/워크플로우가 있으며 실제 상용급 검증은 추가 필요
 
-```bash
-rapidtriage benchmark --output-dir ./rapidtriage-benchmark --file-count 1000
-```
+### Windows 아티팩트
 
-Build a release validation package before handing a build to analysts:
+- EVTX/EventLog triage
+- Event ID 기반 log clear, logon session, USB/WLAN/Print/BITS pivot
+- Registry, NTUSER/UsrClass, ShellBags, RecentDocs, MUICache, Clipboard 후보
+- SAM/SECURITY/SYSTEM 계정/권한 관련 parser 구조
+- Amcache, ShimCache, BAM/DAM, SRUM, Windows.edb 관련 parser/검증 workflow
+- Prefetch, LNK, JumpList, Task Scheduler, WMI, Defender, Firewall, WER
+- USB 외장매체 연결 이력 통합 뷰 목표
+- AnyDesk, TeamViewer, Chrome Remote Desktop, RustDesk 등 원격접속 흔적 triage
 
-```bash
-rapidtriage validation --output-dir ./rapidtriage-validation --overwrite
-```
+### 인터넷, 브라우저, AI 사용기록
 
-Register a completed run in the local case catalog:
+- Chrome, Edge, Firefox, Safari 계열 브라우저 히스토리/다운로드/쿠키/캐시/session 후보
+- WebCacheV01.dat, 로컬 sync DB, browser storage 후보
+- ChatGPT, Claude, Gemini, Perplexity 등 AI 서비스 방문/대화 후보
+- ChatGPT/Copilot desktop app, 로컬 LLM(Ollama, LM Studio, GPT4All) 흔적 taxonomy
+- pagefile/hiberfil/memory URL carving 후보
 
-```bash
-rapidtriage case-catalog --add-run ./rapidtriage-sample/run-output --case-id CASE-001 --name "Sample Case" --list
-```
+### 문서, 메일, 검색
 
-Export normalized timeline/model data and a submission bundle:
+- PDF, Office, TXT, EML, MBOX 등 bounded text extraction
+- 문서별 size cap, PDF stream cap, ZIP member cap
+- SQLite source search cursor/resume
+- 현재 파일 검색, 전체 검색, case DB 검색
+- PST/OST, Gmail Takeout, M365 export workflow는 parser/검증 보강 필요
+- Print Spooler, Sticky Notes, macro risk, metadata extraction 항목 노출
 
-```bash
-rapidtriage timeline-export ./rapidtriage-sample/run-output --output timeline-export.json
-rapidtriage normalize ./rapidtriage-sample/run-output --output normalized-case.json
-rapidtriage bundle ./rapidtriage-case.json --allowed-root ./rapidtriage-sample/evidence --output-dir ./submission-bundle
-rapidtriage plugins --list
-```
+### 메신저, 모바일, 클라우드
 
-Run directly from an E01 image when `libewf` and Sleuth Kit tools are installed:
+- PC KakaoTalk Windows 구형/후패치 계열 분석 workflow와 별도 참조 스크립트
+- macOS KakaoTalk 수집/DB 후보 탐지 workflow
+- WhatsApp, Telegram, Signal, LINE, Discord, WeChat, Instagram export/import taxonomy
+- iOS/Android backup/export 기반 parser 구조
+- Google Takeout, iCloud, M365/Teams, AWS/Azure/GCP audit log taxonomy
+- cloud API acquisition은 lawful OAuth/token handling 전제
 
-```bash
-rapidtriage run ./case.E01 --mode fraud --output-dir ./rapidtriage-run-e01
-```
+### 미디어, OCR, 메모리, 침해사고
 
-## rapidtriage
+- 이미지 EXIF/GPS, gallery review, perceptual similarity 후보
+- OCR queue와 OCR hit review
+- 영상/음성 preview/transcript workflow
+- hiberfil.sys, pagefile.sys, MEMORY.DMP, minidump import workflow
+- YARA/IOC, TI enrichment, NSRL/whitelist, super timeline 목표
+- 악성 증거 파일 preview sandbox와 active content 차단은 추가 검증 필요
 
-`rapidtriage` is designed as an OS-independent core with pluggable artifact collectors. It can be used on macOS, Linux, and Windows against ordinary folders, mounted images, E01-derived exports, or live filesystem roots.
+## GUI 구조
 
-Current structure:
+현재 GUI는 분석관이 대량 데이터를 덜 지치고 검토하도록 아래 구조를 목표로 합니다.
 
-- `rapidtriage/core`: orchestration, manifests, document scanning, file triage, extraction, timelines, reports, cases, and job execution.
-- `rapidtriage/artifacts/windows`: Windows-focused artifact providers behind provider interfaces.
-- `rapidtriage/artifacts/generic.py`: cross-platform document candidate provider.
-- `rapidtriage/api`: FastAPI local API for the web UI.
-- `rapidtriage/web/static`: browser UI assets.
-- `rapidtriage/schemas/`: JSON Schema contracts for published outputs.
-- `docs/rapidtriage-output-schema.md`: output contract summary and sample index.
-- `docs/rapidtriage-rule-engine.md`: rule-engine and IOC lookup contract.
+- 좌측: capability/artifact tree
+- 상단: evidence input, dependency check, run state, readiness gate
+- 중앙: virtualized result table
+- 우측: preview/detail/source viewer
+- 하단 또는 side tray: selected evidence, review state, report candidate
+- 공통: current-file search, global search, cursor/resume, truncated warning, citation
 
-CLI help:
+중요한 UX 원칙은 “예쁜 화면”보다 “10만 건 이상 결과에서도 누락/오판을 줄이는 화면”입니다.
 
-```bash
-rapidtriage --help
-rapidtriage manifest --help
-rapidtriage docs --help
-rapidtriage files --help
-rapidtriage extract --help
-rapidtriage artifacts --help
-rapidtriage taxonomy-audit --help
-rapidtriage collect-plan --help
-rapidtriage collect-export --help
-rapidtriage run --help
-rapidtriage timeline --help
-rapidtriage case --help
-rapidtriage web --help
-rapidtriage-web --help
-```
+## 산출물
 
-Common examples:
+대표 산출물은 다음과 같습니다.
 
-```bash
-rapidtriage manifest . --output rapidtriage-manifest.json
-rapidtriage manifest /Volumes/case-mount --input-kind mounted-image --output case-manifest.json
-rapidtriage docs . -k incident -k registry --output rapidtriage-docs.json
-rapidtriage files . --output rapidtriage-files.json
-rapidtriage files . --category executables --ext exe --modified-after 2025-01-01 --output recent-executables.json
-rapidtriage files . --name-contains note --path-contains desktop --output desktop-notes.json
-rapidtriage collect-plan /Volumes/case-mount --profile intrusion --output rapidtriage-collect-plan.json
-rapidtriage collect-export /Volumes/case-mount ./collect-export --profile intrusion --copy
-rapidtriage extract rapidtriage-files.json ./extract-out --category documents --ext txt
-rapidtriage extract rapidtriage-docs.json ./docs-out --kind pdf --manifest ./docs-out/rapidtriage-extract-manifest.json
-rapidtriage artifacts . --kind browser --output ./rapidtriage-artifacts-browser.json
-rapidtriage artifacts . --kind recent-files --output ./rapidtriage-artifacts-recent-files.json
-rapidtriage taxonomy-audit --output ./rapidtriage-taxonomy-audit.json
-rapidtriage run . --mode seizure --output-dir ./rapidtriage-run-seizure
-rapidtriage run . --mode fraud --output-dir ./rapidtriage-run-fraud
-rapidtriage run ./case.E01 --mode fraud --output-dir ./rapidtriage-run-e01
-rapidtriage run . --mode hacking --output-dir ./rapidtriage-run-hacking
-rapidtriage run . --mode recovery --output-dir ./rapidtriage-run-recovery
-rapidtriage source-read ./rapidtriage-run-hacking --path Users/alice/Documents/note.txt --hash
-rapidtriage timeline . --output ./rapidtriage-timeline.json --report ./rapidtriage-timeline-report.md
-rapidtriage case ./incident-case.json --source ./rapidtriage-timeline.json --pointer /events/0 --tag suspicious --note "Review this event"
-rapidtriage case ./incident-case.json --source ./rapidtriage-files.json --pointer /candidates/0 --bookmark-id file-001 --tag executable
-rapidtriage web --host 127.0.0.1 --port 8765
-```
+- `manifest.json`
+- `files.json`
+- `docs.json`
+- `artifacts.json`
+- `timeline.json`
+- `normalized-case.json`
+- `case.db`
+- `report-candidates.json`
+- `validation package`
+- `commercial-readiness.json`
+- `submission bundle`
 
-## Web UI
+보고서 후보에는 가능한 경우 source path, source hash, parser version, offset/index, reviewer state, limitation, citation metadata를 포함해야 합니다.
 
-The local UI is a browser-based dashboard served by FastAPI. It supports:
+## 검증과 QC
 
-- Creating `run` workflows from a folder path, mounted image root, E01-derived folder, direct `.E01` image path, raw/split image, archive image, or qemu-convertible virtual disk when required external tools are present.
-- Checking evidence support before a run, including folders, E01/Ex01, AD1/L01/Lx01, AFF/AFF4, DD/RAW/IMG/001, ISO/DMG/WIM, VHD/VHDX/VMDK/VDI/XVA/QCOW, mobile packages, and memory dumps.
-- Choosing a processing profile: fast first pass, bounded standard extraction, or uncapped deep processing.
-- Previewing KAPE-style collection profiles from the start screen so users can see present/missing Windows/macOS artifact targets before a heavy run.
-- Showing a guided first-run workflow, safe read-only default, and remembered local form/search inputs to reduce repeated typing.
-- For direct `.E01` input, extracting the image read-only into the run output directory through `ewfmount`, `mmls`, and `tsk_recover`, then running the same triage pipeline on the extracted filesystem.
-- For direct DD/RAW/IMG/001 input, recovering files with Sleuth Kit; for ISO/DMG/WIM/SWM, extracting with `7zz`/`7z` or ISO `bsdtar`; for VHD/VHDX/VMDK/VDI/QCOW/QCOW2, converting with `qemu-img` before Sleuth Kit recovery.
-- Persisting the local run catalog across server restarts.
-- Importing an existing run output directory that contains `rapidtriage-run-summary.json`.
-- Viewing run status, summaries, files, docs, artifacts, timeline events, indicator pivots, and generated markdown reports.
-- Displaying step-level run status for recovery/retry diagnostics.
-- Splitting the case workspace into `Triage`, `Find`, `Review`, and `Deliver` views so large cases are handled by task instead of one overloaded screen.
-- Pinning search results, viewer previews, and reviewed evidence into a persistent A/B compare tray for quick back-and-forth inspection.
-- Loading large files/docs/artifacts/timeline/indicator outputs in bounded pages instead of rendering entire result sets at once.
-- Downloading generated output files directly from the browser.
-- Filtering result tables in the browser.
-- Previewing source evidence from search results, including text/document snippets, image previews, and safe binary metadata.
-- Computing MD5, SHA1, and SHA256 for an opened source file on demand from the viewer.
-- Searching either the whole case or only the currently opened evidence file from the viewer.
-- Narrowing whole-case search by source, extension, and path fragment before opening results.
-- Preparing a run-local SQLite Case DB automatically before DB-backed search so users do not have to manually import JSON outputs first.
-- Using keyboard shortcuts for case search, current-file search, workspace switching, and paginated navigation.
-- Using keyword presets for common review pivots such as credentials, web activity, financial terms, and intrusion indicators.
-- Saving analyst review decisions from the viewer with `Relevant`, `Needs review`, `Not relevant`, tags, notes, and report-candidate flags in `rapidtriage-case.json`.
-- Tracking review revisions in `rapidtriage-case.json` and selecting review-board items into a local working set while comparing evidence.
-- Reading generated case review boards from the run output directory.
-- Generating `rapidtriage-submission-manifest.json` with MD5, SHA1, and SHA256 hashes for report-candidate evidence.
-- Drafting `rapidtriage-case-report.md` from case metadata, reviewed evidence, analyst notes, and submission hashes.
-- Removing a run from the local web catalog without deleting evidence output files.
+핵심 검증 문서:
 
-API endpoints are served under `/api`, including health, run creation/listing/detail, run import, catalog removal, named outputs, paginated files/docs/artifacts/timeline/indicator views, downloadable output files, source previews, report text, case loading, submission hash manifest generation, case report drafting, and review/bookmark creation.
+- [한글 기능 명세서](docs/rapidforensic-feature-spec-ko.md)
+- [한글 QC 체크리스트](docs/rapidforensic-qc-checklist-ko.md)
+- [사용자 노출 기능 taxonomy](docs/rapidforensic-visible-forensic-feature-taxonomy.md)
+- [Windows 핵심 흐름 QC](docs/rapidforensic-core-flow-windows-qc-checklist.md)
+- [E01 workflow](docs/rapidtriage-e01-workflow.md)
+- [known limitations](docs/rapidtriage-known-limitations.md)
 
-The web server defaults to `127.0.0.1`. If you bind it to a non-localhost interface, use `--auth-token` unless you intentionally pass `--allow-remote-without-auth`.
-
-By default, the web run catalog is stored in the user state directory:
-
-- Windows: `%LOCALAPPDATA%\rapidtriage\runs.json`
-- macOS/Linux: `$XDG_STATE_HOME/rapidtriage/runs.json` or `~/.local/state/rapidtriage/runs.json`
-
-Set `RAPIDTRIAGE_STATE_PATH` to override this location.
-
-## Contracts
-
-Schema and sample references:
-
-- `manifest`: `rapidtriage/schemas/manifest.schema.json` + `docs/samples/rapidtriage-manifest.sample.json`
-- `docs`: `rapidtriage/schemas/docs.schema.json` + `docs/samples/rapidtriage-docs.sample.json`
-- `files`: `rapidtriage/schemas/files.schema.json` + `docs/samples/rapidtriage-files.sample.json`
-- `extract`: `rapidtriage/schemas/extract.schema.json` + `docs/samples/rapidtriage-extract.sample.json`
-- `artifacts`: `rapidtriage/schemas/artifacts.schema.json` + `docs/samples/rapidtriage-artifacts.sample.json`
-- `run-summary`: `rapidtriage/schemas/run-summary.schema.json` + `docs/samples/rapidtriage-run-summary.sample.json`
-- `timeline`: `rapidtriage/schemas/timeline.schema.json`
-- `indicators`: `rapidtriage/schemas/indicators.schema.json`
-- `compare`: `rapidtriage/schemas/compare.schema.json`
-- `carve`: bounded signature carving output written as `rapidtriage-carve.json`
-- `case`: `rapidtriage/schemas/case.schema.json`
-- `submission-manifest`: `rapidtriage/schemas/submission-manifest.schema.json`
-- `rule-engine`: `docs/rapidtriage-rule-engine.md` + `docs/samples/rapidtriage-rules.sample.yaml`
-
-Implemented:
-
-- `docs` searches text/config/log/data files, EML/MBOX email, bounded Outlook MSG/PST/OST strings, HTML/RTF, PDF, Office OpenXML (`docx`, `xlsx`, `pptx`), and OpenDocument (`odt`, `ods`, `odp`) bodies for keywords; it can also write an AXIOM-inspired processed-text inverted index sidecar for faster post-processing keyword pivots.
-- `files` performs metadata-only triage over names, paths, extensions, sizes, and mtimes, including document, archive, database, executable/script, email archive, AXIOM-aligned disk/VM/mobile image, memory dump, and vehicle export candidates.
-- `collect-plan` previews KAPE-style Windows/macOS collection targets by profile before scanning or copying evidence. It reports present/missing EventLogs, AccountUsage, BrowserHistory, EvidenceOfExecution, Persistence, RemoteAccess, FileSystemTimeline, and CloudAndSync paths without hashing the whole input root.
-- `collect-export` creates a profile-based evidence package from `collect-plan` targets. It defaults to a dry-run manifest, copies only with `--copy`, preserves source-relative paths under `OUTPUT_DIR/evidence`, records SHA256/source/destination/size/mtime, and skips broad inventory-only directories to avoid accidental whole-profile exports.
-- `cloud-collect` performs authorized cloud API collection from a JSON request manifest, writes raw responses plus SHA256/audit metadata, redacts tokens from outputs, and hands collected JSON to `artifacts --kind cloud-export` for normalization.
-- `vsc-compare` compares a current mounted/exported tree with one or more Volume Shadow Copy snapshot folders, surfacing deleted, added, and modified file candidates with optional SHA256 confirmation. `vsc-extract` copies selected deleted/modified snapshot-side files into an evidence package with source/destination SHA256 values.
-- `compare` compares two individual evidence/export files for A/B review, records MD5/SHA1/SHA256, field differences, and a bounded unified text diff when safe.
-- `carve` performs capped signature carving for JPEG, PNG, PDF, and ZIP candidates, preserving source path, byte offsets, SHA256, status, and optional extracted bytes under `OUTPUT_DIR/carved`.
-- `extract` copies selected `files` or `docs` results into an output directory with overwrite guards, size/count limits, hashes, and manifest/audit output.
-- `artifacts` exposes dedicated collectors for `browser`, `recent-files`, `eventlog`, `windows-os-account`, `windows-execution`, `windows-prefetch`, `windows-filesystem`, `windows-system`, `linux-system`, `macos-system`, `android-apk`, `mobile-export`, `media-image`, `memory-volatility`, and `cloud-export`. Browser artifacts include web usage pivots, source hashes, AI-service visit detections, and review-only AI question/answer transcript candidates with completeness scoring recovered from browser storage for common tools such as ChatGPT, Claude, Gemini, Perplexity, and Copilot; mobile exports normalize Cellebrite/XRY/GrayKey/AXIOM-style CSV/JSON rows into message, contact, call, app, file, and source-summary pivots; media rows include thumbnails, perceptual hashes, OCR sidecar/Korean language/translation validation metadata, and rule-based visual classification hints; Linux artifacts include shell history, SSH, auth log, auditd, dpkg package, Docker container, cron, and systemd pivots; macOS artifacts include TCC privacy permissions plus bounded Unified Log, Spotlight, FSEvents, and APFS snapshot-hint pivots; memory artifacts include Volatility imports plus bounded direct dump scans for redacted and checksum-validated BitLocker key candidates, process string candidates, suspicious strings, URLs, and IPs.
-- `taxonomy-audit` compares the target forensic artifact taxonomy against actual collectors, `artifact_type` rows, viewer markers, tests, and documentation so missing Maestro/WISDOM-style capabilities are explicit. Use `--strict` in CI when incomplete taxonomy targets should fail a build.
-- `indicators` summarizes URL, domain, IP, and hash indicators from completed run outputs, keeps source pointers, and can apply local `--rules` IOC matches without calling external threat-intelligence APIs.
-- `run` orchestrates `manifest`, `docs`, `files`, `extract`, `artifacts`, and `timeline` for `seizure`, `fraud`, `hacking`, and `recovery`; Windows-focused modes automatically include account, event log, execution, filesystem, recent-file, browser, and system-artifact collectors where relevant. `--resume` reuses valid existing stage JSON outputs in the same output directory and reruns missing or invalid stages.
-- Direct `.E01` input is supported for `run` when `ewfmount`, `mmls`, and `tsk_recover` are available; `rapidtriage-e01.json` records the extracted filesystem root and selected partition offset.
-- `search` searches a completed run across document/log text, file metadata, browser/web/AI-usage artifacts, indicator pivots, timeline rows, and optional OCR over image candidates.
-- `source-read` reads a file from a completed run's analysis root with bounded text or hex preview, optional MD5/SHA1/SHA256, audit sidecar, and explicit reportability caveats so analysts can verify a search/artifact hit against the underlying source file.
-- `timeline` merges `files`, `docs`, and `artifacts` JSON into chronological events and writes JSON plus markdown.
-- `case` stores bookmarks from implemented `files`, `docs`, `artifacts`, `timeline`, `indicators`, and `compare` outputs, validates source schemas, and persists stable `reference`, minimal `snapshot`, analyst `review` status, tags, notes, and report-candidate markers.
-- `submission-manifest` hashes report-candidate case evidence with MD5, SHA1, and SHA256, preserves review/bookmark context, skips unavailable or out-of-scope paths, and writes an audit sidecar.
-- `case-report` writes a Korean/English-friendly Markdown report draft with case metadata, analysis scope, reviewed evidence, IOC/indicator review pivots, A/B compare review pivots, hashes, skipped hash rows, conclusion text, and audit sidecar.
-- `web` starts a local FastAPI server with a browser UI for launching runs, importing existing outputs, searching evidence, previewing source files, reviewing hits, organizing case findings, downloading generated files, and reading reports.
-- `case-db` initializes the SQLite case database v1 with tables for cases, evidence sources, files, hashes, artifacts, events, indexed documents/FTS, reviews, audit events, report items, jobs, and stable citation ID sequences.
-- `case-search` searches imported SQLite case databases across FTS-indexed documents, file records, artifacts, indicator pivots, and timeline events while preserving citation IDs; hits include review-priority guidance and source-reference details, and artifact/indicator hits expose reviewable source paths plus key Windows and macOS metadata for event logs, PowerShell history, MFT/USN rows, browser history, AI-service usage, quarantine events, LaunchAgents, and IOC values.
-- `case-review` stores DB-backed review/verification marks, tags, notes, reviewer names, and report-candidate flags for individual search targets.
-- `case-db-report` exports DB-backed reviewed report candidates with review citations, target citations, source references, parser/hash context, and analyst review state.
-- `evidence` identifies folder, E01/Ex01, raw image, ISO/DMG/WIM/SWM, and virtual-disk source adapters and reports whether required external extraction tooling is available.
-- `benchmark` writes JSON and Markdown benchmark results with ingest/search latency, peak memory, output size, and result counts.
-- `validation` writes JSON and Markdown release-readiness checks, required command evidence, required documents, known limits, and operator-owned external responsibilities.
-- `case-catalog` stores user-facing case metadata, associated run outputs, and portable catalog archives.
-- `timeline-export` writes an AXIOM-style normalized timeline with stable event IDs and filters for date, source, event type, and review status.
-- `normalize` converts completed run outputs into stable model collections for files, artifacts, events, and indexed documents.
-- `bundle` creates a submission folder and zip with report, selected evidence list, hash manifest, audit JSON, and bundle integrity hashes.
-- `plugins` lists built-in plugin contracts and validates external `plugin.json` manifests for parsers, evidence adapters, viewers, and report exporters.
-- `report` rendering is assembled from a normalized run-report context built from run summary, indicators, artifacts, timeline, and extract outputs.
-- `rules` and IOC lookup are implemented additively; matching metadata is appended without breaking existing output shapes.
-
-Experimental:
-
-- `report` keeps an optional compare slot in markdown/context so run-level compare findings can be attached by future workflows.
-
-Planned:
-
-- any future case source beyond `files`, `docs`, `artifacts`, `timeline`, `indicators`, and `compare`
-
-## Integrity
-
-Every top-level `manifest`, `docs`, `files`, `collect-plan`, `collect-export`, `extract`, `artifacts`, `timeline`, `case`, and `run` execution writes audit data. Audit sidecars record command options, input file hashes where applicable, and generated output hashes. `collect-plan` intentionally skips whole-root inventory hashing so large evidence planning stays fast; run `manifest` when you need a full root fingerprint.
-
-Examples:
-
-- `rapidtriage-files.json` -> `rapidtriage-files.audit.json`
-- `rapidtriage-extract-manifest.json` -> `rapidtriage-extract-manifest.audit.json`
-- `rapidtriage-case.json` -> `rapidtriage-case.audit.json`
-- `run` writes `rapidtriage-run-audit.json` in the output directory.
-
-## Dashcam Tools
-
-Installed commands:
+기본 검증:
 
 ```bash
-dashcam-report
-dashcam-gui
-dashcam-rename
-dashcam-ingest
+.venv/bin/python -m unittest tests.test_rapidtriage_web_static tests.test_rapidtriage_artifact_taxonomy
+rapidtriage taxonomy-audit --strict
+rapidtriage commercial-readiness --json
 ```
 
-`dashcam-gui` opens the desktop GUI for source/destination selection and rename options.
+릴리스 전에는 Windows 11 E01 실케이스, macOS 폴더/마운트 케이스, 대형 SQLite/FTS case, source viewer, report bundle, dependency check, crash/cancel/retry까지 별도 QC가 필요합니다.
 
-## Verification
+## 중요한 제한사항
 
-```bash
-python -m unittest discover -s tests
-python -m build --wheel --sdist
-```
+- 현재 구현은 triage와 reviewer workflow 중심입니다.
+- 모든 parser가 상용 도구 수준의 native/full parser는 아닙니다.
+- EVTX, Registry, ESE, MFT, USN은 trusted-tool diff와 대형 fixture 검증이 더 필요합니다.
+- Python 기반 hot path는 대형 케이스에서 병목이 될 수 있으므로 Rust/Go/C++ sidecar 전환 대상이 남아 있습니다.
+- 암호화 볼륨, browser secret, cloud token, messenger key handling은 lawful authority와 audit log를 전제로 합니다.
+- GUI에 보이는 기능은 “사용 가능”을 뜻하며, “법정 제출 완성”이나 “상용급 검증 완료”를 뜻하지 않습니다.
+
+## 개발자 참고
+
+주요 디렉터리:
+
+| 경로 | 설명 |
+| --- | --- |
+| `rapidtriage/cli.py` | CLI entrypoint |
+| `rapidtriage/api/app.py` | FastAPI 로컬 API |
+| `rapidtriage/web/static/` | 로컬 웹 UI |
+| `rapidtriage/core/` | orchestration, case DB, search, validation, reporting |
+| `rapidtriage/artifacts/` | OS/app/cloud/media artifact collectors |
+| `rapidtriage/artifacts/windows/` | Windows 전용 parser/collector |
+| `docs/` | 사용자 문서, QC, validation, architecture |
+| `scripts/` | release, smoke, KakaoTalk, sandbox, evidence helper |
+| `tests/` | unit/static/QC tests |
+
+로컬 가상환경, 캐시, OMX 런타임 파일은 저장소에 커밋하지 않습니다. 재현 가능한 설치 명령과 문서/테스트/샘플 산출물만 Git에 남깁니다.

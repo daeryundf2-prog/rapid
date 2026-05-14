@@ -1,8 +1,0 @@
-#!/bin/sh
-'''exec' "/Users/shinyoohag/Documents/untitled folder/.venv/bin/python3" "$0" "$@"
-' '''
-import sys
-from dashcam_tools.rename import cli
-if __name__ == '__main__':
-    sys.argv[0] = sys.argv[0].removesuffix('.exe')
-    sys.exit(cli())
