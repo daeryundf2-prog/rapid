@@ -1333,3 +1333,21 @@ SQLite 기반 아티팩트는 브라우저 History, 카카오톡, Sticky Notes, 
 1. `docs-index-search`는 인덱스에 저장된 term postings만 검색한다. 문맥 preview, phrase/proximity, OCR/EVTX/Registry/artifact 통합 검색을 완성했다는 의미가 아니다.
 2. sidecar는 full extracted text를 저장하지 않는다. 보고서에 넣기 전에는 반드시 source viewer나 원본 문서 재검색으로 hit context를 확인해야 한다.
 3. 상용급 검색엔진으로 주장하려면 SQLite FTS/외부 기준도구와의 known-answer hit parity, million-row runtime, corruption recovery, GUI cursor resume 검증이 필요하다.
+
+## 44. 2026-05-14 구현 반영: 검색/SQLite 검증 기능의 capability registry 승격
+
+이전 라운드에서 source viewer, docs-index 검색, SQLite WAL preview 기능은 구현됐지만, 사용자 기능 카탈로그에서는 여전히 `document-content-search`나 `sqlite-table-viewer` 같은 큰 묶음 안에 묻힐 수 있었다. 분석관이 GUI에서 기능 존재 여부를 바로 판단해야 하므로, 실제로 누를 수 있는 세부 기능을 visible capability로 분리했다.
+
+추가/승격된 사용자 노출 기능:
+
+| 사용자 노출 기능 | capability id | 구현 내용 | 남은 상용급 보강 |
+| --- | --- | --- | --- |
+| Docs-index hit citation/review 연결 | `docs-index-citation-review` | `docs-index-review-note-citation-v1`, matched terms, result hash, `bookmark-source-mapping-required` blocker를 capability registry와 GUI catalog에서 검색 가능하게 했다. | source viewer E2E clickthrough, 원본 문서 재검색 hit parity |
+| 현재 파일 검색 cursor/resume | `current-file-search-resume` | `source-search-full-cursor-scan-contract-v1`, SQLite/file resume token, GUI continue 버튼을 기능 목록에서 직접 찾을 수 있게 했다. | 100k/1M/10M row runtime, resume cursor 반복 E2E |
+| SQLite WAL/SHM sidecar preview | `sqlite-sidecar-wal-preview` | `/source-sqlite-wal-preview`, `sqlite-sidecar-preview`, `wal-shm-journal-sidecar-status`를 SQLite viewer 기능으로 독립 노출했다. | trusted WAL parser diff, deleted-row recovery, checkpoint 전후 fixture |
+
+검증 포인트:
+
+1. `tests/test_rapidtriage_web_static.py::test_hidden_forensic_capabilities_are_exposed_as_visible_steps`가 새 capability id와 핵심 signal term이 정적 GUI catalog에 남아 있는지 검증한다.
+2. `tests/test_rapidtriage_web_static.py::test_visible_forensic_capability_ids_stay_synced_between_api_and_gui`가 Python API registry의 모든 capability id가 GUI fallback config에도 존재하는지 검증한다.
+3. 이 변경은 “기능 노출/탐색성” 보강이다. 검증 corpus나 trusted-tool diff 없이 상용급 완료로 주장하지 않는다.
