@@ -29,6 +29,12 @@ from rapidtriage.core.run import (
     parallel_parser_scheduler_assessment,
     parser_crash_isolation_assessment,
 )
+from rapidtriage.core.run_workflow import (
+    RUN_WORKFLOW_STAGE_ORDER,
+    build_run_workflow_contract,
+    stage_for_output_name,
+    stage_for_step_name,
+)
 from rapidtriage.core.silent_failure import build_silent_failure_report
 from tests.windows_artifact_fixtures import build_windows_artifact_fixture
 
@@ -313,6 +319,46 @@ class RapidTriageRunTests(unittest.TestCase):
             self.assertIn("Processing decisions / skipped, capped, reused", report_text)
             self.assertIn("Read-only mode was enabled", report_text)
             self.assertIn("docs-extract` status=`skipped", report_text)
+
+    def test_run_workflow_contract_maps_internal_steps_to_analyst_flow(self) -> None:
+        steps = [
+            {"name": "manifest", "status": "completed", "output": "/case/manifest.json", "warning_level": "none"},
+            {"name": "docs-extract", "status": "completed", "output": "/case/extract.json", "warning_level": "none"},
+            {"name": "artifacts-eventlog", "status": "completed", "output": "/case/eventlog.json", "warning_level": "none"},
+            {"name": "timeline", "status": "completed", "output": "/case/timeline.json", "warning_level": "none"},
+            {
+                "name": "silent-failure-detection",
+                "status": "completed",
+                "output": "inline",
+                "warning_level": "notice",
+                "warning_messages": ["eventlog target exists but zero rows were collected"],
+            },
+        ]
+        outputs = {
+            "fingerprint": Path("/case/fingerprint.json"),
+            "docs_extract_manifest": Path("/case/docs-extract.json"),
+            "artifacts_eventlog": Path("/case/eventlog.json"),
+            "timeline": Path("/case/timeline.json"),
+            "report": Path("/case/report.md"),
+        }
+
+        contract = build_run_workflow_contract(
+            steps=steps,
+            outputs=outputs,
+            safety={"read_only": False, "resume": False},
+            source={"type": "e01", "source_path": "/evidence/case.E01", "analysis_root": "/case/root"},
+        )
+
+        self.assertEqual(contract["profile_version"], "run-workflow-contract-v1")
+        self.assertEqual(contract["stage_order"], list(RUN_WORKFLOW_STAGE_ORDER))
+        self.assertEqual(contract["stage_lookup"]["ingest"], "completed")
+        self.assertEqual(contract["stage_lookup"]["review"], "warning")
+        self.assertEqual(stage_for_step_name("artifacts-eventlog"), "parse")
+        self.assertEqual(stage_for_output_name("artifacts_eventlog"), "parse")
+        self.assertRegex(str(contract["stage_hash"]), r"^[0-9a-f]{64}$")
+        review_stage = next(stage for stage in contract["stages"] if stage["id"] == "review")
+        self.assertIn("silent-failure-detection", review_stage["step_names"])
+        self.assertGreaterEqual(review_stage["warning_count"], 1)
 
     def test_silent_failure_detector_flags_target_files_without_artifacts(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -1226,6 +1272,14 @@ class RapidTriageRunTests(unittest.TestCase):
             self.assertIn("silent_failure_detection", summary_payload)
             self.assertIn("silent_failure_risk", summary_payload["summary"])
             self.assertIn("silent-failure-detector", {step["name"] for step in summary_payload["steps"]})
+            self.assertEqual(summary_payload["workflow"]["profile_version"], "run-workflow-contract-v1")
+            self.assertEqual(summary_payload["workflow"]["stage_order"], list(RUN_WORKFLOW_STAGE_ORDER))
+            self.assertTrue(summary_payload["workflow"]["gui_primary_flow"])
+            self.assertEqual(summary_payload["workflow"]["stage_count"], 6)
+            self.assertIn("parse", summary_payload["workflow"]["stage_lookup"])
+            self.assertIn("report", summary_payload["workflow"]["stage_lookup"])
+            workflow_stage_ids = {stage["id"] for stage in summary_payload["workflow"]["stages"]}
+            self.assertEqual(workflow_stage_ids, set(RUN_WORKFLOW_STAGE_ORDER))
             self.assertGreaterEqual(timeline_payload["summary"]["event_count"], 1)
             self.assertIn("recent_file_candidates", summary_payload["highlights"])
             self.assertIn("large_file_candidates", summary_payload["highlights"])

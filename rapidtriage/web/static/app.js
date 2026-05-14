@@ -787,15 +787,26 @@ function caseHeroMetric(label, value) {
 
 function renderCoreEvidenceWorkflow(run) {
   const payload = run.summary || {};
-  const steps = typeof CORE_EVIDENCE_WORKFLOW !== "undefined" ? CORE_EVIDENCE_WORKFLOW : [];
+  const contractStages = Array.isArray(payload.workflow?.stages) ? payload.workflow.stages : [];
+  const steps = contractStages.length
+    ? contractStages.map((stage, index) => ({
+      id: stage.id,
+      number: String(index + 1),
+      label: stage.label || stage.id,
+      title: stage.title || stage.id,
+      tab: stage.gui?.primary_tab || "summary",
+      action: stage.gui?.next_action || "Open",
+    }))
+    : (typeof CORE_EVIDENCE_WORKFLOW !== "undefined" ? CORE_EVIDENCE_WORKFLOW : []);
   if (!steps.length) return "";
   const statuses = coreEvidenceWorkflowStatuses(payload);
   return `
     <section class="core-evidence-workflow completed-core-workflow" aria-label="Core evidence workflow" data-testid="core-evidence-workflow">
       ${steps.map((step) => {
         const status = statuses[step.id] || {};
+        const stateClass = status.ready ? (status.warning ? "warning" : "done") : (status.blocked ? "blocked" : "pending");
         return `
-          <button class="core-workflow-step ${status.ready ? "done" : "pending"}" type="button" data-open-tab="${escapeHtml(step.tab || "summary")}" data-core-workflow-step="${escapeHtml(step.id)}" data-testid="core-workflow-step-${escapeHtml(step.id)}">
+          <button class="core-workflow-step ${stateClass}" type="button" data-open-tab="${escapeHtml(step.tab || "summary")}" data-core-workflow-step="${escapeHtml(step.id)}" data-testid="core-workflow-step-${escapeHtml(step.id)}">
             <span class="sr-only">${escapeHtml(`${step.label || ""} ${status.state || ""}`)}</span>
             <span class="core-workflow-number">${escapeHtml(step.number || "")}</span>
             <span class="core-workflow-body">
@@ -815,6 +826,19 @@ function renderCoreEvidenceWorkflow(run) {
 }
 
 function coreEvidenceWorkflowStatuses(payload) {
+  const workflowStages = Array.isArray(payload.workflow?.stages) ? payload.workflow.stages : [];
+  if (workflowStages.length) {
+    return Object.fromEntries(workflowStages.map((stage) => {
+      const warnings = Number(stage.warning_count || 0);
+      return [stage.id, {
+        ready: Boolean(stage.ready),
+        warning: stage.status === "warning" || warnings > 0,
+        blocked: stage.status === "blocked",
+        state: runWorkflowStatusLabel(stage.status || "pending"),
+        detail: `${(stage.step_names || []).length} step(s) · ${(stage.output_keys || []).length} output(s) · ${warnings} warning(s)`,
+      }];
+    }));
+  }
   const summary = payload.summary || {};
   const outputs = payload.outputs || {};
   const artifactKinds = Object.keys(payload.artifacts || {});
@@ -844,6 +868,13 @@ function coreEvidenceWorkflowStatuses(payload) {
       detail: `${formatNumber(searchable)}개 문서/파일/타임라인 row를 전체 검색 대상으로 사용`,
     },
   };
+}
+
+function runWorkflowStatusLabel(status) {
+  if (status === "completed") return "완료";
+  if (status === "warning") return "경고";
+  if (status === "blocked") return "차단";
+  return "대기";
 }
 
 function normalizeRunPayload(source) {
@@ -1413,6 +1444,7 @@ function renderProcessingSummary(payload) {
         <span>Max extract: ${caps.max_extract_size_bytes ? formatBytes(caps.max_extract_size_bytes) : "uncapped"}</span>
         <span>Max files: ${caps.max_file_count ? formatNumber(caps.max_file_count) : "uncapped"}</span>
       </div>
+      ${renderRunWorkflowContract(payload)}
       ${warnings.length ? `
         <div class="processing-warning-list">
           ${warnings.slice(0, 8).map((item) => `
@@ -1425,6 +1457,31 @@ function renderProcessingSummary(payload) {
       ` : '<p class="empty-state">No processing warnings.</p>'}
       <div class="processing-step-grid">
         ${steps.map((step) => renderProcessingStep(step)).join("")}
+      </div>
+    </section>
+  `;
+}
+
+function renderRunWorkflowContract(payload) {
+  const workflow = payload.workflow || {};
+  const stages = Array.isArray(workflow.stages) ? workflow.stages : [];
+  if (!stages.length) return "";
+  return `
+    <section class="run-workflow-contract" data-testid="run-workflow-contract" aria-label="Run workflow contract">
+      <div>
+        <p class="eyebrow">single-case workflow contract</p>
+        <h3>${escapeHtml(workflow.source_type || "evidence")} · ${formatNumber(workflow.completed_stage_count || 0)}/${formatNumber(workflow.stage_count || stages.length)} stage(s) ready</h3>
+        <p>입력, 추출, 파싱, 인덱싱, 리뷰, 보고서가 같은 산출물 계약으로 연결됩니다.</p>
+      </div>
+      <div class="run-workflow-stage-grid">
+        ${stages.map((stage) => `
+          <button class="run-workflow-stage ${escapeHtml(stage.status || "pending")}" type="button" data-open-tab="${escapeHtml(stage.gui?.primary_tab || "summary")}" data-workflow-stage="${escapeHtml(stage.id || "")}">
+            <strong>${escapeHtml(stage.label || stage.id || "stage")}</strong>
+            <span>${escapeHtml(runWorkflowStatusLabel(stage.status || "pending"))}</span>
+            <small>${escapeHtml(stage.title || "")}</small>
+            <em>${formatNumber((stage.step_names || []).length)} step(s) · ${formatNumber((stage.output_keys || []).length)} output(s)</em>
+          </button>
+        `).join("")}
       </div>
     </section>
   `;

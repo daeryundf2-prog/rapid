@@ -375,6 +375,7 @@ Current run modes:
 - `profile`
 - `outputs`
 - `steps`
+- `workflow`
 - `processing`
 - `summary`
 - `highlights`
@@ -399,6 +400,8 @@ Current run modes:
 - reused output count and reused step names when `run --resume` accepts existing stage JSON
 - warning count and highest warning level
 - per-step warning messages for empty outputs, read-only skips, capped extraction, or missing source paths
+
+`workflow` records the GUI-facing single-case pipeline contract (`run-workflow-contract-v1`). It maps low-level run steps into six analyst stages: `ingest`, `extract`, `parse`, `index`, `review`, and `report`. Each stage records status (`completed`, `warning`, `blocked`, or `pending`), contributing step names, output keys, warning messages, and the primary GUI tab/action. The web workbench uses this field to show whether evidence selection, extraction, artifact parsing, keyword/search indexing, review handoff, and report export are actually connected instead of inferring readiness from scattered counters.
 
 `summary` contains aggregated counters for:
 

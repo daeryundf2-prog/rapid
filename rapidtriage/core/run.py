@@ -46,6 +46,7 @@ from .indicators import build_indicator_summary
 from .input_root import InputRoot, derive_child_input_root, resolve_input_root
 from .reporting import build_run_report_context, render_run_markdown_report
 from .rules import RuleSet, summarize_payload_annotations
+from .run_workflow import build_run_workflow_contract
 from .silent_failure import build_silent_failure_report
 from .timeline import build_timeline_report, run_timeline
 from .vsc import build_vsc_image_workflow_handoff
@@ -3242,6 +3243,12 @@ def build_run_summary(
     )
     step_rows.append(build_silent_failure_step(silent_failure))
     processing_summary = build_processing_summary(step_rows, safety=safety)
+    workflow_contract = build_run_workflow_contract(
+        steps=step_rows,
+        outputs=outputs,
+        safety=safety,
+        source=source,
+    )
 
     payload = {
         "command": "run",
@@ -3272,6 +3279,7 @@ def build_run_summary(
         },
         "outputs": {name: str(path) for name, path in outputs.items()},
         "steps": step_rows,
+        "workflow": workflow_contract,
         "processing": processing_summary,
         "silent_failure_detection": silent_failure,
         "summary": {

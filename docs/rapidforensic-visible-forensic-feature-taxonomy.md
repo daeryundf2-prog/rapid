@@ -1016,3 +1016,30 @@ RecentDocs와 file dialog MRU는 이미 `registry-user-activity`로 정규화되
 1. pagefile/hiberfil/memory 문자열은 stale, fragmented, copied cache일 수 있어 단독 방문 증거가 아니다.
 2. URL query preview는 분석 편의상 제한 길이로 노출되며, 원문 검색어는 report inclusion 전에 민감정보 검토가 필요하다.
 3. 상용급 판정에는 process owner, browser DB, DNS/cache, WebCacheV01, acquisition timestamp와의 상관분석이 필요하다.
+
+## 32. 2026-05-14 구조 반영: Run Workflow Contract 추가
+
+이전 GUI는 “분석/추출/검색” 3개 핵심 흐름을 화면에서만 추정했다. 이번 구조정리에서는 `rapidtriage-run-summary.json`에 `workflow.profile_version=run-workflow-contract-v1`을 추가하여, 실행 산출물 자체가 `ingest -> extract -> parse -> index -> review -> report` 상태를 증명하게 했다.
+
+GUI 노출 계약:
+
+| stage | GUI primary tab | 의미 | 상태 판단 근거 |
+| --- | --- | --- | --- |
+| `ingest` | Summary | E01/RAW/VM/폴더 입력, source/analysis root, fingerprint/checkpoint | `source`, `fingerprint`, image metadata outputs |
+| `extract` | Files | 문서/파일 후보 추출과 해시 manifest | `docs-extract`, `files-extract` step/output |
+| `parse` | Artifacts | manifest, docs/files scan, 전용 artifact collector | `manifest`, `docs`, `files`, `artifacts-*` |
+| `index` | Search | docs index, timeline, indicators, FTS 최적화 | `docs-index`, `timeline`, `indicators` |
+| `review` | Review | silent-failure, parser crash, memory cap, preview sandbox handoff | warning/zero-row/reused-output evidence |
+| `report` | Report | run summary/report/timeline report | `summary`, `report`, `timeline_report` |
+
+검증 포인트:
+
+1. `tests/test_rapidtriage_run.py::test_run_workflow_contract_maps_internal_steps_to_analyst_flow`가 내부 step/output을 6개 사용자 stage로 매핑하고 warning stage를 검증한다.
+2. `tests/test_rapidtriage_run.py::assert_run_mode_outputs`가 모든 run mode의 summary에 workflow contract와 stage lookup이 포함되는지 확인한다.
+3. GUI는 `renderCoreEvidenceWorkflow`와 `renderRunWorkflowContract`에서 이 계약을 읽어 단일 케이스 흐름을 표시한다.
+
+중요한 제한:
+
+1. 이 구조는 workflow visibility contract이며, 각 parser의 상용급 정확도를 자동으로 보장하지 않는다.
+2. E01/RAW/VM 입력의 dependency preflight와 실제 mount/extract 성공 여부는 기존 image workflow manifest와 함께 봐야 한다.
+3. 대용량 검증은 stage contract만으로 충분하지 않고 cursor API, fixture corpus, trusted-tool diff 결과가 별도로 필요하다.

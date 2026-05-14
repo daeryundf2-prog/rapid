@@ -13,6 +13,7 @@
     "safety",
     "outputs",
     "steps",
+    "workflow",
     "processing",
     "silent_failure_detection",
     "summary",
@@ -310,6 +311,186 @@
           }
         },
         "additionalProperties": true
+      }
+    },
+    "workflow": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "profile_version",
+        "stage_order",
+        "stage_count",
+        "completed_stage_count",
+        "warning_stage_count",
+        "blocked_stage_count",
+        "pending_stage_count",
+        "gui_primary_flow",
+        "source_type",
+        "source_path",
+        "analysis_root",
+        "read_only",
+        "resume",
+        "stage_hash",
+        "stage_lookup",
+        "stages"
+      ],
+      "properties": {
+        "profile_version": {
+          "const": "run-workflow-contract-v1"
+        },
+        "stage_order": {
+          "type": "array",
+          "items": {
+            "enum": [
+              "ingest",
+              "extract",
+              "parse",
+              "index",
+              "review",
+              "report"
+            ]
+          }
+        },
+        "stage_count": {
+          "type": "integer"
+        },
+        "completed_stage_count": {
+          "type": "integer"
+        },
+        "warning_stage_count": {
+          "type": "integer"
+        },
+        "blocked_stage_count": {
+          "type": "integer"
+        },
+        "pending_stage_count": {
+          "type": "integer"
+        },
+        "gui_primary_flow": {
+          "type": "boolean"
+        },
+        "source_type": {
+          "type": "string"
+        },
+        "source_path": {
+          "type": "string"
+        },
+        "analysis_root": {
+          "type": "string"
+        },
+        "read_only": {
+          "type": "boolean"
+        },
+        "resume": {
+          "type": "boolean"
+        },
+        "stage_hash": {
+          "type": "string"
+        },
+        "stage_lookup": {
+          "type": "object",
+          "additionalProperties": {
+            "enum": [
+              "completed",
+              "warning",
+              "blocked",
+              "pending"
+            ]
+          }
+        },
+        "stages": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "id",
+              "label",
+              "title",
+              "status",
+              "ready",
+              "step_names",
+              "output_keys",
+              "reused",
+              "warning_count",
+              "warning_messages",
+              "gui"
+            ],
+            "properties": {
+              "id": {
+                "enum": [
+                  "ingest",
+                  "extract",
+                  "parse",
+                  "index",
+                  "review",
+                  "report"
+                ]
+              },
+              "label": {
+                "type": "string"
+              },
+              "title": {
+                "type": "string"
+              },
+              "status": {
+                "enum": [
+                  "completed",
+                  "warning",
+                  "blocked",
+                  "pending"
+                ]
+              },
+              "ready": {
+                "type": "boolean"
+              },
+              "step_names": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "output_keys": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "reused": {
+                "type": "boolean"
+              },
+              "warning_count": {
+                "type": "integer"
+              },
+              "warning_messages": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "gui": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "primary_tab",
+                  "next_action",
+                  "large_case_note"
+                ],
+                "properties": {
+                  "primary_tab": {
+                    "type": "string"
+                  },
+                  "next_action": {
+                    "type": "string"
+                  },
+                  "large_case_note": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        }
       }
     },
     "processing": {
