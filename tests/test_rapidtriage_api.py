@@ -280,6 +280,65 @@ class RapidTriageApiTests(unittest.TestCase):
         self.assertEqual(getattr(raised.exception, "status_code", None), 400)
         self.assertEqual(getattr(raised.exception, "detail", ""), "file_resume_token is missing resume state")
 
+    def test_source_preview_mbox_discloses_bounded_parse_window(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            mbox_path = Path(temp) / "mailbox.mbox"
+            first = (
+                b"From first@example.test Mon Jan 01 00:00:00 2026\n"
+                b"From: first@example.test\n"
+                b"To: analyst@example.test\n"
+                b"Subject: First bounded message\n"
+                b"\n"
+                b"needle in first body\n"
+            )
+            second = (
+                b"From second@example.test Mon Jan 01 00:01:00 2026\n"
+                b"From: second@example.test\n"
+                b"To: analyst@example.test\n"
+                b"Subject: Second outside cap\n"
+                b"\n"
+                + (b"x" * 256)
+            )
+            mbox_path.write_bytes(first + second)
+
+            with patch("rapidtriage.api.app.EMAIL_PREVIEW_MAX_BYTES", len(first) + 16):
+                payload = build_source_preview("run-1", mbox_path)
+
+        self.assertEqual(payload["preview_type"], "email")
+        self.assertTrue(payload["truncated"])
+        self.assertIn("partial", payload["message"])
+        diagnostics = payload["email"]["parse_diagnostics"]
+        self.assertEqual(diagnostics["parse_mode"], "bounded-mbox")
+        self.assertTrue(diagnostics["source_truncated"])
+        self.assertLessEqual(diagnostics["bytes_read"], len(first) + 16)
+        self.assertGreaterEqual(payload["email"]["message_count"], 1)
+        self.assertEqual(payload["email"]["messages"][0]["subject"], "First bounded message")
+
+    def test_source_preview_large_eml_limits_message_parse_size(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            eml_path = Path(temp) / "large.eml"
+            eml_path.write_bytes(
+                b"From: sender@example.test\n"
+                b"To: analyst@example.test\n"
+                b"Subject: Large bounded EML\n"
+                b"\n"
+                + (b"body " * 128)
+            )
+
+            with (
+                patch("rapidtriage.api.app.EMAIL_PREVIEW_MAX_BYTES", 256),
+                patch("rapidtriage.api.app.EMAIL_PREVIEW_MESSAGE_MAX_BYTES", 128),
+            ):
+                payload = build_source_preview("run-1", eml_path)
+
+        self.assertEqual(payload["preview_type"], "email")
+        self.assertTrue(payload["truncated"])
+        diagnostics = payload["email"]["parse_diagnostics"]
+        self.assertEqual(diagnostics["parse_mode"], "bounded-eml")
+        self.assertTrue(diagnostics["source_truncated"])
+        self.assertEqual(diagnostics["message_size_truncated_count"], 1)
+        self.assertEqual(payload["email"]["messages"][0]["subject"], "Large bounded EML")
+
     def test_source_search_rejects_oversized_docx_member_before_expanding(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
             docx_path = Path(temp) / "oversized.docx"

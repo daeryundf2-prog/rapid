@@ -70,6 +70,9 @@ XML_PREVIEW_NODE_LIMIT = 80
 EMAIL_PREVIEW_MESSAGE_LIMIT = 10
 EMAIL_BODY_PREVIEW_CHARS = 4000
 EMAIL_ATTACHMENT_EXPORT_MAX_BYTES = 256 * 1024
+EMAIL_PREVIEW_MAX_BYTES = 25 * 1024 * 1024
+EMAIL_PREVIEW_MESSAGE_MAX_BYTES = 5 * 1024 * 1024
+DOCUMENT_PREVIEW_MAX_BYTES = 25 * 1024 * 1024
 IMAGE_GALLERY_MAX_ITEMS = 200
 IMAGE_GALLERY_DEFAULT_LIMIT = 50
 SOURCE_OCR_QUEUE_DEFAULT_MAX_ITEMS = 200
@@ -2780,7 +2783,13 @@ def build_source_preview(run_id: str, source_path: Path, *, max_chars: int = 200
     text = ""
     if suffix in SUPPORTED_DOC_EXTS:
         try:
-            text = extract_text(source_path, suffix.lstrip("."))
+            text = extract_text(
+                source_path,
+                suffix.lstrip("."),
+                max_input_bytes=DOCUMENT_PREVIEW_MAX_BYTES,
+                max_archive_member_bytes=DOCUMENT_PREVIEW_MAX_BYTES,
+                max_archive_total_bytes=DOCUMENT_PREVIEW_MAX_BYTES,
+            )
         except Exception as exc:
             payload["message"] = f"Text extraction failed: {exc}"
             return payload
@@ -4283,6 +4292,10 @@ def source_viewer_limitations(source_path: Path, *, suffix: str, mime_type: str,
         limitations.append("SQLite previews show bounded tables/rows; use file search or a dedicated database tool for full table review.")
     if suffix in {".json", ".jsonl", ".ndjson", ".xml"} and source_path.stat().st_size > STRUCTURED_PREVIEW_MAX_BYTES:
         limitations.append("Structured parsing is skipped for very large JSON/XML files; use current-file search or external tooling.")
+    if suffix in SUPPORTED_DOC_EXTS and source_path.stat().st_size > DOCUMENT_PREVIEW_MAX_BYTES:
+        limitations.append("Document text extraction is bounded for preview; use source search resume or an external parser for full-document validation.")
+    if suffix in {".eml", ".mbox"} and source_path.stat().st_size > EMAIL_PREVIEW_MAX_BYTES:
+        limitations.append("Email preview is bounded; only the first parse window is shown until mailbox-specific pagination is implemented.")
     if source_path.stat().st_size > max_chars:
         limitations.append(f"Inline text snippets are capped near {max_chars} characters.")
     return limitations
@@ -4290,7 +4303,8 @@ def source_viewer_limitations(source_path: Path, *, suffix: str, mime_type: str,
 
 def is_probably_binary(source_path: Path, *, sample_size: int = 4096) -> bool:
     try:
-        sample = source_path.read_bytes()[:sample_size]
+        with source_path.open("rb") as handle:
+            sample = handle.read(sample_size)
     except OSError:
         return False
     if not sample:
@@ -4589,7 +4603,7 @@ def local_xml_name(value: str) -> str:
 
 def build_email_preview(source_path: Path, suffix: str, *, run_id: str | None = None) -> Dict[str, object]:
     try:
-        messages = read_email_messages(source_path, suffix)
+        messages, diagnostics = read_email_messages_with_diagnostics(source_path, suffix)
     except OSError as exc:
         return {
             "preview_type": "binary",
@@ -4612,15 +4626,31 @@ def build_email_preview(source_path: Path, suffix: str, *, run_id: str | None = 
         attachment_profile=attachment_profile,
     )
     text = "\n\n".join(item["body_preview"] for item in summaries if item.get("body_preview"))
+    parse_truncated = bool(
+        diagnostics.get("source_truncated")
+        or diagnostics.get("message_limit_reached")
+        or diagnostics.get("message_size_truncated_count")
+    )
     return {
         "preview_type": "email",
-        "message": "Email structured preview is available.",
+        "message": (
+            "Email structured preview is partial because bounded parsing limits were reached."
+            if parse_truncated
+            else "Email structured preview is available."
+        ),
         "text": text[:20000],
-        "truncated": len(messages) >= EMAIL_PREVIEW_MESSAGE_LIMIT or len(text) > 20000,
-        "viewer_metadata": structured_viewer_metadata("email", "bounded-email-parse", "available"),
+        "truncated": parse_truncated or len(text) > 20000,
+        "viewer_metadata": structured_viewer_metadata(
+            "email",
+            "bounded-email-parse",
+            "partial" if parse_truncated else "available",
+        ),
         "email": {
             "message_count": len(summaries),
             "message_limit": EMAIL_PREVIEW_MESSAGE_LIMIT,
+            "parse_diagnostics": diagnostics,
+            "max_input_bytes": EMAIL_PREVIEW_MAX_BYTES,
+            "max_message_bytes": EMAIL_PREVIEW_MESSAGE_MAX_BYTES,
             "messages": summaries,
             "attachment_package_profile": attachment_profile,
             "threads": threads,
@@ -4628,7 +4658,7 @@ def build_email_preview(source_path: Path, suffix: str, *, run_id: str | None = 
             "email_conversation_manifest": conversation_manifest,
             "email_conversation_manifest_hash": conversation_manifest["manifest_hash"],
             "thread_count": len(threads),
-            "truncated": len(messages) >= EMAIL_PREVIEW_MESSAGE_LIMIT,
+            "truncated": parse_truncated,
             "email_conversation_viewer_assessment": source_viewer_component_assessment(
                 VIEWER_WORKFLOW_GAP_IDS["email"],
                 "email-conversation-viewer",
@@ -4662,6 +4692,11 @@ def build_email_preview(source_path: Path, suffix: str, *, run_id: str | None = 
                     "native-pst-ost-msg-conversation-view-not-implemented",
                     "deleted-mailbox-item-recovery-not-implemented",
                     "attachment-content-export-is-bounded-and-needs-trusted-mailbox-validation",
+                    *(
+                        ["email-source-preview-is-partial-requires-resume-or-mailbox-export-validation"]
+                        if parse_truncated
+                        else []
+                    ),
                     "message-id-graph-validation-required",
                     EMAIL_VIEWER_TRUSTED_DIFF_BLOCKER,
                 ],
@@ -4675,6 +4710,7 @@ def build_email_preview(source_path: Path, suffix: str, *, run_id: str | None = 
                     "attachment_inventory": True,
                     "attachment_package_endpoint": True,
                     "attachment_content_export_max_bytes": EMAIL_ATTACHMENT_EXPORT_MAX_BYTES,
+                    "email_parse_diagnostics": diagnostics,
                     "email_conversation_manifest_hash": conversation_manifest["manifest_hash"],
                     "email_thread_hash_count": conversation_manifest["thread_hash_count"],
                     "email_message_hash_count": conversation_manifest["message_hash_count"],
@@ -6721,23 +6757,81 @@ def read_wav_metadata(source_path: Path) -> dict[str, object]:
         return {}
 
 
+def read_bounded_email_bytes(source_path: Path, *, max_bytes: int | None = None) -> tuple[bytes, dict[str, object]]:
+    max_bytes = EMAIL_PREVIEW_MAX_BYTES if max_bytes is None else max_bytes
+    stat = source_path.stat()
+    with source_path.open("rb") as handle:
+        raw = handle.read(max_bytes + 1)
+    source_truncated = len(raw) > max_bytes or stat.st_size > max_bytes
+    if len(raw) > max_bytes:
+        raw = raw[:max_bytes]
+    diagnostics = {
+        "source_size": stat.st_size,
+        "max_input_bytes": max_bytes,
+        "source_truncated": source_truncated,
+        "bytes_read": len(raw),
+    }
+    return raw, diagnostics
+
+
 def parse_mbox_messages(source_path: Path) -> list[email.message.EmailMessage]:
-    raw = source_path.read_bytes()
-    chunks = re.split(rb"(?m)^From .*$", raw)
-    messages = []
-    for chunk in chunks:
-        if not chunk.strip():
-            continue
-        messages.append(email.message_from_bytes(chunk, policy=policy.default))
-        if len(messages) >= EMAIL_PREVIEW_MESSAGE_LIMIT:
-            break
+    messages, _diagnostics = parse_mbox_messages_with_diagnostics(source_path)
     return messages
 
 
-def read_email_messages(source_path: Path, suffix: str) -> list[email.message.EmailMessage]:
+def parse_mbox_messages_with_diagnostics(source_path: Path) -> tuple[list[email.message.EmailMessage], dict[str, object]]:
+    raw, diagnostics = read_bounded_email_bytes(source_path)
+    chunks = re.split(rb"(?m)^From .*$", raw)
+    messages = []
+    message_size_truncated_count = 0
+    for chunk in chunks:
+        if not chunk.strip():
+            continue
+        parse_chunk = chunk.lstrip(b"\r\n")
+        if len(parse_chunk) > EMAIL_PREVIEW_MESSAGE_MAX_BYTES:
+            parse_chunk = parse_chunk[:EMAIL_PREVIEW_MESSAGE_MAX_BYTES]
+            message_size_truncated_count += 1
+        messages.append(email.message_from_bytes(parse_chunk, policy=policy.default))
+        if len(messages) >= EMAIL_PREVIEW_MESSAGE_LIMIT:
+            break
+    diagnostics.update(
+        {
+            "parse_mode": "bounded-mbox",
+            "message_limit": EMAIL_PREVIEW_MESSAGE_LIMIT,
+            "message_limit_reached": len(messages) >= EMAIL_PREVIEW_MESSAGE_LIMIT,
+            "max_message_bytes": EMAIL_PREVIEW_MESSAGE_MAX_BYTES,
+            "message_size_truncated_count": message_size_truncated_count,
+            "parsed_message_count": len(messages),
+        }
+    )
+    return messages, diagnostics
+
+
+def read_email_messages_with_diagnostics(source_path: Path, suffix: str) -> tuple[list[email.message.EmailMessage], dict[str, object]]:
     if suffix == ".eml":
-        return [email.message_from_bytes(source_path.read_bytes(), policy=policy.default)]
-    return parse_mbox_messages(source_path)
+        raw, diagnostics = read_bounded_email_bytes(source_path)
+        parse_raw = raw
+        message_truncated = False
+        if len(parse_raw) > EMAIL_PREVIEW_MESSAGE_MAX_BYTES:
+            parse_raw = parse_raw[:EMAIL_PREVIEW_MESSAGE_MAX_BYTES]
+            message_truncated = True
+        diagnostics.update(
+            {
+                "parse_mode": "bounded-eml",
+                "message_limit": 1,
+                "message_limit_reached": False,
+                "max_message_bytes": EMAIL_PREVIEW_MESSAGE_MAX_BYTES,
+                "message_size_truncated_count": 1 if diagnostics.get("source_truncated") or message_truncated else 0,
+                "parsed_message_count": 1,
+            }
+        )
+        return [email.message_from_bytes(parse_raw, policy=policy.default)], diagnostics
+    return parse_mbox_messages_with_diagnostics(source_path)
+
+
+def read_email_messages(source_path: Path, suffix: str) -> list[email.message.EmailMessage]:
+    messages, _diagnostics = read_email_messages_with_diagnostics(source_path, suffix)
+    return messages
 
 
 def summarize_email_message(message: email.message.EmailMessage, index: int) -> dict[str, object]:
@@ -6840,11 +6934,16 @@ def build_email_attachment_package(
     include_content: bool,
 ) -> Dict[str, object]:
     try:
-        messages = read_email_messages(source_path, suffix)
+        messages, diagnostics = read_email_messages_with_diagnostics(source_path, suffix)
     except OSError as exc:
         raise HTTPException(status_code=400, detail=f"Email attachment package failed: {exc}") from exc
     if message_index > len(messages):
-        raise HTTPException(status_code=404, detail="message_index not found")
+        detail = (
+            "message_index not found within bounded email parse"
+            if diagnostics.get("source_truncated") or diagnostics.get("message_limit_reached")
+            else "message_index not found"
+        )
+        raise HTTPException(status_code=404, detail=detail)
     message = messages[message_index - 1]
     attachments: list[tuple[email.message.EmailMessage, bytes]] = []
     for part in message.walk():
@@ -6893,6 +6992,7 @@ def build_email_attachment_package(
         "content_status": content_status,
         "content_base64": content_b64,
         "max_inline_content_bytes": EMAIL_ATTACHMENT_EXPORT_MAX_BYTES,
+        "email_parse_diagnostics": diagnostics,
         "email_attachment_proof_manifest": proof_manifest,
         "email_attachment_proof_manifest_hash": proof_manifest["manifest_hash"],
         "copy_safe_citation": {
@@ -6915,6 +7015,7 @@ def build_email_attachment_package(
                 "bounded_content_export": include_content and content_status == "included-base64",
                 "max_inline_content_bytes": EMAIL_ATTACHMENT_EXPORT_MAX_BYTES,
                 "native_pst_ost_msg": False,
+                "email_parse_diagnostics": diagnostics,
             },
         ),
         "core_accuracy_gates": email_viewer_core_accuracy_gates(
