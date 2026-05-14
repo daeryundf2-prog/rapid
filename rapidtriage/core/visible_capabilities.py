@@ -252,7 +252,7 @@ CAPABILITY_GROUPS: tuple[dict[str, Any], ...] = (
         "label": "문서 유출 보조 아티팩트",
         "capabilities": (
             {"id": "print-spooler-spl-shd", "label": "Print Spooler SPL/SHD", "status": "partial", "terms": ("print spooler", "print-spooler-job", "print_spooler_job_profile", ".spl", ".shd", "printed", "printer")},
-            {"id": "document-metadata-macro-risk", "label": "문서 메타데이터/매크로 위험", "status": "partial", "terms": ("metadata", "vba", "macro", "ole", "ooxml", "author")},
+            {"id": "document-metadata-macro-risk", "label": "문서 메타데이터/매크로 위험", "status": "partial", "terms": ("metadata", "vba", "macro", "ole", "ooxml", "author", "document-metadata-risk", "metadata_profile", "macro_profile", "external_reference_candidates")},
             {"id": "sticky-notes-plum", "label": "Sticky Notes plum.sqlite", "status": "partial", "terms": ("sticky notes", "plum.sqlite", "stickynotes", "note", "sticky-note", "sticky-note-recovery-candidate", "sticky_note_schema_profile", "sticky_note_review_profile")},
         ),
     },

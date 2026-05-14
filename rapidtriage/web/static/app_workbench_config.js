@@ -1013,8 +1013,8 @@ const VISIBLE_FORENSIC_CAPABILITY_GROUPS = [
         id: "document-metadata-macro-risk",
         label: "문서 메타데이터/매크로 위험",
         status: "partial",
-        terms: ["metadata", "vba", "macro", "ole", "ooxml", "author"],
-        nextAction: "OLE/OOXML 작성자/수정 이력/인쇄 시간/VBA 존재 risk flag 강화",
+        terms: ["metadata", "vba", "macro", "ole", "ooxml", "author", "document-metadata-risk", "metadata_profile", "macro_profile", "external_reference_candidates"],
+        nextAction: "OOXML/ODF 작성자·시간·VBA 존재·외부 relationship 후보는 제공, legacy OLE와 macro static analysis/sandbox 검증 필요",
       },
       {
         id: "sticky-notes-plum",

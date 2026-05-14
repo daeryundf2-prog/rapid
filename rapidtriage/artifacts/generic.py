@@ -4,8 +4,10 @@ import datetime as dt
 import hashlib
 import re
 import sqlite3
+import zipfile
 from pathlib import Path
 from typing import Iterable, Mapping, Sequence
+from xml.etree import ElementTree as ET
 
 from ..core.models import ArtifactRecord
 from ..core.submission import compute_hashes
@@ -37,6 +39,10 @@ DESKTOP_AI_APP_PATH_TERMS = {
 }
 LOCAL_LLM_MODEL_SUFFIXES = {".gguf", ".ggml", ".bin", ".safetensors"}
 LOCAL_LLM_CONFIG_SUFFIXES = {".json", ".yaml", ".yml", ".toml", ".log", ".txt", ".sqlite", ".db"}
+DOCUMENT_METADATA_SUFFIXES = {".docx", ".xlsx", ".pptx", ".odt", ".ods", ".odp"}
+OOXML_VBA_PATHS = {"word/vbaProject.bin", "xl/vbaProject.bin", "ppt/vbaProject.bin"}
+OOXML_PROPS_PATHS = {"docProps/core.xml", "docProps/app.xml", "docProps/custom.xml"}
+ODF_META_PATHS = {"meta.xml"}
 DESKTOP_AI_APP_SUFFIXES = {
     ".sqlite",
     ".sqlite3",
@@ -78,9 +84,46 @@ class GenericDocumentArtifactProvider:
                 supported=True,
                 details={"extension": suffix},
             )
+        yield from collect_document_metadata_risk(root)
         yield from collect_sticky_notes(root)
         yield from collect_local_llm_inventory(root)
         yield from collect_desktop_ai_app_inventory(root)
+
+
+def collect_document_metadata_risk(root: Path) -> Iterable[ArtifactRecord]:
+    for path in sorted(root.rglob("*"), key=lambda item: str(item).lower()):
+        if not path.is_file() or path.suffix.lower() not in DOCUMENT_METADATA_SUFFIXES:
+            continue
+        profile = document_metadata_profile(path)
+        if profile.get("analysis_status") == "not-a-zip-document":
+            continue
+        yield ArtifactRecord(
+            provider=GenericDocumentArtifactProvider.name,
+            artifact_type="document-metadata-risk",
+            path=str(path.resolve()),
+            supported=True,
+            details={
+                "parser": "document-metadata-risk",
+                "parser_version": PARSER_VERSION,
+                "source_path": str(path.resolve()),
+                "source_hashes": safe_source_hashes(path),
+                "document_family": profile.get("document_family", ""),
+                "metadata_profile": profile,
+                "author_candidates": profile.get("author_candidates", []),
+                "timestamp_candidates": profile.get("timestamp_candidates", {}),
+                "macro_profile": profile.get("macro_profile", {}),
+                "external_reference_candidates": profile.get("external_reference_candidates", []),
+                "coverage_status": "document-metadata-and-risk-profile",
+                "validation_required": bool(profile.get("risk_flags")),
+                "commercial_grade_ready": False,
+                "commercial_grade_blockers": [
+                    "office-version-metadata-fixture-required",
+                    "macro-static-analysis-not-complete",
+                    "trusted-document-parser-diff-required",
+                ],
+                "risk_flags": profile.get("risk_flags", []),
+            },
+        )
 
 
 def collect_sticky_notes(root: Path) -> Iterable[ArtifactRecord]:
@@ -88,6 +131,144 @@ def collect_sticky_notes(root: Path) -> Iterable[ArtifactRecord]:
         if not path.is_file() or path.name.lower() != "plum.sqlite":
             continue
         yield from collect_sticky_notes_sqlite(path)
+
+
+def document_metadata_profile(path: Path) -> dict[str, object]:
+    suffix = path.suffix.lower()
+    try:
+        with zipfile.ZipFile(path) as archive:
+            names = set(archive.namelist())
+            if suffix in {".docx", ".xlsx", ".pptx"}:
+                props = extract_ooxml_properties(archive, names)
+                macro_paths = sorted(
+                    name for name in names if name in OOXML_VBA_PATHS or name.lower().endswith("vbaproject.bin")
+                )
+                external_refs = extract_ooxml_external_references(archive, names)
+                family = suffix.lstrip(".")
+            elif suffix in {".odt", ".ods", ".odp"}:
+                props = extract_odf_properties(archive, names)
+                macro_paths = sorted(name for name in names if "script" in name.lower() or "basic/" in name.lower())
+                external_refs = []
+                family = suffix.lstrip(".")
+            else:
+                props = {}
+                macro_paths = []
+                external_refs = []
+                family = suffix.lstrip(".")
+    except (OSError, zipfile.BadZipFile):
+        return {"analysis_status": "not-a-zip-document", "document_family": suffix.lstrip(".")}
+    author_candidates = unique_values(
+        [
+            str(props.get(key) or "")
+            for key in ("creator", "lastModifiedBy", "initialCreator", "generator", "company", "manager")
+        ]
+    )
+    timestamp_candidates = {
+        key: value
+        for key, value in props.items()
+        if key.lower() in {"created", "modified", "creationdate", "date"} and value
+    }
+    risk_flags = document_metadata_risk_flags(author_candidates, macro_paths, external_refs, props)
+    return {
+        "profile_version": "document-metadata-risk-profile-v1",
+        "analysis_status": "parsed",
+        "document_family": family,
+        "properties": props,
+        "author_candidates": author_candidates,
+        "timestamp_candidates": timestamp_candidates,
+        "macro_profile": {
+            "macro_present": bool(macro_paths),
+            "macro_paths": macro_paths[:20],
+            "macro_scan_status": "vba-project-present" if macro_paths else "not-detected",
+        },
+        "external_reference_candidates": external_refs[:50],
+        "risk_flags": risk_flags,
+        "values_are_candidates": True,
+        "validation_guidance": (
+            "Document metadata and VBA presence are triage pivots. Confirm author/timestamp semantics and macro behavior "
+            "with a dedicated Office/ODF parser or sandbox before reporting intent or malware conclusions."
+        ),
+    }
+
+
+def extract_ooxml_properties(archive: zipfile.ZipFile, names: set[str]) -> dict[str, str]:
+    props: dict[str, str] = {}
+    for name in sorted(OOXML_PROPS_PATHS.intersection(names)):
+        try:
+            xml_data = archive.read(name)
+        except (KeyError, OSError):
+            continue
+        props.update(extract_xml_leaf_text(xml_data))
+    return props
+
+
+def extract_odf_properties(archive: zipfile.ZipFile, names: set[str]) -> dict[str, str]:
+    props: dict[str, str] = {}
+    for name in sorted(ODF_META_PATHS.intersection(names)):
+        try:
+            xml_data = archive.read(name)
+        except (KeyError, OSError):
+            continue
+        props.update(extract_xml_leaf_text(xml_data))
+    return props
+
+
+def extract_xml_leaf_text(xml_data: bytes) -> dict[str, str]:
+    try:
+        root = ET.fromstring(xml_data)
+    except ET.ParseError:
+        return {}
+    props: dict[str, str] = {}
+    for node in root.iter():
+        if not node.text or not node.text.strip():
+            continue
+        tag = node.tag.rsplit("}", 1)[-1]
+        props.setdefault(tag, node.text.strip()[:500])
+    return props
+
+
+def extract_ooxml_external_references(archive: zipfile.ZipFile, names: set[str]) -> list[dict[str, str]]:
+    refs: list[dict[str, str]] = []
+    for name in sorted(item for item in names if item.endswith(".rels")):
+        try:
+            xml_data = archive.read(name)
+        except (KeyError, OSError):
+            continue
+        try:
+            root = ET.fromstring(xml_data)
+        except ET.ParseError:
+            continue
+        for node in root.iter():
+            target = str(node.attrib.get("Target") or "")
+            mode = str(node.attrib.get("TargetMode") or "")
+            if mode.lower() == "external" or target.lower().startswith(("http://", "https://", "file://", "\\\\")):
+                refs.append(
+                    {
+                        "relationship_file": name,
+                        "target": target[:500],
+                        "target_mode": mode,
+                        "type": str(node.attrib.get("Type") or "")[:200],
+                    }
+                )
+    return refs
+
+
+def document_metadata_risk_flags(
+    author_candidates: Sequence[str],
+    macro_paths: Sequence[str],
+    external_refs: Sequence[Mapping[str, str]],
+    props: Mapping[str, str],
+) -> list[str]:
+    flags = ["document-metadata-profile"]
+    if author_candidates:
+        flags.append("document-author-metadata")
+    if macro_paths:
+        flags.append("document-macro-present")
+    if external_refs:
+        flags.append("document-external-reference-candidate")
+    if any(str(value).strip() for key, value in props.items() if key.lower() in {"created", "modified"}):
+        flags.append("document-timestamp-metadata")
+    return flags
 
 
 def collect_sticky_notes_sqlite(path: Path) -> Iterable[ArtifactRecord]:
@@ -866,6 +1047,18 @@ def first_matching_column(columns: Sequence[str], names: Sequence[str]) -> str:
 
 def normalize_column(value: object) -> str:
     return "".join(character for character in str(value).lower() if character.isalnum())
+
+
+def unique_values(values: Sequence[str]) -> list[str]:
+    seen: set[str] = set()
+    output: list[str] = []
+    for value in values:
+        cleaned = " ".join(str(value).split()).strip()
+        if not cleaned or cleaned in seen:
+            continue
+        seen.add(cleaned)
+        output.append(cleaned)
+    return output
 
 
 def optional_text(value: object) -> str:

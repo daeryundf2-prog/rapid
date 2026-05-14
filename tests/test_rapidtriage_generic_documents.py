@@ -4,6 +4,7 @@ import json
 import sqlite3
 import tempfile
 import unittest
+import zipfile
 from pathlib import Path
 
 from rapidtriage.cli import build_parser, main
@@ -48,6 +49,9 @@ class RapidTriageGenericDocumentsTests(unittest.TestCase):
             with ai_connection:
                 ai_connection.execute("CREATE TABLE messages (role TEXT, content TEXT, created_at INTEGER)")
                 ai_connection.execute("INSERT INTO messages VALUES ('user', 'Summarize incident timeline', 1710000000)")
+            suspicious_doc = root / "Users" / "Alice" / "Documents" / "macro-template-report.docx"
+            suspicious_doc.parent.mkdir(parents=True)
+            write_suspicious_ooxml_document(suspicious_doc)
             output = root / "generic-artifacts.json"
 
             exit_code = main(["artifacts", str(root), "--kind", "generic-documents", "--output", str(output)])
@@ -60,6 +64,21 @@ class RapidTriageGenericDocumentsTests(unittest.TestCase):
             self.assertIn("local-llm-artifact", artifact_types)
             self.assertIn("desktop-ai-app-artifact", artifact_types)
             self.assertIn("desktop-ai-conversation-candidate", artifact_types)
+            self.assertIn("document-metadata-risk", artifact_types)
+
+            doc_risk = next(
+                artifact for artifact in payload["artifacts"] if artifact["artifact_type"] == "document-metadata-risk"
+            )
+            self.assertEqual(doc_risk["details"]["document_family"], "docx")
+            self.assertIn("Alice Analyst", doc_risk["details"]["author_candidates"])
+            self.assertTrue(doc_risk["details"]["macro_profile"]["macro_present"])
+            self.assertIn("document-macro-present", doc_risk["details"]["risk_flags"])
+            self.assertIn("document-external-reference-candidate", doc_risk["details"]["risk_flags"])
+            self.assertEqual(
+                doc_risk["details"]["external_reference_candidates"][0]["target"],
+                "https://example.invalid/template.dotm",
+            )
+            self.assertIn("sha256", doc_risk["details"]["source_hashes"])
 
             sticky = next(artifact for artifact in payload["artifacts"] if artifact["artifact_type"] == "sticky-note")
             self.assertEqual(sticky["details"]["source_table"], "Note")
@@ -112,6 +131,37 @@ class RapidTriageGenericDocumentsTests(unittest.TestCase):
                 "ChatGPT Desktop",
             )
             self.assertIn("ai-user-prompt-candidate", ai_message["details"]["risk_flags"])
+
+
+def write_suspicious_ooxml_document(path: Path) -> None:
+    with zipfile.ZipFile(path, "w") as archive:
+        archive.writestr("[Content_Types].xml", "<Types />")
+        archive.writestr("word/document.xml", "<w:document xmlns:w='urn:test'>Investigation notes</w:document>")
+        archive.writestr("word/vbaProject.bin", b"fake-vba-project")
+        archive.writestr(
+            "docProps/core.xml",
+            """
+            <cp:coreProperties xmlns:cp="http://schemas.openxmlformats.org/package/2006/metadata/core-properties"
+                xmlns:dc="http://purl.org/dc/elements/1.1/"
+                xmlns:dcterms="http://purl.org/dc/terms/">
+                <dc:creator>Alice Analyst</dc:creator>
+                <cp:lastModifiedBy>Bob Reviewer</cp:lastModifiedBy>
+                <dcterms:created>2026-05-01T10:00:00Z</dcterms:created>
+                <dcterms:modified>2026-05-02T11:00:00Z</dcterms:modified>
+            </cp:coreProperties>
+            """,
+        )
+        archive.writestr(
+            "word/_rels/document.xml.rels",
+            """
+            <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+              <Relationship Id="rId1"
+                Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/attachedTemplate"
+                Target="https://example.invalid/template.dotm"
+                TargetMode="External" />
+            </Relationships>
+            """,
+        )
 
 
 if __name__ == "__main__":
