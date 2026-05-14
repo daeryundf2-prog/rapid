@@ -3997,6 +3997,7 @@ function renderEmailPreview(emailPayload, payload) {
   const threads = emailPayload.threads || [];
   const attachmentProfile = emailPayload.attachment_package_profile || {};
   const attachmentLinks = attachmentProfile.links || [];
+  const parseDiagnostics = emailPayload.parse_diagnostics || {};
   return `
     <section class="structured-preview">
       <div class="file-search-summary">
@@ -4006,6 +4007,7 @@ function renderEmailPreview(emailPayload, payload) {
         ${metric("Preview", payload.truncated ? "capped" : "complete")}
       </div>
       <p class="help-text">Email viewer extracts headers, body preview, and attachment names without loading external content.</p>
+      ${renderEmailParseDiagnostics(parseDiagnostics)}
       ${attachmentLinks.length ? `
         <div class="email-attachment-card">
           <strong>Attachment citation packages</strong>
@@ -4043,6 +4045,30 @@ function renderEmailPreview(emailPayload, payload) {
       </div>
       ${emailPayload.truncated ? '<p class="help-text">Email preview was capped for performance.</p>' : ""}
     </section>
+  `;
+}
+
+function renderEmailParseDiagnostics(diagnostics) {
+  if (!diagnostics || !Object.keys(diagnostics).length) return "";
+  const truncated = Boolean(
+    diagnostics.source_truncated
+    || diagnostics.message_limit_reached
+    || Number(diagnostics.message_size_truncated_count || 0) > 0
+  );
+  return `
+    <div class="email-diagnostics-card ${truncated ? "warning" : "ok"}" data-testid="email-parse-diagnostics">
+      <div>
+        <strong>Email parse window</strong>
+        <span>${truncated ? "bounded / partial" : "bounded / complete in preview window"}</span>
+      </div>
+      <dl class="compact-dl">
+        <div><dt>Mode</dt><dd>${escapeHtml(diagnostics.parse_mode || "unknown")}</dd></div>
+        <div><dt>Bytes read</dt><dd>${formatBytes(diagnostics.bytes_read || 0)}</dd></div>
+        <div><dt>Max input</dt><dd>${formatBytes(diagnostics.max_input_bytes || 0)}</dd></div>
+        <div><dt>Truncated messages</dt><dd>${escapeHtml(diagnostics.message_size_truncated_count ?? 0)}</dd></div>
+      </dl>
+      <small>${truncated ? "Do not conclude the mailbox is complete until mailbox-specific pagination/export validation is complete." : "Preview diagnostics did not report truncation for this parse window."}</small>
+    </div>
   `;
 }
 

@@ -1288,3 +1288,19 @@ SQLite 기반 아티팩트는 브라우저 History, 카카오톡, Sticky Notes, 
 
 1. 이 변경은 UI 오판 방지다. 모든 파일을 자동 완전 스캔하도록 바꾼 것이 아니다.
 2. 포렌식 결론에서 "키워드 없음"을 쓰려면 resume cursor를 끝까지 소비했거나, full-case index/reindex 결과와 교차 확인해야 한다.
+
+## 42. 2026-05-14 구현 반영: Email/MBOX bounded parse diagnostics GUI 노출
+
+대용량 EML/MBOX는 첫 parse window에 보이는 메시지가 전체 mailbox를 대표하지 않을 수 있다. API는 `email.parse_diagnostics`로 parse mode, 읽은 바이트 수, source truncation, message-size truncation을 내려주고 있었지만, GUI에서는 이 정보가 attachment/thread 목록보다 덜 보였다.
+
+이번 라운드에서는 email viewer 상단에 `Email parse window` 카드를 추가했다. 분석자는 `bounded / partial`, `bytes_read`, `max_input_bytes`, `message_size_truncated_count`를 먼저 보고, mailbox-specific pagination/export 검증 전에는 mailbox 전체 결론을 내리지 않도록 안내받는다.
+
+검증 포인트:
+
+1. `tests/test_rapidtriage_api.py::test_source_preview_mbox_discloses_bounded_parse_window`와 `test_source_preview_large_eml_limits_message_parse_size`가 API diagnostics를 검증한다.
+2. `tests/test_rapidtriage_web_static.py::test_workbench_review_queue_and_schema_visibility_contracts`가 `renderEmailParseDiagnostics`, `email-parse-diagnostics`, incomplete mailbox warning이 GUI에 남아 있는지 검증한다.
+
+중요한 제한:
+
+1. 이 변경은 EML/MBOX preview의 bounded parse 상태를 드러내는 UI 보강이다. PST/OST native folder/message/deleted item parser를 완성한 것이 아니다.
+2. 대형 mailbox에서 “없다”는 결론은 bounded preview가 아니라 mailbox pagination/export, source hash, trusted parser diff를 통해 내려야 한다.

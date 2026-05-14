@@ -3866,6 +3866,37 @@ mark {
   color: var(--muted);
 }
 
+.email-diagnostics-card {
+  display: grid;
+  gap: 8px;
+  margin: 10px 0;
+  padding: 10px 12px;
+  border: 1px solid rgba(15, 116, 107, 0.18);
+  border-radius: 10px;
+  background: #f7fbfa;
+}
+
+.email-diagnostics-card.warning {
+  border-color: rgba(178, 87, 44, 0.32);
+  background: #fff6ec;
+}
+
+.email-diagnostics-card.ok {
+  border-color: rgba(43, 118, 82, 0.25);
+  background: #f3fbf6;
+}
+
+.email-diagnostics-card > div:first-child {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.email-diagnostics-card span,
+.email-diagnostics-card small {
+  color: var(--muted);
+}
+
 .image-gallery-card {
   display: grid;
   gap: 5px;
@@ -5850,6 +5881,7 @@ button:hover,
 .review-capture,
 .file-search-form,
 .file-search-results,
+.email-diagnostics-card,
 .sqlite-page-card,
 .sqlite-sidecar-card,
 .sqlite-schema-panel {
@@ -5868,6 +5900,7 @@ button:hover,
 .viewer-evidence-card,
 .viewer-action-card,
 .metric,
+.email-diagnostics-card,
 .sqlite-column-chip,
 .sqlite-sidecar-chip,
 .sqlite-sidecar-action {
