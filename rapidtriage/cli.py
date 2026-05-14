@@ -193,7 +193,7 @@ EXTRACT_EPILOG = f"""Examples:
 
 
 def add_rules_argument(parser: argparse.ArgumentParser) -> None:
-    parser.add_argument("--rules", help="Path to a rapidtriage JSON/YAML rule file for matched_rules and IOC lookup")
+    parser.add_argument("--rules", help="Path to a rapidtriage JSON/YAML or YARA-lite string rule file for matched_rules and IOC lookup")
 
 
 def add_web_arguments(parser: argparse.ArgumentParser) -> None:

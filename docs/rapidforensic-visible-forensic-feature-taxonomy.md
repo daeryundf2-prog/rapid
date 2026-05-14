@@ -794,7 +794,7 @@ GUI 표기 방식:
 | 원격접속 / Tampering | Defender/EDR 무력화 | 부분 구현 | `defender-policy-artifact`가 Defender 예외, 보호 비활성화, TamperProtection 후보를 GUI 노출용 profile로 분리하고, 서비스 중지/policy 변경/로그 삭제 상관은 EVTX/registry transaction 검증 대상으로 남긴다. |
 | 검색 / 타임라인 고급 | Super Timeline | 부분 구현 | MFT/USN/EVTX/Registry/Web/Execution 단일 시간축 |
 | 검색 / 타임라인 고급 | De-NISTing/Whitelisting | 부분 구현 | `rapidtriage files --known-good-hash-feed`로 TXT/CSV/JSON 및 NSRL RDS CSV(`SHA-1`, `MD5`, `FileName`, `ProductCode` 등) 피드를 읽어 known-good 파일을 표시하거나 `--hide-known-good`로 숨김. 매칭 row는 `known_good_match.source_detail`에 feed/row/hash column/NSRL metadata를 남김. Bundled NSRL updater/full database management와 검색 결과 suppression UI는 남음 |
-| 검색 / 타임라인 고급 | YARA / IOC 스캐너 | 부분 구현 | 로컬 rule/IOC hit를 `ioc_scanner_hits`로 모아 source pointer와 manifest를 제공. Native YARA grammar/신뢰 corpus diff는 남음 |
+| 검색 / 타임라인 고급 | YARA / IOC 스캐너 | 부분 구현 | 로컬 JSON/YAML rule과 YARA-lite `.yar/.yara` literal string IOC를 `ioc_scanner_hits`로 모아 source pointer와 manifest를 제공. Native YARA grammar/신뢰 corpus diff는 남음 |
 
 구현 반영:
 

@@ -59,8 +59,24 @@ class RecordContext:
 
 HASH_RE = re.compile(r"\b[a-fA-F0-9]{64}\b")
 URL_RE = re.compile(r"https?://[^\s\]\[\)\(\}\{\"'<>]+", re.IGNORECASE)
+DOMAIN_LITERAL_RE = re.compile(
+    r"^(?=.{1,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$",
+    re.IGNORECASE,
+)
+YARA_RULE_RE = re.compile(r"\brule\s+([A-Za-z_][A-Za-z0-9_]*)\b[^{]*\{", re.IGNORECASE)
+YARA_SECTION_RE = re.compile(r"(?m)^\s*(meta|strings|condition)\s*:", re.IGNORECASE)
+YARA_STRING_RE = re.compile(
+    r"\$(?P<name>[A-Za-z_][A-Za-z0-9_]*)\s*=\s*(?P<literal>\"(?:\\.|[^\"\\])*\")(?P<modifiers>[^\r\n]*)",
+    re.IGNORECASE,
+)
+YARA_META_TEXT_RE = re.compile(
+    r"(?m)^\s*(?:description|desc)\s*=\s*(?P<literal>\"(?:\\.|[^\"\\])*\")",
+    re.IGNORECASE,
+)
 TEXT_EXTS = {".txt", ".md", ".log", ".json", ".csv", ".tsv", ".xml"}
 DOC_EXTS = {".docx", ".pdf"}
+YARA_RULE_EXTS = {".yar", ".yara"}
+MAX_YARA_STRING_LITERAL_LENGTH = 1024
 
 
 class _RuleEvaluator:
@@ -141,6 +157,11 @@ def load_rule_set(path: Path | str) -> RuleSet:
     rule_path = Path(path).expanduser().resolve()
     text = rule_path.read_text(encoding="utf-8")
     format_name = detect_rule_format(rule_path, text)
+    if format_name == "yara-lite":
+        rules = parse_yara_lite_rules(text, rule_path)
+        if not rules:
+            raise RuleConfigError(f"YARA rule file did not contain supported string IOC rules: {rule_path}")
+        return RuleSet(path=str(rule_path), format=format_name, rules=tuple(rules))
     if format_name == "json":
         data = json.loads(text)
     else:
@@ -155,6 +176,8 @@ def load_rule_set(path: Path | str) -> RuleSet:
 def detect_rule_format(path: Path, text: str) -> str:
     suffix = path.suffix.lower()
     stripped = text.lstrip()
+    if suffix in YARA_RULE_EXTS or YARA_RULE_RE.search(stripped):
+        return "yara-lite"
     if suffix == ".json":
         return "json"
     if suffix in {".yaml", ".yml"}:
@@ -164,6 +187,252 @@ def detect_rule_format(path: Path, text: str) -> str:
     if stripped.startswith("{") or stripped.startswith("["):
         return "json"
     return "yaml"
+
+
+@dataclass(frozen=True)
+class YaraStringDefinition:
+    name: str
+    value: str
+    modifiers: tuple[str, ...] = ()
+
+
+def parse_yara_lite_rules(text: str, path: Path) -> list[Rule]:
+    """Import a safe YARA subset as local IOC string rules.
+
+    This is intentionally not a native YARA engine. It extracts literal strings
+    from standard ``strings:`` sections and maps them into the existing bounded
+    rule matcher so analysts can reuse simple IOC-focused .yar files without
+    implying full grammar or malware-engine parity.
+    """
+
+    rules: list[Rule] = []
+    stripped = strip_yara_comments(text)
+    for rule_name, body in iter_yara_rule_blocks(stripped):
+        strings_section = yara_section(body, "strings")
+        string_defs = parse_yara_string_definitions(strings_section)
+        if not string_defs:
+            continue
+        condition = yara_section(body, "condition")
+        selected = select_yara_strings_for_condition(string_defs, condition)
+        if not selected:
+            selected = string_defs
+        description = parse_yara_description(yara_section(body, "meta")) or f"Imported YARA string rule from {path.name}"
+        if yara_condition_requires_all(condition):
+            rule = build_rule_from_yara_strings(rule_name, description, selected)
+            if rule_has_terms(rule):
+                rules.append(rule)
+            continue
+        for string_def in selected:
+            rule = build_rule_from_yara_strings(rule_name, description, [string_def])
+            if rule_has_terms(rule):
+                rules.append(rule)
+    return dedupe_rules(rules)
+
+
+def strip_yara_comments(text: str) -> str:
+    result: list[str] = []
+    index = 0
+    in_string = False
+    escape = False
+    while index < len(text):
+        char = text[index]
+        next_char = text[index + 1] if index + 1 < len(text) else ""
+        if in_string:
+            result.append(char)
+            if escape:
+                escape = False
+            elif char == "\\":
+                escape = True
+            elif char == '"':
+                in_string = False
+            index += 1
+            continue
+        if char == '"':
+            in_string = True
+            result.append(char)
+            index += 1
+            continue
+        if char == "/" and next_char == "/":
+            newline = text.find("\n", index)
+            if newline == -1:
+                break
+            result.append("\n")
+            index = newline + 1
+            continue
+        if char == "/" and next_char == "*":
+            end = text.find("*/", index + 2)
+            comment = text[index + 2 : end if end != -1 else len(text)]
+            result.extend("\n" for _ in range(comment.count("\n")))
+            index = len(text) if end == -1 else end + 2
+            continue
+        result.append(char)
+        index += 1
+    return "".join(result)
+
+
+def iter_yara_rule_blocks(text: str) -> Iterable[tuple[str, str]]:
+    search_pos = 0
+    while True:
+        match = YARA_RULE_RE.search(text, search_pos)
+        if match is None:
+            return
+        open_brace = text.find("{", match.end() - 1)
+        close_brace = find_matching_yara_brace(text, open_brace)
+        if open_brace == -1 or close_brace is None:
+            raise RuleConfigError(f"invalid YARA rule block near {match.group(1)!r}")
+        yield match.group(1), text[open_brace + 1 : close_brace]
+        search_pos = close_brace + 1
+
+
+def find_matching_yara_brace(text: str, open_brace: int) -> int | None:
+    depth = 0
+    in_string = False
+    escape = False
+    for index in range(open_brace, len(text)):
+        char = text[index]
+        if in_string:
+            if escape:
+                escape = False
+            elif char == "\\":
+                escape = True
+            elif char == '"':
+                in_string = False
+            continue
+        if char == '"':
+            in_string = True
+            continue
+        if char == "{":
+            depth += 1
+        elif char == "}":
+            depth -= 1
+            if depth == 0:
+                return index
+    return None
+
+
+def yara_section(body: str, section_name: str) -> str:
+    matches = list(YARA_SECTION_RE.finditer(body))
+    for index, match in enumerate(matches):
+        if match.group(1).lower() != section_name.lower():
+            continue
+        end = matches[index + 1].start() if index + 1 < len(matches) else len(body)
+        return body[match.end() : end].strip()
+    return ""
+
+
+def parse_yara_string_definitions(section: str) -> list[YaraStringDefinition]:
+    definitions: list[YaraStringDefinition] = []
+    for match in YARA_STRING_RE.finditer(section):
+        value = decode_yara_string_literal(match.group("literal"))
+        if not value or len(value) > MAX_YARA_STRING_LITERAL_LENGTH:
+            continue
+        modifiers = tuple(item.lower() for item in match.group("modifiers").split() if item.strip())
+        definitions.append(YaraStringDefinition(name=match.group("name"), value=value, modifiers=modifiers))
+    return definitions
+
+
+def decode_yara_string_literal(literal: str) -> str:
+    inner = literal[1:-1]
+    result: list[str] = []
+    index = 0
+    while index < len(inner):
+        char = inner[index]
+        if char != "\\":
+            result.append(char)
+            index += 1
+            continue
+        if index + 1 >= len(inner):
+            result.append("\\")
+            break
+        escape = inner[index + 1]
+        if escape == "x" and index + 3 < len(inner):
+            hex_value = inner[index + 2 : index + 4]
+            try:
+                result.append(chr(int(hex_value, 16)))
+                index += 4
+                continue
+            except ValueError:
+                pass
+        result.append({"n": "\n", "r": "\r", "t": "\t", '"': '"', "\\": "\\"}.get(escape, escape))
+        index += 2
+    return "".join(result).strip()
+
+
+def parse_yara_description(meta_section: str) -> str | None:
+    match = YARA_META_TEXT_RE.search(meta_section)
+    if match is None:
+        return None
+    return decode_yara_string_literal(match.group("literal")) or None
+
+
+def select_yara_strings_for_condition(
+    string_defs: Sequence[YaraStringDefinition],
+    condition: str,
+) -> list[YaraStringDefinition]:
+    referenced_names = {match.lower() for match in re.findall(r"\$([A-Za-z_][A-Za-z0-9_]*)", condition)}
+    if not referenced_names:
+        return list(string_defs)
+    return [item for item in string_defs if item.name.lower() in referenced_names]
+
+
+def yara_condition_requires_all(condition: str) -> bool:
+    lowered = f" {condition.lower()} "
+    if " all of " in lowered:
+        return True
+    if " and " in lowered and " or " not in lowered:
+        return True
+    return False
+
+
+def build_rule_from_yara_strings(
+    rule_name: str,
+    description: str,
+    string_defs: Sequence[YaraStringDefinition],
+) -> Rule:
+    keywords: set[str] = set()
+    hashes: set[str] = set()
+    domains: set[str] = set()
+    urls: set[str] = set()
+    for string_def in string_defs:
+        value = string_def.value.strip().lower()
+        if not value:
+            continue
+        if HASH_RE.fullmatch(value):
+            hashes.add(value)
+        elif URL_RE.fullmatch(value):
+            urls.add(value)
+        elif is_domain_literal(value):
+            domains.add(value)
+        else:
+            keywords.add(value)
+    return Rule(
+        id=rule_name,
+        description=description,
+        keywords=tuple(sorted(keywords)),
+        hashes=tuple(sorted(hashes)),
+        domains=tuple(sorted(domains)),
+        urls=tuple(sorted(urls)),
+    )
+
+
+def is_domain_literal(value: str) -> bool:
+    return bool(DOMAIN_LITERAL_RE.fullmatch(value)) and " " not in value and "/" not in value
+
+
+def rule_has_terms(rule: Rule) -> bool:
+    return any((rule.keywords, rule.hashes, rule.domains, rule.urls))
+
+
+def dedupe_rules(rules: Sequence[Rule]) -> list[Rule]:
+    deduped: list[Rule] = []
+    seen: set[tuple[object, ...]] = set()
+    for rule in rules:
+        key = (rule.id, rule.keywords, rule.hashes, rule.domains, rule.urls)
+        if key in seen:
+            continue
+        seen.add(key)
+        deduped.append(rule)
+    return deduped
 
 
 def normalize_rule_root(data: object) -> list[Mapping[str, object]]:

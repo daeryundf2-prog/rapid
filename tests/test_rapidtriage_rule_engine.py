@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any, Iterable
 
 from rapidtriage.cli import build_parser, main
+from rapidtriage.core.rules import load_rule_set
 from tests.test_rapidtriage_run import build_run_fixture
 
 
@@ -163,6 +164,52 @@ class RapidTriageRuleEngineTests(unittest.TestCase):
             summary_payload = json.loads((output_dir / "rapidtriage-run-summary.json").read_text(encoding="utf-8"))
             self.assertPayloadHasRule(summary_payload, "downloads-exe-sha256")
             self.assertPayloadHasIoc(summary_payload, "malicious.example")
+
+    def test_run_accepts_yara_lite_string_rules_file(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir) / "case-root"
+            output_dir = Path(tmp_dir) / "run-out"
+            root.mkdir(parents=True, exist_ok=True)
+            build_run_fixture(root)
+            self.add_rule_fixture_content(root)
+            yara_rules = Path(tmp_dir) / "rapidtriage-iocs.yar"
+            yara_rules.write_text(
+                """
+rule CredentialLeak {
+  meta:
+    description = "Credential and phishing IOC strings"
+  strings:
+    $credential = "credential password" nocase ascii
+    $domain = "malicious.example" nocase ascii
+  condition:
+    any of them
+}
+
+rule BrowserDownloadIOC {
+  strings:
+    $download = "https://download.example/tools/installer.exe" ascii
+  condition:
+    $download
+}
+""".strip()
+                + "\n",
+                encoding="utf-8",
+            )
+
+            rule_set = load_rule_set(yara_rules)
+            self.assertEqual(rule_set.format, "yara-lite")
+            self.assertGreaterEqual(rule_set.rule_count, 2)
+
+            self.assertEqual(
+                main(["run", str(root), "--mode", "hacking", "--rules", str(yara_rules), "--output-dir", str(output_dir)]),
+                0,
+            )
+
+            summary_payload = json.loads((output_dir / "rapidtriage-run-summary.json").read_text(encoding="utf-8"))
+            self.assertPayloadHasRule(summary_payload, "CredentialLeak")
+            self.assertPayloadHasIoc(summary_payload, "malicious.example")
+            self.assertPayloadHasRule(summary_payload, "BrowserDownloadIOC")
+            self.assertPayloadHasIoc(summary_payload, "https://download.example/tools/installer.exe")
 
     def add_rule_fixture_content(self, root: Path) -> tuple[Path, Path]:
         downloads_dir = root / "Users" / "alice" / "Downloads"

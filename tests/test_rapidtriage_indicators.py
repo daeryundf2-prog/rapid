@@ -128,6 +128,7 @@ class RapidTriageIndicatorsTests(unittest.TestCase):
             self.assertGreaterEqual(manual_payload["summary"]["enriched_indicator_count"], 1)
             self.assertTrue(manual_payload["indicator_native_capabilities"]["rule_based_ioc_scanner"])
             self.assertTrue(manual_payload["indicator_native_capabilities"]["bounded_file_content_keyword_scanning"])
+            self.assertTrue(manual_payload["indicator_native_capabilities"]["yara_string_rule_import"])
             self.assertFalse(manual_payload["indicator_native_capabilities"]["yara_compatible_full_grammar"])
             self.assertIocScannerHit(manual_payload, "credential-url-hit", "domain", "malicious.example")
             self.assertIocScannerHit(manual_payload, "payload-sha256", "hash", sha256_hex(payload_installer))
@@ -216,6 +217,49 @@ class RapidTriageIndicatorsTests(unittest.TestCase):
                 sources=["indicators"],
             )
             self.assertGreaterEqual(case_scanner_search["summary"]["match_count"], 1)
+
+    def test_yara_lite_string_rules_feed_ioc_scanner_manifest(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir) / "case-root"
+            output_dir = Path(tmp_dir) / "run-out"
+            root.mkdir(parents=True, exist_ok=True)
+            build_run_fixture(root)
+            add_indicator_fixture_content(root)
+            yara_rules = Path(tmp_dir) / "case-iocs.yar"
+            yara_rules.write_text(
+                """
+rule CredentialLeak {
+  meta:
+    description = "Credential collection domain"
+  strings:
+    $domain = "malicious.example" nocase ascii
+    $phrase = "credential password" nocase ascii
+  condition:
+    any of them
+}
+""".strip()
+                + "\n",
+                encoding="utf-8",
+            )
+
+            self.assertEqual(
+                main(["run", str(root), "--mode", "hacking", "--rules", str(yara_rules), "--output-dir", str(output_dir)]),
+                0,
+            )
+            output = Path(tmp_dir) / "indicators-yara.json"
+            self.assertEqual(
+                main(["indicators", str(output_dir), "--rules", str(yara_rules), "--output", str(output)]),
+                0,
+            )
+
+            payload = json.loads(output.read_text(encoding="utf-8"))
+            self.assertTrue(payload["indicator_native_capabilities"]["yara_string_rule_import"])
+            self.assertFalse(payload["indicator_native_capabilities"]["native_yara_engine_integration"])
+            self.assertEqual(payload["ioc_scanner_manifest"]["rule_set_format"], "yara-lite")
+            self.assertTrue(payload["ioc_scanner_manifest"]["yara_string_rule_import"])
+            self.assertGreaterEqual(payload["ioc_scanner_manifest"]["rule_set_rule_count"], 2)
+            self.assertIn("native-yara-full-grammar-engine", payload["ioc_scanner_manifest"]["blockers"])
+            self.assertIocScannerHit(payload, "CredentialLeak", "domain", "malicious.example")
 
     def assertIndicatorPresent(self, payload: dict[str, object], indicator_type: str, value: str) -> None:
         for indicator in payload["indicators"]:
