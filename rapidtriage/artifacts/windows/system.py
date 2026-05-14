@@ -1468,9 +1468,13 @@ def collect_activity_notification_uwp_artifacts(root: Path) -> Iterable[Artifact
     for path in sorted(root.rglob("*"), key=lambda item: str(item).lower()):
         name = path.name.lower()
         if path.is_file() and name == "activitiescache.db":
-            yield build_activity_style_record(path, "activities-cache-db", "connected-devices-activities", root=root)
+            record = build_activity_style_record(path, "activities-cache-db", "connected-devices-activities", root=root)
+            yield record
+            yield from build_activity_style_row_records(record)
         elif path.is_file() and name in {"wpndatabase.db", "notifications.db"}:
-            yield build_activity_style_record(path, "notification-database", "windows-notifications", root=root)
+            record = build_activity_style_record(path, "notification-database", "windows-notifications", root=root)
+            yield record
+            yield from build_activity_style_row_records(record)
         elif path.is_dir() and path.parent.name.lower() == "packages" and "appdata" in str(path).lower():
             if emitted_packages >= 500:
                 continue
@@ -1549,6 +1553,145 @@ def build_activity_style_record(path: Path, artifact_type: str, source_format: s
             ],
         },
     )
+
+
+def build_activity_style_row_records(parent: ArtifactRecord) -> Iterable[ArtifactRecord]:
+    details = parent.details
+    schema_inventory = details.get("sqlite_schema_inventory")
+    if not isinstance(schema_inventory, Mapping) or not schema_inventory.get("opened_readonly"):
+        return
+    row_artifact_type = activity_style_row_artifact_type(parent.artifact_type)
+    if not row_artifact_type:
+        return
+    source_path = Path(parent.path)
+    source_hashes = details.get("source_hashes") if isinstance(details.get("source_hashes"), Mapping) else {}
+    tables = schema_inventory.get("tables")
+    if not isinstance(tables, list):
+        return
+    emitted = 0
+    for table in tables:
+        if not isinstance(table, Mapping):
+            continue
+        samples = table.get("normalized_timeline_samples")
+        if not isinstance(samples, list):
+            continue
+        for sample in samples:
+            if emitted >= 100:
+                return
+            if not isinstance(sample, Mapping):
+                continue
+            emitted += 1
+            row_details = activity_style_row_details(
+                parent,
+                source_path,
+                source_hashes,
+                table,
+                sample,
+                row_index=emitted - 1,
+            )
+            yield ArtifactRecord(
+                provider=WindowsSystemArtifactsProvider.name,
+                artifact_type=row_artifact_type,
+                path=parent.path,
+                supported=True,
+                details=row_details,
+            )
+
+
+def activity_style_row_artifact_type(parent_artifact_type: str) -> str:
+    if parent_artifact_type == "activities-cache-db":
+        return "activities-cache-row-candidate"
+    if parent_artifact_type == "notification-database":
+        return "notification-row-candidate"
+    return ""
+
+
+def activity_style_row_details(
+    parent: ArtifactRecord,
+    source_path: Path,
+    source_hashes: Mapping[str, object],
+    table: Mapping[str, object],
+    sample: Mapping[str, object],
+    *,
+    row_index: int,
+) -> dict[str, object]:
+    timeline_type = str(sample.get("timeline_type") or "generic-system-sqlite")
+    decoded_text_hint = sample.get("decoded_text_hint") if isinstance(sample.get("decoded_text_hint"), Mapping) else {}
+    source_locator = dict(sample.get("source_locator") or {}) if isinstance(sample.get("source_locator"), Mapping) else {}
+    source_locator.update(
+        {
+            "source_path": str(source_path.resolve()),
+            "source_sha256": source_hashes.get("sha256", ""),
+            "parent_artifact_type": parent.artifact_type,
+        }
+    )
+    review_profile = {
+        "profile_version": "windows-activity-row-review-profile-v1",
+        "row_index": row_index,
+        "timeline_type": timeline_type,
+        "has_normalized_time": bool(sample.get("normalized_time")),
+        "has_decoded_text_hint": bool(decoded_text_hint.get("preview")),
+        "has_app_hint": bool((sample.get("app_preview") or {}).get("preview") if isinstance(sample.get("app_preview"), Mapping) else False),
+        "uwp_package_status": (sample.get("uwp_package_correlation") or {}).get("status")
+        if isinstance(sample.get("uwp_package_correlation"), Mapping)
+        else "",
+        "profile_attribution_status": (sample.get("profile_attribution") or {}).get("sid_correlation_status")
+        if isinstance(sample.get("profile_attribution"), Mapping)
+        else "",
+        "source_viewer": "sqlite",
+        "review_questions": [
+            "Does the app/package match the user action being asserted?",
+            "Does EVTX, LNK/JumpList, browser history, MFT/USN, or notification state corroborate this row?",
+            "Is the timestamp parse status acceptable for the report wording?",
+        ],
+        "reportability_warning": "Activity/notification rows are schema-guided candidates until validated against the exact Windows build and source table semantics.",
+    }
+    risk_flags = ["windows-activity-row-candidate", f"{timeline_type}-timeline-candidate"]
+    if sample.get("normalized_time"):
+        risk_flags.append("normalized-time-present")
+    if decoded_text_hint.get("preview"):
+        risk_flags.append("decoded-text-hint-present")
+    if review_profile["uwp_package_status"] == "matched":
+        risk_flags.append("uwp-package-correlated")
+    return {
+        "parser": "windows-system-activity-row",
+        "parser_version": PARSER_VERSION,
+        "source_path": str(source_path.resolve()),
+        "source_format": f"{parent.details.get('source_format', 'windows-system-sqlite')}-row",
+        "source_hashes": dict(source_hashes),
+        "parent_artifact_type": parent.artifact_type,
+        "table": str(table.get("name") or sample.get("table") or ""),
+        "rowid": sample.get("rowid"),
+        "row_hash": sample.get("row_hash", ""),
+        "timeline_type": timeline_type,
+        "normalized_time": sample.get("normalized_time"),
+        "timestamp": sample.get("normalized_time"),
+        "timestamp_source": sample.get("time_column") or "sqlite_timeline_candidate",
+        "time_parse_status": sample.get("time_parse_status"),
+        "app_preview": sample.get("app_preview", {}),
+        "text_preview": sample.get("text_preview", {}),
+        "decoded_text_hint": decoded_text_hint,
+        "id_preview": sample.get("id_preview", {}),
+        "profile_attribution": sample.get("profile_attribution", {}),
+        "uwp_package_correlation": sample.get("uwp_package_correlation", {}),
+        "source_locator": source_locator,
+        "activity_row_review_profile": review_profile,
+        "coverage_status": "sqlite-timeline-row-candidate",
+        "reportability": "triage",
+        "parser_confidence": "medium",
+        "risk_flags": unique_preserve_order(risk_flags),
+        "validation_required": True,
+        "validation_guidance": (
+            "Row is promoted from a schema-guided Activities/Notifications SQLite timeline sample. Validate table "
+            "schema, timestamp semantics, app attribution, and correlated activity before report-grade use."
+        ),
+        "commercial_grade_ready": False,
+        "commercial_grade_blockers": [
+            "activities-notifications-native-table-parser-required",
+            "windows-build-specific-schema-validation-required",
+            "correlated-activity-validation-required",
+        ],
+    }
 
 
 def windows_user_profile_attribution(path: Path, *, root: Path | None = None) -> dict[str, object]:

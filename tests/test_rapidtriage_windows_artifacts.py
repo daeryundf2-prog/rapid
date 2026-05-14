@@ -587,7 +587,9 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
             self.assertGreaterEqual(type_counts.get("thumbnail-cache-file", 0), 1)
             self.assertGreaterEqual(type_counts.get("icon-cache-file", 0), 1)
             self.assertGreaterEqual(type_counts.get("activities-cache-db", 0), 1)
+            self.assertGreaterEqual(type_counts.get("activities-cache-row-candidate", 0), 1)
             self.assertGreaterEqual(type_counts.get("notification-database", 0), 1)
+            self.assertGreaterEqual(type_counts.get("notification-row-candidate", 0), 1)
             self.assertGreaterEqual(type_counts.get("uwp-package", 0), 1)
             self.assertGreaterEqual(type_counts.get("webshell-source-candidate", 0), 1)
             self.assertGreaterEqual(type_counts.get("web-server-log", 0), 1)
@@ -706,6 +708,20 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
                 "Microsoft.WindowsNotepad_8wekyb3d8bbwe",
             )
             self.assertEqual(activity_timeline["source_locator"]["viewer"], "sqlite")
+            activity_row = next(
+                artifact for artifact in payload["artifacts"] if artifact["artifact_type"] == "activities-cache-row-candidate"
+            )
+            self.assertEqual(activity_row["details"]["timeline_type"], "activity")
+            self.assertEqual(activity_row["details"]["normalized_time"], "2026-01-01T00:00:00+00:00")
+            self.assertEqual(activity_row["details"]["decoded_text_hint"]["preview"], "Opened case notes")
+            self.assertEqual(activity_row["details"]["source_locator"]["viewer"], "sqlite")
+            self.assertEqual(activity_row["details"]["source_locator"]["parent_artifact_type"], "activities-cache-db")
+            self.assertEqual(
+                activity_row["details"]["activity_row_review_profile"]["uwp_package_status"],
+                "matched",
+            )
+            self.assertIn("uwp-package-correlated", activity_row["details"]["risk_flags"])
+            self.assertFalse(activity_row["details"]["commercial_grade_ready"])
             notification = next(artifact for artifact in payload["artifacts"] if artifact["artifact_type"] == "notification-database")
             self.assertEqual(notification["details"]["profile_attribution"]["profile_name"], "alice")
             self.assertEqual(notification["details"]["profile_attribution"]["sid"], "S-1-5-21-111-222-333-1001")
@@ -714,6 +730,16 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
             self.assertEqual(notification_timeline["time_parse_status"], "iso8601")
             self.assertEqual(notification_timeline["decoded_text_hint"]["format"], "xml-or-html-text")
             self.assertEqual(notification_timeline["decoded_text_hint"]["preview"], "Meeting soon")
+            notification_row = next(
+                artifact for artifact in payload["artifacts"] if artifact["artifact_type"] == "notification-row-candidate"
+            )
+            self.assertEqual(notification_row["details"]["timeline_type"], "notification")
+            self.assertEqual(notification_row["details"]["decoded_text_hint"]["preview"], "Meeting soon")
+            self.assertEqual(
+                notification_row["details"]["source_locator"]["parent_artifact_type"],
+                "notification-database",
+            )
+            self.assertIn("decoded-text-hint-present", notification_row["details"]["risk_flags"])
             uwp_row = next(artifact for artifact in payload["artifacts"] if artifact["artifact_type"] == "uwp-package")
             self.assertEqual(uwp_row["details"]["profile_attribution"]["profile_name"], "alice")
             self.assertEqual(uwp_row["details"]["profile_attribution"]["sid"], "S-1-5-21-111-222-333-1001")
