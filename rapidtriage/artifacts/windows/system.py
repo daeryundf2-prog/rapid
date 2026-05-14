@@ -59,6 +59,35 @@ TASK_LOLBINS = {
     "wscript.exe",
 }
 DEFENDER_SUPPORT_ROOT = ("ProgramData", "Microsoft", "Windows Defender", "Support")
+DEFENDER_POLICY_SCAN_LIMIT = 1024 * 1024
+DEFENDER_POLICY_SUFFIXES = {".reg", ".txt", ".csv"}
+DEFENDER_POLICY_PATH_TERMS = (
+    "windows defender",
+    "microsoft\\windows defender",
+    "mppreference",
+    "mpcmdrun",
+)
+DEFENDER_PROTECTION_DISABLE_NAMES = {
+    "disableantispyware",
+    "disableantivirus",
+    "disablerealtimemonitoring",
+    "disablebehaviormonitoring",
+    "disableioavprotection",
+    "disableonaccessprotection",
+    "disablescriptscanning",
+    "disableblockatfirstseen",
+    "disablearchivescanning",
+}
+DEFENDER_EXCLUSION_NAMES = {
+    "exclusionpath",
+    "exclusionprocess",
+    "exclusionextension",
+    "exclusionipaddress",
+    "exclusions_paths",
+    "exclusions_processes",
+    "exclusions_extensions",
+    "exclusions_ipaddresses",
+}
 WMI_REPOSITORY_ROOT = ("Windows", "System32", "wbem", "Repository")
 WMI_REPOSITORY_NAMES = {"OBJECTS.DATA", "INDEX.BTR", "MAPPING.VER"}
 WMI_REPOSITORY_SUFFIXES = {".MAP", ".BTR", ".DATA"}
@@ -79,6 +108,11 @@ REMOTE_CONTROL_TIMESTAMP_RE = re.compile(
 )
 REMOTE_CONTROL_ID_RE = re.compile(
     r"(?i)(?:remote\s*id|client\s*id|peer\s*id|desk\s*id|alias|id)\s*[:=#-]?\s*([A-Z0-9][A-Z0-9 _.-]{4,40})"
+)
+DEFENDER_REG_VALUE_RE = re.compile(r'^\s*"(?P<name>[^"]+)"\s*=\s*(?P<value>.+?)\s*$')
+DEFENDER_PREFERENCE_VALUE_RE = re.compile(
+    r"^\s*(?P<name>Exclusion(?:Path|Process|Extension|IpAddress)|Disable[A-Za-z0-9]+|TamperProtection|PUAProtection)\s*[:=]\s*(?P<value>.+?)\s*$",
+    re.IGNORECASE,
 )
 PRINT_DOCUMENT_SUFFIXES = {
     ".doc",
@@ -185,6 +219,7 @@ class WindowsSystemArtifactsProvider:
 
     def collect(self, root: Path) -> Iterable[ArtifactRecord]:
         yield from collect_task_scheduler(root)
+        yield from collect_defender_policy_artifacts(root)
         yield from collect_defender_support(root)
         yield from collect_firewall_logs(root)
         yield from collect_wer_reports(root)
@@ -3567,6 +3602,207 @@ def collect_task_scheduler(root: Path) -> Iterable[ArtifactRecord]:
         )
 
 
+def collect_defender_policy_artifacts(root: Path) -> Iterable[ArtifactRecord]:
+    for path in sorted(root.rglob("*"), key=lambda item: str(item).lower()):
+        if not path.is_file() or path.suffix.lower() not in DEFENDER_POLICY_SUFFIXES:
+            continue
+        lower_path = str(path).lower().replace("/", "\\")
+        if not any(term in lower_path for term in DEFENDER_POLICY_PATH_TERMS):
+            continue
+        text = read_bounded_text(path, limit=DEFENDER_POLICY_SCAN_LIMIT)
+        profile = defender_policy_profile(text)
+        if not profile["policy_entries"]:
+            continue
+        stat_result = path.stat()
+        validation_checks = {
+            "policy_source_readable": True,
+            "policy_entries_present": True,
+            "exclusion_or_disabled_control_present": bool(
+                profile["exclusion_entries"] or profile["disabled_protection_entries"]
+            ),
+            "defender_eventlog_correlated": False,
+            "mpcmdrun_history_correlated": False,
+            "registry_hive_transaction_replayed": False,
+        }
+        yield ArtifactRecord(
+            provider=WindowsSystemArtifactsProvider.name,
+            artifact_type="defender-policy-artifact",
+            path=str(path.resolve()),
+            supported=True,
+            details=with_system_deep_parser_manifest("defender", {
+                **source_details(path, "defender-policy-export"),
+                "coverage_status": "defender-policy-tamper-pivot",
+                "reportability": "triage",
+                "parser_confidence": profile["parser_confidence"],
+                "validation_required": True,
+                "validation_guidance": (
+                    "Defender policy/exclusion values are normalized from registry or MpPreference-style exports. "
+                    "Correlate with Defender EVTX 5007, MPLog, registry transaction logs, process creation, and "
+                    "authorized admin change records before report-grade tampering conclusions."
+                ),
+                "defender_policy_profile": profile,
+                "policy_entries": profile["policy_entries"],
+                "exclusion_entries": profile["exclusion_entries"],
+                "disabled_protection_entries": profile["disabled_protection_entries"],
+                "tamper_entries": profile["tamper_entries"],
+                "risk_flags": defender_policy_risk_flags(profile),
+                "risk_score": min(100, 25 + len(defender_policy_risk_flags(profile)) * 15),
+                "validation_checks": validation_checks,
+                "core_accuracy_gates": system_core_accuracy_gates(
+                    "defender",
+                    {
+                        "source_path": str(path.resolve()),
+                        "source_hashes": {"sha256": compute_sha256(path)},
+                        "validation_checks": validation_checks,
+                        "interesting_entries": [
+                            entry["name"] for entry in profile["policy_entries"][:25]
+                        ],
+                    },
+                ),
+                "system_validation_matrix": system_validation_matrix("defender", validation_checks),
+                "system_report_grade_assessment": system_report_grade_assessment("defender", validation_checks),
+                "system_native_capabilities": dict(SYSTEM_NATIVE_CAPABILITIES),
+                "forensic_review": system_forensic_review(
+                    "defender",
+                    [
+                        f"policy_entry_count={profile['policy_entry_count']}",
+                        f"exclusion_count={len(profile['exclusion_entries'])}",
+                        f"disabled_control_count={len(profile['disabled_protection_entries'])}",
+                    ],
+                    validation_checks,
+                ),
+                "commercial_grade_ready": False,
+                "commercial_grade_blockers": [
+                    "defender-event-policy-and-quarantine-correlation-required",
+                    "registry-transaction-replay-required",
+                    "administrator-change-attribution-required",
+                ],
+                "modified_at": isoformat_from_timestamp(stat_result.st_mtime),
+                "timestamp": isoformat_from_timestamp(stat_result.st_mtime),
+                "timestamp_source": "defender_policy_source_modified_at",
+                "source_hashes": {"sha256": compute_sha256(path)},
+                "raw_preview": text[:600],
+            }),
+        )
+
+
+def defender_policy_profile(text: str) -> dict[str, object]:
+    entries: list[dict[str, object]] = []
+    current_key = ""
+    for line in text.splitlines()[:2000]:
+        stripped = line.strip()
+        if not stripped:
+            continue
+        if stripped.startswith("[") and stripped.endswith("]"):
+            current_key = stripped.strip("[]")
+            continue
+        entry = defender_policy_entry_from_reg_line(stripped, current_key)
+        if entry is None:
+            entry = defender_policy_entry_from_preference_line(stripped)
+        if entry is not None:
+            entries.append(entry)
+        if len(entries) >= 200:
+            break
+    exclusions = [entry for entry in entries if entry["category"] == "exclusion"]
+    disabled_controls = [entry for entry in entries if entry["category"] == "protection-disabled"]
+    tamper_entries = [entry for entry in entries if entry["category"] == "tamper-protection"]
+    return {
+        "profile_version": "defender-policy-profile-v1",
+        "policy_entry_count": len(entries),
+        "policy_entries": entries,
+        "exclusion_entries": exclusions[:80],
+        "disabled_protection_entries": disabled_controls[:80],
+        "tamper_entries": tamper_entries[:40],
+        "values_are_candidates": True,
+        "parser_confidence": "high" if disabled_controls or exclusions else ("medium" if entries else "none"),
+        "validation_required": True,
+        "validation_guidance": (
+            "Registry/MpPreference policy values are candidates for Defender tampering or administrative change. "
+            "Report only after correlating Event ID 5007, registry transaction timing, process/user attribution, "
+            "and sanctioned policy baselines."
+        ),
+    }
+
+
+def defender_policy_entry_from_reg_line(line: str, current_key: str) -> dict[str, object] | None:
+    match = DEFENDER_REG_VALUE_RE.match(line)
+    if not match:
+        return None
+    key_lower = current_key.lower()
+    name = match.group("name").strip()
+    name_lower = name.lower()
+    if "windows defender" not in key_lower and name_lower not in DEFENDER_PROTECTION_DISABLE_NAMES:
+        return None
+    value = parse_defender_policy_value(match.group("value").strip())
+    category = defender_policy_category(name, current_key, value)
+    return {
+        "name": name,
+        "value": value,
+        "raw_value": match.group("value").strip(),
+        "key_path": current_key,
+        "category": category,
+        "source_format": "reg-export",
+        "high_risk": category in {"exclusion", "protection-disabled", "tamper-protection"},
+    }
+
+
+def defender_policy_entry_from_preference_line(line: str) -> dict[str, object] | None:
+    match = DEFENDER_PREFERENCE_VALUE_RE.match(line)
+    if not match:
+        return None
+    name = match.group("name").strip()
+    value = parse_defender_policy_value(match.group("value").strip())
+    category = defender_policy_category(name, "", value)
+    return {
+        "name": name,
+        "value": value,
+        "raw_value": match.group("value").strip(),
+        "key_path": "",
+        "category": category,
+        "source_format": "mppreference-export",
+        "high_risk": category in {"exclusion", "protection-disabled", "tamper-protection"},
+    }
+
+
+def parse_defender_policy_value(raw_value: str) -> object:
+    value = raw_value.strip().rstrip(",")
+    lower = value.lower()
+    if lower.startswith("dword:"):
+        try:
+            return int(lower.split(":", 1)[1], 16)
+        except ValueError:
+            return value
+    if value.startswith('"') and value.endswith('"'):
+        return value[1:-1].replace(r"\\", "\\").replace(r"\"", '"')
+    return value
+
+
+def defender_policy_category(name: str, key_path: str, value: object) -> str:
+    lower_name = name.lower()
+    lower_key = key_path.lower()
+    truthy = value in {1, "1", "True", "true", "Enabled", "enabled"}
+    if lower_name in DEFENDER_EXCLUSION_NAMES or "exclusions" in lower_key:
+        return "exclusion"
+    if lower_name in DEFENDER_PROTECTION_DISABLE_NAMES and truthy:
+        return "protection-disabled"
+    if "tamper" in lower_name:
+        return "tamper-protection"
+    if lower_name.startswith("disable"):
+        return "protection-setting"
+    return "policy-setting"
+
+
+def defender_policy_risk_flags(profile: Mapping[str, object]) -> list[str]:
+    flags = ["defender-policy-pivot"]
+    if profile.get("exclusion_entries"):
+        flags.append("defender-exclusion-candidate")
+    if profile.get("disabled_protection_entries"):
+        flags.append("defender-protection-disabled-candidate")
+    if profile.get("tamper_entries"):
+        flags.append("defender-tamper-setting-candidate")
+    return unique_preserve_order(flags)
+
+
 def collect_defender_support(root: Path) -> Iterable[ArtifactRecord]:
     support_root = root.joinpath(*DEFENDER_SUPPORT_ROOT)
     if not support_root.is_dir():
@@ -5062,6 +5298,15 @@ def read_lines(path: Path, *, limit: int) -> list[str]:
     except OSError:
         return []
     return text.splitlines()[:limit]
+
+
+def read_bounded_text(path: Path, *, limit: int) -> str:
+    try:
+        data = path.read_bytes()[:limit]
+    except OSError:
+        return ""
+    encoding = "utf-16" if data.startswith((b"\xff\xfe", b"\xfe\xff")) else "utf-8"
+    return data.decode(encoding, errors="replace")
 
 
 def preview_text(path: Path, *, limit: int = 600) -> str:

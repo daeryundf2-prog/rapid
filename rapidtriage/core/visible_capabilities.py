@@ -566,7 +566,7 @@ CAPABILITY_GROUPS: tuple[dict[str, Any], ...] = (
         "label": "원격접속 / Tampering",
         "capabilities": (
             {"id": "remote-control-anydesk-teamviewer-rustdesk", "label": "AnyDesk/TeamViewer/RustDesk", "status": "partial", "terms": ("anydesk", "teamviewer", "rustdesk", "chrome remote desktop", "remote control", "third-party-remote-control-artifact", "remote_control_session_profile")},
-            {"id": "defender-edr-tampering", "label": "Defender/EDR 무력화", "status": "partial", "terms": ("defender", "tamper", "exclusion", "edr", "service stopped")},
+            {"id": "defender-edr-tampering", "label": "Defender/EDR 무력화", "status": "partial", "terms": ("defender", "tamper", "exclusion", "edr", "service stopped", "defender-policy-artifact", "defender_policy_profile", "DisableRealtimeMonitoring", "ExclusionPath")},
         ),
     },
     {

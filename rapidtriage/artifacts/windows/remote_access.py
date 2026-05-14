@@ -8,6 +8,7 @@ from ...core.audit import compute_sha256
 from ...core.models import ArtifactRecord
 from .common import isoformat_from_timestamp, iter_windows_user_homes
 from .system import (
+    IP_RE,
     REMOTE_CONTROL_SCAN_LIMIT,
     URL_RE,
     extract_ascii_strings,
@@ -15,10 +16,12 @@ from .system import (
     read_prefix,
     regex_candidates,
     remote_control_product_for_path,
+    remote_control_risk_flags,
+    remote_control_session_profile,
     unique_strings,
 )
 
-PARSER_VERSION = "windows-remote-access-v3"
+PARSER_VERSION = "windows-remote-access-v4"
 RDP_CACHE_ROOT = ("AppData", "Local", "Microsoft", "Terminal Server Client", "Cache")
 RDP_DESTINATION_RE = re.compile(r"(?i)\\terminal server client\\(?:default|servers)\\(?P<destination>[^\\\]\"]+)")
 RDP_CACHE_SCAN_LIMIT = 4 * 1024 * 1024
@@ -136,7 +139,8 @@ def collect_third_party_remote_control_artifacts(root: Path) -> Iterable[Artifac
         blob = read_prefix(path, REMOTE_CONTROL_SCAN_LIMIT)
         strings = unique_strings([*extract_ascii_strings(blob), *extract_utf16_strings(blob)])
         urls = regex_candidates(strings, URL_RE)[:20]
-        ips = sorted(set(re.findall(r"(?<!\d)(?:\d{1,3}\.){3}\d{1,3}(?!\d)", " ".join(strings))))[:20]
+        ips = sorted(set(IP_RE.findall(" ".join(strings))))[:20]
+        session_profile = remote_control_session_profile(product, strings, urls, ips)
         yield ArtifactRecord(
             provider=WindowsRemoteAccessProvider.name,
             artifact_type="third-party-remote-control-artifact",
@@ -154,16 +158,21 @@ def collect_third_party_remote_control_artifacts(root: Path) -> Iterable[Artifac
                 "string_samples": strings[:40],
                 "url_candidates": urls,
                 "ip_candidates": ips,
-                "evidence_strength": "remote-control-session-pivot",
-                "coverage_status": "remote-control-file-inventory",
+                "remote_control_session_profile": session_profile,
+                "session_candidates": session_profile["session_candidates"],
+                "remote_id_candidates": session_profile["remote_id_candidates"],
+                "file_transfer_indicators": session_profile["file_transfer_indicators"],
+                "coverage_status": "remote-control-session-pivot-inventory"
+                if session_profile["session_candidates"]
+                else "remote-control-file-inventory",
                 "reportability": "triage",
                 "parser_confidence": "medium",
-                "risk_flags": [f"remote-control:{product}"],
+                "risk_flags": remote_control_risk_flags(product, session_profile),
                 "validation_required": True,
-                "validation_guidance": "Third-party remote-control file is a triage pivot. Validate session time, peer ID/IP, transfer logs, and account attribution with product-specific parsers before report-grade use.",
+                "validation_guidance": "Third-party remote-control file is parsed for bounded session, peer, IP/URL, and transfer pivots. Validate session start/end, peer identity, file transfer logs, and account attribution with product-specific parsers before report-grade use.",
                 "commercial_grade_ready": False,
                 "commercial_grade_blockers": [
-                    "product-specific-session-decoder-required",
+                    "full-product-specific-session-state-decoder-required",
                     "remote-peer-attribution-validation-required",
                     "file-transfer-log-validation-required",
                 ],

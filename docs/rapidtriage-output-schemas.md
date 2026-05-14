@@ -607,6 +607,7 @@ The `manifest-windows-artifacts.json` sample also fixes the current artifact row
   - `prefetch-reference`
 - `windows-system`
   - `task-scheduler-task`
+  - `defender-policy-artifact`
   - `defender-support-log`
   - `firewall-log`
   - `wer-report`

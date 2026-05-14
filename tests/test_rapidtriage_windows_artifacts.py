@@ -3951,7 +3951,39 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
             fixture = build_windows_artifact_fixture(root)
             anydesk = root / "ProgramData" / "AnyDesk" / "service.trace"
             anydesk.parent.mkdir(parents=True, exist_ok=True)
-            anydesk.write_text("2026-05-14 AnyDesk session from 203.0.113.10 https://relay.anydesk.com", encoding="utf-8")
+            anydesk.write_text(
+                "2026-05-14 10:15:20 AnyDesk session remote id 123 456 789 from 203.0.113.10 "
+                "https://relay.anydesk.com file transfer upload SecretPlan.docx",
+                encoding="utf-8",
+            )
+            teamviewer = root / "ProgramData" / "TeamViewer" / "Connections_incoming.txt"
+            teamviewer.parent.mkdir(parents=True, exist_ok=True)
+            teamviewer.write_text(
+                "2026-05-14 10:18:44 TeamViewer incoming connection Partner ID: 222 333 444 "
+                "from 198.51.100.20 transferred file Budget.xlsx",
+                encoding="utf-8",
+            )
+            rustdesk = root / "Users" / "alice" / "AppData" / "Roaming" / "RustDesk" / "log" / "rustdesk.log"
+            rustdesk.parent.mkdir(parents=True, exist_ok=True)
+            rustdesk.write_text(
+                "2026-05-14 10:20:00 RustDesk connected peer id 555666777 from 203.0.113.20",
+                encoding="utf-8",
+            )
+            chrome_remote = (
+                root
+                / "Users"
+                / "alice"
+                / "AppData"
+                / "Local"
+                / "Google"
+                / "Chrome Remote Desktop"
+                / "chromoting.log"
+            )
+            chrome_remote.parent.mkdir(parents=True, exist_ok=True)
+            chrome_remote.write_text(
+                "2026-05-14 10:22:00 chromoting remoting_host session client id abc123xyz from 192.0.2.44",
+                encoding="utf-8",
+            )
             output = root / "remote-access.json"
 
             self.assertEqual(main(["artifacts", str(root), "--kind", "windows-remote-access", "--output", str(output)]), 0)
@@ -3960,7 +3992,10 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
             config = next(item for item in artifacts if item["artifact_type"] == "rdp-config")
             cache = next(item for item in artifacts if item["artifact_type"] == "rdp-cache-file")
             destinations = [item for item in artifacts if item["artifact_type"] == "rdp-destination"]
-            remote = next(item for item in artifacts if item["artifact_type"] == "third-party-remote-control-artifact")
+            remotes = [
+                item for item in artifacts if item["artifact_type"] == "third-party-remote-control-artifact"
+            ]
+            remotes_by_product = {item["details"]["product"]: item for item in remotes}
 
             self.assertEqual(config["details"]["destination"], "10.0.0.50")
             self.assertEqual(config["details"]["username_hint"], r"CORP\alice")
@@ -3974,11 +4009,45 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
             self.assertEqual(cache["details"]["thumbnail_candidates"][0]["height"], 200)
             self.assertTrue(any(item["details"]["destination"] == "10.0.0.50" for item in destinations))
             self.assertTrue(any(item["details"]["destination"] == "rdp-target.example" for item in destinations))
+            self.assertEqual(
+                set(remotes_by_product),
+                {"anydesk", "teamviewer", "rustdesk", "chrome-remote-desktop"},
+            )
+            remote = remotes_by_product["anydesk"]
             self.assertEqual(remote["provider"], "windows-remote-access")
             self.assertEqual(remote["details"]["product"], "anydesk")
             self.assertEqual(remote["details"]["ip_candidates"], ["203.0.113.10"])
             self.assertIn("https://relay.anydesk.com", remote["details"]["url_candidates"])
+            self.assertEqual(remote["details"]["coverage_status"], "remote-control-session-pivot-inventory")
+            self.assertTrue(remote["details"]["remote_control_session_profile"]["session_candidates"])
+            self.assertIn("123 456 789", remote["details"]["remote_id_candidates"])
+            self.assertTrue(remote["details"]["file_transfer_indicators"])
             self.assertIn("remote-control:anydesk", remote["details"]["risk_flags"])
+            self.assertIn("remote-control-file-transfer-candidate", remote["details"]["risk_flags"])
+            self.assertEqual(
+                remotes_by_product["teamviewer"]["details"]["ip_candidates"],
+                ["198.51.100.20"],
+            )
+            self.assertIn(
+                "222 333 444",
+                remotes_by_product["teamviewer"]["details"]["remote_id_candidates"],
+            )
+            self.assertEqual(
+                remotes_by_product["rustdesk"]["details"]["ip_candidates"],
+                ["203.0.113.20"],
+            )
+            self.assertIn(
+                "555666777",
+                remotes_by_product["rustdesk"]["details"]["remote_id_candidates"],
+            )
+            self.assertEqual(
+                remotes_by_product["chrome-remote-desktop"]["details"]["ip_candidates"],
+                ["192.0.2.44"],
+            )
+            self.assertIn(
+                "abc123xyz",
+                remotes_by_product["chrome-remote-desktop"]["details"]["remote_id_candidates"],
+            )
 
     def test_windows_system_collector_maps_print_spooler_and_remote_control_artifacts(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -4026,6 +4095,44 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
             self.assertTrue(remote["details"]["file_transfer_indicators"])
             self.assertIn("remote-control:anydesk", remote["details"]["risk_flags"])
             self.assertIn("remote-control-file-transfer-candidate", remote["details"]["risk_flags"])
+
+    def test_windows_system_collector_maps_defender_policy_tamper_exports(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            policy = root / "Windows" / "System32" / "config" / "Windows Defender policy.reg"
+            policy.parent.mkdir(parents=True, exist_ok=True)
+            policy.write_text(
+                """Windows Registry Editor Version 5.00
+
+[HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows Defender\\Exclusions\\Paths]
+"C:\\Temp"=dword:00000000
+
+[HKEY_LOCAL_MACHINE\\SOFTWARE\\Policies\\Microsoft\\Windows Defender\\Real-Time Protection]
+"DisableRealtimeMonitoring"=dword:00000001
+
+[HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows Defender\\Features]
+"TamperProtection"=dword:00000000
+""",
+                encoding="utf-16",
+            )
+            output = root / "windows-system.json"
+
+            self.assertEqual(main(["artifacts", str(root), "--kind", "windows-system", "--output", str(output)]), 0)
+            payload = json.loads(output.read_text(encoding="utf-8"))
+            artifact = next(item for item in payload["artifacts"] if item["artifact_type"] == "defender-policy-artifact")
+            details = artifact["details"]
+            profile = details["defender_policy_profile"]
+
+            self.assertEqual(details["coverage_status"], "defender-policy-tamper-pivot")
+            self.assertEqual(profile["profile_version"], "defender-policy-profile-v1")
+            self.assertEqual(profile["policy_entry_count"], 3)
+            self.assertTrue(details["exclusion_entries"])
+            self.assertTrue(details["disabled_protection_entries"])
+            self.assertTrue(details["tamper_entries"])
+            self.assertIn("defender-exclusion-candidate", details["risk_flags"])
+            self.assertIn("defender-protection-disabled-candidate", details["risk_flags"])
+            self.assertIn("defender-tamper-setting-candidate", details["risk_flags"])
+            self.assertIn("defender-event-policy-and-quarantine-correlation-required", details["commercial_grade_blockers"])
 
     def test_windows_system_collector_inventories_windows_recall_pivots(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:

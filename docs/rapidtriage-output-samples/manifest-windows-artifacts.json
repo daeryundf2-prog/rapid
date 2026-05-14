@@ -12591,7 +12591,7 @@
           "supported": true,
           "details": {
             "parser": "windows-remote-access",
-            "parser_version": "windows-remote-access-v3",
+            "parser_version": "windows-remote-access-v4",
             "coverage_status": "mapped",
             "reportability": "triage",
             "source_path": "<ROOT>/Users/alice/AppData/Local/Microsoft/Terminal Server Client/Cache/Cache0000.bin",
@@ -12618,7 +12618,7 @@
           "supported": true,
           "details": {
             "parser": "windows-remote-access",
-            "parser_version": "windows-remote-access-v3",
+            "parser_version": "windows-remote-access-v4",
             "coverage_status": "mapped",
             "reportability": "triage",
             "source_path": "<ROOT>/Users/alice/Documents/Default.rdp",
@@ -12648,7 +12648,7 @@
           "supported": true,
           "details": {
             "parser": "windows-remote-access",
-            "parser_version": "windows-remote-access-v3",
+            "parser_version": "windows-remote-access-v4",
             "coverage_status": "mapped",
             "reportability": "triage",
             "source_path": "<ROOT>/Windows/System32/config/rdp.reg",

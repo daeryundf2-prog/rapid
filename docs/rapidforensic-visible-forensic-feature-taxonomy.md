@@ -791,7 +791,7 @@ GUI 표기 방식:
 | 디스크 내 메모리 파일 | hiberfil/pagefile 통합 카빙 | 목록화 | 디스크 이미지 내부 메모리 파일 문자열/URL/secret carving |
 | 디스크 내 메모리 파일 | MEMORY.DMP/Minidump | 목록화 | crash dump inventory와 의심 문자열 추출 |
 | 원격접속 / Tampering | AnyDesk/TeamViewer/RustDesk | 목록화 | 랜섬웨어/유출 사고에서 흔한 상용 원격제어 흔적 |
-| 원격접속 / Tampering | Defender/EDR 무력화 | 부분 구현 | Defender 예외, 서비스 중지, policy 변경, 로그 삭제 상관 |
+| 원격접속 / Tampering | Defender/EDR 무력화 | 부분 구현 | `defender-policy-artifact`가 Defender 예외, 보호 비활성화, TamperProtection 후보를 GUI 노출용 profile로 분리하고, 서비스 중지/policy 변경/로그 삭제 상관은 EVTX/registry transaction 검증 대상으로 남긴다. |
 | 검색 / 타임라인 고급 | Super Timeline | 부분 구현 | MFT/USN/EVTX/Registry/Web/Execution 단일 시간축 |
 | 검색 / 타임라인 고급 | De-NISTing/Whitelisting | 부분 구현 | `rapidtriage files --known-good-hash-feed`로 MD5/SHA1/SHA256 피드를 읽어 known-good 파일을 표시하거나 `--hide-known-good`로 숨김. Full NSRL RDS import/update와 검색 결과 suppression UI는 남음 |
 | 검색 / 타임라인 고급 | YARA / IOC 스캐너 | 부분 구현 | 로컬 rule/IOC hit를 `ioc_scanner_hits`로 모아 source pointer와 manifest를 제공. Native YARA grammar/신뢰 corpus diff는 남음 |
