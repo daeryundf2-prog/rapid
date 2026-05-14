@@ -6,12 +6,20 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from PIL import Image
+HAS_PILLOW = True
+try:
+    from PIL import Image
+except ModuleNotFoundError as exc:
+    if exc.name == "PIL":
+        HAS_PILLOW = False
+    else:
+        raise
 
 from rapidtriage.artifacts.media import build_image_gallery_manifest, build_media_trusted_diff, average_hash, media_core_accuracy_gates
 from rapidtriage.cli import build_parser, main
 
 
+@unittest.skipUnless(HAS_PILLOW, "Pillow is required for RapidTriage media image fixture tests")
 class RapidTriageMediaImageTests(unittest.TestCase):
     def test_parser_exposes_media_image_collector_kind(self) -> None:
         parser = build_parser()

@@ -7,9 +7,17 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from fastapi.testclient import TestClient
+HAS_FASTAPI = True
+try:
+    from fastapi.testclient import TestClient
+except ModuleNotFoundError as exc:
+    if exc.name == "fastapi":
+        HAS_FASTAPI = False
+    else:
+        raise
 
-from rapidtriage.api.app import create_app
+if HAS_FASTAPI:
+    from rapidtriage.api.app import create_app
 from rapidtriage.cli import build_parser, main
 from rapidtriage.core.doctor import OK, WARN, format_doctor_text, run_doctor
 from rapidtriage.core.jobs import RunJobStore
@@ -83,6 +91,7 @@ class RapidTriageDoctorTests(unittest.TestCase):
         self.assertIn(payload["status"], {OK, WARN})
         self.assertIn("checks", payload)
 
+    @unittest.skipUnless(HAS_FASTAPI, "fastapi is required for RapidTriage doctor API tests")
     def test_api_exposes_doctor_without_port_self_check(self) -> None:
         client = TestClient(create_app(RunJobStore()))
 

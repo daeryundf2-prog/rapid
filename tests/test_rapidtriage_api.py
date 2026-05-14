@@ -10,33 +10,41 @@ import zipfile
 from pathlib import Path
 from unittest.mock import patch
 
-from fastapi.testclient import TestClient
+HAS_FASTAPI = True
+try:
+    from fastapi.testclient import TestClient
+except ModuleNotFoundError as exc:
+    if exc.name == "fastapi":
+        HAS_FASTAPI = False
+    else:
+        raise
 
-from rapidtriage.api.app import (
-    build_email_conversation_trusted_diff,
-    build_run_validation_diff_inventory,
-    build_run_validation_package,
-    build_hex_viewer_trusted_diff,
-    build_large_sqlite_fts_trusted_diff,
-    build_media_transcript_trusted_diff,
-    build_pagination_cursor_manifest,
-    build_pagination_trusted_diff,
-    build_preview_sandbox_trusted_diff,
-    build_source_preview,
-    build_source_search,
-    build_sqlite_viewer_trusted_diff,
-    build_ui_virtualization_trusted_diff,
-    build_ui_virtualization_manifest,
-    email_viewer_core_accuracy_gates,
-    create_app,
-    hex_viewer_core_accuracy_gates,
-    large_sqlite_fts_core_accuracy_gates,
-    media_viewer_core_accuracy_gates,
-    pagination_core_accuracy_gates,
-    preview_sandbox_core_accuracy_gates,
-    sqlite_viewer_core_accuracy_gates,
-    ui_virtualization_core_accuracy_gates,
-)
+if HAS_FASTAPI:
+    from rapidtriage.api.app import (
+        build_email_conversation_trusted_diff,
+        build_run_validation_diff_inventory,
+        build_run_validation_package,
+        build_hex_viewer_trusted_diff,
+        build_large_sqlite_fts_trusted_diff,
+        build_media_transcript_trusted_diff,
+        build_pagination_cursor_manifest,
+        build_pagination_trusted_diff,
+        build_preview_sandbox_trusted_diff,
+        build_source_preview,
+        build_source_search,
+        build_sqlite_viewer_trusted_diff,
+        build_ui_virtualization_trusted_diff,
+        build_ui_virtualization_manifest,
+        email_viewer_core_accuracy_gates,
+        create_app,
+        hex_viewer_core_accuracy_gates,
+        large_sqlite_fts_core_accuracy_gates,
+        media_viewer_core_accuracy_gates,
+        pagination_core_accuracy_gates,
+        preview_sandbox_core_accuracy_gates,
+        sqlite_viewer_core_accuracy_gates,
+        ui_virtualization_core_accuracy_gates,
+    )
 from rapidtriage.cli import build_web_parser
 from rapidtriage.core.crash import write_crash_report
 from rapidtriage.core.jobs import RunJobStore
@@ -57,6 +65,7 @@ def hash_file(path: Path, algorithm: str) -> str:
     return hasher.hexdigest()
 
 
+@unittest.skipUnless(HAS_FASTAPI, "fastapi is required for RapidTriage API tests")
 class RapidTriageApiTests(unittest.TestCase):
     def test_source_search_finds_sqlite_hits_after_legacy_5000_row_boundary(self) -> None:
         with tempfile.TemporaryDirectory() as temp:

@@ -8,11 +8,21 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
+HAS_FASTAPI = True
+try:
+    import fastapi  # noqa: F401
+except ModuleNotFoundError as exc:
+    if exc.name == "fastapi":
+        HAS_FASTAPI = False
+    else:
+        raise
+
 from rapidtriage.cli import build_parser, main
 from rapidtriage.core import browser_stress
 from rapidtriage.core.browser_stress import build_browser_large_result_stress_plan, run_browser_large_result_stress
 
 
+@unittest.skipUnless(HAS_FASTAPI, "fastapi is required for RapidTriage browser stress contract tests")
 class RapidTriageBrowserStressTests(unittest.TestCase):
     def test_browser_large_result_stress_plan_exposes_playwright_contract(self) -> None:
         plan = build_browser_large_result_stress_plan(record_count=100_000)

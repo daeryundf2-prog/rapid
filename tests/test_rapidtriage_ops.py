@@ -12,9 +12,17 @@ import zipfile
 from unittest.mock import patch
 from pathlib import Path
 
-from fastapi.testclient import TestClient
+HAS_FASTAPI = True
+try:
+    from fastapi.testclient import TestClient
+except ModuleNotFoundError as exc:
+    if exc.name == "fastapi":
+        HAS_FASTAPI = False
+    else:
+        raise
 
-from rapidtriage.api.app import create_app
+if HAS_FASTAPI:
+    from rapidtriage.api.app import create_app
 from rapidtriage.cli import build_parser, main, run_web_server
 from rapidtriage.core.backup import backup_restore_core_accuracy_gates, build_backup_restore_trusted_diff
 from rapidtriage.core.crash import build_crash_report_trusted_diff, crash_report_core_accuracy_gates, write_crash_report
@@ -3154,6 +3162,7 @@ class RapidTriageOpsTests(unittest.TestCase):
             imported = json.loads(imported_catalog_path.read_text(encoding="utf-8"))
             self.assertEqual(imported["cases"][0]["case_id"], "CASE-CATALOG")
 
+    @unittest.skipUnless(HAS_FASTAPI, "fastapi is required for RapidTriage operations API tests")
     def test_api_auth_token_protects_api_routes(self) -> None:
         client = TestClient(create_app(RunJobStore(), auth_token="secret"))
 
@@ -3168,6 +3177,7 @@ class RapidTriageOpsTests(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, "non-localhost"):
             run_web_server("0.0.0.0", 8765)
 
+    @unittest.skipUnless(HAS_FASTAPI, "fastapi is required for RapidTriage operations API tests")
     def test_run_jobs_include_step_status_for_recovery_visibility(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             root = Path(tmp_dir) / "missing"
