@@ -150,12 +150,15 @@ The sample JSON uses a few placeholders so the examples stay stable across machi
   - `manifest`
   - `candidates`
   - `results`
+  - optional `extraction_errors`
   - optional `index` metadata when a processed-text index sidecar is written
 - `summary` currently records:
   - `candidate_count`
   - `match_count`
   - `supported_extensions`
+  - optional `extraction_error_count` and `skipped_document_count` when large/corrupt documents are skipped
 - Supported document extensions include text/config/log/data, HTML/RTF, PDF, Office/OpenDocument files, EML/MBOX email, and bounded Outlook MSG/PST/OST string extraction.
+- `extraction_errors[]` records path, kind, size, reason, error type, and `document-skipped-search-continues` effect so analysts can see that a missing hit is a partial-search condition, not proof that the keyword is absent.
 - Optional `docs-index` sidecars use a processed-text inverted index and do not store full extracted text.
 
 ### `files`

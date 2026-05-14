@@ -7,6 +7,7 @@ import zipfile
 from pathlib import Path
 
 from rapidtriage.cli import main
+from rapidtriage.core.docs import MAX_EXTRACT_TEXT_BYTES, run_docs_search
 
 
 def write_minimal_docx(path: Path, text: str) -> None:
@@ -94,6 +95,27 @@ def write_minimal_mail_container(path: Path, text: str) -> None:
 
 
 class RapidTriageDocsTests(unittest.TestCase):
+    def test_docs_search_continues_when_large_document_hits_extraction_cap(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            (root / "small.txt").write_text("secret survives after large skip", encoding="utf-8")
+            huge = root / "huge.log"
+            with huge.open("wb") as handle:
+                handle.seek(MAX_EXTRACT_TEXT_BYTES + 1)
+                handle.write(b"\0")
+
+            payload = run_docs_search(root, ["secret"])
+
+            self.assertEqual(payload["summary"]["candidate_count"], 2)
+            self.assertEqual(payload["summary"]["match_count"], 1)
+            self.assertEqual(payload["summary"]["extraction_error_count"], 1)
+            self.assertEqual(payload["summary"]["skipped_document_count"], 1)
+            self.assertEqual(Path(payload["results"][0]["path"]).name, "small.txt")
+            error = payload["extraction_errors"][0]
+            self.assertEqual(Path(error["path"]).name, "huge.log")
+            self.assertEqual(error["reason"], "input-too-large")
+            self.assertEqual(error["effect"], "document-skipped-search-continues")
+
     def test_docs_command_scans_supported_document_extensions_and_writes_json(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             root = Path(tmp_dir)

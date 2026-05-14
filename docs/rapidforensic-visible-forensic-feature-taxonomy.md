@@ -618,6 +618,7 @@ GUI 표시 권장:
 - 상용급 blocker 수
 - source viewer 가능 여부
 - report 포함 가능 여부
+- 문서/메일/로그 추출 실패 또는 대용량 cap으로 인한 partial-search 경고
 
 ## 18. Windows QC에서 확인할 항목
 

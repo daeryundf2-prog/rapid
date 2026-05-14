@@ -51,6 +51,12 @@
         },
         "ioc_hit_count": {
           "type": "integer"
+        },
+        "extraction_error_count": {
+          "type": "integer"
+        },
+        "skipped_document_count": {
+          "type": "integer"
         }
       }
     },
@@ -265,6 +271,49 @@
                 }
               }
             }
+          }
+        }
+      }
+    },
+    "extraction_errors": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "path",
+          "kind",
+          "size",
+          "reason",
+          "error_type",
+          "message",
+          "recoverable",
+          "effect"
+        ],
+        "properties": {
+          "path": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string"
+          },
+          "size": {
+            "type": "integer"
+          },
+          "reason": {
+            "type": "string"
+          },
+          "error_type": {
+            "type": "string"
+          },
+          "message": {
+            "type": "string"
+          },
+          "recoverable": {
+            "type": "boolean"
+          },
+          "effect": {
+            "type": "string"
           }
         }
       }

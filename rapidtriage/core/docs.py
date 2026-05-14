@@ -140,11 +140,20 @@ def run_docs_search(
     candidates = scan_document_candidates(input_root, limit=limit)
     matches: List[DocumentMatch] = []
     text_by_path: Dict[str, str] = {}
+    extraction_errors: list[dict[str, object]] = []
     for candidate in candidates:
         try:
             text = extract_text(Path(candidate.path), candidate.kind)
-        except (OSError, UnicodeError, zipfile.BadZipFile, ET.ParseError):
+        except TextExtractionTooLarge as exc:
             text = ""
+            extraction_errors.append(
+                document_extraction_error(candidate, "input-too-large", exc, recoverable=True)
+            )
+        except (OSError, UnicodeError, zipfile.BadZipFile, ET.ParseError, ValueError) as exc:
+            text = ""
+            extraction_errors.append(
+                document_extraction_error(candidate, "text-extraction-failed", exc, recoverable=True)
+            )
         text_by_path[candidate.path] = text
         matched = [keyword for keyword in normalized if keyword in text.lower()]
         if not matched:
@@ -171,6 +180,10 @@ def run_docs_search(
         "candidates": [item.to_dict() for item in candidates],
         "results": [item.to_dict() for item in matches],
     }
+    if extraction_errors:
+        payload["summary"]["extraction_error_count"] = len(extraction_errors)
+        payload["summary"]["skipped_document_count"] = len(extraction_errors)
+        payload["extraction_errors"] = extraction_errors
     if rule_set is not None:
         annotate_docs_payload(payload, rule_set, text_by_path=text_by_path)
     if index_output is not None:
@@ -185,6 +198,25 @@ def run_docs_search(
             "term_count": index_payload["summary"]["term_count"],
         }
     return payload
+
+
+def document_extraction_error(
+    candidate: DocumentCandidate,
+    reason: str,
+    exc: BaseException,
+    *,
+    recoverable: bool,
+) -> dict[str, object]:
+    return {
+        "path": candidate.path,
+        "kind": candidate.kind,
+        "size": candidate.size,
+        "reason": reason,
+        "error_type": type(exc).__name__,
+        "message": str(exc),
+        "recoverable": recoverable,
+        "effect": "document-skipped-search-continues",
+    }
 
 
 def build_docs_index(

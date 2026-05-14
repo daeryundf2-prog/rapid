@@ -397,6 +397,13 @@ class RapidTriageWebStaticTests(unittest.TestCase):
         self.assertIn(".sr-only", styles)
         self.assertIn("body.analysis-active .completed-core-workflow", styles)
 
+    def test_docs_tab_discloses_skipped_extraction_errors(self) -> None:
+        app_js = (REPO_ROOT / "rapidtriage" / "web" / "static" / "app.js").read_text(encoding="utf-8")
+
+        self.assertIn("payload.extraction_errors", app_js)
+        self.assertIn("document(s) skipped during text extraction", app_js)
+        self.assertIn("Search continued; review the skipped list", app_js)
+
     def test_file_triage_controls_are_exposed_in_gui_and_files_tab(self) -> None:
         app_js = (REPO_ROOT / "rapidtriage" / "web" / "static" / "app.js").read_text(encoding="utf-8")
         index_html = (REPO_ROOT / "rapidtriage" / "web" / "static" / "index.html").read_text(encoding="utf-8")

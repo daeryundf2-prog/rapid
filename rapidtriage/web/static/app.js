@@ -2901,8 +2901,20 @@ function renderFileTriageBadges(file) {
 function renderDocs(payload) {
   const rows = payload.results || [];
   const offset = payload.pagination?.offset || 0;
-  if (!rows.length) return '<p class="empty-state">No document matches.</p>';
+  const extractionErrors = payload.extraction_errors || [];
+  const extractionNotice = extractionErrors.length
+    ? `<div class="search-verification-card warning">
+        <strong>${formatNumber(extractionErrors.length)} document(s) skipped during text extraction.</strong>
+        <span>Search continued; review the skipped list before concluding that a keyword is absent.</span>
+        <details>
+          <summary>Show skipped documents</summary>
+          <ul>${extractionErrors.slice(0, 20).map((item) => `<li>${escapeHtml(fileName(item.path))} · ${escapeHtml(item.reason || "extraction failed")} · ${formatBytes(item.size || 0)}</li>`).join("")}</ul>
+        </details>
+      </div>`
+    : "";
+  if (!rows.length) return `${extractionNotice}<p class="empty-state">No document matches.</p>`;
   return `
+    ${extractionNotice}
     ${renderPaginationNotice(payload.pagination, "docs")}
     <table class="data-table">
       <thead><tr><th>Document</th><th>Kind</th><th>Keywords</th><th>Preview</th><th></th></tr></thead>
