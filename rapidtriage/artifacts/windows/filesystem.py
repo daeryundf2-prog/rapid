@@ -26,6 +26,36 @@ NTFS_LOGFILE_SIGNATURES = {
 NTFS_LOGFILE_PAGE_SIZE_ASSUMPTION = 4096
 NTFS_LOGFILE_CONTEXT_WINDOW = 384
 NTFS_LOGFILE_HINT_LIMIT = 100
+ADS_SCAN_FILE_LIMIT = 10000
+ADS_PREFIX_SCAN_LIMIT = 4096
+ADS_TEXT_PREVIEW_LIMIT = 2048
+ADS_SUSPICIOUS_STREAM_SUFFIXES = {
+    ".bat",
+    ".cmd",
+    ".com",
+    ".dll",
+    ".exe",
+    ".hta",
+    ".js",
+    ".jse",
+    ".lnk",
+    ".ps1",
+    ".scr",
+    ".sys",
+    ".vbe",
+    ".vbs",
+    ".wsf",
+}
+ADS_SUSPICIOUS_STREAM_TERMS = (
+    "payload",
+    "secret",
+    "hidden",
+    "dropper",
+    "shell",
+    "script",
+    "powershell",
+    "encodedcommand",
+)
 NTFS_LOGFILE_OPERATION_KEYWORDS = {
     "delete": ("filedelete", "file_delete", "delete", "unlink", "remove"),
     "rename": ("filerename", "file_rename", "rename", "old_name", "new_name", "rename_old_name", "rename_new_name"),
@@ -171,6 +201,7 @@ class WindowsFilesystemProvider:
         yield from collect_native_ntfs_artifacts(root)
         yield from collect_ntfs_logfile_artifacts(root)
         yield from collect_recycle_bin_artifacts(root)
+        yield from collect_ads_stream_artifacts(root)
         yield from collect_signature_mismatch_artifacts(root)
         for path in sorted(root.rglob("*"), key=lambda item: str(item).lower()):
             if not path.is_file() or path.suffix.lower() not in SUPPORTED_SUFFIXES:
@@ -183,6 +214,231 @@ class WindowsFilesystemProvider:
                 if not isinstance(row, Mapping):
                     continue
                 yield build_filesystem_record(path, family, row, index)
+
+
+def collect_ads_stream_artifacts(root: Path) -> Iterable[ArtifactRecord]:
+    scanned = 0
+    for path in sorted((item for item in root.rglob("*") if item.is_file()), key=lambda item: str(item).lower()):
+        scanned += 1
+        if scanned > ADS_SCAN_FILE_LIMIT:
+            break
+        parsed = parse_ads_export_name(path.name)
+        if not parsed:
+            continue
+        host_name = parsed["host_name"]
+        stream_name = parsed["stream_name"]
+        stat_result = path.stat()
+        blob = read_prefix(path, ADS_PREFIX_SCAN_LIMIT)
+        detected = detect_file_signature(blob)
+        zone_fields = parse_ads_zone_identifier_fields(blob) if stream_name.lower() == "zone.identifier" else {}
+        host_path = path.with_name(host_name)
+        details = {
+            "parser": "windows-ads-stream-inventory",
+            "parser_version": PARSER_VERSION,
+            "coverage_status": "ads-export-file-inventory",
+            "reportability": "triage",
+            "source_path": str(path.resolve()),
+            "source_format": "ads-export-file",
+            "source_hashes": file_hashes(path),
+            "source_size": stat_result.st_size,
+            "modified_at": dt.datetime.fromtimestamp(stat_result.st_mtime, dt.timezone.utc).isoformat(),
+            "host_file_name": host_name,
+            "host_file_path_candidate": str(host_path.resolve()),
+            "host_file_present": host_path.is_file(),
+            "stream_name": stream_name,
+            "stream_type": parsed["stream_type"],
+            "stream_family": ads_stream_family(stream_name, detected, zone_fields),
+            "stream_suffix": Path(stream_name).suffix.lower(),
+            "detected_signature_kind": detected.get("kind", "") if detected else "",
+            "signature_hex": detected.get("signature_hex", "") if detected else "",
+            "zone_identifier_fields": zone_fields,
+            "zone_id": zone_fields.get("ZoneId", ""),
+            "referrer_url": zone_fields.get("ReferrerUrl", ""),
+            "host_url": zone_fields.get("HostUrl", ""),
+            "bounded_preview": ads_text_preview(blob),
+            "source_locator": {
+                "viewer": "source-hex-range",
+                "path": str(path.resolve()),
+                "byte_offset": 0,
+                "byte_length": min(len(blob), ADS_PREFIX_SCAN_LIMIT),
+                "stream_name": stream_name,
+            },
+            "ads_review_profile": ads_review_profile(
+                host_name=host_name,
+                stream_name=stream_name,
+                host_present=host_path.is_file(),
+                detected=detected,
+                zone_fields=zone_fields,
+            ),
+            "risk_flags": ads_risk_flags(stream_name, blob, detected, zone_fields, host_path.is_file()),
+            "validation_required": True,
+            "validation_guidance": (
+                "ADS rows are generated from mounted/exported stream files such as name:stream or "
+                "name.Zone.Identifier. Validate native stream existence with the original NTFS image, MFT/USN, "
+                "and extraction logs before reporting concealment or download provenance."
+            ),
+            "commercial_grade_ready": False,
+            "commercial_grade_blockers": [
+                "native-ntfs-ads-enumeration-required",
+                "host-file-mft-usn-correlation-required",
+                "trusted-ads-parser-or-extraction-log-diff-required",
+            ],
+        }
+        yield ArtifactRecord(
+            provider=WindowsFilesystemProvider.name,
+            artifact_type="ads-stream-candidate",
+            path=str(path.resolve()),
+            supported=True,
+            details=details,
+        )
+
+
+def parse_ads_export_name(name: str) -> dict[str, str] | None:
+    if name.lower().endswith(".zone.identifier") and ":" not in name:
+        host_name = name[: -len(".Zone.Identifier")]
+        if host_name:
+            return {"host_name": host_name, "stream_name": "Zone.Identifier", "stream_type": "sidecar-export"}
+    if ":" not in name:
+        return None
+    parts = name.split(":")
+    if len(parts) < 2 or not parts[0] or not parts[1]:
+        return None
+    stream_type = "named-stream-export"
+    stream_parts = parts[1:]
+    if stream_parts[-1].upper() == "$DATA":
+        stream_type = "$DATA"
+        stream_parts = stream_parts[:-1]
+    stream_name = ":".join(stream_parts).strip()
+    if not stream_name:
+        return None
+    return {"host_name": parts[0], "stream_name": stream_name, "stream_type": stream_type}
+
+
+def parse_ads_zone_identifier_fields(blob: bytes) -> dict[str, str]:
+    text = decode_ads_text(blob)
+    fields: dict[str, str] = {}
+    for line in text.splitlines():
+        if "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        cleaned_key = key.strip()
+        if cleaned_key:
+            fields[cleaned_key] = value.strip()[:500]
+    return fields
+
+
+def decode_ads_text(blob: bytes) -> str:
+    if blob.startswith(b"\xff\xfe"):
+        return blob.decode("utf-16le", errors="replace")
+    if blob.startswith(b"\xfe\xff"):
+        return blob.decode("utf-16be", errors="replace")
+    return blob.decode("utf-8", errors="replace")
+
+
+def ads_text_preview(blob: bytes) -> str:
+    text = decode_ads_text(blob)
+    printable = "".join(character if character.isprintable() or character in "\r\n\t" else " " for character in text)
+    return " ".join(printable.split())[:ADS_TEXT_PREVIEW_LIMIT]
+
+
+def ads_stream_family(
+    stream_name: str,
+    detected: Mapping[str, object] | None,
+    zone_fields: Mapping[str, str],
+) -> str:
+    if stream_name.lower() == "zone.identifier" or zone_fields:
+        return "download-provenance"
+    suffix = Path(stream_name).suffix.lower()
+    if suffix in ADS_SUSPICIOUS_STREAM_SUFFIXES:
+        return "executable-or-script-stream"
+    if detected:
+        return f"embedded-{detected.get('kind')}"
+    if any(term in stream_name.lower() for term in ADS_SUSPICIOUS_STREAM_TERMS):
+        return "suspicious-named-stream"
+    return "named-data-stream"
+
+
+def ads_risk_flags(
+    stream_name: str,
+    blob: bytes,
+    detected: Mapping[str, object] | None,
+    zone_fields: Mapping[str, str],
+    host_present: bool,
+) -> list[str]:
+    lowered_name = stream_name.lower()
+    lowered_preview = ads_text_preview(blob).lower()
+    flags = ["alternate-data-stream-candidate"]
+    if not host_present:
+        flags.append("ads-host-file-not-present-in-export")
+    if stream_name.lower() == "zone.identifier" or zone_fields:
+        flags.append("ads-zone-identifier-download-provenance")
+        if str(zone_fields.get("ZoneId", "")).strip() == "3":
+            flags.append("internet-zone-download")
+    if Path(stream_name).suffix.lower() in ADS_SUSPICIOUS_STREAM_SUFFIXES:
+        flags.append("ads-suspicious-stream-extension")
+    if any(term in lowered_name for term in ADS_SUSPICIOUS_STREAM_TERMS):
+        flags.append("ads-suspicious-stream-name")
+    if detected:
+        flags.append("ads-embedded-file-signature")
+        if detected.get("kind") == "windows-pe":
+            flags.append("ads-executable-payload-candidate")
+    if any(term in lowered_preview for term in ("powershell", "encodedcommand", "cmd.exe", "wscript", "mshta")):
+        flags.append("ads-script-payload-candidate")
+    return flags
+
+
+def ads_review_profile(
+    *,
+    host_name: str,
+    stream_name: str,
+    host_present: bool,
+    detected: Mapping[str, object] | None,
+    zone_fields: Mapping[str, str],
+) -> dict[str, object]:
+    return {
+        "profile_version": "ads-review-profile-v1",
+        "host_file_name": host_name,
+        "stream_name": stream_name,
+        "host_file_present": host_present,
+        "stream_family": ads_stream_family(stream_name, detected, zone_fields),
+        "download_provenance_present": bool(zone_fields),
+        "payload_signature_present": bool(detected),
+        "review_priority": ads_review_priority(stream_name, detected, zone_fields, host_present),
+        "correlation_targets": [
+            "$MFT:$DATA named attributes",
+            "$UsnJrnl STREAM_CHANGE records",
+            "browser downloads",
+            "Zone.Identifier provenance",
+            "execution traces",
+        ],
+        "not_proof_of": [
+            "native-stream-existence-without-original-ntfs-correlation",
+            "user-intent-to-hide-data",
+            "file-execution",
+        ],
+        "report_blockers": [
+            "native-ntfs-ads-enumeration-required",
+            "host-file-mft-usn-correlation-required",
+            "trusted-extraction-manifest-required",
+        ],
+    }
+
+
+def ads_review_priority(
+    stream_name: str,
+    detected: Mapping[str, object] | None,
+    zone_fields: Mapping[str, str],
+    host_present: bool,
+) -> str:
+    if detected and detected.get("kind") == "windows-pe":
+        return "high-review-embedded-executable-stream"
+    if Path(stream_name).suffix.lower() in ADS_SUSPICIOUS_STREAM_SUFFIXES:
+        return "high-review-script-or-executable-stream"
+    if zone_fields:
+        return "review-download-provenance"
+    if not host_present:
+        return "review-orphaned-stream-export"
+    return "review-named-stream"
 
 
 def collect_recycle_bin_artifacts(root: Path) -> Iterable[ArtifactRecord]:

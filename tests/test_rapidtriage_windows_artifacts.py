@@ -3817,6 +3817,20 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
             disguised = root / "Users" / "alice" / "Pictures" / "holiday.jpg"
             disguised.parent.mkdir(parents=True)
             disguised.write_bytes(b"MZ" + b"\x00" * 64 + b"hidden pe payload")
+            host_doc = root / "Users" / "alice" / "Downloads" / "report.docx"
+            host_doc.parent.mkdir(parents=True, exist_ok=True)
+            host_doc.write_bytes(b"PK\x03\x04docx fixture")
+            (host_doc.parent / "report.docx:Zone.Identifier").write_text(
+                "[ZoneTransfer]\n"
+                "ZoneId=3\n"
+                "ReferrerUrl=https://referrer.example/download\n"
+                "HostUrl=https://download.example/report.docx\n",
+                encoding="utf-8",
+            )
+            (host_doc.parent / "report.docx:hidden.ps1:$DATA").write_text(
+                "powershell -EncodedCommand SQBFAFgA",
+                encoding="utf-8",
+            )
             output = root / "filesystem.json"
 
             self.assertEqual(main(["artifacts", str(root), "--kind", "windows-filesystem", "--output", str(output)]), 0)
@@ -3824,6 +3838,8 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
             artifacts = payload["artifacts"]
             recycle = next(item for item in artifacts if item["artifact_type"] == "recycle-bin-entry")
             mismatch = next(item for item in artifacts if item["artifact_type"] == "file-signature-mismatch")
+            ads_rows = [item for item in artifacts if item["artifact_type"] == "ads-stream-candidate"]
+            ads_by_stream = {item["details"]["stream_name"]: item["details"] for item in ads_rows}
 
             self.assertEqual(recycle["details"]["original_path"], original_path)
             self.assertEqual(recycle["details"]["deleted_file_size"], 12345)
@@ -3834,6 +3850,22 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
             self.assertEqual(mismatch["details"]["actual_extension"], ".jpg")
             self.assertEqual(mismatch["details"]["detected_signature_kind"], "windows-pe")
             self.assertIn("signature-extension-mismatch", mismatch["details"]["risk_flags"])
+            self.assertIn("Zone.Identifier", ads_by_stream)
+            self.assertIn("hidden.ps1", ads_by_stream)
+            zone_ads = ads_by_stream["Zone.Identifier"]
+            self.assertEqual(zone_ads["zone_id"], "3")
+            self.assertEqual(zone_ads["host_url"], "https://download.example/report.docx")
+            self.assertEqual(zone_ads["stream_family"], "download-provenance")
+            self.assertTrue(zone_ads["host_file_present"])
+            self.assertIn("ads-zone-identifier-download-provenance", zone_ads["risk_flags"])
+            self.assertEqual(zone_ads["ads_review_profile"]["review_priority"], "review-download-provenance")
+            script_ads = ads_by_stream["hidden.ps1"]
+            self.assertEqual(script_ads["stream_type"], "$DATA")
+            self.assertEqual(script_ads["stream_family"], "executable-or-script-stream")
+            self.assertIn("ads-suspicious-stream-extension", script_ads["risk_flags"])
+            self.assertIn("ads-script-payload-candidate", script_ads["risk_flags"])
+            self.assertEqual(script_ads["source_locator"]["viewer"], "source-hex-range")
+            self.assertIn("native-ntfs-ads-enumeration-required", script_ads["commercial_grade_blockers"])
 
     def test_windows_search_index_collector_imports_exports_and_inventories_edb(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:

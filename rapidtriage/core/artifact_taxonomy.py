@@ -11,6 +11,8 @@ from ..artifacts import artifact_collectors
 TAXONOMY_VERSION = "forensic-artifact-taxonomy-v1"
 KNOWN_DYNAMIC_ARTIFACT_TYPES = {
     "activities-cache-db",
+    "ads-stream-candidate",
+    "archive-file-inventory",
     "browser-cache-inventory",
     "browser-cookie-store-inventory",
     "browser-credential-store-inventory",
@@ -232,6 +234,16 @@ TAXONOMY_TARGETS: tuple[TaxonomyTarget, ...] = (
         required_doc_markers=("Recycle",),
     ),
     TaxonomyTarget(
+        id="ads-antiforensics",
+        category="windows-core",
+        title="Alternate Data Stream inventory",
+        expectation="Inventory Zone.Identifier and suspicious named ADS exports with stream hashes, host correlation, risk scoring, and source locators.",
+        required_collectors=("windows-filesystem",),
+        expected_artifact_types=("ads-stream-candidate",),
+        required_test_markers=("ads-stream-candidate", "Zone.Identifier"),
+        required_doc_markers=("ADS", "Zone.Identifier"),
+    ),
+    TaxonomyTarget(
         id="thumbnail-icon-cache",
         category="windows-core",
         title="Thumbnail and icon cache parser",
@@ -302,6 +314,16 @@ TAXONOMY_TARGETS: tuple[TaxonomyTarget, ...] = (
         required_viewer_markers=("email",),
         required_test_markers=("email",),
         required_doc_markers=("PST", "OST", "email"),
+    ),
+    TaxonomyTarget(
+        id="archive-encrypted-inventory",
+        category="documents-db",
+        title="Archive and encrypted container inventory",
+        expectation="Inventory ZIP/RAR/7z evidence files, encrypted entries, traversal risk, nested containers, executable entries, and safe extraction blockers.",
+        required_collectors=("generic-documents",),
+        expected_artifact_types=("archive-file-inventory",),
+        required_test_markers=("archive-file-inventory", "archive-encrypted-entry"),
+        required_doc_markers=("archive", "encrypted"),
     ),
     TaxonomyTarget(
         id="cloud-export-google",

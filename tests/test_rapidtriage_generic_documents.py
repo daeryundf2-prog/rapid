@@ -62,6 +62,11 @@ class RapidTriageGenericDocumentsTests(unittest.TestCase):
             suspicious_doc = root / "Users" / "Alice" / "Documents" / "macro-template-report.docx"
             suspicious_doc.parent.mkdir(parents=True)
             write_suspicious_ooxml_document(suspicious_doc)
+            archive = root / "Users" / "Alice" / "Downloads" / "evidence-pack.zip"
+            archive.parent.mkdir(parents=True)
+            write_archive_with_risky_entries(archive)
+            unsupported_archive = root / "Users" / "Alice" / "Downloads" / "backup.7z"
+            unsupported_archive.write_bytes(b"7z\xbc\xaf\x27\x1c\x00\x04archive metadata fixture")
             output = root / "generic-artifacts.json"
 
             exit_code = main(["artifacts", str(root), "--kind", "generic-documents", "--output", str(output)])
@@ -76,6 +81,7 @@ class RapidTriageGenericDocumentsTests(unittest.TestCase):
             self.assertIn("desktop-ai-conversation-candidate", artifact_types)
             self.assertIn("document-metadata-risk", artifact_types)
             self.assertIn("local-llm-prompt-candidate", artifact_types)
+            self.assertIn("archive-file-inventory", artifact_types)
 
             doc_risk = next(
                 artifact for artifact in payload["artifacts"] if artifact["artifact_type"] == "document-metadata-risk"
@@ -159,6 +165,25 @@ class RapidTriageGenericDocumentsTests(unittest.TestCase):
             )
             self.assertIn("ai-user-prompt-candidate", ai_message["details"]["risk_flags"])
 
+            archives = [
+                artifact for artifact in payload["artifacts"] if artifact["artifact_type"] == "archive-file-inventory"
+            ]
+            zip_archive = next(artifact for artifact in archives if artifact["details"]["archive_format"] == "zip")
+            self.assertEqual(zip_archive["details"]["archive_inventory_profile"]["analysis_status"], "zip-central-directory-parsed")
+            self.assertEqual(zip_archive["details"]["encrypted_entry_count"], 1)
+            self.assertEqual(zip_archive["details"]["path_traversal_entry_count"], 1)
+            self.assertEqual(zip_archive["details"]["executable_entry_count"], 1)
+            self.assertEqual(zip_archive["details"]["nested_archive_entry_count"], 1)
+            self.assertIn("archive-encrypted-entry", zip_archive["details"]["risk_flags"])
+            self.assertIn("archive-path-traversal-risk", zip_archive["details"]["risk_flags"])
+            self.assertEqual(
+                zip_archive["details"]["archive_review_profile"]["review_priority"],
+                "high-review-path-traversal-entry",
+            )
+            seven_zip = next(artifact for artifact in archives if artifact["details"]["archive_format"] == "7z")
+            self.assertEqual(seven_zip["details"]["archive_inventory_profile"]["analysis_status"], "archive-metadata-only")
+            self.assertIn("archive-metadata-only", seven_zip["details"]["risk_flags"])
+
 
 def write_suspicious_ooxml_document(path: Path) -> None:
     with zipfile.ZipFile(path, "w") as archive:
@@ -189,6 +214,21 @@ def write_suspicious_ooxml_document(path: Path) -> None:
             </Relationships>
             """,
         )
+
+
+def write_archive_with_risky_entries(path: Path) -> None:
+    with zipfile.ZipFile(path, "w") as archive:
+        archive.writestr("docs/report.txt", "normal report")
+        archive.writestr("../escape.txt", "path traversal candidate")
+        archive.writestr("payload/runme.exe", b"MZ fake executable")
+        archive.writestr("nested/evidence.zip", b"PK\x03\x04nested")
+    data = bytearray(path.read_bytes())
+    for signature, flag_offset in ((b"PK\x03\x04", 6), (b"PK\x01\x02", 8)):
+        offset = data.find(signature)
+        if offset >= 0:
+            flags = int.from_bytes(data[offset + flag_offset : offset + flag_offset + 2], "little")
+            data[offset + flag_offset : offset + flag_offset + 2] = (flags | 0x1).to_bytes(2, "little")
+    path.write_bytes(data)
 
 
 if __name__ == "__main__":

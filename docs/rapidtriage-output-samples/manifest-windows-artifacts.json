@@ -10921,6 +10921,91 @@
       "artifacts": [
         {
           "provider": "windows-filesystem",
+          "artifact_type": "ads-stream-candidate",
+          "path": "<ROOT>/Users/alice/Downloads/report.zip.Zone.Identifier",
+          "supported": true,
+          "details": {
+            "parser": "windows-ads-stream-inventory",
+            "parser_version": "windows-filesystem-v7",
+            "coverage_status": "ads-export-file-inventory",
+            "reportability": "triage",
+            "source_path": "<ROOT>/Users/alice/Downloads/report.zip.Zone.Identifier",
+            "source_format": "ads-export-file",
+            "source_hashes": {
+              "sha256": "5714e0b56ffd9122261cdc9bc8b1ac5362198030d7a391d443052630f0f1ae3a"
+            },
+            "source_size": 119,
+            "modified_at": "2024-03-05T06:18:19+00:00",
+            "host_file_name": "report.zip",
+            "host_file_path_candidate": "<ROOT>/Users/alice/Downloads/report.zip",
+            "host_file_present": false,
+            "stream_name": "Zone.Identifier",
+            "stream_type": "sidecar-export",
+            "stream_family": "download-provenance",
+            "stream_suffix": ".identifier",
+            "detected_signature_kind": "",
+            "signature_hex": "",
+            "zone_identifier_fields": {
+              "ZoneId": "3",
+              "ReferrerUrl": "https://mail.example.com/message/1",
+              "HostUrl": "https://download.example.com/report.zip"
+            },
+            "zone_id": "3",
+            "referrer_url": "https://mail.example.com/message/1",
+            "host_url": "https://download.example.com/report.zip",
+            "bounded_preview": "[ZoneTransfer] ZoneId=3 ReferrerUrl=https://mail.example.com/message/1 HostUrl=https://download.example.com/report.zip",
+            "source_locator": {
+              "viewer": "source-hex-range",
+              "path": "<ROOT>/Users/alice/Downloads/report.zip.Zone.Identifier",
+              "byte_offset": 0,
+              "byte_length": 119,
+              "stream_name": "Zone.Identifier"
+            },
+            "ads_review_profile": {
+              "profile_version": "ads-review-profile-v1",
+              "host_file_name": "report.zip",
+              "stream_name": "Zone.Identifier",
+              "host_file_present": false,
+              "stream_family": "download-provenance",
+              "download_provenance_present": true,
+              "payload_signature_present": false,
+              "review_priority": "review-download-provenance",
+              "correlation_targets": [
+                "$MFT:$DATA named attributes",
+                "$UsnJrnl STREAM_CHANGE records",
+                "browser downloads",
+                "Zone.Identifier provenance",
+                "execution traces"
+              ],
+              "not_proof_of": [
+                "native-stream-existence-without-original-ntfs-correlation",
+                "user-intent-to-hide-data",
+                "file-execution"
+              ],
+              "report_blockers": [
+                "native-ntfs-ads-enumeration-required",
+                "host-file-mft-usn-correlation-required",
+                "trusted-extraction-manifest-required"
+              ]
+            },
+            "risk_flags": [
+              "alternate-data-stream-candidate",
+              "ads-host-file-not-present-in-export",
+              "ads-zone-identifier-download-provenance",
+              "internet-zone-download"
+            ],
+            "validation_required": true,
+            "validation_guidance": "ADS rows are generated from mounted/exported stream files such as name:stream or name.Zone.Identifier. Validate native stream existence with the original NTFS image, MFT/USN, and extraction logs before reporting concealment or download provenance.",
+            "commercial_grade_ready": false,
+            "commercial_grade_blockers": [
+              "native-ntfs-ads-enumeration-required",
+              "host-file-mft-usn-correlation-required",
+              "trusted-ads-parser-or-extraction-log-diff-required"
+            ]
+          }
+        },
+        {
+          "provider": "windows-filesystem",
           "artifact_type": "file-signature-mismatch",
           "path": "<ROOT>/Users/alice/AppData/Local/Google/Chrome/User Data/Default/History",
           "supported": true,

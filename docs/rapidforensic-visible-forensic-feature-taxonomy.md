@@ -821,6 +821,8 @@ GUI 표기 방식:
 | --- | --- | --- | --- |
 | Recycle Bin $I/$R 매핑 | `recycle-bin-entry` | `$Recycle.Bin` 아래 `$I*` metadata에서 원래 경로, 삭제 시각, 삭제 파일 크기를 읽고 sibling `$R*` payload hash를 연결한다. | MFT/USN delete timeline 상관, Windows 버전별 fixture, trusted parser diff |
 | 확장자 변조 탐지 | `file-signature-mismatch`, `file_signature_profile`, `signature_mismatch_candidates` | Windows artifact scan과 일반 파일 스캔 모두 PE/PDF/PNG/JPEG/GIF/ZIP/OLE/RAR/7z/SQLite magic header와 확장자를 비교해 mismatch 파일을 위험 후보로 표시한다. | 전체 파일타입 parser, 오탐 정책, archive 내부 파일 검사 |
+| ADS named stream / Zone.Identifier | `ads-stream-candidate`, `ads_review_profile` | `name:stream`, `name:stream:$DATA`, `name.Zone.Identifier` export 파일을 찾아 host-file 존재, stream name/type/family, ZoneId/Referrer/HostUrl, bounded preview, embedded signature, source hex locator, script/exe risk flag를 기록한다. | 원본 NTFS의 native ADS enumeration, `$MFT/$UsnJrnl` STREAM_CHANGE 상관, extraction manifest/trusted parser diff |
+| ZIP/RAR/7z archive inventory | `archive-file-inventory`, `archive_review_profile` | ZIP central directory를 추출 없이 읽어 encrypted entry, path traversal, executable/script entry, nested archive, compression ratio를 보여주고 RAR/7z는 metadata-only row로 sandbox/parser 필요성을 표시한다. | sandboxed recursive extraction, password candidate workflow, entry hash manifest, 7z/RAR trusted parser diff |
 | Print Spooler SPL/SHD | `print-spooler-job`, `print_spooler_job_profile`, `print_spooler_companion_profile` | `spool/PRINTERS`의 `.SPL`/`.SHD` 파일을 찾아 hash, mtime, document/printer/user/source path 후보를 분리하고 같은 job id의 SHD metadata/SPL payload 짝 존재 여부를 표시한다. | SPL/SHD full binary decoder, PrintService EVTX 상관, driver별 spool fixture |
 | AnyDesk/TeamViewer/RustDesk | `third-party-remote-control-artifact`, `remote_control_session_profile` | AnyDesk, TeamViewer, RustDesk, Chrome Remote Desktop 경로/파일을 찾아 product tag, URL/IP, session 후보, remote ID 후보, 파일전송 후보를 생성한다. | 제품별 full session state decoder, peer ID/IP/파일전송 검증, 계정 attribution |
 | Explorer thumbnail/icon cache | `thumbnail-cache-file`, `thumbnail-cache-entry-candidate`, `thumbnail-cache-media-candidate`, `icon-cache-file`, `icon-cache-entry-candidate` | `thumbcache_*.db`/`iconcache_*.db` 파일을 inventory에만 두지 않고 CMMM entry 후보, bounded JPEG/PNG/BMP embedded media 후보, offset/length/source hash/row hash/source locator를 별도 row로 노출한다. | Windows 빌드별 cache entry 구조 decoder, embedded image export validation, source file/LNK/JumpList/ShellBags/MFT/USN 상관, trusted thumbnail-cache parser diff |
@@ -836,9 +838,11 @@ GUI 표기 방식:
 
 1. `recycle-bin-entry`의 삭제 시각은 `$I` metadata 기반이다. 보고서 확정 증거로 쓰려면 MFT/USN과 교차검증해야 한다.
 2. `file-signature-mismatch`는 “위장/은닉 의심”이지 의도 입증이 아니다. 정상적인 무확장 파일, 캐시, 임시 파일에서 오탐이 가능하다.
-3. `print-spooler-job`은 document/printer/user 후보와 SHD/SPL companion pair 상태를 분리하지만 아직 full SPL/SHD binary structure decoder는 아니다. 실제 출력된 문서명/소유자/프린터 확정에는 PrintService EVTX와 source document metadata 상관이 필요하다.
-4. `third-party-remote-control-artifact`는 session/remote ID/file-transfer 후보를 분리하지만 실제 접속 세션, 원격 ID, 파일 전송 여부 확정에는 제품별 로그 format validation과 계정 attribution이 필요하다.
-5. `thumbnail-cache-entry-candidate`와 `thumbnail-cache-media-candidate`는 Explorer cache 안의 bounded source locator를 제공하지만, 실제 사용자가 해당 원본 파일을 열었다는 결론은 LNK/JumpList/ShellBags/MFT/USN 등 별도 실행/열람 흔적과 함께 검증해야 한다.
+3. `ads-stream-candidate`는 export 파일 기반이다. 원본 NTFS image에서 stream이 실제 존재했는지, 어떤 host 파일과 연결되는지, 언제 생성/변경됐는지는 `$MFT`, `$UsnJrnl`, extraction log와 교차검증해야 한다.
+4. `archive-file-inventory`는 extraction 전 안전 metadata view다. 암호 해제 성공, 내부 파일 내용, 악성 여부를 의미하지 않는다.
+5. `print-spooler-job`은 document/printer/user 후보와 SHD/SPL companion pair 상태를 분리하지만 아직 full SPL/SHD binary structure decoder는 아니다. 실제 출력된 문서명/소유자/프린터 확정에는 PrintService EVTX와 source document metadata 상관이 필요하다.
+6. `third-party-remote-control-artifact`는 session/remote ID/file-transfer 후보를 분리하지만 실제 접속 세션, 원격 ID, 파일 전송 여부 확정에는 제품별 로그 format validation과 계정 attribution이 필요하다.
+7. `thumbnail-cache-entry-candidate`와 `thumbnail-cache-media-candidate`는 Explorer cache 안의 bounded source locator를 제공하지만, 실제 사용자가 해당 원본 파일을 열었다는 결론은 LNK/JumpList/ShellBags/MFT/USN 등 별도 실행/열람 흔적과 함께 검증해야 한다.
 
 ## 25. 2026-05-14 구현 반영: 앱/클라우드/디스크 메모리 triage 2차 보강
 

@@ -6,6 +6,7 @@ import hashlib
 import re
 import sqlite3
 import zipfile
+from zipfile import ZipInfo
 from pathlib import Path
 from typing import Iterable, Mapping, Sequence
 from xml.etree import ElementTree as ET
@@ -78,6 +79,28 @@ DESKTOP_AI_APP_STORAGE_MARKERS = (
     "leveldb",
     "session storage",
 )
+ARCHIVE_SUFFIXES = {".zip", ".rar", ".7z"}
+ARCHIVE_ENTRY_SAMPLE_LIMIT = 80
+ARCHIVE_RISK_ENTRY_LIMIT = 100
+ARCHIVE_BOMB_RATIO_THRESHOLD = 100.0
+ARCHIVE_BOMB_SIZE_THRESHOLD = 50 * 1024 * 1024
+ARCHIVE_EXECUTABLE_SUFFIXES = {
+    ".bat",
+    ".cmd",
+    ".com",
+    ".dll",
+    ".exe",
+    ".hta",
+    ".js",
+    ".jse",
+    ".lnk",
+    ".ps1",
+    ".scr",
+    ".vbe",
+    ".vbs",
+    ".wsf",
+}
+ARCHIVE_NESTED_SUFFIXES = {".zip", ".rar", ".7z", ".tar", ".gz", ".tgz", ".bz2", ".xz"}
 
 
 class GenericDocumentArtifactProvider:
@@ -98,10 +121,255 @@ class GenericDocumentArtifactProvider:
                 supported=True,
                 details={"extension": suffix},
             )
+        yield from collect_archive_inventory(root)
         yield from collect_document_metadata_risk(root)
         yield from collect_sticky_notes(root)
         yield from collect_local_llm_inventory(root)
         yield from collect_desktop_ai_app_inventory(root)
+
+
+def collect_archive_inventory(root: Path) -> Iterable[ArtifactRecord]:
+    for path in sorted(root.rglob("*"), key=lambda item: str(item).lower()):
+        if not path.is_file() or path.suffix.lower() not in ARCHIVE_SUFFIXES:
+            continue
+        stat_result = safe_stat(path)
+        profile = archive_inventory_profile(path)
+        risk_flags = archive_risk_flags(profile)
+        yield ArtifactRecord(
+            provider=GenericDocumentArtifactProvider.name,
+            artifact_type="archive-file-inventory",
+            path=str(path.resolve()),
+            supported=True,
+            details={
+                "parser": "archive-file-inventory",
+                "parser_version": PARSER_VERSION,
+                "source_path": str(path.resolve()),
+                "source_hashes": safe_source_hashes(path),
+                "source_size": stat_result.get("size", 0),
+                "modified_at": stat_result.get("modified_at", ""),
+                "archive_format": archive_format_hint(path),
+                "archive_inventory_profile": profile,
+                "entry_count": profile.get("entry_count", 0),
+                "encrypted_entry_count": profile.get("encrypted_entry_count", 0),
+                "path_traversal_entry_count": profile.get("path_traversal_entry_count", 0),
+                "executable_entry_count": profile.get("executable_entry_count", 0),
+                "nested_archive_entry_count": profile.get("nested_archive_entry_count", 0),
+                "compression_ratio": profile.get("compression_ratio", 0.0),
+                "coverage_status": profile.get("analysis_status", "archive-inventory"),
+                "archive_review_profile": archive_review_profile(profile),
+                "validation_required": True,
+                "commercial_grade_ready": False,
+                "commercial_grade_blockers": [
+                    "archive-recursive-extraction-sandbox-required",
+                    "password-candidate-workflow-not-implemented",
+                    "archive-family-trusted-parser-diff-required",
+                ],
+                "risk_flags": risk_flags,
+            },
+        )
+
+
+def archive_inventory_profile(path: Path) -> dict[str, object]:
+    if path.suffix.lower() != ".zip":
+        return archive_metadata_only_profile(path)
+    try:
+        with zipfile.ZipFile(path) as archive:
+            entries = archive.infolist()
+    except (OSError, zipfile.BadZipFile):
+        return {
+            "profile_version": "archive-inventory-profile-v1",
+            "analysis_status": "zip-open-failed",
+            "entry_count": 0,
+            "sample_entries": [],
+            "validation_guidance": "ZIP metadata could not be opened. Validate with a dedicated archive parser.",
+        }
+    sample_entries: list[dict[str, object]] = []
+    total_compressed = 0
+    total_uncompressed = 0
+    encrypted_count = 0
+    path_traversal_count = 0
+    executable_count = 0
+    nested_archive_count = 0
+    suspicious_entries: list[dict[str, object]] = []
+    for index, info in enumerate(entries):
+        entry = zip_entry_profile(info, index)
+        total_compressed += int(entry["compressed_size"])
+        total_uncompressed += int(entry["uncompressed_size"])
+        if entry["encrypted"]:
+            encrypted_count += 1
+        if entry["path_traversal_risk"]:
+            path_traversal_count += 1
+        if entry["executable_or_script"]:
+            executable_count += 1
+        if entry["nested_archive"]:
+            nested_archive_count += 1
+        if len(sample_entries) < ARCHIVE_ENTRY_SAMPLE_LIMIT:
+            sample_entries.append(entry)
+        if entry["risk_flags"] and len(suspicious_entries) < ARCHIVE_RISK_ENTRY_LIMIT:
+            suspicious_entries.append(entry)
+    ratio = float(total_uncompressed / max(total_compressed, 1)) if total_uncompressed else 0.0
+    return {
+        "profile_version": "archive-inventory-profile-v1",
+        "analysis_status": "zip-central-directory-parsed",
+        "entry_count": len(entries),
+        "sample_entries": sample_entries,
+        "suspicious_entries": suspicious_entries,
+        "encrypted_entry_count": encrypted_count,
+        "path_traversal_entry_count": path_traversal_count,
+        "executable_entry_count": executable_count,
+        "nested_archive_entry_count": nested_archive_count,
+        "total_compressed_size": total_compressed,
+        "total_uncompressed_size": total_uncompressed,
+        "compression_ratio": round(ratio, 3),
+        "zip_bomb_candidate": total_uncompressed >= ARCHIVE_BOMB_SIZE_THRESHOLD and ratio >= ARCHIVE_BOMB_RATIO_THRESHOLD,
+        "truncated_entries": len(entries) > ARCHIVE_ENTRY_SAMPLE_LIMIT,
+        "values_are_metadata_only": True,
+        "validation_guidance": (
+            "ZIP central-directory metadata is safe to review, but extraction, passwords, path traversal, and nested "
+            "archives require a sandboxed recursive workflow before reporting file contents."
+        ),
+    }
+
+
+def archive_metadata_only_profile(path: Path) -> dict[str, object]:
+    signature = read_prefix(path, 8).hex()
+    return {
+        "profile_version": "archive-inventory-profile-v1",
+        "analysis_status": "archive-metadata-only",
+        "format_hint": archive_format_hint(path),
+        "signature_hex": signature,
+        "entry_count": 0,
+        "encrypted_entry_count": 0,
+        "path_traversal_entry_count": 0,
+        "executable_entry_count": 0,
+        "nested_archive_entry_count": 0,
+        "compression_ratio": 0.0,
+        "sample_entries": [],
+        "suspicious_entries": [],
+        "values_are_metadata_only": True,
+        "validation_guidance": "RAR/7z metadata is inventoried without extraction. Use a sandboxed parser for entry-level review.",
+    }
+
+
+def zip_entry_profile(info: ZipInfo, index: int) -> dict[str, object]:
+    suffix = Path(info.filename).suffix.lower()
+    risk_flags: list[str] = []
+    encrypted = bool(info.flag_bits & 0x1)
+    traversal = archive_entry_path_traversal_risk(info.filename)
+    executable = suffix in ARCHIVE_EXECUTABLE_SUFFIXES
+    nested = suffix in ARCHIVE_NESTED_SUFFIXES
+    if encrypted:
+        risk_flags.append("archive-encrypted-entry")
+    if traversal:
+        risk_flags.append("archive-path-traversal-entry")
+    if executable:
+        risk_flags.append("archive-executable-or-script-entry")
+    if nested:
+        risk_flags.append("archive-nested-container-entry")
+    if info.file_size >= ARCHIVE_BOMB_SIZE_THRESHOLD and info.file_size / max(info.compress_size, 1) >= ARCHIVE_BOMB_RATIO_THRESHOLD:
+        risk_flags.append("archive-high-compression-ratio-entry")
+    return {
+        "source_index": index,
+        "name": info.filename[:500],
+        "is_dir": info.is_dir(),
+        "compressed_size": int(info.compress_size),
+        "uncompressed_size": int(info.file_size),
+        "compression_type": int(info.compress_type),
+        "encrypted": encrypted,
+        "path_traversal_risk": traversal,
+        "executable_or_script": executable,
+        "nested_archive": nested,
+        "last_modified": zip_datetime_to_iso(info.date_time),
+        "crc32": f"{info.CRC:08x}",
+        "risk_flags": risk_flags,
+    }
+
+
+def archive_entry_path_traversal_risk(name: str) -> bool:
+    normalized = name.replace("\\", "/")
+    parts = [part for part in normalized.split("/") if part]
+    return (
+        normalized.startswith("/")
+        or normalized.startswith("//")
+        or bool(re.match(r"(?i)^[a-z]:/", normalized))
+        or any(part == ".." for part in parts)
+    )
+
+
+def archive_risk_flags(profile: Mapping[str, object]) -> list[str]:
+    flags = ["archive-file-inventory"]
+    if profile.get("analysis_status") == "zip-open-failed":
+        flags.append("archive-open-failed")
+    if int(profile.get("encrypted_entry_count") or 0):
+        flags.append("archive-encrypted-entry")
+    if int(profile.get("path_traversal_entry_count") or 0):
+        flags.append("archive-path-traversal-risk")
+    if int(profile.get("executable_entry_count") or 0):
+        flags.append("archive-executable-or-script-entry")
+    if int(profile.get("nested_archive_entry_count") or 0):
+        flags.append("archive-nested-container-entry")
+    if profile.get("zip_bomb_candidate"):
+        flags.append("archive-zip-bomb-candidate")
+    if profile.get("analysis_status") == "archive-metadata-only":
+        flags.append("archive-metadata-only")
+    return flags
+
+
+def archive_review_profile(profile: Mapping[str, object]) -> dict[str, object]:
+    return {
+        "profile_version": "archive-review-profile-v1",
+        "analysis_status": profile.get("analysis_status", ""),
+        "entry_count": profile.get("entry_count", 0),
+        "encrypted_entry_count": profile.get("encrypted_entry_count", 0),
+        "path_traversal_entry_count": profile.get("path_traversal_entry_count", 0),
+        "executable_entry_count": profile.get("executable_entry_count", 0),
+        "nested_archive_entry_count": profile.get("nested_archive_entry_count", 0),
+        "review_priority": archive_review_priority(profile),
+        "source_viewer_hint": "Open the archive metadata row first; extract only through a sandboxed recursive workflow.",
+        "not_proof_of": [
+            "archive-content-review-without-extraction",
+            "password-success-or-decryption",
+            "malicious-intent",
+        ],
+        "report_blockers": [
+            "sandboxed-recursive-extraction-required",
+            "entry-hash-manifest-required",
+            "trusted-archive-parser-diff-required",
+        ],
+    }
+
+
+def archive_review_priority(profile: Mapping[str, object]) -> str:
+    if int(profile.get("path_traversal_entry_count") or 0):
+        return "high-review-path-traversal-entry"
+    if int(profile.get("encrypted_entry_count") or 0):
+        return "review-encrypted-archive-workflow"
+    if int(profile.get("executable_entry_count") or 0):
+        return "review-executable-archive-entry"
+    if profile.get("zip_bomb_candidate"):
+        return "high-review-compression-bomb-candidate"
+    if profile.get("analysis_status") == "archive-metadata-only":
+        return "review-with-dedicated-archive-parser"
+    return "review-archive-metadata"
+
+
+def archive_format_hint(path: Path) -> str:
+    suffix = path.suffix.lower()
+    if suffix == ".zip":
+        return "zip"
+    if suffix == ".rar":
+        return "rar"
+    if suffix == ".7z":
+        return "7z"
+    return suffix.lstrip(".")
+
+
+def zip_datetime_to_iso(value: Sequence[int]) -> str:
+    try:
+        year, month, day, hour, minute, second = [int(part) for part in value[:6]]
+        return dt.datetime(year, month, day, hour, minute, second).isoformat()
+    except (TypeError, ValueError):
+        return ""
 
 
 def collect_document_metadata_risk(root: Path) -> Iterable[ArtifactRecord]:
