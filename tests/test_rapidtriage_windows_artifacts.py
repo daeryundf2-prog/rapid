@@ -79,6 +79,7 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
             artifact_types = {artifact["artifact_type"] for artifact in payload["artifacts"]}
             self.assertIn("webcachev01-ese-file", artifact_types)
             self.assertIn("desktop-cloud-sync-db", artifact_types)
+            self.assertIn("desktop-cloud-sync-row-candidate", artifact_types)
 
             webcache_artifact = next(
                 artifact for artifact in payload["artifacts"] if artifact["artifact_type"] == "webcachev01-ese-file"
@@ -97,6 +98,18 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
             self.assertEqual(sync_artifact["details"]["sync_provider"], "onedrive")
             self.assertTrue(sync_artifact["details"]["sqlite_schema_inventory"]["opened_readonly"])
             self.assertIn("sync-db-sqlite-opened", sync_artifact["details"]["risk_flags"])
+
+            sync_row = next(
+                artifact
+                for artifact in payload["artifacts"]
+                if artifact["artifact_type"] == "desktop-cloud-sync-row-candidate"
+            )
+            self.assertEqual(sync_row["details"]["sync_provider"], "onedrive")
+            self.assertEqual(sync_row["details"]["local_path_candidate"], "C:\\Users\\alice\\Documents\\secret.docx")
+            self.assertEqual(sync_row["details"]["sync_status_candidate"], "uploaded")
+            self.assertEqual(sync_row["details"]["owner_or_account_candidate"], "alice@example.com")
+            self.assertIn("possible-cloud-upload-or-sync-state", sync_row["details"]["risk_flags"])
+            self.assertTrue(sync_row["details"]["cloud_sync_row_review_profile"]["has_path_candidate"])
 
     def test_windows_filesystem_collector_maps_ntfs_logfile_transaction_candidates(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:

@@ -765,7 +765,7 @@ GUI 표기 방식:
 | 사용자 실행 / 활동 | RecentDocs/Clipboard/MUICache | 목록화 | 사용자 활동 보조 증거를 실행 흔적과 연결 |
 | 브라우저 심화 복원 | 시크릿 모드 URL 카빙 | 목록화 | pagefile/hiberfil/memory 잔재에서 URL/검색어 후보 복원 |
 | 브라우저 심화 복원 | WebCacheV01.dat | 목록화 | ESE 기반 legacy/webview 통신 흔적 분석 |
-| 브라우저 심화 복원 | OneDrive/Google Drive sync DB | 목록화 | 데스크톱 클라우드 sync DB 기반 파일 유출 시점 확인 |
+| 브라우저 심화 복원 | OneDrive/Google Drive sync DB | `desktop-cloud-sync-db`, `desktop-cloud-sync-row-candidate` | 데스크톱 클라우드 sync DB schema와 파일/동기화/삭제/공유 row 후보 |
 | 로컬/데스크톱 AI | Ollama/LM Studio/GPT4All | `local-llm-artifact`, `local-llm-prompt-candidate` | 로컬 LLM 모델/설정/로그/SQLite 프롬프트 후보와 review profile |
 | 로컬/데스크톱 AI | ChatGPT/Copilot 데스크톱 앱 DB | `desktop-ai-app-artifact`, `desktop-ai-conversation-candidate` | 브라우저 밖 AI 앱 로컬 SQLite/cache 분석, 메시지 후보 row 및 리뷰 프로필 |
 | 로컬/데스크톱 AI | Windows Copilot Recall | `windows-recall-database`, `windows-recall-snapshot-file` | CoreAIPlatform/UKP DB schema inventory, snapshot hash/signature, OCR/app/window table 후보와 privacy warning |
@@ -883,12 +883,12 @@ GUI 표기 방식:
 | Windows Timeline ActivitiesCache | `activities-cache-db` | 기존 Windows system collector의 `ActivitiesCache.db` read-only SQLite schema/timeline sample inventory를 visible capability와 연결했다. | ActivitiesCache 테이블별 row semantics, app/document/URL attribution, deleted state 검증 |
 | BITS qmgr.dat 전송 | `bits-qmgr-transfer-candidate` | `qmgr0.dat/qmgr1.dat/qmgr.dat/qmgr.db`와 `Network/Downloader` DB 후보를 bounded string scan하여 URL/path pivot, mtime, hash, risk flag를 만든다. | BITS job 구조 decoder, owner/state/retry/transfer time, trusted BitsParser/Velociraptor diff |
 | WebCacheV01.dat | `webcachev01-ese-file`, `webcachev01_review_profile`, `ese_page_map` | `WebCacheV01.dat`의 ESE header, page size, bounded URL/domain/path/string pivot, page-local marker family 후보를 추출한다. | ESE catalog/table/long value decoder, container별 history/cache/cookie row 복원, deleted record recovery |
-| OneDrive/Google Drive sync DB | `desktop-cloud-sync-db` | OneDrive/Google Drive/DriveFS 경로의 sync DB 후보를 read-only SQLite schema inventory로 열고 file/sync/delete/share/account semantic hint를 만든다. | provider/version별 sync DB parser, upload/delete/share timestamp semantics, account scope 검증 |
+| OneDrive/Google Drive sync DB | `desktop-cloud-sync-db`, `desktop-cloud-sync-row-candidate` | OneDrive/Google Drive/DriveFS 경로의 sync DB 후보를 read-only SQLite schema inventory로 열고 file/sync/delete/share/account semantic hint를 만든다. 관련 table에서는 bounded row 후보를 생성해 local path, remote id, sync status, owner/account, deleted state, timestamp 후보와 `cloud_sync_row_review_profile`을 보여준다. | provider/version별 sync DB parser, upload/delete/share timestamp semantics, account scope 검증, provider export diff |
 
 대용량/안전 설계:
 
 1. `WebCacheV01.dat`는 ESE 전체 row decode가 아니라 header, bounded string, page-local marker family pivot만 수행한다.
-2. `desktop-cloud-sync-db`는 SQLite schema와 row count만 읽고, 원문 값은 기본적으로 노출하지 않는다.
+2. `desktop-cloud-sync-db`는 SQLite schema와 row count를 읽고, `desktop-cloud-sync-row-candidate`는 선택된 file/sync/delete/share/account column 값만 bounded preview로 노출한다.
 3. 브라우저/클라우드 sync 대형 DB는 `safe_browser_file_hashes` 정책으로 일정 크기 이상이면 전체 해시를 지연한다.
 4. BITS qmgr 파일은 2MB prefix scan으로 제한해 대형/손상 파일에서도 collector가 멈추지 않게 했다.
 
@@ -902,7 +902,7 @@ GUI 표기 방식:
 
 1. `bits-qmgr-transfer-candidate`는 URL/path string 후보이지 완성된 BITS job record가 아니다.
 2. `webcachev01-ese-file`은 ESE header/string/page pivot이다. 방문 시각, container, cache entry, 삭제 상태를 아직 확정하지 않는다.
-3. `desktop-cloud-sync-db`는 schema inventory다. 파일이 업로드/삭제/공유됐다는 최종 결론은 provider-specific parser와 계정 scope 자료가 필요하다.
+3. `desktop-cloud-sync-row-candidate`는 파일/상태 후보를 보여주지만, 파일이 업로드/삭제/공유됐다는 최종 결론은 provider-specific parser와 계정 scope 자료가 필요하다.
 
 ## 27. 2026-05-14 구현 반영: NTFS 로그/ETL/USB/Wi-Fi triage 4차 보강
 

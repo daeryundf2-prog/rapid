@@ -119,6 +119,8 @@ WEBCACHE_TABLE_MARKERS = {
 }
 CLOUD_SYNC_DB_NAMES = {"sync_engine.db", "metadata_sqlite_db", "sync_config.db", "snapshot.db", "sync.db"}
 CLOUD_SYNC_PATH_TERMS = ("onedrive", "drivefs", "google drive", "googledrive")
+DESKTOP_CLOUD_SYNC_ROW_LIMIT = 200
+DESKTOP_CLOUD_SYNC_TABLE_LIMIT = 8
 
 AI_SERVICE_DOMAINS: Tuple[Tuple[str, str], ...] = (
     ("chatgpt.com", "ChatGPT"),
@@ -450,6 +452,8 @@ def collect_desktop_cloud_sync_db_artifacts(root: Path) -> Iterable[ArtifactReco
         stat_result = path.stat()
         schema_inventory = sqlite_sync_schema_inventory(path)
         profile = windows_browser_user_profile(path, root=root)
+        source_hashes = safe_browser_file_hashes(path)
+        sync_provider = infer_cloud_sync_provider(path)
         yield ArtifactRecord(
             provider=WindowsBrowserArtifactsProvider.name,
             artifact_type="desktop-cloud-sync-db",
@@ -460,9 +464,9 @@ def collect_desktop_cloud_sync_db_artifacts(root: Path) -> Iterable[ArtifactReco
                 "parser_version": PARSER_VERSION,
                 "source_path": str(path.resolve()),
                 "source_format": "sqlite-or-sync-db",
-                "source_hashes": safe_browser_file_hashes(path),
+                "source_hashes": source_hashes,
                 "source_profile": profile,
-                "sync_provider": infer_cloud_sync_provider(path),
+                "sync_provider": sync_provider,
                 "sync_db_name": path.name,
                 "size": stat_result.st_size,
                 "modified_at": isoformat_from_timestamp(stat_result.st_mtime),
@@ -488,6 +492,111 @@ def collect_desktop_cloud_sync_db_artifacts(root: Path) -> Iterable[ArtifactReco
                 ],
             },
         )
+        yield from collect_desktop_cloud_sync_row_candidates(
+            path=path,
+            schema_inventory=schema_inventory,
+            source_hashes=source_hashes,
+            profile=profile,
+            sync_provider=sync_provider,
+        )
+
+
+def collect_desktop_cloud_sync_row_candidates(
+    *,
+    path: Path,
+    schema_inventory: Mapping[str, object],
+    source_hashes: Mapping[str, str],
+    profile: Mapping[str, object],
+    sync_provider: str,
+) -> Iterable[ArtifactRecord]:
+    tables = schema_inventory.get("tables")
+    if not schema_inventory.get("opened_readonly") or not isinstance(tables, list):
+        return
+    emitted = 0
+    try:
+        with open_sqlite_snapshot(path) as connection:
+            for table_profile in tables[:DESKTOP_CLOUD_SYNC_TABLE_LIMIT]:
+                if emitted >= DESKTOP_CLOUD_SYNC_ROW_LIMIT or not isinstance(table_profile, Mapping):
+                    break
+                table_name = str(table_profile.get("name") or "")
+                columns = [str(column) for column in table_profile.get("columns") or []]
+                semantic_hints = [str(hint) for hint in table_profile.get("semantic_hints") or []]
+                if not table_name or not columns or not desktop_cloud_sync_row_relevant(semantic_hints):
+                    continue
+                selected_columns = desktop_cloud_sync_selected_columns(columns)
+                if not selected_columns:
+                    continue
+                sql = (
+                    "SELECT rowid, "
+                    + ", ".join(quote_sync_identifier(column) for column in selected_columns)
+                    + f" FROM {quote_sync_identifier(table_name)} LIMIT ?"
+                )
+                try:
+                    rows = connection.execute(sql, (DESKTOP_CLOUD_SYNC_ROW_LIMIT - emitted,)).fetchall()
+                except sqlite3.Error:
+                    continue
+                for row in rows:
+                    values = {column: normalize_sync_value(row[column]) for column in selected_columns}
+                    if not any(values.values()):
+                        continue
+                    emitted += 1
+                    row_profile = desktop_cloud_sync_row_profile(values, semantic_hints)
+                    yield ArtifactRecord(
+                        provider=WindowsBrowserArtifactsProvider.name,
+                        artifact_type="desktop-cloud-sync-row-candidate",
+                        path=str(path.resolve()),
+                        supported=True,
+                        details={
+                            "parser": "desktop-cloud-sync-db-inventory",
+                            "parser_version": PARSER_VERSION,
+                            "source_path": str(path.resolve()),
+                            "source_hashes": dict(source_hashes),
+                            "source_profile": dict(profile),
+                            "sync_provider": sync_provider,
+                            "sync_db_name": path.name,
+                            "source_table": table_name,
+                            "source_index": emitted - 1,
+                            "rowid": row["rowid"],
+                            "semantic_hints": semantic_hints,
+                            "local_path_candidate": first_sync_value(
+                                values, ("local_path", "path", "file_path", "filepath", "filename", "name")
+                            ),
+                            "remote_id_candidate": first_sync_value(
+                                values, ("resource_id", "remote_id", "item_id", "file_id", "id", "drive_id")
+                            ),
+                            "sync_status_candidate": first_sync_value(
+                                values, ("sync_status", "status", "state", "syncstate", "operation")
+                            ),
+                            "owner_or_account_candidate": first_sync_value(
+                                values, ("owner_email", "email", "user_email", "account", "owner", "user")
+                            ),
+                            "deleted_state_candidate": first_sync_value(
+                                values, ("deleted", "is_deleted", "trashed", "removed", "delete_state")
+                            ),
+                            "timestamp_candidates": sync_timestamp_candidates(values),
+                            "raw_value_preview": values,
+                            "cloud_sync_row_review_profile": row_profile,
+                            "coverage_status": "desktop-cloud-sync-row-candidate",
+                            "reportability": "triage",
+                            "parser_confidence": "medium",
+                            "validation_required": True,
+                            "validation_guidance": (
+                                "This row is a bounded sync DB candidate. Confirm provider version, account scope, "
+                                "operation semantics, and source file/MFT/USN/browser corroboration before reporting."
+                            ),
+                            "commercial_grade_ready": False,
+                            "commercial_grade_blockers": [
+                                "provider-specific-sync-db-row-semantics-required",
+                                "upload-delete-share-timestamp-validation-required",
+                                "trusted-provider-export-diff-required",
+                            ],
+                            "risk_flags": cloud_sync_row_risk_flags(values, semantic_hints),
+                        },
+                    )
+                    if emitted >= DESKTOP_CLOUD_SYNC_ROW_LIMIT:
+                        break
+    except (sqlite3.Error, OSError):
+        return
 
 
 def is_cloud_sync_db_candidate(path: Path) -> bool:
@@ -606,6 +715,146 @@ def summarize_sync_tables(tables: Sequence[Mapping[str, object]]) -> list[dict[s
         for hint in table.get("semantic_hints", []) if isinstance(table.get("semantic_hints"), list) else []:
             counts[str(hint)] = counts.get(str(hint), 0) + 1
     return [{"value": value, "count": count} for value, count in sorted(counts.items())]
+
+
+def desktop_cloud_sync_row_relevant(semantic_hints: Sequence[str]) -> bool:
+    return bool(set(semantic_hints).intersection({"file-metadata", "sync-state", "delete-state", "sharing-state"}))
+
+
+def desktop_cloud_sync_selected_columns(columns: Sequence[str]) -> list[str]:
+    wanted_terms = (
+        "path",
+        "file",
+        "name",
+        "resource",
+        "remote",
+        "drive",
+        "id",
+        "sync",
+        "status",
+        "state",
+        "operation",
+        "delete",
+        "trash",
+        "removed",
+        "share",
+        "permission",
+        "owner",
+        "email",
+        "account",
+        "user",
+        "time",
+        "date",
+        "created",
+        "modified",
+        "updated",
+    )
+    selected: list[str] = []
+    for column in columns:
+        normalized = normalize_sync_name(column)
+        if any(term in normalized for term in wanted_terms):
+            selected.append(column)
+        if len(selected) >= 16:
+            break
+    return selected
+
+
+def normalize_sync_name(value: object) -> str:
+    return "".join(character for character in str(value).lower() if character.isalnum())
+
+
+def normalize_sync_value(value: object) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, bytes):
+        decoded = value.decode("utf-8", errors="replace")
+    else:
+        decoded = str(value)
+    return " ".join(decoded.split())[:500]
+
+
+def first_sync_value(values: Mapping[str, str], names: Sequence[str]) -> str:
+    normalized_to_value = {normalize_sync_name(key): value for key, value in values.items() if value}
+    for name in names:
+        normalized = normalize_sync_name(name)
+        if normalized in normalized_to_value:
+            return normalized_to_value[normalized]
+    for name in names:
+        normalized = normalize_sync_name(name)
+        for key, value in normalized_to_value.items():
+            if normalized in key:
+                return value
+    return ""
+
+
+def sync_timestamp_candidates(values: Mapping[str, str]) -> dict[str, str]:
+    timestamps: dict[str, str] = {}
+    for column, value in values.items():
+        normalized = normalize_sync_name(column)
+        if value and any(term in normalized for term in ("time", "date", "created", "modified", "updated")):
+            timestamps[column] = normalize_sync_timestamp(value)
+    return timestamps
+
+
+def normalize_sync_timestamp(value: str) -> str:
+    stripped = value.strip()
+    if not stripped:
+        return ""
+    if re.fullmatch(r"\d{9,18}", stripped):
+        number = int(stripped)
+        if number > 10_000_000_000_000_000:
+            return isoformat_from_webkit_micros(number) or stripped
+        if number > 10_000_000_000_000:
+            return isoformat_from_timestamp(number / 1_000_000) or stripped
+        if number > 10_000_000_000:
+            return isoformat_from_timestamp(number / 1000) or stripped
+        return isoformat_from_timestamp(number) or stripped
+    return stripped[:120]
+
+
+def desktop_cloud_sync_row_profile(values: Mapping[str, str], semantic_hints: Sequence[str]) -> dict[str, object]:
+    preview_text = json.dumps(values, ensure_ascii=False, sort_keys=True)
+    return {
+        "profile_version": "desktop-cloud-sync-row-review-profile-v1",
+        "semantic_hints": list(semantic_hints),
+        "has_path_candidate": bool(first_sync_value(values, ("local_path", "path", "file_path", "filename", "name"))),
+        "has_account_candidate": bool(first_sync_value(values, ("owner_email", "email", "account", "owner", "user"))),
+        "has_sync_status_candidate": bool(first_sync_value(values, ("sync_status", "status", "state", "operation"))),
+        "has_deleted_state_candidate": bool(first_sync_value(values, ("deleted", "is_deleted", "trashed", "removed"))),
+        "values_are_candidates": True,
+        "row_hash": hashlib.sha256(preview_text.encode("utf-8", errors="replace")).hexdigest(),
+        "source_viewer_hint": "Open the sync DB row and corroborate with MFT/USN/browser/cloud export before reporting leakage.",
+        "not_proof_of": [
+            "cloud-upload-completed",
+            "file-deleted-from-cloud",
+            "share-permission-effective-state",
+            "account-scope-completeness",
+        ],
+        "report_blockers": [
+            "provider-sync-schema-fixture-required",
+            "cloud-provider-export-diff-required",
+            "filesystem-timeline-corroboration-required",
+        ],
+    }
+
+
+def cloud_sync_row_risk_flags(values: Mapping[str, str], semantic_hints: Sequence[str]) -> list[str]:
+    lowered = json.dumps(values, ensure_ascii=False, default=str).lower()
+    flags = ["desktop-cloud-sync-row-candidate"]
+    flags.extend(f"sync-row:{hint}" for hint in semantic_hints)
+    if any(term in lowered for term in ("upload", "uploaded", "cloudonly", "synced")):
+        flags.append("possible-cloud-upload-or-sync-state")
+    if any(term in lowered for term in ("delete", "deleted", "trash", "removed")):
+        flags.append("possible-cloud-delete-state")
+    if any(term in lowered for term in ("share", "permission", "acl", "owner")):
+        flags.append("possible-cloud-sharing-state")
+    if re.search(r"(?i)[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}", lowered):
+        flags.append("cloud-account-email-candidate")
+    return browser_unique_preserve_order(flags)
+
+
+def quote_sync_identifier(value: str) -> str:
+    return '"' + value.replace('"', '""') + '"'
 
 
 def windows_browser_user_profile(path: Path, *, root: Path | None = None) -> dict[str, object]:
