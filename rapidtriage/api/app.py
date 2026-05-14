@@ -31,6 +31,7 @@ from ..core.case_catalog import CaseCatalog, CaseCatalogError, default_case_cata
 from ..core.case_report import build_case_report_markdown, case_report_export_paths, write_case_report_exports
 from ..core.case_db import CaseDatabaseError, open_case_database
 from ..core.collect_plan import CollectPlanError, build_collect_plan, supported_collect_profiles
+from ..core.commercial_readiness import CommercialReadinessError, build_commercial_readiness_report
 from ..core.crash import export_crash_report_bundle, list_crash_reports, read_crash_report, write_crash_report
 from ..core.docs import SUPPORTED_DOC_EXTS, TEXT_EXTS, extract_text, query_docs_index
 from ..core.doctor import run_doctor
@@ -456,6 +457,17 @@ def create_app(job_store: RunJobStore | None = None, auth_token: str | None = No
     @api.get("/api/workbench/large-result-evidence")
     def workbench_large_result_evidence(record_count: int = Query(100_000, ge=1, le=10_000_000)) -> Dict[str, object]:
         return build_workbench_large_result_evidence(record_count=record_count)
+
+    @api.get("/api/commercial-readiness")
+    def commercial_readiness(
+        next_gate: str = Query("validated", min_length=1, max_length=64),
+        limit: int = Query(8, ge=1, le=50),
+    ) -> Dict[str, object]:
+        try:
+            report = build_commercial_readiness_report(uplift_targets=limit, uplift_batch_size=5)
+        except CommercialReadinessError as exc:
+            raise HTTPException(status_code=500, detail=str(exc))
+        return build_commercial_readiness_api_payload(report, next_gate=next_gate, limit=limit)
 
     @api.get("/api/doctor")
     def doctor() -> Dict[str, object]:
@@ -2459,6 +2471,102 @@ def build_run_validation_package(store: RunJobStore, run_id: str) -> Dict[str, o
         "generated_at": generated_at,
         "output_path": str(default_run_validation_package_path(store, run_id)),
         "package_manifest_hash": manifest_hash,
+    }
+
+
+def build_commercial_readiness_api_payload(
+    report: Mapping[str, object],
+    *,
+    next_gate: str,
+    limit: int,
+) -> Dict[str, object]:
+    maturity_summary = report.get("maturity_gate_summary") if isinstance(report.get("maturity_gate_summary"), Mapping) else {}
+    gate_counts = maturity_summary.get("gate_counts") if isinstance(maturity_summary.get("gate_counts"), Mapping) else {}
+    blocker_separation = (
+        report.get("blocker_separation_profile")
+        if isinstance(report.get("blocker_separation_profile"), Mapping)
+        else {}
+    )
+    blocker_summary = (
+        blocker_separation.get("summary")
+        if isinstance(blocker_separation.get("summary"), Mapping)
+        else {}
+    )
+    items = [item for item in report.get("all_items", []) if isinstance(item, Mapping)]
+    normalized_next_gate = next_gate.strip()
+    if normalized_next_gate.lower() == "priority":
+        focused_source = [item for item in report.get("priority_work_plan", []) if isinstance(item, Mapping)]
+    else:
+        focused_source = [
+            item
+            for item in items
+            if str(item.get("next_required_gate") or "") == normalized_next_gate
+        ]
+    focused_items = [
+        commercial_readiness_focus_item(item)
+        for item in focused_source[: max(limit, 0)]
+    ]
+    return {
+        "command": "commercial-readiness",
+        "api_profile": {
+            "profile_version": "commercial-readiness-gui-gate-v1",
+            "gui_binding": "commercial-readiness-gate",
+            "claim_policy": "do-not-claim-commercial-parity-when-commercial_claim_allowed-is-false",
+            "default_next_gate": "validated",
+        },
+        "generated_at": report.get("generated_at"),
+        "status": report.get("status"),
+        "release_claim": report.get("release_claim"),
+        "commercial_claim_allowed": bool(report.get("commercial_claim_allowed")),
+        "readiness_score": int(report.get("readiness_score") or 0),
+        "item_count": int(report.get("item_count") or 0),
+        "commercial_ready_count": int(report.get("commercial_ready_count") or 0),
+        "non_commercial_count": int(report.get("non_commercial_count") or 0),
+        "maturity_gate_summary": maturity_summary,
+        "gate_counts": gate_counts,
+        "validation_evidence_summary": report.get("validation_evidence_summary", {}),
+        "blocker_separation_summary": blocker_summary,
+        "focused_next_gate": normalized_next_gate,
+        "focused_limit": limit,
+        "focused_items": focused_items,
+        "operator_guidance": list(report.get("operator_guidance", []))[:6]
+        if isinstance(report.get("operator_guidance"), list)
+        else [],
+        "workbench_actions": [
+            {
+                "id": "open-validation-package",
+                "label": "Open run validation package",
+                "required_before_claim": True,
+            },
+            {
+                "id": "attach-trusted-diff",
+                "label": "Attach trusted-tool diff / known-answer evidence",
+                "required_before_claim": True,
+            },
+            {
+                "id": "rerun-commercial-readiness",
+                "label": "Rerun commercial-readiness after evidence is attached",
+                "required_before_claim": True,
+                "command": "rapidtriage commercial-readiness --validation-package <package.json> --json",
+            },
+        ],
+    }
+
+
+def commercial_readiness_focus_item(item: Mapping[str, object]) -> Dict[str, object]:
+    return {
+        "number": item.get("number"),
+        "title": item.get("title"),
+        "category": item.get("category"),
+        "severity": item.get("severity"),
+        "status": item.get("status"),
+        "highest_maturity_stage": item.get("highest_maturity_stage"),
+        "next_required_gate": item.get("next_required_gate"),
+        "remaining_gap": item.get("remaining_gap"),
+        "next_action": item.get("next_internal_or_evidence_action") or item.get("next_action"),
+        "commercial_blockers": list(item.get("commercial_blockers", []))
+        if isinstance(item.get("commercial_blockers"), list)
+        else [],
     }
 
 

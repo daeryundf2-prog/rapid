@@ -200,6 +200,7 @@ async function loadRunDetail(runId, tab = "summary") {
   restoreWorkbenchControls();
   persistWorkbenchSession();
   loadRunValidationPackageSummary(runId);
+  loadCommercialReadinessSummary();
   await renderActiveTab();
 }
 
@@ -691,6 +692,9 @@ function renderWorkbenchSmokePanel(run) {
       <div id="runValidationDiffPanel" class="run-validation-diff-panel" data-testid="run-validation-diff-panel">
         <p class="empty-state">Run validation diff inventory will appear here after the validation package loads.</p>
       </div>
+      <div id="commercialReadinessPanel" class="commercial-readiness-panel" data-testid="commercial-readiness-panel">
+        <p class="empty-state">Commercial readiness gate will appear here. Do not claim commercial parity until this gate allows it.</p>
+      </div>
     </section>
   `;
 }
@@ -705,6 +709,55 @@ async function loadRunValidationPackageSummary(runId) {
   } catch (error) {
     panel.innerHTML = `<p class="empty-state">${escapeHtml(error.message)}</p>`;
   }
+}
+
+async function loadCommercialReadinessSummary() {
+  const panel = detailPanel.querySelector("#commercialReadinessPanel");
+  if (!panel) return;
+  panel.innerHTML = '<p class="empty-state">Loading commercial readiness gate...</p>';
+  try {
+    const payload = await api("/api/commercial-readiness?next_gate=validated&limit=8");
+    panel.innerHTML = renderCommercialReadinessSummary(payload);
+  } catch (error) {
+    panel.innerHTML = `<p class="empty-state">${escapeHtml(error.message)}</p>`;
+  }
+}
+
+function renderCommercialReadinessSummary(payload) {
+  const gates = payload?.gate_counts || {};
+  const validated = gates.validated || {};
+  const commercial = gates.commercial_grade || {};
+  const focused = Array.isArray(payload?.focused_items) ? payload.focused_items : [];
+  const claimClass = payload?.commercial_claim_allowed ? "commercial-ready" : "not-commercial-ready";
+  return `
+    <div class="commercial-readiness-card ${claimClass}">
+      <div>
+        <strong>Commercial readiness gate</strong>
+        <span>${escapeHtml(payload?.release_claim || "Readiness gate unavailable")}</span>
+      </div>
+      <dl class="compact-dl">
+        <dt>Score</dt>
+        <dd>${escapeHtml(payload?.readiness_score || 0)}/100</dd>
+        <dt>Validated</dt>
+        <dd>${escapeHtml(validated.passed || 0)} passed / ${escapeHtml(validated.failed || 0)} remaining</dd>
+        <dt>Commercial</dt>
+        <dd>${escapeHtml(commercial.passed || 0)} passed / ${escapeHtml(commercial.failed || 0)} remaining</dd>
+        <dt>Claim allowed</dt>
+        <dd>${escapeHtml(payload?.commercial_claim_allowed ? "yes" : "no")}</dd>
+      </dl>
+      ${focused.length ? `
+        <ul class="commercial-readiness-list">
+          ${focused.slice(0, 5).map((item) => `
+            <li>
+              <strong>#${escapeHtml(item.number || "?")} ${escapeHtml(item.title || "Readiness item")}</strong>
+              <span>${escapeHtml(item.next_required_gate || "next gate")} · ${escapeHtml(item.remaining_gap || item.next_action || "validation evidence required")}</span>
+            </li>
+          `).join("")}
+        </ul>
+      ` : `<p class="help-text">No focused gate items returned. Re-run the CLI gate when validation evidence changes.</p>`}
+      <p class="help-text">GUI 기능이 보이더라도 trusted diff, known-answer fixture, independent validation이 없으면 상용급 완료로 표시하지 않습니다.</p>
+    </div>
+  `;
 }
 
 function renderRunValidationPackageSummary(payload) {

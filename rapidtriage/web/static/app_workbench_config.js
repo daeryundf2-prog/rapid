@@ -1534,6 +1534,23 @@ const VISIBLE_FORENSIC_CAPABILITY_GROUPS = [
         terms: ["audit", "hash", "custody", "validation"],
         nextAction: "tamper-evident bundle과 same input/same output reproducibility 검증",
       },
+      {
+        id: "commercial-readiness-gate",
+        label: "상용급 readiness gate",
+        status: "usable",
+        viewer: "QC dashboard",
+        artifactTypes: ["commercial-readiness", "validation-gate"],
+        terms: [
+          "commercial-readiness",
+          "commercial-readiness-gui-gate-v1",
+          "readiness_score",
+          "commercial_claim_allowed",
+          "validated",
+          "commercial_grade",
+          "trusted diff",
+        ],
+        nextAction: "validated/commercial_grade가 통과하기 전에는 AXIOM/WISDOM급 또는 법정 제출 완성으로 표현하지 않음",
+      },
     ],
   },
 ];

@@ -663,6 +663,10 @@ class RapidTriageApiTests(unittest.TestCase):
         self.assertIn("renderCaseHero(run)", app_js)
         self.assertIn("renderCaseReadinessDashboard(payload)", app_js)
         self.assertIn("case-readiness-dashboard", app_js)
+        self.assertIn("loadCommercialReadinessSummary", app_js)
+        self.assertIn("/api/commercial-readiness?next_gate=validated&limit=8", app_js)
+        self.assertIn("commercial-readiness-panel", app_js)
+        self.assertIn("Commercial readiness gate", app_js)
         self.assertIn("globalCaseSearchForm", app_js)
         self.assertIn("runGlobalCommandSearch", app_js)
         self.assertIn("renderE01IngestWorkflow", app_js)
@@ -837,6 +841,26 @@ class RapidTriageApiTests(unittest.TestCase):
         self.assertIn("e01-stage-grid", styles)
         self.assertIn("run-plan-e01-readiness", styles)
         self.assertIn("e01-pre-run-grid", styles)
+        self.assertIn("commercial-readiness-card", styles)
+        self.assertIn("not-commercial-ready", styles)
+
+    def test_commercial_readiness_api_returns_compact_gui_gate(self) -> None:
+        client = TestClient(create_app(RunJobStore()))
+
+        response = client.get("/api/commercial-readiness?next_gate=validated&limit=3")
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["command"], "commercial-readiness")
+        self.assertEqual(payload["api_profile"]["profile_version"], "commercial-readiness-gui-gate-v1")
+        self.assertEqual(payload["api_profile"]["gui_binding"], "commercial-readiness-gate")
+        self.assertFalse(payload["commercial_claim_allowed"])
+        self.assertIn("validated", payload["gate_counts"])
+        self.assertIn("commercial_grade", payload["gate_counts"])
+        self.assertLessEqual(len(payload["focused_items"]), 3)
+        self.assertTrue(payload["focused_items"])
+        self.assertEqual(payload["focused_next_gate"], "validated")
+        self.assertIn("workbench_actions", payload)
 
     def test_crash_report_api_lists_details_and_exports_local_bundle(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:

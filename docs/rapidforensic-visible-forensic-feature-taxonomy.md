@@ -1351,3 +1351,19 @@ SQLite 기반 아티팩트는 브라우저 History, 카카오톡, Sticky Notes, 
 1. `tests/test_rapidtriage_web_static.py::test_hidden_forensic_capabilities_are_exposed_as_visible_steps`가 새 capability id와 핵심 signal term이 정적 GUI catalog에 남아 있는지 검증한다.
 2. `tests/test_rapidtriage_web_static.py::test_visible_forensic_capability_ids_stay_synced_between_api_and_gui`가 Python API registry의 모든 capability id가 GUI fallback config에도 존재하는지 검증한다.
 3. 이 변경은 “기능 노출/탐색성” 보강이다. 검증 corpus나 trusted-tool diff 없이 상용급 완료로 주장하지 않는다.
+
+## 45. 2026-05-14 구현 반영: GUI 상용급 readiness gate 직접 노출
+
+분석 기능이 많아질수록 가장 위험한 UX는 "기능이 보인다 = 법정 제출/상용급 검증 완료"로 오해하게 만드는 것이다. 이번 라운드에서는 CLI의 `commercial-readiness` 결과를 웹 워크벤치에서도 바로 확인할 수 있게 compact API와 패널을 추가했다.
+
+| 사용자 노출 기능 | 연결 API/UI | 구현 내용 | 남은 상용급 보강 |
+| --- | --- | --- | --- |
+| 상용급 readiness gate | `/api/commercial-readiness`, `commercial-readiness-panel` | readiness score, validated/commercial gate pass/fail, claim allowed 여부, 다음 validated gate 항목을 GUI에서 표시한다. | validation package attachment flow와 per-run evidence diff를 더 깊게 연결 |
+| Overclaim 방지 | `commercial_claim_allowed=false`, `release_claim` | GUI 패널이 상용급 claim 금지 문구를 그대로 보여주고, focused item의 남은 검증 gap을 표시한다. | 독립 검증/외부 trusted diff 증거가 들어왔을 때 자동 재산출 E2E |
+| Capability registry 노출 | `commercial-readiness-gate`, `commercial-readiness-gui-gate-v1` | feature catalog/capability chip에서 readiness gate 자체를 검색 가능한 기능으로 등록했다. | release dashboard와 CI artifact upload 연동 |
+
+검증 포인트:
+
+1. `tests/test_rapidtriage_api.py::test_commercial_readiness_api_returns_compact_gui_gate`가 compact API가 claim allowed=false, gate counts, focused validated items를 반환하는지 검증한다.
+2. `tests/test_rapidtriage_api.py::test_web_console_exposes_maestro_style_artifact_workbench`가 GUI JS/CSS에 readiness panel과 API 호출이 남아 있는지 검증한다.
+3. 이 기능은 상용급 달성을 의미하지 않는다. 오히려 현재 상용급이 아님을 사용자가 GUI에서 빠르게 확인하도록 하는 안전장치다.

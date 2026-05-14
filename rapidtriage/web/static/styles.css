@@ -5111,7 +5111,12 @@ body::before {
   grid-column: 1 / -1;
 }
 
-.validation-diff-card {
+.commercial-readiness-panel {
+  grid-column: 1 / -1;
+}
+
+.validation-diff-card,
+.commercial-readiness-card {
   display: grid;
   gap: 10px;
   border: 1px solid rgba(15, 116, 107, 0.16);
@@ -5120,13 +5125,26 @@ body::before {
   padding: 12px;
 }
 
-.validation-diff-card strong {
+.commercial-readiness-card.not-commercial-ready {
+  border-color: rgba(201, 75, 68, 0.32);
+  background:
+    linear-gradient(135deg, rgba(255, 255, 255, 0.78), rgba(255, 242, 240, 0.78));
+}
+
+.commercial-readiness-card.commercial-ready {
+  border-color: rgba(15, 116, 107, 0.28);
+}
+
+.validation-diff-card strong,
+.commercial-readiness-card strong {
   display: block;
   color: var(--ink);
 }
 
 .validation-diff-card span,
-.validation-diff-card .help-text {
+.validation-diff-card .help-text,
+.commercial-readiness-card span,
+.commercial-readiness-card .help-text {
   color: var(--muted);
   font-size: 0.78rem;
 }
@@ -5149,7 +5167,8 @@ body::before {
   overflow-wrap: anywhere;
 }
 
-.validation-diff-list {
+.validation-diff-list,
+.commercial-readiness-list {
   display: grid;
   gap: 6px;
   margin: 0;
@@ -5157,7 +5176,8 @@ body::before {
   list-style: none;
 }
 
-.validation-diff-list li {
+.validation-diff-list li,
+.commercial-readiness-list li {
   display: grid;
   gap: 2px;
   border-top: 1px solid rgba(15, 116, 107, 0.1);

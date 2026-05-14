@@ -745,6 +745,21 @@ CAPABILITY_GROUPS: tuple[dict[str, Any], ...] = (
             {"id": "review-evidence-tray", "label": "Evidence tray/review status", "status": "usable", "terms": ("relevant", "excluded", "include", "tag", "note")},
             {"id": "report-citation-bundle", "label": "Citation/report bundle", "status": "partial", "terms": ("report", "citation", "hash", "bundle", "exhibit")},
             {"id": "audit-hash-chain", "label": "Audit hash chain", "status": "partial", "terms": ("audit", "hash", "custody", "validation")},
+            {
+                "id": "commercial-readiness-gate",
+                "label": "상용급 readiness gate",
+                "status": "usable",
+                "artifact_types": ("commercial-readiness", "validation-gate"),
+                "terms": (
+                    "commercial-readiness",
+                    "commercial-readiness-gui-gate-v1",
+                    "readiness_score",
+                    "commercial_claim_allowed",
+                    "validated",
+                    "commercial_grade",
+                    "trusted diff",
+                ),
+            },
         ),
     },
 )
