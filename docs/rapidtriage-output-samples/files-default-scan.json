@@ -20,11 +20,15 @@
     "extensions": [],
     "modified_after": null,
     "modified_before": null,
-    "limit": 0
+    "limit": 0,
+    "known_good_hash_feeds": [],
+    "hide_known_good": false,
+    "known_good_max_hash_bytes": 67108864
   },
   "summary": {
     "scanned_file_count": 4,
     "candidate_count": 4,
+    "raw_candidate_count": 4,
     "category_counts": {
       "documents": 1,
       "archives": 1,
@@ -43,11 +47,64 @@
     "duplicate_file_count": 0,
     "fuzzy_text_duplicate_group_count": 0,
     "fuzzy_text_duplicate_file_count": 0,
+    "known_good_feed_count": 0,
+    "known_good_hash_count": 0,
+    "known_good_match_count": 0,
+    "known_good_suppressed_count": 0,
+    "known_good_hash_skipped_large_count": 0,
     "commercial_gap_ids": [
       "#76",
-      "#77"
+      "#77",
+      "visible-denisting"
     ]
   },
+  "known_good_suppression_profile": {
+    "profile": "known-good-hash-suppression-v1",
+    "profile_version": "known-good-hash-suppression-v1",
+    "capability_id": "denisting-nsrl-whitelist",
+    "commercial_gap_ids": [
+      "visible-denisting"
+    ],
+    "configured": false,
+    "hide_known_good": false,
+    "max_hash_bytes": 67108864,
+    "candidate_count": 4,
+    "visible_candidate_count": 4,
+    "hashed_candidate_count": 0,
+    "known_good_hash_count": 0,
+    "known_good_hash_counts_by_algorithm": {
+      "md5": 0,
+      "sha1": 0,
+      "sha256": 0
+    },
+    "feed_count": 0,
+    "feed_summaries": [],
+    "duplicate_feed_hash_count": 0,
+    "rejected_feed_token_count": 0,
+    "match_count": 0,
+    "suppressed_count": 0,
+    "skipped_large_count": 0,
+    "suppressed_candidates_truncated": false,
+    "policy": {
+      "default_behavior": "mark-known-good-without-hiding",
+      "hide_behavior": "hide only when --hide-known-good is explicitly provided",
+      "scope": "analyst-supplied MD5/SHA1/SHA256 feeds; full NSRL RDS ingestion is not bundled",
+      "legal_review_note": "Known-good suppression reduces triage noise but does not prove irrelevance by itself."
+    },
+    "limitations": [
+      "Full NSRL RDS database ingestion/update workflow is not implemented.",
+      "Files larger than max_hash_bytes are skipped to avoid surprise long-running scans.",
+      "Hash-based known-good checks cannot identify modified-but-benign files without a trusted feed match."
+    ],
+    "source_viewer_contract": {
+      "candidate_field": "known_good_match",
+      "suppressed_list": "known_good_suppressed_candidates",
+      "review_action": "toggle --hide-known-good off when the analyst needs to inspect suppressed rows"
+    },
+    "commercial_claim_allowed": false,
+    "profile_hash": "a44dfba33acb126627081a039e6d173c8a6f107ae5a8d8386608a3ebc63234de"
+  },
+  "known_good_suppressed_candidates": [],
   "hash_cache_manifest": {
     "profile": "hash-cache-manifest-v1",
     "profile_version": "hash-cache-manifest-v1",
@@ -617,7 +674,8 @@
           "extension:.zip",
           "name:bundle"
         ]
-      }
+      },
+      "known_good_status": "not-configured"
     },
     {
       "path": "<ROOT>/notes.txt",
@@ -634,7 +692,8 @@
           "extension:.txt",
           "name:note"
         ]
-      }
+      },
+      "known_good_status": "not-configured"
     },
     {
       "path": "<ROOT>/records.sqlite",
@@ -652,7 +711,8 @@
           "name:sqlite",
           "path:sqlite"
         ]
-      }
+      },
+      "known_good_status": "not-configured"
     },
     {
       "path": "<ROOT>/tool.exe",
@@ -668,7 +728,8 @@
         "executables": [
           "extension:.exe"
         ]
-      }
+      },
+      "known_good_status": "not-configured"
     }
   ]
 }

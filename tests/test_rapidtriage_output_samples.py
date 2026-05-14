@@ -222,13 +222,14 @@ def normalize_payload(payload: Any, root: Path) -> Any:
     if isinstance(payload, dict):
         normalized = {}
         for key, value in payload.items():
+            normalized_key = normalize_payload(key, root) if isinstance(key, str) else key
             if key == "generated_at" and isinstance(value, str):
-                normalized[key] = "<GENERATED_AT>"
+                normalized[normalized_key] = "<GENERATED_AT>"
                 continue
             if key == "platform" and isinstance(value, str):
-                normalized[key] = "<PLATFORM>"
+                normalized[normalized_key] = "<PLATFORM>"
                 continue
-            normalized[key] = normalize_payload(value, root)
+            normalized[normalized_key] = normalize_payload(value, root)
         return normalized
     if isinstance(payload, list):
         return [normalize_payload(item, root) for item in payload]

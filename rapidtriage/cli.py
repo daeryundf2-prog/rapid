@@ -633,6 +633,23 @@ def build_parser() -> argparse.ArgumentParser:
     files.add_argument("--ext", action="append", help="Only keep files with this extension (repeatable)")
     files.add_argument("--modified-after", help="Only keep files modified at or after this ISO timestamp/date")
     files.add_argument("--modified-before", help="Only keep files modified at or before this ISO timestamp/date")
+    files.add_argument(
+        "--known-good-hash-feed",
+        action="append",
+        default=[],
+        help="Analyst-supplied MD5/SHA1/SHA256 known-good feed (TXT/CSV/JSON; repeatable)",
+    )
+    files.add_argument(
+        "--hide-known-good",
+        action="store_true",
+        help="Hide files that match the known-good hash feed while preserving a suppression manifest",
+    )
+    files.add_argument(
+        "--known-good-max-hash-bytes",
+        type=int,
+        default=64 * 1024 * 1024,
+        help="Maximum file size to hash for known-good checks (default: 67108864)",
+    )
     add_rules_argument(files)
 
     collect_plan = sub.add_parser(
@@ -4709,6 +4726,9 @@ def main(argv=None) -> int:
                 modified_before=args.modified_before,
                 limit=args.limit,
                 rule_set=rule_set,
+                known_good_hash_feeds=args.known_good_hash_feed,
+                hide_known_good=args.hide_known_good,
+                known_good_max_hash_bytes=args.known_good_max_hash_bytes,
             )
         except FileScanError as exc:
             parser.error(str(exc))
@@ -4725,6 +4745,9 @@ def main(argv=None) -> int:
                 "modified_after": args.modified_after,
                 "modified_before": args.modified_before,
                 "limit": args.limit,
+                "known_good_hash_feeds": args.known_good_hash_feed,
+                "hide_known_good": args.hide_known_good,
+                "known_good_max_hash_bytes": args.known_good_max_hash_bytes,
                 "output": str(output),
                 "input_kind": args.input_kind,
                 "rules": args.rules,

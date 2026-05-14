@@ -75,6 +75,18 @@
         },
         "limit": {
           "type": "integer"
+        },
+        "known_good_hash_feeds": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "hide_known_good": {
+          "type": "boolean"
+        },
+        "known_good_max_hash_bytes": {
+          "type": "integer"
         }
       }
     },
@@ -93,6 +105,9 @@
           "type": "integer"
         },
         "candidate_count": {
+          "type": "integer"
+        },
+        "raw_candidate_count": {
           "type": "integer"
         },
         "category_counts": {
@@ -123,6 +138,21 @@
           "type": "integer"
         },
         "fuzzy_text_duplicate_file_count": {
+          "type": "integer"
+        },
+        "known_good_feed_count": {
+          "type": "integer"
+        },
+        "known_good_hash_count": {
+          "type": "integer"
+        },
+        "known_good_match_count": {
+          "type": "integer"
+        },
+        "known_good_suppressed_count": {
+          "type": "integer"
+        },
+        "known_good_hash_skipped_large_count": {
           "type": "integer"
         },
         "commercial_gap_ids": {
@@ -220,8 +250,35 @@
                 }
               }
             }
+          },
+          "known_good_status": {
+            "type": "string"
+          },
+          "known_good_error": {
+            "type": "string"
+          },
+          "known_good_match": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "report_suppression_status": {
+            "type": "string"
+          },
+          "analyst_review_required": {
+            "type": "boolean"
           }
         }
+      }
+    },
+    "known_good_suppression_profile": {
+      "type": "object",
+      "additionalProperties": true
+    },
+    "known_good_suppressed_candidates": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": true
       }
     },
     "duplicate_content_groups": {

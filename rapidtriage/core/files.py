@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import datetime as dt
+import csv
 import difflib
 import hashlib
 import json
 import os
+import re
 import stat as stat_module
 from pathlib import Path
 from typing import Dict, Iterable, List, Mapping, Optional, Sequence, Tuple, Union
@@ -28,10 +30,14 @@ DEFAULT_FILE_CATEGORIES: Tuple[str, ...] = (
     "images",
 )
 DEDUPLICATE_CONTENT_GAP_ID = "#77"
+DENISTING_GAP_ID = "visible-denisting"
 FUNCTIONAL_SCALE_BATCH_ID = "commercial-uplift-031-035"
 DUPLICATE_CONTENT_TRUSTED_DIFF_BLOCKER_77 = "trusted-duplicate-file-manifest-diff-missing"
 DUPLICATE_CONTENT_TRUSTED_TOOLS = {"duplicate-file-manifest", "known-answer-duplicate-group-export", "content-hash-oracle"}
 EXECUTABLE_BITS = stat_module.S_IXUSR | stat_module.S_IXGRP | stat_module.S_IXOTH
+DEFAULT_KNOWN_GOOD_MAX_HASH_BYTES = 64 * 1024 * 1024
+KNOWN_GOOD_HASH_ALGORITHMS = ("md5", "sha1", "sha256")
+HASH_TOKEN_RE = re.compile(r"\b[a-fA-F0-9]{32}\b|\b[a-fA-F0-9]{40}\b|\b[a-fA-F0-9]{64}\b")
 FUZZY_TEXT_EXTENSIONS = {
     ".txt",
     ".md",
@@ -308,6 +314,9 @@ def run_files_scan(
     modified_before: Optional[str] = None,
     limit: int = 0,
     rule_set: RuleSet | None = None,
+    known_good_hash_feeds: Optional[Sequence[Union[str, Path]]] = None,
+    hide_known_good: bool = False,
+    known_good_max_hash_bytes: int = DEFAULT_KNOWN_GOOD_MAX_HASH_BYTES,
 ) -> Dict[str, object]:
     input_root = resolve_input_root(root, kind=input_kind)
     selected_categories = normalize_categories(categories)
@@ -328,14 +337,25 @@ def run_files_scan(
         limit=limit,
     )
 
+    known_good_index = load_known_good_hash_feeds(known_good_hash_feeds or [])
+    known_good_result = apply_known_good_hash_profile(
+        candidates,
+        known_good_index=known_good_index,
+        hide_known_good=hide_known_good,
+        max_hash_bytes=known_good_max_hash_bytes,
+    )
+    visible_candidates = known_good_result["visible_candidates"]
+    candidate_payloads = known_good_result["candidate_payloads"]
+    known_good_profile = known_good_result["profile"]
+
     category_counts = {category: 0 for category in selected_categories}
-    for candidate in candidates:
+    for candidate in visible_candidates:
         for category in candidate.categories:
             category_counts[category] = category_counts.get(category, 0) + 1
 
-    modified_values = [candidate.modified_at for candidate in candidates]
-    duplicate_groups = build_duplicate_content_groups(candidates)
-    fuzzy_text_groups = build_fuzzy_text_duplicate_groups(candidates)
+    modified_values = [candidate.modified_at for candidate in visible_candidates]
+    duplicate_groups = build_duplicate_content_groups(visible_candidates)
+    fuzzy_text_groups = build_fuzzy_text_duplicate_groups(visible_candidates)
     duplicate_content_manifest = build_duplicate_content_manifest(
         duplicate_groups,
         fuzzy_text_groups=fuzzy_text_groups,
@@ -354,10 +374,14 @@ def run_files_scan(
             "modified_after": modified_after_dt.isoformat() if modified_after_dt else None,
             "modified_before": modified_before_dt.isoformat() if modified_before_dt else None,
             "limit": limit,
+            "known_good_hash_feeds": [str(path) for path in known_good_index["feed_paths"]],
+            "hide_known_good": hide_known_good,
+            "known_good_max_hash_bytes": known_good_max_hash_bytes,
         },
         "summary": {
             "scanned_file_count": scanned_files,
-            "candidate_count": len(candidates),
+            "candidate_count": len(visible_candidates),
+            "raw_candidate_count": len(candidates),
             "category_counts": category_counts,
             "newest_modified_at": max(modified_values) if modified_values else None,
             "oldest_modified_at": min(modified_values) if modified_values else None,
@@ -365,8 +389,15 @@ def run_files_scan(
             "duplicate_file_count": sum(int(group["file_count"]) for group in duplicate_groups),
             "fuzzy_text_duplicate_group_count": len(fuzzy_text_groups),
             "fuzzy_text_duplicate_file_count": sum(int(group["file_count"]) for group in fuzzy_text_groups),
-            "commercial_gap_ids": [HASH_CACHE_GAP_ID, DEDUPLICATE_CONTENT_GAP_ID],
+            "known_good_feed_count": len(known_good_index["feed_paths"]),
+            "known_good_hash_count": known_good_profile["known_good_hash_count"],
+            "known_good_match_count": known_good_profile["match_count"],
+            "known_good_suppressed_count": known_good_profile["suppressed_count"],
+            "known_good_hash_skipped_large_count": known_good_profile["skipped_large_count"],
+            "commercial_gap_ids": [HASH_CACHE_GAP_ID, DEDUPLICATE_CONTENT_GAP_ID, DENISTING_GAP_ID],
         },
+        "known_good_suppression_profile": known_good_profile,
+        "known_good_suppressed_candidates": known_good_result["suppressed_candidates"],
         "hash_cache_manifest": hash_cache_manifest,
         "hash_cache_assessment": hash_cache_profile,
         "duplicate_content_manifest": duplicate_content_manifest,
@@ -385,7 +416,7 @@ def run_files_scan(
         ],
         "duplicate_content_groups": duplicate_groups,
         "fuzzy_text_duplicate_groups": fuzzy_text_groups,
-        "candidates": [item.to_dict() for item in candidates],
+        "candidates": candidate_payloads,
     }
     if rule_set is not None:
         annotate_files_payload(payload, rule_set)
@@ -445,6 +476,257 @@ def scan_file_candidates(
 
     candidates.sort(key=lambda item: (-item.modified_epoch, item.path))
     return candidates, scanned_files
+
+
+def load_known_good_hash_feeds(paths: Sequence[Union[str, Path]]) -> dict[str, object]:
+    """Load analyst-provided known-good hash feeds without requiring a full NSRL install."""
+
+    index: dict[str, set[str]] = {algorithm: set() for algorithm in KNOWN_GOOD_HASH_ALGORITHMS}
+    feed_paths: list[Path] = []
+    feed_summaries: list[dict[str, object]] = []
+    duplicate_count = 0
+    rejected_token_count = 0
+
+    for raw_path in paths:
+        feed_path = Path(raw_path).expanduser().resolve()
+        if not feed_path.exists():
+            raise FileScanError(f"known-good hash feed not found: {feed_path}")
+        if not feed_path.is_file():
+            raise FileScanError(f"known-good hash feed is not a file: {feed_path}")
+        feed_paths.append(feed_path)
+        before_count = sum(len(values) for values in index.values())
+        raw_tokens = extract_hash_feed_tokens(feed_path)
+        accepted_for_feed = 0
+        rejected_for_feed = 0
+        duplicates_for_feed = 0
+        for token in raw_tokens:
+            normalized = normalize_known_good_hash(token)
+            if normalized is None:
+                rejected_for_feed += 1
+                continue
+            algorithm, value = normalized
+            if value in index[algorithm]:
+                duplicates_for_feed += 1
+                continue
+            index[algorithm].add(value)
+            accepted_for_feed += 1
+        after_count = sum(len(values) for values in index.values())
+        duplicate_count += duplicates_for_feed
+        rejected_token_count += rejected_for_feed
+        feed_summaries.append(
+            {
+                "path": str(feed_path),
+                "format": guess_known_good_feed_format(feed_path),
+                "accepted_hash_count": accepted_for_feed,
+                "duplicate_hash_count": duplicates_for_feed,
+                "rejected_token_count": rejected_for_feed,
+                "cumulative_hash_count_before": before_count,
+                "cumulative_hash_count_after": after_count,
+            }
+        )
+
+    return {
+        "hashes": index,
+        "feed_paths": feed_paths,
+        "feed_summaries": feed_summaries,
+        "duplicate_count": duplicate_count,
+        "rejected_token_count": rejected_token_count,
+    }
+
+
+def extract_hash_feed_tokens(path: Path) -> list[str]:
+    suffix = path.suffix.lower()
+    if suffix == ".json":
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except UnicodeDecodeError:
+            data = json.loads(path.read_text(encoding="utf-8-sig"))
+        tokens: list[str] = []
+        collect_hash_tokens_from_json(data, tokens)
+        return tokens
+    if suffix == ".csv":
+        text = path.read_text(encoding="utf-8-sig", errors="replace")
+        tokens = []
+        for row in csv.DictReader(text.splitlines()):
+            for key, value in row.items():
+                lowered_key = (key or "").strip().lower()
+                if lowered_key in {"md5", "sha1", "sha256", "hash", "value", "digest"}:
+                    tokens.extend(HASH_TOKEN_RE.findall(value or ""))
+        if tokens:
+            return tokens
+        return HASH_TOKEN_RE.findall(text)
+    return HASH_TOKEN_RE.findall(path.read_text(encoding="utf-8", errors="replace"))
+
+
+def collect_hash_tokens_from_json(value: object, tokens: list[str]) -> None:
+    if isinstance(value, str):
+        tokens.extend(HASH_TOKEN_RE.findall(value))
+        return
+    if isinstance(value, Mapping):
+        for item in value.values():
+            collect_hash_tokens_from_json(item, tokens)
+        return
+    if isinstance(value, list):
+        for item in value:
+            collect_hash_tokens_from_json(item, tokens)
+
+
+def guess_known_good_feed_format(path: Path) -> str:
+    suffix = path.suffix.lower()
+    if suffix in {".json", ".csv"}:
+        return suffix[1:]
+    return "text"
+
+
+def normalize_known_good_hash(value: str) -> Optional[tuple[str, str]]:
+    token = value.strip().lower()
+    if len(token) == 32 and all(char in "0123456789abcdef" for char in token):
+        return "md5", token
+    if len(token) == 40 and all(char in "0123456789abcdef" for char in token):
+        return "sha1", token
+    if len(token) == 64 and all(char in "0123456789abcdef" for char in token):
+        return "sha256", token
+    return None
+
+
+def apply_known_good_hash_profile(
+    candidates: Sequence[FileCandidate],
+    *,
+    known_good_index: Mapping[str, object],
+    hide_known_good: bool,
+    max_hash_bytes: int,
+) -> dict[str, object]:
+    if max_hash_bytes < 0:
+        raise FileScanError("known-good max hash bytes must be >= 0")
+
+    raw_hash_index = known_good_index.get("hashes", {})
+    if not isinstance(raw_hash_index, Mapping):
+        raw_hash_index = {}
+    known_good_hashes = {algorithm: set(raw_hash_index.get(algorithm, set())) for algorithm in KNOWN_GOOD_HASH_ALGORITHMS}
+    configured = any(known_good_hashes.values())
+    visible_candidates: list[FileCandidate] = []
+    candidate_payloads: list[dict[str, object]] = []
+    suppressed_candidates: list[dict[str, object]] = []
+    match_count = 0
+    skipped_large_count = 0
+    hashed_candidate_count = 0
+
+    for candidate in candidates:
+        candidate_payload = candidate.to_dict()
+        known_good_match: Optional[dict[str, object]] = None
+        if configured:
+            if int(candidate.size) > max_hash_bytes:
+                skipped_large_count += 1
+                candidate_payload["known_good_status"] = "not-checked-size-limit"
+            else:
+                try:
+                    hashes = compute_hashes_cached(Path(candidate.path))
+                except OSError as exc:
+                    candidate_payload["known_good_status"] = "hash-error"
+                    candidate_payload["known_good_error"] = exc.__class__.__name__
+                else:
+                    hashed_candidate_count += 1
+                    known_good_match = first_known_good_hash_match(hashes, known_good_hashes)
+                    if known_good_match:
+                        match_count += 1
+                        candidate_payload["known_good_status"] = "known-good-feed-match"
+                        candidate_payload["known_good_match"] = known_good_match
+                        candidate_payload["report_suppression_status"] = (
+                            "suppressed-known-good" if hide_known_good else "candidate-known-good-reviewable"
+                        )
+                        candidate_payload["analyst_review_required"] = not hide_known_good
+                    else:
+                        candidate_payload["known_good_status"] = "not-known-good"
+        else:
+            candidate_payload["known_good_status"] = "not-configured"
+
+        if known_good_match and hide_known_good:
+            suppressed_candidates.append(
+                {
+                    "path": candidate.path,
+                    "name": candidate.name,
+                    "size": candidate.size,
+                    "modified_at": candidate.modified_at,
+                    "known_good_match": known_good_match,
+                    "suppression_reason": "analyst-enabled-known-good-feed-match",
+                    "source_viewer_locator": {
+                        "source": "files",
+                        "path": candidate.path,
+                        "viewer": "file-metadata",
+                    },
+                }
+            )
+            continue
+        visible_candidates.append(candidate)
+        candidate_payloads.append(candidate_payload)
+
+    suppressed_candidates_truncated = len(suppressed_candidates) > 200
+    suppressed_head = suppressed_candidates[:200]
+    profile_core = {
+        "profile": "known-good-hash-suppression-v1",
+        "profile_version": "known-good-hash-suppression-v1",
+        "capability_id": "denisting-nsrl-whitelist",
+        "commercial_gap_ids": [DENISTING_GAP_ID],
+        "configured": configured,
+        "hide_known_good": hide_known_good,
+        "max_hash_bytes": max_hash_bytes,
+        "candidate_count": len(candidates),
+        "visible_candidate_count": len(visible_candidates),
+        "hashed_candidate_count": hashed_candidate_count,
+        "known_good_hash_count": sum(len(values) for values in known_good_hashes.values()),
+        "known_good_hash_counts_by_algorithm": {
+            algorithm: len(known_good_hashes[algorithm]) for algorithm in KNOWN_GOOD_HASH_ALGORITHMS
+        },
+        "feed_count": len(known_good_index.get("feed_paths", [])),
+        "feed_summaries": list(known_good_index.get("feed_summaries", [])),
+        "duplicate_feed_hash_count": int(known_good_index.get("duplicate_count", 0)),
+        "rejected_feed_token_count": int(known_good_index.get("rejected_token_count", 0)),
+        "match_count": match_count,
+        "suppressed_count": len(suppressed_candidates) if hide_known_good else 0,
+        "skipped_large_count": skipped_large_count,
+        "suppressed_candidates_truncated": suppressed_candidates_truncated,
+        "policy": {
+            "default_behavior": "mark-known-good-without-hiding",
+            "hide_behavior": "hide only when --hide-known-good is explicitly provided",
+            "scope": "analyst-supplied MD5/SHA1/SHA256 feeds; full NSRL RDS ingestion is not bundled",
+            "legal_review_note": "Known-good suppression reduces triage noise but does not prove irrelevance by itself.",
+        },
+        "limitations": [
+            "Full NSRL RDS database ingestion/update workflow is not implemented.",
+            "Files larger than max_hash_bytes are skipped to avoid surprise long-running scans.",
+            "Hash-based known-good checks cannot identify modified-but-benign files without a trusted feed match.",
+        ],
+        "source_viewer_contract": {
+            "candidate_field": "known_good_match",
+            "suppressed_list": "known_good_suppressed_candidates",
+            "review_action": "toggle --hide-known-good off when the analyst needs to inspect suppressed rows",
+        },
+        "commercial_claim_allowed": False,
+    }
+    profile_hash = hashlib.sha256(json.dumps(profile_core, sort_keys=True).encode("utf-8")).hexdigest()
+    return {
+        "visible_candidates": visible_candidates,
+        "candidate_payloads": candidate_payloads,
+        "suppressed_candidates": suppressed_head,
+        "profile": {**profile_core, "profile_hash": profile_hash},
+    }
+
+
+def first_known_good_hash_match(
+    hashes: Mapping[str, str],
+    known_good_hashes: Mapping[str, set[str]],
+) -> Optional[dict[str, object]]:
+    for algorithm in KNOWN_GOOD_HASH_ALGORITHMS:
+        value = hashes.get(algorithm, "").lower()
+        if value and value in known_good_hashes.get(algorithm, set()):
+            return {
+                "algorithm": algorithm,
+                "value": value,
+                "source": "analyst-known-good-feed",
+                "classification": "known-good",
+                "confidence": "hash-exact",
+            }
+    return None
 
 
 def build_file_candidate(path: Path, entry_stat: os.stat_result, categories: Sequence[str]) -> Optional[FileCandidate]:

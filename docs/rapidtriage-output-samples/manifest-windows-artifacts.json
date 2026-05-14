@@ -36,6 +36,39 @@
           "details": {
             "extension": ".txt"
           }
+        },
+        {
+          "provider": "generic-documents",
+          "artifact_type": "local-llm-artifact",
+          "path": "<ROOT>/Users/alice/AppData/Local/Microsoft/Terminal Server Client/Cache/Cache0000.bin",
+          "supported": true,
+          "details": {
+            "parser": "local-llm-inventory",
+            "parser_version": "generic-documents-v2",
+            "source_path": "<ROOT>/Users/alice/AppData/Local/Microsoft/Terminal Server Client/Cache/Cache0000.bin",
+            "source_hashes": {
+              "md5": "da7f6376c1c3652e03ce7c57aed2cda0",
+              "sha1": "bcc3ba4de1061cee51cf426f8d832c6519ca611c",
+              "sha256": "be45a509d05e772aa8200d8a922c64a197020bb5ccf6d52913ebf11c27f78e7f"
+            },
+            "product_hint": "Local LLM model file",
+            "artifact_role": "model-file",
+            "model_name_hint": "Cache0000",
+            "source_size": 16,
+            "modified_at": "2024-03-05T15:07:12",
+            "coverage_status": "local-llm-file-inventory",
+            "validation_required": true,
+            "commercial_grade_ready": false,
+            "commercial_grade_blockers": [
+              "application-version-and-schema-not-verified",
+              "prompt-history-db-parser-not-complete",
+              "model-download-provenance-not-validated"
+            ],
+            "risk_flags": [
+              "local-ai-artifact",
+              "local-model-file"
+            ]
+          }
         }
       ]
     },
@@ -96,11 +129,11 @@
       "artifacts": []
     },
     {
-      "artifacts": [],
-      "description": "macOS KakaoTalk container and database inventory with SQLite openability checks",
       "name": "kakaotalk-macos-database-inventory",
+      "description": "macOS KakaoTalk container and database inventory with SQLite openability checks",
+      "target_platform": "macos",
       "supported": true,
-      "target_platform": "macos"
+      "artifacts": []
     },
     {
       "name": "kakaotalk-windows-correlation",
@@ -10885,7 +10918,82 @@
       "description": "Windows MFT and USN Journal imports plus bounded native NTFS inventory",
       "target_platform": "windows",
       "supported": true,
-      "artifacts": []
+      "artifacts": [
+        {
+          "provider": "windows-filesystem",
+          "artifact_type": "file-signature-mismatch",
+          "path": "<ROOT>/Users/alice/AppData/Local/Google/Chrome/User Data/Default/History",
+          "supported": true,
+          "details": {
+            "parser": "windows-file-signature-mismatch",
+            "parser_version": "windows-filesystem-v7",
+            "coverage_status": "bounded-magic-header-check",
+            "reportability": "triage",
+            "source_path": "<ROOT>/Users/alice/AppData/Local/Google/Chrome/User Data/Default/History",
+            "source_format": "filesystem-file",
+            "source_hashes": {
+              "sha256": "779f16740b6777f0df5007d78f4f412772a50aaa4d746ccee92293b94510aa6c"
+            },
+            "source_size": 16384,
+            "modified_at": "2026-04-11T06:55:53.168849+00:00",
+            "actual_extension": "",
+            "detected_signature_kind": "sqlite",
+            "signature_hex": "53514c69746520666f726d6174203300",
+            "expected_extensions": [
+              ".db",
+              ".sqlite",
+              ".sqlite3"
+            ],
+            "risk_flags": [
+              "signature-extension-mismatch"
+            ],
+            "validation_required": true,
+            "validation_guidance": "Magic-header mismatch is a triage lead. Validate with a full file-type parser and user/action timeline before reporting concealment intent.",
+            "commercial_grade_ready": false,
+            "commercial_grade_blockers": [
+              "full-file-type-parser-validation-required",
+              "false-positive-extension-policy-required"
+            ]
+          }
+        },
+        {
+          "provider": "windows-filesystem",
+          "artifact_type": "file-signature-mismatch",
+          "path": "<ROOT>/Users/alice/AppData/Local/Microsoft/Edge/User Data/Profile 1/History",
+          "supported": true,
+          "details": {
+            "parser": "windows-file-signature-mismatch",
+            "parser_version": "windows-filesystem-v7",
+            "coverage_status": "bounded-magic-header-check",
+            "reportability": "triage",
+            "source_path": "<ROOT>/Users/alice/AppData/Local/Microsoft/Edge/User Data/Profile 1/History",
+            "source_format": "filesystem-file",
+            "source_hashes": {
+              "sha256": "da647054cafa048475860030861135cdd6222712c1befd0f4e851677e6533639"
+            },
+            "source_size": 12288,
+            "modified_at": "2026-04-11T06:55:53.169214+00:00",
+            "actual_extension": "",
+            "detected_signature_kind": "sqlite",
+            "signature_hex": "53514c69746520666f726d6174203300",
+            "expected_extensions": [
+              ".db",
+              ".sqlite",
+              ".sqlite3"
+            ],
+            "risk_flags": [
+              "signature-extension-mismatch"
+            ],
+            "validation_required": true,
+            "validation_guidance": "Magic-header mismatch is a triage lead. Validate with a full file-type parser and user/action timeline before reporting concealment intent.",
+            "commercial_grade_ready": false,
+            "commercial_grade_blockers": [
+              "full-file-type-parser-validation-required",
+              "false-positive-extension-policy-required"
+            ]
+          }
+        }
+      ]
     },
     {
       "name": "windows-eventlog",
@@ -11226,6 +11334,82 @@
               "LogonType": "10"
             },
             "raw_preview": "<ns0:Event xmlns:ns0=\"http://schemas.microsoft.com/win/2004/08/events/event\">\n    <ns0:System>\n      <ns0:Provider Name=\"Microsoft-Windows-Security-Auditing\" />\n      <ns0:EventID>4624</ns0:EventID>\n      <ns0:Level>0</ns0:Level>\n      <ns0:Channel>Security</ns0:Channel>\n      <ns0:Computer>WIN-CASE01</ns0:Computer>\n      <ns0:EventRecordID>1001</ns0:EventRecordID>\n      <ns0:TimeCreated SystemTime=\"2024-04-01T12:34:56.0000000Z\" />\n    </ns0:System>\n    <ns0:EventData>\n      <ns0:Data Name=\"TargetUserName\">alice</ns0:Data>\n      <ns0:Data Name=\"IpAddress\">10.0.0.5</ns0:Data>\n      <ns0:Data Name=\"LogonType\">10</ns0:Data>\n    </ns0:EventData>\n  </ns0:Event>\n"
+          }
+        },
+        {
+          "provider": "windows-eventlog",
+          "artifact_type": "eventlog-logon-session",
+          "path": "<ROOT>",
+          "supported": true,
+          "details": {
+            "parser": "windows-eventlog-logon-session-builder",
+            "parser_version": "eventlog-normalized-v16",
+            "coverage_status": "logon-events-correlated-by-logon-id-or-pivots",
+            "reportability": "triage",
+            "source_path": "<ROOT>",
+            "source_format": "eventlog-session-correlation",
+            "source_index": 0,
+            "source_files": [
+              "<ROOT>/Windows/System32/winevt/Logs/Security.xml"
+            ],
+            "source_hashes_by_file": {
+              "<ROOT>/Windows/System32/winevt/Logs/Security.xml": "3280198506b93b1d8c90fed52b92c8740c1b0ebb493bbe0d86d40941bad6f906"
+            },
+            "session_key": "WIN-CASE01|alice|10.0.0.5|10",
+            "session_status": "open-or-not-observed",
+            "user_name": "alice",
+            "target_domain_name": "",
+            "logon_type": "10",
+            "source_ip": "10.0.0.5",
+            "workstation_name": "",
+            "computer": "WIN-CASE01",
+            "started_at": "2024-04-01T12:34:56.000000+00:00",
+            "ended_at": "",
+            "duration_seconds": null,
+            "event_ids": [
+              "4624"
+            ],
+            "event_count": 1,
+            "events": [
+              {
+                "timestamp": "2024-04-01T12:34:56.000000+00:00",
+                "event_id": "4624",
+                "event_category": "logon-success",
+                "record_id": "1001",
+                "channel": "Security",
+                "computer": "WIN-CASE01",
+                "user_name": "alice",
+                "target_domain_name": "",
+                "logon_type": "10",
+                "logon_id": "",
+                "source_ip": "10.0.0.5",
+                "workstation_name": "",
+                "source_path": "<ROOT>/Windows/System32/winevt/Logs/Security.xml",
+                "source_index": 0
+              }
+            ],
+            "timestamp": "2024-04-01T12:34:56.000000+00:00",
+            "timestamp_source": "first_correlated_logon_event",
+            "risk_flags": [
+              "logon-session",
+              "rdp-logon-session",
+              "remote-source-ip"
+            ],
+            "validation_required": true,
+            "validation_checks": {
+              "has_logon_event": true,
+              "has_logoff_event": false,
+              "has_logon_id_or_fallback_key": true,
+              "session_duration_available": false,
+              "cross_artifact_correlation_available": false
+            },
+            "validation_guidance": "Logon sessions are correlated from observed authentication events. Validate missing logoff, filtered exports, reused logon IDs, and RDP/network context before final timeline conclusions.",
+            "commercial_grade_ready": false,
+            "commercial_grade_blockers": [
+              "complete-security-channel-export-required",
+              "session-reuse-and-filtered-export-validation-required",
+              "rdp-network-process-correlation-required"
+            ]
           }
         },
         {
@@ -11999,6 +12183,8 @@
                 "TypedPaths",
                 "OpenSavePidlMRU",
                 "LastVisitedPidlMRU",
+                "MUICache",
+                "Clipboard",
                 "ShellBags",
                 "MountPoints2",
                 "Network",
@@ -12037,6 +12223,8 @@
                   "TypedPaths",
                   "OpenSavePidlMRU",
                   "LastVisitedPidlMRU",
+                  "MUICache",
+                  "Clipboard",
                   "MountPoints2",
                   "Network",
                   "ComDlg32"
@@ -12220,6 +12408,8 @@
                 "TypedPaths",
                 "OpenSavePidlMRU",
                 "LastVisitedPidlMRU",
+                "MUICache",
+                "Clipboard",
                 "ShellBags",
                 "MountPoints2",
                 "Network",
@@ -12256,6 +12446,8 @@
                   "TypedPaths",
                   "OpenSavePidlMRU",
                   "LastVisitedPidlMRU",
+                  "MUICache",
+                  "Clipboard",
                   "ShellBags",
                   "MountPoints2",
                   "Network",
@@ -19893,6 +20085,8 @@
                 "TypedPaths",
                 "OpenSavePidlMRU",
                 "LastVisitedPidlMRU",
+                "MUICache",
+                "Clipboard",
                 "ShellBags",
                 "MountPoints2",
                 "Network",
@@ -19931,6 +20125,8 @@
                   "TypedPaths",
                   "OpenSavePidlMRU",
                   "LastVisitedPidlMRU",
+                  "MUICache",
+                  "Clipboard",
                   "MountPoints2",
                   "Network",
                   "ComDlg32"
