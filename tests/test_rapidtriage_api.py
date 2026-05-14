@@ -2579,6 +2579,50 @@ class RapidTriageApiTests(unittest.TestCase):
             self.assertEqual(delete_response.status_code, 204)
             self.assertEqual(restored_client.get(f"/api/runs/{run_id}").status_code, 404)
 
+    def test_run_api_passes_file_triage_controls_to_gui_files_output(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir) / "case-root"
+            output_dir = Path(tmp_dir) / "run-out"
+            root.mkdir(parents=True, exist_ok=True)
+            known_good = root / "known-good-note.txt"
+            known_good.write_text("standard operating system help text\n", encoding="utf-8")
+            suspicious = root / "suspicious-note.txt"
+            suspicious.write_text("needle exfil staging note\n", encoding="utf-8")
+            disguised = root / "holiday.jpg"
+            disguised.write_bytes(b"MZ\x90\x00not actually a jpeg")
+            feed = Path(tmp_dir) / "known-good.csv"
+            feed.write_text(hashlib.sha256(known_good.read_bytes()).hexdigest() + "\n", encoding="utf-8")
+            client = TestClient(create_app(RunJobStore()))
+
+            run_response = client.post(
+                "/api/runs",
+                json={
+                    "root": str(root),
+                    "mode": "fraud",
+                    "output_dir": str(output_dir),
+                    "read_only": True,
+                    "known_good_hash_feeds": [str(feed)],
+                    "hide_known_good": True,
+                    "known_good_max_hash_bytes": 1024 * 1024,
+                    "wait": True,
+                },
+            )
+            self.assertEqual(run_response.status_code, 202, run_response.text)
+            run_id = run_response.json()["run_id"]
+
+            files_response = client.get(f"/api/runs/{run_id}/files")
+            self.assertEqual(files_response.status_code, 200)
+            payload = files_response.json()
+
+        self.assertEqual(payload["filters"]["known_good_hash_feeds"], [str(feed.resolve())])
+        self.assertTrue(payload["filters"]["hide_known_good"])
+        self.assertEqual(payload["filters"]["known_good_max_hash_bytes"], 1024 * 1024)
+        self.assertEqual(payload["summary"]["known_good_suppressed_count"], 1)
+        self.assertEqual(payload["known_good_suppressed_candidates"][0]["name"], "known-good-note.txt")
+        self.assertNotIn("known-good-note.txt", {item["name"] for item in payload["candidates"]})
+        self.assertEqual(payload["summary"]["signature_mismatch_count"], 1)
+        self.assertEqual(payload["signature_mismatch_candidates"][0]["name"], "holiday.jpg")
+
     def test_case_db_api_imports_searches_and_marks_review(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             root = Path(tmp_dir) / "case-root"

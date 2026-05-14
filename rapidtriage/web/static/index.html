@@ -183,6 +183,26 @@
             <input id="e01PartitionStartSectorInput" name="e01PartitionStartSector" type="number" min="0" placeholder="auto: largest supported filesystem from mmls" />
           </label>
 
+          <section class="run-plan-preview known-good-run-options" aria-label="Known-good and signature triage options">
+            <p class="eyebrow">file triage controls</p>
+            <h3>Known-good suppression and extension spoofing checks</h3>
+            <p class="help-text">Use a TXT/CSV/JSON MD5/SHA1/SHA256 feed to mark normal files. Signature mismatch checks run automatically and appear in the Files tab.</p>
+            <label>
+              Known-good hash feed path(s)
+              <textarea id="knownGoodHashFeedInput" name="knownGoodHashFeeds" rows="3" placeholder="/cases/feeds/nsrl-lite.csv&#10;/cases/feeds/company-whitelist.json"></textarea>
+            </label>
+            <div class="field-grid">
+              <label>
+                Known-good max hash MB
+                <input id="knownGoodMaxHashMbInput" name="knownGoodMaxHashMb" type="number" min="0" value="64" />
+              </label>
+              <label class="inline-toggle">
+                <input id="hideKnownGoodInput" type="checkbox" />
+                Hide known-good rows
+              </label>
+            </div>
+          </section>
+
           <div class="toggle-row">
             <label><input id="readOnlyInput" type="checkbox" checked /> Read-only</label>
             <label><input id="dryRunInput" type="checkbox" /> Dry run</label>

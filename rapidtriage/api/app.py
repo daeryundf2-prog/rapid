@@ -34,6 +34,7 @@ from ..core.docs import SUPPORTED_DOC_EXTS, extract_text
 from ..core.doctor import run_doctor
 from ..core.enterprise import build_enterprise_policy
 from ..core.evidence import identify_evidence, supported_evidence_formats
+from ..core.files import DEFAULT_KNOWN_GOOD_MAX_HASH_BYTES
 from ..core.forensic_accuracy import build_accuracy_gate
 from ..core.hash_cache import hash_cache_assessment
 from ..core.jobs import RunJobStore, RunRequest, default_job_store, is_relative_to, run_output_dir
@@ -247,6 +248,9 @@ class RunCreateRequest(BaseModel):
     e01_partition_start_sector: Optional[int] = None
     overwrite: bool = False
     resume: bool = False
+    known_good_hash_feeds: list[str] = Field(default_factory=list)
+    hide_known_good: bool = False
+    known_good_max_hash_bytes: int = Field(DEFAULT_KNOWN_GOOD_MAX_HASH_BYTES, ge=0)
     wait: bool = False
 
 
@@ -722,6 +726,9 @@ def create_app(job_store: RunJobStore | None = None, auth_token: str | None = No
             e01_partition_start_sector=request.e01_partition_start_sector,
             overwrite=request.overwrite,
             resume=request.resume,
+            known_good_hash_feeds=tuple(path.strip() for path in request.known_good_hash_feeds if path.strip()),
+            hide_known_good=request.hide_known_good,
+            known_good_max_hash_bytes=request.known_good_max_hash_bytes,
         )
         job = store.run_sync(run_request) if request.wait else store.submit(run_request)
         return job.to_dict(include_summary=request.wait)

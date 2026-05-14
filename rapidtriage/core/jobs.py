@@ -14,6 +14,7 @@ from typing import Dict, List, Mapping, Sequence
 
 from .forensic_accuracy import build_accuracy_gate
 from .rules import RuleConfigError, load_rule_set
+from .files import DEFAULT_KNOWN_GOOD_MAX_HASH_BYTES
 from .run import RunModeError, run_triage_mode
 
 
@@ -36,6 +37,20 @@ def now_iso() -> str:
     return dt.datetime.now().isoformat()
 
 
+def string_tuple(value: object) -> tuple[str, ...]:
+    if isinstance(value, str):
+        return (value,) if value else ()
+    if isinstance(value, Sequence):
+        return tuple(str(item) for item in value if str(item))
+    return ()
+
+
+def int_or_default(value: object, default: int) -> int:
+    if value in (None, ""):
+        return default
+    return int(value)
+
+
 @dataclass(frozen=True)
 class RunRequest:
     root: str
@@ -51,6 +66,9 @@ class RunRequest:
     e01_partition_start_sector: int | None = None
     overwrite: bool = False
     resume: bool = False
+    known_good_hash_feeds: tuple[str, ...] = ()
+    hide_known_good: bool = False
+    known_good_max_hash_bytes: int = DEFAULT_KNOWN_GOOD_MAX_HASH_BYTES
 
     def to_dict(self) -> Dict[str, object]:
         return {
@@ -67,6 +85,9 @@ class RunRequest:
             "e01_partition_start_sector": self.e01_partition_start_sector,
             "overwrite": self.overwrite,
             "resume": self.resume,
+            "known_good_hash_feeds": list(self.known_good_hash_feeds),
+            "hide_known_good": self.hide_known_good,
+            "known_good_max_hash_bytes": self.known_good_max_hash_bytes,
         }
 
     @classmethod
@@ -89,6 +110,12 @@ class RunRequest:
             ),
             overwrite=bool(payload.get("overwrite", False)),
             resume=bool(payload.get("resume", False)),
+            known_good_hash_feeds=string_tuple(payload.get("known_good_hash_feeds", [])),
+            hide_known_good=bool(payload.get("hide_known_good", False)),
+            known_good_max_hash_bytes=int_or_default(
+                payload.get("known_good_max_hash_bytes"),
+                DEFAULT_KNOWN_GOOD_MAX_HASH_BYTES,
+            ),
         )
 
 
@@ -316,6 +343,12 @@ class RunJobStore:
             max_file_count=int(safety_options.get("max_file_count") or 0),
             memory_cap_bytes=int(safety_options.get("memory_cap_bytes") or 0),
             overwrite=bool(safety_options.get("overwrite", False)),
+            known_good_hash_feeds=string_tuple(safety_options.get("known_good_hash_feeds", [])),
+            hide_known_good=bool(safety_options.get("hide_known_good", False)),
+            known_good_max_hash_bytes=int_or_default(
+                safety_options.get("known_good_max_hash_bytes"),
+                DEFAULT_KNOWN_GOOD_MAX_HASH_BYTES,
+            ),
         )
         imported_at = now_iso()
         job = RunJob(
@@ -1325,6 +1358,9 @@ def execute_run_request(request: RunRequest, *, run_id: str | None = None) -> Di
             e01_partition_start_sector=request.e01_partition_start_sector,
             overwrite=request.overwrite,
             resume=request.resume,
+            known_good_hash_feeds=request.known_good_hash_feeds,
+            hide_known_good=request.hide_known_good,
+            known_good_max_hash_bytes=request.known_good_max_hash_bytes,
             rule_set=rule_set,
         )
     except (FileNotFoundError, OSError, RuleConfigError, RunModeError, ValueError):

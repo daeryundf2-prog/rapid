@@ -2539,18 +2539,23 @@ function artifactActionButtons(kind, index, artifact) {
 function renderFiles(payload) {
   const rows = payload.candidates || [];
   const offset = payload.pagination?.offset || 0;
-  if (!rows.length) return '<p class="empty-state">No file candidates.</p>';
+  const summary = renderFileTriageSummary(payload);
+  if (!rows.length) return `${summary}<p class="empty-state">No file candidates.</p>`;
   return `
+    ${summary}
     ${renderPaginationNotice(payload.pagination, "files")}
-    <table class="data-table">
-      <thead><tr><th>Name</th><th>Categories</th><th>Size</th><th>Modified</th><th></th></tr></thead>
+    <table class="data-table file-triage-table">
+      <thead><tr><th>Name</th><th>Triage</th><th>Categories</th><th>Size</th><th>Modified</th><th></th></tr></thead>
       <tbody>
         ${rows.map((file, index) => {
           const context = { source: "files", pointer: `/candidates/${offset + index}`, title: file.name || fileName(file.path), note: file.name || "", path: file.path || "", tags: ["file", ...(file.categories || [])].filter(Boolean) };
           const match = { source: "files", kind: (file.categories || []).join(", "), path: file.path || "", title: file.name || fileName(file.path), preview: file.name || "", pointer: context.pointer };
+          const signature = file.file_signature || {};
+          const triageClass = signature.mismatch ? "risk-row" : "";
           return `
-            <tr data-filter="${rowText(file)}" ${file.path ? `data-viewer-row-path="${escapeHtml(file.path)}" data-review-context="${escapeHtml(JSON.stringify(context))}"` : ""}>
+            <tr class="${triageClass}" data-filter="${rowText(file)}" ${file.path ? `data-viewer-row-path="${escapeHtml(file.path)}" data-review-context="${escapeHtml(JSON.stringify(context))}"` : ""}>
               <td><strong>${escapeHtml(file.name)}</strong><span>${escapeHtml(file.path)}</span></td>
+              <td>${renderFileTriageBadges(file)}</td>
               <td>${escapeHtml((file.categories || []).join(", "))}</td>
               <td>${formatBytes(file.size)}</td>
               <td>${escapeHtml(file.modified_at)}</td>
@@ -2561,6 +2566,82 @@ function renderFiles(payload) {
       </tbody>
     </table>
     ${renderPaginationControls(payload.pagination, "files")}
+  `;
+}
+
+function renderFileTriageSummary(payload) {
+  const summary = payload.summary || {};
+  const knownGood = payload.known_good_suppression_profile || {};
+  const signature = payload.file_signature_profile || {};
+  const suppressed = payload.known_good_suppressed_candidates || [];
+  const mismatches = payload.signature_mismatch_candidates || [];
+  return `
+    <section class="file-triage-summary" data-testid="file-triage-summary">
+      <div class="processing-summary-head">
+        <div>
+          <p class="eyebrow">file triage</p>
+          <h3>Known-good suppression and extension spoofing</h3>
+          <p class="help-text">정상 파일 숨김 여부와 확장자 위장 의심 파일을 여기서 바로 확인합니다.</p>
+        </div>
+        <span class="status-pill ${summary.signature_mismatch_count ? "warning" : "ok"}">${summary.signature_mismatch_count || 0} mismatch</span>
+      </div>
+      <div class="metric-grid compact-metric-grid">
+        ${metric(formatNumber(summary.raw_candidate_count || summary.candidate_count || 0), "Raw candidates")}
+        ${metric(formatNumber(summary.candidate_count || 0), "Visible candidates")}
+        ${metric(formatNumber(summary.known_good_match_count || 0), "Known-good matches")}
+        ${metric(formatNumber(summary.signature_mismatch_count || 0), "Signature mismatches")}
+      </div>
+      <div class="processing-caps file-triage-caps">
+        <span>Known-good feed: ${knownGood.configured ? `${formatNumber(knownGood.feed_count || 0)} feed(s)` : "not configured"}</span>
+        <span>Hash count: ${formatNumber(knownGood.known_good_hash_count || 0)}</span>
+        <span>Suppression: ${knownGood.hide_known_good ? "hidden from candidate table" : "reviewable in table"}</span>
+        <span>Signature checked: ${formatNumber(signature.checked_count || summary.signature_checked_count || 0)}</span>
+        <span>Unrecognized header: ${formatNumber(signature.unrecognized_known_extension_count || 0)}</span>
+      </div>
+      ${suppressed.length ? `
+        <details class="dense-list file-triage-details">
+          <summary>Hidden known-good rows (${formatNumber(suppressed.length)})</summary>
+          ${suppressed.slice(0, 12).map((item) => `
+            <div class="dense-row">
+              <strong>${escapeHtml(item.name || fileName(item.path))}</strong>
+              <span>${escapeHtml(item.path || "")}</span>
+              <span>${escapeHtml(item.known_good_match?.algorithm || "hash")} match · ${escapeHtml(item.known_good_match?.value || "")}</span>
+            </div>
+          `).join("")}
+        </details>
+      ` : ""}
+      ${mismatches.length ? `
+        <details class="dense-list file-triage-details" open>
+          <summary>Extension/signature mismatch review queue (${formatNumber(mismatches.length)})</summary>
+          ${mismatches.slice(0, 12).map((item) => `
+            <div class="dense-row warning">
+              <strong>${escapeHtml(item.name || fileName(item.path))}</strong>
+              <span>${escapeHtml(item.path || "")}</span>
+              <span>Detected ${escapeHtml(item.detected || "unknown")} but expected ${(item.expected || []).map(escapeHtml).join(", ")}</span>
+            </div>
+          `).join("")}
+        </details>
+      ` : ""}
+    </section>
+  `;
+}
+
+function renderFileTriageBadges(file) {
+  const knownStatus = file.known_good_status || "not-configured";
+  const knownMatch = file.known_good_match || {};
+  const signature = file.file_signature || {};
+  const knownLabel = knownStatus === "known-good-feed-match"
+    ? `Known-good ${knownMatch.algorithm || ""}`.trim()
+    : knownStatus.replace(/-/g, " ");
+  const signatureLabel = signature.status
+    ? signature.status.replace(/-/g, " ")
+    : "signature not checked";
+  return `
+    <div class="file-triage-badges">
+      <span class="file-triage-badge ${knownStatus === "known-good-feed-match" ? "ok" : ""}">${escapeHtml(knownLabel)}</span>
+      <span class="file-triage-badge ${signature.mismatch ? "warning" : ""}">${escapeHtml(signatureLabel)}</span>
+      ${signature.detected ? `<span class="file-triage-badge">detected: ${escapeHtml(signature.detected)}</span>` : ""}
+    </div>
   `;
 }
 
@@ -6065,6 +6146,8 @@ function hydrateRunForm() {
     ["#maxExtractMbInput", "maxExtractMb"],
     ["#maxFileCountInput", "maxFileCount"],
     ["#e01PartitionStartSectorInput", "e01PartitionStartSector"],
+    ["#knownGoodHashFeedInput", "knownGoodHashFeeds"],
+    ["#knownGoodMaxHashMbInput", "knownGoodMaxHashMb"],
     ["#importOutputInput", "importOutputDir"],
   ]) {
     const element = document.querySelector(selector);
@@ -6074,6 +6157,7 @@ function hydrateRunForm() {
     ["#readOnlyInput", "readOnly"],
     ["#dryRunInput", "dryRun"],
     ["#overwriteInput", "overwrite"],
+    ["#hideKnownGoodInput", "hideKnownGood"],
   ]) {
     const element = document.querySelector(selector);
     if (element && saved[key] !== undefined) element.checked = Boolean(saved[key]);
@@ -6092,10 +6176,13 @@ function persistRunForm() {
     maxExtractMb: document.querySelector("#maxExtractMbInput")?.value || "0",
     maxFileCount: document.querySelector("#maxFileCountInput")?.value || "0",
     e01PartitionStartSector: document.querySelector("#e01PartitionStartSectorInput")?.value || "",
+    knownGoodHashFeeds: document.querySelector("#knownGoodHashFeedInput")?.value || "",
+    knownGoodMaxHashMb: document.querySelector("#knownGoodMaxHashMbInput")?.value || "64",
     importOutputDir: document.querySelector("#importOutputInput")?.value || "",
     readOnly: document.querySelector("#readOnlyInput")?.checked ?? true,
     dryRun: document.querySelector("#dryRunInput")?.checked ?? false,
     overwrite: document.querySelector("#overwriteInput")?.checked ?? false,
+    hideKnownGood: document.querySelector("#hideKnownGoodInput")?.checked ?? false,
   };
   window.localStorage.setItem(RUN_FORM_STORAGE_KEY, JSON.stringify(payload));
 }
@@ -6111,10 +6198,13 @@ function bindRunFormPersistence() {
     "#maxExtractMbInput",
     "#maxFileCountInput",
     "#e01PartitionStartSectorInput",
+    "#knownGoodHashFeedInput",
+    "#knownGoodMaxHashMbInput",
     "#importOutputInput",
     "#readOnlyInput",
     "#dryRunInput",
     "#overwriteInput",
+    "#hideKnownGoodInput",
   ]) {
     document.querySelector(selector)?.addEventListener("input", persistRunForm);
     document.querySelector(selector)?.addEventListener("change", persistRunForm);
@@ -6198,12 +6288,17 @@ function refreshRunPlanPreview() {
   const maxExtractBytes = extractLimitBytes();
   const maxFiles = Number(document.querySelector("#maxFileCountInput")?.value || 0);
   const e01PartitionStartSector = optionalInteger(document.querySelector("#e01PartitionStartSectorInput")?.value);
+  const knownGoodFeeds = parseKnownGoodHashFeeds();
+  const hideKnownGood = document.querySelector("#hideKnownGoodInput")?.checked ?? false;
+  const knownGoodMaxBytes = knownGoodMaxHashBytes();
   const mode = document.querySelector("#modeInput")?.value || "fraud";
   const collectors = RUN_MODE_COLLECTORS[mode] || RUN_MODE_COLLECTORS.fraud;
   const badges = [
     ...profile.badges,
     readOnly ? "read-only" : "extract allowed",
     dryRun ? "dry-run" : "writes output",
+    knownGoodFeeds.length ? `${knownGoodFeeds.length} known-good feed(s)` : "no known-good feed",
+    hideKnownGood ? "hide known-good" : "known-good reviewable",
   ];
   target.innerHTML = `
     <p class="eyebrow">run plan preview</p>
@@ -6216,6 +6311,8 @@ function refreshRunPlanPreview() {
       <span>Max extract: ${maxExtractBytes ? formatBytes(maxExtractBytes) : "uncapped/none"}</span>
       <span>Max files: ${Number.isFinite(maxFiles) && maxFiles > 0 ? formatNumber(maxFiles) : "uncapped/none"}</span>
       <span>E01 partition: ${e01PartitionStartSector === null ? "auto largest supported" : `sector ${formatNumber(e01PartitionStartSector)}`}</span>
+      <span>Known-good hash cap: ${formatBytes(knownGoodMaxBytes)}</span>
+      <span>Signature mismatch: always on</span>
     </div>
   `;
   updateRunSubmissionCta(root, profileKey);
@@ -6290,6 +6387,22 @@ function optionalInteger(value) {
 function extractLimitBytes() {
   const mb = Number(document.querySelector("#maxExtractMbInput")?.value || 0);
   if (!Number.isFinite(mb) || mb <= 0) return 0;
+  return Math.floor(mb * 1024 * 1024);
+}
+
+function parseKnownGoodHashFeeds() {
+  const raw = document.querySelector("#knownGoodHashFeedInput")?.value || "";
+  return raw
+    .split(/[\n,;]+/)
+    .map((value) => value.trim())
+    .filter(Boolean);
+}
+
+function knownGoodMaxHashBytes() {
+  const raw = document.querySelector("#knownGoodMaxHashMbInput")?.value;
+  if (raw === undefined || String(raw).trim() === "") return 64 * 1024 * 1024;
+  const mb = Number(raw);
+  if (!Number.isFinite(mb) || mb < 0) return 64 * 1024 * 1024;
   return Math.floor(mb * 1024 * 1024);
 }
 
@@ -6382,6 +6495,9 @@ runForm.addEventListener("submit", async (event) => {
     max_extract_size_bytes: extractLimitBytes(),
     max_file_count: Number(document.querySelector("#maxFileCountInput")?.value || 0),
     e01_partition_start_sector: optionalInteger(document.querySelector("#e01PartitionStartSectorInput")?.value),
+    known_good_hash_feeds: parseKnownGoodHashFeeds(),
+    hide_known_good: document.querySelector("#hideKnownGoodInput")?.checked ?? false,
+    known_good_max_hash_bytes: knownGoodMaxHashBytes(),
   };
   try {
     const run = await api("/api/runs", { method: "POST", body: JSON.stringify(request) });

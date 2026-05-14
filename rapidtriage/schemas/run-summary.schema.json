@@ -196,6 +196,18 @@
         "resume_disabled_reason": {
           "type": "string"
         },
+        "known_good_hash_feeds": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "hide_known_good": {
+          "type": "boolean"
+        },
+        "known_good_max_hash_bytes": {
+          "type": "integer"
+        },
         "reused_outputs": {
           "type": "array",
           "items": {

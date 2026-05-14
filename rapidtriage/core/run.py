@@ -40,7 +40,7 @@ from .e01 import (
     is_e01_path,
 )
 from .extract import DEFAULT_EXTRACT_MANIFEST_NAME, SUPPORTED_DOC_KINDS, run_extract
-from .files import run_files_scan
+from .files import DEFAULT_KNOWN_GOOD_MAX_HASH_BYTES, run_files_scan
 from .forensic_accuracy import build_accuracy_gate
 from .indicators import build_indicator_summary
 from .input_root import InputRoot, derive_child_input_root, resolve_input_root
@@ -237,6 +237,9 @@ def run_triage_mode(
     e01_partition_start_sector: int | None = None,
     overwrite: bool = False,
     resume: bool = False,
+    known_good_hash_feeds: Sequence[Union[str, Path]] = (),
+    hide_known_good: bool = False,
+    known_good_max_hash_bytes: int = DEFAULT_KNOWN_GOOD_MAX_HASH_BYTES,
     rule_set: RuleSet | None = None,
 ) -> Dict[str, object]:
     normalized_mode = mode.lower()
@@ -377,9 +380,15 @@ def run_triage_mode(
     docs_payload["scan_scope_root"] = str(scan_input_root.root_path)
     record_memory_cap("docs")
 
+    files_scan_resume = (
+        effective_resume
+        and not known_good_hash_feeds
+        and not hide_known_good
+        and known_good_max_hash_bytes == DEFAULT_KNOWN_GOOD_MAX_HASH_BYTES
+    )
     files_payload, reused = load_or_build_json(
         files_path,
-        resume=effective_resume,
+        resume=files_scan_resume,
         expected_command="files",
         required_keys=("summary", "candidates"),
         producer=lambda: run_files_scan(
@@ -387,6 +396,9 @@ def run_triage_mode(
             categories=profile.file_scan_categories,
             path_contains=profile.file_scan_path_contains or None,
             rule_set=rule_set,
+            known_good_hash_feeds=known_good_hash_feeds,
+            hide_known_good=hide_known_good,
+            known_good_max_hash_bytes=known_good_max_hash_bytes,
         ),
     )
     if reused:
@@ -582,6 +594,9 @@ def run_triage_mode(
             "resume": resume,
             "resume_effective": effective_resume,
             "resume_disabled_reason": resume_disabled_reason,
+            "known_good_hash_feeds": [str(path) for path in known_good_hash_feeds],
+            "hide_known_good": hide_known_good,
+            "known_good_max_hash_bytes": known_good_max_hash_bytes,
             "reused_outputs": sorted(reused_outputs),
             "input_fingerprint": current_fingerprint,
             "artifact_scheduler": {
@@ -641,6 +656,9 @@ def run_triage_mode(
             "memory_cap_bytes": effective_memory_cap,
             "overwrite": overwrite,
             "resume": resume,
+            "known_good_hash_feeds": [str(path) for path in known_good_hash_feeds],
+            "hide_known_good": hide_known_good,
+            "known_good_max_hash_bytes": known_good_max_hash_bytes,
             "reused_outputs": sorted(reused_outputs),
             "image_source": str(image_result.source_path) if image_result else None,
             "image_extracted_root": str(image_result.extract_dir) if image_result else None,

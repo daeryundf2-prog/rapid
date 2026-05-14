@@ -258,6 +258,27 @@ class RapidTriageWebStaticTests(unittest.TestCase):
         self.assertIn(".sr-only", styles)
         self.assertIn("body.analysis-active .completed-core-workflow", styles)
 
+    def test_file_triage_controls_are_exposed_in_gui_and_files_tab(self) -> None:
+        app_js = (REPO_ROOT / "rapidtriage" / "web" / "static" / "app.js").read_text(encoding="utf-8")
+        index_html = (REPO_ROOT / "rapidtriage" / "web" / "static" / "index.html").read_text(encoding="utf-8")
+        styles = (REPO_ROOT / "rapidtriage" / "web" / "static" / "styles.css").read_text(encoding="utf-8")
+
+        self.assertIn("knownGoodHashFeedInput", index_html)
+        self.assertIn("hideKnownGoodInput", index_html)
+        self.assertIn("knownGoodMaxHashMbInput", index_html)
+        self.assertIn("Known-good suppression and extension spoofing checks", index_html)
+        self.assertIn("parseKnownGoodHashFeeds", app_js)
+        self.assertIn("knownGoodMaxHashBytes", app_js)
+        self.assertIn("known_good_hash_feeds: parseKnownGoodHashFeeds()", app_js)
+        self.assertIn("renderFileTriageSummary", app_js)
+        self.assertIn("file_signature_profile", app_js)
+        self.assertIn("known_good_suppression_profile", app_js)
+        self.assertIn("signature_mismatch_candidates", app_js)
+        self.assertIn("data-testid=\"file-triage-summary\"", app_js)
+        self.assertIn(".file-triage-summary", styles)
+        self.assertIn(".file-triage-badge", styles)
+        self.assertIn(".file-triage-table tr.risk-row", styles)
+
     def test_command_palette_connects_lazyweb_actions_to_forensic_workbench(self) -> None:
         app_js = (REPO_ROOT / "rapidtriage" / "web" / "static" / "app.js").read_text(encoding="utf-8")
         config_js = (REPO_ROOT / "rapidtriage" / "web" / "static" / "app_workbench_config.js").read_text(encoding="utf-8")

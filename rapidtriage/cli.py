@@ -1906,6 +1906,23 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument("--e01-partition-start-sector", type=int, help="Use this mmls partition start sector for direct E01/Ex01 recovery instead of the automatic recommendation")
     run.add_argument("--overwrite", action="store_true", help="Allow extract stages to overwrite existing output files")
     run.add_argument("--resume", action="store_true", help="Reuse valid existing stage JSON outputs in OUTPUT_DIR and rerun missing or invalid stages")
+    run.add_argument(
+        "--known-good-hash-feed",
+        action="append",
+        default=[],
+        help="Analyst-supplied MD5/SHA1/SHA256 known-good feed for the run file triage stage (TXT/CSV/JSON; repeatable)",
+    )
+    run.add_argument(
+        "--hide-known-good",
+        action="store_true",
+        help="Hide known-good file candidates from the run Files output while preserving a suppression manifest",
+    )
+    run.add_argument(
+        "--known-good-max-hash-bytes",
+        type=int,
+        default=64 * 1024 * 1024,
+        help="Maximum file size to hash for run known-good checks (default: 67108864)",
+    )
     add_rules_argument(run)
 
     web = sub.add_parser(
@@ -4608,6 +4625,9 @@ def main(argv=None) -> int:
                 e01_partition_start_sector=getattr(args, "e01_partition_start_sector", None),
                 overwrite=args.overwrite,
                 resume=args.resume,
+                known_good_hash_feeds=args.known_good_hash_feed,
+                hide_known_good=args.hide_known_good,
+                known_good_max_hash_bytes=args.known_good_max_hash_bytes,
                 rule_set=rule_set,
             )
         except RunModeError as exc:
