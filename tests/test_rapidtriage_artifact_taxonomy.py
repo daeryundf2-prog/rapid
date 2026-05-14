@@ -33,8 +33,13 @@ class RapidTriageArtifactTaxonomyTests(unittest.TestCase):
         self.assertGreaterEqual(summary["artifact_type_literal_count"], 100)
         self.assertGreater(summary["target_count"], 40)
         self.assertGreaterEqual(summary["covered_count"], 40)
-        self.assertIn(targets["evtx-native-binxml"]["status"], {"covered", "partial"})
+        self.assertEqual(summary["missing_count"], 0)
+        self.assertEqual(summary["partial_count"], 0)
+        self.assertTrue(summary["strict_pass"])
+        self.assertEqual(targets["evtx-native-binxml"]["status"], "covered")
         self.assertEqual(targets["webshell-server-logs"]["status"], "covered")
+        self.assertEqual(targets["memory-volatility"]["status"], "covered")
+        self.assertEqual(targets["memory-volatility"]["missing_bindings"]["artifact_types"], [])
         self.assertIn("missing_bindings", targets["browser-cache-session-extension"])
 
     def test_taxonomy_audit_command_writes_json_and_strict_fails_when_incomplete(self) -> None:

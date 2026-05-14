@@ -2,7 +2,7 @@
 
 이 문서는 `artifact collector` 개수만 보면 실제 기능이 적어 보이는 문제를 줄이기 위해 작성한다. 현재 코드는 여러 기능을 하나의 collector 안에 묶어 둔 경우가 많다. 예를 들어 `browser` collector 하나 안에는 인터넷 사용기록, 다운로드, 브라우저 저장소, AI 서비스 방문, AI 대화 후보 복원, citation manifest, 검증 gate가 같이 들어 있다.
 
-목표는 GUI와 QC 문서에서 "22개 collector"가 아니라 "분석자가 실제로 선택하고 확인할 수 있는 기능 단위"로 보여주는 것이다.
+목표는 GUI와 QC 문서에서 "23개 collector"가 아니라 "분석자가 실제로 선택하고 확인할 수 있는 기능 단위"로 보여주는 것이다.
 
 ## 0. 구조 정리 원칙
 
@@ -26,7 +26,7 @@
 
 ## 1. 현재 집계 방식의 문제
 
-현재 `artifact_collectors()` 기준 collector는 22개다.
+현재 `artifact_collectors()` 기준 collector는 23개다.
 
 하지만 사용자 관점 기능은 다음처럼 더 잘게 나뉜다.
 
@@ -38,7 +38,9 @@
 | Viewer task | 사용자가 실제로 하는 일 | URL 확인, 원본 DB row 열기, 리뷰 표시, 보고서 포함 |
 | Validation gate | 법정 제출 전 검증 조건 | trusted-tool diff, known-answer corpus, large-case benchmark |
 
-따라서 GUI에는 collector 22개만 보여주면 안 된다. 최소한 artifact type과 parser stage까지 펼쳐야 한다.
+따라서 GUI에는 collector 23개만 보여주면 안 된다. 최소한 artifact type과 parser stage까지 펼쳐야 한다.
+
+현재 `taxonomy-audit` 기준 사용자 노출 forensic target은 48개이며, 동적 artifact type까지 포함해 48/48개가 GUI/QC 바인딩을 가진다. 이 수치는 "상용급 검증 완료"가 아니라 "사용자가 기능을 찾고 실행/검토할 수 있는 노출 계약이 빠지지 않는다"는 의미다.
 
 ## 2. 최상위 사용자 기능 그룹
 
