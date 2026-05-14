@@ -3809,6 +3809,57 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
             self.assertIn("https://relay.anydesk.com", remote["details"]["url_candidates"])
             self.assertIn("remote-control:anydesk", remote["details"]["risk_flags"])
 
+    def test_windows_system_collector_inventories_windows_recall_pivots(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            recall_root = (
+                root
+                / "Users"
+                / "alice"
+                / "AppData"
+                / "Local"
+                / "CoreAIPlatform.00"
+                / "UKP"
+                / "S-1-5-21-1000"
+            )
+            recall_root.mkdir(parents=True)
+            db_path = recall_root / "ukg.db"
+            with sqlite3.connect(db_path) as connection:
+                connection.execute(
+                    "CREATE TABLE WindowCaptureText (AppName TEXT, WindowTitle TEXT, OCRText TEXT, Timestamp INTEGER)"
+                )
+                connection.execute(
+                    "INSERT INTO WindowCaptureText VALUES ('Edge', 'ChatGPT - Work', 'redacted prompt text', 133589952000000000)"
+                )
+                connection.commit()
+            snapshot = recall_root / "ImageStore" / "frame_0001.jpg"
+            snapshot.parent.mkdir(parents=True)
+            snapshot.write_bytes(b"\xff\xd8\xff\xe0" + b"\x00" * 32 + b"\xff\xd9")
+            output = root / "windows-system.json"
+
+            self.assertEqual(main(["artifacts", str(root), "--kind", "windows-system", "--output", str(output)]), 0)
+            payload = json.loads(output.read_text(encoding="utf-8"))
+            artifacts = payload["artifacts"]
+            recall_db = next(item for item in artifacts if item["artifact_type"] == "windows-recall-database")
+            recall_snapshot = next(
+                item for item in artifacts if item["artifact_type"] == "windows-recall-snapshot-file"
+            )
+
+            self.assertEqual(recall_db["details"]["source_path"], str(db_path.resolve()))
+            self.assertEqual(recall_db["details"]["sqlite_schema_inventory"]["open_status"], "opened")
+            self.assertEqual(recall_db["details"]["sqlite_schema_inventory"]["total_row_count"], 1)
+            self.assertEqual(
+                recall_db["details"]["recall_evidence_profile"]["semantic_table_candidates"][0]["table"],
+                "WindowCaptureText",
+            )
+            self.assertIn("recall-ocr-text-store-candidate", recall_db["details"]["risk_flags"])
+            self.assertIn("recall-app-window-attribution-candidate", recall_db["details"]["risk_flags"])
+            self.assertIn("legal_privacy_warning", recall_db["details"]["recall_evidence_profile"])
+            self.assertFalse(recall_db["details"]["commercial_grade_ready"])
+            self.assertEqual(recall_snapshot["details"]["source_path"], str(snapshot.resolve()))
+            self.assertEqual(recall_snapshot["details"]["image_signature"]["format"], "jpeg")
+            self.assertIn("windows-recall-snapshot-file", recall_snapshot["details"]["risk_flags"])
+
     def test_windows_system_collector_inventories_wmi_repository_files(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             root = Path(tmp_dir)

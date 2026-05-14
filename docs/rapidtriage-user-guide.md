@@ -290,6 +290,7 @@ Other Windows system artifacts:
 - Windows Firewall W3C logs, including blocked connection counts, sample rows, and `system_analyst_review_profile` pivots for Firewall policy store, event log, SRUM, browser, and socket/process correlation.
 - Windows Error Reporting `Report.wer` files, including normalized crashed app/module paths, exception code, report ID, event time, problem signature values, source hashes, validation checks, `system_analyst_review_profile`, and explicit blockers when dump/cab/ReportQueue validation is not available.
 - WMI repository files such as `OBJECTS.DATA` are inventoried with hashes plus bounded string pivots for permanent event consumer/filter names, suspicious commands, paths, URLs, WMI persistence risk flags, and `system_analyst_review_profile` warnings that native WMI binding reconstruction is still required for report-grade persistence claims.
+- Windows Recall/CoreAIPlatform candidates are exposed as `windows-recall-database` and `windows-recall-snapshot-file` rows. SQLite-like Recall DB candidates are opened read-only for bounded table, row-count, and semantic table-role metadata; snapshot files are inventoried by path, hash, signature, and profile attribution. Recall rows always carry legal/privacy warnings and remain triage-grade until real Windows 11 Recall corpus validation, protected-store authority, and snapshot-to-DB linkage are attached.
 - Zone.Identifier sidecar exports, including ZoneId, referrer URL, and host URL.
 
 Use:

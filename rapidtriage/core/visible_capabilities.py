@@ -243,7 +243,7 @@ CAPABILITY_GROUPS: tuple[dict[str, Any], ...] = (
         "capabilities": (
             {"id": "local-llm-ollama-lmstudio-gpt4all", "label": "Ollama/LM Studio/GPT4All", "status": "partial", "terms": ("ollama", "lm studio", "gpt4all", "local llm", "model", "local-llm-artifact")},
             {"id": "ai-desktop-app-db", "label": "ChatGPT/Copilot 데스크톱 앱 DB", "status": "inventory", "terms": ("chatgpt desktop", "copilot", "desktop app", "sqlite")},
-            {"id": "windows-copilot-recall", "label": "Windows Copilot Recall", "status": "inventory", "terms": ("recall", "copilot recall", "screenray", "windows 11 24h2")},
+            {"id": "windows-copilot-recall", "label": "Windows Copilot Recall", "status": "partial", "terms": ("recall", "copilot recall", "screenray", "windows 11 24h2", "ukg.db", "coreaiplatform", "windows-recall-database", "windows-recall-snapshot-file")},
         ),
     },
     {

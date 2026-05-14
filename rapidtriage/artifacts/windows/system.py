@@ -67,6 +67,7 @@ SPOOLER_SCAN_LIMIT = 2 * 1024 * 1024
 REMOTE_CONTROL_SCAN_LIMIT = 2 * 1024 * 1024
 BITS_QMGR_SCAN_LIMIT = 2 * 1024 * 1024
 SETUPAPI_SCAN_LIMIT = 4 * 1024 * 1024
+RECALL_SCAN_LIMIT = 2 * 1024 * 1024
 WIFI_PROFILE_ROOT_MARKER = "programdata/microsoft/wlansvc/profiles/interfaces"
 USB_DEVICE_RE = re.compile(r"(?i)(USBSTOR\\[^\s\]]+|USB\\VID_[0-9A-F]{4}&PID_[0-9A-F]{4}[^\s\]]*)")
 SETUPAPI_TIMESTAMP_RE = re.compile(r"(?P<date>\d{4}[/-]\d{2}[/-]\d{2})\s+(?P<time>\d{2}:\d{2}:\d{2}(?:\.\d+)?)")
@@ -141,6 +142,10 @@ REMOTE_CONTROL_PRODUCTS = {
     "chrome-remote-desktop": ("chrome remote desktop", "chromoting", "remoting_host"),
 }
 BITS_QMGR_NAMES = {"qmgr0.dat", "qmgr1.dat", "qmgr.db", "qmgr.dat"}
+RECALL_DB_NAMES = {"ukg.db", "semantictextstore.sidb", "semanticindex.db", "recall.db"}
+RECALL_DB_SUFFIXES = {".db", ".sqlite", ".sqlite3", ".sidb"}
+RECALL_SNAPSHOT_SUFFIXES = {".jpg", ".jpeg", ".png", ".webp", ".bmp"}
+RECALL_PATH_MARKERS = ("coreaiplatform.00/ukp", "windows/recall", "microsoft/windows/recall")
 
 
 class WindowsSystemArtifactsProvider:
@@ -163,6 +168,7 @@ class WindowsSystemArtifactsProvider:
         yield from collect_setupapi_usb_artifacts(root)
         yield from collect_wifi_profile_artifacts(root)
         yield from collect_third_party_remote_control_artifacts(root)
+        yield from collect_windows_recall_artifacts(root)
         yield from collect_zone_identifier_ads(root)
         yield from collect_explorer_cache_artifacts(root)
         yield from collect_activity_notification_uwp_artifacts(root)
@@ -258,6 +264,243 @@ def collect_third_party_remote_control_artifacts(root: Path) -> Iterable[Artifac
                 ],
             },
         )
+
+
+def collect_windows_recall_artifacts(root: Path) -> Iterable[ArtifactRecord]:
+    emitted = 0
+    for path in sorted(root.rglob("*"), key=lambda item: str(item).lower()):
+        if not path.is_file() or emitted >= 2000:
+            continue
+        role = windows_recall_path_role(path)
+        if not role:
+            continue
+        emitted += 1
+        if role == "database":
+            yield build_windows_recall_database_record(root, path)
+        elif role == "snapshot":
+            yield build_windows_recall_snapshot_record(root, path)
+
+
+def windows_recall_path_role(path: Path) -> str:
+    normalized = str(path).lower().replace("\\", "/")
+    name = path.name.lower()
+    suffix = path.suffix.lower()
+    has_known_marker = any(marker in normalized for marker in RECALL_PATH_MARKERS)
+    has_coreai_store = "coreaiplatform.00" in normalized and (
+        "/ukp/" in normalized or "/imagestore/" in normalized or "/images/" in normalized
+    )
+    has_recall_label = "recall" in normalized or "screenray" in normalized
+
+    if name in RECALL_DB_NAMES or (
+        suffix in RECALL_DB_SUFFIXES and (has_known_marker or has_coreai_store or has_recall_label)
+    ):
+        return "database"
+    if suffix in RECALL_SNAPSHOT_SUFFIXES and (has_coreai_store or has_known_marker or has_recall_label):
+        return "snapshot"
+    return ""
+
+
+def build_windows_recall_database_record(root: Path, path: Path) -> ArtifactRecord:
+    stat_result = path.stat()
+    schema_inventory = sqlite_schema_inventory(path, max_tables=60, max_columns=100)
+    semantic_candidates = recall_table_semantic_candidates(schema_inventory)
+    details = {
+        **source_details(path, "windows-recall-database-candidate"),
+        "source_hashes": {"sha256": compute_sha256(path)},
+        "profile_attribution": windows_user_profile_attribution(path, root=root),
+        "size": stat_result.st_size,
+        "modified_at": isoformat_from_timestamp(stat_result.st_mtime),
+        "timestamp": isoformat_from_timestamp(stat_result.st_mtime),
+        "timestamp_source": "recall_database_modified_at",
+        "sqlite_schema_inventory": schema_inventory,
+        "recall_evidence_profile": {
+            "profile_version": "windows-recall-evidence-profile-v1",
+            "role": "database",
+            "known_store_markers": recall_store_markers(path),
+            "sqlite_open_status": schema_inventory.get("open_status", "not-opened"),
+            "table_count": schema_inventory.get("table_count", 0),
+            "total_row_count": schema_inventory.get("total_row_count", 0),
+            "semantic_table_candidates": semantic_candidates,
+            "values_redacted": True,
+            "protected_store_possible": True,
+            "legal_privacy_warning": (
+                "Windows Recall/Screenray stores may contain screenshots, OCR text, app/window titles, URLs, "
+                "and sensitive on-screen content. Confirm legal authority and Windows protection state before "
+                "viewing or reporting row content."
+            ),
+            "source_viewer_hint": "Open as SQLite/schema inventory first; inspect source DB/snapshots only after scope approval.",
+        },
+        "coverage_status": "windows-recall-sqlite-schema-inventory"
+        if schema_inventory.get("opened_readonly")
+        else "windows-recall-database-file-inventory",
+        "reportability": "triage",
+        "parser_confidence": "medium" if semantic_candidates else "low",
+        "risk_flags": recall_database_risk_flags(schema_inventory, semantic_candidates),
+        "validation_required": True,
+        "validation_guidance": (
+            "Recall DB candidate is inventoried with read-only bounded schema metadata only. Validate schema version, "
+            "Windows account attribution, snapshot linkage, protected-store state, and source hashes against a real "
+            "Windows 11 Recall corpus before using content as evidence."
+        ),
+        "commercial_grade_ready": False,
+        "commercial_grade_blockers": [
+            "real-windows-11-recall-corpus-required",
+            "recall-schema-version-diff-required",
+            "protected-store-unlock-and-authority-workflow-required",
+            "snapshot-ocr-app-window-linkage-required",
+            "trusted-parser-or-manual-sqlite-diff-required",
+        ],
+    }
+    return ArtifactRecord(
+        provider=WindowsSystemArtifactsProvider.name,
+        artifact_type="windows-recall-database",
+        path=str(path.resolve()),
+        supported=True,
+        details=details,
+    )
+
+
+def build_windows_recall_snapshot_record(root: Path, path: Path) -> ArtifactRecord:
+    stat_result = path.stat()
+    blob = read_prefix(path, RECALL_SCAN_LIMIT)
+    strings = unique_strings([*extract_ascii_strings(blob), *extract_utf16_strings(blob)])
+    details = {
+        **source_details(path, "windows-recall-snapshot-candidate"),
+        "source_hashes": {"sha256": compute_sha256(path)},
+        "profile_attribution": windows_user_profile_attribution(path, root=root),
+        "size": stat_result.st_size,
+        "modified_at": isoformat_from_timestamp(stat_result.st_mtime),
+        "timestamp": isoformat_from_timestamp(stat_result.st_mtime),
+        "timestamp_source": "recall_snapshot_modified_at",
+        "scan_bytes": len(blob),
+        "image_signature": recall_snapshot_signature(blob, path),
+        "recall_evidence_profile": {
+            "profile_version": "windows-recall-evidence-profile-v1",
+            "role": "snapshot",
+            "known_store_markers": recall_store_markers(path),
+            "values_redacted": True,
+            "protected_store_possible": True,
+            "legal_privacy_warning": (
+                "Recall snapshot candidates can show complete screen contents. Preview only after scope approval, "
+                "and cite source hash plus associated DB row when available."
+            ),
+            "source_viewer_hint": "Use image preview as a sensitive evidence view and correlate with Recall DB row IDs/timestamps.",
+        },
+        "string_samples": strings[:20],
+        "coverage_status": "windows-recall-snapshot-file-inventory",
+        "reportability": "triage",
+        "parser_confidence": "medium",
+        "risk_flags": ["windows-recall-artifact", "windows-recall-snapshot-file", "sensitive-screen-content"],
+        "validation_required": True,
+        "validation_guidance": (
+            "Snapshot candidate is inventoried by path/signature/hash only. Validate DB linkage, timestamp semantics, "
+            "account attribution, and acquisition authority before preview/report use."
+        ),
+        "commercial_grade_ready": False,
+        "commercial_grade_blockers": [
+            "snapshot-to-db-linkage-required",
+            "real-recall-snapshot-corpus-required",
+            "privacy-scope-approval-required",
+        ],
+    }
+    return ArtifactRecord(
+        provider=WindowsSystemArtifactsProvider.name,
+        artifact_type="windows-recall-snapshot-file",
+        path=str(path.resolve()),
+        supported=True,
+        details=details,
+    )
+
+
+def recall_store_markers(path: Path) -> list[str]:
+    normalized = str(path).lower().replace("\\", "/")
+    markers: list[str] = []
+    if "coreaiplatform.00/ukp" in normalized:
+        markers.append("coreaiplatform.00/ukp")
+    if "imagestore" in normalized:
+        markers.append("imagestore")
+    if "screenray" in normalized:
+        markers.append("screenray")
+    if "recall" in normalized:
+        markers.append("recall")
+    if path.name.lower() in RECALL_DB_NAMES:
+        markers.append(f"known-db-name:{path.name.lower()}")
+    return unique_preserve_order(markers)
+
+
+def recall_table_semantic_candidates(schema_inventory: Mapping[str, object]) -> list[dict[str, object]]:
+    tables = schema_inventory.get("tables") if isinstance(schema_inventory.get("tables"), list) else []
+    candidates: list[dict[str, object]] = []
+    for table in tables:
+        if not isinstance(table, Mapping):
+            continue
+        name = str(table.get("name") or "")
+        columns = [str(column) for column in table.get("columns") or []]
+        lowered = " ".join([name, *columns]).lower()
+        roles = []
+        if any(token in lowered for token in ("ocr", "text", "transcript", "semantic")):
+            roles.append("ocr-text-or-semantic-store")
+        if any(token in lowered for token in ("window", "title", "app", "process", "package")):
+            roles.append("app-window-attribution")
+        if any(token in lowered for token in ("image", "snapshot", "screenshot", "frame")):
+            roles.append("snapshot-linkage")
+        if any(token in lowered for token in ("time", "date", "created", "modified", "timestamp")):
+            roles.append("timeline")
+        if any(token in lowered for token in ("url", "uri", "domain", "web")):
+            roles.append("web-context")
+        if not roles:
+            continue
+        candidates.append(
+            {
+                "table": name,
+                "row_count": table.get("row_count"),
+                "roles": roles,
+                "columns": columns[:20],
+            }
+        )
+    return candidates[:30]
+
+
+def recall_database_risk_flags(
+    schema_inventory: Mapping[str, object],
+    semantic_candidates: Sequence[Mapping[str, object]],
+) -> list[str]:
+    flags = ["windows-recall-artifact", "windows-recall-database"]
+    if not schema_inventory.get("opened_readonly"):
+        flags.append("recall-db-not-opened")
+    role_text = " ".join(
+        role
+        for candidate in semantic_candidates
+        for role in candidate.get("roles", [])
+        if isinstance(role, str)
+    )
+    if "ocr-text-or-semantic-store" in role_text:
+        flags.append("recall-ocr-text-store-candidate")
+    if "app-window-attribution" in role_text:
+        flags.append("recall-app-window-attribution-candidate")
+    if "snapshot-linkage" in role_text:
+        flags.append("recall-snapshot-linkage-candidate")
+    if "web-context" in role_text:
+        flags.append("recall-web-context-candidate")
+    return unique_preserve_order(flags)
+
+
+def recall_snapshot_signature(blob: bytes, path: Path) -> dict[str, object]:
+    signature = {
+        "extension": path.suffix.lower().lstrip("."),
+        "header_hex": blob[:16].hex(),
+        "recognized": False,
+        "format": "unknown",
+    }
+    if blob.startswith(b"\xff\xd8\xff"):
+        signature.update({"recognized": True, "format": "jpeg"})
+    elif blob.startswith(b"\x89PNG\r\n\x1a\n"):
+        signature.update({"recognized": True, "format": "png"})
+    elif blob.startswith(b"RIFF") and b"WEBP" in blob[:16]:
+        signature.update({"recognized": True, "format": "webp"})
+    elif blob.startswith(b"BM"):
+        signature.update({"recognized": True, "format": "bmp"})
+    return signature
 
 
 def remote_control_product_for_path(path: Path) -> str:

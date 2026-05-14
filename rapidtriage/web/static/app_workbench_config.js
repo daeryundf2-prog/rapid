@@ -989,9 +989,10 @@ const VISIBLE_FORENSIC_CAPABILITY_GROUPS = [
       {
         id: "windows-copilot-recall",
         label: "Windows Copilot Recall",
-        status: "inventory",
-        terms: ["recall", "copilot recall", "screenray", "windows 11 24h2"],
-        nextAction: "Recall snapshot DB, OCR text, app/window attribution과 legal warning UX 조사",
+        status: "partial",
+        artifactTypes: ["windows-recall-database", "windows-recall-snapshot-file"],
+        terms: ["recall", "copilot recall", "screenray", "windows 11 24h2", "ukg.db", "coreaiplatform"],
+        nextAction: "Recall DB/snapshot inventory는 가능, protected store 해제·schema corpus·snapshot linkage 검증 필요",
       },
     ],
   },
