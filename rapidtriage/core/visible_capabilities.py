@@ -317,7 +317,37 @@ CAPABILITY_GROUPS: tuple[dict[str, Any], ...] = (
         "catalog_id": "documents-db",
         "label": "문서 / 이메일 / DB",
         "capabilities": (
-            {"id": "document-content-search", "label": "PDF/Office/text 본문 검색", "status": "usable", "terms": ("pdf", "office", "docx", "xlsx", "pptx", "txt")},
+            {
+                "id": "document-content-search",
+                "label": "PDF/Office/text 본문 검색",
+                "status": "usable",
+                "terms": (
+                    "pdf",
+                    "office",
+                    "docx",
+                    "xlsx",
+                    "pptx",
+                    "txt",
+                    "docs-index",
+                    "docs-index-search",
+                    "processed-text-inverted-index",
+                    "source-viewer-hit-context-validation-required",
+                ),
+            },
+            {
+                "id": "docs-index-sidecar-search",
+                "label": "문서 인덱스 sidecar 재검색",
+                "status": "usable",
+                "artifact_types": ("docs-index", "docs-index-search", "document-text"),
+                "terms": (
+                    "docs-index",
+                    "docs-index-search",
+                    "processed-text-inverted-index",
+                    "document index",
+                    "docs-index-sidecar-search",
+                    "source-viewer-hit-context-validation-required",
+                ),
+            },
             {"id": "sqlite-table-viewer", "label": "SQLite table viewer", "status": "usable", "terms": ("sqlite", "database", "table", "row")},
             {"id": "email-eml-mbox", "label": "EML/MBOX 메일", "status": "partial", "terms": ("email", "eml", "mbox", "attachment")},
             {
