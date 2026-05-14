@@ -55,6 +55,7 @@ from ..core.search import SearchError, run_unified_search
 from ..core.source_paths import candidate_source_paths, source_path_resolution_diagnostics
 from ..core.submission import compute_hashes, build_submission_manifest
 from ..core.ocr_queue import OcrQueueError, build_ocr_queue
+from ..core.sqlite_wal import SqliteWalPreviewError, build_sqlite_wal_preview
 from ..core.visible_capabilities import build_visible_capability_response
 
 
@@ -888,6 +889,30 @@ def create_app(job_store: RunJobStore | None = None, auth_token: str | None = No
             order_by=order_by,
             descending=descending,
         )
+
+    @api.get("/api/runs/{run_id}/source-sqlite-wal-preview")
+    def source_sqlite_wal_preview(
+        run_id: str,
+        path: str = Query(..., min_length=1),
+        max_frames: int = Query(20, ge=1, le=100),
+    ) -> Dict[str, object]:
+        source_path = resolve_allowed_source_file(store, run_id, path)
+        if not is_sqlite_candidate(source_path):
+            raise HTTPException(status_code=400, detail="source file is not a supported SQLite database")
+        try:
+            payload = build_sqlite_wal_preview(database_path=source_path, output_dir=None, max_frames=max_frames)
+        except (SqliteWalPreviewError, OSError, sqlite3.DatabaseError) as exc:
+            raise HTTPException(status_code=409, detail=str(exc))
+        payload["api_profile"] = {
+            "profile_version": "source-sqlite-wal-preview-api-v1",
+            "gui_binding": "sqlite-sidecar-preview",
+            "source_path": str(source_path),
+            "max_frames": max_frames,
+            "reportability_warning": (
+                "WAL preview rows are recovery leads; validate with a trusted SQLite recovery tool before reporting."
+            ),
+        }
+        return payload
 
     @api.get("/api/runs/{run_id}/source-email-attachment")
     def source_email_attachment(

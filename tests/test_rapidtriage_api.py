@@ -373,6 +373,56 @@ class RapidTriageApiTests(unittest.TestCase):
         controls = payload["sqlite"]["commercial_uplift_evidence"]["reportability_decision"]["control_snapshot"]
         self.assertTrue(controls["sqlite_sidecar_review_required"])
 
+    def test_source_sqlite_wal_preview_endpoint_links_sidecar_review_to_gui(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            db_path = root / "chat.db"
+            connection = sqlite3.connect(db_path)
+            try:
+                connection.execute("CREATE TABLE messages(id INTEGER PRIMARY KEY, body TEXT)")
+                connection.execute("INSERT INTO messages(body) VALUES ('wal endpoint')")
+                connection.commit()
+            finally:
+                connection.close()
+            db_path.with_name(db_path.name + "-wal").write_bytes(
+                struct.pack(">IIIIIIII", 0x377F0683, 3007000, 1024, 7, 1, 2, 3, 4)
+                + struct.pack(">IIIIII", 1, 1, 1, 2, 3, 4)
+                + (b"\0" * 1024)
+            )
+            run_dir = root / "run"
+            run_dir.mkdir()
+            summary_path = run_dir / "rapidtriage-run-summary.json"
+            summary_path.write_text(
+                json.dumps(
+                    {
+                        "profile_version": "rapidtriage-run-summary-v1",
+                        "mode": "fraud",
+                        "root": str(root),
+                        "output_dir": str(run_dir),
+                        "outputs": {"summary": str(summary_path)},
+                    }
+                ),
+                encoding="utf-8",
+            )
+            store = RunJobStore()
+            job = store.import_completed_run(run_dir)
+            client = TestClient(create_app(store))
+
+            response = client.get(
+                f"/api/runs/{job.run_id}/source-sqlite-wal-preview",
+                params={"path": str(db_path), "max_frames": 5},
+            )
+
+        self.assertEqual(response.status_code, 200, response.text)
+        payload = response.json()
+        self.assertEqual(payload["command"], "sqlite-wal-preview")
+        self.assertEqual(payload["api_profile"]["profile_version"], "source-sqlite-wal-preview-api-v1")
+        self.assertEqual(payload["api_profile"]["gui_binding"], "sqlite-sidecar-preview")
+        self.assertTrue(payload["recovery_scope"]["wal_detected"])
+        self.assertEqual(payload["recovery_scope"]["frame_preview_count"], 1)
+        self.assertEqual(payload["wal"]["frames"][0]["page_number"], 1)
+        self.assertIn("trusted SQLite recovery tool", payload["api_profile"]["reportability_warning"])
+
     def test_sqlite_wal_sidecar_header_profile_counts_frames(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
             wal_path = Path(temp) / "chat.db-wal"

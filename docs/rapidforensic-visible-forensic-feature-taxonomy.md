@@ -1263,14 +1263,15 @@ SQLite 기반 아티팩트는 브라우저 History, 카카오톡, Sticky Notes, 
 | --- | --- | --- | --- |
 | SQLite sidecar 상태 감지 | `sqlite.sidecar_state_profile` | DB 옆의 `-wal`, `-shm`, `-journal` 존재, 크기, mtime, hash policy, 검토 필요 여부를 source viewer payload에 포함한다. | sidecar 전체 해시/복사본 보존, checkpoint 전후 DB diff, deleted row recovery |
 | WAL header triage | `sidecars.wal.header` | WAL magic/version/page size/checkpoint sequence/salt/checksum/estimated frame count를 bounded header read로 계산한다. | frame checksum validation, page-level row mapping, trusted SQLite/WAL parser diff |
-| GUI review 경고 | `renderSqliteSidecarState`, `sqlite-sidecar-card` | SQLite preview 상단에 WAL/SHM/journal 감지 여부와 `rapidtriage sqlite-wal-preview` 후속 명령을 보여준다. | browser E2E, WAL preview output을 같은 viewer에서 바로 여는 workflow |
+| GUI review 경고 | `renderSqliteSidecarState`, `sqlite-sidecar-card`, `/source-sqlite-wal-preview` | SQLite preview 상단에 WAL/SHM/journal 감지 여부와 `rapidtriage sqlite-wal-preview` 후속 명령을 보여주고, GUI 버튼으로 bounded WAL preview를 같은 viewer 안에 렌더링한다. | browser E2E, trusted SQLite recovery tool diff, deleted-row recovery |
 | 보고서 제한 근거 | `sqlite_preview_manifest.database.sidecar_state_profile_hash` | preview manifest에 sidecar profile hash를 넣어 "sidecar 검토 전 preview는 완전하지 않다"는 제한을 citation에 남길 수 있게 했다. | 법정 제출용 sidecar acquisition manifest, 외부 도구 diff package |
 
 검증 포인트:
 
 1. `tests/test_rapidtriage_api.py::test_source_preview_sqlite_discloses_sidecar_review_state`가 SQLite source preview에서 SHM sidecar를 감지하고 `requires_wal_review`, manifest hash, GUI review feature가 노출되는지 검증한다.
 2. `tests/test_rapidtriage_api.py::test_sqlite_wal_sidecar_header_profile_counts_frames`가 WAL header magic/page size/estimated frame count parser를 검증한다.
-3. `tests/test_rapidtriage_web_static.py::test_workbench_review_queue_and_schema_visibility_contracts`가 `renderSqliteSidecarState`, `sqlite-sidecar-card`, `sqlite-wal-preview`, `estimated_frame_count`가 GUI 정적 계약에 포함되는지 확인한다.
+3. `tests/test_rapidtriage_web_static.py::test_workbench_review_queue_and_schema_visibility_contracts`가 `renderSqliteSidecarState`, `sqlite-sidecar-card`, `sqlite-wal-preview`, `/source-sqlite-wal-preview`, `estimated_frame_count`가 GUI 정적 계약에 포함되는지 확인한다.
+4. `tests/test_rapidtriage_api.py::test_source_sqlite_wal_preview_endpoint_links_sidecar_review_to_gui`가 source viewer에서 같은 DB의 WAL preview API를 열고 frame/page/hash 후보를 반환하는지 확인한다.
 
 중요한 제한:
 

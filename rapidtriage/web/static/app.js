@@ -3980,8 +3980,10 @@ function renderSqliteSidecarState(profile) {
       <div class="sqlite-sidecar-action">
         <strong>Next step</strong>
         <code>${escapeHtml(profile.recommended_cli || "rapidtriage sqlite-wal-preview <database> --json")}</code>
+        ${profile.source_path ? `<button class="mini-inline-button" type="button" data-sqlite-wal-preview-path="${escapeHtml(profile.source_path)}">Preview WAL in viewer</button>` : ""}
         <small>Detected sidecars: ${escapeHtml(detected.length ? detected.join(", ") : "none")}</small>
       </div>
+      <div class="sqlite-wal-preview-inline" data-testid="sqlite-wal-preview-inline" aria-live="polite"></div>
     </article>
   `;
 }
@@ -4355,6 +4357,13 @@ function bindViewerButtons() {
       await loadSourceMetadata(button.dataset.sourceHashPath, button);
     });
   }
+  for (const button of detailPanel.querySelectorAll("[data-sqlite-wal-preview-path]")) {
+    if (button.dataset.sqliteWalBound) continue;
+    button.dataset.sqliteWalBound = "1";
+    button.addEventListener("click", async () => {
+      await loadSqliteWalPreview(button);
+    });
+  }
   const fileSearchForm = detailPanel.querySelector("#fileSearchForm");
   if (fileSearchForm) fileSearchForm.addEventListener("submit", searchCurrentFile);
   const reviewForm = detailPanel.querySelector("#viewerReviewForm");
@@ -4392,6 +4401,69 @@ async function loadSourceMetadata(path, button) {
     button.disabled = false;
     button.textContent = "Compute hashes";
   }
+}
+
+async function loadSqliteWalPreview(button) {
+  const card = button.closest("[data-testid='sqlite-sidecar-state']");
+  const output = card?.querySelector("[data-testid='sqlite-wal-preview-inline']");
+  if (!output || !button.dataset.sqliteWalPreviewPath) return;
+  button.disabled = true;
+  button.textContent = "Previewing...";
+  output.innerHTML = '<p class="help-text">Reading WAL/SHM/journal sidecar metadata in a bounded preview...</p>';
+  try {
+    const params = new URLSearchParams();
+    params.set("path", button.dataset.sqliteWalPreviewPath);
+    params.set("max_frames", "20");
+    const payload = await api(`/api/runs/${selectedRunId}/source-sqlite-wal-preview?${params.toString()}`);
+    output.innerHTML = renderSqliteWalPreviewInline(payload);
+    bindCopyButtons();
+  } catch (error) {
+    output.innerHTML = `<p class="empty-state">${escapeHtml(error.message)}</p>`;
+  } finally {
+    button.disabled = false;
+    button.textContent = "Preview WAL in viewer";
+  }
+}
+
+function renderSqliteWalPreviewInline(payload) {
+  const recovery = payload.recovery_scope || {};
+  const wal = payload.wal || {};
+  const header = wal.header || {};
+  const frames = Array.isArray(wal.frames) ? wal.frames : [];
+  const warning = payload.api_profile?.reportability_warning || "Validate WAL recovery candidates before reporting.";
+  return `
+    <section class="sqlite-wal-preview-panel" data-testid="sqlite-wal-preview-panel">
+      <div class="mini-stat-row">
+        <span>WAL ${wal.exists ? "detected" : "missing"}</span>
+        <span>${formatNumber(recovery.frame_preview_count || frames.length)} frame(s)</span>
+        <span>${formatNumber(recovery.schema_mapped_record_count || 0)} schema-mapped</span>
+        <span>${formatNumber(recovery.deleted_record_candidate_count || 0)} deleted candidate(s)</span>
+      </div>
+      <p class="help-text">${escapeHtml(warning)}</p>
+      ${wal.exists ? `
+        <dl class="compact-dl">
+          <div><dt>Header</dt><dd>${escapeHtml(wal.status || "unknown")}</dd></div>
+          <div><dt>Page size</dt><dd>${escapeHtml(header.page_size || "n/a")}</dd></div>
+          <div><dt>Manifest</dt><dd><code>${escapeHtml(payload.manifest_sha256 || "n/a")}</code></dd></div>
+        </dl>
+      ` : ""}
+      ${frames.length ? `
+        <table class="data-table compact">
+          <thead><tr><th>#</th><th>Page</th><th>Commit</th><th>Hash</th></tr></thead>
+          <tbody>
+            ${frames.slice(0, 10).map((frame) => `
+              <tr>
+                <td>${escapeHtml(frame.frame_index ?? "")}</td>
+                <td>${escapeHtml(frame.page_number ?? "")}</td>
+                <td>${escapeHtml(frame.commit_db_size_pages ?? "")}</td>
+                <td><code>${escapeHtml(frame.page_sha256 || "")}</code></td>
+              </tr>
+            `).join("")}
+          </tbody>
+        </table>
+      ` : ""}
+    </section>
+  `;
 }
 
 function renderSourceMetadata(payload) {
