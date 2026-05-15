@@ -1183,23 +1183,173 @@ def normalize_cloud_mail(row: Mapping[str, object], *, source_path: str) -> dict
     }
 
 
+def m365_file_permission_review_profile(row: Mapping[str, object]) -> dict[str, object]:
+    permissions = sequence_value(
+        row,
+        (
+            "permissions",
+            "permission",
+            "sharedWith",
+            "grantedToIdentities",
+            "grantedToIdentitiesV2",
+            "sharingPermissions",
+        ),
+    )
+    roles: list[str] = []
+    principal_hashes: list[str] = []
+    sharing_link_hashes: list[str] = []
+    for item in permissions:
+        if not isinstance(item, Mapping):
+            principal = optional_text(item)
+            if principal:
+                principal_hashes.append(sha256_text(principal))
+            continue
+        role_value = first_value(item, ("roles", "role", "permission", "access"))
+        role_items = role_value if isinstance(role_value, list) else [role_value]
+        roles.extend(optional_text(role) for role in role_items if optional_text(role))
+        link_value = first_value(item, ("link", "sharingLink", "webUrl", "url", "linkUrl"))
+        if isinstance(link_value, Mapping):
+            link_value = first_value(link_value, ("webUrl", "url", "scope", "type"))
+        if optional_text(link_value):
+            sharing_link_hashes.append(sha256_text(optional_text(link_value)))
+        granted_value = first_value(
+            item,
+            (
+                "grantedTo",
+                "grantedToV2",
+                "grantedToIdentities",
+                "grantedToIdentitiesV2",
+                "user",
+                "group",
+                "siteUser",
+                "invitation",
+            ),
+        )
+        granted_items = granted_value if isinstance(granted_value, list) else [granted_value]
+        for granted_item in granted_items:
+            principal = normalize_cloud_actor(granted_item)
+            if principal:
+                principal_hashes.append(sha256_text(principal))
+    return {
+        "profile_version": "m365-file-permission-review-profile-v1",
+        "permission_count": len(permissions),
+        "permission_roles": sorted(set(roles))[:20],
+        "permission_principal_sha256": sorted(set(principal_hashes))[:50],
+        "sharing_link_count": len(sharing_link_hashes),
+        "sharing_link_sha256": sorted(set(sharing_link_hashes))[:20],
+        "permission_source_fields": [
+            key
+            for key in (
+                "permissions",
+                "permission",
+                "sharedWith",
+                "grantedToIdentities",
+                "grantedToIdentitiesV2",
+                "sharingPermissions",
+            )
+            if first_value(row, (key,))
+        ],
+        "metadata_collapsed_by_default": True,
+        "commercial_blockers": [
+            "sharepoint-permission-graph-provider-diff-required",
+            "sharing-link-expiration-and-scope-validation-required",
+        ],
+    }
+
+
+def m365_file_state_review_profile(row: Mapping[str, object]) -> dict[str, object]:
+    versions = sequence_value(row, ("versions", "versionHistory", "driveItemVersions"))
+    deleted_value = first_value(row, ("deletedDateTime", "deletedAt", "deleted", "recycleBinDeletedDateTime"))
+    version_id = optional_text(first_value(row, ("versionId", "eTag", "cTag", "listItemUniqueId")))
+    if not version_id:
+        version_id = optional_text(nested_value(row, ("sharepointIds", "listItemUniqueId")))
+    deleted_status = "deleted-hint-present" if deleted_value else "not-observed"
+    deleted_at = ""
+    if isinstance(deleted_value, Mapping):
+        deleted_at = normalize_timestamp(first_value(deleted_value, ("dateTime", "deletedDateTime", "time")))
+    elif deleted_value not in (None, "", False):
+        deleted_at = normalize_timestamp(deleted_value)
+    return {
+        "profile_version": "m365-file-state-review-profile-v1",
+        "version_id": version_id,
+        "version_count": len(versions),
+        "deleted_status": deleted_status,
+        "deleted_at": deleted_at,
+        "retention_label": optional_text(first_value(row, ("retentionLabel", "complianceTag", "sensitivityLabel"))),
+        "state_source_fields": [
+            key
+            for key in (
+                "versions",
+                "versionHistory",
+                "driveItemVersions",
+                "versionId",
+                "eTag",
+                "cTag",
+                "deletedDateTime",
+                "deleted",
+                "retentionLabel",
+                "complianceTag",
+            )
+            if first_value(row, (key,))
+        ],
+        "metadata_collapsed_by_default": True,
+        "commercial_blockers": [
+            "sharepoint-version-history-provider-diff-required",
+            "deleted-recycle-bin-retention-state-validation-required",
+        ],
+    }
+
+
 def normalize_cloud_file(row: Mapping[str, object], *, source_path: str) -> dict[str, object]:
     name = optional_text(first_value(row, ("name", "fileName", "filename", "title", "displayName")))
     url = optional_text(first_value(row, ("url", "webUrl", "downloadUrl", "alternateLink")))
+    service = service_from_path(source_path, default="cloud-files")
+    is_m365_file = service in {"microsoft-onedrive", "sharepoint", "microsoft-365"} or any(
+        token in source_path.lower() for token in ("onedrive", "sharepoint", "microsoft 365", "m365")
+    )
+    permission_profile = m365_file_permission_review_profile(row)
+    state_profile = m365_file_state_review_profile(row)
+    validation_checks = cloud_validation_checks(row, required=("name", "fileName", "id", "webUrl"))
+    validation_checks.update(
+        {
+            "m365_file_permission_review_profile_emitted": is_m365_file,
+            "m365_permission_pivot_present": is_m365_file and bool(permission_profile.get("permission_count")),
+            "m365_file_state_review_profile_emitted": is_m365_file,
+            "m365_version_or_deleted_state_pivot_present": is_m365_file
+            and bool(state_profile.get("version_id") or state_profile.get("version_count") or state_profile.get("deleted_at")),
+        }
+    )
+    m365_file_fields = (
+        {
+            "permission_count": int(permission_profile.get("permission_count") or 0),
+            "permission_roles": list(permission_profile.get("permission_roles") or []),
+            "sharing_link_count": int(permission_profile.get("sharing_link_count") or 0),
+            "version_id": optional_text(state_profile.get("version_id")),
+            "version_count": int(state_profile.get("version_count") or 0),
+            "deleted_status": optional_text(state_profile.get("deleted_status")),
+            "deleted_at": optional_text(state_profile.get("deleted_at")),
+            "retention_label": optional_text(state_profile.get("retention_label")),
+            "m365_file_permission_review_profile": permission_profile,
+            "m365_file_state_review_profile": state_profile,
+        }
+        if is_m365_file
+        else {}
+    )
     return {
-        "service": service_from_path(source_path, default="cloud-files"),
+        "service": service,
         "event_type": "file",
         "timestamp": normalize_timestamp(first_value(row, ("modifiedTime", "createdTime", "lastModifiedDateTime", "dateCreated", "time"))),
         "file_id": optional_text(first_value(row, ("id", "fileId", "docId"))),
         "file_name": name,
         "mime_type": optional_text(first_value(row, ("mimeType", "mime", "contentType"))),
         "size": optional_text(first_value(row, ("size", "fileSize", "quotaBytesUsed"))),
-        "owner": optional_text(first_value(row, ("owner", "owners", "createdBy", "lastModifiedBy"))),
+        "owner": normalize_cloud_actor(first_value(row, ("owner", "owners", "createdBy", "lastModifiedBy"))),
         "url": url,
         "url_sha256": sha256_text(url) if url else "",
         "risk_flags": cloud_file_risk_flags(name, url),
-        "validation_checks": cloud_validation_checks(row, required=("name", "fileName", "id", "webUrl")),
+        "validation_checks": validation_checks,
         "commercial_grade_blockers": cloud_blockers("cloud-file"),
+        **m365_file_fields,
         "raw": dict(row),
     }
 
@@ -2177,6 +2327,10 @@ def build_cloud_export_import_manifest(
             "file_id",
             "subject",
             "file_name",
+            "permission_count",
+            "sharing_link_count",
+            "version_id",
+            "deleted_status",
             "chat_id",
             "attachment_count",
             "reaction_count",
@@ -2588,6 +2742,10 @@ def build_m365_export_parser_manifest(
             "file_id",
             "file_name",
             "owner",
+            "permission_count",
+            "sharing_link_count",
+            "version_id",
+            "deleted_status",
             "operation",
             "actor",
             "ip_address",
@@ -3325,7 +3483,17 @@ def m365_export_review_profile(
             "reaction_count",
             "message_text_sha256",
         ],
-        "onedrive-sharepoint": ["file_id", "file_name", "owner", "url_sha256", "size"],
+        "onedrive-sharepoint": [
+            "file_id",
+            "file_name",
+            "owner",
+            "url_sha256",
+            "size",
+            "permission_count",
+            "sharing_link_count",
+            "version_id",
+            "deleted_status",
+        ],
         "audit": ["operation", "actor", "ip_address", "user_agent", "object_id"],
         "tenant-account": ["account_email", "account_name", "timestamp"],
     }
@@ -3526,6 +3694,7 @@ def cloud_analyst_review_profile(
                 optional_text(details.get("reply_to_message_id")),
                 optional_text(details.get("file_id")),
                 optional_text(details.get("file_name")),
+                optional_text(details.get("version_id")),
                 optional_text(details.get("chat_id")),
                 optional_text(details.get("operation")),
                 optional_text(details.get("account_email")),
@@ -3546,6 +3715,10 @@ def cloud_analyst_review_profile(
             "attachment_count": optional_text(details.get("attachment_count")),
             "reaction_count": optional_text(details.get("reaction_count")),
             "file_name": optional_text(details.get("file_name")),
+            "permission_count": optional_text(details.get("permission_count")),
+            "sharing_link_count": optional_text(details.get("sharing_link_count")),
+            "version_id": optional_text(details.get("version_id")),
+            "deleted_status": optional_text(details.get("deleted_status")),
             "operation": optional_text(details.get("operation")),
             "manifest_sha256": optional_text(manifest.get("manifest_sha256")),
             "viewer": optional_text(viewer_locator.get("viewer")),

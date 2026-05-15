@@ -605,6 +605,25 @@ class RapidTriageCloudExportTests(unittest.TestCase):
             )
             self.assertEqual(cloud_file["details"]["service"], "microsoft-onedrive")
             self.assertEqual(cloud_file["details"]["file_name"], "case.zip")
+            self.assertEqual(cloud_file["details"]["owner"], "alice@example.com")
+            self.assertEqual(cloud_file["details"]["permission_count"], 2)
+            self.assertEqual(cloud_file["details"]["permission_roles"], ["read", "write"])
+            self.assertEqual(cloud_file["details"]["sharing_link_count"], 1)
+            self.assertEqual(cloud_file["details"]["version_id"], "v3")
+            self.assertEqual(cloud_file["details"]["version_count"], 2)
+            self.assertEqual(cloud_file["details"]["deleted_status"], "deleted-hint-present")
+            self.assertEqual(
+                cloud_file["details"]["m365_file_permission_review_profile"]["profile_version"],
+                "m365-file-permission-review-profile-v1",
+            )
+            self.assertEqual(
+                cloud_file["details"]["m365_file_state_review_profile"]["profile_version"],
+                "m365-file-state-review-profile-v1",
+            )
+            self.assertTrue(cloud_file["details"]["validation_checks"]["m365_file_permission_review_profile_emitted"])
+            self.assertTrue(cloud_file["details"]["validation_checks"]["m365_permission_pivot_present"])
+            self.assertTrue(cloud_file["details"]["validation_checks"]["m365_file_state_review_profile_emitted"])
+            self.assertTrue(cloud_file["details"]["validation_checks"]["m365_version_or_deleted_state_pivot_present"])
             self.assertIn("reviewable-document-or-archive", cloud_file["details"]["risk_flags"])
             self.assertIn("#39", cloud_file["details"]["commercial_gap_ids"])
             self.assertEqual(cloud_file["details"]["forensic_review"]["gap_id"], "#39")
@@ -626,6 +645,8 @@ class RapidTriageCloudExportTests(unittest.TestCase):
             self.assertEqual(m365_file_profile["workload_family"], "onedrive-sharepoint")
             self.assertTrue(m365_file_profile["primary_pivot_present"])
             self.assertIn("file_id", m365_file_profile["present_primary_pivots"])
+            self.assertIn("permission_count", m365_file_profile["present_primary_pivots"])
+            self.assertIn("version_id", m365_file_profile["present_primary_pivots"])
             self.assertEqual(m365_file_profile["sharepoint_permission_graph_status"], "not-built")
             self.assertTrue(cloud_file["details"]["validation_checks"]["m365_export_review_profile_emitted"])
             self.assertTrue(cloud_file["details"]["validation_checks"]["m365_row_pivot_present"])
@@ -650,6 +671,10 @@ class RapidTriageCloudExportTests(unittest.TestCase):
             self.assertEqual(m365_manifest["row_citation"]["source_viewer_locator"]["viewer"], "m365-export-workload-row")
             self.assertEqual(len(m365_manifest["row_citation"]["row_hash"]), 64)
             self.assertIn("file_id", m365_manifest["row_citation"]["row_pivots"])
+            self.assertIn("permission_count", m365_manifest["row_citation"]["row_pivots"])
+            self.assertIn("sharing_link_count", m365_manifest["row_citation"]["row_pivots"])
+            self.assertIn("version_id", m365_manifest["row_citation"]["row_pivots"])
+            self.assertIn("deleted_status", m365_manifest["row_citation"]["row_pivots"])
             self.assertTrue(m365_manifest["workload_review"]["primary_pivot_present"])
             self.assertEqual(m365_manifest["workload_review"]["sharepoint_permission_graph_status"], "not-built")
             self.assertEqual(m365_manifest["workload_review"]["retention_hold_policy_status"], "not-validated")
@@ -689,6 +714,10 @@ class RapidTriageCloudExportTests(unittest.TestCase):
             )
             self.assertTrue(file_uplift["large_data_controls"]["m365_export_source_row_citation_present"])
             self.assertTrue(file_uplift["large_data_controls"]["m365_export_viewer_controls_present"])
+            self.assertIn(
+                "version_id=v3",
+                cloud_file["details"]["cloud_analyst_review_profile"]["row_pivots"],
+            )
             self.assertEqual(
                 file_uplift["reportability_decision"]["decision"],
                 "do-not-report-m365-export-as-tenant-or-permission-complete",
@@ -954,7 +983,25 @@ def write_cloud_export_fixtures(root: Path) -> None:
                     "name": "case.zip",
                     "webUrl": "https://contoso-my.sharepoint.com/personal/alice/Documents/case.zip",
                     "size": 1234,
+                    "createdBy": {"user": {"userPrincipalName": "alice@example.com"}},
                     "lastModifiedDateTime": "2026-04-26T05:00:00Z",
+                    "versionId": "v3",
+                    "versions": [{"id": "v2"}, {"id": "v3"}],
+                    "deletedDateTime": "2026-04-26T05:30:00Z",
+                    "retentionLabel": "CaseHold",
+                    "permissions": [
+                        {
+                            "id": "perm-1",
+                            "roles": ["read"],
+                            "grantedTo": {"user": {"userPrincipalName": "bob@example.com"}},
+                            "link": {"webUrl": "https://contoso.sharepoint.com/:u:/case-link"},
+                        },
+                        {
+                            "id": "perm-2",
+                            "roles": ["write"],
+                            "grantedTo": {"user": {"userPrincipalName": "carol@example.com"}},
+                        },
+                    ],
                 }
             ]
         ),
