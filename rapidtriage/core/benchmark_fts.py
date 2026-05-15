@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import contextlib
 import datetime as dt
 import hashlib
 import json
@@ -60,7 +61,7 @@ def run_sqlite_fts_benchmark(
 
     manifest = build_sqlite_fts_synthetic_manifest(record_count=record_count, keyword=normalized_keyword, hit_every=hit_every)
     started = time.perf_counter()
-    with sqlite3.connect(db_path) as connection:
+    with contextlib.closing(sqlite3.connect(db_path)) as connection:
         connection.execute("PRAGMA journal_mode = WAL")
         connection.execute("PRAGMA synchronous = NORMAL")
         create_sqlite_fts_benchmark_schema(connection)

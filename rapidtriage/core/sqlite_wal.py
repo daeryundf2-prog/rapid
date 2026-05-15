@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import contextlib
 import datetime as dt
 import csv
 import hashlib
@@ -1281,7 +1282,9 @@ def sqlite_schema_profile(database_path: Path) -> dict[str, object]:
         "triggers": [],
     }
     try:
-        with sqlite3.connect(f"{database_path.as_uri()}?mode=ro&immutable=1", uri=True) as connection:
+        with contextlib.closing(
+            sqlite3.connect(f"{database_path.as_uri()}?mode=ro&immutable=1", uri=True)
+        ) as connection:
             connection.row_factory = sqlite3.Row
             rows = connection.execute(
                 """

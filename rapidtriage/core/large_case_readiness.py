@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import contextlib
 import datetime as dt
 import json
 import sqlite3
@@ -145,7 +146,7 @@ def load_sqlite_fts_benchmark(path: Path) -> dict[str, object]:
 def profile_case_db(path: Path) -> dict[str, object]:
     if not path.is_file():
         raise LargeCaseReadinessError(f"Case DB not found: {path}")
-    with sqlite3.connect(f"file:{path}?mode=ro", uri=True) as connection:
+    with contextlib.closing(sqlite3.connect(f"file:{path}?mode=ro", uri=True)) as connection:
         connection.row_factory = sqlite3.Row
         tables = [
             str(row["name"])

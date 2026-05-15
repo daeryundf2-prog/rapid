@@ -86,7 +86,7 @@ class RapidTriageSqliteWalPreviewTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
             db_path = root / "case.db"
-            with sqlite3.connect(db_path) as connection:
+            with contextlib.closing(sqlite3.connect(db_path)) as connection:
                 connection.execute("CREATE TABLE evidence(id INTEGER PRIMARY KEY, url TEXT NOT NULL, deleted INTEGER DEFAULT 0)")
                 connection.execute("CREATE INDEX evidence_url_idx ON evidence(url)")
                 connection.commit()
@@ -214,7 +214,7 @@ class RapidTriageSqliteWalPreviewTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
             db_path = root / "case.db"
-            with sqlite3.connect(db_path) as connection:
+            with contextlib.closing(sqlite3.connect(db_path)) as connection:
                 connection.execute("PRAGMA page_size = 1024")
                 connection.execute("CREATE TABLE evidence(id INTEGER PRIMARY KEY, url TEXT NOT NULL, visits INTEGER)")
                 connection.commit()
@@ -249,7 +249,7 @@ class RapidTriageSqliteWalPreviewTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
             db_path = root / "case.db"
-            with sqlite3.connect(db_path) as connection:
+            with contextlib.closing(sqlite3.connect(db_path)) as connection:
                 connection.execute("PRAGMA page_size = 1024")
                 connection.execute("CREATE TABLE evidence(id INTEGER PRIMARY KEY, url TEXT NOT NULL, visits INTEGER)")
                 connection.commit()
@@ -306,7 +306,7 @@ class RapidTriageSqliteWalPreviewTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
             db_path = root / "case.db"
-            with sqlite3.connect(db_path) as connection:
+            with contextlib.closing(sqlite3.connect(db_path)) as connection:
                 connection.execute("CREATE TABLE evidence(id INTEGER PRIMARY KEY, url TEXT)")
                 connection.commit()
 
@@ -335,7 +335,7 @@ class RapidTriageSqliteWalPreviewTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
             db_path = root / "case.db"
-            with sqlite3.connect(db_path) as connection:
+            with contextlib.closing(sqlite3.connect(db_path)) as connection:
                 connection.execute("PRAGMA page_size = 1024")
                 connection.execute("CREATE TABLE evidence(id INTEGER PRIMARY KEY, url TEXT NOT NULL, visits INTEGER)")
                 connection.commit()
