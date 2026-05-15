@@ -136,6 +136,8 @@ class RapidTriageRunTests(unittest.TestCase):
         self.assertIn("--resume", run_help)
         self.assertIn("source-read", commands)
         self.assertIn("--sqlite-table", commands["source-read"].format_help())
+        self.assertIn("source-search", commands)
+        self.assertIn("archive.zip::entry", commands["source-search"].format_help())
 
     def test_run_fraud_mode_writes_component_outputs_summary_and_report(self) -> None:
         self.assert_run_mode_outputs("fraud")
@@ -1024,6 +1026,46 @@ class RapidTriageRunTests(unittest.TestCase):
             self.assertIn("zip entry conversations.json", citation["citation_text"])
             self.assertEqual(citation["source_locator"]["locator_type"], "zip-entry-text-preview")
             self.assertIn("archive completeness", " ".join(citation["core_accuracy_gates"]["remaining_blockers"]))
+
+    def test_source_search_command_finds_zip_entry_hit_with_archive_locator(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir) / "case-root"
+            output_dir = Path(tmp_dir) / "run-out"
+            source_output = Path(tmp_dir) / "source-search-zip.json"
+            export_path = root / "Users" / "alice" / "Documents" / "ChatGPT-export.zip"
+            root.mkdir(parents=True, exist_ok=True)
+            build_run_fixture(root)
+            export_path.parent.mkdir(parents=True, exist_ok=True)
+            with zipfile.ZipFile(export_path, "w") as archive:
+                archive.writestr("conversations.json", '{"message":"find evtx then check 4624"}\n')
+
+            self.assertEqual(main(["run", str(root), "--mode", "fraud", "--output-dir", str(output_dir)]), 0)
+            self.assertEqual(
+                main(
+                    [
+                        "source-search",
+                        str(output_dir),
+                        "--path",
+                        "Users/alice/Documents/ChatGPT-export.zip::conversations.json",
+                        "-k",
+                        "evtx",
+                        "--output",
+                        str(source_output),
+                        "--json",
+                    ]
+                ),
+                0,
+            )
+
+            payload = json.loads(source_output.read_text(encoding="utf-8"))
+            self.assertEqual(payload["command"], "source-search")
+            self.assertEqual(payload["profile_version"], "source-search-cli-v1")
+            self.assertEqual(payload["relative_path"], "Users/alice/Documents/ChatGPT-export.zip::conversations.json")
+            self.assertTrue(payload["summary"]["zip_entry_search"])
+            self.assertEqual(payload["summary"]["match_count"], 1)
+            self.assertEqual(payload["matches"][0]["keyword"], "evtx")
+            self.assertIn("ChatGPT-export.zip::conversations.json", payload["matches"][0]["citation"])
+            self.assertEqual(payload["reportability_decision"]["decision"], "source-search-hit-is-review-lead-not-standalone-proof")
 
     def test_source_read_command_opens_bounded_sqlite_table_locator(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:

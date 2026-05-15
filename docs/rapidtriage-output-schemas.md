@@ -106,6 +106,13 @@ The sample JSON uses a few placeholders so the examples stay stable across machi
 - `source_locator` is the stable viewer locator for the current preview, such as `text-preview`, `sqlite-table-page`, `byte-range`, `zip-entry-text-preview`, or `zip-entry-byte-range`.
 - `source_citation_package` uses `source-read-citation-package-v1` and includes copy-safe `citation_text`, `source_locator`, optional `source_sha256`, `snippet`, `snippet_sha256`, `review_note_template`, `package_hash`, and report-selection blockers. Use the `Current-file hit:` template to carry verified source-viewer hits into review marks or report candidates without losing hash/locator provenance.
 - `case-review --source-read-json <source-read.json>` imports that `review_note_template`, citation text, and package hash into the Case DB review note so the report history records the exact source-viewer handoff.
+
+### `source-search`
+
+- Output: JSON from `rapidtriage source-search`.
+- `profile_version`: `source-search-cli-v1`.
+- Searches only one bounded source preview at a time, including `--path archive.zip::entry.json` ZIP members without extraction. It returns `relative_path`, optional `container_relative_path`, `archive_entry`, normalized `keywords`, `summary.match_count`, `summary.zip_entry_search`, and `matches[]` with `keyword`, `line`, `offset`, `line_offset`, `snippet`, `citation`, and `source_path`.
+- `source_locator` and `source_citation_package` mirror the matching `source-read` locator so terminal hit context can be verified in the web source viewer and carried into Case DB review notes without losing archive-entry provenance.
 - `ready_for_review_note` means the package is usable as a reviewer handoff. `ready_for_court_report` remains `false` until analyst sign-off, original evidence provenance, and any parser-specific validation are attached.
 
 ### `large-case-readiness`

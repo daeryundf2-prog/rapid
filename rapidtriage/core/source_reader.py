@@ -143,6 +143,115 @@ def run_source_read(
     }
 
 
+def run_source_search(
+    run_summary: Mapping[str, object] | Path,
+    raw_path: str,
+    keywords: Sequence[str],
+    *,
+    limit: int = 100,
+    context: int = 120,
+    max_chars: int = MAX_SOURCE_READ_TEXT_CHARS,
+) -> dict[str, object]:
+    normalized = [item.strip().lower() for item in keywords if item.strip()]
+    if not normalized:
+        raise SourceReadError("at least one keyword is required")
+    source_payload = run_source_read(
+        run_summary,
+        raw_path,
+        include_hashes=False,
+        max_chars=max_chars,
+        hex_bytes=DEFAULT_MAX_HEX_BYTES,
+    )
+    preview = source_payload.get("preview")
+    if not isinstance(preview, Mapping):
+        raise SourceReadError("source-read preview is missing")
+    searchable = preview.get("preview_type") == "text"
+    text = str(preview.get("text") or "") if searchable else ""
+    matches = search_preview_text(
+        text,
+        normalized,
+        relative_path=str(source_payload.get("relative_path") or raw_path),
+        limit=limit,
+        context=context,
+    ) if searchable else []
+    return {
+        "command": "source-search",
+        "profile_version": "source-search-cli-v1",
+        "generated_at": dt.datetime.now(dt.timezone.utc).isoformat(),
+        "run_summary": source_payload.get("run_summary", ""),
+        "path": source_payload.get("path", ""),
+        "relative_path": source_payload.get("relative_path", raw_path),
+        "container_relative_path": source_payload.get("container_relative_path", ""),
+        "name": source_payload.get("name", ""),
+        "extension": source_payload.get("extension", ""),
+        "size": source_payload.get("size", 0),
+        "archive_entry": source_payload.get("archive_entry", {}),
+        "keywords": normalized,
+        "searchable": searchable,
+        "truncated": bool(preview.get("truncated")) or len(matches) >= normalize_limit(limit, default=100, maximum=10_000),
+        "summary": {
+            "match_count": len(matches),
+            "limit": normalize_limit(limit, default=100, maximum=10_000),
+            "context": normalize_limit(context, default=120, maximum=2_000),
+            "search_mode": "bounded-source-read-preview",
+            "zip_entry_search": bool(source_payload.get("archive_entry")),
+        },
+        "matches": matches,
+        "source_locator": source_payload.get("source_locator", {}),
+        "source_citation_package": source_payload.get("source_citation_package", {}),
+        "reportability_decision": {
+            "decision": "source-search-hit-is-review-lead-not-standalone-proof",
+            "allowed_use": "current-file-keyword-hit-context",
+            "required_before_report": [
+                "open source-read/source viewer for the same locator",
+                "record review status and analyst note",
+                "cite path plus line/offset and preserve container provenance",
+            ],
+        },
+    }
+
+
+def search_preview_text(
+    text: str,
+    keywords: Sequence[str],
+    *,
+    relative_path: str,
+    limit: int,
+    context: int,
+) -> list[dict[str, object]]:
+    normalized_limit = normalize_limit(limit, default=100, maximum=10_000)
+    normalized_context = normalize_limit(context, default=120, maximum=2_000)
+    lower_text = text.lower()
+    matches: list[dict[str, object]] = []
+    for keyword in keywords:
+        start = 0
+        while len(matches) < normalized_limit:
+            offset = lower_text.find(keyword, start)
+            if offset < 0:
+                break
+            line = text.count("\n", 0, offset) + 1
+            line_start = text.rfind("\n", 0, offset) + 1
+            snippet_start = max(0, offset - normalized_context)
+            snippet_end = min(len(text), offset + len(keyword) + normalized_context)
+            matches.append(
+                {
+                    "match_id": f"{hashlib.sha256(f'{relative_path}:{keyword}:{offset}'.encode('utf-8')).hexdigest()[:16]}",
+                    "keyword": keyword,
+                    "line": line,
+                    "offset": offset,
+                    "line_offset": offset - line_start,
+                    "snippet": text[snippet_start:snippet_end].replace("\n", "\\n"),
+                    "citation": f"{relative_path} line {line} offset {offset} keyword {keyword}",
+                    "source_path": relative_path,
+                }
+            )
+            start = offset + max(1, len(keyword))
+        if len(matches) >= normalized_limit:
+            break
+    matches.sort(key=lambda item: int(item["offset"]))
+    return matches[:normalized_limit]
+
+
 def load_summary_or_raise(run_summary: Mapping[str, object] | Path) -> Mapping[str, object]:
     try:
         return load_run_summary(run_summary)

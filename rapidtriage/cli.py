@@ -141,7 +141,7 @@ from .core.run import RunModeError, SUPPORTED_RUN_MODES, run_triage_mode
 from .core.run_validation import RunValidationAttachmentError, attach_validation_diff_outputs
 from .core.sample_case import DEFAULT_SAMPLE_DIR, DEFAULT_SAMPLE_MODE, SampleCaseError, create_sample_case, run_sample_workflow
 from .core.search import SearchError, run_unified_search
-from .core.source_reader import SourceReadError, render_source_read_text, run_source_read
+from .core.source_reader import SourceReadError, render_source_read_text, run_source_read, run_source_search
 from .core.sqlite_wal import SqliteWalPreviewError, build_sqlite_wal_preview
 from .core.timeline import TimelineError, build_timeline_report, run_timeline
 from .core.timeline_export import TimelineExportError, build_unified_timeline_export
@@ -1014,6 +1014,28 @@ def build_parser() -> argparse.ArgumentParser:
     source_read.add_argument("--sqlite-where-contains", help="SQLite table contains filter value for --sqlite-where-column")
     source_read.add_argument("--hash", action="store_true", help="Compute MD5/SHA1/SHA256 for the source file")
     source_read.add_argument("--json", action="store_true", help="Print machine-readable JSON instead of a compact preview")
+
+    source_search = sub.add_parser(
+        "source-search",
+        help="Search inside one source file or ZIP entry from a completed run",
+        description="Search inside one source file or ZIP entry from a completed run with bounded preview limits",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=textwrap.dedent(
+            """\
+            Examples:
+              rapidtriage source-search ./rapidtriage-run-hacking --path Users/alice/Documents/note.txt -k password
+              rapidtriage source-search ./rapidtriage-run-hacking --path Users/alice/Documents/ChatGPT-export.zip::conversations.json -k evtx --json
+            """
+        ),
+    )
+    source_search.add_argument("run_output", help="Run output directory or rapidtriage-run-summary.json")
+    source_search.add_argument("--path", required=True, help="Source file path, absolute, run-root relative, or archive.zip::entry")
+    source_search.add_argument("-k", "--keyword", action="append", required=True, help="Keyword to search for")
+    source_search.add_argument("--output", default="rapidtriage-source-search.json", help="JSON output path")
+    source_search.add_argument("--limit", type=int, default=100, help="Maximum current-source matches")
+    source_search.add_argument("--context", type=int, default=120, help="Characters of snippet context around each hit")
+    source_search.add_argument("--max-chars", type=int, default=2_000_000, help="Maximum text characters to read from the source preview")
+    source_search.add_argument("--json", action="store_true", help="Print machine-readable JSON instead of a compact summary")
 
     ocr_queue = sub.add_parser(
         "ocr-queue",
@@ -3859,6 +3881,54 @@ def main(argv=None) -> int:
             print(json.dumps(payload, ensure_ascii=False, indent=2))
         else:
             print(render_source_read_text(payload))
+        return 0
+
+    if args.command == "source-search":
+        run_output = Path(args.run_output).expanduser().resolve()
+        output = Path(args.output).expanduser().resolve()
+        try:
+            payload = run_source_search(
+                run_output,
+                args.path,
+                args.keyword,
+                limit=args.limit,
+                context=args.context,
+                max_chars=args.max_chars,
+            )
+        except SourceReadError as exc:
+            parser.error(str(exc))
+        write_result(payload, output)
+        audit_output = audit_path_for(output)
+        input_summary = run_output / "rapidtriage-run-summary.json" if run_output.is_dir() else run_output
+        write_audit_record(
+            audit_output,
+            command="source-search",
+            options={
+                "path": args.path,
+                "keywords": args.keyword,
+                "output": str(output),
+                "limit": args.limit,
+                "context": args.context,
+                "max_chars": args.max_chars,
+            },
+            input_files=[("run-summary", input_summary), ("source-file", Path(str(payload["path"])))],
+            output_files=[("source-search-json", output)],
+            notes=[
+                "source-search is bounded current-source hit context; verify matches in source-read/source viewer before reporting.",
+            ],
+        )
+        print(f"Saved source-search JSON: {output}")
+        print(f"Saved audit JSON: {audit_output}")
+        if args.json:
+            print(json.dumps(payload, ensure_ascii=False, indent=2))
+        else:
+            summary = payload["summary"]
+            print(
+                f"Matches: {summary['match_count']}  Searchable: {payload['searchable']}  "
+                f"Path: {payload['relative_path']}"
+            )
+            for match in payload["matches"][:8]:
+                print(f"- {match['citation']}: {match['snippet']}")
         return 0
 
     if args.command == "ocr-queue":
