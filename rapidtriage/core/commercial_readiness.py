@@ -158,11 +158,15 @@ MAC_FIRST_EVIDENCE_COMMANDS = {
     "macos-live-smoke",
     "large-case-readiness",
     "email-external-parse",
+    "source-read",
+    "source-search",
 }
 MAC_FIRST_EVIDENCE_FILENAMES = {
     "macos-live-smoke.json",
     "large-case-readiness.json",
     "email-external-parser.json",
+    "source-read.json",
+    "source-search.json",
 }
 MAC_FIRST_EVIDENCE_DISCOVERY_MAX_FILES = 100
 
@@ -194,6 +198,10 @@ def _mac_first_evidence_target_items(raw: Mapping[str, object]) -> list[int]:
         command = str(raw.get("command") or "")
         if command in {"macos-live-smoke", "large-case-readiness"}:
             target_items.extend(MAC_FIRST_PREPARABLE_BACKLOG_ITEMS)
+        elif command == "source-read":
+            target_items.extend([52, 64, 65])
+        elif command == "source-search":
+            target_items.extend([52, 61, 64, 65])
     return target_items
 
 
@@ -260,6 +268,13 @@ def load_mac_first_evidence(path: Path) -> dict[str, object]:
     selected_tool = raw.get("selected_tool") if isinstance(raw.get("selected_tool"), Mapping) else {}
     evidence_manifest = raw.get("evidence_manifest") if isinstance(raw.get("evidence_manifest"), Mapping) else {}
     uplift = raw.get("commercial_uplift_evidence") if isinstance(raw.get("commercial_uplift_evidence"), Mapping) else {}
+    source_locator = raw.get("source_locator") if isinstance(raw.get("source_locator"), Mapping) else {}
+    source_citation_package = (
+        raw.get("source_citation_package") if isinstance(raw.get("source_citation_package"), Mapping) else {}
+    )
+    reportability_decision = (
+        raw.get("reportability_decision") if isinstance(raw.get("reportability_decision"), Mapping) else {}
+    )
     large_case_summary = large_case.get("summary") if isinstance(large_case.get("summary"), Mapping) else {}
     case_db_profile = large_case.get("case_db_profile") if isinstance(large_case.get("case_db_profile"), Mapping) else {}
     search_diagnostics = (
@@ -290,6 +305,14 @@ def load_mac_first_evidence(path: Path) -> dict[str, object]:
         "ready_for_trusted_diff": summary.get("ready_for_trusted_diff"),
         "selected_tool": str(selected_tool.get("tool") or ""),
         "selected_tool_available": selected_tool.get("available"),
+        "source_relative_path": str(raw.get("relative_path") or raw.get("path") or ""),
+        "source_locator_type": str(source_locator.get("locator_type") or ""),
+        "source_match_count": summary.get("match_count"),
+        "source_searchable": raw.get("searchable"),
+        "source_citation_package_hash": str(source_citation_package.get("package_hash") or ""),
+        "source_ready_for_review_note": source_citation_package.get("ready_for_review_note"),
+        "source_ready_for_court_report": source_citation_package.get("ready_for_court_report"),
+        "source_reportability_decision": str(reportability_decision.get("decision") or ""),
         "output_keys": sorted(str(key) for key in outputs),
     }
 
@@ -328,6 +351,12 @@ def build_mac_first_evidence_summary(
         "failed_check_counts": dict(sorted(failed_check_counts.items())),
         "large_case_search_diagnostics_ready_count": sum(
             1 for row in rows if row.get("large_case_search_diagnostics_ready") is True
+        ),
+        "source_review_handoff_ready_count": sum(
+            1 for row in rows if row.get("source_ready_for_review_note") is True
+        ),
+        "source_court_report_ready_count": sum(
+            1 for row in rows if row.get("source_ready_for_court_report") is True
         ),
         "supports_backlog_items": supported_items,
         "claim_effect": (

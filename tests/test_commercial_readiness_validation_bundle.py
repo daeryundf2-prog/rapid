@@ -176,6 +176,80 @@ class CommercialReadinessValidationBundleTests(unittest.TestCase):
         self.assertIn("attach-10m-record-sqlite-fts-benchmark-json", mac_first["blocker_counts"])
         self.assertFalse(report["commercial_claim_allowed"])
 
+    def test_commercial_readiness_attaches_source_viewer_handoff_evidence(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            source_read_path = Path(tmp_dir) / "source-read.json"
+            source_read_path.write_text(
+                json.dumps(
+                    {
+                        "command": "source-read",
+                        "profile_version": "source-read-v1",
+                        "relative_path": "Users/alice/notes.txt",
+                        "source_locator": {"locator_type": "text-preview"},
+                        "source_citation_package": {
+                            "profile_version": "source-read-citation-package-v1",
+                            "package_hash": "c" * 64,
+                            "ready_for_review_note": True,
+                            "ready_for_court_report": False,
+                        },
+                        "reportability_decision": {
+                            "decision": "source-preview-is-review-aid-not-standalone-proof",
+                        },
+                    },
+                    ensure_ascii=False,
+                ),
+                encoding="utf-8",
+            )
+            source_search_path = Path(tmp_dir) / "source-search.json"
+            source_search_path.write_text(
+                json.dumps(
+                    {
+                        "command": "source-search",
+                        "profile_version": "source-search-cli-v1",
+                        "relative_path": "Users/alice/notes.txt",
+                        "searchable": True,
+                        "summary": {"match_count": 3},
+                        "source_locator": {"locator_type": "text-preview"},
+                        "source_citation_package": {
+                            "profile_version": "source-read-citation-package-v1",
+                            "package_hash": "s" * 64,
+                            "ready_for_review_note": True,
+                            "ready_for_court_report": False,
+                        },
+                        "reportability_decision": {
+                            "decision": "source-search-hit-is-review-lead-not-standalone-proof",
+                        },
+                    },
+                    ensure_ascii=False,
+                ),
+                encoding="utf-8",
+            )
+
+            report = build_commercial_readiness_report(
+                mac_first_evidence_paths=[source_read_path, source_search_path]
+            )
+
+        mac_first = report["mac_first_evidence_summary"]
+        self.assertTrue(mac_first["attached"])
+        self.assertEqual(mac_first["evidence_count"], 2)
+        self.assertEqual(mac_first["source_review_handoff_ready_count"], 2)
+        self.assertEqual(mac_first["source_court_report_ready_count"], 0)
+        self.assertIn(52, mac_first["supports_backlog_items"])
+        self.assertIn(61, mac_first["supports_backlog_items"])
+        self.assertIn(64, mac_first["supports_backlog_items"])
+        self.assertIn(65, mac_first["supports_backlog_items"])
+        rows = {row["command"]: row for row in mac_first["rows"]}
+        self.assertEqual(rows["source-read"]["source_citation_package_hash"], "c" * 64)
+        self.assertTrue(rows["source-read"]["source_ready_for_review_note"])
+        self.assertEqual(
+            rows["source-read"]["source_reportability_decision"],
+            "source-preview-is-review-aid-not-standalone-proof",
+        )
+        self.assertEqual(rows["source-search"]["source_match_count"], 3)
+        self.assertTrue(rows["source-search"]["source_searchable"])
+        self.assertEqual(rows["source-search"]["source_citation_package_hash"], "s" * 64)
+        self.assertFalse(report["commercial_claim_allowed"])
+
     def test_commercial_readiness_discovers_mac_first_evidence_from_directory(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             root = Path(tmp_dir) / "qc"
