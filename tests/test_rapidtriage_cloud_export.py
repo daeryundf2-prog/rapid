@@ -91,6 +91,17 @@ class RapidTriageCloudExportTests(unittest.TestCase):
                             "",
                             "Please review the invoice password from archived mail.",
                             "",
+                            "From bob@example.com Fri May 01 00:45:00 2026",
+                            "Message-ID: <gmail-mbox-2@example.com>",
+                            "In-Reply-To: <gmail-mbox-1@example.com>",
+                            "References: <gmail-mbox-1@example.com>",
+                            "Date: Fri, 01 May 2026 00:45:00 +0000",
+                            "From: Bob <bob@example.com>",
+                            "To: Alice <alice@example.com>",
+                            "Subject: Re: Invoice password from MBOX",
+                            "",
+                            "Confirmed the invoice password thread.",
+                            "",
                         ]
                     ),
                 )
@@ -117,7 +128,7 @@ class RapidTriageCloudExportTests(unittest.TestCase):
 
             self.assertEqual(exit_code, 0)
             payload = json.loads(output.read_text(encoding="utf-8"))
-            self.assertEqual(payload["summary"]["artifact_count"], 6)
+            self.assertEqual(payload["summary"]["artifact_count"], 7)
             artifact = next(item for item in payload["artifacts"] if item["artifact_type"] == "cloud-export-archive")
             self.assertEqual(artifact["artifact_type"], "cloud-export-archive")
             details = artifact["details"]
@@ -165,18 +176,49 @@ class RapidTriageCloudExportTests(unittest.TestCase):
                 "cloud-provider-archive-manifest-emitted",
                 uplift["functional_priority_profile"]["passed_validation_check_ids"],
             )
-            archive_mail = next(item for item in payload["artifacts"] if item["artifact_type"] == "cloud-mail")
+            archive_mail = next(
+                item
+                for item in payload["artifacts"]
+                if item["artifact_type"] == "cloud-mail"
+                and item["details"].get("source_format") == "zip-mbox-entry"
+                and item["details"].get("message_id") == "<gmail-mbox-1@example.com>"
+            )
             mail_details = archive_mail["details"]
             self.assertEqual(mail_details["source_format"], "zip-mbox-entry")
             self.assertEqual(mail_details["service"], "gmail-takeout")
             self.assertEqual(mail_details["subject"], "Invoice password from MBOX")
             self.assertEqual(mail_details["message_id"], "<gmail-mbox-1@example.com>")
+            self.assertEqual(mail_details["thread_root_id"], "<gmail-mbox-1@example.com>")
+            self.assertEqual(mail_details["normalized_thread_subject"], "Invoice password from MBOX")
+            self.assertEqual(mail_details["gmail_thread_profile"]["profile_version"], "gmail-takeout-thread-profile-v1")
+            self.assertEqual(mail_details["gmail_thread_profile"]["thread_link_status"], "single-message-or-root")
             self.assertEqual(mail_details["archive_entry_index"], 3)
             self.assertEqual(mail_details["archive_message_index"], 0)
             self.assertIn("provider-archive-embedded-mail", mail_details["risk_flags"])
             self.assertTrue(mail_details["validation_checks"]["archive_embedded_row"])
             self.assertTrue(mail_details["validation_checks"]["bounded_archive_entry_parse"])
+            self.assertTrue(mail_details["validation_checks"]["gmail_thread_profile_emitted"])
             self.assertIn("archive_entry_name", mail_details["google_takeout_parser_manifest"]["row_citation"]["row_pivots"])
+            self.assertIn("thread_root_id", mail_details["google_takeout_parser_manifest"]["row_citation"]["row_pivots"])
+            archive_reply_mail = next(
+                item
+                for item in payload["artifacts"]
+                if item["artifact_type"] == "cloud-mail"
+                and item["details"].get("source_format") == "zip-mbox-entry"
+                and item["details"].get("message_id") == "<gmail-mbox-2@example.com>"
+            )
+            reply_details = archive_reply_mail["details"]
+            self.assertEqual(reply_details["archive_message_index"], 1)
+            self.assertEqual(reply_details["thread_root_id"], "<gmail-mbox-1@example.com>")
+            self.assertEqual(reply_details["thread_parent_id"], "<gmail-mbox-1@example.com>")
+            self.assertEqual(reply_details["normalized_thread_subject"], "Invoice password from MBOX")
+            self.assertEqual(reply_details["gmail_thread_profile"]["thread_link_status"], "reply-linked")
+            self.assertEqual(reply_details["google_takeout_review_profile"]["product_family"], "gmail")
+            self.assertIn("thread_root_id", reply_details["google_takeout_review_profile"]["present_primary_pivots"])
+            self.assertIn(
+                "thread_root_id=<gmail-mbox-1@example.com>",
+                reply_details["cloud_analyst_review_profile"]["row_pivots"],
+            )
             archive_json_mail = next(
                 item
                 for item in payload["artifacts"]

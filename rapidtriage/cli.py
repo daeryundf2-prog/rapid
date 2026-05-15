@@ -203,6 +203,28 @@ def compact_commercial_readiness_payload(payload: dict[str, object], *, limit: i
     row_limit = max(0, int(limit))
     compact = json.loads(json.dumps(payload, ensure_ascii=False, default=str))
     truncated_paths: list[dict[str, object]] = []
+    validation_summary = compact.get("validation_evidence_summary")
+    pinned_item_numbers = set()
+    if isinstance(validation_summary, dict):
+        pinned_item_numbers = {
+            int(number)
+            for number in validation_summary.get("mapped_item_numbers", [])
+            if isinstance(number, int) or (isinstance(number, str) and number.isdigit())
+        }
+
+    def bounded_with_pinned_items(values: list[object]) -> list[object]:
+        if not pinned_item_numbers:
+            return values[:row_limit]
+        selected = values[:row_limit]
+        selected_numbers = {item.get("number") for item in selected if isinstance(item, dict)}
+        for item in values[row_limit:]:
+            if not isinstance(item, dict):
+                continue
+            number = item.get("number")
+            if number in pinned_item_numbers and number not in selected_numbers:
+                selected.append(item)
+                selected_numbers.add(number)
+        return selected
 
     def truncate_list(path: tuple[str, ...]) -> None:
         target: dict[str, object] = compact
@@ -217,12 +239,15 @@ def compact_commercial_readiness_payload(payload: dict[str, object], *, limit: i
             return
         original_count = len(values)
         if original_count > row_limit:
-            target[key] = values[:row_limit]
+            if path in (("all_items",), ("critical_non_commercial_items",), ("non_commercial_items",)):
+                target[key] = bounded_with_pinned_items(values)
+            else:
+                target[key] = values[:row_limit]
             truncated_paths.append(
                 {
                     "path": ".".join(path),
                     "original_count": original_count,
-                    "returned_count": row_limit,
+                    "returned_count": len(target[key]),
                 }
             )
 

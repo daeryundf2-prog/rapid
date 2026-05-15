@@ -975,6 +975,9 @@ def extract_mbox_message_rows(data: bytes) -> list[Mapping[str, object]]:
                 "to": optional_text(message.get("to", "")),
                 "date": optional_text(message.get("date", "")),
                 "messageId": optional_text(message.get("message-id", "")),
+                "inReplyTo": optional_text(message.get("in-reply-to", "")),
+                "references": optional_text(message.get("references", "")),
+                "gmailThreadProfile": gmail_thread_profile(message),
                 "body": extract_email_text_body(message),
                 "attachmentCount": count_email_attachments(message),
             }
@@ -1019,6 +1022,42 @@ def count_email_attachments(message: email.message.Message) -> int:
         if "attachment" in content_disposition or filename:
             count += 1
     return count
+
+
+def gmail_thread_profile(message: email.message.Message) -> dict[str, object]:
+    message_id = optional_text(message.get("message-id", ""))
+    in_reply_to = optional_text(message.get("in-reply-to", ""))
+    references = parse_message_references(optional_text(message.get("references", "")))
+    thread_root_id = references[0] if references else in_reply_to or message_id
+    normalized_subject = normalize_mail_thread_subject(optional_text(message.get("subject", "")))
+    return {
+        "profile_version": "gmail-takeout-thread-profile-v1",
+        "message_id": message_id,
+        "thread_root_id": thread_root_id,
+        "thread_parent_id": in_reply_to,
+        "reference_count": len(references),
+        "references": references[:10],
+        "normalized_subject": normalized_subject,
+        "thread_link_status": "reply-linked" if in_reply_to or references else "single-message-or-root",
+        "thread_validation_status": "provider-export-or-known-answer-required",
+        "required_before_report": [
+            "compare thread_root_id and references against Gmail native export or provider API where available",
+            "validate duplicate suppression and timezone semantics before reporting a complete conversation",
+        ],
+    }
+
+
+def parse_message_references(value: str) -> list[str]:
+    return re.findall(r"<[^>\s]+>", value or "")
+
+
+def normalize_mail_thread_subject(subject: str) -> str:
+    text = optional_text(subject)
+    while True:
+        next_text = re.sub(r"^\s*(?:re|fw|fwd)\s*:\s*", "", text, flags=re.IGNORECASE)
+        if next_text == text:
+            return next_text.strip()
+        text = next_text
 
 
 def normalize_google_location(row: Mapping[str, object]) -> dict[str, object]:
@@ -1089,6 +1128,7 @@ def normalize_account(payload: Mapping[str, object], *, source_path: str) -> dic
 def normalize_cloud_mail(row: Mapping[str, object], *, source_path: str) -> dict[str, object]:
     subject = optional_text(first_value(row, ("subject", "Subject", "title")))
     body = optional_text(first_value(row, ("body", "snippet", "text", "plainText", "bodyPreview")))
+    thread_profile = row.get("gmailThreadProfile") if isinstance(row.get("gmailThreadProfile"), Mapping) else {}
     archive_fields = {
         key: row[key]
         for key in (
@@ -1103,6 +1143,14 @@ def normalize_cloud_mail(row: Mapping[str, object], *, source_path: str) -> dict
         if key in row
     }
     validation_checks = cloud_validation_checks(row, required=("subject", "from", "date", "receivedDateTime"))
+    if thread_profile:
+        validation_checks.update(
+            {
+                "gmail_thread_profile_emitted": True,
+                "gmail_thread_root_present": bool(thread_profile.get("thread_root_id")),
+                "gmail_thread_subject_normalized": bool(thread_profile.get("normalized_subject")),
+            }
+        )
     if archive_fields:
         validation_checks.update(
             {
@@ -1120,6 +1168,10 @@ def normalize_cloud_mail(row: Mapping[str, object], *, source_path: str) -> dict
         "from": optional_text(first_value(row, ("from", "sender", "senderEmailAddress"))),
         "to": optional_text(first_value(row, ("to", "recipients", "toRecipients"))),
         "message_id": optional_text(first_value(row, ("messageId", "messageid", "id", "internetMessageId"))),
+        "thread_root_id": optional_text(thread_profile.get("thread_root_id")),
+        "thread_parent_id": optional_text(thread_profile.get("thread_parent_id")),
+        "normalized_thread_subject": optional_text(thread_profile.get("normalized_subject")),
+        "gmail_thread_profile": dict(thread_profile),
         "body_preview": body[:1000],
         "body_sha256": sha256_text(body) if body else "",
         "attachment_count": optional_text(first_value(row, ("attachmentCount", "attachments", "hasAttachments"))),
@@ -1913,6 +1965,9 @@ def build_cloud_export_import_manifest(
         key: optional_text(details.get(key))
         for key in (
             "message_id",
+            "thread_root_id",
+            "thread_parent_id",
+            "normalized_thread_subject",
             "file_id",
             "subject",
             "file_name",
@@ -2012,6 +2067,9 @@ def build_google_takeout_parser_manifest(
         key: optional_text(details.get(key))
         for key in (
             "message_id",
+            "thread_root_id",
+            "thread_parent_id",
+            "normalized_thread_subject",
             "subject",
             "file_id",
             "file_name",
@@ -2895,7 +2953,16 @@ def google_takeout_review_profile(
         return {}
     product_family = google_takeout_product_family(service=service, artifact_type=artifact_type, source_path=source_path)
     primary_pivots = {
-        "gmail": ["message_id", "subject", "from", "to", "body_sha256", "attachment_count"],
+        "gmail": [
+            "message_id",
+            "thread_root_id",
+            "normalized_thread_subject",
+            "subject",
+            "from",
+            "to",
+            "body_sha256",
+            "attachment_count",
+        ],
         "drive": ["file_id", "file_name", "mime_type", "owner", "url_sha256", "size"],
         "activity": ["timestamp", "title", "products"],
         "location": ["timestamp", "latitude", "longitude", "accuracy_meters", "source"],
@@ -3194,7 +3261,13 @@ def cloud_analyst_review_profile(
     viewer_locator = manifest.get("source_viewer_locator") if isinstance(manifest.get("source_viewer_locator"), Mapping) else {}
     validation_checks = details.get("validation_checks") if isinstance(details.get("validation_checks"), Mapping) else {}
     risk_flags = details.get("risk_flags") if isinstance(details.get("risk_flags"), list) else []
-    row_pivots = manifest.get("row_pivots") if isinstance(manifest.get("row_pivots"), list) else []
+    row_pivots_value = manifest.get("row_pivots")
+    if isinstance(row_pivots_value, Mapping):
+        row_pivots = [f"{key}={value}" for key, value in row_pivots_value.items()]
+    elif isinstance(row_pivots_value, list):
+        row_pivots = [optional_text(value) for value in row_pivots_value if optional_text(value)]
+    else:
+        row_pivots = []
     profile_names = [
         key
         for key in ("google_takeout_review_profile", "icloud_export_review_profile", "m365_export_review_profile")
@@ -3227,6 +3300,8 @@ def cloud_analyst_review_profile(
             value
             for value in (
                 optional_text(details.get("message_id")),
+                optional_text(details.get("thread_root_id")),
+                optional_text(details.get("normalized_thread_subject")),
                 optional_text(details.get("file_id")),
                 optional_text(details.get("file_name")),
                 optional_text(details.get("chat_id")),
@@ -3243,6 +3318,8 @@ def cloud_analyst_review_profile(
             "event_type": optional_text(details.get("event_type")),
             "timestamp": optional_text(details.get("timestamp")),
             "subject": optional_text(details.get("subject")),
+            "thread_root_id": optional_text(details.get("thread_root_id")),
+            "normalized_thread_subject": optional_text(details.get("normalized_thread_subject")),
             "file_name": optional_text(details.get("file_name")),
             "operation": optional_text(details.get("operation")),
             "manifest_sha256": optional_text(manifest.get("manifest_sha256")),
