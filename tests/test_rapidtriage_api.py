@@ -786,6 +786,9 @@ class RapidTriageApiTests(unittest.TestCase):
         self.assertIn("Commercial readiness gate", app_js)
         self.assertIn("globalCaseSearchForm", app_js)
         self.assertIn("runGlobalCommandSearch", app_js)
+        self.assertIn("bindCaseDbCursorButtons", app_js)
+        self.assertIn("data-testid=\"case-db-cursor-pagination\"", app_js)
+        self.assertIn("Next results", app_js)
         self.assertIn("renderE01IngestWorkflow", app_js)
         self.assertIn("renderE01HandoffContract", app_js)
         self.assertIn("renderE01PartitionBrowser", app_js)
@@ -3200,6 +3203,39 @@ class RapidTriageApiTests(unittest.TestCase):
             self.assertIn(
                 "assignment queue metadata emitted",
                 search_payload["review_workflow_summary"]["core_accuracy_gates"][0]["satisfied_checks"],
+            )
+            first_page_response = client.post(
+                "/api/case-db/search",
+                json={
+                    "database": str(db_path),
+                    "case_id": "CASE-API-DB",
+                    "keywords": ["password"],
+                    "sources": ["documents"],
+                    "limit": 1,
+                },
+            )
+            self.assertEqual(first_page_response.status_code, 200, first_page_response.text)
+            first_page = first_page_response.json()
+            self.assertEqual(first_page["summary"]["returned_count"], 1)
+            self.assertTrue(first_page["summary"]["has_more"])
+            second_page_response = client.post(
+                "/api/case-db/search",
+                json={
+                    "database": str(db_path),
+                    "case_id": "CASE-API-DB",
+                    "keywords": ["password"],
+                    "sources": ["documents"],
+                    "limit": 1,
+                    "cursor": first_page["summary"]["next_cursor"],
+                },
+            )
+            self.assertEqual(second_page_response.status_code, 200, second_page_response.text)
+            second_page = second_page_response.json()
+            self.assertEqual(second_page["summary"]["cursor_api"]["offset"], 1)
+            self.assertEqual(second_page["summary"]["returned_count"], 1)
+            self.assertNotEqual(
+                first_page["matches"][0]["citation_id"],
+                second_page["matches"][0]["citation_id"],
             )
             target = search_payload["matches"][0]
             metadata_filter = "fixture_marker=api-roundtrip"

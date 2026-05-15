@@ -1822,6 +1822,7 @@ function renderCaseDbPanel(payload) {
       </form>
       <form id="caseDbSearchForm" class="search-form">
         <label>DB keywords <input name="keywords" placeholder="password, powershell, download" required /></label>
+        <input type="hidden" name="cursor" value="" />
         <label>Source filter
           <select name="source">
             <option value="">All sources</option>
@@ -6322,10 +6323,18 @@ function bindCaseDbPanel() {
       const reviewStatus = String(searchData.get("review_status") || "");
       const verificationStatus = String(searchData.get("verification_status") || "");
       const saveAs = String(searchData.get("save_as") || "").trim();
+      const cursorOverride = Object.prototype.hasOwnProperty.call(searchForm.dataset, "caseDbCursorOverride")
+        ? String(searchForm.dataset.caseDbCursorOverride || "")
+        : null;
+      if (cursorOverride !== null) delete searchForm.dataset.caseDbCursorOverride;
+      const submittedCursor = cursorOverride !== null
+        ? cursorOverride
+        : event.submitter?.hasAttribute("data-case-db-cursor") ? String(event.submitter.dataset.caseDbCursor || "") : "";
       const request = {
         database: String(importData.get("database") || ""),
         case_id: String(importData.get("case_id") || ""),
         keywords,
+        cursor: submittedCursor,
         sources: source ? [source] : null,
         review_status: reviewStatus || null,
         verification_status: verificationStatus || null,
@@ -6349,8 +6358,10 @@ function bindCaseDbPanel() {
         virtualWindowOffsets.caseDb = 0;
         currentCaseDbSearchPayload = payload;
         output.innerHTML = renderCaseDbSearchResult(payload);
+        searchForm.elements.cursor.value = payload.summary?.next_cursor || "";
         rememberCaseDbKeywords(request);
         await loadCaseDbSavedSearches(request.database, request.case_id);
+        bindCaseDbCursorButtons();
         bindCaseDbReviewButtons(request.database, request.case_id);
         bindCaseDbBatchButtons(request.database, request.case_id);
         bindCaseDbReportExportButton(request.database, request.case_id);
@@ -6366,6 +6377,20 @@ function bindCaseDbPanel() {
     savedSearchButton.addEventListener("click", async () => {
       const importData = new FormData(importForm);
       await loadCaseDbSavedSearches(String(importData.get("database") || ""), String(importData.get("case_id") || ""));
+    });
+  }
+}
+
+function bindCaseDbCursorButtons() {
+  const searchForm = detailPanel.querySelector("#caseDbSearchForm");
+  if (!searchForm) return;
+  for (const button of detailPanel.querySelectorAll("[data-case-db-cursor]")) {
+    if (button.dataset.cursorBound) continue;
+    button.dataset.cursorBound = "1";
+    button.addEventListener("click", () => {
+      searchForm.elements.cursor.value = button.dataset.caseDbCursor || "";
+      searchForm.dataset.caseDbCursorOverride = button.dataset.caseDbCursor || "";
+      searchForm.requestSubmit();
     });
   }
 }
@@ -6446,6 +6471,7 @@ function applyCaseDbSearchPreset(form, item) {
   form.elements.source.value = (item.sources || [])[0] || "";
   form.elements.review_status.value = item.review_status || "";
   form.elements.verification_status.value = item.verification_status || "";
+  form.elements.cursor.value = "";
 }
 
 function renderCaseDbEnsureResult(payload) {
@@ -6468,13 +6494,17 @@ function renderCaseDbSearchResult(payload) {
   const saved = payload.saved_search;
   const reviewWorkflow = payload.review_workflow_summary || {};
   const documentErrors = payload.documents?.errors || [];
+  const cursorApi = payload.summary?.cursor_api || {};
+  const pagination = renderCaseDbPagination(payload);
   if (!rows.length) {
     return `
       ${saved ? `<p class="help-text">Saved search: ${escapeHtml(saved.name)} (${escapeHtml(saved.citation_id)})</p>` : ""}
       <div class="metric-grid">
         ${metric("DB matches", payload.summary?.match_count)}
+        ${metric("Returned", payload.summary?.returned_count)}
         ${metric("Document errors", payload.summary?.document_error_count)}
       </div>
+      ${pagination}
       <p class="empty-state">No Case DB matches found.</p>
       ${renderDocumentErrors(documentErrors)}
     `;
@@ -6483,11 +6513,14 @@ function renderCaseDbSearchResult(payload) {
     ${saved ? `<p class="help-text">Saved search: ${escapeHtml(saved.name)} (${escapeHtml(saved.citation_id)})</p>` : ""}
     <div class="metric-grid">
       ${metric("DB matches", payload.summary?.match_count)}
+      ${metric("Returned", payload.summary?.returned_count)}
+      ${metric("Page offset", cursorApi.offset)}
       ${metric("Sources", Object.keys(payload.summary?.source_counts || {}).length)}
       ${metric("Document errors", payload.summary?.document_error_count)}
       ${metric("Keywords", (payload.keywords || []).length)}
       ${metric("High priority", payload.summary?.priority_counts?.high)}
     </div>
+    ${pagination}
     ${renderDocumentErrors(documentErrors)}
     ${renderCaseDbReviewWorkflowSummary(reviewWorkflow)}
     <section class="review-selection-tray">
@@ -6559,6 +6592,30 @@ function renderCaseDbSearchResult(payload) {
         }).join("")}
       </tbody>
     </table>
+  `;
+}
+
+function renderCaseDbPagination(payload) {
+  const summary = payload.summary || {};
+  const cursorApi = summary.cursor_api || {};
+  const nextCursor = summary.next_cursor || cursorApi.next_cursor || "";
+  const offset = Number(cursorApi.offset || summary.page_offset || 0);
+  const pageSize = Number(cursorApi.page_size || summary.page_size || 0);
+  if (!nextCursor && offset <= 0) return "";
+  return `
+    <section class="review-selection-tray compact" data-testid="case-db-cursor-pagination">
+      <div class="review-group-header">
+        <div>
+          <p class="eyebrow">large-case paging</p>
+          <h3>Viewing ${escapeHtml(offset + 1)}-${escapeHtml(offset + (summary.returned_count || 0))}${pageSize ? ` of page size ${escapeHtml(pageSize)}` : ""}</h3>
+        </div>
+        <div class="detail-actions">
+          ${offset > 0 ? `<button class="secondary-button" type="button" data-case-db-cursor="">Restart results</button>` : ""}
+          ${nextCursor ? `<button class="secondary-button" type="button" data-case-db-cursor="${escapeHtml(nextCursor)}">Next results</button>` : ""}
+        </div>
+      </div>
+      <p class="help-text">Cursor tokens are bound to the current case, keywords, source filters, metadata filters, and review filters to prevent accidental query drift.</p>
+    </section>
   `;
 }
 

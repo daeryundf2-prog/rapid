@@ -338,6 +338,7 @@ class CaseDbSearchRequest(BaseModel):
     case_id: str = Field(..., min_length=1)
     keywords: list[str] = Field(..., min_length=1)
     limit: int = Field(100, ge=1, le=1000)
+    cursor: Optional[str] = None
     sources: Optional[list[str]] = None
     metadata_filters: Optional[list[str]] = None
     review_status: Optional[str] = None
@@ -633,6 +634,7 @@ def create_app(job_store: RunJobStore | None = None, auth_token: str | None = No
                 case_id=request.case_id,
                 keywords=keywords,
                 limit=request.limit,
+                cursor=request.cursor or "",
                 sources=request.sources,
                 metadata_filters=request.metadata_filters,
                 review_status=request.review_status,
