@@ -6,6 +6,7 @@ import json
 import os
 import sqlite3
 import textwrap
+from collections.abc import Mapping
 from pathlib import Path
 
 from .core.audit import audit_path_for, write_audit_record
@@ -81,13 +82,14 @@ from .core.confidence import (
 from .core.cross_tool import (
     CrossToolValidationError,
     build_cross_tool_validation_report,
+    iter_rows as iter_cross_tool_rows,
     write_usn_state_replay_known_answer_template,
 )
 from .core.docs import build_manifest, query_docs_index, run_docs_search, write_result
 from .core.doctor import format_doctor_text, run_doctor
 from .core.enterprise import build_enterprise_policy
 from .core.evidence import identify_evidence
-from .core.e01 import build_windows11_e01_known_answer_manifest
+from .core.e01 import build_image_workflow_trusted_diff, build_windows11_e01_known_answer_manifest
 from .core.e01_hash import E01StreamingHashError, run_e01_streaming_hash
 from .core.e01_smoke import run_windows11_e01_smoke
 from .core.extract import DEFAULT_EXTRACT_MANIFEST_NAME, ExtractError, SUPPORTED_DOC_KINDS, run_extract
@@ -300,6 +302,36 @@ def parse_named_cli_values(
             parser.error(f"{option_name} must use NAME=VALUE")
         parsed[name.strip()] = raw.strip()
     return parsed
+
+
+def load_image_workflow_rows(path: Path, *, max_rows: int = 50000) -> list[dict[str, object]]:
+    """Load image workflow comparison rows while preserving nested Rapid JSON.
+
+    Generic cross-tool rows are intentionally flattened for broad artifact diffs.
+    Image workflow evidence often keeps partition/source metadata under nested
+    `details` blocks, so preserve those rows too before applying field-specific
+    normalization in the image trusted-diff layer.
+    """
+    rows = list(iter_cross_tool_rows(path, max_rows=max_rows))
+    if path.suffix.lower() != ".json" or len(rows) >= max_rows:
+        return rows[:max_rows]
+
+    raw = json.loads(path.read_text(encoding="utf-8"))
+    preserved: list[Mapping[str, object]] = []
+    if isinstance(raw, Mapping):
+        preserved.append(raw)
+        for key in ("artifacts", "events", "results", "records", "rows", "candidates", "entries"):
+            value = raw.get(key)
+            if isinstance(value, list):
+                preserved.extend(item for item in value if isinstance(item, Mapping))
+    elif isinstance(raw, list):
+        preserved.extend(item for item in raw if isinstance(item, Mapping))
+
+    for item in preserved:
+        if len(rows) >= max_rows:
+            break
+        rows.append(dict(item))
+    return rows[:max_rows]
 
 
 def load_source_read_review_note(path: Path) -> str:
@@ -1892,6 +1924,39 @@ def build_parser() -> argparse.ArgumentParser:
     )
     cross_tool.add_argument("--output", help="Optional JSON report path")
     cross_tool.add_argument("--json", action="store_true", help="Print machine-readable JSON")
+
+    image_workflow_validate = sub.add_parser(
+        "image-workflow-validate",
+        help="Diff E01/RAW/virtual-disk/container workflow metadata against trusted exports",
+        description=(
+            "Build the #22-#25 image workflow trusted-diff artifact used before report-grade "
+            "claims for E01/Ex01, RAW/split, VHD/VHDX/VMDK/VDI/QCOW, and vendor/export-first containers."
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=textwrap.dedent(
+            """\
+            Examples:
+              rapidtriage image-workflow-validate --item-number 22 --rapid-output rapidtriage-e01.json --trusted-output ewfverify.csv --trusted-tool ewfverify --json
+              rapidtriage image-workflow-validate --item-number 24 --rapid-output rapidtriage-virtual-disk.json --trusted-output qemu-reference.json --trusted-tool qemu-img --output image-diff.json
+            """
+        ),
+    )
+    image_workflow_validate.add_argument(
+        "--item-number",
+        type=int,
+        choices=(22, 23, 24, 25),
+        required=True,
+        help="Commercial-readiness image workflow item: 22=E01/Ex01, 23=RAW/split, 24=virtual disk, 25=AD1/L01/AFF/XVA export workflow",
+    )
+    image_workflow_validate.add_argument("--rapid-output", required=True, help="RapidTriage image workflow JSON/JSONL/CSV output")
+    image_workflow_validate.add_argument("--trusted-output", required=True, help="Trusted tool/vendor workflow JSON/JSONL/CSV output")
+    image_workflow_validate.add_argument(
+        "--trusted-tool",
+        required=True,
+        help="Trusted tool or workflow name, e.g. ewfverify, tsk_recover, qemu-img, FTK Imager, vendor export manifest",
+    )
+    image_workflow_validate.add_argument("--output", help="Optional JSON trusted-diff path")
+    image_workflow_validate.add_argument("--json", action="store_true", help="Print machine-readable JSON")
 
     usn_state_template = sub.add_parser(
         "usn-state-replay-template",
@@ -3574,6 +3639,40 @@ def main(argv=None) -> int:
                     f"- {item['reference_name']}: status={item['status']} "
                     f"overlap={item['overlap_ratio']} row_delta={item['row_count_delta']}"
                 )
+            if payload.get("output"):
+                print(f"Saved report: {payload['output']}")
+        return 0
+
+    if args.command == "image-workflow-validate":
+        rapid_path = Path(args.rapid_output).expanduser().resolve()
+        trusted_path = Path(args.trusted_output).expanduser().resolve()
+        try:
+            rapid_rows = load_image_workflow_rows(rapid_path, max_rows=50000)
+            trusted_rows = load_image_workflow_rows(trusted_path, max_rows=50000)
+            payload = build_image_workflow_trusted_diff(
+                args.item_number,
+                rapid_rows,
+                trusted_rows,
+                trusted_tool=args.trusted_tool,
+            )
+            payload["command"] = "image-workflow-validate"
+            payload["rapid_output"] = str(rapid_path)
+            payload["trusted_output"] = str(trusted_path)
+            payload["rapid_row_count"] = len(rapid_rows)
+            payload["trusted_row_count"] = len(trusted_rows)
+            if args.output:
+                output_path = Path(args.output).expanduser().resolve()
+                output_path.parent.mkdir(parents=True, exist_ok=True)
+                output_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+                payload["output"] = str(output_path)
+        except (CrossToolValidationError, OSError, json.JSONDecodeError, UnicodeDecodeError) as exc:
+            parser.error(str(exc))
+        if args.json:
+            print(json.dumps(payload, ensure_ascii=False, indent=2))
+        else:
+            print("RapidTriage image workflow validation")
+            print(f"Status: {payload['status']}")
+            print(f"Matched: {payload['matched_count']}  Mismatches: {payload['mismatch_count']}")
             if payload.get("output"):
                 print(f"Saved report: {payload['output']}")
         return 0

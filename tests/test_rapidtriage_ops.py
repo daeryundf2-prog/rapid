@@ -135,6 +135,8 @@ class RapidTriageOpsTests(unittest.TestCase):
         self.assertIn("--manifest", commands["forensic-validation-evidence-import"].format_help())
         self.assertIn("cross-tool-validate", commands)
         self.assertIn("--reference-output", commands["cross-tool-validate"].format_help())
+        self.assertIn("image-workflow-validate", commands)
+        self.assertIn("--item-number", commands["image-workflow-validate"].format_help())
         self.assertIn("confidence-dashboard", commands)
         self.assertIn("parser-explainability", commands)
         self.assertIn("reproducibility-kit", commands)
@@ -774,8 +776,8 @@ class RapidTriageOpsTests(unittest.TestCase):
             self.assertIn("#83", payload["parser_false_positive_false_negative_notes"][0]["commercial_gap_ids"])
             runner_matrix = payload["validation_diff_runner_matrix"]
             self.assertEqual(runner_matrix["profile_version"], "validation-diff-runner-matrix-v1")
-            self.assertEqual(runner_matrix["qc_prep_item_numbers"], [76, 77, 78, 79, 80, 81, 82, 83, 84])
-            self.assertEqual(runner_matrix["summary"]["runner_group_count"], 8)
+            self.assertEqual(runner_matrix["qc_prep_item_numbers"], [76, 77, 78, 79, 80, 81, 82, 83, 84, 85])
+            self.assertEqual(runner_matrix["summary"]["runner_group_count"], 9)
             self.assertEqual(len(runner_matrix["matrix_hash"]), 64)
             self.assertIn("NIST CFReDS", {row["corpus_name"] for row in runner_matrix["public_corpus_registry"]})
             self.assertIn("EvtxECmd", {tool["name"] for group in runner_matrix["runner_groups"] for tool in group["trusted_tools"]})
@@ -784,6 +786,7 @@ class RapidTriageOpsTests(unittest.TestCase):
             self.assertIn("Velociraptor", {tool["name"] for group in runner_matrix["runner_groups"] for tool in group["trusted_tools"]})
             self.assertIn("AmcacheParser", {tool["name"] for group in runner_matrix["runner_groups"] for tool in group["trusted_tools"]})
             self.assertIn("Hindsight", {tool["name"] for group in runner_matrix["runner_groups"] for tool in group["trusted_tools"]})
+            self.assertIn("qemu-img", {tool["name"] for group in runner_matrix["runner_groups"] for tool in group["trusted_tools"]})
             final_qc = payload["final_qc_execution_report"]
             self.assertEqual(final_qc["profile_version"], "final-qc-execution-report-v1")
             self.assertEqual(final_qc["qc_prep_item_numbers"], [81, 82, 83, 84, 85, 86, 87, 88, 89, 90])
@@ -959,11 +962,11 @@ class RapidTriageOpsTests(unittest.TestCase):
             self.assertEqual(exit_code, 0)
             payload = json.loads(stdout.getvalue())
             self.assertEqual(payload["profile_version"], "validation-diff-runner-matrix-v1")
-            self.assertEqual(payload["qc_prep_item_numbers"], [76, 77, 78, 79, 80, 81, 82, 83, 84])
+            self.assertEqual(payload["qc_prep_item_numbers"], [76, 77, 78, 79, 80, 81, 82, 83, 84, 85])
             self.assertTrue(output.is_file())
             self.assertEqual(len(payload["matrix_hash"]), 64)
-            self.assertEqual(payload["summary"]["runner_group_count"], 8)
-            self.assertEqual(payload["summary"]["trusted_tool_count"], 27)
+            self.assertEqual(payload["summary"]["runner_group_count"], 9)
+            self.assertEqual(payload["summary"]["trusted_tool_count"], 32)
             self.assertFalse(payload["summary"]["version_probe_enabled"])
             self.assertEqual(payload["summary"]["version_captured_count"], 0)
             self.assertEqual(payload["output_manifest"]["bytes"], output.stat().st_size)
@@ -975,6 +978,7 @@ class RapidTriageOpsTests(unittest.TestCase):
             self.assertIn("execution-user-activity", groups[81]["artifact_family"])
             self.assertIn("os-account-execution", groups[82]["artifact_family"])
             self.assertIn("browser-ai", groups[84]["artifact_family"])
+            self.assertIn("evidence-image-workflow", groups[85]["artifact_family"])
             self.assertIn("--tool-version", groups[77]["required_cross_tool_metadata"])
             self.assertEqual(groups[77]["trusted_tools"][0]["version_probe"]["status"], "not-run")
 
@@ -3613,6 +3617,62 @@ class RapidTriageOpsTests(unittest.TestCase):
             self.assertGreaterEqual(timeline_comparison["common_record_count"], 1)
             self.assertEqual(timeline_comparison["mismatch_count"], 0)
             self.assertIn("url", timeline_comparison["compared_canonical_fields"])
+
+    def test_image_workflow_validate_command_emits_trusted_diff(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            rapid = root / "rapid-e01.json"
+            trusted = root / "ewfverify.csv"
+            output = root / "image-diff.json"
+            rapid.write_text(
+                json.dumps(
+                    [
+                        {
+                            "details": {
+                                "source_path": "case.E01",
+                                "source_integrity": {"sha256": "a" * 64},
+                                "partition_selection": {"selected_start_sector": 2048},
+                                "recovery_mode": "partition-offset",
+                            }
+                        }
+                    ]
+                ),
+                encoding="utf-8",
+            )
+            trusted.write_text(
+                "SourcePath,SHA256,StartSector,Workflow\n"
+                f"case.E01,{('a' * 64)},2048,partition-offset\n",
+                encoding="utf-8",
+            )
+            stdout = io.StringIO()
+
+            with contextlib.redirect_stdout(stdout):
+                exit_code = main(
+                    [
+                        "image-workflow-validate",
+                        "--item-number",
+                        "22",
+                        "--rapid-output",
+                        str(rapid),
+                        "--trusted-output",
+                        str(trusted),
+                        "--trusted-tool",
+                        "ewfverify",
+                        "--output",
+                        str(output),
+                        "--json",
+                    ]
+                )
+
+            self.assertEqual(exit_code, 0)
+            payload = json.loads(stdout.getvalue())
+            self.assertEqual(payload["command"], "image-workflow-validate")
+            self.assertEqual(payload["gap_id"], "#22")
+            self.assertEqual(payload["status"], "pass")
+            self.assertEqual(payload["trusted_tool"], "ewfverify")
+            self.assertEqual(payload["matched_count"], 1)
+            self.assertTrue(payload["commercial_grade_evidence"])
+            self.assertTrue(output.is_file())
 
     def test_confidence_explainability_and_reproducibility_commands(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:

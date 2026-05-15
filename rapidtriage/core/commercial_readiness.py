@@ -325,6 +325,47 @@ TRUSTED_DIFF_RUNNER_HINTS_BY_ITEM: dict[int, dict[str, object]] = {
             "--independent-report <review.md> --corpus-scope <scope> --backlog-item 21"
         ),
     },
+    22: {
+        "artifact_family": "evidence-image-workflow",
+        "runner_group_item": 85,
+        "trusted_tools": ["libewf ewfverify", "Sleuth Kit", "FTK Imager"],
+        "rapid_output_hint": "rapidtriage evidence <case.E01> --json; rapidtriage run <case.E01> --output-dir <run-dir>",
+        "cross_tool_template": (
+            "rapidtriage image-workflow-validate --item-number 22 --rapid-output <rapid-e01-workflow.json> "
+            "--trusted-output <ewfverify-or-suite-reference.json> --trusted-tool ewfverify --output e01-image-diff.json --json"
+        ),
+    },
+    23: {
+        "artifact_family": "evidence-image-workflow",
+        "runner_group_item": 85,
+        "trusted_tools": ["Sleuth Kit", "FTK Imager", "X-Ways/EnCase/AXIOM vendor export"],
+        "rapid_output_hint": "rapidtriage evidence <case.001-or-dd> --json; rapidtriage run <case.001-or-dd> --output-dir <run-dir>",
+        "cross_tool_template": (
+            "rapidtriage image-workflow-validate --item-number 23 --rapid-output <rapid-raw-workflow.json> "
+            "--trusted-output <tsk-or-suite-reference.csv> --trusted-tool tsk_recover --output raw-image-diff.json --json"
+        ),
+    },
+    24: {
+        "artifact_family": "evidence-image-workflow",
+        "runner_group_item": 85,
+        "trusted_tools": ["qemu-img", "Sleuth Kit", "X-Ways/EnCase/AXIOM vendor export"],
+        "rapid_output_hint": "rapidtriage evidence <disk.vmdk-or-vhdx> --json; rapidtriage run <disk.vmdk-or-vhdx> --output-dir <run-dir>",
+        "cross_tool_template": (
+            "rapidtriage image-workflow-validate --item-number 24 --rapid-output <rapid-virtual-disk-workflow.json> "
+            "--trusted-output <qemu-or-suite-reference.json> --trusted-tool qemu-img --output virtual-disk-diff.json --json"
+        ),
+    },
+    25: {
+        "artifact_family": "evidence-image-workflow",
+        "runner_group_item": 85,
+        "trusted_tools": ["FTK Imager", "X-Ways/EnCase/AXIOM vendor export", "AFF/AFF4 tooling"],
+        "rapid_output_hint": "rapidtriage evidence <case.AD1-or-AFF-or-XVA> --json; scan the verified vendor export folder after export",
+        "cross_tool_template": (
+            "rapidtriage image-workflow-validate --item-number 25 --rapid-output <rapid-container-preflight.json> "
+            "--trusted-output <vendor-export-manifest.json> --trusted-tool 'vendor export manifest' "
+            "--output container-export-diff.json --json"
+        ),
+    },
 }
 
 
@@ -422,6 +463,7 @@ MAC_FIRST_EVIDENCE_COMMANDS = {
     "macos-live-smoke",
     "large-case-readiness",
     "email-external-parse",
+    "image-workflow-validate",
     "source-read",
     "source-search",
     "cloud-export",
@@ -430,6 +472,12 @@ MAC_FIRST_EVIDENCE_FILENAMES = {
     "macos-live-smoke.json",
     "large-case-readiness.json",
     "email-external-parser.json",
+    "image-workflow-validate.json",
+    "image-workflow-trusted-diff.json",
+    "e01-workflow-trusted-diff.json",
+    "raw-workflow-trusted-diff.json",
+    "virtual-disk-workflow-trusted-diff.json",
+    "container-workflow-trusted-diff.json",
     "source-read.json",
     "source-search.json",
     "cloud-export-artifacts.json",
@@ -556,6 +604,13 @@ def _mac_first_evidence_target_items(raw: Mapping[str, object]) -> list[int]:
             target_items.extend([52, 64, 65])
         elif command == "source-search":
             target_items.extend([52, 61, 64, 65])
+        elif command == "image-workflow-validate":
+            try:
+                item_number = int(str(raw.get("item_number") or raw.get("gap_id") or "").lstrip("#"))
+            except ValueError:
+                item_number = 0
+            if item_number in {22, 23, 24, 25}:
+                target_items.append(item_number)
         elif command == "cloud-export":
             target_items.extend(_cloud_export_evidence_summary(raw)["supported_backlog_items"])
     return target_items
@@ -638,6 +693,9 @@ def load_mac_first_evidence(path: Path) -> dict[str, object]:
         case_db_profile.get("search_diagnostics") if isinstance(case_db_profile.get("search_diagnostics"), Mapping) else {}
     )
     cloud_export_summary = _cloud_export_evidence_summary(raw) if command == "cloud-export" else {}
+    image_reportability = (
+        raw.get("reportability_decision") if isinstance(raw.get("reportability_decision"), Mapping) else {}
+    )
     for blocker in cloud_export_summary.get("commercial_grade_blockers", []):
         text = str(blocker)
         if text and text not in blocker_list:
@@ -682,6 +740,19 @@ def load_mac_first_evidence(path: Path) -> dict[str, object]:
         "cloud_export_archive_manifest_hash_count": cloud_export_summary.get("archive_manifest_hash_count"),
         "cloud_export_ai_conversation_count": cloud_export_summary.get("ai_conversation_count"),
         "cloud_export_ai_complete_pair_count": cloud_export_summary.get("ai_complete_pair_count"),
+        "image_workflow_status": str(raw.get("status") or "") if command == "image-workflow-validate" else "",
+        "image_workflow_gap_id": str(raw.get("gap_id") or "") if command == "image-workflow-validate" else "",
+        "image_workflow_trusted_tool": str(raw.get("trusted_tool") or "") if command == "image-workflow-validate" else "",
+        "image_workflow_matched_count": raw.get("matched_count") if command == "image-workflow-validate" else None,
+        "image_workflow_mismatch_count": raw.get("mismatch_count") if command == "image-workflow-validate" else None,
+        "image_workflow_missing_count": raw.get("missing_count") if command == "image-workflow-validate" else None,
+        "image_workflow_extra_count": raw.get("extra_count") if command == "image-workflow-validate" else None,
+        "image_workflow_commercial_grade_evidence": (
+            raw.get("commercial_grade_evidence") if command == "image-workflow-validate" else None
+        ),
+        "image_workflow_reportability_decision": (
+            str(image_reportability.get("decision") or "") if command == "image-workflow-validate" else ""
+        ),
         "output_keys": sorted(str(key) for key in outputs),
     }
 
@@ -736,6 +807,12 @@ def build_mac_first_evidence_summary(
         ),
         "cloud_export_ai_conversation_count": sum(
             int(row.get("cloud_export_ai_conversation_count") or 0) for row in rows
+        ),
+        "image_workflow_evidence_count": sum(1 for row in rows if row.get("command") == "image-workflow-validate"),
+        "image_workflow_pass_count": sum(
+            1
+            for row in rows
+            if row.get("command") == "image-workflow-validate" and row.get("image_workflow_status") == "pass"
         ),
         "supports_backlog_items": supported_items,
         "claim_effect": (

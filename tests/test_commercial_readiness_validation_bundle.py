@@ -138,6 +138,16 @@ class CommercialReadinessValidationBundleTests(unittest.TestCase):
         self.assertIn("BrowserHistoryView", timeline_hint["trusted_tools"])
         ai_hint = trusted_diff_runner_hint(21)
         self.assertIn("Service export", ai_hint["trusted_tools"])
+        e01_hint = trusted_diff_runner_hint(22)
+        self.assertEqual(e01_hint["artifact_family"], "evidence-image-workflow")
+        self.assertEqual(e01_hint["validation_diff_runner_group_item"], 85)
+        self.assertIn("libewf ewfverify", e01_hint["trusted_tools"])
+        raw_hint = trusted_diff_runner_hint(23)
+        self.assertIn("Sleuth Kit", raw_hint["trusted_tools"])
+        vm_hint = trusted_diff_runner_hint(24)
+        self.assertIn("qemu-img", vm_hint["trusted_tools"])
+        container_hint = trusted_diff_runner_hint(25)
+        self.assertIn("FTK Imager", container_hint["trusted_tools"])
 
     def test_commercial_readiness_attaches_email_external_mac_first_evidence(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -398,9 +408,11 @@ class CommercialReadinessValidationBundleTests(unittest.TestCase):
             smoke_dir = root / "macos-live"
             email_dir = root / "email-external"
             cloud_dir = root / "cloud-export"
+            image_dir = root / "image-workflow"
             smoke_dir.mkdir(parents=True)
             email_dir.mkdir(parents=True)
             cloud_dir.mkdir(parents=True)
+            image_dir.mkdir(parents=True)
             (smoke_dir / "macos-live-smoke.json").write_text(
                 json.dumps(
                     {
@@ -454,19 +466,40 @@ class CommercialReadinessValidationBundleTests(unittest.TestCase):
                 ),
                 encoding="utf-8",
             )
+            (image_dir / "image-workflow-validate.json").write_text(
+                json.dumps(
+                    {
+                        "command": "image-workflow-validate",
+                        "gap_id": "#22",
+                        "status": "pass",
+                        "trusted_tool": "ewfverify",
+                        "matched_count": 1,
+                        "mismatch_count": 0,
+                        "missing_count": 0,
+                        "extra_count": 0,
+                        "commercial_grade_evidence": True,
+                        "reportability_decision": {"decision": "trusted-diff-passed"},
+                    },
+                    ensure_ascii=False,
+                ),
+                encoding="utf-8",
+            )
 
             report = build_commercial_readiness_report(mac_first_evidence_paths=[root])
 
         mac_first = report["mac_first_evidence_summary"]
         self.assertTrue(mac_first["attached"])
-        self.assertEqual(mac_first["evidence_count"], 3)
+        self.assertEqual(mac_first["evidence_count"], 4)
         self.assertEqual(
             sorted(row["command"] for row in mac_first["rows"]),
-            ["cloud-export", "email-external-parse", "macos-live-smoke"],
+            ["cloud-export", "email-external-parse", "image-workflow-validate", "macos-live-smoke"],
         )
         self.assertIn(21, mac_first["supports_backlog_items"])
+        self.assertIn(22, mac_first["supports_backlog_items"])
         self.assertIn(36, mac_first["supports_backlog_items"])
         self.assertIn(66, mac_first["supports_backlog_items"])
+        self.assertEqual(mac_first["image_workflow_evidence_count"], 1)
+        self.assertEqual(mac_first["image_workflow_pass_count"], 1)
         self.assertIn("email_external_tool_available", mac_first["failed_check_counts"])
         self.assertIn("windows-e01-real-image-validation-not-run", mac_first["blocker_counts"])
 

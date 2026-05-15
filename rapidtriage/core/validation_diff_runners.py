@@ -349,6 +349,54 @@ RUNNER_GROUPS: tuple[dict[str, object], ...] = (
             "--reference-output serviceexport=<AI-service-export.json> --backlog-item 19 --backlog-item 20 --backlog-item 21"
         ),
     },
+    {
+        "item_number": 85,
+        "artifact_family": "evidence-image-workflow",
+        "title": "E01/RAW/virtual-disk/container image workflow trusted diff runners",
+        "trusted_tools": (
+            {
+                "name": "libewf ewfverify",
+                "binary_candidates": ("ewfverify", "ewfverify.exe"),
+                "reference_name": "ewfverify",
+                "output_format": "text/CSV normalized workflow export",
+                "command_template": "ewfverify <case.E01> > <ewfverify.txt>",
+            },
+            {
+                "name": "Sleuth Kit",
+                "binary_candidates": ("mmls", "fls", "tsk_recover"),
+                "reference_name": "sleuthkit",
+                "output_format": "partition table, file listing, recovered file hash CSV",
+                "command_template": "mmls <image>; fls -r -o <offset> <image>; tsk_recover -o <offset> <image> <export-dir>",
+            },
+            {
+                "name": "qemu-img",
+                "binary_candidates": ("qemu-img", "qemu-img.exe"),
+                "reference_name": "qemu-img",
+                "output_format": "JSON info plus converted raw hash manifest",
+                "command_template": "qemu-img info --output=json <disk>; qemu-img convert -O raw <disk> <disk.raw>",
+            },
+            {
+                "name": "FTK Imager",
+                "binary_candidates": ("ftkimager", "ftkimager.exe"),
+                "reference_name": "ftkimager",
+                "output_format": "export log/file listing/hash manifest",
+                "command_template": "FTK Imager export or mount log plus file hash manifest",
+            },
+            {
+                "name": "X-Ways/EnCase/AXIOM vendor export",
+                "binary_candidates": (),
+                "reference_name": "vendor-export",
+                "output_format": "verified export manifest",
+                "command_template": "Export/mount with trusted suite; preserve source hash, export inventory, tool version, and command/procedure.",
+            },
+        ),
+        "rapid_output_hint": "rapidtriage evidence <image-or-container> --json; rapidtriage run <image-or-container> --output-dir <run-dir>",
+        "cross_tool_template": (
+            "rapidtriage image-workflow-validate --item-number <22|23|24|25> "
+            "--rapid-output <rapid-image-workflow.json> --trusted-output <trusted-image-reference.json-or-csv> "
+            "--trusted-tool <ewfverify|tsk_recover|qemu-img|vendor export manifest> --json"
+        ),
+    },
 )
 
 
@@ -384,7 +432,7 @@ def build_validation_diff_runner_matrix(
     total_tool_count = sum(len(group["trusted_tools"]) for group in runner_groups)
     core = {
         "profile_version": "validation-diff-runner-matrix-v1",
-        "qc_prep_item_numbers": [76, 77, 78, 79, 80, 81, 82, 83, 84],
+        "qc_prep_item_numbers": [76, 77, 78, 79, 80, 81, 82, 83, 84, 85],
         "public_corpus_registry": list(PUBLIC_CORPUS_ROWS),
         "runner_groups": runner_groups,
         "summary": {
