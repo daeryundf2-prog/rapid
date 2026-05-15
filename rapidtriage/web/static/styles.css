@@ -5208,6 +5208,19 @@ body::before {
   padding-top: 6px;
 }
 
+.mac-first-evidence-rows {
+  display: grid;
+  gap: 6px;
+  border: 1px solid rgba(12, 88, 130, 0.12);
+  border-radius: 12px;
+  background: rgba(232, 245, 249, 0.48);
+  padding: 10px;
+}
+
+.mac-first-evidence-list li {
+  border-color: rgba(12, 88, 130, 0.12);
+}
+
 .case-command-bar {
   top: 10px;
   border-radius: 20px;

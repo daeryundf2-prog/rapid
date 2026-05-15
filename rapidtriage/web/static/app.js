@@ -756,6 +756,7 @@ function renderCommercialReadinessSummary(payload) {
       </dl>
       ${macFirst.attached ? `
         <p class="help-text">Mac-first evidence is attached as preparatory proof only: ${escapeHtml(macFirst.claim_effect || "commercial gates still require trusted validation evidence.")}</p>
+        ${renderMacFirstEvidenceRows(macFirst)}
       ` : ""}
       ${focused.length ? `
         <ul class="commercial-readiness-list">
@@ -771,6 +772,47 @@ function renderCommercialReadinessSummary(payload) {
       <p class="help-text">현재 패널은 내부 fixture 검증과 commercial-grade gate를 분리해서 보여줍니다. validated가 통과되어도 commercial이 0이면 상용급 완료가 아닙니다.</p>
     </div>
   `;
+}
+
+function renderMacFirstEvidenceRows(macFirst) {
+  const rows = Array.isArray(macFirst?.rows) ? macFirst.rows : [];
+  if (!rows.length) return "";
+  return `
+    <div class="mac-first-evidence-rows" data-testid="mac-first-evidence-rows">
+      <strong>Attached Mac evidence</strong>
+      <ul class="commercial-readiness-list mac-first-evidence-list">
+        ${rows.slice(0, 6).map((row) => `
+          <li>
+            <strong>${escapeHtml(row.command || "mac evidence")} · ${escapeHtml(row.status || "observed")}</strong>
+            <span>${escapeHtml(macFirstEvidenceSummaryText(row))}</span>
+          </li>
+        `).join("")}
+      </ul>
+    </div>
+  `;
+}
+
+function macFirstEvidenceSummaryText(row) {
+  const parts = [];
+  if (row.local_smoke_score !== undefined && row.local_smoke_score !== null && row.local_smoke_score !== "") {
+    parts.push(`score ${row.local_smoke_score}`);
+  }
+  if (row.large_case_status) {
+    parts.push(`large-case ${row.large_case_status}`);
+  }
+  if (row.export_file_count !== undefined && row.export_file_count !== null && row.export_file_count !== "") {
+    parts.push(`exports ${row.export_file_count}`);
+  }
+  if (row.ready_for_trusted_diff !== undefined && row.ready_for_trusted_diff !== null && row.ready_for_trusted_diff !== "") {
+    parts.push(`trusted diff ${row.ready_for_trusted_diff ? "ready" : "not ready"}`);
+  }
+  if (row.evidence_manifest_hash) {
+    parts.push(`manifest ${String(row.evidence_manifest_hash).slice(0, 12)}`);
+  }
+  if (row.path_sha256) {
+    parts.push(`file ${String(row.path_sha256).slice(0, 12)}`);
+  }
+  return parts.join(" · ") || "preparatory evidence attached";
 }
 
 function renderRunValidationPackageSummary(payload) {

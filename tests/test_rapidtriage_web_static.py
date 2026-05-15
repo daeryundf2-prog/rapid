@@ -61,6 +61,20 @@ class RapidTriageWebStaticTests(unittest.TestCase):
         self.assertIn("validation-diff-list", styles)
         self.assertIn("compact-dl", styles)
 
+    def test_web_workbench_exposes_mac_first_evidence_detail_rows(self) -> None:
+        app_js = (REPO_ROOT / "rapidtriage" / "web" / "static" / "app.js").read_text(encoding="utf-8")
+        styles = (REPO_ROOT / "rapidtriage" / "web" / "static" / "styles.css").read_text(encoding="utf-8")
+
+        self.assertIn("renderMacFirstEvidenceRows", app_js)
+        self.assertIn("macFirstEvidenceSummaryText", app_js)
+        self.assertIn("data-testid=\"mac-first-evidence-rows\"", app_js)
+        self.assertIn("Attached Mac evidence", app_js)
+        self.assertIn("evidence_manifest_hash", app_js)
+        self.assertIn("ready_for_trusted_diff", app_js)
+        self.assertIn("trusted diff", app_js)
+        self.assertIn("mac-first-evidence-rows", styles)
+        self.assertIn("mac-first-evidence-list", styles)
+
     def test_search_results_expose_review_facets_for_fast_triage(self) -> None:
         app_js = (REPO_ROOT / "rapidtriage" / "web" / "static" / "app.js").read_text(encoding="utf-8")
         styles = (REPO_ROOT / "rapidtriage" / "web" / "static" / "styles.css").read_text(encoding="utf-8")
