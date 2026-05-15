@@ -211,6 +211,55 @@ RUNNER_GROUPS: tuple[dict[str, object], ...] = (
             "--backlog-item 14 --backlog-item 15 --backlog-item 16 --backlog-item 17"
         ),
     },
+    {
+        "item_number": 82,
+        "artifact_family": "os-account-execution",
+        "title": "SAM/SECURITY/SYSTEM and execution artifact trusted diff runners",
+        "trusted_tools": (
+            {
+                "name": "RECmd",
+                "binary_candidates": ("RECmd", "RECmd.exe"),
+                "reference_name": "recmd",
+                "output_format": "CSV",
+                "command_template": "RECmd -f <SAM-or-SYSTEM-or-Amcache.hve> --csv <reference-dir>",
+            },
+            {
+                "name": "RegRipper",
+                "binary_candidates": ("rip.pl", "regripper", "rr", "rr.exe"),
+                "reference_name": "regripper",
+                "output_format": "text/CSV normalized export",
+                "command_template": "rip.pl -r <hive> -p <sam|security|system|bam|shimcache> > <reference.txt>",
+            },
+            {
+                "name": "AmcacheParser",
+                "binary_candidates": ("AmcacheParser", "AmcacheParser.exe"),
+                "reference_name": "amcacheparser",
+                "output_format": "CSV",
+                "command_template": "AmcacheParser -f <Amcache.hve> --csv <reference-dir>",
+            },
+            {
+                "name": "AppCompatCacheParser",
+                "binary_candidates": ("AppCompatCacheParser", "AppCompatCacheParser.exe", "ShimCacheParser.py", "ShimCacheParser"),
+                "reference_name": "appcompatcacheparser",
+                "output_format": "CSV",
+                "command_template": "AppCompatCacheParser -f <SYSTEM> --csv <reference-dir>",
+            },
+            {
+                "name": "SrumECmd",
+                "binary_candidates": ("SrumECmd", "SrumECmd.exe"),
+                "reference_name": "srumecmd",
+                "output_format": "CSV",
+                "command_template": "SrumECmd -f <SRUDB.dat> --csv <reference-dir>",
+            },
+        ),
+        "rapid_output_hint": "rapidtriage artifacts --kind windows-os-account --kind windows-execution --kind windows-srum --output rapid-os-exec.json",
+        "cross_tool_template": (
+            "rapidtriage cross-tool-validate --rapid-output rapid-os-exec.json "
+            "--reference-output recmd=<RECmd.csv> --reference-output amcacheparser=<AmcacheParser.csv> "
+            "--reference-output appcompatcacheparser=<AppCompatCacheParser.csv> --reference-output srumecmd=<SrumECmd.csv> "
+            "--backlog-item 6 --backlog-item 7 --backlog-item 8 --backlog-item 9 --backlog-item 10"
+        ),
+    },
 )
 
 
@@ -246,7 +295,7 @@ def build_validation_diff_runner_matrix(
     total_tool_count = sum(len(group["trusted_tools"]) for group in runner_groups)
     core = {
         "profile_version": "validation-diff-runner-matrix-v1",
-        "qc_prep_item_numbers": [76, 77, 78, 79, 80, 81],
+        "qc_prep_item_numbers": [76, 77, 78, 79, 80, 81, 82],
         "public_corpus_registry": list(PUBLIC_CORPUS_ROWS),
         "runner_groups": runner_groups,
         "summary": {

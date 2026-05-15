@@ -18,6 +18,8 @@ MAX_REGISTRY_FIELD_DIFF_ROWS = 5_000
 MAX_NTFS_FIELD_DIFF_ROWS = 5_000
 MAX_ESE_FIELD_DIFF_ROWS = 5_000
 MAX_USN_STATE_REPLAY_FIELD_DIFF_ROWS = 5_000
+MAX_OS_ACCOUNT_FIELD_DIFF_ROWS = 5_000
+MAX_EXECUTION_ARTIFACT_FIELD_DIFF_ROWS = 5_000
 MAX_FIELD_MISMATCH_SAMPLES = 50
 FUNCTIONAL_VALIDATION_BATCH_ID = "commercial-uplift-036-040"
 KEY_FIELDS = (
@@ -120,6 +122,60 @@ REGISTRY_PATH_PREFIX_ALIASES = {
     "hkey_classes_root": "hkcr",
     "hkey_users": "hku",
     "hkey_current_config": "hkcc",
+}
+OS_ACCOUNT_FIELD_ALIASES = {
+    "account_name": ("account_name", "UserName", "Username", "Name", "name", "user_name"),
+    "rid": ("rid", "RID", "RelativeId", "relative_id"),
+    "sid": ("sid", "SID", "UserSid", "user_sid"),
+    "account_type": ("account_type", "AccountType", "type", "Type"),
+    "admin_status": ("admin_status", "IsAdmin", "is_admin", "admin", "Admin"),
+    "created_at": ("created_at", "Created", "created", "CreatedOn", "creation_time"),
+    "last_login_at": ("last_login_at", "LastLogin", "last_login", "LastLogon", "last_logon"),
+    "deleted_at": ("deleted_at", "DeletedAt", "deleted_time", "DeletedTime"),
+    "uac_flags": ("uac_flags", "UacFlags", "UserAccountControl", "uac", "UAC"),
+    "group_name": ("group_name", "GroupName", "AliasName", "alias_name", "group", "Group"),
+    "privilege_name": ("privilege_name", "Privilege", "privilege", "PrivilegeName", "RightName"),
+    "control_set": ("control_set", "ControlSet", "CurrentControlSet", "controlset"),
+    "lsa_secret_name": ("lsa_secret_name", "SecretName", "secret_name", "LSASecret", "lsa_secret"),
+    "secret_redaction_status": (
+        "secret_redaction_status",
+        "SecretRedactionStatus",
+        "redaction_status",
+        "RedactionStatus",
+    ),
+}
+EXECUTION_ARTIFACT_FIELD_ALIASES = {
+    "artifact_family": ("artifact_family", "ArtifactFamily", "source_family", "SourceFamily"),
+    "executable_path": (
+        "executable_path",
+        "ExecutablePath",
+        "Path",
+        "path",
+        "FilePath",
+        "file_path",
+        "ProgramName",
+        "program_name",
+    ),
+    "timestamp": (
+        "timestamp",
+        "Timestamp",
+        "TimeStamp",
+        "LastRun",
+        "LastExecution",
+        "last_execution_at",
+        "LastModified",
+    ),
+    "user_sid": ("user_sid", "UserSid", "SID", "sid"),
+    "sha1": ("sha1", "SHA1", "SourceFileSHA1", "source_file_sha1", "hash", "Hash"),
+    "source_key": ("source_key", "SourceKey", "key_path", "KeyPath", "registry_path", "RegistryPath"),
+    "source_value": ("source_value", "SourceValue", "ValueName", "value_name"),
+    "semantics_warning": ("semantics_warning", "SemanticsWarning", "Warning", "warning"),
+    "execution_evidence_status": (
+        "execution_evidence_status",
+        "ExecutionEvidenceStatus",
+        "evidence_status",
+        "EvidenceStatus",
+    ),
 }
 MFT_FIELD_ALIASES = {
     "record_number": ("record_number", "RecordNumber", "EntryNumber", "entry_number", "MFTEntryNumber"),
@@ -489,6 +545,8 @@ def load_tool_dataset(name: str, path: Path) -> dict[str, object]:
         "usn_field_index": usn_field_index(rows),
         "usn_state_replay_field_index": usn_state_replay_field_index(rows),
         "ese_field_index": ese_field_index(rows),
+        "os_account_field_index": os_account_field_index(rows),
+        "execution_artifact_field_index": execution_artifact_field_index(rows),
     }
 
 
@@ -672,6 +730,8 @@ def composite_candidate_keys(row: Mapping[str, object]) -> list[str]:
         composites.append(normalize_key(f"registry-value:{key_path}:{value_name}"))
     if cell_offset is not None:
         composites.append(normalize_key(f"registry-cell:{normalize_registry_numeric_string(str(cell_offset))}"))
+    composites.extend(os_account_key_variants(row))
+    composites.extend(execution_artifact_key_variants(row))
 
     mft_record_number = ntfs_int_value(row, MFT_FIELD_ALIASES["record_number"])
     mft_path = ntfs_path_value(row, MFT_FIELD_ALIASES["file_path"])
@@ -741,6 +801,8 @@ def compare_datasets(
     usn_field_comparison = compare_usn_fields(rapid_dataset, reference_dataset)
     usn_state_replay_field_comparison = compare_usn_state_replay_fields(rapid_dataset, reference_dataset)
     ese_field_comparison = compare_ese_fields(rapid_dataset, reference_dataset)
+    os_account_field_comparison = compare_os_account_fields(rapid_dataset, reference_dataset)
+    execution_artifact_field_comparison = compare_execution_artifact_fields(rapid_dataset, reference_dataset)
     if field_comparison["mismatch_count"] or field_comparison["missing_common_field_count"]:
         status = "failed"
     if registry_field_comparison["mismatch_count"]:
@@ -752,6 +814,10 @@ def compare_datasets(
     if usn_state_replay_field_comparison["mismatch_count"]:
         status = "failed"
     if ese_field_comparison["mismatch_count"]:
+        status = "failed"
+    if os_account_field_comparison["mismatch_count"]:
+        status = "failed"
+    if execution_artifact_field_comparison["mismatch_count"]:
         status = "failed"
     if input_quality_blockers:
         status = "failed"
@@ -790,6 +856,8 @@ def compare_datasets(
         "usn_field_comparison": usn_field_comparison,
         "usn_state_replay_field_comparison": usn_state_replay_field_comparison,
         "ese_field_comparison": ese_field_comparison,
+        "os_account_field_comparison": os_account_field_comparison,
+        "execution_artifact_field_comparison": execution_artifact_field_comparison,
         "release_gate": "review-required" if status != "pass" else "comparison-passed",
     }
 
@@ -1138,6 +1206,208 @@ def compare_registry_fields(
         "mismatch_samples": mismatch_samples,
         "truncated": len(common_keys) > MAX_REGISTRY_FIELD_DIFF_ROWS,
     }
+
+
+def os_account_field_index(rows: Sequence[Mapping[str, object]]) -> dict[str, dict[str, str]]:
+    index: dict[str, dict[str, str]] = {}
+    for row in rows[:MAX_OS_ACCOUNT_FIELD_DIFF_ROWS]:
+        keys = os_account_key_variants(row)
+        if not keys:
+            continue
+        fields = os_account_normalized_fields(row)
+        if fields:
+            for key in keys:
+                index.setdefault(key, fields)
+    return index
+
+
+def os_account_key_variants(row: Mapping[str, object]) -> list[str]:
+    sid = normalize_sid(first_value(row, OS_ACCOUNT_FIELD_ALIASES["sid"]))
+    rid = ntfs_int_value(row, OS_ACCOUNT_FIELD_ALIASES["rid"])
+    account_name = normalize_windows_identity(first_value(row, OS_ACCOUNT_FIELD_ALIASES["account_name"]))
+    group_name = normalize_windows_identity(first_value(row, OS_ACCOUNT_FIELD_ALIASES["group_name"]))
+    privilege_name = normalize_windows_identity(first_value(row, OS_ACCOUNT_FIELD_ALIASES["privilege_name"]))
+    secret_name = normalize_windows_identity(first_value(row, OS_ACCOUNT_FIELD_ALIASES["lsa_secret_name"]))
+    keys: list[str] = []
+    if sid:
+        keys.append(normalize_key(f"os-account-sid:{sid}"))
+    if rid:
+        keys.append(normalize_key(f"os-account-rid:{rid}"))
+        if account_name:
+            keys.append(normalize_key(f"os-account-rid-name:{rid}:{account_name}"))
+    if account_name:
+        keys.append(normalize_key(f"os-account-name:{account_name}"))
+    if sid and group_name:
+        keys.append(normalize_key(f"os-account-group:{sid}:{group_name}"))
+    if account_name and group_name:
+        keys.append(normalize_key(f"os-account-group:{account_name}:{group_name}"))
+    if sid and privilege_name:
+        keys.append(normalize_key(f"os-account-privilege:{sid}:{privilege_name}"))
+    if account_name and privilege_name:
+        keys.append(normalize_key(f"os-account-privilege:{account_name}:{privilege_name}"))
+    if secret_name:
+        keys.append(normalize_key(f"os-account-secret:{secret_name}"))
+    return list(dict.fromkeys(keys))
+
+
+def os_account_normalized_fields(row: Mapping[str, object]) -> dict[str, str]:
+    fields: dict[str, str] = {}
+    for canonical, aliases in OS_ACCOUNT_FIELD_ALIASES.items():
+        if canonical == "sid":
+            value = normalize_sid(first_value(row, aliases))
+        elif canonical == "rid":
+            value = ntfs_int_value(row, aliases)
+        elif canonical in {"account_name", "group_name", "privilege_name", "lsa_secret_name"}:
+            value = normalize_windows_identity(first_value(row, aliases))
+        elif canonical == "admin_status":
+            value = normalize_boolish(first_value(row, aliases))
+        elif canonical == "uac_flags":
+            value = normalize_ntfs_list(first_value(row, aliases))
+        else:
+            raw = first_value(row, aliases)
+            value = normalize_field_value(raw) if raw is not None and str(raw).strip() else ""
+        if value:
+            fields[canonical] = value
+    return fields
+
+
+def execution_artifact_field_index(rows: Sequence[Mapping[str, object]]) -> dict[str, dict[str, str]]:
+    index: dict[str, dict[str, str]] = {}
+    for row in rows[:MAX_EXECUTION_ARTIFACT_FIELD_DIFF_ROWS]:
+        keys = execution_artifact_key_variants(row)
+        if not keys:
+            continue
+        fields = execution_artifact_normalized_fields(row)
+        if fields:
+            for key in keys:
+                index.setdefault(key, fields)
+    return index
+
+
+def execution_artifact_key_variants(row: Mapping[str, object]) -> list[str]:
+    family = infer_execution_artifact_family(row)
+    executable_path = ntfs_path_value(row, EXECUTION_ARTIFACT_FIELD_ALIASES["executable_path"])
+    user_sid = normalize_sid(first_value(row, EXECUTION_ARTIFACT_FIELD_ALIASES["user_sid"]))
+    sha1 = normalize_hash_value(first_value(row, EXECUTION_ARTIFACT_FIELD_ALIASES["sha1"]))
+    source_key = registry_path_value(row, EXECUTION_ARTIFACT_FIELD_ALIASES["source_key"])
+    source_value = normalize_windows_identity(first_value(row, EXECUTION_ARTIFACT_FIELD_ALIASES["source_value"]))
+    if not family:
+        return []
+    keys: list[str] = []
+    if executable_path:
+        keys.append(normalize_key(f"execution:{family}:path:{executable_path}"))
+    if user_sid and executable_path:
+        keys.append(normalize_key(f"execution:{family}:sid-path:{user_sid}:{executable_path}"))
+    if sha1:
+        keys.append(normalize_key(f"execution:{family}:sha1:{sha1}"))
+    if source_key and source_value:
+        keys.append(normalize_key(f"execution:{family}:source:{source_key}:{source_value}"))
+    elif source_key:
+        keys.append(normalize_key(f"execution:{family}:source:{source_key}"))
+    return list(dict.fromkeys(keys))
+
+
+def execution_artifact_normalized_fields(row: Mapping[str, object]) -> dict[str, str]:
+    family = infer_execution_artifact_family(row)
+    if not family:
+        return {}
+    fields: dict[str, str] = {"artifact_family": family}
+    for canonical, aliases in EXECUTION_ARTIFACT_FIELD_ALIASES.items():
+        if canonical == "artifact_family":
+            value = family
+        elif canonical == "executable_path":
+            value = ntfs_path_value(row, aliases)
+        elif canonical == "user_sid":
+            value = normalize_sid(first_value(row, aliases))
+        elif canonical == "sha1":
+            value = normalize_hash_value(first_value(row, aliases))
+        elif canonical == "source_key":
+            value = registry_path_value(row, aliases)
+        elif canonical == "source_value":
+            value = normalize_windows_identity(first_value(row, aliases))
+        else:
+            raw = first_value(row, aliases)
+            value = normalize_field_value(raw) if raw is not None and str(raw).strip() else ""
+        if value:
+            fields[canonical] = value
+    return fields
+
+
+def infer_execution_artifact_family(row: Mapping[str, object]) -> str:
+    explicit = first_value(row, EXECUTION_ARTIFACT_FIELD_ALIASES["artifact_family"])
+    explicit_text = normalize_field_value(explicit) if explicit is not None else ""
+    haystack = " ".join(
+        str(value)
+        for key, value in row.items()
+        if key.lower().endswith(("artifact_type", "parser", "source_path", "path", "source_key", "key_path"))
+    ).lower()
+    combined = f"{explicit_text} {haystack}"
+    if "amcache" in combined:
+        return "amcache"
+    if "shimcache" in combined or "appcompatcache" in combined or "appcompat" in combined:
+        return "shimcache"
+    if "bam" in combined:
+        return "bam"
+    if "dam" in combined:
+        return "dam"
+    return ""
+
+
+def compare_os_account_fields(
+    rapid_dataset: Mapping[str, object],
+    reference_dataset: Mapping[str, object],
+) -> dict[str, object]:
+    return compare_ntfs_field_indexes(
+        rapid_dataset,
+        reference_dataset,
+        index_key="os_account_field_index",
+        mode="os-account-sam-security-system-field-diff",
+        key_name="os_account_key",
+        row_limit=MAX_OS_ACCOUNT_FIELD_DIFF_ROWS,
+    )
+
+
+def compare_execution_artifact_fields(
+    rapid_dataset: Mapping[str, object],
+    reference_dataset: Mapping[str, object],
+) -> dict[str, object]:
+    return compare_ntfs_field_indexes(
+        rapid_dataset,
+        reference_dataset,
+        index_key="execution_artifact_field_index",
+        mode="execution-artifact-amcache-shimcache-bam-dam-field-diff",
+        key_name="execution_artifact_key",
+        row_limit=MAX_EXECUTION_ARTIFACT_FIELD_DIFF_ROWS,
+    )
+
+
+def normalize_sid(value: object) -> str:
+    if value is None:
+        return ""
+    text = str(value).strip()
+    if not text:
+        return ""
+    return re.sub(r"[^a-z0-9-]+", "", text.lower())
+
+
+def normalize_windows_identity(value: object) -> str:
+    if value is None:
+        return ""
+    text = normalize_field_value(value)
+    return re.sub(r"\s+", " ", text).strip()
+
+
+def normalize_boolish(value: object) -> str:
+    if value in (None, ""):
+        return ""
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    text = normalize_field_value(value)
+    if text in {"1", "true", "yes", "y", "admin", "administrator", "enabled"}:
+        return "true"
+    if text in {"0", "false", "no", "n", "standard", "disabled"}:
+        return "false"
+    return text
 
 
 def mft_field_index(rows: Sequence[Mapping[str, object]]) -> dict[str, dict[str, str]]:
@@ -1928,6 +2198,8 @@ def trusted_tool_diff_functional_profile(
             "registry-key-value-field-diff-supported",
             "registry-deleted-cell-offset-field-diff-supported",
             "registry-transaction-replay-status-diff-supported",
+            "os-account-sam-security-system-field-diff-supported",
+            "execution-artifact-amcache-shimcache-bam-dam-field-diff-supported",
             "mft-record-field-diff-supported",
             "mft-parent-path-attribute-diff-supported",
             "usn-frn-reason-timestamp-field-diff-supported",

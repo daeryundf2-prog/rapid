@@ -8,6 +8,7 @@ from pathlib import Path
 from rapidtriage.core.commercial_readiness import (
     build_commercial_readiness_report,
     load_validation_evidence,
+    trusted_diff_runner_hint,
 )
 
 
@@ -97,6 +98,17 @@ class CommercialReadinessValidationBundleTests(unittest.TestCase):
         )
         self.assertEqual(registry_hint["artifact_family"], "registry")
         self.assertIn("RECmd", registry_hint["trusted_tools"])
+
+    def test_commercial_readiness_has_second_batch_runner_hints(self) -> None:
+        account_hint = trusted_diff_runner_hint(6)
+        self.assertEqual(account_hint["artifact_family"], "os-account-execution")
+        self.assertEqual(account_hint["validation_diff_runner_group_item"], 82)
+        self.assertIn("RECmd", account_hint["trusted_tools"])
+        execution_hint = trusted_diff_runner_hint(7)
+        self.assertIn("AmcacheParser", execution_hint["trusted_tools"])
+        srum_hint = trusted_diff_runner_hint(10)
+        self.assertEqual(srum_hint["artifact_family"], "ese")
+        self.assertIn("SrumECmd", srum_hint["trusted_tools"])
 
     def test_commercial_readiness_attaches_email_external_mac_first_evidence(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:

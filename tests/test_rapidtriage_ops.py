@@ -774,12 +774,13 @@ class RapidTriageOpsTests(unittest.TestCase):
             self.assertIn("#83", payload["parser_false_positive_false_negative_notes"][0]["commercial_gap_ids"])
             runner_matrix = payload["validation_diff_runner_matrix"]
             self.assertEqual(runner_matrix["profile_version"], "validation-diff-runner-matrix-v1")
-            self.assertEqual(runner_matrix["qc_prep_item_numbers"], [76, 77, 78, 79, 80, 81])
-            self.assertEqual(runner_matrix["summary"]["runner_group_count"], 5)
+            self.assertEqual(runner_matrix["qc_prep_item_numbers"], [76, 77, 78, 79, 80, 81, 82])
+            self.assertEqual(runner_matrix["summary"]["runner_group_count"], 6)
             self.assertEqual(len(runner_matrix["matrix_hash"]), 64)
             self.assertIn("NIST CFReDS", {row["corpus_name"] for row in runner_matrix["public_corpus_registry"]})
             self.assertIn("EvtxECmd", {tool["name"] for group in runner_matrix["runner_groups"] for tool in group["trusted_tools"]})
             self.assertIn("PECmd", {tool["name"] for group in runner_matrix["runner_groups"] for tool in group["trusted_tools"]})
+            self.assertIn("AmcacheParser", {tool["name"] for group in runner_matrix["runner_groups"] for tool in group["trusted_tools"]})
             final_qc = payload["final_qc_execution_report"]
             self.assertEqual(final_qc["profile_version"], "final-qc-execution-report-v1")
             self.assertEqual(final_qc["qc_prep_item_numbers"], [81, 82, 83, 84, 85, 86, 87, 88, 89, 90])
@@ -955,11 +956,11 @@ class RapidTriageOpsTests(unittest.TestCase):
             self.assertEqual(exit_code, 0)
             payload = json.loads(stdout.getvalue())
             self.assertEqual(payload["profile_version"], "validation-diff-runner-matrix-v1")
-            self.assertEqual(payload["qc_prep_item_numbers"], [76, 77, 78, 79, 80, 81])
+            self.assertEqual(payload["qc_prep_item_numbers"], [76, 77, 78, 79, 80, 81, 82])
             self.assertTrue(output.is_file())
             self.assertEqual(len(payload["matrix_hash"]), 64)
-            self.assertEqual(payload["summary"]["runner_group_count"], 5)
-            self.assertEqual(payload["summary"]["trusted_tool_count"], 13)
+            self.assertEqual(payload["summary"]["runner_group_count"], 6)
+            self.assertEqual(payload["summary"]["trusted_tool_count"], 18)
             self.assertFalse(payload["summary"]["version_probe_enabled"])
             self.assertEqual(payload["summary"]["version_captured_count"], 0)
             self.assertEqual(payload["output_manifest"]["bytes"], output.stat().st_size)
@@ -969,6 +970,7 @@ class RapidTriageOpsTests(unittest.TestCase):
             self.assertIn("ntfs", groups[79]["artifact_family"])
             self.assertIn("ese", groups[80]["artifact_family"])
             self.assertIn("execution-user-activity", groups[81]["artifact_family"])
+            self.assertIn("os-account-execution", groups[82]["artifact_family"])
             self.assertIn("--tool-version", groups[77]["required_cross_tool_metadata"])
             self.assertEqual(groups[77]["trusted_tools"][0]["version_probe"]["status"], "not-run")
 
@@ -2697,6 +2699,138 @@ class RapidTriageOpsTests(unittest.TestCase):
             self.assertEqual(registry_comparison["mismatch_count"], 1)
             self.assertEqual(registry_comparison["mismatch_samples"][0]["field"], "value_data")
             self.assertFalse(payload["cross_tool_validation_assessment"]["ready_for_validated_gate"])
+
+    def test_cross_tool_validate_compares_os_account_privilege_rows(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            rapid = root / "rapid-os-account.json"
+            reference = root / "recmd-sam.csv"
+            output = root / "os-account-cross-tool.json"
+            rapid.write_text(
+                json.dumps(
+                    {
+                        "artifacts": [
+                            {
+                                "artifact_type": "windows-os-account",
+                                "details": {
+                                    "account_name": "alice",
+                                    "rid": 1001,
+                                    "sid": "S-1-5-21-1-2-3-1001",
+                                    "admin_status": True,
+                                    "group_name": "Administrators",
+                                    "privilege_name": "SeDebugPrivilege",
+                                    "secret_redaction_status": "redacted",
+                                },
+                            }
+                        ]
+                    }
+                ),
+                encoding="utf-8",
+            )
+            reference.write_text(
+                "UserName,RID,SID,IsAdmin,GroupName,PrivilegeName,SecretRedactionStatus\n"
+                "alice,1001,S-1-5-21-1-2-3-1001,true,Administrators,SeDebugPrivilege,redacted\n",
+                encoding="utf-8",
+            )
+
+            stdout = io.StringIO()
+            with contextlib.redirect_stdout(stdout):
+                exit_code = main(
+                    [
+                        "cross-tool-validate",
+                        "--rapid-output",
+                        str(rapid),
+                        "--reference-output",
+                        f"recmd={reference}",
+                        "--backlog-item",
+                        "6",
+                        "--min-overlap",
+                        "1.0",
+                        "--output",
+                        str(output),
+                        "--json",
+                    ]
+                )
+
+            self.assertEqual(exit_code, 0)
+            payload = json.loads(stdout.getvalue())
+            self.assertEqual(payload["status"], "pass")
+            comparison = payload["comparisons"][0]["os_account_field_comparison"]
+            self.assertGreaterEqual(comparison["common_record_count"], 1)
+            self.assertEqual(comparison["mismatch_count"], 0)
+            self.assertIn("privilege_name", comparison["compared_canonical_fields"])
+            profile = payload["cross_tool_validation_assessment"]["functional_priority_profile"]
+            self.assertIn("os-account-sam-security-system-field-diff-supported", profile["passed_validation_check_ids"])
+
+    def test_cross_tool_validate_compares_execution_artifact_rows(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            rapid = root / "rapid-execution.json"
+            reference = root / "amcacheparser.csv"
+            output = root / "execution-cross-tool.json"
+            rapid.write_text(
+                json.dumps(
+                    {
+                        "artifacts": [
+                            {
+                                "artifact_type": "amcache-entry",
+                                "details": {
+                                    "artifact_family": "amcache",
+                                    "executable_path": r"C:\Program Files\App\agent.exe",
+                                    "timestamp": "2024-01-02T03:04:05+00:00",
+                                    "user_sid": "S-1-5-21-1-2-3-1001",
+                                    "sha1": "A" * 40,
+                                    "semantics_warning": "install-or-execution-context",
+                                    "execution_evidence_status": "corroborate-before-reporting",
+                                },
+                            }
+                        ]
+                    }
+                ),
+                encoding="utf-8",
+            )
+            reference.write_text(
+                "ArtifactFamily,ExecutablePath,Timestamp,UserSid,SHA1,SemanticsWarning,ExecutionEvidenceStatus\n"
+                r"amcache,C:\Program Files\App\agent.exe,2024-01-02T03:04:05+00:00,S-1-5-21-1-2-3-1001,"
+                f"{'A' * 40},install-or-execution-context,corroborate-before-reporting\n",
+                encoding="utf-8",
+            )
+
+            stdout = io.StringIO()
+            with contextlib.redirect_stdout(stdout):
+                exit_code = main(
+                    [
+                        "cross-tool-validate",
+                        "--rapid-output",
+                        str(rapid),
+                        "--reference-output",
+                        f"amcacheparser={reference}",
+                        "--backlog-item",
+                        "7",
+                        "--backlog-item",
+                        "8",
+                        "--backlog-item",
+                        "9",
+                        "--min-overlap",
+                        "1.0",
+                        "--output",
+                        str(output),
+                        "--json",
+                    ]
+                )
+
+            self.assertEqual(exit_code, 0)
+            payload = json.loads(stdout.getvalue())
+            self.assertEqual(payload["status"], "pass")
+            comparison = payload["comparisons"][0]["execution_artifact_field_comparison"]
+            self.assertGreaterEqual(comparison["common_record_count"], 1)
+            self.assertEqual(comparison["mismatch_count"], 0)
+            self.assertIn("semantics_warning", comparison["compared_canonical_fields"])
+            profile = payload["cross_tool_validation_assessment"]["functional_priority_profile"]
+            self.assertIn(
+                "execution-artifact-amcache-shimcache-bam-dam-field-diff-supported",
+                profile["passed_validation_check_ids"],
+            )
 
     def test_cross_tool_validate_compares_mft_records_against_mftecmd_export(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:

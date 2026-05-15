@@ -128,6 +128,66 @@ TRUSTED_DIFF_RUNNER_HINTS_BY_ITEM: dict[int, dict[str, object]] = {
             "--independent-report <review.md> --corpus-scope <scope> --backlog-item 4 --backlog-item 5"
         ),
     },
+    6: {
+        "artifact_family": "os-account-execution",
+        "runner_group_item": 82,
+        "trusted_tools": ["RECmd", "RegRipper"],
+        "rapid_output_hint": "rapidtriage artifacts --kind windows-os-account --output rapid-os-account.json",
+        "cross_tool_template": (
+            "rapidtriage cross-tool-validate --rapid-output rapid-os-account.json "
+            "--reference-output recmd=<RECmd.csv> --reference-output regripper=<RegRipper.csv> "
+            "--source-evidence <SAM-or-SECURITY-or-SYSTEM> --tool-version recmd=<version> "
+            "--tool-command recmd=<command> --independent-report <review.md> --corpus-scope <scope> --backlog-item 6"
+        ),
+    },
+    7: {
+        "artifact_family": "os-account-execution",
+        "runner_group_item": 82,
+        "trusted_tools": ["AmcacheParser", "RECmd"],
+        "rapid_output_hint": "rapidtriage artifacts --kind windows-execution --output rapid-execution.json",
+        "cross_tool_template": (
+            "rapidtriage cross-tool-validate --rapid-output rapid-execution.json "
+            "--reference-output amcacheparser=<AmcacheParser.csv> --reference-output recmd=<RECmd.csv> "
+            "--source-evidence <Amcache.hve> --tool-version amcacheparser=<version> "
+            "--tool-command amcacheparser=<command> --independent-report <review.md> --corpus-scope <scope> --backlog-item 7"
+        ),
+    },
+    8: {
+        "artifact_family": "os-account-execution",
+        "runner_group_item": 82,
+        "trusted_tools": ["AppCompatCacheParser", "RECmd"],
+        "rapid_output_hint": "rapidtriage artifacts --kind windows-execution --output rapid-execution.json",
+        "cross_tool_template": (
+            "rapidtriage cross-tool-validate --rapid-output rapid-execution.json "
+            "--reference-output appcompatcacheparser=<AppCompatCacheParser.csv> --reference-output recmd=<RECmd.csv> "
+            "--source-evidence <SYSTEM> --tool-version appcompatcacheparser=<version> "
+            "--tool-command appcompatcacheparser=<command> --independent-report <review.md> --corpus-scope <scope> --backlog-item 8"
+        ),
+    },
+    9: {
+        "artifact_family": "os-account-execution",
+        "runner_group_item": 82,
+        "trusted_tools": ["RECmd", "RegRipper"],
+        "rapid_output_hint": "rapidtriage artifacts --kind windows-execution --output rapid-execution.json",
+        "cross_tool_template": (
+            "rapidtriage cross-tool-validate --rapid-output rapid-execution.json "
+            "--reference-output recmd=<RECmd.csv> --reference-output regripper=<RegRipper.csv> "
+            "--source-evidence <SYSTEM> --tool-version recmd=<version> --tool-command recmd=<command> "
+            "--independent-report <review.md> --corpus-scope <scope> --backlog-item 9"
+        ),
+    },
+    10: {
+        "artifact_family": "ese",
+        "runner_group_item": 80,
+        "trusted_tools": ["SrumECmd", "libesedb esedbexport"],
+        "rapid_output_hint": "rapidtriage artifacts --kind windows-srum --output rapid-srum.json",
+        "cross_tool_template": (
+            "rapidtriage cross-tool-validate --rapid-output rapid-srum.json "
+            "--reference-output srumecmd=<SrumECmd.csv> --reference-output libesedb=<esedbexport.csv> "
+            "--source-evidence <SRUDB.dat> --tool-version srumecmd=<version> --tool-command srumecmd=<command> "
+            "--independent-report <review.md> --corpus-scope <scope> --backlog-item 10"
+        ),
+    },
 }
 
 
