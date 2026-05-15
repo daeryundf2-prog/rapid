@@ -244,6 +244,81 @@ class RapidTriageApiTests(unittest.TestCase):
         self.assertEqual(resumed_payload["matches"][0]["row_number"], 100_001)
         self.assertEqual(resumed_payload["matches"][0]["source_viewer_locator"]["offset"], 100_000)
 
+    def test_source_preview_opens_zip_entry_locator_without_extraction(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp) / "evidence"
+            run_dir = Path(temp) / "run"
+            export_dir = root / "Users" / "alice" / "Documents"
+            export_dir.mkdir(parents=True)
+            run_dir.mkdir()
+            archive_path = export_dir / "ChatGPT-export.zip"
+            with zipfile.ZipFile(archive_path, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+                archive.writestr(
+                    "conversations.json",
+                    json.dumps(
+                        [
+                            {
+                                "title": "Forensic review",
+                                "mapping": {
+                                    "1": {"message": {"author": {"role": "user"}, "content": {"parts": ["find evtx"]}}},
+                                    "2": {
+                                        "message": {
+                                            "author": {"role": "assistant"},
+                                            "content": {"parts": ["open source viewer"]},
+                                        }
+                                    },
+                                },
+                            }
+                        ],
+                        ensure_ascii=False,
+                    ),
+                )
+            summary_path = run_dir / "rapidtriage-run-summary.json"
+            summary_path.write_text(
+                json.dumps(
+                    {
+                        "profile_version": "rapidtriage-run-summary-v1",
+                        "mode": "fraud",
+                        "root": str(root),
+                        "output_dir": str(run_dir),
+                        "source": {"type": "folder", "source_path": str(root), "analysis_root": str(root)},
+                        "outputs": {"summary": str(summary_path)},
+                    }
+                ),
+                encoding="utf-8",
+            )
+            store = RunJobStore()
+            job = store.import_completed_run(run_dir)
+            client = TestClient(create_app(store))
+
+            response = client.get(
+                f"/api/runs/{job.run_id}/source-preview",
+                params={"path": "Users/alice/Documents/ChatGPT-export.zip::conversations.json"},
+            )
+            self.assertEqual(response.status_code, 200, response.text)
+            payload = response.json()
+            self.assertEqual(payload["preview_type"], "json")
+            self.assertEqual(payload["archive_entry"]["archive_entry_name"], "conversations.json")
+            self.assertEqual(payload["viewer_metadata"]["container_type"], "zip")
+            self.assertEqual(payload["viewer_metadata"]["parser"], "rapidtriage.source-viewer.zip-entry-json")
+            self.assertEqual(payload["zip_entry"]["core_accuracy_gates"]["component"], "source-read-zip-entry-locator")
+            self.assertEqual(payload["source_locator"]["locator_type"], "zip-entry-text-preview")
+            self.assertIn("find evtx", payload["text"])
+            self.assertIn("hash=true", payload["metadata_url"])
+            self.assertIn(str(archive_path), payload["download_url"])
+            self.assertIn("Archive completeness", " ".join(payload["viewer_limitations"]))
+            self.assertEqual(
+                {action["id"] for action in payload["viewer_actions"]},
+                {"download-container", "hash-container", "pin-compare", "save-review"},
+            )
+
+            traversal_response = client.get(
+                f"/api/runs/{job.run_id}/source-preview",
+                params={"path": "Users/alice/Documents/ChatGPT-export.zip::../secret.json"},
+            )
+            self.assertEqual(traversal_response.status_code, 400)
+            self.assertIn("must not contain parent traversal", traversal_response.json()["detail"])
+
     def test_source_search_large_file_emits_resume_token_and_continues(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
             log_path = Path(temp) / "huge.log"

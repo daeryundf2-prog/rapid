@@ -54,6 +54,12 @@ from ..core.run import RunModeError
 from ..core.sample_case import DEFAULT_SAMPLE_MODE, SampleCaseError, run_sample_workflow
 from ..core.search import SearchError, run_unified_search
 from ..core.source_paths import candidate_source_paths, source_path_resolution_diagnostics
+from ..core.source_reader import (
+    SourceReadError,
+    build_archived_source_preview as build_archived_source_read_preview,
+    build_source_locator,
+    parse_archived_source_request,
+)
 from ..core.submission import compute_hashes, build_submission_manifest
 from ..core.ocr_queue import OcrQueueError, build_ocr_queue
 from ..core.sqlite_wal import SqliteWalPreviewError, build_sqlite_wal_preview
@@ -880,6 +886,10 @@ def create_app(job_store: RunJobStore | None = None, auth_token: str | None = No
 
     @api.get("/api/runs/{run_id}/source-preview")
     def preview_source_file(run_id: str, path: str = Query(..., min_length=1)) -> Dict[str, object]:
+        archive_request = parse_source_preview_archive_request(path)
+        if archive_request:
+            source_path = resolve_allowed_source_file(store, run_id, archive_request["archive_path"])
+            return build_archived_source_api_preview(run_id, source_path, archive_request["entry_name"])
         source_path = resolve_allowed_source_file(store, run_id, path)
         return build_source_preview(run_id, source_path)
 
@@ -2273,6 +2283,13 @@ def resolve_allowed_source_file(store: RunJobStore, run_id: str, raw_path: str) 
     )
 
 
+def parse_source_preview_archive_request(raw_path: str) -> dict[str, str] | None:
+    try:
+        return parse_archived_source_request(raw_path)
+    except SourceReadError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
 def allowed_source_roots(summary: Dict[str, object]) -> list[Path]:
     roots: list[Path] = []
     for key in ("root", "scan_scope_root", "output_dir"):
@@ -3040,6 +3057,107 @@ def model_to_dict(model: BaseModel) -> Dict[str, object]:
     return model.dict()
 
 
+def build_archived_source_api_preview(run_id: str, archive_path: Path, entry_name: str, *, max_chars: int = 20000) -> Dict[str, object]:
+    try:
+        preview, archive_entry = build_archived_source_read_preview(
+            archive_path,
+            entry_name=entry_name,
+            max_chars=max_chars,
+            hex_bytes=HEX_PREVIEW_MAX_BYTES,
+        )
+    except SourceReadError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    stat = archive_path.stat()
+    displayed_entry = str(archive_entry["archive_entry_name"])
+    display_path = f"{archive_path}::{displayed_entry}"
+    entry_path = Path(displayed_entry)
+    suffix = entry_path.suffix.lower()
+    mime_type = mimetypes.guess_type(entry_path.name)[0] or "application/octet-stream"
+    quoted_archive_path = quote(str(archive_path))
+    quoted_display_path = quote(display_path)
+    source_locator = build_source_locator(preview)
+    viewer_limitations = source_viewer_limitations(archive_path, suffix=suffix, mime_type=mime_type, max_chars=max_chars)
+    viewer_limitations.extend(
+        [
+            "ZIP entry preview is read in-memory without extraction and is capped to one bounded archive member.",
+            "Archive completeness, original container provenance, nested archives, and encrypted entries require separate validation.",
+        ]
+    )
+    payload: Dict[str, object] = {
+        "path": display_path,
+        "container_path": str(archive_path),
+        "name": entry_path.name,
+        "extension": suffix,
+        "size": int(archive_entry["archive_entry_size"]),
+        "container_size": stat.st_size,
+        "modified_at": archive_entry.get("archive_entry_modified_at") or "",
+        "container_modified_at": dt.datetime.fromtimestamp(stat.st_mtime, dt.timezone.utc).isoformat(),
+        "mime_type": mime_type,
+        "download_url": f"/api/runs/{run_id}/source-file?path={quoted_archive_path}",
+        "metadata_url": f"/api/runs/{run_id}/source-metadata?path={quoted_archive_path}&hash=true",
+        "search_url": "",
+        "viewer_actions": archived_source_viewer_actions(run_id, archive_path, display_path),
+        "viewer_limitations": viewer_limitations,
+        "viewer_sandbox": source_viewer_sandbox(archive_path, suffix=suffix, mime_type=mime_type, max_chars=max_chars),
+        "source_viewer_specialization_profile": source_viewer_specialization_profile(
+            run_id=run_id,
+            source_path=archive_path,
+            suffix=suffix,
+            mime_type=mime_type,
+            max_chars=max_chars,
+        ),
+        "review_evidence_tray_profile": source_review_evidence_tray_profile(run_id=run_id, source_path=archive_path),
+        "review_workflow": source_review_workflow_metadata(),
+        "compare_workflow": source_compare_workflow_metadata(),
+        "compare_pin_profile": source_compare_pin_profile(run_id=run_id, source_path=archive_path),
+        "analyst_workbench_profile": source_analyst_workbench_profile(
+            run_id=run_id,
+            source_path=archive_path,
+            suffix=suffix,
+            mime_type=mime_type,
+            max_chars=max_chars,
+        ),
+        "preview_type": preview.get("preview_type", "binary"),
+        "text": preview.get("text", ""),
+        "hex": preview.get("hex", {}),
+        "truncated": bool(preview.get("truncated", False)),
+        "message": preview.get("message", "ZIP entry preview is available."),
+        "archive_entry": archive_entry,
+        "zip_entry": preview,
+        "source_locator": source_locator,
+        "viewer_metadata": {
+            "source_format": suffix.lstrip(".") or "archive-entry",
+            "strategy": preview.get("strategy", "bounded-zip-entry"),
+            "preview_status": "available",
+            "parser": "rapidtriage.source-viewer.zip-entry",
+            "parser_version": SOURCE_VIEWER_VERSION,
+            "container_type": "zip",
+            "container_path": str(archive_path),
+            "archive_entry_name": displayed_entry,
+            "archive_entry_crc32": archive_entry.get("archive_entry_crc32"),
+            "archive_entry_size": archive_entry.get("archive_entry_size"),
+            "source_preview_path": display_path,
+            "source_preview_url": f"/api/runs/{run_id}/source-preview?path={quoted_display_path}",
+        },
+    }
+    if suffix in {".json", ".jsonl", ".ndjson"} and preview.get("preview_type") == "text":
+        payload.update(build_json_preview_from_text(str(preview.get("text") or ""), suffix))
+        payload["viewer_metadata"].update(
+            {
+                "parser": "rapidtriage.source-viewer.zip-entry-json",
+                "container_type": "zip",
+                "container_path": str(archive_path),
+                "archive_entry_name": displayed_entry,
+                "archive_entry_crc32": archive_entry.get("archive_entry_crc32"),
+                "archive_entry_size": archive_entry.get("archive_entry_size"),
+                "source_preview_path": display_path,
+                "source_preview_url": f"/api/runs/{run_id}/source-preview?path={quoted_display_path}",
+            }
+        )
+    return payload
+
+
 def build_source_preview(run_id: str, source_path: Path, *, max_chars: int = 20000) -> Dict[str, object]:
     stat = source_path.stat()
     suffix = source_path.suffix.lower()
@@ -3184,6 +3302,46 @@ def source_viewer_actions(run_id: str, source_path: Path) -> list[dict[str, obje
             "url": None,
             "purpose": "Mark the result as relevant, rejected, needs-review, and optionally include it in reports.",
             "heavy": False,
+            "commercial_gap_ids": [VIEWER_WORKFLOW_GAP_IDS["review"]],
+            "status_fields": ["status", "verification_status", "reviewer", "assignee", "priority", "due_at", "include_in_report"],
+        },
+    ]
+
+
+def archived_source_viewer_actions(run_id: str, archive_path: Path, display_path: str) -> list[dict[str, object]]:
+    quoted_archive_path = quote(str(archive_path))
+    return [
+        {
+            "id": "download-container",
+            "label": "Open original ZIP container",
+            "url": f"/api/runs/{run_id}/source-file?path={quoted_archive_path}",
+            "purpose": "Open or download the authoritative archive for manual verification.",
+            "heavy": False,
+        },
+        {
+            "id": "hash-container",
+            "label": "Compute ZIP MD5/SHA1/SHA256",
+            "url": f"/api/runs/{run_id}/source-metadata?path={quoted_archive_path}&hash=true",
+            "purpose": "Calculate submission-friendly hashes for the original archive.",
+            "heavy": True,
+        },
+        {
+            "id": "pin-compare",
+            "label": "Pin entry for A/B/C compare",
+            "url": None,
+            "purpose": "Keep this ZIP entry available while opening one or two more results for side-by-side review.",
+            "heavy": False,
+            "source_preview_path": display_path,
+            "commercial_gap_ids": [VIEWER_WORKFLOW_GAP_IDS["compare"]],
+            "max_pinned_items": 3,
+        },
+        {
+            "id": "save-review",
+            "label": "Save review decision",
+            "url": None,
+            "purpose": "Mark the ZIP entry as relevant, rejected, needs-review, and optionally include it in reports.",
+            "heavy": False,
+            "source_preview_path": display_path,
             "commercial_gap_ids": [VIEWER_WORKFLOW_GAP_IDS["review"]],
             "status_fields": ["status", "verification_status", "reviewer", "assignee", "priority", "due_at", "include_in_report"],
         },
@@ -4841,6 +4999,51 @@ def build_json_preview(source_path: Path, suffix: str) -> Dict[str, object]:
         "text": formatted[:20000],
         "truncated": len(formatted) > 20000,
         "viewer_metadata": structured_viewer_metadata("json", "bounded-json-parse", "available"),
+        "json": {
+            "summary": preview,
+            "item_count": item_count,
+            "item_limit": JSON_PREVIEW_ITEM_LIMIT,
+            "truncated": item_count >= JSON_PREVIEW_ITEM_LIMIT,
+        },
+    }
+
+
+def build_json_preview_from_text(text: str, suffix: str) -> Dict[str, object]:
+    try:
+        if suffix == ".json":
+            data = json.loads(text)
+            preview = summarize_json_value(data)
+            formatted = json.dumps(data, ensure_ascii=False, indent=2)
+            item_count = json_item_count(data)
+        else:
+            rows = []
+            errors = []
+            for line_number, line in enumerate(text.splitlines(), start=1):
+                if not line.strip():
+                    continue
+                if len(rows) >= JSON_PREVIEW_ITEM_LIMIT:
+                    break
+                try:
+                    rows.append({"line": line_number, "value": summarize_json_value(json.loads(line))})
+                except json.JSONDecodeError as exc:
+                    errors.append({"line": line_number, "error": str(exc)})
+            preview = {"type": "jsonl", "rows": rows, "errors": errors[:5]}
+            formatted = "\n".join(text.splitlines()[:JSON_PREVIEW_ITEM_LIMIT])
+            item_count = len(rows)
+    except json.JSONDecodeError as exc:
+        return {
+            "preview_type": "text",
+            "message": f"JSON parse failed, showing text fallback: {exc}",
+            "text": text[:20000],
+            "truncated": len(text) > 20000,
+            "viewer_metadata": structured_viewer_metadata("json", "parse-fallback-text", "parse-failed"),
+        }
+    return {
+        "preview_type": "json",
+        "message": "JSON structured preview is available from a ZIP entry.",
+        "text": formatted[:20000],
+        "truncated": len(formatted) > 20000,
+        "viewer_metadata": structured_viewer_metadata("json", "bounded-zip-entry-json-parse", "available"),
         "json": {
             "summary": preview,
             "item_count": item_count,
