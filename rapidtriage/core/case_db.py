@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 import datetime as dt
 import hashlib
 import json
@@ -74,6 +75,7 @@ REVIEW_WORKFLOW_TRUSTED_DIFF_BLOCKER = "review-workflow-trusted-audit-diff-requi
 CASE_DB_SEARCH_SCAN_ROW_LIMIT = 100_000
 CASE_DB_SEARCH_SCAN_OVERSAMPLE = 100
 CASE_DB_SEARCH_MIN_SCAN_ROWS = 10_000
+CASE_SEARCH_CURSOR_VERSION = "case-search-cursor-v1"
 REVIEW_WORKFLOW_TRUSTED_TOOLS = {
     "analyst-review-log",
     "case-review-ground-truth",
@@ -469,6 +471,7 @@ class CaseDatabase:
         case_id: str,
         keywords: Iterable[str],
         limit: int = 100,
+        cursor: str = "",
         sources: Iterable[str] | None = None,
         metadata_filters: Iterable[str] | None = None,
         review_status: str | None = None,
@@ -480,7 +483,19 @@ class CaseDatabase:
         normalized_case_id = normalize_identifier(case_id, fallback="case")
         source_filter = {source.strip() for source in (sources or []) if source.strip()}
         metadata_filter = parse_metadata_filters(metadata_filters or [])
-        scan_candidate_limit = case_search_scan_candidate_limit(limit)
+        cursor_scope = case_search_cursor_scope(
+            case_id=normalized_case_id,
+            keywords=normalized_keywords,
+            sources=source_filter,
+            metadata_filter=metadata_filter,
+            review_status=review_status,
+            verification_status=verification_status,
+        )
+        page_offset = decode_case_search_cursor(cursor, expected_scope=cursor_scope) if cursor else 0
+        page_size = max(0, int(limit))
+        retrieval_limit = page_offset + page_size + 1 if page_size else 0
+        query_limit = retrieval_limit or limit
+        scan_candidate_limit = case_search_scan_candidate_limit(query_limit)
         with self.connect() as connection:
             apply_schema(connection)
             if connection.execute("SELECT 1 FROM case_record WHERE case_id = ?", (normalized_case_id,)).fetchone() is None:
@@ -490,19 +505,21 @@ class CaseDatabase:
                 normalized_case_id,
                 source_filter=source_filter,
                 limit=limit,
+                cursor_offset=page_offset,
+                retrieval_limit=retrieval_limit,
                 scan_candidate_limit=scan_candidate_limit,
             )
             matches: list[dict[str, object]] = []
             document_errors: list[dict[str, object]] = []
             if case_search_source_requested(source_filter, "documents"):
-                matches.extend(search_indexed_documents(connection, normalized_case_id, normalized_keywords, limit))
+                matches.extend(search_indexed_documents(connection, normalized_case_id, normalized_keywords, query_limit))
                 document_errors = case_document_extraction_errors(connection, normalized_case_id)
             if case_search_source_requested(source_filter, "files"):
-                matches.extend(search_file_records(connection, normalized_case_id, normalized_keywords, limit, scan_candidate_limit))
+                matches.extend(search_file_records(connection, normalized_case_id, normalized_keywords, query_limit, scan_candidate_limit))
             if case_search_source_requested(source_filter, "artifacts", "indicators"):
-                matches.extend(search_artifacts(connection, normalized_case_id, normalized_keywords, limit, scan_candidate_limit))
+                matches.extend(search_artifacts(connection, normalized_case_id, normalized_keywords, query_limit, scan_candidate_limit))
             if case_search_source_requested(source_filter, "timeline"):
-                matches.extend(search_events(connection, normalized_case_id, normalized_keywords, limit, scan_candidate_limit))
+                matches.extend(search_events(connection, normalized_case_id, normalized_keywords, query_limit, scan_candidate_limit))
             matches = attach_review_marks(connection, normalized_case_id, matches)
             if source_filter:
                 matches = [match for match in matches if str(match.get("source") or "") in source_filter]
@@ -521,8 +538,14 @@ class CaseDatabase:
                     if str((match.get("review") or {}).get("verification_status") or "unverified") == verification_status
                 ]
             matches = enrich_case_search_matches(matches, normalized_keywords)
-            if limit:
-                matches = matches[:limit]
+            total_returnable_count = len(matches)
+            has_more = False
+            next_cursor = ""
+            if page_size:
+                has_more = total_returnable_count > page_offset + page_size
+                matches = matches[page_offset : page_offset + page_size]
+                if has_more:
+                    next_cursor = encode_case_search_cursor(offset=page_offset + page_size, scope=cursor_scope)
 
         source_counts: dict[str, int] = {}
         keyword_counts: dict[str, int] = {keyword.lower(): 0 for keyword in normalized_keywords}
@@ -547,6 +570,11 @@ class CaseDatabase:
             "keywords": normalized_keywords,
             "options": {
                 "limit": limit,
+                "cursor": cursor,
+                "page_offset": page_offset,
+                "page_size": page_size,
+                "retrieval_limit": retrieval_limit,
+                "cursor_scope_hash": cursor_scope,
                 "sources": sorted(source_filter),
                 "metadata": dict(metadata_filter),
                 "review_status": review_status,
@@ -555,10 +583,31 @@ class CaseDatabase:
             },
             "summary": {
                 "match_count": len(matches),
+                "returned_count": len(matches),
+                "total_returnable_count": total_returnable_count,
+                "has_more": has_more,
+                "next_cursor": next_cursor,
                 "source_counts": source_counts,
                 "keyword_counts": keyword_counts,
                 "priority_counts": priority_counts,
                 "document_error_count": len(document_errors),
+                "cursor_api": {
+                    "profile_version": CASE_SEARCH_CURSOR_VERSION,
+                    "offset": page_offset,
+                    "page_size": page_size,
+                    "has_more": has_more,
+                    "next_cursor": next_cursor,
+                    "scope_hash": cursor_scope,
+                    "stable_scope_fields": [
+                        "case_id",
+                        "keywords",
+                        "sources",
+                        "metadata",
+                        "review_status",
+                        "verification_status",
+                    ],
+                    "commercial_gap_ids": ["#78", "#79"],
+                },
             },
             "documents": {
                 "errors": document_errors,
@@ -2983,12 +3032,63 @@ def case_table_has_more_than_scan_limit(
     return row is not None
 
 
+def case_search_cursor_scope(
+    *,
+    case_id: str,
+    keywords: Sequence[str],
+    sources: set[str],
+    metadata_filter: Mapping[str, str],
+    review_status: str | None,
+    verification_status: str | None,
+) -> str:
+    payload = {
+        "case_id": case_id,
+        "keywords": [keyword.strip().lower() for keyword in keywords],
+        "sources": sorted(sources),
+        "metadata": dict(sorted(metadata_filter.items())),
+        "review_status": review_status or "",
+        "verification_status": verification_status or "",
+    }
+    return hashlib.sha256(json.dumps(payload, ensure_ascii=False, sort_keys=True).encode("utf-8")).hexdigest()
+
+
+def encode_case_search_cursor(*, offset: int, scope: str) -> str:
+    payload = {
+        "version": CASE_SEARCH_CURSOR_VERSION,
+        "offset": max(0, int(offset)),
+        "scope": scope,
+    }
+    raw = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    return base64.urlsafe_b64encode(raw).decode("ascii").rstrip("=")
+
+
+def decode_case_search_cursor(cursor: str, *, expected_scope: str) -> int:
+    token = cursor.strip()
+    if not token:
+        return 0
+    try:
+        padded = token + ("=" * (-len(token) % 4))
+        payload = json.loads(base64.urlsafe_b64decode(padded.encode("ascii")).decode("utf-8"))
+    except (ValueError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise CaseDatabaseError("invalid case-search cursor") from exc
+    if not isinstance(payload, Mapping) or payload.get("version") != CASE_SEARCH_CURSOR_VERSION:
+        raise CaseDatabaseError("invalid case-search cursor version")
+    if str(payload.get("scope") or "") != expected_scope:
+        raise CaseDatabaseError("case-search cursor does not match the current query")
+    offset = optional_int(payload.get("offset"))
+    if offset is None or offset < 0:
+        raise CaseDatabaseError("invalid case-search cursor offset")
+    return offset
+
+
 def build_case_search_execution_plan(
     connection: sqlite3.Connection,
     case_id: str,
     *,
     source_filter: set[str],
     limit: int,
+    cursor_offset: int,
+    retrieval_limit: int,
     scan_candidate_limit: int,
 ) -> dict[str, object]:
     requested_sources = sorted(source_filter)
@@ -3011,6 +3111,8 @@ def build_case_search_execution_plan(
             "table": table_name,
             "fts_table": fts_table,
             "limit": limit,
+            "cursor_offset": cursor_offset,
+            "retrieval_limit": retrieval_limit,
             "scan_candidate_limit": scan_candidate_limit if uses_scan_cap else None,
             "partial_coverage_warning": False,
             "notes": list(notes),
@@ -3071,6 +3173,8 @@ def build_case_search_execution_plan(
         "requested_sources": requested_sources,
         "scan_policy": {
             "scan_candidate_limit": scan_candidate_limit,
+            "cursor_offset": cursor_offset,
+            "retrieval_limit": retrieval_limit,
             "min_scan_rows": CASE_DB_SEARCH_MIN_SCAN_ROWS,
             "max_scan_rows": CASE_DB_SEARCH_SCAN_ROW_LIMIT,
             "oversample_per_requested_result": CASE_DB_SEARCH_SCAN_OVERSAMPLE,

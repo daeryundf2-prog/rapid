@@ -1234,6 +1234,7 @@ def build_parser() -> argparse.ArgumentParser:
     case_search.add_argument("--case-id", required=True, help="Case ID to search")
     case_search.add_argument("-k", "--keyword", action="append", required=True, help="Keyword to search for")
     case_search.add_argument("--limit", type=int, default=100, help="Maximum number of combined matches")
+    case_search.add_argument("--cursor", default="", help="Opaque next_cursor from a previous case-search response")
     case_search.add_argument("--source", action="append", help="Limit to a result source such as documents, files, artifacts, indicators, or timeline")
     case_search.add_argument("--metadata", action="append", help="Limit artifact/timeline results by metadata KEY=VALUE, repeatable")
     case_search.add_argument("--review-status", help="Limit by analyst review status")
@@ -2673,6 +2674,7 @@ def main(argv=None) -> int:
                 case_id=args.case_id,
                 keywords=resolved_keywords,
                 limit=args.limit,
+                cursor=args.cursor,
                 sources=args.source,
                 metadata_filters=args.metadata,
                 review_status=args.review_status,

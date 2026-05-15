@@ -96,6 +96,7 @@ class RapidTriageCaseDatabaseTests(unittest.TestCase):
         self.assertIn("--verification-status", commands["case-search"].format_help())
         self.assertIn("--save-as", commands["case-search"].format_help())
         self.assertIn("--keyword-pack", commands["case-search"].format_help())
+        self.assertIn("--cursor", commands["case-search"].format_help())
         self.assertIn("case-review", commands)
         self.assertIn("--include-in-report", commands["case-review"].format_help())
         self.assertIn("--exclude-from-report", commands["case-review"].format_help())
@@ -781,6 +782,34 @@ class RapidTriageCaseDatabaseTests(unittest.TestCase):
             self.assertIn("artifacts", sources)
             self.assertIn("timeline", sources)
             self.assertTrue(all(str(match["citation_id"]).startswith("CASE-SEARCH-001-") for match in payload["matches"]))
+
+            first_page = database.search_case(
+                case_id="CASE-SEARCH-001",
+                keywords=["password", "payload-installer", "download"],
+                limit=1,
+            )
+            self.assertEqual(first_page["summary"]["returned_count"], 1)
+            self.assertTrue(first_page["summary"]["has_more"])
+            self.assertTrue(first_page["summary"]["next_cursor"])
+            self.assertEqual(first_page["summary"]["cursor_api"]["profile_version"], "case-search-cursor-v1")
+            self.assertEqual(first_page["options"]["page_offset"], 0)
+
+            second_page = database.search_case(
+                case_id="CASE-SEARCH-001",
+                keywords=["password", "payload-installer", "download"],
+                limit=1,
+                cursor=first_page["summary"]["next_cursor"],
+            )
+            self.assertEqual(second_page["options"]["page_offset"], 1)
+            self.assertEqual(second_page["summary"]["returned_count"], 1)
+            self.assertNotEqual(first_page["matches"][0]["citation_id"], second_page["matches"][0]["citation_id"])
+            with self.assertRaisesRegex(CaseDatabaseError, "cursor does not match"):
+                database.search_case(
+                    case_id="CASE-SEARCH-001",
+                    keywords=["different"],
+                    limit=1,
+                    cursor=first_page["summary"]["next_cursor"],
+                )
 
     def test_case_search_exposes_windows_artifact_paths_and_metadata_for_review(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
