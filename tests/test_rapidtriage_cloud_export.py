@@ -781,6 +781,43 @@ class RapidTriageCloudExportTests(unittest.TestCase):
             )
             self.assertEqual(slack["details"]["cloud_family"], "collaboration-saas")
             self.assertIn("workspace-plan-dependent-export-scope", slack["details"]["cloud_provider_profile"]["known_gaps"])
+            self.assertEqual(slack["details"]["channel_id"], "C123")
+            self.assertEqual(slack["details"]["thread_root_id"], "1745640000.000100")
+            self.assertEqual(slack["details"]["attachment_count"], 1)
+            self.assertEqual(slack["details"]["attachment_names"], ["case-note.txt"])
+            self.assertEqual(slack["details"]["reaction_count"], 1)
+            self.assertEqual(slack["details"]["reaction_types"], ["eyes"])
+            self.assertEqual(
+                slack["details"]["collaboration_message_review_profile"]["profile_version"],
+                "collaboration-message-review-profile-v1",
+            )
+            self.assertEqual(
+                slack["details"]["collaboration_message_review_profile"]["source_track"],
+                "collaboration-saas-export-row",
+            )
+            self.assertIn(
+                "channel_id",
+                slack["details"]["collaboration_message_review_profile"]["present_primary_pivots"],
+            )
+            self.assertTrue(slack["details"]["validation_checks"]["collaboration_message_review_profile_emitted"])
+            self.assertTrue(slack["details"]["validation_checks"]["collaboration_thread_or_channel_pivot_present"])
+            self.assertTrue(slack["details"]["validation_checks"]["collaboration_attachment_inventory_emitted"])
+            self.assertTrue(slack["details"]["validation_checks"]["collaboration_reaction_inventory_emitted"])
+            slack_manifest = slack["details"]["cloud_export_import_manifest"]
+            self.assertEqual(
+                slack_manifest["provider_review"]["profile_version"],
+                "collaboration-message-review-profile-v1",
+            )
+            self.assertIn("channel_id", slack_manifest["row_pivots"])
+            self.assertIn("reaction_count", slack_manifest["row_pivots"])
+            self.assertIn(
+                "channel_id=C123",
+                slack["details"]["cloud_analyst_review_profile"]["row_pivots"],
+            )
+            self.assertIn(
+                "collaboration_message_review_profile",
+                slack["details"]["cloud_analyst_review_profile"]["provider_profiles_present"],
+            )
 
             audit = next(artifact for artifact in payload["artifacts"] if artifact["artifact_type"] == "cloud-audit")
             self.assertEqual(audit["details"]["service"], "microsoft-365")
@@ -1064,9 +1101,18 @@ def write_cloud_export_fixtures(root: Path) -> None:
                 {
                     "timestamp": "2026-04-26T08:00:00Z",
                     "channelId": "C123",
+                    "thread_ts": "1745640000.000100",
                     "id": "slack-msg-1",
                     "user": "alice@example.com",
                     "text": "Slack export message",
+                    "files": [
+                        {
+                            "id": "F123",
+                            "name": "case-note.txt",
+                            "url_private": "https://files.slack.example/case-note.txt",
+                        }
+                    ],
+                    "reactions": [{"name": "eyes", "users": ["bob@example.com"]}],
                 }
             ]
         ),

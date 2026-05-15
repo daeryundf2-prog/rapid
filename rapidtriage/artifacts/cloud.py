@@ -1506,13 +1506,130 @@ def teams_message_review_profile(row: Mapping[str, object], *, source_path: str)
     }
 
 
+COLLABORATION_MESSAGE_SERVICES = {
+    "slack",
+    "discord",
+    "dropbox",
+    "box",
+    "zoom",
+    "notion",
+    "atlassian",
+    "github",
+}
+
+
+def is_collaboration_saas_message_service(service: str) -> bool:
+    return service in COLLABORATION_MESSAGE_SERVICES
+
+
+def collaboration_message_review_profile(
+    row: Mapping[str, object],
+    *,
+    service: str,
+    source_path: str,
+) -> dict[str, object]:
+    attachments = sequence_value(row, ("attachments", "files", "file", "media", "sharedFiles"))
+    reactions = sequence_value(row, ("reactions", "reactionSummary", "likes", "emoji_reactions"))
+    attachment_names: list[str] = []
+    attachment_url_hashes: list[str] = []
+    attachment_ids: list[str] = []
+    for item in attachments:
+        if isinstance(item, Mapping):
+            name = optional_text(first_value(item, ("name", "fileName", "filename", "title", "displayName")))
+            attachment_id = optional_text(first_value(item, ("id", "fileId", "file_id", "url_private")))
+            url = optional_text(first_value(item, ("url", "url_private", "permalink", "downloadUrl", "webUrl")))
+        else:
+            name = optional_text(item)
+            attachment_id = ""
+            url = optional_text(item) if optional_text(item).lower().startswith(("http://", "https://")) else ""
+        if name:
+            attachment_names.append(name)
+        if attachment_id:
+            attachment_ids.append(attachment_id)
+        if url:
+            attachment_url_hashes.append(sha256_text(url))
+
+    reaction_types: list[str] = []
+    reaction_actors: list[str] = []
+    for item in reactions:
+        if isinstance(item, Mapping):
+            reaction_type = optional_text(first_value(item, ("name", "type", "emoji", "reactionType")))
+            users = sequence_value(item, ("users", "user", "actors", "actor"))
+            for user in users:
+                actor = normalize_cloud_actor(user)
+                if actor:
+                    reaction_actors.append(actor)
+        else:
+            reaction_type = optional_text(item)
+        if reaction_type:
+            reaction_types.append(reaction_type)
+
+    edited_value = first_value(row, ("edited", "editedAt", "edited_at", "lastEdited", "lastModified", "updated"))
+    deleted_value = first_value(row, ("deleted", "deletedAt", "deleted_at", "is_deleted", "isDeleted"))
+    thread_root_id = optional_text(
+        first_value(row, ("thread_ts", "threadId", "thread_id", "rootMessageId", "parentMessageId", "conversationId"))
+    )
+    parent_id = optional_text(first_value(row, ("parent_id", "parentId", "replyToId", "reply_to", "replyToMessageId")))
+    pivots = {
+        "workspace_id": optional_text(first_value(row, ("workspaceId", "workspace_id", "teamId", "team_id", "enterprise_id"))),
+        "channel_id": optional_text(first_value(row, ("channelId", "channel_id", "channel", "roomId", "room_id"))),
+        "thread_root_id": thread_root_id,
+        "message_id": optional_text(first_value(row, ("id", "messageId", "message_id", "client_msg_id", "ts", "event_ts"))),
+        "attachment_count": str(len(attachments)) if attachments else "",
+        "reaction_count": str(len(reactions)) if reactions else "",
+    }
+    expected_pivots = ["workspace_id", "channel_id", "thread_root_id", "message_id", "attachment_count", "reaction_count"]
+    present_pivots = [key for key in expected_pivots if optional_text(pivots.get(key))]
+    return {
+        "profile_version": "collaboration-message-review-profile-v1",
+        "source_track": "collaboration-saas-export-row",
+        "service": service,
+        "workspace_id": pivots["workspace_id"],
+        "channel_id": pivots["channel_id"],
+        "thread_root_id": thread_root_id,
+        "parent_message_id": parent_id,
+        "message_id": pivots["message_id"],
+        "expected_primary_pivots": expected_pivots,
+        "present_primary_pivots": present_pivots,
+        "primary_pivot_present": bool(present_pivots),
+        "review_display_mode": "collaboration-thread-row-with-metadata-collapsed",
+        "edited_status": "edited-hint-present" if edited_value not in (None, "", False) else "not-observed",
+        "deleted_status": "deleted-hint-present" if deleted_value not in (None, "", False) else "not-observed",
+        "attachment_count": len(attachments),
+        "attachment_names": attachment_names[:20],
+        "attachment_ids": attachment_ids[:20],
+        "attachment_url_sha256": attachment_url_hashes[:20],
+        "reaction_count": len(reactions),
+        "reaction_types": sorted(set(reaction_types))[:20],
+        "reaction_actor_count": len(set(reaction_actors)),
+        "reaction_actor_sha256": [sha256_text(actor) for actor in sorted(set(reaction_actors))[:20]],
+        "source_path_hints": {
+            "slack_path": "slack" in source_path.lower(),
+            "discord_path": "discord" in source_path.lower(),
+            "collaboration_export_path": any(
+                token in source_path.lower()
+                for token in ("slack", "discord", "dropbox", "box", "zoom", "notion", "atlassian", "github")
+            ),
+        },
+        "metadata_collapsed_by_default": True,
+        "commercial_blockers": [
+            "workspace-export-scope-validation-required",
+            "thread-reaction-edit-delete-provider-diff-required",
+            "file-sharing-version-state-provider-diff-required",
+            "known-answer-collaboration-export-corpus-required",
+        ],
+    }
+
+
 def normalize_cloud_message(row: Mapping[str, object], *, source_path: str) -> dict[str, object]:
     text = normalize_cloud_message_text(first_value(row, ("messageText", "messagetext", "body", "bodyContent", "content", "text")))
     service = service_from_path(source_path, default="microsoft-teams" if "teams" in source_path.lower() else "cloud-message")
     is_microsoft_teams = service == "microsoft-teams"
+    is_collaboration_saas = is_collaboration_saas_message_service(service)
     attachment_profile = teams_attachment_review_profile(row)
     reaction_profile = teams_reaction_review_profile(row)
     message_profile = teams_message_review_profile(row, source_path=source_path)
+    collaboration_profile = collaboration_message_review_profile(row, service=service, source_path=source_path)
     archive_fields = {
         key: row[key]
         for key in (
@@ -1534,6 +1651,13 @@ def normalize_cloud_message(row: Mapping[str, object], *, source_path: str) -> d
             "teams_reply_pivot_present": is_microsoft_teams and bool(message_profile.get("reply_to_message_id")),
             "teams_attachment_inventory_emitted": is_microsoft_teams and bool(attachment_profile.get("attachment_count")),
             "teams_reaction_inventory_emitted": is_microsoft_teams and bool(reaction_profile.get("reaction_count")),
+            "collaboration_message_review_profile_emitted": is_collaboration_saas,
+            "collaboration_thread_or_channel_pivot_present": is_collaboration_saas
+            and bool(collaboration_profile.get("thread_root_id") or collaboration_profile.get("channel_id")),
+            "collaboration_attachment_inventory_emitted": is_collaboration_saas
+            and bool(collaboration_profile.get("attachment_count")),
+            "collaboration_reaction_inventory_emitted": is_collaboration_saas
+            and bool(collaboration_profile.get("reaction_count")),
         }
     )
     if archive_fields:
@@ -1559,18 +1683,33 @@ def normalize_cloud_message(row: Mapping[str, object], *, source_path: str) -> d
         if is_microsoft_teams
         else {}
     )
+    collaboration_fields = (
+        {
+            "thread_root_id": optional_text(collaboration_profile.get("thread_root_id")),
+            "reply_to_message_id": optional_text(collaboration_profile.get("parent_message_id")),
+            "attachment_count": int(collaboration_profile.get("attachment_count") or 0),
+            "attachment_names": list(collaboration_profile.get("attachment_names") or []),
+            "attachment_content_url_sha256": list(collaboration_profile.get("attachment_url_sha256") or []),
+            "reaction_count": int(collaboration_profile.get("reaction_count") or 0),
+            "reaction_types": list(collaboration_profile.get("reaction_types") or []),
+            "collaboration_message_review_profile": collaboration_profile,
+        }
+        if is_collaboration_saas
+        else {}
+    )
     return {
         "service": service,
         "event_type": "message",
         "timestamp": normalize_timestamp(first_value(row, ("createdDateTime", "lastModifiedDateTime", "time", "timestamp", "date"))),
-        "team_id": optional_text(first_value(row, ("teamId", "teamid"))),
-        "channel_id": optional_text(first_value(row, ("channelId", "channelid"))),
+        "team_id": optional_text(first_value(row, ("teamId", "teamid", "team_id"))),
+        "channel_id": optional_text(first_value(row, ("channelId", "channelid", "channel_id", "channel", "roomId", "room_id"))),
         "chat_id": optional_text(first_value(row, ("chatId", "chatid", "conversationId"))),
-        "message_id": optional_text(first_value(row, ("id", "messageId", "messageid"))),
+        "message_id": optional_text(first_value(row, ("id", "messageId", "messageid", "message_id", "client_msg_id", "ts", "event_ts"))),
         "sender": normalize_cloud_actor(first_value(row, ("from", "sender", "user", "actor"))),
         "message_text_preview": text[:1000],
         "message_text_sha256": sha256_text(text) if text else "",
         **teams_fields,
+        **collaboration_fields,
         "risk_flags": ["cloud-message"] + cloud_text_risk_flags("", text),
         "validation_checks": validation_checks,
         "commercial_grade_blockers": cloud_blockers("cloud-message"),
@@ -1882,12 +2021,20 @@ def service_from_path(source_path: str, *, default: str) -> str:
         return "gmail-takeout"
     if "slack" in lowered:
         return "slack"
+    if "discord" in lowered:
+        return "discord"
     if "dropbox" in lowered:
         return "dropbox"
     if "/box/" in lowered or "\\box\\" in lowered or "box export" in lowered:
         return "box"
     if "zoom" in lowered:
         return "zoom"
+    if "notion" in lowered:
+        return "notion"
+    if "atlassian" in lowered or "confluence" in lowered or "jira" in lowered:
+        return "atlassian"
+    if "github" in lowered:
+        return "github"
     if "icloud" in lowered or "apple" in lowered:
         return "apple-icloud-export"
     if "teams" in lowered:
@@ -1905,7 +2052,7 @@ def cloud_gap_ids(service: str, artifact_type: str) -> CloudGap:
     lowered = f"{service} {artifact_type}".lower()
     if any(token in lowered for token in ("iaas", "cloudtrail", "aws", "azure", "entra", "gcp-audit", "google cloud")):
         return ["#40"], "iaas-cloud"
-    if any(token in lowered for token in ("slack", "dropbox", "box", "zoom", "notion", "atlassian", "github")):
+    if any(token in lowered for token in ("slack", "discord", "dropbox", "box", "zoom", "notion", "atlassian", "github")):
         return ["#37", "#38", "#39"], "collaboration-saas"
     if any(token in lowered for token in ("microsoft", "m365", "office", "onedrive", "teams")):
         return ["#39"], "microsoft-365"
@@ -2247,6 +2394,7 @@ def cloud_commercial_uplift_evidence(
             "google_takeout_review_profile_present": bool(details.get("google_takeout_review_profile")),
             "icloud_export_review_profile_present": bool(details.get("icloud_export_review_profile")),
             "m365_export_review_profile_present": bool(details.get("m365_export_review_profile")),
+            "collaboration_message_review_profile_present": bool(details.get("collaboration_message_review_profile")),
             "cloud_export_import_manifest_hash": optional_text(export_manifest.get("manifest_sha256")),
             "cloud_export_source_locator_present": isinstance(export_manifest.get("source_viewer_locator"), Mapping),
             "google_takeout_parser_manifest_hash": optional_text(google_manifest.get("manifest_sha256")),
@@ -2315,7 +2463,12 @@ def build_cloud_export_import_manifest(
         if isinstance(details.get("m365_export_review_profile"), Mapping)
         else {}
     )
-    primary_profile = google_profile or icloud_profile or m365_profile
+    collaboration_profile = (
+        details.get("collaboration_message_review_profile")
+        if isinstance(details.get("collaboration_message_review_profile"), Mapping)
+        else {}
+    )
+    primary_profile = google_profile or icloud_profile or m365_profile or collaboration_profile
     row_pivots = {
         key: optional_text(details.get(key))
         for key in (
@@ -2324,6 +2477,7 @@ def build_cloud_export_import_manifest(
             "thread_parent_id",
             "normalized_thread_subject",
             "reply_to_message_id",
+            "channel_id",
             "file_id",
             "subject",
             "file_name",
@@ -2374,7 +2528,9 @@ def build_cloud_export_import_manifest(
         "provider_review": {
             "profile_version": optional_text(primary_profile.get("profile_version")),
             "product_or_workload_family": optional_text(
-                primary_profile.get("product_family") or primary_profile.get("workload_family")
+                primary_profile.get("product_family")
+                or primary_profile.get("workload_family")
+                or primary_profile.get("source_track")
             ),
             "present_primary_pivots": primary_profile.get("present_primary_pivots", []),
             "primary_pivot_present": bool(primary_profile.get("primary_pivot_present")),
@@ -3659,7 +3815,12 @@ def cloud_analyst_review_profile(
         row_pivots = []
     profile_names = [
         key
-        for key in ("google_takeout_review_profile", "icloud_export_review_profile", "m365_export_review_profile")
+        for key in (
+            "google_takeout_review_profile",
+            "icloud_export_review_profile",
+            "m365_export_review_profile",
+            "collaboration_message_review_profile",
+        )
         if isinstance(details.get(key), Mapping)
     ]
     return {
