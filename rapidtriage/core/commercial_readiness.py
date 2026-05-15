@@ -255,10 +255,16 @@ def load_mac_first_evidence(path: Path) -> dict[str, object]:
     summary = raw.get("summary") if isinstance(raw.get("summary"), Mapping) else {}
     outputs = raw.get("outputs") if isinstance(raw.get("outputs"), Mapping) else {}
     blockers = raw.get("commercial_grade_blockers")
-    large_case = raw.get("large_case_readiness") if isinstance(raw.get("large_case_readiness"), Mapping) else {}
+    embedded_large_case = raw.get("large_case_readiness") if isinstance(raw.get("large_case_readiness"), Mapping) else {}
+    large_case = raw if command == "large-case-readiness" else embedded_large_case
     selected_tool = raw.get("selected_tool") if isinstance(raw.get("selected_tool"), Mapping) else {}
     evidence_manifest = raw.get("evidence_manifest") if isinstance(raw.get("evidence_manifest"), Mapping) else {}
     uplift = raw.get("commercial_uplift_evidence") if isinstance(raw.get("commercial_uplift_evidence"), Mapping) else {}
+    large_case_summary = large_case.get("summary") if isinstance(large_case.get("summary"), Mapping) else {}
+    case_db_profile = large_case.get("case_db_profile") if isinstance(large_case.get("case_db_profile"), Mapping) else {}
+    search_diagnostics = (
+        case_db_profile.get("search_diagnostics") if isinstance(case_db_profile.get("search_diagnostics"), Mapping) else {}
+    )
     return {
         "path": str(resolved),
         "path_sha256": sha256_file(resolved),
@@ -272,11 +278,10 @@ def load_mac_first_evidence(path: Path) -> dict[str, object]:
         "failed_or_blocked_checks": list(uplift.get("failed_or_blocked_checks") or []),
         "commercial_grade_blockers": list(blockers or []),
         "large_case_status": str(large_case.get("status") or ""),
-        "large_case_largest_record_count": (
-            large_case.get("summary", {}).get("largest_benchmark_record_count")
-            if isinstance(large_case.get("summary"), Mapping)
-            else None
-        ),
+        "large_case_largest_record_count": large_case_summary.get("largest_benchmark_record_count"),
+        "large_case_search_diagnostics_ready": large_case_summary.get("case_db_search_diagnostics_ready"),
+        "large_case_search_diagnostics_hash": str(search_diagnostics.get("profile_hash") or ""),
+        "large_case_search_diagnostics_fts_table_count": search_diagnostics.get("fts_table_count"),
         "supported_backlog_items": _mac_first_evidence_target_items(raw),
         "evidence_manifest_hash": str(
             evidence_manifest.get("manifest_sha256") or uplift.get("evidence_manifest_hash") or ""
@@ -321,6 +326,9 @@ def build_mac_first_evidence_summary(
         "rows": rows,
         "blocker_counts": dict(sorted(blocker_counts.items())),
         "failed_check_counts": dict(sorted(failed_check_counts.items())),
+        "large_case_search_diagnostics_ready_count": sum(
+            1 for row in rows if row.get("large_case_search_diagnostics_ready") is True
+        ),
         "supports_backlog_items": supported_items,
         "claim_effect": (
             "Mac-first evidence is preparatory only: it can prove local plumbing, source-viewer handoff, "

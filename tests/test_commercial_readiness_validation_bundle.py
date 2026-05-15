@@ -128,6 +128,54 @@ class CommercialReadinessValidationBundleTests(unittest.TestCase):
         self.assertEqual(row["evidence_manifest_hash"], "m" * 64)
         self.assertFalse(report["commercial_claim_allowed"])
 
+    def test_commercial_readiness_attaches_direct_large_case_search_diagnostics(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            evidence_path = Path(tmp_dir) / "large-case-readiness.json"
+            evidence_path.write_text(
+                json.dumps(
+                    {
+                        "command": "large-case-readiness",
+                        "profile_version": "large-case-readiness-v1",
+                        "status": "needs-large-case-evidence",
+                        "summary": {
+                            "largest_benchmark_record_count": 100000,
+                            "case_db_attached": True,
+                            "case_db_search_diagnostics_ready": True,
+                        },
+                        "case_db_profile": {
+                            "attached": True,
+                            "search_diagnostics": {
+                                "profile_version": "case-db-search-diagnostics-v1",
+                                "ready": True,
+                                "fts_table_count": 2,
+                                "profile_hash": "d" * 64,
+                            },
+                        },
+                        "commercial_grade_blockers": [
+                            "attach-10m-record-sqlite-fts-benchmark-json",
+                        ],
+                    },
+                    ensure_ascii=False,
+                ),
+                encoding="utf-8",
+            )
+
+            report = build_commercial_readiness_report(mac_first_evidence_paths=[evidence_path])
+
+        mac_first = report["mac_first_evidence_summary"]
+        self.assertTrue(mac_first["attached"])
+        self.assertEqual(mac_first["large_case_search_diagnostics_ready_count"], 1)
+        self.assertIn(74, mac_first["supports_backlog_items"])
+        row = mac_first["rows"][0]
+        self.assertEqual(row["command"], "large-case-readiness")
+        self.assertEqual(row["large_case_status"], "needs-large-case-evidence")
+        self.assertEqual(row["large_case_largest_record_count"], 100000)
+        self.assertTrue(row["large_case_search_diagnostics_ready"])
+        self.assertEqual(row["large_case_search_diagnostics_hash"], "d" * 64)
+        self.assertEqual(row["large_case_search_diagnostics_fts_table_count"], 2)
+        self.assertIn("attach-10m-record-sqlite-fts-benchmark-json", mac_first["blocker_counts"])
+        self.assertFalse(report["commercial_claim_allowed"])
+
     def test_commercial_readiness_discovers_mac_first_evidence_from_directory(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             root = Path(tmp_dir) / "qc"
