@@ -485,6 +485,13 @@ class CaseDatabase:
             apply_schema(connection)
             if connection.execute("SELECT 1 FROM case_record WHERE case_id = ?", (normalized_case_id,)).fetchone() is None:
                 raise CaseDatabaseError(f"case not found: {normalized_case_id}")
+            large_case_search_plan = build_case_search_execution_plan(
+                connection,
+                normalized_case_id,
+                source_filter=source_filter,
+                limit=limit,
+                scan_candidate_limit=scan_candidate_limit,
+            )
             matches: list[dict[str, object]] = []
             document_errors: list[dict[str, object]] = []
             if case_search_source_requested(source_filter, "documents"):
@@ -556,6 +563,7 @@ class CaseDatabase:
             "documents": {
                 "errors": document_errors,
             },
+            "large_case_search_plan": large_case_search_plan,
             "review_workflow_summary": review_workflow_summary,
             "matches": matches,
         }
@@ -2951,6 +2959,126 @@ def artifact_match_source(artifact_type: str) -> str:
 
 def case_search_source_requested(source_filter: set[str], *sources: str) -> bool:
     return not source_filter or any(source in source_filter for source in sources)
+
+
+def case_table_has_more_than_scan_limit(
+    connection: sqlite3.Connection,
+    *,
+    table_name: str,
+    case_id: str,
+    scan_candidate_limit: int,
+) -> bool:
+    if scan_candidate_limit <= 0:
+        return False
+    row = connection.execute(
+        f"""
+        SELECT 1
+        FROM {table_name}
+        WHERE case_id = ?
+        ORDER BY id ASC
+        LIMIT 1 OFFSET ?
+        """,
+        (case_id, scan_candidate_limit),
+    ).fetchone()
+    return row is not None
+
+
+def build_case_search_execution_plan(
+    connection: sqlite3.Connection,
+    case_id: str,
+    *,
+    source_filter: set[str],
+    limit: int,
+    scan_candidate_limit: int,
+) -> dict[str, object]:
+    requested_sources = sorted(source_filter)
+    sources: list[dict[str, object]] = []
+
+    def add_source(
+        *,
+        source: str,
+        requested: bool,
+        backend: str,
+        table_name: str,
+        uses_scan_cap: bool,
+        fts_table: str = "",
+        notes: Sequence[str] = (),
+    ) -> None:
+        entry: dict[str, object] = {
+            "source": source,
+            "requested": requested,
+            "backend": backend if requested else "skipped",
+            "table": table_name,
+            "fts_table": fts_table,
+            "limit": limit,
+            "scan_candidate_limit": scan_candidate_limit if uses_scan_cap else None,
+            "partial_coverage_warning": False,
+            "notes": list(notes),
+        }
+        if requested and uses_scan_cap:
+            has_more = case_table_has_more_than_scan_limit(
+                connection,
+                table_name=table_name,
+                case_id=case_id,
+                scan_candidate_limit=scan_candidate_limit,
+            )
+            entry["partial_coverage_warning"] = has_more
+            if has_more:
+                entry["notes"].append(
+                    "bounded scan reached candidate cap; use FTS-backed sources or narrower filters for complete large-case search"
+                )
+        sources.append(entry)
+
+    add_source(
+        source="documents",
+        requested=case_search_source_requested(source_filter, "documents"),
+        backend="sqlite-fts5",
+        table_name="indexed_document",
+        fts_table="indexed_document_fts",
+        uses_scan_cap=False,
+        notes=("full-text index over extracted/OCR/document text",),
+    )
+    add_source(
+        source="files",
+        requested=case_search_source_requested(source_filter, "files"),
+        backend="bounded-scan",
+        table_name="file_record",
+        uses_scan_cap=True,
+        notes=("path/extension/hash metadata scan is capped for large-case responsiveness",),
+    )
+    artifact_requested = case_search_source_requested(source_filter, "artifacts", "indicators")
+    artifact_uses_fts = artifact_requested and artifact_fts_has_rows(connection, case_id)
+    add_source(
+        source="artifacts",
+        requested=artifact_requested,
+        backend="sqlite-fts5" if artifact_uses_fts else "bounded-scan",
+        table_name="artifact",
+        fts_table="artifact_fts" if artifact_uses_fts else "",
+        uses_scan_cap=not artifact_uses_fts,
+        notes=("artifact and indicator rows share this backend; source filters are applied after matching",),
+    )
+    add_source(
+        source="timeline",
+        requested=case_search_source_requested(source_filter, "timeline"),
+        backend="bounded-scan",
+        table_name="event",
+        uses_scan_cap=True,
+        notes=("timeline scan is capped until event FTS/cursor indexing is available",),
+    )
+    return {
+        "profile_version": "case-search-large-case-plan-v1",
+        "case_id": case_id,
+        "requested_sources": requested_sources,
+        "scan_policy": {
+            "scan_candidate_limit": scan_candidate_limit,
+            "min_scan_rows": CASE_DB_SEARCH_MIN_SCAN_ROWS,
+            "max_scan_rows": CASE_DB_SEARCH_SCAN_ROW_LIMIT,
+            "oversample_per_requested_result": CASE_DB_SEARCH_SCAN_OVERSAMPLE,
+        },
+        "sources": sources,
+        "commercial_gap_ids": ["#61", "#74", "#78", "#79"],
+        "status": "validated-local-search-plan-validation-required",
+    }
 
 
 def case_search_scan_candidate_limit(limit: int) -> int:

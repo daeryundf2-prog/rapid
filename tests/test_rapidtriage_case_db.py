@@ -530,6 +530,16 @@ class RapidTriageCaseDatabaseTests(unittest.TestCase):
 
                     self.assertEqual(payload["options"]["scan_candidate_limit"], 10_000)
                     self.assertEqual(payload["summary"]["match_count"], 0)
+                    self.assertEqual(payload["large_case_search_plan"]["profile_version"], "case-search-large-case-plan-v1")
+                    source_plan = {
+                        item["source"]: item
+                        for item in payload["large_case_search_plan"]["sources"]
+                    }[source]
+                    self.assertEqual(source_plan["requested"], True)
+                    self.assertEqual(source_plan["backend"], "bounded-scan")
+                    self.assertEqual(source_plan["scan_candidate_limit"], 10_000)
+                    self.assertEqual(source_plan["partial_coverage_warning"], True)
+                    self.assertIn("#74", payload["large_case_search_plan"]["commercial_gap_ids"])
 
     def test_case_search_source_filter_skips_unrequested_large_backends(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
