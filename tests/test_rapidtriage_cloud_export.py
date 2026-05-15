@@ -702,17 +702,48 @@ class RapidTriageCloudExportTests(unittest.TestCase):
             message = next(artifact for artifact in payload["artifacts"] if artifact["artifact_type"] == "cloud-message")
             self.assertEqual(message["details"]["service"], "microsoft-teams")
             self.assertEqual(message["details"]["chat_id"], "chat-1")
+            self.assertEqual(message["details"]["reply_to_message_id"], "teams-msg-root")
+            self.assertEqual(message["details"]["sender"], "alice@example.com")
+            self.assertEqual(message["details"]["attachment_count"], 1)
+            self.assertEqual(message["details"]["attachment_names"], ["case.zip"])
+            self.assertEqual(message["details"]["reaction_count"], 2)
+            self.assertEqual(message["details"]["reaction_types"], ["heart", "like"])
             self.assertIn("cloud-message", message["details"]["risk_flags"])
             self.assertIn("#39", message["details"]["cloud_report_grade_assessment"]["commercial_gap_ids"])
             self.assertEqual(message["details"]["forensic_review"]["gap_id"], "#39")
             self.assertEqual(message["details"]["m365_export_review_profile"]["workload_family"], "teams")
             self.assertIn("message_id", message["details"]["m365_export_review_profile"]["present_primary_pivots"])
+            self.assertIn("attachment_count", message["details"]["m365_export_review_profile"]["present_primary_pivots"])
+            self.assertIn("reaction_count", message["details"]["m365_export_review_profile"]["present_primary_pivots"])
+            self.assertEqual(
+                message["details"]["teams_message_review_profile"]["profile_version"],
+                "teams-message-review-profile-v1",
+            )
+            self.assertEqual(message["details"]["teams_message_review_profile"]["edited_status"], "edited-hint-present")
+            self.assertEqual(
+                message["details"]["teams_attachment_review_profile"]["profile_version"],
+                "teams-attachment-review-profile-v1",
+            )
+            self.assertEqual(
+                message["details"]["teams_reaction_review_profile"]["profile_version"],
+                "teams-reaction-review-profile-v1",
+            )
+            self.assertTrue(message["details"]["validation_checks"]["teams_message_review_profile_emitted"])
+            self.assertTrue(message["details"]["validation_checks"]["teams_attachment_inventory_emitted"])
+            self.assertTrue(message["details"]["validation_checks"]["teams_reaction_inventory_emitted"])
             teams_manifest = message["details"]["m365_export_parser_manifest"]
             self.assertEqual(teams_manifest["workload_family"], "teams")
             self.assertIn("message_id", teams_manifest["row_citation"]["row_pivots"])
+            self.assertIn("reply_to_message_id", teams_manifest["row_citation"]["row_pivots"])
+            self.assertIn("attachment_count", teams_manifest["row_citation"]["row_pivots"])
+            self.assertIn("reaction_count", teams_manifest["row_citation"]["row_pivots"])
             self.assertEqual(teams_manifest["workload_review"]["teams_compliance_record_status"], "not-validated")
             self.assertEqual(teams_manifest["manifest_sha256"], message["details"]["m365_export_parser_manifest_hash"])
             self.assertIn("teams-cosmosdb-vs-exchange-compliance-records", message["details"]["cloud_provider_profile"]["known_gaps"])
+            self.assertIn(
+                "reply_to_message_id=teams-msg-root",
+                message["details"]["cloud_analyst_review_profile"]["row_pivots"],
+            )
 
             slack = next(
                 artifact
@@ -937,10 +968,24 @@ def write_cloud_export_fixtures(root: Path) -> None:
             [
                 {
                     "createdDateTime": "2026-04-26T06:00:00Z",
+                    "lastModifiedDateTime": "2026-04-26T06:05:00Z",
                     "chatId": "chat-1",
+                    "replyToId": "teams-msg-root",
                     "id": "teams-msg-1",
-                    "from": "alice@example.com",
+                    "from": {"user": {"displayName": "Alice Example", "userPrincipalName": "alice@example.com"}},
                     "messageText": "Incident response Teams message",
+                    "attachments": [
+                        {
+                            "id": "att-1",
+                            "name": "case.zip",
+                            "contentType": "reference",
+                            "contentUrl": "https://contoso.sharepoint.com/case.zip",
+                        }
+                    ],
+                    "reactions": [
+                        {"reactionType": "like", "user": {"userPrincipalName": "bob@example.com"}},
+                        {"reactionType": "heart", "user": {"userPrincipalName": "carol@example.com"}},
+                    ],
                 }
             ]
         ),

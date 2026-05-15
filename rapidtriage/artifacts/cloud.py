@@ -1204,22 +1204,227 @@ def normalize_cloud_file(row: Mapping[str, object], *, source_path: str) -> dict
     }
 
 
-def normalize_cloud_message(row: Mapping[str, object], *, source_path: str) -> dict[str, object]:
-    text = optional_text(first_value(row, ("messageText", "messagetext", "body", "bodyContent", "content", "text")))
+def normalize_cloud_actor(value: object) -> str:
+    """Return the most useful review label from Graph/Purview-style actor objects."""
+    if isinstance(value, Mapping):
+        user = value.get("user") if isinstance(value.get("user"), Mapping) else value
+        email_value = first_value(
+            user,
+            (
+                "userPrincipalName",
+                "email",
+                "mail",
+                "address",
+                "id",
+                "displayName",
+            ),
+        )
+        if email_value:
+            return optional_text(email_value)
+        application = value.get("application") if isinstance(value.get("application"), Mapping) else {}
+        app_value = first_value(application, ("displayName", "id"))
+        if app_value:
+            return optional_text(app_value)
+        return preview_json(value, limit=300)
+    return optional_text(value)
+
+
+def normalize_cloud_message_text(value: object) -> str:
+    if isinstance(value, Mapping):
+        content = first_value(value, ("content", "text", "plainText", "body"))
+        if content:
+            return optional_text(content)
+        return preview_json(value)
+    return optional_text(value)
+
+
+def sequence_value(row: Mapping[str, object], keys: Iterable[str]) -> list[object]:
+    value = first_value(row, keys)
+    if isinstance(value, list):
+        return value
+    if isinstance(value, tuple):
+        return list(value)
+    if value in (None, ""):
+        return []
+    return [value]
+
+
+def teams_attachment_review_profile(row: Mapping[str, object]) -> dict[str, object]:
+    attachments = sequence_value(row, ("attachments", "files", "hostedContents", "hostedContent", "attachments@odata.bind"))
+    names: list[str] = []
+    ids: list[str] = []
+    url_hashes: list[str] = []
+    content_type_counts: dict[str, int] = {}
+    for item in attachments:
+        if isinstance(item, Mapping):
+            name = optional_text(first_value(item, ("name", "fileName", "filename", "displayName", "title")))
+            attachment_id = optional_text(first_value(item, ("id", "attachmentId", "contentId")))
+            content_url = optional_text(first_value(item, ("contentUrl", "url", "webUrl", "downloadUrl")))
+            content_type = optional_text(first_value(item, ("contentType", "mimeType", "mediaType")))
+        else:
+            name = optional_text(item)
+            attachment_id = ""
+            content_url = optional_text(item) if optional_text(item).lower().startswith(("http://", "https://")) else ""
+            content_type = ""
+        if name:
+            names.append(name)
+        if attachment_id:
+            ids.append(attachment_id)
+        if content_url:
+            url_hashes.append(sha256_text(content_url))
+        if content_type:
+            content_type_counts[content_type] = content_type_counts.get(content_type, 0) + 1
     return {
-        "service": service_from_path(source_path, default="microsoft-teams" if "teams" in source_path.lower() else "cloud-message"),
+        "profile_version": "teams-attachment-review-profile-v1",
+        "attachment_count": len(attachments),
+        "attachment_names": names[:20],
+        "attachment_ids": ids[:20],
+        "attachment_content_url_sha256": url_hashes[:20],
+        "content_type_counts": content_type_counts,
+        "attachment_source_fields": [
+            key
+            for key in ("attachments", "files", "hostedContents", "hostedContent", "attachments@odata.bind")
+            if first_value(row, (key,))
+        ],
+        "metadata_collapsed_by_default": True,
+        "commercial_blockers": [
+            "teams-attachment-file-content-export-required",
+            "sharepoint-onedrive-file-permission-diff-required",
+        ],
+    }
+
+
+def teams_reaction_review_profile(row: Mapping[str, object]) -> dict[str, object]:
+    reactions = sequence_value(row, ("reactions", "reactionSummary", "likes"))
+    types: list[str] = []
+    actors: list[str] = []
+    for item in reactions:
+        if isinstance(item, Mapping):
+            reaction_type = optional_text(first_value(item, ("reactionType", "type", "emoji", "name")))
+            actor = normalize_cloud_actor(first_value(item, ("user", "actor", "from", "createdBy")))
+        else:
+            reaction_type = optional_text(item)
+            actor = ""
+        if reaction_type:
+            types.append(reaction_type)
+        if actor:
+            actors.append(actor)
+    return {
+        "profile_version": "teams-reaction-review-profile-v1",
+        "reaction_count": len(reactions),
+        "reaction_types": sorted(set(types))[:20],
+        "reaction_actor_count": len(set(actors)),
+        "reaction_actor_sha256": [sha256_text(actor) for actor in sorted(set(actors))[:20]],
+        "reaction_source_fields": [
+            key for key in ("reactions", "reactionSummary", "likes") if first_value(row, (key,))
+        ],
+        "metadata_collapsed_by_default": True,
+        "commercial_blockers": [
+            "teams-reaction-provider-diff-required",
+            "teams-reaction-actor-attribution-validation-required",
+        ],
+    }
+
+
+def teams_message_review_profile(row: Mapping[str, object], *, source_path: str) -> dict[str, object]:
+    last_modified = optional_text(first_value(row, ("lastModifiedDateTime", "modifiedDateTime", "editedDateTime")))
+    deleted_at = optional_text(first_value(row, ("deletedDateTime", "deletedAt", "softDeletedDateTime")))
+    return {
+        "profile_version": "teams-message-review-profile-v1",
+        "source_track": "m365-teams-export-row",
+        "chat_id": optional_text(first_value(row, ("chatId", "chatid", "conversationId"))),
+        "channel_id": optional_text(first_value(row, ("channelId", "channelid"))),
+        "team_id": optional_text(first_value(row, ("teamId", "teamid"))),
+        "message_id": optional_text(first_value(row, ("id", "messageId", "messageid"))),
+        "reply_to_message_id": optional_text(
+            first_value(row, ("replyToId", "replyToMessageId", "parentMessageId", "rootMessageId"))
+        ),
+        "importance": optional_text(first_value(row, ("importance", "priority"))),
+        "edited_status": "edited-hint-present" if last_modified else "not-observed",
+        "deleted_status": "deleted-hint-present" if deleted_at else "not-observed",
+        "last_modified_at": normalize_timestamp(last_modified),
+        "deleted_at": normalize_timestamp(deleted_at),
+        "source_path_hints": {
+            "teams_path": "teams" in source_path.lower(),
+            "purview_or_ediscovery_path": "purview" in source_path.lower() or "ediscovery" in source_path.lower(),
+        },
+        "metadata_collapsed_by_default": True,
+        "commercial_blockers": [
+            "teams-exchange-compliance-record-reconciliation-required",
+            "teams-edited-deleted-state-provider-diff-required",
+        ],
+    }
+
+
+def normalize_cloud_message(row: Mapping[str, object], *, source_path: str) -> dict[str, object]:
+    text = normalize_cloud_message_text(first_value(row, ("messageText", "messagetext", "body", "bodyContent", "content", "text")))
+    service = service_from_path(source_path, default="microsoft-teams" if "teams" in source_path.lower() else "cloud-message")
+    is_microsoft_teams = service == "microsoft-teams"
+    attachment_profile = teams_attachment_review_profile(row)
+    reaction_profile = teams_reaction_review_profile(row)
+    message_profile = teams_message_review_profile(row, source_path=source_path)
+    archive_fields = {
+        key: row[key]
+        for key in (
+            "source_format",
+            "archive_entry_name",
+            "archive_entry_index",
+            "archive_entry_crc32",
+            "archive_entry_size",
+            "archive_entry_modified_at",
+            "archive_json_row_index",
+            "archive_csv_row_index",
+        )
+        if key in row
+    }
+    validation_checks = cloud_validation_checks(row, required=("createdDateTime", "messageText", "body", "id"))
+    validation_checks.update(
+        {
+            "teams_message_review_profile_emitted": is_microsoft_teams,
+            "teams_reply_pivot_present": is_microsoft_teams and bool(message_profile.get("reply_to_message_id")),
+            "teams_attachment_inventory_emitted": is_microsoft_teams and bool(attachment_profile.get("attachment_count")),
+            "teams_reaction_inventory_emitted": is_microsoft_teams and bool(reaction_profile.get("reaction_count")),
+        }
+    )
+    if archive_fields:
+        validation_checks.update(
+            {
+                "archive_embedded_row": True,
+                "archive_entry_name_present": bool(archive_fields.get("archive_entry_name")),
+                "bounded_archive_entry_parse": True,
+            }
+        )
+    teams_fields = (
+        {
+            "reply_to_message_id": optional_text(message_profile.get("reply_to_message_id")),
+            "attachment_count": int(attachment_profile.get("attachment_count") or 0),
+            "attachment_names": list(attachment_profile.get("attachment_names") or []),
+            "attachment_content_url_sha256": list(attachment_profile.get("attachment_content_url_sha256") or []),
+            "reaction_count": int(reaction_profile.get("reaction_count") or 0),
+            "reaction_types": list(reaction_profile.get("reaction_types") or []),
+            "teams_message_review_profile": message_profile,
+            "teams_attachment_review_profile": attachment_profile,
+            "teams_reaction_review_profile": reaction_profile,
+        }
+        if is_microsoft_teams
+        else {}
+    )
+    return {
+        "service": service,
         "event_type": "message",
         "timestamp": normalize_timestamp(first_value(row, ("createdDateTime", "lastModifiedDateTime", "time", "timestamp", "date"))),
         "team_id": optional_text(first_value(row, ("teamId", "teamid"))),
         "channel_id": optional_text(first_value(row, ("channelId", "channelid"))),
         "chat_id": optional_text(first_value(row, ("chatId", "chatid", "conversationId"))),
         "message_id": optional_text(first_value(row, ("id", "messageId", "messageid"))),
-        "sender": optional_text(first_value(row, ("from", "sender", "user", "actor"))),
+        "sender": normalize_cloud_actor(first_value(row, ("from", "sender", "user", "actor"))),
         "message_text_preview": text[:1000],
         "message_text_sha256": sha256_text(text) if text else "",
+        **teams_fields,
         "risk_flags": ["cloud-message"] + cloud_text_risk_flags("", text),
-        "validation_checks": cloud_validation_checks(row, required=("createdDateTime", "messageText", "body", "id")),
+        "validation_checks": validation_checks,
         "commercial_grade_blockers": cloud_blockers("cloud-message"),
+        **archive_fields,
         "raw": dict(row),
     }
 
@@ -1968,10 +2173,13 @@ def build_cloud_export_import_manifest(
             "thread_root_id",
             "thread_parent_id",
             "normalized_thread_subject",
+            "reply_to_message_id",
             "file_id",
             "subject",
             "file_name",
             "chat_id",
+            "attachment_count",
+            "reaction_count",
             "operation",
             "account_email",
             "timestamp",
@@ -2370,10 +2578,13 @@ def build_m365_export_parser_manifest(
         key: optional_text(details.get(key))
         for key in (
             "message_id",
+            "reply_to_message_id",
             "chat_id",
             "channel_id",
             "team_id",
             "sender",
+            "attachment_count",
+            "reaction_count",
             "file_id",
             "file_name",
             "owner",
@@ -3103,7 +3314,17 @@ def m365_export_review_profile(
     workload_family = m365_workload_family(service=service, artifact_type=artifact_type, source_path=source_path)
     primary_pivots = {
         "exchange": ["message_id", "subject", "from", "to", "body_sha256"],
-        "teams": ["chat_id", "channel_id", "team_id", "message_id", "sender", "message_text_sha256"],
+        "teams": [
+            "chat_id",
+            "channel_id",
+            "team_id",
+            "message_id",
+            "reply_to_message_id",
+            "sender",
+            "attachment_count",
+            "reaction_count",
+            "message_text_sha256",
+        ],
         "onedrive-sharepoint": ["file_id", "file_name", "owner", "url_sha256", "size"],
         "audit": ["operation", "actor", "ip_address", "user_agent", "object_id"],
         "tenant-account": ["account_email", "account_name", "timestamp"],
@@ -3302,6 +3523,7 @@ def cloud_analyst_review_profile(
                 optional_text(details.get("message_id")),
                 optional_text(details.get("thread_root_id")),
                 optional_text(details.get("normalized_thread_subject")),
+                optional_text(details.get("reply_to_message_id")),
                 optional_text(details.get("file_id")),
                 optional_text(details.get("file_name")),
                 optional_text(details.get("chat_id")),
@@ -3320,6 +3542,9 @@ def cloud_analyst_review_profile(
             "subject": optional_text(details.get("subject")),
             "thread_root_id": optional_text(details.get("thread_root_id")),
             "normalized_thread_subject": optional_text(details.get("normalized_thread_subject")),
+            "reply_to_message_id": optional_text(details.get("reply_to_message_id")),
+            "attachment_count": optional_text(details.get("attachment_count")),
+            "reaction_count": optional_text(details.get("reaction_count")),
             "file_name": optional_text(details.get("file_name")),
             "operation": optional_text(details.get("operation")),
             "manifest_sha256": optional_text(manifest.get("manifest_sha256")),
