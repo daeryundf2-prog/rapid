@@ -117,6 +117,7 @@ class RapidTriageOpsTests(unittest.TestCase):
         self.assertIn("--write-known-answer-template-dir", commands["commercial-readiness"].format_help())
         self.assertIn("--uplift-targets", commands["commercial-readiness"].format_help())
         self.assertIn("--uplift-batch-size", commands["commercial-readiness"].format_help())
+        self.assertIn("--mac-first-evidence", commands["commercial-readiness"].format_help())
         self.assertIn("forensic-validation-plan", commands)
         self.assertIn("--items", commands["forensic-validation-plan"].format_help())
         self.assertIn("forensic-validation-pack", commands)

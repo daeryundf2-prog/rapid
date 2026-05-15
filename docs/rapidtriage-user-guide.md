@@ -136,6 +136,7 @@ The commercial re-architecture introduces isolated Rust parser workers while kee
 ```bash
 rapidtriage rearchitecture-status --json
 rapidtriage commercial-readiness --validation-package docs/validation/rapidtriage-core-forensics-001-120-known-answer.json --output-dir ./commercial-readiness --json
+rapidtriage commercial-readiness --mac-first-evidence ./qc/macos-live/macos-live-smoke.json --output-dir ./commercial-readiness --json
 ```
 
 For QC-prep and large-case validation evidence, use the helper commands below. These commands do not make a parser commercial-grade by themselves; they create reproducible evidence, blocker records, and trusted-diff handoff artifacts that a reviewer can attach to a case or release QC package.
@@ -154,6 +155,8 @@ rapidtriage browser-stress --base-url http://127.0.0.1:8765 --output-dir ./qc/br
 `large-case-readiness` is the Mac-first gate for large evidence sets. It combines one or more `sqlite-fts-benchmark` JSON files with an optional RapidTriage Case DB profile, then records whether 100k/1M/10M search evidence, FTS table/index metadata, p95 latency thresholds, and remaining commercial blockers are present. A failed status does not mean the tool cannot search; it means the evidence is not strong enough yet for 1TB/10TB or commercial-grade claims.
 
 `macos-live-smoke` is designed for the analyst's current Mac. It writes a macOS collect-plan summary, redacted live artifact counts, a small triage benchmark, SQLite FTS benchmark evidence, a `large-case-readiness.json` gate built from that benchmark, and validation-tool availability. By default it stores path hashes and counts only; it does not print browser history URLs, quarantine URLs, or TCC client paths. Use `--include-path-details` only for authorized local debugging.
+
+Use `commercial-readiness --mac-first-evidence ./qc/macos-live/macos-live-smoke.json` after a Mac hardening run to attach that smoke/large-case evidence to the 120-item readiness report. The `mac_first_evidence_summary` hashes the attached JSON and lists failed checks/blockers, but it is deliberately not treated as a passing validation package; Windows image tests, 1TB-10TB hardware runs, signed installers, and independent signoff stay as separate blockers.
 
 Use `--overwrite` only for intentionally repeated QC runs. The overwrite paths now clear stale parser exports, SQLite benchmark sidecars, and SQLite WAL safe-copy artifacts before writing fresh evidence, so reruns do not accidentally preserve old parser output as if it came from the current source.
 

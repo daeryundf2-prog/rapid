@@ -1584,6 +1584,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="Optional validation package or known-answer manifest that maps passing datasets to backlog item numbers; repeat to combine batches",
     )
     commercial_readiness.add_argument(
+        "--mac-first-evidence",
+        action="append",
+        help="Attach macos-live-smoke or large-case-readiness JSON as preparatory Mac evidence without satisfying commercial gates",
+    )
+    commercial_readiness.add_argument(
         "--next-gate",
         choices=MATURITY_GATE_ORDER,
         help="Focus console/JSON triage on items whose next required maturity gate matches this value",
@@ -3144,6 +3149,9 @@ def main(argv=None) -> int:
                 validation_package_paths=[
                     Path(path).expanduser().resolve() for path in (args.validation_package or [])
                 ],
+                mac_first_evidence_paths=[
+                    Path(path).expanduser().resolve() for path in (args.mac_first_evidence or [])
+                ],
                 uplift_targets=args.uplift_targets,
                 uplift_batch_size=args.uplift_batch_size,
             )
@@ -3215,6 +3223,9 @@ def main(argv=None) -> int:
                     "Validation evidence attached: "
                     f"{validation_summary.get('items_with_passed_validation_evidence', 0)} items"
                 )
+            mac_first_summary = payload.get("mac_first_evidence_summary")
+            if isinstance(mac_first_summary, dict) and mac_first_summary.get("attached"):
+                print(f"Mac-first evidence attached: {mac_first_summary.get('evidence_count', 0)} file(s)")
             separation = payload.get("blocker_separation_profile")
             if isinstance(separation, dict):
                 summary = separation.get("summary") if isinstance(separation.get("summary"), dict) else {}
