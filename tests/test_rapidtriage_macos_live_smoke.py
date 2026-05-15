@@ -35,6 +35,10 @@ class RapidTriageMacOsLiveSmokeTests(unittest.TestCase):
             self.assertEqual(payload["command"], "macos-live-smoke")
             self.assertTrue((output_dir / "macos-live-smoke.json").is_file())
             self.assertTrue((output_dir / "macos-live-smoke.md").is_file())
+            attachment_script = output_dir / "attach-mac-evidence-to-readiness.sh"
+            self.assertTrue(attachment_script.is_file())
+            self.assertTrue(attachment_script.stat().st_mode & 0o111)
+            self.assertIn("--mac-first-evidence", attachment_script.read_text(encoding="utf-8"))
             self.assertGreaterEqual(payload["macos_artifact_summary"]["record_count"], 1)
             self.assertFalse(payload["macos_artifact_summary"]["redaction"]["raw_paths_included"])
             serialized = json.dumps(payload, ensure_ascii=False)
@@ -44,6 +48,10 @@ class RapidTriageMacOsLiveSmokeTests(unittest.TestCase):
             self.assertTrue((output_dir / "large-case-readiness.json").is_file())
             self.assertEqual(payload["large_case_readiness"]["profile_version"], "large-case-readiness-v1")
             self.assertEqual(payload["large_case_readiness"]["summary"]["largest_benchmark_record_count"], 30)
+            self.assertEqual(
+                payload["outputs"]["readiness_attachment_script"],
+                str(attachment_script.resolve()),
+            )
             self.assertEqual(
                 payload["outputs"]["large_case_readiness_json"],
                 str((output_dir / "large-case-readiness.json").resolve()),
