@@ -95,6 +95,18 @@ The sample JSON uses a few placeholders so the examples stay stable across machi
 - Top-level keys include `summary`, `documents`, `review_workflow_summary`, and `matches`.
 - `summary.document_error_count` and `documents.errors[]` surface document text extraction failures recorded while importing a completed run into the Case DB. These rows include path, kind, audit citation, target document id, error type/message, and `case-search-documents-partial-coverage` effect. Treat them the same way as completed-run `documents.errors[]`: the Case DB search continued, but the listed documents were not text-indexed and need source-viewer byte-window search, a dedicated parser, or a trusted external extractor before absence can be asserted.
 
+### `large-case-readiness`
+
+- Output: JSON from `rapidtriage large-case-readiness`.
+- `profile_version`: `large-case-readiness-v1`.
+- `item_numbers`: large-case readiness targets covered by the report: #66, #67, #74, #78, and #79.
+- `status`: `internal-evidence-present` only when attached evidence passes the local checks; otherwise `needs-large-case-evidence`.
+- `checks[]`: stable pass/fail rows for attached SQLite FTS benchmark JSON, 100k/1M/10M coverage, seeded hit-count parity, p95 threshold, Case DB attachment, FTS tables, and hot-path indexes.
+- `benchmarks[]`: normalized summary of each `sqlite-fts-benchmark` JSON with record count, p50/p95 latency, expected-vs-returned hit counts, query-plan hash, and proof manifest hash.
+- `case_db_profile`: optional read-only profile of the RapidTriage Case DB, including table counts, FTS tables, index names, SQLite pragmas, and the existing Case DB FTS optimization assessment.
+- `search_backend_contract`: the current search backend contract for the representative keyword and corpus estimate.
+- `commercial_grade_ready` is intentionally `false` until real 1TB/10TB stress evidence, UI virtualization evidence, cursor API regression evidence, and independent/lab validation are attached.
+
 ### `vsc-compare`
 
 - Output: `rapidtriage-vsc-compare.json`

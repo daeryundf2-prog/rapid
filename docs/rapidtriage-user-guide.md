@@ -144,10 +144,13 @@ rapidtriage macos-live-smoke --output-dir ./qc/macos-live --overwrite --json
 rapidtriage e01-hash ./case.E01 --output-dir ./qc/e01-hash --json
 rapidtriage known-answer-qc --manifest ./known-answer.json --trusted-manifest ./trusted-known-answer.json --output-dir ./qc/known-answer --json
 rapidtriage sqlite-fts-benchmark --output-dir ./qc/fts-100k --record-count 100000 --json
+rapidtriage large-case-readiness --case-db ./case.db --benchmark ./qc/fts-100k/sqlite-fts-benchmark.json --output ./qc/large-case-readiness.json --json
 rapidtriage sqlite-wal-preview ./History --output-dir ./qc/sqlite-wal --json
 rapidtriage email-external-parse ./mailbox.pst --output-dir ./qc/email-external --json
 rapidtriage browser-stress --base-url http://127.0.0.1:8765 --output-dir ./qc/browser-stress --json
 ```
+
+`large-case-readiness` is the Mac-first gate for large evidence sets. It combines one or more `sqlite-fts-benchmark` JSON files with an optional RapidTriage Case DB profile, then records whether 100k/1M/10M search evidence, FTS table/index metadata, p95 latency thresholds, and remaining commercial blockers are present. A failed status does not mean the tool cannot search; it means the evidence is not strong enough yet for 1TB/10TB or commercial-grade claims.
 
 `macos-live-smoke` is designed for the analyst's current Mac. It writes a macOS collect-plan summary, redacted live artifact counts, a small triage benchmark, SQLite FTS benchmark evidence, and validation-tool availability. By default it stores path hashes and counts only; it does not print browser history URLs, quarantine URLs, or TCC client paths. Use `--include-path-details` only for authorized local debugging.
 

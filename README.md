@@ -140,6 +140,7 @@ rapidtriage sample --run --overwrite
 | case 검색 | `rapidtriage case-search <case.db> --case-id CASE-001 -k password` |
 | 리뷰 상태 부여 | `rapidtriage case-review <case.db> --case-id CASE-001 --target-type indexed_document --target-id 1 --status relevant` |
 | 보고서 후보 | `rapidtriage case-db-report <case.db> --case-id CASE-001 --output report-candidates.json` |
+| 대용량 검색 검증 | `rapidtriage large-case-readiness --case-db <case.db> --benchmark ./qc/fts-100k/sqlite-fts-benchmark.json --json` |
 | taxonomy 검증 | `rapidtriage taxonomy-audit --strict` |
 | commercial readiness | `rapidtriage commercial-readiness --json` |
 | validation package | `rapidtriage validation --output-dir ./rapidtriage-validation --overwrite` |

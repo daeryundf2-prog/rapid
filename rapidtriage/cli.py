@@ -108,6 +108,11 @@ from .core.macos_live_smoke import (
     MacOsLiveSmokeError,
     run_macos_live_smoke,
 )
+from .core.large_case_readiness import (
+    DEFAULT_LARGE_CASE_P95_THRESHOLD_MS,
+    LargeCaseReadinessError,
+    build_large_case_readiness_report,
+)
 from .core.kakaotalk import (
     DEFAULT_MEMORY_SQLITE_MAX_CARVE_BYTES,
     DEFAULT_MEMORY_SQLITE_MAX_HITS,
@@ -1423,6 +1428,23 @@ def build_parser() -> argparse.ArgumentParser:
     sqlite_fts_benchmark.add_argument("--hit-every", type=int, default=SQLITE_FTS_DEFAULT_HIT_EVERY, help="Seed the keyword every N rows")
     sqlite_fts_benchmark.add_argument("--overwrite", action="store_true", help="Allow writing into a non-empty benchmark output directory")
     sqlite_fts_benchmark.add_argument("--json", action="store_true", help="Print machine-readable JSON")
+
+    large_case_readiness = sub.add_parser(
+        "large-case-readiness",
+        help="Combine Case DB and SQLite FTS evidence into a large-case readiness report",
+        description="Assess Mac-local large-case search/indexing evidence before claiming 1TB/10TB or commercial-scale readiness",
+    )
+    large_case_readiness.add_argument("--case-db", help="Optional RapidTriage Case DB to profile")
+    large_case_readiness.add_argument("--benchmark", action="append", default=[], help="SQLite FTS benchmark JSON; repeat for 100k/1M/10M runs")
+    large_case_readiness.add_argument("--keyword", default=DEFAULT_BENCHMARK_KEYWORD, help="Representative keyword for the search backend contract")
+    large_case_readiness.add_argument(
+        "--max-query-p95-ms",
+        type=float,
+        default=DEFAULT_LARGE_CASE_P95_THRESHOLD_MS,
+        help="Maximum accepted SQLite FTS benchmark query p95 in milliseconds",
+    )
+    large_case_readiness.add_argument("--output", help="Optional JSON output path")
+    large_case_readiness.add_argument("--json", action="store_true", help="Print machine-readable JSON")
 
     sqlite_wal_preview = sub.add_parser(
         "sqlite-wal-preview",
@@ -2949,6 +2971,31 @@ def main(argv=None) -> int:
                 f"expected hits {metrics['expected_hit_count']}"
             )
         return 0
+
+    if args.command == "large-case-readiness":
+        try:
+            payload = build_large_case_readiness_report(
+                case_db_path=Path(args.case_db).expanduser().resolve() if args.case_db else None,
+                benchmark_paths=[Path(path).expanduser().resolve() for path in args.benchmark],
+                keyword=args.keyword,
+                max_query_p95_ms=args.max_query_p95_ms,
+                output=Path(args.output).expanduser().resolve() if args.output else None,
+            )
+        except (LargeCaseReadinessError, OSError, sqlite3.Error, json.JSONDecodeError) as exc:
+            parser.error(str(exc))
+        if args.json:
+            print(json.dumps(payload, ensure_ascii=False, indent=2))
+        else:
+            print(f"Large-case readiness: {payload['status']}")
+            print(
+                "Checks: "
+                f"{payload['summary']['passed_check_count']}/{payload['summary']['check_count']} passed"
+            )
+            print(f"Largest benchmark: {payload['summary']['largest_benchmark_record_count']} rows")
+            print(f"Commercial blockers: {payload['summary']['commercial_blocker_count']}")
+            if args.output:
+                print(f"Saved readiness JSON: {Path(args.output).expanduser().resolve()}")
+        return 0 if payload["status"] == "internal-evidence-present" else 2
 
     if args.command == "known-answer-qc":
         try:
