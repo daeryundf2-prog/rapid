@@ -111,7 +111,7 @@ The sample JSON uses a few placeholders so the examples stay stable across machi
 
 - Output: JSON from `rapidtriage source-search`.
 - `profile_version`: `source-search-cli-v1`.
-- Searches only one bounded source preview at a time, including `--path archive.zip::entry.json` ZIP members without extraction. It returns `relative_path`, optional `container_relative_path`, `archive_entry`, normalized `keywords`, `summary.match_count`, `summary.zip_entry_search`, and `matches[]` with `keyword`, `line`, `offset`, `line_offset`, `snippet`, `citation`, and `source_path`.
+- Searches only one bounded source preview at a time, including `--path archive.zip::entry.json` ZIP members without extraction. SQLite `.db`/`.sqlite`/`.sqlite3` files are opened read-only and scanned across bounded text columns. It returns `relative_path`, optional `container_relative_path`, `archive_entry`, normalized `keywords`, `summary.match_count`, `summary.zip_entry_search`, optional SQLite `summary.sqlite_search/sqlite_scanned_tables/sqlite_scanned_rows/sqlite_searchable_columns`, and `matches[]` with `keyword`, `line`, `offset`, `line_offset`, `snippet`, `citation`, `source_path`, plus SQLite `table`, `rowid`, and `column` when applicable.
 - `source_locator` and `source_citation_package` mirror the matching `source-read` locator so terminal hit context can be verified in the web source viewer and carried into Case DB review notes without losing archive-entry provenance.
 - `ready_for_review_note` means the package is usable as a reviewer handoff. `ready_for_court_report` remains `false` until analyst sign-off, original evidence provenance, and any parser-specific validation are attached.
 

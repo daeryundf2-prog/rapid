@@ -1067,6 +1067,56 @@ class RapidTriageRunTests(unittest.TestCase):
             self.assertIn("ChatGPT-export.zip::conversations.json", payload["matches"][0]["citation"])
             self.assertEqual(payload["reportability_decision"]["decision"], "source-search-hit-is-review-lead-not-standalone-proof")
 
+    def test_source_search_command_scans_sqlite_text_columns_read_only(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir) / "case-root"
+            output_dir = Path(tmp_dir) / "run-out"
+            source_output = Path(tmp_dir) / "source-search-sqlite.json"
+            root.mkdir(parents=True, exist_ok=True)
+            build_run_fixture(root)
+            db_path = root / "Users" / "alice" / "Databases" / "chat.sqlite"
+            with contextlib.closing(sqlite3.connect(db_path)) as connection:
+                with connection:
+                    connection.execute("CREATE TABLE messages(id INTEGER PRIMARY KEY, sender TEXT, body TEXT)")
+                    connection.executemany(
+                        "INSERT INTO messages(sender, body) VALUES (?, ?)",
+                        [
+                            ("alice", "normal hello"),
+                            ("bob", "wire transfer password appears here"),
+                            ("carol", "later message"),
+                        ],
+                    )
+
+            self.assertEqual(main(["run", str(root), "--mode", "fraud", "--output-dir", str(output_dir)]), 0)
+            self.assertEqual(
+                main(
+                    [
+                        "source-search",
+                        str(output_dir),
+                        "--path",
+                        "Users/alice/Databases/chat.sqlite",
+                        "-k",
+                        "password",
+                        "--output",
+                        str(source_output),
+                    ]
+                ),
+                0,
+            )
+
+            payload = json.loads(source_output.read_text(encoding="utf-8"))
+            self.assertEqual(payload["command"], "source-search")
+            self.assertEqual(payload["summary"]["search_mode"], "bounded-sqlite-table-scan")
+            self.assertTrue(payload["summary"]["sqlite_search"])
+            self.assertEqual(payload["summary"]["sqlite_status"], "searched")
+            self.assertGreaterEqual(payload["summary"]["sqlite_scanned_tables"], 1)
+            self.assertGreaterEqual(payload["summary"]["match_count"], 1)
+            match = payload["matches"][0]
+            self.assertEqual(match["table"], "messages")
+            self.assertEqual(match["column"], "body")
+            self.assertIn("table messages", match["citation"])
+            self.assertIn("password", match["snippet"])
+
     def test_source_read_command_opens_bounded_sqlite_table_locator(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             root = Path(tmp_dir) / "case-root"

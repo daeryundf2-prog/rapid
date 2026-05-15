@@ -165,15 +165,35 @@ def run_source_search(
     preview = source_payload.get("preview")
     if not isinstance(preview, Mapping):
         raise SourceReadError("source-read preview is missing")
-    searchable = preview.get("preview_type") == "text"
-    text = str(preview.get("text") or "") if searchable else ""
-    matches = search_preview_text(
-        text,
-        normalized,
-        relative_path=str(source_payload.get("relative_path") or raw_path),
-        limit=limit,
-        context=context,
-    ) if searchable else []
+    source_path = Path(str(source_payload.get("path") or ""))
+    is_archive_entry = bool(source_payload.get("archive_entry"))
+    is_sqlite_candidate = (
+        not is_archive_entry
+        and source_path.suffix.lower() in {".db", ".sqlite", ".sqlite3"}
+        and source_path.is_file()
+    )
+    if is_sqlite_candidate:
+        matches, sqlite_summary = search_sqlite_source(
+            source_path,
+            normalized,
+            relative_path=str(source_payload.get("relative_path") or raw_path),
+            limit=limit,
+            context=context,
+        )
+        searchable = True
+        search_mode = "bounded-sqlite-table-scan"
+    else:
+        searchable = preview.get("preview_type") == "text"
+        text = str(preview.get("text") or "") if searchable else ""
+        matches = search_preview_text(
+            text,
+            normalized,
+            relative_path=str(source_payload.get("relative_path") or raw_path),
+            limit=limit,
+            context=context,
+        ) if searchable else []
+        sqlite_summary = {}
+        search_mode = "bounded-source-read-preview"
     return {
         "command": "source-search",
         "profile_version": "source-search-cli-v1",
@@ -193,8 +213,9 @@ def run_source_search(
             "match_count": len(matches),
             "limit": normalize_limit(limit, default=100, maximum=10_000),
             "context": normalize_limit(context, default=120, maximum=2_000),
-            "search_mode": "bounded-source-read-preview",
-            "zip_entry_search": bool(source_payload.get("archive_entry")),
+            "search_mode": search_mode,
+            "zip_entry_search": is_archive_entry,
+            **sqlite_summary,
         },
         "matches": matches,
         "source_locator": source_payload.get("source_locator", {}),
@@ -250,6 +271,127 @@ def search_preview_text(
             break
     matches.sort(key=lambda item: int(item["offset"]))
     return matches[:normalized_limit]
+
+
+def search_sqlite_source(
+    source_path: Path,
+    keywords: Sequence[str],
+    *,
+    relative_path: str,
+    limit: int,
+    context: int,
+    row_scan_limit: int = 5_000,
+) -> tuple[list[dict[str, object]], dict[str, object]]:
+    normalized_limit = normalize_limit(limit, default=100, maximum=10_000)
+    normalized_context = normalize_limit(context, default=120, maximum=2_000)
+    max_rows = normalize_limit(row_scan_limit, default=5_000, maximum=100_000)
+    matches: list[dict[str, object]] = []
+    scanned_tables = 0
+    scanned_rows = 0
+    searchable_columns = 0
+    try:
+        connection = sqlite3.connect(f"{source_path.resolve().as_uri()}?mode=ro", uri=True)
+    except sqlite3.Error as exc:
+        return [], {
+            "sqlite_search": True,
+            "sqlite_status": f"open-failed: {exc}",
+            "sqlite_scanned_tables": 0,
+            "sqlite_scanned_rows": 0,
+            "sqlite_searchable_columns": 0,
+        }
+    with contextlib.closing(connection):
+        connection.row_factory = sqlite3.Row
+        try:
+            table_rows = connection.execute(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name"
+            ).fetchall()
+        except sqlite3.Error as exc:
+            return [], {
+                "sqlite_search": True,
+                "sqlite_status": f"schema-read-failed: {exc}",
+                "sqlite_scanned_tables": 0,
+                "sqlite_scanned_rows": 0,
+                "sqlite_searchable_columns": 0,
+            }
+        for table_row in table_rows:
+            if len(matches) >= normalized_limit or scanned_rows >= max_rows:
+                break
+            table = str(table_row["name"])
+            columns = sqlite_searchable_columns(connection, table)
+            if not columns:
+                continue
+            scanned_tables += 1
+            searchable_columns += len(columns)
+            quoted_columns = ", ".join(sqlite_quote_identifier(column) for column in columns)
+            rowid_expr = "rowid"
+            try:
+                rows = connection.execute(
+                    f"SELECT {rowid_expr} AS __rapid_rowid, {quoted_columns} "
+                    f"FROM {sqlite_quote_identifier(table)} LIMIT ?",
+                    (max_rows - scanned_rows,),
+                )
+            except sqlite3.Error:
+                continue
+            for row in rows:
+                scanned_rows += 1
+                rowid = row["__rapid_rowid"] if "__rapid_rowid" in row.keys() else ""
+                for column in columns:
+                    value = row[column]
+                    if value is None:
+                        continue
+                    text = str(value)
+                    for match in search_preview_text(
+                        text,
+                        keywords,
+                        relative_path=relative_path,
+                        limit=normalized_limit - len(matches),
+                        context=normalized_context,
+                    ):
+                        match.update(
+                            {
+                                "table": table,
+                                "column": column,
+                                "rowid": rowid,
+                                "citation": (
+                                    f"{relative_path} table {table} rowid {rowid} "
+                                    f"column {column} offset {match['offset']} keyword {match['keyword']}"
+                                ),
+                                "source_path": relative_path,
+                            }
+                        )
+                        matches.append(match)
+                        if len(matches) >= normalized_limit:
+                            break
+                    if len(matches) >= normalized_limit:
+                        break
+                if len(matches) >= normalized_limit or scanned_rows >= max_rows:
+                    break
+    return matches[:normalized_limit], {
+        "sqlite_search": True,
+        "sqlite_status": "searched",
+        "sqlite_scanned_tables": scanned_tables,
+        "sqlite_scanned_rows": scanned_rows,
+        "sqlite_searchable_columns": searchable_columns,
+        "sqlite_row_scan_limit": max_rows,
+    }
+
+
+def sqlite_searchable_columns(connection: sqlite3.Connection, table: str) -> list[str]:
+    try:
+        rows = connection.execute(f"PRAGMA table_info({sqlite_quote_identifier(table)})").fetchall()
+    except sqlite3.Error:
+        return []
+    columns: list[str] = []
+    for row in rows:
+        name = str(row[1])
+        declared_type = str(row[2] or "").upper()
+        if not declared_type or any(token in declared_type for token in ("CHAR", "CLOB", "TEXT", "VARCHAR")):
+            columns.append(name)
+    return columns
+
+
+def sqlite_quote_identifier(identifier: str) -> str:
+    return '"' + identifier.replace('"', '""') + '"'
 
 
 def load_summary_or_raise(run_summary: Mapping[str, object] | Path) -> Mapping[str, object]:
