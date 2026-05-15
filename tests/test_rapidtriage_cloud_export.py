@@ -79,6 +79,22 @@ class RapidTriageCloudExportTests(unittest.TestCase):
                     ),
                 )
                 archive.writestr(
+                    "Takeout/Mail/All mail Including Spam and Trash.mbox",
+                    "\n".join(
+                        [
+                            "From alice@example.com Fri May 01 00:00:00 2026",
+                            "Message-ID: <gmail-mbox-1@example.com>",
+                            "Date: Fri, 01 May 2026 00:30:00 +0000",
+                            "From: Alice <alice@example.com>",
+                            "To: Bob <bob@example.com>",
+                            "Subject: Invoice password from MBOX",
+                            "",
+                            "Please review the invoice password from archived mail.",
+                            "",
+                        ]
+                    ),
+                )
+                archive.writestr(
                     "Takeout/Drive/My Drive/file-metadata.json",
                     json.dumps([{"name": "case.pdf", "id": "drive-1", "modifiedTime": "2026-05-01T01:00:00Z"}]),
                 )
@@ -92,14 +108,14 @@ class RapidTriageCloudExportTests(unittest.TestCase):
 
             self.assertEqual(exit_code, 0)
             payload = json.loads(output.read_text(encoding="utf-8"))
-            self.assertEqual(payload["summary"]["artifact_count"], 1)
-            artifact = payload["artifacts"][0]
+            self.assertEqual(payload["summary"]["artifact_count"], 2)
+            artifact = next(item for item in payload["artifacts"] if item["artifact_type"] == "cloud-export-archive")
             self.assertEqual(artifact["artifact_type"], "cloud-export-archive")
             details = artifact["details"]
             self.assertEqual(details["source_format"], "zip")
             self.assertEqual(details["service"], "google-takeout")
             self.assertEqual(details["cloud_family"], "google")
-            self.assertEqual(details["archive_entry_count"], 3)
+            self.assertEqual(details["archive_entry_count"], 4)
             self.assertEqual(details["archive_json_entry_count"], 3)
             self.assertTrue(details["validation_checks"]["archive_opened"])
             self.assertTrue(details["validation_checks"]["archive_entry_manifest_emitted"])
@@ -108,7 +124,7 @@ class RapidTriageCloudExportTests(unittest.TestCase):
             self.assertEqual(manifest["manifest_version"], "cloud-export-archive-manifest-v1")
             self.assertEqual(manifest["source_sha256"], details["source_hashes"]["sha256"])
             self.assertEqual(manifest["json_entry_count"], 3)
-            self.assertEqual(manifest["product_counts"]["gmail"], 1)
+            self.assertEqual(manifest["product_counts"]["gmail"], 2)
             self.assertEqual(manifest["product_counts"]["drive"], 1)
             self.assertEqual(manifest["product_counts"]["location-history"], 1)
             self.assertEqual(len(manifest["manifest_sha256"]), 64)
@@ -132,12 +148,24 @@ class RapidTriageCloudExportTests(unittest.TestCase):
             )
             self.assertEqual(
                 uplift["functional_priority_profile"]["implemented_controls"]["cloud_archive_entry_count"],
-                3,
+                4,
             )
             self.assertIn(
                 "cloud-provider-archive-manifest-emitted",
                 uplift["functional_priority_profile"]["passed_validation_check_ids"],
             )
+            archive_mail = next(item for item in payload["artifacts"] if item["artifact_type"] == "cloud-mail")
+            mail_details = archive_mail["details"]
+            self.assertEqual(mail_details["source_format"], "zip-mbox-entry")
+            self.assertEqual(mail_details["service"], "gmail-takeout")
+            self.assertEqual(mail_details["subject"], "Invoice password from MBOX")
+            self.assertEqual(mail_details["message_id"], "<gmail-mbox-1@example.com>")
+            self.assertEqual(mail_details["archive_entry_index"], 2)
+            self.assertEqual(mail_details["archive_message_index"], 0)
+            self.assertIn("provider-archive-embedded-mail", mail_details["risk_flags"])
+            self.assertTrue(mail_details["validation_checks"]["archive_embedded_row"])
+            self.assertTrue(mail_details["validation_checks"]["bounded_archive_entry_parse"])
+            self.assertIn("archive_entry_name", mail_details["google_takeout_parser_manifest"]["row_citation"]["row_pivots"])
 
     def test_cloud_export_collects_google_location_activity_and_account_rows(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:

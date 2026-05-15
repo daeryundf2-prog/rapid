@@ -1,9 +1,12 @@
 from __future__ import annotations
 
 import datetime as dt
+import email
 import hashlib
 import json
+import re
 import zipfile
+from email import policy
 from pathlib import Path
 from typing import Iterable, Mapping, Sequence
 
@@ -17,6 +20,9 @@ FUNCTIONAL_EXPANSION_BATCH_ID = "commercial-uplift-051-055"
 CLOUD_JSON_SUFFIXES = {".json"}
 CLOUD_ARCHIVE_SUFFIXES = {".zip"}
 CLOUD_ARCHIVE_ENTRY_LIMIT = 1000
+CLOUD_ARCHIVE_PARSE_ENTRY_LIMIT = 25
+CLOUD_ARCHIVE_PARSE_ENTRY_MAX_BYTES = 8 * 1024 * 1024
+CLOUD_ARCHIVE_MBOX_MESSAGE_LIMIT = 50
 CloudGap = tuple[list[str], str]
 CLOUD_NATIVE_CAPABILITIES = {
     "google_takeout_location_activity_import": True,
@@ -198,18 +204,66 @@ class CloudExportProvider:
             if path.is_file() and path.suffix.lower() in CLOUD_JSON_SUFFIXES:
                 yield from collect_cloud_json(path)
             elif path.is_file() and path.suffix.lower() in CLOUD_ARCHIVE_SUFFIXES:
-                yield collect_cloud_archive(path)
+                yield from collect_cloud_archive(path)
 
 
-def collect_cloud_archive(path: Path) -> ArtifactRecord:
+def collect_cloud_archive(path: Path) -> Iterable[ArtifactRecord]:
     source_hashes = compute_hashes(path)
-    return build_record(
+    yield build_record(
         path,
         artifact_type="cloud-export-archive",
         source_index=0,
         source_hashes=source_hashes,
         details=normalize_cloud_archive(path, source_hashes=source_hashes),
     )
+    yield from collect_cloud_archive_embedded_rows(path, source_hashes=source_hashes)
+
+
+def collect_cloud_archive_embedded_rows(
+    path: Path,
+    *,
+    source_hashes: Mapping[str, str],
+) -> Iterable[ArtifactRecord]:
+    """Parse small, reviewable provider-export rows without extracting the ZIP."""
+
+    try:
+        with zipfile.ZipFile(path) as archive:
+            entries = [info for info in sorted(archive.infolist(), key=lambda item: item.filename.lower()) if not info.is_dir()]
+            parsed_entries = 0
+            for archive_index, info in enumerate(entries):
+                if parsed_entries >= CLOUD_ARCHIVE_PARSE_ENTRY_LIMIT:
+                    return
+                product = infer_cloud_archive_product(info.filename)
+                suffix = Path(info.filename).suffix.lower()
+                if product != "gmail" or suffix != ".mbox":
+                    continue
+                if info.file_size > CLOUD_ARCHIVE_PARSE_ENTRY_MAX_BYTES:
+                    continue
+                try:
+                    data = archive.read(info)
+                except (RuntimeError, OSError, zipfile.BadZipFile):
+                    continue
+                parsed_entries += 1
+                for message_index, row in enumerate(extract_mbox_message_rows(data)):
+                    row = {
+                        **row,
+                        "source_format": "zip-mbox-entry",
+                        "archive_entry_name": info.filename,
+                        "archive_entry_index": archive_index,
+                        "archive_entry_crc32": f"{info.CRC:08x}",
+                        "archive_entry_size": int(info.file_size),
+                        "archive_entry_modified_at": zip_datetime_iso(info),
+                        "archive_message_index": message_index,
+                    }
+                    yield build_record(
+                        path,
+                        artifact_type="cloud-mail",
+                        source_index=(archive_index * CLOUD_ARCHIVE_MBOX_MESSAGE_LIMIT) + message_index + 1,
+                        source_hashes=source_hashes,
+                        details=normalize_cloud_mail(row, source_path=f"{path.resolve()}::{info.filename}"),
+                    )
+    except (OSError, zipfile.BadZipFile, zipfile.LargeZipFile):
+        return
 
 
 def collect_cloud_json(path: Path) -> Iterable[ArtifactRecord]:
@@ -549,7 +603,7 @@ def build_record(
             "parser": "cloud-export",
             "parser_version": PARSER_VERSION,
             "source_path": str(path.resolve()),
-            "source_format": "zip" if artifact_type == "cloud-export-archive" else "json",
+            "source_format": str(detail_payload.get("source_format") or ("zip" if artifact_type == "cloud-export-archive" else "json")),
             "source_index": source_index,
             "source_hashes": dict(source_hashes),
             "commercial_grade_ready": False,
@@ -681,6 +735,68 @@ def extract_list_or_single_rows(payload: object) -> list[Mapping[str, object]]:
     return []
 
 
+def extract_mbox_message_rows(data: bytes) -> list[Mapping[str, object]]:
+    rows: list[Mapping[str, object]] = []
+    chunks = re.split(rb"\n(?=From [^\n]+\n)", data)
+    for chunk in chunks[:CLOUD_ARCHIVE_MBOX_MESSAGE_LIMIT]:
+        if chunk.startswith(b"From "):
+            chunk = chunk.split(b"\n", 1)[1] if b"\n" in chunk else b""
+        if not chunk.strip():
+            continue
+        message = email.message_from_bytes(chunk, policy=policy.default)
+        rows.append(
+            {
+                "subject": optional_text(message.get("subject", "")),
+                "from": optional_text(message.get("from", "")),
+                "to": optional_text(message.get("to", "")),
+                "date": optional_text(message.get("date", "")),
+                "messageId": optional_text(message.get("message-id", "")),
+                "body": extract_email_text_body(message),
+                "attachmentCount": count_email_attachments(message),
+            }
+        )
+    return rows
+
+
+def extract_email_text_body(message: email.message.Message) -> str:
+    if message.is_multipart():
+        for part in message.walk():
+            content_disposition = str(part.get("content-disposition", "")).lower()
+            if "attachment" in content_disposition:
+                continue
+            if part.get_content_type() != "text/plain":
+                continue
+            try:
+                return optional_text(part.get_content())
+            except (LookupError, UnicodeDecodeError, AttributeError):
+                payload = part.get_payload(decode=True)
+                return decode_email_payload(payload)
+        return ""
+    try:
+        return optional_text(message.get_content())
+    except (LookupError, UnicodeDecodeError, AttributeError):
+        payload = message.get_payload(decode=True)
+        return decode_email_payload(payload)
+
+
+def decode_email_payload(payload: object) -> str:
+    if isinstance(payload, bytes):
+        return payload.decode("utf-8", errors="replace")
+    if isinstance(payload, str):
+        return payload
+    return ""
+
+
+def count_email_attachments(message: email.message.Message) -> int:
+    count = 0
+    for part in message.walk():
+        content_disposition = str(part.get("content-disposition", "")).lower()
+        filename = part.get_filename()
+        if "attachment" in content_disposition or filename:
+            count += 1
+    return count
+
+
 def normalize_google_location(row: Mapping[str, object]) -> dict[str, object]:
     latitude = e7_to_decimal(row.get("latitudeE7") or row.get("latitude_e7"))
     longitude = e7_to_decimal(row.get("longitudeE7") or row.get("longitude_e7"))
@@ -749,6 +865,29 @@ def normalize_account(payload: Mapping[str, object], *, source_path: str) -> dic
 def normalize_cloud_mail(row: Mapping[str, object], *, source_path: str) -> dict[str, object]:
     subject = optional_text(first_value(row, ("subject", "Subject", "title")))
     body = optional_text(first_value(row, ("body", "snippet", "text", "plainText", "bodyPreview")))
+    archive_fields = {
+        key: row[key]
+        for key in (
+            "source_format",
+            "archive_entry_name",
+            "archive_entry_index",
+            "archive_entry_crc32",
+            "archive_entry_size",
+            "archive_entry_modified_at",
+            "archive_message_index",
+        )
+        if key in row
+    }
+    validation_checks = cloud_validation_checks(row, required=("subject", "from", "date", "receivedDateTime"))
+    if archive_fields:
+        validation_checks.update(
+            {
+                "archive_embedded_row": True,
+                "archive_entry_name_present": bool(archive_fields.get("archive_entry_name")),
+                "archive_entry_crc32_present": bool(archive_fields.get("archive_entry_crc32")),
+                "bounded_archive_entry_parse": True,
+            }
+        )
     return {
         "service": service_from_path(source_path, default="gmail-takeout" if "takeout" in source_path.lower() else "cloud-mail"),
         "event_type": "mail",
@@ -760,9 +899,10 @@ def normalize_cloud_mail(row: Mapping[str, object], *, source_path: str) -> dict
         "body_preview": body[:1000],
         "body_sha256": sha256_text(body) if body else "",
         "attachment_count": optional_text(first_value(row, ("attachmentCount", "attachments", "hasAttachments"))),
-        "risk_flags": cloud_text_risk_flags(subject, body),
-        "validation_checks": cloud_validation_checks(row, required=("subject", "from", "date", "receivedDateTime")),
+        "risk_flags": cloud_text_risk_flags(subject, body) + (["provider-archive-embedded-mail"] if archive_fields else []),
+        "validation_checks": validation_checks,
         "commercial_grade_blockers": cloud_blockers("cloud-mail"),
+        **archive_fields,
         "raw": dict(row),
     }
 
@@ -1105,16 +1245,16 @@ def service_from_path(source_path: str, *, default: str) -> str:
         return "azure-activity-log"
     if "gcp" in lowered or "google cloud" in lowered or "googlecloud" in lowered:
         return "gcp-audit-log"
+    if "gmail" in lowered or "/mail/" in lowered or "\\mail\\" in lowered:
+        return "gmail-takeout"
     if "slack" in lowered:
         return "slack"
     if "dropbox" in lowered:
         return "dropbox"
-    if "box" in lowered:
+    if "/box/" in lowered or "\\box\\" in lowered or "box export" in lowered:
         return "box"
     if "zoom" in lowered:
         return "zoom"
-    if "gmail" in lowered:
-        return "gmail-takeout"
     if "icloud" in lowered or "apple" in lowered:
         return "apple-icloud-export"
     if "teams" in lowered:
@@ -1545,7 +1685,18 @@ def build_cloud_export_import_manifest(
     primary_profile = google_profile or icloud_profile or m365_profile
     row_pivots = {
         key: optional_text(details.get(key))
-        for key in ("message_id", "file_id", "subject", "file_name", "chat_id", "operation", "account_email", "timestamp")
+        for key in (
+            "message_id",
+            "file_id",
+            "subject",
+            "file_name",
+            "chat_id",
+            "operation",
+            "account_email",
+            "timestamp",
+            "archive_entry_name",
+            "archive_message_index",
+        )
         if optional_text(details.get(key))
     }
     manifest: dict[str, object] = {
@@ -1640,6 +1791,8 @@ def build_google_takeout_parser_manifest(
             "longitude",
             "title",
             "account_email",
+            "archive_entry_name",
+            "archive_message_index",
         )
         if optional_text(details.get(key))
     }
