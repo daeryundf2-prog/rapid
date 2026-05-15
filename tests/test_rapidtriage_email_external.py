@@ -28,6 +28,10 @@ class RapidTriageEmailExternalParserTests(unittest.TestCase):
         self.assertFalse(payload["selected_tool"]["available"])
         self.assertFalse(payload["summary"]["native_decode_attempted"])
         self.assertIn("sha256", payload["source"]["hashes"])
+        self.assertEqual(payload["evidence_manifest"]["manifest_version"], "email-external-parser-evidence-manifest-v1")
+        self.assertIn("manifest_sha256", payload["evidence_manifest"])
+        self.assertIn("email_external_tool_available", payload["commercial_uplift_evidence"]["failed_or_blocked_checks"])
+        self.assertEqual(payload["forensic_review"]["review_profile"], "email_external_parser_review_profile")
 
     def test_email_external_parse_records_exports_when_tool_runs(self) -> None:
         def fake_runner(command, **_kwargs):
@@ -53,6 +57,37 @@ class RapidTriageEmailExternalParserTests(unittest.TestCase):
         self.assertTrue(payload["selected_tool"]["available"])
         self.assertEqual(payload["summary"]["export_file_count"], 1)
         self.assertTrue(payload["summary"]["ready_for_trusted_diff"])
+        self.assertIn("command_argv_sha256", payload["execution"])
+        self.assertIn("stdout_sha256", payload["execution"])
+        self.assertIn("export_inventory_sha256", payload["evidence_manifest"])
+        self.assertIn("email_external_trusted_diff_ready", payload["commercial_uplift_evidence"]["passed_checks"])
+
+    def test_email_external_parse_supports_absolute_preferred_tool(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            source = root / "message.msg"
+            source.write_bytes(bytes.fromhex("d0cf11e0a1b11ae1") + b"msg fixture")
+            tool = root / "fake-msg-tool"
+            tool.write_text(
+                "#!/bin/sh\n"
+                "mkdir -p \"$2\"\n"
+                "printf 'Subject: Absolute Tool\\n\\nBody' > \"$2/absolute.eml\"\n",
+                encoding="utf-8",
+            )
+            tool.chmod(0o755)
+
+            payload = run_email_external_parse(
+                source_path=source,
+                output_dir=root / "out",
+                preferred_tool=str(tool),
+                tool_resolver=lambda _tool: None,
+            )
+
+        self.assertEqual(payload["status"], "complete")
+        self.assertEqual(payload["selected_tool"]["path"], str(tool.resolve()))
+        self.assertEqual(payload["selected_tool"]["tool"], str(tool))
+        self.assertEqual(payload["tool_availability_matrix"][0]["family"], "custom")
+        self.assertEqual(payload["summary"]["export_file_count"], 1)
 
     def test_email_external_overwrite_removes_stale_exports(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
