@@ -40,6 +40,14 @@ class RapidTriageMacOsLiveSmokeTests(unittest.TestCase):
             self.assertNotIn("https://example.test/mac-download", serialized)
             self.assertIn("triage_benchmark", payload["performance_summary"])
             self.assertIn("sqlite_fts", payload["performance_summary"])
+            self.assertTrue((output_dir / "large-case-readiness.json").is_file())
+            self.assertEqual(payload["large_case_readiness"]["profile_version"], "large-case-readiness-v1")
+            self.assertEqual(payload["large_case_readiness"]["summary"]["largest_benchmark_record_count"], 30)
+            self.assertEqual(
+                payload["outputs"]["large_case_readiness_json"],
+                str((output_dir / "large-case-readiness.json").resolve()),
+            )
+            self.assertIn("Large-case readiness", (output_dir / "macos-live-smoke.md").read_text(encoding="utf-8"))
 
     def test_macos_live_smoke_cli_prints_json(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:

@@ -20,6 +20,7 @@ from .benchmark import DEFAULT_BENCHMARK_KEYWORD, run_benchmark
 from .benchmark_fts import run_sqlite_fts_benchmark
 from .collect_plan import build_collect_plan
 from .docs import write_result
+from .large_case_readiness import build_large_case_readiness_report
 
 
 MACOS_LIVE_SMOKE_VERSION = "macos-live-smoke-v1"
@@ -70,6 +71,11 @@ def run_macos_live_smoke(
         query_iterations=3,
         overwrite=True,
     )
+    large_case_readiness = build_large_case_readiness_report(
+        benchmark_paths=[Path(str(fts_payload.get("outputs", {}).get("json", "")))],
+        keyword=normalized_keyword,
+        output=output_dir / "large-case-readiness.json",
+    )
     external_tools = external_validation_tool_profile()
     checks = build_macos_smoke_checks(
         collect_plan=collect_plan,
@@ -96,6 +102,7 @@ def run_macos_live_smoke(
             "triage_benchmark": benchmark_payload.get("metrics", {}),
             "sqlite_fts": fts_payload.get("metrics", {}),
         },
+        "large_case_readiness": large_case_readiness,
         "external_validation_tools": external_tools,
         "checks": checks,
         "summary": summarize_checks(checks),
@@ -105,6 +112,7 @@ def run_macos_live_smoke(
             "markdown": str(output_dir / "macos-live-smoke.md"),
             "triage_benchmark_json": str(benchmark_payload.get("outputs", {}).get("json", "")),
             "sqlite_fts_json": str(fts_payload.get("outputs", {}).get("json", "")),
+            "large_case_readiness_json": str(output_dir / "large-case-readiness.json"),
         },
     }
     write_result(payload, output_dir / "macos-live-smoke.json")
@@ -115,7 +123,13 @@ def run_macos_live_smoke(
 def cleanup_owned_outputs(output_dir: Path, *, overwrite: bool) -> None:
     if not overwrite:
         return
-    for name in ("macos-live-smoke.json", "macos-live-smoke.md", "triage-benchmark", "sqlite-fts-benchmark"):
+    for name in (
+        "macos-live-smoke.json",
+        "macos-live-smoke.md",
+        "large-case-readiness.json",
+        "triage-benchmark",
+        "sqlite-fts-benchmark",
+    ):
         path = output_dir / name
         if path.is_dir():
             shutil.rmtree(path)
@@ -296,6 +310,8 @@ def macos_live_commercial_blockers(*, checks: list[Mapping[str, object]], extern
 def render_macos_live_smoke_markdown(payload: Mapping[str, object]) -> str:
     summary = payload.get("summary", {}) if isinstance(payload.get("summary"), Mapping) else {}
     artifact_summary = payload.get("macos_artifact_summary", {}) if isinstance(payload.get("macos_artifact_summary"), Mapping) else {}
+    large_case = payload.get("large_case_readiness", {}) if isinstance(payload.get("large_case_readiness"), Mapping) else {}
+    large_case_summary = large_case.get("summary", {}) if isinstance(large_case.get("summary"), Mapping) else {}
     redaction = artifact_summary.get("redaction", {}) if isinstance(artifact_summary.get("redaction"), Mapping) else {}
     lines = [
         "# RapidTriage macOS Live Smoke",
@@ -304,6 +320,8 @@ def render_macos_live_smoke_markdown(payload: Mapping[str, object]) -> str:
         f"- Local smoke score: `{summary.get('local_smoke_score', 0)}`",
         f"- Passed checks: `{summary.get('passed_count', 0)}/{summary.get('check_count', 0)}`",
         f"- Live artifact records: `{artifact_summary.get('record_count', 0)}`",
+        f"- Large-case readiness: `{large_case.get('status', 'not-run')}`",
+        f"- Largest FTS benchmark: `{large_case_summary.get('largest_benchmark_record_count', 0)}` rows",
         f"- Redaction: `{redaction.get('policy', '')}`",
         "",
         "## Failed Checks",
