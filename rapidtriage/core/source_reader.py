@@ -22,6 +22,8 @@ MAX_SOURCE_READ_TEXT_CHARS = 2_000_000
 MAX_SOURCE_READ_HEX_BYTES = 1_048_576
 MAX_SQLITE_ROW_LIMIT = 500
 MAX_ARCHIVED_SOURCE_ENTRY_BYTES = 16 * 1024 * 1024
+DEFAULT_SOURCE_SEARCH_BYTES = 2_000_000
+MAX_SOURCE_SEARCH_BYTES = 64 * 1024 * 1024
 ARCHIVED_SOURCE_SEPARATOR = "::"
 
 
@@ -151,6 +153,8 @@ def run_source_search(
     limit: int = 100,
     context: int = 120,
     max_chars: int = MAX_SOURCE_READ_TEXT_CHARS,
+    byte_offset: int = 0,
+    max_search_bytes: int = DEFAULT_SOURCE_SEARCH_BYTES,
 ) -> dict[str, object]:
     normalized = [item.strip().lower() for item in keywords if item.strip()]
     if not normalized:
@@ -182,6 +186,19 @@ def run_source_search(
         )
         searchable = True
         search_mode = "bounded-sqlite-table-scan"
+    elif can_stream_search_source(source_path, preview):
+        matches, stream_summary = search_plain_text_source_stream(
+            source_path,
+            normalized,
+            relative_path=str(source_payload.get("relative_path") or raw_path),
+            limit=limit,
+            context=context,
+            byte_offset=byte_offset,
+            max_search_bytes=max_search_bytes or max_chars,
+        )
+        searchable = stream_summary["stream_status"] == "searched"
+        sqlite_summary = stream_summary
+        search_mode = "bounded-plain-text-stream"
     else:
         searchable = preview.get("preview_type") == "text"
         text = str(preview.get("text") or "") if searchable else ""
@@ -194,6 +211,7 @@ def run_source_search(
         ) if searchable else []
         sqlite_summary = {}
         search_mode = "bounded-source-read-preview"
+    normalized_limit = normalize_limit(limit, default=100, maximum=10_000)
     return {
         "command": "source-search",
         "profile_version": "source-search-cli-v1",
@@ -208,10 +226,10 @@ def run_source_search(
         "archive_entry": source_payload.get("archive_entry", {}),
         "keywords": normalized,
         "searchable": searchable,
-        "truncated": bool(preview.get("truncated")) or len(matches) >= normalize_limit(limit, default=100, maximum=10_000),
+        "truncated": bool(preview.get("truncated")) or len(matches) >= normalized_limit,
         "summary": {
             "match_count": len(matches),
-            "limit": normalize_limit(limit, default=100, maximum=10_000),
+            "limit": normalized_limit,
             "context": normalize_limit(context, default=120, maximum=2_000),
             "search_mode": search_mode,
             "zip_entry_search": is_archive_entry,
@@ -229,6 +247,91 @@ def run_source_search(
                 "cite path plus line/offset and preserve container provenance",
             ],
         },
+    }
+
+
+def can_stream_search_source(source_path: Path, preview: object) -> bool:
+    if source_path.suffix.lower() in {".db", ".sqlite", ".sqlite3"}:
+        return False
+    if not source_path.is_file():
+        return False
+    if isinstance(preview, Mapping) and preview.get("container_type") == "zip":
+        return False
+    return not is_probably_binary(source_path)
+
+
+def search_plain_text_source_stream(
+    source_path: Path,
+    keywords: Sequence[str],
+    *,
+    relative_path: str,
+    limit: int,
+    context: int,
+    byte_offset: int,
+    max_search_bytes: int,
+) -> tuple[list[dict[str, object]], dict[str, object]]:
+    normalized_offset = max(0, int_or_default(byte_offset, 0))
+    normalized_bytes = normalize_limit(
+        max_search_bytes,
+        default=DEFAULT_SOURCE_SEARCH_BYTES,
+        maximum=MAX_SOURCE_SEARCH_BYTES,
+    )
+    try:
+        total_size = source_path.stat().st_size
+        with source_path.open("rb") as handle:
+            handle.seek(min(normalized_offset, total_size))
+            blob = handle.read(normalized_bytes)
+    except OSError as exc:
+        return [], {
+            "plain_text_stream_search": True,
+            "stream_status": f"read-failed: {exc}",
+            "byte_offset": normalized_offset,
+            "bytes_read": 0,
+            "max_search_bytes": normalized_bytes,
+            "next_byte_offset": normalized_offset,
+            "stream_truncated": False,
+        }
+
+    if is_probably_binary_bytes(blob):
+        return [], {
+            "plain_text_stream_search": True,
+            "stream_status": "binary-window-skipped",
+            "byte_offset": normalized_offset,
+            "bytes_read": len(blob),
+            "max_search_bytes": normalized_bytes,
+            "next_byte_offset": min(total_size, normalized_offset + len(blob)),
+            "stream_truncated": normalized_offset + len(blob) < total_size,
+        }
+
+    text = blob.decode("utf-8", errors="replace")
+    matches = search_preview_text(
+        text,
+        keywords,
+        relative_path=relative_path,
+        limit=limit,
+        context=context,
+    )
+    for match in matches:
+        local_offset = int_or_default(match.get("offset"), 0)
+        match["offset"] = normalized_offset + local_offset
+        match["window_offset"] = local_offset
+        match["byte_offset"] = normalized_offset
+        match["citation"] = (
+            f"{relative_path} byte-window {normalized_offset} offset {match['offset']} "
+            f"keyword {match['keyword']}"
+        )
+        match["source_path"] = relative_path
+
+    next_offset = min(total_size, normalized_offset + len(blob))
+    return matches, {
+        "plain_text_stream_search": True,
+        "stream_status": "searched",
+        "byte_offset": normalized_offset,
+        "bytes_read": len(blob),
+        "max_search_bytes": normalized_bytes,
+        "next_byte_offset": next_offset,
+        "stream_truncated": next_offset < total_size,
+        "offset_semantics": "decoded-character-offset-from-byte-window",
     }
 
 

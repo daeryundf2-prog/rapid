@@ -138,6 +138,7 @@ class RapidTriageRunTests(unittest.TestCase):
         self.assertIn("--sqlite-table", commands["source-read"].format_help())
         self.assertIn("source-search", commands)
         self.assertIn("archive.zip::entry", commands["source-search"].format_help())
+        self.assertIn("--byte-offset", commands["source-search"].format_help())
 
     def test_run_fraud_mode_writes_component_outputs_summary_and_report(self) -> None:
         self.assert_run_mode_outputs("fraud")
@@ -1116,6 +1117,50 @@ class RapidTriageRunTests(unittest.TestCase):
             self.assertEqual(match["column"], "body")
             self.assertIn("table messages", match["citation"])
             self.assertIn("password", match["snippet"])
+
+    def test_source_search_command_streams_large_plain_text_windows(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir) / "case-root"
+            output_dir = Path(tmp_dir) / "run-out"
+            source_output = Path(tmp_dir) / "source-search-large-log.json"
+            root.mkdir(parents=True, exist_ok=True)
+            build_run_fixture(root)
+            log_path = root / "Users" / "alice" / "Logs" / "application.log"
+            log_path.parent.mkdir(parents=True, exist_ok=True)
+            log_path.write_text(("A" * 1_500_000) + "\ncritical evtx marker after first window\n", encoding="utf-8")
+
+            self.assertEqual(main(["run", str(root), "--mode", "fraud", "--output-dir", str(output_dir)]), 0)
+            self.assertEqual(
+                main(
+                    [
+                        "source-search",
+                        str(output_dir),
+                        "--path",
+                        "Users/alice/Logs/application.log",
+                        "-k",
+                        "evtx",
+                        "--byte-offset",
+                        "1000000",
+                        "--max-search-bytes",
+                        "800000",
+                        "--output",
+                        str(source_output),
+                    ]
+                ),
+                0,
+            )
+
+            payload = json.loads(source_output.read_text(encoding="utf-8"))
+            self.assertEqual(payload["summary"]["search_mode"], "bounded-plain-text-stream")
+            self.assertTrue(payload["summary"]["plain_text_stream_search"])
+            self.assertEqual(payload["summary"]["stream_status"], "searched")
+            self.assertEqual(payload["summary"]["byte_offset"], 1_000_000)
+            self.assertGreaterEqual(payload["summary"]["bytes_read"], 500_000)
+            self.assertGreater(payload["summary"]["next_byte_offset"], payload["summary"]["byte_offset"])
+            self.assertEqual(payload["summary"]["match_count"], 1)
+            self.assertEqual(payload["matches"][0]["keyword"], "evtx")
+            self.assertGreater(payload["matches"][0]["offset"], 1_000_000)
+            self.assertIn("byte-window 1000000", payload["matches"][0]["citation"])
 
     def test_source_read_command_opens_bounded_sqlite_table_locator(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
