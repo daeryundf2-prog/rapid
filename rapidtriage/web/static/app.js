@@ -2342,6 +2342,7 @@ function renderArtifactDetails(artifact) {
   const accuracyGateCard = renderCoreAccuracyGateCard(artifact);
   const aiUsageCard = renderAiUsageArtifactCard(artifact);
   const aiConversationCard = renderAiConversationArtifactCard(artifact);
+  const cloudExportReviewCard = renderCloudExportReviewArtifactCard(artifact);
   return `
     ${eventLogCard}
     ${evtxReadinessCard}
@@ -2352,10 +2353,75 @@ function renderArtifactDetails(artifact) {
     ${accuracyGateCard}
     ${aiUsageCard}
     ${aiConversationCard}
+    ${cloudExportReviewCard}
     <details class="match-details">
       <summary>Inspect artifact details</summary>
       <pre>${escapeHtml(JSON.stringify(artifact.details, null, 2))}</pre>
     </details>
+  `;
+}
+
+function renderCloudExportReviewArtifactCard(artifact) {
+  const details = artifact.details || {};
+  const cloudProfile = details.cloud_analyst_review_profile || {};
+  const providerProfile =
+    details.m365_export_review_profile ||
+    details.google_takeout_review_profile ||
+    details.icloud_export_review_profile ||
+    {};
+  const manifest =
+    details.m365_export_parser_manifest ||
+    details.google_takeout_parser_manifest ||
+    details.icloud_export_parser_manifest ||
+    details.cloud_export_import_manifest ||
+    {};
+  if (!cloudProfile.profile_version && !providerProfile.profile_version && !manifest.manifest_version) return "";
+  const rowPivots = Array.isArray(cloudProfile.row_pivots)
+    ? cloudProfile.row_pivots.slice(0, 8)
+    : Object.entries(manifest.row_pivots || {}).slice(0, 8).map(([key, value]) => `${key}=${value}`);
+  const providerFamily = providerProfile.product_family || providerProfile.workload_family || cloudProfile.cloud_family;
+  const teamsProfile = details.teams_message_review_profile || {};
+  const filePermissionProfile = details.m365_file_permission_review_profile || {};
+  const fileStateProfile = details.m365_file_state_review_profile || {};
+  const chips = [
+    details.service || cloudProfile.service,
+    providerFamily,
+    details.commercial_grade_ready === false ? "not commercial-ready" : "",
+    providerProfile.provider_native_diff_status || providerProfile.teams_compliance_record_status,
+  ].filter(Boolean);
+  const rows = [
+    ["Summary", cloudProfile.summary || artifact.artifact_type],
+    ["Primary pivots", (providerProfile.present_primary_pivots || []).slice(0, 8).join(" · ")],
+    ["Row pivots", rowPivots.join(" · ")],
+    ["Viewer", manifest.row_citation?.source_viewer_locator?.viewer || manifest.source_viewer_locator?.viewer],
+    ["Teams review", [
+      teamsProfile.reply_to_message_id ? `reply=${teamsProfile.reply_to_message_id}` : "",
+      details.attachment_count !== undefined ? `attachments=${details.attachment_count}` : "",
+      details.reaction_count !== undefined ? `reactions=${details.reaction_count}` : "",
+      teamsProfile.edited_status,
+      teamsProfile.deleted_status,
+    ].filter(Boolean).join(" · ")],
+    ["File permission/state", [
+      filePermissionProfile.permission_count !== undefined ? `permissions=${filePermissionProfile.permission_count}` : "",
+      filePermissionProfile.sharing_link_count !== undefined ? `sharing links=${filePermissionProfile.sharing_link_count}` : "",
+      fileStateProfile.version_id ? `version=${fileStateProfile.version_id}` : "",
+      fileStateProfile.deleted_status,
+      fileStateProfile.retention_label ? `retention=${fileStateProfile.retention_label}` : "",
+    ].filter(Boolean).join(" · ")],
+    ["Questions", (cloudProfile.analyst_questions || []).slice(0, 3).join(" · ")],
+    ["Not proof of", (cloudProfile.not_proof_of || []).slice(0, 4).join(" · ")],
+  ].filter(([, value]) => value !== undefined && value !== null && String(value).trim());
+  return `
+    <section class="core-accuracy-card cloud-export-review-card" data-testid="cloud-export-review-card">
+      <div class="eventlog-card-header">
+        <strong>Cloud export review</strong>
+        <span>${escapeHtml([manifest.manifest_version, manifest.manifest_sha256 ? `manifest ${String(manifest.manifest_sha256).slice(0, 12)}` : ""].filter(Boolean).join(" · "))}</span>
+      </div>
+      <div class="eventlog-chip-row">${chips.map((chip) => `<span>${escapeHtml(chip)}</span>`).join("")}</div>
+      <dl class="eventlog-fields">
+        ${rows.map(([label, value]) => `<dt>${escapeHtml(label)}</dt><dd>${escapeHtml(String(value))}</dd>`).join("")}
+      </dl>
+    </section>
   `;
 }
 
