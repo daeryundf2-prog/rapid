@@ -774,13 +774,14 @@ class RapidTriageOpsTests(unittest.TestCase):
             self.assertIn("#83", payload["parser_false_positive_false_negative_notes"][0]["commercial_gap_ids"])
             runner_matrix = payload["validation_diff_runner_matrix"]
             self.assertEqual(runner_matrix["profile_version"], "validation-diff-runner-matrix-v1")
-            self.assertEqual(runner_matrix["qc_prep_item_numbers"], [76, 77, 78, 79, 80, 81, 82])
-            self.assertEqual(runner_matrix["summary"]["runner_group_count"], 6)
+            self.assertEqual(runner_matrix["qc_prep_item_numbers"], [76, 77, 78, 79, 80, 81, 82, 83])
+            self.assertEqual(runner_matrix["summary"]["runner_group_count"], 7)
             self.assertEqual(len(runner_matrix["matrix_hash"]), 64)
             self.assertIn("NIST CFReDS", {row["corpus_name"] for row in runner_matrix["public_corpus_registry"]})
             self.assertIn("EvtxECmd", {tool["name"] for group in runner_matrix["runner_groups"] for tool in group["trusted_tools"]})
             self.assertIn("PECmd", {tool["name"] for group in runner_matrix["runner_groups"] for tool in group["trusted_tools"]})
             self.assertIn("LECmd", {tool["name"] for group in runner_matrix["runner_groups"] for tool in group["trusted_tools"]})
+            self.assertIn("Velociraptor", {tool["name"] for group in runner_matrix["runner_groups"] for tool in group["trusted_tools"]})
             self.assertIn("AmcacheParser", {tool["name"] for group in runner_matrix["runner_groups"] for tool in group["trusted_tools"]})
             final_qc = payload["final_qc_execution_report"]
             self.assertEqual(final_qc["profile_version"], "final-qc-execution-report-v1")
@@ -957,11 +958,11 @@ class RapidTriageOpsTests(unittest.TestCase):
             self.assertEqual(exit_code, 0)
             payload = json.loads(stdout.getvalue())
             self.assertEqual(payload["profile_version"], "validation-diff-runner-matrix-v1")
-            self.assertEqual(payload["qc_prep_item_numbers"], [76, 77, 78, 79, 80, 81, 82])
+            self.assertEqual(payload["qc_prep_item_numbers"], [76, 77, 78, 79, 80, 81, 82, 83])
             self.assertTrue(output.is_file())
             self.assertEqual(len(payload["matrix_hash"]), 64)
-            self.assertEqual(payload["summary"]["runner_group_count"], 6)
-            self.assertEqual(payload["summary"]["trusted_tool_count"], 19)
+            self.assertEqual(payload["summary"]["runner_group_count"], 7)
+            self.assertEqual(payload["summary"]["trusted_tool_count"], 22)
             self.assertFalse(payload["summary"]["version_probe_enabled"])
             self.assertEqual(payload["summary"]["version_captured_count"], 0)
             self.assertEqual(payload["output_manifest"]["bytes"], output.stat().st_size)
@@ -3460,6 +3461,65 @@ class RapidTriageOpsTests(unittest.TestCase):
             self.assertEqual(comparison["mismatch_count"], 0)
             self.assertIn("tracker_guid", comparison["compared_canonical_fields"])
             self.assertIn("target_path", comparison["compared_canonical_fields"])
+
+    def test_cross_tool_validate_compares_windows_system_rows(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            rapid = root / "rapid-windows-system.json"
+            reference = root / "velociraptor.csv"
+            rapid.write_text(
+                json.dumps(
+                    {
+                        "artifacts": [
+                            {
+                                "artifact_type": "windows-scheduled-task",
+                                "details": {
+                                    "artifact_family": "task",
+                                    "task_uri": r"\SecurityUpdater",
+                                    "command": r"C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe -enc AAAA",
+                                    "principal": "SYSTEM",
+                                    "trigger": "LogonTrigger",
+                                    "source_path": r"C:\Windows\System32\Tasks\SecurityUpdater",
+                                },
+                            }
+                        ]
+                    }
+                ),
+                encoding="utf-8",
+            )
+            reference.write_text(
+                "Family,TaskURI,Command,Principal,Trigger,SourceFile\n"
+                r"task,\SecurityUpdater,C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe -enc AAAA,"
+                r"SYSTEM,LogonTrigger,C:\Windows\System32\Tasks\SecurityUpdater"
+                "\n",
+                encoding="utf-8",
+            )
+
+            stdout = io.StringIO()
+            with contextlib.redirect_stdout(stdout):
+                exit_code = main(
+                    [
+                        "cross-tool-validate",
+                        "--rapid-output",
+                        str(rapid),
+                        "--reference-output",
+                        f"velociraptor={reference}",
+                        "--backlog-item",
+                        "18",
+                        "--min-overlap",
+                        "0.75",
+                        "--json",
+                    ]
+                )
+
+            self.assertEqual(exit_code, 0)
+            payload = json.loads(stdout.getvalue())
+            self.assertEqual(payload["status"], "pass")
+            comparison = payload["comparisons"][0]["system_artifact_field_comparison"]
+            self.assertGreaterEqual(comparison["common_record_count"], 1)
+            self.assertEqual(comparison["mismatch_count"], 0)
+            self.assertIn("task_uri", comparison["compared_canonical_fields"])
+            self.assertIn("command", comparison["compared_canonical_fields"])
 
     def test_confidence_explainability_and_reproducibility_commands(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:

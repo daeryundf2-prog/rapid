@@ -128,6 +128,9 @@ class CommercialReadinessValidationBundleTests(unittest.TestCase):
         self.assertIn("PECmd", prefetch_hint["trusted_tools"])
         lnk_hint = trusted_diff_runner_hint(17)
         self.assertIn("LECmd", lnk_hint["trusted_tools"])
+        system_hint = trusted_diff_runner_hint(18)
+        self.assertEqual(system_hint["artifact_family"], "windows-system-ir")
+        self.assertIn("Velociraptor", system_hint["trusted_tools"])
 
     def test_commercial_readiness_attaches_email_external_mac_first_evidence(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:

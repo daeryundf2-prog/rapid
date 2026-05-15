@@ -267,6 +267,40 @@ RUNNER_GROUPS: tuple[dict[str, object], ...] = (
             "--backlog-item 6 --backlog-item 7 --backlog-item 8 --backlog-item 9 --backlog-item 10"
         ),
     },
+    {
+        "item_number": 83,
+        "artifact_family": "windows-system-ir",
+        "title": "Windows system artifact trusted diff runners",
+        "trusted_tools": (
+            {
+                "name": "Velociraptor",
+                "binary_candidates": ("velociraptor", "velociraptor.exe"),
+                "reference_name": "velociraptor",
+                "output_format": "JSON/CSV artifact export",
+                "command_template": "velociraptor artifacts collect <Task/Defender/Firewall/WER/WMI-artifacts> --format jsonl",
+            },
+            {
+                "name": "Chainsaw",
+                "binary_candidates": ("chainsaw", "chainsaw.exe"),
+                "reference_name": "chainsaw",
+                "output_format": "JSON/CSV",
+                "command_template": "chainsaw hunt <EVTX-dir> --json --output <reference.json>",
+            },
+            {
+                "name": "Autoruns",
+                "binary_candidates": ("autorunsc", "autorunsc.exe"),
+                "reference_name": "autoruns",
+                "output_format": "CSV",
+                "command_template": "autorunsc -accepteula -a t -ct > <Autoruns-tasks.csv>",
+            },
+        ),
+        "rapid_output_hint": "rapidtriage artifacts --kind windows-system --output rapid-windows-system.json",
+        "cross_tool_template": (
+            "rapidtriage cross-tool-validate --rapid-output rapid-windows-system.json "
+            "--reference-output velociraptor=<Velociraptor.jsonl> --reference-output chainsaw=<Chainsaw.json> "
+            "--reference-output autoruns=<Autoruns.csv> --backlog-item 18"
+        ),
+    },
 )
 
 
@@ -302,7 +336,7 @@ def build_validation_diff_runner_matrix(
     total_tool_count = sum(len(group["trusted_tools"]) for group in runner_groups)
     core = {
         "profile_version": "validation-diff-runner-matrix-v1",
-        "qc_prep_item_numbers": [76, 77, 78, 79, 80, 81, 82],
+        "qc_prep_item_numbers": [76, 77, 78, 79, 80, 81, 82, 83],
         "public_corpus_registry": list(PUBLIC_CORPUS_ROWS),
         "runner_groups": runner_groups,
         "summary": {

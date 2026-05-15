@@ -21,6 +21,7 @@ MAX_USN_STATE_REPLAY_FIELD_DIFF_ROWS = 5_000
 MAX_OS_ACCOUNT_FIELD_DIFF_ROWS = 5_000
 MAX_EXECUTION_ARTIFACT_FIELD_DIFF_ROWS = 5_000
 MAX_USER_ACTIVITY_FIELD_DIFF_ROWS = 5_000
+MAX_SYSTEM_ARTIFACT_FIELD_DIFF_ROWS = 5_000
 MAX_FIELD_MISMATCH_SAMPLES = 50
 FUNCTIONAL_VALIDATION_BATCH_ID = "commercial-uplift-036-040"
 KEY_FIELDS = (
@@ -211,6 +212,33 @@ USER_ACTIVITY_FIELD_ALIASES = {
     "bag_path": ("bag_path", "BagPath", "bag_path", "shell_path", "ShellPath", "AbsolutePath"),
     "shell_item_type": ("shell_item_type", "ShellItemType", "ItemType", "item_type"),
     "tracker_guid": ("tracker_guid", "TrackerGuid", "DroidFileIdentifier", "MachineIdentifier"),
+}
+SYSTEM_ARTIFACT_FIELD_ALIASES = {
+    "artifact_family": ("artifact_family", "ArtifactFamily", "Family", "family", "Type", "type"),
+    "task_uri": ("task_uri", "TaskURI", "TaskUri", "TaskName", "task_name", "Path", "path"),
+    "command": (
+        "command",
+        "Command",
+        "ActionCommand",
+        "Executable",
+        "ImagePath",
+        "ProcessCommandLine",
+        "process_command_line",
+    ),
+    "principal": ("principal", "Principal", "UserId", "UserID", "User", "Account", "user"),
+    "trigger": ("trigger", "Trigger", "TriggerType", "StartBoundary", "trigger_type"),
+    "threat_name": ("threat_name", "ThreatName", "Threat", "Detection", "Signature", "Name"),
+    "remediation": ("remediation", "Remediation", "RemediationAction", "Action", "Result"),
+    "source_ip": ("source_ip", "SourceIP", "SourceAddress", "src_ip", "src"),
+    "destination_ip": ("destination_ip", "DestinationIP", "DestinationAddress", "dst_ip", "dst"),
+    "destination_port": ("destination_port", "DestinationPort", "DestPort", "dst_port", "port"),
+    "protocol": ("protocol", "Protocol", "proto"),
+    "application_name": ("application_name", "ApplicationName", "AppName", "FaultingApplication", "ProcessName"),
+    "exception_code": ("exception_code", "ExceptionCode", "FaultCode", "ErrorCode"),
+    "wmi_consumer": ("wmi_consumer", "ConsumerName", "Consumer", "EventConsumer", "Name"),
+    "wmi_filter": ("wmi_filter", "FilterName", "Filter", "EventFilter", "Query"),
+    "timestamp": ("timestamp", "Timestamp", "TimeCreated", "LastWriteTime", "Modified", "DateTime"),
+    "source_path": ("source_path", "SourcePath", "SourceFile", "source_file", "FilePath", "Path"),
 }
 MFT_FIELD_ALIASES = {
     "record_number": ("record_number", "RecordNumber", "EntryNumber", "entry_number", "MFTEntryNumber"),
@@ -583,6 +611,7 @@ def load_tool_dataset(name: str, path: Path) -> dict[str, object]:
         "os_account_field_index": os_account_field_index(rows),
         "execution_artifact_field_index": execution_artifact_field_index(rows),
         "user_activity_field_index": user_activity_field_index(rows),
+        "system_artifact_field_index": system_artifact_field_index(rows),
     }
 
 
@@ -769,6 +798,7 @@ def composite_candidate_keys(row: Mapping[str, object]) -> list[str]:
     composites.extend(os_account_key_variants(row))
     composites.extend(execution_artifact_key_variants(row))
     composites.extend(user_activity_key_variants(row))
+    composites.extend(system_artifact_key_variants(row))
 
     mft_record_number = ntfs_int_value(row, MFT_FIELD_ALIASES["record_number"])
     mft_path = ntfs_path_value(row, MFT_FIELD_ALIASES["file_path"])
@@ -841,6 +871,7 @@ def compare_datasets(
     os_account_field_comparison = compare_os_account_fields(rapid_dataset, reference_dataset)
     execution_artifact_field_comparison = compare_execution_artifact_fields(rapid_dataset, reference_dataset)
     user_activity_field_comparison = compare_user_activity_fields(rapid_dataset, reference_dataset)
+    system_artifact_field_comparison = compare_system_artifact_fields(rapid_dataset, reference_dataset)
     if field_comparison["mismatch_count"] or field_comparison["missing_common_field_count"]:
         status = "failed"
     if registry_field_comparison["mismatch_count"]:
@@ -858,6 +889,8 @@ def compare_datasets(
     if execution_artifact_field_comparison["mismatch_count"]:
         status = "failed"
     if user_activity_field_comparison["mismatch_count"]:
+        status = "failed"
+    if system_artifact_field_comparison["mismatch_count"]:
         status = "failed"
     if input_quality_blockers:
         status = "failed"
@@ -899,6 +932,7 @@ def compare_datasets(
         "os_account_field_comparison": os_account_field_comparison,
         "execution_artifact_field_comparison": execution_artifact_field_comparison,
         "user_activity_field_comparison": user_activity_field_comparison,
+        "system_artifact_field_comparison": system_artifact_field_comparison,
         "release_gate": "review-required" if status != "pass" else "comparison-passed",
     }
 
@@ -1525,6 +1559,127 @@ def compare_user_activity_fields(
         mode="user-activity-jumplist-shellbags-prefetch-lnk-field-diff",
         key_name="user_activity_key",
         row_limit=MAX_USER_ACTIVITY_FIELD_DIFF_ROWS,
+    )
+
+
+def system_artifact_field_index(rows: Sequence[Mapping[str, object]]) -> dict[str, dict[str, str]]:
+    index: dict[str, dict[str, str]] = {}
+    for row in rows[:MAX_SYSTEM_ARTIFACT_FIELD_DIFF_ROWS]:
+        keys = system_artifact_key_variants(row)
+        if not keys:
+            continue
+        fields = system_artifact_normalized_fields(row)
+        if fields:
+            for key in keys:
+                index.setdefault(key, fields)
+    return index
+
+
+def system_artifact_key_variants(row: Mapping[str, object]) -> list[str]:
+    family = infer_system_artifact_family(row)
+    if not family:
+        return []
+    task_uri = ntfs_path_value(row, SYSTEM_ARTIFACT_FIELD_ALIASES["task_uri"])
+    command = ntfs_path_value(row, SYSTEM_ARTIFACT_FIELD_ALIASES["command"])
+    principal = normalize_windows_identity(first_value(row, SYSTEM_ARTIFACT_FIELD_ALIASES["principal"]))
+    threat_name = normalize_windows_identity(first_value(row, SYSTEM_ARTIFACT_FIELD_ALIASES["threat_name"]))
+    source_ip = normalize_windows_identity(first_value(row, SYSTEM_ARTIFACT_FIELD_ALIASES["source_ip"]))
+    destination_ip = normalize_windows_identity(first_value(row, SYSTEM_ARTIFACT_FIELD_ALIASES["destination_ip"]))
+    destination_port = ntfs_int_value(row, SYSTEM_ARTIFACT_FIELD_ALIASES["destination_port"])
+    protocol = normalize_windows_identity(first_value(row, SYSTEM_ARTIFACT_FIELD_ALIASES["protocol"]))
+    application_name = normalize_windows_identity(first_value(row, SYSTEM_ARTIFACT_FIELD_ALIASES["application_name"]))
+    exception_code = normalize_windows_identity(first_value(row, SYSTEM_ARTIFACT_FIELD_ALIASES["exception_code"]))
+    wmi_consumer = normalize_windows_identity(first_value(row, SYSTEM_ARTIFACT_FIELD_ALIASES["wmi_consumer"]))
+    wmi_filter = normalize_windows_identity(first_value(row, SYSTEM_ARTIFACT_FIELD_ALIASES["wmi_filter"]))
+    source_path = ntfs_path_value(row, SYSTEM_ARTIFACT_FIELD_ALIASES["source_path"])
+    keys: list[str] = []
+    if family == "task":
+        if task_uri:
+            keys.append(normalize_key(f"system:{family}:task:{task_uri}"))
+        if task_uri and command:
+            keys.append(normalize_key(f"system:{family}:task-command:{task_uri}:{command}"))
+        if command and principal:
+            keys.append(normalize_key(f"system:{family}:principal-command:{principal}:{command}"))
+    elif family == "defender":
+        if threat_name:
+            keys.append(normalize_key(f"system:{family}:threat:{threat_name}"))
+        if threat_name and source_path:
+            keys.append(normalize_key(f"system:{family}:threat-source:{threat_name}:{source_path}"))
+    elif family == "firewall":
+        if destination_ip and destination_port:
+            keys.append(normalize_key(f"system:{family}:dst:{destination_ip}:{destination_port}:{protocol}"))
+        if source_ip and destination_ip and destination_port:
+            keys.append(normalize_key(f"system:{family}:tuple:{source_ip}:{destination_ip}:{destination_port}:{protocol}"))
+    elif family == "wer":
+        if application_name and exception_code:
+            keys.append(normalize_key(f"system:{family}:app-exception:{application_name}:{exception_code}"))
+        if application_name:
+            keys.append(normalize_key(f"system:{family}:app:{application_name}"))
+    elif family == "wmi":
+        if wmi_consumer:
+            keys.append(normalize_key(f"system:{family}:consumer:{wmi_consumer}"))
+        if wmi_filter:
+            keys.append(normalize_key(f"system:{family}:filter:{wmi_filter}"))
+        if command:
+            keys.append(normalize_key(f"system:{family}:command:{command}"))
+    if source_path:
+        keys.append(normalize_key(f"system:{family}:source:{source_path}"))
+    return list(dict.fromkeys(keys))
+
+
+def system_artifact_normalized_fields(row: Mapping[str, object]) -> dict[str, str]:
+    family = infer_system_artifact_family(row)
+    if not family:
+        return {}
+    fields: dict[str, str] = {"artifact_family": family}
+    for canonical, aliases in SYSTEM_ARTIFACT_FIELD_ALIASES.items():
+        if canonical == "artifact_family":
+            value = family
+        elif canonical in {"task_uri", "command", "source_path"}:
+            value = ntfs_path_value(row, aliases)
+        elif canonical == "destination_port":
+            value = ntfs_int_value(row, aliases)
+        else:
+            raw = first_value(row, aliases)
+            value = normalize_field_value(raw) if raw is not None and str(raw).strip() else ""
+        if value:
+            fields[canonical] = value
+    return fields
+
+
+def infer_system_artifact_family(row: Mapping[str, object]) -> str:
+    explicit = first_value(row, SYSTEM_ARTIFACT_FIELD_ALIASES["artifact_family"])
+    explicit_text = normalize_field_value(explicit) if explicit is not None else ""
+    haystack = " ".join(
+        str(value)
+        for key, value in row.items()
+        if key.lower().endswith(("artifact_type", "parser", "source_path", "path", "source_file", "kind"))
+    ).lower()
+    combined = f"{explicit_text} {haystack}"
+    if "task" in combined or "scheduled" in combined:
+        return "task"
+    if "defender" in combined or "microsoft-windows-windows defender" in combined or "mplog" in combined:
+        return "defender"
+    if "firewall" in combined or "pfirewall" in combined:
+        return "firewall"
+    if "wer" in combined or "windows error reporting" in combined:
+        return "wer"
+    if "wmi" in combined or "objects.data" in combined:
+        return "wmi"
+    return ""
+
+
+def compare_system_artifact_fields(
+    rapid_dataset: Mapping[str, object],
+    reference_dataset: Mapping[str, object],
+) -> dict[str, object]:
+    return compare_ntfs_field_indexes(
+        rapid_dataset,
+        reference_dataset,
+        index_key="system_artifact_field_index",
+        mode="system-artifact-task-defender-firewall-wer-wmi-field-diff",
+        key_name="system_artifact_key",
+        row_limit=MAX_SYSTEM_ARTIFACT_FIELD_DIFF_ROWS,
     )
 
 
@@ -2218,6 +2373,10 @@ def build_trusted_tool_diff_manifest(
             "usn_field_comparison",
             "usn_state_replay_field_comparison",
             "ese_field_comparison",
+            "os_account_field_comparison",
+            "execution_artifact_field_comparison",
+            "user_activity_field_comparison",
+            "system_artifact_field_comparison",
         ):
             field_comparison = comparison.get(field_name)
             if not isinstance(field_comparison, Mapping):

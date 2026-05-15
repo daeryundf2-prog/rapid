@@ -800,7 +800,14 @@ class RapidTriageKakaoTalkDecryptTests(unittest.TestCase):
             self.assertEqual(attachment["review_status"], "local-file-present")
             self.assertEqual(attachment["local_matches"][0]["signature"], "jpeg")
             self.assertEqual(attachment["message_preview"], "사진 확인")
-            self.assertNotIn("cs", json.dumps(attachment))
+            attachment_payload = json.dumps(
+                {key: value for key, value in attachment.items() if key != "source_sqlite"},
+                ensure_ascii=False,
+            )
+            self.assertNotIn('"cs"', attachment_payload)
+            self.assertNotIn("talk.kakaocdn.net", attachment_payload)
+            self.assertIn("checksum_sha256", attachment)
+            self.assertIn("attachment_json_sha256", attachment)
 
     def test_standalone_legacy_algorithm_matches_existing_derivation(self) -> None:
         key_iv = derive_legacy_key_iv("sample-pragma", "12345")

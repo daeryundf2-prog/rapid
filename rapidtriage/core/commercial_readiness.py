@@ -274,6 +274,19 @@ TRUSTED_DIFF_RUNNER_HINTS_BY_ITEM: dict[int, dict[str, object]] = {
             "--independent-report <review.md> --corpus-scope <scope> --backlog-item 17"
         ),
     },
+    18: {
+        "artifact_family": "windows-system-ir",
+        "runner_group_item": 83,
+        "trusted_tools": ["Velociraptor", "Chainsaw", "Autoruns"],
+        "rapid_output_hint": "rapidtriage artifacts --kind windows-system --output rapid-windows-system.json",
+        "cross_tool_template": (
+            "rapidtriage cross-tool-validate --rapid-output rapid-windows-system.json "
+            "--reference-output velociraptor=<Velociraptor.jsonl> --reference-output chainsaw=<Chainsaw.json> "
+            "--reference-output autoruns=<Autoruns.csv> --source-evidence <Windows-system-artifact-root> "
+            "--tool-version velociraptor=<version> --tool-command velociraptor=<command> "
+            "--independent-report <review.md> --corpus-scope <scope> --backlog-item 18"
+        ),
+    },
 }
 
 

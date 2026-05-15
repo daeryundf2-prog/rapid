@@ -779,6 +779,10 @@ def summarize_diff_comparison_health(comparisons: object) -> dict[str, object]:
         "usn_field_comparison",
         "usn_state_replay_field_comparison",
         "ese_field_comparison",
+        "os_account_field_comparison",
+        "execution_artifact_field_comparison",
+        "user_activity_field_comparison",
+        "system_artifact_field_comparison",
     )
     mismatch_count = 0
     missing_common_field_count = 0

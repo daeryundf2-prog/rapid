@@ -12,6 +12,10 @@ FIELD_DIFF_KEYS = (
     "usn_field_comparison",
     "usn_state_replay_field_comparison",
     "ese_field_comparison",
+    "os_account_field_comparison",
+    "execution_artifact_field_comparison",
+    "user_activity_field_comparison",
+    "system_artifact_field_comparison",
 )
 
 DEFAULT_CONFIDENCE_FAMILIES = (
