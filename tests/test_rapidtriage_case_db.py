@@ -782,6 +782,15 @@ class RapidTriageCaseDatabaseTests(unittest.TestCase):
             self.assertIn("artifacts", sources)
             self.assertIn("timeline", sources)
             self.assertTrue(all(str(match["citation_id"]).startswith("CASE-SEARCH-001-") for match in payload["matches"]))
+            manifest = payload["case_search_result_window_manifest"]
+            self.assertEqual(manifest["profile_version"], "case-search-result-window-manifest-v1")
+            self.assertEqual(payload["summary"]["case_search_result_window_manifest_hash"], manifest["manifest_hash"])
+            self.assertEqual(len(manifest["manifest_hash"]), 64)
+            self.assertEqual(len(manifest["page_window_hash"]), 64)
+            self.assertEqual(manifest["counts"]["returned_count"], payload["summary"]["returned_count"])
+            self.assertGreaterEqual(manifest["counts"]["backend_counts"]["sqlite-fts5"], 1)
+            self.assertGreaterEqual(len(manifest["match_rows"]), 1)
+            self.assertEqual(manifest["match_rows"][0]["source_viewer_locator"]["viewer"], "case-review-source")
 
             first_page = database.search_case(
                 case_id="CASE-SEARCH-001",
@@ -793,6 +802,10 @@ class RapidTriageCaseDatabaseTests(unittest.TestCase):
             self.assertTrue(first_page["summary"]["next_cursor"])
             self.assertEqual(first_page["summary"]["cursor_api"]["profile_version"], "case-search-cursor-v1")
             self.assertEqual(first_page["options"]["page_offset"], 0)
+            first_manifest = first_page["case_search_result_window_manifest"]
+            self.assertEqual(first_manifest["cursor"]["offset"], 0)
+            self.assertEqual(first_manifest["cursor"]["page_size"], 1)
+            self.assertEqual(first_manifest["match_rows"][0]["window_position"], 1)
 
             second_page = database.search_case(
                 case_id="CASE-SEARCH-001",
@@ -802,6 +815,10 @@ class RapidTriageCaseDatabaseTests(unittest.TestCase):
             )
             self.assertEqual(second_page["options"]["page_offset"], 1)
             self.assertEqual(second_page["summary"]["returned_count"], 1)
+            second_manifest = second_page["case_search_result_window_manifest"]
+            self.assertEqual(second_manifest["query_scope_hash"], first_manifest["query_scope_hash"])
+            self.assertNotEqual(second_manifest["page_window_hash"], first_manifest["page_window_hash"])
+            self.assertEqual(second_manifest["match_rows"][0]["window_position"], 2)
             self.assertNotEqual(first_page["matches"][0]["citation_id"], second_page["matches"][0]["citation_id"])
             with self.assertRaisesRegex(CaseDatabaseError, "cursor does not match"):
                 database.search_case(

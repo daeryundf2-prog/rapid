@@ -562,6 +562,28 @@ class CaseDatabase:
             review_status_filter=review_status,
             verification_status_filter=verification_status,
         )
+        result_window_manifest = build_case_search_result_window_manifest(
+            case_id=normalized_case_id,
+            keywords=normalized_keywords,
+            source_filter=source_filter,
+            metadata_filter=metadata_filter,
+            review_status=review_status,
+            verification_status=verification_status,
+            cursor_scope=cursor_scope,
+            page_offset=page_offset,
+            page_size=page_size,
+            retrieval_limit=retrieval_limit,
+            scan_candidate_limit=scan_candidate_limit,
+            total_returnable_count=total_returnable_count,
+            returned_matches=matches,
+            source_counts=source_counts,
+            keyword_counts=keyword_counts,
+            priority_counts=priority_counts,
+            has_more=has_more,
+            next_cursor=next_cursor,
+            large_case_search_plan=large_case_search_plan,
+            review_workflow_summary=review_workflow_summary,
+        )
         return {
             "command": "case-search",
             "generated_at": now_iso(),
@@ -608,12 +630,14 @@ class CaseDatabase:
                     ],
                     "commercial_gap_ids": ["#78", "#79"],
                 },
+                "case_search_result_window_manifest_hash": result_window_manifest["manifest_hash"],
             },
             "documents": {
                 "errors": document_errors,
             },
             "large_case_search_plan": large_case_search_plan,
             "review_workflow_summary": review_workflow_summary,
+            "case_search_result_window_manifest": result_window_manifest,
             "matches": matches,
         }
 
@@ -3183,6 +3207,189 @@ def build_case_search_execution_plan(
         "commercial_gap_ids": ["#61", "#74", "#78", "#79"],
         "status": "validated-local-search-plan-validation-required",
     }
+
+
+def build_case_search_result_window_manifest(
+    *,
+    case_id: str,
+    keywords: Sequence[str],
+    source_filter: set[str],
+    metadata_filter: Mapping[str, str],
+    review_status: str | None,
+    verification_status: str | None,
+    cursor_scope: str,
+    page_offset: int,
+    page_size: int,
+    retrieval_limit: int,
+    scan_candidate_limit: int,
+    total_returnable_count: int,
+    returned_matches: Sequence[Mapping[str, object]],
+    source_counts: Mapping[str, int],
+    keyword_counts: Mapping[str, int],
+    priority_counts: Mapping[str, int],
+    has_more: bool,
+    next_cursor: str,
+    large_case_search_plan: Mapping[str, object],
+    review_workflow_summary: Mapping[str, object],
+) -> dict[str, object]:
+    source_plan_rows = [
+        row for row in large_case_search_plan.get("sources", []) if isinstance(row, Mapping)
+    ]
+    partial_sources = [
+        str(row.get("source") or "")
+        for row in source_plan_rows
+        if row.get("requested") and row.get("partial_coverage_warning")
+    ]
+    backend_counts: dict[str, int] = {}
+    for row in source_plan_rows:
+        if not row.get("requested"):
+            continue
+        backend = str(row.get("backend") or "unknown")
+        backend_counts[backend] = backend_counts.get(backend, 0) + 1
+
+    match_rows: list[dict[str, object]] = []
+    for index, match in enumerate(returned_matches[:200]):
+        source_reference = match.get("source_reference") if isinstance(match.get("source_reference"), Mapping) else {}
+        locator = build_review_queue_source_viewer_locator(match, {})
+        raw_matched_terms = match.get("matched_keywords")
+        matched_terms = raw_matched_terms if isinstance(raw_matched_terms, (list, tuple, set)) else []
+        row_core = {
+            "window_position": page_offset + index + 1,
+            "source": str(match.get("source") or "unknown"),
+            "target_type": str(match.get("target_type") or ""),
+            "target_id": str(match.get("target_id") or ""),
+            "citation_id": str(match.get("citation_id") or ""),
+            "kind": str(match.get("kind") or ""),
+            "title": str(match.get("title") or match.get("path") or ""),
+            "path": str(match.get("path") or source_reference.get("path") or ""),
+            "matched_keywords": [str(item) for item in matched_terms],
+            "review_status": str((match.get("review") or {}).get("status") or "unreviewed")
+            if isinstance(match.get("review"), Mapping)
+            else "unreviewed",
+            "verification_status": str((match.get("review") or {}).get("verification_status") or "unverified")
+            if isinstance(match.get("review"), Mapping)
+            else "unverified",
+            "source_reference_hash": stable_payload_sha256(source_reference) if source_reference else "",
+            "source_viewer_locator": locator,
+        }
+        match_rows.append({**row_core, "row_hash": stable_payload_sha256(row_core)})
+
+    filter_after_retrieval = bool(metadata_filter or review_status or verification_status)
+    page_core = {
+        "case_id": case_id,
+        "query_scope_hash": cursor_scope,
+        "page_offset": page_offset,
+        "page_size": page_size,
+        "match_row_hashes": [str(row.get("row_hash") or "") for row in match_rows],
+    }
+    satisfied = [
+        "opaque cursor scope hash emitted",
+        "page window row hashes emitted",
+        "source viewer locators emitted",
+        "source backend plan emitted",
+        "bounded scan partial coverage disclosure emitted",
+        "review workflow manifest linked",
+    ]
+    if next_cursor:
+        satisfied.append("next cursor emitted for continued pagination")
+    if not partial_sources:
+        satisfied.append("no bounded source reported scan cap truncation")
+    if filter_after_retrieval:
+        satisfied.append("post-retrieval filter disclosure emitted")
+
+    manifest_core: dict[str, object] = {
+        "profile_version": "case-search-result-window-manifest-v1",
+        "commercial_gap_ids": ["#61", "#74", "#78", "#79"],
+        "case_id": case_id,
+        "query_scope_hash": cursor_scope,
+        "query_hash": stable_payload_sha256(
+            {
+                "case_id": case_id,
+                "keywords": [str(keyword).strip().lower() for keyword in keywords],
+                "sources": sorted(source_filter),
+                "metadata": dict(sorted(metadata_filter.items())),
+                "review_status": review_status or "",
+                "verification_status": verification_status or "",
+            }
+        ),
+        "page_window_hash": stable_payload_sha256(page_core),
+        "cursor": {
+            "profile_version": CASE_SEARCH_CURSOR_VERSION,
+            "offset": page_offset,
+            "page_size": page_size,
+            "retrieval_limit": retrieval_limit,
+            "scan_candidate_limit": scan_candidate_limit,
+            "has_more": bool(has_more),
+            "next_cursor_hash": stable_payload_sha256({"next_cursor": next_cursor}) if next_cursor else "",
+        },
+        "filters": {
+            "sources": sorted(source_filter),
+            "metadata": dict(sorted(metadata_filter.items())),
+            "review_status": review_status or "",
+            "verification_status": verification_status or "",
+            "post_retrieval_filtering": filter_after_retrieval,
+            "post_retrieval_filtering_warning": (
+                "metadata/review filters are applied after candidate retrieval; treat absence as validation-required "
+                "when bounded sources report partial coverage"
+                if filter_after_retrieval
+                else ""
+            ),
+        },
+        "counts": {
+            "returned_count": len(returned_matches),
+            "total_returnable_count": total_returnable_count,
+            "source_counts": dict(sorted(source_counts.items())),
+            "keyword_counts": dict(sorted(keyword_counts.items())),
+            "priority_counts": dict(sorted(priority_counts.items())),
+            "backend_counts": dict(sorted(backend_counts.items())),
+            "partial_source_count": len(partial_sources),
+        },
+        "large_case_controls": {
+            "source_plan_profile": str(large_case_search_plan.get("profile_version") or ""),
+            "source_plan_status": str(large_case_search_plan.get("status") or ""),
+            "partial_sources": partial_sources,
+            "bounded_window_rows": len(match_rows),
+            "bounded_window_limit": 200,
+            "window_truncated": len(returned_matches) > len(match_rows),
+            "review_assignment_manifest_hash": str(review_workflow_summary.get("review_assignment_manifest_hash") or ""),
+        },
+        "match_rows": match_rows,
+        "core_accuracy_gates": [
+            build_accuracy_gate(
+                61,
+                satisfied_checks=satisfied,
+                evidence_refs=[
+                    f"query_scope_hash:{cursor_scope}",
+                    f"page_window_hash:{stable_payload_sha256(page_core)}",
+                    f"returned_count:{len(returned_matches)}",
+                ],
+            ),
+            build_accuracy_gate(
+                78,
+                satisfied_checks=satisfied,
+                evidence_refs=[
+                    f"cursor_offset:{page_offset}",
+                    f"page_size:{page_size}",
+                    f"has_more:{bool(has_more)}",
+                ],
+            ),
+            build_accuracy_gate(
+                79,
+                satisfied_checks=satisfied,
+                evidence_refs=[
+                    f"bounded_window_rows:{len(match_rows)}",
+                    f"window_truncated:{len(returned_matches) > len(match_rows)}",
+                    "ui:virtualized-table-compatible-window",
+                ],
+            ),
+        ],
+        "ready_for_court_absence_claim": not partial_sources and not filter_after_retrieval,
+        "operator_warning": (
+            "Use manifest_hash, page_window_hash, source locators, and source-plan warnings when moving search hits "
+            "into review or reports; bounded-source no-hit claims still require validation evidence."
+        ),
+    }
+    return {**manifest_core, "manifest_hash": stable_payload_sha256(manifest_core)}
 
 
 def case_search_scan_candidate_limit(limit: int) -> int:

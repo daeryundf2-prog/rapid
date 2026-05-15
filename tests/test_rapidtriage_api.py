@@ -3237,6 +3237,21 @@ class RapidTriageApiTests(unittest.TestCase):
             first_page = first_page_response.json()
             self.assertEqual(first_page["summary"]["returned_count"], 1)
             self.assertTrue(first_page["summary"]["has_more"])
+            first_manifest = first_page["case_search_result_window_manifest"]
+            self.assertEqual(first_manifest["profile_version"], "case-search-result-window-manifest-v1")
+            self.assertEqual(first_manifest["cursor"]["offset"], 0)
+            self.assertEqual(first_manifest["cursor"]["page_size"], 1)
+            self.assertEqual(first_manifest["counts"]["returned_count"], 1)
+            self.assertEqual(first_manifest["query_scope_hash"], first_page["summary"]["cursor_api"]["scope_hash"])
+            self.assertEqual(
+                first_page["summary"]["case_search_result_window_manifest_hash"],
+                first_manifest["manifest_hash"],
+            )
+            self.assertEqual(len(first_manifest["manifest_hash"]), 64)
+            self.assertEqual(len(first_manifest["page_window_hash"]), 64)
+            self.assertGreaterEqual(len(first_manifest["match_rows"]), 1)
+            self.assertEqual(first_manifest["match_rows"][0]["window_position"], 1)
+            self.assertEqual(first_manifest["match_rows"][0]["source_viewer_locator"]["viewer"], "case-review-source")
             second_page_response = client.post(
                 "/api/case-db/search",
                 json={
@@ -3252,6 +3267,11 @@ class RapidTriageApiTests(unittest.TestCase):
             second_page = second_page_response.json()
             self.assertEqual(second_page["summary"]["cursor_api"]["offset"], 1)
             self.assertEqual(second_page["summary"]["returned_count"], 1)
+            second_manifest = second_page["case_search_result_window_manifest"]
+            self.assertEqual(second_manifest["cursor"]["offset"], 1)
+            self.assertEqual(second_manifest["query_scope_hash"], first_manifest["query_scope_hash"])
+            self.assertNotEqual(second_manifest["page_window_hash"], first_manifest["page_window_hash"])
+            self.assertEqual(second_manifest["match_rows"][0]["window_position"], 2)
             self.assertNotEqual(
                 first_page["matches"][0]["citation_id"],
                 second_page["matches"][0]["citation_id"],
@@ -3275,6 +3295,8 @@ class RapidTriageApiTests(unittest.TestCase):
             filter_key, filter_value = metadata_filter.split("=", 1)
             self.assertEqual(metadata_payload["options"]["metadata"], {filter_key: filter_value})
             self.assertEqual(metadata_payload["saved_search"]["filters"]["metadata"], {filter_key: filter_value})
+            self.assertEqual(metadata_payload["case_search_result_window_manifest"]["filters"]["metadata"], {filter_key: filter_value})
+            self.assertTrue(metadata_payload["case_search_result_window_manifest"]["filters"]["post_retrieval_filtering"])
 
             review_response = client.post(
                 "/api/case-db/review",
