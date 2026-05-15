@@ -311,6 +311,25 @@ def build_validation_package(
     markdown_path.write_text(render_validation_markdown(payload), encoding="utf-8")
     artifact_manifest = build_validation_artifact_manifest(output_dir, (json_path, markdown_path))
     write_result(artifact_manifest, artifacts_path)
+    final_output_presence = {
+        name: (output_dir / name).is_file() for name in VALIDATION_PACKAGE_REQUIRED_OUTPUTS
+    }
+    validation_package_assessment = build_validation_package_assessment(
+        output_dir,
+        required_output_presence=final_output_presence,
+    )
+    payload["validation_package_assessment"] = validation_package_assessment
+    payload["validation_legal_defensibility_matrix"] = build_validation_legal_defensibility_matrix(
+        known_answer_validation=known_answer_validation,
+        parser_fixture_corpus=parser_fixture_corpus,
+        parser_fp_fn_profile=parser_fp_fn_profile,
+        independent_validation_report=independent_validation_report,
+        validation_package_assessment=validation_package_assessment,
+    )
+    write_result(payload, json_path)
+    markdown_path.write_text(render_validation_markdown(payload), encoding="utf-8")
+    artifact_manifest = build_validation_artifact_manifest(output_dir, (json_path, markdown_path))
+    write_result(artifact_manifest, artifacts_path)
     return payload
 
 
@@ -635,6 +654,7 @@ def known_answer_manifest_digest(datasets: Sequence[Mapping[str, object]]) -> st
 def build_validation_package_assessment(
     output_dir: Path,
     *,
+    required_output_presence: Mapping[str, bool] | None = None,
     trusted_diff: Mapping[str, object] | None = None,
 ) -> dict[str, object]:
     satisfied = [
@@ -647,7 +667,11 @@ def build_validation_package_assessment(
         "known-answer/fixture sections included",
         "package generation limitation warning",
     ]
-    package_manifest = build_validation_package_manifest_profile(output_dir, [])
+    package_manifest = build_validation_package_manifest_profile(
+        output_dir,
+        [],
+        required_output_presence=required_output_presence,
+    )
     if trusted_diff and trusted_diff.get("status") == "pass":
         satisfied.append("trusted validation package manifest diff pass")
     blockers = [
@@ -1616,6 +1640,8 @@ def build_validation_artifact_manifest(
 def build_validation_package_manifest_profile(
     output_dir: Path,
     artifacts: Sequence[Mapping[str, object]],
+    *,
+    required_output_presence: Mapping[str, bool] | None = None,
 ) -> dict[str, object]:
     artifact_rows = [
         {
@@ -1626,18 +1652,28 @@ def build_validation_package_manifest_profile(
         for row in artifacts
     ]
     present_names = {row["name"] for row in artifact_rows}
-    required_output_presence = {
-        name: (name in present_names if name != VALIDATION_ARTIFACTS_NAME else True)
-        for name in VALIDATION_PACKAGE_REQUIRED_OUTPUTS
-    }
+    if required_output_presence is None:
+        output_presence = {
+            name: (
+                name in present_names
+                or (output_dir / name).is_file()
+                or (name == VALIDATION_ARTIFACTS_NAME and bool(artifact_rows))
+            )
+            for name in VALIDATION_PACKAGE_REQUIRED_OUTPUTS
+        }
+    else:
+        output_presence = {
+            name: bool(required_output_presence.get(name))
+            for name in VALIDATION_PACKAGE_REQUIRED_OUTPUTS
+        }
     artifact_set_hash = hashlib_json({"artifacts": artifact_rows})
-    required_output_presence_hash = hashlib_json({"required_output_presence": required_output_presence})
+    required_output_presence_hash = hashlib_json({"required_output_presence": output_presence})
     manifest_core = {
         "profile_version": "validation-package-manifest-v1",
         "item_number": 85,
         "output_dir": str(output_dir),
         "required_outputs": VALIDATION_PACKAGE_REQUIRED_OUTPUTS,
-        "required_output_presence": required_output_presence,
+        "required_output_presence": output_presence,
         "required_output_presence_hash": required_output_presence_hash,
         "required_sections": VALIDATION_PACKAGE_REQUIRED_SECTIONS,
         "required_section_count": len(VALIDATION_PACKAGE_REQUIRED_SECTIONS),

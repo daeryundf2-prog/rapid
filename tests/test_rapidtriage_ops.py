@@ -727,8 +727,19 @@ class RapidTriageOpsTests(unittest.TestCase):
             self.assertEqual(payload["score_target"], 100)
             self.assertTrue((output_dir / "rapidtriage-validation-package.json").is_file())
             self.assertTrue((output_dir / "rapidtriage-validation-report.md").is_file())
+            self.assertTrue((output_dir / "rapidtriage-validation-artifacts.json").is_file())
             self.assertIn("#85", payload["validation_package_assessment"]["commercial_gap_ids"])
             self.assertEqual(payload["validation_package_assessment"]["core_accuracy_gates"][0]["gap_id"], "#85")
+            assessment_presence = payload["validation_package_assessment"]["validation_package_manifest"][
+                "required_output_presence"
+            ]
+            self.assertTrue(all(assessment_presence.values()))
+            artifact_manifest = json.loads(
+                (output_dir / "rapidtriage-validation-artifacts.json").read_text(encoding="utf-8")
+            )
+            artifact_presence = artifact_manifest["validation_package_manifest"]["required_output_presence"]
+            self.assertTrue(all(artifact_presence.values()))
+            self.assertEqual(artifact_manifest["artifact_count"], 2)
             self.assertEqual(payload["validation_package_assessment"]["trusted_validation_package_diff"]["status"], "missing")
             self.assertIn("trusted-validation-package-manifest-diff-missing", payload["validation_package_assessment"]["blockers"])
             self.assertIn("#81", payload["known_answer_validation"]["commercial_gap_ids"])

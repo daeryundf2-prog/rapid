@@ -73,4 +73,4 @@ Every new parser should publish:
 - Fixture path and expected output.
 - Known limitations.
 
-Validation package coverage now exposes #81 known-answer test manifests, #82 parser fixture corpus inventory, #83 parser false-positive/false-negative notes, #84 independent validation report attachment/hashing, and #85 validation-package automation metadata. These fields document release evidence readiness; they do not by themselves make a parser court-ready without attached test output and reviewer sign-off.
+Validation package coverage now exposes #81 known-answer test manifests, #82 parser fixture corpus inventory, #83 parser false-positive/false-negative notes, #84 independent validation report attachment/hashing, and #85 validation-package automation metadata. The package self-assessment now records required JSON/Markdown/artifact-manifest output presence after generation, and the artifact manifest records package-file SHA256/size rows. These fields document release evidence readiness; they do not by themselves make a parser court-ready without attached test output and reviewer sign-off.
