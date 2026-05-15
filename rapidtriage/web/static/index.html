@@ -30,25 +30,49 @@
           <article class="core-workflow-step">
             <span class="core-workflow-number">1</span>
             <div>
-              <p class="eyebrow">분석</p>
-              <strong>이미지/E01 안을 읽고 분류</strong>
-              <small>E01, RAW, folder/export를 넣으면 지원 여부와 분석 산출물을 먼저 확인합니다.</small>
+              <p class="eyebrow">입력</p>
+              <strong>이미지/E01 선택과 지원 여부 확인</strong>
+              <small>E01/Ex01, RAW, VHDX, DMG, ZIP, Folder를 넣고 dependency와 mount/export 필요 여부를 확인합니다.</small>
             </div>
           </article>
           <article class="core-workflow-step">
             <span class="core-workflow-number">2</span>
             <div>
               <p class="eyebrow">추출</p>
-              <strong>필요한 파일을 해시와 함께 꺼내기</strong>
-              <small>문서/파일 후보를 output 폴더로 복사하고 원본 경로와 SHA256을 남깁니다.</small>
+              <strong>파일과 아티팩트를 해시와 함께 확보</strong>
+              <small>manifest, file triage, bounded extraction으로 원본 경로, 크기, SHA256, 제한 사유를 보존합니다.</small>
             </div>
           </article>
           <article class="core-workflow-step">
             <span class="core-workflow-number">3</span>
             <div>
+              <p class="eyebrow">분석</p>
+              <strong>OS·문서·메신저 아티팩트 파싱</strong>
+              <small>EVTX, Registry, MFT/USN, Browser, AI, Mail, KakaoTalk 등 collector 결과와 warning을 확인합니다.</small>
+            </div>
+          </article>
+          <article class="core-workflow-step">
+            <span class="core-workflow-number">4</span>
+            <div>
               <p class="eyebrow">검색</p>
-              <strong>키워드로 찾고 원본에서 재확인</strong>
-              <small>문서, 웹/AI, 로그, OCR, 타임라인을 통합 검색하고 viewer로 검증합니다.</small>
+              <strong>전체 검색과 현재 파일 검색</strong>
+              <small>본문, DB, 로그, OCR 후보를 찾고 cursor/resume 상태로 대량 누락을 확인합니다.</small>
+            </div>
+          </article>
+          <article class="core-workflow-step">
+            <span class="core-workflow-number">5</span>
+            <div>
+              <p class="eyebrow">리뷰</p>
+              <strong>원본 뷰어에서 확인하고 표시</strong>
+              <small>source viewer에서 path/hash/parser/offset을 확인하고 relevant, note, tag를 남깁니다.</small>
+            </div>
+          </article>
+          <article class="core-workflow-step">
+            <span class="core-workflow-number">6</span>
+            <div>
+              <p class="eyebrow">보고서</p>
+              <strong>선택 증거를 제출 후보로 묶기</strong>
+              <small>evidence tray, citation, limitation, validation 상태를 report bundle에 연결합니다.</small>
             </div>
           </article>
         </section>
@@ -236,12 +260,13 @@
             <button id="refreshButton" type="button">Refresh</button>
           </div>
         </div>
-        <div class="mission-strip" aria-label="Review workflow reminder">
-          <span><strong>1</strong> Ingest</span>
-          <span><strong>2</strong> Index</span>
-          <span><strong>3</strong> Search</span>
-          <span><strong>4</strong> Verify</span>
-          <span><strong>5</strong> Report</span>
+        <div class="mission-strip" aria-label="Review workflow reminder" data-testid="six-step-mission-strip">
+          <span><strong>1</strong> 입력</span>
+          <span><strong>2</strong> 추출</span>
+          <span><strong>3</strong> 분석</span>
+          <span><strong>4</strong> 검색</span>
+          <span><strong>5</strong> 리뷰</span>
+          <span><strong>6</strong> 보고서</span>
         </div>
         <div id="runList" class="run-list" data-testid="run-list"></div>
         <div id="detailPanel" class="detail-panel" data-testid="detail-panel">

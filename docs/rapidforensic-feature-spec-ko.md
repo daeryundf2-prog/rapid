@@ -49,6 +49,17 @@ RapidForensic은 분석관이 단일 포렌식 케이스에서 증거 입력, �
 
 ## 4. 핵심 워크플로우
 
+GUI와 CLI 산출물은 아래 6단계를 같은 순서로 보여야 한다. 기능이 내부에 있더라도 이 흐름에서 보이지 않으면 사용자는 “지원하지 않는다”고 판단하므로, 신규 기능은 반드시 단계, viewer, next action을 함께 연결한다.
+
+| 단계 | 사용자에게 보이는 이름 | 핵심 질문 | 대표 산출물 |
+| --- | --- | --- | --- |
+| 1 | 입력 | 이 증거를 안전하게 읽을 수 있는가? | evidence support, dependency check, source fingerprint |
+| 2 | 추출 | 원본 경로와 해시를 보존하면서 필요한 파일을 꺼냈는가? | extract manifest, skipped/capped rows, SHA256 |
+| 3 | 분석 | OS, 파일 시스템, 문서, 웹/AI, 메신저 아티팩트가 row로 나왔는가? | artifacts, files, docs, timeline, warnings |
+| 4 | 검색 | 전체 검색과 현재 파일 검색이 누락 없이 이어지는가? | case search, source search, cursor/resume state |
+| 5 | 리뷰 | 원본 뷰어에서 확인하고 판단 상태를 남겼는가? | relevant, needs-review, excluded, note, tag |
+| 6 | 보고서 | 선택 증거가 citation/provenance와 함께 묶였는가? | report candidates, evidence tray, limitation |
+
 ### 4.1 입력
 
 1. 사용자가 GUI 또는 CLI에서 source를 선택한다.

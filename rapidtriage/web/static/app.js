@@ -914,11 +914,13 @@ function coreEvidenceWorkflowStatuses(payload) {
   const outputCount = Object.keys(outputs).length;
   const searchable = docs + files + timeline;
   const extractManifestReady = Boolean(outputs.docs_extract_manifest || outputs.files_extract_manifest);
+  const reportReady = Boolean(outputs.report || outputs.summary || summary.report_candidate_count);
+  const warningCount = Number(summary.warning_count || 0) + Number(summary.parser_warning_count || 0);
   return {
-    analyze: {
-      ready: outputCount > 0 || searchable > 0 || artifactKinds.length > 0,
-      state: outputCount > 0 ? "분석 완료" : "확인 필요",
-      detail: `${formatNumber(docs)} 문서 · ${formatNumber(files)} 파일 · ${formatNumber(timeline)} 타임라인 · ${formatNumber(artifactKinds.length)} 아티팩트 그룹`,
+    ingest: {
+      ready: outputCount > 0 || Boolean(payload.source || payload.request || summary.source_kind),
+      state: outputCount > 0 ? "입력 확인" : "입력 대기",
+      detail: "증거 종류, read-only 전제, dependency, mount/export 필요 여부를 먼저 확인합니다.",
     },
     extract: {
       ready: extracted > 0 || extractManifestReady,
@@ -927,10 +929,26 @@ function coreEvidenceWorkflowStatuses(payload) {
         ? `${formatNumber(extracted)}개 파일 추출 · manifest/SHA256 기록 있음`
         : "추출 manifest를 보고 필요한 후보만 output 폴더로 꺼냅니다.",
     },
-    search: {
+    parse: {
+      ready: outputCount > 0 || searchable > 0 || artifactKinds.length > 0,
+      state: outputCount > 0 ? "분석 완료" : "확인 필요",
+      detail: `${formatNumber(docs)} 문서 · ${formatNumber(files)} 파일 · ${formatNumber(timeline)} 타임라인 · ${formatNumber(artifactKinds.length)} 아티팩트 그룹`,
+    },
+    index: {
       ready: searchable > 0,
       state: searchable > 0 ? "검색 가능" : "검색 대기",
       detail: `${formatNumber(searchable)}개 문서/파일/타임라인 row를 전체 검색 대상으로 사용`,
+    },
+    review: {
+      ready: searchable > 0 || reportReady,
+      warning: warningCount > 0,
+      state: warningCount > 0 ? "검토 필요" : "리뷰 준비",
+      detail: "검색 결과를 source viewer에서 확인한 뒤 relevant, needs-review, excluded, note, tag를 남깁니다.",
+    },
+    report: {
+      ready: reportReady,
+      state: reportReady ? "보고서 가능" : "후보 대기",
+      detail: "evidence tray와 citation, limitation, validation 상태를 보고서 후보에 연결합니다.",
     },
   };
 }

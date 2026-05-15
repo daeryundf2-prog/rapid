@@ -394,17 +394,25 @@ class RapidTriageWebStaticTests(unittest.TestCase):
                 self.assertTrue(capability["next_action"])
                 self.assertTrue(capability["gui_surfaces"])
 
-    def test_core_three_step_evidence_workflow_is_visually_primary(self) -> None:
+    def test_core_six_step_evidence_workflow_is_visually_primary(self) -> None:
         app_js = (REPO_ROOT / "rapidtriage" / "web" / "static" / "app.js").read_text(encoding="utf-8")
         config_js = (REPO_ROOT / "rapidtriage" / "web" / "static" / "app_workbench_config.js").read_text(encoding="utf-8")
         index_html = (REPO_ROOT / "rapidtriage" / "web" / "static" / "index.html").read_text(encoding="utf-8")
         styles = (REPO_ROOT / "rapidtriage" / "web" / "static" / "styles.css").read_text(encoding="utf-8")
 
         self.assertIn("CORE_EVIDENCE_WORKFLOW", config_js)
-        self.assertIn("이미지/E01 안을 읽고 분류", config_js)
-        self.assertIn("필요한 파일을 해시와 함께 꺼내기", config_js)
-        self.assertIn("키워드로 찾고 원본에서 재확인", config_js)
+        for expected in [
+            "이미지/E01 선택과 지원 여부 확인",
+            "파일과 아티팩트를 해시와 함께 확보",
+            "OS·문서·메신저 아티팩트 파싱",
+            "전체 검색과 현재 파일 검색",
+            "원본 뷰어에서 확인하고 표시",
+            "선택 증거를 제출 후보로 묶기",
+        ]:
+            self.assertIn(expected, config_js)
+            self.assertIn(expected, index_html)
         self.assertIn("data-testid=\"core-evidence-workflow\"", index_html)
+        self.assertIn("data-testid=\"six-step-mission-strip\"", index_html)
         self.assertIn("renderCoreEvidenceWorkflow", app_js)
         self.assertIn("coreEvidenceWorkflowStatuses", app_js)
         self.assertIn("payload.workflow?.stages", app_js)
@@ -430,12 +438,16 @@ class RapidTriageWebStaticTests(unittest.TestCase):
         self.assertIn("/outputs/${encodeURIComponent(name)}/file", app_js)
         self.assertIn("data-core-workflow-step", app_js)
         self.assertIn("data-testid=\"core-workflow-step-${escapeHtml(step.id)}\"", app_js)
+        self.assertIn("입력 확인", app_js)
         self.assertIn("분석 완료", app_js)
         self.assertIn("추출 완료", app_js)
         self.assertIn("검색 가능", app_js)
+        self.assertIn("리뷰 준비", app_js)
+        self.assertIn("보고서 가능", app_js)
         self.assertIn("docs_extracted_count", app_js)
         self.assertIn("files_extracted_count", app_js)
         self.assertIn(".core-evidence-workflow", styles)
+        self.assertIn(".intake-core-workflow", styles)
         self.assertIn(".core-workflow-step", styles)
         self.assertIn(".run-workflow-contract", styles)
         self.assertIn(".run-workflow-stage", styles)

@@ -215,6 +215,10 @@ h3 {
   margin: 14px 0;
 }
 
+.intake-core-workflow {
+  grid-template-columns: 1fr;
+}
+
 .core-workflow-step {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr);
@@ -229,6 +233,26 @@ h3 {
   padding: 14px;
   text-align: left;
   box-shadow: var(--shadow-soft);
+}
+
+.intake-core-workflow .core-workflow-step {
+  min-height: auto;
+  border-radius: 16px;
+  padding: 12px;
+}
+
+.intake-core-workflow .core-workflow-number {
+  width: 30px;
+  height: 30px;
+  border-radius: 10px;
+}
+
+.intake-core-workflow .core-workflow-step strong {
+  font-size: 0.9rem;
+}
+
+.intake-core-workflow .core-workflow-step small {
+  font-size: 0.74rem;
 }
 
 button.core-workflow-step {
