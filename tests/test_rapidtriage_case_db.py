@@ -99,6 +99,7 @@ class RapidTriageCaseDatabaseTests(unittest.TestCase):
         self.assertIn("case-review", commands)
         self.assertIn("--include-in-report", commands["case-review"].format_help())
         self.assertIn("--exclude-from-report", commands["case-review"].format_help())
+        self.assertIn("--source-read-json", commands["case-review"].format_help())
         self.assertIn("case-db-report", commands)
         self.assertIn("--include-all", commands["case-db-report"].format_help())
         self.assertIn("evidence", commands)
@@ -555,6 +556,62 @@ class RapidTriageCaseDatabaseTests(unittest.TestCase):
                 payload = database.search_case(case_id="CASE-SOURCE-SCOPE", keywords=["needle"], limit=10, sources=["files"])
 
             self.assertEqual(payload["summary"]["match_count"], 0)
+
+    def test_cli_case_review_appends_source_read_citation_package(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            db_path = root / "case.db"
+            database = open_case_database(db_path)
+            database.create_case(case_id="CASE-SOURCE-NOTE")
+            source_read_path = root / "source-read.json"
+            source_read_path.write_text(
+                json.dumps(
+                    {
+                        "source_citation_package": {
+                            "review_note_template": "Current-file hit: Users/alice/note.txt [text preview length 12]\nSnippet: password",
+                            "citation_text": "Users/alice/note.txt [text preview length 12] sha256:abc123",
+                            "package_hash": "f" * 64,
+                        }
+                    },
+                    ensure_ascii=False,
+                ),
+                encoding="utf-8",
+            )
+
+            stdout = io.StringIO()
+            with contextlib.redirect_stdout(stdout):
+                exit_code = main(
+                    [
+                        "case-review",
+                        str(db_path),
+                        "--case-id",
+                        "CASE-SOURCE-NOTE",
+                        "--target-type",
+                        "indexed_document",
+                        "--target-id",
+                        "1",
+                        "--status",
+                        "relevant",
+                        "--verification-status",
+                        "source_opened",
+                        "--note",
+                        "Analyst verified the opened source.",
+                        "--source-read-json",
+                        str(source_read_path),
+                        "--include-in-report",
+                        "--json",
+                    ]
+                )
+
+            self.assertEqual(exit_code, 0)
+            payload = json.loads(stdout.getvalue())
+            self.assertEqual(payload["status"], "relevant")
+            self.assertEqual(payload["verification_status"], "source_opened")
+            self.assertTrue(payload["include_in_report"])
+            self.assertIn("Analyst verified the opened source.", payload["note"])
+            self.assertIn("Current-file hit:", payload["note"])
+            self.assertIn("Source citation:", payload["note"])
+            self.assertIn("Source citation package hash:", payload["note"])
 
     def test_cli_case_db_import_run_outputs_counts(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:

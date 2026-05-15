@@ -228,6 +228,31 @@ def parse_named_cli_values(
     return parsed
 
 
+def load_source_read_review_note(path: Path) -> str:
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except OSError as exc:
+        raise ValueError(f"failed to read source-read JSON: {path}") from exc
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"source-read JSON is invalid: {path}") from exc
+    package = payload.get("source_citation_package") if isinstance(payload, dict) else None
+    if not isinstance(package, dict):
+        raise ValueError("source-read JSON is missing source_citation_package")
+    review_note = str(package.get("review_note_template") or "").strip()
+    citation_text = str(package.get("citation_text") or "").strip()
+    package_hash = str(package.get("package_hash") or "").strip()
+    if not review_note:
+        raise ValueError("source-read JSON does not contain a review_note_template")
+    footer = []
+    if citation_text:
+        footer.append(f"Source citation: {citation_text}")
+    if package_hash:
+        footer.append(f"Source citation package hash: {package_hash}")
+    if footer:
+        return f"{review_note}\n" + "\n".join(footer)
+    return review_note
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="rapidtriage",
@@ -1213,6 +1238,7 @@ def build_parser() -> argparse.ArgumentParser:
     case_review.add_argument("--verification-status", help="Verification status such as source_opened, cross_checked, verified, or rejected")
     case_review.add_argument("--tag", action="append", help="Review tag (repeatable)")
     case_review.add_argument("--note", help="Review note")
+    case_review.add_argument("--source-read-json", help="Append a source-read citation package review note to --note")
     case_review.add_argument("--reviewer", help="Reviewer name")
     case_review.add_argument("--assignee", help="Analyst assigned to follow up this result")
     case_review.add_argument("--priority", help="Review priority: urgent, high, normal, or low")
@@ -2649,6 +2675,9 @@ def main(argv=None) -> int:
     if args.command == "case-review":
         try:
             database = open_case_database(Path(args.database).expanduser().resolve())
+            review_note_parts = [args.note.strip()] if args.note else []
+            if args.source_read_json:
+                review_note_parts.append(load_source_read_review_note(Path(args.source_read_json).expanduser().resolve()))
             payload = database.mark_review(
                 case_id=args.case_id,
                 target_type=args.target_type,
@@ -2656,14 +2685,14 @@ def main(argv=None) -> int:
                 status=args.status,
                 verification_status=args.verification_status,
                 tags=args.tag or [],
-                note=args.note,
+                note="\n\n".join(review_note_parts) if review_note_parts else None,
                 reviewer=args.reviewer,
                 assignee=args.assignee,
                 priority=args.priority,
                 due_at=args.due_at,
                 include_in_report=args.include_in_report,
             )
-        except CaseDatabaseError as exc:
+        except (CaseDatabaseError, ValueError) as exc:
             parser.error(str(exc))
         if args.json:
             print(json.dumps(payload, ensure_ascii=False, indent=2))

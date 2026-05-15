@@ -104,6 +104,7 @@ The sample JSON uses a few placeholders so the examples stay stable across machi
 - `preview.preview_type` is one of `text`, `sqlite-table`, `hex`, or `error`; all preview modes are bounded so large files remain responsive.
 - `source_locator` is the stable viewer locator for the current preview, such as `text-preview`, `sqlite-table-page`, or `byte-range`.
 - `source_citation_package` uses `source-read-citation-package-v1` and includes copy-safe `citation_text`, `source_locator`, optional `source_sha256`, `snippet`, `snippet_sha256`, `review_note_template`, `package_hash`, and report-selection blockers. Use the `Current-file hit:` template to carry verified source-viewer hits into review marks or report candidates without losing hash/locator provenance.
+- `case-review --source-read-json <source-read.json>` imports that `review_note_template`, citation text, and package hash into the Case DB review note so the report history records the exact source-viewer handoff.
 - `ready_for_review_note` means the package is usable as a reviewer handoff. `ready_for_court_report` remains `false` until analyst sign-off, original evidence provenance, and any parser-specific validation are attached.
 
 ### `large-case-readiness`
