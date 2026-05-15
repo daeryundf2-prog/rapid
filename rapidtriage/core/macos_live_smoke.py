@@ -106,6 +106,7 @@ def run_macos_live_smoke(
         "external_validation_tools": external_tools,
         "checks": checks,
         "summary": summarize_checks(checks),
+        "readiness_attachment": build_readiness_attachment_profile(output_dir=output_dir),
         "commercial_grade_blockers": macos_live_commercial_blockers(checks=checks, external_tools=external_tools),
         "outputs": {
             "json": str(output_dir / "macos-live-smoke.json"),
@@ -118,6 +119,42 @@ def run_macos_live_smoke(
     write_result(payload, output_dir / "macos-live-smoke.json")
     (output_dir / "macos-live-smoke.md").write_text(render_macos_live_smoke_markdown(payload), encoding="utf-8")
     return payload
+
+
+def build_readiness_attachment_profile(*, output_dir: Path) -> dict[str, object]:
+    smoke_json = output_dir / "macos-live-smoke.json"
+    large_case_json = output_dir / "large-case-readiness.json"
+    return {
+        "profile_version": "macos-live-smoke-readiness-attachment-v1",
+        "claim_effect": "preparatory-only; does not satisfy commercial-grade validation gates by itself",
+        "supports_backlog_items": [66, 67, 68, 69, 70, 74, 78, 79, 80, 101, 102, 106, 118, 120],
+        "cli_command": (
+            "rapidtriage commercial-readiness "
+            f"--mac-first-evidence {quote_shell_path(smoke_json)} "
+            f"--mac-first-evidence {quote_shell_path(large_case_json)} "
+            "--output-dir ./commercial-readiness --json"
+        ),
+        "api_query": f"/api/commercial-readiness?mac_first_evidence={url_path_hint(smoke_json)}",
+        "gui_note": (
+            "Open the readiness dashboard after rerunning commercial-readiness; the Mac evidence row should show "
+            "attached evidence while commercial gates remain blocked until trusted validation packages are supplied."
+        ),
+        "required_follow_up": [
+            "Attach trusted parser/cross-tool validation packages for the relevant backlog items.",
+            "Run larger SQLite FTS benchmarks on target Mac hardware before million-row or commercial-scale claims.",
+            "Attach independent review, signed package, and real hardware stress evidence before commercial-grade release claims.",
+        ],
+    }
+
+
+def quote_shell_path(path: Path) -> str:
+    value = str(path)
+    return "'" + value.replace("'", "'\"'\"'") + "'"
+
+
+def url_path_hint(path: Path) -> str:
+    # Keep this human-readable. The API also accepts the raw local path from trusted desktop use.
+    return str(path).replace(" ", "%20")
 
 
 def cleanup_owned_outputs(output_dir: Path, *, overwrite: bool) -> None:
@@ -334,6 +371,21 @@ def render_macos_live_smoke_markdown(payload: Mapping[str, object]) -> str:
     lines.extend(["", "## Commercial Blockers"])
     blockers = payload.get("commercial_grade_blockers") if isinstance(payload.get("commercial_grade_blockers"), list) else []
     lines.extend(f"- `{item}`" for item in blockers)
+    attachment = payload.get("readiness_attachment") if isinstance(payload.get("readiness_attachment"), Mapping) else {}
+    lines.extend(
+        [
+            "",
+            "## Readiness Attachment",
+            f"- Claim effect: `{attachment.get('claim_effect', '')}`",
+            f"- CLI: `{attachment.get('cli_command', '')}`",
+            f"- API: `{attachment.get('api_query', '')}`",
+            f"- GUI note: {attachment.get('gui_note', '')}",
+        ]
+    )
+    follow_up = attachment.get("required_follow_up") if isinstance(attachment.get("required_follow_up"), list) else []
+    if follow_up:
+        lines.append("- Required follow-up:")
+        lines.extend(f"  - {item}" for item in follow_up)
     return "\n".join(lines) + "\n"
 
 

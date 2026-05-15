@@ -47,7 +47,15 @@ class RapidTriageMacOsLiveSmokeTests(unittest.TestCase):
                 payload["outputs"]["large_case_readiness_json"],
                 str((output_dir / "large-case-readiness.json").resolve()),
             )
-            self.assertIn("Large-case readiness", (output_dir / "macos-live-smoke.md").read_text(encoding="utf-8"))
+            attachment = payload["readiness_attachment"]
+            self.assertEqual(attachment["profile_version"], "macos-live-smoke-readiness-attachment-v1")
+            self.assertIn("--mac-first-evidence", attachment["cli_command"])
+            self.assertIn("large-case-readiness.json", attachment["cli_command"])
+            self.assertIn(66, attachment["supports_backlog_items"])
+            report_text = (output_dir / "macos-live-smoke.md").read_text(encoding="utf-8")
+            self.assertIn("Large-case readiness", report_text)
+            self.assertIn("Readiness Attachment", report_text)
+            self.assertIn("preparatory-only", report_text)
 
     def test_macos_live_smoke_cli_prints_json(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
