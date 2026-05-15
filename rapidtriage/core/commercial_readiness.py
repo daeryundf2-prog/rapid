@@ -85,6 +85,11 @@ def sha256_file(path: Path) -> str:
     return digest.hexdigest()
 
 
+def sha256_json(value: object) -> str:
+    encoded = json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
+
+
 def load_validation_evidence(validation_package_path: Path | None = None) -> dict[int, list[dict[str, object]]]:
     if validation_package_path is None:
         return {}
@@ -924,6 +929,13 @@ def build_commercial_readiness_report(
     maturity_gate_summary = build_maturity_gate_summary(items)
     commercial_blocker_matrix = build_commercial_blocker_matrix(items)
     blocker_separation_profile = build_blocker_separation_profile(commercial_blocker_matrix)
+    blocker_execution_package = build_blocker_execution_package(
+        commercial_blocker_matrix,
+        blocker_separation_profile,
+        validation_evidence_summary=validation_evidence_summary,
+        mac_first_evidence_summary=mac_first_evidence_summary,
+        batch_size=uplift_batch_size,
+    )
     platform_uplift_actionability = build_platform_uplift_actionability(
         items,
         readiness_score=readiness_score,
@@ -1031,6 +1043,7 @@ def build_commercial_readiness_report(
         "maturity_gate_summary": maturity_gate_summary,
         "commercial_blocker_matrix": commercial_blocker_matrix,
         "blocker_separation_profile": blocker_separation_profile,
+        "blocker_execution_package": blocker_execution_package,
         "platform_uplift_actionability": platform_uplift_actionability,
         "commercial_uplift_plan": commercial_uplift_plan,
         "functional_defensibility_progress": functional_defensibility_progress,
@@ -1652,6 +1665,126 @@ def build_blocker_separation_profile(blocker_matrix: Mapping[str, object]) -> di
             "the paired trusted-tool, independent-review, signed-platform, large-hardware, or staffed-support evidence is attached."
         ),
     }
+
+
+def build_blocker_execution_package(
+    blocker_matrix: Mapping[str, object],
+    blocker_separation_profile: Mapping[str, object],
+    *,
+    validation_evidence_summary: Mapping[str, object],
+    mac_first_evidence_summary: Mapping[str, object],
+    batch_size: int = COMMERCIAL_UPLIFT_DEFAULT_BATCH_SIZE,
+) -> dict[str, object]:
+    """Create an operator-friendly next-action package without satisfying gates."""
+
+    rows = [row for row in blocker_matrix.get("rows", []) if isinstance(row, Mapping)]
+    internal_rows = [
+        blocker_execution_row(row, lane="internal")
+        for row in rows
+        if bool(row.get("internally_actionable"))
+    ][: max(1, batch_size)]
+    external_rows = [
+        blocker_execution_row(row, lane="external")
+        for row in rows
+        if bool(row.get("external_or_trusted_evidence_required"))
+    ][: max(1, batch_size)]
+    internal_item_numbers = [int(row["number"]) for row in internal_rows if int(row.get("number") or 0)]
+    external_item_numbers = [int(row["number"]) for row in external_rows if int(row.get("number") or 0)]
+    mapped_validation_items = validation_evidence_summary.get("mapped_item_numbers")
+    if not isinstance(mapped_validation_items, list):
+        mapped_validation_items = []
+    supported_mac_items = mac_first_evidence_summary.get("supports_backlog_items")
+    if not isinstance(supported_mac_items, list):
+        supported_mac_items = []
+    package: dict[str, object] = {
+        "profile_version": "commercial-blocker-execution-package-v1",
+        "status": "commercial-claim-blocked" if rows else "commercial-ready",
+        "commercial_claim_allowed": not bool(rows),
+        "batch_size": max(1, batch_size),
+        "internal_batch": internal_rows,
+        "external_evidence_batch": external_rows,
+        "internal_item_numbers": internal_item_numbers,
+        "external_evidence_item_numbers": external_item_numbers,
+        "validation_evidence_attached_item_count": len(mapped_validation_items),
+        "mac_first_supported_item_count": len(supported_mac_items),
+        "recommended_commands": blocker_execution_commands(internal_item_numbers),
+        "operator_evidence_checklist": [
+            "Attach known-answer or trusted-tool diff JSON before moving an item to validated.",
+            "Attach provider/export/API diff evidence for cloud, mailbox, messenger, and AI service outputs.",
+            "Attach signed platform smoke, notarization, and installer evidence before release claims.",
+            "Attach large hardware benchmark logs before 1TB-10TB or million-record claims.",
+            "Rerun commercial-readiness after each evidence batch and keep blocker rows non-destructive.",
+        ],
+        "separation_counts": blocker_separation_profile.get("summary", {}),
+        "claim_rule": (
+            "This package is an execution checklist. It does not pass validation or commercial_grade gates; "
+            "only attached validation packages and cleared blockers can do that."
+        ),
+    }
+    package["package_hash"] = sha256_json({key: value for key, value in package.items() if key != "package_hash"})
+    return package
+
+
+def blocker_execution_row(row: Mapping[str, object], *, lane: str) -> dict[str, object]:
+    number = int(row.get("number") or 0)
+    lanes = row.get("blocker_lanes") if isinstance(row.get("blocker_lanes"), list) else []
+    return {
+        "number": number,
+        "title": str(row.get("title") or ""),
+        "lane": lane,
+        "category": str(row.get("category") or ""),
+        "severity": str(row.get("severity") or ""),
+        "next_required_gate": str(row.get("next_required_gate") or ""),
+        "blocker_lanes": [str(value) for value in lanes],
+        "action": str(row.get("next_internal_or_evidence_action") or ""),
+        "requires_external_or_trusted_evidence": bool(row.get("external_or_trusted_evidence_required")),
+        "blocker_summary": str(row.get("blocker_summary") or ""),
+        "acceptance_evidence": blocker_acceptance_evidence(row),
+        "review_status": "todo",
+    }
+
+
+def blocker_acceptance_evidence(row: Mapping[str, object]) -> list[str]:
+    raw_lanes = row.get("blocker_lanes", [])
+    lanes = {str(value) for value in raw_lanes if value} if isinstance(raw_lanes, list) else set()
+    evidence = [
+        "RapidTriage output JSON with source path/hash/parser version",
+        "commercial-readiness JSON after the change",
+    ]
+    if "known-answer-validation" in lanes:
+        evidence.append("known-answer or trusted-tool diff manifest mapped to this item number")
+    if "native-parser-depth" in lanes:
+        evidence.append("parser fixture with expected rows, edge cases, and limitation text")
+    if "large-scale-performance" in lanes:
+        evidence.append("benchmark JSON with record count, p95 latency, memory profile, and hardware notes")
+    if "security-legal-assurance" in lanes:
+        evidence.append("audit/legal/security review artifact with reviewer and limitation signoff")
+    if "platform-release-evidence" in lanes:
+        evidence.append("signed/notarized/package smoke output with artifact SHA256")
+    if "external-operator-evidence" in lanes:
+        evidence.append("external lab/operator evidence file with provenance and reviewer signoff")
+    return evidence
+
+
+def blocker_execution_commands(item_numbers: list[int]) -> list[str]:
+    commands = [
+        "rapidtriage commercial-readiness --output-dir ./commercial-readiness --json",
+    ]
+    if item_numbers:
+        item_range = ",".join(str(number) for number in item_numbers)
+        commands.append(
+            "rapidtriage commercial-readiness "
+            f"--template-items {item_range} "
+            "--write-known-answer-template-dir ./known-answer-next-batch "
+            "--output-dir ./commercial-readiness --json"
+        )
+    commands.append(
+        "rapidtriage commercial-readiness "
+        "--validation-package ./validation/rapidtriage-validation-package.json "
+        "--mac-first-evidence ./qc "
+        "--output-dir ./commercial-readiness --json"
+    )
+    return commands
 
 
 def build_platform_uplift_actionability(

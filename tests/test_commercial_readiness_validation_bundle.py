@@ -79,6 +79,13 @@ class CommercialReadinessValidationBundleTests(unittest.TestCase):
         self.assertIn("forensic-cross-tool-ready", mac_first["failed_check_counts"])
         self.assertFalse(report["commercial_claim_allowed"])
         self.assertFalse(report["validation_evidence_summary"]["validation_package_attached"])
+        blocker_package = report["blocker_execution_package"]
+        self.assertEqual(blocker_package["profile_version"], "commercial-blocker-execution-package-v1")
+        self.assertFalse(blocker_package["commercial_claim_allowed"])
+        self.assertTrue(blocker_package["internal_batch"])
+        self.assertTrue(blocker_package["external_evidence_batch"])
+        self.assertTrue(blocker_package["package_hash"])
+        self.assertIn("known-answer-next-batch", " ".join(blocker_package["recommended_commands"]))
 
     def test_commercial_readiness_attaches_email_external_mac_first_evidence(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
