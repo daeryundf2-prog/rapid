@@ -110,6 +110,21 @@ class CommercialReadinessValidationBundleTests(unittest.TestCase):
         self.assertEqual(srum_hint["artifact_family"], "ese")
         self.assertIn("SrumECmd", srum_hint["trusted_tools"])
 
+    def test_commercial_readiness_has_third_batch_runner_hints(self) -> None:
+        windows_edb_hint = trusted_diff_runner_hint(11)
+        self.assertEqual(windows_edb_hint["artifact_family"], "ese")
+        self.assertIn("Windows Search DB Analyzer", windows_edb_hint["trusted_tools"])
+        mft_hint = trusted_diff_runner_hint(12)
+        self.assertEqual(mft_hint["validation_diff_runner_group_item"], 79)
+        self.assertIn("MFTECmd", mft_hint["trusted_tools"])
+        usn_hint = trusted_diff_runner_hint(13)
+        self.assertIn("UsnJrnl2Csv", usn_hint["trusted_tools"])
+        jumplist_hint = trusted_diff_runner_hint(14)
+        self.assertEqual(jumplist_hint["artifact_family"], "execution-user-activity")
+        self.assertIn("JLECmd", jumplist_hint["trusted_tools"])
+        shellbags_hint = trusted_diff_runner_hint(15)
+        self.assertIn("ShellBagsExplorer/SBECmd", shellbags_hint["trusted_tools"])
+
     def test_commercial_readiness_attaches_email_external_mac_first_evidence(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             evidence_path = Path(tmp_dir) / "email-external-parser.json"

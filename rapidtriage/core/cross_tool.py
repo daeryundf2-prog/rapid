@@ -20,6 +20,7 @@ MAX_ESE_FIELD_DIFF_ROWS = 5_000
 MAX_USN_STATE_REPLAY_FIELD_DIFF_ROWS = 5_000
 MAX_OS_ACCOUNT_FIELD_DIFF_ROWS = 5_000
 MAX_EXECUTION_ARTIFACT_FIELD_DIFF_ROWS = 5_000
+MAX_USER_ACTIVITY_FIELD_DIFF_ROWS = 5_000
 MAX_FIELD_MISMATCH_SAMPLES = 50
 FUNCTIONAL_VALIDATION_BATCH_ID = "commercial-uplift-036-040"
 KEY_FIELDS = (
@@ -176,6 +177,31 @@ EXECUTION_ARTIFACT_FIELD_ALIASES = {
         "evidence_status",
         "EvidenceStatus",
     ),
+}
+USER_ACTIVITY_FIELD_ALIASES = {
+    "artifact_family": ("artifact_family", "ArtifactFamily", "source_family", "SourceFamily"),
+    "app_id": ("app_id", "AppId", "AppID", "ApplicationID", "application_id"),
+    "entry_id": ("entry_id", "EntryId", "EntryID", "DestListEntryNumber", "destlist_entry_number", "MRU"),
+    "target_path": (
+        "target_path",
+        "TargetPath",
+        "TargetFilename",
+        "target_filename",
+        "Path",
+        "path",
+        "file_path",
+        "FilePath",
+    ),
+    "file_name": ("file_name", "FileName", "filename", "Name", "name"),
+    "timestamp": ("timestamp", "Timestamp", "LastAccessTime", "LastModified", "Created", "Accessed"),
+    "source_path": ("source_path", "SourcePath", "source_file", "SourceFile"),
+    "source_offset": ("source_offset", "SourceOffset", "Offset", "offset"),
+    "mru_order": ("mru_order", "MRUOrder", "mru", "Slot", "slot"),
+    "access_count": ("access_count", "AccessCount", "access_count", "OpenCount", "open_count"),
+    "volume_name": ("volume_name", "VolumeName", "volume", "Volume"),
+    "bag_path": ("bag_path", "BagPath", "bag_path", "shell_path", "ShellPath", "AbsolutePath"),
+    "shell_item_type": ("shell_item_type", "ShellItemType", "ItemType", "item_type"),
+    "tracker_guid": ("tracker_guid", "TrackerGuid", "DroidFileIdentifier", "MachineIdentifier"),
 }
 MFT_FIELD_ALIASES = {
     "record_number": ("record_number", "RecordNumber", "EntryNumber", "entry_number", "MFTEntryNumber"),
@@ -547,6 +573,7 @@ def load_tool_dataset(name: str, path: Path) -> dict[str, object]:
         "ese_field_index": ese_field_index(rows),
         "os_account_field_index": os_account_field_index(rows),
         "execution_artifact_field_index": execution_artifact_field_index(rows),
+        "user_activity_field_index": user_activity_field_index(rows),
     }
 
 
@@ -732,6 +759,7 @@ def composite_candidate_keys(row: Mapping[str, object]) -> list[str]:
         composites.append(normalize_key(f"registry-cell:{normalize_registry_numeric_string(str(cell_offset))}"))
     composites.extend(os_account_key_variants(row))
     composites.extend(execution_artifact_key_variants(row))
+    composites.extend(user_activity_key_variants(row))
 
     mft_record_number = ntfs_int_value(row, MFT_FIELD_ALIASES["record_number"])
     mft_path = ntfs_path_value(row, MFT_FIELD_ALIASES["file_path"])
@@ -803,6 +831,7 @@ def compare_datasets(
     ese_field_comparison = compare_ese_fields(rapid_dataset, reference_dataset)
     os_account_field_comparison = compare_os_account_fields(rapid_dataset, reference_dataset)
     execution_artifact_field_comparison = compare_execution_artifact_fields(rapid_dataset, reference_dataset)
+    user_activity_field_comparison = compare_user_activity_fields(rapid_dataset, reference_dataset)
     if field_comparison["mismatch_count"] or field_comparison["missing_common_field_count"]:
         status = "failed"
     if registry_field_comparison["mismatch_count"]:
@@ -818,6 +847,8 @@ def compare_datasets(
     if os_account_field_comparison["mismatch_count"]:
         status = "failed"
     if execution_artifact_field_comparison["mismatch_count"]:
+        status = "failed"
+    if user_activity_field_comparison["mismatch_count"]:
         status = "failed"
     if input_quality_blockers:
         status = "failed"
@@ -858,6 +889,7 @@ def compare_datasets(
         "ese_field_comparison": ese_field_comparison,
         "os_account_field_comparison": os_account_field_comparison,
         "execution_artifact_field_comparison": execution_artifact_field_comparison,
+        "user_activity_field_comparison": user_activity_field_comparison,
         "release_gate": "review-required" if status != "pass" else "comparison-passed",
     }
 
@@ -1381,6 +1413,112 @@ def compare_execution_artifact_fields(
     )
 
 
+def user_activity_field_index(rows: Sequence[Mapping[str, object]]) -> dict[str, dict[str, str]]:
+    index: dict[str, dict[str, str]] = {}
+    for row in rows[:MAX_USER_ACTIVITY_FIELD_DIFF_ROWS]:
+        keys = user_activity_key_variants(row)
+        if not keys:
+            continue
+        fields = user_activity_normalized_fields(row)
+        if fields:
+            for key in keys:
+                index.setdefault(key, fields)
+    return index
+
+
+def user_activity_key_variants(row: Mapping[str, object]) -> list[str]:
+    family = infer_user_activity_family(row)
+    if not family:
+        return []
+    app_id = normalize_windows_identity(first_value(row, USER_ACTIVITY_FIELD_ALIASES["app_id"]))
+    entry_id = ntfs_int_value(row, USER_ACTIVITY_FIELD_ALIASES["entry_id"])
+    target_path = ntfs_path_value(row, USER_ACTIVITY_FIELD_ALIASES["target_path"])
+    file_name = normalize_ntfs_file_name(first_value(row, USER_ACTIVITY_FIELD_ALIASES["file_name"]))
+    source_path = ntfs_path_value(row, USER_ACTIVITY_FIELD_ALIASES["source_path"])
+    source_offset = ntfs_int_value(row, USER_ACTIVITY_FIELD_ALIASES["source_offset"])
+    bag_path = ntfs_path_value(row, USER_ACTIVITY_FIELD_ALIASES["bag_path"])
+    mru_order = ntfs_int_value(row, USER_ACTIVITY_FIELD_ALIASES["mru_order"])
+    tracker_guid = normalize_guidish(first_value(row, USER_ACTIVITY_FIELD_ALIASES["tracker_guid"]))
+    keys: list[str] = []
+    if app_id and entry_id:
+        keys.append(normalize_key(f"user-activity:{family}:app-entry:{app_id}:{entry_id}"))
+    if app_id and target_path:
+        keys.append(normalize_key(f"user-activity:{family}:app-target:{app_id}:{target_path}"))
+    if target_path:
+        keys.append(normalize_key(f"user-activity:{family}:target:{target_path}"))
+    if file_name and source_path:
+        keys.append(normalize_key(f"user-activity:{family}:file-source:{file_name}:{source_path}"))
+    if source_path and source_offset:
+        keys.append(normalize_key(f"user-activity:{family}:source-offset:{source_path}:{source_offset}"))
+    if bag_path and mru_order:
+        keys.append(normalize_key(f"user-activity:{family}:bag-mru:{bag_path}:{mru_order}"))
+    if bag_path:
+        keys.append(normalize_key(f"user-activity:{family}:bag:{bag_path}"))
+    if tracker_guid:
+        keys.append(normalize_key(f"user-activity:{family}:tracker:{tracker_guid}"))
+    return list(dict.fromkeys(keys))
+
+
+def user_activity_normalized_fields(row: Mapping[str, object]) -> dict[str, str]:
+    family = infer_user_activity_family(row)
+    if not family:
+        return {}
+    fields: dict[str, str] = {"artifact_family": family}
+    for canonical, aliases in USER_ACTIVITY_FIELD_ALIASES.items():
+        if canonical == "artifact_family":
+            value = family
+        elif canonical in {"entry_id", "source_offset", "mru_order", "access_count"}:
+            value = ntfs_int_value(row, aliases)
+        elif canonical in {"target_path", "source_path", "bag_path"}:
+            value = ntfs_path_value(row, aliases)
+        elif canonical == "file_name":
+            value = normalize_ntfs_file_name(first_value(row, aliases))
+        elif canonical == "tracker_guid":
+            value = normalize_guidish(first_value(row, aliases))
+        elif canonical in {"app_id", "volume_name", "shell_item_type"}:
+            value = normalize_windows_identity(first_value(row, aliases))
+        else:
+            raw = first_value(row, aliases)
+            value = normalize_field_value(raw) if raw is not None and str(raw).strip() else ""
+        if value:
+            fields[canonical] = value
+    return fields
+
+
+def infer_user_activity_family(row: Mapping[str, object]) -> str:
+    explicit = first_value(row, USER_ACTIVITY_FIELD_ALIASES["artifact_family"])
+    explicit_text = normalize_field_value(explicit) if explicit is not None else ""
+    haystack = " ".join(
+        str(value)
+        for key, value in row.items()
+        if key.lower().endswith(("artifact_type", "parser", "source_path", "path", "source_file", "kind"))
+    ).lower()
+    combined = f"{explicit_text} {haystack}"
+    if "jumplist" in combined or "jump list" in combined or "destlist" in combined or "jlecmd" in combined:
+        return "jumplist"
+    if "shellbag" in combined or "bagmru" in combined or "sbecmd" in combined:
+        return "shellbags"
+    if "prefetch" in combined or "pecmd" in combined:
+        return "prefetch"
+    if "lnk" in combined or "shelllink" in combined:
+        return "lnk"
+    return ""
+
+
+def compare_user_activity_fields(
+    rapid_dataset: Mapping[str, object],
+    reference_dataset: Mapping[str, object],
+) -> dict[str, object]:
+    return compare_ntfs_field_indexes(
+        rapid_dataset,
+        reference_dataset,
+        index_key="user_activity_field_index",
+        mode="user-activity-jumplist-shellbags-prefetch-lnk-field-diff",
+        key_name="user_activity_key",
+        row_limit=MAX_USER_ACTIVITY_FIELD_DIFF_ROWS,
+    )
+
+
 def normalize_sid(value: object) -> str:
     if value is None:
         return ""
@@ -1395,6 +1533,13 @@ def normalize_windows_identity(value: object) -> str:
         return ""
     text = normalize_field_value(value)
     return re.sub(r"\s+", " ", text).strip()
+
+
+def normalize_guidish(value: object) -> str:
+    if value is None:
+        return ""
+    text = normalize_field_value(value)
+    return re.sub(r"[^a-f0-9-]+", "", text)
 
 
 def normalize_boolish(value: object) -> str:
@@ -2200,6 +2345,7 @@ def trusted_tool_diff_functional_profile(
             "registry-transaction-replay-status-diff-supported",
             "os-account-sam-security-system-field-diff-supported",
             "execution-artifact-amcache-shimcache-bam-dam-field-diff-supported",
+            "user-activity-jumplist-shellbags-prefetch-lnk-field-diff-supported",
             "mft-record-field-diff-supported",
             "mft-parent-path-attribute-diff-supported",
             "usn-frn-reason-timestamp-field-diff-supported",

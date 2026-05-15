@@ -3217,6 +3217,131 @@ class RapidTriageOpsTests(unittest.TestCase):
             self.assertEqual(comparison["mismatch_count"], 1)
             self.assertEqual(comparison["mismatch_samples"][0]["field"], "deleted_state")
 
+    def test_cross_tool_validate_compares_jumplist_destlist_rows(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            rapid = root / "rapid-jumplist.json"
+            reference = root / "jlecmd.csv"
+            rapid.write_text(
+                json.dumps(
+                    {
+                        "artifacts": [
+                            {
+                                "artifact_type": "jumplist-destlist-entry",
+                                "details": {
+                                    "artifact_family": "jumplist",
+                                    "app_id": "f01b4d95cf55d32a",
+                                    "entry_id": 3,
+                                    "target_path": r"C:\Users\alice\Desktop\case.xlsx",
+                                    "timestamp": "2024-07-01T02:03:04+00:00",
+                                    "access_count": 5,
+                                    "source_path": r"C:\Users\alice\AppData\Roaming\Microsoft\Windows\Recent\AutomaticDestinations\f01b4d95cf55d32a.automaticDestinations-ms",
+                                },
+                            }
+                        ]
+                    }
+                ),
+                encoding="utf-8",
+            )
+            reference.write_text(
+                "ArtifactFamily,AppId,DestListEntryNumber,TargetFilename,Timestamp,AccessCount,SourceFile\n"
+                r"jumplist,f01b4d95cf55d32a,3,C:\Users\alice\Desktop\case.xlsx,"
+                "2024-07-01T02:03:04+00:00,5,"
+                r"C:\Users\alice\AppData\Roaming\Microsoft\Windows\Recent\AutomaticDestinations\f01b4d95cf55d32a.automaticDestinations-ms"
+                "\n",
+                encoding="utf-8",
+            )
+
+            stdout = io.StringIO()
+            with contextlib.redirect_stdout(stdout):
+                exit_code = main(
+                    [
+                        "cross-tool-validate",
+                        "--rapid-output",
+                        str(rapid),
+                        "--reference-output",
+                        f"jlecmd={reference}",
+                        "--backlog-item",
+                        "14",
+                        "--min-overlap",
+                        "0.75",
+                        "--json",
+                    ]
+                )
+
+            self.assertEqual(exit_code, 0)
+            payload = json.loads(stdout.getvalue())
+            self.assertEqual(payload["status"], "pass")
+            comparison = payload["comparisons"][0]["user_activity_field_comparison"]
+            self.assertEqual(comparison["mode"], "user-activity-jumplist-shellbags-prefetch-lnk-field-diff")
+            self.assertGreaterEqual(comparison["common_record_count"], 1)
+            self.assertEqual(comparison["mismatch_count"], 0)
+            self.assertIn("app_id", comparison["compared_canonical_fields"])
+            self.assertIn("target_path", comparison["compared_canonical_fields"])
+            profile = payload["cross_tool_validation_assessment"]["functional_priority_profile"]
+            self.assertIn(
+                "user-activity-jumplist-shellbags-prefetch-lnk-field-diff-supported",
+                profile["passed_validation_check_ids"],
+            )
+
+    def test_cross_tool_validate_compares_shellbags_rows(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            rapid = root / "rapid-shellbags.json"
+            reference = root / "sbecmd.csv"
+            rapid.write_text(
+                json.dumps(
+                    {
+                        "artifacts": [
+                            {
+                                "artifact_type": "shellbags-bagmru-entry",
+                                "details": {
+                                    "artifact_family": "shellbags",
+                                    "bag_path": r"Desktop\Cases",
+                                    "mru_order": 2,
+                                    "timestamp": "2024-08-09T10:11:12+00:00",
+                                    "shell_item_type": "directory",
+                                    "source_path": r"C:\Users\alice\NTUSER.DAT",
+                                },
+                            }
+                        ]
+                    }
+                ),
+                encoding="utf-8",
+            )
+            reference.write_text(
+                "ArtifactFamily,BagPath,MRUOrder,LastAccessTime,ShellItemType,SourceFile\n"
+                r"shellbags,Desktop\Cases,2,2024-08-09T10:11:12+00:00,directory,C:\Users\alice\NTUSER.DAT"
+                "\n",
+                encoding="utf-8",
+            )
+
+            stdout = io.StringIO()
+            with contextlib.redirect_stdout(stdout):
+                exit_code = main(
+                    [
+                        "cross-tool-validate",
+                        "--rapid-output",
+                        str(rapid),
+                        "--reference-output",
+                        f"shellbagsexplorer={reference}",
+                        "--backlog-item",
+                        "15",
+                        "--min-overlap",
+                        "1.0",
+                        "--json",
+                    ]
+                )
+
+            self.assertEqual(exit_code, 0)
+            payload = json.loads(stdout.getvalue())
+            self.assertEqual(payload["status"], "pass")
+            comparison = payload["comparisons"][0]["user_activity_field_comparison"]
+            self.assertGreaterEqual(comparison["common_record_count"], 1)
+            self.assertEqual(comparison["mismatch_count"], 0)
+            self.assertIn("bag_path", comparison["compared_canonical_fields"])
+            self.assertIn("mru_order", comparison["compared_canonical_fields"])
+
     def test_confidence_explainability_and_reproducibility_commands(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             root = Path(tmp_dir)

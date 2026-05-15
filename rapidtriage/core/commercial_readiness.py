@@ -188,6 +188,68 @@ TRUSTED_DIFF_RUNNER_HINTS_BY_ITEM: dict[int, dict[str, object]] = {
             "--independent-report <review.md> --corpus-scope <scope> --backlog-item 10"
         ),
     },
+    11: {
+        "artifact_family": "ese",
+        "runner_group_item": 80,
+        "trusted_tools": ["Windows Search DB Analyzer", "libesedb esedbexport"],
+        "rapid_output_hint": "rapidtriage artifacts --kind windows-search --output rapid-windows-edb.json",
+        "cross_tool_template": (
+            "rapidtriage cross-tool-validate --rapid-output rapid-windows-edb.json "
+            "--reference-output winsearchdbanalyzer=<WinSearchDBAnalyzer.csv> "
+            "--reference-output libesedb=<esedbexport.csv> --source-evidence <Windows.edb> "
+            "--tool-version winsearchdbanalyzer=<version> --tool-command winsearchdbanalyzer=<command> "
+            "--independent-report <review.md> --corpus-scope <scope> --backlog-item 11"
+        ),
+    },
+    12: {
+        "artifact_family": "ntfs",
+        "runner_group_item": 79,
+        "trusted_tools": ["MFTECmd", "analyzeMFT"],
+        "rapid_output_hint": "rapidtriage artifacts --kind windows-filesystem --output rapid-mft.json",
+        "cross_tool_template": (
+            "rapidtriage cross-tool-validate --rapid-output rapid-mft.json "
+            "--reference-output mftecmd=<MFTECmd.csv> --reference-output analyzemft=<analyzeMFT.csv> "
+            "--source-evidence <$MFT> --tool-version mftecmd=<version> --tool-command mftecmd=<command> "
+            "--independent-report <review.md> --corpus-scope <scope> --backlog-item 12"
+        ),
+    },
+    13: {
+        "artifact_family": "ntfs",
+        "runner_group_item": 79,
+        "trusted_tools": ["UsnJrnl2Csv", "MFTECmd"],
+        "rapid_output_hint": "rapidtriage artifacts --kind windows-filesystem --output rapid-usn.json",
+        "cross_tool_template": (
+            "rapidtriage cross-tool-validate --rapid-output rapid-usn.json "
+            "--reference-output usnjrnl2csv=<UsnJrnl2Csv.csv> --reference-output mftecmd=<MFTECmd.csv> "
+            "--source-evidence <$UsnJrnl> --tool-version usnjrnl2csv=<version> "
+            "--tool-command usnjrnl2csv=<command> --independent-report <review.md> --corpus-scope <scope> "
+            "--backlog-item 13"
+        ),
+    },
+    14: {
+        "artifact_family": "execution-user-activity",
+        "runner_group_item": 81,
+        "trusted_tools": ["JLECmd"],
+        "rapid_output_hint": "rapidtriage artifacts --kind execution --kind recent-files --output rapid-jumplist.json",
+        "cross_tool_template": (
+            "rapidtriage cross-tool-validate --rapid-output rapid-jumplist.json "
+            "--reference-output jlecmd=<JLECmd.csv> --source-evidence <AutomaticDestinations-or-CustomDestinations> "
+            "--tool-version jlecmd=<version> --tool-command jlecmd=<command> "
+            "--independent-report <review.md> --corpus-scope <scope> --backlog-item 14"
+        ),
+    },
+    15: {
+        "artifact_family": "execution-user-activity",
+        "runner_group_item": 81,
+        "trusted_tools": ["ShellBagsExplorer/SBECmd"],
+        "rapid_output_hint": "rapidtriage artifacts --kind shellbags --output rapid-shellbags.json",
+        "cross_tool_template": (
+            "rapidtriage cross-tool-validate --rapid-output rapid-shellbags.json "
+            "--reference-output shellbagsexplorer=<ShellBagsExplorer.csv> --source-evidence <NTUSER.DAT-or-UsrClass.dat> "
+            "--tool-version shellbagsexplorer=<version> --tool-command shellbagsexplorer=<command> "
+            "--independent-report <review.md> --corpus-scope <scope> --backlog-item 15"
+        ),
+    },
 }
 
 
