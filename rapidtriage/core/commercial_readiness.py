@@ -250,6 +250,30 @@ TRUSTED_DIFF_RUNNER_HINTS_BY_ITEM: dict[int, dict[str, object]] = {
             "--independent-report <review.md> --corpus-scope <scope> --backlog-item 15"
         ),
     },
+    16: {
+        "artifact_family": "execution-user-activity",
+        "runner_group_item": 81,
+        "trusted_tools": ["PECmd"],
+        "rapid_output_hint": "rapidtriage artifacts --kind windows-prefetch --output rapid-prefetch.json",
+        "cross_tool_template": (
+            "rapidtriage cross-tool-validate --rapid-output rapid-prefetch.json "
+            "--reference-output pecmd=<PECmd.csv> --source-evidence <Prefetch-directory> "
+            "--tool-version pecmd=<version> --tool-command pecmd=<command> "
+            "--independent-report <review.md> --corpus-scope <scope> --backlog-item 16"
+        ),
+    },
+    17: {
+        "artifact_family": "execution-user-activity",
+        "runner_group_item": 81,
+        "trusted_tools": ["LECmd", "JLECmd"],
+        "rapid_output_hint": "rapidtriage artifacts --kind recent-files --output rapid-lnk.json",
+        "cross_tool_template": (
+            "rapidtriage cross-tool-validate --rapid-output rapid-lnk.json "
+            "--reference-output lecmd=<LECmd.csv> --reference-output jlecmd=<JLECmd.csv> "
+            "--source-evidence <LNK-directory> --tool-version lecmd=<version> --tool-command lecmd=<command> "
+            "--independent-report <review.md> --corpus-scope <scope> --backlog-item 17"
+        ),
+    },
 }
 
 

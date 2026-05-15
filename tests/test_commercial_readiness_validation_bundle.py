@@ -124,6 +124,10 @@ class CommercialReadinessValidationBundleTests(unittest.TestCase):
         self.assertIn("JLECmd", jumplist_hint["trusted_tools"])
         shellbags_hint = trusted_diff_runner_hint(15)
         self.assertIn("ShellBagsExplorer/SBECmd", shellbags_hint["trusted_tools"])
+        prefetch_hint = trusted_diff_runner_hint(16)
+        self.assertIn("PECmd", prefetch_hint["trusted_tools"])
+        lnk_hint = trusted_diff_runner_hint(17)
+        self.assertIn("LECmd", lnk_hint["trusted_tools"])
 
     def test_commercial_readiness_attaches_email_external_mac_first_evidence(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:

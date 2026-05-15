@@ -780,6 +780,7 @@ class RapidTriageOpsTests(unittest.TestCase):
             self.assertIn("NIST CFReDS", {row["corpus_name"] for row in runner_matrix["public_corpus_registry"]})
             self.assertIn("EvtxECmd", {tool["name"] for group in runner_matrix["runner_groups"] for tool in group["trusted_tools"]})
             self.assertIn("PECmd", {tool["name"] for group in runner_matrix["runner_groups"] for tool in group["trusted_tools"]})
+            self.assertIn("LECmd", {tool["name"] for group in runner_matrix["runner_groups"] for tool in group["trusted_tools"]})
             self.assertIn("AmcacheParser", {tool["name"] for group in runner_matrix["runner_groups"] for tool in group["trusted_tools"]})
             final_qc = payload["final_qc_execution_report"]
             self.assertEqual(final_qc["profile_version"], "final-qc-execution-report-v1")
@@ -960,7 +961,7 @@ class RapidTriageOpsTests(unittest.TestCase):
             self.assertTrue(output.is_file())
             self.assertEqual(len(payload["matrix_hash"]), 64)
             self.assertEqual(payload["summary"]["runner_group_count"], 6)
-            self.assertEqual(payload["summary"]["trusted_tool_count"], 18)
+            self.assertEqual(payload["summary"]["trusted_tool_count"], 19)
             self.assertFalse(payload["summary"]["version_probe_enabled"])
             self.assertEqual(payload["summary"]["version_captured_count"], 0)
             self.assertEqual(payload["output_manifest"]["bytes"], output.stat().st_size)
@@ -3341,6 +3342,124 @@ class RapidTriageOpsTests(unittest.TestCase):
             self.assertEqual(comparison["mismatch_count"], 0)
             self.assertIn("bag_path", comparison["compared_canonical_fields"])
             self.assertIn("mru_order", comparison["compared_canonical_fields"])
+
+    def test_cross_tool_validate_compares_prefetch_rows(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            rapid = root / "rapid-prefetch.json"
+            reference = root / "pecmd.csv"
+            rapid.write_text(
+                json.dumps(
+                    {
+                        "artifacts": [
+                            {
+                                "artifact_type": "windows-prefetch-entry",
+                                "details": {
+                                    "artifact_family": "prefetch",
+                                    "target_path": r"C:\Windows\System32\cmd.exe",
+                                    "file_name": "CMD.EXE-12345678.pf",
+                                    "timestamp": "2024-09-01T01:02:03+00:00",
+                                    "access_count": 9,
+                                    "source_path": r"C:\Windows\Prefetch\CMD.EXE-12345678.pf",
+                                },
+                            }
+                        ]
+                    }
+                ),
+                encoding="utf-8",
+            )
+            reference.write_text(
+                "ArtifactFamily,Path,FileName,LastRun,RunCount,SourceFile\n"
+                r"prefetch,C:\Windows\System32\cmd.exe,CMD.EXE-12345678.pf,"
+                r"2024-09-01T01:02:03+00:00,9,C:\Windows\Prefetch\CMD.EXE-12345678.pf"
+                "\n",
+                encoding="utf-8",
+            )
+
+            stdout = io.StringIO()
+            with contextlib.redirect_stdout(stdout):
+                exit_code = main(
+                    [
+                        "cross-tool-validate",
+                        "--rapid-output",
+                        str(rapid),
+                        "--reference-output",
+                        f"pecmd={reference}",
+                        "--backlog-item",
+                        "16",
+                        "--min-overlap",
+                        "0.75",
+                        "--json",
+                    ]
+                )
+
+            self.assertEqual(exit_code, 0)
+            payload = json.loads(stdout.getvalue())
+            self.assertEqual(payload["status"], "pass")
+            comparison = payload["comparisons"][0]["user_activity_field_comparison"]
+            self.assertGreaterEqual(comparison["common_record_count"], 1)
+            self.assertEqual(comparison["mismatch_count"], 0)
+            self.assertIn("access_count", comparison["compared_canonical_fields"])
+            self.assertIn("target_path", comparison["compared_canonical_fields"])
+
+    def test_cross_tool_validate_compares_lnk_rows(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            rapid = root / "rapid-lnk.json"
+            reference = root / "lecmd.csv"
+            rapid.write_text(
+                json.dumps(
+                    {
+                        "artifacts": [
+                            {
+                                "artifact_type": "lnk-shelllink-entry",
+                                "details": {
+                                    "artifact_family": "lnk",
+                                    "target_path": r"C:\Users\alice\Documents\case.docx",
+                                    "file_name": "case.lnk",
+                                    "timestamp": "2024-10-11T12:13:14+00:00",
+                                    "tracker_guid": "{12345678-1234-1234-1234-1234567890ab}",
+                                    "source_path": r"C:\Users\alice\AppData\Roaming\Microsoft\Windows\Recent\case.lnk",
+                                },
+                            }
+                        ]
+                    }
+                ),
+                encoding="utf-8",
+            )
+            reference.write_text(
+                "ArtifactFamily,TargetPath,FileName,Timestamp,TrackerGuid,SourceFile\n"
+                r"lnk,C:\Users\alice\Documents\case.docx,case.lnk,2024-10-11T12:13:14+00:00,"
+                r"{12345678-1234-1234-1234-1234567890ab},C:\Users\alice\AppData\Roaming\Microsoft\Windows\Recent\case.lnk"
+                "\n",
+                encoding="utf-8",
+            )
+
+            stdout = io.StringIO()
+            with contextlib.redirect_stdout(stdout):
+                exit_code = main(
+                    [
+                        "cross-tool-validate",
+                        "--rapid-output",
+                        str(rapid),
+                        "--reference-output",
+                        f"lecmd={reference}",
+                        "--backlog-item",
+                        "17",
+                        "--min-overlap",
+                        "0.75",
+                        "--json",
+                    ]
+                )
+
+            self.assertEqual(exit_code, 0)
+            payload = json.loads(stdout.getvalue())
+            self.assertEqual(payload["status"], "pass")
+            comparison = payload["comparisons"][0]["user_activity_field_comparison"]
+            self.assertGreaterEqual(comparison["common_record_count"], 1)
+            self.assertEqual(comparison["mismatch_count"], 0)
+            self.assertIn("tracker_guid", comparison["compared_canonical_fields"])
+            self.assertIn("target_path", comparison["compared_canonical_fields"])
 
     def test_confidence_explainability_and_reproducibility_commands(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:

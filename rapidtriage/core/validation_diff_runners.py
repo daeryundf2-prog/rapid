@@ -196,6 +196,13 @@ RUNNER_GROUPS: tuple[dict[str, object], ...] = (
                 "command_template": "JLECmd -d <JumpList-dir> --csv <reference-dir>",
             },
             {
+                "name": "LECmd",
+                "binary_candidates": ("LECmd", "LECmd.exe"),
+                "reference_name": "lecmd",
+                "output_format": "CSV",
+                "command_template": "LECmd -d <LNK-dir> --csv <reference-dir>",
+            },
+            {
                 "name": "ShellBagsExplorer",
                 "binary_candidates": ("ShellBagsExplorer", "ShellBagsExplorer.exe", "SBECmd", "SBECmd.exe"),
                 "reference_name": "shellbagsexplorer",
@@ -207,7 +214,7 @@ RUNNER_GROUPS: tuple[dict[str, object], ...] = (
         "cross_tool_template": (
             "rapidtriage cross-tool-validate --rapid-output rapid-user-activity.json "
             "--reference-output pecmd=<PECmd.csv> --reference-output jlecmd=<JLECmd.csv> "
-            "--reference-output shellbagsexplorer=<ShellBagsExplorer.csv> "
+            "--reference-output lecmd=<LECmd.csv> --reference-output shellbagsexplorer=<ShellBagsExplorer.csv> "
             "--backlog-item 14 --backlog-item 15 --backlog-item 16 --backlog-item 17"
         ),
     },
