@@ -469,6 +469,7 @@ def create_app(job_store: RunJobStore | None = None, auth_token: str | None = No
         next_gate: str = Query("commercial_grade", min_length=1, max_length=64),
         limit: int = Query(8, ge=1, le=50),
         validation_package: Optional[str] = Query(default=None, max_length=4096),
+        mac_first_evidence: Optional[str] = Query(default=None, max_length=4096),
         include_internal_validation: bool = Query(False),
     ) -> Dict[str, object]:
         try:
@@ -476,8 +477,10 @@ def create_app(job_store: RunJobStore | None = None, auth_token: str | None = No
                 validation_package,
                 include_internal_validation=include_internal_validation,
             )
+            mac_first_evidence_paths = [Path(mac_first_evidence).expanduser().resolve()] if mac_first_evidence else []
             report = build_commercial_readiness_report(
                 validation_package_path=validation_package_path,
+                mac_first_evidence_paths=mac_first_evidence_paths,
                 uplift_targets=limit,
                 uplift_batch_size=5,
             )
@@ -2554,6 +2557,7 @@ def build_commercial_readiness_api_payload(
         "maturity_gate_summary": maturity_summary,
         "gate_counts": gate_counts,
         "validation_evidence_summary": report.get("validation_evidence_summary", {}),
+        "mac_first_evidence_summary": report.get("mac_first_evidence_summary", {}),
         "validation_package": commercial_readiness_validation_package_profile(validation_package_path),
         "blocker_separation_summary": blocker_summary,
         "focused_next_gate": normalized_next_gate,

@@ -692,6 +692,8 @@ class RapidTriageApiTests(unittest.TestCase):
         self.assertIn("/api/commercial-readiness?next_gate=commercial_grade&limit=8&include_internal_validation=true", app_js)
         self.assertIn("Validation package", app_js)
         self.assertIn("Mapped evidence", app_js)
+        self.assertIn("Mac evidence", app_js)
+        self.assertIn("Mac-first evidence is attached as preparatory proof only", app_js)
         self.assertIn("commercial-readiness-panel", app_js)
         self.assertIn("Commercial readiness gate", app_js)
         self.assertIn("globalCaseSearchForm", app_js)
@@ -908,6 +910,39 @@ class RapidTriageApiTests(unittest.TestCase):
         self.assertEqual(payload["gate_counts"]["commercial_grade"]["passed"], 0)
         self.assertEqual(payload["focused_next_gate"], "commercial_grade")
         self.assertTrue(payload["focused_items"])
+
+    def test_commercial_readiness_api_can_attach_mac_first_evidence(self) -> None:
+        client = TestClient(create_app(RunJobStore()))
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            evidence_path = Path(tmp_dir) / "macos-live-smoke.json"
+            evidence_path.write_text(
+                json.dumps(
+                    {
+                        "command": "macos-live-smoke",
+                        "profile_version": "macos-live-smoke-v1",
+                        "summary": {
+                            "local_smoke_score": 85.71,
+                            "passed_count": 6,
+                            "failed_count": 1,
+                            "failed_check_ids": ["forensic-cross-tool-ready"],
+                        },
+                        "commercial_grade_blockers": ["trusted-forensic-cross-tool-output-missing"],
+                        "outputs": {"json": str(evidence_path)},
+                    },
+                    ensure_ascii=False,
+                ),
+                encoding="utf-8",
+            )
+
+            response = client.get(f"/api/commercial-readiness?mac_first_evidence={evidence_path}")
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        mac_first = payload["mac_first_evidence_summary"]
+        self.assertTrue(mac_first["attached"])
+        self.assertEqual(mac_first["evidence_count"], 1)
+        self.assertFalse(payload["commercial_claim_allowed"])
+        self.assertEqual(payload["gate_counts"]["commercial_grade"]["passed"], 0)
 
     def test_crash_report_api_lists_details_and_exports_local_bundle(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:

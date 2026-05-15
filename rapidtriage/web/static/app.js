@@ -730,6 +730,7 @@ function renderCommercialReadinessSummary(payload) {
   const focused = Array.isArray(payload?.focused_items) ? payload.focused_items : [];
   const validationPackage = payload?.validation_package || {};
   const evidenceSummary = payload?.validation_evidence_summary || {};
+  const macFirst = payload?.mac_first_evidence_summary || {};
   const claimClass = payload?.commercial_claim_allowed ? "commercial-ready" : "not-commercial-ready";
   return `
     <div class="commercial-readiness-card ${claimClass}">
@@ -750,7 +751,12 @@ function renderCommercialReadinessSummary(payload) {
         <dd>${escapeHtml(validationPackage.attached ? validationPackage.mode || "attached" : "not attached")}</dd>
         <dt>Mapped evidence</dt>
         <dd>${escapeHtml(evidenceSummary.items_with_passed_validation_evidence || 0)} / ${escapeHtml(payload?.item_count || 0)}</dd>
+        <dt>Mac evidence</dt>
+        <dd>${escapeHtml(macFirst.attached ? `${macFirst.evidence_count || 0} attached` : "not attached")}</dd>
       </dl>
+      ${macFirst.attached ? `
+        <p class="help-text">Mac-first evidence is attached as preparatory proof only: ${escapeHtml(macFirst.claim_effect || "commercial gates still require trusted validation evidence.")}</p>
+      ` : ""}
       ${focused.length ? `
         <ul class="commercial-readiness-list">
           ${focused.slice(0, 5).map((item) => `
