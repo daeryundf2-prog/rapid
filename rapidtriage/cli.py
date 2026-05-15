@@ -1026,6 +1026,7 @@ def build_parser() -> argparse.ArgumentParser:
               rapidtriage source-search ./rapidtriage-run-hacking --path Users/alice/Documents/note.txt -k password
               rapidtriage source-search ./rapidtriage-run-hacking --path Users/alice/Documents/ChatGPT-export.zip::conversations.json -k evtx --json
               rapidtriage source-search ./rapidtriage-run-hacking --path Users/alice/Logs/big.log -k error --byte-offset 2000000 --max-search-bytes 2000000
+              rapidtriage source-search ./rapidtriage-run-hacking --path Users/alice/Databases/chat.sqlite -k invoice --sqlite-row-scan-limit 100000
             """
         ),
     )
@@ -1038,6 +1039,7 @@ def build_parser() -> argparse.ArgumentParser:
     source_search.add_argument("--max-chars", type=int, default=2_000_000, help="Maximum text characters to read from the source preview")
     source_search.add_argument("--byte-offset", type=int, default=0, help="Start byte offset for large plain-text source streaming")
     source_search.add_argument("--max-search-bytes", type=int, default=2_000_000, help="Maximum bytes to scan in a plain-text source window")
+    source_search.add_argument("--sqlite-row-scan-limit", type=int, default=5_000, help="Maximum SQLite rows to scan across text columns")
     source_search.add_argument("--json", action="store_true", help="Print machine-readable JSON instead of a compact summary")
 
     ocr_queue = sub.add_parser(
@@ -3899,6 +3901,7 @@ def main(argv=None) -> int:
                 max_chars=args.max_chars,
                 byte_offset=args.byte_offset,
                 max_search_bytes=args.max_search_bytes,
+                sqlite_row_scan_limit=args.sqlite_row_scan_limit,
             )
         except SourceReadError as exc:
             parser.error(str(exc))
@@ -3917,6 +3920,7 @@ def main(argv=None) -> int:
                 "max_chars": args.max_chars,
                 "byte_offset": args.byte_offset,
                 "max_search_bytes": args.max_search_bytes,
+                "sqlite_row_scan_limit": args.sqlite_row_scan_limit,
             },
             input_files=[("run-summary", input_summary), ("source-file", Path(str(payload["path"])))],
             output_files=[("source-search-json", output)],

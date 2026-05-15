@@ -155,6 +155,7 @@ def run_source_search(
     max_chars: int = MAX_SOURCE_READ_TEXT_CHARS,
     byte_offset: int = 0,
     max_search_bytes: int = DEFAULT_SOURCE_SEARCH_BYTES,
+    sqlite_row_scan_limit: int = 5_000,
 ) -> dict[str, object]:
     normalized = [item.strip().lower() for item in keywords if item.strip()]
     if not normalized:
@@ -183,6 +184,7 @@ def run_source_search(
             relative_path=str(source_payload.get("relative_path") or raw_path),
             limit=limit,
             context=context,
+            row_scan_limit=sqlite_row_scan_limit,
         )
         searchable = True
         search_mode = "bounded-sqlite-table-scan"

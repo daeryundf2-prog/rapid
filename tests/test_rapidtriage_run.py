@@ -139,6 +139,7 @@ class RapidTriageRunTests(unittest.TestCase):
         self.assertIn("source-search", commands)
         self.assertIn("archive.zip::entry", commands["source-search"].format_help())
         self.assertIn("--byte-offset", commands["source-search"].format_help())
+        self.assertIn("--sqlite-row-scan-limit", commands["source-search"].format_help())
 
     def test_run_fraud_mode_writes_component_outputs_summary_and_report(self) -> None:
         self.assert_run_mode_outputs("fraud")
@@ -1098,6 +1099,8 @@ class RapidTriageRunTests(unittest.TestCase):
                         "Users/alice/Databases/chat.sqlite",
                         "-k",
                         "password",
+                        "--sqlite-row-scan-limit",
+                        "2",
                         "--output",
                         str(source_output),
                     ]
@@ -1111,6 +1114,7 @@ class RapidTriageRunTests(unittest.TestCase):
             self.assertTrue(payload["summary"]["sqlite_search"])
             self.assertEqual(payload["summary"]["sqlite_status"], "searched")
             self.assertGreaterEqual(payload["summary"]["sqlite_scanned_tables"], 1)
+            self.assertEqual(payload["summary"]["sqlite_row_scan_limit"], 2)
             self.assertGreaterEqual(payload["summary"]["match_count"], 1)
             match = payload["matches"][0]
             self.assertEqual(match["table"], "messages")
