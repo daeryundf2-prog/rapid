@@ -3745,6 +3745,232 @@ class RapidTriageOpsTests(unittest.TestCase):
             manifest = payload["cross_tool_validation_assessment"]["trusted_tool_diff_manifest"]
             self.assertIn("mobile_app_field_comparison", manifest["comparison_summaries"][0]["field_diffs"])
 
+    def test_cross_tool_validate_compares_chat_app_rows(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            rapid = root / "rapid-chat.json"
+            trusted = root / "whatsapp-export.csv"
+            rapid.write_text(
+                json.dumps(
+                    [
+                        {
+                            "artifact_type": "whatsapp-message",
+                            "service": "WhatsApp",
+                            "conversation_id": "chat-7",
+                            "message_id": "m-001",
+                            "timestamp": "2024-04-01T09:10:11+00:00",
+                            "sender": "+82 10-1234-5678",
+                            "recipient": "alice@example.test",
+                            "message_text_hash": "e" * 64,
+                            "media_hash": "f" * 64,
+                            "read_state": "read",
+                        }
+                    ]
+                ),
+                encoding="utf-8",
+            )
+            trusted.write_text(
+                "Service,ConversationId,MessageId,Timestamp,Sender,Recipient,MessageTextHash,MediaHash,ReadState\n"
+                f"whatsapp,chat-7,m-001,2024-04-01T09:10:11+00:00,+821012345678,"
+                f"alice@example.test,{('e' * 64)},{('f' * 64)},read\n",
+                encoding="utf-8",
+            )
+
+            stdout = io.StringIO()
+            with contextlib.redirect_stdout(stdout):
+                exit_code = main(
+                    [
+                        "cross-tool-validate",
+                        "--rapid-output",
+                        str(rapid),
+                        "--reference-output",
+                        f"service-export={trusted}",
+                        "--backlog-item",
+                        "32",
+                        "--min-overlap",
+                        "1.0",
+                        "--json",
+                    ]
+                )
+
+            self.assertEqual(exit_code, 0)
+            payload = json.loads(stdout.getvalue())
+            field_comparison = payload["comparisons"][0]["chat_app_field_comparison"]
+            self.assertEqual(payload["status"], "pass")
+            self.assertGreaterEqual(field_comparison["common_record_count"], 1)
+            self.assertEqual(field_comparison["mismatch_count"], 0)
+            self.assertEqual(field_comparison["missing_common_field_count"], 0)
+            self.assertIn("conversation_id", field_comparison["compared_canonical_fields"])
+
+    def test_cross_tool_validate_compares_email_rows(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            rapid = root / "rapid-email.json"
+            trusted = root / "readpst.csv"
+            rapid.write_text(
+                json.dumps(
+                    [
+                        {
+                            "artifact_type": "email-message",
+                            "message_id": "<case-001@example.test>",
+                            "subject": "Case Update",
+                            "sent_at": "2024-04-01T09:10:11+00:00",
+                            "sender": "bob@example.test",
+                            "recipient": "alice@example.test",
+                            "folder": "Inbox",
+                            "attachment_count": 2,
+                            "body_hash": "1" * 64,
+                        }
+                    ]
+                ),
+                encoding="utf-8",
+            )
+            trusted.write_text(
+                "InternetMessageId,Subject,Date,From,To,Folder,AttachmentCount,BodyHash\n"
+                f"case-001@example.test,case update,2024-04-01T09:10:11+00:00,bob@example.test,"
+                f"alice@example.test,Inbox,2,{('1' * 64)}\n",
+                encoding="utf-8",
+            )
+
+            stdout = io.StringIO()
+            with contextlib.redirect_stdout(stdout):
+                exit_code = main(
+                    [
+                        "cross-tool-validate",
+                        "--rapid-output",
+                        str(rapid),
+                        "--reference-output",
+                        f"readpst={trusted}",
+                        "--backlog-item",
+                        "36",
+                        "--min-overlap",
+                        "1.0",
+                        "--json",
+                    ]
+                )
+
+            self.assertEqual(exit_code, 0)
+            payload = json.loads(stdout.getvalue())
+            field_comparison = payload["comparisons"][0]["email_field_comparison"]
+            self.assertEqual(payload["status"], "pass")
+            self.assertGreaterEqual(field_comparison["common_record_count"], 1)
+            self.assertEqual(field_comparison["mismatch_count"], 0)
+            self.assertEqual(field_comparison["missing_common_field_count"], 0)
+            self.assertIn("message_id", field_comparison["compared_canonical_fields"])
+
+    def test_cross_tool_validate_compares_cloud_export_rows(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            rapid = root / "rapid-cloud.json"
+            trusted = root / "takeout.csv"
+            rapid.write_text(
+                json.dumps(
+                    [
+                        {
+                            "artifact_type": "cloud-file",
+                            "provider": "google",
+                            "product": "drive",
+                            "record_id": "rec-1",
+                            "item_id": "file-9",
+                            "timestamp": "2024-04-01T09:10:11+00:00",
+                            "actor": "alice@example.test",
+                            "target": "/Drive/case.docx",
+                            "action": "create",
+                            "hash": "2" * 64,
+                            "size": 4096,
+                        }
+                    ]
+                ),
+                encoding="utf-8",
+            )
+            trusted.write_text(
+                "Provider,Product,CloudRecordId,ItemId,Timestamp,Actor,Target,Action,Hash,Size\n"
+                f"google,drive,rec-1,file-9,2024-04-01T09:10:11+00:00,alice@example.test,"
+                f"/Drive/case.docx,create,{('2' * 64)},4096\n",
+                encoding="utf-8",
+            )
+
+            stdout = io.StringIO()
+            with contextlib.redirect_stdout(stdout):
+                exit_code = main(
+                    [
+                        "cross-tool-validate",
+                        "--rapid-output",
+                        str(rapid),
+                        "--reference-output",
+                        f"takeout={trusted}",
+                        "--backlog-item",
+                        "37",
+                        "--min-overlap",
+                        "1.0",
+                        "--json",
+                    ]
+                )
+
+            self.assertEqual(exit_code, 0)
+            payload = json.loads(stdout.getvalue())
+            field_comparison = payload["comparisons"][0]["cloud_export_field_comparison"]
+            self.assertEqual(payload["status"], "pass")
+            self.assertGreaterEqual(field_comparison["common_record_count"], 1)
+            self.assertEqual(field_comparison["mismatch_count"], 0)
+            self.assertEqual(field_comparison["missing_common_field_count"], 0)
+            self.assertIn("record_id", field_comparison["compared_canonical_fields"])
+
+    def test_cross_tool_validate_compares_cloud_api_rows(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            rapid = root / "rapid-cloud-api.json"
+            trusted = root / "graph-api.csv"
+            rapid.write_text(
+                json.dumps(
+                    [
+                        {
+                            "artifact_type": "cloud-api-response",
+                            "request_id": "req-1",
+                            "provider": "m365",
+                            "endpoint": "https://graph.microsoft.com/v1.0/me/drive/root/children",
+                            "method": "GET",
+                            "status_code": 200,
+                            "response_hash": "3" * 64,
+                            "item_count": 5,
+                            "page_token": "next-1",
+                        }
+                    ]
+                ),
+                encoding="utf-8",
+            )
+            trusted.write_text(
+                "RequestId,Provider,Endpoint,Method,StatusCode,ResponseHash,ItemCount,PageToken\n"
+                f"req-1,m365,https://graph.microsoft.com/v1.0/me/drive/root/children,GET,200,{('3' * 64)},5,next-1\n",
+                encoding="utf-8",
+            )
+
+            stdout = io.StringIO()
+            with contextlib.redirect_stdout(stdout):
+                exit_code = main(
+                    [
+                        "cross-tool-validate",
+                        "--rapid-output",
+                        str(rapid),
+                        "--reference-output",
+                        f"graph-api={trusted}",
+                        "--backlog-item",
+                        "40",
+                        "--min-overlap",
+                        "1.0",
+                        "--json",
+                    ]
+                )
+
+            self.assertEqual(exit_code, 0)
+            payload = json.loads(stdout.getvalue())
+            field_comparison = payload["comparisons"][0]["cloud_api_field_comparison"]
+            self.assertEqual(payload["status"], "pass")
+            self.assertGreaterEqual(field_comparison["common_record_count"], 1)
+            self.assertEqual(field_comparison["mismatch_count"], 0)
+            self.assertEqual(field_comparison["missing_common_field_count"], 0)
+            self.assertIn("response_hash", field_comparison["compared_canonical_fields"])
+
     def test_image_workflow_validate_command_emits_trusted_diff(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             root = Path(tmp_dir)

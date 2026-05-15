@@ -24,6 +24,7 @@ MAX_USER_ACTIVITY_FIELD_DIFF_ROWS = 5_000
 MAX_SYSTEM_ARTIFACT_FIELD_DIFF_ROWS = 5_000
 MAX_BROWSER_FIELD_DIFF_ROWS = 5_000
 MAX_MOBILE_FIELD_DIFF_ROWS = 5_000
+MAX_MESSAGING_FIELD_DIFF_ROWS = 5_000
 MAX_FIELD_MISMATCH_SAMPLES = 50
 FUNCTIONAL_VALIDATION_BATCH_ID = "commercial-uplift-036-040"
 KEY_FIELDS = (
@@ -74,6 +75,14 @@ KEY_FIELDS = (
     "PackageName",
     "apk_sha256",
     "ApkSHA256",
+    "internet_message_id",
+    "InternetMessageId",
+    "cloud_record_id",
+    "CloudRecordId",
+    "provider_record_id",
+    "ProviderRecordId",
+    "api_request_id",
+    "ApiRequestId",
 )
 EVTX_FIELD_ALIASES = {
     "event_record_id": ("event_record_id", "EventRecordID", "record_id", "RecordNumber", "record_number"),
@@ -334,6 +343,64 @@ MOBILE_APP_FIELD_ALIASES = {
     "table_name": ("table_name", "TableName", "table", "Table"),
     "indicator": ("indicator", "Indicator", "url", "URL", "ip", "IP", "domain", "Domain"),
     "risk_model": ("risk_model", "RiskModel", "risk", "Risk", "permission_risk_model"),
+}
+CHAT_APP_FIELD_ALIASES = {
+    "service": ("service", "Service", "app", "App", "platform", "Platform"),
+    "profile": ("profile", "Profile", "account", "Account", "account_id", "AccountId"),
+    "conversation_id": ("conversation_id", "ConversationId", "chat_id", "ChatId", "thread_id", "ThreadId"),
+    "conversation_title": ("conversation_title", "ConversationTitle", "chat_name", "ChatName", "thread_name", "ThreadName"),
+    "message_id": ("message_id", "MessageId", "msg_id", "MsgId", "id", "Id"),
+    "timestamp": ("timestamp", "Timestamp", "datetime", "DateTime", "created_at", "CreatedAt", "sent_at", "SentAt"),
+    "sender": ("sender", "Sender", "from", "From", "from_id", "FromId", "author", "Author"),
+    "recipient": ("recipient", "Recipient", "to", "To", "to_id", "ToId", "recipient_id", "RecipientId"),
+    "message_text_hash": ("message_text_hash", "MessageTextHash", "text_hash", "TextHash", "body_hash", "BodyHash"),
+    "message_text": ("message_text", "MessageText", "text", "Text", "body", "Body", "message", "Message"),
+    "media_hash": ("media_hash", "MediaHash", "attachment_hash", "AttachmentHash", "file_hash", "FileHash"),
+    "media_path": ("media_path", "MediaPath", "attachment_path", "AttachmentPath", "file_path", "FilePath"),
+    "reaction_summary": ("reaction_summary", "ReactionSummary", "reactions", "Reactions"),
+    "read_state": ("read_state", "ReadState", "read_status", "ReadStatus"),
+    "deleted_state": ("deleted_state", "DeletedState", "deleted", "Deleted"),
+    "schema_version": ("schema_version", "SchemaVersion", "schema", "Schema"),
+    "source_record_id": ("source_record_id", "SourceRecordId", "RecordId", "record_id"),
+}
+EMAIL_FIELD_ALIASES = {
+    "message_id": ("message_id", "MessageId", "InternetMessageId", "internet_message_id", "Message-ID"),
+    "subject": ("subject", "Subject"),
+    "sent_at": ("sent_at", "SentAt", "Date", "date", "timestamp", "Timestamp"),
+    "sender": ("sender", "Sender", "From", "from"),
+    "recipient": ("recipient", "Recipient", "To", "to"),
+    "cc": ("cc", "CC", "Cc"),
+    "mailbox": ("mailbox", "Mailbox", "mailbox_name", "MailboxName"),
+    "folder": ("folder", "Folder", "folder_path", "FolderPath"),
+    "attachment_count": ("attachment_count", "AttachmentCount", "attachments", "Attachments"),
+    "attachment_hash": ("attachment_hash", "AttachmentHash", "file_hash", "FileHash"),
+    "body_hash": ("body_hash", "BodyHash", "message_text_hash", "MessageTextHash"),
+    "source_path": ("source_path", "SourcePath", "SourceFile", "path", "Path"),
+    "source_record_id": ("source_record_id", "SourceRecordId", "RecordId", "record_id"),
+}
+CLOUD_EXPORT_FIELD_ALIASES = {
+    "provider": ("provider", "Provider", "cloud_family", "CloudFamily", "service", "Service"),
+    "product": ("product", "Product", "workload", "Workload", "app", "App"),
+    "record_id": ("record_id", "RecordId", "cloud_record_id", "CloudRecordId", "provider_record_id", "ProviderRecordId"),
+    "item_id": ("item_id", "ItemId", "file_id", "FileId", "message_id", "MessageId", "event_id", "EventId"),
+    "timestamp": ("timestamp", "Timestamp", "created_at", "CreatedAt", "event_time", "EventTime"),
+    "actor": ("actor", "Actor", "user", "User", "sender", "Sender", "owner", "Owner"),
+    "target": ("target", "Target", "recipient", "Recipient", "path", "Path", "name", "Name", "url", "URL"),
+    "action": ("action", "Action", "operation", "Operation", "activity", "Activity"),
+    "ip": ("ip", "IP", "client_ip", "ClientIP"),
+    "hash": ("hash", "Hash", "sha256", "SHA256", "file_hash", "FileHash"),
+    "size": ("size", "Size", "bytes", "Bytes"),
+    "source_record_id": ("source_record_id", "SourceRecordId", "SourceRow", "source_row"),
+}
+CLOUD_API_FIELD_ALIASES = {
+    "request_id": ("request_id", "RequestId", "api_request_id", "ApiRequestId"),
+    "provider": ("provider", "Provider", "service", "Service"),
+    "endpoint": ("endpoint", "Endpoint", "url", "URL", "request_url", "RequestUrl"),
+    "method": ("method", "Method", "http_method", "HttpMethod"),
+    "status_code": ("status_code", "StatusCode", "status", "Status"),
+    "response_hash": ("response_hash", "ResponseHash", "body_hash", "BodyHash", "sha256", "SHA256"),
+    "item_count": ("item_count", "ItemCount", "record_count", "RecordCount"),
+    "page_token": ("page_token", "PageToken", "cursor", "Cursor", "next_cursor", "NextCursor"),
 }
 MFT_FIELD_ALIASES = {
     "record_number": ("record_number", "RecordNumber", "EntryNumber", "entry_number", "MFTEntryNumber"),
@@ -711,6 +778,10 @@ def load_tool_dataset(name: str, path: Path) -> dict[str, object]:
         "browser_timeline_field_index": browser_timeline_field_index(rows),
         "mobile_export_field_index": mobile_export_field_index(rows),
         "mobile_app_field_index": mobile_app_field_index(rows),
+        "chat_app_field_index": chat_app_field_index(rows),
+        "email_field_index": email_field_index(rows),
+        "cloud_export_field_index": cloud_export_field_index(rows),
+        "cloud_api_field_index": cloud_api_field_index(rows),
     }
 
 
@@ -889,7 +960,10 @@ def candidate_keys(row: Mapping[str, object]) -> list[str]:
     for field in KEY_FIELDS:
         value = value_for_key(row, field)
         if value is not None and str(value).strip():
-            keys.append(normalize_key(value))
+            if field.lower() in {"message_id", "messageid", "internetmessageid", "message-id"}:
+                keys.append(normalize_key(normalize_email_message_id(value)))
+            else:
+                keys.append(normalize_key(value))
     if not keys:
         joined = "|".join(f"{key}={row[key]}" for key in sorted(row)[:8])
         if joined:
@@ -929,6 +1003,14 @@ def composite_candidate_keys(row: Mapping[str, object]) -> list[str]:
         composites.extend(mobile_export_key_variants(row))
     if has_mobile_app_signal(row):
         composites.extend(mobile_app_key_variants(row))
+    if has_chat_app_signal(row):
+        composites.extend(chat_app_key_variants(row))
+    if has_email_signal(row):
+        composites.extend(email_key_variants(row))
+    if has_cloud_export_signal(row):
+        composites.extend(cloud_export_key_variants(row))
+    if has_cloud_api_signal(row):
+        composites.extend(cloud_api_key_variants(row))
 
     mft_record_number = ntfs_int_value(row, MFT_FIELD_ALIASES["record_number"])
     mft_path = ntfs_path_value(row, MFT_FIELD_ALIASES["file_path"])
@@ -1006,6 +1088,10 @@ def compare_datasets(
     browser_timeline_field_comparison = compare_browser_timeline_fields(rapid_dataset, reference_dataset)
     mobile_export_field_comparison = compare_mobile_export_fields(rapid_dataset, reference_dataset)
     mobile_app_field_comparison = compare_mobile_app_fields(rapid_dataset, reference_dataset)
+    chat_app_field_comparison = compare_chat_app_fields(rapid_dataset, reference_dataset)
+    email_field_comparison = compare_email_fields(rapid_dataset, reference_dataset)
+    cloud_export_field_comparison = compare_cloud_export_fields(rapid_dataset, reference_dataset)
+    cloud_api_field_comparison = compare_cloud_api_fields(rapid_dataset, reference_dataset)
     if field_comparison["mismatch_count"] or field_comparison["missing_common_field_count"]:
         status = "failed"
     if registry_field_comparison["mismatch_count"]:
@@ -1036,6 +1122,14 @@ def compare_datasets(
     ):
         status = "failed"
     if mobile_app_field_comparison["mismatch_count"] or mobile_app_field_comparison["missing_common_field_count"]:
+        status = "failed"
+    if chat_app_field_comparison["mismatch_count"] or chat_app_field_comparison["missing_common_field_count"]:
+        status = "failed"
+    if email_field_comparison["mismatch_count"] or email_field_comparison["missing_common_field_count"]:
+        status = "failed"
+    if cloud_export_field_comparison["mismatch_count"] or cloud_export_field_comparison["missing_common_field_count"]:
+        status = "failed"
+    if cloud_api_field_comparison["mismatch_count"] or cloud_api_field_comparison["missing_common_field_count"]:
         status = "failed"
     if input_quality_blockers:
         status = "failed"
@@ -1082,6 +1176,10 @@ def compare_datasets(
         "browser_timeline_field_comparison": browser_timeline_field_comparison,
         "mobile_export_field_comparison": mobile_export_field_comparison,
         "mobile_app_field_comparison": mobile_app_field_comparison,
+        "chat_app_field_comparison": chat_app_field_comparison,
+        "email_field_comparison": email_field_comparison,
+        "cloud_export_field_comparison": cloud_export_field_comparison,
+        "cloud_api_field_comparison": cloud_api_field_comparison,
         "release_gate": "review-required" if status != "pass" else "comparison-passed",
     }
 
@@ -2163,6 +2261,318 @@ def compare_mobile_app_fields(
     )
 
 
+def chat_app_field_index(rows: Sequence[Mapping[str, object]]) -> dict[str, dict[str, str]]:
+    return messaging_field_index(
+        rows,
+        signal=has_chat_app_signal,
+        key_builder=chat_app_key_variants,
+        field_builder=chat_app_normalized_fields,
+    )
+
+
+def email_field_index(rows: Sequence[Mapping[str, object]]) -> dict[str, dict[str, str]]:
+    return messaging_field_index(
+        rows,
+        signal=has_email_signal,
+        key_builder=email_key_variants,
+        field_builder=email_normalized_fields,
+    )
+
+
+def cloud_export_field_index(rows: Sequence[Mapping[str, object]]) -> dict[str, dict[str, str]]:
+    return messaging_field_index(
+        rows,
+        signal=has_cloud_export_signal,
+        key_builder=cloud_export_key_variants,
+        field_builder=cloud_export_normalized_fields,
+    )
+
+
+def cloud_api_field_index(rows: Sequence[Mapping[str, object]]) -> dict[str, dict[str, str]]:
+    return messaging_field_index(
+        rows,
+        signal=has_cloud_api_signal,
+        key_builder=cloud_api_key_variants,
+        field_builder=cloud_api_normalized_fields,
+    )
+
+
+def messaging_field_index(
+    rows: Sequence[Mapping[str, object]],
+    *,
+    signal,
+    key_builder,
+    field_builder,
+) -> dict[str, dict[str, str]]:
+    index: dict[str, dict[str, str]] = {}
+    for row in rows[:MAX_MESSAGING_FIELD_DIFF_ROWS]:
+        if not signal(row):
+            continue
+        keys = key_builder(row)
+        if not keys:
+            continue
+        fields = field_builder(row)
+        if fields:
+            for key in keys:
+                index.setdefault(key, fields)
+    return index
+
+
+def has_chat_app_signal(row: Mapping[str, object]) -> bool:
+    artifact_hint = normalize_mobile_identifier(
+        first_value(row, ("artifact_type", "ArtifactType", "artifact_family", "ArtifactFamily", "source_type", "SourceType"))
+    )
+    if re.search(r"\b(kakaotalk|whatsapp|telegram|signal|wechat|line|discord|instagram|facebook|messenger|chat)\b", artifact_hint):
+        return True
+    service = normalize_mobile_identifier(first_value(row, CHAT_APP_FIELD_ALIASES["service"]))
+    conversation_id = first_value(row, CHAT_APP_FIELD_ALIASES["conversation_id"])
+    message_id = first_value(row, CHAT_APP_FIELD_ALIASES["message_id"])
+    return bool(service and (conversation_id or message_id))
+
+
+def has_email_signal(row: Mapping[str, object]) -> bool:
+    artifact_hint = normalize_mobile_identifier(
+        first_value(row, ("artifact_type", "ArtifactType", "artifact_family", "ArtifactFamily", "source_type", "SourceType"))
+    )
+    if re.search(r"\b(email|mail|mbox|eml|emlx|pst|ost|msg)\b", artifact_hint):
+        return True
+    email_specific_message_id = first_value(row, ("InternetMessageId", "internet_message_id", "Message-ID", "message-id"))
+    subject = first_value(row, EMAIL_FIELD_ALIASES["subject"])
+    folder = first_value(row, EMAIL_FIELD_ALIASES["folder"])
+    mailbox = first_value(row, EMAIL_FIELD_ALIASES["mailbox"])
+    sender = first_value(row, EMAIL_FIELD_ALIASES["sender"])
+    return bool(sender and (email_specific_message_id or subject or folder or mailbox))
+
+
+def has_cloud_export_signal(row: Mapping[str, object]) -> bool:
+    artifact_hint = normalize_mobile_identifier(
+        first_value(row, ("artifact_type", "ArtifactType", "artifact_family", "ArtifactFamily", "source_type", "SourceType"))
+    )
+    if re.search(r"\b(cloud|takeout|icloud|m365|onedrive|teams|sharepoint|purview|gmail|drive)\b", artifact_hint):
+        return True
+    provider = first_value(row, CLOUD_EXPORT_FIELD_ALIASES["provider"])
+    product = first_value(row, CLOUD_EXPORT_FIELD_ALIASES["product"])
+    return bool(
+        provider
+        and product
+        and (
+            first_value(row, CLOUD_EXPORT_FIELD_ALIASES["record_id"])
+            or first_value(row, CLOUD_EXPORT_FIELD_ALIASES["item_id"])
+        )
+    )
+
+
+def has_cloud_api_signal(row: Mapping[str, object]) -> bool:
+    artifact_hint = normalize_mobile_identifier(
+        first_value(row, ("artifact_type", "ArtifactType", "artifact_family", "ArtifactFamily", "source_type", "SourceType"))
+    )
+    if re.search(r"\b(cloud-api|api-response|oauth|graph-api|provider-api)\b", artifact_hint):
+        return True
+    request_id = first_value(row, CLOUD_API_FIELD_ALIASES["request_id"])
+    endpoint = first_value(row, CLOUD_API_FIELD_ALIASES["endpoint"])
+    response_hash = first_value(row, CLOUD_API_FIELD_ALIASES["response_hash"])
+    return bool(request_id or (endpoint and response_hash))
+
+
+def chat_app_key_variants(row: Mapping[str, object]) -> list[str]:
+    service = normalize_mobile_identifier(first_value(row, CHAT_APP_FIELD_ALIASES["service"]))
+    conversation_id = normalize_mobile_identifier(first_value(row, CHAT_APP_FIELD_ALIASES["conversation_id"]))
+    message_id = normalize_mobile_identifier(first_value(row, CHAT_APP_FIELD_ALIASES["message_id"]))
+    timestamp = normalize_field_value(first_value(row, CHAT_APP_FIELD_ALIASES["timestamp"]) or "")
+    sender = normalize_mobile_actor(first_value(row, CHAT_APP_FIELD_ALIASES["sender"]))
+    text_hash = normalize_hash_value(first_value(row, CHAT_APP_FIELD_ALIASES["message_text_hash"]))
+    source_record_id = normalize_mobile_identifier(first_value(row, CHAT_APP_FIELD_ALIASES["source_record_id"]))
+    keys: list[str] = []
+    if source_record_id:
+        keys.append(normalize_key(f"chat-source:{source_record_id}"))
+    if service and conversation_id and message_id:
+        keys.append(normalize_key(f"chat-message:{service}:{conversation_id}:{message_id}"))
+    if service and message_id:
+        keys.append(normalize_key(f"chat-message:{service}:{message_id}"))
+    if conversation_id and timestamp and (sender or text_hash):
+        keys.append(normalize_key(f"chat-context:{conversation_id}:{timestamp}:{sender}:{text_hash}"))
+    return list(dict.fromkeys(keys))
+
+
+def email_key_variants(row: Mapping[str, object]) -> list[str]:
+    message_id = normalize_email_message_id(first_value(row, EMAIL_FIELD_ALIASES["message_id"]))
+    subject = normalize_mobile_identifier(first_value(row, EMAIL_FIELD_ALIASES["subject"]))
+    sender = normalize_mobile_actor(first_value(row, EMAIL_FIELD_ALIASES["sender"]))
+    sent_at = normalize_field_value(first_value(row, EMAIL_FIELD_ALIASES["sent_at"]) or "")
+    source_record_id = normalize_mobile_identifier(first_value(row, EMAIL_FIELD_ALIASES["source_record_id"]))
+    keys: list[str] = []
+    if source_record_id:
+        keys.append(normalize_key(f"email-source:{source_record_id}"))
+    if message_id:
+        keys.append(normalize_key(f"email-message:{message_id}"))
+    if sender and sent_at and subject:
+        keys.append(normalize_key(f"email-context:{sender}:{sent_at}:{subject}"))
+    return list(dict.fromkeys(keys))
+
+
+def cloud_export_key_variants(row: Mapping[str, object]) -> list[str]:
+    provider = normalize_mobile_identifier(first_value(row, CLOUD_EXPORT_FIELD_ALIASES["provider"]))
+    product = normalize_mobile_identifier(first_value(row, CLOUD_EXPORT_FIELD_ALIASES["product"]))
+    record_id = normalize_mobile_identifier(first_value(row, CLOUD_EXPORT_FIELD_ALIASES["record_id"]))
+    item_id = normalize_mobile_identifier(first_value(row, CLOUD_EXPORT_FIELD_ALIASES["item_id"]))
+    timestamp = normalize_field_value(first_value(row, CLOUD_EXPORT_FIELD_ALIASES["timestamp"]) or "")
+    actor = normalize_mobile_actor(first_value(row, CLOUD_EXPORT_FIELD_ALIASES["actor"]))
+    action = normalize_mobile_identifier(first_value(row, CLOUD_EXPORT_FIELD_ALIASES["action"]))
+    keys: list[str] = []
+    if provider and product and record_id:
+        keys.append(normalize_key(f"cloud-record:{provider}:{product}:{record_id}"))
+    if provider and product and item_id:
+        keys.append(normalize_key(f"cloud-item:{provider}:{product}:{item_id}"))
+    if provider and timestamp and actor and action:
+        keys.append(normalize_key(f"cloud-context:{provider}:{timestamp}:{actor}:{action}"))
+    return list(dict.fromkeys(keys))
+
+
+def cloud_api_key_variants(row: Mapping[str, object]) -> list[str]:
+    request_id = normalize_mobile_identifier(first_value(row, CLOUD_API_FIELD_ALIASES["request_id"]))
+    provider = normalize_mobile_identifier(first_value(row, CLOUD_API_FIELD_ALIASES["provider"]))
+    endpoint = normalize_field_value(first_value(row, CLOUD_API_FIELD_ALIASES["endpoint"]) or "")
+    response_hash = normalize_hash_value(first_value(row, CLOUD_API_FIELD_ALIASES["response_hash"]))
+    keys: list[str] = []
+    if request_id:
+        keys.append(normalize_key(f"cloud-api-request:{request_id}"))
+    if provider and endpoint and response_hash:
+        keys.append(normalize_key(f"cloud-api-response:{provider}:{endpoint}:{response_hash}"))
+    return list(dict.fromkeys(keys))
+
+
+def chat_app_normalized_fields(row: Mapping[str, object]) -> dict[str, str]:
+    return normalized_fields_by_alias(
+        row,
+        CHAT_APP_FIELD_ALIASES,
+        actor_fields={"sender", "recipient"},
+        hash_fields={"message_text_hash", "media_hash"},
+        path_fields={"media_path"},
+    )
+
+
+def email_normalized_fields(row: Mapping[str, object]) -> dict[str, str]:
+    return normalized_fields_by_alias(
+        row,
+        EMAIL_FIELD_ALIASES,
+        actor_fields={"sender", "recipient", "cc"},
+        hash_fields={"attachment_hash", "body_hash"},
+        path_fields={"source_path"},
+        int_fields={"attachment_count"},
+        email_message_id_fields={"message_id"},
+    )
+
+
+def cloud_export_normalized_fields(row: Mapping[str, object]) -> dict[str, str]:
+    return normalized_fields_by_alias(
+        row,
+        CLOUD_EXPORT_FIELD_ALIASES,
+        actor_fields={"actor", "target"},
+        hash_fields={"hash"},
+        int_fields={"size"},
+    )
+
+
+def cloud_api_normalized_fields(row: Mapping[str, object]) -> dict[str, str]:
+    return normalized_fields_by_alias(
+        row,
+        CLOUD_API_FIELD_ALIASES,
+        hash_fields={"response_hash"},
+        int_fields={"status_code", "item_count"},
+    )
+
+
+def normalized_fields_by_alias(
+    row: Mapping[str, object],
+    aliases_by_field: Mapping[str, Sequence[str]],
+    *,
+    actor_fields: set[str] | None = None,
+    hash_fields: set[str] | None = None,
+    path_fields: set[str] | None = None,
+    int_fields: set[str] | None = None,
+    email_message_id_fields: set[str] | None = None,
+) -> dict[str, str]:
+    actor_fields = actor_fields or set()
+    hash_fields = hash_fields or set()
+    path_fields = path_fields or set()
+    int_fields = int_fields or set()
+    email_message_id_fields = email_message_id_fields or set()
+    fields: dict[str, str] = {}
+    for canonical, aliases in aliases_by_field.items():
+        if canonical in actor_fields:
+            value = normalize_mobile_actor(first_value(row, aliases))
+        elif canonical in hash_fields:
+            value = normalize_hash_value(first_value(row, aliases))
+        elif canonical in path_fields:
+            value = ntfs_path_value(row, aliases)
+        elif canonical in int_fields:
+            value = ntfs_int_value(row, aliases)
+        elif canonical in email_message_id_fields:
+            value = normalize_email_message_id(first_value(row, aliases))
+        else:
+            raw = first_value(row, aliases)
+            value = normalize_field_value(raw) if raw is not None and str(raw).strip() else ""
+        if value:
+            fields[canonical] = value
+    return fields
+
+
+def compare_chat_app_fields(
+    rapid_dataset: Mapping[str, object],
+    reference_dataset: Mapping[str, object],
+) -> dict[str, object]:
+    return compare_ntfs_field_indexes(
+        rapid_dataset,
+        reference_dataset,
+        index_key="chat_app_field_index",
+        mode="messenger-chat-app-field-diff",
+        key_name="chat_app_key",
+        row_limit=MAX_MESSAGING_FIELD_DIFF_ROWS,
+    )
+
+
+def compare_email_fields(
+    rapid_dataset: Mapping[str, object],
+    reference_dataset: Mapping[str, object],
+) -> dict[str, object]:
+    return compare_ntfs_field_indexes(
+        rapid_dataset,
+        reference_dataset,
+        index_key="email_field_index",
+        mode="email-mailbox-field-diff",
+        key_name="email_key",
+        row_limit=MAX_MESSAGING_FIELD_DIFF_ROWS,
+    )
+
+
+def compare_cloud_export_fields(
+    rapid_dataset: Mapping[str, object],
+    reference_dataset: Mapping[str, object],
+) -> dict[str, object]:
+    return compare_ntfs_field_indexes(
+        rapid_dataset,
+        reference_dataset,
+        index_key="cloud_export_field_index",
+        mode="cloud-provider-export-field-diff",
+        key_name="cloud_export_key",
+        row_limit=MAX_MESSAGING_FIELD_DIFF_ROWS,
+    )
+
+
+def compare_cloud_api_fields(
+    rapid_dataset: Mapping[str, object],
+    reference_dataset: Mapping[str, object],
+) -> dict[str, object]:
+    return compare_ntfs_field_indexes(
+        rapid_dataset,
+        reference_dataset,
+        index_key="cloud_api_field_index",
+        mode="cloud-api-response-field-diff",
+        key_name="cloud_api_key",
+        row_limit=MAX_MESSAGING_FIELD_DIFF_ROWS,
+    )
+
+
 def normalize_mobile_identifier(value: object) -> str:
     if value is None:
         return ""
@@ -2191,6 +2601,10 @@ def normalize_mobile_actor(value: object) -> str:
     if text.startswith("+") or len(digits) >= 7:
         return normalize_mobile_phone(text)
     return normalize_mobile_identifier(text)
+
+
+def normalize_email_message_id(value: object) -> str:
+    return normalize_mobile_identifier(value).strip("<>")
 
 
 def normalize_sid(value: object) -> str:
@@ -2891,6 +3305,10 @@ def build_trusted_tool_diff_manifest(
             "browser_timeline_field_comparison",
             "mobile_export_field_comparison",
             "mobile_app_field_comparison",
+            "chat_app_field_comparison",
+            "email_field_comparison",
+            "cloud_export_field_comparison",
+            "cloud_api_field_comparison",
         ):
             field_comparison = comparison.get(field_name)
             if not isinstance(field_comparison, Mapping):
