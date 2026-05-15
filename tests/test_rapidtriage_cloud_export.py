@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import tempfile
 import unittest
+import zipfile
 from pathlib import Path
 
 from rapidtriage.cli import build_parser, main
@@ -58,6 +59,85 @@ class RapidTriageCloudExportTests(unittest.TestCase):
             self.assertIn("identity-privilege-action", details["risk_flags"])
             self.assertIn("#40", details["commercial_gap_ids"])
             self.assertEqual(details["cloud_family"], "iaas-cloud")
+
+    def test_cloud_export_inventories_provider_zip_archive(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            archive_path = root / "takeout-archive.zip"
+            with zipfile.ZipFile(archive_path, "w") as archive:
+                archive.writestr(
+                    "Takeout/Mail/messages.json",
+                    json.dumps(
+                        [
+                            {
+                                "subject": "Exported message",
+                                "from": "alice@example.com",
+                                "date": "2026-05-01T00:00:00Z",
+                                "messageId": "msg-1",
+                            }
+                        ]
+                    ),
+                )
+                archive.writestr(
+                    "Takeout/Drive/My Drive/file-metadata.json",
+                    json.dumps([{"name": "case.pdf", "id": "drive-1", "modifiedTime": "2026-05-01T01:00:00Z"}]),
+                )
+                archive.writestr(
+                    "Takeout/Location History/Records.json",
+                    json.dumps({"locations": [{"timestamp": "2026-05-01T02:00:00Z", "latitudeE7": 374220000}]}),
+                )
+            output = root / "cloud-archive-artifacts.json"
+
+            exit_code = main(["artifacts", str(root), "--kind", "cloud-export", "--output", str(output)])
+
+            self.assertEqual(exit_code, 0)
+            payload = json.loads(output.read_text(encoding="utf-8"))
+            self.assertEqual(payload["summary"]["artifact_count"], 1)
+            artifact = payload["artifacts"][0]
+            self.assertEqual(artifact["artifact_type"], "cloud-export-archive")
+            details = artifact["details"]
+            self.assertEqual(details["source_format"], "zip")
+            self.assertEqual(details["service"], "google-takeout")
+            self.assertEqual(details["cloud_family"], "google")
+            self.assertEqual(details["archive_entry_count"], 3)
+            self.assertEqual(details["archive_json_entry_count"], 3)
+            self.assertTrue(details["validation_checks"]["archive_opened"])
+            self.assertTrue(details["validation_checks"]["archive_entry_manifest_emitted"])
+            self.assertTrue(details["validation_checks"]["original_export_hash_verified"])
+            manifest = details["cloud_archive_manifest"]
+            self.assertEqual(manifest["manifest_version"], "cloud-export-archive-manifest-v1")
+            self.assertEqual(manifest["source_sha256"], details["source_hashes"]["sha256"])
+            self.assertEqual(manifest["json_entry_count"], 3)
+            self.assertEqual(manifest["product_counts"]["gmail"], 1)
+            self.assertEqual(manifest["product_counts"]["drive"], 1)
+            self.assertEqual(manifest["product_counts"]["location-history"], 1)
+            self.assertEqual(len(manifest["manifest_sha256"]), 64)
+            self.assertEqual(details["cloud_archive_manifest_hash"], manifest["manifest_sha256"])
+            self.assertIn("provider-export-archive", details["risk_flags"])
+            self.assertIn("contains-mail-export", details["risk_flags"])
+            self.assertIn("contains-location-export", details["risk_flags"])
+            gate = details["core_accuracy_gates"][0]
+            self.assertIn("cloud provider archive manifest", gate["satisfied_checks"])
+            self.assertIn(
+                f"cloud_archive_manifest_sha256:{manifest['manifest_sha256']}",
+                gate["evidence_refs"],
+            )
+            uplift = details["commercial_uplift_evidence"]
+            self.assertIn(
+                f"cloud_archive_manifest_sha256:{manifest['manifest_sha256']}",
+                uplift["source_refs"],
+            )
+            self.assertTrue(
+                uplift["functional_priority_profile"]["implemented_controls"]["cloud_archive_manifest_emitted"]
+            )
+            self.assertEqual(
+                uplift["functional_priority_profile"]["implemented_controls"]["cloud_archive_entry_count"],
+                3,
+            )
+            self.assertIn(
+                "cloud-provider-archive-manifest-emitted",
+                uplift["functional_priority_profile"]["passed_validation_check_ids"],
+            )
 
     def test_cloud_export_collects_google_location_activity_and_account_rows(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:

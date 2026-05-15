@@ -3,6 +3,7 @@ from __future__ import annotations
 import datetime as dt
 import hashlib
 import json
+import zipfile
 from pathlib import Path
 from typing import Iterable, Mapping, Sequence
 
@@ -14,12 +15,15 @@ from .review import build_forensic_review
 PARSER_VERSION = "cloud-export-v3"
 FUNCTIONAL_EXPANSION_BATCH_ID = "commercial-uplift-051-055"
 CLOUD_JSON_SUFFIXES = {".json"}
+CLOUD_ARCHIVE_SUFFIXES = {".zip"}
+CLOUD_ARCHIVE_ENTRY_LIMIT = 1000
 CloudGap = tuple[list[str], str]
 CLOUD_NATIVE_CAPABILITIES = {
     "google_takeout_location_activity_import": True,
     "gmail_json_export_import": True,
     "icloud_account_file_export_import": True,
     "microsoft_365_onedrive_teams_audit_import": True,
+    "provider_archive_manifest_inventory": True,
     "source_hashing": True,
     "provider_api_native_acquisition": False,
     "provider_export_scope_verification": False,
@@ -82,6 +86,7 @@ CLOUD_QC_PREP_CONTRACTS = {
         "goal": CLOUD_QC_PREP_GOALS[43],
         "implemented_outputs": [
             "Google Takeout/Gmail/Drive/Photos/Activity/Location row normalization",
+            "bounded ZIP provider archive manifest inventory with original archive hash",
             "product-family review profile, row pivots, parser manifest, and source viewer locator",
             "selected-products, sidecar, timezone, and provider-diff blockers",
         ],
@@ -97,6 +102,7 @@ CLOUD_QC_PREP_CONTRACTS = {
         "goal": CLOUD_QC_PREP_GOALS[44],
         "implemented_outputs": [
             "iCloud account, file, photo, and mail export row normalization",
+            "bounded ZIP provider archive manifest inventory with original archive hash",
             "ADP/shared-album/container review profile, parser manifest, and source viewer locator",
             "Photos sidecar/EXIF/album/share blocker metadata",
         ],
@@ -112,6 +118,7 @@ CLOUD_QC_PREP_CONTRACTS = {
         "goal": CLOUD_QC_PREP_GOALS[45],
         "implemented_outputs": [
             "M365/Teams/OneDrive/SharePoint/eDiscovery/audit row normalization",
+            "bounded ZIP provider archive manifest inventory with original archive hash",
             "workload review profile, parser manifest, source viewer locator, and row pivots",
             "Teams, SharePoint permission, retention, deleted/version-state blocker metadata",
         ],
@@ -190,6 +197,19 @@ class CloudExportProvider:
         for path in sorted(root.rglob("*"), key=lambda item: str(item).lower()):
             if path.is_file() and path.suffix.lower() in CLOUD_JSON_SUFFIXES:
                 yield from collect_cloud_json(path)
+            elif path.is_file() and path.suffix.lower() in CLOUD_ARCHIVE_SUFFIXES:
+                yield collect_cloud_archive(path)
+
+
+def collect_cloud_archive(path: Path) -> ArtifactRecord:
+    source_hashes = compute_hashes(path)
+    return build_record(
+        path,
+        artifact_type="cloud-export-archive",
+        source_index=0,
+        source_hashes=source_hashes,
+        details=normalize_cloud_archive(path, source_hashes=source_hashes),
+    )
 
 
 def collect_cloud_json(path: Path) -> Iterable[ArtifactRecord]:
@@ -277,6 +297,123 @@ def collect_cloud_json(path: Path) -> Iterable[ArtifactRecord]:
                 source_hashes=source_hashes,
                 details=normalize_cloud_iaas_audit(row, source_path=source_path),
             )
+
+
+def normalize_cloud_archive(path: Path, *, source_hashes: Mapping[str, str]) -> dict[str, object]:
+    source_path = str(path.resolve())
+    entry_manifest: list[dict[str, object]] = []
+    product_counts: dict[str, int] = {}
+    provider_counts: dict[str, int] = {}
+    suffix_counts: dict[str, int] = {}
+    total_uncompressed = 0
+    total_compressed = 0
+    truncated = False
+    archive_opened = False
+    archive_error = ""
+
+    try:
+        with zipfile.ZipFile(path) as archive:
+            archive_opened = True
+            entries = [info for info in archive.infolist() if not info.is_dir()]
+            for index, info in enumerate(sorted(entries, key=lambda item: item.filename.lower())):
+                product = infer_cloud_archive_product(info.filename)
+                provider = cloud_archive_provider_for_product(product, info.filename)
+                suffix = Path(info.filename).suffix.lower() or "(none)"
+                product_counts[product] = product_counts.get(product, 0) + 1
+                provider_counts[provider] = provider_counts.get(provider, 0) + 1
+                suffix_counts[suffix] = suffix_counts.get(suffix, 0) + 1
+                total_uncompressed += int(info.file_size)
+                total_compressed += int(info.compress_size)
+                if len(entry_manifest) >= CLOUD_ARCHIVE_ENTRY_LIMIT:
+                    truncated = True
+                    continue
+                entry_manifest.append(
+                    {
+                        "index": index,
+                        "name": info.filename,
+                        "suffix": suffix,
+                        "product_family": product,
+                        "provider_family": provider,
+                        "uncompressed_size": int(info.file_size),
+                        "compressed_size": int(info.compress_size),
+                        "crc32": f"{info.CRC:08x}",
+                        "modified_at": zip_datetime_iso(info),
+                        "json_candidate": suffix == ".json",
+                    }
+                )
+    except (OSError, zipfile.BadZipFile, zipfile.LargeZipFile) as exc:
+        archive_error = str(exc)
+
+    service = cloud_archive_service_from_counts(provider_counts, source_path)
+    entry_count = sum(product_counts.values())
+    json_entry_count = suffix_counts.get(".json", 0)
+    archive_manifest = build_cloud_archive_manifest(
+        source_path=source_path,
+        source_hashes=source_hashes,
+        service=service,
+        entry_count=entry_count,
+        json_entry_count=json_entry_count,
+        product_counts=product_counts,
+        provider_counts=provider_counts,
+        suffix_counts=suffix_counts,
+        total_uncompressed=total_uncompressed,
+        total_compressed=total_compressed,
+        entry_manifest=entry_manifest,
+        truncated=truncated,
+        archive_opened=archive_opened,
+        archive_error=archive_error,
+    )
+    risk_flags = ["provider-export-archive"]
+    if total_uncompressed >= 10 * 1024 * 1024 * 1024:
+        risk_flags.append("large-cloud-export-archive")
+    if product_counts.get("gmail") or product_counts.get("icloud-mail") or product_counts.get("exchange"):
+        risk_flags.append("contains-mail-export")
+    if product_counts.get("location-history"):
+        risk_flags.append("contains-location-export")
+    if product_counts.get("teams"):
+        risk_flags.append("contains-team-chat-export")
+
+    return {
+        "service": service,
+        "event_type": "cloud-export-archive",
+        "timestamp": "",
+        "archive_entry_count": entry_count,
+        "archive_json_entry_count": json_entry_count,
+        "archive_total_uncompressed_size": total_uncompressed,
+        "archive_total_compressed_size": total_compressed,
+        "archive_manifest_truncated": truncated,
+        "archive_error": archive_error,
+        "product_counts": dict(sorted(product_counts.items())),
+        "provider_counts": dict(sorted(provider_counts.items())),
+        "suffix_counts": dict(sorted(suffix_counts.items())),
+        "cloud_archive_manifest": archive_manifest,
+        "cloud_archive_manifest_hash": archive_manifest["manifest_sha256"],
+        "risk_flags": risk_flags,
+        "validation_checks": {
+            "archive_opened": archive_opened,
+            "archive_entry_manifest_emitted": True,
+            "has_required_field_candidate": archive_opened and entry_count > 0,
+            "provider_export_schema_validated": False,
+            "provider_scope_verified": False,
+            "provider_known_answer_validated": False,
+            "original_export_hash_verified": bool(source_hashes.get("sha256")),
+            "timezone_semantics_verified": False,
+            "json_entry_count": json_entry_count,
+            "product_family_count": len(product_counts),
+        },
+        "commercial_grade_blockers": cloud_blockers(service)
+        + [
+            "provider-selected-products-or-workload-scope-manifest-required",
+            "split-archive-completeness-and-password-state-required",
+            "provider-native-export-or-api-diff-required",
+        ],
+        "legal_warning": "Provider export archives may contain broad account, tenant, mail, file, and location data. Preserve the original archive hash and verify export scope before reporting.",
+        "raw": {
+            "archive_name": path.name,
+            "entry_manifest_sample": entry_manifest,
+            "entry_manifest_truncated": truncated,
+        },
+    }
 
 
 def build_record(
@@ -412,7 +549,7 @@ def build_record(
             "parser": "cloud-export",
             "parser_version": PARSER_VERSION,
             "source_path": str(path.resolve()),
-            "source_format": "json",
+            "source_format": "zip" if artifact_type == "cloud-export-archive" else "json",
             "source_index": source_index,
             "source_hashes": dict(source_hashes),
             "commercial_grade_ready": False,
@@ -837,6 +974,125 @@ def first_value(row: Mapping[str, object], keys: Iterable[str]) -> object:
     return ""
 
 
+def infer_cloud_archive_product(name: str) -> str:
+    lowered = name.lower().replace("\\", "/")
+    if "gmail" in lowered or "/mail/" in lowered or lowered.endswith(".mbox"):
+        return "gmail"
+    if "location history" in lowered or "semantic location" in lowered or "records.json" in lowered:
+        return "location-history"
+    if "my activity" in lowered or "/activity/" in lowered:
+        return "my-activity"
+    if "google photos" in lowered or "/photos/" in lowered:
+        return "photos"
+    if "/drive/" in lowered or "my drive" in lowered or "google drive" in lowered:
+        return "drive"
+    if "teams" in lowered or "team chat" in lowered:
+        return "teams"
+    if "onedrive" in lowered:
+        return "onedrive"
+    if "sharepoint" in lowered:
+        return "sharepoint"
+    if "exchange" in lowered or "purview" in lowered or "ediscovery" in lowered:
+        return "exchange"
+    if "audit" in lowered or "unified audit" in lowered:
+        return "m365-audit"
+    if "icloud" in lowered and ("photo" in lowered or "album" in lowered):
+        return "icloud-photos"
+    if "icloud" in lowered and "mail" in lowered:
+        return "icloud-mail"
+    if "icloud" in lowered or "apple" in lowered:
+        return "icloud-drive"
+    if "account" in lowered or "profile" in lowered:
+        return "account"
+    return "unknown"
+
+
+def cloud_archive_provider_for_product(product: str, name: str) -> str:
+    lowered = name.lower()
+    if product in {"gmail", "location-history", "my-activity", "photos", "drive"} or "takeout" in lowered:
+        return "google"
+    if product in {"teams", "onedrive", "sharepoint", "exchange", "m365-audit"} or any(
+        token in lowered for token in ("m365", "microsoft", "office 365", "purview", "ediscovery")
+    ):
+        return "microsoft-365"
+    if product in {"icloud-photos", "icloud-mail", "icloud-drive"} or any(token in lowered for token in ("icloud", "apple")):
+        return "apple-icloud"
+    return "unknown"
+
+
+def cloud_archive_service_from_counts(provider_counts: Mapping[str, int], source_path: str) -> str:
+    known = {provider: count for provider, count in provider_counts.items() if provider != "unknown"}
+    if known:
+        provider = max(sorted(known), key=lambda item: known[item])
+        return {
+            "google": "google-takeout",
+            "microsoft-365": "microsoft-365",
+            "apple-icloud": "apple-icloud-export",
+        }.get(provider, "cloud-export")
+    return service_from_path(source_path, default="cloud-export")
+
+
+def zip_datetime_iso(info: zipfile.ZipInfo) -> str:
+    try:
+        return dt.datetime(*info.date_time, tzinfo=dt.timezone.utc).isoformat()
+    except (TypeError, ValueError):
+        return ""
+
+
+def build_cloud_archive_manifest(
+    *,
+    source_path: str,
+    source_hashes: Mapping[str, str],
+    service: str,
+    entry_count: int,
+    json_entry_count: int,
+    product_counts: Mapping[str, int],
+    provider_counts: Mapping[str, int],
+    suffix_counts: Mapping[str, int],
+    total_uncompressed: int,
+    total_compressed: int,
+    entry_manifest: Sequence[Mapping[str, object]],
+    truncated: bool,
+    archive_opened: bool,
+    archive_error: str,
+) -> dict[str, object]:
+    manifest: dict[str, object] = {
+        "manifest_version": "cloud-export-archive-manifest-v1",
+        "source_path": source_path,
+        "source_sha256": source_hashes.get("sha256", ""),
+        "service": service,
+        "archive_opened": archive_opened,
+        "archive_error": archive_error,
+        "entry_count": entry_count,
+        "json_entry_count": json_entry_count,
+        "product_counts": dict(sorted(product_counts.items())),
+        "provider_counts": dict(sorted(provider_counts.items())),
+        "suffix_counts": dict(sorted(suffix_counts.items())),
+        "total_uncompressed_size": total_uncompressed,
+        "total_compressed_size": total_compressed,
+        "entry_manifest_limit": CLOUD_ARCHIVE_ENTRY_LIMIT,
+        "entry_manifest_truncated": truncated,
+        "entry_manifest": [dict(item) for item in entry_manifest],
+        "source_viewer_locator": {
+            "viewer": "cloud-provider-archive-manifest",
+            "source_path": source_path,
+            "service": service,
+            "entry_manifest_limit": CLOUD_ARCHIVE_ENTRY_LIMIT,
+        },
+        "validation_status": "archive-inventoried-scope-validation-required",
+        "commercial_blockers": [
+            "provider-selected-products-or-workload-scope-manifest-required",
+            "split-archive-completeness-and-password-state-required",
+            "provider-native-export-or-api-diff-required",
+            "known-answer-cloud-export-corpus-required",
+        ],
+    }
+    manifest["manifest_sha256"] = stable_cloud_json_sha256(
+        {key: value for key, value in manifest.items() if key != "manifest_sha256"}
+    )
+    return manifest
+
+
 def normalize_key(value: object) -> str:
     return "".join(character for character in str(value).lower() if character.isalnum())
 
@@ -982,6 +1238,11 @@ def cloud_export_import_functional_profile(
         if isinstance(details.get("m365_export_parser_manifest"), Mapping)
         else {}
     )
+    archive_manifest = (
+        details.get("cloud_archive_manifest")
+        if isinstance(details.get("cloud_archive_manifest"), Mapping)
+        else {}
+    )
     failed_checks = [
         check
         for check, failed in {
@@ -1040,6 +1301,10 @@ def cloud_export_import_functional_profile(
                 isinstance(m365_manifest.get("row_citation"), Mapping)
                 and m365_manifest.get("row_citation", {}).get("row_hash")
             ),
+            "cloud_archive_manifest_hash": optional_text(archive_manifest.get("manifest_sha256")),
+            "cloud_archive_manifest_emitted": bool(archive_manifest),
+            "cloud_archive_entry_count": int(details.get("archive_entry_count") or 0),
+            "cloud_archive_json_entry_count": int(details.get("archive_json_entry_count") or 0),
         },
         "source_subject_or_object": optional_text(
             details.get("subject") or details.get("file_name") or details.get("chat_id") or details.get("account_email")
@@ -1062,6 +1327,7 @@ def cloud_export_import_functional_profile(
                 "m365-export-source-locator-emitted": family == "microsoft-365"
                 and isinstance(m365_manifest.get("row_citation"), Mapping)
                 and isinstance(m365_manifest.get("row_citation", {}).get("source_viewer_locator"), Mapping),
+                "cloud-provider-archive-manifest-emitted": bool(archive_manifest),
                 "cloud-source-hash-preserved": bool(source_hashes.get("sha256")),
             }.items()
             if passed
@@ -1134,6 +1400,13 @@ def cloud_commercial_uplift_evidence(
     )
     if m365_manifest.get("manifest_sha256"):
         source_refs.append(f"m365_export_parser_manifest_sha256:{m365_manifest['manifest_sha256']}")
+    archive_manifest = (
+        details.get("cloud_archive_manifest")
+        if isinstance(details.get("cloud_archive_manifest"), Mapping)
+        else {}
+    )
+    if archive_manifest.get("manifest_sha256"):
+        source_refs.append(f"cloud_archive_manifest_sha256:{archive_manifest['manifest_sha256']}")
     for key in ("subject", "file_name", "chat_id", "operation", "account_email", "message_id", "file_id"):
         value = optional_text(details.get(key))
         if value:
@@ -1901,6 +2174,13 @@ def cloud_core_accuracy_gates(
     )
     if m365_manifest.get("manifest_sha256"):
         evidence_refs.append(f"m365_export_parser_manifest_sha256:{m365_manifest['manifest_sha256']}")
+    archive_manifest = (
+        details.get("cloud_archive_manifest")
+        if isinstance(details.get("cloud_archive_manifest"), Mapping)
+        else {}
+    )
+    if archive_manifest.get("manifest_sha256"):
+        evidence_refs.append(f"cloud_archive_manifest_sha256:{archive_manifest['manifest_sha256']}")
     trusted_diff = details.get("cloud_trusted_diff") if isinstance(details.get("cloud_trusted_diff"), Mapping) else {}
     if trusted_diff:
         evidence_refs.append(f"trusted_diff_status:{trusted_diff.get('status', '')}")
@@ -1929,6 +2209,8 @@ def cloud_core_accuracy_gates(
                 satisfied.append("cloud export import manifest")
                 if isinstance(export_manifest.get("source_viewer_locator"), Mapping):
                     satisfied.append("cloud export source locator")
+            if archive_manifest:
+                satisfied.append("cloud provider archive manifest")
             if google_manifest:
                 satisfied.append("Google Takeout parser manifest")
                 if isinstance(google_manifest.get("row_citation"), Mapping) and google_manifest.get("row_citation", {}).get("row_hash"):
@@ -1957,6 +2239,8 @@ def cloud_core_accuracy_gates(
                 satisfied.append("cloud export import manifest")
                 if isinstance(export_manifest.get("source_viewer_locator"), Mapping):
                     satisfied.append("cloud export source locator")
+            if archive_manifest:
+                satisfied.append("cloud provider archive manifest")
             if icloud_manifest:
                 satisfied.append("iCloud export parser manifest")
                 if isinstance(icloud_manifest.get("row_citation"), Mapping) and icloud_manifest.get("row_citation", {}).get("row_hash"):
@@ -1985,6 +2269,8 @@ def cloud_core_accuracy_gates(
                 satisfied.append("cloud export import manifest")
                 if isinstance(export_manifest.get("source_viewer_locator"), Mapping):
                     satisfied.append("cloud export source locator")
+            if archive_manifest:
+                satisfied.append("cloud provider archive manifest")
             if m365_manifest:
                 satisfied.append("M365 export parser manifest")
                 if isinstance(m365_manifest.get("row_citation"), Mapping) and m365_manifest.get("row_citation", {}).get("row_hash"):
