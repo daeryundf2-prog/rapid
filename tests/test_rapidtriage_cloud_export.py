@@ -207,6 +207,63 @@ class RapidTriageCloudExportTests(unittest.TestCase):
             self.assertTrue(audit_details["validation_checks"]["archive_csv_row_index_present"])
             self.assertIn("archive_csv_row_index", audit_details["m365_export_parser_manifest"]["row_citation"]["row_pivots"])
 
+    def test_cloud_export_parses_ai_service_zip_export_conversations(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            archive_path = root / "ChatGPT-export.zip"
+            with zipfile.ZipFile(archive_path, "w") as archive:
+                archive.writestr(
+                    "conversations.json",
+                    json.dumps(
+                        [
+                            {
+                                "title": "Incident notes",
+                                "mapping": {
+                                    "question": {
+                                        "message": {
+                                            "author": {"role": "user"},
+                                            "content": {"parts": ["find evtx"]},
+                                        }
+                                    },
+                                    "answer": {
+                                        "message": {
+                                            "author": {"role": "assistant"},
+                                            "content": {"parts": ["check 4624"]},
+                                        }
+                                    },
+                                },
+                            }
+                        ],
+                        ensure_ascii=False,
+                    ),
+                )
+            output = root / "cloud-ai-archive-artifacts.json"
+
+            exit_code = main(["artifacts", str(root), "--kind", "cloud-export", "--output", str(output)])
+
+            self.assertEqual(exit_code, 0)
+            payload = json.loads(output.read_text(encoding="utf-8"))
+            ai = next(
+                item for item in payload["artifacts"] if item["artifact_type"] == "ai-service-export-conversation"
+            )
+            self.assertEqual(ai["provider"], "cloud-export-artifacts")
+            details = ai["details"]
+            self.assertEqual(details["source_format"], "zip-json-entry")
+            self.assertEqual(details["coverage_status"], "service-export-zip-json-candidate")
+            self.assertEqual(details["archive_entry_name"], "conversations.json")
+            self.assertEqual(details["ai_service_counts"][0]["value"], "ChatGPT")
+            self.assertEqual(details["complete_pair_count"], 1)
+            self.assertEqual(details["conversation_candidates"][0]["source_storage_kind"], "service-export-zip-json")
+            self.assertIn("::conversations.json", details["conversation_candidates"][0]["source_path"])
+            self.assertEqual(details["ai_service_export_parser_manifest"]["source_format"], "zip-json-entry")
+            self.assertEqual(
+                details["ai_service_export_parser_manifest"]["archive_context"]["archive_entry_name"],
+                "conversations.json",
+            )
+            self.assertIn("archive completeness", details["validation_guidance"].lower())
+            archive = next(item for item in payload["artifacts"] if item["artifact_type"] == "cloud-export-archive")
+            self.assertEqual(archive["details"]["archive_entry_count"], 1)
+
     def test_cloud_export_collects_standalone_csv_rows(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             root = Path(tmp_dir)

@@ -16,6 +16,7 @@ from ..core.forensic_accuracy import build_accuracy_gate
 from ..core.models import ArtifactRecord
 from ..core.submission import compute_hashes
 from .review import build_forensic_review
+from .windows.browser import collect_ai_service_export_artifacts
 
 PARSER_VERSION = "cloud-export-v3"
 FUNCTIONAL_EXPANSION_BATCH_ID = "commercial-uplift-051-055"
@@ -213,6 +214,11 @@ class CloudExportProvider:
                 yield from collect_cloud_csv(path)
             elif path.is_file() and path.suffix.lower() in CLOUD_ARCHIVE_SUFFIXES:
                 yield from collect_cloud_archive(path)
+        yield from collect_ai_service_export_artifacts(
+            root,
+            provider=self.name,
+            parser_version=PARSER_VERSION,
+        )
 
 
 def collect_cloud_archive(path: Path) -> Iterable[ArtifactRecord]:
