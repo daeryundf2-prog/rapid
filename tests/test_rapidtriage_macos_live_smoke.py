@@ -59,7 +59,9 @@ class RapidTriageMacOsLiveSmokeTests(unittest.TestCase):
             attachment = payload["readiness_attachment"]
             self.assertEqual(attachment["profile_version"], "macos-live-smoke-readiness-attachment-v1")
             self.assertIn("--mac-first-evidence", attachment["cli_command"])
-            self.assertIn("large-case-readiness.json", attachment["cli_command"])
+            self.assertIn(str(output_dir.resolve()), attachment["cli_command"])
+            self.assertIn(f"mac_first_evidence={str(output_dir.resolve())}", attachment["api_query"])
+            self.assertIn("Mac evidence/QC folder", attachment["gui_note"])
             self.assertIn(66, attachment["supports_backlog_items"])
             report_text = (output_dir / "macos-live-smoke.md").read_text(encoding="utf-8")
             self.assertIn("Large-case readiness", report_text)

@@ -135,22 +135,21 @@ def run_macos_live_smoke(
 
 
 def build_readiness_attachment_profile(*, output_dir: Path) -> dict[str, object]:
-    smoke_json = output_dir / "macos-live-smoke.json"
-    large_case_json = output_dir / "large-case-readiness.json"
+    evidence_dir = output_dir
     return {
         "profile_version": "macos-live-smoke-readiness-attachment-v1",
         "claim_effect": "preparatory-only; does not satisfy commercial-grade validation gates by itself",
         "supports_backlog_items": [66, 67, 68, 69, 70, 74, 78, 79, 80, 101, 102, 106, 118, 120],
         "cli_command": (
             "rapidtriage commercial-readiness "
-            f"--mac-first-evidence {quote_shell_path(smoke_json)} "
-            f"--mac-first-evidence {quote_shell_path(large_case_json)} "
+            f"--mac-first-evidence {quote_shell_path(evidence_dir)} "
             "--output-dir ./commercial-readiness --json"
         ),
-        "api_query": f"/api/commercial-readiness?mac_first_evidence={url_path_hint(smoke_json)}",
+        "api_query": f"/api/commercial-readiness?mac_first_evidence={url_path_hint(evidence_dir)}",
         "gui_note": (
-            "Open the readiness dashboard after rerunning commercial-readiness; the Mac evidence row should show "
-            "attached evidence while commercial gates remain blocked until trusted validation packages are supplied."
+            "Open the readiness dashboard and paste this QC folder path into Mac evidence/QC folder; "
+            "the Mac evidence rows should show attached evidence while commercial gates remain blocked "
+            "until trusted validation packages are supplied."
         ),
         "required_follow_up": [
             "Attach trusted parser/cross-tool validation packages for the relevant backlog items.",
