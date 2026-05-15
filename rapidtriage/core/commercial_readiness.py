@@ -160,6 +160,7 @@ MAC_FIRST_EVIDENCE_COMMANDS = {
     "email-external-parse",
     "source-read",
     "source-search",
+    "cloud-export",
 }
 MAC_FIRST_EVIDENCE_FILENAMES = {
     "macos-live-smoke.json",
@@ -167,8 +168,97 @@ MAC_FIRST_EVIDENCE_FILENAMES = {
     "email-external-parser.json",
     "source-read.json",
     "source-search.json",
+    "cloud-export-artifacts.json",
+    "cloud-artifacts.json",
+    "cloud-ai-archive-artifacts.json",
+    "cloud-archive-artifacts.json",
+    "cloud-csv-artifacts.json",
+    "iaas-cloud-artifacts.json",
 }
 MAC_FIRST_EVIDENCE_DISCOVERY_MAX_FILES = 100
+
+
+def _mac_first_evidence_command(raw: Mapping[str, object]) -> str:
+    command = str(raw.get("command") or "")
+    if command:
+        return command
+    kind = str(raw.get("kind") or "")
+    if kind == "cloud-export":
+        return kind
+    return ""
+
+
+def _cloud_export_evidence_summary(raw: Mapping[str, object]) -> dict[str, object]:
+    artifacts = raw.get("artifacts")
+    if not isinstance(artifacts, list):
+        artifacts = []
+    artifact_type_counts: dict[str, int] = {}
+    service_counts: dict[str, int] = {}
+    manifest_hashes: set[str] = set()
+    archive_manifest_hashes: set[str] = set()
+    commercial_blockers: list[str] = []
+    supported_items: set[int] = set()
+    ai_conversation_count = 0
+    ai_complete_pair_count = 0
+
+    for artifact in artifacts:
+        if not isinstance(artifact, Mapping):
+            continue
+        artifact_type = str(artifact.get("artifact_type") or "")
+        if artifact_type:
+            artifact_type_counts[artifact_type] = artifact_type_counts.get(artifact_type, 0) + 1
+        details = artifact.get("details") if isinstance(artifact.get("details"), Mapping) else {}
+        service = str(details.get("service") or details.get("profile") or "")
+        family = str(details.get("cloud_family") or "").lower()
+        service_key = (service or family or artifact_type or "unknown").lower()
+        service_counts[service_key] = service_counts.get(service_key, 0) + 1
+
+        if artifact_type == "ai-service-export-conversation":
+            supported_items.add(21)
+            ai_conversation_count += 1
+            try:
+                ai_complete_pair_count += int(details.get("complete_pair_count") or 0)
+            except (TypeError, ValueError):
+                pass
+        if "google" in family or "google" in service_key or "gmail" in service_key:
+            supported_items.add(37)
+        if "apple" in family or "icloud" in family or "icloud" in service_key:
+            supported_items.add(38)
+        if "microsoft" in family or "m365" in service_key or "teams" in service_key or "onedrive" in service_key:
+            supported_items.add(39)
+
+        for key in (
+            "cloud_export_import_manifest_hash",
+            "google_takeout_parser_manifest_hash",
+            "icloud_export_parser_manifest_hash",
+            "m365_export_parser_manifest_hash",
+            "ai_service_export_parser_manifest_hash",
+        ):
+            value = str(details.get(key) or "")
+            if value:
+                manifest_hashes.add(value)
+        archive_hash = str(details.get("cloud_archive_manifest_hash") or "")
+        if archive_hash:
+            archive_manifest_hashes.add(archive_hash)
+        blockers = details.get("commercial_grade_blockers")
+        if isinstance(blockers, list):
+            for blocker in blockers:
+                text = str(blocker)
+                if text and text not in commercial_blockers:
+                    commercial_blockers.append(text)
+
+    summary = raw.get("summary") if isinstance(raw.get("summary"), Mapping) else {}
+    return {
+        "artifact_count": summary.get("artifact_count", len(artifacts)),
+        "artifact_type_counts": dict(sorted(artifact_type_counts.items())),
+        "service_counts": dict(sorted(service_counts.items())),
+        "parser_manifest_hash_count": len(manifest_hashes),
+        "archive_manifest_hash_count": len(archive_manifest_hashes),
+        "ai_conversation_count": ai_conversation_count,
+        "ai_complete_pair_count": ai_complete_pair_count,
+        "supported_backlog_items": sorted(supported_items),
+        "commercial_grade_blockers": commercial_blockers,
+    }
 
 
 def _mac_first_evidence_target_items(raw: Mapping[str, object]) -> list[int]:
@@ -195,13 +285,15 @@ def _mac_first_evidence_target_items(raw: Mapping[str, object]) -> list[int]:
             if 1 <= number <= 120 and number not in target_items:
                 target_items.append(number)
     if not target_items:
-        command = str(raw.get("command") or "")
+        command = _mac_first_evidence_command(raw)
         if command in {"macos-live-smoke", "large-case-readiness"}:
             target_items.extend(MAC_FIRST_PREPARABLE_BACKLOG_ITEMS)
         elif command == "source-read":
             target_items.extend([52, 64, 65])
         elif command == "source-search":
             target_items.extend([52, 61, 64, 65])
+        elif command == "cloud-export":
+            target_items.extend(_cloud_export_evidence_summary(raw)["supported_backlog_items"])
     return target_items
 
 
@@ -255,7 +347,7 @@ def load_mac_first_evidence(path: Path) -> dict[str, object]:
         raise CommercialReadinessError(f"failed to read Mac-first evidence: {exc}") from exc
     if not isinstance(raw, Mapping):
         raise CommercialReadinessError("Mac-first evidence must be a JSON object")
-    command = str(raw.get("command") or "")
+    command = _mac_first_evidence_command(raw)
     if command not in MAC_FIRST_EVIDENCE_COMMANDS:
         raise CommercialReadinessError(
             f"unsupported Mac-first evidence command in {resolved}: {command or '<missing>'}"
@@ -263,6 +355,7 @@ def load_mac_first_evidence(path: Path) -> dict[str, object]:
     summary = raw.get("summary") if isinstance(raw.get("summary"), Mapping) else {}
     outputs = raw.get("outputs") if isinstance(raw.get("outputs"), Mapping) else {}
     blockers = raw.get("commercial_grade_blockers")
+    blocker_list = list(blockers) if isinstance(blockers, list) else []
     embedded_large_case = raw.get("large_case_readiness") if isinstance(raw.get("large_case_readiness"), Mapping) else {}
     large_case = raw if command == "large-case-readiness" else embedded_large_case
     selected_tool = raw.get("selected_tool") if isinstance(raw.get("selected_tool"), Mapping) else {}
@@ -280,6 +373,11 @@ def load_mac_first_evidence(path: Path) -> dict[str, object]:
     search_diagnostics = (
         case_db_profile.get("search_diagnostics") if isinstance(case_db_profile.get("search_diagnostics"), Mapping) else {}
     )
+    cloud_export_summary = _cloud_export_evidence_summary(raw) if command == "cloud-export" else {}
+    for blocker in cloud_export_summary.get("commercial_grade_blockers", []):
+        text = str(blocker)
+        if text and text not in blocker_list:
+            blocker_list.append(text)
     return {
         "path": str(resolved),
         "path_sha256": sha256_file(resolved),
@@ -291,7 +389,7 @@ def load_mac_first_evidence(path: Path) -> dict[str, object]:
         "failed_count": summary.get("failed_count"),
         "failed_check_ids": list(summary.get("failed_check_ids") or []),
         "failed_or_blocked_checks": list(uplift.get("failed_or_blocked_checks") or []),
-        "commercial_grade_blockers": list(blockers or []),
+        "commercial_grade_blockers": blocker_list,
         "large_case_status": str(large_case.get("status") or ""),
         "large_case_largest_record_count": large_case_summary.get("largest_benchmark_record_count"),
         "large_case_search_diagnostics_ready": large_case_summary.get("case_db_search_diagnostics_ready"),
@@ -313,6 +411,13 @@ def load_mac_first_evidence(path: Path) -> dict[str, object]:
         "source_ready_for_review_note": source_citation_package.get("ready_for_review_note"),
         "source_ready_for_court_report": source_citation_package.get("ready_for_court_report"),
         "source_reportability_decision": str(reportability_decision.get("decision") or ""),
+        "cloud_export_artifact_count": cloud_export_summary.get("artifact_count"),
+        "cloud_export_artifact_type_counts": cloud_export_summary.get("artifact_type_counts", {}),
+        "cloud_export_service_counts": cloud_export_summary.get("service_counts", {}),
+        "cloud_export_parser_manifest_hash_count": cloud_export_summary.get("parser_manifest_hash_count"),
+        "cloud_export_archive_manifest_hash_count": cloud_export_summary.get("archive_manifest_hash_count"),
+        "cloud_export_ai_conversation_count": cloud_export_summary.get("ai_conversation_count"),
+        "cloud_export_ai_complete_pair_count": cloud_export_summary.get("ai_complete_pair_count"),
         "output_keys": sorted(str(key) for key in outputs),
     }
 
@@ -358,6 +463,16 @@ def build_mac_first_evidence_summary(
         "source_court_report_ready_count": sum(
             1 for row in rows if row.get("source_ready_for_court_report") is True
         ),
+        "cloud_export_evidence_count": sum(1 for row in rows if row.get("command") == "cloud-export"),
+        "cloud_export_artifact_count": sum(
+            int(row.get("cloud_export_artifact_count") or 0) for row in rows
+        ),
+        "cloud_export_parser_manifest_hash_count": sum(
+            int(row.get("cloud_export_parser_manifest_hash_count") or 0) for row in rows
+        ),
+        "cloud_export_ai_conversation_count": sum(
+            int(row.get("cloud_export_ai_conversation_count") or 0) for row in rows
+        ),
         "supports_backlog_items": supported_items,
         "claim_effect": (
             "Mac-first evidence is preparatory only: it can prove local plumbing, source-viewer handoff, "
@@ -368,6 +483,7 @@ def build_mac_first_evidence_summary(
             "Attach macos-live-smoke.json after every Mac hardening batch.",
             "Attach large-case-readiness.json for search/index scalability review.",
             "Attach email-external-parser.json for PST/OST/MSG external-parser evidence and trusted diff planning.",
+            "Attach cloud-export-artifacts.json for Gmail/Takeout, iCloud, M365, and AI service export parser evidence.",
             "Keep Windows image, independent lab, signed release, and 1TB-10TB hardware blockers separate.",
         ],
     }

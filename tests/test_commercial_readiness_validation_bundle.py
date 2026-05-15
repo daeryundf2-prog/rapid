@@ -250,13 +250,98 @@ class CommercialReadinessValidationBundleTests(unittest.TestCase):
         self.assertEqual(rows["source-search"]["source_citation_package_hash"], "s" * 64)
         self.assertFalse(report["commercial_claim_allowed"])
 
+    def test_commercial_readiness_attaches_cloud_export_parser_evidence(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            evidence_path = Path(tmp_dir) / "cloud-export-artifacts.json"
+            evidence_path.write_text(
+                json.dumps(
+                    {
+                        "kind": "cloud-export",
+                        "provider": {"name": "cloud-export-artifacts"},
+                        "summary": {"artifact_count": 4},
+                        "artifacts": [
+                            {
+                                "artifact_type": "cloud-mail",
+                                "details": {
+                                    "service": "gmail-takeout",
+                                    "cloud_family": "google",
+                                    "google_takeout_parser_manifest_hash": "g" * 64,
+                                    "commercial_grade_blockers": [
+                                        "google-takeout-provider-diff-required",
+                                    ],
+                                },
+                            },
+                            {
+                                "artifact_type": "cloud-audit",
+                                "details": {
+                                    "service": "microsoft-365",
+                                    "cloud_family": "microsoft-365",
+                                    "m365_export_parser_manifest_hash": "m" * 64,
+                                    "commercial_grade_blockers": [
+                                        "m365-ediscovery-provider-diff-required",
+                                    ],
+                                },
+                            },
+                            {
+                                "artifact_type": "cloud-export-archive",
+                                "details": {
+                                    "service": "apple-icloud-export",
+                                    "cloud_family": "apple-icloud",
+                                    "icloud_export_parser_manifest_hash": "i" * 64,
+                                    "cloud_archive_manifest_hash": "z" * 64,
+                                    "commercial_grade_blockers": [
+                                        "icloud-provider-export-diff-required",
+                                    ],
+                                },
+                            },
+                            {
+                                "artifact_type": "ai-service-export-conversation",
+                                "details": {
+                                    "service": "chatgpt",
+                                    "ai_service_export_parser_manifest_hash": "a" * 64,
+                                    "complete_pair_count": 2,
+                                    "commercial_grade_blockers": [
+                                        "trusted-ai-export-diff-required",
+                                    ],
+                                },
+                            },
+                        ],
+                    },
+                    ensure_ascii=False,
+                ),
+                encoding="utf-8",
+            )
+
+            report = build_commercial_readiness_report(mac_first_evidence_paths=[evidence_path])
+
+        mac_first = report["mac_first_evidence_summary"]
+        self.assertTrue(mac_first["attached"])
+        self.assertEqual(mac_first["cloud_export_evidence_count"], 1)
+        self.assertEqual(mac_first["cloud_export_artifact_count"], 4)
+        self.assertEqual(mac_first["cloud_export_parser_manifest_hash_count"], 4)
+        self.assertEqual(mac_first["cloud_export_ai_conversation_count"], 1)
+        self.assertIn(21, mac_first["supports_backlog_items"])
+        self.assertIn(37, mac_first["supports_backlog_items"])
+        self.assertIn(38, mac_first["supports_backlog_items"])
+        self.assertIn(39, mac_first["supports_backlog_items"])
+        self.assertIn("trusted-ai-export-diff-required", mac_first["blocker_counts"])
+        row = mac_first["rows"][0]
+        self.assertEqual(row["command"], "cloud-export")
+        self.assertEqual(row["cloud_export_artifact_count"], 4)
+        self.assertEqual(row["cloud_export_archive_manifest_hash_count"], 1)
+        self.assertEqual(row["cloud_export_ai_complete_pair_count"], 2)
+        self.assertEqual(row["cloud_export_service_counts"]["gmail-takeout"], 1)
+        self.assertFalse(report["commercial_claim_allowed"])
+
     def test_commercial_readiness_discovers_mac_first_evidence_from_directory(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             root = Path(tmp_dir) / "qc"
             smoke_dir = root / "macos-live"
             email_dir = root / "email-external"
+            cloud_dir = root / "cloud-export"
             smoke_dir.mkdir(parents=True)
             email_dir.mkdir(parents=True)
+            cloud_dir.mkdir(parents=True)
             (smoke_dir / "macos-live-smoke.json").write_text(
                 json.dumps(
                     {
@@ -290,16 +375,37 @@ class CommercialReadinessValidationBundleTests(unittest.TestCase):
                 ),
                 encoding="utf-8",
             )
+            (cloud_dir / "cloud-export-artifacts.json").write_text(
+                json.dumps(
+                    {
+                        "kind": "cloud-export",
+                        "summary": {"artifact_count": 1},
+                        "artifacts": [
+                            {
+                                "artifact_type": "ai-service-export-conversation",
+                                "details": {
+                                    "service": "chatgpt",
+                                    "ai_service_export_parser_manifest_hash": "a" * 64,
+                                    "commercial_grade_blockers": ["trusted-ai-export-diff-required"],
+                                },
+                            }
+                        ],
+                    },
+                    ensure_ascii=False,
+                ),
+                encoding="utf-8",
+            )
 
             report = build_commercial_readiness_report(mac_first_evidence_paths=[root])
 
         mac_first = report["mac_first_evidence_summary"]
         self.assertTrue(mac_first["attached"])
-        self.assertEqual(mac_first["evidence_count"], 2)
+        self.assertEqual(mac_first["evidence_count"], 3)
         self.assertEqual(
             sorted(row["command"] for row in mac_first["rows"]),
-            ["email-external-parse", "macos-live-smoke"],
+            ["cloud-export", "email-external-parse", "macos-live-smoke"],
         )
+        self.assertIn(21, mac_first["supports_backlog_items"])
         self.assertIn(36, mac_first["supports_backlog_items"])
         self.assertIn(66, mac_first["supports_backlog_items"])
         self.assertIn("email_external_tool_available", mac_first["failed_check_counts"])
