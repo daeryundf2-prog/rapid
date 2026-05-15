@@ -1689,7 +1689,7 @@ def build_parser() -> argparse.ArgumentParser:
     commercial_readiness.add_argument(
         "--mac-first-evidence",
         action="append",
-        help="Attach macos-live-smoke or large-case-readiness JSON as preparatory Mac evidence without satisfying commercial gates",
+        help="Attach macos-live-smoke, large-case-readiness, or email-external-parse JSON as preparatory Mac evidence without satisfying commercial gates",
     )
     commercial_readiness.add_argument(
         "--next-gate",

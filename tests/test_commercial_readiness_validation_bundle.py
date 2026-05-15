@@ -80,6 +80,54 @@ class CommercialReadinessValidationBundleTests(unittest.TestCase):
         self.assertFalse(report["commercial_claim_allowed"])
         self.assertFalse(report["validation_evidence_summary"]["validation_package_attached"])
 
+    def test_commercial_readiness_attaches_email_external_mac_first_evidence(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            evidence_path = Path(tmp_dir) / "email-external-parser.json"
+            evidence_path.write_text(
+                json.dumps(
+                    {
+                        "command": "email-external-parse",
+                        "profile_version": "email-external-parser-wrapper-v2",
+                        "status": "complete",
+                        "selected_tool": {"tool": "readpst", "available": True},
+                        "summary": {
+                            "export_file_count": 3,
+                            "ready_for_trusted_diff": True,
+                        },
+                        "evidence_manifest": {
+                            "manifest_sha256": "m" * 64,
+                            "export_inventory_sha256": "e" * 64,
+                        },
+                        "commercial_uplift_evidence": {
+                            "target_items": [36, 55, 81, 85, 90, 95],
+                            "failed_or_blocked_checks": ["trusted_parser_diff_missing"],
+                            "evidence_manifest_hash": "m" * 64,
+                        },
+                        "commercial_grade_blockers": [
+                            "trusted-libpff-readpst-outlook-diff-required",
+                        ],
+                    },
+                    ensure_ascii=False,
+                ),
+                encoding="utf-8",
+            )
+
+            report = build_commercial_readiness_report(mac_first_evidence_paths=[evidence_path])
+
+        mac_first = report["mac_first_evidence_summary"]
+        self.assertTrue(mac_first["attached"])
+        self.assertEqual(mac_first["evidence_count"], 1)
+        self.assertIn(36, mac_first["supports_backlog_items"])
+        self.assertIn(95, mac_first["supports_backlog_items"])
+        self.assertIn("trusted_parser_diff_missing", mac_first["failed_check_counts"])
+        self.assertIn("trusted-libpff-readpst-outlook-diff-required", mac_first["blocker_counts"])
+        row = mac_first["rows"][0]
+        self.assertEqual(row["command"], "email-external-parse")
+        self.assertEqual(row["export_file_count"], 3)
+        self.assertTrue(row["ready_for_trusted_diff"])
+        self.assertEqual(row["evidence_manifest_hash"], "m" * 64)
+        self.assertFalse(report["commercial_claim_allowed"])
+
 
 if __name__ == "__main__":
     unittest.main()

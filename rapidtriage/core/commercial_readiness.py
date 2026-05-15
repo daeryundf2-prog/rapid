@@ -153,6 +153,44 @@ def load_validation_evidence_packages(
     return evidence_by_item
 
 
+MAC_FIRST_PREPARABLE_BACKLOG_ITEMS = [61, 64, 65, 66, 68, 74, 78, 79]
+MAC_FIRST_EVIDENCE_COMMANDS = {
+    "macos-live-smoke",
+    "large-case-readiness",
+    "email-external-parse",
+}
+
+
+def _mac_first_evidence_target_items(raw: Mapping[str, object]) -> list[int]:
+    target_items: list[int] = []
+    candidate_containers = [
+        raw.get("readiness_attachment"),
+        raw.get("commercial_uplift_evidence"),
+        raw.get("summary"),
+    ]
+    for container in candidate_containers:
+        if not isinstance(container, Mapping):
+            continue
+        values = (
+            container.get("supported_backlog_items")
+            or container.get("supports_backlog_items")
+            or container.get("target_items")
+            or []
+        )
+        for value in values if isinstance(values, list) else [values]:
+            try:
+                number = int(str(value).lstrip("#"))
+            except ValueError:
+                continue
+            if 1 <= number <= 120 and number not in target_items:
+                target_items.append(number)
+    if not target_items:
+        command = str(raw.get("command") or "")
+        if command in {"macos-live-smoke", "large-case-readiness"}:
+            target_items.extend(MAC_FIRST_PREPARABLE_BACKLOG_ITEMS)
+    return target_items
+
+
 def load_mac_first_evidence(path: Path) -> dict[str, object]:
     resolved = path.expanduser().resolve()
     try:
@@ -162,7 +200,7 @@ def load_mac_first_evidence(path: Path) -> dict[str, object]:
     if not isinstance(raw, Mapping):
         raise CommercialReadinessError("Mac-first evidence must be a JSON object")
     command = str(raw.get("command") or "")
-    if command not in {"macos-live-smoke", "large-case-readiness"}:
+    if command not in MAC_FIRST_EVIDENCE_COMMANDS:
         raise CommercialReadinessError(
             f"unsupported Mac-first evidence command in {resolved}: {command or '<missing>'}"
         )
@@ -170,6 +208,9 @@ def load_mac_first_evidence(path: Path) -> dict[str, object]:
     outputs = raw.get("outputs") if isinstance(raw.get("outputs"), Mapping) else {}
     blockers = raw.get("commercial_grade_blockers")
     large_case = raw.get("large_case_readiness") if isinstance(raw.get("large_case_readiness"), Mapping) else {}
+    selected_tool = raw.get("selected_tool") if isinstance(raw.get("selected_tool"), Mapping) else {}
+    evidence_manifest = raw.get("evidence_manifest") if isinstance(raw.get("evidence_manifest"), Mapping) else {}
+    uplift = raw.get("commercial_uplift_evidence") if isinstance(raw.get("commercial_uplift_evidence"), Mapping) else {}
     return {
         "path": str(resolved),
         "path_sha256": sha256_file(resolved),
@@ -180,6 +221,7 @@ def load_mac_first_evidence(path: Path) -> dict[str, object]:
         "passed_count": summary.get("passed_count"),
         "failed_count": summary.get("failed_count"),
         "failed_check_ids": list(summary.get("failed_check_ids") or []),
+        "failed_or_blocked_checks": list(uplift.get("failed_or_blocked_checks") or []),
         "commercial_grade_blockers": list(blockers or []),
         "large_case_status": str(large_case.get("status") or ""),
         "large_case_largest_record_count": (
@@ -187,6 +229,14 @@ def load_mac_first_evidence(path: Path) -> dict[str, object]:
             if isinstance(large_case.get("summary"), Mapping)
             else None
         ),
+        "supported_backlog_items": _mac_first_evidence_target_items(raw),
+        "evidence_manifest_hash": str(
+            evidence_manifest.get("manifest_sha256") or uplift.get("evidence_manifest_hash") or ""
+        ),
+        "export_file_count": summary.get("export_file_count"),
+        "ready_for_trusted_diff": summary.get("ready_for_trusted_diff"),
+        "selected_tool": str(selected_tool.get("tool") or ""),
+        "selected_tool_available": selected_tool.get("available"),
         "output_keys": sorted(str(key) for key in outputs),
     }
 
@@ -204,6 +254,18 @@ def build_mac_first_evidence_summary(
         for check_id in row.get("failed_check_ids", []):
             text = str(check_id)
             failed_check_counts[text] = failed_check_counts.get(text, 0) + 1
+        for check_id in row.get("failed_or_blocked_checks", []):
+            text = str(check_id)
+            failed_check_counts[text] = failed_check_counts.get(text, 0) + 1
+    supported_items = sorted(
+        set(MAC_FIRST_PREPARABLE_BACKLOG_ITEMS)
+        | {
+            int(number)
+            for row in rows
+            for number in row.get("supported_backlog_items", [])
+            if isinstance(number, int)
+        }
+    )
     return {
         "profile_version": "mac-first-evidence-attachment-v1",
         "attached": bool(rows),
@@ -211,14 +273,16 @@ def build_mac_first_evidence_summary(
         "rows": rows,
         "blocker_counts": dict(sorted(blocker_counts.items())),
         "failed_check_counts": dict(sorted(failed_check_counts.items())),
-        "supports_backlog_items": [61, 64, 65, 66, 68, 74, 78, 79],
+        "supports_backlog_items": supported_items,
         "claim_effect": (
             "Mac-first evidence is preparatory only: it can prove local plumbing, source-viewer handoff, "
-            "and synthetic benchmark execution, but it does not by itself satisfy validated or commercial_grade gates."
+            "external-parser wrapper evidence, and synthetic benchmark execution, but it does not by itself satisfy "
+            "validated or commercial_grade gates."
         ),
         "next_internal_use": [
             "Attach macos-live-smoke.json after every Mac hardening batch.",
             "Attach large-case-readiness.json for search/index scalability review.",
+            "Attach email-external-parser.json for PST/OST/MSG external-parser evidence and trusted diff planning.",
             "Keep Windows image, independent lab, signed release, and 1TB-10TB hardware blockers separate.",
         ],
     }
@@ -3581,11 +3645,19 @@ def render_commercial_readiness_markdown(payload: dict[str, object]) -> str:
         )
         for row in mac_first.get("rows", []):
             if isinstance(row, dict):
+                email_bits = ""
+                if row.get("command") == "email-external-parse":
+                    email_bits = (
+                        f", exports `{row.get('export_file_count', '')}`, "
+                        f"trusted-diff-ready `{row.get('ready_for_trusted_diff', '')}`, "
+                        f"manifest `{row.get('evidence_manifest_hash', '')}`"
+                    )
                 lines.append(
                     f"- `{row.get('command', '')}` `{row.get('status', '')}`: "
                     f"score `{row.get('local_smoke_score', '')}`, "
                     f"large-case `{row.get('large_case_status', '')}`, "
                     f"sha256 `{row.get('path_sha256', '')}`"
+                    f"{email_bits}"
                 )
     functional_progress = (
         payload.get("functional_defensibility_progress")
