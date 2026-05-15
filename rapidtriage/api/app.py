@@ -493,7 +493,7 @@ def create_app(job_store: RunJobStore | None = None, auth_token: str | None = No
                 uplift_batch_size=5,
             )
         except CommercialReadinessError as exc:
-            raise HTTPException(status_code=500, detail=str(exc))
+            raise HTTPException(status_code=400, detail=str(exc))
         return build_commercial_readiness_api_payload(
             report,
             next_gate=next_gate,

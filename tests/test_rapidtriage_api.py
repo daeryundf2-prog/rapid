@@ -1044,6 +1044,16 @@ class RapidTriageApiTests(unittest.TestCase):
         self.assertFalse(payload["commercial_claim_allowed"])
         self.assertEqual(payload["gate_counts"]["commercial_grade"]["passed"], 0)
 
+    def test_commercial_readiness_api_reports_bad_mac_first_evidence_as_operator_input_error(self) -> None:
+        client = TestClient(create_app(RunJobStore()))
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            missing_path = Path(tmp_dir) / "missing-qc"
+
+            response = client.get(f"/api/commercial-readiness?mac_first_evidence={missing_path}")
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("Mac-first evidence path not found", response.json()["detail"])
+
     def test_crash_report_api_lists_details_and_exports_local_bundle(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             with patch.dict("os.environ", {"RAPIDTRIAGE_CRASH_LOG_DIR": tmp_dir}, clear=False):
