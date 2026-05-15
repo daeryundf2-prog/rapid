@@ -3925,8 +3925,8 @@ function renderViewerAction(action, payload) {
   let control = "";
   if (action.id === "hash") {
     control = `<button class="mini-inline-button" type="button" data-source-hash-path="${escapeHtml(payload.path)}">Run</button>`;
-  } else if (action.id === "search-current-file") {
-    control = `<span>${kbd("Ctrl F")}</span>`;
+  } else if (action.id === "search-current-file" || action.id === "search-current-entry") {
+    control = `<button class="mini-inline-button" type="button" data-focus-source-search="1">Focus search</button>`;
   } else if (action.url) {
     control = `<a class="mini-link" href="${escapeHtml(action.url)}" target="_blank" rel="noreferrer">Open</a>`;
   } else if (action.id === "pin-compare") {
@@ -4451,6 +4451,11 @@ function bindViewerButtons() {
     button.addEventListener("click", async () => {
       await loadSqliteWalPreview(button);
     });
+  }
+  for (const button of detailPanel.querySelectorAll("[data-focus-source-search]")) {
+    if (button.dataset.focusSourceSearchBound) continue;
+    button.dataset.focusSourceSearchBound = "1";
+    button.addEventListener("click", () => focusContextSearch());
   }
   const fileSearchForm = detailPanel.querySelector("#fileSearchForm");
   if (fileSearchForm) fileSearchForm.addEventListener("submit", searchCurrentFile);
