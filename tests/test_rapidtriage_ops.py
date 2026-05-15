@@ -776,8 +776,8 @@ class RapidTriageOpsTests(unittest.TestCase):
             self.assertIn("#83", payload["parser_false_positive_false_negative_notes"][0]["commercial_gap_ids"])
             runner_matrix = payload["validation_diff_runner_matrix"]
             self.assertEqual(runner_matrix["profile_version"], "validation-diff-runner-matrix-v1")
-            self.assertEqual(runner_matrix["qc_prep_item_numbers"], [76, 77, 78, 79, 80, 81, 82, 83, 84, 85])
-            self.assertEqual(runner_matrix["summary"]["runner_group_count"], 9)
+            self.assertEqual(runner_matrix["qc_prep_item_numbers"], [76, 77, 78, 79, 80, 81, 82, 83, 84, 85, 86])
+            self.assertEqual(runner_matrix["summary"]["runner_group_count"], 10)
             self.assertEqual(len(runner_matrix["matrix_hash"]), 64)
             self.assertIn("NIST CFReDS", {row["corpus_name"] for row in runner_matrix["public_corpus_registry"]})
             self.assertIn("EvtxECmd", {tool["name"] for group in runner_matrix["runner_groups"] for tool in group["trusted_tools"]})
@@ -787,6 +787,8 @@ class RapidTriageOpsTests(unittest.TestCase):
             self.assertIn("AmcacheParser", {tool["name"] for group in runner_matrix["runner_groups"] for tool in group["trusted_tools"]})
             self.assertIn("Hindsight", {tool["name"] for group in runner_matrix["runner_groups"] for tool in group["trusted_tools"]})
             self.assertIn("qemu-img", {tool["name"] for group in runner_matrix["runner_groups"] for tool in group["trusted_tools"]})
+            self.assertIn("iLEAPP", {tool["name"] for group in runner_matrix["runner_groups"] for tool in group["trusted_tools"]})
+            self.assertIn("apktool/aapt/jadx", {tool["name"] for group in runner_matrix["runner_groups"] for tool in group["trusted_tools"]})
             final_qc = payload["final_qc_execution_report"]
             self.assertEqual(final_qc["profile_version"], "final-qc-execution-report-v1")
             self.assertEqual(final_qc["qc_prep_item_numbers"], [81, 82, 83, 84, 85, 86, 87, 88, 89, 90])
@@ -962,11 +964,11 @@ class RapidTriageOpsTests(unittest.TestCase):
             self.assertEqual(exit_code, 0)
             payload = json.loads(stdout.getvalue())
             self.assertEqual(payload["profile_version"], "validation-diff-runner-matrix-v1")
-            self.assertEqual(payload["qc_prep_item_numbers"], [76, 77, 78, 79, 80, 81, 82, 83, 84, 85])
+            self.assertEqual(payload["qc_prep_item_numbers"], [76, 77, 78, 79, 80, 81, 82, 83, 84, 85, 86])
             self.assertTrue(output.is_file())
             self.assertEqual(len(payload["matrix_hash"]), 64)
-            self.assertEqual(payload["summary"]["runner_group_count"], 9)
-            self.assertEqual(payload["summary"]["trusted_tool_count"], 32)
+            self.assertEqual(payload["summary"]["runner_group_count"], 10)
+            self.assertEqual(payload["summary"]["trusted_tool_count"], 40)
             self.assertFalse(payload["summary"]["version_probe_enabled"])
             self.assertEqual(payload["summary"]["version_captured_count"], 0)
             self.assertEqual(payload["output_manifest"]["bytes"], output.stat().st_size)
@@ -979,6 +981,9 @@ class RapidTriageOpsTests(unittest.TestCase):
             self.assertIn("os-account-execution", groups[82]["artifact_family"])
             self.assertIn("browser-ai", groups[84]["artifact_family"])
             self.assertIn("evidence-image-workflow", groups[85]["artifact_family"])
+            self.assertIn("mobile-app-export", groups[86]["artifact_family"])
+            self.assertIn("iLEAPP", {tool["name"] for tool in groups[86]["trusted_tools"]})
+            self.assertIn("apktool/aapt/jadx", {tool["name"] for tool in groups[86]["trusted_tools"]})
             self.assertIn("--tool-version", groups[77]["required_cross_tool_metadata"])
             self.assertEqual(groups[77]["trusted_tools"][0]["version_probe"]["status"], "not-run")
 
@@ -3617,6 +3622,128 @@ class RapidTriageOpsTests(unittest.TestCase):
             self.assertGreaterEqual(timeline_comparison["common_record_count"], 1)
             self.assertEqual(timeline_comparison["mismatch_count"], 0)
             self.assertIn("url", timeline_comparison["compared_canonical_fields"])
+
+    def test_cross_tool_validate_compares_mobile_vendor_export_rows(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            rapid = root / "rapid-mobile.json"
+            cellebrite = root / "cellebrite.csv"
+            rapid.write_text(
+                json.dumps(
+                    [
+                        {
+                            "artifact_type": "mobile-message",
+                            "source_tool": "rapidtriage",
+                            "source_record_id": "msg-001",
+                            "service": "WhatsApp",
+                            "conversation_id": "chat-7",
+                            "message_id": "m-001",
+                            "timestamp": "2024-04-01T09:10:11+00:00",
+                            "sender": "+82 10-1234-5678",
+                            "recipient": "alice@example.test",
+                            "message_text_hash": "a" * 64,
+                            "media_hash": "b" * 64,
+                        }
+                    ]
+                ),
+                encoding="utf-8",
+            )
+            cellebrite.write_text(
+                "SourceTool,SourceRecordId,Service,ConversationId,MessageId,Timestamp,Sender,Recipient,MessageTextHash,MediaHash\n"
+                f"Cellebrite,msg-001,whatsapp,chat-7,m-001,2024-04-01T09:10:11+00:00,+821012345678,"
+                f"alice@example.test,{('a' * 64)},{('b' * 64)}\n",
+                encoding="utf-8",
+            )
+
+            stdout = io.StringIO()
+            with contextlib.redirect_stdout(stdout):
+                exit_code = main(
+                    [
+                        "cross-tool-validate",
+                        "--rapid-output",
+                        str(rapid),
+                        "--reference-output",
+                        f"cellebrite={cellebrite}",
+                        "--backlog-item",
+                        "26",
+                        "--min-overlap",
+                        "1.0",
+                        "--json",
+                    ]
+                )
+
+            self.assertEqual(exit_code, 0)
+            payload = json.loads(stdout.getvalue())
+            comparison = payload["comparisons"][0]
+            field_comparison = comparison["mobile_export_field_comparison"]
+            self.assertEqual(payload["status"], "pass")
+            self.assertGreaterEqual(field_comparison["common_record_count"], 1)
+            self.assertEqual(field_comparison["mismatch_count"], 0)
+            self.assertEqual(field_comparison["missing_common_field_count"], 0)
+            self.assertIn("conversation_id", field_comparison["compared_canonical_fields"])
+            manifest = payload["cross_tool_validation_assessment"]["trusted_tool_diff_manifest"]
+            self.assertIn("mobile_export_field_comparison", manifest["comparison_summaries"][0]["field_diffs"])
+
+    def test_cross_tool_validate_compares_android_app_rows(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            rapid = root / "rapid-apk.json"
+            apktool = root / "apktool.csv"
+            rapid.write_text(
+                json.dumps(
+                    [
+                        {
+                            "artifact_type": "android-apk",
+                            "package_name": "com.example.caseapp",
+                            "app_label": "Case App",
+                            "version_name": "1.2.3",
+                            "version_code": 42,
+                            "permission": ["android.permission.INTERNET", "android.permission.READ_SMS"],
+                            "dangerous_permission_count": 1,
+                            "cert_sha256": "c" * 64,
+                            "apk_sha256": "d" * 64,
+                            "dex_count": 2,
+                            "native_library_count": 1,
+                        }
+                    ]
+                ),
+                encoding="utf-8",
+            )
+            apktool.write_text(
+                "PackageName,AppLabel,VersionName,VersionCode,Permissions,DangerousPermissionCount,CertSHA256,ApkSHA256,DexCount,NativeLibraryCount\n"
+                "com.example.caseapp,case app,1.2.3,42,android.permission.INTERNET|android.permission.READ_SMS,"
+                f"1,{('c' * 64)},{('d' * 64)},2,1\n",
+                encoding="utf-8",
+            )
+
+            stdout = io.StringIO()
+            with contextlib.redirect_stdout(stdout):
+                exit_code = main(
+                    [
+                        "cross-tool-validate",
+                        "--rapid-output",
+                        str(rapid),
+                        "--reference-output",
+                        f"apktool={apktool}",
+                        "--backlog-item",
+                        "30",
+                        "--min-overlap",
+                        "1.0",
+                        "--json",
+                    ]
+                )
+
+            self.assertEqual(exit_code, 0)
+            payload = json.loads(stdout.getvalue())
+            comparison = payload["comparisons"][0]
+            field_comparison = comparison["mobile_app_field_comparison"]
+            self.assertEqual(payload["status"], "pass")
+            self.assertGreaterEqual(field_comparison["common_record_count"], 1)
+            self.assertEqual(field_comparison["mismatch_count"], 0)
+            self.assertEqual(field_comparison["missing_common_field_count"], 0)
+            self.assertIn("package_name", field_comparison["compared_canonical_fields"])
+            manifest = payload["cross_tool_validation_assessment"]["trusted_tool_diff_manifest"]
+            self.assertIn("mobile_app_field_comparison", manifest["comparison_summaries"][0]["field_diffs"])
 
     def test_image_workflow_validate_command_emits_trusted_diff(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:

@@ -148,6 +148,18 @@ class CommercialReadinessValidationBundleTests(unittest.TestCase):
         self.assertIn("qemu-img", vm_hint["trusted_tools"])
         container_hint = trusted_diff_runner_hint(25)
         self.assertIn("FTK Imager", container_hint["trusted_tools"])
+        vendor_hint = trusted_diff_runner_hint(26)
+        self.assertEqual(vendor_hint["artifact_family"], "mobile-app-export")
+        self.assertEqual(vendor_hint["validation_diff_runner_group_item"], 86)
+        self.assertIn("Cellebrite Physical Analyzer/UFED", vendor_hint["trusted_tools"])
+        ios_backup_hint = trusted_diff_runner_hint(27)
+        self.assertIn("iLEAPP", ios_backup_hint["trusted_tools"])
+        ios_keychain_hint = trusted_diff_runner_hint(28)
+        self.assertIn("GrayKey/GrayKey FFS export", ios_keychain_hint["trusted_tools"])
+        android_hint = trusted_diff_runner_hint(29)
+        self.assertIn("ALEAPP", android_hint["trusted_tools"])
+        apk_hint = trusted_diff_runner_hint(30)
+        self.assertIn("apktool/aapt/jadx", apk_hint["trusted_tools"])
 
     def test_commercial_readiness_attaches_email_external_mac_first_evidence(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:

@@ -397,6 +397,80 @@ RUNNER_GROUPS: tuple[dict[str, object], ...] = (
             "--trusted-tool <ewfverify|tsk_recover|qemu-img|vendor export manifest> --json"
         ),
     },
+    {
+        "item_number": 86,
+        "artifact_family": "mobile-app-export",
+        "title": "Mobile vendor export, iOS backup/keychain, Android artifact, and APK trusted diff runners",
+        "trusted_tools": (
+            {
+                "name": "Cellebrite Physical Analyzer/UFED",
+                "binary_candidates": (),
+                "reference_name": "cellebrite",
+                "output_format": "CSV/Excel/JSON export normalized to CSV/JSON",
+                "command_template": "Export messages, contacts, calls, app data, iOS backup rows, and media metadata from Cellebrite PA/UFED.",
+            },
+            {
+                "name": "MSAB XRY",
+                "binary_candidates": (),
+                "reference_name": "xry",
+                "output_format": "XRY report CSV/JSON export",
+                "command_template": "Export XRY parsed artifacts with stable record IDs and source paths.",
+            },
+            {
+                "name": "GrayKey/GrayKey FFS export",
+                "binary_candidates": (),
+                "reference_name": "graykey",
+                "output_format": "filesystem/full-file-system export plus report CSV/JSON",
+                "command_template": "Export authorized GrayKey FFS/report rows; preserve acquisition metadata and keychain redaction state.",
+            },
+            {
+                "name": "Magnet AXIOM",
+                "binary_candidates": (),
+                "reference_name": "axiom",
+                "output_format": "CSV/JSON artifact export",
+                "command_template": "Export AXIOM mobile artifacts with messages, contacts, calls, apps, media, and source references.",
+            },
+            {
+                "name": "iLEAPP",
+                "binary_candidates": ("ileapp", "ileapp.exe"),
+                "reference_name": "ileapp",
+                "output_format": "CSV/JSON reports",
+                "command_template": "ileapp -t fs -i <iOS-backup-or-filesystem> -o <reference-dir>",
+            },
+            {
+                "name": "ALEAPP",
+                "binary_candidates": ("aleapp", "aleapp.exe"),
+                "reference_name": "aleapp",
+                "output_format": "CSV/JSON reports",
+                "command_template": "aleapp -t fs -i <Android-backup-or-filesystem> -o <reference-dir>",
+            },
+            {
+                "name": "Mobile Verification Toolkit",
+                "binary_candidates": ("mvt-ios", "mvt-android"),
+                "reference_name": "mvt",
+                "output_format": "JSON indicators/artifact export",
+                "command_template": "mvt-ios check-backup <backup> --output <reference-dir>; mvt-android check-adb --output <reference-dir>",
+            },
+            {
+                "name": "apktool/aapt/jadx",
+                "binary_candidates": ("apktool", "aapt", "jadx"),
+                "reference_name": "apktool",
+                "output_format": "manifest, permission, cert, and DEX/string inventory",
+                "command_template": "apktool d <app.apk>; aapt dump badging <app.apk>; jadx --export-gradle <app.apk>",
+            },
+        ),
+        "rapid_output_hint": (
+            "rapidtriage artifacts <mobile-export-root> --kind mobile-export --kind ios-backup "
+            "--kind android --kind android-apk --output rapid-mobile-app.json"
+        ),
+        "cross_tool_template": (
+            "rapidtriage cross-tool-validate --rapid-output rapid-mobile-app.json "
+            "--reference-output cellebrite=<Cellebrite-export.csv> --reference-output axiom=<AXIOM-export.csv> "
+            "--reference-output ileapp=<iLEAPP.json-or-csv> --reference-output aleapp=<ALEAPP.json-or-csv> "
+            "--reference-output apktool=<apktool-aapt-jadx-normalized.csv> "
+            "--backlog-item 26 --backlog-item 27 --backlog-item 28 --backlog-item 29 --backlog-item 30"
+        ),
+    },
 )
 
 
@@ -432,7 +506,7 @@ def build_validation_diff_runner_matrix(
     total_tool_count = sum(len(group["trusted_tools"]) for group in runner_groups)
     core = {
         "profile_version": "validation-diff-runner-matrix-v1",
-        "qc_prep_item_numbers": [76, 77, 78, 79, 80, 81, 82, 83, 84, 85],
+        "qc_prep_item_numbers": [76, 77, 78, 79, 80, 81, 82, 83, 84, 85, 86],
         "public_corpus_registry": list(PUBLIC_CORPUS_ROWS),
         "runner_groups": runner_groups,
         "summary": {

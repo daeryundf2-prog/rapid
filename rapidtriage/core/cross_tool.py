@@ -23,6 +23,7 @@ MAX_EXECUTION_ARTIFACT_FIELD_DIFF_ROWS = 5_000
 MAX_USER_ACTIVITY_FIELD_DIFF_ROWS = 5_000
 MAX_SYSTEM_ARTIFACT_FIELD_DIFF_ROWS = 5_000
 MAX_BROWSER_FIELD_DIFF_ROWS = 5_000
+MAX_MOBILE_FIELD_DIFF_ROWS = 5_000
 MAX_FIELD_MISMATCH_SAMPLES = 50
 FUNCTIONAL_VALIDATION_BATCH_ID = "commercial-uplift-036-040"
 KEY_FIELDS = (
@@ -61,6 +62,18 @@ KEY_FIELDS = (
     "sha256",
     "SHA256",
     "hash",
+    "source_record_id",
+    "SourceRecordId",
+    "message_id",
+    "MessageId",
+    "conversation_id",
+    "ConversationId",
+    "file_id",
+    "FileId",
+    "package_name",
+    "PackageName",
+    "apk_sha256",
+    "ApkSHA256",
 )
 EVTX_FIELD_ALIASES = {
     "event_record_id": ("event_record_id", "EventRecordID", "record_id", "RecordNumber", "record_number"),
@@ -273,6 +286,54 @@ BROWSER_TIMELINE_FIELD_ALIASES = {
     "ai_service": ("ai_service", "AIService", "service", "Service"),
     "source_table": ("source_table", "SourceTable", "table", "Table"),
     "source_index": ("source_index", "SourceIndex", "row_index", "RowIndex", "index", "Index"),
+}
+MOBILE_EXPORT_FIELD_ALIASES = {
+    "artifact_family": ("artifact_family", "ArtifactFamily", "artifact_type", "ArtifactType", "type", "Type"),
+    "source_tool": ("source_tool", "SourceTool", "tool", "Tool", "vendor_tool", "VendorTool"),
+    "source_record_id": ("source_record_id", "SourceRecordId", "RecordId", "record_id", "id", "Id"),
+    "service": ("service", "Service", "app", "App", "platform", "Platform"),
+    "conversation_id": ("conversation_id", "ConversationId", "chat_id", "ChatId", "thread_id", "ThreadId"),
+    "message_id": ("message_id", "MessageId", "msg_id", "MsgId", "id", "Id"),
+    "timestamp": ("timestamp", "Timestamp", "datetime", "DateTime", "created_at", "CreatedAt", "sent_at", "SentAt"),
+    "sender": ("sender", "Sender", "from", "From", "from_id", "FromId", "sender_id", "SenderId"),
+    "recipient": ("recipient", "Recipient", "to", "To", "to_id", "ToId", "recipient_id", "RecipientId"),
+    "message_text_hash": ("message_text_hash", "MessageTextHash", "text_hash", "TextHash", "body_hash", "BodyHash"),
+    "message_text": ("message_text", "MessageText", "text", "Text", "body", "Body"),
+    "media_hash": ("media_hash", "MediaHash", "attachment_hash", "AttachmentHash", "file_hash", "FileHash"),
+    "media_path": ("media_path", "MediaPath", "attachment_path", "AttachmentPath", "file_path", "FilePath"),
+    "contact_name": ("contact_name", "ContactName", "display_name", "DisplayName", "name", "Name"),
+    "phone": ("phone", "Phone", "phone_number", "PhoneNumber", "number", "Number"),
+    "email": ("email", "Email", "email_address", "EmailAddress"),
+    "call_type": ("call_type", "CallType", "direction", "Direction"),
+    "duration": ("duration", "Duration", "duration_seconds", "DurationSeconds"),
+    "domain": ("domain", "Domain", "ios_domain", "IOSDomain"),
+    "relative_path": ("relative_path", "RelativePath", "path", "Path", "logical_path", "LogicalPath"),
+    "file_id": ("file_id", "FileId", "fileID", "ManifestFileId", "manifest_file_id", "backup_file_id"),
+    "protection_class": ("protection_class", "ProtectionClass", "DataProtectionClass"),
+    "redaction_status": ("redaction_status", "RedactionStatus", "secret_redaction_status", "SecretRedactionStatus"),
+    "schema_version": ("schema_version", "SchemaVersion", "schema", "Schema"),
+}
+MOBILE_APP_FIELD_ALIASES = {
+    "package_name": ("package_name", "PackageName", "bundle_id", "BundleId", "application_id", "ApplicationId"),
+    "app_label": ("app_label", "AppLabel", "application_label", "ApplicationLabel", "name", "Name"),
+    "version_name": ("version_name", "VersionName", "CFBundleShortVersionString", "version", "Version"),
+    "version_code": ("version_code", "VersionCode", "build", "Build", "CFBundleVersion"),
+    "permission": ("permission", "Permission", "permissions", "Permissions"),
+    "dangerous_permission_count": (
+        "dangerous_permission_count",
+        "DangerousPermissionCount",
+        "dangerous_permissions",
+        "DangerousPermissions",
+    ),
+    "cert_sha256": ("cert_sha256", "CertSHA256", "certificate_sha256", "CertificateSHA256", "signer_sha256"),
+    "apk_sha256": ("apk_sha256", "ApkSHA256", "file_sha256", "FileSHA256", "sha256", "SHA256"),
+    "dex_count": ("dex_count", "DexCount", "dex_files", "DexFiles"),
+    "native_library_count": ("native_library_count", "NativeLibraryCount", "so_count", "SoCount"),
+    "app_data_path": ("app_data_path", "AppDataPath", "data_path", "DataPath", "path", "Path"),
+    "database": ("database", "Database", "db_name", "DbName", "source_path", "SourcePath"),
+    "table_name": ("table_name", "TableName", "table", "Table"),
+    "indicator": ("indicator", "Indicator", "url", "URL", "ip", "IP", "domain", "Domain"),
+    "risk_model": ("risk_model", "RiskModel", "risk", "Risk", "permission_risk_model"),
 }
 MFT_FIELD_ALIASES = {
     "record_number": ("record_number", "RecordNumber", "EntryNumber", "entry_number", "MFTEntryNumber"),
@@ -648,6 +709,8 @@ def load_tool_dataset(name: str, path: Path) -> dict[str, object]:
         "system_artifact_field_index": system_artifact_field_index(rows),
         "browser_storage_field_index": browser_storage_field_index(rows),
         "browser_timeline_field_index": browser_timeline_field_index(rows),
+        "mobile_export_field_index": mobile_export_field_index(rows),
+        "mobile_app_field_index": mobile_app_field_index(rows),
     }
 
 
@@ -862,6 +925,10 @@ def composite_candidate_keys(row: Mapping[str, object]) -> list[str]:
     composites.extend(system_artifact_key_variants(row))
     composites.extend(browser_storage_key_variants(row))
     composites.extend(browser_timeline_key_variants(row))
+    if has_mobile_export_signal(row):
+        composites.extend(mobile_export_key_variants(row))
+    if has_mobile_app_signal(row):
+        composites.extend(mobile_app_key_variants(row))
 
     mft_record_number = ntfs_int_value(row, MFT_FIELD_ALIASES["record_number"])
     mft_path = ntfs_path_value(row, MFT_FIELD_ALIASES["file_path"])
@@ -937,6 +1004,8 @@ def compare_datasets(
     system_artifact_field_comparison = compare_system_artifact_fields(rapid_dataset, reference_dataset)
     browser_storage_field_comparison = compare_browser_storage_fields(rapid_dataset, reference_dataset)
     browser_timeline_field_comparison = compare_browser_timeline_fields(rapid_dataset, reference_dataset)
+    mobile_export_field_comparison = compare_mobile_export_fields(rapid_dataset, reference_dataset)
+    mobile_app_field_comparison = compare_mobile_app_fields(rapid_dataset, reference_dataset)
     if field_comparison["mismatch_count"] or field_comparison["missing_common_field_count"]:
         status = "failed"
     if registry_field_comparison["mismatch_count"]:
@@ -960,6 +1029,13 @@ def compare_datasets(
     if browser_storage_field_comparison["mismatch_count"]:
         status = "failed"
     if browser_timeline_field_comparison["mismatch_count"]:
+        status = "failed"
+    if (
+        mobile_export_field_comparison["mismatch_count"]
+        or mobile_export_field_comparison["missing_common_field_count"]
+    ):
+        status = "failed"
+    if mobile_app_field_comparison["mismatch_count"] or mobile_app_field_comparison["missing_common_field_count"]:
         status = "failed"
     if input_quality_blockers:
         status = "failed"
@@ -1004,6 +1080,8 @@ def compare_datasets(
         "system_artifact_field_comparison": system_artifact_field_comparison,
         "browser_storage_field_comparison": browser_storage_field_comparison,
         "browser_timeline_field_comparison": browser_timeline_field_comparison,
+        "mobile_export_field_comparison": mobile_export_field_comparison,
+        "mobile_app_field_comparison": mobile_app_field_comparison,
         "release_gate": "review-required" if status != "pass" else "comparison-passed",
     }
 
@@ -1882,6 +1960,239 @@ def compare_browser_timeline_fields(
     )
 
 
+def mobile_export_field_index(rows: Sequence[Mapping[str, object]]) -> dict[str, dict[str, str]]:
+    index: dict[str, dict[str, str]] = {}
+    for row in rows[:MAX_MOBILE_FIELD_DIFF_ROWS]:
+        if not has_mobile_export_signal(row):
+            continue
+        keys = mobile_export_key_variants(row)
+        if not keys:
+            continue
+        fields = mobile_export_normalized_fields(row)
+        if fields:
+            for key in keys:
+                index.setdefault(key, fields)
+    return index
+
+
+def mobile_app_field_index(rows: Sequence[Mapping[str, object]]) -> dict[str, dict[str, str]]:
+    index: dict[str, dict[str, str]] = {}
+    for row in rows[:MAX_MOBILE_FIELD_DIFF_ROWS]:
+        if not has_mobile_app_signal(row):
+            continue
+        keys = mobile_app_key_variants(row)
+        if not keys:
+            continue
+        fields = mobile_app_normalized_fields(row)
+        if fields:
+            for key in keys:
+                index.setdefault(key, fields)
+    return index
+
+
+def has_mobile_export_signal(row: Mapping[str, object]) -> bool:
+    artifact_hint = normalize_mobile_identifier(
+        first_value(row, ("artifact_type", "ArtifactType", "artifact_family", "ArtifactFamily", "source_type", "SourceType"))
+    )
+    if re.search(r"\b(mobile|ios|android|sms|mms|call|contact|message|chat|whatsapp|telegram|signal|kakao|line|wechat)\b", artifact_hint):
+        return True
+    signal_fields = (
+        "conversation_id",
+        "message_id",
+        "sender",
+        "recipient",
+        "message_text_hash",
+        "message_text",
+        "media_hash",
+        "phone",
+        "email",
+        "call_type",
+        "duration",
+        "file_id",
+        "protection_class",
+        "redaction_status",
+    )
+    return any(first_value(row, MOBILE_EXPORT_FIELD_ALIASES[field]) for field in signal_fields)
+
+
+def has_mobile_app_signal(row: Mapping[str, object]) -> bool:
+    artifact_hint = normalize_mobile_identifier(
+        first_value(row, ("artifact_type", "ArtifactType", "artifact_family", "ArtifactFamily", "source_type", "SourceType"))
+    )
+    if re.search(r"\b(apk|android-app|mobile-app|app-data|ios-app|bundle)\b", artifact_hint):
+        return True
+    signal_fields = (
+        "package_name",
+        "permission",
+        "dangerous_permission_count",
+        "cert_sha256",
+        "apk_sha256",
+        "dex_count",
+        "native_library_count",
+        "risk_model",
+    )
+    return any(first_value(row, MOBILE_APP_FIELD_ALIASES[field]) for field in signal_fields)
+
+
+def mobile_export_key_variants(row: Mapping[str, object]) -> list[str]:
+    source_record_id = normalize_mobile_identifier(first_value(row, MOBILE_EXPORT_FIELD_ALIASES["source_record_id"]))
+    service = normalize_mobile_identifier(first_value(row, MOBILE_EXPORT_FIELD_ALIASES["service"]))
+    conversation_id = normalize_mobile_identifier(first_value(row, MOBILE_EXPORT_FIELD_ALIASES["conversation_id"]))
+    message_id = normalize_mobile_identifier(first_value(row, MOBILE_EXPORT_FIELD_ALIASES["message_id"]))
+    timestamp = normalize_field_value(first_value(row, MOBILE_EXPORT_FIELD_ALIASES["timestamp"]) or "")
+    sender = normalize_mobile_actor(first_value(row, MOBILE_EXPORT_FIELD_ALIASES["sender"]))
+    text_hash = normalize_hash_value(first_value(row, MOBILE_EXPORT_FIELD_ALIASES["message_text_hash"]))
+    phone = normalize_mobile_phone(first_value(row, MOBILE_EXPORT_FIELD_ALIASES["phone"]))
+    email = normalize_mobile_identifier(first_value(row, MOBILE_EXPORT_FIELD_ALIASES["email"]))
+    file_id = normalize_mobile_identifier(first_value(row, MOBILE_EXPORT_FIELD_ALIASES["file_id"]))
+    relative_path = ntfs_path_value(row, MOBILE_EXPORT_FIELD_ALIASES["relative_path"])
+    keys: list[str] = []
+    if source_record_id:
+        keys.append(normalize_key(f"mobile-source:{source_record_id}"))
+    if service and conversation_id and message_id:
+        keys.append(normalize_key(f"mobile-message:{service}:{conversation_id}:{message_id}"))
+    if service and message_id:
+        keys.append(normalize_key(f"mobile-message:{service}:{message_id}"))
+    if conversation_id and timestamp and (sender or text_hash):
+        keys.append(normalize_key(f"mobile-message-context:{conversation_id}:{timestamp}:{sender}:{text_hash}"))
+    if phone:
+        keys.append(normalize_key(f"mobile-phone:{phone}"))
+    if email:
+        keys.append(normalize_key(f"mobile-email:{email}"))
+    if file_id:
+        keys.append(normalize_key(f"mobile-file-id:{file_id}"))
+    if relative_path:
+        keys.append(normalize_key(f"mobile-path:{relative_path}"))
+    return list(dict.fromkeys(keys))
+
+
+def mobile_app_key_variants(row: Mapping[str, object]) -> list[str]:
+    package_name = normalize_mobile_identifier(first_value(row, MOBILE_APP_FIELD_ALIASES["package_name"]))
+    apk_sha256 = normalize_hash_value(first_value(row, MOBILE_APP_FIELD_ALIASES["apk_sha256"]))
+    cert_sha256 = normalize_hash_value(first_value(row, MOBILE_APP_FIELD_ALIASES["cert_sha256"]))
+    app_data_path = ntfs_path_value(row, MOBILE_APP_FIELD_ALIASES["app_data_path"])
+    database = ntfs_path_value(row, MOBILE_APP_FIELD_ALIASES["database"])
+    table_name = normalize_mobile_identifier(first_value(row, MOBILE_APP_FIELD_ALIASES["table_name"]))
+    keys: list[str] = []
+    if package_name:
+        keys.append(normalize_key(f"mobile-app:{package_name}"))
+    if apk_sha256:
+        keys.append(normalize_key(f"mobile-apk:{apk_sha256}"))
+    if cert_sha256 and package_name:
+        keys.append(normalize_key(f"mobile-app-cert:{package_name}:{cert_sha256}"))
+    if app_data_path:
+        keys.append(normalize_key(f"mobile-app-data:{app_data_path}"))
+    if database and table_name:
+        keys.append(normalize_key(f"mobile-app-db:{database}:{table_name}"))
+    return list(dict.fromkeys(keys))
+
+
+def mobile_export_normalized_fields(row: Mapping[str, object]) -> dict[str, str]:
+    fields: dict[str, str] = {}
+    for canonical, aliases in MOBILE_EXPORT_FIELD_ALIASES.items():
+        if canonical in {"artifact_family", "source_tool"}:
+            continue
+        if canonical in {"service", "conversation_id", "message_id", "file_id"}:
+            value = normalize_mobile_identifier(first_value(row, aliases))
+        elif canonical in {"sender", "recipient"}:
+            value = normalize_mobile_actor(first_value(row, aliases))
+        elif canonical == "phone":
+            value = normalize_mobile_phone(first_value(row, aliases))
+        elif canonical == "email":
+            value = normalize_mobile_identifier(first_value(row, aliases))
+        elif canonical in {"message_text_hash", "media_hash"}:
+            value = normalize_hash_value(first_value(row, aliases))
+        elif canonical in {"media_path", "relative_path"}:
+            value = ntfs_path_value(row, aliases)
+        elif canonical == "duration":
+            value = ntfs_int_value(row, aliases)
+        else:
+            raw = first_value(row, aliases)
+            value = normalize_field_value(raw) if raw is not None and str(raw).strip() else ""
+        if value:
+            fields[canonical] = value
+    return fields
+
+
+def mobile_app_normalized_fields(row: Mapping[str, object]) -> dict[str, str]:
+    fields: dict[str, str] = {}
+    for canonical, aliases in MOBILE_APP_FIELD_ALIASES.items():
+        if canonical in {"package_name", "version_name", "app_label", "table_name", "risk_model"}:
+            value = normalize_mobile_identifier(first_value(row, aliases))
+        elif canonical in {"version_code", "dangerous_permission_count", "dex_count", "native_library_count"}:
+            value = ntfs_int_value(row, aliases)
+        elif canonical in {"cert_sha256", "apk_sha256"}:
+            value = normalize_hash_value(first_value(row, aliases))
+        elif canonical in {"app_data_path", "database"}:
+            value = ntfs_path_value(row, aliases)
+        elif canonical == "permission":
+            value = normalize_ntfs_list(first_value(row, aliases))
+        else:
+            raw = first_value(row, aliases)
+            value = normalize_field_value(raw) if raw is not None and str(raw).strip() else ""
+        if value:
+            fields[canonical] = value
+    return fields
+
+
+def compare_mobile_export_fields(
+    rapid_dataset: Mapping[str, object],
+    reference_dataset: Mapping[str, object],
+) -> dict[str, object]:
+    return compare_ntfs_field_indexes(
+        rapid_dataset,
+        reference_dataset,
+        index_key="mobile_export_field_index",
+        mode="mobile-vendor-ios-android-export-field-diff",
+        key_name="mobile_export_key",
+        row_limit=MAX_MOBILE_FIELD_DIFF_ROWS,
+    )
+
+
+def compare_mobile_app_fields(
+    rapid_dataset: Mapping[str, object],
+    reference_dataset: Mapping[str, object],
+) -> dict[str, object]:
+    return compare_ntfs_field_indexes(
+        rapid_dataset,
+        reference_dataset,
+        index_key="mobile_app_field_index",
+        mode="mobile-apk-app-data-field-diff",
+        key_name="mobile_app_key",
+        row_limit=MAX_MOBILE_FIELD_DIFF_ROWS,
+    )
+
+
+def normalize_mobile_identifier(value: object) -> str:
+    if value is None:
+        return ""
+    text = normalize_field_value(value)
+    return re.sub(r"\s+", " ", text).strip()
+
+
+def normalize_mobile_phone(value: object) -> str:
+    if value is None:
+        return ""
+    text = str(value).strip()
+    if not text:
+        return ""
+    if text.startswith("+"):
+        return "+" + re.sub(r"\D+", "", text[1:])
+    return re.sub(r"\D+", "", text)
+
+
+def normalize_mobile_actor(value: object) -> str:
+    if value is None:
+        return ""
+    text = str(value).strip()
+    if not text:
+        return ""
+    digits = re.sub(r"\D+", "", text)
+    if text.startswith("+") or len(digits) >= 7:
+        return normalize_mobile_phone(text)
+    return normalize_mobile_identifier(text)
+
+
 def normalize_sid(value: object) -> str:
     if value is None:
         return ""
@@ -2578,6 +2889,8 @@ def build_trusted_tool_diff_manifest(
             "system_artifact_field_comparison",
             "browser_storage_field_comparison",
             "browser_timeline_field_comparison",
+            "mobile_export_field_comparison",
+            "mobile_app_field_comparison",
         ):
             field_comparison = comparison.get(field_name)
             if not isinstance(field_comparison, Mapping):

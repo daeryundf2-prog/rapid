@@ -366,6 +366,69 @@ TRUSTED_DIFF_RUNNER_HINTS_BY_ITEM: dict[int, dict[str, object]] = {
             "--output container-export-diff.json --json"
         ),
     },
+    26: {
+        "artifact_family": "mobile-app-export",
+        "runner_group_item": 86,
+        "trusted_tools": ["Cellebrite Physical Analyzer/UFED", "MSAB XRY", "GrayKey/GrayKey FFS export", "Magnet AXIOM"],
+        "rapid_output_hint": "rapidtriage artifacts <mobile-export-root> --kind mobile-export --output rapid-mobile-vendor.json",
+        "cross_tool_template": (
+            "rapidtriage cross-tool-validate --rapid-output rapid-mobile-vendor.json "
+            "--reference-output cellebrite=<Cellebrite-export.csv> --reference-output xry=<XRY-export.csv> "
+            "--reference-output graykey=<GrayKey-export.json> --reference-output axiom=<AXIOM-export.csv> "
+            "--source-evidence <authorized-mobile-export-root> --tool-version cellebrite=<version> "
+            "--tool-command cellebrite=<export-procedure> --independent-report <review.md> "
+            "--corpus-scope <scope> --backlog-item 26"
+        ),
+    },
+    27: {
+        "artifact_family": "mobile-app-export",
+        "runner_group_item": 86,
+        "trusted_tools": ["iLEAPP", "Cellebrite Physical Analyzer/UFED", "Magnet AXIOM"],
+        "rapid_output_hint": "rapidtriage artifacts <ios-backup-root> --kind ios-backup --output rapid-ios-backup.json",
+        "cross_tool_template": (
+            "rapidtriage cross-tool-validate --rapid-output rapid-ios-backup.json "
+            "--reference-output ileapp=<iLEAPP-ios-backup.csv-or-json> --reference-output cellebrite=<Cellebrite-ios.csv> "
+            "--source-evidence <Manifest.db-or-backup-root> --tool-version ileapp=<version> "
+            "--tool-command ileapp=<command> --independent-report <review.md> --corpus-scope <scope> --backlog-item 27"
+        ),
+    },
+    28: {
+        "artifact_family": "mobile-app-export",
+        "runner_group_item": 86,
+        "trusted_tools": ["iLEAPP", "GrayKey/GrayKey FFS export", "Cellebrite Physical Analyzer/UFED"],
+        "rapid_output_hint": "rapidtriage artifacts <ios-keychain-export> --kind ios-backup --output rapid-ios-keychain.json",
+        "cross_tool_template": (
+            "rapidtriage cross-tool-validate --rapid-output rapid-ios-keychain.json "
+            "--reference-output ileapp=<iLEAPP-keychain-redacted.csv> --reference-output graykey=<GrayKey-keychain-redacted.json> "
+            "--source-evidence <authorized-keychain-export-or-inventory> --tool-version ileapp=<version> "
+            "--tool-command ileapp=<command> --independent-report <review.md> --corpus-scope <scope> --backlog-item 28"
+        ),
+    },
+    29: {
+        "artifact_family": "mobile-app-export",
+        "runner_group_item": 86,
+        "trusted_tools": ["ALEAPP", "Mobile Verification Toolkit", "Magnet AXIOM", "Cellebrite Physical Analyzer/UFED"],
+        "rapid_output_hint": "rapidtriage artifacts <android-export-root> --kind android --output rapid-android-artifacts.json",
+        "cross_tool_template": (
+            "rapidtriage cross-tool-validate --rapid-output rapid-android-artifacts.json "
+            "--reference-output aleapp=<ALEAPP-android.csv-or-json> --reference-output mvt=<MVT-android.json> "
+            "--reference-output axiom=<AXIOM-android.csv> --source-evidence <authorized-android-export-root> "
+            "--tool-version aleapp=<version> --tool-command aleapp=<command> "
+            "--independent-report <review.md> --corpus-scope <scope> --backlog-item 29"
+        ),
+    },
+    30: {
+        "artifact_family": "mobile-app-export",
+        "runner_group_item": 86,
+        "trusted_tools": ["apktool/aapt/jadx", "ALEAPP", "Mobile Verification Toolkit", "Magnet AXIOM"],
+        "rapid_output_hint": "rapidtriage artifacts <apk-or-app-data-root> --kind android-apk --kind android --output rapid-android-app.json",
+        "cross_tool_template": (
+            "rapidtriage cross-tool-validate --rapid-output rapid-android-app.json "
+            "--reference-output apktool=<apktool-aapt-jadx-normalized.csv> --reference-output aleapp=<ALEAPP-app-data.csv> "
+            "--source-evidence <APK-or-app-data-root> --tool-version apktool=<version> --tool-command apktool=<command> "
+            "--independent-report <review.md> --corpus-scope <scope> --backlog-item 30"
+        ),
+    },
 }
 
 
