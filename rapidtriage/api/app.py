@@ -99,6 +99,7 @@ VIRTUAL_TABLE_ROW_LIMIT = 300
 HEX_PREVIEW_MAX_BYTES = 4096
 HEX_PREVIEW_ROW_WIDTH = 16
 HEX_RANGE_EXPORT_MAX_BYTES = 64 * 1024
+MAX_SOURCE_SEARCH_ARCHIVE_TEXT_CHARS = 2_000_000
 MEDIA_TRANSCRIPT_PREVIEW_CHARS = 8000
 MEDIA_TRANSCRIPT_SUFFIXES = (".srt", ".vtt", ".txt", ".transcript.txt", ".ocr.txt")
 MEDIA_CUE_EXPORT_MAX_CHARS = 4000
@@ -1063,6 +1064,18 @@ def create_app(job_store: RunJobStore | None = None, auth_token: str | None = No
         sqlite_resume_token: Optional[str] = Query(default=None),
         file_resume_token: Optional[str] = Query(default=None),
     ) -> Dict[str, object]:
+        archive_request = parse_source_preview_archive_request(path)
+        if archive_request:
+            source_path = resolve_allowed_source_file(store, run_id, archive_request["archive_path"])
+            return build_archived_source_search(
+                source_path,
+                archive_request["entry_name"],
+                keyword,
+                limit=limit,
+                context=context,
+                sqlite_resume_token=sqlite_resume_token,
+                file_resume_token=file_resume_token,
+            )
         source_path = resolve_allowed_source_file(store, run_id, path)
         return build_source_search(
             source_path,
@@ -3096,7 +3109,7 @@ def build_archived_source_api_preview(run_id: str, archive_path: Path, entry_nam
         "mime_type": mime_type,
         "download_url": f"/api/runs/{run_id}/source-file?path={quoted_archive_path}",
         "metadata_url": f"/api/runs/{run_id}/source-metadata?path={quoted_archive_path}&hash=true",
-        "search_url": "",
+        "search_url": f"/api/runs/{run_id}/source-search?path={quoted_display_path}",
         "viewer_actions": archived_source_viewer_actions(run_id, archive_path, display_path),
         "viewer_limitations": viewer_limitations,
         "viewer_sandbox": source_viewer_sandbox(archive_path, suffix=suffix, mime_type=mime_type, max_chars=max_chars),
@@ -3310,6 +3323,7 @@ def source_viewer_actions(run_id: str, source_path: Path) -> list[dict[str, obje
 
 def archived_source_viewer_actions(run_id: str, archive_path: Path, display_path: str) -> list[dict[str, object]]:
     quoted_archive_path = quote(str(archive_path))
+    quoted_display_path = quote(display_path)
     return [
         {
             "id": "download-container",
@@ -3324,6 +3338,14 @@ def archived_source_viewer_actions(run_id: str, archive_path: Path, display_path
             "url": f"/api/runs/{run_id}/source-metadata?path={quoted_archive_path}&hash=true",
             "purpose": "Calculate submission-friendly hashes for the original archive.",
             "heavy": True,
+        },
+        {
+            "id": "search-current-entry",
+            "label": "Search inside this ZIP entry",
+            "url": f"/api/runs/{run_id}/source-search?path={quoted_display_path}",
+            "purpose": "Search only the currently opened archive member without expanding the ZIP or re-searching the whole case.",
+            "heavy": False,
+            "source_preview_path": display_path,
         },
         {
             "id": "pin-compare",
@@ -9133,6 +9155,112 @@ def build_source_search(
         ),
         "source_search_full_cursor_contract": build_source_search_full_cursor_contract(),
         "matches": enrich_source_search_matches(source_path, matches),
+    }
+
+
+def build_archived_source_search(
+    archive_path: Path,
+    entry_name: str,
+    keywords: Sequence[str],
+    *,
+    limit: int = 100,
+    context: int = 120,
+    sqlite_resume_token: str | None = None,
+    file_resume_token: str | None = None,
+) -> Dict[str, object]:
+    if sqlite_resume_token or file_resume_token:
+        raise HTTPException(status_code=400, detail="resume tokens are not supported for ZIP entry source-search")
+    normalized = [item.strip().lower() for item in keywords if item.strip()]
+    if not normalized:
+        raise HTTPException(status_code=400, detail="at least one keyword is required")
+    try:
+        preview, archive_entry = build_archived_source_read_preview(
+            archive_path,
+            entry_name=entry_name,
+            max_chars=MAX_SOURCE_SEARCH_ARCHIVE_TEXT_CHARS,
+            hex_bytes=HEX_PREVIEW_MAX_BYTES,
+        )
+    except SourceReadError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    displayed_entry = str(archive_entry["archive_entry_name"])
+    display_path = f"{archive_path}::{displayed_entry}"
+    entry_path = Path(displayed_entry)
+    suffix = entry_path.suffix.lower()
+    mime_type = mimetypes.guess_type(entry_path.name)[0] or "application/octet-stream"
+    searchable = preview.get("preview_type") == "text"
+    matches: list[dict[str, object]] = []
+    if searchable:
+        matches = search_text_content(str(preview.get("text") or ""), normalized, limit=limit, context=context)
+        for match in matches:
+            match["archive_entry_name"] = displayed_entry
+            match["archive_entry_crc32"] = archive_entry.get("archive_entry_crc32", "")
+            match["source_viewer_locator"] = {
+                "profile_version": "zip-entry-source-viewer-locator-v1",
+                "locator_type": "zip-entry-text-preview",
+                "container_path": str(archive_path),
+                "archive_entry_name": displayed_entry,
+                "archive_entry_index": archive_entry.get("archive_entry_index"),
+                "archive_entry_crc32": archive_entry.get("archive_entry_crc32"),
+                "line": match.get("line"),
+                "offset": match.get("offset"),
+                "keyword": match.get("keyword"),
+            }
+    truncated = bool(preview.get("truncated")) or len(matches) >= limit
+    diagnostics = {
+        "max_plain_text_bytes": MAX_SOURCE_SEARCH_ARCHIVE_TEXT_CHARS,
+        "file_search_mode": "bounded-zip-entry-text" if searchable else "zip-entry-not-text-searchable",
+        "archive_entry_name": displayed_entry,
+        "archive_entry_crc32": archive_entry.get("archive_entry_crc32", ""),
+        "archive_entry_size": archive_entry.get("archive_entry_size", 0),
+        "container_path": str(archive_path),
+        "container_type": "zip",
+        "zip_entry_search": True,
+    }
+    enriched = enrich_source_search_matches(archive_path, matches)
+    for item in enriched:
+        item["source_path"] = display_path
+        item["source_name"] = entry_path.name
+        item["container_path"] = str(archive_path)
+        item["archive_entry"] = archive_entry
+        item["citation"] = (
+            f"{archive_path.name}::{displayed_entry} line {item.get('line')} "
+            f"offset {item.get('offset')} keyword {item.get('keyword')}"
+        )
+        if isinstance(item.get("citation_profile"), MutableMapping):
+            item["citation_profile"]["source_path"] = display_path
+            item["citation_profile"]["source_name"] = entry_path.name
+            item["citation_profile"]["container_path"] = str(archive_path)
+    return {
+        "command": "source-search",
+        "path": display_path,
+        "container_path": str(archive_path),
+        "archive_entry": archive_entry,
+        "name": entry_path.name,
+        "extension": suffix,
+        "size": int(archive_entry["archive_entry_size"]),
+        "container_size": archive_path.stat().st_size,
+        "mime_type": mime_type,
+        "keywords": normalized,
+        "searchable": searchable,
+        "truncated": truncated,
+        "message": "ZIP entry text search completed." if searchable else "ZIP entry is not text-searchable in the bounded viewer.",
+        "summary": {
+            "match_count": len(matches),
+            "limit": limit,
+            **diagnostics,
+        },
+        "source_search_profile": source_search_profile(
+            source_path=archive_path,
+            searchable=searchable,
+            truncated=truncated,
+            match_count=len(matches),
+            limit=limit,
+            context=context,
+            diagnostics=diagnostics,
+        ),
+        "source_search_full_cursor_contract": build_source_search_full_cursor_contract(),
+        "matches": enriched,
     }
 
 

@@ -305,12 +305,25 @@ class RapidTriageApiTests(unittest.TestCase):
             self.assertEqual(payload["source_locator"]["locator_type"], "zip-entry-text-preview")
             self.assertIn("find evtx", payload["text"])
             self.assertIn("hash=true", payload["metadata_url"])
+            self.assertIn("source-search", payload["search_url"])
             self.assertIn(str(archive_path), payload["download_url"])
             self.assertIn("Archive completeness", " ".join(payload["viewer_limitations"]))
             self.assertEqual(
                 {action["id"] for action in payload["viewer_actions"]},
-                {"download-container", "hash-container", "pin-compare", "save-review"},
+                {"download-container", "hash-container", "search-current-entry", "pin-compare", "save-review"},
             )
+            search_response = client.get(
+                f"/api/runs/{job.run_id}/source-search",
+                params={"path": "Users/alice/Documents/ChatGPT-export.zip::conversations.json", "keyword": "evtx"},
+            )
+            self.assertEqual(search_response.status_code, 200, search_response.text)
+            search_payload = search_response.json()
+            self.assertTrue(search_payload["path"].endswith("ChatGPT-export.zip::conversations.json"))
+            self.assertEqual(search_payload["summary"]["zip_entry_search"], True)
+            self.assertEqual(search_payload["summary"]["match_count"], 1)
+            self.assertEqual(search_payload["matches"][0]["source_name"], "conversations.json")
+            self.assertEqual(search_payload["matches"][0]["archive_entry"]["archive_entry_name"], "conversations.json")
+            self.assertIn("ChatGPT-export.zip::conversations.json", search_payload["matches"][0]["citation"])
 
             traversal_response = client.get(
                 f"/api/runs/{job.run_id}/source-preview",
