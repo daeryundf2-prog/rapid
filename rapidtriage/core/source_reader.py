@@ -5,6 +5,7 @@ import datetime as dt
 import hashlib
 import json
 import sqlite3
+import zipfile
 from pathlib import Path
 from typing import Mapping, Sequence
 
@@ -20,6 +21,8 @@ DEFAULT_SQLITE_ROW_LIMIT = 50
 MAX_SOURCE_READ_TEXT_CHARS = 2_000_000
 MAX_SOURCE_READ_HEX_BYTES = 1_048_576
 MAX_SQLITE_ROW_LIMIT = 500
+MAX_ARCHIVED_SOURCE_ENTRY_BYTES = 16 * 1024 * 1024
+ARCHIVED_SOURCE_SEPARATOR = "::"
 
 
 class SourceReadError(ValueError):
@@ -42,7 +45,11 @@ def run_source_read(
     summary = load_summary_or_raise(run_summary)
     source = summary_source(summary)
     analysis_root = source_analysis_root(source)
-    source_path = resolve_source_read_path(raw_path, analysis_root=analysis_root)
+    archive_request = parse_archived_source_request(raw_path)
+    source_path = resolve_source_read_path(
+        archive_request["archive_path"] if archive_request else raw_path,
+        analysis_root=analysis_root,
+    )
 
     if not source_path.is_file():
         raise SourceReadError(f"source file not found or not a regular file: {source_path}")
@@ -52,7 +59,17 @@ def run_source_read(
     stat = source_path.stat()
     max_chars = normalize_limit(max_chars, default=DEFAULT_MAX_TEXT_CHARS, maximum=MAX_SOURCE_READ_TEXT_CHARS)
     hex_bytes = normalize_limit(hex_bytes, default=DEFAULT_MAX_HEX_BYTES, maximum=MAX_SOURCE_READ_HEX_BYTES)
-    if sqlite_table:
+    archive_entry: dict[str, object] | None = None
+    if archive_request:
+        if sqlite_table:
+            raise SourceReadError("sqlite table preview is not supported for archived source entries")
+        preview, archive_entry = build_archived_source_preview(
+            source_path,
+            entry_name=str(archive_request["entry_name"]),
+            max_chars=max_chars,
+            hex_bytes=hex_bytes,
+        )
+    elif sqlite_table:
         if bool(sqlite_where_column) != bool(sqlite_where_contains):
             raise SourceReadError("--sqlite-where-column and --sqlite-where-contains must be used together")
         preview = build_sqlite_table_preview(
@@ -69,6 +86,11 @@ def run_source_read(
 
     source_locator = build_source_locator(preview)
     relative_path = str(source_path.relative_to(analysis_root))
+    display_relative_path = (
+        f"{relative_path}{ARCHIVED_SOURCE_SEPARATOR}{archive_entry['archive_entry_name']}"
+        if archive_entry
+        else relative_path
+    )
     return {
         "command": "source-read",
         "profile_version": SOURCE_READ_PROFILE_VERSION,
@@ -77,16 +99,24 @@ def run_source_read(
         "source": source,
         "analysis_root": str(analysis_root),
         "path": str(source_path),
-        "relative_path": relative_path,
-        "name": source_path.name,
-        "extension": source_path.suffix.lower(),
-        "size": stat.st_size,
-        "modified_at": dt.datetime.fromtimestamp(stat.st_mtime, dt.timezone.utc).isoformat(),
+        "relative_path": display_relative_path,
+        "container_relative_path": relative_path if archive_entry else "",
+        "name": Path(str(archive_entry["archive_entry_name"])).name if archive_entry else source_path.name,
+        "extension": Path(str(archive_entry["archive_entry_name"])).suffix.lower() if archive_entry else source_path.suffix.lower(),
+        "size": int(archive_entry["archive_entry_size"]) if archive_entry else stat.st_size,
+        "container_size": stat.st_size if archive_entry else 0,
+        "modified_at": str(archive_entry["archive_entry_modified_at"])
+        if archive_entry
+        else dt.datetime.fromtimestamp(stat.st_mtime, dt.timezone.utc).isoformat(),
+        "container_modified_at": dt.datetime.fromtimestamp(stat.st_mtime, dt.timezone.utc).isoformat()
+        if archive_entry
+        else "",
+        "archive_entry": archive_entry or {},
         "hashes": hashes,
         "preview": preview,
         "source_locator": source_locator,
         "source_citation_package": build_source_citation_package(
-            relative_path=relative_path,
+            relative_path=display_relative_path,
             source_path=source_path,
             preview=preview,
             source_locator=source_locator,
@@ -143,6 +173,22 @@ def resolve_source_read_path(raw_path: str, *, analysis_root: Path) -> Path:
     return resolve_source_path_in_roots(raw_path, [analysis_root])
 
 
+def parse_archived_source_request(raw_path: str) -> dict[str, str] | None:
+    text = str(raw_path or "").strip()
+    if ARCHIVED_SOURCE_SEPARATOR not in text:
+        return None
+    archive_path, entry_name = text.split(ARCHIVED_SOURCE_SEPARATOR, 1)
+    archive_path = archive_path.strip()
+    entry_name = entry_name.strip().replace("\\", "/")
+    if not archive_path or not entry_name:
+        raise SourceReadError("archived source path must be formatted as archive.zip::entry/path.json")
+    if Path(entry_name).is_absolute() or ".." in Path(entry_name).parts:
+        raise SourceReadError("archive entry path must be relative and must not contain parent traversal")
+    if Path(archive_path).suffix.lower() != ".zip":
+        raise SourceReadError("archived source-read currently supports .zip containers only")
+    return {"archive_path": archive_path, "entry_name": entry_name}
+
+
 def build_source_read_preview(source_path: Path, *, max_chars: int, hex_bytes: int) -> dict[str, object]:
     suffix = source_path.suffix.lower()
     if suffix in SUPPORTED_DOC_EXTS:
@@ -170,6 +216,106 @@ def build_source_read_preview(source_path: Path, *, max_chars: int, hex_bytes: i
             }
 
     return hex_preview_payload(source_path, hex_bytes=hex_bytes)
+
+
+def build_archived_source_preview(
+    archive_path: Path,
+    *,
+    entry_name: str,
+    max_chars: int,
+    hex_bytes: int,
+) -> tuple[dict[str, object], dict[str, object]]:
+    try:
+        with zipfile.ZipFile(archive_path) as archive:
+            info = find_zip_entry(archive, entry_name)
+            if info.is_dir():
+                raise SourceReadError(f"archive entry is a directory: {entry_name}")
+            if info.file_size > MAX_ARCHIVED_SOURCE_ENTRY_BYTES:
+                raise SourceReadError(
+                    f"archive entry is too large for source-read ({info.file_size} bytes > "
+                    f"{MAX_ARCHIVED_SOURCE_ENTRY_BYTES} bytes): {entry_name}"
+                )
+            blob = archive.read(info)
+    except zipfile.BadZipFile as exc:
+        raise SourceReadError(f"invalid zip archive: {archive_path}") from exc
+    except KeyError as exc:
+        raise SourceReadError(f"archive entry not found: {entry_name}") from exc
+    except OSError as exc:
+        raise SourceReadError(f"failed to read archive entry {entry_name}: {exc}") from exc
+
+    entry_hashes = {
+        "sha256": hashlib.sha256(blob).hexdigest(),
+        "md5": hashlib.md5(blob).hexdigest(),
+        "sha1": hashlib.sha1(blob).hexdigest(),
+    }
+    entry_metadata = {
+        "container_type": "zip",
+        "archive_path": str(archive_path),
+        "archive_entry_name": info.filename,
+        "archive_entry_index": zip_entry_index(archive_path, info.filename),
+        "archive_entry_size": info.file_size,
+        "archive_entry_compressed_size": info.compress_size,
+        "archive_entry_crc32": f"{info.CRC:08x}",
+        "archive_entry_modified_at": zip_info_modified_at(info),
+        "entry_hashes": entry_hashes,
+        "source_path": f"{archive_path}{ARCHIVED_SOURCE_SEPARATOR}{info.filename}",
+        "large_data_controls": {
+            "max_entry_bytes": MAX_ARCHIVED_SOURCE_ENTRY_BYTES,
+            "extraction_mode": "in-memory-bounded-single-entry",
+            "writes_extracted_files": False,
+        },
+    }
+
+    if len(blob) <= max_chars and not is_probably_binary_bytes(blob):
+        text = blob.decode("utf-8", errors="replace")
+        preview = text_preview_payload(text, max_chars=max_chars, strategy="bounded-zip-entry-text")
+    else:
+        preview = hex_preview_payload_from_bytes(blob, hex_bytes=hex_bytes, total_size=len(blob))
+    preview.update(entry_metadata)
+    preview["core_accuracy_gates"] = {
+        "component": "source-read-zip-entry-locator",
+        "satisfied_checks": [
+            "zip entry read without extraction",
+            "entry size cap enforced",
+            "entry crc and hashes emitted",
+            "container path and entry locator preserved",
+        ],
+        "remaining_blockers": [
+            "archive completeness and original evidence container provenance must be validated separately",
+            "nested archives and encrypted zip entries are not expanded by source-read",
+        ],
+    }
+    return preview, entry_metadata
+
+
+def find_zip_entry(archive: zipfile.ZipFile, entry_name: str) -> zipfile.ZipInfo:
+    normalized = entry_name.strip().replace("\\", "/")
+    try:
+        return archive.getinfo(normalized)
+    except KeyError:
+        lower = normalized.lower()
+        for info in archive.infolist():
+            if info.filename.lower() == lower:
+                return info
+        raise
+
+
+def zip_entry_index(archive_path: Path, entry_name: str) -> int:
+    try:
+        with zipfile.ZipFile(archive_path) as archive:
+            for index, info in enumerate(archive.infolist()):
+                if info.filename == entry_name:
+                    return index
+    except (OSError, zipfile.BadZipFile):
+        return -1
+    return -1
+
+
+def zip_info_modified_at(info: zipfile.ZipInfo) -> str:
+    try:
+        return dt.datetime(*info.date_time, tzinfo=dt.timezone.utc).isoformat()
+    except (TypeError, ValueError):
+        return ""
 
 
 def build_sqlite_table_preview(
@@ -363,6 +509,25 @@ def stable_json_hash(payload: Mapping[str, object]) -> str:
 
 
 def build_source_locator(preview: Mapping[str, object]) -> dict[str, object]:
+    if preview.get("container_type") == "zip":
+        locator_type = "zip-entry-text-preview" if preview.get("preview_type") == "text" else "zip-entry-byte-range"
+        return {
+            "locator_type": locator_type,
+            "container_type": "zip",
+            "archive_entry_name": str(preview.get("archive_entry_name") or ""),
+            "archive_entry_index": int_or_default(preview.get("archive_entry_index"), -1),
+            "archive_entry_crc32": str(preview.get("archive_entry_crc32") or ""),
+            "archive_entry_size": int(preview.get("archive_entry_size") or 0),
+            "preview_length": int(preview.get("preview_length") or 0),
+            "byte_count": int(preview.get("byte_count") or 0),
+            "entry_sha256": str(
+                preview.get("entry_hashes", {}).get("sha256")
+                if isinstance(preview.get("entry_hashes"), Mapping)
+                else ""
+            ),
+            "text_sha256": str(preview.get("text_sha256") or ""),
+            "preview_sha256": str(preview.get("preview_sha256") or ""),
+        }
     if preview.get("preview_type") == "sqlite-table":
         return {
             "locator_type": "sqlite-table-page",
@@ -457,6 +622,8 @@ def source_citation_blockers(*, hash_status: str, preview: Mapping[str, object])
         "review mark and analyst sign-off required before report inclusion",
         "original evidence container provenance must be preserved outside source-read",
     ]
+    if preview.get("container_type") == "zip":
+        blockers.append("archive completeness and original ZIP container provenance must be validated separately")
     if hash_status != "present":
         blockers.append("source hash was not computed for this source-read run")
     if bool(preview.get("truncated")):
@@ -466,6 +633,11 @@ def source_citation_blockers(*, hash_status: str, preview: Mapping[str, object])
 
 def copy_safe_locator_text(source_locator: Mapping[str, object]) -> str:
     locator_type = str(source_locator.get("locator_type") or "unavailable")
+    if locator_type in {"zip-entry-text-preview", "zip-entry-byte-range"}:
+        return (
+            f"zip entry {source_locator.get('archive_entry_name', '')} "
+            f"crc32 {source_locator.get('archive_entry_crc32', '')}"
+        )
     if locator_type == "sqlite-table-page":
         return (
             f"sqlite table {source_locator.get('table', '')} "
@@ -512,6 +684,11 @@ def text_preview_payload(text: str, *, max_chars: int, strategy: str) -> dict[st
 def hex_preview_payload(source_path: Path, *, hex_bytes: int) -> dict[str, object]:
     with source_path.open("rb") as handle:
         blob = handle.read(hex_bytes)
+    return hex_preview_payload_from_bytes(blob, hex_bytes=hex_bytes, total_size=source_path.stat().st_size)
+
+
+def hex_preview_payload_from_bytes(blob: bytes, *, hex_bytes: int, total_size: int) -> dict[str, object]:
+    blob = blob[:hex_bytes]
     ascii_preview = "".join(chr(byte) if 32 <= byte < 127 else "." for byte in blob)
     return {
         "preview_type": "hex",
@@ -521,7 +698,7 @@ def hex_preview_payload(source_path: Path, *, hex_bytes: int) -> dict[str, objec
         "hex": blob.hex(),
         "ascii": ascii_preview,
         "preview_sha256": hashlib.sha256(blob).hexdigest() if blob else "",
-        "truncated": source_path.stat().st_size > len(blob),
+        "truncated": total_size > len(blob),
         "message": "Binary/large-file hex preview is available.",
     }
 
@@ -541,6 +718,8 @@ def forensic_read_profile(
         "path_inside_analysis_root": is_relative_to(source_path, analysis_root),
         "preview_type": str(preview.get("preview_type") or ""),
         "source_locator_type": str(build_source_locator(preview).get("locator_type") or ""),
+        "container_type": str(preview.get("container_type") or ""),
+        "archive_entry_name": str(preview.get("archive_entry_name") or ""),
         "hashes_computed": bool(hashes),
         "hash_algorithms": sorted(hashes) if hashes else [],
         "hashes_requested": include_hashes,
@@ -565,11 +744,28 @@ def normalize_limit(value: int, *, default: int, maximum: int) -> int:
     return min(parsed, maximum)
 
 
+def int_or_default(value: object, default: int) -> int:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
+
+
 def is_probably_binary(source_path: Path, *, sample_size: int = 4096) -> bool:
     try:
         sample = source_path.read_bytes()[:sample_size]
     except OSError:
         return False
+    if not sample:
+        return False
+    if b"\x00" in sample:
+        return True
+    control = sum(1 for byte in sample if byte < 9 or (13 < byte < 32))
+    return control / len(sample) > 0.08
+
+
+def is_probably_binary_bytes(blob: bytes, *, sample_size: int = 4096) -> bool:
+    sample = blob[:sample_size]
     if not sample:
         return False
     if b"\x00" in sample:

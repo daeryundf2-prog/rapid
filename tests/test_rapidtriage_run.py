@@ -962,6 +962,69 @@ class RapidTriageRunTests(unittest.TestCase):
             self.assertIn("Snippet:", citation["review_note_template"])
             self.assertEqual(len(citation["package_hash"]), 64)
 
+    def test_source_read_command_previews_zip_entry_with_archive_locator(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir) / "case-root"
+            output_dir = Path(tmp_dir) / "run-out"
+            source_output = Path(tmp_dir) / "source-read-zip.json"
+            export_path = root / "Users" / "alice" / "Documents" / "ChatGPT-export.zip"
+            root.mkdir(parents=True, exist_ok=True)
+            build_run_fixture(root)
+            export_path.parent.mkdir(parents=True, exist_ok=True)
+            with zipfile.ZipFile(export_path, "w") as archive:
+                archive.writestr(
+                    "conversations.json",
+                    json.dumps(
+                        [
+                            {
+                                "title": "Incident notes",
+                                "mapping": {
+                                    "1": {"message": {"author": {"role": "user"}, "content": {"parts": ["find evtx"]}}},
+                                    "2": {"message": {"author": {"role": "assistant"}, "content": {"parts": ["check 4624"]}}},
+                                },
+                            }
+                        ],
+                        ensure_ascii=False,
+                    ),
+                )
+
+            self.assertEqual(main(["run", str(root), "--mode", "fraud", "--output-dir", str(output_dir)]), 0)
+            self.assertEqual(
+                main(
+                    [
+                        "source-read",
+                        str(output_dir),
+                        "--path",
+                        "Users/alice/Documents/ChatGPT-export.zip::conversations.json",
+                        "--hash",
+                        "--output",
+                        str(source_output),
+                        "--json",
+                    ]
+                ),
+                0,
+            )
+
+            payload = json.loads(source_output.read_text(encoding="utf-8"))
+            self.assertEqual(payload["relative_path"], "Users/alice/Documents/ChatGPT-export.zip::conversations.json")
+            self.assertEqual(payload["path"], str(export_path.resolve()))
+            self.assertEqual(payload["container_relative_path"], "Users/alice/Documents/ChatGPT-export.zip")
+            self.assertEqual(payload["extension"], ".json")
+            self.assertEqual(payload["archive_entry"]["container_type"], "zip")
+            self.assertEqual(payload["archive_entry"]["archive_entry_name"], "conversations.json")
+            self.assertEqual(len(payload["archive_entry"]["entry_hashes"]["sha256"]), 64)
+            self.assertEqual(payload["preview"]["preview_type"], "text")
+            self.assertEqual(payload["preview"]["strategy"], "bounded-zip-entry-text")
+            self.assertIn("find evtx", payload["preview"]["text"])
+            self.assertEqual(payload["source_locator"]["locator_type"], "zip-entry-text-preview")
+            self.assertEqual(payload["source_locator"]["archive_entry_name"], "conversations.json")
+            self.assertEqual(payload["forensic_read_profile"]["container_type"], "zip")
+            citation = payload["source_citation_package"]
+            self.assertIn("ChatGPT-export.zip::conversations.json", citation["citation_text"])
+            self.assertIn("zip entry conversations.json", citation["citation_text"])
+            self.assertEqual(citation["source_locator"]["locator_type"], "zip-entry-text-preview")
+            self.assertIn("archive completeness", " ".join(citation["core_accuracy_gates"]["remaining_blockers"]))
+
     def test_source_read_command_opens_bounded_sqlite_table_locator(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             root = Path(tmp_dir) / "case-root"
