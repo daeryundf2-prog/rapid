@@ -102,21 +102,31 @@ class RapidTriageCloudExportTests(unittest.TestCase):
                     "Takeout/Location History/Records.json",
                     json.dumps({"locations": [{"timestamp": "2026-05-01T02:00:00Z", "latitudeE7": 374220000}]}),
                 )
+                archive.writestr(
+                    "M365/Audit/UnifiedAuditLog.csv",
+                    "\n".join(
+                        [
+                            "CreationTime,Operation,UserId,ClientIP,ObjectId",
+                            "2026-05-01T03:00:00Z,FileDeleted,alice@example.com,198.51.100.7,/sites/case/doc.docx",
+                        ]
+                    ),
+                )
             output = root / "cloud-archive-artifacts.json"
 
             exit_code = main(["artifacts", str(root), "--kind", "cloud-export", "--output", str(output)])
 
             self.assertEqual(exit_code, 0)
             payload = json.loads(output.read_text(encoding="utf-8"))
-            self.assertEqual(payload["summary"]["artifact_count"], 5)
+            self.assertEqual(payload["summary"]["artifact_count"], 6)
             artifact = next(item for item in payload["artifacts"] if item["artifact_type"] == "cloud-export-archive")
             self.assertEqual(artifact["artifact_type"], "cloud-export-archive")
             details = artifact["details"]
             self.assertEqual(details["source_format"], "zip")
             self.assertEqual(details["service"], "google-takeout")
             self.assertEqual(details["cloud_family"], "google")
-            self.assertEqual(details["archive_entry_count"], 4)
+            self.assertEqual(details["archive_entry_count"], 5)
             self.assertEqual(details["archive_json_entry_count"], 3)
+            self.assertEqual(details["archive_csv_entry_count"], 1)
             self.assertTrue(details["validation_checks"]["archive_opened"])
             self.assertTrue(details["validation_checks"]["archive_entry_manifest_emitted"])
             self.assertTrue(details["validation_checks"]["original_export_hash_verified"])
@@ -125,6 +135,7 @@ class RapidTriageCloudExportTests(unittest.TestCase):
             self.assertEqual(manifest["source_sha256"], details["source_hashes"]["sha256"])
             self.assertEqual(manifest["json_entry_count"], 3)
             self.assertEqual(manifest["product_counts"]["gmail"], 2)
+            self.assertEqual(manifest["csv_entry_count"], 1)
             self.assertEqual(manifest["product_counts"]["drive"], 1)
             self.assertEqual(manifest["product_counts"]["location-history"], 1)
             self.assertEqual(len(manifest["manifest_sha256"]), 64)
@@ -148,7 +159,7 @@ class RapidTriageCloudExportTests(unittest.TestCase):
             )
             self.assertEqual(
                 uplift["functional_priority_profile"]["implemented_controls"]["cloud_archive_entry_count"],
-                4,
+                5,
             )
             self.assertIn(
                 "cloud-provider-archive-manifest-emitted",
@@ -160,7 +171,7 @@ class RapidTriageCloudExportTests(unittest.TestCase):
             self.assertEqual(mail_details["service"], "gmail-takeout")
             self.assertEqual(mail_details["subject"], "Invoice password from MBOX")
             self.assertEqual(mail_details["message_id"], "<gmail-mbox-1@example.com>")
-            self.assertEqual(mail_details["archive_entry_index"], 2)
+            self.assertEqual(mail_details["archive_entry_index"], 3)
             self.assertEqual(mail_details["archive_message_index"], 0)
             self.assertIn("provider-archive-embedded-mail", mail_details["risk_flags"])
             self.assertTrue(mail_details["validation_checks"]["archive_embedded_row"])
@@ -186,6 +197,45 @@ class RapidTriageCloudExportTests(unittest.TestCase):
             self.assertEqual(archive_location["details"]["source_format"], "zip-json-entry")
             self.assertEqual(archive_location["details"]["latitude"], 37.422)
             self.assertEqual(archive_location["details"]["archive_entry_name"], "Takeout/Location History/Records.json")
+            archive_audit = next(item for item in payload["artifacts"] if item["artifact_type"] == "cloud-audit")
+            audit_details = archive_audit["details"]
+            self.assertEqual(audit_details["source_format"], "zip-csv-entry")
+            self.assertEqual(audit_details["service"], "microsoft-365")
+            self.assertEqual(audit_details["operation"], "FileDeleted")
+            self.assertEqual(audit_details["archive_entry_name"], "M365/Audit/UnifiedAuditLog.csv")
+            self.assertEqual(audit_details["archive_csv_row_index"], 0)
+            self.assertTrue(audit_details["validation_checks"]["archive_csv_row_index_present"])
+            self.assertIn("archive_csv_row_index", audit_details["m365_export_parser_manifest"]["row_citation"]["row_pivots"])
+
+    def test_cloud_export_collects_standalone_csv_rows(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            csv_path = root / "m365-audit.csv"
+            csv_path.write_text(
+                "\n".join(
+                    [
+                        "CreationTime,Operation,UserId,ClientIP,ObjectId",
+                        "2026-05-01T03:00:00Z,FileAccessed,bob@example.com,198.51.100.8,/sites/case/readme.txt",
+                    ]
+                ),
+                encoding="utf-8",
+            )
+            output = root / "cloud-csv-artifacts.json"
+
+            exit_code = main(["artifacts", str(root), "--kind", "cloud-export", "--output", str(output)])
+
+            self.assertEqual(exit_code, 0)
+            payload = json.loads(output.read_text(encoding="utf-8"))
+            self.assertEqual(payload["summary"]["artifact_count"], 1)
+            artifact = payload["artifacts"][0]
+            self.assertEqual(artifact["artifact_type"], "cloud-audit")
+            details = artifact["details"]
+            self.assertEqual(details["source_format"], "csv")
+            self.assertEqual(details["operation"], "FileAccessed")
+            self.assertEqual(details["actor"], "bob@example.com")
+            self.assertEqual(details["csv_row_index"], 0)
+            self.assertIn("provider-csv-row", details["risk_flags"])
+            self.assertTrue(details["validation_checks"]["bounded_csv_row_parse"])
 
     def test_cloud_export_collects_google_location_activity_and_account_rows(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:

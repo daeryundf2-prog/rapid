@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import csv
 import datetime as dt
 import email
 import hashlib
+import io
 import json
 import re
 import zipfile
@@ -18,11 +20,14 @@ from .review import build_forensic_review
 PARSER_VERSION = "cloud-export-v3"
 FUNCTIONAL_EXPANSION_BATCH_ID = "commercial-uplift-051-055"
 CLOUD_JSON_SUFFIXES = {".json"}
+CLOUD_CSV_SUFFIXES = {".csv"}
 CLOUD_ARCHIVE_SUFFIXES = {".zip"}
 CLOUD_ARCHIVE_ENTRY_LIMIT = 1000
 CLOUD_ARCHIVE_PARSE_ENTRY_LIMIT = 25
 CLOUD_ARCHIVE_PARSE_ENTRY_MAX_BYTES = 8 * 1024 * 1024
 CLOUD_ARCHIVE_JSON_ROW_LIMIT = 100
+CLOUD_ARCHIVE_CSV_ROW_LIMIT = 100
+CLOUD_CSV_ROW_LIMIT = 1000
 CLOUD_ARCHIVE_MBOX_MESSAGE_LIMIT = 50
 CloudGap = tuple[list[str], str]
 CLOUD_NATIVE_CAPABILITIES = {
@@ -204,6 +209,8 @@ class CloudExportProvider:
         for path in sorted(root.rglob("*"), key=lambda item: str(item).lower()):
             if path.is_file() and path.suffix.lower() in CLOUD_JSON_SUFFIXES:
                 yield from collect_cloud_json(path)
+            elif path.is_file() and path.suffix.lower() in CLOUD_CSV_SUFFIXES:
+                yield from collect_cloud_csv(path)
             elif path.is_file() and path.suffix.lower() in CLOUD_ARCHIVE_SUFFIXES:
                 yield from collect_cloud_archive(path)
 
@@ -236,7 +243,7 @@ def collect_cloud_archive_embedded_rows(
                     return
                 product = infer_cloud_archive_product(info.filename)
                 suffix = Path(info.filename).suffix.lower()
-                if suffix not in {".mbox", ".json"}:
+                if suffix not in {".mbox", ".json", ".csv"}:
                     continue
                 if info.file_size > CLOUD_ARCHIVE_PARSE_ENTRY_MAX_BYTES:
                     continue
@@ -264,6 +271,26 @@ def collect_cloud_archive_embedded_rows(
                             source_hashes=source_hashes,
                             details=normalize_cloud_mail(row, source_path=f"{path.resolve()}::{info.filename}"),
                         )
+                    continue
+                if suffix == ".csv":
+                    rows = load_csv_rows_bytes(data, limit=CLOUD_ARCHIVE_CSV_ROW_LIMIT)
+                    if not rows:
+                        continue
+                    parsed_entries += 1
+                    yield from collect_cloud_tabular_rows(
+                        path,
+                        rows,
+                        source_hashes=source_hashes,
+                        source_path=f"{path.resolve()}::{info.filename}",
+                        source_index_base=(archive_index * CLOUD_ARCHIVE_CSV_ROW_LIMIT) + 1,
+                        row_context=cloud_archive_row_context(
+                            info,
+                            archive_index=archive_index,
+                            row_index=0,
+                            source_format="zip-csv-entry",
+                            row_index_key="archive_csv_row_index",
+                        ),
+                    )
                     continue
                 payload = load_json_bytes(data)
                 if payload is None:
@@ -316,6 +343,8 @@ def with_cloud_archive_context(
     context = dict(archive_context)
     if "archive_json_row_index" in context:
         context["archive_json_row_index"] = row_index
+    if "archive_csv_row_index" in context:
+        context["archive_csv_row_index"] = row_index
     detail_payload.update(context)
     checks = dict(detail_payload.get("validation_checks") or {})
     checks.update(
@@ -325,6 +354,7 @@ def with_cloud_archive_context(
             "archive_entry_crc32_present": bool(context.get("archive_entry_crc32")),
             "bounded_archive_entry_parse": True,
             "archive_json_row_index_present": "archive_json_row_index" in context,
+            "archive_csv_row_index_present": "archive_csv_row_index" in context,
         }
     )
     detail_payload["validation_checks"] = checks
@@ -332,6 +362,67 @@ def with_cloud_archive_context(
     risk_flags.append("provider-archive-embedded-json")
     detail_payload["risk_flags"] = sorted(set(map(str, risk_flags)))
     return detail_payload
+
+
+def with_cloud_row_context(
+    details: Mapping[str, object],
+    *,
+    row_context: Mapping[str, object],
+    row_index: int,
+) -> dict[str, object]:
+    if any(str(key).startswith("archive_") for key in row_context):
+        return with_cloud_archive_context(details, archive_context=row_context, row_index=row_index)
+    detail_payload = dict(details)
+    context = dict(row_context)
+    if "csv_row_index" in context:
+        context["csv_row_index"] = row_index
+    detail_payload.update(context)
+    checks = dict(detail_payload.get("validation_checks") or {})
+    checks.update(
+        {
+            "bounded_csv_row_parse": True,
+            "csv_row_index_present": "csv_row_index" in context,
+        }
+    )
+    detail_payload["validation_checks"] = checks
+    risk_flags = list(detail_payload.get("risk_flags") or [])
+    risk_flags.append("provider-csv-row")
+    detail_payload["risk_flags"] = sorted(set(map(str, risk_flags)))
+    return detail_payload
+
+
+def collect_cloud_tabular_rows(
+    path: Path,
+    rows: Sequence[Mapping[str, object]],
+    *,
+    source_hashes: Mapping[str, str],
+    source_path: str,
+    source_index_base: int,
+    row_context: Mapping[str, object],
+) -> Iterable[ArtifactRecord]:
+    if not rows:
+        return
+    detected = detect_row_export_type(source_path.lower(), rows[0])
+    normalizers = {
+        "cloud-mail": ("cloud-mail", normalize_cloud_mail),
+        "cloud-file": ("cloud-file", normalize_cloud_file),
+        "cloud-message": ("cloud-message", normalize_cloud_message),
+        "cloud-audit": ("cloud-audit", normalize_cloud_audit),
+        "cloud-iaas-audit": ("cloud-iaas-audit", normalize_cloud_iaas_audit),
+    }
+    if detected not in normalizers:
+        return
+    artifact_type, normalizer = normalizers[detected]
+    for index, row in enumerate(rows):
+        details = normalizer(row, source_path=source_path)
+        details = with_cloud_row_context(details, row_context=row_context, row_index=index)
+        yield build_record(
+            path,
+            artifact_type=artifact_type,
+            source_index=source_index_base + index,
+            source_hashes=source_hashes,
+            details=details,
+        )
 
 
 def collect_cloud_json_payload(
@@ -417,6 +508,21 @@ def collect_cloud_json(path: Path) -> Iterable[ArtifactRecord]:
     yield from collect_cloud_json_payload(path, payload, source_hashes=source_hashes, source_path=str(path.resolve()))
 
 
+def collect_cloud_csv(path: Path) -> Iterable[ArtifactRecord]:
+    rows = load_csv_rows(path, limit=CLOUD_CSV_ROW_LIMIT)
+    if not rows:
+        return
+    source_hashes = compute_hashes(path)
+    yield from collect_cloud_tabular_rows(
+        path,
+        rows,
+        source_hashes=source_hashes,
+        source_path=str(path.resolve()),
+        source_index_base=0,
+        row_context={"source_format": "csv", "csv_row_index": 0},
+    )
+
+
 def normalize_cloud_archive(path: Path, *, source_hashes: Mapping[str, str]) -> dict[str, object]:
     source_path = str(path.resolve())
     entry_manifest: list[dict[str, object]] = []
@@ -457,6 +563,7 @@ def normalize_cloud_archive(path: Path, *, source_hashes: Mapping[str, str]) -> 
                         "crc32": f"{info.CRC:08x}",
                         "modified_at": zip_datetime_iso(info),
                         "json_candidate": suffix == ".json",
+                        "csv_candidate": suffix == ".csv",
                     }
                 )
     except (OSError, zipfile.BadZipFile, zipfile.LargeZipFile) as exc:
@@ -465,12 +572,14 @@ def normalize_cloud_archive(path: Path, *, source_hashes: Mapping[str, str]) -> 
     service = cloud_archive_service_from_counts(provider_counts, source_path)
     entry_count = sum(product_counts.values())
     json_entry_count = suffix_counts.get(".json", 0)
+    csv_entry_count = suffix_counts.get(".csv", 0)
     archive_manifest = build_cloud_archive_manifest(
         source_path=source_path,
         source_hashes=source_hashes,
         service=service,
         entry_count=entry_count,
         json_entry_count=json_entry_count,
+        csv_entry_count=csv_entry_count,
         product_counts=product_counts,
         provider_counts=provider_counts,
         suffix_counts=suffix_counts,
@@ -497,6 +606,7 @@ def normalize_cloud_archive(path: Path, *, source_hashes: Mapping[str, str]) -> 
         "timestamp": "",
         "archive_entry_count": entry_count,
         "archive_json_entry_count": json_entry_count,
+        "archive_csv_entry_count": csv_entry_count,
         "archive_total_uncompressed_size": total_uncompressed,
         "archive_total_compressed_size": total_compressed,
         "archive_manifest_truncated": truncated,
@@ -517,6 +627,7 @@ def normalize_cloud_archive(path: Path, *, source_hashes: Mapping[str, str]) -> 
             "original_export_hash_verified": bool(source_hashes.get("sha256")),
             "timezone_semantics_verified": False,
             "json_entry_count": json_entry_count,
+            "csv_entry_count": csv_entry_count,
             "product_family_count": len(product_counts),
         },
         "commercial_grade_blockers": cloud_blockers(service)
@@ -737,6 +848,37 @@ def load_json_bytes(data: bytes) -> object | None:
         return json.loads(data.decode("utf-8"))
     except (UnicodeDecodeError, json.JSONDecodeError):
         return None
+
+
+def load_csv_rows(path: Path, *, limit: int) -> list[Mapping[str, object]]:
+    rows: list[Mapping[str, object]] = []
+    try:
+        with path.open("r", encoding="utf-8-sig", newline="") as handle:
+            reader = csv.DictReader(handle)
+            for index, row in enumerate(reader):
+                if index >= limit:
+                    break
+                rows.append({str(key): value for key, value in row.items() if key is not None})
+    except (OSError, UnicodeDecodeError, csv.Error):
+        return []
+    return rows
+
+
+def load_csv_rows_bytes(data: bytes, *, limit: int) -> list[Mapping[str, object]]:
+    try:
+        text = data.decode("utf-8-sig")
+    except UnicodeDecodeError:
+        text = data.decode("utf-8", errors="replace")
+    rows: list[Mapping[str, object]] = []
+    try:
+        reader = csv.DictReader(io.StringIO(text))
+        for index, row in enumerate(reader):
+            if index >= limit:
+                break
+            rows.append({str(key): value for key, value in row.items() if key is not None})
+    except csv.Error:
+        return []
+    return rows
 
 
 def detect_export_type(path: Path, payload: object) -> str:
@@ -1262,6 +1404,7 @@ def build_cloud_archive_manifest(
     service: str,
     entry_count: int,
     json_entry_count: int,
+    csv_entry_count: int,
     product_counts: Mapping[str, int],
     provider_counts: Mapping[str, int],
     suffix_counts: Mapping[str, int],
@@ -1281,6 +1424,7 @@ def build_cloud_archive_manifest(
         "archive_error": archive_error,
         "entry_count": entry_count,
         "json_entry_count": json_entry_count,
+        "csv_entry_count": csv_entry_count,
         "product_counts": dict(sorted(product_counts.items())),
         "provider_counts": dict(sorted(provider_counts.items())),
         "suffix_counts": dict(sorted(suffix_counts.items())),
@@ -1773,6 +1917,8 @@ def build_cloud_export_import_manifest(
             "archive_entry_name",
             "archive_message_index",
             "archive_json_row_index",
+            "archive_csv_row_index",
+            "csv_row_index",
         )
         if optional_text(details.get(key))
     }
@@ -1871,6 +2017,8 @@ def build_google_takeout_parser_manifest(
             "archive_entry_name",
             "archive_message_index",
             "archive_json_row_index",
+            "archive_csv_row_index",
+            "csv_row_index",
         )
         if optional_text(details.get(key))
     }
@@ -2016,6 +2164,8 @@ def build_icloud_export_parser_manifest(
             "url_sha256",
             "archive_entry_name",
             "archive_json_row_index",
+            "archive_csv_row_index",
+            "csv_row_index",
         )
         if optional_text(details.get(key))
     }
@@ -2172,6 +2322,8 @@ def build_m365_export_parser_manifest(
             "message_text_sha256",
             "archive_entry_name",
             "archive_json_row_index",
+            "archive_csv_row_index",
+            "csv_row_index",
         )
         if optional_text(details.get(key))
     }
