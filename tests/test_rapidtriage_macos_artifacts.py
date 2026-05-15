@@ -7,6 +7,7 @@ import plistlib
 import sqlite3
 import tempfile
 import unittest
+import zipfile
 from pathlib import Path
 from unittest.mock import patch
 
@@ -152,6 +153,54 @@ class RapidTriageMacOsArtifactsTests(unittest.TestCase):
             self.assertIn("artifacts_macos-system", summary["outputs"])
             self.assertTrue(Path(summary["outputs"]["artifacts_macos-system"]).is_file())
             self.assertGreaterEqual(summary["summary"]["artifacts"]["macos-system"]["artifact_count"], 1)
+
+    def test_macos_system_collector_parses_ai_service_export_zip_entries(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            evidence_root = root / "mac-case"
+            output = root / "macos-system-ai-zip.json"
+            user_docs = evidence_root / "Users" / "alice" / "Documents"
+            user_docs.mkdir(parents=True)
+            (evidence_root / "System" / "Library").mkdir(parents=True)
+            archive_path = user_docs / "ChatGPT-export.zip"
+            with zipfile.ZipFile(archive_path, "w") as archive:
+                archive.writestr(
+                    "conversations.json",
+                    json.dumps(
+                        [
+                            {
+                                "title": "Mac export ZIP",
+                                "messages": [
+                                    {"role": "user", "content": "Can ZIP exports keep citations?"},
+                                    {"role": "assistant", "content": "Yes, keep archive and entry hashes."},
+                                ],
+                            }
+                        ]
+                    ),
+                )
+
+            self.assertEqual(main(["artifacts", str(evidence_root), "--kind", "macos-system", "--output", str(output)]), 0)
+
+            payload = json.loads(output.read_text(encoding="utf-8"))
+            ai_export = next(item for item in payload["artifacts"] if item["artifact_type"] == "ai-service-export-conversation")
+            details = ai_export["details"]
+            self.assertEqual(ai_export["provider"], "macos-system-artifacts")
+            self.assertEqual(details["source_format"], "zip-json-entry")
+            self.assertEqual(details["coverage_status"], "service-export-zip-json-candidate")
+            self.assertEqual(details["archive_entry_name"], "conversations.json")
+            self.assertEqual(details["profile"], "ChatGPT")
+            self.assertEqual(details["complete_pair_count"], 1)
+            self.assertEqual(details["conversation_candidates"][0]["source_storage_kind"], "service-export-zip-json")
+            self.assertIn("::conversations.json", details["conversation_candidates"][0]["source_path"])
+            self.assertEqual(
+                details["ai_service_export_parser_manifest"]["source_format"],
+                "zip-json-entry",
+            )
+            self.assertEqual(
+                details["ai_service_export_parser_manifest"]["archive_context"]["archive_entry_name"],
+                "conversations.json",
+            )
+            self.assertIn("archive completeness", details["validation_guidance"])
 
     def test_kakaotalk_macos_collector_reports_db_openability_and_message_tables(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:

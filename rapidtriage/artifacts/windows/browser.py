@@ -4,6 +4,7 @@ import hashlib
 import json
 import re
 import sqlite3
+import zipfile
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Mapping, Sequence, Tuple
 from urllib.parse import parse_qs, unquote_plus, urlparse
@@ -106,6 +107,8 @@ MAX_AI_STORAGE_FILE_BYTES = 5 * 1024 * 1024
 MAX_AI_CONVERSATION_ROWS = 200
 MAX_AI_EXPORT_FILES = 120
 MAX_AI_EXPORT_FILE_BYTES = 20 * 1024 * 1024
+MAX_AI_EXPORT_ARCHIVE_ENTRIES = 40
+MAX_AI_EXPORT_ARCHIVE_ENTRY_BYTES = 8 * 1024 * 1024
 MAX_BROWSER_INVENTORY_FILES = 5000
 MAX_BROWSER_INVENTORY_SAMPLE_FILES = 6
 MAX_BROWSER_INVENTORY_HASH_BYTES = 16 * 1024 * 1024
@@ -160,7 +163,8 @@ AI_STORAGE_DIRS: Tuple[Tuple[str, ...], ...] = (
     ("Cache",),
 )
 AI_STORAGE_SUFFIXES = {".log", ".ldb", ".sqlite", ".sqlite3", ".db", ".json", ".txt"}
-AI_EXPORT_SUFFIXES = {".json", ".jsonl"}
+AI_EXPORT_SUFFIXES = {".json", ".jsonl", ".zip"}
+AI_EXPORT_ENTRY_SUFFIXES = {".json", ".jsonl"}
 AI_EXPORT_PATH_TERMS = (
     "chatgpt",
     "openai",
@@ -533,6 +537,14 @@ def collect_ai_service_export_artifacts(
         if not is_ai_export_candidate_path(path):
             continue
         scanned += 1
+        if path.suffix.lower() == ".zip":
+            yield from collect_ai_service_export_archive_artifacts(
+                path,
+                root=root,
+                provider=provider or WindowsBrowserArtifactsProvider.name,
+                parser_version=parser_version or PARSER_VERSION,
+            )
+            continue
         record = build_ai_service_export_artifact(
             path,
             root=root,
@@ -545,6 +557,62 @@ def collect_ai_service_export_artifacts(
 
 def is_ai_export_candidate_path(path: Path) -> bool:
     lowered = str(path).lower()
+    return any(term in lowered for term in AI_EXPORT_PATH_TERMS)
+
+
+def collect_ai_service_export_archive_artifacts(
+    archive_path: Path,
+    *,
+    root: Path,
+    provider: str = WindowsBrowserArtifactsProvider.name,
+    parser_version: str = PARSER_VERSION,
+) -> Iterable[ArtifactRecord]:
+    try:
+        archive_stat = archive_path.stat()
+    except OSError:
+        return
+    if archive_stat.st_size <= 0 or archive_stat.st_size > MAX_AI_EXPORT_FILE_BYTES:
+        return
+    try:
+        with zipfile.ZipFile(archive_path) as archive:
+            entries = [
+                info
+                for info in sorted(archive.infolist(), key=lambda item: item.filename.lower())
+                if not info.is_dir()
+                and Path(info.filename).suffix.lower() in AI_EXPORT_ENTRY_SUFFIXES
+                and info.file_size <= MAX_AI_EXPORT_ARCHIVE_ENTRY_BYTES
+                and is_ai_export_candidate_name(f"{archive_path}::{info.filename}")
+            ][:MAX_AI_EXPORT_ARCHIVE_ENTRIES]
+            for archive_index, info in enumerate(entries):
+                try:
+                    data = archive.read(info)
+                except (RuntimeError, OSError, zipfile.BadZipFile):
+                    continue
+                record = build_ai_service_export_artifact_from_bytes(
+                    archive_path,
+                    data,
+                    root=root,
+                    provider=provider,
+                    parser_version=parser_version,
+                    source_suffix=Path(info.filename).suffix.lower(),
+                    source_size=int(info.file_size),
+                    modified_at=zip_info_modified_at(info) or isoformat_from_timestamp(archive_stat.st_mtime),
+                    archive_context={
+                        "archive_entry_name": info.filename,
+                        "archive_entry_index": archive_index,
+                        "archive_entry_crc32": f"{info.CRC:08x}",
+                        "archive_entry_size": int(info.file_size),
+                        "archive_entry_modified_at": zip_info_modified_at(info),
+                    },
+                )
+                if record:
+                    yield record
+    except (OSError, zipfile.BadZipFile, zipfile.LargeZipFile):
+        return
+
+
+def is_ai_export_candidate_name(value: object) -> bool:
+    lowered = str(value).lower()
     return any(term in lowered for term in AI_EXPORT_PATH_TERMS)
 
 
@@ -565,27 +633,58 @@ def build_ai_service_export_artifact(
         data = path.read_bytes()
     except OSError:
         return None
+    return build_ai_service_export_artifact_from_bytes(
+        path,
+        data,
+        root=root,
+        provider=provider,
+        parser_version=parser_version,
+        source_suffix=path.suffix.lower(),
+        source_size=stat_result.st_size,
+        modified_at=isoformat_from_timestamp(stat_result.st_mtime),
+    )
+
+
+def build_ai_service_export_artifact_from_bytes(
+    path: Path,
+    data: bytes,
+    *,
+    root: Path,
+    provider: str = WindowsBrowserArtifactsProvider.name,
+    parser_version: str = PARSER_VERSION,
+    source_suffix: str,
+    source_size: int,
+    modified_at: str | None,
+    archive_context: Mapping[str, object] | None = None,
+) -> ArtifactRecord | None:
     text = decode_storage_blob(data)
     if not text:
         return None
-    payloads = parse_ai_export_payloads(text, suffix=path.suffix.lower())
+    payloads = parse_ai_export_payloads(text, suffix=source_suffix)
     if not payloads:
         return None
-    service_hint = infer_ai_service_from_path(path) or detect_ai_service(text[:16000], "")
+    archive_entry_name = str((archive_context or {}).get("archive_entry_name") or "")
+    service_hint = infer_ai_service_from_path(Path(archive_entry_name)) if archive_entry_name else ""
+    service_hint = service_hint or infer_ai_service_from_path(path) or detect_ai_service(text[:16000], "")
     rows: List[Dict[str, object]] = []
+    source_hash = hashlib.sha256(data).hexdigest()
     for payload in payloads:
-        rows.extend(
-            extract_ai_export_rows(
-                payload,
-                source=path,
-                root=root,
-                source_text=text,
-                source_sha256=hashlib.sha256(data).hexdigest(),
-                source_size=stat_result.st_size,
-                source_modified_at=isoformat_from_timestamp(stat_result.st_mtime),
-                service_hint=service_hint,
-            )
+        payload_rows = extract_ai_export_rows(
+            payload,
+            source=path,
+            root=root,
+            source_text=text,
+            source_sha256=source_hash,
+            source_size=source_size,
+            source_modified_at=modified_at,
+            service_hint=service_hint,
         )
+        if archive_context:
+            payload_rows = [
+                with_ai_export_archive_context(row, archive_path=path, root=root, archive_context=archive_context)
+                for row in payload_rows
+            ]
+        rows.extend(payload_rows)
         if len(rows) >= MAX_AI_CONVERSATION_ROWS:
             break
     rows = deduplicate_conversation_rows(rows)[:MAX_AI_CONVERSATION_ROWS]
@@ -597,9 +696,55 @@ def build_ai_service_export_artifact(
         root=root,
         conversation_rows=rows,
         parser_version=parser_version,
-        source_size=stat_result.st_size,
-        modified_at=isoformat_from_timestamp(stat_result.st_mtime),
+        source_size=source_size,
+        modified_at=modified_at,
+        source_format_override="zip-json-entry" if archive_context else None,
+        archive_context=archive_context,
     )
+
+
+def with_ai_export_archive_context(
+    row: Mapping[str, object],
+    *,
+    archive_path: Path,
+    root: Path,
+    archive_context: Mapping[str, object],
+) -> Dict[str, object]:
+    payload = dict(row)
+    entry_name = str(archive_context.get("archive_entry_name") or "")
+    try:
+        archive_relative = str(archive_path.resolve().relative_to(root.resolve()))
+    except ValueError:
+        archive_relative = archive_path.name
+    payload.update(
+        {
+            **archive_context,
+            "storage_area": "service-export-archive",
+            "source_storage_kind": "service-export-zip-json",
+            "source_relative_path": f"{archive_relative}::{entry_name}",
+            "source_path": f"{archive_path.resolve()}::{entry_name}",
+            "service_detection_source": "service-export-zip-json",
+            "export_schema": "service-export-zip-json",
+            "evidence_note": (
+                "Recovered from a JSON/JSONL entry inside a service export ZIP; preserve the archive hash and "
+                "verify provider schema/version and account scope before reporting completeness."
+            ),
+        }
+    )
+    return payload
+
+
+def zip_info_modified_at(info: zipfile.ZipInfo) -> str | None:
+    try:
+        return dt_from_zip_tuple(info.date_time).isoformat()
+    except (ValueError, OverflowError):
+        return None
+
+
+def dt_from_zip_tuple(value: tuple[int, int, int, int, int, int]) -> Any:
+    import datetime as _dt
+
+    return _dt.datetime(*value, tzinfo=_dt.timezone.utc)
 
 
 def parse_ai_export_payloads(text: str, *, suffix: str) -> List[Any]:
@@ -913,6 +1058,8 @@ def build_ai_service_export_record(
     parser_version: str,
     source_size: int,
     modified_at: str | None,
+    source_format_override: str | None = None,
+    archive_context: Mapping[str, object] | None = None,
 ) -> ArtifactRecord:
     profile = windows_browser_user_profile(source, root=root)
     service = str(conversation_rows[0].get("ai_service") or infer_ai_service_from_path(source) or "AI service")
@@ -944,6 +1091,8 @@ def build_ai_service_export_record(
         transcript=transcript,
         source_size=source_size,
         modified_at=modified_at,
+        source_format_override=source_format_override,
+        archive_context=archive_context,
     )
     validation_checks = {
         "has_candidate_transcript_rows": bool(conversation_rows),
@@ -962,7 +1111,7 @@ def build_ai_service_export_record(
         "coverage_status": "service-export-json-candidate",
         "reportability": "review",
         "source_path": str(source.resolve()),
-        "source_format": source.suffix.lower().lstrip(".") or "json",
+        "source_format": source_format_override or source.suffix.lower().lstrip(".") or "json",
         "source_hashes": safe_browser_file_hashes(source),
         "source_profile": profile,
         "size": source_size,
@@ -1043,6 +1192,19 @@ def build_ai_service_export_record(
             "deleted-fragment-recovery-and-fp-fn-corpus-required",
         ],
     }
+    if archive_context:
+        details["archive_context"] = dict(archive_context)
+        details["archive_entry_name"] = str(archive_context.get("archive_entry_name") or "")
+        details["archive_entry_index"] = archive_context.get("archive_entry_index")
+        details["archive_entry_crc32"] = str(archive_context.get("archive_entry_crc32") or "")
+        details["archive_entry_size"] = int(archive_context.get("archive_entry_size") or 0)
+        details["archive_entry_modified_at"] = str(archive_context.get("archive_entry_modified_at") or "")
+        details["coverage_status"] = "service-export-zip-json-candidate"
+        details["validation_guidance"] = (
+            "Service export rows were parsed from a ZIP entry and preserve both archive-level and entry-level "
+            "source references. Provider schema version, account scope, archive completeness, and trusted export "
+            "diffs are still required."
+        )
     return ArtifactRecord(
         provider=provider,
         artifact_type="ai-service-export-conversation",
@@ -1060,15 +1222,18 @@ def build_ai_service_export_parser_manifest(
     transcript: Mapping[str, object],
     source_size: int,
     modified_at: str | None,
+    source_format_override: str | None = None,
+    archive_context: Mapping[str, object] | None = None,
 ) -> Dict[str, object]:
     manifest: Dict[str, object] = {
         "manifest_version": "ai-service-export-parser-manifest-v1",
         "parser_version": PARSER_VERSION,
         "source_path": str(source.resolve()),
         "source_file_name": source.name,
-        "source_format": source.suffix.lower().lstrip(".") or "json",
+        "source_format": source_format_override or source.suffix.lower().lstrip(".") or "json",
         "source_size": source_size,
         "source_modified_at": modified_at,
+        "archive_context": dict(archive_context or {}),
         "detected_service": service,
         "service_side_export_parsed": True,
         "schema_version_known": False,
@@ -1079,6 +1244,8 @@ def build_ai_service_export_parser_manifest(
         "large_data_controls": {
             "max_ai_export_files": MAX_AI_EXPORT_FILES,
             "max_ai_export_file_bytes": MAX_AI_EXPORT_FILE_BYTES,
+            "max_ai_export_archive_entries": MAX_AI_EXPORT_ARCHIVE_ENTRIES,
+            "max_ai_export_archive_entry_bytes": MAX_AI_EXPORT_ARCHIVE_ENTRY_BYTES,
             "max_ai_conversation_rows": MAX_AI_CONVERSATION_ROWS,
         },
         "review_workflow": {
