@@ -22,6 +22,7 @@ CLOUD_ARCHIVE_SUFFIXES = {".zip"}
 CLOUD_ARCHIVE_ENTRY_LIMIT = 1000
 CLOUD_ARCHIVE_PARSE_ENTRY_LIMIT = 25
 CLOUD_ARCHIVE_PARSE_ENTRY_MAX_BYTES = 8 * 1024 * 1024
+CLOUD_ARCHIVE_JSON_ROW_LIMIT = 100
 CLOUD_ARCHIVE_MBOX_MESSAGE_LIMIT = 50
 CloudGap = tuple[list[str], str]
 CLOUD_NATIVE_CAPABILITIES = {
@@ -235,7 +236,7 @@ def collect_cloud_archive_embedded_rows(
                     return
                 product = infer_cloud_archive_product(info.filename)
                 suffix = Path(info.filename).suffix.lower()
-                if product != "gmail" or suffix != ".mbox":
+                if suffix not in {".mbox", ".json"}:
                     continue
                 if info.file_size > CLOUD_ARCHIVE_PARSE_ENTRY_MAX_BYTES:
                     continue
@@ -243,27 +244,169 @@ def collect_cloud_archive_embedded_rows(
                     data = archive.read(info)
                 except (RuntimeError, OSError, zipfile.BadZipFile):
                     continue
+                if product == "gmail" and suffix == ".mbox":
+                    parsed_entries += 1
+                    for message_index, row in enumerate(extract_mbox_message_rows(data)):
+                        row = {
+                            **row,
+                            **cloud_archive_row_context(
+                                info,
+                                archive_index=archive_index,
+                                row_index=message_index,
+                                source_format="zip-mbox-entry",
+                                row_index_key="archive_message_index",
+                            ),
+                        }
+                        yield build_record(
+                            path,
+                            artifact_type="cloud-mail",
+                            source_index=(archive_index * CLOUD_ARCHIVE_MBOX_MESSAGE_LIMIT) + message_index + 1,
+                            source_hashes=source_hashes,
+                            details=normalize_cloud_mail(row, source_path=f"{path.resolve()}::{info.filename}"),
+                        )
+                    continue
+                payload = load_json_bytes(data)
+                if payload is None:
+                    continue
                 parsed_entries += 1
-                for message_index, row in enumerate(extract_mbox_message_rows(data)):
-                    row = {
-                        **row,
-                        "source_format": "zip-mbox-entry",
-                        "archive_entry_name": info.filename,
-                        "archive_entry_index": archive_index,
-                        "archive_entry_crc32": f"{info.CRC:08x}",
-                        "archive_entry_size": int(info.file_size),
-                        "archive_entry_modified_at": zip_datetime_iso(info),
-                        "archive_message_index": message_index,
-                    }
-                    yield build_record(
-                        path,
-                        artifact_type="cloud-mail",
-                        source_index=(archive_index * CLOUD_ARCHIVE_MBOX_MESSAGE_LIMIT) + message_index + 1,
-                        source_hashes=source_hashes,
-                        details=normalize_cloud_mail(row, source_path=f"{path.resolve()}::{info.filename}"),
-                    )
+                yield from collect_cloud_json_payload(
+                    path,
+                    payload,
+                    source_hashes=source_hashes,
+                    source_path=f"{path.resolve()}::{info.filename}",
+                    source_index_base=(archive_index * CLOUD_ARCHIVE_JSON_ROW_LIMIT) + 1,
+                    archive_context=cloud_archive_row_context(
+                        info,
+                        archive_index=archive_index,
+                        row_index=0,
+                        source_format="zip-json-entry",
+                        row_index_key="archive_json_row_index",
+                    ),
+                )
     except (OSError, zipfile.BadZipFile, zipfile.LargeZipFile):
         return
+
+
+def cloud_archive_row_context(
+    info: zipfile.ZipInfo,
+    *,
+    archive_index: int,
+    row_index: int,
+    source_format: str,
+    row_index_key: str,
+) -> dict[str, object]:
+    return {
+        "source_format": source_format,
+        "archive_entry_name": info.filename,
+        "archive_entry_index": archive_index,
+        "archive_entry_crc32": f"{info.CRC:08x}",
+        "archive_entry_size": int(info.file_size),
+        "archive_entry_modified_at": zip_datetime_iso(info),
+        row_index_key: row_index,
+    }
+
+
+def with_cloud_archive_context(
+    details: Mapping[str, object],
+    *,
+    archive_context: Mapping[str, object],
+    row_index: int,
+) -> dict[str, object]:
+    detail_payload = dict(details)
+    context = dict(archive_context)
+    if "archive_json_row_index" in context:
+        context["archive_json_row_index"] = row_index
+    detail_payload.update(context)
+    checks = dict(detail_payload.get("validation_checks") or {})
+    checks.update(
+        {
+            "archive_embedded_row": True,
+            "archive_entry_name_present": bool(context.get("archive_entry_name")),
+            "archive_entry_crc32_present": bool(context.get("archive_entry_crc32")),
+            "bounded_archive_entry_parse": True,
+            "archive_json_row_index_present": "archive_json_row_index" in context,
+        }
+    )
+    detail_payload["validation_checks"] = checks
+    risk_flags = list(detail_payload.get("risk_flags") or [])
+    risk_flags.append("provider-archive-embedded-json")
+    detail_payload["risk_flags"] = sorted(set(map(str, risk_flags)))
+    return detail_payload
+
+
+def collect_cloud_json_payload(
+    path: Path,
+    payload: object,
+    *,
+    source_hashes: Mapping[str, str],
+    source_path: str,
+    source_index_base: int = 0,
+    archive_context: Mapping[str, object] | None = None,
+) -> Iterable[ArtifactRecord]:
+    detected = detect_export_type(Path(source_path), payload)
+    if detected == "google-location":
+        rows = extract_google_location_rows(payload)[:CLOUD_ARCHIVE_JSON_ROW_LIMIT if archive_context else None]
+        for index, row in enumerate(rows):
+            details = normalize_google_location(row)
+            if archive_context:
+                details = with_cloud_archive_context(details, archive_context=archive_context, row_index=index)
+            yield build_record(
+                path,
+                artifact_type="cloud-location",
+                source_index=source_index_base + index,
+                source_hashes=source_hashes,
+                details=details,
+            )
+        return
+    if detected == "google-activity":
+        rows = extract_list_rows(payload)[:CLOUD_ARCHIVE_JSON_ROW_LIMIT if archive_context else None]
+        for index, row in enumerate(rows):
+            details = normalize_activity(row)
+            if archive_context:
+                details = with_cloud_archive_context(details, archive_context=archive_context, row_index=index)
+            yield build_record(
+                path,
+                artifact_type="cloud-activity",
+                source_index=source_index_base + index,
+                source_hashes=source_hashes,
+                details=details,
+            )
+        return
+    if detected == "cloud-account":
+        details = normalize_account(payload if isinstance(payload, Mapping) else {}, source_path=source_path)
+        if archive_context:
+            details = with_cloud_archive_context(details, archive_context=archive_context, row_index=0)
+        yield build_record(
+            path,
+            artifact_type="cloud-account",
+            source_index=source_index_base,
+            source_hashes=source_hashes,
+            details=details,
+        )
+        return
+    normalizers = {
+        "cloud-mail": ("cloud-mail", normalize_cloud_mail),
+        "cloud-file": ("cloud-file", normalize_cloud_file),
+        "cloud-message": ("cloud-message", normalize_cloud_message),
+        "cloud-audit": ("cloud-audit", normalize_cloud_audit),
+        "cloud-iaas-audit": ("cloud-iaas-audit", normalize_cloud_iaas_audit),
+    }
+    if detected not in normalizers:
+        return
+    artifact_type, normalizer = normalizers[detected]
+    rows = extract_list_or_single_rows(payload)[:CLOUD_ARCHIVE_JSON_ROW_LIMIT if archive_context else None]
+    for index, row in enumerate(rows):
+        details = normalizer(row, source_path=source_path)
+        if archive_context:
+            details = with_cloud_archive_context(details, archive_context=archive_context, row_index=index)
+        yield build_record(
+            path,
+            artifact_type=artifact_type,
+            source_index=source_index_base + index,
+            source_hashes=source_hashes,
+            details=details,
+        )
+    return
 
 
 def collect_cloud_json(path: Path) -> Iterable[ArtifactRecord]:
@@ -271,86 +414,7 @@ def collect_cloud_json(path: Path) -> Iterable[ArtifactRecord]:
     if payload is None:
         return
     source_hashes = compute_hashes(path)
-    source_path = str(path.resolve())
-    detected = detect_export_type(path, payload)
-    if detected == "google-location":
-        for index, row in enumerate(extract_google_location_rows(payload)):
-            yield build_record(
-                path,
-                artifact_type="cloud-location",
-                source_index=index,
-                source_hashes=source_hashes,
-                details=normalize_google_location(row),
-            )
-        return
-    if detected == "google-activity":
-        for index, row in enumerate(extract_list_rows(payload)):
-            yield build_record(
-                path,
-                artifact_type="cloud-activity",
-                source_index=index,
-                source_hashes=source_hashes,
-                details=normalize_activity(row),
-            )
-        return
-    if detected == "cloud-account":
-        yield build_record(
-            path,
-            artifact_type="cloud-account",
-            source_index=0,
-            source_hashes=source_hashes,
-            details=normalize_account(payload if isinstance(payload, Mapping) else {}, source_path=source_path),
-        )
-        return
-    if detected == "cloud-mail":
-        for index, row in enumerate(extract_list_or_single_rows(payload)):
-            yield build_record(
-                path,
-                artifact_type="cloud-mail",
-                source_index=index,
-                source_hashes=source_hashes,
-                details=normalize_cloud_mail(row, source_path=source_path),
-            )
-        return
-    if detected == "cloud-file":
-        for index, row in enumerate(extract_list_or_single_rows(payload)):
-            yield build_record(
-                path,
-                artifact_type="cloud-file",
-                source_index=index,
-                source_hashes=source_hashes,
-                details=normalize_cloud_file(row, source_path=source_path),
-            )
-        return
-    if detected == "cloud-message":
-        for index, row in enumerate(extract_list_or_single_rows(payload)):
-            yield build_record(
-                path,
-                artifact_type="cloud-message",
-                source_index=index,
-                source_hashes=source_hashes,
-                details=normalize_cloud_message(row, source_path=source_path),
-            )
-        return
-    if detected == "cloud-audit":
-        for index, row in enumerate(extract_list_or_single_rows(payload)):
-            yield build_record(
-                path,
-                artifact_type="cloud-audit",
-                source_index=index,
-                source_hashes=source_hashes,
-                details=normalize_cloud_audit(row, source_path=source_path),
-            )
-        return
-    if detected == "cloud-iaas-audit":
-        for index, row in enumerate(extract_list_or_single_rows(payload)):
-            yield build_record(
-                path,
-                artifact_type="cloud-iaas-audit",
-                source_index=index,
-                source_hashes=source_hashes,
-                details=normalize_cloud_iaas_audit(row, source_path=source_path),
-            )
+    yield from collect_cloud_json_payload(path, payload, source_hashes=source_hashes, source_path=str(path.resolve()))
 
 
 def normalize_cloud_archive(path: Path, *, source_hashes: Mapping[str, str]) -> dict[str, object]:
@@ -668,6 +732,13 @@ def load_json(path: Path) -> object | None:
         return None
 
 
+def load_json_bytes(data: bytes) -> object | None:
+    try:
+        return json.loads(data.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError):
+        return None
+
+
 def detect_export_type(path: Path, payload: object) -> str:
     lowered = str(path).lower()
     if isinstance(payload, Mapping):
@@ -694,12 +765,17 @@ def detect_row_export_type(source_hint: str, row: Mapping[str, object]) -> str:
     keys = {normalize_key(key) for key in row}
     if is_iaas_audit_row(source_hint, keys, row):
         return "cloud-iaas-audit"
+    if (
+        "gmail" in source_hint
+        or "/mail/" in source_hint
+        or keys.intersection({"messageid", "internetmessageid"})
+        or ("subject" in keys and keys.intersection({"to", "torecipients", "senderemailaddress"}))
+    ):
+        return "cloud-mail"
     if any(token in source_hint for token in ("teams", "chat", "messages")) or keys.intersection(
         {"chatid", "channelid", "teamid", "messagetext", "bodycontent"}
     ):
         return "cloud-message"
-    if "gmail" in source_hint or "mail" in source_hint or keys.intersection({"subject", "from", "to", "messageid"}):
-        return "cloud-mail"
     if any(token in source_hint for token in ("drive", "onedrive", "icloud", "photos", "files")) or keys.intersection(
         {"filename", "fileid", "weburl", "downloadurl", "owner", "owners", "size", "mimeType".lower()}
     ):
@@ -1696,6 +1772,7 @@ def build_cloud_export_import_manifest(
             "timestamp",
             "archive_entry_name",
             "archive_message_index",
+            "archive_json_row_index",
         )
         if optional_text(details.get(key))
     }
@@ -1793,6 +1870,7 @@ def build_google_takeout_parser_manifest(
             "account_email",
             "archive_entry_name",
             "archive_message_index",
+            "archive_json_row_index",
         )
         if optional_text(details.get(key))
     }
@@ -1936,6 +2014,8 @@ def build_icloud_export_parser_manifest(
             "mime_type",
             "owner",
             "url_sha256",
+            "archive_entry_name",
+            "archive_json_row_index",
         )
         if optional_text(details.get(key))
     }
@@ -2090,6 +2170,8 @@ def build_m365_export_parser_manifest(
             "timestamp",
             "url_sha256",
             "message_text_sha256",
+            "archive_entry_name",
+            "archive_json_row_index",
         )
         if optional_text(details.get(key))
     }

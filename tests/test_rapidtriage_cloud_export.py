@@ -108,7 +108,7 @@ class RapidTriageCloudExportTests(unittest.TestCase):
 
             self.assertEqual(exit_code, 0)
             payload = json.loads(output.read_text(encoding="utf-8"))
-            self.assertEqual(payload["summary"]["artifact_count"], 2)
+            self.assertEqual(payload["summary"]["artifact_count"], 5)
             artifact = next(item for item in payload["artifacts"] if item["artifact_type"] == "cloud-export-archive")
             self.assertEqual(artifact["artifact_type"], "cloud-export-archive")
             details = artifact["details"]
@@ -166,6 +166,26 @@ class RapidTriageCloudExportTests(unittest.TestCase):
             self.assertTrue(mail_details["validation_checks"]["archive_embedded_row"])
             self.assertTrue(mail_details["validation_checks"]["bounded_archive_entry_parse"])
             self.assertIn("archive_entry_name", mail_details["google_takeout_parser_manifest"]["row_citation"]["row_pivots"])
+            archive_json_mail = next(
+                item
+                for item in payload["artifacts"]
+                if item["artifact_type"] == "cloud-mail"
+                and item["details"].get("source_format") == "zip-json-entry"
+            )
+            json_mail_details = archive_json_mail["details"]
+            self.assertEqual(json_mail_details["subject"], "Exported message")
+            self.assertEqual(json_mail_details["archive_entry_name"], "Takeout/Mail/messages.json")
+            self.assertEqual(json_mail_details["archive_json_row_index"], 0)
+            self.assertIn("provider-archive-embedded-json", json_mail_details["risk_flags"])
+            self.assertTrue(json_mail_details["validation_checks"]["archive_json_row_index_present"])
+            archive_file = next(item for item in payload["artifacts"] if item["artifact_type"] == "cloud-file")
+            self.assertEqual(archive_file["details"]["source_format"], "zip-json-entry")
+            self.assertEqual(archive_file["details"]["file_name"], "case.pdf")
+            self.assertEqual(archive_file["details"]["archive_entry_name"], "Takeout/Drive/My Drive/file-metadata.json")
+            archive_location = next(item for item in payload["artifacts"] if item["artifact_type"] == "cloud-location")
+            self.assertEqual(archive_location["details"]["source_format"], "zip-json-entry")
+            self.assertEqual(archive_location["details"]["latitude"], 37.422)
+            self.assertEqual(archive_location["details"]["archive_entry_name"], "Takeout/Location History/Records.json")
 
     def test_cloud_export_collects_google_location_activity_and_account_rows(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
