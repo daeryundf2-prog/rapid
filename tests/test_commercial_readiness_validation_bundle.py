@@ -86,6 +86,17 @@ class CommercialReadinessValidationBundleTests(unittest.TestCase):
         self.assertTrue(blocker_package["external_evidence_batch"])
         self.assertTrue(blocker_package["package_hash"])
         self.assertIn("known-answer-next-batch", " ".join(blocker_package["recommended_commands"]))
+        self.assertIn("validation-diff-runners", " ".join(blocker_package["recommended_commands"]))
+        evtx_hint = blocker_package["internal_batch"][0]["trusted_diff_runner_hint"]
+        self.assertEqual(evtx_hint["artifact_family"], "evtx")
+        self.assertIn("EvtxECmd", evtx_hint["trusted_tools"])
+        registry_hint = next(
+            row["trusted_diff_runner_hint"]
+            for row in blocker_package["internal_batch"]
+            if row["number"] == 4
+        )
+        self.assertEqual(registry_hint["artifact_family"], "registry")
+        self.assertIn("RECmd", registry_hint["trusted_tools"])
 
     def test_commercial_readiness_attaches_email_external_mac_first_evidence(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:

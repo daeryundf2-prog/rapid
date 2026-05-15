@@ -67,6 +67,68 @@ CATEGORY_PRIORITY = {
     "deployment-operations": 5,
     "unknown": 9,
 }
+TRUSTED_DIFF_RUNNER_HINTS_BY_ITEM: dict[int, dict[str, object]] = {
+    1: {
+        "artifact_family": "evtx",
+        "runner_group_item": 77,
+        "trusted_tools": ["EvtxECmd", "Hayabusa"],
+        "rapid_output_hint": "rapidtriage artifacts --kind eventlog --output rapid-evtx.json",
+        "cross_tool_template": (
+            "rapidtriage cross-tool-validate --rapid-output rapid-evtx.json "
+            "--reference-output evtxecmd=<EvtxECmd.csv> --reference-output hayabusa=<hayabusa.csv> "
+            "--source-evidence <source.evtx> --tool-version evtxecmd=<version> --tool-command evtxecmd=<command> "
+            "--independent-report <review.md> --corpus-scope <scope> --backlog-item 1 --backlog-item 2 --backlog-item 3"
+        ),
+    },
+    2: {
+        "artifact_family": "evtx",
+        "runner_group_item": 77,
+        "trusted_tools": ["EvtxECmd", "Hayabusa"],
+        "rapid_output_hint": "rapidtriage artifacts --kind eventlog --output rapid-evtx.json",
+        "cross_tool_template": (
+            "rapidtriage cross-tool-validate --rapid-output rapid-evtx.json "
+            "--reference-output evtxecmd=<EvtxECmd.csv> --reference-output hayabusa=<hayabusa.csv> "
+            "--source-evidence <source.evtx> --tool-version evtxecmd=<version> --tool-command evtxecmd=<command> "
+            "--independent-report <review.md> --corpus-scope <scope> --backlog-item 1 --backlog-item 2 --backlog-item 3"
+        ),
+    },
+    3: {
+        "artifact_family": "evtx",
+        "runner_group_item": 77,
+        "trusted_tools": ["EvtxECmd", "Hayabusa"],
+        "rapid_output_hint": "rapidtriage artifacts --kind eventlog --output rapid-evtx.json",
+        "cross_tool_template": (
+            "rapidtriage cross-tool-validate --rapid-output rapid-evtx.json "
+            "--reference-output evtxecmd=<EvtxECmd.csv> --reference-output hayabusa=<hayabusa.csv> "
+            "--source-evidence <source.evtx> --tool-version evtxecmd=<version> --tool-command evtxecmd=<command> "
+            "--independent-report <review.md> --corpus-scope <scope> --backlog-item 1 --backlog-item 2 --backlog-item 3"
+        ),
+    },
+    4: {
+        "artifact_family": "registry",
+        "runner_group_item": 78,
+        "trusted_tools": ["RECmd", "Registry Explorer"],
+        "rapid_output_hint": "rapidtriage artifacts --kind registry --output rapid-registry.json",
+        "cross_tool_template": (
+            "rapidtriage cross-tool-validate --rapid-output rapid-registry.json "
+            "--reference-output recmd=<RECmd.csv> --reference-output registryexplorer=<RegistryExplorer.csv> "
+            "--source-evidence <hive> --tool-version recmd=<version> --tool-command recmd=<command> "
+            "--independent-report <review.md> --corpus-scope <scope> --backlog-item 4 --backlog-item 5"
+        ),
+    },
+    5: {
+        "artifact_family": "registry",
+        "runner_group_item": 78,
+        "trusted_tools": ["RECmd", "Registry Explorer"],
+        "rapid_output_hint": "rapidtriage artifacts --kind registry --output rapid-registry.json",
+        "cross_tool_template": (
+            "rapidtriage cross-tool-validate --rapid-output rapid-registry.json "
+            "--reference-output recmd=<RECmd.csv> --reference-output registryexplorer=<RegistryExplorer.csv> "
+            "--source-evidence <hive> --tool-version recmd=<version> --tool-command recmd=<command> "
+            "--independent-report <review.md> --corpus-scope <scope> --backlog-item 4 --backlog-item 5"
+        ),
+    },
+}
 
 
 class CommercialReadinessError(ValueError):
@@ -1728,7 +1790,7 @@ def build_blocker_execution_package(
 def blocker_execution_row(row: Mapping[str, object], *, lane: str) -> dict[str, object]:
     number = int(row.get("number") or 0)
     lanes = row.get("blocker_lanes") if isinstance(row.get("blocker_lanes"), list) else []
-    return {
+    output = {
         "number": number,
         "title": str(row.get("title") or ""),
         "lane": lane,
@@ -1742,6 +1804,10 @@ def blocker_execution_row(row: Mapping[str, object], *, lane: str) -> dict[str, 
         "acceptance_evidence": blocker_acceptance_evidence(row),
         "review_status": "todo",
     }
+    runner_hint = trusted_diff_runner_hint(number)
+    if runner_hint:
+        output["trusted_diff_runner_hint"] = runner_hint
+    return output
 
 
 def blocker_acceptance_evidence(row: Mapping[str, object]) -> list[str]:
@@ -1766,9 +1832,26 @@ def blocker_acceptance_evidence(row: Mapping[str, object]) -> list[str]:
     return evidence
 
 
+def trusted_diff_runner_hint(item_number: int) -> dict[str, object]:
+    hint = TRUSTED_DIFF_RUNNER_HINTS_BY_ITEM.get(item_number)
+    if not hint:
+        return {}
+    return {
+        "profile_version": "trusted-diff-runner-hint-v1",
+        "artifact_family": hint["artifact_family"],
+        "validation_diff_runner_group_item": hint["runner_group_item"],
+        "trusted_tools": list(hint["trusted_tools"]),
+        "rapid_output_hint": hint["rapid_output_hint"],
+        "cross_tool_template": hint["cross_tool_template"],
+        "preflight_command": "rapidtriage validation-diff-runners --json",
+        "claim_rule": "Runner hints prepare validation only; they do not pass trusted-diff gates until outputs and signoff are attached.",
+    }
+
+
 def blocker_execution_commands(item_numbers: list[int]) -> list[str]:
     commands = [
         "rapidtriage commercial-readiness --output-dir ./commercial-readiness --json",
+        "rapidtriage validation-diff-runners --output ./qc/validation-diff-runners.json --json",
     ]
     if item_numbers:
         item_range = ",".join(str(number) for number in item_numbers)
