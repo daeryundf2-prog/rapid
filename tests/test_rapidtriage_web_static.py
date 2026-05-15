@@ -65,6 +65,12 @@ class RapidTriageWebStaticTests(unittest.TestCase):
         app_js = (REPO_ROOT / "rapidtriage" / "web" / "static" / "app.js").read_text(encoding="utf-8")
         styles = (REPO_ROOT / "rapidtriage" / "web" / "static" / "styles.css").read_text(encoding="utf-8")
 
+        self.assertIn("MAC_FIRST_EVIDENCE_STORAGE_KEY", app_js)
+        self.assertIn("bindMacFirstEvidenceControls", app_js)
+        self.assertIn("data-testid=\"mac-first-evidence-form\"", app_js)
+        self.assertIn("Apply Mac evidence", app_js)
+        self.assertIn("clearMacFirstEvidence", app_js)
+        self.assertIn("params.set(\"mac_first_evidence\"", app_js)
         self.assertIn("renderMacFirstEvidenceRows", app_js)
         self.assertIn("macFirstEvidenceSummaryText", app_js)
         self.assertIn("data-testid=\"mac-first-evidence-rows\"", app_js)
@@ -74,6 +80,8 @@ class RapidTriageWebStaticTests(unittest.TestCase):
         self.assertIn("trusted diff", app_js)
         self.assertIn("mac-first-evidence-rows", styles)
         self.assertIn("mac-first-evidence-list", styles)
+        self.assertIn("mac-first-evidence-form", styles)
+        self.assertIn("mac-first-evidence-controls", styles)
 
     def test_search_results_expose_review_facets_for_fast_triage(self) -> None:
         app_js = (REPO_ROOT / "rapidtriage" / "web" / "static" / "app.js").read_text(encoding="utf-8")

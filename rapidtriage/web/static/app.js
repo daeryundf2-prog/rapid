@@ -14,6 +14,7 @@ const runList = document.querySelector("#runList");
 const detailPanel = document.querySelector("#detailPanel");
 const RUN_FORM_STORAGE_KEY = "rapidtriage.runForm.v1";
 const WORKBENCH_SESSION_STORAGE_KEY = "rapidtriage.workbenchSession.v1";
+const MAC_FIRST_EVIDENCE_STORAGE_KEY = "rapidtriage.macFirstEvidencePath.v1";
 const SEARCH_STORAGE_PREFIX = "rapidtriage.search.";
 const SEARCH_HISTORY_PREFIX = "rapidtriage.searchHistory.";
 const COMPARE_STORAGE_PREFIX = "rapidtriage.compare.";
@@ -198,6 +199,7 @@ async function loadRunDetail(runId, tab = "summary") {
   detailPanel.innerHTML = renderDetailShell(selectedRun, activeTab);
   bindTabButtons();
   restoreWorkbenchControls();
+  bindMacFirstEvidenceControls();
   persistWorkbenchSession();
   loadRunValidationPackageSummary(runId);
   loadCommercialReadinessSummary();
@@ -695,6 +697,15 @@ function renderWorkbenchSmokePanel(run) {
       <div id="commercialReadinessPanel" class="commercial-readiness-panel" data-testid="commercial-readiness-panel">
         <p class="empty-state">Commercial readiness gate will appear here. Do not claim commercial parity until this gate allows it.</p>
       </div>
+      <form id="macFirstEvidenceForm" class="mac-first-evidence-form" data-testid="mac-first-evidence-form">
+        <label for="macFirstEvidencePath">Mac evidence/QC folder</label>
+        <div class="mac-first-evidence-controls">
+          <input id="macFirstEvidencePath" name="mac_first_evidence" type="text" placeholder="./qc or ./qc/macos-live-smoke.json" autocomplete="off" />
+          <button type="submit">Apply Mac evidence</button>
+          <button type="button" id="clearMacFirstEvidence" class="secondary-button">Clear</button>
+        </div>
+        <p class="help-text">맥에서 만든 <code>macos-live-smoke.json</code>, <code>large-case-readiness.json</code>, <code>email-external-parser.json</code> 또는 그 파일들이 들어있는 QC 폴더를 입력하면 readiness API에 붙여서 다시 계산합니다.</p>
+      </form>
     </section>
   `;
 }
@@ -716,11 +727,58 @@ async function loadCommercialReadinessSummary() {
   if (!panel) return;
   panel.innerHTML = '<p class="empty-state">Loading commercial readiness gate...</p>';
   try {
-    const payload = await api("/api/commercial-readiness?next_gate=commercial_grade&limit=8&include_internal_validation=true");
+    const params = new URLSearchParams({
+      next_gate: "commercial_grade",
+      limit: "8",
+      include_internal_validation: "true",
+    });
+    const macFirstEvidencePath = getStoredMacFirstEvidencePath();
+    if (macFirstEvidencePath) {
+      params.set("mac_first_evidence", macFirstEvidencePath);
+    }
+    const payload = await api(`/api/commercial-readiness?${params.toString()}`);
     panel.innerHTML = renderCommercialReadinessSummary(payload);
   } catch (error) {
     panel.innerHTML = `<p class="empty-state">${escapeHtml(error.message)}</p>`;
   }
+}
+
+function getStoredMacFirstEvidencePath() {
+  try {
+    return localStorage.getItem(MAC_FIRST_EVIDENCE_STORAGE_KEY)?.trim() || "";
+  } catch {
+    return "";
+  }
+}
+
+function setStoredMacFirstEvidencePath(value) {
+  try {
+    const trimmed = String(value || "").trim();
+    if (trimmed) {
+      localStorage.setItem(MAC_FIRST_EVIDENCE_STORAGE_KEY, trimmed);
+    } else {
+      localStorage.removeItem(MAC_FIRST_EVIDENCE_STORAGE_KEY);
+    }
+  } catch {
+    // localStorage may be disabled; the form still refreshes the current panel state.
+  }
+}
+
+function bindMacFirstEvidenceControls() {
+  const form = detailPanel.querySelector("#macFirstEvidenceForm");
+  const input = detailPanel.querySelector("#macFirstEvidencePath");
+  if (!form || !input) return;
+  input.value = getStoredMacFirstEvidencePath();
+  form.addEventListener("submit", (event) => {
+    event.preventDefault();
+    setStoredMacFirstEvidencePath(input.value);
+    loadCommercialReadinessSummary();
+  });
+  detailPanel.querySelector("#clearMacFirstEvidence")?.addEventListener("click", () => {
+    input.value = "";
+    setStoredMacFirstEvidencePath("");
+    loadCommercialReadinessSummary();
+  });
 }
 
 function renderCommercialReadinessSummary(payload) {

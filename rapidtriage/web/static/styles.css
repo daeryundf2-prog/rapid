@@ -5221,6 +5221,31 @@ body::before {
   border-color: rgba(12, 88, 130, 0.12);
 }
 
+.mac-first-evidence-form {
+  display: grid;
+  gap: 8px;
+  border: 1px solid rgba(15, 116, 107, 0.14);
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.68);
+  padding: 12px;
+}
+
+.mac-first-evidence-form label {
+  color: var(--ink);
+  font-size: 0.78rem;
+  font-weight: 850;
+}
+
+.mac-first-evidence-controls {
+  display: grid;
+  grid-template-columns: minmax(180px, 1fr) auto auto;
+  gap: 8px;
+}
+
+.mac-first-evidence-controls input {
+  min-width: 0;
+}
+
 .case-command-bar {
   top: 10px;
   border-radius: 20px;
