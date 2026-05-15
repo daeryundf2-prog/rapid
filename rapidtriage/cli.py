@@ -1519,6 +1519,7 @@ def build_parser() -> argparse.ArgumentParser:
               rapidtriage commercial-readiness --json
               rapidtriage commercial-readiness --output-dir ./commercial-readiness --json
               rapidtriage commercial-readiness --validation-package ./validation/rapidtriage-validation-package.json --json
+              rapidtriage commercial-readiness --validation-package ./validation/core-001-025.json --validation-package ./validation/core-026-030.json --json
               rapidtriage commercial-readiness --next-gate validated --limit 10
               rapidtriage commercial-readiness --next-gate validated --limit 5 --write-known-answer-template ./known-answer-runs.template.json
               rapidtriage commercial-readiness --template-items 1-120 --template-batch-size 5 --write-known-answer-template-dir ./known-answer-batches
@@ -1531,7 +1532,8 @@ def build_parser() -> argparse.ArgumentParser:
     commercial_readiness.add_argument("--output-dir", help="Optional directory for JSON and Markdown gate reports")
     commercial_readiness.add_argument(
         "--validation-package",
-        help="Optional validation package or known-answer manifest that maps passing datasets to backlog item numbers",
+        action="append",
+        help="Optional validation package or known-answer manifest that maps passing datasets to backlog item numbers; repeat to combine batches",
     )
     commercial_readiness.add_argument(
         "--next-gate",
@@ -3063,9 +3065,9 @@ def main(argv=None) -> int:
             payload = build_commercial_readiness_report(
                 backlog_path=Path(args.backlog).expanduser().resolve() if args.backlog else None,
                 output_dir=Path(args.output_dir).expanduser().resolve() if args.output_dir else None,
-                validation_package_path=(
-                    Path(args.validation_package).expanduser().resolve() if args.validation_package else None
-                ),
+                validation_package_paths=[
+                    Path(path).expanduser().resolve() for path in (args.validation_package or [])
+                ],
                 uplift_targets=args.uplift_targets,
                 uplift_batch_size=args.uplift_batch_size,
             )

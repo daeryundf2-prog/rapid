@@ -144,6 +144,29 @@ rapidtriage sample --run --overwrite
 | commercial readiness | `rapidtriage commercial-readiness --json` |
 | validation package | `rapidtriage validation --output-dir ./rapidtriage-validation --overwrite` |
 
+문서와 스키마:
+
+- Output schema: `docs/rapidtriage-output-schema.md`
+- Extended output schemas: `docs/rapidtriage-output-schemas.md`
+- Windows quickstart: `docs/rapidtriage-windows-quickstart.md`
+- Rule engine and IOC lookup: `docs/rapidtriage-rule-engine.md`
+- Rule sample: `docs/samples/rapidtriage-rules.sample.yaml`
+- JSON schemas: `rapidtriage/schemas/manifest.schema.json`, `rapidtriage/schemas/compare.schema.json`
+- Sample JSON: `docs/samples/rapidtriage-manifest.sample.json`, `docs/samples/rapidtriage-docs.sample.json`, `docs/samples/rapidtriage-files.sample.json`, `docs/samples/rapidtriage-extract.sample.json`, `docs/samples/rapidtriage-artifacts.sample.json`, `docs/samples/rapidtriage-run-summary.sample.json`
+
+계약 상태:
+
+- Implemented: `manifest`, `docs`, `files`, `extract`, `artifacts`, `timeline`, `indicators`, `compare`, `run`, case DB, review, report-candidate, validation package, and commercial-readiness workflows are callable from CLI/API/GUI paths.
+- Experimental: source viewers, large-case cursor/resume, E01/Ex01 mount/export workflows, Windows artifact parsers, browser/AI traces, messenger/email/cloud importers, and validation gates need broader corpus and platform validation before 상용급 표현이 가능합니다.
+- Planned: full native parser parity, independent validation, signed installers, external signing/notarization, 10TB stress evidence, staffed support, and complete chain-of-custody release operations remain operator/release work.
+
+`case-db` stores bookmarks from implemented `files`, `docs`, `artifacts`, `timeline`, `indicators`, and `compare` outputs. `compare` compares two individual evidence/export files. Example commands:
+
+```bash
+rapidtriage run . --mode fraud --output-dir ./rapidtriage-run-fraud
+rapidtriage artifacts . --kind browser
+```
+
 ## 지원 입력 범위
 
 | 입력 종류 | 현재 처리 방식 | 주의사항 |

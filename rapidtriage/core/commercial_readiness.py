@@ -113,6 +113,38 @@ def load_validation_evidence(validation_package_path: Path | None = None) -> dic
     return evidence_by_item
 
 
+def resolve_validation_package_paths(
+    *,
+    validation_package_path: Path | None = None,
+    validation_package_paths: Iterable[Path] | None = None,
+) -> list[Path]:
+    paths: list[Path] = []
+    if validation_package_path is not None:
+        paths.append(validation_package_path)
+    paths.extend(path for path in (validation_package_paths or []) if path is not None)
+
+    resolved_paths: list[Path] = []
+    seen: set[str] = set()
+    for path in paths:
+        resolved = path.expanduser().resolve()
+        key = str(resolved)
+        if key in seen:
+            continue
+        seen.add(key)
+        resolved_paths.append(resolved)
+    return resolved_paths
+
+
+def load_validation_evidence_packages(
+    validation_package_paths: Iterable[Path] | None = None,
+) -> dict[int, list[dict[str, object]]]:
+    evidence_by_item: dict[int, list[dict[str, object]]] = {}
+    for validation_package_path in validation_package_paths or []:
+        for item_number, evidence_rows in load_validation_evidence(validation_package_path).items():
+            evidence_by_item.setdefault(item_number, []).extend(evidence_rows)
+    return evidence_by_item
+
+
 def validation_evidence_paths_present(dataset: Mapping[str, object], *, manifest_path: Path) -> bool:
     explicit = dataset.get("evidence_paths_present")
     if explicit is False:
@@ -505,6 +537,7 @@ def build_commercial_readiness_report(
     backlog_path: Path | None = None,
     output_dir: Path | None = None,
     validation_package_path: Path | None = None,
+    validation_package_paths: Iterable[Path] | None = None,
     uplift_targets: int = COMMERCIAL_UPLIFT_DEFAULT_TARGET_COUNT,
     uplift_batch_size: int = COMMERCIAL_UPLIFT_DEFAULT_BATCH_SIZE,
 ) -> dict[str, object]:
@@ -516,10 +549,18 @@ def build_commercial_readiness_report(
     if not items:
         raise CommercialReadinessError(f"no numbered backlog items found in: {backlog_path}")
 
+    resolved_validation_package_paths = resolve_validation_package_paths(
+        validation_package_path=validation_package_path,
+        validation_package_paths=validation_package_paths,
+    )
     validation_evidence_summary = attach_validation_evidence(
         items,
-        load_validation_evidence(validation_package_path),
+        load_validation_evidence_packages(resolved_validation_package_paths),
     )
+    validation_evidence_summary["validation_package_count"] = len(resolved_validation_package_paths)
+    validation_evidence_summary["validation_package_paths"] = [
+        str(path) for path in resolved_validation_package_paths
+    ]
     non_commercial = [item for item in items if not item["commercial_grade_ready"]]
     status_counts: dict[str, int] = {}
     severity_counts: dict[str, int] = {}

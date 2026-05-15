@@ -1618,6 +1618,80 @@ class RapidTriageOpsTests(unittest.TestCase):
         self.assertFalse(first_item["maturity_gates"]["commercial_grade"]["passed"])
         self.assertEqual(first_item["next_required_gate"], "commercial_grade")
 
+    def test_commercial_readiness_combines_repeated_validation_packages(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            evidence_a = root / "evtx-known-answer.diff.json"
+            evidence_b = root / "mobile-export-known-answer.diff.json"
+            evidence_a.write_text('{"status":"pass"}', encoding="utf-8")
+            evidence_b.write_text('{"status":"pass"}', encoding="utf-8")
+            validation_package_a = root / "validation-a.json"
+            validation_package_b = root / "validation-b.json"
+            validation_package_a.write_text(
+                json.dumps(
+                    {
+                        "command": "validation",
+                        "known_answer_validation": {
+                            "datasets": [
+                                {
+                                    "id": "evtx-core-known-answer",
+                                    "name": "EVTX core known-answer",
+                                    "status": "pass",
+                                    "backlog_items": [1, 2],
+                                    "evidence_paths": [str(evidence_a)],
+                                }
+                            ]
+                        },
+                    }
+                ),
+                encoding="utf-8",
+            )
+            validation_package_b.write_text(
+                json.dumps(
+                    {
+                        "command": "validation",
+                        "known_answer_validation": {
+                            "datasets": [
+                                {
+                                    "id": "mobile-export-known-answer",
+                                    "name": "Mobile export known-answer",
+                                    "status": "pass",
+                                    "backlog_items": [26],
+                                    "evidence_paths": [str(evidence_b)],
+                                }
+                            ]
+                        },
+                    }
+                ),
+                encoding="utf-8",
+            )
+            stdout = io.StringIO()
+            with contextlib.redirect_stdout(stdout):
+                exit_code = main(
+                    [
+                        "commercial-readiness",
+                        "--validation-package",
+                        str(validation_package_a),
+                        "--validation-package",
+                        str(validation_package_b),
+                        "--json",
+                    ]
+                )
+
+        self.assertEqual(exit_code, 0)
+        payload = json.loads(stdout.getvalue())
+        summary = payload["validation_evidence_summary"]
+        self.assertEqual(summary["validation_package_count"], 2)
+        self.assertEqual(summary["items_with_passed_validation_evidence"], 3)
+        self.assertEqual(summary["mapped_item_numbers"], [1, 2, 26])
+        self.assertEqual(
+            summary["validation_package_paths"],
+            [str(validation_package_a.resolve()), str(validation_package_b.resolve())],
+        )
+        item_26 = next(item for item in payload["all_items"] if item["number"] == 26)
+        self.assertTrue(item_26["maturity_gates"]["validated"]["passed"])
+        self.assertEqual(item_26["next_required_gate"], "commercial_grade")
+
     def test_commercial_readiness_requires_present_validation_evidence_paths(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             validation_package = Path(tmp_dir) / "validation.json"
