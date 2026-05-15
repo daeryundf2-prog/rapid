@@ -128,6 +128,61 @@ class CommercialReadinessValidationBundleTests(unittest.TestCase):
         self.assertEqual(row["evidence_manifest_hash"], "m" * 64)
         self.assertFalse(report["commercial_claim_allowed"])
 
+    def test_commercial_readiness_discovers_mac_first_evidence_from_directory(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir) / "qc"
+            smoke_dir = root / "macos-live"
+            email_dir = root / "email-external"
+            smoke_dir.mkdir(parents=True)
+            email_dir.mkdir(parents=True)
+            (smoke_dir / "macos-live-smoke.json").write_text(
+                json.dumps(
+                    {
+                        "command": "macos-live-smoke",
+                        "profile_version": "macos-live-smoke-v1",
+                        "summary": {
+                            "local_smoke_score": 85.71,
+                            "failed_check_ids": ["forensic-cross-tool-ready"],
+                        },
+                        "readiness_attachment": {"supported_backlog_items": [66, 68]},
+                        "commercial_grade_blockers": ["windows-e01-real-image-validation-not-run"],
+                    },
+                    ensure_ascii=False,
+                ),
+                encoding="utf-8",
+            )
+            (email_dir / "email-external-parser.json").write_text(
+                json.dumps(
+                    {
+                        "command": "email-external-parse",
+                        "profile_version": "email-external-parser-wrapper-v2",
+                        "status": "failed",
+                        "summary": {"export_file_count": 0, "ready_for_trusted_diff": False},
+                        "commercial_uplift_evidence": {
+                            "target_items": [36, 55, 90],
+                            "failed_or_blocked_checks": ["email_external_tool_available"],
+                        },
+                        "commercial_grade_blockers": ["trusted-libpff-readpst-outlook-diff-required"],
+                    },
+                    ensure_ascii=False,
+                ),
+                encoding="utf-8",
+            )
+
+            report = build_commercial_readiness_report(mac_first_evidence_paths=[root])
+
+        mac_first = report["mac_first_evidence_summary"]
+        self.assertTrue(mac_first["attached"])
+        self.assertEqual(mac_first["evidence_count"], 2)
+        self.assertEqual(
+            sorted(row["command"] for row in mac_first["rows"]),
+            ["email-external-parse", "macos-live-smoke"],
+        )
+        self.assertIn(36, mac_first["supports_backlog_items"])
+        self.assertIn(66, mac_first["supports_backlog_items"])
+        self.assertIn("email_external_tool_available", mac_first["failed_check_counts"])
+        self.assertIn("windows-e01-real-image-validation-not-run", mac_first["blocker_counts"])
+
 
 if __name__ == "__main__":
     unittest.main()

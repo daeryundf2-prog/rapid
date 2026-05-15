@@ -159,6 +159,12 @@ MAC_FIRST_EVIDENCE_COMMANDS = {
     "large-case-readiness",
     "email-external-parse",
 }
+MAC_FIRST_EVIDENCE_FILENAMES = {
+    "macos-live-smoke.json",
+    "large-case-readiness.json",
+    "email-external-parser.json",
+}
+MAC_FIRST_EVIDENCE_DISCOVERY_MAX_FILES = 100
 
 
 def _mac_first_evidence_target_items(raw: Mapping[str, object]) -> list[int]:
@@ -189,6 +195,48 @@ def _mac_first_evidence_target_items(raw: Mapping[str, object]) -> list[int]:
         if command in {"macos-live-smoke", "large-case-readiness"}:
             target_items.extend(MAC_FIRST_PREPARABLE_BACKLOG_ITEMS)
     return target_items
+
+
+def discover_mac_first_evidence_paths(root: Path) -> list[Path]:
+    resolved = root.expanduser().resolve()
+    if not resolved.exists():
+        raise CommercialReadinessError(f"Mac-first evidence path not found: {resolved}")
+    if resolved.is_file():
+        return [resolved]
+    if not resolved.is_dir():
+        raise CommercialReadinessError(f"Mac-first evidence path is not a file or directory: {resolved}")
+
+    discovered: list[Path] = []
+    seen: set[str] = set()
+    for name in sorted(MAC_FIRST_EVIDENCE_FILENAMES):
+        for candidate in resolved.rglob(name):
+            candidate_resolved = candidate.resolve()
+            key = str(candidate_resolved)
+            if key in seen:
+                continue
+            seen.add(key)
+            discovered.append(candidate_resolved)
+            if len(discovered) >= MAC_FIRST_EVIDENCE_DISCOVERY_MAX_FILES:
+                return discovered
+    if not discovered:
+        raise CommercialReadinessError(
+            f"no supported Mac-first evidence JSON found under {resolved}; expected one of "
+            f"{sorted(MAC_FIRST_EVIDENCE_FILENAMES)}"
+        )
+    return discovered
+
+
+def resolve_mac_first_evidence_paths(paths: Iterable[Path] | None = None) -> list[Path]:
+    resolved_paths: list[Path] = []
+    seen: set[str] = set()
+    for path in paths or []:
+        for discovered in discover_mac_first_evidence_paths(path):
+            key = str(discovered)
+            if key in seen:
+                continue
+            seen.add(key)
+            resolved_paths.append(discovered)
+    return resolved_paths
 
 
 def load_mac_first_evidence(path: Path) -> dict[str, object]:
@@ -244,7 +292,7 @@ def load_mac_first_evidence(path: Path) -> dict[str, object]:
 def build_mac_first_evidence_summary(
     mac_first_evidence_paths: Iterable[Path] | None = None,
 ) -> dict[str, object]:
-    rows = [load_mac_first_evidence(path) for path in (mac_first_evidence_paths or [])]
+    rows = [load_mac_first_evidence(path) for path in resolve_mac_first_evidence_paths(mac_first_evidence_paths)]
     blocker_counts: dict[str, int] = {}
     failed_check_counts: dict[str, int] = {}
     for row in rows:
