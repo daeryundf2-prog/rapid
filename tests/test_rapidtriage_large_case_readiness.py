@@ -46,6 +46,19 @@ class RapidTriageLargeCaseReadinessTests(unittest.TestCase):
             self.assertEqual(payload["summary"]["largest_benchmark_record_count"], 100_000)
             self.assertTrue(payload["case_db_profile"]["attached"])
             self.assertIn("artifact_fts", payload["case_db_profile"]["fts_tables"])
+            self.assertTrue(payload["summary"]["case_db_search_diagnostics_ready"])
+            self.assertEqual(
+                payload["case_db_profile"]["search_diagnostics"]["profile_version"],
+                "case-db-search-diagnostics-v1",
+            )
+            self.assertEqual(payload["case_db_profile"]["search_diagnostics"]["keyword"], "needle")
+            self.assertRegex(payload["case_db_profile"]["search_diagnostics"]["profile_hash"], r"^[0-9a-f]{64}$")
+            self.assertTrue(
+                all(
+                    item["query_plan_available"]
+                    for item in payload["case_db_profile"]["search_diagnostics"]["fts_tables"]
+                )
+            )
             self.assertRegex(payload["manifest_hash"], r"^[0-9a-f]{64}$")
             self.assertTrue(
                 any(check["id"] == "sqlite-fts-100k-or-higher" and check["passed"] for check in payload["checks"])
@@ -91,6 +104,9 @@ class RapidTriageLargeCaseReadinessTests(unittest.TestCase):
         self.assertFalse(payload["summary"]["case_db_attached"])
         self.assertTrue(
             any(check["id"] == "case-db-attached" and not check["passed"] for check in payload["checks"])
+        )
+        self.assertTrue(
+            any(check["id"] == "case-db-search-diagnostics-ready" and not check["passed"] for check in payload["checks"])
         )
 
 

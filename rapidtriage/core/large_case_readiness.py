@@ -51,7 +51,11 @@ def build_large_case_readiness_report(
         load_sqlite_fts_benchmark(path.expanduser().resolve())
         for path in (benchmark_paths or [])
     ]
-    case_db_profile = profile_case_db(case_db_path.expanduser().resolve()) if case_db_path else {"attached": False}
+    case_db_profile = (
+        profile_case_db(case_db_path.expanduser().resolve(), keyword=normalized_keyword)
+        if case_db_path
+        else {"attached": False}
+    )
     checks = build_large_case_checks(
         benchmarks=benchmarks,
         case_db_profile=case_db_profile,
@@ -87,6 +91,9 @@ def build_large_case_readiness_report(
             "largest_benchmark_record_count": max(record_counts) if record_counts else 0,
             "benchmark_count": len(benchmarks),
             "case_db_attached": bool(case_db_profile.get("attached")),
+            "case_db_search_diagnostics_ready": bool(
+                ((case_db_profile.get("search_diagnostics") or {}).get("ready"))
+            ),
             "commercial_blocker_count": len(large_case_commercial_blockers(record_counts)),
         },
         "checks": checks,
@@ -143,7 +150,7 @@ def load_sqlite_fts_benchmark(path: Path) -> dict[str, object]:
     }
 
 
-def profile_case_db(path: Path) -> dict[str, object]:
+def profile_case_db(path: Path, *, keyword: str = "needle") -> dict[str, object]:
     if not path.is_file():
         raise LargeCaseReadinessError(f"Case DB not found: {path}")
     with contextlib.closing(sqlite3.connect(f"file:{path}?mode=ro", uri=True)) as connection:
@@ -178,6 +185,7 @@ def profile_case_db(path: Path) -> dict[str, object]:
             "freelist_count": read_pragma(connection, "freelist_count"),
         }
         assessment = case_db_fts_optimization_assessment(connection)
+        search_diagnostics = case_db_search_diagnostics(connection, keyword=keyword, fts_tables=fts_tables)
 
     profile_without_hash: dict[str, object] = {
         "attached": True,
@@ -193,6 +201,7 @@ def profile_case_db(path: Path) -> dict[str, object]:
         "total_profiled_rows": sum(table_counts.values()),
         "sqlite_pragmas": pragmas,
         "case_db_fts_optimization": assessment,
+        "search_diagnostics": search_diagnostics,
     }
     profile = dict(profile_without_hash)
     profile["profile_hash"] = stable_backend_sha256(profile_without_hash)
@@ -215,6 +224,85 @@ def read_pragma(connection: sqlite3.Connection, pragma_name: str) -> object:
     if row is None:
         return None
     return row[0]
+
+
+def case_db_search_diagnostics(
+    connection: sqlite3.Connection,
+    *,
+    keyword: str,
+    fts_tables: Sequence[str],
+) -> dict[str, object]:
+    normalized_keyword = keyword.strip() or "needle"
+    table_profiles = [
+        case_db_fts_table_search_profile(connection, table_name=table_name, keyword=normalized_keyword)
+        for table_name in fts_tables
+    ]
+    ready = bool(table_profiles) and all(bool(item.get("query_plan_available")) for item in table_profiles)
+    core: dict[str, object] = {
+        "profile_version": "case-db-search-diagnostics-v1",
+        "keyword": normalized_keyword,
+        "ready": ready,
+        "fts_table_count": len(table_profiles),
+        "fts_tables": table_profiles,
+        "diagnostic_scope": [
+            "fts-row-count",
+            "keyword-match-count",
+            "explain-query-plan",
+            "stable-table-profile-hash",
+        ],
+        "commercial_gap_ids": ["#66", "#74", "#78", "#79"],
+        "commercial_claim_allowed": False,
+        "blockers": [
+            "attach-real-million-row-case-db-search-run-before-commercial-claim",
+            "attach-ui-virtualization-evidence-for-large-result-review",
+            "attach-trusted-tool-query-plan-or-known-answer-diff",
+        ],
+    }
+    return {**core, "profile_hash": stable_backend_sha256(core)}
+
+
+def case_db_fts_table_search_profile(
+    connection: sqlite3.Connection,
+    *,
+    table_name: str,
+    keyword: str,
+) -> dict[str, object]:
+    quoted = quote_sqlite_identifier(table_name)
+    errors: list[str] = []
+    row_count = -1
+    keyword_match_count = -1
+    plan_details: list[str] = []
+    try:
+        row = connection.execute(f"SELECT COUNT(*) AS count FROM {quoted}").fetchone()
+        row_count = int(row["count"] if isinstance(row, sqlite3.Row) else row[0])
+    except sqlite3.DatabaseError as exc:
+        errors.append(f"row-count-error:{exc}")
+    try:
+        row = connection.execute(f"SELECT COUNT(*) AS count FROM {quoted} WHERE {quoted} MATCH ?", (keyword,)).fetchone()
+        keyword_match_count = int(row["count"] if isinstance(row, sqlite3.Row) else row[0])
+    except sqlite3.DatabaseError as exc:
+        errors.append(f"match-count-error:{exc}")
+    try:
+        rows = connection.execute(
+            f"EXPLAIN QUERY PLAN SELECT rowid FROM {quoted} WHERE {quoted} MATCH ? LIMIT 100",
+            (keyword,),
+        ).fetchall()
+        plan_details = [str(row["detail"] if isinstance(row, sqlite3.Row) else row[-1]) for row in rows]
+    except sqlite3.DatabaseError as exc:
+        errors.append(f"query-plan-error:{exc}")
+    core: dict[str, object] = {
+        "table": table_name,
+        "row_count": row_count,
+        "keyword_match_count": keyword_match_count,
+        "query_plan_available": bool(plan_details) and not any(item.startswith("query-plan-error:") for item in errors),
+        "query_plan_details": plan_details,
+        "errors": errors,
+    }
+    return {**core, "table_profile_hash": stable_backend_sha256(core)}
+
+
+def quote_sqlite_identifier(identifier: str) -> str:
+    return '"' + identifier.replace('"', '""') + '"'
 
 
 def build_large_case_checks(
@@ -277,6 +365,14 @@ def build_large_case_checks(
             int(case_db_profile.get("index_count") or 0) > 0,
             "Case DB has non-SQLite hot-path indexes.",
         ),
+        readiness_check(
+            "case-db-search-diagnostics-ready",
+            bool(((case_db_profile.get("search_diagnostics") or {}).get("ready"))),
+            "Case DB search diagnostics include FTS row counts, MATCH counts, and query plans.",
+            evidence=[
+                str(((case_db_profile.get("search_diagnostics") or {}).get("profile_hash")) or ""),
+            ],
+        ),
     ]
 
 
@@ -319,5 +415,7 @@ def large_case_next_actions(record_counts: Sequence[int], case_db_profile: Mappi
         actions.append("Run a 10M row SQLite FTS benchmark overnight before commercial large-case claims.")
     if not case_db_profile.get("attached"):
         actions.append("Attach a real Case DB with imported evidence to profile FTS/index/table counts.")
+    elif not ((case_db_profile.get("search_diagnostics") or {}).get("ready")):
+        actions.append("Regenerate the Case DB or investigate missing FTS query plans before large-case search claims.")
     actions.append("Repeat this report after every indexing/search change and commit the JSON as validation evidence.")
     return actions

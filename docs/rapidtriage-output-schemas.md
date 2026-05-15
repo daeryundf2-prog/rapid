@@ -125,7 +125,8 @@ The sample JSON uses a few placeholders so the examples stay stable across machi
 - `status`: `internal-evidence-present` only when attached evidence passes the local checks; otherwise `needs-large-case-evidence`.
 - `checks[]`: stable pass/fail rows for attached SQLite FTS benchmark JSON, 100k/1M/10M coverage, seeded hit-count parity, p95 threshold, Case DB attachment, FTS tables, and hot-path indexes.
 - `benchmarks[]`: normalized summary of each `sqlite-fts-benchmark` JSON with record count, p50/p95 latency, expected-vs-returned hit counts, query-plan hash, and proof manifest hash.
-- `case_db_profile`: optional read-only profile of the RapidTriage Case DB, including table counts, FTS tables, index names, SQLite pragmas, and the existing Case DB FTS optimization assessment.
+- `case_db_profile`: optional read-only profile of the RapidTriage Case DB, including table counts, FTS tables, index names, SQLite pragmas, the existing Case DB FTS optimization assessment, and `search_diagnostics`.
+- `case_db_profile.search_diagnostics`: `case-db-search-diagnostics-v1` records the readiness keyword, per-FTS-table row counts, keyword `MATCH` counts, `EXPLAIN QUERY PLAN` details, stable table hashes, blockers, and a profile hash. This is Mac-local evidence that Case DB search is wired to FTS paths; it is still not a commercial large-case claim without 1M/10M benchmark JSON, UI virtualization evidence, and trusted-tool/known-answer diffs.
 - `search_backend_contract`: the current search backend contract for the representative keyword and corpus estimate.
 - `commercial_grade_ready` is intentionally `false` until real 1TB/10TB stress evidence, UI virtualization evidence, cursor API regression evidence, and independent/lab validation are attached.
 
