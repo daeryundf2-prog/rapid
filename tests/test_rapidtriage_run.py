@@ -953,6 +953,14 @@ class RapidTriageRunTests(unittest.TestCase):
             self.assertEqual(set(payload["hashes"]), {"md5", "sha1", "sha256"})
             self.assertTrue(payload["forensic_read_profile"]["path_inside_analysis_root"])
             self.assertFalse(payload["reportability_decision"]["decision"].startswith("ready"))
+            citation = payload["source_citation_package"]
+            self.assertEqual(citation["profile_version"], "source-read-citation-package-v1")
+            self.assertEqual(citation["source_hash_status"], "present")
+            self.assertIn("Users/alice/Documents/wire-transfer-notes.txt", citation["citation_text"])
+            self.assertIn("sha256:", citation["citation_text"])
+            self.assertIn("Current-file hit:", citation["review_note_template"])
+            self.assertIn("Snippet:", citation["review_note_template"])
+            self.assertEqual(len(citation["package_hash"]), 64)
 
     def test_source_read_command_opens_bounded_sqlite_table_locator(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -1011,6 +1019,12 @@ class RapidTriageRunTests(unittest.TestCase):
             self.assertEqual(len(preview["sqlite_table_locator_manifest_hash"]), 64)
             self.assertIn("sha256", payload["hashes"])
             self.assertEqual(payload["forensic_read_profile"]["source_locator_type"], "sqlite-table-page")
+            citation = payload["source_citation_package"]
+            self.assertIn("sqlite table messages", citation["citation_text"])
+            self.assertIn("password", citation["snippet"])
+            self.assertEqual(citation["source_locator"]["locator_type"], "sqlite-table-page")
+            self.assertTrue(citation["ready_for_review_note"])
+            self.assertFalse(citation["ready_for_court_report"])
 
     def test_source_read_command_rejects_paths_outside_analysis_root(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:

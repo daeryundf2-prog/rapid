@@ -95,6 +95,16 @@ The sample JSON uses a few placeholders so the examples stay stable across machi
 - Top-level keys include `summary`, `documents`, `review_workflow_summary`, and `matches`.
 - `summary.document_error_count` and `documents.errors[]` surface document text extraction failures recorded while importing a completed run into the Case DB. These rows include path, kind, audit citation, target document id, error type/message, and `case-search-documents-partial-coverage` effect. Treat them the same way as completed-run `documents.errors[]`: the Case DB search continued, but the listed documents were not text-indexed and need source-viewer byte-window search, a dedicated parser, or a trusted external extractor before absence can be asserted.
 
+### `source-read`
+
+- Output: JSON from `rapidtriage source-read`.
+- `profile_version`: `source-read-v1`.
+- Top-level keys include `source`, `analysis_root`, `path`, `relative_path`, `hashes`, `preview`, `source_locator`, `source_citation_package`, `forensic_read_profile`, and `reportability_decision`.
+- `preview.preview_type` is one of `text`, `sqlite-table`, `hex`, or `error`; all preview modes are bounded so large files remain responsive.
+- `source_locator` is the stable viewer locator for the current preview, such as `text-preview`, `sqlite-table-page`, or `byte-range`.
+- `source_citation_package` uses `source-read-citation-package-v1` and includes copy-safe `citation_text`, `source_locator`, optional `source_sha256`, `snippet`, `snippet_sha256`, `review_note_template`, `package_hash`, and report-selection blockers. Use the `Current-file hit:` template to carry verified source-viewer hits into review marks or report candidates without losing hash/locator provenance.
+- `ready_for_review_note` means the package is usable as a reviewer handoff. `ready_for_court_report` remains `false` until analyst sign-off, original evidence provenance, and any parser-specific validation are attached.
+
 ### `large-case-readiness`
 
 - Output: JSON from `rapidtriage large-case-readiness`.

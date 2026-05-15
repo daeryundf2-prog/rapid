@@ -67,6 +67,8 @@ def run_source_read(
         preview = build_source_read_preview(source_path, max_chars=max_chars, hex_bytes=hex_bytes)
     hashes = compute_hashes(source_path) if include_hashes else {}
 
+    source_locator = build_source_locator(preview)
+    relative_path = str(source_path.relative_to(analysis_root))
     return {
         "command": "source-read",
         "profile_version": SOURCE_READ_PROFILE_VERSION,
@@ -75,14 +77,22 @@ def run_source_read(
         "source": source,
         "analysis_root": str(analysis_root),
         "path": str(source_path),
-        "relative_path": str(source_path.relative_to(analysis_root)),
+        "relative_path": relative_path,
         "name": source_path.name,
         "extension": source_path.suffix.lower(),
         "size": stat.st_size,
         "modified_at": dt.datetime.fromtimestamp(stat.st_mtime, dt.timezone.utc).isoformat(),
         "hashes": hashes,
         "preview": preview,
-        "source_locator": build_source_locator(preview),
+        "source_locator": source_locator,
+        "source_citation_package": build_source_citation_package(
+            relative_path=relative_path,
+            source_path=source_path,
+            preview=preview,
+            source_locator=source_locator,
+            hashes=hashes,
+            include_hashes=include_hashes,
+        ),
         "forensic_read_profile": forensic_read_profile(
             source_path=source_path,
             analysis_root=analysis_root,
@@ -376,6 +386,112 @@ def build_source_locator(preview: Mapping[str, object]) -> dict[str, object]:
             "text_sha256": str(preview.get("text_sha256") or ""),
         }
     return {"locator_type": "unavailable"}
+
+
+def build_source_citation_package(
+    *,
+    relative_path: str,
+    source_path: Path,
+    preview: Mapping[str, object],
+    source_locator: Mapping[str, object],
+    hashes: Mapping[str, str],
+    include_hashes: bool,
+) -> dict[str, object]:
+    locator_text = copy_safe_locator_text(source_locator)
+    snippet = source_citation_snippet(preview)
+    sha256 = str(hashes.get("sha256") or "")
+    hash_status = "present" if sha256 else "not-requested" if not include_hashes else "missing"
+    citation_core = {
+        "relative_path": relative_path,
+        "locator": source_locator,
+        "source_sha256": sha256,
+        "preview_type": str(preview.get("preview_type") or ""),
+        "snippet_sha256": hashlib.sha256(snippet.encode("utf-8", errors="replace")).hexdigest() if snippet else "",
+    }
+    citation_id = stable_json_hash(citation_core)[:16]
+    citation_text = f"{relative_path} [{locator_text}]"
+    if sha256:
+        citation_text = f"{citation_text} sha256:{sha256}"
+    review_note_lines = [
+        f"Current-file hit: {citation_text}",
+        f"Snippet: {snippet}",
+        "Review hint: Verify source hash, locator, parser limitation, and review status before report inclusion.",
+    ]
+    package_core = {
+        "profile_version": "source-read-citation-package-v1",
+        "citation_id": citation_id,
+        "citation_text": citation_text,
+        "relative_path": relative_path,
+        "source_path_hash": hashlib.sha256(str(source_path).encode("utf-8", errors="replace")).hexdigest(),
+        "source_locator": dict(source_locator),
+        "source_hash_status": hash_status,
+        "source_sha256": sha256,
+        "snippet": snippet,
+        "snippet_sha256": citation_core["snippet_sha256"],
+        "review_note_template": "\n".join(review_note_lines),
+        "report_selection_guidance": [
+            "Open and verify this source before selecting it for a report.",
+            "Carry the citation text, source hash, and locator into the review mark or report item.",
+            "Treat bounded previews as reviewer aids, not standalone proof.",
+        ],
+        "core_accuracy_gates": {
+            "component": "source-read-citation-package",
+            "satisfied_checks": [
+                "copy-safe citation text emitted",
+                "stable locator serialized",
+                "snippet hash emitted",
+                "report note template emitted",
+            ],
+            "remaining_blockers": source_citation_blockers(hash_status=hash_status, preview=preview),
+        },
+        "commercial_gap_ids": ["#52", "#64", "#65"],
+        "ready_for_review_note": True,
+        "ready_for_court_report": False,
+    }
+    package_core["package_hash"] = stable_json_hash(package_core)
+    return package_core
+
+
+def source_citation_blockers(*, hash_status: str, preview: Mapping[str, object]) -> list[str]:
+    blockers = [
+        "review mark and analyst sign-off required before report inclusion",
+        "original evidence container provenance must be preserved outside source-read",
+    ]
+    if hash_status != "present":
+        blockers.append("source hash was not computed for this source-read run")
+    if bool(preview.get("truncated")):
+        blockers.append("preview was truncated; open the exact locator or continue pagination before final wording")
+    return blockers
+
+
+def copy_safe_locator_text(source_locator: Mapping[str, object]) -> str:
+    locator_type = str(source_locator.get("locator_type") or "unavailable")
+    if locator_type == "sqlite-table-page":
+        return (
+            f"sqlite table {source_locator.get('table', '')} "
+            f"offset {source_locator.get('offset', 0)} limit {source_locator.get('limit', 0)}"
+        )
+    if locator_type == "byte-range":
+        return f"byte offset {source_locator.get('offset', 0)} length {source_locator.get('byte_count', 0)}"
+    if locator_type == "text-preview":
+        return f"text preview length {source_locator.get('preview_length', 0)}"
+    return locator_type
+
+
+def source_citation_snippet(preview: Mapping[str, object], *, max_chars: int = 240) -> str:
+    snippet = ""
+    if preview.get("preview_type") == "text":
+        snippet = str(preview.get("text") or "")
+    elif preview.get("preview_type") == "sqlite-table":
+        rows = preview.get("rows") if isinstance(preview.get("rows"), list) else []
+        if rows and isinstance(rows[0], Mapping):
+            snippet = json.dumps(rows[0].get("values", {}), ensure_ascii=False, sort_keys=True)
+    elif preview.get("preview_type") == "hex":
+        snippet = str(preview.get("ascii") or preview.get("hex") or "")
+    else:
+        snippet = str(preview.get("message") or "")
+    snippet = " ".join(snippet.split())
+    return snippet if len(snippet) <= max_chars else snippet[: max_chars - 14] + "...[truncated]"
 
 
 def text_preview_payload(text: str, *, max_chars: int, strategy: str) -> dict[str, object]:
