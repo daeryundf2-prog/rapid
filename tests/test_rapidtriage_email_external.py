@@ -37,7 +37,16 @@ class RapidTriageEmailExternalParserTests(unittest.TestCase):
         def fake_runner(command, **_kwargs):
             export_dir = Path(command[command.index("-o") + 1])
             export_dir.mkdir(parents=True, exist_ok=True)
-            (export_dir / "message.eml").write_text("Subject: Exported\n\nBody", encoding="utf-8")
+            (export_dir / "Inbox").mkdir()
+            (export_dir / "Inbox" / "message.eml").write_text(
+                "Message-ID: <exported@example.test>\n"
+                "From: alice@example.test\n"
+                "To: bob@example.test\n"
+                "Subject: Exported\n"
+                "\n"
+                "Body",
+                encoding="utf-8",
+            )
             return subprocess.CompletedProcess(command, 0, stdout="ok", stderr="")
 
         with tempfile.TemporaryDirectory() as temp:
@@ -56,11 +65,72 @@ class RapidTriageEmailExternalParserTests(unittest.TestCase):
         self.assertEqual(payload["status"], "complete")
         self.assertTrue(payload["selected_tool"]["available"])
         self.assertEqual(payload["summary"]["export_file_count"], 1)
+        self.assertEqual(payload["summary"]["parsed_message_candidate_count"], 1)
         self.assertTrue(payload["summary"]["ready_for_trusted_diff"])
         self.assertIn("command_argv_sha256", payload["execution"])
         self.assertIn("stdout_sha256", payload["execution"])
         self.assertIn("export_inventory_sha256", payload["evidence_manifest"])
+        self.assertIn("export_review_profile_sha256", payload["evidence_manifest"])
+        self.assertEqual(
+            payload["forensic_review"]["export_review_profile_hash"],
+            payload["export_review_profile"]["profile_sha256"],
+        )
+        self.assertEqual(payload["export_review_profile"]["profile_version"], "email-external-export-review-profile-v1")
+        self.assertEqual(payload["export_review_profile"]["message_candidate_count"], 1)
+        self.assertEqual(payload["export_review_profile"]["folder_candidates"], ["Inbox"])
+        self.assertEqual(
+            payload["export_review_profile"]["message_samples"][0]["headers"]["message_id"],
+            "<exported@example.test>",
+        )
+        self.assertEqual(
+            payload["export_review_profile"]["message_samples"][0]["source_viewer_locator"]["viewer"],
+            "external-email-export-file",
+        )
         self.assertIn("email_external_trusted_diff_ready", payload["commercial_uplift_evidence"]["passed_checks"])
+
+    def test_email_external_parse_profiles_exported_mbox_messages(self) -> None:
+        def fake_runner(command, **_kwargs):
+            export_dir = Path(command[command.index("-o") + 1])
+            export_dir.mkdir(parents=True, exist_ok=True)
+            (export_dir / "mailbox.mbox").write_text(
+                "From alice@example.test Mon Apr 01 00:00:00 2024\n"
+                "Message-ID: <m1@example.test>\n"
+                "From: alice@example.test\n"
+                "To: bob@example.test\n"
+                "Subject: First\n"
+                "\n"
+                "Body 1\n"
+                "\n"
+                "From bob@example.test Mon Apr 01 00:01:00 2024\n"
+                "Message-ID: <m2@example.test>\n"
+                "From: bob@example.test\n"
+                "To: alice@example.test\n"
+                "Subject: Re: First\n"
+                "\n"
+                "Body 2\n",
+                encoding="utf-8",
+            )
+            return subprocess.CompletedProcess(command, 0, stdout="ok", stderr="")
+
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            source = root / "mailbox.ost"
+            source.write_bytes(b"!BDNost fixture")
+
+            payload = run_email_external_parse(
+                source_path=source,
+                output_dir=root / "out",
+                preferred_tool="readpst",
+                tool_resolver=lambda tool: f"/usr/bin/{tool}" if tool == "readpst" else None,
+                command_runner=fake_runner,
+            )
+
+        review = payload["export_review_profile"]
+        self.assertEqual(review["message_candidate_count"], 2)
+        self.assertEqual(review["message_samples"][0]["headers"]["subject"], "First")
+        self.assertEqual(review["message_samples"][1]["headers"]["message_id"], "<m2@example.test>")
+        self.assertFalse(review["validation"]["commercial_grade"])
+        self.assertIn("trusted-libpff-readpst-outlook-diff-required", review["validation"]["blockers"])
 
     def test_email_external_parse_supports_absolute_preferred_tool(self) -> None:
         with tempfile.TemporaryDirectory() as temp:

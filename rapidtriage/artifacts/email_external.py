@@ -1,21 +1,28 @@
 from __future__ import annotations
 
 import datetime as dt
+import email
 import hashlib
 import json
 import os
+import re
 import shutil
 import subprocess
+from email import policy
 from pathlib import Path
 from typing import Callable
 
 from ..core.docs import write_result
 from ..core.submission import compute_hashes
-from .email import EMAIL_FORMAT_PROFILES, EMAIL_REQUIRED_TOOLS_BY_FORMAT, EMAIL_TRUSTED_DIFF_TOOLS
+from .email import EMAIL_FORMAT_PROFILES, EMAIL_REQUIRED_TOOLS_BY_FORMAT, EMAIL_TRUSTED_DIFF_TOOLS, attachment_summaries
 
 
 EMAIL_EXTERNAL_PARSE_VERSION = "email-external-parser-wrapper-v2"
 EMAIL_EXTERNAL_EVIDENCE_MANIFEST_VERSION = "email-external-parser-evidence-manifest-v1"
+EMAIL_EXTERNAL_EXPORT_REVIEW_PROFILE_VERSION = "email-external-export-review-profile-v1"
+EMAIL_EXTERNAL_REVIEW_MAX_EXPORT_BYTES = 2 * 1024 * 1024
+EMAIL_EXTERNAL_REVIEW_MAX_MESSAGES = 200
+EMAIL_EXTERNAL_REVIEW_BODY_PREVIEW_CHARS = 500
 
 
 class EmailExternalParserError(ValueError):
@@ -70,6 +77,13 @@ def run_email_external_parse(
             status = "failed"
             error = str(exc)
     exports = inventory_email_external_exports(export_dir)
+    export_review_profile = email_external_export_review_profile(
+        source_path=source_path,
+        source_hashes=source_hashes,
+        suffix=suffix,
+        export_dir=export_dir,
+        exports=exports,
+    )
     execution = {
         "command": command,
         "command_argv_sha256": stable_json_sha256(command),
@@ -95,6 +109,7 @@ def run_email_external_parse(
         tool_matrix=tool_matrix,
         execution=execution,
         exports=exports,
+        export_review_profile=export_review_profile,
         status=status,
         validation_checks=validation_checks,
     )
@@ -116,6 +131,7 @@ def run_email_external_parse(
         "trusted_tool_families": sorted(EMAIL_TRUSTED_DIFF_TOOLS),
         "execution": execution,
         "exports": exports,
+        "export_review_profile": export_review_profile,
         "evidence_manifest": evidence_manifest,
         "validation_checks": validation_checks,
         "forensic_review": {
@@ -123,6 +139,7 @@ def run_email_external_parse(
             "analyst_action": "Attach this JSON, Markdown report, exported-file hashes, and a trusted parser diff before relying on PST/OST/MSG contents.",
             "source_citation": f"{source_path.name}:{source_hashes['sha256']}",
             "export_inventory_hash": evidence_manifest["export_inventory_sha256"],
+            "export_review_profile_hash": export_review_profile["profile_sha256"],
             "external_validation_required": True,
         },
         "commercial_uplift_evidence": {
@@ -134,6 +151,8 @@ def run_email_external_parse(
         },
         "summary": {
             "export_file_count": len(exports),
+            "parsed_message_candidate_count": export_review_profile["message_candidate_count"],
+            "attachment_candidate_count": export_review_profile["attachment_candidate_count"],
             "native_decode_attempted": bool(selected["available"]),
             "native_decode_completed": status == "complete",
             "ready_for_trusted_diff": status == "complete" and bool(exports),
@@ -265,8 +284,203 @@ def inventory_email_external_exports(export_dir: Path) -> list[dict[str, object]
         if not path.is_file():
             continue
         stat = path.stat()
-        rows.append({"path": str(path), "name": path.name, "size_bytes": stat.st_size, "sha256": compute_hashes(path)["sha256"]})
+        source_hashes = compute_hashes(path)
+        rows.append(
+            {
+                "path": str(path),
+                "relative_path": str(path.relative_to(export_dir)),
+                "name": path.name,
+                "suffix": path.suffix.lower().lstrip("."),
+                "size_bytes": stat.st_size,
+                "sha256": source_hashes["sha256"],
+                "source_viewer_locator": {
+                    "profile_version": "external-email-export-file-locator-v1",
+                    "viewer": "external-email-export-file",
+                    "path": str(path),
+                    "relative_path": str(path.relative_to(export_dir)),
+                    "sha256": source_hashes["sha256"],
+                },
+            }
+        )
     return rows
+
+
+def email_external_export_review_profile(
+    *,
+    source_path: Path,
+    source_hashes: dict[str, str],
+    suffix: str,
+    export_dir: Path,
+    exports: list[dict[str, object]],
+) -> dict[str, object]:
+    message_samples: list[dict[str, object]] = []
+    folder_candidates: set[str] = set()
+    attachment_candidate_count = 0
+    parsed_export_count = 0
+    truncated_exports: list[str] = []
+    for row in exports:
+        path = Path(str(row["path"]))
+        if path.parent != export_dir:
+            folder_candidates.add(str(path.parent.relative_to(export_dir)))
+        if int(row.get("size_bytes") or 0) > EMAIL_EXTERNAL_REVIEW_MAX_EXPORT_BYTES:
+            truncated_exports.append(str(row.get("relative_path") or row.get("name") or path.name))
+        parsed = parse_external_email_export(path, row)
+        if not parsed:
+            continue
+        parsed_export_count += 1
+        for message in parsed:
+            if len(message_samples) >= EMAIL_EXTERNAL_REVIEW_MAX_MESSAGES:
+                break
+            attachment_candidate_count += int(message.get("attachment_count") or 0)
+            message_samples.append(message)
+
+    source_locator = {
+        "profile_version": "external-email-source-locator-v1",
+        "viewer": "email-external-source",
+        "path": str(source_path),
+        "source_format": suffix,
+        "sha256": source_hashes["sha256"],
+    }
+    profile: dict[str, object] = {
+        "profile_version": EMAIL_EXTERNAL_EXPORT_REVIEW_PROFILE_VERSION,
+        "source": source_locator,
+        "export_dir": str(export_dir),
+        "export_file_count": len(exports),
+        "parsed_export_count": parsed_export_count,
+        "message_candidate_count": len(message_samples),
+        "attachment_candidate_count": attachment_candidate_count,
+        "folder_candidate_count": len(folder_candidates),
+        "folder_candidates": sorted(folder_candidates)[:100],
+        "message_samples": message_samples,
+        "message_sample_limit": EMAIL_EXTERNAL_REVIEW_MAX_MESSAGES,
+        "truncated_export_count": len(truncated_exports),
+        "truncated_exports": truncated_exports[:100],
+        "review_tabs": [
+            "mailbox-export-inventory",
+            "conversation-list",
+            "message-preview",
+            "attachment-inventory",
+            "validation-blockers",
+        ],
+        "large_data_controls": {
+            "max_export_parse_bytes": EMAIL_EXTERNAL_REVIEW_MAX_EXPORT_BYTES,
+            "max_message_samples": EMAIL_EXTERNAL_REVIEW_MAX_MESSAGES,
+            "body_preview_chars": EMAIL_EXTERNAL_REVIEW_BODY_PREVIEW_CHARS,
+            "metadata_collapsed_by_default": True,
+            "open_original_export_file_from_locator": True,
+        },
+        "validation": {
+            "commercial_grade": False,
+            "trusted_diff_required": True,
+            "known_answer_required": True,
+            "deleted_item_recovery_validated": False,
+            "native_pst_ost_msg_decode_complete": False,
+            "blockers": [
+                "trusted-libpff-readpst-outlook-diff-required",
+                "broad-mailbox-known-answer-corpus-required",
+                "pst-ost-msg-native-folder-and-deleted-item-validation-required",
+            ],
+        },
+    }
+    profile["profile_sha256"] = stable_json_sha256(profile)
+    return profile
+
+
+def parse_external_email_export(path: Path, export_row: dict[str, object]) -> list[dict[str, object]]:
+    suffix = path.suffix.lower()
+    if suffix == ".mbox" or looks_like_mbox(path):
+        return parse_external_mbox_samples(path, export_row)
+    if suffix in {".eml", ".msg"} or looks_like_rfc822_message(path):
+        try:
+            data = path.read_bytes()[:EMAIL_EXTERNAL_REVIEW_MAX_EXPORT_BYTES]
+            return [external_email_message_sample(path, export_row, 1, data)]
+        except OSError:
+            return []
+    return []
+
+
+def parse_external_mbox_samples(path: Path, export_row: dict[str, object]) -> list[dict[str, object]]:
+    try:
+        data = path.read_bytes()[:EMAIL_EXTERNAL_REVIEW_MAX_EXPORT_BYTES]
+    except OSError:
+        return []
+    samples: list[dict[str, object]] = []
+    chunks = re.split(rb"(?m)^From [^\n]+\n", data)
+    for chunk in chunks[:EMAIL_EXTERNAL_REVIEW_MAX_MESSAGES]:
+        if not chunk.strip():
+            continue
+        samples.append(external_email_message_sample(path, export_row, len(samples) + 1, chunk))
+    return samples
+
+
+def external_email_message_sample(path: Path, export_row: dict[str, object], index: int, data: bytes) -> dict[str, object]:
+    message = email.message_from_bytes(data, policy=policy.default)
+    attachments = attachment_summaries(message)
+    body_preview = external_email_body_preview(message)
+    headers = {
+        "message_id": str(message.get("message-id", "")),
+        "subject": str(message.get("subject", "")),
+        "from": str(message.get("from", "")),
+        "to": str(message.get("to", "")),
+        "cc": str(message.get("cc", "")),
+        "date": str(message.get("date", "")),
+    }
+    row = {
+        "index": index,
+        "export_path": str(path),
+        "relative_path": str(export_row.get("relative_path") or path.name),
+        "export_sha256": str(export_row.get("sha256") or ""),
+        "headers": headers,
+        "body_preview": body_preview,
+        "body_preview_sha256": sha256_text(body_preview),
+        "attachment_count": len(attachments),
+        "attachments": attachments[:20],
+        "source_viewer_locator": export_row.get("source_viewer_locator", {}),
+    }
+    row["row_hash"] = stable_json_sha256(row)
+    return row
+
+
+def external_email_body_preview(message: email.message.EmailMessage) -> str:
+    parts: list[str] = []
+    if message.is_multipart():
+        for part in message.walk():
+            if part.get_content_disposition() == "attachment":
+                continue
+            if part.get_content_type() not in {"text/plain", "text/html"}:
+                continue
+            try:
+                value = part.get_content()
+            except Exception:
+                continue
+            if isinstance(value, str) and value.strip():
+                parts.append(value.strip())
+            if sum(len(part) for part in parts) >= EMAIL_EXTERNAL_REVIEW_BODY_PREVIEW_CHARS:
+                break
+    else:
+        try:
+            value = message.get_content()
+        except Exception:
+            value = ""
+        if isinstance(value, str):
+            parts.append(value.strip())
+    return "\n\n".join(parts)[:EMAIL_EXTERNAL_REVIEW_BODY_PREVIEW_CHARS]
+
+
+def looks_like_rfc822_message(path: Path) -> bool:
+    try:
+        head = path.read_bytes()[:512]
+    except OSError:
+        return False
+    return bool(re.search(rb"(?im)^(from|to|subject|date|message-id):\s+", head))
+
+
+def looks_like_mbox(path: Path) -> bool:
+    try:
+        head = path.read_bytes()[:256]
+    except OSError:
+        return False
+    return head.startswith(b"From ") and b"\nSubject:" in head[:512]
 
 
 def tail_text(value: str, limit: int = 4000) -> str:
@@ -328,6 +542,7 @@ def email_external_evidence_manifest(
     tool_matrix: list[dict[str, object]],
     execution: dict[str, object],
     exports: list[dict[str, object]],
+    export_review_profile: dict[str, object],
     status: str,
     validation_checks: list[dict[str, object]],
 ) -> dict[str, object]:
@@ -344,7 +559,10 @@ def email_external_evidence_manifest(
         "stdout_sha256": execution["stdout_sha256"],
         "stderr_sha256": execution["stderr_sha256"],
         "export_inventory_sha256": export_inventory_sha256,
+        "export_review_profile_sha256": export_review_profile["profile_sha256"],
         "export_file_count": len(exports),
+        "parsed_message_candidate_count": export_review_profile["message_candidate_count"],
+        "attachment_candidate_count": export_review_profile["attachment_candidate_count"],
         "status": status,
         "validation_check_ids": [row["id"] for row in validation_checks],
         "report_grade_claim": "blocked_until_trusted_diff_attached",
