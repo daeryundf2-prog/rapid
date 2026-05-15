@@ -1220,6 +1220,11 @@ class RapidTriageOpsTests(unittest.TestCase):
             self.assertEqual(payload["item_count"], 120)
             self.assertEqual(payload["status"], "commercial-gaps-present")
             self.assertFalse(payload["commercial_claim_allowed"])
+            self.assertEqual(payload["stdout_limit_profile"]["profile_version"], "commercial-readiness-stdout-limit-v1")
+            self.assertTrue(payload["stdout_limit_profile"]["truncated"])
+            self.assertLessEqual(len(payload["all_items"]), 25)
+            full_payload = json.loads((Path(tmp_dir) / "rapidtriage-commercial-readiness.json").read_text(encoding="utf-8"))
+            self.assertEqual(len(full_payload["all_items"]), 120)
             self.assertEqual(payload["claim_discipline_profile"]["item_number"], 45)
             self.assertEqual(payload["claim_discipline_manifest"]["profile_version"], "claim-discipline-manifest-v1")
             self.assertEqual(payload["claim_discipline_manifest"]["item_number"], 45)
@@ -1589,6 +1594,8 @@ class RapidTriageOpsTests(unittest.TestCase):
         payload = json.loads(stdout.getvalue())
         self.assertEqual(payload["focused_next_gate"], "validated")
         self.assertEqual(len(payload["focused_items"]), 3)
+        self.assertLessEqual(len(payload["all_items"]), 3)
+        self.assertEqual(payload["stdout_limit_profile"]["limit"], 3)
         self.assertTrue(all(item["next_required_gate"] == "validated" for item in payload["focused_items"]))
 
     def test_commercial_readiness_attaches_passed_validation_evidence(self) -> None:

@@ -198,6 +198,55 @@ EXTRACT_EPILOG = f"""Examples:
 """
 
 
+def compact_commercial_readiness_payload(payload: dict[str, object], *, limit: int) -> dict[str, object]:
+    """Keep commercial-readiness stdout usable while full --output-dir reports remain complete."""
+    row_limit = max(0, int(limit))
+    compact = json.loads(json.dumps(payload, ensure_ascii=False, default=str))
+    truncated_paths: list[dict[str, object]] = []
+
+    def truncate_list(path: tuple[str, ...]) -> None:
+        target: dict[str, object] = compact
+        for key in path[:-1]:
+            child = target.get(key)
+            if not isinstance(child, dict):
+                return
+            target = child
+        key = path[-1]
+        values = target.get(key)
+        if not isinstance(values, list):
+            return
+        original_count = len(values)
+        if original_count > row_limit:
+            target[key] = values[:row_limit]
+            truncated_paths.append(
+                {
+                    "path": ".".join(path),
+                    "original_count": original_count,
+                    "returned_count": row_limit,
+                }
+            )
+
+    for path in (
+        ("all_items",),
+        ("critical_non_commercial_items",),
+        ("non_commercial_items",),
+        ("priority_work_plan",),
+        ("commercial_blocker_matrix", "rows"),
+        ("commercial_blocker_matrix", "top_internal_items"),
+        ("commercial_blocker_matrix", "top_external_evidence_items"),
+    ):
+        truncate_list(path)
+
+    compact["stdout_limit_profile"] = {
+        "profile_version": "commercial-readiness-stdout-limit-v1",
+        "limit": row_limit,
+        "truncated": bool(truncated_paths),
+        "truncated_paths": truncated_paths,
+        "full_report_hint": "Use --output-dir to write complete JSON/Markdown reports; stdout is compacted for terminal usability.",
+    }
+    return compact
+
+
 def add_rules_argument(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--rules", help="Path to a rapidtriage JSON/YAML or YARA-lite string rule file for matched_rules and IOC lookup")
 
@@ -3231,8 +3280,9 @@ def main(argv=None) -> int:
                 parser.error(str(exc))
             batch_payload["outputs"] = batch_outputs
             payload["known_answer_manifest_template_batches"] = batch_payload
+        stdout_payload = compact_commercial_readiness_payload(payload, limit=args.limit)
         if args.json:
-            print(json.dumps(payload, ensure_ascii=False, indent=2))
+            print(json.dumps(stdout_payload, ensure_ascii=False, indent=2))
         else:
             print("RapidTriage commercial readiness gate")
             print(f"Status: {payload['status']}")

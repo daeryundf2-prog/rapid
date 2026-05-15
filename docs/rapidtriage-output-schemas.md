@@ -146,6 +146,11 @@ The sample JSON uses a few placeholders so the examples stay stable across machi
 - `case-db --import-vsc-compare` stores each change record as `vsc-deleted-file`, `vsc-added-file`, or `vsc-modified-file` artifact rows so they can be searched, reviewed, tagged, and included in reports.
 - `case-search --metadata KEY=VALUE` can narrow artifact results by promoted metadata such as `event_id=4104`, `event_family=execution`, `channel_family=powershell`, `channel=Security`, `status=deleted`, or `snapshot_label=VSC1`.
 
+### `commercial-readiness`
+
+- Output: JSON from `rapidtriage commercial-readiness --json`.
+- `stdout_limit_profile.profile_version` is `commercial-readiness-stdout-limit-v1` when CLI stdout arrays are compacted by `--limit`. Complete, untrimmed JSON and Markdown reports are written when `--output-dir` is supplied.
+
 ### `vsc-extract`
 
 - Output: `OUTPUT_DIR/rapidtriage-vsc-extract.json`
