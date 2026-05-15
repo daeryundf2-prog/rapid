@@ -1382,6 +1382,7 @@ def build_parser() -> argparse.ArgumentParser:
     macos_live_smoke.add_argument("--output-dir", required=True, help="Directory for macOS smoke JSON/Markdown and benchmark outputs")
     macos_live_smoke.add_argument("--root", default="/", help="macOS evidence root for collect-plan (default: /)")
     macos_live_smoke.add_argument("--home", help="User home to inspect for redacted live artifacts (default: current home)")
+    macos_live_smoke.add_argument("--case-db", help="Optional RapidTriage Case DB to include in large-case readiness profiling")
     macos_live_smoke.add_argument("--benchmark-file-count", type=int, default=DEFAULT_MACOS_SMOKE_BENCHMARK_FILES, help="Synthetic triage benchmark file count")
     macos_live_smoke.add_argument("--fts-record-count", type=int, default=DEFAULT_MACOS_SMOKE_FTS_RECORDS, help="Synthetic SQLite FTS benchmark row count")
     macos_live_smoke.add_argument("--keyword", default=DEFAULT_BENCHMARK_KEYWORD, help="Keyword used in synthetic benchmark checks")
@@ -2858,6 +2859,7 @@ def main(argv=None) -> int:
                 output_dir=Path(args.output_dir),
                 root=Path(args.root),
                 home=Path(args.home) if args.home else None,
+                case_db_path=Path(args.case_db) if args.case_db else None,
                 benchmark_file_count=args.benchmark_file_count,
                 fts_record_count=args.fts_record_count,
                 keyword=args.keyword,

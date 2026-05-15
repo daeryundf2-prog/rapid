@@ -39,6 +39,7 @@ def run_macos_live_smoke(
     output_dir: Path,
     root: Path = Path("/"),
     home: Path | None = None,
+    case_db_path: Path | None = None,
     benchmark_file_count: int = DEFAULT_MACOS_SMOKE_BENCHMARK_FILES,
     fts_record_count: int = DEFAULT_MACOS_SMOKE_FTS_RECORDS,
     keyword: str = DEFAULT_MACOS_SMOKE_KEYWORD,
@@ -72,6 +73,7 @@ def run_macos_live_smoke(
         overwrite=True,
     )
     large_case_readiness = build_large_case_readiness_report(
+        case_db_path=case_db_path.expanduser().resolve() if case_db_path else None,
         benchmark_paths=[Path(str(fts_payload.get("outputs", {}).get("json", "")))],
         keyword=normalized_keyword,
         output=output_dir / "large-case-readiness.json",
@@ -92,8 +94,17 @@ def run_macos_live_smoke(
         "inputs": {
             "root_path_hash": hash_text(str(root_path)),
             "home_path_hash": hash_text(str(home_path)),
+            "case_db_path_hash": hash_text(str(case_db_path.expanduser().resolve())) if case_db_path else "",
             "path_details_included": include_path_details,
-            **({"root": str(root_path), "home": str(home_path)} if include_path_details else {}),
+            **(
+                {
+                    "root": str(root_path),
+                    "home": str(home_path),
+                    **({"case_db": str(case_db_path.expanduser().resolve())} if case_db_path else {}),
+                }
+                if include_path_details
+                else {}
+            ),
         },
         "environment": environment_profile(),
         "collect_plan_summary": collect_plan.get("summary", {}),

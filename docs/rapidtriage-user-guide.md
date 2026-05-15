@@ -143,6 +143,7 @@ For QC-prep and large-case validation evidence, use the helper commands below. T
 
 ```bash
 rapidtriage macos-live-smoke --output-dir ./qc/macos-live --overwrite --json
+rapidtriage macos-live-smoke --output-dir ./qc/macos-live --case-db ./case.db --overwrite --json
 rapidtriage e01-hash ./case.E01 --output-dir ./qc/e01-hash --json
 rapidtriage known-answer-qc --manifest ./known-answer.json --trusted-manifest ./trusted-known-answer.json --output-dir ./qc/known-answer --json
 rapidtriage sqlite-fts-benchmark --output-dir ./qc/fts-100k --record-count 100000 --json
@@ -154,7 +155,7 @@ rapidtriage browser-stress --base-url http://127.0.0.1:8765 --output-dir ./qc/br
 
 `large-case-readiness` is the Mac-first gate for large evidence sets. It combines one or more `sqlite-fts-benchmark` JSON files with an optional RapidTriage Case DB profile, then records whether 100k/1M/10M search evidence, FTS table/index metadata, p95 latency thresholds, and remaining commercial blockers are present. A failed status does not mean the tool cannot search; it means the evidence is not strong enough yet for 1TB/10TB or commercial-grade claims.
 
-`macos-live-smoke` is designed for the analyst's current Mac. It writes a macOS collect-plan summary, redacted live artifact counts, a small triage benchmark, SQLite FTS benchmark evidence, a `large-case-readiness.json` gate built from that benchmark, and validation-tool availability. By default it stores path hashes and counts only; it does not print browser history URLs, quarantine URLs, or TCC client paths. Use `--include-path-details` only for authorized local debugging.
+`macos-live-smoke` is designed for the analyst's current Mac. It writes a macOS collect-plan summary, redacted live artifact counts, a small triage benchmark, SQLite FTS benchmark evidence, a `large-case-readiness.json` gate built from that benchmark, and validation-tool availability. If you already have a RapidTriage Case DB, pass `--case-db ./case.db` so the smoke report also profiles FTS tables, indexes, table counts, and Case DB search readiness. By default it stores path hashes and counts only; it does not print browser history URLs, quarantine URLs, TCC client paths, or the Case DB path. Use `--include-path-details` only for authorized local debugging.
 
 Use `commercial-readiness --mac-first-evidence ./qc/macos-live/macos-live-smoke.json` after a Mac hardening run to attach that smoke/large-case evidence to the 120-item readiness report. The smoke JSON now includes a `readiness_attachment` block with the exact CLI command, API query hint, GUI note, supported Mac-preparable backlog item numbers, and required follow-up evidence. The `mac_first_evidence_summary` hashes the attached JSON and lists failed checks/blockers, but it is deliberately not treated as a passing validation package; Windows image tests, 1TB-10TB hardware runs, signed installers, and independent signoff stay as separate blockers.
 

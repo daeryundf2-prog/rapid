@@ -6,6 +6,7 @@ import unittest
 from pathlib import Path
 
 from rapidtriage.cli import main
+from rapidtriage.core.case_db import CaseDatabase
 from rapidtriage.core.macos_live_smoke import (
     MACOS_LIVE_SOURCE_HASH_MAX_BYTES,
     build_redacted_source_profile,
@@ -56,6 +57,36 @@ class RapidTriageMacOsLiveSmokeTests(unittest.TestCase):
             self.assertIn("Large-case readiness", report_text)
             self.assertIn("Readiness Attachment", report_text)
             self.assertIn("preparatory-only", report_text)
+
+    def test_macos_live_smoke_can_profile_case_db_for_large_case_readiness(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir) / "mac-root"
+            output_dir = Path(tmp_dir) / "smoke"
+            db_path = Path(tmp_dir) / "case.db"
+            build_macos_fixture(root)
+            database = CaseDatabase(db_path)
+            database.initialize()
+            database.create_case(case_id="CASE-MAC")
+
+            payload = run_macos_live_smoke(
+                output_dir=output_dir,
+                root=root,
+                home=root / "Users" / "alice",
+                case_db_path=db_path,
+                benchmark_file_count=5,
+                fts_record_count=30,
+                keyword="password",
+                overwrite=True,
+            )
+
+            large_case = payload["large_case_readiness"]
+            self.assertTrue(large_case["case_db_profile"]["attached"])
+            self.assertEqual(large_case["summary"]["case_db_attached"], True)
+            self.assertGreaterEqual(large_case["case_db_profile"]["fts_table_count"], 1)
+            self.assertEqual(
+                payload["inputs"]["case_db_path_hash"],
+                build_redacted_source_profile(str(db_path.resolve()), count=1, include_path_details=False)["source_path_hash"],
+            )
 
     def test_macos_live_smoke_cli_prints_json(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
