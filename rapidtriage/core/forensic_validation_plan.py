@@ -783,6 +783,8 @@ def summarize_diff_comparison_health(comparisons: object) -> dict[str, object]:
         "execution_artifact_field_comparison",
         "user_activity_field_comparison",
         "system_artifact_field_comparison",
+        "browser_storage_field_comparison",
+        "browser_timeline_field_comparison",
     )
     mismatch_count = 0
     missing_common_field_count = 0

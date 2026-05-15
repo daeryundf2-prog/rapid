@@ -16,6 +16,8 @@ FIELD_DIFF_KEYS = (
     "execution_artifact_field_comparison",
     "user_activity_field_comparison",
     "system_artifact_field_comparison",
+    "browser_storage_field_comparison",
+    "browser_timeline_field_comparison",
 )
 
 DEFAULT_CONFIDENCE_FAMILIES = (

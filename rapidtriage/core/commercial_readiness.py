@@ -287,6 +287,44 @@ TRUSTED_DIFF_RUNNER_HINTS_BY_ITEM: dict[int, dict[str, object]] = {
             "--independent-report <review.md> --corpus-scope <scope> --backlog-item 18"
         ),
     },
+    19: {
+        "artifact_family": "browser-ai",
+        "runner_group_item": 84,
+        "trusted_tools": ["Hindsight", "DB Browser for SQLite", "Velociraptor"],
+        "rapid_output_hint": "rapidtriage artifacts --kind browser --output rapid-browser-storage.json",
+        "cross_tool_template": (
+            "rapidtriage cross-tool-validate --rapid-output rapid-browser-storage.json "
+            "--reference-output hindsight=<Hindsight-storage.csv-or-json> --reference-output sqlitebrowser=<SQLite-export.csv> "
+            "--source-evidence <browser-profile-root> --tool-version hindsight=<version> "
+            "--tool-command hindsight=<command> --independent-report <review.md> --corpus-scope <scope> --backlog-item 19"
+        ),
+    },
+    20: {
+        "artifact_family": "browser-ai",
+        "runner_group_item": 84,
+        "trusted_tools": ["Hindsight", "BrowserHistoryView", "Velociraptor"],
+        "rapid_output_hint": "rapidtriage artifacts --kind browser --output rapid-browser-timeline.json",
+        "cross_tool_template": (
+            "rapidtriage cross-tool-validate --rapid-output rapid-browser-timeline.json "
+            "--reference-output hindsight=<Hindsight-history.csv-or-json> "
+            "--reference-output browserhistoryview=<BrowserHistoryView.csv> --source-evidence <browser-profile-root> "
+            "--tool-version browserhistoryview=<version> --tool-command browserhistoryview=<command> "
+            "--independent-report <review.md> --corpus-scope <scope> --backlog-item 20"
+        ),
+    },
+    21: {
+        "artifact_family": "browser-ai",
+        "runner_group_item": 84,
+        "trusted_tools": ["Service export", "Hindsight", "DB Browser for SQLite"],
+        "rapid_output_hint": "rapidtriage artifacts --kind browser --output rapid-ai-transcripts.json",
+        "cross_tool_template": (
+            "rapidtriage cross-tool-validate --rapid-output rapid-ai-transcripts.json "
+            "--reference-output serviceexport=<ChatGPT-Claude-Gemini-Perplexity-export.json> "
+            "--reference-output hindsight=<Hindsight-ai-storage.csv-or-json> --source-evidence <browser-profile-or-service-export> "
+            "--tool-version serviceexport=<export-version-or-date> --tool-command serviceexport=<export-command-or-procedure> "
+            "--independent-report <review.md> --corpus-scope <scope> --backlog-item 21"
+        ),
+    },
 }
 
 

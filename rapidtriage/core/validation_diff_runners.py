@@ -301,6 +301,54 @@ RUNNER_GROUPS: tuple[dict[str, object], ...] = (
             "--reference-output autoruns=<Autoruns.csv> --backlog-item 18"
         ),
     },
+    {
+        "item_number": 84,
+        "artifact_family": "browser-ai",
+        "title": "Browser storage, unified timeline, and AI transcript trusted diff runners",
+        "trusted_tools": (
+            {
+                "name": "Hindsight",
+                "binary_candidates": ("hindsight.py", "hindsight"),
+                "reference_name": "hindsight",
+                "output_format": "XLSX/SQLite/JSON/CSV export",
+                "command_template": "hindsight.py -i <browser-profile-root> -o <reference.json> -f json",
+            },
+            {
+                "name": "BrowserHistoryView",
+                "binary_candidates": ("BrowsingHistoryView.exe", "BrowserHistoryView", "browsinghistoryview"),
+                "reference_name": "browserhistoryview",
+                "output_format": "CSV",
+                "command_template": "BrowsingHistoryView.exe /scomma <reference.csv>",
+            },
+            {
+                "name": "DB Browser for SQLite",
+                "binary_candidates": ("DB Browser for SQLite", "sqlitebrowser", "sqlitebrowser.exe"),
+                "reference_name": "sqlitebrowser",
+                "output_format": "CSV/table export",
+                "command_template": "sqlitebrowser <History-or-storage-db> <manual/exported-csv>",
+            },
+            {
+                "name": "Velociraptor",
+                "binary_candidates": ("velociraptor", "velociraptor.exe"),
+                "reference_name": "velociraptor",
+                "output_format": "JSON/CSV artifact export",
+                "command_template": "velociraptor artifacts collect <BrowserHistory/BrowserExtensions/AI-export-artifacts> --format jsonl",
+            },
+            {
+                "name": "Service export",
+                "binary_candidates": (),
+                "reference_name": "serviceexport",
+                "output_format": "ChatGPT/Claude/Gemini/Perplexity JSON export",
+                "command_template": "Export service-side conversation data, then normalize to JSON/CSV for cross-tool-validate",
+            },
+        ),
+        "rapid_output_hint": "rapidtriage artifacts --kind browser --output rapid-browser-ai.json",
+        "cross_tool_template": (
+            "rapidtriage cross-tool-validate --rapid-output rapid-browser-ai.json "
+            "--reference-output hindsight=<Hindsight.json> --reference-output browserhistoryview=<BrowserHistoryView.csv> "
+            "--reference-output serviceexport=<AI-service-export.json> --backlog-item 19 --backlog-item 20 --backlog-item 21"
+        ),
+    },
 )
 
 
@@ -336,7 +384,7 @@ def build_validation_diff_runner_matrix(
     total_tool_count = sum(len(group["trusted_tools"]) for group in runner_groups)
     core = {
         "profile_version": "validation-diff-runner-matrix-v1",
-        "qc_prep_item_numbers": [76, 77, 78, 79, 80, 81, 82, 83],
+        "qc_prep_item_numbers": [76, 77, 78, 79, 80, 81, 82, 83, 84],
         "public_corpus_registry": list(PUBLIC_CORPUS_ROWS),
         "runner_groups": runner_groups,
         "summary": {

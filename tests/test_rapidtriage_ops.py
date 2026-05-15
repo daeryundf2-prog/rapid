@@ -774,8 +774,8 @@ class RapidTriageOpsTests(unittest.TestCase):
             self.assertIn("#83", payload["parser_false_positive_false_negative_notes"][0]["commercial_gap_ids"])
             runner_matrix = payload["validation_diff_runner_matrix"]
             self.assertEqual(runner_matrix["profile_version"], "validation-diff-runner-matrix-v1")
-            self.assertEqual(runner_matrix["qc_prep_item_numbers"], [76, 77, 78, 79, 80, 81, 82, 83])
-            self.assertEqual(runner_matrix["summary"]["runner_group_count"], 7)
+            self.assertEqual(runner_matrix["qc_prep_item_numbers"], [76, 77, 78, 79, 80, 81, 82, 83, 84])
+            self.assertEqual(runner_matrix["summary"]["runner_group_count"], 8)
             self.assertEqual(len(runner_matrix["matrix_hash"]), 64)
             self.assertIn("NIST CFReDS", {row["corpus_name"] for row in runner_matrix["public_corpus_registry"]})
             self.assertIn("EvtxECmd", {tool["name"] for group in runner_matrix["runner_groups"] for tool in group["trusted_tools"]})
@@ -783,6 +783,7 @@ class RapidTriageOpsTests(unittest.TestCase):
             self.assertIn("LECmd", {tool["name"] for group in runner_matrix["runner_groups"] for tool in group["trusted_tools"]})
             self.assertIn("Velociraptor", {tool["name"] for group in runner_matrix["runner_groups"] for tool in group["trusted_tools"]})
             self.assertIn("AmcacheParser", {tool["name"] for group in runner_matrix["runner_groups"] for tool in group["trusted_tools"]})
+            self.assertIn("Hindsight", {tool["name"] for group in runner_matrix["runner_groups"] for tool in group["trusted_tools"]})
             final_qc = payload["final_qc_execution_report"]
             self.assertEqual(final_qc["profile_version"], "final-qc-execution-report-v1")
             self.assertEqual(final_qc["qc_prep_item_numbers"], [81, 82, 83, 84, 85, 86, 87, 88, 89, 90])
@@ -958,11 +959,11 @@ class RapidTriageOpsTests(unittest.TestCase):
             self.assertEqual(exit_code, 0)
             payload = json.loads(stdout.getvalue())
             self.assertEqual(payload["profile_version"], "validation-diff-runner-matrix-v1")
-            self.assertEqual(payload["qc_prep_item_numbers"], [76, 77, 78, 79, 80, 81, 82, 83])
+            self.assertEqual(payload["qc_prep_item_numbers"], [76, 77, 78, 79, 80, 81, 82, 83, 84])
             self.assertTrue(output.is_file())
             self.assertEqual(len(payload["matrix_hash"]), 64)
-            self.assertEqual(payload["summary"]["runner_group_count"], 7)
-            self.assertEqual(payload["summary"]["trusted_tool_count"], 22)
+            self.assertEqual(payload["summary"]["runner_group_count"], 8)
+            self.assertEqual(payload["summary"]["trusted_tool_count"], 27)
             self.assertFalse(payload["summary"]["version_probe_enabled"])
             self.assertEqual(payload["summary"]["version_captured_count"], 0)
             self.assertEqual(payload["output_manifest"]["bytes"], output.stat().st_size)
@@ -973,6 +974,7 @@ class RapidTriageOpsTests(unittest.TestCase):
             self.assertIn("ese", groups[80]["artifact_family"])
             self.assertIn("execution-user-activity", groups[81]["artifact_family"])
             self.assertIn("os-account-execution", groups[82]["artifact_family"])
+            self.assertIn("browser-ai", groups[84]["artifact_family"])
             self.assertIn("--tool-version", groups[77]["required_cross_tool_metadata"])
             self.assertEqual(groups[77]["trusted_tools"][0]["version_probe"]["status"], "not-run")
 
@@ -3520,6 +3522,97 @@ class RapidTriageOpsTests(unittest.TestCase):
             self.assertEqual(comparison["mismatch_count"], 0)
             self.assertIn("task_uri", comparison["compared_canonical_fields"])
             self.assertIn("command", comparison["compared_canonical_fields"])
+
+    def test_cross_tool_validate_compares_browser_storage_and_timeline_rows(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            rapid = root / "rapid-browser.json"
+            hindsight = root / "hindsight.csv"
+            history = root / "browser-history.csv"
+            rapid.write_text(
+                json.dumps(
+                    {
+                        "artifacts": [
+                            {
+                                "artifact_type": "browser-summary",
+                                "details": {
+                                    "browser": "chrome",
+                                    "profile": "Default",
+                                    "storage_inventory": [
+                                        {
+                                            "storage_type": "cache",
+                                            "storage_name": "Cache_Data",
+                                            "relative_path": r"Cache\Cache_Data",
+                                            "file_count": 2,
+                                            "total_bytes": 4096,
+                                            "sensitive": False,
+                                        }
+                                    ],
+                                    "unified_timeline": [
+                                        {
+                                            "timeline_type": "visit",
+                                            "timestamp": "2024-04-01T09:10:11+00:00",
+                                            "url": "https://example.test/search?q=rapid",
+                                            "title": "Example Search",
+                                            "transition": "typed",
+                                            "visit_count": 3,
+                                            "source_table": "history",
+                                            "source_index": 7,
+                                        }
+                                    ],
+                                },
+                            }
+                        ]
+                    }
+                ),
+                encoding="utf-8",
+            )
+            hindsight.write_text(
+                "Browser,Profile,Type,Name,RelativePath,FileCount,TotalBytes,Sensitive\n"
+                r"chrome,Default,cache,Cache_Data,Cache\Cache_Data,2,4096,false"
+                "\n",
+                encoding="utf-8",
+            )
+            history.write_text(
+                "Browser,Profile,Type,VisitTime,URL,Title,Transition,VisitCount,SourceTable,SourceIndex\n"
+                "chrome,Default,visit,2024-04-01T09:10:11+00:00,https://example.test/search?q=rapid,"
+                "Example Search,typed,3,history,7\n",
+                encoding="utf-8",
+            )
+
+            stdout = io.StringIO()
+            with contextlib.redirect_stdout(stdout):
+                exit_code = main(
+                    [
+                        "cross-tool-validate",
+                        "--rapid-output",
+                        str(rapid),
+                        "--reference-output",
+                        f"hindsight={hindsight}",
+                        "--reference-output",
+                        f"browserhistoryview={history}",
+                        "--backlog-item",
+                        "19",
+                        "--backlog-item",
+                        "20",
+                        "--min-overlap",
+                        "0.75",
+                        "--json",
+                    ]
+                )
+
+            self.assertEqual(exit_code, 0)
+            payload = json.loads(stdout.getvalue())
+            self.assertEqual(payload["status"], "pass")
+            comparisons = {item["reference_name"]: item for item in payload["comparisons"]}
+            storage_comparison = comparisons["hindsight"]["browser_storage_field_comparison"]
+            timeline_comparison = comparisons["browserhistoryview"]["browser_timeline_field_comparison"]
+            self.assertGreaterEqual(storage_comparison["common_record_count"], 1)
+            self.assertEqual(storage_comparison["mismatch_count"], 0)
+            self.assertIn("storage_type", storage_comparison["compared_canonical_fields"])
+            self.assertGreaterEqual(timeline_comparison["common_record_count"], 1)
+            self.assertEqual(timeline_comparison["mismatch_count"], 0)
+            self.assertIn("url", timeline_comparison["compared_canonical_fields"])
 
     def test_confidence_explainability_and_reproducibility_commands(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:

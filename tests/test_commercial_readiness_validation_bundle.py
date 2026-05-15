@@ -131,6 +131,13 @@ class CommercialReadinessValidationBundleTests(unittest.TestCase):
         system_hint = trusted_diff_runner_hint(18)
         self.assertEqual(system_hint["artifact_family"], "windows-system-ir")
         self.assertIn("Velociraptor", system_hint["trusted_tools"])
+        storage_hint = trusted_diff_runner_hint(19)
+        self.assertEqual(storage_hint["artifact_family"], "browser-ai")
+        self.assertIn("Hindsight", storage_hint["trusted_tools"])
+        timeline_hint = trusted_diff_runner_hint(20)
+        self.assertIn("BrowserHistoryView", timeline_hint["trusted_tools"])
+        ai_hint = trusted_diff_runner_hint(21)
+        self.assertIn("Service export", ai_hint["trusted_tools"])
 
     def test_commercial_readiness_attaches_email_external_mac_first_evidence(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:

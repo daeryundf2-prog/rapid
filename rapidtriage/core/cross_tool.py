@@ -22,6 +22,7 @@ MAX_OS_ACCOUNT_FIELD_DIFF_ROWS = 5_000
 MAX_EXECUTION_ARTIFACT_FIELD_DIFF_ROWS = 5_000
 MAX_USER_ACTIVITY_FIELD_DIFF_ROWS = 5_000
 MAX_SYSTEM_ARTIFACT_FIELD_DIFF_ROWS = 5_000
+MAX_BROWSER_FIELD_DIFF_ROWS = 5_000
 MAX_FIELD_MISMATCH_SAMPLES = 50
 FUNCTIONAL_VALIDATION_BATCH_ID = "commercial-uplift-036-040"
 KEY_FIELDS = (
@@ -239,6 +240,39 @@ SYSTEM_ARTIFACT_FIELD_ALIASES = {
     "wmi_filter": ("wmi_filter", "FilterName", "Filter", "EventFilter", "Query"),
     "timestamp": ("timestamp", "Timestamp", "TimeCreated", "LastWriteTime", "Modified", "DateTime"),
     "source_path": ("source_path", "SourcePath", "SourceFile", "source_file", "FilePath", "Path"),
+}
+BROWSER_STORAGE_FIELD_ALIASES = {
+    "browser": ("browser", "Browser"),
+    "profile": ("profile", "Profile", "profile_name", "ProfileName"),
+    "storage_type": ("storage_type", "Type", "type", "store_type", "StoreType"),
+    "storage_name": ("storage_name", "Name", "name", "store_name", "StoreName", "path", "Path"),
+    "relative_path": ("relative_path", "RelativePath", "source_path", "SourcePath", "path", "Path"),
+    "artifact_hint": ("artifact_hint", "ArtifactHint", "hint", "Hint", "artifact", "Artifact"),
+    "file_count": ("file_count", "FileCount", "files", "Files", "count", "Count"),
+    "total_bytes": ("total_bytes", "TotalBytes", "bytes", "Bytes", "size", "Size"),
+    "is_file": ("is_file", "IsFile", "file", "File"),
+    "sensitive": ("sensitive", "Sensitive", "contains_secrets", "ContainsSecrets", "scope_sensitive"),
+    "sample_hashes": ("sample_hashes", "SampleHashes", "sample_files", "SampleFiles", "hashes", "Hashes"),
+    "inventory_truncated": ("inventory_truncated", "InventoryTruncated", "truncated", "Truncated"),
+}
+BROWSER_TIMELINE_FIELD_ALIASES = {
+    "browser": ("browser", "Browser"),
+    "profile": ("profile", "Profile", "profile_name", "ProfileName"),
+    "timeline_type": ("timeline_type", "Type", "type", "row_type", "RowType"),
+    "timestamp": ("timestamp", "Timestamp", "visit_time", "VisitTime", "start_time", "StartTime", "started_at"),
+    "url": ("url", "URL", "source_url", "SourceURL", "target_url", "TargetURL"),
+    "title": ("title", "Title", "page_title", "PageTitle"),
+    "domain": ("domain", "Domain", "host", "Host", "hostname", "Hostname"),
+    "transition": ("transition", "Transition", "transition_type", "TransitionType"),
+    "visit_count": ("visit_count", "VisitCount", "visitcount"),
+    "typed_count": ("typed_count", "TypedCount", "typedcount"),
+    "target_path": ("target_path", "TargetPath", "download_path", "DownloadPath", "filename", "Filename"),
+    "total_bytes": ("total_bytes", "TotalBytes", "bytes", "Bytes", "size", "Size"),
+    "state": ("state", "State", "download_state", "DownloadState"),
+    "ended_at": ("ended_at", "EndTime", "end_time", "completed_at", "CompletedAt"),
+    "ai_service": ("ai_service", "AIService", "service", "Service"),
+    "source_table": ("source_table", "SourceTable", "table", "Table"),
+    "source_index": ("source_index", "SourceIndex", "row_index", "RowIndex", "index", "Index"),
 }
 MFT_FIELD_ALIASES = {
     "record_number": ("record_number", "RecordNumber", "EntryNumber", "entry_number", "MFTEntryNumber"),
@@ -612,6 +646,8 @@ def load_tool_dataset(name: str, path: Path) -> dict[str, object]:
         "execution_artifact_field_index": execution_artifact_field_index(rows),
         "user_activity_field_index": user_activity_field_index(rows),
         "system_artifact_field_index": system_artifact_field_index(rows),
+        "browser_storage_field_index": browser_storage_field_index(rows),
+        "browser_timeline_field_index": browser_timeline_field_index(rows),
     }
 
 
@@ -702,6 +738,31 @@ def rows_from_mapping(item: Mapping[str, object]) -> Iterable[dict[str, object]]
     flattened = flatten_mapping(item)
     yield flattened
     yield from nested_usn_state_replay_rows(item, flattened)
+    yield from nested_browser_rows(item, flattened)
+
+
+def nested_browser_rows(
+    item: Mapping[str, object],
+    flattened_parent: Mapping[str, object],
+) -> Iterable[dict[str, object]]:
+    browser = first_value(flattened_parent, ("browser", "details.browser", "Browser")) or ""
+    profile = first_value(flattened_parent, ("profile", "details.profile", "Profile")) or ""
+    for storage_row in first_nested_list(item, (("details", "storage_inventory"), ("storage_inventory",))):
+        if not isinstance(storage_row, Mapping):
+            continue
+        row = flatten_mapping(storage_row)
+        row.setdefault("artifact_type", "browser-storage-inventory")
+        row.setdefault("browser", browser)
+        row.setdefault("profile", profile)
+        yield row
+    for timeline_row in first_nested_list(item, (("details", "unified_timeline"), ("unified_timeline",))):
+        if not isinstance(timeline_row, Mapping):
+            continue
+        row = flatten_mapping(timeline_row)
+        row.setdefault("artifact_type", "browser-unified-timeline")
+        row.setdefault("browser", browser)
+        row.setdefault("profile", profile)
+        yield row
 
 
 def nested_usn_state_replay_rows(
@@ -799,6 +860,8 @@ def composite_candidate_keys(row: Mapping[str, object]) -> list[str]:
     composites.extend(execution_artifact_key_variants(row))
     composites.extend(user_activity_key_variants(row))
     composites.extend(system_artifact_key_variants(row))
+    composites.extend(browser_storage_key_variants(row))
+    composites.extend(browser_timeline_key_variants(row))
 
     mft_record_number = ntfs_int_value(row, MFT_FIELD_ALIASES["record_number"])
     mft_path = ntfs_path_value(row, MFT_FIELD_ALIASES["file_path"])
@@ -872,6 +935,8 @@ def compare_datasets(
     execution_artifact_field_comparison = compare_execution_artifact_fields(rapid_dataset, reference_dataset)
     user_activity_field_comparison = compare_user_activity_fields(rapid_dataset, reference_dataset)
     system_artifact_field_comparison = compare_system_artifact_fields(rapid_dataset, reference_dataset)
+    browser_storage_field_comparison = compare_browser_storage_fields(rapid_dataset, reference_dataset)
+    browser_timeline_field_comparison = compare_browser_timeline_fields(rapid_dataset, reference_dataset)
     if field_comparison["mismatch_count"] or field_comparison["missing_common_field_count"]:
         status = "failed"
     if registry_field_comparison["mismatch_count"]:
@@ -891,6 +956,10 @@ def compare_datasets(
     if user_activity_field_comparison["mismatch_count"]:
         status = "failed"
     if system_artifact_field_comparison["mismatch_count"]:
+        status = "failed"
+    if browser_storage_field_comparison["mismatch_count"]:
+        status = "failed"
+    if browser_timeline_field_comparison["mismatch_count"]:
         status = "failed"
     if input_quality_blockers:
         status = "failed"
@@ -933,6 +1002,8 @@ def compare_datasets(
         "execution_artifact_field_comparison": execution_artifact_field_comparison,
         "user_activity_field_comparison": user_activity_field_comparison,
         "system_artifact_field_comparison": system_artifact_field_comparison,
+        "browser_storage_field_comparison": browser_storage_field_comparison,
+        "browser_timeline_field_comparison": browser_timeline_field_comparison,
         "release_gate": "review-required" if status != "pass" else "comparison-passed",
     }
 
@@ -1683,6 +1754,134 @@ def compare_system_artifact_fields(
     )
 
 
+def browser_storage_field_index(rows: Sequence[Mapping[str, object]]) -> dict[str, dict[str, str]]:
+    index: dict[str, dict[str, str]] = {}
+    for row in rows[:MAX_BROWSER_FIELD_DIFF_ROWS]:
+        keys = browser_storage_key_variants(row)
+        if not keys:
+            continue
+        fields = browser_storage_normalized_fields(row)
+        if fields:
+            for key in keys:
+                index.setdefault(key, fields)
+    return index
+
+
+def browser_storage_key_variants(row: Mapping[str, object]) -> list[str]:
+    storage_type = normalize_windows_identity(first_value(row, BROWSER_STORAGE_FIELD_ALIASES["storage_type"]))
+    browser = normalize_windows_identity(first_value(row, BROWSER_STORAGE_FIELD_ALIASES["browser"]))
+    profile = normalize_windows_identity(first_value(row, BROWSER_STORAGE_FIELD_ALIASES["profile"]))
+    storage_name = normalize_windows_identity(first_value(row, BROWSER_STORAGE_FIELD_ALIASES["storage_name"]))
+    relative_path = ntfs_path_value(row, BROWSER_STORAGE_FIELD_ALIASES["relative_path"])
+    keys: list[str] = []
+    if storage_type and browser and profile and storage_name:
+        keys.append(normalize_key(f"browser-storage:{browser}:{profile}:{storage_type}:{storage_name}"))
+    if storage_type and browser and profile and relative_path:
+        keys.append(normalize_key(f"browser-storage:{browser}:{profile}:{storage_type}:{relative_path}"))
+    if storage_type and relative_path:
+        keys.append(normalize_key(f"browser-storage:{storage_type}:path:{relative_path}"))
+    return list(dict.fromkeys(keys))
+
+
+def browser_storage_normalized_fields(row: Mapping[str, object]) -> dict[str, str]:
+    if not browser_storage_key_variants(row):
+        return {}
+    fields: dict[str, str] = {}
+    for canonical, aliases in BROWSER_STORAGE_FIELD_ALIASES.items():
+        if canonical in {"relative_path", "storage_name"}:
+            value = ntfs_path_value(row, aliases)
+        elif canonical in {"file_count", "total_bytes"}:
+            value = ntfs_int_value(row, aliases)
+        elif canonical in {"is_file", "sensitive", "inventory_truncated"}:
+            value = normalize_boolish(first_value(row, aliases))
+        elif canonical == "sample_hashes":
+            value = normalize_ntfs_list(first_value(row, aliases))
+        else:
+            raw = first_value(row, aliases)
+            value = normalize_field_value(raw) if raw is not None and str(raw).strip() else ""
+        if value:
+            fields[canonical] = value
+    return fields
+
+
+def browser_timeline_field_index(rows: Sequence[Mapping[str, object]]) -> dict[str, dict[str, str]]:
+    index: dict[str, dict[str, str]] = {}
+    for row in rows[:MAX_BROWSER_FIELD_DIFF_ROWS]:
+        keys = browser_timeline_key_variants(row)
+        if not keys:
+            continue
+        fields = browser_timeline_normalized_fields(row)
+        if fields:
+            for key in keys:
+                index.setdefault(key, fields)
+    return index
+
+
+def browser_timeline_key_variants(row: Mapping[str, object]) -> list[str]:
+    browser = normalize_windows_identity(first_value(row, BROWSER_TIMELINE_FIELD_ALIASES["browser"]))
+    profile = normalize_windows_identity(first_value(row, BROWSER_TIMELINE_FIELD_ALIASES["profile"]))
+    timeline_type = normalize_windows_identity(first_value(row, BROWSER_TIMELINE_FIELD_ALIASES["timeline_type"]))
+    timestamp = normalize_field_value(first_value(row, BROWSER_TIMELINE_FIELD_ALIASES["timestamp"]) or "")
+    url = normalize_field_value(first_value(row, BROWSER_TIMELINE_FIELD_ALIASES["url"]) or "")
+    target_path = ntfs_path_value(row, BROWSER_TIMELINE_FIELD_ALIASES["target_path"])
+    source_index = ntfs_int_value(row, BROWSER_TIMELINE_FIELD_ALIASES["source_index"])
+    keys: list[str] = []
+    if browser and profile and timeline_type and timestamp and url:
+        keys.append(normalize_key(f"browser-timeline:{browser}:{profile}:{timeline_type}:{timestamp}:{url}"))
+    if timeline_type and timestamp and url:
+        keys.append(normalize_key(f"browser-timeline:{timeline_type}:{timestamp}:{url}"))
+    if timeline_type and timestamp and target_path:
+        keys.append(normalize_key(f"browser-timeline:{timeline_type}:{timestamp}:{target_path}"))
+    if browser and profile and timeline_type and source_index:
+        keys.append(normalize_key(f"browser-timeline:{browser}:{profile}:{timeline_type}:row:{source_index}"))
+    return list(dict.fromkeys(keys))
+
+
+def browser_timeline_normalized_fields(row: Mapping[str, object]) -> dict[str, str]:
+    if not browser_timeline_key_variants(row):
+        return {}
+    fields: dict[str, str] = {}
+    for canonical, aliases in BROWSER_TIMELINE_FIELD_ALIASES.items():
+        if canonical == "target_path":
+            value = ntfs_path_value(row, aliases)
+        elif canonical in {"visit_count", "typed_count", "total_bytes", "state", "source_index"}:
+            value = ntfs_int_value(row, aliases)
+        else:
+            raw = first_value(row, aliases)
+            value = normalize_field_value(raw) if raw is not None and str(raw).strip() else ""
+        if value:
+            fields[canonical] = value
+    return fields
+
+
+def compare_browser_storage_fields(
+    rapid_dataset: Mapping[str, object],
+    reference_dataset: Mapping[str, object],
+) -> dict[str, object]:
+    return compare_ntfs_field_indexes(
+        rapid_dataset,
+        reference_dataset,
+        index_key="browser_storage_field_index",
+        mode="browser-cache-session-extension-sync-storage-field-diff",
+        key_name="browser_storage_key",
+        row_limit=MAX_BROWSER_FIELD_DIFF_ROWS,
+    )
+
+
+def compare_browser_timeline_fields(
+    rapid_dataset: Mapping[str, object],
+    reference_dataset: Mapping[str, object],
+) -> dict[str, object]:
+    return compare_ntfs_field_indexes(
+        rapid_dataset,
+        reference_dataset,
+        index_key="browser_timeline_field_index",
+        mode="browser-unified-timeline-field-diff",
+        key_name="browser_timeline_key",
+        row_limit=MAX_BROWSER_FIELD_DIFF_ROWS,
+    )
+
+
 def normalize_sid(value: object) -> str:
     if value is None:
         return ""
@@ -2377,6 +2576,8 @@ def build_trusted_tool_diff_manifest(
             "execution_artifact_field_comparison",
             "user_activity_field_comparison",
             "system_artifact_field_comparison",
+            "browser_storage_field_comparison",
+            "browser_timeline_field_comparison",
         ):
             field_comparison = comparison.get(field_name)
             if not isinstance(field_comparison, Mapping):
