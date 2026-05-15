@@ -88,6 +88,7 @@ class RapidTriageMacOsArtifactsTests(unittest.TestCase):
             self.assertIn("macos-spotlight-store", artifact_types)
             self.assertIn("macos-fsevents-file", artifact_types)
             self.assertIn("macos-apfs-snapshot-hint", artifact_types)
+            self.assertIn("ai-service-export-conversation", artifact_types)
 
             browser = next(item for item in payload["artifacts"] if item["artifact_type"] == "macos-browser-history-downloads")
             self.assertEqual(browser["details"]["browser"], "safari")
@@ -121,6 +122,14 @@ class RapidTriageMacOsArtifactsTests(unittest.TestCase):
 
             snapshot_hint = next(item for item in payload["artifacts"] if item["artifact_type"] == "macos-apfs-snapshot-hint")
             self.assertTrue(snapshot_hint["details"]["is_directory"])
+
+            ai_export = next(item for item in payload["artifacts"] if item["artifact_type"] == "ai-service-export-conversation")
+            self.assertEqual(ai_export["provider"], "macos-system-artifacts")
+            self.assertEqual(ai_export["details"]["parser"], "ai-service-export-parser")
+            self.assertEqual(ai_export["details"]["profile"], "ChatGPT")
+            self.assertEqual(ai_export["details"]["complete_pair_count"], 1)
+            self.assertEqual(ai_export["details"]["transcript_pairs"][0]["question"], "How do we preserve citations?")
+            self.assertIn("ai_service_export_parser_manifest", ai_export["details"])
 
     def test_macos_system_collector_is_wired_into_run_outputs(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -360,6 +369,20 @@ def build_macos_fixture(root: Path) -> None:
     )
     (fsevents_dir / "0000000000000001.fseventsd").write_bytes(
         b"\x00/Users/alice/Documents/mac-report.txt\x00/Applications/Safari.app\x00"
+    )
+    (user_root / "Documents" / "ChatGPT-conversations.json").write_text(
+        json.dumps(
+            [
+                {
+                    "title": "Citation workflow",
+                    "messages": [
+                        {"role": "user", "content": "How do we preserve citations?"},
+                        {"role": "assistant", "content": "Keep source hashes and stable locators."},
+                    ],
+                }
+            ]
+        ),
+        encoding="utf-8",
     )
     create_kakaotalk_macos_fixture(user_root)
 

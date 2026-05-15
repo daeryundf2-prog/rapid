@@ -12,6 +12,7 @@ from ..core.models import ArtifactRecord
 from .windows.browser import (
     build_browser_artifacts,
     build_browser_storage_only_artifacts,
+    collect_ai_service_export_artifacts,
     extract_chromium_history_and_downloads,
     extract_firefox_history,
     sqlite_table_exists,
@@ -94,6 +95,11 @@ class MacOsSystemArtifactsProvider:
         yield from collect_tcc_permissions(root.joinpath(*SYSTEM_TCC_DB), owner="system", scope="system")
         yield from collect_system_launch_agents(root)
         yield from collect_macos_native_inventory(root)
+        yield from collect_ai_service_export_artifacts(
+            root,
+            provider=self.name,
+            parser_version=PARSER_VERSION,
+        )
 
 
 def looks_like_macos_evidence(root: Path) -> bool:

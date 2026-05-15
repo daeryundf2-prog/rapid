@@ -356,6 +356,7 @@ On mounted or exported macOS evidence, `macos-system` collects a baseline set of
 - TCC privacy permission rows for camera, microphone, screen capture, accessibility, full-disk access, and protected folders, including risk flags for allowed high-value permissions and user-writable clients.
 - User and system LaunchAgent/LaunchDaemon plist inventory, including label, program arguments, and `RunAtLoad`.
 - Native inventory/string pivots for Unified Logs (`tracev3`/`uuidtext`), Spotlight stores, FSEvents files, and APFS snapshot hints so large macOS evidence can be searched and reviewed before dedicated macOS parser validation.
+- Bounded ChatGPT/Claude/Gemini/Perplexity-style JSON/JSONL service exports under the evidence root, emitted as `ai-service-export-conversation` rows with Q/A pairing, source hashes, service-export parser manifests, and source-viewer citation metadata. Provider scope/schema validation and trusted export diffs are still required before report-grade AI transcript claims.
 
 Use:
 

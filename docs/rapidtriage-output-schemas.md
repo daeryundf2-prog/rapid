@@ -659,6 +659,7 @@ The `manifest-windows-artifacts.json` sample also fixes the current artifact row
   - `macos-spotlight-store`
   - `macos-fsevents-file`
   - `macos-apfs-snapshot-hint`
+  - `ai-service-export-conversation`
 - `linux-system`
   - `linux-user-profile`
   - `linux-shell-history`

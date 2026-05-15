@@ -518,7 +518,12 @@ def collect_desktop_cloud_sync_db_artifacts(root: Path) -> Iterable[ArtifactReco
         )
 
 
-def collect_ai_service_export_artifacts(root: Path) -> Iterable[ArtifactRecord]:
+def collect_ai_service_export_artifacts(
+    root: Path,
+    *,
+    provider: str | None = None,
+    parser_version: str | None = None,
+) -> Iterable[ArtifactRecord]:
     scanned = 0
     for path in sorted(root.rglob("*"), key=lambda item: str(item).lower()):
         if scanned >= MAX_AI_EXPORT_FILES:
@@ -528,7 +533,12 @@ def collect_ai_service_export_artifacts(root: Path) -> Iterable[ArtifactRecord]:
         if not is_ai_export_candidate_path(path):
             continue
         scanned += 1
-        record = build_ai_service_export_artifact(path, root=root)
+        record = build_ai_service_export_artifact(
+            path,
+            root=root,
+            provider=provider or WindowsBrowserArtifactsProvider.name,
+            parser_version=parser_version or PARSER_VERSION,
+        )
         if record:
             yield record
 
@@ -538,7 +548,13 @@ def is_ai_export_candidate_path(path: Path) -> bool:
     return any(term in lowered for term in AI_EXPORT_PATH_TERMS)
 
 
-def build_ai_service_export_artifact(path: Path, *, root: Path) -> ArtifactRecord | None:
+def build_ai_service_export_artifact(
+    path: Path,
+    *,
+    root: Path,
+    provider: str = WindowsBrowserArtifactsProvider.name,
+    parser_version: str = PARSER_VERSION,
+) -> ArtifactRecord | None:
     try:
         stat_result = path.stat()
     except OSError:
@@ -576,11 +592,11 @@ def build_ai_service_export_artifact(path: Path, *, root: Path) -> ArtifactRecor
     if not rows:
         return None
     return build_ai_service_export_record(
-        provider=WindowsBrowserArtifactsProvider.name,
+        provider=provider,
         source=path,
         root=root,
         conversation_rows=rows,
-        parser_version=PARSER_VERSION,
+        parser_version=parser_version,
         source_size=stat_result.st_size,
         modified_at=isoformat_from_timestamp(stat_result.st_mtime),
     )
