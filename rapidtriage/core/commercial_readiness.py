@@ -2997,6 +2997,7 @@ def forensic_integrity_evidence_chain() -> list[dict[str, object]]:
             "primary_outputs": [
                 "case-db-report-export.custody_workflow",
                 "custody_workflow.custody_event_manifest.manifest_hash",
+                "custody_workflow.custody_report_grade_validation_plan_hash",
                 "custody_workflow.evidence_sources[].custody_row_hash",
                 "custody_workflow.custody_events[].custody_row_hash",
             ],

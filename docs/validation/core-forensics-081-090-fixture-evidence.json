@@ -54,9 +54,9 @@
       "title": "Chain-of-custody full workflow",
       "test_files": ["tests/test_rapidtriage_case_db.py"],
       "assertions": [
-        "Case DB report exports preserve evidence-source inventory, custody events, citation IDs, source status/hash fields, custody row hashes, custody-event-manifest-v1, custody manifest hash, acquisition metadata limitations, trusted custody event manifest diff helpers/gates, and #86 core_accuracy_gates."
+        "Case DB report exports preserve evidence-source inventory, custody events, citation IDs, source status/hash fields, custody row hashes, custody-event-manifest-v1, custody manifest hash, custody-report-grade-validation-plan-v1, plan hash/counts, acquisition metadata limitations, trusted custody event manifest diff helpers/gates, and #86 core_accuracy_gates."
       ],
-      "remaining_external_validation": ["Signed custody handoff forms, acquisition-device/write-blocker metadata, and trusted custody event manifests."]
+      "remaining_external_validation": ["Signed custody handoff forms, acquisition-device/write-blocker metadata, lab custody policy, full lifecycle stage coverage, and trusted custody event manifests."]
     },
     {
       "item": 87,

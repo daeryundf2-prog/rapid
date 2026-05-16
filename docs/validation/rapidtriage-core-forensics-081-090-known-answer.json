@@ -66,8 +66,8 @@
       "status": "pass",
       "backlog_items": [86],
       "evidence_paths": ["docs/validation/core-forensics-081-090-fixture-evidence.json", "tests/test_rapidtriage_case_db.py"],
-      "expected": {"required_assertions": ["Case DB report export preserves evidence-source inventory, custody events, citation IDs, source status/hash fields, custody row hashes, custody-event-manifest-v1, custody manifest hash, acquisition metadata warning, trusted custody event manifest diff helpers/gates, and #86 core_accuracy_gates."]},
-      "notes": "Internal fixture pass; signed handoff/acquisition metadata and trusted custody event manifests remain blockers."
+      "expected": {"required_assertions": ["Case DB report export preserves evidence-source inventory, custody events, citation IDs, source status/hash fields, custody row hashes, custody-event-manifest-v1, custody manifest hash, custody-report-grade-validation-plan-v1, plan hash/counts, acquisition metadata warning, trusted custody event manifest diff helpers/gates, and #86 core_accuracy_gates."]},
+      "notes": "Internal fixture pass; signed handoff/acquisition metadata, write-blocker metadata, lab custody policy, full lifecycle stage coverage, and trusted custody event manifests remain blockers."
     },
     {
       "id": "core-forensics-087-acquisition-hash",

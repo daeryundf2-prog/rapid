@@ -1387,6 +1387,8 @@ CORE_FORENSIC_ACCURACY_ITEMS: tuple[dict[str, object], ...] = (
             "source status/hash fields preserved",
             "custody row hashes emitted",
             "custody event manifest hash emitted",
+            "custody report-grade validation plan",
+            "custody report-grade ready slots",
             "acquisition metadata limitation warning",
             "trusted custody event manifest diff pass",
         ),

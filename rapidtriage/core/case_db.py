@@ -37,6 +37,14 @@ LARGE_SQLITE_FTS_REPORT_GRADE_BLOCKERS = [
     "index-maintenance-vacuum-regression-required",
 ]
 CHAIN_OF_CUSTODY_GAP_ID = "#86"
+CUSTODY_REPORT_GRADE_VALIDATION_PLAN_VERSION = "custody-report-grade-validation-plan-v1"
+CUSTODY_REPORT_GRADE_BLOCKERS = [
+    "trusted-custody-event-manifest-diff-missing",
+    "signed-custody-handoff-required",
+    "acquisition-device-metadata-required",
+    "write-blocker-metadata-required",
+    "lab-custody-policy-required",
+]
 ACQUISITION_HASH_GAP_ID = "#87"
 IMMUTABLE_AUDIT_GAP_ID = "#88"
 REPORT_REPRODUCIBILITY_GAP_ID = "#89"
@@ -6342,9 +6350,17 @@ def build_custody_workflow(
         custody_event_manifest=custody_event_manifest,
         trusted_diff=trusted_diff,
     )
+    custody_report_grade_validation_plan = build_custody_report_grade_validation_plan(
+        evidence_sources=evidence_sources,
+        custody_events=custody_events,
+        custody_event_manifest=custody_event_manifest,
+        custody_chain_manifest=custody_chain_manifest,
+        trusted_diff=trusted_diff,
+    )
     blockers = []
     if not trusted_diff or trusted_diff.get("status") != "pass":
         blockers.append(CUSTODY_TRUSTED_DIFF_BLOCKER_86)
+    blockers = sorted({*blockers, *custody_report_grade_validation_plan["blockers"]})
     return {
         "status": "case-db-custody-export",
         "commercial_gap_ids": [CHAIN_OF_CUSTODY_GAP_ID],
@@ -6354,6 +6370,7 @@ def build_custody_workflow(
             custody_event_manifest=custody_event_manifest,
             custody_chain_manifest=custody_chain_manifest,
             trusted_diff=trusted_diff,
+            report_grade_validation_plan=custody_report_grade_validation_plan,
         ),
             "summary": {
                 "evidence_source_count": len(evidence_sources),
@@ -6371,6 +6388,10 @@ def build_custody_workflow(
         "custody_completeness_matrix": custody_chain_manifest["custody_completeness_matrix"],
         "custody_completeness_matrix_hash": custody_chain_manifest["custody_completeness_matrix_hash"],
         "custody_manifest_hash": custody_event_manifest["manifest_hash"],
+        "custody_report_grade_validation_plan": custody_report_grade_validation_plan,
+        "custody_report_grade_validation_plan_hash": custody_report_grade_validation_plan["validation_plan_sha256"],
+        "report_grade_ready_slot_count": custody_report_grade_validation_plan["ready_slot_count"],
+        "report_grade_blocking_slot_count": custody_report_grade_validation_plan["blocking_slot_count"],
         "trusted_custody_diff": dict(trusted_diff) if trusted_diff else missing_integrity_trusted_diff(
             CHAIN_OF_CUSTODY_GAP_ID,
             CUSTODY_TRUSTED_DIFF_BLOCKER_86,
@@ -6382,6 +6403,7 @@ def build_custody_workflow(
             custody_event_manifest=custody_event_manifest,
             custody_chain_manifest=custody_chain_manifest,
             trusted_diff=trusted_diff,
+            report_grade_validation_plan=custody_report_grade_validation_plan,
         ),
         "blockers": blockers,
         "limitations": [
@@ -6515,6 +6537,186 @@ def build_custody_chain_manifest(
             json.dumps(manifest_core, ensure_ascii=False, sort_keys=True).encode("utf-8")
         ).hexdigest(),
     }
+
+
+def build_custody_report_grade_validation_plan(
+    *,
+    evidence_sources: Sequence[Mapping[str, object]],
+    custody_events: Sequence[Mapping[str, object]],
+    custody_event_manifest: Mapping[str, object],
+    custody_chain_manifest: Mapping[str, object],
+    trusted_diff: Mapping[str, object] | None,
+) -> dict[str, object]:
+    missing_stages = list(custody_chain_manifest.get("missing_stage_names") or [])
+    trusted_status = str(trusted_diff.get("status") or "missing") if trusted_diff else "missing"
+    source_hash_coverage = sum(1 for item in evidence_sources if item.get("sha256"))
+    source_citation_coverage = sum(1 for item in evidence_sources if item.get("citation_id"))
+    event_actor_coverage = sum(1 for item in custody_events if item.get("actor"))
+    event_timestamp_coverage = sum(1 for item in custody_events if item.get("timestamp"))
+    ready_slots = [
+        {
+            "slot_id": "custody-evidence-source-inventory",
+            "status": "complete",
+            "evidence": {
+                "evidence_source_count": len(evidence_sources),
+                "source_hash_coverage_count": source_hash_coverage,
+                "source_citation_coverage_count": source_citation_coverage,
+            },
+        },
+        {
+            "slot_id": "custody-event-inventory",
+            "status": "complete",
+            "evidence": {
+                "custody_event_count": len(custody_events),
+                "event_actor_coverage_count": event_actor_coverage,
+                "event_timestamp_coverage_count": event_timestamp_coverage,
+            },
+        },
+        {
+            "slot_id": "custody-event-manifest",
+            "status": "complete",
+            "evidence": {
+                "manifest_hash": custody_event_manifest.get("manifest_hash"),
+                "evidence_source_hash_count": len(custody_event_manifest.get("evidence_source_hashes") or []),
+                "custody_event_hash_count": len(custody_event_manifest.get("custody_event_hashes") or []),
+            },
+        },
+        {
+            "slot_id": "custody-chain-manifest",
+            "status": "complete",
+            "evidence": {
+                "manifest_hash": custody_chain_manifest.get("manifest_hash"),
+                "hash_chain_head": custody_chain_manifest.get("hash_chain_head"),
+                "row_hash_count": custody_chain_manifest.get("row_hash_count"),
+            },
+        },
+        {
+            "slot_id": "custody-completeness-matrix",
+            "status": "complete",
+            "evidence": {
+                "matrix_hash": custody_chain_manifest.get("custody_completeness_matrix_hash"),
+                "missing_stage_names": missing_stages,
+            },
+        },
+        {
+            "slot_id": "custody-trusted-diff-disclosure",
+            "status": "complete",
+            "evidence": {
+                "trusted_diff_status": trusted_status,
+                "trusted_tool": str((trusted_diff or {}).get("trusted_tool") or ""),
+            },
+        },
+    ]
+    blocking_slots: list[dict[str, object]] = []
+    if not evidence_sources:
+        blocking_slots.append(
+            {
+                "slot_id": "custody-evidence-source-inventory-present",
+                "status": "blocked",
+                "blocker": "custody-evidence-source-inventory-required",
+                "required_evidence": "at least one evidence_source row linked to the exported case",
+            }
+        )
+    if source_hash_coverage != len(evidence_sources):
+        blocking_slots.append(
+            {
+                "slot_id": "custody-source-hash-completeness",
+                "status": "blocked",
+                "blocker": "custody-source-hash-completeness-required",
+                "required_evidence": "SHA-256 or source hash for every evidence source row",
+            }
+        )
+    if source_citation_coverage != len(evidence_sources):
+        blocking_slots.append(
+            {
+                "slot_id": "custody-source-citation-completeness",
+                "status": "blocked",
+                "blocker": "custody-source-citation-completeness-required",
+                "required_evidence": "stable citation_id for every evidence source row",
+            }
+        )
+    if not custody_events:
+        blocking_slots.append(
+            {
+                "slot_id": "custody-event-log-present",
+                "status": "blocked",
+                "blocker": "custody-event-log-required",
+                "required_evidence": "acquisition, transfer, review, export, and report custody events",
+            }
+        )
+    if event_actor_coverage != len(custody_events) or event_timestamp_coverage != len(custody_events):
+        blocking_slots.append(
+            {
+                "slot_id": "custody-event-actor-timestamp-completeness",
+                "status": "blocked",
+                "blocker": "custody-event-actor-timestamp-completeness-required",
+                "required_evidence": "actor and timestamp for every custody event row",
+            }
+        )
+    if missing_stages:
+        blocking_slots.append(
+            {
+                "slot_id": "custody-lifecycle-stage-coverage",
+                "status": "blocked",
+                "blocker": "custody-lifecycle-stage-coverage-required",
+                "required_evidence": ", ".join(missing_stages),
+            }
+        )
+    if trusted_status != "pass":
+        blocking_slots.append(
+            {
+                "slot_id": "custody-trusted-event-manifest-diff",
+                "status": "external-required",
+                "blocker": CUSTODY_TRUSTED_DIFF_BLOCKER_86,
+                "required_evidence": "trusted custody-event manifest diff covering evidence source rows, custody events, manifest hash, and completeness matrix hash",
+            }
+        )
+    blocking_slots.extend(
+        [
+            {
+                "slot_id": "custody-signed-handoff",
+                "status": "external-required",
+                "blocker": "signed-custody-handoff-required",
+                "required_evidence": "signed custody handoff or receipt form for acquisition, transfer, and report delivery",
+            },
+            {
+                "slot_id": "custody-acquisition-device-metadata",
+                "status": "external-required",
+                "blocker": "acquisition-device-metadata-required",
+                "required_evidence": "acquisition workstation/device, examiner, clock, source device, and collection context metadata",
+            },
+            {
+                "slot_id": "custody-write-blocker-metadata",
+                "status": "external-required",
+                "blocker": "write-blocker-metadata-required",
+                "required_evidence": "write-blocker or source-protection device serial, firmware/version, and validation result",
+            },
+            {
+                "slot_id": "custody-lab-policy",
+                "status": "external-required",
+                "blocker": "lab-custody-policy-required",
+                "required_evidence": "lab-approved custody policy or SOP revision used for the case",
+            },
+        ]
+    )
+    plan_core: dict[str, object] = {
+        "profile_version": CUSTODY_REPORT_GRADE_VALIDATION_PLAN_VERSION,
+        "item_number": 86,
+        "commercial_gap_ids": [CHAIN_OF_CUSTODY_GAP_ID],
+        "plan_context": "case-db-report-export",
+        "custody_event_manifest_hash": custody_event_manifest.get("manifest_hash"),
+        "custody_chain_manifest_hash": custody_chain_manifest.get("manifest_hash"),
+        "custody_completeness_matrix_hash": custody_chain_manifest.get("custody_completeness_matrix_hash"),
+        "trusted_diff_status": trusted_status,
+        "ready_slots": ready_slots,
+        "blocking_slots": blocking_slots,
+        "ready_slot_count": len(ready_slots),
+        "blocking_slot_count": len(blocking_slots),
+        "blockers": sorted({str(slot.get("blocker") or "") for slot in blocking_slots if slot.get("blocker")}),
+        "commercial_claim_allowed": False,
+        "reporting_boundary": "This plan makes Case DB custody exports auditable, but court/commercial custody claims still require external handoff, acquisition-device, write-blocker, policy, and trusted-manifest evidence.",
+    }
+    return {**plan_core, "validation_plan_sha256": stable_payload_sha256(plan_core)}
 
 
 def build_custody_completeness_matrix(
@@ -7075,6 +7277,7 @@ def custody_workflow_functional_profile(
     custody_event_manifest: Mapping[str, object],
     custody_chain_manifest: Mapping[str, object],
     trusted_diff: Mapping[str, object] | None,
+    report_grade_validation_plan: Mapping[str, object] | None = None,
 ) -> dict[str, object]:
     sources_with_hash = sum(1 for item in evidence_sources if item.get("sha256"))
     sources_with_citation = sum(1 for item in evidence_sources if item.get("citation_id"))
@@ -7105,6 +7308,11 @@ def custody_workflow_functional_profile(
         failed_checks.append("custody-chain-manifest-hash-missing")
     if not trusted_diff or trusted_diff.get("status") != "pass":
         failed_checks.append(CUSTODY_TRUSTED_DIFF_BLOCKER_86)
+    if not report_grade_validation_plan or not report_grade_validation_plan.get("validation_plan_sha256"):
+        failed_checks.append("custody-report-grade-validation-plan-missing")
+    else:
+        failed_checks.extend(str(blocker) for blocker in report_grade_validation_plan.get("blockers") or [])
+    failed_checks = sorted(dict.fromkeys(failed_checks))
     return {
         "item_number": 40,
         "batch_id": FUNCTIONAL_VALIDATION_BATCH_ID,
@@ -7123,6 +7331,11 @@ def custody_workflow_functional_profile(
             "custody_hash_chain_head": str(custody_chain_manifest.get("hash_chain_head") or ""),
             "missing_stage_names": list(custody_chain_manifest.get("missing_stage_names") or []),
             "trusted_diff_status": str(trusted_diff.get("status")) if trusted_diff else "missing",
+            "custody_report_grade_validation_plan_hash": str(
+                (report_grade_validation_plan or {}).get("validation_plan_sha256") or ""
+            ),
+            "report_grade_ready_slot_count": int((report_grade_validation_plan or {}).get("ready_slot_count") or 0),
+            "report_grade_blocking_slot_count": int((report_grade_validation_plan or {}).get("blocking_slot_count") or 0),
         },
         "passed_validation_check_ids": [
             "case-db-evidence-source-inventory-exported",
@@ -7132,6 +7345,7 @@ def custody_workflow_functional_profile(
             "case-db-custody-manifest-hash-exported",
             "case-db-custody-chain-manifest-hash-exported",
             "case-db-custody-limitations-disclosed",
+            "case-db-custody-report-grade-validation-plan-exported",
         ],
         "failed_validation_check_ids": failed_checks,
         "reportability_decision": {
@@ -9099,6 +9313,7 @@ def custody_workflow_core_accuracy_gates(
     custody_event_manifest: Mapping[str, object] | None = None,
     custody_chain_manifest: Mapping[str, object] | None = None,
     trusted_diff: Mapping[str, object] | None = None,
+    report_grade_validation_plan: Mapping[str, object] | None = None,
 ) -> list[dict[str, object]]:
     satisfied = ["acquisition metadata limitation warning"]
     if evidence_sources:
@@ -9117,6 +9332,10 @@ def custody_workflow_core_accuracy_gates(
         satisfied.append("custody chain manifest hash emitted")
     if custody_chain_manifest and custody_chain_manifest.get("custody_completeness_matrix_hash"):
         satisfied.append("custody completeness matrix hash emitted")
+    if report_grade_validation_plan and report_grade_validation_plan.get("validation_plan_sha256"):
+        satisfied.append("custody report-grade validation plan")
+    if report_grade_validation_plan and int(report_grade_validation_plan.get("ready_slot_count") or 0) >= 6:
+        satisfied.append("custody report-grade ready slots")
     if trusted_diff and trusted_diff.get("status") == "pass":
         satisfied.append("trusted custody event manifest diff pass")
     return [
@@ -9129,6 +9348,7 @@ def custody_workflow_core_accuracy_gates(
                 f"custody_manifest_hash:{(custody_event_manifest or {}).get('manifest_hash', '')}",
                 f"custody_chain_manifest_hash:{(custody_chain_manifest or {}).get('manifest_hash', '')}",
                 f"custody_completeness_matrix_hash:{(custody_chain_manifest or {}).get('custody_completeness_matrix_hash', '')}",
+                f"custody_report_grade_validation_plan_hash:{(report_grade_validation_plan or {}).get('validation_plan_sha256', '')}",
             ],
         )
     ]

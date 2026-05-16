@@ -2015,10 +2015,10 @@
       ],
       "expected": {
         "required_assertions": [
-          "Case DB report export preserves evidence-source inventory, custody events, citation IDs, source status/hash fields, custody row hashes, custody-event-manifest-v1, custody manifest hash, acquisition metadata warning, and #86 core_accuracy_gates."
+          "Case DB report export preserves evidence-source inventory, custody events, citation IDs, source status/hash fields, custody row hashes, custody-event-manifest-v1, custody manifest hash, custody-report-grade-validation-plan-v1, plan hash/counts, acquisition metadata warning, and #86 core_accuracy_gates."
         ]
       },
-      "notes": "Internal fixture pass; signed handoff/acquisition metadata remains blocker.",
+      "notes": "Internal fixture pass; signed handoff/acquisition metadata, write-blocker metadata, lab custody policy, full lifecycle stage coverage, and trusted custody event manifests remain blockers.",
       "source_manifest": "docs/validation/rapidtriage-core-forensics-081-090-known-answer.json"
     },
     {

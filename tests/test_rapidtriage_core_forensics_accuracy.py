@@ -211,6 +211,7 @@ class RapidTriageCoreForensicsAccuracyTests(unittest.TestCase):
         )
         self.assertIn("trusted validation package manifest diff pass", validation_package["required_checks"])
         self.assertIn("custody event inventory", custody["required_checks"])
+        self.assertIn("custody report-grade validation plan", custody["required_checks"])
         self.assertIn("trusted custody event manifest diff pass", custody["required_checks"])
         self.assertIn("evidence-source hashes exported", acquisition_hash["required_checks"])
         self.assertIn("trusted acquisition hash manifest diff pass", acquisition_hash["required_checks"])

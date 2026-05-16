@@ -2115,6 +2115,41 @@ class RapidTriageCaseDatabaseTests(unittest.TestCase):
                 export["custody_workflow"]["functional_priority_profile"]["implemented_controls"]["custody_chain_manifest_hash"],
                 export["custody_workflow"]["custody_chain_manifest"]["manifest_hash"],
             )
+            custody_plan = export["custody_workflow"]["custody_report_grade_validation_plan"]
+            self.assertEqual(custody_plan["profile_version"], "custody-report-grade-validation-plan-v1")
+            self.assertEqual(custody_plan["item_number"], 86)
+            self.assertEqual(custody_plan["plan_context"], "case-db-report-export")
+            self.assertEqual(
+                custody_plan["custody_event_manifest_hash"],
+                export["custody_workflow"]["custody_event_manifest"]["manifest_hash"],
+            )
+            self.assertEqual(
+                custody_plan["custody_chain_manifest_hash"],
+                export["custody_workflow"]["custody_chain_manifest"]["manifest_hash"],
+            )
+            self.assertEqual(
+                custody_plan["custody_completeness_matrix_hash"],
+                export["custody_workflow"]["custody_completeness_matrix_hash"],
+            )
+            self.assertEqual(
+                export["custody_workflow"]["custody_report_grade_validation_plan_hash"],
+                custody_plan["validation_plan_sha256"],
+            )
+            self.assertEqual(custody_plan["ready_slot_count"], 6)
+            self.assertGreaterEqual(custody_plan["blocking_slot_count"], 5)
+            self.assertEqual(export["custody_workflow"]["report_grade_ready_slot_count"], 6)
+            self.assertEqual(
+                export["custody_workflow"]["report_grade_blocking_slot_count"],
+                custody_plan["blocking_slot_count"],
+            )
+            custody_ready_slots = {slot["slot_id"] for slot in custody_plan["ready_slots"]}
+            custody_blocking_slots = {slot["slot_id"] for slot in custody_plan["blocking_slots"]}
+            self.assertIn("custody-chain-manifest", custody_ready_slots)
+            self.assertIn("custody-trusted-event-manifest-diff", custody_blocking_slots)
+            self.assertIn(
+                "custody_report_grade_validation_plan_hash",
+                export["custody_workflow"]["functional_priority_profile"]["implemented_controls"],
+            )
             self.assertTrue(all(len(item["custody_row_hash"]) == 64 for item in export["custody_workflow"]["evidence_sources"]))
             self.assertTrue(all(len(item["custody_row_hash"]) == 64 for item in export["custody_workflow"]["custody_events"]))
             self.assertIn(
@@ -2127,18 +2162,24 @@ class RapidTriageCaseDatabaseTests(unittest.TestCase):
             self.assertIn("custody event manifest hash emitted", export["custody_workflow"]["core_accuracy_gates"][0]["satisfied_checks"])
             self.assertIn("custody chain manifest hash emitted", export["custody_workflow"]["core_accuracy_gates"][0]["satisfied_checks"])
             self.assertIn("custody completeness matrix hash emitted", export["custody_workflow"]["core_accuracy_gates"][0]["satisfied_checks"])
+            self.assertIn("custody report-grade validation plan", export["custody_workflow"]["core_accuracy_gates"][0]["satisfied_checks"])
+            self.assertIn("custody report-grade ready slots", export["custody_workflow"]["core_accuracy_gates"][0]["satisfied_checks"])
             self.assertEqual(export["custody_workflow"]["trusted_custody_diff"]["status"], "missing")
             self.assertIn("trusted-custody-event-manifest-diff-missing", export["custody_workflow"]["blockers"])
+            self.assertIn("signed-custody-handoff-required", export["custody_workflow"]["blockers"])
             custody_diff = build_custody_workflow_trusted_diff(export["custody_workflow"], export["custody_workflow"])
             custody_gates = custody_workflow_core_accuracy_gates(
                 evidence_sources=export["custody_workflow"]["evidence_sources"],
                 custody_events=export["custody_workflow"]["custody_events"],
                 custody_event_manifest=export["custody_workflow"]["custody_event_manifest"],
+                custody_chain_manifest=export["custody_workflow"]["custody_chain_manifest"],
                 trusted_diff=custody_diff,
+                report_grade_validation_plan=custody_plan,
             )
             self.assertEqual(custody_diff["status"], "pass")
             self.assertIn("manifest_hash", custody_diff["compared_fields"])
             self.assertIn("trusted custody event manifest diff pass", custody_gates[0]["satisfied_checks"])
+            self.assertIn("custody report-grade validation plan", custody_gates[0]["satisfied_checks"])
             self.assertIn("acquisition_hash_workflow", export)
             self.assertIn("#87", export["acquisition_hash_workflow"]["commercial_gap_ids"])
             self.assertEqual(
