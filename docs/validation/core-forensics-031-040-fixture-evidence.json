@@ -91,6 +91,7 @@
       "title": "Email PST/OST full mailbox parser",
       "assertions": [
         "EML/MBOX/Maildir/PST/OST/MSG rows preserve source profiles, source hashes, message/body/attachment inventory, PST/OST limitations, threading/dedup warnings, legal privilege boundary, email_analyst_review_profile, #36 core_accuracy_gates, and native/deleted-complete reportability blockers.",
+        "Email rows emit email-report-grade-validation-plan-v1 with source mailbox hash integrity, row citation, header/body/attachment inventory, thread/participant profile, bounded MAPI inventory boundary, source-viewer locator, hash-only body policy, attachment locator, trusted mailbox diff, native MAPI/deleted/thread/attachment/auth validation, privilege review, and independent-review slots.",
         "build_email_trusted_diff compares Rapid email rows against libpff/readpst/Outlook/native mailbox rows before satisfying the #36 trusted diff gate."
       ],
       "blockers_kept": [

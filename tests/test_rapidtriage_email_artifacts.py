@@ -59,6 +59,8 @@ class RapidTriageEmailArtifactsTests(unittest.TestCase):
             self.assertIn("email mailbox parser manifest", eml_gate["satisfied_checks"])
             self.assertIn("email mailbox source row citation", eml_gate["satisfied_checks"])
             self.assertIn("email mailbox review viewer controls", eml_gate["satisfied_checks"])
+            self.assertIn("email report-grade validation plan", eml_gate["satisfied_checks"])
+            self.assertIn("email report-grade ready slots", eml_gate["satisfied_checks"])
             self.assertIn("message header/body/attachment inventory", eml_gate["satisfied_checks"])
             self.assertIn("email thread/participant profile", eml_gate["satisfied_checks"])
             self.assertIn("PST/OST native limitation warning", eml_gate["satisfied_checks"])
@@ -98,6 +100,33 @@ class RapidTriageEmailArtifactsTests(unittest.TestCase):
                 eml["details"]["email_mailbox_parser_manifest_hash"],
                 eml_mailbox_manifest["manifest_sha256"],
             )
+            eml_report_plan = eml["details"]["email_report_grade_validation_plan"]
+            self.assertEqual(eml_report_plan["profile_version"], "email-report-grade-validation-plan-v1")
+            self.assertEqual(eml_report_plan["item_number"], 36)
+            self.assertEqual(eml_report_plan["gap_id"], "#36")
+            self.assertEqual(eml_report_plan["source_format"], "eml")
+            self.assertEqual(eml_report_plan["mailbox_parser_manifest_sha256"], eml_mailbox_manifest["manifest_sha256"])
+            self.assertEqual(eml_report_plan["citation_manifest_sha256"], eml_manifest["manifest_sha256"])
+            self.assertFalse(eml_report_plan["commercial_grade"])
+            self.assertEqual(
+                eml["details"]["email_report_grade_validation_plan_hash"],
+                eml_report_plan["manifest_sha256"],
+            )
+            eml_slots = {slot["id"]: slot for slot in eml_report_plan["evidence_slots"]}
+            self.assertEqual(eml_slots["source-mailbox-hash-integrity"]["status"], "complete")
+            self.assertEqual(eml_slots["message-or-mailbox-row-citation"]["status"], "complete")
+            self.assertEqual(eml_slots["header-body-attachment-inventory"]["status"], "complete")
+            self.assertEqual(eml_slots["thread-participant-profile"]["status"], "complete")
+            self.assertEqual(eml_slots["bounded-mapi-inventory-boundary"]["status"], "not-applicable")
+            self.assertEqual(eml_slots["source-viewer-locator"]["status"], "complete")
+            self.assertEqual(eml_slots["hash-only-body-policy"]["status"], "complete")
+            self.assertEqual(eml_slots["attachment-source-locator"]["status"], "complete")
+            self.assertEqual(eml_slots["trusted-mailbox-export-native-diff"]["status"], "pending-cross-tool-validate")
+            self.assertEqual(eml_slots["deleted-item-recovery-corpus"]["status"], "external-corpus-required")
+            self.assertEqual(eml_slots["privilege-scope-review"]["status"], "legal-review-required")
+            self.assertEqual(eml_report_plan["ready_slot_count"], 7)
+            self.assertEqual(eml_report_plan["blocking_slot_count"], 7)
+            self.assertIn("trusted-email-mailbox-export-native-diff-required", eml_report_plan["blockers"])
             self.assertEqual(
                 eml_mailbox_manifest["attachment_locator_profile"]["profile_sha256"],
                 eml["details"]["email_attachment_locator_profile"]["profile_sha256"],
@@ -154,6 +183,10 @@ class RapidTriageEmailArtifactsTests(unittest.TestCase):
                 eml_uplift["functional_priority_profile"]["passed_validation_check_ids"],
             )
             self.assertIn(
+                "email-report-grade-validation-plan-emitted",
+                eml_uplift["functional_priority_profile"]["passed_validation_check_ids"],
+            )
+            self.assertIn(
                 "email-mailbox-source-locator-emitted",
                 eml_uplift["functional_priority_profile"]["passed_validation_check_ids"],
             )
@@ -177,6 +210,12 @@ class RapidTriageEmailArtifactsTests(unittest.TestCase):
                 ],
                 eml_mailbox_manifest["manifest_sha256"],
             )
+            self.assertEqual(
+                eml_uplift["functional_priority_profile"]["implemented_controls"][
+                    "email_report_grade_validation_plan_hash"
+                ],
+                eml_report_plan["manifest_sha256"],
+            )
             self.assertTrue(
                 eml_uplift["functional_priority_profile"]["implemented_controls"][
                     "email_mailbox_row_citation_present"
@@ -186,6 +225,12 @@ class RapidTriageEmailArtifactsTests(unittest.TestCase):
                 eml_uplift["large_data_controls"]["email_mailbox_parser_manifest_hash"],
                 eml_mailbox_manifest["manifest_sha256"],
             )
+            self.assertEqual(
+                eml_uplift["large_data_controls"]["email_report_grade_validation_plan_hash"],
+                eml_report_plan["manifest_sha256"],
+            )
+            self.assertEqual(eml_uplift["large_data_controls"]["email_report_grade_validation_ready_slot_count"], 7)
+            self.assertEqual(eml_uplift["large_data_controls"]["email_report_grade_validation_blocking_slot_count"], 7)
             self.assertTrue(eml_uplift["large_data_controls"]["email_mailbox_source_row_citation_present"])
             self.assertTrue(eml_uplift["large_data_controls"]["email_mailbox_viewer_controls_present"])
             self.assertEqual(
@@ -246,6 +291,8 @@ class RapidTriageEmailArtifactsTests(unittest.TestCase):
             self.assertIn("email mailbox parser manifest", pst_gate["satisfied_checks"])
             self.assertIn("email mailbox source row citation", pst_gate["satisfied_checks"])
             self.assertIn("email mailbox review viewer controls", pst_gate["satisfied_checks"])
+            self.assertIn("email report-grade validation plan", pst_gate["satisfied_checks"])
+            self.assertIn("email report-grade ready slots", pst_gate["satisfied_checks"])
             mapi_profile = pst["details"]["mapi_container_review_profile"]
             self.assertEqual(mapi_profile["profile_version"], "mapi-container-review-v1")
             self.assertEqual(mapi_profile["native_object_decode_status"], "not-implemented")
@@ -283,6 +330,30 @@ class RapidTriageEmailArtifactsTests(unittest.TestCase):
                 pst["details"]["email_mailbox_parser_manifest_hash"],
                 pst_mailbox_manifest["manifest_sha256"],
             )
+            pst_report_plan = pst["details"]["email_report_grade_validation_plan"]
+            self.assertEqual(pst_report_plan["profile_version"], "email-report-grade-validation-plan-v1")
+            self.assertEqual(pst_report_plan["item_number"], 36)
+            self.assertEqual(pst_report_plan["source_format"], "pst")
+            self.assertEqual(pst_report_plan["support_tier"], "bounded-string-inventory")
+            self.assertEqual(pst_report_plan["mailbox_parser_manifest_sha256"], pst_mailbox_manifest["manifest_sha256"])
+            self.assertEqual(
+                pst["details"]["email_report_grade_validation_plan_hash"],
+                pst_report_plan["manifest_sha256"],
+            )
+            pst_slots = {slot["id"]: slot for slot in pst_report_plan["evidence_slots"]}
+            self.assertEqual(pst_slots["source-mailbox-hash-integrity"]["status"], "complete")
+            self.assertEqual(pst_slots["message-or-mailbox-row-citation"]["status"], "complete")
+            self.assertEqual(pst_slots["header-body-attachment-inventory"]["status"], "complete")
+            self.assertEqual(pst_slots["thread-participant-profile"]["status"], "not-applicable")
+            self.assertEqual(pst_slots["bounded-mapi-inventory-boundary"]["status"], "complete")
+            self.assertEqual(pst_slots["source-viewer-locator"]["status"], "complete")
+            self.assertEqual(pst_slots["hash-only-body-policy"]["status"], "complete")
+            self.assertEqual(pst_slots["attachment-source-locator"]["status"], "not-applicable")
+            self.assertEqual(pst_slots["native-mapi-object-decoding"]["status"], "external-native-parser-required")
+            self.assertTrue(pst_slots["native-mapi-object-decoding"]["blocking"])
+            self.assertEqual(pst_report_plan["ready_slot_count"], 6)
+            self.assertEqual(pst_report_plan["blocking_slot_count"], 8)
+            self.assertIn("native-mapi-object-decoding-or-trusted-export-required", pst_report_plan["blockers"])
             self.assertIn(
                 "bounded-container-candidate-citations-emitted",
                 pst_uplift["functional_priority_profile"]["passed_validation_check_ids"],
@@ -292,12 +363,22 @@ class RapidTriageEmailArtifactsTests(unittest.TestCase):
                 pst_uplift["functional_priority_profile"]["passed_validation_check_ids"],
             )
             self.assertIn(
+                "email-report-grade-validation-plan-emitted",
+                pst_uplift["functional_priority_profile"]["passed_validation_check_ids"],
+            )
+            self.assertIn(
                 "pst-ost-msg-native-object-decode-not-implemented",
                 pst_uplift["functional_priority_profile"]["failed_validation_check_ids"],
             )
             self.assertIn("native-container-object-decode", pst_uplift["failed_validation_matrix_ids"])
             self.assertEqual(pst_uplift["large_data_controls"]["container_scan_limit"], 16 * 1024 * 1024)
             self.assertTrue(pst_uplift["large_data_controls"]["mapi_container_review_profile_present"])
+            self.assertEqual(
+                pst_uplift["large_data_controls"]["email_report_grade_validation_plan_hash"],
+                pst_report_plan["manifest_sha256"],
+            )
+            self.assertEqual(pst_uplift["large_data_controls"]["email_report_grade_validation_ready_slot_count"], 6)
+            self.assertEqual(pst_uplift["large_data_controls"]["email_report_grade_validation_blocking_slot_count"], 8)
             self.assertIn(
                 "native-mapi-container-decoding-not-validated",
                 pst_uplift["reportability_decision"]["blockers"],

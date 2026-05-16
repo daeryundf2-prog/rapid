@@ -948,7 +948,8 @@
       ],
       "expected": {
         "required_assertions": [
-          "Email rows preserve mailbox/message profile, header/body/attachment inventory, PST/OST limitations, threading warnings, legal boundary, and #36 core_accuracy_gates"
+          "Email rows preserve mailbox/message profile, header/body/attachment inventory, PST/OST limitations, threading warnings, legal boundary, and #36 core_accuracy_gates",
+          "Email rows emit email-report-grade-validation-plan-v1 with source mailbox hash integrity, message/mailbox row citation, header/body/attachment inventory, thread/participant profile, bounded MAPI inventory boundary, source-viewer locator, hash-only body policy, attachment source locator, trusted mailbox export/native diff, native MAPI decoding or trusted export, deleted-item corpus, thread/dedup/timezone corpus, attachment-byte validation, auth/signature/crypto validation, privilege/scope review, and independent-review evidence slots"
         ]
       },
       "notes": "Internal fixture pass; native PST/OST/MSG decoding and deleted item recovery remain commercial blockers.",

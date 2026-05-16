@@ -128,6 +128,7 @@
         "required_assertions": [
           "Email rows preserve mailbox/message profile, header/body/attachment inventory, PST/OST limitations, threading warnings, legal boundary, and #36 core_accuracy_gates",
           "Email rows emit email_mailbox_parser_manifest with stable manifest hash, row citation, source viewer locator, thread/participant profile, bounded MAPI inventory state, and viewer controls",
+          "Email rows emit email-report-grade-validation-plan-v1 with source mailbox hash integrity, message/mailbox row citation, header/body/attachment inventory, thread/participant profile, bounded MAPI inventory boundary, source-viewer locator, hash-only body policy, attachment source locator, trusted mailbox export/native diff, native MAPI decoding or trusted export, deleted-item corpus, thread/dedup/timezone corpus, attachment-byte validation, auth/signature/crypto validation, privilege/scope review, and independent-review evidence slots",
           "Email trusted diff helper requires libpff/readpst/Outlook/native mailbox row equality before satisfying the #36 trusted email mailbox export diff pass gate",
           "Email reportability decisions block native/deleted-complete mailbox claims until PST/OST/MSG, deleted item, threading, and privilege validation exists"
         ]

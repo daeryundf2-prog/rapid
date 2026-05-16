@@ -43,6 +43,17 @@ EMAIL_REPORT_GRADE_BLOCKERS = [
     "conversation-threading-and-dedup-validation-required",
     "broad-mailbox-known-answer-corpus-required",
 ]
+EMAIL_REPORT_GRADE_VALIDATION_PLAN_VERSION = "email-report-grade-validation-plan-v1"
+EMAIL_REPORT_GRADE_VALIDATION_BLOCKERS = [
+    "trusted-email-mailbox-export-native-diff-required",
+    "native-mapi-object-decoding-or-trusted-export-required",
+    "deleted-item-recovery-corpus-required",
+    "thread-dedup-timezone-corpus-required",
+    "attachment-byte-validation-required",
+    "auth-signature-crypto-validation-required",
+    "privilege-scope-review-required",
+    "independent-mailbox-review-required",
+]
 EMAIL_TRUSTED_DIFF_BLOCKER = "email-mailbox-trusted-diff-required"
 EMAIL_TRUSTED_DIFF_TOOLS = {
     "libpff",
@@ -343,6 +354,28 @@ def build_message_record(
             "validation_checks": validation_checks,
         },
     )
+    report_plan = build_email_report_grade_validation_plan(
+        source_format=source_format,
+        source_path=path,
+        source_hashes=source_hashes,
+        details={
+            "artifact_type": "email-message",
+            "source_index": source_index,
+            "message_id": header_value(message, "Message-ID"),
+            "subject": header_value(message, "Subject"),
+            "from": header_value(message, "From"),
+            "to": header_value(message, "To"),
+            "date": header_value(message, "Date"),
+            "body_sha256": body_hash,
+            "attachment_count": len(attachments),
+            "attachments": attachments,
+            "email_attachment_locator_profile": attachment_locator_profile,
+            "email_thread_profile": thread_profile,
+            "email_expansion_citation_manifest": citation_manifest,
+            "email_mailbox_parser_manifest": mailbox_manifest,
+            "validation_checks": validation_checks,
+        },
+    )
     details = {
         "parser": "email-artifacts",
         "parser_version": PARSER_VERSION,
@@ -370,6 +403,8 @@ def build_message_record(
         "email_expansion_citation_manifest_hash": citation_manifest["manifest_sha256"],
         "email_mailbox_parser_manifest": mailbox_manifest,
         "email_mailbox_parser_manifest_hash": mailbox_manifest["manifest_sha256"],
+        "email_report_grade_validation_plan": report_plan,
+        "email_report_grade_validation_plan_hash": report_plan["manifest_sha256"],
         "email_validation_matrix": email_validation_matrix(source_format, {"headers_parsed": True, "body_present": bool(body_preview)}),
         "email_report_grade_assessment": email_report_grade_assessment(source_format),
         "commercial_uplift_evidence": email_commercial_uplift_evidence(
@@ -384,6 +419,7 @@ def build_message_record(
                 "email_attachment_locator_profile": attachment_locator_profile,
                 "email_expansion_citation_manifest": citation_manifest,
                 "email_mailbox_parser_manifest": mailbox_manifest,
+                "email_report_grade_validation_plan": report_plan,
                 "email_thread_profile": thread_profile,
                 "validation_checks": validation_checks,
                 "email_mailbox_strategy_profile": strategy_profile,
@@ -405,6 +441,7 @@ def build_message_record(
                 "email_attachment_locator_profile": attachment_locator_profile,
                 "email_expansion_citation_manifest": citation_manifest,
                 "email_mailbox_parser_manifest": mailbox_manifest,
+                "email_report_grade_validation_plan": report_plan,
                 "email_thread_profile": thread_profile,
                 "validation_checks": validation_checks,
                 "email_mailbox_strategy_profile": strategy_profile,
@@ -494,6 +531,20 @@ def build_mailbox_record(
             **(extra_details or {}),
         },
     )
+    report_plan = build_email_report_grade_validation_plan(
+        source_format=source_format,
+        source_path=path,
+        source_hashes=source_hashes,
+        details={
+            "artifact_type": "email-mailbox",
+            "mailbox_name": path.name,
+            "message_count": message_count,
+            "email_expansion_citation_manifest": citation_manifest,
+            "email_mailbox_parser_manifest": mailbox_manifest,
+            "validation_checks": validation_checks,
+            **(extra_details or {}),
+        },
+    )
     details = {
         "parser": "email-artifacts",
         "parser_version": PARSER_VERSION,
@@ -508,6 +559,8 @@ def build_mailbox_record(
         "email_expansion_citation_manifest_hash": citation_manifest["manifest_sha256"],
         "email_mailbox_parser_manifest": mailbox_manifest,
         "email_mailbox_parser_manifest_hash": mailbox_manifest["manifest_sha256"],
+        "email_report_grade_validation_plan": report_plan,
+        "email_report_grade_validation_plan_hash": report_plan["manifest_sha256"],
         "email_validation_matrix": email_validation_matrix(source_format, validation_checks),
         "email_report_grade_assessment": email_report_grade_assessment(source_format),
         "commercial_uplift_evidence": email_commercial_uplift_evidence(
@@ -519,6 +572,7 @@ def build_mailbox_record(
                 "message_count": message_count,
                 "email_expansion_citation_manifest": citation_manifest,
                 "email_mailbox_parser_manifest": mailbox_manifest,
+                "email_report_grade_validation_plan": report_plan,
                 "validation_checks": validation_checks,
                 "email_mailbox_strategy_profile": strategy_profile,
                 **(extra_details or {}),
@@ -536,6 +590,7 @@ def build_mailbox_record(
                 "message_count": message_count,
                 "email_expansion_citation_manifest": citation_manifest,
                 "email_mailbox_parser_manifest": mailbox_manifest,
+                "email_report_grade_validation_plan": report_plan,
                 "validation_checks": validation_checks,
                 "email_mailbox_strategy_profile": strategy_profile,
                 **(extra_details or {}),
@@ -1013,6 +1068,257 @@ def build_email_mailbox_parser_manifest(
     return manifest
 
 
+def build_email_report_grade_validation_plan(
+    *,
+    source_format: str,
+    source_path: Path,
+    source_hashes: Mapping[str, str],
+    details: Mapping[str, object],
+) -> dict[str, object]:
+    """Report-grade evidence contract for #36 without overstating native mailbox support."""
+    artifact_type = str(details.get("artifact_type") or "email-mailbox")
+    validation = details.get("validation_checks") if isinstance(details.get("validation_checks"), Mapping) else {}
+    mailbox_manifest = (
+        details.get("email_mailbox_parser_manifest")
+        if isinstance(details.get("email_mailbox_parser_manifest"), Mapping)
+        else {}
+    )
+    citation_manifest = (
+        details.get("email_expansion_citation_manifest")
+        if isinstance(details.get("email_expansion_citation_manifest"), Mapping)
+        else {}
+    )
+    thread_profile = (
+        details.get("email_thread_profile") if isinstance(details.get("email_thread_profile"), Mapping) else {}
+    )
+    attachment_locator_profile = (
+        details.get("email_attachment_locator_profile")
+        if isinstance(details.get("email_attachment_locator_profile"), Mapping)
+        else {}
+    )
+    mapi_profile = (
+        details.get("mapi_container_review_profile")
+        if isinstance(details.get("mapi_container_review_profile"), Mapping)
+        else {}
+    )
+    row_citation = mailbox_manifest.get("row_citation") if isinstance(mailbox_manifest.get("row_citation"), Mapping) else {}
+    row_locator = (
+        row_citation.get("source_viewer_locator")
+        if isinstance(row_citation.get("source_viewer_locator"), Mapping)
+        else {}
+    )
+    native_container = source_format in {"pst", "ost", "msg"}
+
+    def slot(
+        slot_id: str,
+        status: str,
+        *,
+        description: str,
+        evidence_ref: str = "",
+        blocking: bool = False,
+        blocker_id: str = "",
+    ) -> dict[str, object]:
+        return {
+            "id": slot_id,
+            "status": status,
+            "description": description,
+            "evidence_ref": evidence_ref,
+            "blocking": blocking,
+            "blocker_id": blocker_id,
+        }
+
+    row_hash = str(row_citation.get("row_hash") or "")
+    message_or_candidate_present = bool(
+        validation.get("headers_parsed")
+        or validation.get("parsed_message_count")
+        or validation.get("bounded_candidate_inventory_present")
+        or details.get("email_candidates")
+        or details.get("subject_candidates")
+    )
+    thread_slot_status = "complete" if thread_profile else ("not-applicable" if artifact_type == "email-mailbox" else "missing")
+    mapi_slot_status = "complete" if native_container and mapi_profile else ("not-applicable" if not native_container else "missing")
+    body_hash_policy_ready = bool(
+        isinstance(mailbox_manifest.get("large_data_controls"), Mapping)
+        and mailbox_manifest.get("large_data_controls", {}).get("body_preview_hash_only_for_reporting")
+    )
+    attachment_locator_count = int(attachment_locator_profile.get("locator_count") or 0)
+    evidence_slots = [
+        slot(
+            "source-mailbox-hash-integrity",
+            "complete" if source_hashes.get("sha256") else "missing",
+            description="Original message/mailbox source hash is recorded for report provenance.",
+            evidence_ref=f"source_sha256:{source_hashes.get('sha256', '')}",
+        ),
+        slot(
+            "message-or-mailbox-row-citation",
+            "complete" if row_hash else "missing",
+            description="Stable row citation hash and source viewer locator are available.",
+            evidence_ref=f"row_hash:{row_hash}",
+        ),
+        slot(
+            "header-body-attachment-inventory",
+            "complete" if message_or_candidate_present else "missing",
+            description="Headers/body hash/attachment metadata or bounded mailbox candidates are inventoried.",
+            evidence_ref=f"validation_checks:{stable_email_sha256(dict(validation)) if validation else ''}",
+        ),
+        slot(
+            "thread-participant-profile",
+            thread_slot_status,
+            description="Message-ID, References/In-Reply-To, normalized subject, participants, and UTC date are available for threaded review where applicable.",
+            evidence_ref=f"thread_root_id:{thread_profile.get('thread_root_id', '')}",
+        ),
+        slot(
+            "bounded-mapi-inventory-boundary",
+            mapi_slot_status,
+            description="PST/OST/MSG native decode is not claimed; bounded MAPI candidate inventory and limitation state are explicit.",
+            evidence_ref=f"mapi_profile:{mapi_profile.get('profile_version', '')}",
+        ),
+        slot(
+            "source-viewer-locator",
+            "complete" if row_locator else "missing",
+            description="Reviewer can jump back to the message row or bounded mailbox inventory row.",
+            evidence_ref=f"viewer:{row_locator.get('viewer', '')}",
+        ),
+        slot(
+            "hash-only-body-policy",
+            "complete" if body_hash_policy_ready else "missing",
+            description="Body preview is treated as review aid; reporting should carry hashes/citations rather than raw bulk content by default.",
+            evidence_ref=f"mailbox_manifest:{mailbox_manifest.get('manifest_sha256', '')}",
+        ),
+        slot(
+            "attachment-source-locator",
+            "complete" if attachment_locator_count else ("not-applicable" if artifact_type == "email-mailbox" else "missing"),
+            description="Attachment source-viewer locators and bounded preview hashes are available when attachments exist.",
+            evidence_ref=f"attachment_locator_count:{attachment_locator_count}",
+        ),
+        slot(
+            "trusted-mailbox-export-native-diff",
+            "pending-cross-tool-validate",
+            description="Rapid rows must match libpff/readpst/Outlook/Purview/native mailbox rows before report-grade claims.",
+            evidence_ref="email_trusted_diff",
+            blocking=True,
+            blocker_id="trusted-email-mailbox-export-native-diff-required",
+        ),
+        slot(
+            "native-mapi-object-decoding",
+            "external-native-parser-required" if native_container else "not-applicable",
+            description="PST/OST/MSG folder tree, message flags, properties, embedded attachments, and sync state need native or trusted-export decoding.",
+            evidence_ref=source_format,
+            blocking=native_container,
+            blocker_id="native-mapi-object-decoding-or-trusted-export-required" if native_container else "",
+        ),
+        slot(
+            "deleted-item-recovery-corpus",
+            "external-corpus-required",
+            description="Deleted/recoverable/orphaned item behavior must be validated with known-answer mailboxes.",
+            evidence_ref="known-answer-mailbox-corpus",
+            blocking=True,
+            blocker_id="deleted-item-recovery-corpus-required",
+        ),
+        slot(
+            "thread-dedup-timezone-corpus",
+            "external-corpus-required",
+            description="Thread graph, duplicate handling, and timezone interpretation need known-answer validation.",
+            evidence_ref="known-answer-thread-corpus",
+            blocking=True,
+            blocker_id="thread-dedup-timezone-corpus-required",
+        ),
+        slot(
+            "attachment-byte-validation",
+            "external-corpus-required",
+            description="Attachment bytes, nested messages, hashes, and extraction paths need trusted mailbox validation.",
+            evidence_ref="known-answer-attachment-corpus",
+            blocking=True,
+            blocker_id="attachment-byte-validation-required",
+        ),
+        slot(
+            "auth-signature-crypto-validation",
+            "external-corpus-required",
+            description="DKIM/ARC/SPF plus S/MIME/OpenPGP state must be validated before authentication or crypto conclusions.",
+            evidence_ref="auth-signature-crypto-corpus",
+            blocking=True,
+            blocker_id="auth-signature-crypto-validation-required",
+        ),
+        slot(
+            "privilege-scope-review",
+            "legal-review-required",
+            description="Mailbox content may be privileged or out of scope; authority and redaction review must be attached.",
+            evidence_ref="analyst-privilege-scope-review",
+            blocking=True,
+            blocker_id="privilege-scope-review-required",
+        ),
+        slot(
+            "independent-mailbox-review",
+            "external-review-required",
+            description="Independent reviewer/lab signoff is required for commercial-grade mailbox claims.",
+            evidence_ref="independent-review",
+            blocking=True,
+            blocker_id="independent-mailbox-review-required",
+        ),
+    ]
+    ready_slot_count = sum(1 for item in evidence_slots if item["status"] == "complete")
+    blocking_slot_count = sum(1 for item in evidence_slots if item.get("blocking"))
+    plan: dict[str, object] = {
+        "profile_version": EMAIL_REPORT_GRADE_VALIDATION_PLAN_VERSION,
+        "item_number": 36,
+        "batch_id": "commercial-uplift-036-040",
+        "gap_id": "#36",
+        "qc_prep_item_number": EMAIL_QC_PREP_ITEM_NUMBER,
+        "qc_prep_item_goal": EMAIL_QC_PREP_GOAL,
+        "artifact_type": artifact_type,
+        "source_format": source_format,
+        "format_family": email_format_profile(source_format)["family"],
+        "support_tier": email_format_profile(source_format)["support_tier"],
+        "source_path": str(source_path.resolve()),
+        "source_sha256": source_hashes.get("sha256", ""),
+        "mailbox_parser_manifest_sha256": str(mailbox_manifest.get("manifest_sha256") or ""),
+        "citation_manifest_sha256": str(citation_manifest.get("manifest_sha256") or ""),
+        "target_capability": "full mailbox folder/message/header/attachment/thread/deleted-item parser",
+        "validation_status": "report-validation-blocked",
+        "commercial_grade": False,
+        "ready_slot_count": ready_slot_count,
+        "blocking_slot_count": blocking_slot_count,
+        "evidence_slots": evidence_slots,
+        "validation_commands": [
+            {
+                "id": "source-email-manifest",
+                "command": "rapidtriage artifacts <case-root> --kind email --output email-artifacts.json",
+                "purpose": "Generate source hashes, parser manifests, row citations, and review pivots.",
+            },
+            {
+                "id": "email-external-parse",
+                "command": "rapidtriage email-external-parse <pst|ost|msg> --output-dir <out>",
+                "purpose": "Capture libpff/readpst/Outlook/Purview external parser evidence when available.",
+            },
+            {
+                "id": "trusted-mailbox-diff",
+                "command": "rapidtriage cross-tool-validate --family email --rapid email-artifacts.json --trusted <trusted-export.json>",
+                "purpose": "Diff Rapid email rows against trusted mailbox/native export rows.",
+            },
+            {
+                "id": "mailbox-known-answer-run",
+                "command": "rapidtriage commercial-readiness --validation-package <mailbox-known-answer.json> --json",
+                "purpose": "Prove deleted items, threading, timezone, attachment, and MAPI semantics on known-answer corpora.",
+            },
+            {
+                "id": "privilege-scope-review",
+                "command": "case review mark --artifact <row> --status scoped-reviewed",
+                "purpose": "Attach authorization, privilege/scope decision, and redaction note before report export.",
+            },
+        ],
+        "blockers": list(EMAIL_REPORT_GRADE_VALIDATION_BLOCKERS),
+        "report_guidance": [
+            "Use current rows as triage and review pivots until all blocking slots are satisfied.",
+            "Do not claim native PST/OST/MSG object completeness from bounded string inventory.",
+            "Carry source hash, row citation hash, parser version, trusted diff, and privilege review into report exhibits.",
+        ],
+    }
+    plan["manifest_sha256"] = stable_email_sha256(
+        {key: value for key, value in plan.items() if key != "manifest_sha256"}
+    )
+    return plan
+
+
 def email_thread_profile(message: EmailMessage) -> dict[str, object]:
     subject = header_value(message, "Subject")
     message_id = header_value(message, "Message-ID")
@@ -1411,6 +1717,11 @@ def email_commercial_uplift_evidence(
         if isinstance(details.get("email_mailbox_parser_manifest"), Mapping)
         else {}
     )
+    report_plan = (
+        details.get("email_report_grade_validation_plan")
+        if isinstance(details.get("email_report_grade_validation_plan"), Mapping)
+        else {}
+    )
     attachment_locator_profile = (
         details.get("email_attachment_locator_profile")
         if isinstance(details.get("email_attachment_locator_profile"), Mapping)
@@ -1452,6 +1763,7 @@ def email_commercial_uplift_evidence(
             f"mailbox_name:{details.get('mailbox_name', '')}",
             f"citation_manifest_sha256:{citation_manifest.get('manifest_sha256', '')}",
             f"email_mailbox_parser_manifest_sha256:{mailbox_manifest.get('manifest_sha256', '')}",
+            f"email_report_grade_validation_plan_sha256:{report_plan.get('manifest_sha256', '')}",
         ],
         "email_mailbox_strategy_profile": (
             dict(details["email_mailbox_strategy_profile"])
@@ -1477,6 +1789,9 @@ def email_commercial_uplift_evidence(
             "mapi_container_review_profile_present": bool(details.get("mapi_container_review_profile")),
             "citation_manifest_hash": str(citation_manifest.get("manifest_sha256") or ""),
             "email_mailbox_parser_manifest_hash": str(mailbox_manifest.get("manifest_sha256") or ""),
+            "email_report_grade_validation_plan_hash": str(report_plan.get("manifest_sha256") or ""),
+            "email_report_grade_validation_ready_slot_count": int(report_plan.get("ready_slot_count") or 0),
+            "email_report_grade_validation_blocking_slot_count": int(report_plan.get("blocking_slot_count") or 0),
             "email_attachment_locator_profile_hash": str(attachment_locator_profile.get("profile_sha256") or ""),
             "email_mailbox_source_row_citation_present": bool(
                 isinstance(mailbox_manifest.get("row_citation"), Mapping)
@@ -1528,6 +1843,11 @@ def email_expansion_functional_profile(
         if isinstance(details.get("email_mailbox_parser_manifest"), Mapping)
         else {}
     )
+    report_plan = (
+        details.get("email_report_grade_validation_plan")
+        if isinstance(details.get("email_report_grade_validation_plan"), Mapping)
+        else {}
+    )
     attachment_locator_profile = (
         details.get("email_attachment_locator_profile")
         if isinstance(details.get("email_attachment_locator_profile"), Mapping)
@@ -1537,6 +1857,8 @@ def email_expansion_functional_profile(
         failed_checks.append("email-expansion-citation-manifest-not-emitted")
     if not mailbox_manifest.get("manifest_sha256"):
         failed_checks.append("email-mailbox-parser-manifest-not-emitted")
+    if not report_plan.get("manifest_sha256"):
+        failed_checks.append("email-report-grade-validation-plan-not-emitted")
     passed_checks = [
         "eml-emlx-maildir-message-parse",
         "mbox-bounded-message-parse",
@@ -1548,6 +1870,8 @@ def email_expansion_functional_profile(
         passed_checks.append("email-expansion-citation-manifest-emitted")
     if mailbox_manifest.get("manifest_sha256"):
         passed_checks.append("email-mailbox-parser-manifest-emitted")
+    if report_plan.get("manifest_sha256"):
+        passed_checks.append("email-report-grade-validation-plan-emitted")
     if isinstance(mailbox_manifest.get("row_citation"), Mapping) and mailbox_manifest.get("row_citation", {}).get("source_viewer_locator"):
         passed_checks.append("email-mailbox-source-locator-emitted")
     if attachment_locator_profile.get("profile_sha256"):
@@ -1571,6 +1895,9 @@ def email_expansion_functional_profile(
             "source_sha256_present": bool(source_hashes.get("sha256")),
             "citation_manifest_hash": str(citation_manifest.get("manifest_sha256") or ""),
             "email_mailbox_parser_manifest_hash": str(mailbox_manifest.get("manifest_sha256") or ""),
+            "email_report_grade_validation_plan_hash": str(report_plan.get("manifest_sha256") or ""),
+            "email_report_grade_validation_ready_slot_count": int(report_plan.get("ready_slot_count") or 0),
+            "email_report_grade_validation_blocking_slot_count": int(report_plan.get("blocking_slot_count") or 0),
             "email_attachment_locator_profile_hash": str(attachment_locator_profile.get("profile_sha256") or ""),
             "email_attachment_locator_count": int(attachment_locator_profile.get("locator_count") or 0),
             "email_mailbox_row_citation_present": bool(
@@ -1660,6 +1987,13 @@ def email_core_accuracy_gates(
     )
     if mailbox_manifest.get("manifest_sha256"):
         evidence_refs.append(f"email_mailbox_parser_manifest_sha256:{mailbox_manifest['manifest_sha256']}")
+    report_plan = (
+        details.get("email_report_grade_validation_plan")
+        if isinstance(details.get("email_report_grade_validation_plan"), Mapping)
+        else {}
+    )
+    if report_plan.get("manifest_sha256"):
+        evidence_refs.append(f"email_report_grade_validation_plan_sha256:{report_plan['manifest_sha256']}")
     attachment_locator_profile = (
         details.get("email_attachment_locator_profile")
         if isinstance(details.get("email_attachment_locator_profile"), Mapping)
@@ -1684,6 +2018,10 @@ def email_core_accuracy_gates(
             satisfied.append("email mailbox source row citation")
         if isinstance(mailbox_manifest.get("large_data_controls"), Mapping) and mailbox_manifest.get("large_data_controls", {}).get("viewer_default"):
             satisfied.append("email mailbox review viewer controls")
+    if report_plan:
+        satisfied.append("email report-grade validation plan")
+        if int(report_plan.get("ready_slot_count") or 0) >= 5:
+            satisfied.append("email report-grade ready slots")
     if validation.get("headers_parsed") or validation.get("parsed_message_count") is not None or details.get("email_candidates"):
         satisfied.append("message header/body/attachment inventory")
     if details.get("email_thread_profile"):
