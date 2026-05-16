@@ -1740,6 +1740,10 @@ class RapidTriageOpsTests(unittest.TestCase):
                 "timezone_validation.timezone_report_grade_validation_plan_hash",
                 acquisition_by_number[97]["primary_outputs"],
             )
+            self.assertIn(
+                "clock_skew_analysis.clock_skew_report_grade_validation_plan_hash",
+                acquisition_by_number[98]["primary_outputs"],
+            )
             self.assertEqual(acquisition_by_number[100]["trusted_diff_required"], "trusted-tamper-signature-attestation-diff")
             release_operations = payload["release_operations_progress"]
             self.assertEqual(release_operations["version"], "release-operations-progress-v1")

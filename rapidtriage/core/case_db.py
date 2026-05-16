@@ -164,6 +164,16 @@ TIMEZONE_REPORT_GRADE_BLOCKERS = [
     "source-clock-baseline-required",
 ]
 CLOCK_SKEW_TRUSTED_DIFF_BLOCKER_98 = "trusted-clock-skew-baseline-diff-missing"
+CLOCK_SKEW_REPORT_GRADE_VALIDATION_PLAN_VERSION = "clock-skew-report-grade-validation-plan-v1"
+CLOCK_SKEW_REPORT_GRADE_BLOCKERS = [
+    "trusted-clock-skew-baseline-diff-missing",
+    "host-device-clock-baseline-required",
+    "multi-device-skew-model-required",
+    "trusted-external-timestamp-comparison-required",
+    "acquisition-time-baseline-required",
+    "timezone-normalization-linkage-required",
+    "clock-skew-known-answer-corpus-required",
+]
 CONTAMINATION_WARNING_TRUSTED_DIFF_BLOCKER_99 = "trusted-contamination-checklist-diff-missing"
 ACQUISITION_QUALITY_TRUSTED_TOOLS = {
     "signed-acquisition-handoff",
@@ -10400,6 +10410,163 @@ def build_clock_skew_range_matrix(
     return {**matrix_core, "matrix_hash": stable_payload_sha256(matrix_core)}
 
 
+def build_clock_skew_report_grade_validation_plan(
+    *,
+    parsed_timestamp_count: int,
+    warnings: Sequence[Mapping[str, object]],
+    earliest: str,
+    latest: str,
+    clock_manifest: Mapping[str, object],
+    trusted_diff: Mapping[str, object],
+) -> dict[str, object]:
+    trusted_status = str(trusted_diff.get("status") or "missing")
+    warning_row_hashes = [str(warning.get("clock_skew_warning_row_hash") or "") for warning in warnings]
+    ready_slots = [
+        {
+            "slot_id": "parsed-timestamp-range",
+            "status": "complete",
+            "evidence": {
+                "parsed_timestamp_count": parsed_timestamp_count,
+                "earliest_timestamp": earliest,
+                "latest_timestamp": latest,
+            },
+        },
+        {
+            "slot_id": "clock-skew-warning-records",
+            "status": "complete",
+            "evidence": {
+                "warning_count": len(warnings),
+                "warning_row_hash_count": sum(1 for value in warning_row_hashes if value),
+            },
+        },
+        {
+            "slot_id": "clock-skew-range-matrix",
+            "status": "complete",
+            "evidence": {"matrix_hash": str(clock_manifest.get("clock_skew_range_matrix_hash") or "")},
+        },
+        {
+            "slot_id": "clock-skew-baseline-manifest",
+            "status": "complete",
+            "evidence": {"manifest_hash": str(clock_manifest.get("manifest_hash") or "")},
+        },
+        {
+            "slot_id": "baseline-and-heuristic-disclosure",
+            "status": "complete",
+            "evidence": {
+                "baseline_required": str(clock_manifest.get("baseline_required") or ""),
+                "heuristic_only": bool(clock_manifest.get("heuristic_only")),
+            },
+        },
+        {
+            "slot_id": "trusted-clock-skew-diff-disclosure",
+            "status": "complete",
+            "evidence": {
+                "trusted_diff_status": trusted_status,
+                "trusted_tool": str(trusted_diff.get("trusted_tool") or ""),
+            },
+        },
+    ]
+    blocking_slots: list[dict[str, object]] = []
+    if parsed_timestamp_count == 0:
+        blocking_slots.append(
+            {
+                "slot_id": "parsed-timestamps-present",
+                "status": "blocked",
+                "blocker": "parsed-timestamps-present-required",
+                "required_evidence": "at least one parsed case timestamp before clock-skew review",
+            }
+        )
+    if len([value for value in warning_row_hashes if value]) != len(warnings):
+        blocking_slots.append(
+            {
+                "slot_id": "clock-skew-warning-row-hash-completeness",
+                "status": "blocked",
+                "blocker": "clock-skew-warning-row-hash-completeness-required",
+                "required_evidence": "row hash for every exported clock-skew warning record",
+            }
+        )
+    if not clock_manifest.get("manifest_hash") or not clock_manifest.get("clock_skew_range_matrix_hash"):
+        blocking_slots.append(
+            {
+                "slot_id": "clock-skew-baseline-manifest-complete",
+                "status": "blocked",
+                "blocker": "clock-skew-baseline-manifest-required",
+                "required_evidence": "clock-skew baseline manifest hash and range matrix hash",
+            }
+        )
+    if trusted_status != "pass":
+        blocking_slots.append(
+            {
+                "slot_id": "trusted-clock-skew-baseline-diff",
+                "status": "external-required",
+                "blocker": CLOCK_SKEW_TRUSTED_DIFF_BLOCKER_98,
+                "required_evidence": "trusted clock-skew baseline diff covering parsed ranges, warnings, baseline manifest, and range matrix",
+            }
+        )
+    blocking_slots.extend(
+        [
+            {
+                "slot_id": "host-device-clock-baseline",
+                "status": "external-required",
+                "blocker": "host-device-clock-baseline-required",
+                "required_evidence": "host/device clock baseline captured at acquisition and tied to the evidence source",
+            },
+            {
+                "slot_id": "multi-device-skew-model",
+                "status": "external-required",
+                "blocker": "multi-device-skew-model-required",
+                "required_evidence": "case-level model reconciling skew across each host, mobile device, cloud source, and removable media source",
+            },
+            {
+                "slot_id": "trusted-external-timestamp-comparison",
+                "status": "external-required",
+                "blocker": "trusted-external-timestamp-comparison-required",
+                "required_evidence": "comparison against trusted external timestamps such as acquisition logs, server logs, NTP records, or signed communications",
+            },
+            {
+                "slot_id": "acquisition-time-baseline",
+                "status": "external-required",
+                "blocker": "acquisition-time-baseline-required",
+                "required_evidence": "acquisition-start and acquisition-end timestamps with trusted operator/device time source",
+            },
+            {
+                "slot_id": "timezone-normalization-linkage",
+                "status": "external-required",
+                "blocker": "timezone-normalization-linkage-required",
+                "required_evidence": "linkage to #97 timezone normalization output for every reportable skew conclusion",
+            },
+            {
+                "slot_id": "clock-skew-known-answer-corpus",
+                "status": "external-required",
+                "blocker": "clock-skew-known-answer-corpus-required",
+                "required_evidence": "known-answer corpus with normal, skewed, future, pre-epoch, and multi-device timestamp fixtures",
+            },
+        ]
+    )
+    plan_core: dict[str, object] = {
+        "profile_version": CLOCK_SKEW_REPORT_GRADE_VALIDATION_PLAN_VERSION,
+        "item_number": 98,
+        "commercial_gap_ids": [CLOCK_SKEW_ANALYSIS_GAP_ID],
+        "plan_context": "case-db-clock-skew-analysis-validation",
+        "parsed_timestamp_count": parsed_timestamp_count,
+        "warning_count": len(warnings),
+        "earliest_timestamp": earliest,
+        "latest_timestamp": latest,
+        "clock_skew_baseline_manifest_hash": str(clock_manifest.get("manifest_hash") or ""),
+        "clock_skew_range_matrix_hash": str(clock_manifest.get("clock_skew_range_matrix_hash") or ""),
+        "trusted_diff_status": trusted_status,
+        "ready_slots": ready_slots,
+        "blocking_slots": blocking_slots,
+        "ready_slot_count": len(ready_slots),
+        "blocking_slot_count": len(blocking_slots),
+        "external_blocker_catalog": list(CLOCK_SKEW_REPORT_GRADE_BLOCKERS),
+        "blockers": sorted({str(slot.get("blocker") or "") for slot in blocking_slots if slot.get("blocker")}),
+        "commercial_claim_allowed": False,
+        "reporting_boundary": "This plan makes clock-skew review auditable, but commercial claims require trusted host/device baselines, acquisition-time baselines, external timestamp comparisons, multi-device skew modeling, #97 timezone linkage, and known-answer corpus evidence.",
+    }
+    return {**plan_core, "validation_plan_hash": stable_payload_sha256(plan_core)}
+
+
 def build_clock_skew_analysis(
     connection: sqlite3.Connection,
     case_id: str,
@@ -10442,13 +10609,23 @@ def build_clock_skew_analysis(
         blockers.append(CLOCK_SKEW_TRUSTED_DIFF_BLOCKER_98)
     earliest = min((value.isoformat() for value in parsed_times), default="")
     latest = max((value.isoformat() for value in parsed_times), default="")
+    warnings_for_report = warnings[:100]
     clock_manifest = build_clock_skew_baseline_manifest(
         parsed_timestamp_count=len(parsed_times),
-        warnings=warnings[:100],
+        warnings=warnings_for_report,
         earliest=earliest,
         latest=latest,
         trusted_diff=trusted_diff,
     )
+    report_grade_validation_plan = build_clock_skew_report_grade_validation_plan(
+        parsed_timestamp_count=len(parsed_times),
+        warnings=warnings_for_report,
+        earliest=earliest,
+        latest=latest,
+        clock_manifest=clock_manifest,
+        trusted_diff=trusted_diff,
+    )
+    blockers = sorted({*blockers, *report_grade_validation_plan["blockers"]})
     return {
         "status": "warnings-present" if warnings else "no-obvious-clock-skew",
         "commercial_gap_ids": [CLOCK_SKEW_ANALYSIS_GAP_ID],
@@ -10468,12 +10645,19 @@ def build_clock_skew_analysis(
             "latest_timestamp": latest,
             "clock_skew_baseline_manifest_hash": clock_manifest["manifest_hash"],
             "clock_skew_range_matrix_hash": clock_manifest["clock_skew_range_matrix_hash"],
+            "clock_skew_report_grade_validation_plan_hash": report_grade_validation_plan["validation_plan_hash"],
+            "clock_skew_report_grade_ready_slot_count": report_grade_validation_plan["ready_slot_count"],
+            "clock_skew_report_grade_blocking_slot_count": report_grade_validation_plan["blocking_slot_count"],
             "commercial_gap_ids": [CLOCK_SKEW_ANALYSIS_GAP_ID],
         },
-        "warnings": warnings[:100],
+        "warnings": warnings_for_report,
         "clock_skew_baseline_manifest": clock_manifest,
         "clock_skew_baseline_manifest_hash": clock_manifest["manifest_hash"],
         "clock_skew_range_matrix_hash": clock_manifest["clock_skew_range_matrix_hash"],
+        "clock_skew_report_grade_validation_plan": report_grade_validation_plan,
+        "clock_skew_report_grade_validation_plan_hash": report_grade_validation_plan["validation_plan_hash"],
+        "clock_skew_report_grade_ready_slot_count": report_grade_validation_plan["ready_slot_count"],
+        "clock_skew_report_grade_blocking_slot_count": report_grade_validation_plan["blocking_slot_count"],
         "trusted_clock_skew_diff": trusted_diff,
         "blockers": blockers,
         "validation_assessment": {
@@ -10483,12 +10667,16 @@ def build_clock_skew_analysis(
             "review_required": bool(warnings),
             "clock_skew_baseline_manifest_hash": clock_manifest["manifest_hash"],
             "clock_skew_range_matrix_hash": clock_manifest["clock_skew_range_matrix_hash"],
+            "clock_skew_report_grade_validation_plan_hash": report_grade_validation_plan["validation_plan_hash"],
+            "clock_skew_report_grade_ready_slot_count": report_grade_validation_plan["ready_slot_count"],
+            "clock_skew_report_grade_blocking_slot_count": report_grade_validation_plan["blocking_slot_count"],
             "core_accuracy_gates": clock_skew_core_accuracy_gates(
                 parsed_timestamp_count=len(parsed_times),
-                warnings=warnings[:100],
+                warnings=warnings_for_report,
                 earliest=earliest,
                 latest=latest,
                 clock_manifest=clock_manifest,
+                report_grade_validation_plan=report_grade_validation_plan,
                 trusted_diff=trusted_diff,
             ),
             "trusted_clock_skew_diff": trusted_diff,
@@ -12408,6 +12596,7 @@ def clock_skew_core_accuracy_gates(
     earliest: str,
     latest: str,
     clock_manifest: Mapping[str, object] | None = None,
+    report_grade_validation_plan: Mapping[str, object] | None = None,
     trusted_diff: Mapping[str, object] | None = None,
 ) -> list[dict[str, object]]:
     satisfied = [
@@ -12423,6 +12612,10 @@ def clock_skew_core_accuracy_gates(
         satisfied.append("clock-skew baseline manifest hash emitted")
     if clock_manifest and clock_manifest.get("clock_skew_range_matrix_hash"):
         satisfied.append("clock skew range matrix hash emitted")
+    if report_grade_validation_plan and report_grade_validation_plan.get("validation_plan_hash"):
+        satisfied.append("clock skew report-grade validation plan")
+    if report_grade_validation_plan and report_grade_validation_plan.get("ready_slot_count"):
+        satisfied.append("clock skew report-grade ready slots")
     if trusted_diff and trusted_diff.get("status") == "pass":
         satisfied.append("trusted clock-skew baseline diff pass")
     return [
@@ -12436,6 +12629,7 @@ def clock_skew_core_accuracy_gates(
                 f"latest:{latest}",
                 f"clock_skew_baseline_manifest_hash:{(clock_manifest or {}).get('manifest_hash', '')}",
                 f"clock_skew_range_matrix_hash:{(clock_manifest or {}).get('clock_skew_range_matrix_hash', '')}",
+                f"clock_skew_report_grade_validation_plan_hash:{(report_grade_validation_plan or {}).get('validation_plan_hash', '')}",
             ],
         )
     ]

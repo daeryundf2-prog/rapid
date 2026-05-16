@@ -2974,6 +2974,25 @@ class RapidTriageCaseDatabaseTests(unittest.TestCase):
                 export["clock_skew_analysis"]["clock_skew_range_matrix_hash"],
                 export["clock_skew_analysis"]["clock_skew_baseline_manifest"]["clock_skew_range_matrix_hash"],
             )
+            self.assertEqual(
+                export["clock_skew_analysis"]["clock_skew_report_grade_validation_plan"]["profile_version"],
+                "clock-skew-report-grade-validation-plan-v1",
+            )
+            self.assertEqual(
+                export["clock_skew_analysis"]["clock_skew_report_grade_validation_plan_hash"],
+                export["clock_skew_analysis"]["clock_skew_report_grade_validation_plan"]["validation_plan_hash"],
+            )
+            self.assertGreaterEqual(export["clock_skew_analysis"]["clock_skew_report_grade_ready_slot_count"], 6)
+            self.assertGreaterEqual(export["clock_skew_analysis"]["clock_skew_report_grade_blocking_slot_count"], 6)
+            self.assertIn(
+                "host-device-clock-baseline",
+                {
+                    slot["slot_id"]
+                    for slot in export["clock_skew_analysis"]["clock_skew_report_grade_validation_plan"][
+                        "blocking_slots"
+                    ]
+                },
+            )
             self.assertIn("trusted-clock-skew-baseline-diff-missing", export["clock_skew_analysis"]["blockers"])
             clock_diff = build_clock_skew_trusted_diff(export["clock_skew_analysis"], export["clock_skew_analysis"])
             clock_gates = clock_skew_core_accuracy_gates(
@@ -2982,6 +3001,7 @@ class RapidTriageCaseDatabaseTests(unittest.TestCase):
                 earliest=export["clock_skew_analysis"]["summary"]["earliest_timestamp"],
                 latest=export["clock_skew_analysis"]["summary"]["latest_timestamp"],
                 clock_manifest=export["clock_skew_analysis"]["clock_skew_baseline_manifest"],
+                report_grade_validation_plan=export["clock_skew_analysis"]["clock_skew_report_grade_validation_plan"],
                 trusted_diff=clock_diff,
             )
             self.assertEqual(clock_diff["status"], "pass")
@@ -2989,6 +3009,7 @@ class RapidTriageCaseDatabaseTests(unittest.TestCase):
             self.assertIn("clock_skew_range_matrix_hash", clock_diff["compared_fields"])
             self.assertIn("clock skew range matrix hash emitted", clock_gates[0]["satisfied_checks"])
             self.assertIn("clock-skew baseline manifest hash emitted", clock_gates[0]["satisfied_checks"])
+            self.assertIn("clock skew report-grade validation plan", clock_gates[0]["satisfied_checks"])
             self.assertIn("trusted clock-skew baseline diff pass", clock_gates[0]["satisfied_checks"])
             self.assertIn("contamination_warnings", export)
             self.assertIn("#99", export["summary"]["contamination_warning_gap_ids"])

@@ -57,8 +57,8 @@
       "item": 98,
       "title": "Clock skew analysis",
       "test_files": ["tests/test_rapidtriage_case_db.py"],
-      "assertions": ["Report exports preserve parsed timestamp ranges, skew warnings, clock-skew warning row hashes, warning counts, baseline requirement, clock-skew-baseline-manifest-v1 manifest hashes, heuristic caveat, trusted clock-skew baseline diff helpers/gates, and #98 core_accuracy_gates."],
-      "remaining_external_validation": ["Host/device baseline model, trusted baseline manifests, and multi-device skew validation."]
+      "assertions": ["Report exports preserve parsed timestamp ranges, skew warnings, clock-skew warning row hashes, warning counts, baseline requirement, clock-skew-baseline-manifest-v1 manifest hashes, clock-skew-report-grade-validation-plan-v1 plan hashes/counts, heuristic caveat, trusted clock-skew baseline diff helpers/gates, and #98 core_accuracy_gates."],
+      "remaining_external_validation": ["Host/device clock baseline, acquisition-time baseline, trusted external timestamp comparison, timezone-normalization linkage, trusted baseline manifests, multi-device skew model, and known-answer clock-skew corpus."]
     },
     {
       "item": 99,

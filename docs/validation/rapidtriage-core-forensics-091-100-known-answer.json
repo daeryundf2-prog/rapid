@@ -88,8 +88,8 @@
       "status": "pass",
       "backlog_items": [98],
       "evidence_paths": ["docs/validation/core-forensics-091-100-fixture-evidence.json", "tests/test_rapidtriage_case_db.py"],
-      "expected": {"required_assertions": ["Report exports preserve parsed timestamp range, skew warning records, clock-skew warning row hashes, warning count, baseline requirement, clock-skew-baseline-manifest-v1 manifest hashes, heuristic limitation, trusted clock-skew baseline diff helpers/gates, and #98 core_accuracy_gates."]},
-      "notes": "Internal fixture pass; host/device baseline comparison and trusted baseline manifests remain blocker."
+      "expected": {"required_assertions": ["Report exports preserve parsed timestamp range, skew warning records, clock-skew warning row hashes, warning count, baseline requirement, clock-skew-baseline-manifest-v1 manifest hashes, clock-skew-report-grade-validation-plan-v1 plan hashes/counts, heuristic limitation, trusted clock-skew baseline diff helpers/gates, and #98 core_accuracy_gates."]},
+      "notes": "Internal fixture pass; host/device clock baseline, acquisition-time baseline, trusted external timestamp comparison, timezone-normalization linkage, trusted baseline manifests, multi-device skew model, and known-answer corpus remain blockers."
     },
     {
       "id": "core-forensics-099-contamination-warning",

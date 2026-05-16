@@ -3309,6 +3309,7 @@ def acquisition_quality_evidence_chain() -> list[dict[str, object]]:
                 "clock_skew_analysis.warnings[].clock_skew_warning_row_hash",
                 "clock_skew_analysis.clock_skew_baseline_manifest.manifest_hash",
                 "clock_skew_analysis.validation_assessment.baseline_required",
+                "clock_skew_analysis.clock_skew_report_grade_validation_plan_hash",
                 "clock_skew_analysis.trusted_clock_skew_diff",
             ],
             "trusted_diff": "trusted-clock-skew-baseline-diff",

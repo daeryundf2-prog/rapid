@@ -247,6 +247,7 @@ class RapidTriageCoreForensicsAccuracyTests(unittest.TestCase):
         self.assertIn("timezone report-grade validation plan", timezone_validation["required_checks"])
         self.assertIn("trusted timezone normalization matrix diff pass", timezone_validation["required_checks"])
         self.assertIn("baseline requirement disclosed", clock_skew["required_checks"])
+        self.assertIn("clock skew report-grade validation plan", clock_skew["required_checks"])
         self.assertIn("trusted clock-skew baseline diff pass", clock_skew["required_checks"])
         self.assertIn("write-blocker integration limitation emitted", contamination["required_checks"])
         self.assertIn("trusted contamination checklist diff pass", contamination["required_checks"])

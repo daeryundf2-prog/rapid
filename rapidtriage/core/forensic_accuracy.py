@@ -1621,6 +1621,8 @@ CORE_FORENSIC_ACCURACY_ITEMS: tuple[dict[str, object], ...] = (
             "warning count summarized",
             "baseline requirement disclosed",
             "clock-skew baseline manifest hash emitted",
+            "clock skew report-grade validation plan",
+            "clock skew report-grade ready slots",
             "heuristic limitation emitted",
             "trusted clock-skew baseline diff pass",
         ),
