@@ -42,7 +42,7 @@ Status legend:
 
 | Screenshot capability | Practical requirement | Current status | Gap to close |
 | --- | --- | --- | --- |
-| Web browser integrated analysis | Chrome/Edge/Firefox/Safari history, downloads, cache/session/storage, unified timeline. | `partial` | Cache/session/extension/sync depth and deleted history validation. |
+| Web browser integrated analysis | Chrome/Edge/Firefox/Safari history, downloads, cache/session/storage, unified timeline. | `partial+` | macOS Safari downloads now correlate from LaunchServices quarantine; cache/session/extension/sync depth and deleted history validation remain. |
 | Download file | Browser downloads, Zone.Identifier, source URL correlation. | `partial` | Stronger ADS + browser + filesystem correlation UI. |
 | AI use history | ChatGPT/Claude/Gemini/Perplexity visits and recoverable Q/A candidates. | `partial` | Service/export-specific transcript parsers and Q/A pairing validation. |
 | SNS / CHAT | KakaoTalk and messenger export/mobile import parsing. | `partial` | Version/schema matrix, post-patch KakaoTalk fixtures, media/deleted/ephemeral validation. |

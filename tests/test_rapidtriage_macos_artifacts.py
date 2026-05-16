@@ -94,6 +94,34 @@ class RapidTriageMacOsArtifactsTests(unittest.TestCase):
             browser = next(item for item in payload["artifacts"] if item["artifact_type"] == "macos-browser-history-downloads")
             self.assertEqual(browser["details"]["browser"], "safari")
             self.assertEqual(browser["details"]["history"][0]["url"], "https://example.test/mac-download")
+            self.assertEqual(browser["details"]["download_count"], 1)
+            safari_download = browser["details"]["downloads"][0]
+            self.assertEqual(safari_download["download_evidence"], "macos-quarantine")
+            self.assertEqual(safari_download["source_table"], "LSQuarantineEvent")
+            self.assertEqual(safari_download["source_database"], "com.apple.LaunchServices.QuarantineEventsV2")
+            self.assertEqual(safari_download["source_url"], "https://example.test/mac-download/payload.zip")
+            self.assertEqual(safari_download["agent_name"], "Safari")
+            download_timeline = [
+                row for row in browser["details"]["unified_timeline"] if row["timeline_type"] == "download"
+            ]
+            self.assertEqual(len(download_timeline), 1)
+            self.assertEqual(download_timeline[0]["download_evidence"], "macos-quarantine")
+            self.assertEqual(download_timeline[0]["source_table"], "LSQuarantineEvent")
+            self.assertEqual(
+                download_timeline[0]["source_database"],
+                "com.apple.LaunchServices.QuarantineEventsV2",
+            )
+            browser_gates = {gate["gap_id"]: gate for gate in browser["details"]["core_accuracy_gates"]}
+            self.assertIn("macOS Safari quarantine download correlation", browser_gates["#20"]["satisfied_checks"])
+            self.assertTrue(browser["details"]["browser_timeline_depth_manifest"]["native_depth"]["macos_safari_quarantine_downloads"])
+            citation_manifest = browser["details"]["browser_history_download_citation_manifest"]
+            self.assertEqual(citation_manifest["download_row_count"], 1)
+            self.assertIn("com.apple.LaunchServices.QuarantineEventsV2", citation_manifest["download_citations"][0]["source_viewer_locator"]["source_path"])
+            self.assertEqual(citation_manifest["download_citations"][0]["source_database"], "com.apple.LaunchServices.QuarantineEventsV2")
+            self.assertIn(
+                "macos-safari-quarantine-downloads-correlated",
+                browser["details"]["commercial_uplift_evidence"]["functional_priority_profiles"][0]["passed_validation_check_ids"],
+            )
 
             quarantine = next(item for item in payload["artifacts"] if item["artifact_type"] == "macos-quarantine-event")
             self.assertEqual(quarantine["details"]["agent_name"], "Safari")

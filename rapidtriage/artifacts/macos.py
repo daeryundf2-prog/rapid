@@ -177,8 +177,9 @@ def collect_macos_browsers(user_root: Path) -> Iterable[ArtifactRecord]:
     safari_path = user_root.joinpath(*SAFARI_HISTORY)
     if safari_path.is_file():
         history_rows = extract_safari_history(safari_path)
-        if history_rows:
-            yield from browser_records(user_root, "safari", "Default", safari_path, history_rows, [])
+        download_rows = extract_safari_download_rows_from_quarantine(user_root.joinpath(*QUARANTINE_DB))
+        if history_rows or download_rows:
+            yield from browser_records(user_root, "safari", "Default", safari_path, history_rows, download_rows)
 
 
 def browser_records(
@@ -239,6 +240,53 @@ def extract_safari_history(history_db: Path) -> list[dict[str, object]]:
         return []
 
 
+def extract_safari_download_rows_from_quarantine(path: Path) -> list[dict[str, object]]:
+    if not path.is_file():
+        return []
+    source_hashes = file_hashes(path)
+    rows: list[dict[str, object]] = []
+    for index, row in enumerate(extract_quarantine_rows(path)):
+        agent_name = str(row.get("agent_name") or "")
+        data_url = str(row.get("data_url") or "")
+        origin_url = str(row.get("origin_url") or "")
+        if not is_safari_quarantine_download(agent_name=agent_name, data_url=data_url, origin_url=origin_url):
+            continue
+        rows.append(
+            {
+                "started_at": row.get("timestamp") or "",
+                "ended_at": "",
+                "source_url": data_url or origin_url,
+                "tab_url": origin_url,
+                "target_path": "",
+                "total_bytes": 0,
+                "state": 0,
+                "source_table": "LSQuarantineEvent",
+                "source_index": index,
+                "source_row_id": row.get("source_row_id"),
+                "source_database": path.name,
+                "source_path": str(path.resolve()),
+                "source_hashes": source_hashes,
+                "download_evidence": "macos-quarantine",
+                "download_source": "LaunchServices QuarantineEventsV2",
+                "agent_name": agent_name,
+                "sender_name": row.get("sender_name") or "",
+                "validation_status": "macos-safari-quarantine-download-candidate",
+                "reportability_warning": (
+                    "QuarantineEventsV2 proves a downloaded item was registered by the agent; "
+                    "correlate with filesystem hashes and browser history before reporting final download chronology."
+                ),
+            }
+        )
+    return rows
+
+
+def is_safari_quarantine_download(*, agent_name: str, data_url: str, origin_url: str) -> bool:
+    lowered_agent = agent_name.lower()
+    if "safari" not in lowered_agent:
+        return False
+    return bool(data_url.startswith(("http://", "https://")) or origin_url.startswith(("http://", "https://")))
+
+
 def collect_quarantine_events(user_root: Path) -> Iterable[ArtifactRecord]:
     path = user_root.joinpath(*QUARANTINE_DB)
     if not path.is_file():
@@ -273,6 +321,7 @@ def extract_quarantine_rows(path: Path) -> list[dict[str, object]]:
             for row in connection.execute(
                 """
                 SELECT
+                    rowid AS source_row_id,
                     LSQuarantineTimeStamp AS timestamp,
                     LSQuarantineAgentName AS agent_name,
                     LSQuarantineDataURLString AS data_url,
@@ -284,6 +333,7 @@ def extract_quarantine_rows(path: Path) -> list[dict[str, object]]:
             ):
                 rows.append(
                     {
+                        "source_row_id": row["source_row_id"],
                         "timestamp": isoformat_from_macos_absolute(row["timestamp"]),
                         "agent_name": row["agent_name"] or "",
                         "data_url": row["data_url"] or "",

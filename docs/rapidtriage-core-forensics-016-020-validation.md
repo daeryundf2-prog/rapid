@@ -30,7 +30,7 @@ Trusted diff helpers added:
 - #17: `build_lnk_trusted_diff` compares target path, working directory, arguments, timestamps, and tracker machine fields against LECmd/Windows Shell-style exports.
 - #18: `build_system_trusted_diff` compares artifact family, name, command/path, timestamp, and risk/action fields against Velociraptor/Chainsaw/Autoruns/native Windows exports.
 - #19: `build_browser_storage_trusted_diff` compares browser, profile, storage type/name, and sensitive-store markers against Hindsight/BrowserHistoryView/native-query rows.
-- #20: `build_browser_timeline_trusted_diff` compares browser, profile, timestamp, URL, transition, and download target fields against Hindsight/BrowserHistoryView/native-query rows.
+- #20: `build_browser_timeline_trusted_diff` compares browser, profile, timestamp, URL, transition, and download target fields against Hindsight/BrowserHistoryView/native-query rows. macOS Safari fixture coverage also verifies that LaunchServices `QuarantineEventsV2` download rows are correlated into the unified browser timeline with quarantine source provenance.
 
 These helpers are not enough by themselves for a commercial claim. Real release evidence still needs tool versions, command lines, source hashes, corpus scope, and independent reviewer sign-off.
 
@@ -40,4 +40,4 @@ Current external blockers:
 - #17: full shell-item property store semantics, drive/network provider validation, LECmd diff corpus.
 - #18: TaskCache, WMI native decode, Defender/Firewall policy correlation, WER dump/CAB linkage.
 - #19: cache/session/schema decoding, audited legal opt-in secret handling, extension/sync validation.
-- #20: multi-profile dedupe, Safari parity, deleted history, browser-version transition semantics.
+- #20: multi-profile dedupe, Safari cache/session/deleted-state parity, deleted history, browser-version transition semantics.

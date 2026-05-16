@@ -587,14 +587,16 @@
       "evidence_paths": [
         "docs/validation/core-forensics-016-020-fixture-evidence.json",
         "tests/windows_artifact_fixtures.py",
-        "tests/test_rapidtriage_windows_artifacts.py"
+        "tests/test_rapidtriage_windows_artifacts.py",
+        "tests/test_rapidtriage_macos_artifacts.py"
       ],
       "expected": {
         "required_assertions": [
-          "Unified browser timeline rows preserve timestamps, profile attribution, source indices, limitation disclosure, and #20 core_accuracy_gates"
+          "Unified browser timeline rows preserve timestamps, profile attribution, source indices, limitation disclosure, and #20 core_accuracy_gates",
+          "macOS Safari timeline rows include QuarantineEventsV2 download correlation with quarantine source table, row ID, source path/hash, and agent provenance"
         ]
       },
-      "notes": "Internal fixture pass; multi-profile dedupe, Safari parity, deleted history, and version-specific transition validation remain required.",
+      "notes": "Internal fixture pass; multi-profile dedupe, Safari cache/session/deleted-state parity, deleted history, and version-specific transition validation remain required.",
       "source_manifest": "docs/validation/rapidtriage-core-forensics-016-020-known-answer.json"
     },
     {

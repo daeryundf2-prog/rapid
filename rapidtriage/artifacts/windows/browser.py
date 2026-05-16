@@ -223,6 +223,7 @@ BROWSER_COMMERCIAL_BLOCKERS = [
 BROWSER_NATIVE_CAPABILITIES = {
     "chromium_history_downloads_sqlite": True,
     "firefox_places_history": True,
+    "macos_safari_quarantine_downloads": True,
     "bounded_unified_visit_download_timeline": True,
     "browser_storage_inventory": True,
     "ai_service_visit_detection": True,
@@ -1810,6 +1811,7 @@ def build_browser_artifacts(
     usage_rows = summarize_internet_usage(history_rows)
     ai_rows = extract_ai_usage(history_rows)
     profile_dir = source_path.parent
+    source_hashes = file_hashes(source_path)
     conversation_rows = extract_ai_conversation_candidates(profile_dir)
     storage_inventory = inventory_browser_storage_artifacts(profile_dir)
     unified_timeline = build_unified_browser_timeline(
@@ -1817,6 +1819,7 @@ def build_browser_artifacts(
         profile=profile,
         user=user,
         source_path=source_path,
+        source_hashes=source_hashes,
         history_rows=history_rows,
         download_rows=download_rows,
         ai_rows=ai_rows,
@@ -1839,7 +1842,6 @@ def build_browser_artifacts(
         storage_citation_manifest=storage_citation_manifest,
     )
     timeline_integrity_profile = browser_timeline_integrity_profile(unified_timeline)
-    source_hashes = file_hashes(source_path)
     citation_manifest = build_browser_history_download_citation_manifest(
         browser=browser,
         profile=profile,
@@ -1952,6 +1954,7 @@ def build_browser_artifacts(
                 "browser_report_grade_assessment": report_grade,
                 "history_count": len(history_rows),
                 "download_count": len(download_rows),
+                "downloads": download_rows,
                 "top_domains": count_field(usage_rows, "domain", limit=20),
                 "storage_inventory_count": len(storage_inventory),
                 "sensitive_inventory_count": sum(1 for row in storage_inventory if row.get("sensitive")),
@@ -2889,6 +2892,9 @@ def build_browser_timeline_depth_manifest(
         "native_depth": {
             "chromium_history_downloads_sqlite": bool(BROWSER_NATIVE_CAPABILITIES["chromium_history_downloads_sqlite"]),
             "firefox_places_history": bool(BROWSER_NATIVE_CAPABILITIES["firefox_places_history"]),
+            "macos_safari_quarantine_downloads": bool(
+                BROWSER_NATIVE_CAPABILITIES["macos_safari_quarantine_downloads"]
+            ),
             "bounded_unified_visit_download_timeline": bool(
                 BROWSER_NATIVE_CAPABILITIES["bounded_unified_visit_download_timeline"]
             ),
@@ -3014,12 +3020,14 @@ def browser_row_citation(
 ) -> Dict[str, object]:
     source_table = str(row.get("source_table") or default_source_table)
     source_row_id = row.get("source_row_id")
+    row_source_path = Path(str(row.get("source_path") or source_path))
+    row_source_hashes = row.get("source_hashes") if isinstance(row.get("source_hashes"), Mapping) else source_hashes
     locator = {
         "viewer": "sqlite",
         "source_table": source_table,
         "source_index": source_index,
         "source_row_id": source_row_id,
-        "source_path": str(source_path.resolve()),
+        "source_path": str(row_source_path.resolve()),
     }
     citation_payload = {
         "row_type": row_type,
@@ -3032,7 +3040,8 @@ def browser_row_citation(
         "source_table": source_table,
         "source_index": source_index,
         "source_row_id": source_row_id,
-        "source_sha256": source_hashes.get("sha256") or "",
+        "source_database": str(row.get("source_database") or row_source_path.name),
+        "source_sha256": row_source_hashes.get("sha256") or "",
     }
     return {
         **citation_payload,
@@ -3425,6 +3434,11 @@ def browser_history_downloads_functional_profile(details: Mapping[str, object]) 
         "browser-profile-and-source-hash-preserved",
         "bounded-unified-browser-timeline-emitted",
     ]
+    if browser == "safari" and any(
+        isinstance(row, Mapping) and row.get("download_evidence") == "macos-quarantine"
+        for row in details.get("downloads") or []
+    ):
+        passed_checks.append("macos-safari-quarantine-downloads-correlated")
     if citation_manifest.get("manifest_sha256"):
         passed_checks.append("browser-row-citation-manifest-emitted")
     if int(citation_manifest.get("row_locator_count") or 0) >= history_count + download_count:
@@ -3437,8 +3451,11 @@ def browser_history_downloads_functional_profile(details: Mapping[str, object]) 
             "browser": browser,
             "profile": str(details.get("profile") or ""),
             "supported_browser_families": ["chrome", "edge", "brave", "firefox", "safari"],
-            "detected_browser_supported": browser in {"chrome", "edge", "brave", "firefox"},
-            "safari_support_note": "Safari parity is handled on macOS collection paths; Windows Safari profiles are not claimed.",
+            "detected_browser_supported": browser in {"chrome", "edge", "brave", "firefox", "safari"},
+            "safari_support_note": (
+                "Safari history and macOS QuarantineEventsV2 download correlation are handled on macOS "
+                "collection paths; Windows Safari profiles and Safari cache/session parity are not claimed."
+            ),
             "history_count": history_count,
             "download_count": download_count,
             "unified_timeline_count": timeline_count,
@@ -3938,6 +3955,8 @@ def browser_core_accuracy_gates(details: Mapping[str, object]) -> list[dict[str,
         item20.append("transition semantics")
     if downloads and any(row.get("target_path") and (row.get("source_url") or row.get("tab_url")) for row in downloads):
         item20.append("download target/source URL linkage")
+    if any(row.get("download_evidence") == "macos-quarantine" for row in downloads):
+        item20.append("macOS Safari quarantine download correlation")
     if citation_manifest.get("manifest_sha256"):
         item20.append("row-level source citation manifest")
     if int(citation_manifest.get("row_locator_count") or 0) >= len(timeline):
@@ -5629,6 +5648,7 @@ def build_unified_browser_timeline(
     profile: str,
     user: str,
     source_path: Path,
+    source_hashes: Mapping[str, object],
     history_rows: Sequence[Mapping[str, object]],
     download_rows: Sequence[Mapping[str, object]],
     ai_rows: Sequence[Mapping[str, object]],
@@ -5663,6 +5683,8 @@ def build_unified_browser_timeline(
         )
     for index, row in enumerate(download_rows[:MAX_BROWSER_TIMELINE_ROWS]):
         source_url = str(row.get("source_url") or row.get("tab_url") or "")
+        row_source_path = Path(str(row.get("source_path") or source_path))
+        row_source_hashes = row.get("source_hashes") if isinstance(row.get("source_hashes"), Mapping) else source_hashes
         rows.append(
             {
                 "timeline_type": "download",
@@ -5677,10 +5699,15 @@ def build_unified_browser_timeline(
                 "total_bytes": int(row.get("total_bytes") or 0),
                 "state": int(row.get("state") or 0),
                 "ended_at": row.get("ended_at"),
-                "source_path": str(source_path.resolve()),
+                "source_path": str(row_source_path.resolve()),
+                "source_sha256": str(row_source_hashes.get("sha256") or ""),
+                "source_database": str(row.get("source_database") or row_source_path.name),
                 "source_table": str(row.get("source_table") or "downloads"),
                 "source_index": index,
                 "source_row_id": row.get("source_row_id"),
+                "download_evidence": row.get("download_evidence") or "",
+                "download_source": row.get("download_source") or "",
+                "agent_name": row.get("agent_name") or "",
                 "validation_status": "normalized-candidate",
             }
         )

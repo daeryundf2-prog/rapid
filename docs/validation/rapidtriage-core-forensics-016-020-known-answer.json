@@ -94,15 +94,17 @@
       "evidence_paths": [
         "docs/validation/core-forensics-016-020-fixture-evidence.json",
         "tests/windows_artifact_fixtures.py",
-        "tests/test_rapidtriage_windows_artifacts.py"
+        "tests/test_rapidtriage_windows_artifacts.py",
+        "tests/test_rapidtriage_macos_artifacts.py"
       ],
       "expected": {
         "required_assertions": [
           "Unified browser timeline rows preserve timestamps, profile attribution, source indices, limitation disclosure, #20 core_accuracy_gates, and browser timeline reportability decisions",
+          "macOS Safari timeline rows include QuarantineEventsV2 download correlation with quarantine source table, row ID, source path/hash, and agent provenance",
           "trusted browser timeline diff helpers pass exact matching rows and block mismatches"
         ]
       },
-      "notes": "Internal fixture pass; multi-profile dedupe, Safari parity, deleted history, and version-specific transition validation remain required."
+      "notes": "Internal fixture pass; multi-profile dedupe, Safari cache/session/deleted-state parity, deleted history, and version-specific transition validation remain required."
     }
   ]
 }

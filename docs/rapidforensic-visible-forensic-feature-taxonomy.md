@@ -251,7 +251,7 @@ GUI에서는 다음 14개 상위 그룹으로 보여주는 것이 적절하다.
 | Chrome/Edge/Brave history | `browser-history-downloads` | baseline+ | deleted history validation |
 | Chromium downloads | `downloads` details | baseline+ | interrupted/chain semantics |
 | Firefox Places | `extract_firefox_history` / `browser-history` | baseline+ | downloads/session parity |
-| macOS Safari history | `extract_safari_history` / `macos-browser-history-downloads` | baseline | downloads/cache/session parity |
+| macOS Safari history/downloads | `extract_safari_history` + `extract_safari_download_rows_from_quarantine` / `macos-browser-history-downloads` | baseline+ | cache/session/deleted-state parity |
 | 통합 browser timeline | `unified_timeline` | baseline+ | timestamp/transition full validation |
 | internet usage summary | `internet_usage` details | baseline+ | category rule tuning |
 | top domains | `top_domains` details | baseline+ | domain normalization validation |

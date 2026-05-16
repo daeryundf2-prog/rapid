@@ -5,7 +5,8 @@
   "claim_boundary": "Internal fixture-backed validation for implemented+usable+validated maturity only; commercial-grade still requires external corpora, independent review, and trusted-tool diffs.",
   "fixture_sources": [
     "tests/windows_artifact_fixtures.py",
-    "tests/test_rapidtriage_windows_artifacts.py"
+    "tests/test_rapidtriage_windows_artifacts.py",
+    "tests/test_rapidtriage_macos_artifacts.py"
   ],
   "collector_commands": [
     "rapidtriage artifacts <fixture-root> --kind windows-prefetch --output prefetch.json",
@@ -73,12 +74,13 @@
       "title": "Chrome/Edge/Firefox/Safari unified browser timeline",
       "assertions": [
         "browser-history-downloads rows preserve timestamp-normalized timeline rows, source indices, profile attribution, browser limitation disclosure, #20 core_accuracy_gates, browser_analyst_review_profile, and browser timeline reportability decisions.",
+        "macOS Safari rows correlate History.db visits with LaunchServices QuarantineEventsV2 download events, preserving quarantine source table, row ID, source path/hash, agent name, and unified download timeline rows.",
         "trusted browser timeline diff helpers compare browser, profile, timestamp, URL, transition, and download target fields against Hindsight/BrowserHistoryView/native-query rows."
       ],
       "blockers_kept": [
         "multi-profile deduplication validation",
         "browser-version-specific transition semantics",
-        "Safari download/session/cache parity"
+        "Safari cache/session/deleted-state parity"
       ]
     }
   ]
