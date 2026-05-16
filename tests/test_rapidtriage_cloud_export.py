@@ -808,6 +808,8 @@ class RapidTriageCloudExportTests(unittest.TestCase):
             self.assertIn("M365 export parser manifest", microsoft_file_gate["satisfied_checks"])
             self.assertIn("M365 export source row citation", microsoft_file_gate["satisfied_checks"])
             self.assertIn("M365 export review viewer controls", microsoft_file_gate["satisfied_checks"])
+            self.assertIn("M365 export report-grade validation plan", microsoft_file_gate["satisfied_checks"])
+            self.assertIn("M365 export report-grade ready slots", microsoft_file_gate["satisfied_checks"])
             m365_file_profile = cloud_file["details"]["m365_export_review_profile"]
             self.assertEqual(m365_file_profile["profile_version"], "m365-export-review-v1")
             self.assertEqual(m365_file_profile["workload_family"], "onedrive-sharepoint")
@@ -856,6 +858,38 @@ class RapidTriageCloudExportTests(unittest.TestCase):
                 cloud_file["details"]["m365_export_parser_manifest_hash"],
                 m365_manifest["manifest_sha256"],
             )
+            self.assertTrue(cloud_file["details"]["validation_checks"]["m365_export_report_grade_validation_plan_emitted"])
+            self.assertEqual(cloud_file["details"]["validation_checks"]["m365_export_report_grade_ready_slots"], 6)
+            m365_plan = cloud_file["details"]["m365_export_report_grade_validation_plan"]
+            self.assertEqual(m365_plan["profile_version"], "m365-export-report-grade-validation-plan-v1")
+            self.assertEqual(m365_plan["item_number"], 39)
+            self.assertEqual(m365_plan["gap_id"], "#39")
+            self.assertEqual(m365_plan["qc_prep_item_number"], 45)
+            self.assertEqual(m365_plan["workload_family"], "onedrive-sharepoint")
+            self.assertEqual(m365_plan["ready_slot_count"], 6)
+            self.assertEqual(m365_plan["blocking_slot_count"], 8)
+            self.assertFalse(m365_plan["commercial_grade"])
+            self.assertEqual(
+                cloud_file["details"]["m365_export_report_grade_validation_plan_hash"],
+                m365_plan["manifest_sha256"],
+            )
+            m365_slots = {item["id"]: item for item in m365_plan["evidence_slots"]}
+            self.assertEqual(m365_slots["source-m365-export-hash-integrity"]["status"], "complete")
+            self.assertEqual(m365_slots["m365-row-citation"]["status"], "complete")
+            self.assertEqual(m365_slots["m365-workload-pivot-inventory"]["status"], "complete")
+            self.assertEqual(m365_slots["m365-source-viewer-locator"]["status"], "complete")
+            self.assertEqual(
+                m365_slots["onedrive-sharepoint-file-permission-pivot"]["status"],
+                "complete",
+            )
+            self.assertEqual(
+                m365_slots["sharepoint-permission-graph-reconciliation"]["status"],
+                "pending-provider-graph",
+            )
+            self.assertEqual(
+                m365_slots["m365-provider-native-row-diff"]["status"],
+                "pending-cross-tool-validate",
+            )
             self.assertEqual(
                 cloud_file["details"]["cloud_provider_strategy_profile"]["selected_track"],
                 "m365-purview-graph-ediscovery-validation",
@@ -870,18 +904,35 @@ class RapidTriageCloudExportTests(unittest.TestCase):
             file_profile = file_uplift["functional_priority_profile"]
             self.assertEqual(file_profile["qc_prep_item_numbers"], [45])
             self.assertIn("m365-export-parser-manifest-emitted", file_profile["passed_validation_check_ids"])
+            self.assertIn("m365-export-report-grade-validation-plan-emitted", file_profile["passed_validation_check_ids"])
             self.assertIn("m365-export-source-locator-emitted", file_profile["passed_validation_check_ids"])
             self.assertEqual(
                 file_profile["implemented_controls"]["m365_export_parser_manifest_hash"],
                 m365_manifest["manifest_sha256"],
             )
+            self.assertEqual(
+                file_profile["implemented_controls"]["m365_export_report_grade_validation_plan_hash"],
+                m365_plan["manifest_sha256"],
+            )
+            self.assertEqual(file_profile["implemented_controls"]["m365_export_report_grade_ready_slot_count"], 6)
+            self.assertEqual(file_profile["implemented_controls"]["m365_export_report_grade_blocking_slot_count"], 8)
             self.assertTrue(file_profile["implemented_controls"]["m365_export_source_row_citation_present"])
             self.assertEqual(
                 file_uplift["large_data_controls"]["m365_export_parser_manifest_hash"],
                 m365_manifest["manifest_sha256"],
             )
+            self.assertEqual(
+                file_uplift["large_data_controls"]["m365_export_report_grade_validation_plan_hash"],
+                m365_plan["manifest_sha256"],
+            )
+            self.assertEqual(file_uplift["large_data_controls"]["m365_export_report_grade_ready_slot_count"], 6)
+            self.assertEqual(file_uplift["large_data_controls"]["m365_export_report_grade_blocking_slot_count"], 8)
             self.assertTrue(file_uplift["large_data_controls"]["m365_export_source_row_citation_present"])
             self.assertTrue(file_uplift["large_data_controls"]["m365_export_viewer_controls_present"])
+            self.assertIn(
+                f"m365_export_report_grade_validation_plan_sha256:{m365_plan['manifest_sha256']}",
+                file_uplift["source_refs"],
+            )
             self.assertIn(
                 "version_id=v3",
                 cloud_file["details"]["cloud_analyst_review_profile"]["row_pivots"],
@@ -936,6 +987,21 @@ class RapidTriageCloudExportTests(unittest.TestCase):
             self.assertIn("reaction_count", teams_manifest["row_citation"]["row_pivots"])
             self.assertEqual(teams_manifest["workload_review"]["teams_compliance_record_status"], "not-validated")
             self.assertEqual(teams_manifest["manifest_sha256"], message["details"]["m365_export_parser_manifest_hash"])
+            teams_plan = message["details"]["m365_export_report_grade_validation_plan"]
+            self.assertEqual(teams_plan["workload_family"], "teams")
+            self.assertEqual(teams_plan["ready_slot_count"], 6)
+            self.assertEqual(teams_plan["blocking_slot_count"], 7)
+            self.assertEqual(
+                teams_plan["manifest_sha256"],
+                message["details"]["m365_export_report_grade_validation_plan_hash"],
+            )
+            teams_slots = {item["id"]: item for item in teams_plan["evidence_slots"]}
+            self.assertEqual(teams_slots["teams-message-thread-pivot"]["status"], "complete")
+            self.assertEqual(teams_slots["teams-attachment-reaction-inventory"]["status"], "complete")
+            self.assertEqual(
+                teams_slots["teams-exchange-compliance-reconciliation"]["status"],
+                "pending-provider-reconcile",
+            )
             self.assertIn("teams-cosmosdb-vs-exchange-compliance-records", message["details"]["cloud_provider_profile"]["known_gaps"])
             self.assertIn(
                 "reply_to_message_id=teams-msg-root",
@@ -996,6 +1062,16 @@ class RapidTriageCloudExportTests(unittest.TestCase):
             audit_manifest = audit["details"]["m365_export_parser_manifest"]
             self.assertEqual(audit_manifest["workload_family"], "audit")
             self.assertIn("operation", audit_manifest["row_citation"]["row_pivots"])
+            audit_plan = audit["details"]["m365_export_report_grade_validation_plan"]
+            self.assertEqual(audit_plan["workload_family"], "audit")
+            self.assertEqual(audit_plan["ready_slot_count"], 5)
+            self.assertEqual(audit_plan["blocking_slot_count"], 7)
+            audit_slots = {item["id"]: item for item in audit_plan["evidence_slots"]}
+            self.assertEqual(audit_slots["m365-audit-operation-pivot"]["status"], "complete")
+            self.assertEqual(
+                audit_slots["m365-retention-deleted-version-validation"]["status"],
+                "pending-retention-diff",
+            )
 
     def test_cloud_trusted_diff_controls_provider_accuracy_gates(self) -> None:
         google_row = {

@@ -1012,7 +1012,8 @@
       ],
       "expected": {
         "required_assertions": [
-          "Microsoft cloud rows preserve profile detection, file/message/audit normalization, eDiscovery warnings, permission/retention limitations, and #39 core_accuracy_gates"
+          "Microsoft cloud rows preserve profile detection, file/message/audit normalization, eDiscovery warnings, permission/retention limitations, and #39 core_accuracy_gates",
+          "Microsoft cloud rows emit m365_export_report_grade_validation_plan with stable hash, source hash, row citation, workload pivot, source-viewer locator, Teams thread/attachment/reaction slots, OneDrive/SharePoint permission and retention/version/deleted slots, audit operation slot, eDiscovery scope, Graph pagination, provider diff, schema, independent-review slots, and ready/blocking counts"
         ]
       },
       "notes": "Internal fixture pass; Graph/eDiscovery diffs and permission graph validation remain required.",

@@ -211,6 +211,7 @@
         "required_assertions": [
           "Microsoft cloud rows preserve profile detection, file/message/audit normalization, eDiscovery warnings, permission/retention limitations, and #39 core_accuracy_gates",
           "Microsoft cloud rows emit m365_export_parser_manifest with stable manifest hash, workload family, row citation, source viewer locator, Teams/OneDrive/SharePoint/Audit pivots, Graph scope, Teams compliance, SharePoint permission, retention/deleted/version state, and viewer controls",
+          "Microsoft cloud rows emit m365_export_report_grade_validation_plan with stable hash, source hash, row citation, workload pivot, source-viewer locator, Teams thread/attachment/reaction slots, OneDrive/SharePoint permission and retention/version/deleted slots, audit operation slot, eDiscovery scope, Graph pagination, provider diff, schema, independent-review slots, and ready/blocking counts",
           "Microsoft 365 trusted diff helper requires Purview/eDiscovery/Graph/API row equality before satisfying the #39 trusted M365/eDiscovery export diff pass gate",
           "Microsoft 365 reportability decisions block tenant/permission-complete claims until eDiscovery, permission graph, retention, and Teams/SharePoint validation exists"
         ]

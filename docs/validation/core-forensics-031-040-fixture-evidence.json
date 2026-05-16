@@ -134,12 +134,14 @@
       "title": "Microsoft 365/OneDrive/Teams export parser",
       "assertions": [
         "Microsoft 365/OneDrive/Teams rows preserve provider profile detection, mail/file/message/audit normalization, source hashes, eDiscovery/export warnings, permissions/retention/deleted warnings, provider schema/timestamp warnings, cloud_analyst_review_profile, #39 core_accuracy_gates, and tenant/permission-complete reportability blockers.",
+        "Microsoft 365 rows emit m365_export_report_grade_validation_plan with stable hash, workload citation, Teams thread/attachment/reaction slots, OneDrive/SharePoint permission and retention/version/deleted slots, audit pivots, eDiscovery/Graph/provider-diff blockers, and ready/blocking counts.",
         "build_cloud_export_trusted_diff compares Microsoft rows against Purview/eDiscovery/Graph provider rows before satisfying the #39 trusted diff gate."
       ],
       "blockers_kept": [
         "Graph/eDiscovery version matrix",
         "Teams reactions/attachments completeness",
-        "SharePoint/OneDrive permission graph"
+        "SharePoint/OneDrive permission graph",
+        "retention/deleted/version and audit completeness provider diff"
       ]
     },
     {

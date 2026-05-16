@@ -106,6 +106,20 @@ ICLOUD_EXPORT_REPORT_GRADE_VALIDATION_BLOCKERS = [
     "apple-provider-schema-version-tracking-required",
     "independent-icloud-export-review-required",
 ]
+M365_EXPORT_REPORT_GRADE_VALIDATION_PLAN_VERSION = "m365-export-report-grade-validation-plan-v1"
+M365_EXPORT_REPORT_GRADE_VALIDATION_BLOCKERS = [
+    "m365-purview-ediscovery-export-scope-required",
+    "m365-tenant-custodian-query-original-package-hash-required",
+    "m365-graph-scope-pagination-validation-required",
+    "teams-exchange-compliance-record-reconciliation-required",
+    "teams-attachment-reaction-provider-diff-required",
+    "sharepoint-onedrive-permission-graph-required",
+    "retention-hold-deleted-version-history-validation-required",
+    "m365-audit-retention-completeness-validation-required",
+    "m365-provider-native-diff-required",
+    "microsoft-provider-schema-version-tracking-required",
+    "independent-m365-export-review-required",
+]
 CLOUD_QC_PREP_ITEMS = {
     "google": 43,
     "apple-icloud": 44,
@@ -840,6 +854,29 @@ def build_record(
         detail_payload["m365_export_parser_manifest_hash"] = detail_payload["m365_export_parser_manifest"][
             "manifest_sha256"
         ]
+        detail_payload["m365_export_report_grade_validation_plan"] = (
+            build_m365_export_report_grade_validation_plan(
+                artifact_type=artifact_type,
+                service=service,
+                source_index=source_index,
+                source_hashes=source_hashes,
+                source_path=str(path.resolve()),
+                details=detail_payload,
+            )
+        )
+        detail_payload["m365_export_report_grade_validation_plan_hash"] = detail_payload[
+            "m365_export_report_grade_validation_plan"
+        ]["manifest_sha256"]
+        checks = dict(detail_payload.get("validation_checks") or {})
+        checks.update(
+            {
+                "m365_export_report_grade_validation_plan_emitted": True,
+                "m365_export_report_grade_ready_slots": detail_payload[
+                    "m365_export_report_grade_validation_plan"
+                ].get("ready_slot_count", 0),
+            }
+        )
+        detail_payload["validation_checks"] = checks
     validation_checks = detail_payload.get("validation_checks")
     if not isinstance(validation_checks, Mapping):
         validation_checks = {}
@@ -2237,6 +2274,11 @@ def cloud_export_import_functional_profile(
         if isinstance(details.get("m365_export_parser_manifest"), Mapping)
         else {}
     )
+    m365_report_plan = (
+        details.get("m365_export_report_grade_validation_plan")
+        if isinstance(details.get("m365_export_report_grade_validation_plan"), Mapping)
+        else {}
+    )
     archive_manifest = (
         details.get("cloud_archive_manifest")
         if isinstance(details.get("cloud_archive_manifest"), Mapping)
@@ -2256,6 +2298,8 @@ def cloud_export_import_functional_profile(
             "icloud-export-report-grade-validation-plan-not-emitted": family == "apple-icloud"
             and not icloud_report_plan,
             "m365-export-parser-manifest-not-emitted": family == "microsoft-365" and not m365_manifest,
+            "m365-export-report-grade-validation-plan-not-emitted": family == "microsoft-365"
+            and not m365_report_plan,
             "trusted-provider-export-diff-required": trusted_diff.get("status") != "pass",
         }.items()
         if failed
@@ -2314,6 +2358,13 @@ def cloud_export_import_functional_profile(
                 and icloud_manifest.get("row_citation", {}).get("row_hash")
             ),
             "m365_export_parser_manifest_hash": optional_text(m365_manifest.get("manifest_sha256")),
+            "m365_export_report_grade_validation_plan_hash": optional_text(
+                m365_report_plan.get("manifest_sha256")
+            ),
+            "m365_export_report_grade_ready_slot_count": int(m365_report_plan.get("ready_slot_count") or 0),
+            "m365_export_report_grade_blocking_slot_count": int(
+                m365_report_plan.get("blocking_slot_count") or 0
+            ),
             "m365_export_source_row_citation_present": bool(
                 isinstance(m365_manifest.get("row_citation"), Mapping)
                 and m365_manifest.get("row_citation", {}).get("row_hash")
@@ -2345,6 +2396,8 @@ def cloud_export_import_functional_profile(
                 and isinstance(icloud_manifest.get("row_citation"), Mapping)
                 and isinstance(icloud_manifest.get("row_citation", {}).get("source_viewer_locator"), Mapping),
                 "m365-export-parser-manifest-emitted": family == "microsoft-365" and bool(m365_manifest),
+                "m365-export-report-grade-validation-plan-emitted": family == "microsoft-365"
+                and bool(m365_report_plan),
                 "m365-export-source-locator-emitted": family == "microsoft-365"
                 and isinstance(m365_manifest.get("row_citation"), Mapping)
                 and isinstance(m365_manifest.get("row_citation", {}).get("source_viewer_locator"), Mapping),
@@ -2439,6 +2492,15 @@ def cloud_commercial_uplift_evidence(
     )
     if m365_manifest.get("manifest_sha256"):
         source_refs.append(f"m365_export_parser_manifest_sha256:{m365_manifest['manifest_sha256']}")
+    m365_report_plan = (
+        details.get("m365_export_report_grade_validation_plan")
+        if isinstance(details.get("m365_export_report_grade_validation_plan"), Mapping)
+        else {}
+    )
+    if m365_report_plan.get("manifest_sha256"):
+        source_refs.append(
+            f"m365_export_report_grade_validation_plan_sha256:{m365_report_plan['manifest_sha256']}"
+        )
     archive_manifest = (
         details.get("cloud_archive_manifest")
         if isinstance(details.get("cloud_archive_manifest"), Mapping)
@@ -2549,6 +2611,13 @@ def cloud_commercial_uplift_evidence(
                 and icloud_manifest.get("large_data_controls", {}).get("viewer_default")
             ),
             "m365_export_parser_manifest_hash": optional_text(m365_manifest.get("manifest_sha256")),
+            "m365_export_report_grade_validation_plan_hash": optional_text(
+                m365_report_plan.get("manifest_sha256")
+            ),
+            "m365_export_report_grade_ready_slot_count": int(m365_report_plan.get("ready_slot_count") or 0),
+            "m365_export_report_grade_blocking_slot_count": int(
+                m365_report_plan.get("blocking_slot_count") or 0
+            ),
             "m365_export_source_row_citation_present": bool(
                 isinstance(m365_manifest.get("row_citation"), Mapping)
                 and m365_manifest.get("row_citation", {}).get("row_hash")
@@ -3696,6 +3765,324 @@ def build_m365_export_parser_manifest(
     return manifest
 
 
+def build_m365_export_report_grade_validation_plan(
+    *,
+    artifact_type: str,
+    service: str,
+    source_index: int,
+    source_hashes: Mapping[str, str],
+    source_path: str,
+    details: Mapping[str, object],
+) -> dict[str, object]:
+    """#39 report-grade evidence slots for M365/Teams/OneDrive/SharePoint rows."""
+
+    review_profile = (
+        details.get("m365_export_review_profile")
+        if isinstance(details.get("m365_export_review_profile"), Mapping)
+        else {}
+    )
+    parser_manifest = (
+        details.get("m365_export_parser_manifest")
+        if isinstance(details.get("m365_export_parser_manifest"), Mapping)
+        else {}
+    )
+    import_manifest = (
+        details.get("cloud_export_import_manifest")
+        if isinstance(details.get("cloud_export_import_manifest"), Mapping)
+        else {}
+    )
+    validation_checks = (
+        details.get("validation_checks")
+        if isinstance(details.get("validation_checks"), Mapping)
+        else {}
+    )
+    row_citation = (
+        parser_manifest.get("row_citation")
+        if isinstance(parser_manifest.get("row_citation"), Mapping)
+        else {}
+    )
+    row_pivots = row_citation.get("row_pivots") if isinstance(row_citation.get("row_pivots"), Mapping) else {}
+    workload_family = optional_text(review_profile.get("workload_family")) or m365_workload_family(
+        service=service,
+        artifact_type=artifact_type,
+        source_path=source_path,
+    )
+    is_teams = workload_family == "teams"
+    is_file = workload_family == "onedrive-sharepoint"
+    is_audit = workload_family == "audit"
+    has_source_hash = bool(source_hashes.get("sha256"))
+    has_row_citation = bool(row_citation.get("row_hash"))
+    has_source_viewer = isinstance(row_citation.get("source_viewer_locator"), Mapping)
+    has_workload_pivot = bool(review_profile.get("primary_pivot_present") or row_pivots)
+    has_teams_message_pivot = bool(
+        details.get("message_id")
+        or details.get("chat_id")
+        or details.get("channel_id")
+        or details.get("team_id")
+        or details.get("message_text_sha256")
+    )
+    has_teams_inventory = bool(
+        validation_checks.get("teams_message_review_profile_emitted")
+        or validation_checks.get("teams_attachment_inventory_emitted")
+        or validation_checks.get("teams_reaction_inventory_emitted")
+    )
+    has_file_identity = bool(details.get("file_id") or details.get("file_name") or details.get("url_sha256"))
+    has_permission_inventory = bool(
+        validation_checks.get("m365_file_permission_review_profile_emitted")
+        or isinstance(details.get("m365_file_permission_review_profile"), Mapping)
+    )
+    has_file_state_inventory = bool(
+        validation_checks.get("m365_file_state_review_profile_emitted")
+        or isinstance(details.get("m365_file_state_review_profile"), Mapping)
+    )
+    has_audit_pivot = bool(
+        details.get("operation") or details.get("actor") or details.get("ip_address") or details.get("object_id")
+    )
+
+    def slot(
+        slot_id: str,
+        status: str,
+        *,
+        blocking: bool,
+        evidence: Mapping[str, object] | None = None,
+        required_before_report: Sequence[str] | None = None,
+    ) -> dict[str, object]:
+        return {
+            "id": slot_id,
+            "status": status,
+            "blocking": blocking,
+            "evidence": dict(evidence or {}),
+            "required_before_report": list(required_before_report or []),
+        }
+
+    slots = [
+        slot(
+            "source-m365-export-hash-integrity",
+            "complete" if has_source_hash else "missing",
+            blocking=not has_source_hash,
+            evidence={"source_sha256": source_hashes.get("sha256", "")},
+            required_before_report=["preserve the original M365/Purview/Graph export or copied source hash"],
+        ),
+        slot(
+            "m365-row-citation",
+            "complete" if has_row_citation else "missing",
+            blocking=not has_row_citation,
+            evidence={
+                "row_hash": optional_text(row_citation.get("row_hash")),
+                "source_index": source_index,
+                "artifact_type": artifact_type,
+            },
+            required_before_report=["cite row hash, source index, workload family, and source path"],
+        ),
+        slot(
+            "m365-workload-pivot-inventory",
+            "complete" if has_workload_pivot else "missing",
+            blocking=not has_workload_pivot,
+            evidence={
+                "workload_family": workload_family,
+                "present_primary_pivots": list(review_profile.get("present_primary_pivots") or []),
+                "row_pivot_keys": sorted(str(key) for key in row_pivots.keys()),
+            },
+            required_before_report=["verify workload-specific pivots identify the mail/message/file/audit row"],
+        ),
+        slot(
+            "m365-source-viewer-locator",
+            "complete" if has_source_viewer else "missing",
+            blocking=not has_source_viewer,
+            evidence={"viewer": "m365-export-workload-row" if has_source_viewer else ""},
+            required_before_report=["open the M365 workload-row viewer before report selection"],
+        ),
+        slot(
+            "teams-message-thread-pivot",
+            "complete" if is_teams and has_teams_message_pivot else ("not-applicable" if not is_teams else "missing"),
+            blocking=is_teams and not has_teams_message_pivot,
+            evidence={
+                "message_id": optional_text(details.get("message_id")),
+                "chat_id": optional_text(details.get("chat_id")),
+                "channel_id": optional_text(details.get("channel_id")),
+                "team_id": optional_text(details.get("team_id")),
+                "reply_to_message_id": optional_text(details.get("reply_to_message_id")),
+            },
+            required_before_report=["tie Teams rows to chat/channel/thread/message identifiers before report use"],
+        ),
+        slot(
+            "teams-attachment-reaction-inventory",
+            "complete" if is_teams and has_teams_inventory else ("not-applicable" if not is_teams else "missing"),
+            blocking=is_teams and not has_teams_inventory,
+            evidence={
+                "attachment_count": int(details.get("attachment_count") or 0),
+                "reaction_count": int(details.get("reaction_count") or 0),
+                "attachment_profile_present": isinstance(details.get("teams_attachment_review_profile"), Mapping),
+                "reaction_profile_present": isinstance(details.get("teams_reaction_review_profile"), Mapping),
+            },
+            required_before_report=["validate Teams attachment bytes, hosted content, reactions, edits, and deletes against provider evidence"],
+        ),
+        slot(
+            "onedrive-sharepoint-file-permission-pivot",
+            "complete" if is_file and has_file_identity and has_permission_inventory else (
+                "not-applicable" if not is_file else "missing"
+            ),
+            blocking=is_file and not (has_file_identity and has_permission_inventory),
+            evidence={
+                "file_id": optional_text(details.get("file_id")),
+                "file_name": optional_text(details.get("file_name")),
+                "permission_count": int(details.get("permission_count") or 0),
+                "sharing_link_count": int(details.get("sharing_link_count") or 0),
+            },
+            required_before_report=["validate SharePoint/OneDrive permission graph and sharing link scope"],
+        ),
+        slot(
+            "onedrive-sharepoint-version-deleted-retention-pivot",
+            "complete" if is_file and has_file_state_inventory else ("not-applicable" if not is_file else "missing"),
+            blocking=is_file and not has_file_state_inventory,
+            evidence={
+                "version_id": optional_text(details.get("version_id")),
+                "version_count": int(details.get("version_count") or 0),
+                "deleted_status": optional_text(details.get("deleted_status")),
+                "retention_label": optional_text(details.get("retention_label")),
+            },
+            required_before_report=["validate version history, retention hold, recycle-bin, and deleted-state semantics"],
+        ),
+        slot(
+            "m365-audit-operation-pivot",
+            "complete" if is_audit and has_audit_pivot else ("not-applicable" if not is_audit else "missing"),
+            blocking=is_audit and not has_audit_pivot,
+            evidence={
+                "operation": optional_text(details.get("operation")),
+                "actor_present": bool(details.get("actor")),
+                "ip_address_present": bool(details.get("ip_address")),
+                "object_id": optional_text(details.get("object_id")),
+            },
+            required_before_report=["validate audit workload, retention window, actor/object attribution, and provider completeness"],
+        ),
+        slot(
+            "m365-ediscovery-scope-manifest",
+            "external-scope-manifest-required",
+            blocking=True,
+            evidence={
+                "purview_export_manifest_attached": bool(review_profile.get("purview_export_manifest_attached")),
+                "provider_scope_verified": bool(validation_checks.get("provider_scope_verified")),
+            },
+            required_before_report=["attach Purview/eDiscovery export manifest, tenant, custodian, query, and export timestamp"],
+        ),
+        slot(
+            "m365-original-export-package-hash",
+            "external-package-proof-required",
+            blocking=True,
+            evidence={
+                "archive_entry_name": optional_text(details.get("archive_entry_name")),
+                "archive_embedded_row": bool(validation_checks.get("archive_embedded_row")),
+                "original_export_hash_verified": bool(validation_checks.get("original_export_hash_verified")),
+            },
+            required_before_report=["prove original eDiscovery/Graph export package completeness and SHA256"],
+        ),
+        slot(
+            "m365-graph-scope-pagination-throttle",
+            "external-api-run-required",
+            blocking=True,
+            evidence={"graph_api_scope_status": optional_text(review_profile.get("graph_api_scope_status"))},
+            required_before_report=["validate Graph scopes, pagination cursors, throttling/backoff, and workload coverage"],
+        ),
+        slot(
+            "teams-exchange-compliance-reconciliation",
+            "pending-provider-reconcile" if is_teams else "not-applicable",
+            blocking=is_teams,
+            evidence={
+                "teams_compliance_record_status": optional_text(
+                    review_profile.get("teams_compliance_record_status")
+                )
+            },
+            required_before_report=["reconcile Teams rows with Exchange compliance records and provider-native exports"],
+        ),
+        slot(
+            "sharepoint-permission-graph-reconciliation",
+            "pending-provider-graph" if is_file else "not-applicable",
+            blocking=is_file,
+            evidence={
+                "sharepoint_permission_graph_status": optional_text(
+                    review_profile.get("sharepoint_permission_graph_status")
+                )
+            },
+            required_before_report=["build and validate SharePoint/OneDrive permission and sharing graph"],
+        ),
+        slot(
+            "m365-retention-deleted-version-validation",
+            "pending-retention-diff" if is_file or is_audit else "not-applicable",
+            blocking=is_file or is_audit,
+            evidence={
+                "retention_hold_policy_status": optional_text(review_profile.get("retention_hold_policy_status")),
+                "deleted_or_version_history_status": optional_text(
+                    review_profile.get("deleted_or_version_history_status")
+                ),
+            },
+            required_before_report=["validate retention holds, deleted items, recycle-bin state, and version history against provider evidence"],
+        ),
+        slot(
+            "m365-provider-native-row-diff",
+            "pending-cross-tool-validate",
+            blocking=True,
+            evidence={"provider_native_diff_status": optional_text(review_profile.get("provider_native_diff_status"))},
+            required_before_report=["diff selected rows against Purview, Graph, Exchange eDiscovery, Teams admin, or known-answer output"],
+        ),
+        slot(
+            "microsoft-provider-schema-version-tracking",
+            "external-schema-matrix-required",
+            blocking=True,
+            evidence={"parser_version": PARSER_VERSION, "source_format": optional_text(details.get("source_format"))},
+            required_before_report=["track M365/Purview/Graph export schema versions and parser compatibility by export date"],
+        ),
+        slot(
+            "independent-m365-export-review",
+            "independent-review-required",
+            blocking=True,
+            evidence={"gap_id": "#39"},
+            required_before_report=["attach independent reviewer signoff before commercial/report-grade wording"],
+        ),
+    ]
+    ready_slot_count = sum(1 for item in slots if item["status"] == "complete")
+    blocking_slot_count = sum(1 for item in slots if item["blocking"])
+    plan: dict[str, object] = {
+        "profile_version": M365_EXPORT_REPORT_GRADE_VALIDATION_PLAN_VERSION,
+        "item_number": 39,
+        "gap_id": "#39",
+        "batch_id": "commercial-uplift-036-040",
+        "qc_prep_item_number": 45,
+        "artifact_type": artifact_type,
+        "service": service or "unknown",
+        "workload_family": workload_family,
+        "source_format": optional_text(details.get("source_format")),
+        "source_path": source_path,
+        "source_index": source_index,
+        "source_sha256": source_hashes.get("sha256", ""),
+        "cloud_export_import_manifest_sha256": optional_text(import_manifest.get("manifest_sha256")),
+        "m365_export_parser_manifest_sha256": optional_text(parser_manifest.get("manifest_sha256")),
+        "validation_status": "report-validation-blocked",
+        "commercial_grade": False,
+        "validation_commands": [
+            "source-m365-purview-ediscovery-scope-manifest",
+            "m365-provider-native-purview-graph-exchange-teams-diff",
+            "m365-known-answer-run",
+            "teams-compliance-attachment-reaction-reconciliation",
+            "sharepoint-onedrive-permission-retention-version-validation",
+            "independent-m365-export-review",
+        ],
+        "evidence_slots": slots,
+        "ready_slot_count": ready_slot_count,
+        "blocking_slot_count": blocking_slot_count,
+        "blockers": list(M365_EXPORT_REPORT_GRADE_VALIDATION_BLOCKERS),
+        "required_before_report": [
+            "attach Purview/eDiscovery/Graph export scope, tenant/custodian/query proof, export timestamp, and original package hash",
+            "diff high-value mail, Teams, OneDrive, SharePoint, and audit rows against Microsoft provider-native evidence",
+            "validate Teams compliance records, attachments, reactions, edit/delete state, SharePoint permission graph, retention, deleted-state, version history, audit retention, and schema-version semantics",
+            "attach independent review before commercial-grade or testimony-grade claims",
+        ],
+    }
+    plan["manifest_sha256"] = stable_cloud_json_sha256(
+        {key: value for key, value in plan.items() if key != "manifest_sha256"}
+    )
+    return plan
+
+
 def stable_cloud_json_sha256(value: Mapping[str, object] | list[object] | str) -> str:
     if isinstance(value, str):
         payload = value
@@ -3838,6 +4225,15 @@ def cloud_core_accuracy_gates(
     )
     if m365_manifest.get("manifest_sha256"):
         evidence_refs.append(f"m365_export_parser_manifest_sha256:{m365_manifest['manifest_sha256']}")
+    m365_report_plan = (
+        details.get("m365_export_report_grade_validation_plan")
+        if isinstance(details.get("m365_export_report_grade_validation_plan"), Mapping)
+        else {}
+    )
+    if m365_report_plan.get("manifest_sha256"):
+        evidence_refs.append(
+            f"m365_export_report_grade_validation_plan_sha256:{m365_report_plan['manifest_sha256']}"
+        )
     archive_manifest = (
         details.get("cloud_archive_manifest")
         if isinstance(details.get("cloud_archive_manifest"), Mapping)
@@ -3949,6 +4345,10 @@ def cloud_core_accuracy_gates(
                     satisfied.append("M365 export source row citation")
                 if isinstance(m365_manifest.get("large_data_controls"), Mapping) and m365_manifest.get("large_data_controls", {}).get("viewer_default"):
                     satisfied.append("M365 export review viewer controls")
+            if m365_report_plan:
+                satisfied.append("M365 export report-grade validation plan")
+                if int(m365_report_plan.get("ready_slot_count") or 0) >= 4:
+                    satisfied.append("M365 export report-grade ready slots")
             if trusted_diff.get("status") == "pass" and int(trusted_diff.get("gap_number") or 0) == 39:
                 satisfied.append("trusted M365/eDiscovery export diff pass")
         gates.append(build_accuracy_gate(number, satisfied_checks=satisfied, evidence_refs=evidence_refs))
