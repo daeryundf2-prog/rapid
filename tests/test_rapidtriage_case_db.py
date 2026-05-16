@@ -444,6 +444,22 @@ class RapidTriageCaseDatabaseTests(unittest.TestCase):
             self.assertEqual(unhealthy["status"], "needs-rebuild")
             self.assertEqual(unhealthy["summary"]["missing_index_rows"], 3)
 
+            warning_payload = database.search_case(
+                case_id="CASE-INDEX-REBUILD",
+                keywords=["needle"],
+                sources=["files"],
+                limit=5,
+            )
+            file_plan = {
+                item["source"]: item
+                for item in warning_payload["large_case_search_plan"]["sources"]
+            }["files"]
+            self.assertEqual(warning_payload["summary"]["search_index_health_status"], "needs-rebuild")
+            self.assertEqual(warning_payload["summary"]["search_index_missing_rows"], 3)
+            self.assertEqual(file_plan["search_index_status"], "needs-rebuild")
+            self.assertEqual(file_plan["missing_index_rows"], 1)
+            self.assertEqual(file_plan["partial_coverage_warning"], True)
+
             rebuilt = database.rebuild_search_indexes("CASE-INDEX-REBUILD")
             self.assertEqual(rebuilt["status"], "rebuilt")
             self.assertEqual(rebuilt["after"]["status"], "healthy")

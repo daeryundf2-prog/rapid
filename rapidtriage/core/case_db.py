@@ -659,6 +659,19 @@ class CaseDatabase:
                 "keyword_counts": keyword_counts,
                 "priority_counts": priority_counts,
                 "document_error_count": len(document_errors),
+                "search_index_health_status": str(
+                    (large_case_search_plan.get("search_index_health") or {}).get("status") or "unknown"
+                )
+                if isinstance(large_case_search_plan.get("search_index_health"), Mapping)
+                else "unknown",
+                "search_index_missing_rows": int(
+                    ((large_case_search_plan.get("search_index_health") or {}).get("summary") or {}).get(
+                        "missing_index_rows",
+                        0,
+                    )
+                )
+                if isinstance((large_case_search_plan.get("search_index_health") or {}).get("summary"), Mapping)
+                else 0,
                 "cursor_api": {
                     "profile_version": CASE_SEARCH_CURSOR_VERSION,
                     "offset": page_offset,
@@ -3542,6 +3555,12 @@ def build_case_search_execution_plan(
     scan_candidate_limit: int,
 ) -> dict[str, object]:
     requested_sources = sorted(source_filter)
+    search_index_health = case_db_search_index_health(connection, case_id)
+    health_by_source = {
+        str(row.get("source") or ""): row
+        for row in search_index_health.get("indexes", [])
+        if isinstance(row, Mapping)
+    }
     sources: list[dict[str, object]] = []
 
     def add_source(
@@ -3554,12 +3573,19 @@ def build_case_search_execution_plan(
         fts_table: str = "",
         notes: Sequence[str] = (),
     ) -> None:
+        health = health_by_source.get(source, {})
+        health_status = str(health.get("status") or "unknown")
+        missing_index_rows = int(health.get("missing_index_rows") or 0)
+        orphan_fts_rows = int(health.get("orphan_fts_rows") or 0)
         entry: dict[str, object] = {
             "source": source,
             "requested": requested,
             "backend": backend if requested else "skipped",
             "table": table_name,
             "fts_table": fts_table,
+            "search_index_status": health_status,
+            "missing_index_rows": missing_index_rows,
+            "orphan_fts_rows": orphan_fts_rows,
             "limit": limit,
             "cursor_offset": cursor_offset,
             "retrieval_limit": retrieval_limit,
@@ -3579,6 +3605,11 @@ def build_case_search_execution_plan(
                 entry["notes"].append(
                     "bounded scan reached candidate cap; use FTS-backed sources or narrower filters for complete large-case search"
                 )
+        if requested and health_status not in ("healthy", "unknown"):
+            entry["partial_coverage_warning"] = True
+            entry["notes"].append(
+                "search index health is not clean; run case-db --search-index-health and --rebuild-search-indexes before absence claims"
+            )
         sources.append(entry)
 
     add_source(
@@ -3636,8 +3667,11 @@ def build_case_search_execution_plan(
             "oversample_per_requested_result": CASE_DB_SEARCH_SCAN_OVERSAMPLE,
         },
         "sources": sources,
+        "search_index_health": search_index_health,
         "commercial_gap_ids": ["#61", "#74", "#78", "#79"],
-        "status": "validated-local-search-plan-validation-required",
+        "status": "validated-local-search-plan-validation-required"
+        if search_index_health["status"] == "healthy"
+        else "search-index-rebuild-required-before-absence-claims",
     }
 
 
