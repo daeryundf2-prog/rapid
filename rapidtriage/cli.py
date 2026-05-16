@@ -1305,6 +1305,8 @@ def build_parser() -> argparse.ArgumentParser:
               rapidtriage case-db ./rapidtriage-case.db --import-run ./rapidtriage-sample/run-output --case-id CASE-001
               rapidtriage case-db ./rapidtriage-case.db --import-vsc-compare ./vsc-delta.json --case-id CASE-001
               rapidtriage case-db ./rapidtriage-case.db --import-worker-jsonl ./worker-artifacts.jsonl --case-id CASE-001
+              rapidtriage case-db ./rapidtriage-case.db --case-id CASE-001 --search-index-health --json
+              rapidtriage case-db ./rapidtriage-case.db --case-id CASE-001 --rebuild-search-indexes --json
               rapidtriage case-db ./rapidtriage-case.db --list --json
             """
         ),
@@ -1320,6 +1322,8 @@ def build_parser() -> argparse.ArgumentParser:
     case_db.add_argument("--examiner", default="", help="Examiner name for --create-case")
     case_db.add_argument("--organization", default="", help="Organization name for --create-case")
     case_db.add_argument("--case-root", help="Evidence/case root path for --create-case")
+    case_db.add_argument("--search-index-health", action="store_true", help="Report case-scoped FTS search index health")
+    case_db.add_argument("--rebuild-search-indexes", action="store_true", help="Rebuild case-scoped FTS indexes for large-case search")
     case_db.add_argument("--list", action="store_true", help="List cases after initialization")
     case_db.add_argument("--json", action="store_true", help="Print machine-readable JSON")
 
@@ -2718,6 +2722,8 @@ def main(argv=None) -> int:
             imported_run = None
             imported_vsc_compare = None
             imported_worker_jsonl = None
+            search_index_health = None
+            rebuilt_search_indexes = None
             if args.create_case:
                 created_case = database.create_case(
                     case_id=args.create_case,
@@ -2761,6 +2767,17 @@ def main(argv=None) -> int:
                     case_id=import_case_id,
                     case_name=args.name,
                 )
+            if args.search_index_health:
+                health_case_id = args.case_id or args.create_case
+                if not health_case_id:
+                    parser.error("--case-id or --create-case is required with --search-index-health")
+                search_index_health = database.search_index_health(health_case_id)
+            if args.rebuild_search_indexes:
+                rebuild_case_id = args.case_id or args.create_case
+                if not rebuild_case_id:
+                    parser.error("--case-id or --create-case is required with --rebuild-search-indexes")
+                rebuilt_search_indexes = database.rebuild_search_indexes(rebuild_case_id)
+                search_index_health = rebuilt_search_indexes["after"]
             cases = database.list_cases() if args.list or created_case is not None else []
         except CaseDatabaseError as exc:
             parser.error(str(exc))
@@ -2773,6 +2790,8 @@ def main(argv=None) -> int:
             "imported_run": imported_run,
             "imported_vsc_compare": imported_vsc_compare,
             "imported_worker_jsonl": imported_worker_jsonl,
+            "search_index_health": search_index_health,
+            "rebuilt_search_indexes": rebuilt_search_indexes,
             "cases": [case.to_dict() for case in cases],
         }
         if args.json:
@@ -2791,6 +2810,15 @@ def main(argv=None) -> int:
             if imported_worker_jsonl:
                 print(f"Imported worker JSONL into case: {imported_worker_jsonl['case_id']}")
                 print(f"Worker import counts: {imported_worker_jsonl['summary']}")
+            if search_index_health:
+                print(
+                    "Search index health: "
+                    f"{search_index_health['status']} "
+                    f"(missing={search_index_health['summary']['missing_index_rows']}, "
+                    f"orphan={search_index_health['summary']['orphan_fts_rows']})"
+                )
+            if rebuilt_search_indexes:
+                print(f"Rebuilt search indexes: {rebuilt_search_indexes['status']}")
             if cases:
                 print(f"Cases: {len(cases)}")
                 for case in cases:

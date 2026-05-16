@@ -185,6 +185,52 @@ class CaseDatabase:
                 "large_sqlite_fts_optimization": case_db_fts_optimization_assessment(connection),
             }
 
+    def search_index_health(self, case_id: str) -> dict[str, object]:
+        normalized_case_id = normalize_identifier(case_id, fallback="case")
+        with self.connect() as connection:
+            apply_schema(connection)
+            ensure_case_exists(connection, normalized_case_id)
+            return case_db_search_index_health(connection, normalized_case_id)
+
+    def rebuild_search_indexes(self, case_id: str) -> dict[str, object]:
+        normalized_case_id = normalize_identifier(case_id, fallback="case")
+        with self.connect() as connection:
+            apply_schema(connection)
+            ensure_case_exists(connection, normalized_case_id)
+            payload = rebuild_case_db_search_indexes(connection, normalized_case_id)
+            connection.execute(
+                """
+                INSERT INTO audit_event (
+                    citation_id, case_id, actor, action, target_type, target_id,
+                    timestamp, tool_name, tool_version, params_json, result, error
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    next_citation_id_for_connection(connection, normalized_case_id, "audit"),
+                    normalized_case_id,
+                    "local-user",
+                    "search-index.rebuilt",
+                    "case",
+                    normalized_case_id,
+                    now_iso(),
+                    "rapidtriage",
+                    "",
+                    json.dumps(
+                        {
+                            "before_status": payload["before"]["status"],
+                            "after_status": payload["after"]["status"],
+                            "actions": payload["actions"],
+                        },
+                        ensure_ascii=False,
+                        sort_keys=True,
+                    ),
+                    "ok" if payload["after"]["status"] == "healthy" else "partial",
+                    "",
+                ),
+            )
+            return payload
+
     def schema_version(self) -> int:
         with self.connect() as connection:
             return get_schema_version(connection)
@@ -1860,50 +1906,6 @@ def apply_schema(connection: sqlite3.Connection) -> None:
     ensure_column(connection, "review_mark", "assignee", "TEXT NOT NULL DEFAULT ''")
     ensure_column(connection, "review_mark", "priority", "TEXT NOT NULL DEFAULT 'normal'")
     ensure_column(connection, "review_mark", "due_at", "TEXT NOT NULL DEFAULT ''")
-    connection.execute(
-        """
-        INSERT OR REPLACE INTO file_record_fts(rowid, path, extension, hashes)
-        SELECT
-            id,
-            path,
-            extension,
-            trim(COALESCE(hash_md5, '') || ' ' || COALESCE(hash_sha1, '') || ' ' || COALESCE(hash_sha256, ''))
-        FROM file_record
-        WHERE id NOT IN (SELECT rowid FROM file_record_fts)
-        """
-    )
-    try:
-        connection.execute(
-            """
-            INSERT INTO artifact_fts(rowid, title, summary, metadata)
-            SELECT
-                id,
-                title,
-                summary,
-                data_json
-            FROM artifact
-            WHERE id NOT IN (SELECT rowid FROM artifact_fts)
-            """
-        )
-    except sqlite3.OperationalError:
-        # Older databases may have an external-content artifact_fts table whose
-        # virtual columns do not map cleanly to artifact.data_json. Keep search
-        # usable via the bounded fallback instead of blocking case access.
-        pass
-    connection.execute(
-        """
-        INSERT OR REPLACE INTO event_fts(rowid, event_type, timestamp, target, description, source)
-        SELECT
-            id,
-            event_type,
-            timestamp,
-            target,
-            description,
-            source
-        FROM event
-        WHERE id NOT IN (SELECT rowid FROM event_fts)
-        """
-    )
     current_version = get_schema_version(connection)
     if current_version not in (0, SCHEMA_VERSION):
         raise CaseDatabaseError(f"unsupported case DB schema version: {current_version}")
@@ -1942,6 +1944,320 @@ def list_tables(connection: sqlite3.Connection) -> list[str]:
 
 def table_columns(connection: sqlite3.Connection, table_name: str) -> list[str]:
     return [str(row["name"]) for row in connection.execute(f"PRAGMA table_info({table_name})")]
+
+
+def ensure_case_exists(connection: sqlite3.Connection, case_id: str) -> None:
+    if connection.execute("SELECT 1 FROM case_record WHERE case_id = ?", (case_id,)).fetchone() is None:
+        raise CaseDatabaseError(f"case not found: {case_id}")
+
+
+def case_db_search_index_health(connection: sqlite3.Connection, case_id: str) -> dict[str, object]:
+    profiles = [
+        case_db_fts_health_profile(
+            connection,
+            case_id=case_id,
+            source="documents",
+            source_table="indexed_document",
+            fts_table="indexed_document_fts",
+            source_label="extracted document/OCR text",
+        ),
+        case_db_fts_health_profile(
+            connection,
+            case_id=case_id,
+            source="files",
+            source_table="file_record",
+            fts_table="file_record_fts",
+            source_label="file path, extension, and hash metadata",
+        ),
+        case_db_fts_health_profile(
+            connection,
+            case_id=case_id,
+            source="artifacts",
+            source_table="artifact",
+            fts_table="artifact_fts",
+            source_label="artifact and indicator title/summary/metadata",
+        ),
+        case_db_fts_health_profile(
+            connection,
+            case_id=case_id,
+            source="timeline",
+            source_table="event",
+            fts_table="event_fts",
+            source_label="timeline event type/time/target/description/source",
+        ),
+    ]
+    missing_total = sum(int(profile["missing_index_rows"]) for profile in profiles)
+    orphan_total = sum(int(profile["orphan_fts_rows"]) for profile in profiles)
+    error_count = sum(1 for profile in profiles if profile.get("error"))
+    status = "healthy" if missing_total == 0 and orphan_total == 0 and error_count == 0 else "needs-rebuild"
+    return {
+        "profile_version": "case-db-search-index-health-v1",
+        "case_id": case_id,
+        "status": status,
+        "ready_for_large_case_search": status == "healthy",
+        "summary": {
+            "source_count": len(profiles),
+            "missing_index_rows": missing_total,
+            "orphan_fts_rows": orphan_total,
+            "error_count": error_count,
+        },
+        "indexes": profiles,
+        "commercial_gap_ids": ["#61", "#68", "#74", "#78", "#79"],
+        "core_accuracy_gates": [
+            build_accuracy_gate(
+                74,
+                satisfied_checks=[
+                    "case-scoped FTS row counts emitted",
+                    "missing source-to-index rows counted",
+                    "orphan index rows counted",
+                    "rebuild recommendation emitted",
+                ],
+                evidence_refs=[
+                    f"status:{status}",
+                    f"missing_index_rows:{missing_total}",
+                    f"orphan_fts_rows:{orphan_total}",
+                ],
+            )
+        ],
+        "blockers": [
+            "external 1M+/10M+ row benchmark evidence still required for commercial performance claims",
+        ]
+        if status == "healthy"
+        else [
+            "run rapidtriage case-db <db> --case-id <case> --rebuild-search-indexes before relying on complete search",
+            "external 1M+/10M+ row benchmark evidence still required for commercial performance claims",
+        ],
+    }
+
+
+def case_db_fts_health_profile(
+    connection: sqlite3.Connection,
+    *,
+    case_id: str,
+    source: str,
+    source_table: str,
+    fts_table: str,
+    source_label: str,
+) -> dict[str, object]:
+    try:
+        source_rows = count_rows(connection, source_table, case_id)
+        indexed_rows = count_case_fts_rows(connection, source_table=source_table, fts_table=fts_table, case_id=case_id)
+        missing_rows = count_missing_fts_rows(connection, source_table=source_table, fts_table=fts_table, case_id=case_id)
+        orphan_rows = count_orphan_fts_rows(connection, source_table=source_table, fts_table=fts_table)
+        status = "healthy" if missing_rows == 0 and orphan_rows == 0 else "needs-rebuild"
+        error = ""
+    except sqlite3.OperationalError as exc:
+        source_rows = 0
+        indexed_rows = 0
+        missing_rows = 0
+        orphan_rows = 0
+        status = "error"
+        error = str(exc)
+    return {
+        "source": source,
+        "source_table": source_table,
+        "fts_table": fts_table,
+        "source_label": source_label,
+        "status": status,
+        "source_rows": source_rows,
+        "indexed_rows": indexed_rows,
+        "missing_index_rows": missing_rows,
+        "orphan_fts_rows": orphan_rows,
+        "error": error,
+        "recommendation": "rebuild-search-indexes" if status != "healthy" else "none",
+    }
+
+
+def count_case_fts_rows(
+    connection: sqlite3.Connection,
+    *,
+    source_table: str,
+    fts_table: str,
+    case_id: str,
+) -> int:
+    row = connection.execute(
+        f"""
+        SELECT COUNT(*) AS count
+        FROM {fts_table}
+        JOIN {source_table} ON {fts_table}.rowid = {source_table}.id
+        WHERE {source_table}.case_id = ?
+        """,
+        (case_id,),
+    ).fetchone()
+    return int(row["count"] if row is not None else 0)
+
+
+def count_missing_fts_rows(
+    connection: sqlite3.Connection,
+    *,
+    source_table: str,
+    fts_table: str,
+    case_id: str,
+) -> int:
+    row = connection.execute(
+        f"""
+        SELECT COUNT(*) AS count
+        FROM {source_table}
+        LEFT JOIN {fts_table} ON {fts_table}.rowid = {source_table}.id
+        WHERE {source_table}.case_id = ?
+          AND {fts_table}.rowid IS NULL
+        """,
+        (case_id,),
+    ).fetchone()
+    return int(row["count"] if row is not None else 0)
+
+
+def count_orphan_fts_rows(
+    connection: sqlite3.Connection,
+    *,
+    source_table: str,
+    fts_table: str,
+) -> int:
+    row = connection.execute(
+        f"""
+        SELECT COUNT(*) AS count
+        FROM {fts_table}
+        LEFT JOIN {source_table} ON {fts_table}.rowid = {source_table}.id
+        WHERE {source_table}.id IS NULL
+        """
+    ).fetchone()
+    return int(row["count"] if row is not None else 0)
+
+
+def rebuild_case_db_search_indexes(connection: sqlite3.Connection, case_id: str) -> dict[str, object]:
+    before = case_db_search_index_health(connection, case_id)
+    actions: list[dict[str, object]] = []
+    actions.append(rebuild_external_content_fts(connection, fts_table="indexed_document_fts"))
+    actions.append(
+        rebuild_standalone_fts(
+            connection,
+            case_id=case_id,
+            source="files",
+            source_table="file_record",
+            fts_table="file_record_fts",
+            columns=("path", "extension", "hashes"),
+            select_sql="""
+                SELECT
+                    id,
+                    path,
+                    extension,
+                    trim(COALESCE(hash_md5, '') || ' ' || COALESCE(hash_sha1, '') || ' ' || COALESCE(hash_sha256, ''))
+                FROM file_record
+                WHERE case_id = ?
+                ORDER BY id ASC
+            """,
+        )
+    )
+    actions.append(
+        rebuild_standalone_fts(
+            connection,
+            case_id=case_id,
+            source="artifacts",
+            source_table="artifact",
+            fts_table="artifact_fts",
+            columns=("title", "summary", "metadata"),
+            select_sql="""
+                SELECT id, title, summary, data_json
+                FROM artifact
+                WHERE case_id = ?
+                ORDER BY id ASC
+            """,
+        )
+    )
+    actions.append(
+        rebuild_standalone_fts(
+            connection,
+            case_id=case_id,
+            source="timeline",
+            source_table="event",
+            fts_table="event_fts",
+            columns=("event_type", "timestamp", "target", "description", "source"),
+            select_sql="""
+                SELECT id, event_type, timestamp, target, description, source
+                FROM event
+                WHERE case_id = ?
+                ORDER BY id ASC
+            """,
+        )
+    )
+    after = case_db_search_index_health(connection, case_id)
+    return {
+        "profile_version": "case-db-search-index-rebuild-v1",
+        "case_id": case_id,
+        "status": "rebuilt" if after["status"] == "healthy" else "partial",
+        "before": before,
+        "after": after,
+        "actions": actions,
+        "commercial_gap_ids": ["#61", "#68", "#74", "#78", "#79"],
+    }
+
+
+def rebuild_external_content_fts(connection: sqlite3.Connection, *, fts_table: str) -> dict[str, object]:
+    try:
+        connection.execute(f"INSERT INTO {fts_table}({fts_table}) VALUES('rebuild')")
+        status = "rebuilt"
+        error = ""
+    except sqlite3.OperationalError as exc:
+        status = "error"
+        error = str(exc)
+    return {
+        "source": "documents",
+        "fts_table": fts_table,
+        "status": status,
+        "scope": "all-cases",
+        "error": error,
+    }
+
+
+def rebuild_standalone_fts(
+    connection: sqlite3.Connection,
+    *,
+    case_id: str,
+    source: str,
+    source_table: str,
+    fts_table: str,
+    columns: Sequence[str],
+    select_sql: str,
+) -> dict[str, object]:
+    try:
+        row_ids = [
+            int(row["id"])
+            for row in connection.execute(
+                f"SELECT id FROM {source_table} WHERE case_id = ? ORDER BY id ASC",
+                (case_id,),
+            ).fetchall()
+        ]
+        for row_id in row_ids:
+            connection.execute(f"DELETE FROM {fts_table} WHERE rowid = ?", (row_id,))
+        placeholders = ", ".join("?" for _ in columns)
+        column_sql = ", ".join(columns)
+        inserted = 0
+        for row in connection.execute(select_sql, (case_id,)).fetchall():
+            values = [row[column] for column in row.keys() if column != "id"]
+            connection.execute(
+                f"INSERT INTO {fts_table}(rowid, {column_sql}) VALUES (?, {placeholders})",
+                (row["id"], *values),
+            )
+            inserted += 1
+        return {
+            "source": source,
+            "fts_table": fts_table,
+            "status": "rebuilt",
+            "deleted_rows": len(row_ids),
+            "inserted_rows": inserted,
+            "scope": "case",
+            "error": "",
+        }
+    except sqlite3.OperationalError as exc:
+        return {
+            "source": source,
+            "fts_table": fts_table,
+            "status": "error",
+            "deleted_rows": 0,
+            "inserted_rows": 0,
+            "scope": "case",
+            "error": str(exc),
+        }
 
 
 def case_db_fts_optimization_assessment(connection: sqlite3.Connection) -> dict[str, object]:

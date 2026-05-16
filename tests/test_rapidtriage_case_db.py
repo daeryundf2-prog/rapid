@@ -90,6 +90,8 @@ class RapidTriageCaseDatabaseTests(unittest.TestCase):
         self.assertIn("--import-run", commands["case-db"].format_help())
         self.assertIn("--import-vsc-compare", commands["case-db"].format_help())
         self.assertIn("--import-worker-jsonl", commands["case-db"].format_help())
+        self.assertIn("--search-index-health", commands["case-db"].format_help())
+        self.assertIn("--rebuild-search-indexes", commands["case-db"].format_help())
         self.assertIn("case-search", commands)
         self.assertIn("--case-id", commands["case-search"].format_help())
         self.assertIn("--source", commands["case-search"].format_help())
@@ -368,6 +370,161 @@ class RapidTriageCaseDatabaseTests(unittest.TestCase):
             self.assertGreaterEqual(counts["event"], 1)
             self.assertGreaterEqual(counts["audit_event"], 1)
             self.assertGreaterEqual(fts_count, 1)
+
+    def test_case_db_rebuilds_missing_search_indexes(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            db_path = Path(tmp_dir) / "case.db"
+            database = open_case_database(db_path)
+            database.create_case(case_id="CASE-INDEX-REBUILD")
+
+            with database.connect() as connection:
+                file_id = connection.execute(
+                    """
+                    INSERT INTO file_record (
+                        citation_id, case_id, path, normalized_path, extension,
+                        mime_type, size_bytes, modified_at, hash_sha256
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        "FILE-INDEX-1",
+                        "CASE-INDEX-REBUILD",
+                        "/evidence/needle-report.txt",
+                        "/evidence/needle-report.txt",
+                        ".txt",
+                        "text/plain",
+                        12,
+                        "2026-01-01T00:00:00+00:00",
+                        "needlehash",
+                    ),
+                ).lastrowid
+                artifact_id = connection.execute(
+                    """
+                    INSERT INTO artifact (
+                        citation_id, case_id, artifact_type, parser_name, title,
+                        summary, data_json, confidence, created_at
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        "ART-INDEX-1",
+                        "CASE-INDEX-REBUILD",
+                        "browser-history",
+                        "fixture",
+                        "Needle artifact",
+                        "artifact summary",
+                        json.dumps({"url": "https://example.test/needle"}, sort_keys=True),
+                        0.9,
+                        "2026-01-01T00:00:00+00:00",
+                    ),
+                ).lastrowid
+                event_id = connection.execute(
+                    """
+                    INSERT INTO event (
+                        citation_id, case_id, event_type, timestamp, target,
+                        description, source
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        "EVT-INDEX-1",
+                        "CASE-INDEX-REBUILD",
+                        "file-observed",
+                        "2026-01-01T00:00:00+00:00",
+                        "/evidence/needle-report.txt",
+                        "needle event",
+                        "fixture",
+                    ),
+                ).lastrowid
+                connection.execute("DELETE FROM file_record_fts WHERE rowid = ?", (file_id,))
+                connection.execute("DELETE FROM artifact_fts WHERE rowid = ?", (artifact_id,))
+                connection.execute("DELETE FROM event_fts WHERE rowid = ?", (event_id,))
+
+            unhealthy = database.search_index_health("CASE-INDEX-REBUILD")
+            self.assertEqual(unhealthy["status"], "needs-rebuild")
+            self.assertEqual(unhealthy["summary"]["missing_index_rows"], 3)
+
+            rebuilt = database.rebuild_search_indexes("CASE-INDEX-REBUILD")
+            self.assertEqual(rebuilt["status"], "rebuilt")
+            self.assertEqual(rebuilt["after"]["status"], "healthy")
+            self.assertEqual(rebuilt["after"]["summary"]["missing_index_rows"], 0)
+            self.assertEqual(
+                {action["source"]: action["status"] for action in rebuilt["actions"]},
+                {
+                    "documents": "rebuilt",
+                    "files": "rebuilt",
+                    "artifacts": "rebuilt",
+                    "timeline": "rebuilt",
+                },
+            )
+
+            for source in ("files", "artifacts", "timeline"):
+                with self.subTest(source=source):
+                    payload = database.search_case(
+                        case_id="CASE-INDEX-REBUILD",
+                        keywords=["needle"],
+                        sources=[source],
+                        limit=5,
+                    )
+                    self.assertEqual(payload["summary"]["match_count"], 1)
+                    self.assertEqual(
+                        payload["large_case_search_plan"]["sources"][1 if source == "files" else 2 if source == "artifacts" else 3]["backend"],
+                        "sqlite-fts5",
+                    )
+
+    def test_cli_case_db_reports_and_rebuilds_search_index_health(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            db_path = Path(tmp_dir) / "case.db"
+            database = open_case_database(db_path)
+            database.create_case(case_id="CASE-CLI-INDEX")
+
+            with database.connect() as connection:
+                file_id = connection.execute(
+                    """
+                    INSERT INTO file_record (citation_id, case_id, path, normalized_path, extension, created_at)
+                    VALUES (?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        "FILE-CLI-1",
+                        "CASE-CLI-INDEX",
+                        "/tmp/cli-needle.txt",
+                        "/tmp/cli-needle.txt",
+                        ".txt",
+                        "2026-01-01T00:00:00+00:00",
+                    ),
+                ).lastrowid
+                connection.execute("DELETE FROM file_record_fts WHERE rowid = ?", (file_id,))
+
+            with contextlib.redirect_stdout(io.StringIO()) as output:
+                exit_code = main(
+                    [
+                        "case-db",
+                        str(db_path),
+                        "--case-id",
+                        "CASE-CLI-INDEX",
+                        "--search-index-health",
+                        "--json",
+                    ]
+                )
+            self.assertEqual(exit_code, 0)
+            payload = json.loads(output.getvalue())
+            self.assertEqual(payload["search_index_health"]["status"], "needs-rebuild")
+
+            with contextlib.redirect_stdout(io.StringIO()) as output:
+                exit_code = main(
+                    [
+                        "case-db",
+                        str(db_path),
+                        "--case-id",
+                        "CASE-CLI-INDEX",
+                        "--rebuild-search-indexes",
+                        "--json",
+                    ]
+                )
+            self.assertEqual(exit_code, 0)
+            payload = json.loads(output.getvalue())
+            self.assertEqual(payload["rebuilt_search_indexes"]["status"], "rebuilt")
+            self.assertEqual(payload["search_index_health"]["status"], "healthy")
 
     def test_import_run_output_audits_document_extraction_failures(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
