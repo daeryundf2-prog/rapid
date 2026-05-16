@@ -102,7 +102,12 @@ from rapidtriage.artifacts.windows.shellbags import (
 )
 from rapidtriage.artifacts.windows.system import build_system_trusted_diff, system_core_accuracy_gates
 from rapidtriage.cli import main
-from tests.windows_artifact_fixtures import build_minimal_registry_hive, build_minimal_shellbags_registry_hive
+from tests.windows_artifact_fixtures import (
+    build_minimal_registry_hive,
+    build_minimal_shellbags_registry_hive,
+    build_minimal_usn_journal,
+    build_minimal_usn_journal_v3,
+)
 
 FIXTURE_ROOT = Path(__file__).resolve().parent / "fixtures" / "rapidtriage" / "windows_artifacts"
 
@@ -471,6 +476,38 @@ class RapidTriageWindowsArtifactsCollectorTests(unittest.TestCase):
         self.assertEqual(scan["first_record_offset"], 2)
         self.assertEqual(scan["records"][0]["major_version"], 4)
         self.assertFalse(scan["next_cursor_available"])
+
+    def test_usn_scan_cursor_window_can_resume_without_overlap(self) -> None:
+        timestamp = datetime(2026, 1, 2, 3, 4, 5, tzinfo=timezone.utc)
+        first = build_minimal_usn_journal("alpha.txt", timestamp, 0x00000100 | 0x80000000)
+        second = build_minimal_usn_journal_v3("beta.txt", timestamp, 0x00002000 | 0x80000000)
+        blob = b"\x00\x00" + first + second + b"tail"
+
+        first_window = parse_usn_record_scan(blob, record_limit=1)
+        resume_offset = first_window["resume_start_offset"]
+        second_window = parse_usn_record_scan(blob, start_offset=int(resume_offset), record_limit=1)
+        full_scan = parse_usn_record_scan(blob)
+        combined = first_window["records"] + second_window["records"]
+
+        self.assertEqual(first_window["first_record_offset"], 2)
+        self.assertTrue(first_window["record_limit_reached"])
+        self.assertEqual(resume_offset, full_scan["records"][0]["next_record_cursor"])
+        self.assertEqual(second_window["scan_start_offset"], resume_offset)
+        self.assertFalse(second_window["record_limit_reached"])
+        self.assertEqual(
+            [item["record_cursor"] for item in combined],
+            [item["record_cursor"] for item in full_scan["records"]],
+        )
+        self.assertEqual(
+            [item["file_name"] for item in combined],
+            ["alpha.txt", "beta.txt"],
+        )
+        profile = first_window["cursor_window_profile"]
+        self.assertEqual(profile["profile_version"], "usn-scan-cursor-window-v1")
+        self.assertEqual(profile["resume_token"], f"usn-offset:{resume_offset}")
+        self.assertTrue(profile["cursor_resume_safe"])
+        self.assertEqual(profile["window_boundary_reason"], "record-limit")
+        self.assertEqual(len(profile["window_hash"]), 64)
 
     def test_ntfs_native_records_emit_report_citation_manifests(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:

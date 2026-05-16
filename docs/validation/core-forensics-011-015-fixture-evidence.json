@@ -51,7 +51,7 @@
       "title": "$UsnJrnl large-scale timeline parser",
       "assertions": [
         "usn-record rows preserve record-size bounds, cursor progression, v2/v3 identity decoding, reason flags, rename/delete hints, timestamps, source hashes, #13 core_accuracy_gates, and ntfs_analyst_review_profile.",
-        "usn-journal-file inventory rows preserve scan metadata, next-cursor state, record-version counts, large-record counts, and timestamp ranges.",
+        "usn-journal-file inventory rows preserve scan metadata, next-cursor state, resume_start_offset, cursor-window profile hashes, record-version counts, large-record counts, and timestamp ranges.",
         "trusted USN parser timeline diff helpers compare USN, FRN, parent FRN, filename/path, reason flags, and timestamp fields against MFTECmd/UsnJrnl2Csv-style rows.",
         "$UsnJrnl reportability decisions block full timeline replay claims until FRN path-cache and large-journal validation are attached."
       ],

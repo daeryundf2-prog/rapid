@@ -57,6 +57,6 @@ These helpers are validation gates, not a shortcut to a commercial claim. They n
 
 - #11: full native ESE catalog/table/row decoding, authoritative row timestamps/properties, deleted/index-state validation.
 - #12: attribute-list extension resolution, full nonresident runlist decoding, full-volume parent path reconstruction.
-- #13: full FRN path-cache replay, large journal pagination validation, timeline replay/correlation.
+- #13: full FRN path-cache replay, million-record cursor resume validation, timeline replay/correlation.
 - #14: OS-version-specific DestList field semantics, deleted-entry recovery, AppID mapping database.
 - #15: binary shell-item payload decoding, transaction log replay, deleted/slack ShellBag validation.

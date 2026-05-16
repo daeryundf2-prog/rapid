@@ -12,7 +12,7 @@ from ...core.forensic_accuracy import build_accuracy_gate
 from ...core.models import ArtifactRecord
 from .common import build_forensic_review
 
-PARSER_VERSION = "windows-filesystem-v8"
+PARSER_VERSION = "windows-filesystem-v9"
 SUPPORTED_SUFFIXES = {".csv", ".json", ".jsonl", ".ndjson"}
 MFT_HINTS = ("mft", "mftexcmd", "$mft")
 USN_HINTS = ("usn", "usnjrnl", "$j")
@@ -1091,10 +1091,14 @@ def build_usn_journal_inventory_record(
             "record_limit": USN_RECORD_SCAN_LIMIT,
             "record_limit_reached": scan_metadata["record_limit_reached"],
             "next_cursor_offset": scan_metadata["next_cursor_offset"],
+            "resume_start_offset": scan_metadata["resume_start_offset"],
             "next_cursor_available": scan_metadata["next_cursor_available"],
+            "cursor_window_profile": scan_metadata["cursor_window_profile"],
             "skipped_bytes_before_records": scan_metadata["skipped_bytes_before_records"],
             "skipped_bytes_during_scan": scan_metadata["skipped_bytes_during_scan"],
+            "partial_record_at_scan_end": scan_metadata["partial_record_at_scan_end"],
             "trailing_unparsed_bytes": scan_metadata["trailing_unparsed_bytes"],
+            "trailing_unparsed_window_bytes": scan_metadata["trailing_unparsed_window_bytes"],
             "native_record_count": len(records),
             "record_validation_counts": count_values(record.get("validation_status") for record in records),
             "record_version_counts": count_values(str(record.get("major_version") or "") for record in records),
@@ -2373,6 +2377,56 @@ def usn_cursor_pagination_profile(record: Mapping[str, object]) -> dict[str, obj
     }
 
 
+def usn_scan_cursor_window_profile(scan_metadata: Mapping[str, object]) -> dict[str, object]:
+    start_offset = int(scan_metadata.get("scan_start_offset") or 0)
+    stop_offset = int(scan_metadata.get("scan_stop_offset") or scan_metadata.get("scan_end_offset") or 0)
+    resume_start = scan_metadata.get("resume_start_offset")
+    record_limit = int(scan_metadata.get("record_limit") or 0)
+    first_offset = scan_metadata.get("first_record_offset")
+    last_offset = scan_metadata.get("last_record_offset")
+    profile = {
+        "profile_version": "usn-scan-cursor-window-v1",
+        "scan_start_offset": start_offset,
+        "scan_stop_offset": stop_offset,
+        "scan_window_bytes": int(scan_metadata.get("scan_window_bytes") or max(stop_offset - start_offset, 0)),
+        "max_scan_bytes": scan_metadata.get("max_scan_bytes"),
+        "first_record_offset": first_offset,
+        "last_record_offset": last_offset,
+        "last_scanned_offset": int(scan_metadata.get("last_scanned_offset") or start_offset),
+        "next_cursor_offset": scan_metadata.get("next_cursor_offset"),
+        "resume_start_offset": resume_start,
+        "resume_token": f"usn-offset:{resume_start}" if resume_start not in (None, "") else "",
+        "next_cursor_available": bool(scan_metadata.get("next_cursor_available")),
+        "record_limit": record_limit,
+        "record_limit_reached": bool(scan_metadata.get("record_limit_reached")),
+        "partial_record_at_scan_end": bool(scan_metadata.get("partial_record_at_scan_end")),
+        "window_boundary_reason": (
+            "record-limit"
+            if scan_metadata.get("record_limit_reached")
+            else "partial-record-at-window-end"
+            if scan_metadata.get("partial_record_at_scan_end")
+            else "more-bytes-after-window"
+            if scan_metadata.get("next_cursor_available")
+            else "exhausted"
+        ),
+        "cursor_resume_safe": bool(scan_metadata.get("next_cursor_available")) and resume_start not in (None, ""),
+        "deterministic_resume_contract": {
+            "resume_with": "parse_usn_record_scan(blob, start_offset=resume_start_offset, record_limit=N)",
+            "ordering": "record_cursor order",
+            "overlap_expected": False,
+            "stable_key_fields": ["record_cursor", "next_record_cursor", "usn", "file_reference_number", "file_name"],
+        },
+        "commercial_grade_ready": False,
+        "blockers": [
+            "usn-million-record-cursor-resume-test-required",
+            "usn-real-journal-pagination-proof-required",
+            "usn-trusted-parser-window-diff-required",
+        ],
+    }
+    profile["window_hash"] = ntfs_stable_sha256(profile)
+    return profile
+
+
 def usn_replay_inventory_profile(
     records: Sequence[Mapping[str, object]],
     scan_metadata: Mapping[str, object],
@@ -2404,6 +2458,7 @@ def usn_replay_inventory_profile(
         rename_pair_preview=rename_pair_preview,
         delete_lifecycle_preview=delete_lifecycle_preview,
     )
+    cursor_window_profile = usn_scan_cursor_window_profile(scan_metadata)
     return {
         "profile_version": "usn-replay-inventory-v1",
         "native_record_count": len(records),
@@ -2417,9 +2472,13 @@ def usn_replay_inventory_profile(
             "first_record_offset": scan_metadata.get("first_record_offset"),
             "last_record_offset": scan_metadata.get("last_record_offset"),
             "next_cursor_offset": scan_metadata.get("next_cursor_offset"),
+            "resume_start_offset": scan_metadata.get("resume_start_offset"),
+            "cursor_window_hash": cursor_window_profile["window_hash"],
             "next_cursor_available": bool(scan_metadata.get("next_cursor_available")),
             "record_limit_reached": bool(scan_metadata.get("record_limit_reached")),
+            "partial_record_at_scan_end": bool(scan_metadata.get("partial_record_at_scan_end")),
         },
+        "cursor_window_profile": cursor_window_profile,
         "bounded_mft_replay_preview": bounded_replay_preview,
         "mft_bounded_path_cache_profile": path_cache_profile,
         "usn_path_reliability_profile": path_reliability_profile,
@@ -4012,6 +4071,7 @@ def usn_journal_replay_profile(artifact_scope: str, details: Mapping[str, object
                 "native USN v2/v3 record scan and v4 extent preview",
                 "reason/source/file-attribute flag decoding",
                 "record cursor pagination and next-cursor metadata",
+                "windowed scan resume token and cursor-window hash metadata",
                 "bounded MFT path correlation and rename/delete transition previews",
                 "trusted UsnJrnl2Csv/MFTECmd-style row and state-replay diff helpers",
             ],
@@ -4019,6 +4079,7 @@ def usn_journal_replay_profile(artifact_scope: str, details: Mapping[str, object
             "validated_by_current_tests": [
                 "native USN fixture decode with cursor metadata",
                 "v4 extent record preservation",
+                "windowed cursor resume parity over synthetic USN records",
                 "bounded state replay preview",
                 "trusted USN diff pass and reason mismatch blocking",
             ],
@@ -4041,6 +4102,11 @@ def usn_journal_replay_profile(artifact_scope: str, details: Mapping[str, object
             "bounded_mft_path_correlation": bool(bounded_path.get("path_candidate")),
             "rename_delete_hints": bool(details.get("rename_hint") or details.get("deleted_hint") or details.get("reason_flag_counts")),
             "cursor_pagination": bool(details.get("record_cursor") not in (None, "") or validation_checks.get("cursor_progress_validated")),
+            "cursor_window_resume": bool(
+                (inventory_profile.get("cursor_window_profile") or {}).get("resume_token")
+            )
+            if isinstance(inventory_profile.get("cursor_window_profile"), Mapping)
+            else bool(scan_metadata.get("resume_start_offset")),
             "full_frn_path_cache_replay": bool(NTFS_FILESYSTEM_CAPABILITIES["usn_full_journal_replay"]),
         },
         "transition_profile": transition_profile,
@@ -4067,7 +4133,16 @@ def usn_journal_replay_profile(artifact_scope: str, details: Mapping[str, object
             "bounded_native_scan": str(details.get("source_format") or "") == "ntfs-usn-journal",
             "scan_limit_bytes": NATIVE_SCAN_LIMIT,
             "record_limit": USN_RECORD_SCAN_LIMIT,
+            "scan_start_offset": scan_metadata.get("scan_start_offset", 0),
+            "scan_stop_offset": scan_metadata.get("scan_stop_offset", scan_metadata.get("scan_end_offset", "")),
+            "resume_start_offset": scan_metadata.get("resume_start_offset"),
+            "cursor_window_hash": (
+                (inventory_profile.get("cursor_window_profile") or {}).get("window_hash")
+                if isinstance(inventory_profile.get("cursor_window_profile"), Mapping)
+                else ""
+            ),
             "record_limit_reached": bool(details.get("record_limit_reached", scan_metadata.get("record_limit_reached", False))),
+            "partial_record_at_scan_end": bool(scan_metadata.get("partial_record_at_scan_end")),
             "safe_for_case_db_indexing": True,
         },
         "report_grade_ready": bool(report_grade.get("report_grade_ready")),
@@ -5449,38 +5524,61 @@ def parse_usn_records(blob: bytes) -> list[dict[str, object]]:
     return list(parse_usn_record_scan(blob)["records"])
 
 
-def parse_usn_record_scan(blob: bytes, *, record_limit: int = USN_RECORD_SCAN_LIMIT) -> dict[str, object]:
+def parse_usn_record_scan(
+    blob: bytes,
+    *,
+    record_limit: int = USN_RECORD_SCAN_LIMIT,
+    start_offset: int = 0,
+    max_scan_bytes: int | None = None,
+) -> dict[str, object]:
     records: list[dict[str, object]] = []
-    offset = 0
+    scan_start_offset = min(max(int(start_offset), 0), len(blob))
+    scan_stop_offset = len(blob)
+    if max_scan_bytes is not None:
+        scan_stop_offset = min(len(blob), scan_start_offset + max(int(max_scan_bytes), 0))
+    offset = scan_start_offset
     skipped_bytes = 0
-    while offset + 60 <= len(blob):
+    partial_record_at_scan_end = False
+    while offset + 60 <= scan_stop_offset:
         record = parse_usn_record_at(blob, offset)
         if record is None:
             skipped_bytes += 1
             offset += 1
             continue
+        if int(record["next_record_cursor"]) > scan_stop_offset:
+            partial_record_at_scan_end = True
+            break
         records.append(record)
         offset = int(record["next_record_cursor"])
         if len(records) >= record_limit:
             break
     timestamps = sorted(str(record.get("timestamp")) for record in records if record.get("timestamp"))
-    next_cursor_available = offset < len(blob) and bool(records)
+    resumable_record_candidate_available = partial_record_at_scan_end or offset + 60 <= len(blob)
+    next_cursor_available = bool(records) and resumable_record_candidate_available
     large_record_count = sum(1 for record in records if record.get("record_size_class") == "large")
     first_record_offset = int(records[0]["record_offset"]) if records else None
-    return {
+    scan_metadata = {
         "records": records,
-        "scan_start_offset": 0,
+        "scan_start_offset": scan_start_offset,
         "scan_end_offset": len(blob),
+        "scan_stop_offset": scan_stop_offset,
+        "scan_window_bytes": max(scan_stop_offset - scan_start_offset, 0),
+        "max_scan_bytes": max_scan_bytes,
         "last_scanned_offset": offset,
         "first_record_offset": first_record_offset,
         "last_record_offset": records[-1]["record_offset"] if records else None,
         "next_cursor_offset": offset if next_cursor_available else None,
+        "resume_start_offset": offset if next_cursor_available else None,
         "next_cursor_available": next_cursor_available,
         "record_limit": record_limit,
-        "record_limit_reached": len(records) >= record_limit and offset < len(blob),
-        "skipped_bytes_before_records": first_record_offset if first_record_offset is not None else skipped_bytes,
+        "record_limit_reached": len(records) >= record_limit and resumable_record_candidate_available,
+        "partial_record_at_scan_end": partial_record_at_scan_end,
+        "skipped_bytes_before_records": (first_record_offset - scan_start_offset)
+        if first_record_offset is not None
+        else skipped_bytes,
         "skipped_bytes_during_scan": skipped_bytes,
         "trailing_unparsed_bytes": max(len(blob) - offset, 0),
+        "trailing_unparsed_window_bytes": max(scan_stop_offset - offset, 0),
         "large_record_count": large_record_count,
         "largest_record_length": max((int(record.get("record_length", 0)) for record in records), default=0),
         "timestamp_range": {
@@ -5488,6 +5586,8 @@ def parse_usn_record_scan(blob: bytes, *, record_limit: int = USN_RECORD_SCAN_LI
             "latest": timestamps[-1] if timestamps else "",
         },
     }
+    scan_metadata["cursor_window_profile"] = usn_scan_cursor_window_profile(scan_metadata)
+    return scan_metadata
 
 
 def parse_usn_record_at(blob: bytes, offset: int) -> dict[str, object] | None:
