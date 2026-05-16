@@ -37,7 +37,13 @@ from .e01 import (
     missing_e01_tools,
     stable_manifest_sha256,
 )
-from .virtual_disk import VIRTUAL_DISK_REQUIRED_TOOLS, VIRTUAL_DISK_SUFFIXES, build_virtual_disk_chain_profile, missing_virtual_disk_tools
+from .virtual_disk import (
+    VIRTUAL_DISK_REQUIRED_TOOLS,
+    VIRTUAL_DISK_SUFFIXES,
+    build_virtual_disk_chain_profile,
+    build_virtual_disk_report_grade_validation_plan,
+    missing_virtual_disk_tools,
+)
 
 
 class EvidenceAdapter(Protocol):
@@ -88,6 +94,7 @@ class EvidenceAdapterResult:
     image_analyst_review_profile: dict[str, object] | None = None
     e01_intake_profile: dict[str, object] | None = None
     raw_split_validation_plan: dict[str, object] | None = None
+    virtual_disk_validation_plan: dict[str, object] | None = None
     recovery_unlock_profile: dict[str, object] | None = None
 
     def to_dict(self) -> dict[str, object]:
@@ -968,6 +975,12 @@ class VirtualDiskAdapter:
                 },
             ),
             virtual_disk_chain_profile=chain_profile,
+            virtual_disk_validation_plan=build_virtual_disk_report_grade_validation_plan(
+                source,
+                source_integrity=source_integrity,
+                tool_preflight=tool_preflight or [],
+                virtual_disk_chain_profile=chain_profile or {},
+            ),
             image_analyst_review_profile=image_workflow_analyst_review_profile(
                 24,
                 {

@@ -82,7 +82,7 @@
       ],
       "expected": {
         "required_assertions": [
-          "Virtual disk adapter and extraction metadata preserve qemu-img evidence, converted raw hash/provenance, nested extraction, VM limitations, and #24 core_accuracy_gates",
+          "Virtual disk adapter and extraction metadata preserve qemu-img evidence, converted raw hash/provenance, nested extraction, VM limitations, virtual-disk-report-grade-validation-plan-v1, and #24 core_accuracy_gates",
           "Virtual disk trusted conversion diff helper requires converted raw/provenance equality before satisfying the #24 trusted virtual disk conversion diff pass gate",
           "Virtual disk reportability decisions block chain-complete VM claims until snapshot/differencing/hypervisor validation exists"
         ]

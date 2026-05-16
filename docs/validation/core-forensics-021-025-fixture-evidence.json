@@ -64,7 +64,7 @@
       "number": 24,
       "title": "VHD/VHDX/VMDK/VDI/QCOW direct handling polish",
       "assertions": [
-        "Virtual disk adapter and extraction metadata preserve qemu-img preflight/commands, snapshot-chain limitation disclosure, converted raw hash/provenance, nested raw extraction metadata, unsupported/encrypted warnings, #24 core_accuracy_gates, image_analyst_review_profile, and chain-complete reportability blockers.",
+        "Virtual disk adapter and extraction metadata preserve qemu-img preflight/commands, snapshot-chain limitation disclosure, converted raw hash/provenance, nested raw extraction metadata, unsupported/encrypted warnings, virtual-disk-report-grade-validation-plan-v1, #24 core_accuracy_gates, image_analyst_review_profile, and chain-complete reportability blockers.",
         "build_image_workflow_trusted_diff compares virtual disk source, qemu-img converted raw hash, and downstream recovery rows before satisfying the #24 trusted diff gate."
       ],
       "blockers_kept": [

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import shlex
 import shutil
 import subprocess
 from dataclasses import dataclass, field
@@ -25,6 +26,7 @@ VIRTUAL_DISK_SUFFIXES = (".vhd", ".vhdx", ".vmdk", ".vdi", ".xva", ".qcow", ".qc
 QEMU_CONVERTIBLE_SUFFIXES = (".vhd", ".vhdx", ".vmdk", ".vdi", ".qcow", ".qcow2")
 VIRTUAL_DISK_REQUIRED_TOOLS = ("qemu-img", "mmls", "tsk_recover")
 VIRTUAL_DISK_WORKFLOW_MANIFEST_VERSION = "virtual-disk-integrated-workflow-manifest-v1"
+VIRTUAL_DISK_REPORT_GRADE_VALIDATION_PLAN_VERSION = "virtual-disk-report-grade-validation-plan-v1"
 VIRTUAL_DISK_NATIVE_CAPABILITIES = {
     "qemu_img_raw_conversion": True,
     "source_integrity_preflight": True,
@@ -42,6 +44,8 @@ VIRTUAL_DISK_REPORT_GRADE_BLOCKERS = [
     "differencing-disk-resolution-not-implemented",
     "hypervisor-metadata-decoding-not-implemented",
     "xva-direct-extraction-not-implemented",
+    "encrypted-compressed-corrupt-vm-disk-validation-required",
+    "qemu-img-version-matrix-required",
     "large-virtual-disk-known-answer-corpus-required",
 ]
 CommandRunner = Callable[[Sequence[str]], subprocess.CompletedProcess[str]]
@@ -103,6 +107,21 @@ class VirtualDiskExtractionResult:
                 qemu_img_info_profile=self.qemu_img_info_profile,
                 run_outputs=None,
                 status_context="extraction-result",
+            ),
+            "report_grade_validation_plan": build_virtual_disk_report_grade_validation_plan(
+                self.source_path,
+                converted_raw_path=self.converted_raw_path,
+                output_dir=self.stage_dir / "report-grade-validation",
+                expected_partition_start_sector=self.raw_result.partition_start_sector,
+                source_integrity=self.source_integrity,
+                converted_raw_integrity=self.converted_raw_integrity,
+                tool_preflight=self.tool_preflight,
+                qemu_img_info_profile=self.qemu_img_info_profile,
+                virtual_disk_chain_profile=self.virtual_disk_chain_profile,
+                command_history=[*list(self.command_history), *list(self.raw_result.command_history)],
+                partition_table=self.raw_result.partition_table,
+                recovered_root_manifest=self.raw_result.recovered_root_manifest,
+                recovery_mode=self.raw_result.recovery_mode,
             ),
             "commercial_grade_ready": self.commercial_grade_ready,
             "commercial_gap_ids": ["#24"],
@@ -372,6 +391,323 @@ def build_virtual_disk_integrated_workflow_manifest(
     }
     payload["manifest_sha256"] = stable_manifest_sha256(payload)
     return payload
+
+
+def build_virtual_disk_report_grade_validation_plan(
+    source_path: Path,
+    *,
+    converted_raw_path: Path | str | None = None,
+    output_dir: Path | str | None = None,
+    expected_partition_start_sector: int | None = None,
+    expected_files: Sequence[str] | None = None,
+    source_integrity: dict[str, object] | None = None,
+    converted_raw_integrity: dict[str, object] | None = None,
+    tool_preflight: Sequence[dict[str, object]] | None = None,
+    qemu_img_info_profile: dict[str, object] | None = None,
+    virtual_disk_chain_profile: dict[str, object] | None = None,
+    command_history: Sequence[dict[str, object]] | None = None,
+    partition_table: Sequence[dict[str, object]] | None = None,
+    recovered_root_manifest: dict[str, object] | None = None,
+    recovery_mode: str | None = None,
+) -> dict[str, object]:
+    """Create the #24 report-grade validation handoff for qemu-convertible VM disks."""
+
+    source = source_path.expanduser().resolve()
+    output_root = Path(output_dir).expanduser().resolve() if output_dir else Path("rapidforensic-virtual-disk-validation")
+    converted_raw = (
+        Path(converted_raw_path).expanduser().resolve()
+        if converted_raw_path
+        else output_root / "converted" / f"{source.stem}.raw"
+    )
+    source_row = dict(source_integrity or {})
+    if not source_row and source.is_file():
+        source_row = describe_source_integrity(source)
+    converted_row = dict(converted_raw_integrity or {})
+    if not converted_row and converted_raw.is_file():
+        converted_row = describe_source_integrity(converted_raw)
+    tool_rows = [dict(row) for row in tool_preflight or []]
+    info_profile = dict(qemu_img_info_profile or {})
+    chain_profile = dict(virtual_disk_chain_profile or build_virtual_disk_chain_profile(source))
+    command_rows = [dict(row) for row in command_history or []]
+    partition_rows = [dict(row) for row in partition_table or []]
+    recovered_manifest = dict(recovered_root_manifest or {})
+    expected_file_rows = [
+        {
+            "id": f"expected-file-{index + 1:03d}",
+            "description": str(item),
+            "status": "pending-trusted-comparison",
+        }
+        for index, item in enumerate(expected_files or [])
+        if str(item).strip()
+    ]
+    fsstat_argv = ["fsstat"]
+    if expected_partition_start_sector is not None:
+        fsstat_argv.extend(["-o", str(expected_partition_start_sector)])
+    fsstat_argv.append(str(converted_raw))
+    tsk_recover_argv = ["tsk_recover", "-e", "-a"]
+    if expected_partition_start_sector is not None:
+        tsk_recover_argv.extend(["-o", str(expected_partition_start_sector)])
+    tsk_recover_argv.extend([str(converted_raw), str(output_root / "filesystem")])
+    validation_commands = [
+        _virtual_disk_validation_command(
+            "source-disk-hash",
+            ["rapidtriage", "e01-hash", str(source), "--output-dir", str(output_root / "source-hash"), "--json"],
+            purpose="Compute and preserve the original virtual disk source hash.",
+            expected_output=str(output_root / "source-hash" / "e01-streaming-hash.json"),
+        ),
+        _virtual_disk_validation_command(
+            "evidence-preflight",
+            ["rapidtriage", "evidence", str(source), "--output", str(output_root / "rapidtriage-evidence-preflight.json"), "--json"],
+            purpose="Record adapter readiness, chain-risk warnings, dependency versions, and unlock/recovery guidance.",
+            expected_output=str(output_root / "rapidtriage-evidence-preflight.json"),
+        ),
+        _virtual_disk_validation_command(
+            "qemu-img-info-json",
+            ["qemu-img", "info", "--output=json", str(source)],
+            purpose="Preserve qemu-img format, size, backing-file, compression/encryption, and chain metadata.",
+            expected_output=str(output_root / "qemu-img-info.json"),
+            trusted_tool=True,
+        ),
+        _virtual_disk_validation_command(
+            "qemu-img-raw-conversion",
+            ["qemu-img", "convert", "-O", "raw", str(source), str(converted_raw)],
+            purpose="Create a read-only derived RAW working copy while preserving original virtual disk evidence.",
+            expected_output=str(converted_raw),
+            trusted_tool=True,
+        ),
+        _virtual_disk_validation_command(
+            "converted-raw-hash",
+            ["rapidtriage", "e01-hash", str(converted_raw), "--output-dir", str(output_root / "converted-raw-hash"), "--json"],
+            purpose="Hash the derived RAW before nested partition/filesystem recovery.",
+            expected_output=str(output_root / "converted-raw-hash" / "e01-streaming-hash.json"),
+            status="pending-conversion" if not converted_row.get("sha256") else "pending-run",
+        ),
+        _virtual_disk_validation_command(
+            "trusted-partition-enumeration",
+            ["mmls", str(converted_raw)],
+            purpose="Preserve Sleuth Kit partition transcript from the converted RAW.",
+            expected_output=str(output_root / "mmls-converted-raw.txt"),
+            trusted_tool=True,
+            status="pending-conversion" if not converted_row.get("sha256") else "pending-run",
+        ),
+        _virtual_disk_validation_command(
+            "trusted-filesystem-stats",
+            fsstat_argv,
+            purpose="Preserve filesystem metadata transcript for the selected converted-RAW partition.",
+            expected_output=str(output_root / "fsstat-selected-filesystem.txt"),
+            trusted_tool=True,
+            status="pending-partition-selection" if expected_partition_start_sector is None else "pending-run",
+        ),
+        _virtual_disk_validation_command(
+            "read-only-recovery",
+            tsk_recover_argv,
+            purpose="Recover supported filesystem content from the converted RAW with deleted-file expectations preserved.",
+            expected_output=str(output_root / "filesystem"),
+            trusted_tool=True,
+            status="pending-conversion" if not converted_row.get("sha256") else "pending-run",
+        ),
+        _virtual_disk_validation_command(
+            "trusted-workflow-diff",
+            [
+                "rapidtriage",
+                "image-workflow-validate",
+                "--item-number",
+                "24",
+                "--rapid-output",
+                str(output_root / "rapidtriage-virtual-disk.json"),
+                "--trusted-output",
+                str(output_root / "trusted-virtual-disk-workflow.csv"),
+                "--trusted-tool",
+                "qemu-img",
+                "--output",
+                str(output_root / "virtual-disk-trusted-diff.json"),
+                "--json",
+            ],
+            purpose="Compare source hash, qemu conversion provenance, selected partition, and recovered file hashes against trusted rows.",
+            expected_output=str(output_root / "virtual-disk-trusted-diff.json"),
+            trusted_tool=True,
+        ),
+    ]
+    source_hash_complete = bool(source_row.get("sha256"))
+    info_complete = bool(info_profile) and info_profile.get("command_status") in {"ok", None}
+    chain_warnings = list(chain_profile.get("warnings") or [])
+    chain_review_required = bool(
+        chain_warnings
+        or chain_profile.get("suspected_snapshot_or_differencing_member")
+        or info_profile.get("backing_filename_present")
+    )
+    conversion_command_seen = any(row.get("purpose") == "qemu-img-raw-conversion" for row in command_rows)
+    converted_hash_complete = bool(converted_row.get("sha256"))
+    partition_ready = bool(partition_rows and expected_partition_start_sector is not None)
+    recovered_count = int(
+        recovered_manifest.get("visited_file_count")
+        or recovered_manifest.get("hashed_file_count")
+        or recovered_manifest.get("file_count")
+        or 0
+    )
+    recovery_command_seen = any(row.get("purpose") == "read-only-filesystem-recovery" for row in command_rows)
+    evidence_slots = [
+        {
+            "id": "source-disk-integrity",
+            "label": "Original virtual disk source hash",
+            "status": "complete" if source_hash_complete else "pending-source-hash",
+            "required_before_report": True,
+            "sha256": source_row.get("sha256"),
+        },
+        {
+            "id": "qemu-info-and-format-profile",
+            "label": "qemu-img info and virtual format metadata",
+            "status": "complete" if info_complete else "pending-qemu-img-info",
+            "required_before_report": True,
+            "format": info_profile.get("format") or chain_profile.get("detected_format"),
+            "virtual_size": info_profile.get("virtual_size"),
+            "backing_filename_present": info_profile.get("backing_filename_present"),
+        },
+        {
+            "id": "snapshot-differencing-chain-review",
+            "label": "Snapshot/differencing/backing-chain review",
+            "status": "review-required" if chain_review_required else "complete",
+            "required_before_report": True,
+            "warnings": chain_warnings,
+            "suspected_snapshot_or_differencing_member": chain_profile.get("suspected_snapshot_or_differencing_member"),
+            "backing_filename": info_profile.get("backing_filename"),
+        },
+        {
+            "id": "raw-conversion-provenance",
+            "label": "qemu-img raw conversion command provenance",
+            "status": "complete" if conversion_command_seen else "pending-qemu-img-convert",
+            "required_before_report": True,
+            "converted_raw_path": str(converted_raw),
+        },
+        {
+            "id": "converted-raw-integrity",
+            "label": "Converted RAW hash evidence",
+            "status": "complete" if converted_hash_complete else "pending-converted-raw-hash",
+            "required_before_report": True,
+            "sha256": converted_row.get("sha256"),
+        },
+        {
+            "id": "nested-partition-and-fsstat",
+            "label": "Converted RAW partition selection plus fsstat",
+            "status": "complete" if partition_ready else "pending-mmls-fsstat",
+            "required_before_report": True,
+            "selected_start_sector": expected_partition_start_sector,
+            "partition_row_count": len(partition_rows),
+        },
+        {
+            "id": "nested-read-only-recovery",
+            "label": "tsk_recover command and recovered-root manifest",
+            "status": "complete" if recovery_command_seen and recovered_count else "pending-read-only-recovery",
+            "required_before_report": True,
+            "recovered_file_count": recovered_count,
+        },
+        {
+            "id": "trusted-conversion-recovery-diff",
+            "label": "Trusted qemu/Sleuth Kit conversion and recovery diff",
+            "status": "pending-image-workflow-validate",
+            "required_before_report": True,
+            "required_fields": [
+                "source_sha256",
+                "converted_raw_sha256",
+                "virtual_disk_format",
+                "chain_status",
+                "selected_start_sector",
+                "recovered_file_count",
+                "recovered_file_sha256",
+            ],
+        },
+        {
+            "id": "snapshot-differencing-chain-corpus",
+            "label": "Snapshot/differencing chain known-answer corpus",
+            "status": "external-corpus-required",
+            "required_before_commercial_grade": True,
+            "minimum_cases": ["single-base-disk", "vmdk-delta-chain", "vhdx-avhdx-chain", "qcow2-backing-file"],
+        },
+        {
+            "id": "hypervisor-metadata-preservation",
+            "label": "Hypervisor/export metadata preservation",
+            "status": "external-export-log-required",
+            "required_before_commercial_grade": True,
+            "accepted_evidence": ["VMX/VBOX/libvirt metadata", "qemu-img info output", "hypervisor export log", "acquisition notes"],
+        },
+        {
+            "id": "encrypted-compressed-corrupt-vm-corpus",
+            "label": "Encrypted/compressed/corrupt VM disk corpus",
+            "status": "external-corpus-required",
+            "required_before_commercial_grade": True,
+            "minimum_cases": ["encrypted-vmdk", "compressed-qcow2", "corrupt-header", "missing-backing-file"],
+        },
+    ]
+    ready_slots = [slot["id"] for slot in evidence_slots if str(slot.get("status", "")).startswith("complete")]
+    blocker_slots = [
+        slot["id"]
+        for slot in evidence_slots
+        if slot.get("required_before_report") and not str(slot.get("status", "")).startswith("complete")
+    ]
+    payload: dict[str, object] = {
+        "profile_version": VIRTUAL_DISK_REPORT_GRADE_VALIDATION_PLAN_VERSION,
+        "item_number": 24,
+        "gap_id": "#24",
+        "source_path": str(source),
+        "output_root": str(output_root),
+        "converted_raw_path": str(converted_raw),
+        "status": "report-validation-blocked" if blocker_slots else "ready-for-report-review",
+        "commercial_grade_ready": False,
+        "recovery_mode": recovery_mode or ("partition-offset" if expected_partition_start_sector is not None else "unknown"),
+        "expected_partition_start_sector": expected_partition_start_sector,
+        "expected_files": expected_file_rows,
+        "source_integrity": source_row,
+        "converted_raw_integrity": converted_row,
+        "tool_preflight": tool_rows,
+        "qemu_img_info_profile": info_profile,
+        "virtual_disk_chain_profile": chain_profile,
+        "command_history": command_rows,
+        "partition_table": partition_rows,
+        "recovered_root_manifest": recovered_manifest,
+        "validation_commands": validation_commands,
+        "evidence_slots": evidence_slots,
+        "ready_slot_ids": ready_slots,
+        "blocking_slot_ids": blocker_slots,
+        "chain_review_policy": {
+            "single_base_disk": "qemu-img info must show no backing file and acquisition notes must not indicate snapshots.",
+            "snapshot_or_differencing": "preserve all parent/backing files and hypervisor metadata before converting.",
+            "manual_override": "allowed only when analyst records missing-parent limitation and trusted tool output.",
+        },
+        "report_claim_boundary": (
+            "This plan can make one qemu-converted VM disk workflow reviewable when report-required slots pass; "
+            "commercial-grade VM claims still require snapshot/differencing, hypervisor metadata, encrypted/compressed/corrupt, and large-corpus validation."
+        ),
+        "commercial_grade_blockers": list(VIRTUAL_DISK_REPORT_GRADE_BLOCKERS),
+        "operator_next_steps": [
+            "Run source-disk-hash, evidence-preflight, and qemu-img-info-json first.",
+            "Preserve qemu-img conversion transcript and converted RAW hash before nested recovery.",
+            "Preserve mmls/fsstat and tsk_recover transcripts from the converted RAW.",
+            "Run trusted-workflow-diff before citing recovered paths, hashes, timestamps, or chain completeness.",
+        ],
+    }
+    payload["manifest_sha256"] = stable_manifest_sha256(payload)
+    return payload
+
+
+def _virtual_disk_validation_command(
+    command_id: str,
+    argv: Sequence[str],
+    *,
+    purpose: str,
+    expected_output: str,
+    trusted_tool: bool = False,
+    status: str = "pending-run",
+) -> dict[str, object]:
+    clean_argv = [str(item) for item in argv if str(item) != ""]
+    return {
+        "id": command_id,
+        "argv": clean_argv,
+        "command": " ".join(shlex.quote(item) for item in clean_argv),
+        "purpose": purpose,
+        "expected_output": expected_output,
+        "status": status,
+        "trusted_tool_required": trusted_tool,
+    }
 
 
 def is_virtual_disk_path(path: Path) -> bool:

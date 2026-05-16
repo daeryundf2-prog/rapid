@@ -37,6 +37,7 @@ from rapidtriage.core.run import run_triage_mode
 from rapidtriage.core.virtual_disk import (
     VirtualDiskExtractionResult,
     build_virtual_disk_chain_profile,
+    build_virtual_disk_report_grade_validation_plan,
     extract_virtual_disk_to_directory,
 )
 from tests.test_rapidtriage_run import build_run_fixture
@@ -740,6 +741,69 @@ DOS Partition Table
             self.assertEqual(plan["expected_files"][0]["description"], "Windows/System32/config/SAM")
             self.assertEqual(len(plan["manifest_sha256"]), 64)
 
+    def test_virtual_disk_report_grade_validation_plan_tracks_conversion_chain_and_blockers(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            source = root / "vm.vmdk"
+            converted = root / "stage" / "converted" / "vm.raw"
+            source.write_bytes(b"virtual")
+            converted.parent.mkdir(parents=True)
+            converted.write_bytes(b"raw")
+
+            plan = build_virtual_disk_report_grade_validation_plan(
+                source,
+                converted_raw_path=converted,
+                output_dir=root / "validation",
+                expected_partition_start_sector=2048,
+                expected_files=["Users/alice/Documents/evidence.txt"],
+                source_integrity={"path": str(source), "sha256": "a" * 64},
+                converted_raw_integrity={"path": str(converted), "sha256": "b" * 64},
+                tool_preflight=[
+                    {"tool": "qemu-img", "available": True, "version": "qemu-img 8.2"},
+                    {"tool": "mmls", "available": True, "version": "mmls 1.0"},
+                    {"tool": "tsk_recover", "available": True, "version": "tsk_recover 1.0"},
+                ],
+                qemu_img_info_profile={
+                    "command_status": "ok",
+                    "format": "vmdk",
+                    "virtual_size": 4096,
+                    "actual_size": 2048,
+                    "backing_filename_present": False,
+                },
+                virtual_disk_chain_profile={
+                    "detected_format": "vmdk",
+                    "suspected_snapshot_or_differencing_member": False,
+                    "warnings": [],
+                },
+                command_history=[
+                    {"purpose": "qemu-img-raw-conversion", "returncode": 0},
+                    {"purpose": "read-only-filesystem-recovery", "returncode": 0},
+                ],
+                partition_table=[{"partition_number": 1, "start_sector": 2048, "filesystem_guess": "ntfs"}],
+                recovered_root_manifest={"visited_file_count": 1},
+                recovery_mode="partition-offset",
+            )
+
+            self.assertEqual(plan["profile_version"], "virtual-disk-report-grade-validation-plan-v1")
+            self.assertEqual(plan["gap_id"], "#24")
+            self.assertEqual(plan["status"], "report-validation-blocked")
+            command_ids = {row["id"] for row in plan["validation_commands"]}
+            self.assertIn("qemu-img-info-json", command_ids)
+            self.assertIn("qemu-img-raw-conversion", command_ids)
+            self.assertIn("converted-raw-hash", command_ids)
+            self.assertIn("trusted-workflow-diff", command_ids)
+            slot_status = {slot["id"]: slot["status"] for slot in plan["evidence_slots"]}
+            self.assertEqual(slot_status["source-disk-integrity"], "complete")
+            self.assertEqual(slot_status["qemu-info-and-format-profile"], "complete")
+            self.assertEqual(slot_status["snapshot-differencing-chain-review"], "complete")
+            self.assertEqual(slot_status["raw-conversion-provenance"], "complete")
+            self.assertEqual(slot_status["converted-raw-integrity"], "complete")
+            self.assertEqual(slot_status["nested-partition-and-fsstat"], "complete")
+            self.assertEqual(slot_status["nested-read-only-recovery"], "complete")
+            self.assertIn("trusted-conversion-recovery-diff", plan["blocking_slot_ids"])
+            self.assertEqual(plan["expected_files"][0]["description"], "Users/alice/Documents/evidence.txt")
+            self.assertEqual(len(plan["manifest_sha256"]), 64)
+
     def test_extract_raw_image_runs_mmls_and_tsk_recover(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             root = Path(tmp_dir)
@@ -978,6 +1042,15 @@ DOS Partition Table
                 "do-not-report-virtual-disk-workflow-as-chain-complete",
             )
             self.assertFalse(vm_uplift["reportability_decision"]["native_parser_complete"])
+            validation_plan = metadata["report_grade_validation_plan"]
+            self.assertEqual(validation_plan["profile_version"], "virtual-disk-report-grade-validation-plan-v1")
+            self.assertEqual(validation_plan["gap_id"], "#24")
+            plan_command_ids = {row["id"] for row in validation_plan["validation_commands"]}
+            self.assertIn("qemu-img-info-json", plan_command_ids)
+            self.assertIn("trusted-workflow-diff", plan_command_ids)
+            self.assertIn("trusted-conversion-recovery-diff", validation_plan["blocking_slot_ids"])
+            self.assertIn("converted-raw-integrity", validation_plan["ready_slot_ids"])
+            self.assertEqual(len(validation_plan["manifest_sha256"]), 64)
 
     def test_virtual_disk_chain_profile_flags_snapshot_names(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:

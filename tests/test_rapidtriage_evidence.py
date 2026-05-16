@@ -296,6 +296,16 @@ class RapidTriageEvidenceAdapterTests(unittest.TestCase):
             self.assertIn("virtual disk chain risk profile", vm_gate["satisfied_checks"])
             self.assertIn("unsupported/encrypted VM warning", vm_gate["satisfied_checks"])
             self.assertEqual(result["virtual_disk_chain_profile"]["detected_format"], "vmdk")
+            vm_plan = result["virtual_disk_validation_plan"]
+            self.assertEqual(vm_plan["profile_version"], "virtual-disk-report-grade-validation-plan-v1")
+            self.assertEqual(vm_plan["gap_id"], "#24")
+            vm_plan_commands = {row["id"] for row in vm_plan["validation_commands"]}
+            self.assertIn("qemu-img-info-json", vm_plan_commands)
+            self.assertIn("qemu-img-raw-conversion", vm_plan_commands)
+            self.assertIn("trusted-workflow-diff", vm_plan_commands)
+            self.assertIn("source-disk-integrity", vm_plan["ready_slot_ids"])
+            self.assertIn("qemu-info-and-format-profile", vm_plan["blocking_slot_ids"])
+            self.assertEqual(len(vm_plan["manifest_sha256"]), 64)
             vm_review = result["image_analyst_review_profile"]
             self.assertEqual(vm_review["gap_id"], "#24")
             self.assertEqual(vm_review["artifact_type"], "virtual-disk-workflow")

@@ -682,7 +682,7 @@
       ],
       "expected": {
         "required_assertions": [
-          "Virtual disk adapter and extraction metadata preserve qemu-img evidence, converted raw hash/provenance, nested extraction, VM limitations, and #24 core_accuracy_gates"
+          "Virtual disk adapter and extraction metadata preserve qemu-img evidence, converted raw hash/provenance, nested extraction, VM limitations, virtual-disk-report-grade-validation-plan-v1, and #24 core_accuracy_gates"
         ]
       },
       "notes": "Internal fixture pass; snapshot/differencing chains, hypervisor metadata, and large VM-disk corpus remain required.",
