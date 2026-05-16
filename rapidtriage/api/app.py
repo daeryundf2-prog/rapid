@@ -284,6 +284,15 @@ PREVIEW_SANDBOX_REPORT_GRADE_BLOCKERS = [
 ]
 SQLITE_FTS_TRUSTED_DIFF_BLOCKER = "large-sqlite-fts-trusted-query-plan-diff-required"
 SQLITE_FTS_TRUSTED_TOOLS = {"sqlite-query-plan-manifest", "large-db-profile-oracle", "fts-benchmark-manifest"}
+LARGE_SQLITE_FTS_REPORT_GRADE_VALIDATION_PLAN_VERSION = "large-sqlite-fts-report-grade-validation-plan-v1"
+LARGE_SQLITE_FTS_REPORT_GRADE_BLOCKERS = [
+    SQLITE_FTS_TRUSTED_DIFF_BLOCKER,
+    "10m-row-query-plan-regression-required",
+    "deleted-row-wal-replay-validation-required",
+    "large-source-db-corpus-required",
+    "browser-pagination-query-plan-e2e-required",
+    "index-maintenance-vacuum-regression-required",
+]
 PAGINATION_TRUSTED_DIFF_BLOCKER_78 = "trusted-pagination-cursor-manifest-diff-missing"
 PAGINATION_TRUSTED_TOOLS = {"pagination-cursor-manifest", "api-pagination-oracle", "known-answer-page-window-export"}
 UI_VIRTUALIZATION_TRUSTED_DIFF_BLOCKER_79 = "trusted-ui-virtualization-manifest-diff-missing"
@@ -10194,6 +10203,15 @@ def sqlite_fts_optimization_metadata(
         searchable_text_column_count=text_column_count,
         query_plan_profile=query_plan_profile,
     )
+    validation_plan = build_large_sqlite_fts_report_grade_validation_plan(
+        database_metadata=database_metadata,
+        query_plan_profile=query_plan_profile,
+        optimization_manifest=optimization_manifest,
+        preview_table_count=len(previews),
+        preview_row_count=total_preview_rows,
+        searchable_text_column_count=text_column_count,
+        scope="source-preview-sqlite",
+    )
     return {
         "commercial_gap_ids": [VIEWER_WORKFLOW_GAP_IDS["sqlite_performance"]],
         "functional_priority_profile": sqlite_fts_functional_profile(
@@ -10202,6 +10220,7 @@ def sqlite_fts_optimization_metadata(
             preview_row_count=total_preview_rows,
             searchable_text_column_count=text_column_count,
             optimization_manifest=optimization_manifest,
+            validation_plan=validation_plan,
         ),
         "status": "bounded-read-only-preview-with-fts-aware-guidance",
         "page_size": database_metadata.get("page_size"),
@@ -10213,6 +10232,10 @@ def sqlite_fts_optimization_metadata(
         "query_plan_profile": query_plan_profile,
         "sqlite_fts_optimization_manifest": optimization_manifest,
         "sqlite_fts_optimization_manifest_hash": optimization_manifest["manifest_hash"],
+        "large_sqlite_fts_report_grade_validation_plan": validation_plan,
+        "large_sqlite_fts_report_grade_validation_plan_hash": validation_plan["validation_plan_sha256"],
+        "report_grade_ready_slot_count": validation_plan["ready_slot_count"],
+        "report_grade_blocking_slot_count": validation_plan["blocking_slot_count"],
         "core_accuracy_gates": large_sqlite_fts_core_accuracy_gates(
             database_metadata=database_metadata,
             previews=previews,
@@ -10220,6 +10243,7 @@ def sqlite_fts_optimization_metadata(
             preview_row_count=total_preview_rows,
             query_plan_profile=query_plan_profile,
             optimization_manifest=optimization_manifest,
+            validation_plan=validation_plan,
         ),
         "trusted_large_sqlite_fts_diff": {
             "status": "missing",
@@ -10232,6 +10256,144 @@ def sqlite_fts_optimization_metadata(
             "Keep row previews bounded and paginate/cursor through API results for case-scale review.",
         ],
         "ready_for_court_report": False,
+    }
+
+
+def build_large_sqlite_fts_report_grade_validation_plan(
+    *,
+    database_metadata: Mapping[str, object],
+    query_plan_profile: Mapping[str, object],
+    optimization_manifest: Mapping[str, object],
+    preview_table_count: int,
+    preview_row_count: int,
+    searchable_text_column_count: int,
+    scope: str,
+) -> dict[str, object]:
+    manifest_hash = str(optimization_manifest.get("manifest_hash") or "")
+    query_plan_hash = str(query_plan_profile.get("plan_hash") or "")
+    query_plan_row_head_hash = str(query_plan_profile.get("plan_row_head_hash") or "")
+    page_profile = {
+        "page_size": optional_int_for_api(database_metadata.get("page_size")) or 0,
+        "page_count": optional_int_for_api(database_metadata.get("page_count")) or 0,
+        "estimated_database_bytes": optional_int_for_api(database_metadata.get("estimated_database_bytes")) or 0,
+        "journal_mode": str(database_metadata.get("journal_mode") or ""),
+    }
+    page_profile_hash = hashlib.sha256(json.dumps(page_profile, sort_keys=True).encode("utf-8")).hexdigest()
+    ready_slots: list[dict[str, object]] = [
+        {
+            "slot_id": "optimization-manifest",
+            "status": "ready",
+            "evidence_ref": "sqlite_fts_optimization_manifest_hash",
+            "evidence_hash": manifest_hash,
+            "description": "Source SQLite preview emits optimization manifest metadata.",
+        },
+        {
+            "slot_id": "query-plan-row-hashes",
+            "status": "ready",
+            "evidence_ref": "query_plan_row_head_hash",
+            "evidence_hash": query_plan_row_head_hash,
+            "description": "Bounded preview query plans are row-hashed.",
+        },
+        {
+            "slot_id": "query-plan-profile",
+            "status": "ready",
+            "evidence_ref": "query_plan_hash",
+            "evidence_hash": query_plan_hash,
+            "description": "SQLite source viewer exposes a deterministic query-plan profile hash.",
+        },
+        {
+            "slot_id": "bounded-row-preview",
+            "status": "ready",
+            "evidence_ref": "preview_row_count",
+            "evidence_hash": hashlib.sha256(str(preview_row_count).encode("ascii")).hexdigest(),
+            "description": "Preview rows are bounded and counted without full-table materialization.",
+        },
+        {
+            "slot_id": "searchable-text-column-inventory",
+            "status": "ready",
+            "evidence_ref": "searchable_text_column_count",
+            "evidence_hash": hashlib.sha256(str(searchable_text_column_count).encode("ascii")).hexdigest(),
+            "description": "Searchable text columns are counted for FTS handoff decisions.",
+        },
+        {
+            "slot_id": "database-page-profile",
+            "status": "ready",
+            "evidence_ref": "database_page_profile_hash",
+            "evidence_hash": page_profile_hash,
+            "description": "Database page size/count and journal mode are preserved for performance review.",
+        },
+    ]
+    blocking_slots: list[dict[str, object]] = [
+        {
+            "slot_id": "trusted-query-plan-manifest",
+            "status": "blocked",
+            "blocker": SQLITE_FTS_TRUSTED_DIFF_BLOCKER,
+            "required_evidence": "trusted sqlite query-plan manifest diff for source viewer and Case DB",
+        },
+        {
+            "slot_id": "10m-row-query-plan-regression",
+            "status": "blocked",
+            "blocker": "10m-row-query-plan-regression-required",
+            "required_evidence": "10M-row query-plan and latency regression on release hardware",
+        },
+        {
+            "slot_id": "deleted-row-wal-replay",
+            "status": "blocked",
+            "blocker": "deleted-row-wal-replay-validation-required",
+            "required_evidence": "WAL/deleted-row replay corpus and expected row-state oracle",
+        },
+        {
+            "slot_id": "large-source-db-corpus",
+            "status": "blocked",
+            "blocker": "large-source-db-corpus-required",
+            "required_evidence": "multi-GB source SQLite corpus with FTS, indexes, WAL, and corrupt-page cases",
+        },
+        {
+            "slot_id": "browser-pagination-query-plan-e2e",
+            "status": "blocked",
+            "blocker": "browser-pagination-query-plan-e2e-required",
+            "required_evidence": "browser E2E proving SQLite pages remain bounded/cursor-paged",
+        },
+        {
+            "slot_id": "index-maintenance-vacuum-regression",
+            "status": "blocked",
+            "blocker": "index-maintenance-vacuum-regression-required",
+            "required_evidence": "index maintenance, PRAGMA optimize, vacuum, and rebuild regression logs",
+        },
+    ]
+    plan_core = {
+        "profile_version": LARGE_SQLITE_FTS_REPORT_GRADE_VALIDATION_PLAN_VERSION,
+        "item_number": 74,
+        "gap_id": VIEWER_WORKFLOW_GAP_IDS["sqlite_performance"],
+        "commercial_gap_ids": [VIEWER_WORKFLOW_GAP_IDS["sqlite_performance"]],
+        "scope": scope,
+        "sqlite_fts_optimization_manifest_hash": manifest_hash,
+        "query_plan_hash": query_plan_hash,
+        "query_plan_row_head_hash": query_plan_row_head_hash,
+        "database_page_profile_hash": page_profile_hash,
+        "preview_table_count": preview_table_count,
+        "preview_row_count": preview_row_count,
+        "searchable_text_column_count": searchable_text_column_count,
+        "bounded_preview_query": bool(query_plan_profile.get("bounded_preview_query")),
+        "arbitrary_sql_allowed": bool(query_plan_profile.get("arbitrary_sql_allowed")),
+        "wal_journal_replay_supported": bool(optimization_manifest.get("wal_journal_replay_supported")),
+        "ten_million_row_regression_attached": bool(
+            optimization_manifest.get("ten_million_row_regression_attached")
+        ),
+        "ready_slots": ready_slots,
+        "blocking_slots": blocking_slots,
+        "ready_slot_count": len(ready_slots),
+        "blocking_slot_count": len(blocking_slots),
+        "blockers": list(LARGE_SQLITE_FTS_REPORT_GRADE_BLOCKERS),
+        "commercial_claim_allowed": False,
+        "ready_for_court_report": False,
+        "report_use_warning": "Use as bounded SQLite/FTS triage evidence only until trusted query-plan, WAL/deleted-row, and 10M-row regression evidence are attached.",
+    }
+    validation_plan_sha256 = hashlib.sha256(json.dumps(plan_core, sort_keys=True).encode("utf-8")).hexdigest()
+    return {
+        **plan_core,
+        "validation_plan_sha256": validation_plan_sha256,
+        "validation_plan_hash": validation_plan_sha256,
     }
 
 
@@ -10318,6 +10480,7 @@ def sqlite_fts_functional_profile(
     preview_row_count: int,
     searchable_text_column_count: int,
     optimization_manifest: Mapping[str, object],
+    validation_plan: Mapping[str, object],
 ) -> dict[str, object]:
     return {
         "batch_id": FUNCTIONAL_SCALE_BATCH_ID,
@@ -10342,6 +10505,11 @@ def sqlite_fts_functional_profile(
             "query_plan_hash": str(optimization_manifest.get("query_plan_hash") or ""),
             "query_plan_row_head_hash": str(optimization_manifest.get("query_plan_row_head_hash") or ""),
             "query_plan_row_hash_count": int(optimization_manifest.get("query_plan_row_hash_count") or 0),
+            "large_sqlite_fts_report_grade_validation_plan_hash": str(
+                validation_plan.get("validation_plan_sha256") or ""
+            ),
+            "large_sqlite_fts_report_grade_ready_slot_count": int(validation_plan.get("ready_slot_count") or 0),
+            "large_sqlite_fts_report_grade_blocking_slot_count": int(validation_plan.get("blocking_slot_count") or 0),
             "wal_journal_replay_supported": bool(optimization_manifest.get("wal_journal_replay_supported")),
         },
         "blockers": [
@@ -10364,6 +10532,7 @@ def large_sqlite_fts_core_accuracy_gates(
     preview_row_count: int,
     query_plan_profile: Mapping[str, object] | None = None,
     optimization_manifest: Mapping[str, object] | None = None,
+    validation_plan: Mapping[str, object] | None = None,
     trusted_diff: Mapping[str, object] | None = None,
 ) -> list[dict[str, object]]:
     satisfied = [
@@ -10387,6 +10556,17 @@ def large_sqlite_fts_core_accuracy_gates(
         evidence_refs.append(f"query_plan_hash:{query_plan_profile.get('plan_hash', '')}")
     if optimization_manifest:
         evidence_refs.append(f"optimization_manifest_hash:{optimization_manifest.get('manifest_hash', '')}")
+    validation_plan = validation_plan if isinstance(validation_plan, Mapping) else {}
+    if validation_plan.get("validation_plan_sha256"):
+        satisfied.append("large SQLite/FTS report-grade validation plan emitted")
+        satisfied.append("large SQLite/FTS report-grade ready slots emitted")
+        evidence_refs.append(
+            f"large_sqlite_fts_report_grade_validation_plan_sha256:{validation_plan.get('validation_plan_sha256')}"
+        )
+        evidence_refs.append(f"large_sqlite_fts_report_grade_ready_slot_count:{validation_plan.get('ready_slot_count', 0)}")
+        evidence_refs.append(
+            f"large_sqlite_fts_report_grade_blocking_slot_count:{validation_plan.get('blocking_slot_count', 0)}"
+        )
     trusted_diff = trusted_diff if isinstance(trusted_diff, Mapping) else {}
     if trusted_diff.get("status") == "pass":
         satisfied.append("trusted large SQLite/FTS query-plan diff pass")

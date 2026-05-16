@@ -2130,6 +2130,35 @@ class RapidTriageApiTests(unittest.TestCase):
                 sqlite_preview["sqlite"]["large_sqlite_fts_optimization"]["functional_priority_profile"]["controls"]["optimization_manifest_hash"],
                 sqlite_preview["sqlite"]["large_sqlite_fts_optimization"]["sqlite_fts_optimization_manifest"]["manifest_hash"],
             )
+            large_sqlite_plan = sqlite_preview["sqlite"]["large_sqlite_fts_optimization"][
+                "large_sqlite_fts_report_grade_validation_plan"
+            ]
+            self.assertEqual(
+                large_sqlite_plan["profile_version"],
+                "large-sqlite-fts-report-grade-validation-plan-v1",
+            )
+            self.assertEqual(
+                sqlite_preview["sqlite"]["large_sqlite_fts_optimization"][
+                    "large_sqlite_fts_report_grade_validation_plan_hash"
+                ],
+                large_sqlite_plan["validation_plan_sha256"],
+            )
+            self.assertEqual(large_sqlite_plan["ready_slot_count"], 6)
+            self.assertEqual(large_sqlite_plan["blocking_slot_count"], 6)
+            self.assertEqual(
+                large_sqlite_plan["sqlite_fts_optimization_manifest_hash"],
+                sqlite_preview["sqlite"]["large_sqlite_fts_optimization"]["sqlite_fts_optimization_manifest"][
+                    "manifest_hash"
+                ],
+            )
+            self.assertIn(
+                "query-plan-row-hashes",
+                {slot["slot_id"] for slot in large_sqlite_plan["ready_slots"]},
+            )
+            self.assertIn(
+                "10m-row-query-plan-regression",
+                {slot["slot_id"] for slot in large_sqlite_plan["blocking_slots"]},
+            )
             self.assertIn(
                 "bounded query plan profile emitted",
                 sqlite_preview["sqlite"]["large_sqlite_fts_optimization"]["core_accuracy_gates"][0]["satisfied_checks"],
@@ -2140,6 +2169,10 @@ class RapidTriageApiTests(unittest.TestCase):
             )
             self.assertIn(
                 "query plan row hashes emitted",
+                sqlite_preview["sqlite"]["large_sqlite_fts_optimization"]["core_accuracy_gates"][0]["satisfied_checks"],
+            )
+            self.assertIn(
+                "large SQLite/FTS report-grade validation plan emitted",
                 sqlite_preview["sqlite"]["large_sqlite_fts_optimization"]["core_accuracy_gates"][0]["satisfied_checks"],
             )
             self.assertEqual(

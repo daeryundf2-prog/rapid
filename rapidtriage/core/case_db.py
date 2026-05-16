@@ -27,6 +27,15 @@ FUNCTIONAL_VALIDATION_BATCH_ID = "commercial-uplift-036-040"
 FUNCTIONAL_DEFENSIBILITY_BATCH_ID = "commercial-uplift-041-045"
 FORENSIC_INTEGRITY_BATCH_ID = "commercial-uplift-086-090"
 LARGE_SQLITE_FTS_GAP_ID = "#74"
+LARGE_SQLITE_FTS_REPORT_GRADE_VALIDATION_PLAN_VERSION = "large-sqlite-fts-report-grade-validation-plan-v1"
+LARGE_SQLITE_FTS_REPORT_GRADE_BLOCKERS = [
+    "trusted-case-db-sqlite-fts-query-plan-diff-missing",
+    "10m-row-query-plan-regression-required",
+    "deleted-row-wal-replay-validation-required",
+    "large-source-db-corpus-required",
+    "browser-pagination-query-plan-e2e-required",
+    "index-maintenance-vacuum-regression-required",
+]
 CHAIN_OF_CUSTODY_GAP_ID = "#86"
 ACQUISITION_HASH_GAP_ID = "#87"
 IMMUTABLE_AUDIT_GAP_ID = "#88"
@@ -2341,6 +2350,11 @@ def case_db_fts_optimization_assessment(connection: sqlite3.Connection) -> dict[
         ).fetchall()
     ]
     query_plan_profile = case_db_query_plan_profile(connection, fts_tables=fts_tables)
+    validation_plan = case_db_large_sqlite_fts_report_grade_validation_plan(
+        query_plan_profile=query_plan_profile,
+        fts_tables=fts_tables,
+        index_count=len(indexes),
+    )
     return {
         "component": "case-db-large-sqlite-fts",
         "status": "fts5-and-hot-path-indexes-enabled",
@@ -2348,6 +2362,7 @@ def case_db_fts_optimization_assessment(connection: sqlite3.Connection) -> dict[
         "functional_priority_profile": case_db_fts_functional_profile(
             fts_tables=fts_tables,
             index_count=len(indexes),
+            validation_plan=validation_plan,
         ),
         "fts_tables": fts_tables,
         "index_count": len(indexes),
@@ -2360,6 +2375,10 @@ def case_db_fts_optimization_assessment(connection: sqlite3.Connection) -> dict[
             "journal_mode": "WAL-when-supported",
             "optimize_on_close": True,
         },
+        "large_sqlite_fts_report_grade_validation_plan": validation_plan,
+        "large_sqlite_fts_report_grade_validation_plan_hash": validation_plan["validation_plan_sha256"],
+        "report_grade_ready_slot_count": validation_plan["ready_slot_count"],
+        "report_grade_blocking_slot_count": validation_plan["blocking_slot_count"],
         "ready_for_court_report": False,
         "core_accuracy_gates": [
             build_accuracy_gate(
@@ -2371,20 +2390,144 @@ def case_db_fts_optimization_assessment(connection: sqlite3.Connection) -> dict[
                     "bounded row preview preserved",
                     "case DB query plan profile emitted",
                     "large corpus optimization limitation warning",
+                    "large SQLite/FTS report-grade validation plan emitted",
+                    "large SQLite/FTS report-grade ready slots emitted",
                 ],
                 evidence_refs=[
                     f"fts_table_count:{len(fts_tables)}",
                     f"index_count:{len(indexes)}",
                     f"query_plan_hash:{query_plan_profile['plan_hash']}",
+                    f"large_sqlite_fts_report_grade_validation_plan_sha256:{validation_plan['validation_plan_sha256']}",
                     "journal_mode:WAL-when-supported",
                 ],
             )
         ],
-        "blockers": [
-            "10m-record-benchmark-and-query-plan-regression-gates-remain-required",
-            "external-source-sqlite-wal/journal-replay-is-not-part-of-case-db-indexing",
-            "trusted-case-db-sqlite-fts-query-plan-diff-missing",
-        ],
+        "blockers": list(validation_plan["blockers"]),
+    }
+
+
+def case_db_large_sqlite_fts_report_grade_validation_plan(
+    *,
+    query_plan_profile: Mapping[str, object],
+    fts_tables: Sequence[str],
+    index_count: int,
+) -> dict[str, object]:
+    query_plan_hash = str(query_plan_profile.get("plan_hash") or "")
+    fts_table_head_hash = hashlib.sha256("\n".join(sorted(str(table) for table in fts_tables)).encode("utf-8")).hexdigest()
+    case_db_profile = {
+        "fts_tables": sorted(str(table) for table in fts_tables),
+        "index_count": index_count,
+        "journal_mode": "WAL-when-supported",
+        "optimize_on_close": True,
+    }
+    case_db_profile_hash = hashlib.sha256(json.dumps(case_db_profile, sort_keys=True).encode("utf-8")).hexdigest()
+    ready_slots: list[dict[str, object]] = [
+        {
+            "slot_id": "case-db-query-plan-profile",
+            "status": "ready",
+            "evidence_ref": "query_plan_hash",
+            "evidence_hash": query_plan_hash,
+            "description": "Case DB emits deterministic query-plan hashes for hot-path and FTS queries.",
+        },
+        {
+            "slot_id": "case-db-fts-table-inventory",
+            "status": "ready",
+            "evidence_ref": "fts_table_head_hash",
+            "evidence_hash": fts_table_head_hash,
+            "description": "FTS table inventory is hashed for release regression review.",
+        },
+        {
+            "slot_id": "case-db-index-inventory",
+            "status": "ready",
+            "evidence_ref": "index_count",
+            "evidence_hash": hashlib.sha256(str(index_count).encode("ascii")).hexdigest(),
+            "description": "Hot-path index count is captured at schema initialization.",
+        },
+        {
+            "slot_id": "wal-when-supported-policy",
+            "status": "ready",
+            "evidence_ref": "journal_mode",
+            "evidence_hash": hashlib.sha256(b"WAL-when-supported").hexdigest(),
+            "description": "Case DB policy requests WAL where the host SQLite build supports it.",
+        },
+        {
+            "slot_id": "pragma-optimize-policy",
+            "status": "ready",
+            "evidence_ref": "optimize_on_close",
+            "evidence_hash": hashlib.sha256(b"True").hexdigest(),
+            "description": "Case DB records PRAGMA optimize on close as the local maintenance policy.",
+        },
+        {
+            "slot_id": "case-db-performance-profile",
+            "status": "ready",
+            "evidence_ref": "case_db_profile_hash",
+            "evidence_hash": case_db_profile_hash,
+            "description": "FTS tables, indexes, WAL policy, and optimize policy are grouped for report review.",
+        },
+    ]
+    blocking_slots: list[dict[str, object]] = [
+        {
+            "slot_id": "trusted-case-db-query-plan-diff",
+            "status": "blocked",
+            "blocker": "trusted-case-db-sqlite-fts-query-plan-diff-missing",
+            "required_evidence": "trusted Case DB SQLite/FTS query-plan manifest diff",
+        },
+        {
+            "slot_id": "10m-row-query-plan-regression",
+            "status": "blocked",
+            "blocker": "10m-row-query-plan-regression-required",
+            "required_evidence": "10M-row Case DB query-plan and latency regression evidence",
+        },
+        {
+            "slot_id": "deleted-row-wal-replay",
+            "status": "blocked",
+            "blocker": "deleted-row-wal-replay-validation-required",
+            "required_evidence": "source SQLite WAL/deleted-row replay validation before claiming recovery completeness",
+        },
+        {
+            "slot_id": "large-source-db-corpus",
+            "status": "blocked",
+            "blocker": "large-source-db-corpus-required",
+            "required_evidence": "large source SQLite and Case DB corpus covering multi-GB evidence",
+        },
+        {
+            "slot_id": "browser-pagination-query-plan-e2e",
+            "status": "blocked",
+            "blocker": "browser-pagination-query-plan-e2e-required",
+            "required_evidence": "browser E2E evidence that large query/table views remain paginated and bounded",
+        },
+        {
+            "slot_id": "index-maintenance-vacuum-regression",
+            "status": "blocked",
+            "blocker": "index-maintenance-vacuum-regression-required",
+            "required_evidence": "index maintenance, PRAGMA optimize, vacuum, and rebuild regression logs",
+        },
+    ]
+    plan_core = {
+        "profile_version": LARGE_SQLITE_FTS_REPORT_GRADE_VALIDATION_PLAN_VERSION,
+        "item_number": 74,
+        "gap_id": LARGE_SQLITE_FTS_GAP_ID,
+        "commercial_gap_ids": [LARGE_SQLITE_FTS_GAP_ID],
+        "scope": "case-db-sqlite-fts",
+        "query_plan_hash": query_plan_hash,
+        "fts_table_count": len(fts_tables),
+        "fts_table_head_hash": fts_table_head_hash,
+        "index_count": index_count,
+        "case_db_profile_hash": case_db_profile_hash,
+        "ready_slots": ready_slots,
+        "blocking_slots": blocking_slots,
+        "ready_slot_count": len(ready_slots),
+        "blocking_slot_count": len(blocking_slots),
+        "blockers": list(LARGE_SQLITE_FTS_REPORT_GRADE_BLOCKERS),
+        "commercial_claim_allowed": False,
+        "ready_for_court_report": False,
+        "report_use_warning": "Use as Case DB SQLite/FTS readiness evidence only until trusted query-plan and large-row regression evidence are attached.",
+    }
+    validation_plan_sha256 = hashlib.sha256(json.dumps(plan_core, sort_keys=True).encode("utf-8")).hexdigest()
+    return {
+        **plan_core,
+        "validation_plan_sha256": validation_plan_sha256,
+        "validation_plan_hash": validation_plan_sha256,
     }
 
 
@@ -2454,7 +2597,12 @@ def case_db_query_plan_profile(connection: sqlite3.Connection, *, fts_tables: Se
     }
 
 
-def case_db_fts_functional_profile(*, fts_tables: Sequence[str], index_count: int) -> dict[str, object]:
+def case_db_fts_functional_profile(
+    *,
+    fts_tables: Sequence[str],
+    index_count: int,
+    validation_plan: Mapping[str, object],
+) -> dict[str, object]:
     return {
         "batch_id": FUNCTIONAL_SCALE_BATCH_ID,
         "item_number": 32,
@@ -2472,6 +2620,11 @@ def case_db_fts_functional_profile(*, fts_tables: Sequence[str], index_count: in
             "wal_when_supported": True,
             "pragma_optimize_on_close": True,
             "bounded_preview_contract": True,
+            "large_sqlite_fts_report_grade_validation_plan_hash": str(
+                validation_plan.get("validation_plan_sha256") or ""
+            ),
+            "large_sqlite_fts_report_grade_ready_slot_count": int(validation_plan.get("ready_slot_count") or 0),
+            "large_sqlite_fts_report_grade_blocking_slot_count": int(validation_plan.get("blocking_slot_count") or 0),
         },
         "blockers": [
             "10m-record-benchmark-and-query-plan-regression-gates-remain-required",

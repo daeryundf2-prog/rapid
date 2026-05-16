@@ -148,6 +148,28 @@ class RapidTriageCaseDatabaseTests(unittest.TestCase):
                 "case DB query plan profile emitted",
                 second["large_sqlite_fts_optimization"]["core_accuracy_gates"][0]["satisfied_checks"],
             )
+            case_db_plan = second["large_sqlite_fts_optimization"][
+                "large_sqlite_fts_report_grade_validation_plan"
+            ]
+            self.assertEqual(
+                case_db_plan["profile_version"],
+                "large-sqlite-fts-report-grade-validation-plan-v1",
+            )
+            self.assertEqual(
+                second["large_sqlite_fts_optimization"]["large_sqlite_fts_report_grade_validation_plan_hash"],
+                case_db_plan["validation_plan_sha256"],
+            )
+            self.assertEqual(case_db_plan["ready_slot_count"], 6)
+            self.assertEqual(case_db_plan["blocking_slot_count"], 6)
+            self.assertIn("case-db-query-plan-profile", {slot["slot_id"] for slot in case_db_plan["ready_slots"]})
+            self.assertIn(
+                "10m-row-query-plan-regression",
+                {slot["slot_id"] for slot in case_db_plan["blocking_slots"]},
+            )
+            self.assertIn(
+                "large SQLite/FTS report-grade validation plan emitted",
+                second["large_sqlite_fts_optimization"]["core_accuracy_gates"][0]["satisfied_checks"],
+            )
             self.assertIn(
                 "trusted-case-db-sqlite-fts-query-plan-diff-missing",
                 second["large_sqlite_fts_optimization"]["blockers"],

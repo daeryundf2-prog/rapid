@@ -1158,6 +1158,7 @@ CORE_FORENSIC_ACCURACY_ITEMS: tuple[dict[str, object], ...] = (
             "bounded row preview preserved",
             "bounded query plan profile emitted",
             "query plan row hashes emitted",
+            "large SQLite/FTS report-grade validation plan emitted",
             "large corpus optimization limitation warning",
             "trusted large SQLite/FTS query-plan diff pass",
         ),

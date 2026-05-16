@@ -704,6 +704,34 @@ class RapidTriageRunTests(unittest.TestCase):
                 summary_payload["processing"]["sqlite_fts_optimization"]["sqlite_fts_optimization_manifest_hash"],
                 sqlite_fts["manifest_hash"],
             )
+            sqlite_fts_plan = sqlite_fts["large_sqlite_fts_report_grade_validation_plan"]
+            self.assertEqual(
+                sqlite_fts_plan["profile_version"],
+                "large-sqlite-fts-report-grade-validation-plan-v1",
+            )
+            self.assertEqual(
+                sqlite_fts["large_sqlite_fts_report_grade_validation_plan_hash"],
+                sqlite_fts_plan["validation_plan_hash"],
+            )
+            self.assertEqual(
+                summary_payload["processing"]["sqlite_fts_optimization"][
+                    "large_sqlite_fts_report_grade_validation_plan_hash"
+                ],
+                sqlite_fts_plan["validation_plan_hash"],
+            )
+            self.assertEqual(sqlite_fts_plan["ready_slot_count"], 6)
+            self.assertEqual(sqlite_fts_plan["blocking_slot_count"], 6)
+            self.assertIn("query-plan-requirement", {slot["slot_id"] for slot in sqlite_fts_plan["ready_slots"]})
+            self.assertIn(
+                "10m-row-query-plan-regression",
+                {slot["slot_id"] for slot in sqlite_fts_plan["blocking_slots"]},
+            )
+            self.assertIn(
+                "large SQLite/FTS report-grade validation plan emitted",
+                summary_payload["processing"]["sqlite_fts_optimization"]["core_accuracy_gates"][0][
+                    "satisfied_checks"
+                ],
+            )
             self.assertIn("#75", summary_payload["processing"]["parallel_parser_scheduler"]["commercial_gap_ids"])
             scheduler_manifest = summary_payload["processing"]["parallel_parser_scheduler"]["scheduler_manifest"]
             self.assertEqual(scheduler_manifest["profile"], "parser-scheduler-run-manifest-v1")
@@ -777,6 +805,14 @@ class RapidTriageRunTests(unittest.TestCase):
             self.assertEqual(
                 runtime_by_number[74]["controls"]["tracked_output_row_head_hash"],
                 sqlite_fts["tracked_output_row_head_hash"],
+            )
+            self.assertEqual(
+                runtime_by_number[74]["controls"]["large_sqlite_fts_report_grade_validation_plan_hash"],
+                sqlite_fts_plan["validation_plan_hash"],
+            )
+            self.assertEqual(
+                runtime_by_number[74]["controls"]["large_sqlite_fts_report_grade_ready_slot_count"],
+                6,
             )
             self.assertEqual(runtime_by_number[75]["component"], "parallel-parser-scheduler")
             self.assertTrue(runtime_by_number[75]["controls"]["deterministic_output_paths"])

@@ -44,8 +44,8 @@
       "status": "pass",
       "backlog_items": [74],
       "evidence_paths": ["docs/validation/core-forensics-071-080-fixture-evidence.json", "tests/test_rapidtriage_api.py", "tests/test_rapidtriage_case_db.py"],
-      "expected": {"required_assertions": ["SQLite outputs preserve performance pragmas, table profiles, searchable text column counts, bounded row previews, source preview query-plan profiles, query-plan row hashes, Case DB query-plan head hashes, large-corpus warnings, trusted query-plan diff status, and #74 core_accuracy_gates."]},
-      "notes": "Internal fixture pass; trusted query-plan manifests, 10M-row query-plan, and WAL/deleted-row validation remain blockers."
+      "expected": {"required_assertions": ["SQLite outputs preserve performance pragmas, table profiles, searchable text column counts, bounded row previews, source preview query-plan profiles, query-plan row hashes, Case DB query-plan head hashes, large SQLite/FTS report-grade validation-plan hashes/ready slots/blocking slots, large-corpus warnings, trusted query-plan diff status, and #74 core_accuracy_gates."]},
+      "notes": "Internal fixture pass; trusted query-plan manifests, 10M-row query-plan regression, WAL/deleted-row validation, large source DB corpus, browser pagination/query-plan E2E, and index-maintenance/vacuum regression remain blockers."
     },
     {
       "id": "core-forensics-075-parser-scheduler-fixture",

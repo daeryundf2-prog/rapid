@@ -152,6 +152,15 @@ PREVIEW_SANDBOX_REPORT_GRADE_BLOCKERS = [
     "browser-e2e-preview-sandbox-required",
 ]
 LARGE_SQLITE_FTS_TRUSTED_DIFF_BLOCKER_74 = "trusted-large-sqlite-fts-query-plan-diff-missing"
+LARGE_SQLITE_FTS_REPORT_GRADE_VALIDATION_PLAN_VERSION = "large-sqlite-fts-report-grade-validation-plan-v1"
+LARGE_SQLITE_FTS_REPORT_GRADE_BLOCKERS = [
+    "trusted-large-sqlite-fts-query-plan-manifest-required",
+    "10m-row-query-plan-regression-required",
+    "deleted-row-wal-replay-validation-required",
+    "large-source-db-corpus-required",
+    "browser-pagination-query-plan-e2e-required",
+    "index-maintenance-vacuum-regression-required",
+]
 SCHEDULER_TRUSTED_DIFF_BLOCKER_75 = "trusted-parser-scheduler-manifest-diff-missing"
 DEFAULT_INCREMENTAL_HASH_MAX_BYTES = 16 * 1024 * 1024
 
@@ -1547,7 +1556,151 @@ def build_sqlite_fts_run_optimization_manifest(*, outputs: Mapping[str, Path]) -
     manifest_core["manifest_hash"] = hashlib.sha256(
         json.dumps(manifest_core, sort_keys=True).encode("utf-8")
     ).hexdigest()
-    return manifest_core
+    validation_plan = sqlite_fts_report_grade_validation_plan(optimization_manifest=manifest_core)
+    return {
+        **manifest_core,
+        "large_sqlite_fts_report_grade_validation_plan": validation_plan,
+        "large_sqlite_fts_report_grade_validation_plan_hash": validation_plan["validation_plan_hash"],
+        "report_grade_ready_slot_count": validation_plan["ready_slot_count"],
+        "report_grade_blocking_slot_count": validation_plan["blocking_slot_count"],
+    }
+
+
+def sqlite_fts_report_grade_validation_plan(*, optimization_manifest: Mapping[str, object]) -> dict[str, object]:
+    optimization_policy = (
+        optimization_manifest.get("optimization_policy")
+        if isinstance(optimization_manifest.get("optimization_policy"), Mapping)
+        else {}
+    )
+    manifest_hash = str(optimization_manifest.get("manifest_hash") or "")
+    tracked_row_head_hash = str(optimization_manifest.get("tracked_output_row_head_hash") or "")
+    tracked_output_head_hash = str(optimization_manifest.get("tracked_output_head_hash") or "")
+    tracked_output_count = int(optimization_manifest.get("tracked_output_row_count") or 0)
+    policy_hash = hashlib.sha256(json.dumps(dict(optimization_policy), sort_keys=True).encode("utf-8")).hexdigest()
+    ready_slots: list[dict[str, object]] = [
+        {
+            "slot_id": "run-optimization-manifest",
+            "status": "ready",
+            "evidence_ref": "sqlite_fts_optimization_manifest_hash",
+            "evidence_hash": manifest_hash,
+            "description": "Run emits a SQLite/FTS optimization manifest for key output stores.",
+        },
+        {
+            "slot_id": "tracked-output-row-hashes",
+            "status": "ready",
+            "evidence_ref": "tracked_output_row_head_hash",
+            "evidence_hash": tracked_row_head_hash,
+            "description": "Tracked run outputs are row-hashed for replayable performance evidence.",
+        },
+        {
+            "slot_id": "tracked-output-content-hash",
+            "status": "ready",
+            "evidence_ref": "tracked_output_head_hash",
+            "evidence_hash": tracked_output_head_hash,
+            "description": "Tracked output content fingerprints are summarized for regression comparison.",
+        },
+        {
+            "slot_id": "cursor-pagination-policy",
+            "status": "ready",
+            "evidence_ref": "optimization_policy.cursor_pagination_required",
+            "evidence_hash": hashlib.sha256(
+                str(bool(optimization_policy.get("cursor_pagination_required"))).encode("ascii")
+            ).hexdigest(),
+            "description": "Run policy requires cursor pagination for large artifact/search/timeline surfaces.",
+        },
+        {
+            "slot_id": "query-plan-requirement",
+            "status": "ready",
+            "evidence_ref": "optimization_policy.query_plan_hash_required_for_case_db_viewers",
+            "evidence_hash": hashlib.sha256(
+                str(bool(optimization_policy.get("query_plan_hash_required_for_case_db_viewers"))).encode("ascii")
+            ).hexdigest(),
+            "description": "Case DB/source SQLite viewers must expose query-plan hashes before report use.",
+        },
+        {
+            "slot_id": "sqlite-policy-profile",
+            "status": "ready",
+            "evidence_ref": "optimization_policy_hash",
+            "evidence_hash": policy_hash,
+            "description": "Optimization policy records WAL/FTS expectations, bounded previews, and blocker flags.",
+        },
+    ]
+    blocking_slots: list[dict[str, object]] = [
+        {
+            "slot_id": "trusted-query-plan-manifest",
+            "status": "blocked",
+            "blocker": "trusted-large-sqlite-fts-query-plan-manifest-required",
+            "required_evidence": "trusted query-plan manifest diff for Case DB and source SQLite viewers",
+        },
+        {
+            "slot_id": "10m-row-query-plan-regression",
+            "status": "blocked",
+            "blocker": "10m-row-query-plan-regression-required",
+            "required_evidence": "10M-row query-plan and latency regression evidence on release hardware",
+        },
+        {
+            "slot_id": "deleted-row-wal-replay",
+            "status": "blocked",
+            "blocker": "deleted-row-wal-replay-validation-required",
+            "required_evidence": "WAL/deleted-row replay corpus with expected row recovery and non-recovery states",
+        },
+        {
+            "slot_id": "large-source-db-corpus",
+            "status": "blocked",
+            "blocker": "large-source-db-corpus-required",
+            "required_evidence": "large source SQLite corpus covering multi-GB DBs, indexes, FTS, and corrupt pages",
+        },
+        {
+            "slot_id": "browser-pagination-query-plan-e2e",
+            "status": "blocked",
+            "blocker": "browser-pagination-query-plan-e2e-required",
+            "required_evidence": "browser E2E evidence that large SQLite/table pages stay cursor-paged and bounded",
+        },
+        {
+            "slot_id": "index-maintenance-vacuum-regression",
+            "status": "blocked",
+            "blocker": "index-maintenance-vacuum-regression-required",
+            "required_evidence": "index maintenance, PRAGMA optimize, and vacuum/rebuild regression run logs",
+        },
+    ]
+    plan_core = {
+        "profile_version": LARGE_SQLITE_FTS_REPORT_GRADE_VALIDATION_PLAN_VERSION,
+        "item_number": 74,
+        "gap_id": LARGE_SQLITE_FTS_GAP_ID,
+        "commercial_gap_ids": [LARGE_SQLITE_FTS_GAP_ID],
+        "scope": "run-sqlite-fts-optimization",
+        "optimization_manifest_hash": manifest_hash,
+        "tracked_output_row_count": tracked_output_count,
+        "tracked_output_row_head_hash": tracked_row_head_hash,
+        "tracked_output_head_hash": tracked_output_head_hash,
+        "optimization_policy_hash": policy_hash,
+        "case_db_wal_pragmas_expected": bool(optimization_policy.get("case_db_wal_pragmas_expected")),
+        "case_db_fts_tables_expected": bool(optimization_policy.get("case_db_fts_tables_expected")),
+        "bounded_source_sqlite_preview_expected": bool(
+            optimization_policy.get("bounded_source_sqlite_preview_expected")
+        ),
+        "cursor_pagination_required": bool(optimization_policy.get("cursor_pagination_required")),
+        "ten_million_row_regression_attached": bool(
+            optimization_policy.get("ten_million_row_regression_attached")
+        ),
+        "deleted_row_wal_replay_validation_attached": bool(
+            optimization_policy.get("deleted_row_wal_replay_validation_attached")
+        ),
+        "ready_slots": ready_slots,
+        "blocking_slots": blocking_slots,
+        "ready_slot_count": len(ready_slots),
+        "blocking_slot_count": len(blocking_slots),
+        "blockers": list(LARGE_SQLITE_FTS_REPORT_GRADE_BLOCKERS),
+        "commercial_claim_allowed": False,
+        "ready_for_court_report": False,
+        "report_use_warning": "Use as Mac-local SQLite/FTS optimization evidence only until trusted query-plan, WAL/deleted-row, and 10M-row regression evidence are attached.",
+    }
+    validation_plan_hash = hashlib.sha256(json.dumps(plan_core, sort_keys=True).encode("utf-8")).hexdigest()
+    return {
+        **plan_core,
+        "validation_plan_hash": validation_plan_hash,
+        "validation_plan_sha256": validation_plan_hash,
+    }
 
 
 def sqlite_fts_tracked_output_row(
@@ -4491,6 +4644,11 @@ def build_processing_summary(
         if isinstance(safety.get("sqlite_fts_optimization"), Mapping)
         else {}
     )
+    sqlite_fts_validation_plan = (
+        sqlite_fts_optimization.get("large_sqlite_fts_report_grade_validation_plan")
+        if isinstance(sqlite_fts_optimization.get("large_sqlite_fts_report_grade_validation_plan"), Mapping)
+        else {}
+    )
     return {
         "profile_label": profile_label,
         "dry_run": dry_run,
@@ -4608,10 +4766,16 @@ def build_processing_summary(
         else parallel_parser_scheduler_assessment(()),
         "sqlite_fts_optimization": {
             "component": "large-sqlite-fts-optimization",
-            "status": "run-optimization-manifest-emitted",
+            "status": "run-optimization-manifest-and-validation-plan-emitted",
             "commercial_gap_ids": [LARGE_SQLITE_FTS_GAP_ID],
             "sqlite_fts_optimization_manifest": dict(sqlite_fts_optimization),
             "sqlite_fts_optimization_manifest_hash": str(sqlite_fts_optimization.get("manifest_hash") or ""),
+            "large_sqlite_fts_report_grade_validation_plan": dict(sqlite_fts_validation_plan),
+            "large_sqlite_fts_report_grade_validation_plan_hash": str(
+                sqlite_fts_validation_plan.get("validation_plan_hash") or ""
+            ),
+            "report_grade_ready_slot_count": int(sqlite_fts_validation_plan.get("ready_slot_count") or 0),
+            "report_grade_blocking_slot_count": int(sqlite_fts_validation_plan.get("blocking_slot_count") or 0),
             "ready_for_court_report": False,
             "core_accuracy_gates": [
                 build_accuracy_gate(
@@ -4621,18 +4785,20 @@ def build_processing_summary(
                         "tracked output hashes emitted",
                         "cursor pagination requirement recorded",
                         "10M-row regression blocker disclosed",
+                        "large SQLite/FTS report-grade validation plan emitted",
+                        "large SQLite/FTS report-grade ready slots emitted",
                     ],
                     evidence_refs=[
                         "run-summary:processing.sqlite_fts_optimization",
                         f"sqlite_fts_manifest_hash:{sqlite_fts_optimization.get('manifest_hash', '')}",
+                        (
+                            "large_sqlite_fts_report_grade_validation_plan_hash:"
+                            f"{sqlite_fts_validation_plan.get('validation_plan_hash', '')}"
+                        ),
                     ],
                 )
             ],
-            "blockers": [
-                LARGE_SQLITE_FTS_TRUSTED_DIFF_BLOCKER_74,
-                "10m-row-query-plan-regression-not-attached",
-                "deleted-row-wal-replay-validation-not-attached",
-            ],
+            "blockers": list(sqlite_fts_validation_plan.get("blockers") or LARGE_SQLITE_FTS_REPORT_GRADE_BLOCKERS),
         },
         "functional_large_data_profiles": build_functional_large_data_profiles(
             max_extract_size_bytes=max_extract_size,
@@ -4702,6 +4868,11 @@ def build_runtime_defensibility_profiles(
     preview_sandbox_validation_plan = (
         (preview_sandbox_policy or {}).get("preview_sandbox_report_grade_validation_plan")
         if isinstance((preview_sandbox_policy or {}).get("preview_sandbox_report_grade_validation_plan"), Mapping)
+        else {}
+    )
+    sqlite_fts_validation_plan = (
+        (sqlite_fts_optimization or {}).get("large_sqlite_fts_report_grade_validation_plan")
+        if isinstance((sqlite_fts_optimization or {}).get("large_sqlite_fts_report_grade_validation_plan"), Mapping)
         else {}
     )
     profiles = [
@@ -4797,7 +4968,7 @@ def build_runtime_defensibility_profiles(
         build_runtime_defensibility_profile(
             item_number=74,
             component="large-sqlite-fts-optimization",
-            status="implemented-bounded-viewer-validation-required",
+            status="implemented-bounded-viewer-report-grade-plan-validation-required",
             controls={
                 "case_db_performance_pragmas_enabled": True,
                 "bounded_sqlite_preview_contract": True,
@@ -4805,14 +4976,19 @@ def build_runtime_defensibility_profiles(
                 "run_sqlite_fts_optimization_manifest_hash": str((sqlite_fts_optimization or {}).get("manifest_hash", "")),
                 "tracked_output_row_count": int((sqlite_fts_optimization or {}).get("tracked_output_row_count") or 0),
                 "tracked_output_row_head_hash": str((sqlite_fts_optimization or {}).get("tracked_output_row_head_hash") or ""),
+                "large_sqlite_fts_report_grade_validation_plan_hash": str(
+                    sqlite_fts_validation_plan.get("validation_plan_hash") or ""
+                ),
+                "large_sqlite_fts_report_grade_ready_slot_count": int(
+                    sqlite_fts_validation_plan.get("ready_slot_count") or 0
+                ),
+                "large_sqlite_fts_report_grade_blocking_slot_count": int(
+                    sqlite_fts_validation_plan.get("blocking_slot_count") or 0
+                ),
                 "ten_million_row_query_plan_regression_attached": False,
                 "deleted_row_wal_replay_validation_attached": False,
             },
-            blockers=[
-                LARGE_SQLITE_FTS_TRUSTED_DIFF_BLOCKER_74,
-                "10m-row-query-plan-regression-not-attached",
-                "deleted-row-wal-replay-validation-not-attached",
-            ],
+            blockers=list(sqlite_fts_validation_plan.get("blockers") or LARGE_SQLITE_FTS_REPORT_GRADE_BLOCKERS),
         ),
         build_runtime_defensibility_profile(
             item_number=75,
