@@ -2771,6 +2771,7 @@ def review_scale_surface_map() -> dict[str, dict[str, object]]:
             "primary_outputs": [
                 "api pagination.ui_virtualization",
                 "ui-virtualization-manifest-v1",
+                "ui-virtualization-report-grade-validation-plan-v1",
                 "web bounded row rendering notice",
                 "web virtual row-window controls",
             ],
@@ -2781,6 +2782,7 @@ def review_scale_surface_map() -> dict[str, dict[str, object]]:
             "primary_outputs": [
                 "run job cancellation_retry_assessment",
                 "cancellation-retry-manifest-v1",
+                "cancellation-retry-report-grade-validation-plan-v1",
                 "retry_lineage_profile",
                 "partial_output_policy",
                 "job step operational_gap_ids",

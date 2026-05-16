@@ -1407,7 +1407,9 @@ class RapidTriageOpsTests(unittest.TestCase):
             self.assertEqual(item_by_number[78]["trusted_manifest_required"], "pagination-cursor-manifest")
             self.assertIn("api pagination.cursor", item_by_number[78]["primary_outputs"])
             self.assertEqual(item_by_number[79]["component"], "ui-virtualization")
+            self.assertIn("ui-virtualization-report-grade-validation-plan-v1", item_by_number[79]["primary_outputs"])
             self.assertIn("cancellation-retry-manifest-v1", item_by_number[80]["primary_outputs"])
+            self.assertIn("cancellation-retry-report-grade-validation-plan-v1", item_by_number[80]["primary_outputs"])
             self.assertIn("retry_lineage_profile", item_by_number[80]["primary_outputs"])
             validation_spine = payload["validation_spine_progress"]
             self.assertEqual(validation_spine["version"], "validation-spine-progress-v1")
@@ -4886,6 +4888,27 @@ class RapidTriageOpsTests(unittest.TestCase):
                 cancel_manifest["retry_lineage_hash"],
                 canceled.to_dict()["retry_lineage_profile"]["lineage_hash"],
             )
+            cancel_validation_plan = canceled.to_dict()["cancellation_retry_assessment"][
+                "cancellation_retry_report_grade_validation_plan"
+            ]
+            self.assertEqual(
+                cancel_validation_plan["profile_version"],
+                "cancellation-retry-report-grade-validation-plan-v1",
+            )
+            self.assertEqual(
+                canceled.to_dict()["cancellation_retry_assessment"][
+                    "cancellation_retry_report_grade_validation_plan_hash"
+                ],
+                cancel_validation_plan["validation_plan_hash"],
+            )
+            self.assertEqual(cancel_validation_plan["manifest_hash"], cancel_manifest["manifest_hash"])
+            self.assertEqual(cancel_validation_plan["retry_lineage_hash"], cancel_manifest["retry_lineage_hash"])
+            self.assertEqual(
+                cancel_validation_plan["partial_output_policy_hash"],
+                cancel_manifest["partial_output_policy_hash"],
+            )
+            self.assertEqual(canceled.to_dict()["cancellation_retry_assessment"]["report_grade_ready_slot_count"], 6)
+            self.assertEqual(canceled.to_dict()["cancellation_retry_assessment"]["report_grade_blocking_slot_count"], 6)
             self.assertEqual(
                 cancel_manifest["transition_evidence"]["transition_head_hash"],
                 canceled.to_dict()["transition_log_profile"]["head_hash"],
@@ -4897,6 +4920,14 @@ class RapidTriageOpsTests(unittest.TestCase):
             )
             self.assertIn(
                 "cancellation/retry manifest hash emitted",
+                canceled.to_dict()["cancellation_retry_assessment"]["core_accuracy_gates"][0]["satisfied_checks"],
+            )
+            self.assertIn(
+                "cancellation/retry report-grade validation plan emitted",
+                canceled.to_dict()["cancellation_retry_assessment"]["core_accuracy_gates"][0]["satisfied_checks"],
+            )
+            self.assertIn(
+                "cancellation/retry report-grade ready slots emitted",
                 canceled.to_dict()["cancellation_retry_assessment"]["core_accuracy_gates"][0]["satisfied_checks"],
             )
             self.assertEqual(
@@ -4949,6 +4980,14 @@ class RapidTriageOpsTests(unittest.TestCase):
             self.assertIn(
                 "trusted cancellation/retry transition diff pass",
                 cancel_assessment["core_accuracy_gates"][0]["satisfied_checks"],
+            )
+            self.assertIn(
+                "cancellation/retry report-grade validation plan emitted",
+                cancel_assessment["core_accuracy_gates"][0]["satisfied_checks"],
+            )
+            self.assertEqual(
+                cancel_assessment["cancellation_retry_report_grade_validation_plan"]["trusted_diff_status"],
+                "pass",
             )
             self.assertTrue(
                 all(step["commercial_uplift_evidence"]["batch_id"] == "commercial-uplift-066-070" for step in canceled.to_dict()["steps"])

@@ -1887,10 +1887,10 @@
       ],
       "expected": {
         "required_assertions": [
-          "Job payloads preserve queued cancellation, running cancel request records, failed/canceled retry support, persisted cancel flags, retry_lineage_profile, job-partial-output-policy-v1, cancellation-retry-manifest-v1 hashes, and #80 core_accuracy_gates."
+          "Job payloads preserve queued cancellation, running cancel request records, failed/canceled retry support, persisted cancel flags, retry_lineage_profile, job-partial-output-policy-v1, cancellation-retry-manifest-v1 hashes, cancellation-retry-report-grade-validation-plan-v1 ready/blocking slots, trusted cancellation/retry transition diff helpers/gates, and #80 core_accuracy_gates."
         ]
       },
-      "notes": "Internal fixture pass; parser-level cancellation under load, trusted cancellation/retry transition manifests, and partial-output cleanup/resume validation remain blockers.",
+      "notes": "Internal fixture pass; parser-level cooperative cancellation under long-running load, trusted cancellation/retry transition manifests, partial-output cleanup/resume replay validation, idempotent retry output validation, long-running parser checkpoint validation, and multi-platform cancel/retry validation remain blockers.",
       "source_manifest": "docs/validation/rapidtriage-core-forensics-071-080-known-answer.json"
     },
     {

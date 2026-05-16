@@ -27,6 +27,7 @@ FUNCTIONAL_JOB_BATCH_ID = "commercial-uplift-026-030"
 JOB_QUEUE_TRUSTED_DIFF_BLOCKER_69 = "trusted-job-transition-log-diff-missing"
 CANCELLATION_RETRY_TRUSTED_DIFF_BLOCKER_80 = "trusted-cancellation-retry-transition-diff-missing"
 JOB_QUEUE_REPORT_GRADE_VALIDATION_PLAN_VERSION = "job-queue-report-grade-validation-plan-v1"
+CANCELLATION_RETRY_REPORT_GRADE_VALIDATION_PLAN_VERSION = "cancellation-retry-report-grade-validation-plan-v1"
 JOB_QUEUE_REPORT_GRADE_BLOCKERS = [
     "distributed-worker-execution-required",
     "external-trusted-transition-log-required",
@@ -34,6 +35,14 @@ JOB_QUEUE_REPORT_GRADE_BLOCKERS = [
     "resource-telemetry-under-load-required",
     "cooperative-cancellation-load-validation-required",
     "multi-worker-retry-idempotency-validation-required",
+]
+CANCELLATION_RETRY_REPORT_GRADE_BLOCKERS = [
+    CANCELLATION_RETRY_TRUSTED_DIFF_BLOCKER_80,
+    "parser-level-cooperative-cancellation-load-validation-required",
+    "partial-output-cleanup-resume-validation-required",
+    "idempotent-retry-output-validation-required",
+    "long-running-parser-state-checkpoint-validation-required",
+    "multi-platform-cancel-retry-validation-required",
 ]
 CANCELLATION_RETRY_TRUSTED_TOOLS = {
     "cancellation-retry-transition-manifest",
@@ -1297,6 +1306,15 @@ def job_queue_reportability_decision(
 
 def cancellation_retry_assessment(job: RunJob, *, trusted_diff: Mapping[str, object] | None = None) -> Dict[str, object]:
     manifest = cancellation_retry_manifest(cancellation_retry_manifest_source(job))
+    retry_lineage = job_retry_lineage_profile(job)
+    partial_output_policy = job_partial_output_policy(job)
+    validation_plan = cancellation_retry_report_grade_validation_plan(
+        job,
+        manifest=manifest,
+        retry_lineage=retry_lineage,
+        partial_output_policy=partial_output_policy,
+        trusted_diff=trusted_diff,
+    )
     satisfied = [
         "queued job cancellation",
         "running cancel request recorded",
@@ -1313,11 +1331,18 @@ def cancellation_retry_assessment(job: RunJob, *, trusted_diff: Mapping[str, obj
     ]
     if trusted_diff and trusted_diff.get("status") == "pass":
         satisfied.append("trusted cancellation/retry transition diff pass")
+    if validation_plan.get("validation_plan_hash"):
+        satisfied.append("cancellation/retry report-grade validation plan emitted")
+        satisfied.append("cancellation/retry report-grade ready slots emitted")
     blockers = [
         "running-parser-cancel-is-cooperative-and-stage-boundary-limited",
         "partial-output-cleanup-and-resume-policy-still-needs-large-case-validation",
+        *CANCELLATION_RETRY_REPORT_GRADE_BLOCKERS,
     ]
-    if not trusted_diff or trusted_diff.get("status") != "pass":
+    if (
+        (not trusted_diff or trusted_diff.get("status") != "pass")
+        and CANCELLATION_RETRY_TRUSTED_DIFF_BLOCKER_80 not in blockers
+    ):
         blockers.append(CANCELLATION_RETRY_TRUSTED_DIFF_BLOCKER_80)
     return {
         "component": "long-running-job-cancellation-retry",
@@ -1329,8 +1354,12 @@ def cancellation_retry_assessment(job: RunJob, *, trusted_diff: Mapping[str, obj
         "retry_attempt": job.retry_attempt,
         "retry_supported_for": ["failed", "canceled"],
         "cancellation_retry_manifest": manifest,
-        "retry_lineage_profile": job_retry_lineage_profile(job),
-        "partial_output_policy": job_partial_output_policy(job),
+        "retry_lineage_profile": retry_lineage,
+        "partial_output_policy": partial_output_policy,
+        "cancellation_retry_report_grade_validation_plan": validation_plan,
+        "cancellation_retry_report_grade_validation_plan_hash": validation_plan["validation_plan_hash"],
+        "report_grade_ready_slot_count": validation_plan["ready_slot_count"],
+        "report_grade_blocking_slot_count": validation_plan["blocking_slot_count"],
         "ready_for_court_report": False,
         "trusted_cancellation_retry_diff": dict(trusted_diff) if trusted_diff else missing_cancellation_retry_trusted_diff(),
         "core_accuracy_gates": [
@@ -1346,6 +1375,9 @@ def cancellation_retry_assessment(job: RunJob, *, trusted_diff: Mapping[str, obj
                     f"step_status_head_hash:{manifest.get('step_status_head_hash', '')}",
                     f"retry_lineage_hash:{manifest.get('retry_lineage_hash', '')}",
                     f"partial_output_cleanup_status:{manifest.get('partial_output_cleanup_status', '')}",
+                    f"cancellation_retry_report_grade_validation_plan_hash:{validation_plan.get('validation_plan_hash', '')}",
+                    f"cancellation_retry_report_grade_ready_slot_count:{validation_plan.get('ready_slot_count', 0)}",
+                    f"cancellation_retry_report_grade_blocking_slot_count:{validation_plan.get('blocking_slot_count', 0)}",
                     "retry_supported_for:failed,canceled",
                 ],
             )
@@ -1360,6 +1392,127 @@ def cancellation_retry_assessment(job: RunJob, *, trusted_diff: Mapping[str, obj
         ],
         "blockers": blockers,
     }
+
+
+def cancellation_retry_report_grade_validation_plan(
+    job: RunJob,
+    *,
+    manifest: Mapping[str, object],
+    retry_lineage: Mapping[str, object],
+    partial_output_policy: Mapping[str, object],
+    trusted_diff: Mapping[str, object] | None = None,
+) -> Dict[str, object]:
+    trusted_diff = trusted_diff if isinstance(trusted_diff, Mapping) else missing_cancellation_retry_trusted_diff()
+    ready_slots: list[dict[str, object]] = [
+        {
+            "slot_id": "cancellation-retry-manifest",
+            "status": "ready",
+            "evidence_ref": "cancellation_retry_manifest.manifest_hash",
+            "evidence_hash": str(manifest.get("manifest_hash") or ""),
+            "description": "Cancellation/retry manifest binds status, cancel flag, retry eligibility, steps, and partial-output policy.",
+        },
+        {
+            "slot_id": "retry-lineage-profile",
+            "status": "ready",
+            "evidence_ref": "retry_lineage_profile.lineage_hash",
+            "evidence_hash": str(retry_lineage.get("lineage_hash") or ""),
+            "description": "Retry lineage records the source run and retry attempt for failed/canceled jobs.",
+        },
+        {
+            "slot_id": "partial-output-policy",
+            "status": "ready",
+            "evidence_ref": "partial_output_policy.policy_hash",
+            "evidence_hash": str(partial_output_policy.get("policy_hash") or ""),
+            "description": "Partial outputs are preserved for analyst review and are not silently deleted.",
+        },
+        {
+            "slot_id": "transition-evidence",
+            "status": "ready",
+            "evidence_ref": "cancellation_retry_manifest.transition_head_hash",
+            "evidence_hash": str(manifest.get("transition_head_hash") or ""),
+            "description": "Transition evidence records cancel/retry state changes for replay review.",
+        },
+        {
+            "slot_id": "step-status-head",
+            "status": "ready",
+            "evidence_ref": "cancellation_retry_manifest.step_status_head_hash",
+            "evidence_hash": str(manifest.get("step_status_head_hash") or ""),
+            "description": "Step statuses are hashed so partial progress can be cited without dumping all job details.",
+        },
+        {
+            "slot_id": "trusted-diff-disclosure",
+            "status": "ready",
+            "evidence_ref": "trusted_cancellation_retry_diff.status",
+            "evidence_hash": hashlib.sha256(str(trusted_diff.get("status", "missing")).encode("utf-8")).hexdigest(),
+            "description": "The assessment explicitly records whether a trusted transition oracle was attached.",
+        },
+    ]
+    blocking_slots: list[dict[str, object]] = [
+        {
+            "slot_id": "trusted-cancellation-retry-transition-diff",
+            "status": "blocked",
+            "blocker": CANCELLATION_RETRY_TRUSTED_DIFF_BLOCKER_80
+            if trusted_diff.get("status") != "pass"
+            else "trusted-diff-present-but-commercial-retest-required",
+            "required_evidence": "trusted transition manifest diff for queued, running, canceled, failed, and retried jobs",
+        },
+        {
+            "slot_id": "parser-level-cooperative-cancellation-load",
+            "status": "blocked",
+            "blocker": "parser-level-cooperative-cancellation-load-validation-required",
+            "required_evidence": "long-running parser workload proving cancel request, stage boundary, and partial-output review behavior",
+        },
+        {
+            "slot_id": "partial-output-cleanup-resume",
+            "status": "blocked",
+            "blocker": "partial-output-cleanup-resume-validation-required",
+            "required_evidence": "resume/cleanup replay showing no evidence loss and no duplicate output after retry",
+        },
+        {
+            "slot_id": "idempotent-retry-output",
+            "status": "blocked",
+            "blocker": "idempotent-retry-output-validation-required",
+            "required_evidence": "failed/canceled retry replay with output identity and duplicate-prevention assertions",
+        },
+        {
+            "slot_id": "long-running-parser-state-checkpoint",
+            "status": "blocked",
+            "blocker": "long-running-parser-state-checkpoint-validation-required",
+            "required_evidence": "checkpoint/resume telemetry for parser stages interrupted by cancellation",
+        },
+        {
+            "slot_id": "multi-platform-cancel-retry",
+            "status": "blocked",
+            "blocker": "multi-platform-cancel-retry-validation-required",
+            "required_evidence": "Windows, macOS, and Linux cancellation/retry run logs with matching manifests",
+        },
+    ]
+    plan_core = {
+        "profile_version": CANCELLATION_RETRY_REPORT_GRADE_VALIDATION_PLAN_VERSION,
+        "item_number": 80,
+        "gap_id": LONG_RUNNING_JOB_GAP_ID,
+        "commercial_gap_ids": [LONG_RUNNING_JOB_GAP_ID],
+        "run_id": job.run_id,
+        "job_status": job.status,
+        "cancellation_requested": job.cancellation_requested,
+        "retry_of_run_id": job.retry_of_run_id,
+        "retry_attempt": int(job.retry_attempt or 0),
+        "manifest_hash": str(manifest.get("manifest_hash") or ""),
+        "retry_lineage_hash": str(retry_lineage.get("lineage_hash") or ""),
+        "partial_output_policy_hash": str(partial_output_policy.get("policy_hash") or ""),
+        "partial_output_cleanup_status": str(partial_output_policy.get("partial_output_cleanup_status") or ""),
+        "trusted_diff_status": str(trusted_diff.get("status") or "missing"),
+        "ready_slots": ready_slots,
+        "blocking_slots": blocking_slots,
+        "ready_slot_count": len(ready_slots),
+        "blocking_slot_count": len(blocking_slots),
+        "blockers": list(CANCELLATION_RETRY_REPORT_GRADE_BLOCKERS),
+        "commercial_claim_allowed": False,
+        "ready_for_court_report": False,
+        "report_use_warning": "Use as local cancellation/retry control evidence only; do not claim commercial-grade long-running parser cancellation until blocking slots are satisfied.",
+    }
+    validation_plan_hash = hashlib.sha256(json.dumps(plan_core, sort_keys=True).encode("utf-8")).hexdigest()
+    return {**plan_core, "validation_plan_hash": validation_plan_hash}
 
 
 def missing_cancellation_retry_trusted_diff() -> Dict[str, object]:

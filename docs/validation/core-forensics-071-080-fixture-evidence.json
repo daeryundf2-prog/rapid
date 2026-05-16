@@ -90,9 +90,9 @@
       "title": "Long-running job cancellation/retry",
       "test_files": ["tests/test_rapidtriage_ops.py"],
       "assertions": [
-        "Job payloads preserve queued/running cancellation, failed/canceled retry support, persisted cancel flags, retry_lineage_profile, job-partial-output-policy-v1, cancellation-retry-manifest-v1 hashes, trusted cancellation/retry transition diff helpers/gates, and #80 core_accuracy_gates."
+        "Job payloads preserve queued/running cancellation, failed/canceled retry support, persisted cancel flags, retry_lineage_profile, job-partial-output-policy-v1, cancellation-retry-manifest-v1 hashes, cancellation-retry-report-grade-validation-plan-v1 ready/blocking slots, trusted cancellation/retry transition diff helpers/gates, and #80 core_accuracy_gates."
       ],
-      "remaining_external_validation": ["Parser-level cancellation under load, trusted cancellation/retry transition manifests, and partial-output cleanup/resume validation."]
+      "remaining_external_validation": ["Parser-level cooperative cancellation under long-running load, trusted cancellation/retry transition manifests, partial-output cleanup/resume replay validation, idempotent retry output validation, long-running parser checkpoint validation, and multi-platform cancel/retry validation."]
     }
   ]
 }

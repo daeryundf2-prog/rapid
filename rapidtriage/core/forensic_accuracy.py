@@ -1270,6 +1270,8 @@ CORE_FORENSIC_ACCURACY_ITEMS: tuple[dict[str, object], ...] = (
             "cancellation/retry manifest hash emitted",
             "partial output policy emitted",
             "partial output cleanup limitation warning",
+            "cancellation/retry report-grade validation plan emitted",
+            "cancellation/retry report-grade ready slots emitted",
             "trusted cancellation/retry transition diff pass",
         ),
     },
