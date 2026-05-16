@@ -189,10 +189,38 @@ class RapidTriageRunTests(unittest.TestCase):
             self.assertEqual(len(payload["parser_crash_isolation_manifest"]["manifest_hash"]), 64)
             self.assertTrue(payload["parser_crash_isolation_manifest"]["run_continuation_expected"])
             self.assertTrue(payload["parser_crash_isolation_manifest"]["quarantine_policy"]["safe_to_continue_later_stages"])
+            crash_validation_plan = payload["parser_crash_report_grade_validation_plan"]
+            self.assertEqual(
+                crash_validation_plan["profile_version"],
+                "parser-crash-report-grade-validation-plan-v1",
+            )
+            self.assertEqual(crash_validation_plan["item_number"], 71)
+            self.assertEqual(len(crash_validation_plan["validation_plan_hash"]), 64)
+            self.assertEqual(crash_validation_plan["ready_slot_count"], 6)
+            self.assertEqual(crash_validation_plan["blocking_slot_count"], 6)
+            self.assertTrue(crash_validation_plan["failed_parser_json_output"])
+            self.assertTrue(crash_validation_plan["run_continuation_expected"])
+            self.assertFalse(crash_validation_plan["native_process_sandbox_for_every_parser"])
+            self.assertIn(
+                "parser-error-hash-inventory",
+                {slot["slot_id"] for slot in crash_validation_plan["ready_slots"]},
+            )
+            self.assertIn(
+                "native-process-sandboxing",
+                {slot["slot_id"] for slot in crash_validation_plan["blocking_slots"]},
+            )
+            self.assertEqual(
+                payload["parser_crash_report_grade_validation_plan_hash"],
+                crash_validation_plan["validation_plan_hash"],
+            )
             self.assertIn("#71", payload["parser_crash_isolation"]["commercial_gap_ids"])
             self.assertEqual(
                 payload["parser_crash_isolation"]["parser_crash_manifest_hash"],
                 payload["parser_crash_isolation_manifest"]["manifest_hash"],
+            )
+            self.assertEqual(
+                payload["parser_crash_isolation"]["parser_crash_report_grade_validation_plan_hash"],
+                crash_validation_plan["validation_plan_hash"],
             )
             self.assertEqual(payload["parser_crash_isolation"]["core_accuracy_gates"][0]["gap_id"], "#71")
             self.assertIn(
@@ -207,8 +235,20 @@ class RapidTriageRunTests(unittest.TestCase):
                 "parser crash isolation manifest hash emitted",
                 payload["parser_crash_isolation"]["core_accuracy_gates"][0]["satisfied_checks"],
             )
+            self.assertIn(
+                "parser crash report-grade validation plan emitted",
+                payload["parser_crash_isolation"]["core_accuracy_gates"][0]["satisfied_checks"],
+            )
+            self.assertIn(
+                "parser crash report-grade ready slots emitted",
+                payload["parser_crash_isolation"]["core_accuracy_gates"][0]["satisfied_checks"],
+            )
             crash_diff = build_parser_crash_trusted_diff(payload, payload)
-            crash_gates = parser_crash_isolation_assessment(error_count=1, trusted_diff=crash_diff)
+            crash_gates = parser_crash_isolation_assessment(
+                error_count=1,
+                trusted_diff=crash_diff,
+                validation_plan=crash_validation_plan,
+            )
             self.assertEqual(crash_diff["status"], "pass")
             self.assertIn("trusted parser crash-corpus diff pass", crash_gates["core_accuracy_gates"][0]["satisfied_checks"])
 
@@ -478,14 +518,42 @@ class RapidTriageRunTests(unittest.TestCase):
                 parser_crash_ledger["parser_crash_continuation_manifest_hash"],
                 continuation_manifest["manifest_hash"],
             )
+            ledger_validation_plan = parser_crash_ledger["parser_crash_report_grade_validation_plan"]
+            self.assertEqual(
+                ledger_validation_plan["profile_version"],
+                "parser-crash-report-grade-validation-plan-v1",
+            )
+            self.assertEqual(ledger_validation_plan["item_number"], 71)
+            self.assertEqual(ledger_validation_plan["ready_slot_count"], 6)
+            self.assertEqual(ledger_validation_plan["blocking_slot_count"], 6)
+            self.assertEqual(
+                ledger_validation_plan["parser_crash_continuation_manifest_hash"],
+                continuation_manifest["manifest_hash"],
+            )
+            self.assertEqual(
+                parser_crash_ledger["parser_crash_report_grade_validation_plan_hash"],
+                ledger_validation_plan["validation_plan_hash"],
+            )
             self.assertEqual(
                 summary_payload["processing"]["parser_crash_isolation"][
                     "parser_crash_continuation_manifest_hash"
                 ],
                 continuation_manifest["manifest_hash"],
             )
+            self.assertEqual(
+                summary_payload["processing"]["parser_crash_isolation"][
+                    "parser_crash_report_grade_validation_plan_hash"
+                ],
+                ledger_validation_plan["validation_plan_hash"],
+            )
             self.assertIn(
                 "parser crash continuation manifest hash emitted",
+                summary_payload["processing"]["parser_crash_isolation"]["core_accuracy_gates"][0][
+                    "satisfied_checks"
+                ],
+            )
+            self.assertIn(
+                "parser crash report-grade validation plan emitted",
                 summary_payload["processing"]["parser_crash_isolation"]["core_accuracy_gates"][0][
                     "satisfied_checks"
                 ],

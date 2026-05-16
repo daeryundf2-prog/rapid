@@ -11,8 +11,8 @@
       "status": "pass",
       "backlog_items": [71],
       "evidence_paths": ["docs/validation/core-forensics-071-080-fixture-evidence.json", "tests/test_rapidtriage_run.py"],
-      "expected": {"required_assertions": ["Parser failures preserve isolated parser_errors, error hashes, crash context, parser-error inventory head hash, failed parser JSON output, run continuation warnings, summary counts, parser crash continuation manifest row hashes, trusted crash-corpus diff status, and #71 core_accuracy_gates."]},
-      "notes": "Internal fixture pass; native process sandboxing, trusted crash-corpus manifests, and corrupt-input fuzz corpus remain blockers."
+      "expected": {"required_assertions": ["Parser failures preserve isolated parser_errors, error hashes, crash context, parser-error inventory head hash, failed parser JSON output, run continuation warnings, summary counts, parser crash continuation manifest row hashes, parser crash report-grade validation plan hashes/ready slots/blocking slots, trusted crash-corpus diff status, and #71 core_accuracy_gates."]},
+      "notes": "Internal fixture pass; native process sandboxing, trusted crash-corpus manifests, corrupt-input fuzz corpus, subprocess crash-boundary validation, long-running corrupt replay, and cross-platform parser isolation remain blockers."
     },
     {
       "id": "core-forensics-072-memory-cap-fixture",

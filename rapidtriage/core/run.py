@@ -122,6 +122,15 @@ CHECKPOINT_RESUME_REPORT_GRADE_BLOCKERS = [
     "case-db-resume-dedup-validation-required",
 ]
 PARSER_CRASH_TRUSTED_DIFF_BLOCKER_71 = "trusted-parser-crash-corpus-diff-missing"
+PARSER_CRASH_REPORT_GRADE_VALIDATION_PLAN_VERSION = "parser-crash-report-grade-validation-plan-v1"
+PARSER_CRASH_REPORT_GRADE_BLOCKERS = [
+    "native-process-sandboxing-required",
+    "trusted-parser-crash-corpus-required",
+    "corrupt-input-fuzz-crash-corpus-required",
+    "subprocess-crash-boundary-validation-required",
+    "long-running-corrupt-evidence-replay-required",
+    "cross-platform-parser-isolation-validation-required",
+]
 MEMORY_CAP_TRUSTED_DIFF_BLOCKER_72 = "trusted-memory-cap-rss-diff-missing"
 PREVIEW_SANDBOX_TRUSTED_DIFF_BLOCKER_73 = "trusted-preview-no-exec-diff-missing"
 LARGE_SQLITE_FTS_TRUSTED_DIFF_BLOCKER_74 = "trusted-large-sqlite-fts-query-plan-diff-missing"
@@ -1457,6 +1466,19 @@ def isolated_parser_error_payload(kind: str, *, input_root: InputRoot, exc: Exce
         input_root=input_root,
         errors=[error_record],
     )
+    validation_plan = parser_crash_report_grade_validation_plan(
+        error_count=1,
+        error_hashes=[str(error_record["error_hash"])],
+        crash_manifest=crash_manifest,
+        parser_statuses=[
+            {
+                "kind": kind,
+                "status": "error",
+                "parser_error_count": 1,
+                "error_hashes": [str(error_record["error_hash"])],
+            }
+        ],
+    )
     return {
         "command": "artifacts",
         "kind": kind,
@@ -1474,10 +1496,15 @@ def isolated_parser_error_payload(kind: str, *, input_root: InputRoot, exc: Exce
         "parser_errors": [error_record],
         "parser_error_inventory": parser_error_inventory_profile([error_record]),
         "parser_crash_isolation_manifest": crash_manifest,
+        "parser_crash_report_grade_validation_plan": validation_plan,
+        "parser_crash_report_grade_validation_plan_hash": validation_plan["validation_plan_hash"],
+        "report_grade_ready_slot_count": validation_plan["ready_slot_count"],
+        "report_grade_blocking_slot_count": validation_plan["blocking_slot_count"],
         "parser_crash_isolation": parser_crash_isolation_assessment(
             error_count=1,
             error_hashes=[str(error_record["error_hash"])],
             crash_manifest=crash_manifest,
+            validation_plan=validation_plan,
         ),
     }
 
@@ -1606,6 +1633,25 @@ def build_parser_crash_isolation_ledger(
         parser_statuses=parser_statuses,
         scheduler_manifest=scheduler_manifest,
     )
+    ledger_head_hash = hashlib.sha256(
+        json.dumps(
+            {
+                "error_hashes": error_hashes,
+                "parser_statuses": parser_statuses,
+                "continuation_manifest_hash": continuation_manifest["manifest_hash"],
+                "scheduler_manifest_hash": scheduler_manifest.get("manifest_hash"),
+            },
+            sort_keys=True,
+        ).encode("utf-8")
+    ).hexdigest()
+    validation_plan = parser_crash_report_grade_validation_plan(
+        error_count=len(errors),
+        error_hashes=error_hashes,
+        continuation_manifest=continuation_manifest,
+        parser_statuses=parser_statuses,
+        scheduler_manifest=scheduler_manifest,
+        ledger_head_hash=ledger_head_hash,
+    )
     ledger_core: Dict[str, object] = {
         "profile_version": "parser-crash-isolation-ledger-v1",
         "item_number": 71,
@@ -1618,6 +1664,10 @@ def build_parser_crash_isolation_ledger(
         "isolated_errors": errors,
         "parser_crash_continuation_manifest": continuation_manifest,
         "parser_crash_continuation_manifest_hash": continuation_manifest["manifest_hash"],
+        "parser_crash_report_grade_validation_plan": validation_plan,
+        "parser_crash_report_grade_validation_plan_hash": validation_plan["validation_plan_hash"],
+        "report_grade_ready_slot_count": validation_plan["ready_slot_count"],
+        "report_grade_blocking_slot_count": validation_plan["blocking_slot_count"],
         "run_continuation_verified": True,
         "isolation_policy": {
             "one_parser_error_does_not_abort_case_run": True,
@@ -1634,19 +1684,10 @@ def build_parser_crash_isolation_ledger(
             PARSER_CRASH_TRUSTED_DIFF_BLOCKER_71,
             "native-process-sandboxing-is-not-yet-used-for-every-parser",
             "corrupt-input-fuzzing-and-crash-corpus-validation-remain-required",
+            *PARSER_CRASH_REPORT_GRADE_BLOCKERS,
         ],
     }
-    ledger_core["ledger_head_hash"] = hashlib.sha256(
-        json.dumps(
-            {
-                "error_hashes": error_hashes,
-                "parser_statuses": parser_statuses,
-                "continuation_manifest_hash": continuation_manifest["manifest_hash"],
-                "scheduler_manifest_hash": scheduler_manifest.get("manifest_hash"),
-            },
-            sort_keys=True,
-        ).encode("utf-8")
-    ).hexdigest()
+    ledger_core["ledger_head_hash"] = ledger_head_hash
     ledger_core["manifest_hash"] = hashlib.sha256(json.dumps(ledger_core, sort_keys=True).encode("utf-8")).hexdigest()
     return ledger_core
 
@@ -1710,6 +1751,154 @@ def parser_crash_continuation_manifest(
         **manifest_core,
         "manifest_hash": hashlib.sha256(json.dumps(manifest_core, sort_keys=True).encode("utf-8")).hexdigest(),
     }
+
+
+def parser_crash_report_grade_validation_plan(
+    *,
+    error_count: int,
+    error_hashes: Sequence[str] = (),
+    crash_manifest: Mapping[str, object] | None = None,
+    continuation_manifest: Mapping[str, object] | None = None,
+    parser_statuses: Sequence[Mapping[str, object]] = (),
+    scheduler_manifest: Mapping[str, object] | None = None,
+    ledger_head_hash: str = "",
+) -> dict[str, object]:
+    clean_error_hashes = sorted(str(value) for value in error_hashes if str(value))
+    error_hash_head = hashlib.sha256("\n".join(clean_error_hashes).encode("ascii")).hexdigest()
+    parser_rows = [
+        {
+            "kind": str(status.get("kind") or ""),
+            "status": str(status.get("status") or ""),
+            "parser_error_count": int(status.get("parser_error_count") or 0),
+            "error_hashes": [str(value) for value in status.get("error_hashes", [])]
+            if isinstance(status.get("error_hashes"), list)
+            else [],
+        }
+        for status in parser_statuses
+        if isinstance(status, Mapping)
+    ]
+    parser_status_head_hash = hashlib.sha256(
+        json.dumps(parser_rows, sort_keys=True).encode("utf-8")
+    ).hexdigest()
+    crash_manifest_hash = str((crash_manifest or {}).get("manifest_hash") or "")
+    continuation_hash = str((continuation_manifest or {}).get("manifest_hash") or "")
+    scheduler_hash = str((scheduler_manifest or {}).get("manifest_hash") or "")
+    review_policy = [
+        "failed parser JSON is quarantined as non-reportable",
+        "later parser outputs require warning review",
+        "trusted crash-corpus diff is required before commercial claim",
+    ]
+    review_policy_hash = hashlib.sha256(json.dumps(review_policy, sort_keys=True).encode("utf-8")).hexdigest()
+    ready_slots: list[dict[str, object]] = [
+        {
+            "slot_id": "parser-error-hash-inventory",
+            "status": "ready",
+            "evidence_ref": "error_hash_head",
+            "evidence_hash": error_hash_head,
+            "description": "Isolated parser errors are normalized into stable error hashes.",
+        },
+        {
+            "slot_id": "failed-parser-json-output",
+            "status": "ready",
+            "evidence_ref": "failed_parser_json_output",
+            "evidence_hash": crash_manifest_hash or error_hash_head,
+            "description": "A failed parser emits machine-readable JSON instead of aborting the run.",
+        },
+        {
+            "slot_id": "parser-status-rows",
+            "status": "ready",
+            "evidence_ref": "parser_status_head_hash",
+            "evidence_hash": parser_status_head_hash,
+            "description": "Parser status rows preserve which sibling parsers continued after a failure.",
+        },
+        {
+            "slot_id": "continuation-manifest",
+            "status": "ready",
+            "evidence_ref": "parser_crash_continuation_manifest_hash",
+            "evidence_hash": continuation_hash or crash_manifest_hash or error_hash_head,
+            "description": "Continuation evidence separates isolated parser failures from completed sibling outputs.",
+        },
+        {
+            "slot_id": "scheduler-manifest-linkage",
+            "status": "ready",
+            "evidence_ref": "scheduler_manifest_hash",
+            "evidence_hash": scheduler_hash or parser_status_head_hash,
+            "description": "Scheduler metadata links parser isolation to deterministic run output ordering.",
+        },
+        {
+            "slot_id": "operator-review-policy",
+            "status": "ready",
+            "evidence_ref": "review_policy_hash",
+            "evidence_hash": review_policy_hash,
+            "description": "Operator warnings prevent isolated failures from being reported as complete artifacts.",
+        },
+    ]
+    blocking_slots: list[dict[str, object]] = [
+        {
+            "slot_id": "native-process-sandboxing",
+            "status": "blocked",
+            "blocker": "native-process-sandboxing-required",
+            "required_evidence": "every parser runs under a subprocess or OS sandbox boundary with crash-only failure mode",
+        },
+        {
+            "slot_id": "trusted-crash-corpus",
+            "status": "blocked",
+            "blocker": "trusted-parser-crash-corpus-required",
+            "required_evidence": "trusted crash-corpus manifest proving expected isolated failures and no missing failures",
+        },
+        {
+            "slot_id": "corrupt-input-fuzz-corpus",
+            "status": "blocked",
+            "blocker": "corrupt-input-fuzz-crash-corpus-required",
+            "required_evidence": "fuzz/corrupt-input corpus logs with parser-level pass/fail and continuation proof",
+        },
+        {
+            "slot_id": "subprocess-crash-boundary",
+            "status": "blocked",
+            "blocker": "subprocess-crash-boundary-validation-required",
+            "required_evidence": "hard process crash fixture proving segfault/abort cannot terminate the case run",
+        },
+        {
+            "slot_id": "long-running-corrupt-replay",
+            "status": "blocked",
+            "blocker": "long-running-corrupt-evidence-replay-required",
+            "required_evidence": "large corrupt-evidence replay showing stable continuation and bounded warning volume",
+        },
+        {
+            "slot_id": "cross-platform-isolation",
+            "status": "blocked",
+            "blocker": "cross-platform-parser-isolation-validation-required",
+            "required_evidence": "Windows, macOS, and Linux parser-isolation run logs with matching manifest semantics",
+        },
+    ]
+    plan_core = {
+        "profile_version": PARSER_CRASH_REPORT_GRADE_VALIDATION_PLAN_VERSION,
+        "item_number": 71,
+        "gap_id": PARSER_CRASH_ISOLATION_GAP_ID,
+        "commercial_gap_ids": [PARSER_CRASH_ISOLATION_GAP_ID],
+        "error_count": error_count,
+        "error_hash_head": error_hash_head,
+        "parser_status_row_count": len(parser_rows),
+        "parser_status_head_hash": parser_status_head_hash,
+        "parser_crash_manifest_hash": crash_manifest_hash,
+        "parser_crash_continuation_manifest_hash": continuation_hash,
+        "scheduler_manifest_hash": scheduler_hash,
+        "ledger_head_hash": ledger_head_hash,
+        "failed_parser_json_output": True,
+        "run_continuation_expected": True,
+        "native_process_sandbox_for_every_parser": False,
+        "trusted_crash_corpus_attached": False,
+        "ready_slots": ready_slots,
+        "blocking_slots": blocking_slots,
+        "ready_slot_count": len(ready_slots),
+        "blocking_slot_count": len(blocking_slots),
+        "blockers": list(PARSER_CRASH_REPORT_GRADE_BLOCKERS),
+        "commercial_claim_allowed": False,
+        "ready_for_court_report": False,
+        "report_use_warning": "Use as parser-failure isolation evidence only; do not claim sandboxed crash containment until blocker slots are satisfied.",
+    }
+    validation_plan_hash = hashlib.sha256(json.dumps(plan_core, sort_keys=True).encode("utf-8")).hexdigest()
+    return {**plan_core, "validation_plan_hash": validation_plan_hash}
 
 
 def parser_error_inventory_profile(errors: Sequence[Mapping[str, object]]) -> Dict[str, object]:
@@ -1841,6 +2030,7 @@ def parser_crash_isolation_assessment(
     error_count: int,
     error_hashes: Sequence[str] = (),
     crash_manifest: Mapping[str, object] | None = None,
+    validation_plan: Mapping[str, object] | None = None,
     trusted_diff: Mapping[str, object] | None = None,
 ) -> dict[str, object]:
     satisfied = [
@@ -1856,6 +2046,17 @@ def parser_crash_isolation_assessment(
         satisfied.append("parser crash isolation manifest hash emitted")
     if crash_manifest and crash_manifest.get("parser_crash_continuation_manifest_hash"):
         satisfied.append("parser crash continuation manifest hash emitted")
+    plan: Mapping[str, object] = validation_plan or {}
+    plan_candidate = (crash_manifest or {}).get("parser_crash_report_grade_validation_plan")
+    if not plan and isinstance(plan_candidate, Mapping):
+        plan = plan_candidate
+    validation_plan_hash = str(plan.get("validation_plan_hash") or "")
+    ready_slot_count = int(plan.get("ready_slot_count") or 0)
+    blocking_slot_count = int(plan.get("blocking_slot_count") or 0)
+    if validation_plan_hash:
+        satisfied.append("parser crash report-grade validation plan emitted")
+    if ready_slot_count:
+        satisfied.append("parser crash report-grade ready slots emitted")
     evidence_refs = [f"parser_error_count:{error_count}", "run-summary:processing.parser_crash_isolation"]
     evidence_refs.extend(f"parser_error_hash:{value}" for value in error_hashes[:10])
     if crash_manifest and crash_manifest.get("manifest_hash"):
@@ -1864,6 +2065,10 @@ def parser_crash_isolation_assessment(
         evidence_refs.append(
             f"parser_crash_continuation_manifest_hash:{crash_manifest.get('parser_crash_continuation_manifest_hash')}"
         )
+    if validation_plan_hash:
+        evidence_refs.append(f"parser_crash_report_grade_validation_plan_hash:{validation_plan_hash}")
+        evidence_refs.append(f"parser_crash_report_grade_ready_slots:{ready_slot_count}")
+        evidence_refs.append(f"parser_crash_report_grade_blocking_slots:{blocking_slot_count}")
     if trusted_diff and trusted_diff.get("status") == "pass":
         satisfied.append("trusted parser crash-corpus diff pass")
         evidence_refs.append(f"trusted_tool:{trusted_diff.get('trusted_tool', '')}")
@@ -1877,6 +2082,10 @@ def parser_crash_isolation_assessment(
         "parser_crash_continuation_manifest_hash": str(
             (crash_manifest or {}).get("parser_crash_continuation_manifest_hash") or ""
         ),
+        "parser_crash_report_grade_validation_plan": dict(plan) if plan else {},
+        "parser_crash_report_grade_validation_plan_hash": validation_plan_hash,
+        "report_grade_ready_slot_count": ready_slot_count,
+        "report_grade_blocking_slot_count": blocking_slot_count,
         "ready_for_court_report": error_count == 0,
         "core_accuracy_gates": [
             build_accuracy_gate(
@@ -1895,6 +2104,7 @@ def parser_crash_isolation_assessment(
             "native-process-sandboxing-is-not-yet-used-for-every-parser",
             "corrupt-input-fuzzing-and-crash-corpus-validation-remain-required",
             PARSER_CRASH_TRUSTED_DIFF_BLOCKER_71,
+            *PARSER_CRASH_REPORT_GRADE_BLOCKERS,
         ],
     }
 
@@ -4184,6 +4394,15 @@ def build_runtime_defensibility_profiles(
                         else {}
                     ).get("parser_status_row_count")
                     or 0
+                ),
+                "parser_crash_report_grade_validation_plan_hash": str(
+                    parser_crash_ledger.get("parser_crash_report_grade_validation_plan_hash") or ""
+                ),
+                "parser_crash_report_grade_ready_slot_count": int(
+                    parser_crash_ledger.get("report_grade_ready_slot_count") or 0
+                ),
+                "parser_crash_report_grade_blocking_slot_count": int(
+                    parser_crash_ledger.get("report_grade_blocking_slot_count") or 0
                 ),
             },
             blockers=[

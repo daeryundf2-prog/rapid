@@ -158,6 +158,7 @@ class RapidTriageCoreForensicsAccuracyTests(unittest.TestCase):
         self.assertIn("checkpoint resume report-grade validation plan emitted", checkpoint["required_checks"])
         self.assertIn("trusted checkpoint/resume manifest diff pass", checkpoint["required_checks"])
         self.assertIn("per-parser exception capture", parser_crash["required_checks"])
+        self.assertIn("parser crash report-grade validation plan emitted", parser_crash["required_checks"])
         self.assertIn("trusted parser crash-corpus diff pass", parser_crash["required_checks"])
         self.assertIn("memory cap configuration recorded", memory_cap["required_checks"])
         self.assertIn("stage telemetry row hashes emitted", memory_cap["required_checks"])

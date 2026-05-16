@@ -1104,6 +1104,8 @@ CORE_FORENSIC_ACCURACY_ITEMS: tuple[dict[str, object], ...] = (
             "run continuation after parser error",
             "summary warning surfaced",
             "parser crash continuation manifest hash emitted",
+            "parser crash report-grade validation plan emitted",
+            "parser crash report-grade ready slots emitted",
             "native sandbox/fuzzing limitation warning",
             "trusted parser crash-corpus diff pass",
         ),
