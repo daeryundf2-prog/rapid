@@ -139,23 +139,32 @@ async function loadRuns() {
 
 function renderRunList(runs) {
   runList.innerHTML = "";
+  document.body.classList.toggle("has-runs", Boolean(runs.length));
   document.body.classList.toggle("analysis-active", Boolean(selectedRunId));
   if (!runs.length) {
     runList.innerHTML = renderEmptyRunList();
     return;
   }
   for (const run of runs) {
+    const request = run.request || {};
+    const isSelected = run.run_id === selectedRunId;
+    const mode = request.mode || "case";
+    const root = request.root || request.output_dir || "";
     const button = document.createElement("button");
     button.type = "button";
-    button.className = `run-item ${run.run_id === selectedRunId ? "selected" : ""}`;
-    button.title = `${run.request.mode} · ${run.run_id} · ${run.status}`;
-    button.setAttribute("aria-label", `Open run ${run.run_id}, mode ${run.request.mode}, status ${run.status}`);
+    button.className = `run-item ${isSelected ? "selected" : ""}`;
+    button.title = `${mode} · ${run.run_id} · ${run.status}`;
+    button.setAttribute("aria-label", `Open run ${run.run_id}, mode ${mode}, status ${run.status}`);
     button.innerHTML = `
-      <span>
-        <strong>${escapeHtml(run.request.mode)} · ${escapeHtml(run.run_id)}</strong>
-        <span>${escapeHtml(run.origin || "web")} · ${escapeHtml(run.request.root || run.request.output_dir || "")}</span>
+      <span class="run-item-main">
+        <span class="run-item-kicker">${escapeHtml(mode)} case</span>
+        <strong>${escapeHtml(run.run_id)}</strong>
+        <span class="run-item-path">${escapeHtml(run.origin || "web")} · ${escapeHtml(root)}</span>
       </span>
-      <span class="status-pill ${statusClass(run.status)}">${escapeHtml(run.status)}</span>
+      <span class="run-item-meta">
+        <span class="status-pill ${statusClass(run.status)}">${escapeHtml(run.status)}</span>
+        <span class="run-item-open">${isSelected ? "열림" : "열기"}</span>
+      </span>
     `;
     button.addEventListener("click", () => loadRunDetail(run.run_id, activeTab));
     runList.appendChild(button);
