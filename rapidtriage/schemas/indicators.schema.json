@@ -255,7 +255,24 @@
     "ioc_ti_enrichment_manifest_hash": {
       "type": "string"
     },
+    "ioc_ti_report_grade_validation_plan": {
+      "type": "object",
+      "additionalProperties": true
+    },
+    "ioc_ti_report_grade_validation_plan_hash": {
+      "type": "string"
+    },
+    "report_grade_ready_slot_count": {
+      "type": "integer"
+    },
+    "report_grade_blocking_slot_count": {
+      "type": "integer"
+    },
     "ti_enrichment_assessment": {
+      "type": "object",
+      "additionalProperties": true
+    },
+    "reportability_decision": {
       "type": "object",
       "additionalProperties": true
     },

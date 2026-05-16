@@ -30,6 +30,7 @@ if HAS_FASTAPI:
         build_large_sqlite_fts_trusted_diff,
         build_media_transcript_trusted_diff,
         build_pagination_cursor_manifest,
+        build_pagination_cursor_report_grade_validation_plan,
         build_pagination_trusted_diff,
         build_preview_sandbox_trusted_diff,
         build_source_preview,
@@ -2884,6 +2885,32 @@ class RapidTriageApiTests(unittest.TestCase):
             )
             self.assertEqual(len(paged_files["pagination"]["cursor_endpoint_coverage_manifest"]["manifest_hash"]), 64)
             self.assertEqual(
+                paged_files["pagination"]["pagination_cursor_report_grade_validation_plan"]["profile_version"],
+                "pagination-cursor-report-grade-validation-plan-v1",
+            )
+            self.assertEqual(
+                paged_files["pagination"]["pagination_cursor_report_grade_validation_plan_hash"],
+                paged_files["pagination"]["pagination_cursor_report_grade_validation_plan"]["validation_plan_sha256"],
+            )
+            self.assertEqual(paged_files["pagination"]["report_grade_ready_slot_count"], 6)
+            self.assertEqual(paged_files["pagination"]["report_grade_blocking_slot_count"], 6)
+            self.assertEqual(
+                paged_files["pagination"]["pagination_cursor_report_grade_validation_plan"]["pagination_manifest_hash"],
+                paged_files["pagination"]["pagination_manifest"]["manifest_hash"],
+            )
+            manual_pagination_plan = build_pagination_cursor_report_grade_validation_plan(
+                collection_name="candidates",
+                total=paged_files["pagination"]["total"],
+                returned=paged_files["pagination"]["returned"],
+                has_more=paged_files["pagination"]["has_more"],
+                pagination_manifest=paged_files["pagination"]["pagination_manifest"],
+                coverage_manifest=paged_files["pagination"]["cursor_endpoint_coverage_manifest"],
+            )
+            self.assertEqual(
+                manual_pagination_plan["validation_plan_sha256"],
+                paged_files["pagination"]["pagination_cursor_report_grade_validation_plan_hash"],
+            )
+            self.assertEqual(
                 paged_files["pagination"]["page_window_id"],
                 paged_files["pagination"]["pagination_manifest"]["page_window_id"],
             )
@@ -2915,6 +2942,20 @@ class RapidTriageApiTests(unittest.TestCase):
             self.assertIn(
                 "pagination cursor manifest hash emitted",
                 paged_files["pagination"]["core_accuracy_gates"][0]["satisfied_checks"],
+            )
+            self.assertIn(
+                "pagination cursor report-grade validation plan emitted",
+                paged_files["pagination"]["core_accuracy_gates"][0]["satisfied_checks"],
+            )
+            self.assertIn(
+                "pagination cursor report-grade ready slots emitted",
+                paged_files["pagination"]["pagination_assessment"]["core_accuracy_gates"][0]["satisfied_checks"],
+            )
+            self.assertEqual(
+                paged_files["pagination"]["pagination_assessment"][
+                    "pagination_cursor_report_grade_validation_plan_hash"
+                ],
+                paged_files["pagination"]["pagination_cursor_report_grade_validation_plan_hash"],
             )
             self.assertEqual(paged_files["pagination"]["core_accuracy_gates"][1]["gap_id"], "#79")
             self.assertEqual(paged_files["pagination"]["ui_virtualization"]["core_accuracy_gates"][0]["gap_id"], "#79")
@@ -3137,6 +3178,38 @@ class RapidTriageApiTests(unittest.TestCase):
             trusted_diff=media_diff,
         )[0]
         self.assertIn("trusted transcript cue/alignment diff pass", media_gate["satisfied_checks"])
+
+        pagination_manifest = build_pagination_cursor_manifest(
+            collection_name="candidates",
+            offset=0,
+            limit=2,
+            returned=2,
+            total=5,
+            cursor="MA==",
+            next_cursor="Mg==",
+            previous_cursor=None,
+            has_more=True,
+        )
+        pagination_plan = build_pagination_cursor_report_grade_validation_plan(
+            collection_name="candidates",
+            total=5,
+            returned=2,
+            has_more=True,
+            pagination_manifest=pagination_manifest,
+        )
+        self.assertEqual(pagination_plan["profile_version"], "pagination-cursor-report-grade-validation-plan-v1")
+        self.assertEqual(pagination_plan["ready_slot_count"], 6)
+        self.assertEqual(pagination_plan["blocking_slot_count"], 6)
+        pagination_gate = pagination_core_accuracy_gates(
+            "candidates",
+            total=5,
+            returned=2,
+            has_more=True,
+            pagination_manifest=pagination_manifest,
+            validation_plan=pagination_plan,
+        )[0]
+        self.assertIn("pagination cursor report-grade validation plan emitted", pagination_gate["satisfied_checks"])
+        self.assertIn("pagination cursor report-grade ready slots emitted", pagination_gate["satisfied_checks"])
 
     def test_create_run_rejects_detected_image_that_cannot_be_scanned_directly(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:

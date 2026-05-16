@@ -88,8 +88,8 @@
       "status": "pass",
       "backlog_items": [78],
       "evidence_paths": ["docs/validation/core-forensics-071-080-fixture-evidence.json", "tests/test_rapidtriage_api.py"],
-      "expected": {"required_assertions": ["API pages preserve cursor tokens, offset/limit/total metadata, next/previous cursors, bounded rows, corrected last-page has_more semantics, pagination-cursor-manifest-v1 page-window IDs/manifest hashes, snapshot warning, trusted pagination cursor manifest diff helpers/gates, and #78 core_accuracy_gates."]},
-      "notes": "Internal fixture pass; snapshot-isolated cursors, trusted external pagination manifests, and endpoint-wide pagination compatibility remain blockers."
+      "expected": {"required_assertions": ["API pages preserve cursor tokens, offset/limit/total metadata, next/previous cursors, bounded rows, corrected last-page has_more semantics, pagination-cursor-manifest-v1 page-window IDs/manifest hashes, snapshot warning, pagination-cursor-report-grade-validation-plan-v1 hashes/ready slots/blocking slots, trusted pagination cursor manifest diff helpers/gates, and #78 core_accuracy_gates."]},
+      "notes": "Internal fixture pass; snapshot-isolated cursors, trusted external pagination manifests, endpoint-wide pagination compatibility, cursor invalidation/replay validation, large-case page latency evidence, and cross-client cursor compatibility remain blockers."
     },
     {
       "id": "core-forensics-079-ui-virtualization-fixture",

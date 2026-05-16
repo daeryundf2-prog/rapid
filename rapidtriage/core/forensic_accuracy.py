@@ -1231,6 +1231,8 @@ CORE_FORENSIC_ACCURACY_ITEMS: tuple[dict[str, object], ...] = (
             "snapshot isolation limitation warning",
             "pagination cursor manifest hash emitted",
             "page window id emitted",
+            "pagination cursor report-grade validation plan emitted",
+            "pagination cursor report-grade ready slots emitted",
             "trusted pagination cursor manifest diff pass",
         ),
     },
