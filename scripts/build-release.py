@@ -58,6 +58,16 @@ LINUX_PACKAGE_REPORT_GRADE_BLOCKERS = [
     "package-signing-policy-required",
 ]
 AUTO_UPDATE_TRUSTED_DIFF_BLOCKER_104 = "trusted-auto-update-channel-diff-missing"
+AUTO_UPDATE_REPORT_GRADE_VALIDATION_PLAN_VERSION = "auto-update-report-grade-validation-plan-v1"
+AUTO_UPDATE_REPORT_GRADE_BLOCKERS = [
+    AUTO_UPDATE_TRUSTED_DIFF_BLOCKER_104,
+    "signed-update-manifest-required",
+    "hosted-update-channel-required",
+    "rollback-test-required",
+    "enterprise-disable-smoke-required",
+    "update-client-implementation-required",
+    "release-artifact-signature-required",
+]
 RELEASE_PACKAGING_TRUSTED_TOOLS = {
     "authenticode-signature-log",
     "macos-notarization-log",
@@ -317,6 +327,157 @@ def build_auto_update_channel_evidence_manifest(
     }
     manifest["manifest_hash"] = stable_release_sha256(manifest)
     return manifest
+
+
+def build_auto_update_report_grade_validation_plan(
+    *,
+    update_evidence_manifest: dict[str, object],
+    artifacts: list[dict[str, object]],
+    trusted_diff: dict[str, object],
+    channel: str,
+    enterprise_disable: bool,
+    rollback_guidance: str,
+    signature_policy: str,
+) -> dict[str, object]:
+    release_artifact_hashes = update_evidence_manifest.get("release_artifact_hashes")
+    update_evidence_slots = (
+        update_evidence_manifest.get("update_evidence_slots")
+        if isinstance(update_evidence_manifest.get("update_evidence_slots"), Mapping)
+        else {}
+    )
+    evidence_slot_matrix = (
+        update_evidence_manifest.get("evidence_slot_matrix")
+        if isinstance(update_evidence_manifest.get("evidence_slot_matrix"), Mapping)
+        else {}
+    )
+    ready_slots: list[dict[str, object]] = []
+    blocking_slots: list[dict[str, object]] = []
+
+    def add_ready(slot_id: str, evidence: str, source: str) -> None:
+        ready_slots.append(
+            {
+                "slot_id": slot_id,
+                "status": "ready",
+                "evidence": evidence,
+                "source": source,
+                "commercial_claim_material": False,
+            }
+        )
+
+    def add_blocking(slot_id: str, blocker: str, required_evidence: str, owner: str = "release engineer") -> None:
+        blocking_slots.append(
+            {
+                "slot_id": slot_id,
+                "status": "external-evidence-required",
+                "blocker": blocker,
+                "required_evidence": required_evidence,
+                "owner": owner,
+                "commercial_claim_material": True,
+            }
+        )
+
+    if artifacts:
+        add_ready("release-artifact-inventory", "Release artifact inventory available for update manifest", "artifacts")
+    else:
+        add_blocking("release-artifact-inventory", "release-artifact-inventory-missing", "Release artifact inventory")
+    if release_artifact_hashes:
+        add_ready("release-artifact-hashes", "Update channel artifact hashes captured", "auto-update-evidence-manifest")
+    else:
+        add_blocking("release-artifact-hashes", "release-artifact-hashes-missing", "Update artifact hash inventory")
+    if update_evidence_manifest.get("manifest_hash"):
+        add_ready("auto-update-evidence-manifest", "Auto-update evidence manifest hash emitted", "update-manifest")
+    else:
+        add_blocking(
+            "auto-update-evidence-manifest",
+            "auto-update-evidence-manifest-hash-missing",
+            "auto-update-channel-evidence-manifest-v1 hash",
+        )
+    if update_evidence_manifest.get("evidence_slot_matrix_hash") and evidence_slot_matrix.get("rows"):
+        add_ready("auto-update-evidence-slot-matrix", "Evidence slot matrix rows and hash emitted", "update-manifest")
+    else:
+        add_blocking(
+            "auto-update-evidence-slot-matrix",
+            "auto-update-evidence-slot-matrix-missing",
+            "release-evidence-slot-matrix-v1 rows and hash",
+        )
+    if channel == "manual":
+        add_ready("manual-channel-boundary", "Manual update channel boundary declared", "update-manifest")
+    if enterprise_disable:
+        add_ready("enterprise-disable-policy", "Enterprise disable flag declared", "update-manifest")
+    if rollback_guidance:
+        add_ready("rollback-guidance", "Rollback guidance declared", "update-manifest")
+    if signature_policy:
+        add_ready("signature-policy", "Signature policy declared", "update-manifest")
+    if trusted_diff.get("status"):
+        add_ready("trusted-diff-boundary", "Trusted signed update channel diff status recorded", "trusted_auto_update_channel_diff")
+    if update_evidence_slots:
+        add_ready("update-slot-disclosure", "signed manifest, hosting, rollback, and enterprise-disable slots disclosed", "update_evidence_slots")
+
+    if trusted_diff.get("status") != "pass":
+        add_blocking(
+            "trusted-auto-update-channel-diff",
+            AUTO_UPDATE_TRUSTED_DIFF_BLOCKER_104,
+            "Trusted signed update channel diff manifest",
+        )
+    required_external_slots = {
+        "signed_manifest": (
+            "signed-update-manifest-required",
+            "Signed update manifest and signature verification transcript",
+        ),
+        "hosted_channel": (
+            "hosted-update-channel-required",
+            "Hosted update channel URL, TLS policy, and access-control review",
+        ),
+        "rollback_test": ("rollback-test-required", "Rollback test transcript using previous and current release artifacts"),
+        "enterprise_disable_smoke": (
+            "enterprise-disable-smoke-required",
+            "Enterprise policy smoke proving auto-update can be disabled",
+        ),
+    }
+    for slot_name, (blocker, required_evidence) in required_external_slots.items():
+        slot = update_evidence_slots.get(slot_name) if isinstance(update_evidence_slots, Mapping) else {}
+        if not isinstance(slot, Mapping) or slot.get("status") != "attached":
+            add_blocking(slot_name, blocker, required_evidence)
+    add_blocking(
+        "update-client-implementation",
+        "update-client-implementation-required",
+        "Implemented update client/channel resolver or explicit manual-update-only commercial policy",
+        owner="product/release engineering",
+    )
+    add_blocking(
+        "release-artifact-signature",
+        "release-artifact-signature-required",
+        "Signed release artifacts referenced by the update channel",
+    )
+
+    blockers = sorted({str(slot.get("blocker")) for slot in blocking_slots if slot.get("blocker")})
+    plan_core: dict[str, object] = {
+        "profile_version": AUTO_UPDATE_REPORT_GRADE_VALIDATION_PLAN_VERSION,
+        "item_number": 104,
+        "commercial_gap_ids": [AUTO_UPDATE_CHANNEL_GAP_ID],
+        "commercial_claim_allowed": False,
+        "reporting_boundary": (
+            "Internal update artifacts prove manual-channel manifest readiness and evidence-slot disclosure only; "
+            "auto-update claims require the blocking hosted signed-channel, rollback, and client evidence."
+        ),
+        "channel": channel,
+        "auto_update_enabled_by_default": False,
+        "enterprise_disable": enterprise_disable,
+        "release_artifact_hashes": release_artifact_hashes or [],
+        "auto_update_evidence_manifest_hash": update_evidence_manifest.get("manifest_hash"),
+        "evidence_slot_matrix_hash": update_evidence_manifest.get("evidence_slot_matrix_hash"),
+        "trusted_diff_status": trusted_diff.get("status"),
+        "trusted_diff_blocker": trusted_diff.get("blocker"),
+        "ready_slots": ready_slots,
+        "blocking_slots": blocking_slots,
+        "ready_slot_count": len(ready_slots),
+        "blocking_slot_count": len(blocking_slots),
+        "external_blocker_catalog": AUTO_UPDATE_REPORT_GRADE_BLOCKERS,
+        "blockers": blockers,
+    }
+    plan = dict(plan_core)
+    plan["validation_plan_sha256"] = stable_release_sha256(plan_core)
+    return plan
 
 
 def build_windows_signing_evidence_manifest(
@@ -2006,12 +2167,24 @@ def write_release_manifest(output_dir: Path, repo: Path, commercial_readiness: d
                 "enterprise_disable_supported": True,
                 "auto_update_evidence_manifest_hash": update_manifest_payload.get("auto_update_evidence_manifest_hash"),
                 "evidence_slot_matrix_hash": update_manifest_payload.get("evidence_slot_matrix_hash"),
+                "auto_update_report_grade_validation_plan": update_manifest_payload.get(
+                    "auto_update_report_grade_validation_plan"
+                ),
+                "auto_update_report_grade_validation_plan_hash": update_manifest_payload.get(
+                    "auto_update_report_grade_validation_plan_hash"
+                ),
+                "auto_update_report_grade_ready_slot_count": update_manifest_payload.get(
+                    "auto_update_report_grade_ready_slot_count"
+                ),
+                "auto_update_report_grade_blocking_slot_count": update_manifest_payload.get(
+                    "auto_update_report_grade_blocking_slot_count"
+                ),
                 "update_evidence_slots": update_manifest_payload.get("update_evidence_slots", {}),
                 "trusted_auto_update_channel_diff": update_manifest_payload.get(
                     "trusted_auto_update_channel_diff",
                     missing_release_packaging_trusted_diff(104),
                 ),
-                "blockers": [AUTO_UPDATE_TRUSTED_DIFF_BLOCKER_104],
+                "blockers": update_manifest_payload.get("blockers", [AUTO_UPDATE_TRUSTED_DIFF_BLOCKER_104]),
             },
             "operations_documents": {
                 "status": "packaged",
@@ -2230,23 +2403,52 @@ def write_update_manifest(output_dir: Path) -> None:
         )
     trusted_diff = missing_release_packaging_trusted_diff(104)
     update_evidence_manifest = build_auto_update_channel_evidence_manifest(artifacts, trusted_diff)
+    channel = "manual"
+    enterprise_disable = True
+    rollback_guidance = "Keep the previous portable ZIP and SHA256SUMS until the new release smoke tests pass."
+    signature_policy = "Public distribution requires signed Windows/macOS artifacts; portable ZIP distribution must verify SHA256SUMS."
+    auto_update_report_grade_validation_plan = build_auto_update_report_grade_validation_plan(
+        update_evidence_manifest=update_evidence_manifest,
+        artifacts=artifacts,
+        trusted_diff=trusted_diff,
+        channel=channel,
+        enterprise_disable=enterprise_disable,
+        rollback_guidance=rollback_guidance,
+        signature_policy=signature_policy,
+    )
+    auto_update_blockers = sorted(
+        {
+            AUTO_UPDATE_TRUSTED_DIFF_BLOCKER_104,
+            *[str(blocker) for blocker in auto_update_report_grade_validation_plan.get("blockers", [])],
+        }
+    )
     manifest = {
         "name": "rapidtriage-update-manifest",
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "commercial_gap_ids": [AUTO_UPDATE_CHANNEL_GAP_ID],
-        "core_accuracy_gates": release_packaging_core_accuracy_gate(104, evidence_manifest=update_evidence_manifest),
-        "channel": "manual",
+        "core_accuracy_gates": release_packaging_core_accuracy_gate(
+            104,
+            evidence_manifest=update_evidence_manifest,
+            report_grade_validation_plan=auto_update_report_grade_validation_plan,
+        ),
+        "channel": channel,
         "auto_update_enabled_by_default": False,
-        "enterprise_disable": True,
-        "rollback_guidance": "Keep the previous portable ZIP and SHA256SUMS until the new release smoke tests pass.",
+        "enterprise_disable": enterprise_disable,
+        "rollback_guidance": rollback_guidance,
         "artifacts": artifacts,
-        "signature_policy": "Public distribution requires signed Windows/macOS artifacts; portable ZIP distribution must verify SHA256SUMS.",
+        "signature_policy": signature_policy,
         "auto_update_evidence_manifest": update_evidence_manifest,
         "auto_update_evidence_manifest_hash": update_evidence_manifest["manifest_hash"],
         "evidence_slot_matrix_hash": update_evidence_manifest["evidence_slot_matrix_hash"],
+        "auto_update_report_grade_validation_plan": auto_update_report_grade_validation_plan,
+        "auto_update_report_grade_validation_plan_hash": auto_update_report_grade_validation_plan[
+            "validation_plan_sha256"
+        ],
+        "auto_update_report_grade_ready_slot_count": auto_update_report_grade_validation_plan["ready_slot_count"],
+        "auto_update_report_grade_blocking_slot_count": auto_update_report_grade_validation_plan["blocking_slot_count"],
         "update_evidence_slots": update_evidence_manifest["update_evidence_slots"],
         "trusted_auto_update_channel_diff": trusted_diff,
-        "blockers": [AUTO_UPDATE_TRUSTED_DIFF_BLOCKER_104],
+        "blockers": auto_update_blockers,
     }
     (output_dir / "update-manifest.json").write_text(json.dumps(manifest, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
 
@@ -2327,7 +2529,14 @@ def build_release_packaging_trusted_diff(
             ]
         )
     if number == 104:
-        compared_fields.extend(["auto_update_evidence_manifest_hash", "update_evidence_slots", "evidence_slot_matrix_hash"])
+        compared_fields.extend(
+            [
+                "auto_update_evidence_manifest_hash",
+                "update_evidence_slots",
+                "evidence_slot_matrix_hash",
+                "auto_update_report_grade_validation_plan_hash",
+            ]
+        )
     mismatches = []
     for field in compared_fields:
         rapid_value = normalize_release_packaging_value(rapid_payload.get(field))
@@ -2530,6 +2739,11 @@ def release_packaging_core_accuracy_gate(
             satisfied_checks.append("auto-update evidence slots emitted")
         if evidence_manifest.get("evidence_slot_matrix_hash"):
             satisfied_checks.append("auto-update evidence slot matrix hash emitted")
+    if number == 104 and report_grade_validation_plan:
+        if report_grade_validation_plan.get("validation_plan_sha256"):
+            satisfied_checks.append("auto-update report-grade validation plan")
+        if int(report_grade_validation_plan.get("ready_slot_count") or 0) > 0:
+            satisfied_checks.append("auto-update report-grade ready slots")
     if trusted_diff and trusted_diff.get("status") == "pass":
         trusted_checks = {
             101: "trusted Windows Authenticode evidence diff pass",

@@ -1740,6 +1740,8 @@ CORE_FORENSIC_ACCURACY_ITEMS: tuple[dict[str, object], ...] = (
             "release artifact hashes captured",
             "auto-update evidence manifest hash emitted",
             "auto-update evidence slots emitted",
+            "auto-update report-grade validation plan",
+            "auto-update report-grade ready slots",
             "trusted signed update channel diff pass",
         ),
     },

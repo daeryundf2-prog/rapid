@@ -2399,10 +2399,10 @@
       ],
       "expected": {
         "required_assertions": [
-          "Update manifest preserves artifact hashes, enterprise disable flag, rollback guidance, auto-update-channel-evidence-manifest-v1 manifest hash/update evidence slots, hosting/signing blocker, trusted signed-update-channel diff helpers/gates, and #104 core_accuracy_gates."
+          "Update manifest preserves artifact hashes, enterprise disable flag, rollback guidance, auto-update-channel-evidence-manifest-v1 manifest hash/update evidence slots, auto-update-report-grade-validation-plan-v1 ready/blocking slots, hosting/signing blocker, trusted signed-update-channel diff helpers/gates, and #104 core_accuracy_gates."
         ]
       },
-      "notes": "Internal fixture pass; hosted signed update channel and trusted update-channel manifests remain external.",
+      "notes": "Internal fixture pass; hosted signed update channel, signed update manifest, update client/channel resolver, rollback tests, release artifact signatures, and trusted update-channel manifests remain external.",
       "source_manifest": "docs/validation/rapidtriage-core-forensics-101-120-known-answer.json"
     },
     {

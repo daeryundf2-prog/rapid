@@ -3468,6 +3468,7 @@ def release_operations_evidence_chain() -> list[dict[str, object]]:
             "primary_outputs": [
                 "update-manifest.json",
                 "update-manifest.auto_update_evidence_manifest.manifest_hash",
+                "update-manifest.auto_update_report_grade_validation_plan_hash",
                 "update-manifest.update_evidence_slots.signed_manifest",
                 "update-manifest.update_evidence_slots.hosted_channel",
                 "update-manifest.update_evidence_slots.rollback_test",

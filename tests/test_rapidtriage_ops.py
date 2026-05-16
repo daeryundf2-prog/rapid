@@ -1791,6 +1791,10 @@ class RapidTriageOpsTests(unittest.TestCase):
                 release_by_number[104]["primary_outputs"],
             )
             self.assertIn(
+                "update-manifest.auto_update_report_grade_validation_plan_hash",
+                release_by_number[104]["primary_outputs"],
+            )
+            self.assertIn(
                 "crash-report.crash_export_evidence_manifest.manifest_hash",
                 release_by_number[105]["primary_outputs"],
             )
@@ -5630,9 +5634,39 @@ class RapidTriageOpsTests(unittest.TestCase):
                 64,
             )
             self.assertEqual(len(manifest["package_readiness"]["auto_update_channel"]["evidence_slot_matrix_hash"]), 64)
+            auto_update_report_grade_plan = manifest["package_readiness"]["auto_update_channel"][
+                "auto_update_report_grade_validation_plan"
+            ]
+            self.assertEqual(
+                auto_update_report_grade_plan["profile_version"],
+                "auto-update-report-grade-validation-plan-v1",
+            )
+            self.assertEqual(
+                manifest["package_readiness"]["auto_update_channel"][
+                    "auto_update_report_grade_validation_plan_hash"
+                ],
+                auto_update_report_grade_plan["validation_plan_sha256"],
+            )
+            self.assertGreaterEqual(
+                manifest["package_readiness"]["auto_update_channel"][
+                    "auto_update_report_grade_ready_slot_count"
+                ],
+                8,
+            )
+            self.assertGreaterEqual(
+                manifest["package_readiness"]["auto_update_channel"][
+                    "auto_update_report_grade_blocking_slot_count"
+                ],
+                6,
+            )
+            self.assertIn("signed-update-manifest-required", auto_update_report_grade_plan["blockers"])
             self.assertIn("signed_manifest", manifest["package_readiness"]["auto_update_channel"]["update_evidence_slots"])
             self.assertIn(
                 "auto-update evidence manifest hash emitted",
+                manifest["package_readiness"]["auto_update_channel"]["core_accuracy_gates"][0]["satisfied_checks"],
+            )
+            self.assertIn(
+                "auto-update report-grade validation plan",
                 manifest["package_readiness"]["auto_update_channel"]["core_accuracy_gates"][0]["satisfied_checks"],
             )
             self.assertIn(
@@ -5641,6 +5675,7 @@ class RapidTriageOpsTests(unittest.TestCase):
             )
             self.assertEqual(manifest["package_readiness"]["auto_update_channel"]["trusted_auto_update_channel_diff"]["status"], "missing")
             self.assertIn("trusted-auto-update-channel-diff-missing", manifest["package_readiness"]["auto_update_channel"]["blockers"])
+            self.assertIn("signed-update-manifest-required", manifest["package_readiness"]["auto_update_channel"]["blockers"])
             self.assertIn("#112", manifest["package_readiness"]["operations_documents"]["commercial_gap_ids"])
             self.assertIn("#120", manifest["package_readiness"]["operations_documents"]["commercial_gap_ids"])
             self.assertEqual(
@@ -5822,6 +5857,15 @@ class RapidTriageOpsTests(unittest.TestCase):
             self.assertEqual(len(update_manifest["auto_update_evidence_manifest_hash"]), 64)
             self.assertEqual(len(update_manifest["evidence_slot_matrix_hash"]), 64)
             self.assertEqual(
+                update_manifest["auto_update_report_grade_validation_plan"]["profile_version"],
+                "auto-update-report-grade-validation-plan-v1",
+            )
+            self.assertEqual(
+                update_manifest["auto_update_report_grade_validation_plan_hash"],
+                update_manifest["auto_update_report_grade_validation_plan"]["validation_plan_sha256"],
+            )
+            self.assertIn("auto-update report-grade ready slots", update_manifest["core_accuracy_gates"][0]["satisfied_checks"])
+            self.assertEqual(
                 update_manifest["evidence_slot_matrix_hash"],
                 update_manifest["auto_update_evidence_manifest"]["evidence_slot_matrix_hash"],
             )
@@ -5920,6 +5964,22 @@ class RapidTriageOpsTests(unittest.TestCase):
             self.assertIn("linux_package_report_grade_validation_plan_hash", linux_diff["compared_fields"])
             self.assertIn("trusted Linux package smoke diff pass", linux_gates[0]["satisfied_checks"])
             self.assertIn("linux package report-grade ready slots", linux_gates[0]["satisfied_checks"])
+            update_diff = build_release.build_release_packaging_trusted_diff(
+                104,
+                update_manifest,
+                update_manifest,
+                trusted_tool="signed-update-channel-log",
+            )
+            update_gates = build_release.release_packaging_core_accuracy_gate(
+                104,
+                trusted_diff=update_diff,
+                evidence_manifest=update_manifest["auto_update_evidence_manifest"],
+                report_grade_validation_plan=update_manifest["auto_update_report_grade_validation_plan"],
+            )
+            self.assertEqual(update_diff["status"], "pass")
+            self.assertIn("auto_update_report_grade_validation_plan_hash", update_diff["compared_fields"])
+            self.assertIn("trusted signed update channel diff pass", update_gates[0]["satisfied_checks"])
+            self.assertIn("auto-update report-grade ready slots", update_gates[0]["satisfied_checks"])
             release_notes_diff = build_release.build_operations_document_trusted_diff(
                 112,
                 manifest["package_readiness"]["operations_documents"],
