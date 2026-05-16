@@ -33,7 +33,7 @@
       "title": "Mobile app media/message timeline correlation",
       "test_files": ["tests/test_rapidtriage_mobile_export.py"],
       "assertions": [
-        "Mobile correlation summary preserves message/media/contact/call counts, candidate media-message links, service attribution, timeline readiness, #43 core_accuracy_gates, and blocks device-wide timeline reportability without timeline/timezone/attachment/vendor diff validation.",
+        "Mobile correlation summary preserves message/media/contact/call counts, candidate media-message links, service attribution, timeline readiness, mobile_timeline_report_grade_validation_plan ready/blocking slots, #43 core_accuracy_gates, and blocks device-wide timeline reportability without timeline/timezone/attachment/vendor diff validation.",
         "build_mobile_correlation_trusted_diff compares correlation rows against vendor/native known-answer rows before satisfying the #43 trusted diff gate."
       ],
       "remaining_external_validation": [

@@ -1098,7 +1098,7 @@
       ],
       "expected": {
         "required_assertions": [
-          "Mobile correlation summary preserves message-media links, row counts, service attribution, timeline readiness, known-answer warning, and #43 core_accuracy_gates."
+          "Mobile correlation summary preserves message-media links, row counts, service attribution, timeline readiness, mobile_timeline_report_grade_validation_plan ready/blocking slots, known-answer warning, and #43 core_accuracy_gates."
         ]
       },
       "notes": "Internal fixture pass; device-wide timeline and vendor diff validation remain required.",

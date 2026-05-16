@@ -56,7 +56,7 @@
       ],
       "expected": {
         "required_assertions": [
-          "Mobile correlation summary preserves message-media links, row counts, service attribution, timeline readiness, mobile_correlation_citation_manifest source citations, known-answer warning, and #43 core_accuracy_gates.",
+          "Mobile correlation summary preserves message-media links, row counts, service attribution, timeline readiness, mobile_correlation_citation_manifest source citations, mobile_timeline_report_grade_validation_plan ready/blocking slots, known-answer warning, and #43 core_accuracy_gates.",
           "Mobile correlation trusted diff helper requires vendor/native timeline row equality before satisfying the #43 trusted mobile correlation diff pass gate.",
           "Mobile correlation reportability decisions block device-wide timeline claims until timeline, timezone, attachment recovery, and vendor diff validation exists."
         ]

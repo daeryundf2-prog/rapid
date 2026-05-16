@@ -1753,6 +1753,41 @@ class RapidTriageMobileExportTests(unittest.TestCase):
                 citation_manifest["passed_validation_check_ids"],
             )
             self.assertIn("device-wide-timeline-not-validated", citation_manifest["failed_validation_check_ids"])
+            timeline_plan = messenger_summary["details"]["mobile_timeline_report_grade_validation_plan"]
+            self.assertEqual(
+                timeline_plan["profile_version"],
+                "mobile-timeline-report-grade-validation-plan-v1",
+            )
+            self.assertEqual(timeline_plan["item_number"], 43)
+            self.assertEqual(timeline_plan["gap_id"], "#43")
+            self.assertEqual(timeline_plan["batch_id"], "commercial-uplift-041-045")
+            self.assertEqual(
+                messenger_summary["details"]["mobile_timeline_report_grade_validation_plan_hash"],
+                timeline_plan["validation_plan_sha256"],
+            )
+            self.assertEqual(len(timeline_plan["timeline_profile_sha256"]), 64)
+            self.assertEqual(timeline_plan["citation_manifest_sha256"], citation_manifest["manifest_sha256"])
+            self.assertEqual(timeline_plan["message_count"], messenger_summary["details"]["message_count"])
+            self.assertGreaterEqual(timeline_plan["timeline_event_count"], 1)
+            self.assertEqual(timeline_plan["ready_slot_count"], 6)
+            self.assertEqual(timeline_plan["blocking_slot_count"], 6)
+            self.assertEqual(timeline_plan["validation_status"], "report-validation-blocked")
+            self.assertFalse(timeline_plan["commercial_grade"])
+            timeline_slots = {slot["slot_id"]: slot for slot in timeline_plan["validation_slots"]}
+            self.assertEqual(timeline_slots["mobile-timeline-profile-emitted"]["status"], "complete")
+            self.assertEqual(
+                timeline_slots["mobile-correlation-citation-manifest-emitted"]["status"],
+                "complete",
+            )
+            self.assertEqual(timeline_slots["mobile-timeline-event-source-citations"]["status"], "complete")
+            self.assertEqual(timeline_slots["mobile-message-media-link-citations"]["status"], "complete")
+            self.assertEqual(timeline_slots["mobile-correlation-device-wide-timeline"]["status"], "external-required")
+            self.assertEqual(
+                timeline_slots["mobile-correlation-timezone-skew-validation"]["status"],
+                "external-required",
+            )
+            self.assertIn("mobile-correlation-device-wide-timeline-required", timeline_plan["blockers"])
+            self.assertIn("mobile-correlation-vendor-timeline-diff-required", timeline_plan["blockers"])
             self.assertGreaterEqual(messenger_summary["details"]["unified_contact_call_sms_view_count"], 2)
             actor_profile = messenger_summary["details"]["mobile_actor_review_profile"]
             self.assertEqual(actor_profile["profile_version"], "mobile-actor-review-v1")
@@ -1827,6 +1862,8 @@ class RapidTriageMobileExportTests(unittest.TestCase):
             self.assertIn("correlation citation manifest", correlation_gates["#43"]["satisfied_checks"])
             self.assertIn("timeline event source citations", correlation_gates["#43"]["satisfied_checks"])
             self.assertIn("message-media link citations", correlation_gates["#43"]["satisfied_checks"])
+            self.assertIn("timeline report-grade validation plan", correlation_gates["#43"]["satisfied_checks"])
+            self.assertIn("timeline report-grade ready slots", correlation_gates["#43"]["satisfied_checks"])
             self.assertIn("known-answer limitation warning", correlation_gates["#43"]["satisfied_checks"])
             self.assertIn("contact/call/SMS actor merge", correlation_gates["#44"]["satisfied_checks"])
             self.assertIn("participant attribution", correlation_gates["#44"]["satisfied_checks"])
@@ -1847,6 +1884,14 @@ class RapidTriageMobileExportTests(unittest.TestCase):
             self.assertEqual(correlation_uplift["batch_id"], "commercial-uplift-041-045")
             self.assertEqual(correlation_uplift["item_numbers"], [43, 44, 45])
             self.assertIn("media_message_links_built", correlation_uplift["passed_validation_check_ids"])
+            self.assertIn(
+                "mobile_timeline_report_grade_validation_plan_present",
+                correlation_uplift["passed_validation_check_ids"],
+            )
+            self.assertIn(
+                "mobile_timeline_report_grade_ready_slots",
+                correlation_uplift["passed_validation_check_ids"],
+            )
             self.assertIn("unified_contact_call_sms_view_built", correlation_uplift["passed_validation_check_ids"])
             self.assertIn("actor_review_profile_built", correlation_uplift["passed_validation_check_ids"])
             self.assertIn("timeline_correlation_profile_built", correlation_uplift["passed_validation_check_ids"])
@@ -1879,6 +1924,22 @@ class RapidTriageMobileExportTests(unittest.TestCase):
             self.assertEqual(
                 correlation_uplift["large_data_controls"]["citation_manifest_hash"],
                 citation_manifest["manifest_sha256"],
+            )
+            self.assertTrue(
+                correlation_uplift["large_data_controls"]["timeline_report_grade_validation_plan_present"]
+            )
+            self.assertEqual(
+                correlation_uplift["large_data_controls"]["timeline_report_grade_validation_plan_hash"],
+                timeline_plan["validation_plan_sha256"],
+            )
+            self.assertEqual(correlation_uplift["large_data_controls"]["timeline_report_grade_ready_slot_count"], 6)
+            self.assertEqual(correlation_uplift["large_data_controls"]["timeline_report_grade_blocking_slot_count"], 6)
+            self.assertTrue(
+                correlation_uplift["reportability_decision"]["timeline_report_grade_validation_plan_present"]
+            )
+            self.assertEqual(
+                correlation_uplift["reportability_decision"]["timeline_report_grade_validation_plan_hash"],
+                timeline_plan["validation_plan_sha256"],
             )
             self.assertGreaterEqual(correlation_uplift["large_data_controls"]["timeline_event_citation_count"], 1)
             self.assertGreaterEqual(correlation_uplift["large_data_controls"]["message_media_link_citation_count"], 1)

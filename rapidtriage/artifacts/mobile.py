@@ -25,6 +25,15 @@ MAX_IOS_BACKUP_FILES = 50_000
 MAX_SQLITE_TABLES = 100
 MAX_CHAT_DB_SAMPLE_ROWS = 25
 MAX_MOBILE_CORRELATION_TIMELINE_ROWS = 500
+MOBILE_TIMELINE_REPORT_GRADE_VALIDATION_PLAN_VERSION = "mobile-timeline-report-grade-validation-plan-v1"
+MOBILE_TIMELINE_REPORT_GRADE_BLOCKERS = [
+    "mobile-correlation-device-wide-timeline-required",
+    "mobile-correlation-timezone-skew-validation-required",
+    "mobile-correlation-attachment-byte-recovery-required",
+    "mobile-correlation-vendor-timeline-diff-required",
+    "mobile-correlation-known-answer-corpus-required",
+    "mobile-correlation-independent-review-required",
+]
 KAKAOTALK_BIGBANG_VERSION = "25.7.2"
 KAKAOTALK_BIGBANG_RELEASE_DATE = "2025-08-13"
 KAKAOTALK_BIGBANG_RELEASE_BUILD = "25.7.2.4641"
@@ -5438,6 +5447,15 @@ def build_mobile_correlation_summary(rows: list[Mapping[str, object]]) -> dict[s
         message_media_links=message_media_links,
         timeline_profile=timeline_profile,
     )
+    timeline_report_grade_validation_plan = build_mobile_timeline_report_grade_validation_plan(
+        message_rows=message_rows,
+        media_rows=media_rows,
+        contact_rows=contact_rows,
+        call_rows=call_rows,
+        message_media_links=message_media_links,
+        timeline_profile=timeline_profile,
+        citation_manifest=correlation_citation_manifest,
+    )
     actor_review_profile = build_mobile_actor_review_profile(unified_actor_view)
     actor_citation_manifest = build_mobile_actor_citation_manifest(
         actor_rows=unified_actor_view,
@@ -5487,6 +5505,10 @@ def build_mobile_correlation_summary(rows: list[Mapping[str, object]]) -> dict[s
         "mobile_timeline_correlation_profile": timeline_profile,
         "mobile_correlation_citation_manifest": correlation_citation_manifest,
         "mobile_correlation_citation_manifest_hash": correlation_citation_manifest["manifest_sha256"],
+        "mobile_timeline_report_grade_validation_plan": timeline_report_grade_validation_plan,
+        "mobile_timeline_report_grade_validation_plan_hash": timeline_report_grade_validation_plan[
+            "validation_plan_sha256"
+        ],
         "unified_contact_call_sms_view": unified_actor_view,
         "unified_contact_call_sms_view_count": len(unified_actor_view),
         "mobile_actor_review_profile": actor_review_profile,
@@ -5509,6 +5531,7 @@ def build_mobile_correlation_summary(rows: list[Mapping[str, object]]) -> dict[s
             validation_checks=validation_checks,
             timeline_profile=timeline_profile,
             citation_manifest=correlation_citation_manifest,
+            timeline_validation_plan=timeline_report_grade_validation_plan,
             actor_review_profile=actor_review_profile,
             actor_citation_manifest=actor_citation_manifest,
             schema_compatibility_profile=schema_compatibility_profile,
@@ -5840,6 +5863,203 @@ def build_mobile_correlation_citation_manifest(
         {key: value for key, value in manifest.items() if key != "manifest_sha256"}
     )
     return manifest
+
+
+def build_mobile_timeline_report_grade_validation_plan(
+    *,
+    message_rows: list[Mapping[str, object]],
+    media_rows: list[Mapping[str, object]],
+    contact_rows: list[Mapping[str, object]],
+    call_rows: list[Mapping[str, object]],
+    message_media_links: list[Mapping[str, object]],
+    timeline_profile: Mapping[str, object],
+    citation_manifest: Mapping[str, object],
+    trusted_diff: Mapping[str, object] | None = None,
+) -> dict[str, object]:
+    trusted_diff = trusted_diff or {}
+    timeline_profile_hash = stable_mobile_sha256(timeline_profile)
+    citation_manifest_hash = optional_text(citation_manifest.get("manifest_sha256"))
+    timeline_event_citation_count = int(citation_manifest.get("timeline_event_citation_count") or 0)
+    message_media_link_citation_count = int(citation_manifest.get("message_media_link_citation_count") or 0)
+    event_count = int(timeline_profile.get("event_count") or 0)
+    event_cap = int(timeline_profile.get("event_cap") or MAX_MOBILE_CORRELATION_TIMELINE_ROWS)
+
+    def slot(
+        slot_id: str,
+        *,
+        ready: bool,
+        evidence: str,
+        blocker_id: str | None = None,
+        operator_action: str = "",
+    ) -> dict[str, object]:
+        row: dict[str, object] = {
+            "slot_id": slot_id,
+            "status": "complete" if ready else "external-required",
+            "evidence": evidence,
+        }
+        if blocker_id and not ready:
+            row["blocker_id"] = blocker_id
+        if operator_action:
+            row["operator_action"] = operator_action
+        return row
+
+    validation_slots = [
+        slot(
+            "mobile-timeline-source-row-counts-preserved",
+            ready=True,
+            evidence=(
+                f"messages={len(message_rows)} media={len(media_rows)} "
+                f"contacts={len(contact_rows)} calls={len(call_rows)}"
+            ),
+        ),
+        slot(
+            "mobile-timeline-profile-emitted",
+            ready=timeline_profile.get("profile_version") == "mobile-timeline-correlation-v1",
+            evidence=f"timeline_profile_sha256={timeline_profile_hash}",
+            blocker_id="mobile-timeline-profile-required",
+            operator_action="Regenerate the mobile export so the bounded timeline correlation profile is emitted.",
+        ),
+        slot(
+            "mobile-correlation-citation-manifest-emitted",
+            ready=bool(citation_manifest_hash),
+            evidence=f"citation_manifest_sha256={citation_manifest_hash}",
+            blocker_id="mobile-correlation-citation-manifest-required",
+            operator_action="Regenerate the mobile export so row, link, and timeline citations are hashable.",
+        ),
+        slot(
+            "mobile-timeline-event-source-citations",
+            ready=timeline_event_citation_count > 0,
+            evidence=f"timeline_event_citation_count={timeline_event_citation_count}",
+            blocker_id="mobile-timeline-event-source-citations-required",
+            operator_action="Attach source row locators for every report-selected timeline event.",
+        ),
+        slot(
+            "mobile-message-media-link-citations",
+            ready=message_media_link_citation_count > 0,
+            evidence=f"message_media_link_citation_count={message_media_link_citation_count}",
+            blocker_id="mobile-message-media-link-citations-required",
+            operator_action="Attach source locators for message-to-media links before reporting attachment correlation.",
+        ),
+        slot(
+            "mobile-timeline-row-cap-and-truncation-disclosed",
+            ready=event_cap > 0,
+            evidence=(
+                f"event_count={event_count} event_cap={event_cap} "
+                f"event_truncated={bool(timeline_profile.get('event_truncated'))}"
+            ),
+            blocker_id="mobile-timeline-row-cap-disclosure-required",
+            operator_action="Record row caps and truncation status before reviewing large mobile timelines.",
+        ),
+        slot(
+            "mobile-correlation-device-wide-timeline",
+            ready=False,
+            evidence="device_wide_timeline_ready=false",
+            blocker_id="mobile-correlation-device-wide-timeline-required",
+            operator_action="Join app export rows with filesystem, acquisition, and device metadata timelines.",
+        ),
+        slot(
+            "mobile-correlation-timezone-skew-validation",
+            ready=False,
+            evidence="timezone_and_clock_skew_validated=false",
+            blocker_id="mobile-correlation-timezone-skew-validation-required",
+            operator_action="Validate source timezone semantics and device clock skew against acquisition metadata.",
+        ),
+        slot(
+            "mobile-correlation-attachment-byte-recovery",
+            ready=False,
+            evidence=(
+                f"resolved_media_link_count={int(timeline_profile.get('resolved_media_link_count') or 0)} "
+                f"unresolved_media_link_count={int(timeline_profile.get('unresolved_media_link_count') or 0)}"
+            ),
+            blocker_id="mobile-correlation-attachment-byte-recovery-required",
+            operator_action="Recover attachment bytes and hash them before claiming media was recovered.",
+        ),
+        slot(
+            "mobile-correlation-vendor-timeline-diff",
+            ready=trusted_diff.get("status") == "pass",
+            evidence=f"trusted_diff_status={trusted_diff.get('status', 'missing')}",
+            blocker_id=MOBILE_CORRELATION_TRUSTED_DIFF_BLOCKERS[43],
+            operator_action="Attach a passing Cellebrite/XRY/GrayKey/AXIOM/iLEAPP/native timeline diff.",
+        ),
+        slot(
+            "mobile-correlation-known-answer-corpus",
+            ready=False,
+            evidence="known_answer_corpus_attached=false",
+            blocker_id="mobile-correlation-known-answer-corpus-required",
+            operator_action="Validate message/media/call chronology against a known-answer mobile corpus.",
+        ),
+        slot(
+            "mobile-correlation-independent-review",
+            ready=False,
+            evidence="independent_review_signoff_present=false",
+            blocker_id="mobile-correlation-independent-review-required",
+            operator_action="Attach independent reviewer signoff before device-wide timeline wording.",
+        ),
+    ]
+    blockers = sorted(
+        {
+            str(item.get("blocker_id"))
+            for item in validation_slots
+            if item.get("status") != "complete" and item.get("blocker_id")
+        }
+    )
+    plan: dict[str, object] = {
+        "profile_version": MOBILE_TIMELINE_REPORT_GRADE_VALIDATION_PLAN_VERSION,
+        "item_number": 43,
+        "gap_id": "#43",
+        "batch_id": "commercial-uplift-041-045",
+        "selected_track": "bounded-message-media-call-timeline-report-validation",
+        "message_count": len(message_rows),
+        "media_count": len(media_rows),
+        "contact_count": len(contact_rows),
+        "call_count": len(call_rows),
+        "message_media_link_count": len(message_media_links),
+        "timeline_event_count": event_count,
+        "timeline_event_cap": event_cap,
+        "timeline_event_truncated": bool(timeline_profile.get("event_truncated")),
+        "timeline_profile_sha256": timeline_profile_hash,
+        "citation_manifest_sha256": citation_manifest_hash,
+        "timeline_event_citation_count": timeline_event_citation_count,
+        "message_media_link_citation_count": message_media_link_citation_count,
+        "resolved_media_link_count": int(timeline_profile.get("resolved_media_link_count") or 0),
+        "unresolved_media_link_count": int(timeline_profile.get("unresolved_media_link_count") or 0),
+        "missing_timestamp_count": int(timeline_profile.get("missing_timestamp_count") or 0),
+        "device_wide_timeline_ready": False,
+        "timezone_validation_required": True,
+        "known_answer_correlation_required": True,
+        "trusted_diff_status": str(trusted_diff.get("status") or "missing"),
+        "ready_slot_count": sum(1 for item in validation_slots if item.get("status") == "complete"),
+        "blocking_slot_count": sum(1 for item in validation_slots if item.get("status") != "complete"),
+        "validation_status": "report-validation-blocked" if blockers else "ready-for-report-review",
+        "commercial_grade": False,
+        "commercial_grade_ready": False,
+        "validation_slots": validation_slots,
+        "blockers": blockers,
+        "commercial_grade_blockers": list(MOBILE_TIMELINE_REPORT_GRADE_BLOCKERS),
+        "validation_commands": [
+            "rapidtriage artifacts <mobile-export-root> --kind mobile-export --output rapidtriage-mobile-export.json",
+            "rapidtriage cross-tool-validate --rapid-output rapidtriage-mobile-export.json --reference-output <trusted-mobile-timeline> --backlog-item 43 --json",
+            "rapidtriage commercial-readiness --validation-package docs/validation/rapidtriage-core-forensics-041-050-known-answer.json --limit 45 --json",
+        ],
+        "report_guidance": {
+            "allowed_use": "mobile-message-media-call-timeline-triage-pivot",
+            "forbidden_claims": [
+                "complete device-wide mobile timeline",
+                "all attachments recovered",
+                "timezone-normalized chronology is court-ready",
+                "deleted or hidden app events are fully recovered",
+            ],
+            "required_disclaimer": (
+                "Mobile correlation is bounded to imported source rows. Treat it as a review pivot until "
+                "device-wide joins, timezone/skew checks, attachment byte recovery, trusted diffs, known-answer "
+                "fixtures, and independent review are attached."
+            ),
+        },
+    }
+    plan["validation_plan_sha256"] = stable_mobile_sha256(
+        {key: value for key, value in plan.items() if key != "validation_plan_sha256"}
+    )
+    return plan
 
 
 def mobile_media_link_status(
@@ -6435,6 +6655,7 @@ def mobile_correlation_commercial_uplift_evidence(
     validation_checks: Mapping[str, object],
     timeline_profile: Mapping[str, object] | None = None,
     citation_manifest: Mapping[str, object] | None = None,
+    timeline_validation_plan: Mapping[str, object] | None = None,
     actor_review_profile: Mapping[str, object] | None = None,
     actor_citation_manifest: Mapping[str, object] | None = None,
     schema_compatibility_profile: Mapping[str, object] | None = None,
@@ -6444,6 +6665,7 @@ def mobile_correlation_commercial_uplift_evidence(
     report_grade = mobile_correlation_report_grade_assessment()
     timeline_profile = timeline_profile or {}
     citation_manifest = citation_manifest or {}
+    timeline_validation_plan = timeline_validation_plan or {}
     actor_review_profile = actor_review_profile or {}
     actor_citation_manifest = actor_citation_manifest or {}
     schema_compatibility_profile = schema_compatibility_profile or {}
@@ -6461,6 +6683,10 @@ def mobile_correlation_commercial_uplift_evidence(
     ]
     if not validation_checks.get("correlation_validated_against_known_answer"):
         failed_validation_check_ids.append("correlation_validated_against_known_answer")
+    if timeline_validation_plan:
+        passed_validation_check_ids.append("mobile_timeline_report_grade_validation_plan_present")
+        if int(timeline_validation_plan.get("ready_slot_count") or 0) >= 6:
+            passed_validation_check_ids.append("mobile_timeline_report_grade_ready_slots")
     return {
         "batch_id": "commercial-uplift-041-045",
         "item_numbers": [43, 44, 45],
@@ -6474,11 +6700,15 @@ def mobile_correlation_commercial_uplift_evidence(
             unified_actor_count=unified_actor_count,
             schema_version_count=schema_version_count,
             trusted_diff=trusted_diff,
+            timeline_validation_plan=timeline_validation_plan,
         ),
         "source_refs": [
             f"service:{service}" for service in services[:20]
         ] + [
             f"mobile_correlation_citation_manifest_sha256:{citation_manifest.get('manifest_sha256', '')}"
+        ] + [
+            "mobile_timeline_report_grade_validation_plan_sha256:"
+            f"{timeline_validation_plan.get('validation_plan_sha256', '')}"
         ] + [
             f"mobile_actor_citation_manifest_sha256:{actor_citation_manifest.get('manifest_sha256', '')}"
         ] + [
@@ -6508,6 +6738,16 @@ def mobile_correlation_commercial_uplift_evidence(
             "timeline_profile_present": bool(timeline_profile),
             "citation_manifest_present": bool(citation_manifest),
             "citation_manifest_hash": str(citation_manifest.get("manifest_sha256") or ""),
+            "timeline_report_grade_validation_plan_present": bool(timeline_validation_plan),
+            "timeline_report_grade_validation_plan_hash": str(
+                timeline_validation_plan.get("validation_plan_sha256") or ""
+            ),
+            "timeline_report_grade_ready_slot_count": int(
+                timeline_validation_plan.get("ready_slot_count") or 0
+            ),
+            "timeline_report_grade_blocking_slot_count": int(
+                timeline_validation_plan.get("blocking_slot_count") or 0
+            ),
             "timeline_event_citation_count": int(citation_manifest.get("timeline_event_citation_count") or 0),
             "message_media_link_citation_count": int(
                 citation_manifest.get("message_media_link_citation_count") or 0
@@ -6547,6 +6787,7 @@ def mobile_correlation_reportability_decision(
     unified_actor_count: int,
     schema_version_count: int,
     trusted_diff: Mapping[str, object] | None = None,
+    timeline_validation_plan: Mapping[str, object] | None = None,
 ) -> dict[str, object]:
     blockers = {str(item) for item in report_grade["blockers"] if str(item)}
     blockers.update(f"check:{item}" for item in failed_validation_check_ids)
@@ -6555,6 +6796,7 @@ def mobile_correlation_reportability_decision(
     if not validation_checks.get("schema_version_registry_known_answer_validated"):
         blockers.add("schema-version-registry-known-answer-not-attached")
     trusted_diff = trusted_diff or {}
+    timeline_validation_plan = timeline_validation_plan or {}
     if trusted_diff.get("status") != "pass":
         blockers.update(MOBILE_CORRELATION_TRUSTED_DIFF_BLOCKERS.values())
     return {
@@ -6568,6 +6810,12 @@ def mobile_correlation_reportability_decision(
         "media_count": media_count,
         "unified_actor_count": unified_actor_count,
         "schema_version_count": schema_version_count,
+        "timeline_report_grade_validation_plan_present": bool(timeline_validation_plan),
+        "timeline_report_grade_validation_plan_hash": str(
+            timeline_validation_plan.get("validation_plan_sha256") or ""
+        ),
+        "timeline_report_grade_ready_slot_count": int(timeline_validation_plan.get("ready_slot_count") or 0),
+        "timeline_report_grade_blocking_slot_count": int(timeline_validation_plan.get("blocking_slot_count") or 0),
         "ready_for_court_report": False,
         "required_before_report": [
             "validate device-wide timeline joins, timezone assumptions, and attachment recovery",
@@ -8856,6 +9104,19 @@ def mobile_correlation_core_accuracy_gates(
             item43.append("timeline event source citations")
         if int(citation_manifest.get("message_media_link_citation_count") or 0) > 0:
             item43.append("message-media link citations")
+    timeline_validation_plan = (
+        details.get("mobile_timeline_report_grade_validation_plan")
+        if isinstance(details.get("mobile_timeline_report_grade_validation_plan"), Mapping)
+        else {}
+    )
+    if timeline_validation_plan:
+        item43.append("timeline report-grade validation plan")
+        evidence_refs.append(
+            "mobile_timeline_report_grade_validation_plan_sha256:"
+            f"{timeline_validation_plan.get('validation_plan_sha256', '')}"
+        )
+        if int(timeline_validation_plan.get("ready_slot_count") or 0) >= 6:
+            item43.append("timeline report-grade ready slots")
     if not validation.get("correlation_validated_against_known_answer", False):
         item43.append("known-answer limitation warning")
     if trusted_diff.get("status") == "pass":
