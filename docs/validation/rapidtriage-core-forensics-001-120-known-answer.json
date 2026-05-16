@@ -1203,7 +1203,7 @@
       ],
       "expected": {
         "required_assertions": [
-          "Search analysis preserves graph nodes, relationship edges, source citation references, paging/truncation disclosure, causal-proof warning, and #48 core_accuracy_gates."
+          "Search analysis preserves graph nodes, relationship edges, source citation references, graph_citation_manifest edge source viewer locators, graph_report_grade_validation_plan ready/blocking slots, paging/truncation disclosure, causal-proof warning, and #48 core_accuracy_gates."
         ]
       },
       "notes": "Internal fixture pass; scalable interactive graph UI and saved layouts remain future work.",

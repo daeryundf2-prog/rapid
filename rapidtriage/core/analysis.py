@@ -105,6 +105,15 @@ ENTITY_REPORT_GRADE_BLOCKERS = [
     "entity-false-positive-corpus-required",
     "entity-independent-review-required",
 ]
+GRAPH_REPORT_GRADE_VALIDATION_PLAN_VERSION = "search-graph-report-grade-validation-plan-v1"
+GRAPH_REPORT_GRADE_BLOCKERS = [
+    "interactive-graph-canvas-required",
+    "server-side-graph-paging-required",
+    "saved-graph-layouts-required",
+    "graph-source-citation-trusted-diff-required",
+    "large-case-graph-performance-validation-required",
+    "graph-independent-review-required",
+]
 
 
 def build_search_analysis(
@@ -282,6 +291,11 @@ def analysis_commercial_uplift_evidence(
         if isinstance(graph.get("graph_citation_manifest"), Mapping)
         else {}
     )
+    graph_validation_plan = (
+        graph.get("graph_report_grade_validation_plan")
+        if isinstance(graph.get("graph_report_grade_validation_plan"), Mapping)
+        else {}
+    )
     timeline_summary = timeline.get("summary") if isinstance(timeline.get("summary"), Mapping) else {}
     timeline_correlation_profile = (
         timeline.get("timeline_correlation_profile")
@@ -318,6 +332,10 @@ def analysis_commercial_uplift_evidence(
         passed_by_item.setdefault("#47", []).append("entity report-grade validation plan")
         if int(entity_validation_plan.get("ready_slot_count") or 0) >= 6:
             passed_by_item["#47"].append("entity report-grade ready slots")
+    if graph_validation_plan:
+        passed_by_item.setdefault("#48", []).append("graph report-grade validation plan")
+        if int(graph_validation_plan.get("ready_slot_count") or 0) >= 6:
+            passed_by_item["#48"].append("graph report-grade ready slots")
     return {
         "batch_id": "commercial-uplift-046-050",
         "item_numbers": [46, 47, 48, 49, 50],
@@ -332,6 +350,7 @@ def analysis_commercial_uplift_evidence(
             f"entity_report_grade_validation_plan_sha256:{entity_validation_plan.get('validation_plan_sha256', '')}",
             f"graph_edges:{graph_summary.get('edge_count', 0)}",
             f"graph_citation_manifest_sha256:{graph_citation_manifest.get('manifest_sha256', '')}",
+            f"graph_report_grade_validation_plan_sha256:{graph_validation_plan.get('validation_plan_sha256', '')}",
             f"timeline_events:{timeline_summary.get('event_count', 0)}",
             f"timeline_citation_manifest_sha256:{timeline_citation_manifest.get('manifest_sha256', '')}",
             f"hypotheses:{workbook_summary.get('hypothesis_count', 0)}",
@@ -348,6 +367,7 @@ def analysis_commercial_uplift_evidence(
             trusted_diffs=trusted_diffs,
             cluster_validation_plan=cluster_validation_plan,
             entity_validation_plan=entity_validation_plan,
+            graph_validation_plan=graph_validation_plan,
         ),
         "passed_validation_check_ids_by_item": passed_by_item,
         "failed_validation_check_ids_by_item": failed_by_item,
@@ -408,6 +428,10 @@ def analysis_commercial_uplift_evidence(
             "graph_interaction_profile_present": bool(graph_interaction_profile),
             "graph_citation_manifest_present": bool(graph_citation_manifest),
             "graph_citation_manifest_hash": str(graph_citation_manifest.get("manifest_sha256") or ""),
+            "graph_report_grade_validation_plan_present": bool(graph_validation_plan),
+            "graph_report_grade_validation_plan_hash": str(graph_validation_plan.get("validation_plan_sha256") or ""),
+            "graph_report_grade_ready_slot_count": int(graph_validation_plan.get("ready_slot_count") or 0),
+            "graph_report_grade_blocking_slot_count": int(graph_validation_plan.get("blocking_slot_count") or 0),
             "graph_citation_edge_count": int(graph_citation_manifest.get("edge_citation_count") or 0),
             "graph_source_viewer_locator_count": int(graph_citation_manifest.get("source_viewer_locator_count") or 0),
             "graph_filter_count": len(graph_interaction_profile.get("available_filters") or []),
@@ -457,6 +481,7 @@ def analysis_reportability_decision(
     trusted_diffs: Mapping[int, Mapping[str, object]] | None = None,
     cluster_validation_plan: Mapping[str, object] | None = None,
     entity_validation_plan: Mapping[str, object] | None = None,
+    graph_validation_plan: Mapping[str, object] | None = None,
 ) -> dict[str, object]:
     blockers = {str(item) for item in report_grade.get("blockers", []) if str(item)}
     for item_id, checks in failed_by_item.items():
@@ -468,6 +493,7 @@ def analysis_reportability_decision(
     trusted_diffs = trusted_diffs or {}
     cluster_validation_plan = cluster_validation_plan or {}
     entity_validation_plan = entity_validation_plan or {}
+    graph_validation_plan = graph_validation_plan or {}
     for number, blocker in ANALYSIS_TRUSTED_DIFF_BLOCKERS.items():
         if trusted_diffs.get(number, {}).get("status") != "pass":
             blockers.add(blocker)
@@ -495,6 +521,10 @@ def analysis_reportability_decision(
         "entity_report_grade_validation_plan_hash": str(entity_validation_plan.get("validation_plan_sha256") or ""),
         "entity_report_grade_ready_slot_count": int(entity_validation_plan.get("ready_slot_count") or 0),
         "entity_report_grade_blocking_slot_count": int(entity_validation_plan.get("blocking_slot_count") or 0),
+        "graph_report_grade_validation_plan_present": bool(graph_validation_plan),
+        "graph_report_grade_validation_plan_hash": str(graph_validation_plan.get("validation_plan_sha256") or ""),
+        "graph_report_grade_ready_slot_count": int(graph_validation_plan.get("ready_slot_count") or 0),
+        "graph_report_grade_blocking_slot_count": int(graph_validation_plan.get("blocking_slot_count") or 0),
         "required_before_report": [
             "persist analyst review state for clusters, entity merge/split decisions, graph layouts, and workbook hypotheses",
             "validate graph and timeline joins against full-case indexed source rows with timezone and parser-confidence evidence",
@@ -565,6 +595,11 @@ def analysis_core_accuracy_gates(
     graph_citation_manifest = (
         graph.get("graph_citation_manifest")
         if isinstance(graph.get("graph_citation_manifest"), Mapping)
+        else {}
+    )
+    graph_validation_plan = (
+        graph.get("graph_report_grade_validation_plan")
+        if isinstance(graph.get("graph_report_grade_validation_plan"), Mapping)
         else {}
     )
     timeline_summary = timeline.get("summary") if isinstance(timeline.get("summary"), Mapping) else {}
@@ -702,6 +737,13 @@ def analysis_core_accuracy_gates(
             item48.append("edge source viewer locators")
         if int(graph_citation_manifest.get("source_viewer_locator_count") or 0) > 0:
             item48.append("graph source locator coverage")
+    if graph_validation_plan:
+        item48.append("graph report-grade validation plan")
+        evidence_refs.append(
+            f"graph_report_grade_validation_plan_sha256:{graph_validation_plan.get('validation_plan_sha256', '')}"
+        )
+        if int(graph_validation_plan.get("ready_slot_count") or 0) >= 6:
+            item48.append("graph report-grade ready slots")
     if "truncated" in graph_summary:
         item48.append("graph paging/truncation disclosure")
     if not ANALYSIS_NATIVE_CAPABILITIES["court_ready_graph_layout"]:
@@ -2493,6 +2535,12 @@ def build_relationship_graph(
         max_edges=max_edges,
     )
     citation_manifest = build_graph_citation_manifest(nodes=list(nodes.values()), edges=edges)
+    validation_plan = build_graph_report_grade_validation_plan(
+        nodes=list(nodes.values()),
+        edges=edges,
+        graph_interaction_profile=interaction_profile,
+        graph_citation_manifest=citation_manifest,
+    )
     return {
         "summary": {
             "node_count": len(nodes),
@@ -2505,6 +2553,8 @@ def build_relationship_graph(
             "source_viewer_locator_count": int(citation_manifest.get("source_viewer_locator_count") or 0),
             "available_filter_count": len(interaction_profile.get("available_filters") or []),
             "edge_page_count": int(interaction_profile.get("edge_page_count") or 0),
+            "graph_report_grade_ready_slot_count": int(validation_plan.get("ready_slot_count") or 0),
+            "graph_report_grade_blocking_slot_count": int(validation_plan.get("blocking_slot_count") or 0),
             "commercial_gap_ids": ["#48"],
             "commercial_grade_ready": False,
         },
@@ -2513,6 +2563,8 @@ def build_relationship_graph(
         "graph_interaction_profile": interaction_profile,
         "graph_citation_manifest": citation_manifest,
         "graph_citation_manifest_hash": citation_manifest["manifest_sha256"],
+        "graph_report_grade_validation_plan": validation_plan,
+        "graph_report_grade_validation_plan_hash": validation_plan["validation_plan_sha256"],
         "report_grade_assessment": component_report_grade_assessment("#48", "relationship-graph"),
     }
 
@@ -2687,6 +2739,183 @@ def build_graph_citation_manifest(
         {key: value for key, value in manifest.items() if key != "manifest_sha256"}
     )
     return manifest
+
+
+def build_graph_report_grade_validation_plan(
+    *,
+    nodes: Sequence[Mapping[str, object]],
+    edges: Sequence[Mapping[str, object]],
+    graph_interaction_profile: Mapping[str, object],
+    graph_citation_manifest: Mapping[str, object],
+    trusted_diff: Mapping[str, object] | None = None,
+) -> dict[str, object]:
+    trusted_diff = trusted_diff or {}
+    interaction_profile_hash = stable_analysis_sha256(graph_interaction_profile)
+    citation_manifest_hash = str(graph_citation_manifest.get("manifest_sha256") or "")
+    edge_citation_count = int(graph_citation_manifest.get("edge_citation_count") or 0)
+    source_viewer_locator_count = int(graph_citation_manifest.get("source_viewer_locator_count") or 0)
+    available_filter_count = len(graph_interaction_profile.get("available_filters") or [])
+    edge_page_count = int(graph_interaction_profile.get("edge_page_count") or 0)
+
+    def slot(
+        slot_id: str,
+        *,
+        ready: bool,
+        evidence: str,
+        blocker_id: str | None = None,
+        operator_action: str = "",
+    ) -> dict[str, object]:
+        row: dict[str, object] = {
+            "slot_id": slot_id,
+            "status": "complete" if ready else "external-required",
+            "evidence": evidence,
+        }
+        if blocker_id and not ready:
+            row["blocker_id"] = blocker_id
+        if operator_action:
+            row["operator_action"] = operator_action
+        return row
+
+    validation_slots = [
+        slot(
+            "search-graph-nodes-and-edges-built",
+            ready=bool(nodes) and bool(edges),
+            evidence=f"node_count={len(nodes)} edge_count={len(edges)}",
+            blocker_id="search-graph-nodes-and-edges-required",
+            operator_action="Run search analysis with enough matches/entities to emit relationship graph nodes and edges.",
+        ),
+        slot(
+            "search-graph-interaction-profile-emitted",
+            ready=graph_interaction_profile.get("profile_version") == "relationship-graph-interaction-v1",
+            evidence=f"graph_interaction_profile_sha256={interaction_profile_hash}",
+            blocker_id="search-graph-interaction-profile-required",
+            operator_action="Regenerate analysis so graph filter/page metadata is available to the reviewer.",
+        ),
+        slot(
+            "search-graph-citation-manifest-emitted",
+            ready=bool(citation_manifest_hash),
+            evidence=f"graph_citation_manifest_sha256={citation_manifest_hash}",
+            blocker_id="search-graph-citation-manifest-required",
+            operator_action="Generate the graph citation manifest before using graph output in a report.",
+        ),
+        slot(
+            "search-graph-edge-source-viewer-locators",
+            ready=edge_citation_count > 0 and source_viewer_locator_count > 0,
+            evidence=f"edge_citation_count={edge_citation_count} source_viewer_locator_count={source_viewer_locator_count}",
+            blocker_id="search-graph-edge-source-viewer-locators-required",
+            operator_action="Attach source viewer locators for graph edge citations.",
+        ),
+        slot(
+            "search-graph-filter-and-page-metadata",
+            ready=available_filter_count > 0 and edge_page_count >= 1,
+            evidence=f"available_filter_count={available_filter_count} edge_page_count={edge_page_count}",
+            blocker_id="search-graph-filter-page-metadata-required",
+            operator_action="Emit filter metadata and bounded edge page metadata for graph review.",
+        ),
+        slot(
+            "search-graph-causal-proof-warning",
+            ready=graph_citation_manifest.get("causal_proof_supported") is False,
+            evidence=f"causal_proof_supported={graph_citation_manifest.get('causal_proof_supported')}",
+            blocker_id="search-graph-causal-proof-warning-required",
+            operator_action="Record that graph edges are candidate pivots, not causal proof.",
+        ),
+        slot(
+            "search-graph-interactive-canvas",
+            ready=False,
+            evidence="interactive_canvas_supported=false",
+            blocker_id="interactive-graph-canvas-required",
+            operator_action="Add an interactive graph canvas with keyboard navigation and source-row opening.",
+        ),
+        slot(
+            "search-graph-server-side-paging",
+            ready=False,
+            evidence="server_side_paging_supported=false",
+            blocker_id="server-side-graph-paging-required",
+            operator_action="Add server-side graph paging before opening large case-wide relationship graphs.",
+        ),
+        slot(
+            "search-graph-saved-layouts",
+            ready=False,
+            evidence="saved_layout_supported=false",
+            blocker_id="saved-graph-layouts-required",
+            operator_action="Persist analyst graph layouts, filters, notes, and reviewer identity.",
+        ),
+        slot(
+            "search-graph-trusted-source-citation-diff",
+            ready=trusted_diff.get("status") == "pass",
+            evidence=f"trusted_diff_status={trusted_diff.get('status', 'missing')}",
+            blocker_id=ANALYSIS_TRUSTED_DIFF_BLOCKERS[48],
+            operator_action="Attach a passing graph source-citation review diff.",
+        ),
+        slot(
+            "search-graph-large-case-performance-validation",
+            ready=False,
+            evidence="large_case_graph_performance_validation=false",
+            blocker_id="large-case-graph-performance-validation-required",
+            operator_action="Validate graph latency, memory, and paging behavior on large result sets.",
+        ),
+        slot(
+            "search-graph-independent-review",
+            ready=False,
+            evidence="independent_review_signoff_present=false",
+            blocker_id="graph-independent-review-required",
+            operator_action="Attach independent reviewer signoff before relationship-graph wording.",
+        ),
+    ]
+    blockers = sorted(
+        {
+            str(item.get("blocker_id"))
+            for item in validation_slots
+            if item.get("status") != "complete" and item.get("blocker_id")
+        }
+    )
+    plan: dict[str, object] = {
+        "profile_version": GRAPH_REPORT_GRADE_VALIDATION_PLAN_VERSION,
+        "item_number": 48,
+        "gap_id": "#48",
+        "batch_id": "commercial-uplift-046-050",
+        "selected_track": "bounded-source-cited-graph-report-validation",
+        "node_count": len(nodes),
+        "edge_count": len(edges),
+        "edge_citation_count": edge_citation_count,
+        "source_viewer_locator_count": source_viewer_locator_count,
+        "available_filter_count": available_filter_count,
+        "edge_page_count": edge_page_count,
+        "graph_interaction_profile_sha256": interaction_profile_hash,
+        "graph_citation_manifest_sha256": citation_manifest_hash,
+        "trusted_diff_status": str(trusted_diff.get("status") or "missing"),
+        "ready_slot_count": sum(1 for item in validation_slots if item.get("status") == "complete"),
+        "blocking_slot_count": sum(1 for item in validation_slots if item.get("status") != "complete"),
+        "validation_status": "report-validation-blocked" if blockers else "ready-for-report-review",
+        "commercial_grade": False,
+        "commercial_grade_ready": False,
+        "validation_slots": validation_slots,
+        "blockers": blockers,
+        "commercial_grade_blockers": list(GRAPH_REPORT_GRADE_BLOCKERS),
+        "validation_commands": [
+            "rapidtriage search <case-db-or-output> --keyword <keyword> --output search-results.json",
+            "rapidtriage cross-tool-validate --rapid-output search-results.json --reference-output <graph-source-citation-review> --backlog-item 48 --json",
+            "rapidtriage commercial-readiness --validation-package docs/validation/rapidtriage-core-forensics-041-050-known-answer.json --limit 48 --json",
+        ],
+        "report_guidance": {
+            "allowed_use": "bounded-source-cited-relationship-graph-pivot",
+            "forbidden_claims": [
+                "graph edges prove causality",
+                "graph layout has been analyst-reviewed and persisted",
+                "graph can scale to full-case relationship data without paging validation",
+                "graph view is commercial-grade for large cases",
+            ],
+            "required_disclaimer": (
+                "Graph edges are candidate source-cited pivots. Do not report graph relationships as reviewed "
+                "findings until interactive review, server-side paging, saved layouts, trusted source-citation diff, "
+                "large-case validation, and independent review are attached."
+            ),
+        },
+    }
+    plan["validation_plan_sha256"] = stable_analysis_sha256(
+        {key: value for key, value in plan.items() if key != "validation_plan_sha256"}
+    )
+    return plan
 
 
 def build_correlated_timeline(

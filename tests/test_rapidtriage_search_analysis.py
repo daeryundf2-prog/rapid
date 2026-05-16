@@ -260,6 +260,8 @@ class RapidTriageSearchAnalysisTests(unittest.TestCase):
         self.assertIn("graph citation manifest", analysis_gates["#48"]["satisfied_checks"])
         self.assertIn("edge source viewer locators", analysis_gates["#48"]["satisfied_checks"])
         self.assertIn("graph source locator coverage", analysis_gates["#48"]["satisfied_checks"])
+        self.assertIn("graph report-grade validation plan", analysis_gates["#48"]["satisfied_checks"])
+        self.assertIn("graph report-grade ready slots", analysis_gates["#48"]["satisfied_checks"])
         self.assertIn("timestamp extraction", analysis_gates["#49"]["satisfied_checks"])
         self.assertIn("UTC normalization", analysis_gates["#49"]["satisfied_checks"])
         self.assertIn("timeline correlation profile", analysis_gates["#49"]["satisfied_checks"])
@@ -294,6 +296,8 @@ class RapidTriageSearchAnalysisTests(unittest.TestCase):
         self.assertIn("entity report-grade ready slots", analysis_uplift["passed_validation_check_ids_by_item"]["#47"])
         self.assertIn("relationship edges built", analysis_uplift["passed_validation_check_ids_by_item"]["#48"])
         self.assertIn("edge source citations", analysis_uplift["passed_validation_check_ids_by_item"]["#48"])
+        self.assertIn("graph report-grade validation plan", analysis_uplift["passed_validation_check_ids_by_item"]["#48"])
+        self.assertIn("graph report-grade ready slots", analysis_uplift["passed_validation_check_ids_by_item"]["#48"])
         self.assertIn("timestamp extraction", analysis_uplift["passed_validation_check_ids_by_item"]["#49"])
         self.assertIn("timeline correlation profile", analysis_uplift["passed_validation_check_ids_by_item"]["#49"])
         self.assertIn("draft hypotheses generated", analysis_uplift["passed_validation_check_ids_by_item"]["#50"])
@@ -318,6 +322,7 @@ class RapidTriageSearchAnalysisTests(unittest.TestCase):
         self.assertEqual(analysis_uplift["reportability_decision"]["review_output_counts"]["hypotheses"], 4)
         self.assertTrue(analysis_uplift["reportability_decision"]["cluster_report_grade_validation_plan_present"])
         self.assertTrue(analysis_uplift["reportability_decision"]["entity_report_grade_validation_plan_present"])
+        self.assertTrue(analysis_uplift["reportability_decision"]["graph_report_grade_validation_plan_present"])
         self.assertFalse(analysis_uplift["large_data_controls"]["persistent_review_state"])
         self.assertFalse(analysis_uplift["large_data_controls"]["full_case_reindex"])
         self.assertTrue(analysis_uplift["large_data_controls"]["cluster_review_profile_present"])
@@ -340,8 +345,11 @@ class RapidTriageSearchAnalysisTests(unittest.TestCase):
         self.assertFalse(analysis_uplift["large_data_controls"]["persistent_entity_review_state"])
         self.assertTrue(analysis_uplift["large_data_controls"]["graph_interaction_profile_present"])
         self.assertTrue(analysis_uplift["large_data_controls"]["graph_citation_manifest_present"])
+        self.assertTrue(analysis_uplift["large_data_controls"]["graph_report_grade_validation_plan_present"])
         self.assertGreaterEqual(analysis_uplift["large_data_controls"]["graph_citation_edge_count"], 1)
         self.assertGreaterEqual(analysis_uplift["large_data_controls"]["graph_source_viewer_locator_count"], 1)
+        self.assertEqual(analysis_uplift["large_data_controls"]["graph_report_grade_ready_slot_count"], 6)
+        self.assertEqual(analysis_uplift["large_data_controls"]["graph_report_grade_blocking_slot_count"], 6)
         self.assertGreaterEqual(analysis_uplift["large_data_controls"]["graph_filter_count"], 1)
         self.assertGreaterEqual(analysis_uplift["large_data_controls"]["graph_edge_page_count"], 1)
         self.assertFalse(analysis_uplift["large_data_controls"]["graph_saved_layout_supported"])
@@ -532,6 +540,37 @@ class RapidTriageSearchAnalysisTests(unittest.TestCase):
         self.assertIn(
             "search-graph-citation-manifest-emitted",
             graph_manifest["passed_validation_check_ids"],
+        )
+        graph_plan = graph["graph_report_grade_validation_plan"]
+        self.assertEqual(graph_plan["profile_version"], "search-graph-report-grade-validation-plan-v1")
+        self.assertEqual(graph_plan["item_number"], 48)
+        self.assertEqual(graph_plan["gap_id"], "#48")
+        self.assertEqual(graph["graph_report_grade_validation_plan_hash"], graph_plan["validation_plan_sha256"])
+        self.assertEqual(graph_plan["graph_citation_manifest_sha256"], graph_manifest["manifest_sha256"])
+        self.assertGreaterEqual(graph_plan["edge_count"], 1)
+        self.assertGreaterEqual(graph_plan["edge_citation_count"], 1)
+        self.assertEqual(graph_plan["ready_slot_count"], 6)
+        self.assertEqual(graph_plan["blocking_slot_count"], 6)
+        self.assertEqual(graph_plan["validation_status"], "report-validation-blocked")
+        self.assertFalse(graph_plan["commercial_grade"])
+        graph_slots = {slot["slot_id"]: slot for slot in graph_plan["validation_slots"]}
+        self.assertEqual(graph_slots["search-graph-nodes-and-edges-built"]["status"], "complete")
+        self.assertEqual(graph_slots["search-graph-interaction-profile-emitted"]["status"], "complete")
+        self.assertEqual(graph_slots["search-graph-citation-manifest-emitted"]["status"], "complete")
+        self.assertEqual(graph_slots["search-graph-edge-source-viewer-locators"]["status"], "complete")
+        self.assertEqual(graph_slots["search-graph-filter-and-page-metadata"]["status"], "complete")
+        self.assertEqual(graph_slots["search-graph-causal-proof-warning"]["status"], "complete")
+        self.assertEqual(graph_slots["search-graph-server-side-paging"]["status"], "external-required")
+        self.assertEqual(graph_slots["search-graph-saved-layouts"]["status"], "external-required")
+        self.assertIn("server-side-graph-paging-required", graph_plan["blockers"])
+        self.assertIn("graph-source-citation-trusted-diff-required", graph_plan["blockers"])
+        self.assertEqual(
+            analysis_uplift["large_data_controls"]["graph_report_grade_validation_plan_hash"],
+            graph_plan["validation_plan_sha256"],
+        )
+        self.assertEqual(
+            analysis_uplift["reportability_decision"]["graph_report_grade_validation_plan_hash"],
+            graph_plan["validation_plan_sha256"],
         )
         self.assertFalse(graph["report_grade_assessment"]["ready_for_court_report"])
         self.assertIn("#49", analysis["timeline"]["summary"]["commercial_gap_ids"])

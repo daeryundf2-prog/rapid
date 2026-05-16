@@ -156,7 +156,7 @@
       ],
       "expected": {
         "required_assertions": [
-          "Search analysis preserves graph nodes, relationship edges, source citation references, graph_citation_manifest edge source viewer locators, paging/truncation disclosure, causal-proof warning, and #48 core_accuracy_gates.",
+          "Search analysis preserves graph nodes, relationship edges, source citation references, graph_citation_manifest edge source viewer locators, graph_report_grade_validation_plan ready/blocking slots, paging/truncation disclosure, causal-proof warning, and #48 core_accuracy_gates.",
           "Search analysis trusted diff helper requires graph source-citation row equality before satisfying the #48 trusted graph source-citation diff pass gate.",
           "Search analysis reportability decisions block causal graph claims until server-side graph paging, saved layouts, and source-row review exists."
         ]

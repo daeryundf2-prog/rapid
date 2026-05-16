@@ -93,7 +93,7 @@
       "title": "Graph view for account-file-URL-time relationships",
       "test_files": ["tests/test_rapidtriage_search_analysis.py"],
       "assertions": [
-        "Search analysis emits bounded relationship graph nodes/edges, source citation references, graph truncation disclosure, analysis_analyst_review_profile, #48 core_accuracy_gates, and reportability blockers for missing server-side graph paging, saved layout, and source-row review.",
+        "Search analysis emits bounded relationship graph nodes/edges, source citation references, graph_report_grade_validation_plan ready/blocking slots, graph truncation disclosure, analysis_analyst_review_profile, #48 core_accuracy_gates, and reportability blockers for missing server-side graph paging, saved layout, and source-row review.",
         "build_analysis_trusted_diff compares graph edge rows against source-citation reviewed graph rows before satisfying the #48 trusted diff gate."
       ],
       "remaining_external_validation": [
