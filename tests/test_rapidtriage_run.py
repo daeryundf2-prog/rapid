@@ -344,6 +344,20 @@ class RapidTriageRunTests(unittest.TestCase):
         self.assertIn("scheduler_event_row_head_hash", scheduler["scheduler_manifest"])
         self.assertRegex(scheduler["scheduler_manifest"]["resource_policy_hash"], r"^[0-9a-f]{64}$")
         self.assertTrue(scheduler["scheduler_manifest"]["deterministic_order_verified"])
+        scheduler_plan = scheduler["parser_scheduler_report_grade_validation_plan"]
+        self.assertEqual(scheduler_plan["profile_version"], "parser-scheduler-report-grade-validation-plan-v1")
+        self.assertEqual(scheduler["parser_scheduler_report_grade_validation_plan_hash"], scheduler_plan["validation_plan_hash"])
+        self.assertEqual(scheduler_plan["ready_slot_count"], 6)
+        self.assertEqual(scheduler_plan["blocking_slot_count"], 6)
+        self.assertIn("bounded-worker-policy", {slot["slot_id"] for slot in scheduler_plan["ready_slots"]})
+        self.assertIn(
+            "tb-scale-fairness-backpressure",
+            {slot["slot_id"] for slot in scheduler_plan["blocking_slots"]},
+        )
+        self.assertIn(
+            "parser scheduler report-grade validation plan emitted",
+            scheduler["core_accuracy_gates"][0]["satisfied_checks"],
+        )
         scheduler_diff = build_scheduler_trusted_diff(scheduler, scheduler)
         scheduler_trusted = parallel_parser_scheduler_assessment(["browser", "windows"], trusted_diff=scheduler_diff)
         self.assertEqual(scheduler_diff["status"], "pass")
@@ -746,6 +760,29 @@ class RapidTriageRunTests(unittest.TestCase):
             self.assertRegex(scheduler_manifest["scheduler_event_row_head_hash"], r"^[0-9a-f]{64}$")
             self.assertRegex(scheduler_manifest["events"][0]["row_hash"], r"^[0-9a-f]{64}$")
             self.assertRegex(scheduler_manifest["resource_policy_hash"], r"^[0-9a-f]{64}$")
+            scheduler_plan = summary_payload["processing"]["parallel_parser_scheduler"][
+                "parser_scheduler_report_grade_validation_plan"
+            ]
+            self.assertEqual(scheduler_plan["profile_version"], "parser-scheduler-report-grade-validation-plan-v1")
+            self.assertEqual(
+                summary_payload["processing"]["parallel_parser_scheduler"][
+                    "parser_scheduler_report_grade_validation_plan_hash"
+                ],
+                scheduler_plan["validation_plan_hash"],
+            )
+            self.assertEqual(scheduler_plan["ready_slot_count"], 6)
+            self.assertEqual(scheduler_plan["blocking_slot_count"], 6)
+            self.assertIn("scheduler-run-manifest", {slot["slot_id"] for slot in scheduler_plan["ready_slots"]})
+            self.assertIn(
+                "distributed-priority-queue",
+                {slot["slot_id"] for slot in scheduler_plan["blocking_slots"]},
+            )
+            self.assertIn(
+                "parser scheduler report-grade validation plan emitted",
+                summary_payload["processing"]["parallel_parser_scheduler"]["core_accuracy_gates"][0][
+                    "satisfied_checks"
+                ],
+            )
             runtime_profiles = summary_payload["processing"]["runtime_defensibility_profiles"]
             self.assertEqual(runtime_profiles["batch_id"], "commercial-uplift-071-075")
             self.assertEqual(runtime_profiles["item_numbers"], [71, 72, 73, 74, 75])
@@ -835,6 +872,14 @@ class RapidTriageRunTests(unittest.TestCase):
                 scheduler_manifest["resource_policy_hash"],
             )
             self.assertTrue(runtime_by_number[75]["controls"]["deterministic_order_verified"])
+            self.assertEqual(
+                runtime_by_number[75]["controls"]["parser_scheduler_report_grade_validation_plan_hash"],
+                scheduler_plan["validation_plan_hash"],
+            )
+            self.assertEqual(
+                runtime_by_number[75]["controls"]["parser_scheduler_report_grade_ready_slot_count"],
+                6,
+            )
             large_data_profiles = summary_payload["processing"]["functional_large_data_profiles"]
             self.assertEqual(large_data_profiles["batch_id"], "commercial-uplift-026-030")
             self.assertEqual(large_data_profiles["item_numbers"], [26, 28, 29, 30])

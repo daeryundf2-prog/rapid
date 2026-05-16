@@ -1176,6 +1176,7 @@ CORE_FORENSIC_ACCURACY_ITEMS: tuple[dict[str, object], ...] = (
             "resume-aware scheduling",
             "distributed scheduler limitation warning",
             "scheduler event row hashes emitted",
+            "parser scheduler report-grade validation plan emitted",
             "trusted scheduler manifest diff pass",
         ),
     },

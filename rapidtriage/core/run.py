@@ -162,6 +162,15 @@ LARGE_SQLITE_FTS_REPORT_GRADE_BLOCKERS = [
     "index-maintenance-vacuum-regression-required",
 ]
 SCHEDULER_TRUSTED_DIFF_BLOCKER_75 = "trusted-parser-scheduler-manifest-diff-missing"
+SCHEDULER_REPORT_GRADE_VALIDATION_PLAN_VERSION = "parser-scheduler-report-grade-validation-plan-v1"
+SCHEDULER_REPORT_GRADE_BLOCKERS = [
+    SCHEDULER_TRUSTED_DIFF_BLOCKER_75,
+    "distributed-priority-scheduler-required",
+    "live-worker-telemetry-stream-required",
+    "tb-scale-fairness-backpressure-validation-required",
+    "cross-platform-worker-quota-validation-required",
+    "priority-starvation-regression-required",
+]
 DEFAULT_INCREMENTAL_HASH_MAX_BYTES = 16 * 1024 * 1024
 
 
@@ -824,13 +833,36 @@ def parallel_parser_scheduler_assessment(
     if trusted_diff and trusted_diff.get("status") == "pass":
         satisfied.append("trusted scheduler manifest diff pass")
         evidence_refs.append(f"trusted_tool:{trusted_diff.get('trusted_tool', '')}")
+    validation_plan = parser_scheduler_report_grade_validation_plan(
+        kinds=kinds,
+        scheduler_manifest=scheduler_manifest,
+        trusted_diff=trusted_diff,
+    )
+    if scheduler_manifest:
+        satisfied.extend(
+            [
+                "parser scheduler report-grade validation plan emitted",
+                "parser scheduler report-grade ready slots emitted",
+            ]
+        )
+        evidence_refs.extend(
+            [
+                f"parser_scheduler_report_grade_validation_plan_hash:{validation_plan['validation_plan_hash']}",
+                f"parser_scheduler_report_grade_ready_slots:{validation_plan['ready_slot_count']}",
+                f"parser_scheduler_report_grade_blocking_slots:{validation_plan['blocking_slot_count']}",
+            ]
+        )
     return {
         "component": "parallel-parser-scheduler",
-        "status": "threaded-parser-stage-scheduler-enabled",
+        "status": "threaded-parser-stage-scheduler-and-validation-plan-emitted",
         "commercial_gap_ids": [PARALLEL_PARSER_SCHEDULER_GAP_ID],
         "scheduled_count": scheduled,
         "max_workers": artifact_scheduler_workers(kinds),
         "scheduler_manifest": scheduler_manifest or {},
+        "parser_scheduler_report_grade_validation_plan": validation_plan,
+        "parser_scheduler_report_grade_validation_plan_hash": validation_plan["validation_plan_hash"],
+        "report_grade_ready_slot_count": validation_plan["ready_slot_count"],
+        "report_grade_blocking_slot_count": validation_plan["blocking_slot_count"],
         "ready_for_court_report": False,
         "core_accuracy_gates": [
             build_accuracy_gate(
@@ -849,12 +881,174 @@ def parallel_parser_scheduler_assessment(
             "single-output-json-io-policy",
             "bounded-future-backpressure-policy",
         ],
-        "blockers": [
-            "scheduler-is-local-threadpool-not-distributed-priority-queue",
-            "scheduler-telemetry-is-run-manifest-not-live-ui-stream",
-            "fairness-and-backpressure-need-terabyte-scale-validation",
-            SCHEDULER_TRUSTED_DIFF_BLOCKER_75,
-        ],
+        "blockers": list(validation_plan["blockers"]),
+    }
+
+
+def parser_scheduler_report_grade_validation_plan(
+    *,
+    kinds: Sequence[str],
+    scheduler_manifest: Mapping[str, object] | None = None,
+    trusted_diff: Mapping[str, object] | None = None,
+) -> dict[str, object]:
+    clean_kinds = tuple(str(kind) for kind in kinds)
+    manifest = scheduler_manifest if isinstance(scheduler_manifest, Mapping) else {}
+    resource_policy = manifest.get("resource_policy") if isinstance(manifest.get("resource_policy"), Mapping) else {}
+    event_rows = manifest.get("events") if isinstance(manifest.get("events"), list) else []
+    manifest_hash = str(manifest.get("manifest_hash") or "")
+    resource_policy_hash = str(manifest.get("resource_policy_hash") or "")
+    events_head_hash = str(manifest.get("events_head_hash") or "")
+    event_row_head_hash = str(manifest.get("scheduler_event_row_head_hash") or "")
+    deterministic_order = [str(value) for value in manifest.get("deterministic_output_order", [])] if isinstance(
+        manifest.get("deterministic_output_order"), list
+    ) else list(clean_kinds)
+    event_status_rows = [
+        {
+            "kind": str(row.get("kind") or ""),
+            "status": str(row.get("status") or ""),
+            "queued_order": int(row.get("queued_order") or 0),
+            "deterministic_output_order": int(row.get("deterministic_output_order") or 0),
+            "duration_ms": int(row.get("duration_ms") or 0),
+            "row_hash": str(row.get("row_hash") or ""),
+            "reused": bool(row.get("reused")),
+            "parser_error_count": int(row.get("parser_error_count") or 0),
+        }
+        for row in event_rows
+        if isinstance(row, Mapping)
+    ]
+    event_status_head_hash = hashlib.sha256(
+        json.dumps(event_status_rows, sort_keys=True).encode("utf-8")
+    ).hexdigest()
+    local_threadpool_contract = {
+        "max_workers": int(manifest.get("max_workers") or artifact_scheduler_workers(clean_kinds)),
+        "cpu_worker_limit": int(resource_policy.get("cpu_worker_limit") or 0),
+        "backpressure_window": int(resource_policy.get("backpressure_window") or 0),
+        "distributed_priority_queue": bool(resource_policy.get("distributed_priority_queue")),
+        "live_worker_stream": bool(resource_policy.get("live_worker_stream")),
+    }
+    local_threadpool_contract_hash = hashlib.sha256(
+        json.dumps(local_threadpool_contract, sort_keys=True).encode("utf-8")
+    ).hexdigest()
+    ready_slots: list[dict[str, object]] = [
+        {
+            "slot_id": "scheduler-run-manifest",
+            "status": "ready",
+            "evidence_ref": "scheduler_manifest_hash",
+            "evidence_hash": manifest_hash,
+            "description": "The run archives a parser scheduler manifest for artifact-stage execution.",
+        },
+        {
+            "slot_id": "bounded-worker-policy",
+            "status": "ready",
+            "evidence_ref": "resource_policy_hash",
+            "evidence_hash": resource_policy_hash,
+            "description": "Worker count, CPU quota source, and local backpressure window are hashed.",
+        },
+        {
+            "slot_id": "deterministic-output-order",
+            "status": "ready",
+            "evidence_ref": "deterministic_output_order_hash",
+            "evidence_hash": hashlib.sha256("\n".join(deterministic_order).encode("utf-8")).hexdigest(),
+            "description": "Parser outputs are emitted in profile order even when futures complete out of order.",
+        },
+        {
+            "slot_id": "scheduler-event-row-hashes",
+            "status": "ready",
+            "evidence_ref": "scheduler_event_row_head_hash",
+            "evidence_hash": event_row_head_hash,
+            "description": "Each queued/completed/reused parser event carries a stable row hash.",
+        },
+        {
+            "slot_id": "per-worker-duration-telemetry",
+            "status": "ready",
+            "evidence_ref": "event_status_head_hash",
+            "evidence_hash": event_status_head_hash,
+            "description": "Scheduler rows preserve per-parser duration, status, reuse, and error counts.",
+        },
+        {
+            "slot_id": "local-threadpool-limitation-disclosure",
+            "status": "ready",
+            "evidence_ref": "local_threadpool_contract_hash",
+            "evidence_hash": local_threadpool_contract_hash,
+            "description": "The manifest discloses local threadpool execution rather than distributed scheduling.",
+        },
+    ]
+    blocking_slots: list[dict[str, object]] = [
+        {
+            "slot_id": "trusted-scheduler-manifest",
+            "status": "blocked",
+            "blocker": SCHEDULER_TRUSTED_DIFF_BLOCKER_75,
+            "required_evidence": "independent trusted parser scheduler manifest diff for identical run outputs",
+        },
+        {
+            "slot_id": "distributed-priority-queue",
+            "status": "blocked",
+            "blocker": "distributed-priority-scheduler-required",
+            "required_evidence": "priority queue or distributed worker evidence with deterministic output reconciliation",
+        },
+        {
+            "slot_id": "live-worker-telemetry-stream",
+            "status": "blocked",
+            "blocker": "live-worker-telemetry-stream-required",
+            "required_evidence": "live per-worker progress/CPU/RSS/error telemetry stream captured during long runs",
+        },
+        {
+            "slot_id": "tb-scale-fairness-backpressure",
+            "status": "blocked",
+            "blocker": "tb-scale-fairness-backpressure-validation-required",
+            "required_evidence": "1TB+ evidence run proving fair scheduling, bounded queues, and stable retry behavior",
+        },
+        {
+            "slot_id": "cross-platform-worker-quota",
+            "status": "blocked",
+            "blocker": "cross-platform-worker-quota-validation-required",
+            "required_evidence": "Windows, macOS, and Linux run logs with matching worker quota and output ordering semantics",
+        },
+        {
+            "slot_id": "priority-starvation-regression",
+            "status": "blocked",
+            "blocker": "priority-starvation-regression-required",
+            "required_evidence": "regression corpus proving long parsers do not starve short/high-priority artifact parsers",
+        },
+    ]
+    trusted_status = str((trusted_diff or {}).get("status") or "missing")
+    plan_core = {
+        "profile_version": SCHEDULER_REPORT_GRADE_VALIDATION_PLAN_VERSION,
+        "item_number": 75,
+        "gap_id": PARALLEL_PARSER_SCHEDULER_GAP_ID,
+        "commercial_gap_ids": [PARALLEL_PARSER_SCHEDULER_GAP_ID],
+        "scheduled_count": int(manifest.get("scheduled_count") or len(clean_kinds)),
+        "max_workers": int(manifest.get("max_workers") or artifact_scheduler_workers(clean_kinds)),
+        "pending_count": int(manifest.get("pending_count") or 0),
+        "completed_count": int(manifest.get("completed_count") or 0),
+        "reused_count": int(manifest.get("reused_count") or 0),
+        "error_count": int(manifest.get("error_count") or 0),
+        "event_row_count": int(manifest.get("event_row_count") or len(event_status_rows)),
+        "scheduler_manifest_hash": manifest_hash,
+        "resource_policy_hash": resource_policy_hash,
+        "events_head_hash": events_head_hash,
+        "scheduler_event_row_head_hash": event_row_head_hash,
+        "event_status_head_hash": event_status_head_hash,
+        "local_threadpool_contract_hash": local_threadpool_contract_hash,
+        "deterministic_order_verified": bool(manifest.get("deterministic_order_verified")),
+        "local_threadpool_scheduler": True,
+        "distributed_priority_scheduler": False,
+        "live_worker_telemetry_stream": False,
+        "trusted_scheduler_diff_status": trusted_status,
+        "ready_slots": ready_slots,
+        "blocking_slots": blocking_slots,
+        "ready_slot_count": len(ready_slots),
+        "blocking_slot_count": len(blocking_slots),
+        "blockers": list(SCHEDULER_REPORT_GRADE_BLOCKERS),
+        "commercial_claim_allowed": False,
+        "ready_for_court_report": False,
+        "report_use_warning": "Use as local bounded scheduler evidence only; do not claim distributed or TB-scale scheduler fairness until blocker slots are satisfied.",
+    }
+    validation_plan_hash = hashlib.sha256(json.dumps(plan_core, sort_keys=True).encode("utf-8")).hexdigest()
+    return {
+        **plan_core,
+        "validation_plan_hash": validation_plan_hash,
+        "validation_plan_sha256": validation_plan_hash,
     }
 
 
@@ -4875,6 +5069,12 @@ def build_runtime_defensibility_profiles(
         if isinstance((sqlite_fts_optimization or {}).get("large_sqlite_fts_report_grade_validation_plan"), Mapping)
         else {}
     )
+    scheduler_validation_plan = parser_scheduler_report_grade_validation_plan(
+        kinds=tuple(str(kind) for kind in (scheduler_manifest or {}).get("deterministic_output_order", []))
+        if isinstance((scheduler_manifest or {}).get("deterministic_output_order"), list)
+        else tuple(),
+        scheduler_manifest=scheduler_manifest,
+    )
     profiles = [
         build_runtime_defensibility_profile(
             item_number=71,
@@ -4993,7 +5193,7 @@ def build_runtime_defensibility_profiles(
         build_runtime_defensibility_profile(
             item_number=75,
             component="parallel-parser-scheduler",
-            status="implemented-local-threadpool-validation-required",
+            status="implemented-local-threadpool-report-grade-plan-validation-required",
             controls={
                 "scheduled_count": scheduled_count,
                 "max_workers": scheduler_max_workers,
@@ -5016,14 +5216,18 @@ def build_runtime_defensibility_profiles(
                 "per_worker_duration_telemetry": bool(scheduler_manifest),
                 "cpu_worker_quota_policy": bool(scheduler_manifest),
                 "io_output_policy": bool(scheduler_manifest),
+                "parser_scheduler_report_grade_validation_plan_hash": str(
+                    scheduler_validation_plan.get("validation_plan_hash") or ""
+                ),
+                "parser_scheduler_report_grade_ready_slot_count": int(
+                    scheduler_validation_plan.get("ready_slot_count") or 0
+                ),
+                "parser_scheduler_report_grade_blocking_slot_count": int(
+                    scheduler_validation_plan.get("blocking_slot_count") or 0
+                ),
                 "distributed_priority_scheduler": False,
             },
-            blockers=[
-                SCHEDULER_TRUSTED_DIFF_BLOCKER_75,
-                "distributed-priority-scheduler-not-enabled",
-                "live-worker-telemetry-ui-not-enabled",
-                "tb-scale-backpressure-validation-not-attached",
-            ],
+            blockers=list(scheduler_validation_plan.get("blockers") or SCHEDULER_REPORT_GRADE_BLOCKERS),
         ),
     ]
     return {

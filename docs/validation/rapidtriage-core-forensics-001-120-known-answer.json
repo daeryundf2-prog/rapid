@@ -1780,10 +1780,10 @@
       ],
       "expected": {
         "required_assertions": [
-          "Run summaries preserve bounded worker count, deterministic outputs, per-parser capture, resume-aware scheduling, scheduler run manifest hash, scheduler event row hashes, per-parser duration telemetry, local-threadpool warning, trusted scheduler diff status, and #75 core_accuracy_gates."
+          "Run summaries preserve bounded worker count, deterministic outputs, per-parser capture, resume-aware scheduling, scheduler run manifest hash, scheduler event row hashes, per-parser duration telemetry, local-threadpool warning, parser scheduler report-grade validation-plan hashes/ready slots/blocking slots, trusted scheduler diff status, and #75 core_accuracy_gates."
         ]
       },
-      "notes": "Internal fixture pass; trusted scheduler manifests, distributed scheduling, live telemetry UI/stream, and TB-scale backpressure validation remain blockers.",
+      "notes": "Internal fixture pass; trusted scheduler manifests, distributed scheduling, live telemetry UI/stream, cross-platform worker quota validation, priority-starvation regression, and TB-scale backpressure validation remain blockers.",
       "source_manifest": "docs/validation/rapidtriage-core-forensics-071-080-known-answer.json"
     },
     {

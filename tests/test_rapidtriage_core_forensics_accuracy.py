@@ -174,6 +174,7 @@ class RapidTriageCoreForensicsAccuracyTests(unittest.TestCase):
         self.assertIn("trusted large SQLite/FTS query-plan diff pass", sqlite_performance["required_checks"])
         self.assertIn("bounded worker count", parser_scheduler["required_checks"])
         self.assertIn("scheduler event row hashes emitted", parser_scheduler["required_checks"])
+        self.assertIn("parser scheduler report-grade validation plan emitted", parser_scheduler["required_checks"])
         self.assertIn("trusted scheduler manifest diff pass", parser_scheduler["required_checks"])
         self.assertIn("hit/miss counters emitted", hash_cache["required_checks"])
         self.assertIn("trusted hash-cache manifest diff pass", hash_cache["required_checks"])
