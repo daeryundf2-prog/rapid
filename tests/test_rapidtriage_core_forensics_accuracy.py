@@ -325,6 +325,8 @@ class RapidTriageCoreForensicsAccuracyTests(unittest.TestCase):
         self.assertIn("malicious sandbox report-grade ready slots", malicious_sandbox["required_checks"])
         self.assertIn("trusted malicious evidence sandbox corpus diff pass", malicious_sandbox["required_checks"])
         self.assertIn("release blocking policy recorded", dependency_monitoring["required_checks"])
+        self.assertIn("dependency monitoring report-grade validation plan", dependency_monitoring["required_checks"])
+        self.assertIn("dependency monitoring report-grade ready slots", dependency_monitoring["required_checks"])
         self.assertIn("trusted dependency advisory/SBOM diff pass", dependency_monitoring["required_checks"])
 
     def test_known_answer_template_maps_every_profile_to_a_dataset(self) -> None:

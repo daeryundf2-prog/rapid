@@ -3884,6 +3884,7 @@ def final_delivery_evidence_chain() -> list[dict[str, object]]:
             "produces": "dependency-monitoring.json",
             "primary_outputs": [
                 "dependency-monitoring.json",
+                "dependency-monitoring.json.dependency_report_grade_validation_plan_hash",
                 "operations_documents.document_evidence_manifests.120.manifest_hash",
                 "operations_documents.document_evidence_slots.120.scheduled_ci_advisory_scan",
             ],

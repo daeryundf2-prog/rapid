@@ -2033,6 +2033,8 @@ CORE_FORENSIC_ACCURACY_ITEMS: tuple[dict[str, object], ...] = (
             "CI scheduled scan blocker disclosed",
             "dependency monitoring evidence manifest hash emitted",
             "dependency monitoring evidence slots emitted",
+            "dependency monitoring report-grade validation plan",
+            "dependency monitoring report-grade ready slots",
             "trusted dependency advisory/SBOM diff pass",
         ),
     },

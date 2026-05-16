@@ -2761,10 +2761,10 @@
       ],
       "expected": {
         "required_assertions": [
-          "Dependency monitoring script preserves dependency inventory, pip-audit attempt, release-blocking policy, packaged script evidence, dependency-monitoring-evidence-manifest-v1 manifest hash/evidence slots, dependency-ci-workflow-evidence-v1 hash, scheduled workflow contract, trusted advisory/SBOM diff helpers/gates, and #120 core_accuracy_gates."
+          "Dependency monitoring script preserves dependency inventory, pip-audit attempt, release-blocking policy, packaged script evidence, dependency-monitoring-evidence-manifest-v1 manifest hash/evidence slots, dependency-monitoring-report-grade-validation-plan-v1 hash/ready/blocking slots, dependency-ci-workflow-evidence-v1 hash, scheduled workflow contract, trusted advisory/SBOM diff helpers/gates, and #120 core_accuracy_gates."
         ]
       },
-      "notes": "Internal fixture pass; actual CI advisory run log/artifact URL, SBOM publication, and trusted exception review remain external.",
+      "notes": "Internal fixture pass; actual CI advisory run log/artifact URL, SBOM publication, scanner/version DB capture, artifact checksum linkage, and trusted dependency exception/independent review remain external.",
       "source_manifest": "docs/validation/rapidtriage-core-forensics-101-120-known-answer.json"
     }
   ]

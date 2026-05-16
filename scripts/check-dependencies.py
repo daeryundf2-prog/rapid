@@ -17,6 +17,18 @@ from rapidtriage.core.forensic_accuracy import build_accuracy_gate
 DEPENDENCY_VULNERABILITY_MONITORING_GAP_ID = "#120"
 DEPENDENCY_MONITORING_TRUSTED_DIFF_BLOCKER_120 = "trusted-dependency-advisory-sbom-diff-missing"
 DEPENDENCY_MONITORING_TRUSTED_TOOLS = {"ci-advisory-scan", "sbom-publication-log", "dependency-exception-review"}
+DEPENDENCY_MONITORING_REPORT_GRADE_VALIDATION_PLAN_VERSION = "dependency-monitoring-report-grade-validation-plan-v1"
+DEPENDENCY_MONITORING_REPORT_GRADE_BLOCKERS = [
+    DEPENDENCY_MONITORING_TRUSTED_DIFF_BLOCKER_120,
+    "ci-advisory-run-log-required",
+    "sbom-publication-required",
+    "dependency-exception-review-required",
+    "release-host-dependency-smoke-required",
+    "scanner-version-lock-required",
+    "high-critical-triage-required",
+    "artifact-checksum-linkage-required",
+    "independent-dependency-review-required",
+]
 FUNCTIONAL_OPS_BATCH_ID = "commercial-uplift-061-065"
 REPO_ROOT = Path(__file__).resolve().parent.parent
 DEPENDENCY_MONITORING_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "dependency-monitoring.yml"
@@ -103,6 +115,27 @@ def main(argv: list[str] | None = None) -> int:
     payload["dependency_monitoring_evidence_manifest_hash"] = evidence_manifest["manifest_hash"]
     payload["dependency_evidence_matrix_hash"] = evidence_manifest["dependency_evidence_matrix_hash"]
     payload["dependency_evidence_slots"] = evidence_manifest["dependency_evidence_slots"]
+    report_grade_validation_plan = build_dependency_monitoring_report_grade_validation_plan(
+        payload=payload,
+        evidence_manifest=evidence_manifest,
+        workflow_evidence=workflow_evidence,
+        trusted_diff=trusted_diff,
+    )
+    payload["dependency_report_grade_validation_plan"] = report_grade_validation_plan
+    payload["dependency_report_grade_validation_plan_hash"] = report_grade_validation_plan["validation_plan_hash"]
+    payload["dependency_report_grade_ready_slot_count"] = report_grade_validation_plan["ready_slot_count"]
+    payload["dependency_report_grade_blocking_slot_count"] = report_grade_validation_plan["blocking_slot_count"]
+    payload["blockers"] = sorted({*payload.get("blockers", []), *report_grade_validation_plan["blockers"]})
+    payload["functional_priority_profile"] = dependency_monitoring_functional_profile(
+        package_count=package_count,
+        pip_audit_return_code=pip_audit.returncode,
+        pip_audit_stdout=pip_audit.stdout,
+        pip_audit_stderr=pip_audit.stderr,
+        sbom_manifest=sbom_manifest,
+        workflow_evidence=workflow_evidence,
+        trusted_diff=trusted_diff,
+        report_grade_validation_plan=report_grade_validation_plan,
+    )
     payload["core_accuracy_gates"] = dependency_monitoring_core_accuracy_gates(
         package_count=package_count,
         scan_attempted=True,
@@ -110,6 +143,7 @@ def main(argv: list[str] | None = None) -> int:
         workflow_evidence=workflow_evidence,
         trusted_diff=trusted_diff,
         evidence_manifest=evidence_manifest,
+        report_grade_validation_plan=report_grade_validation_plan,
     )
     payload["vulnerability_scan"]["core_accuracy_gates"] = payload["core_accuracy_gates"]
     output.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
@@ -125,6 +159,7 @@ def dependency_monitoring_core_accuracy_gates(
     workflow_evidence: Mapping[str, object] | None = None,
     trusted_diff: Mapping[str, object] | None = None,
     evidence_manifest: Mapping[str, object] | None = None,
+    report_grade_validation_plan: Mapping[str, object] | None = None,
 ) -> list[dict[str, object]]:
     satisfied = ["release blocking policy recorded", "CI scheduled scan blocker disclosed"]
     if package_count >= 0:
@@ -146,13 +181,29 @@ def dependency_monitoring_core_accuracy_gates(
             satisfied.append("dependency SBOM manifest hash emitted")
         if evidence_manifest.get("dependency_evidence_matrix_hash"):
             satisfied.append("dependency evidence matrix hash emitted")
+    if report_grade_validation_plan:
+        if report_grade_validation_plan.get("validation_plan_hash"):
+            satisfied.append("dependency monitoring report-grade validation plan")
+        if int(report_grade_validation_plan.get("ready_slot_count") or 0) > 0:
+            satisfied.append("dependency monitoring report-grade ready slots")
     if trusted_diff and trusted_diff.get("status") == "pass":
         satisfied.append("trusted dependency advisory/SBOM diff pass")
+    evidence_refs = [f"package_count:{package_count}", "tool:pip-audit"]
+    if report_grade_validation_plan and report_grade_validation_plan.get("validation_plan_hash"):
+        evidence_refs.append(
+            f"dependency_report_grade_validation_plan_sha256:{report_grade_validation_plan['validation_plan_hash']}"
+        )
+        evidence_refs.append(
+            f"dependency_report_grade_ready_slots:{report_grade_validation_plan.get('ready_slot_count')}"
+        )
+        evidence_refs.append(
+            f"dependency_report_grade_blocking_slots:{report_grade_validation_plan.get('blocking_slot_count')}"
+        )
     return [
         build_accuracy_gate(
             120,
             satisfied_checks=satisfied,
-            evidence_refs=[f"package_count:{package_count}", "tool:pip-audit"],
+            evidence_refs=evidence_refs,
         )
     ]
 
@@ -166,7 +217,9 @@ def dependency_monitoring_functional_profile(
     sbom_manifest: Mapping[str, object],
     workflow_evidence: Mapping[str, object],
     trusted_diff: Mapping[str, object],
+    report_grade_validation_plan: Mapping[str, object] | None = None,
 ) -> dict[str, object]:
+    report_grade_validation_plan = report_grade_validation_plan or {}
     scan_available = pip_audit_return_code != 1 or bool(pip_audit_stdout.strip())
     failed_checks = ["sbom-publication-not-attached"]
     if not workflow_evidence.get("configured"):
@@ -190,6 +243,9 @@ def dependency_monitoring_functional_profile(
             "scheduled_ci_scan_configured": bool(workflow_evidence.get("configured")),
             "scheduled_ci_workflow_hash": str(workflow_evidence.get("workflow_hash") or ""),
             "sbom_archival_configured": bool(workflow_evidence.get("sbom_archived_in_dependency_artifact")),
+            "dependency_report_grade_validation_plan_hash": str(
+                report_grade_validation_plan.get("validation_plan_hash") or ""
+            ),
             "sbom_published": False,
         },
         "evidence_counts": {
@@ -202,6 +258,167 @@ def dependency_monitoring_functional_profile(
         "failed_validation_check_ids": failed_checks,
         "ready_for_commercial_release": False,
     }
+
+
+def build_dependency_monitoring_report_grade_validation_plan(
+    *,
+    payload: Mapping[str, object],
+    evidence_manifest: Mapping[str, object],
+    workflow_evidence: Mapping[str, object],
+    trusted_diff: Mapping[str, object],
+) -> dict[str, object]:
+    pip_list = payload.get("pip_list") if isinstance(payload.get("pip_list"), Mapping) else {}
+    vulnerability_scan = payload.get("vulnerability_scan") if isinstance(payload.get("vulnerability_scan"), Mapping) else {}
+    sbom_manifest = payload.get("dependency_sbom_manifest") if isinstance(payload.get("dependency_sbom_manifest"), Mapping) else {}
+    packages = pip_list.get("packages") if isinstance(pip_list.get("packages"), list) else []
+    ready_slots = [
+        {
+            "slot_id": "dependency-monitoring-json",
+            "status": "ready",
+            "evidence_ref": "scripts/check-dependencies.py --output dependency-monitoring.json",
+            "evidence_hash": stable_dependency_sha256("dependency-monitoring command emits JSON"),
+        },
+        {
+            "slot_id": "pip-list-inventory",
+            "status": "ready",
+            "evidence_ref": "dependency-monitoring.json.pip_list",
+            "evidence_hash": stable_dependency_sha256(
+                {"return_code": pip_list.get("return_code"), "package_count": len(packages)}
+            ),
+        },
+        {
+            "slot_id": "vulnerability-scan-attempt",
+            "status": "ready",
+            "evidence_ref": "dependency-monitoring.json.vulnerability_scan",
+            "evidence_hash": stable_dependency_sha256(
+                {
+                    "tool": vulnerability_scan.get("tool"),
+                    "available": vulnerability_scan.get("available"),
+                    "return_code": vulnerability_scan.get("return_code"),
+                    "release_policy": vulnerability_scan.get("release_policy"),
+                }
+            ),
+        },
+        {
+            "slot_id": "dependency-sbom-manifest",
+            "status": "ready",
+            "evidence_ref": "dependency-monitoring.json.dependency_sbom_manifest_hash",
+            "evidence_hash": str(sbom_manifest.get("manifest_hash") or ""),
+        },
+        {
+            "slot_id": "dependency-ci-workflow-evidence",
+            "status": "ready" if workflow_evidence.get("configured") else "ready-with-blocker",
+            "evidence_ref": "dependency-monitoring.json.dependency_ci_workflow_evidence_hash",
+            "evidence_hash": str(workflow_evidence.get("workflow_hash") or ""),
+        },
+        {
+            "slot_id": "dependency-monitoring-evidence-manifest",
+            "status": "ready",
+            "evidence_ref": "dependency-monitoring.json.dependency_monitoring_evidence_manifest_hash",
+            "evidence_hash": str(evidence_manifest.get("manifest_hash") or ""),
+        },
+        {
+            "slot_id": "dependency-evidence-matrix",
+            "status": "ready",
+            "evidence_ref": "dependency-monitoring.json.dependency_evidence_matrix_hash",
+            "evidence_hash": str(evidence_manifest.get("dependency_evidence_matrix_hash") or ""),
+        },
+        {
+            "slot_id": "trusted-dependency-diff-boundary",
+            "status": "ready" if trusted_diff.get("status") == "pass" else "ready-with-blocker",
+            "evidence_ref": "dependency-monitoring.json.trusted_dependency_monitoring_diff",
+            "evidence_hash": stable_dependency_sha256(trusted_diff),
+        },
+    ]
+    blocking_slots = []
+    if trusted_diff.get("status") != "pass":
+        blocking_slots.append(
+            {
+                "slot_id": "trusted-dependency-advisory-sbom-diff",
+                "status": "blocking",
+                "blocker": DEPENDENCY_MONITORING_TRUSTED_DIFF_BLOCKER_120,
+                "required_evidence": "trusted CI advisory/SBOM diff proving dependency baseline, SBOM, workflow, and evidence slots are unchanged",
+            }
+        )
+    for slot_id, blocker, required_evidence in (
+        (
+            "ci-advisory-run-log",
+            "ci-advisory-run-log-required",
+            "actual scheduled or release CI advisory run log and artifact URL for the release commit",
+        ),
+        (
+            "sbom-publication",
+            "sbom-publication-required",
+            "published SBOM/dependency baseline with release checksums and retention location",
+        ),
+        (
+            "dependency-exception-review",
+            "dependency-exception-review-required",
+            "approved exception review for unresolved high/critical dependency findings",
+        ),
+        (
+            "release-host-dependency-smoke",
+            "release-host-dependency-smoke-required",
+            "release-host smoke proving dependency monitoring command, SBOM manifest, and blockers are packaged",
+        ),
+        (
+            "scanner-version-lock",
+            "scanner-version-lock-required",
+            "scanner version and vulnerability database timestamp captured for reproducible dependency monitoring",
+        ),
+        (
+            "high-critical-triage",
+            "high-critical-triage-required",
+            "triage worksheet proving high/critical findings are blocked or have documented exceptions",
+        ),
+        (
+            "artifact-checksum-linkage",
+            "artifact-checksum-linkage-required",
+            "release artifact checksum linkage between SBOM, dependency-monitoring JSON, and released package set",
+        ),
+        (
+            "independent-dependency-review",
+            "independent-dependency-review-required",
+            "independent reviewer/lab signoff for advisory scan, SBOM publication, and exception policy",
+        ),
+    ):
+        blocking_slots.append(
+            {
+                "slot_id": slot_id,
+                "status": "blocking",
+                "current_attachment_status": "not-attached",
+                "blocker": blocker,
+                "required_evidence": required_evidence,
+            }
+        )
+    blockers = sorted({str(slot["blocker"]) for slot in blocking_slots if slot.get("blocker")})
+    plan: dict[str, object] = {
+        "profile_version": DEPENDENCY_MONITORING_REPORT_GRADE_VALIDATION_PLAN_VERSION,
+        "item_number": 120,
+        "commercial_gap_ids": [DEPENDENCY_VULNERABILITY_MONITORING_GAP_ID],
+        "commercial_claim_allowed": False,
+        "package_count": len(packages),
+        "pip_list_return_code": pip_list.get("return_code"),
+        "pip_audit_return_code": vulnerability_scan.get("return_code"),
+        "pip_audit_available": bool(vulnerability_scan.get("available")),
+        "release_policy": vulnerability_scan.get("release_policy", ""),
+        "dependency_sbom_manifest_hash": str(sbom_manifest.get("manifest_hash") or ""),
+        "dependency_monitoring_evidence_manifest_hash": str(evidence_manifest.get("manifest_hash") or ""),
+        "dependency_evidence_matrix_hash": str(evidence_manifest.get("dependency_evidence_matrix_hash") or ""),
+        "dependency_ci_workflow_evidence_hash": str(workflow_evidence.get("workflow_hash") or ""),
+        "dependency_ci_workflow_configured": bool(workflow_evidence.get("configured")),
+        "trusted_diff_status": str(trusted_diff.get("status") or ""),
+        "trusted_diff_blocker": trusted_diff.get("blocker"),
+        "ready_slots": ready_slots,
+        "blocking_slots": blocking_slots,
+        "ready_slot_count": len(ready_slots),
+        "blocking_slot_count": len(blocking_slots),
+        "external_blocker_catalog": list(DEPENDENCY_MONITORING_REPORT_GRADE_BLOCKERS),
+        "blockers": blockers,
+        "reporting_boundary": "Dependency inventory, SBOM-like manifest, local pip-audit attempt, and CI workflow contract are usable; commercial monitoring claims require actual CI run evidence, published SBOM/checksum linkage, exception review, scanner version capture, and independent review.",
+    }
+    plan["validation_plan_hash"] = stable_dependency_sha256(plan)
+    return plan
 
 
 def missing_dependency_monitoring_trusted_diff() -> dict[str, object]:
@@ -228,6 +445,7 @@ def build_dependency_monitoring_trusted_diff(
         "dependency_evidence_matrix_hash",
         "dependency_evidence_slots",
         "dependency_ci_workflow_evidence_hash",
+        "dependency_report_grade_validation_plan_hash",
     ]
     mismatches = []
     for field in compared_fields:

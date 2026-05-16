@@ -2127,6 +2127,10 @@ class RapidTriageOpsTests(unittest.TestCase):
                 "operations_documents.document_evidence_manifests.120.manifest_hash",
                 final_by_number[120]["primary_outputs"],
             )
+            self.assertIn(
+                "dependency-monitoring.json.dependency_report_grade_validation_plan_hash",
+                final_by_number[120]["primary_outputs"],
+            )
             self.assertEqual(final_by_number[120]["trusted_diff_required"], "trusted-dependency-advisory-sbom-diff")
             self.assertIn("all_items", payload)
             first_item = next(item for item in payload["all_items"] if item["number"] == 1)
@@ -7195,6 +7199,26 @@ class RapidTriageOpsTests(unittest.TestCase):
                 payload["dependency_monitoring_evidence_manifest"]["dependency_ci_workflow_evidence_hash"],
                 payload["dependency_ci_workflow_evidence_hash"],
             )
+            dependency_plan = payload["dependency_report_grade_validation_plan"]
+            self.assertEqual(
+                dependency_plan["profile_version"],
+                "dependency-monitoring-report-grade-validation-plan-v1",
+            )
+            self.assertEqual(dependency_plan["item_number"], 120)
+            self.assertFalse(dependency_plan["commercial_claim_allowed"])
+            self.assertEqual(
+                payload["dependency_report_grade_validation_plan_hash"],
+                dependency_plan["validation_plan_hash"],
+            )
+            self.assertGreaterEqual(payload["dependency_report_grade_ready_slot_count"], 8)
+            self.assertGreaterEqual(payload["dependency_report_grade_blocking_slot_count"], 9)
+            self.assertIn("ci-advisory-run-log-required", payload["blockers"])
+            self.assertIn("sbom-publication-required", dependency_plan["blockers"])
+            self.assertTrue(
+                payload["functional_priority_profile"]["implemented_controls"][
+                    "dependency_report_grade_validation_plan_hash"
+                ]
+            )
             self.assertIn(
                 "dependency monitoring evidence manifest hash emitted",
                 payload["core_accuracy_gates"][0]["satisfied_checks"],
@@ -7205,6 +7229,14 @@ class RapidTriageOpsTests(unittest.TestCase):
             )
             self.assertIn(
                 "dependency evidence matrix hash emitted",
+                payload["core_accuracy_gates"][0]["satisfied_checks"],
+            )
+            self.assertIn(
+                "dependency monitoring report-grade validation plan",
+                payload["core_accuracy_gates"][0]["satisfied_checks"],
+            )
+            self.assertIn(
+                "dependency monitoring report-grade ready slots",
                 payload["core_accuracy_gates"][0]["satisfied_checks"],
             )
             self.assertIn("#120", payload["vulnerability_scan"]["commercial_gap_ids"])
@@ -7219,10 +7251,13 @@ class RapidTriageOpsTests(unittest.TestCase):
                 scan_attempted=True,
                 script_packaged=True,
                 trusted_diff=dependency_diff,
+                report_grade_validation_plan=dependency_plan,
             )
             self.assertEqual(dependency_diff["status"], "pass")
             self.assertIn("dependency_evidence_matrix_hash", dependency_diff["compared_fields"])
+            self.assertIn("dependency_report_grade_validation_plan_hash", dependency_diff["compared_fields"])
             self.assertIn("trusted dependency advisory/SBOM diff pass", dependency_gates[0]["satisfied_checks"])
+            self.assertIn("dependency monitoring report-grade validation plan", dependency_gates[0]["satisfied_checks"])
 
     def test_case_acquisition_command_records_and_lists_metadata(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
