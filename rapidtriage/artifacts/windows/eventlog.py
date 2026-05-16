@@ -19,7 +19,7 @@ from ...core.forensic_accuracy import build_accuracy_gate
 from ...core.models import ArtifactRecord
 
 EVENT_LOG_ROOT = ("Windows", "System32", "winevt", "Logs")
-PARSER_VERSION = "eventlog-normalized-v17"
+PARSER_VERSION = "eventlog-normalized-v18"
 BUILTIN_RULEPACK_VERSION = "eventlog-builtin-rules-v2"
 EVENT_EXPORT_SUFFIXES = {".xml", ".json", ".jsonl", ".ndjson", ".csv"}
 ETL_SUFFIXES = {".etl"}
@@ -67,6 +67,7 @@ MAX_NATIVE_EVTX_CHUNKS = 4096
 MAX_NATIVE_EVTX_RECORD_SIZE = 16 * 1024 * 1024
 MAX_NATIVE_EVTX_STRINGS = 200
 MAX_NATIVE_EVTX_BINXML_TOKENS = 500
+MAX_NATIVE_EVTX_NESTED_BINXML_BYTES = 1024 * 1024
 NATIVE_EVTX_READER_STRATEGY = "mmap-bounded-record-scan"
 NATIVE_EVTX_PARSE_SCOPE = "record-header-binxml-template-scalar-recovery-triage"
 NATIVE_EVTX_BINXML_STATUS = "not-decoded"
@@ -3768,20 +3769,24 @@ def parse_native_evtx_binxml(payload: bytes) -> dict[str, object]:
             if not name:
                 warnings.append(f"truncated-attribute:{offset}")
                 break
-            text, after_value, value_type = read_inline_binxml_value_text(payload, after_name)
+            detail = read_inline_binxml_value_detail(payload, after_name)
+            text = str(detail.get("text") or "")
+            after_value = int(detail.get("next_offset") or after_name)
+            value_type = str(detail.get("value_type") or "")
             current_path = str(stack[-1].get("path") or "") if stack else ""
-            value_fields.append(
-                {
-                    "element": str(stack[-1].get("name") or "") if stack else "",
-                    "element_path": f"{current_path}/@{name}" if current_path else f"@{name}",
-                    "attribute": name,
-                    "text": text,
-                    "value_type": value_type,
-                    "offset": offset,
-                    "confidence": "binxml-attribute",
-                    "more": more,
-                }
-            )
+            field = {
+                "element": str(stack[-1].get("name") or "") if stack else "",
+                "element_path": f"{current_path}/@{name}" if current_path else f"@{name}",
+                "attribute": name,
+                "text": text,
+                "value_type": value_type,
+                "offset": offset,
+                "confidence": "binxml-attribute",
+                "more": more,
+            }
+            if isinstance(detail.get("nested_binxml"), Mapping):
+                field["nested_binxml"] = dict(detail["nested_binxml"])
+            value_fields.append(field)
             rendered.append(f' {name}="{html.escape(text)}"')
             offset = after_value
             continue
@@ -3803,20 +3808,24 @@ def parse_native_evtx_binxml(payload: bytes) -> dict[str, object]:
             offset += 1
             continue
         if token_kind == 0x05:
-            text, after_value, value_type = read_inline_binxml_value_text(payload, offset)
+            detail = read_inline_binxml_value_detail(payload, offset)
+            text = str(detail.get("text") or "")
+            after_value = int(detail.get("next_offset") or offset + 1)
+            value_type = str(detail.get("value_type") or "")
             current = stack[-1] if stack else {}
             current_path = str(current.get("path") or "")
-            value_fields.append(
-                {
-                    "element": str(current.get("name") or ""),
-                    "element_path": current_path,
-                    "text": text,
-                    "value_type": value_type,
-                    "offset": offset,
-                    "confidence": "binxml-value-text",
-                    "more": more,
-                }
-            )
+            field = {
+                "element": str(current.get("name") or ""),
+                "element_path": current_path,
+                "text": text,
+                "value_type": value_type,
+                "offset": offset,
+                "confidence": "binxml-value-text",
+                "more": more,
+            }
+            if isinstance(detail.get("nested_binxml"), Mapping):
+                field["nested_binxml"] = dict(detail["nested_binxml"])
+            value_fields.append(field)
             rendered.append(html.escape(text))
             offset = after_value
             continue
@@ -4013,20 +4022,24 @@ def parse_binxml_fragment_tokens(
             if not name:
                 warnings.append(f"truncated-attribute:{offset}")
                 break
-            text, after_value, value_type = read_inline_binxml_value_text(payload, after_name)
+            detail = read_inline_binxml_value_detail(payload, after_name)
+            text = str(detail.get("text") or "")
+            after_value = int(detail.get("next_offset") or after_name)
+            value_type = str(detail.get("value_type") or "")
             current_path = str(stack[-1].get("path") or "") if stack else ""
-            value_fields.append(
-                {
-                    "element": str(stack[-1].get("name") or "") if stack else "",
-                    "element_path": f"{current_path}/@{name}" if current_path else f"@{name}",
-                    "attribute": name,
-                    "text": text,
-                    "value_type": value_type,
-                    "offset": offset,
-                    "confidence": "binxml-attribute",
-                    "more": more,
-                }
-            )
+            field = {
+                "element": str(stack[-1].get("name") or "") if stack else "",
+                "element_path": f"{current_path}/@{name}" if current_path else f"@{name}",
+                "attribute": name,
+                "text": text,
+                "value_type": value_type,
+                "offset": offset,
+                "confidence": "binxml-attribute",
+                "more": more,
+            }
+            if isinstance(detail.get("nested_binxml"), Mapping):
+                field["nested_binxml"] = dict(detail["nested_binxml"])
+            value_fields.append(field)
             rendered.append(f' {name}="{html.escape(text)}"')
             offset = after_value
             continue
@@ -4048,20 +4061,24 @@ def parse_binxml_fragment_tokens(
             offset += 1
             continue
         if token_kind == 0x05:
-            text, after_value, value_type = read_inline_binxml_value_text(payload, offset)
+            detail = read_inline_binxml_value_detail(payload, offset)
+            text = str(detail.get("text") or "")
+            after_value = int(detail.get("next_offset") or offset + 1)
+            value_type = str(detail.get("value_type") or "")
             current = stack[-1] if stack else {}
             current_path = str(current.get("path") or "")
-            value_fields.append(
-                {
-                    "element": str(current.get("name") or ""),
-                    "element_path": current_path,
-                    "text": text,
-                    "value_type": value_type,
-                    "offset": offset,
-                    "confidence": "binxml-value-text",
-                    "more": more,
-                }
-            )
+            field = {
+                "element": str(current.get("name") or ""),
+                "element_path": current_path,
+                "text": text,
+                "value_type": value_type,
+                "offset": offset,
+                "confidence": "binxml-value-text",
+                "more": more,
+            }
+            if isinstance(detail.get("nested_binxml"), Mapping):
+                field["nested_binxml"] = dict(detail["nested_binxml"])
+            value_fields.append(field)
             rendered.append(html.escape(text))
             offset = after_value
             continue
@@ -4101,6 +4118,8 @@ def parse_binxml_fragment_tokens(
                     "optional": optional,
                 }
             )
+            if isinstance(value, Mapping) and isinstance(value.get("nested_binxml"), Mapping):
+                value_fields[-1]["nested_binxml"] = dict(value["nested_binxml"])
             rendered.append(html.escape(text))
             offset += 4
             continue
@@ -4279,58 +4298,66 @@ def parse_binxml_misc_token(blob: bytes, offset: int, *, current_path: str) -> d
 
 
 def read_inline_binxml_value_text(blob: bytes, offset: int) -> tuple[str, int, str]:
+    detail = read_inline_binxml_value_detail(blob, offset)
+    return str(detail.get("text") or ""), int(detail.get("next_offset") or offset + 1), str(detail.get("value_type") or "")
+
+
+def read_inline_binxml_value_detail(blob: bytes, offset: int) -> dict[str, object]:
     if offset + 2 > len(blob):
-        return "", offset + 1, "truncated"
+        return {"text": "", "next_offset": offset + 1, "value_type": "truncated"}
     token = blob[offset]
     token_kind = token & 0xBF
     if token_kind != 0x05:
-        return "", offset, "missing-value-text-token"
+        return {"text": "", "next_offset": offset, "value_type": "missing-value-text-token"}
     value_type = blob[offset + 1]
     value_type_name = binxml_value_type_name(value_type)
 
     if value_type == 0x00:
-        return "", offset + 2, value_type_name
+        return {"text": "", "next_offset": offset + 2, "value_type": value_type_name}
     if value_type == 0x01:
         if offset + 4 > len(blob):
-            return "", len(blob), "truncated-string"
+            return {"text": "", "next_offset": len(blob), "value_type": "truncated-string"}
         char_count = read_u16(blob, offset + 2)
         start = offset + 4
         end = start + char_count * 2
         if end > len(blob):
-            return "", len(blob), "truncated-string"
+            return {"text": "", "next_offset": len(blob), "value_type": "truncated-string"}
         text = decode_utf16le_string(blob[start:end])
-        return text, end, value_type_name
+        return {"text": text, "next_offset": end, "value_type": value_type_name}
     if value_type == 0x02:
         if offset + 4 > len(blob):
-            return "", len(blob), "truncated-ansi-string"
+            return {"text": "", "next_offset": len(blob), "value_type": "truncated-ansi-string"}
         byte_count = read_u16(blob, offset + 2)
         start = offset + 4
         end = start + byte_count
         if end > len(blob):
-            return "", len(blob), "truncated-ansi-string"
+            return {"text": "", "next_offset": len(blob), "value_type": "truncated-ansi-string"}
         text, _ = decode_binxml_template_value(blob[start:end], value_type)
-        return text, end, value_type_name
-    if value_type == 0x0E:
+        return {"text": text, "next_offset": end, "value_type": value_type_name}
+    if value_type in {0x0E, 0x21}:
         if offset + 4 > len(blob):
-            return "", len(blob), "truncated-binary"
+            return {"text": "", "next_offset": len(blob), "value_type": f"truncated-{value_type_name.lower()}"}
         byte_count = read_u16(blob, offset + 2)
         start = offset + 4
         end = start + byte_count
         if end > len(blob):
-            return "", len(blob), "truncated-binary"
-        text, _ = decode_binxml_template_value(blob[start:end], value_type)
-        return text, end, value_type_name
+            return {"text": "", "next_offset": len(blob), "value_type": f"truncated-{value_type_name.lower()}"}
+        text, value = decode_binxml_template_value(blob[start:end], value_type)
+        detail: dict[str, object] = {"text": text, "next_offset": end, "value_type": value_type_name}
+        if value_type == 0x21 and isinstance(value, Mapping):
+            detail["nested_binxml"] = dict(value)
+        return detail
     if value_type == 0x13:
         start = offset + 2
         if start + 8 > len(blob):
-            return "", len(blob), "truncated-sid"
+            return {"text": "", "next_offset": len(blob), "value_type": "truncated-sid"}
         sub_authority_count = blob[start + 1]
         byte_count = 8 + sub_authority_count * 4
         end = start + byte_count
         if end > len(blob):
-            return "", len(blob), "truncated-sid"
+            return {"text": "", "next_offset": len(blob), "value_type": "truncated-sid"}
         text, _ = decode_binxml_template_value(blob[start:end], value_type)
-        return text, end, value_type_name
+        return {"text": text, "next_offset": end, "value_type": value_type_name}
 
     fixed_lengths = {
         0x03: 1,
@@ -4352,13 +4379,13 @@ def read_inline_binxml_value_text(blob: bytes, offset: int) -> tuple[str, int, s
     }
     byte_count = fixed_lengths.get(value_type)
     if byte_count is None:
-        return "", offset + 2, f"unsupported-type-0x{value_type:02x}"
+        return {"text": "", "next_offset": offset + 2, "value_type": f"unsupported-type-0x{value_type:02x}"}
     start = offset + 2
     end = start + byte_count
     if end > len(blob):
-        return "", len(blob), f"truncated-{value_type_name.lower()}"
+        return {"text": "", "next_offset": len(blob), "value_type": f"truncated-{value_type_name.lower()}"}
     text, _ = decode_binxml_template_value(blob[start:end], value_type)
-    return text, end, value_type_name
+    return {"text": text, "next_offset": end, "value_type": value_type_name}
 
 
 def read_binxml_template_values(blob: bytes, offset: int) -> tuple[list[dict[str, object]], int, list[str]]:
@@ -4396,20 +4423,21 @@ def read_binxml_template_values(blob: bytes, offset: int) -> tuple[list[dict[str
         else:
             cursor += length
         text, normalized_value = decode_binxml_template_value(value_blob, value_type)
-        values.append(
-            {
-                "element": "TemplateValue",
-                "element_path": f"TemplateInstance/Value[{index}]",
-                "text": text,
-                "value": normalized_value,
-                "value_type": binxml_value_type_name(value_type),
-                "value_type_id": value_type,
-                "value_length": length,
-                "offset": cursor - len(value_blob),
-                "confidence": "binxml-template-value",
-                "substitution_id": index,
-            }
-        )
+        value_row = {
+            "element": "TemplateValue",
+            "element_path": f"TemplateInstance/Value[{index}]",
+            "text": text,
+            "value": normalized_value,
+            "value_type": binxml_value_type_name(value_type),
+            "value_type_id": value_type,
+            "value_length": length,
+            "offset": cursor - len(value_blob),
+            "confidence": "binxml-template-value",
+            "substitution_id": index,
+        }
+        if value_type == 0x21 and isinstance(normalized_value, Mapping):
+            value_row["nested_binxml"] = dict(normalized_value)
+        values.append(value_row)
     return values, cursor, warnings
 
 
@@ -4464,8 +4492,46 @@ def decode_binxml_template_value(value_blob: bytes, value_type: int) -> tuple[st
     if value_type == 0x0E:
         text = value_blob.hex()
         return text, text
+    if value_type == 0x21:
+        nested = parse_nested_binxml_value(value_blob)
+        text = str(nested.get("rendered_preview") or nested.get("value_text_preview") or value_blob.hex())
+        return text[:1000], nested
     text = value_blob.hex()
     return text, text
+
+
+def parse_nested_binxml_value(value_blob: bytes) -> dict[str, object]:
+    if len(value_blob) > MAX_NATIVE_EVTX_NESTED_BINXML_BYTES:
+        return {
+            "profile_version": "evtx-nested-binxml-value-v1",
+            "status": "nested-binxml-too-large",
+            "byte_count": len(value_blob),
+            "sha256": hashlib.sha256(value_blob).hexdigest(),
+            "rendered_preview": "",
+            "value_text_preview": "",
+            "warnings": ["nested-binxml-size-cap-exceeded"],
+        }
+    parsed = parse_native_evtx_binxml(value_blob) if value_blob.startswith(b"\x0f") else parse_binxml_fragment_tokens(value_blob)
+    value_fields = parsed.get("value_fields") if isinstance(parsed, Mapping) and isinstance(parsed.get("value_fields"), list) else []
+    value_text_preview = " ".join(
+        str(item.get("text") or "")
+        for item in value_fields
+        if isinstance(item, Mapping) and str(item.get("text") or "").strip()
+    )[:1000]
+    return {
+        "profile_version": "evtx-nested-binxml-value-v1",
+        "status": str(parsed.get("status") or NATIVE_EVTX_BINXML_STATUS) if isinstance(parsed, Mapping) else NATIVE_EVTX_BINXML_STATUS,
+        "byte_count": len(value_blob),
+        "sha256": hashlib.sha256(value_blob).hexdigest(),
+        "rendered_preview": str(parsed.get("rendered_preview") or "")[:1000] if isinstance(parsed, Mapping) else "",
+        "value_text_preview": value_text_preview,
+        "value_field_count": len(value_fields),
+        "value_field_map": dict(parsed.get("value_field_map")) if isinstance(parsed, Mapping) and isinstance(parsed.get("value_field_map"), Mapping) else {},
+        "decoded_value_type_counts": list(parsed.get("decoded_value_type_counts", [])) if isinstance(parsed, Mapping) and isinstance(parsed.get("decoded_value_type_counts"), list) else [],
+        "token_counts": list(parsed.get("token_counts", [])) if isinstance(parsed, Mapping) and isinstance(parsed.get("token_counts"), list) else [],
+        "template_ids": list(parsed.get("template_ids", [])) if isinstance(parsed, Mapping) and isinstance(parsed.get("template_ids"), list) else [],
+        "warnings": list(parsed.get("warnings", []))[:10] if isinstance(parsed, Mapping) and isinstance(parsed.get("warnings"), list) else [],
+    }
 
 
 def binxml_value_type_name(value_type: int) -> str:

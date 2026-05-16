@@ -125,6 +125,25 @@ class RapidTriageWindowsArtifactsCollectorTests(unittest.TestCase):
         self.assertIn("CDataSectionToken", {item["value"] for item in parsed["token_counts"]})
         self.assertEqual(parsed["unsupported_token_count"], 0)
 
+    def test_native_evtx_binxml_decodes_nested_binxml_value_type(self) -> None:
+        def counted_utf16(text: str) -> bytes:
+            return len(text).to_bytes(2, "little") + text.encode("utf-16le")
+
+        nested = b"\x0f\x01\x01\x00" + b"\x07" + counted_utf16("nested evidence") + b"\x00"
+        payload = b"\x0f\x01\x01\x00" + b"\x05\x21" + len(nested).to_bytes(2, "little") + nested + b"\x00"
+
+        parsed = parse_native_evtx_binxml(payload)
+
+        nested_fields = [item for item in parsed["value_fields"] if item.get("value_type") == "BinXmlType"]
+        self.assertEqual(parsed["status"], "basic-rendered")
+        self.assertEqual(len(nested_fields), 1)
+        nested_binxml = nested_fields[0]["nested_binxml"]
+        self.assertEqual(nested_binxml["profile_version"], "evtx-nested-binxml-value-v1")
+        self.assertEqual(nested_binxml["status"], "basic-rendered")
+        self.assertIn("nested evidence", nested_binxml["rendered_preview"])
+        self.assertEqual(nested_binxml["value_field_map"]["BinXmlFragment"], ["nested evidence"])
+        self.assertIn("BinXmlType", {item["value"] for item in parsed["decoded_value_type_counts"]})
+
     def test_evtx_message_catalog_renders_positional_manifest_placeholders(self) -> None:
         rendering = render_event_message(
             provider_name="Microsoft-Windows-Security-Auditing",

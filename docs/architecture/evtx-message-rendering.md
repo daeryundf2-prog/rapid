@@ -7,7 +7,8 @@ RapidTriage separates EVTX record recovery from report-grade provider message re
 - `evtx-records` emits structural `ArtifactRecordV1` rows for chunks and record headers.
 - EVTX files are processed from the file header into 64KB chunks instead of reading the whole file into memory for the normal worker path.
 - BinXML payloads are tokenized into a bounded object model when recognizable.
-- Common BinXML values are decoded for strings, integers, booleans, floats, GUIDs, SIDs, FILETIME/SYSTIME candidates, and binary payloads.
+- Common BinXML values are decoded for strings, integers, booleans, floats, GUIDs, SIDs, FILETIME/SYSTIME candidates, binary payloads, and bounded nested `BinXmlType` payloads.
+- Nested `BinXmlType` payloads are parsed into an `evtx-nested-binxml-value-v1` profile with payload hash, status, token counts, field map, and bounded rendered/text previews so reviewers can inspect embedded BinXML without treating it as provider-rendered testimony.
 - Recoverable `Event/System` and `EventData` fields are promoted into `extracted_fields` for search/review pivots.
 - TemplateInstance records preserve template IDs, template body object-model data, value specs, substitution values, and decoded substitution text where possible.
 - Message rendering emits built-in validation-required templates for selected high-value event IDs such as 4104, 4624, 4688, 7045, and 1102.
