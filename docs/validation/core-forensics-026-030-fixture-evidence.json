@@ -59,6 +59,7 @@
       "title": "Android backup/artifact parser",
       "assertions": [
         "Android app-data export rows preserve package/path attribution, communication/browser/media store hints, encrypted-store limits, schema tracking, android_analyst_review_profile, #29 core_accuracy_gates, and decoded-content reportability blockers.",
+        "Android app-data rows emit android-app-data-report-grade-validation-plan-v1 with source integrity, package/path attribution, read-only SQLite inventory, artifact-family matrix, redaction proof, source viewer locator, acquisition-manifest attribution, trusted Android export diff, app-schema fixture, encrypted/deleted-store corpus, and independent signoff slots.",
         "build_android_trusted_diff compares app-data package/path/category/source rows against ALEAPP/vendor export output before satisfying the #29 trusted diff gate."
       ],
       "blockers_kept": [

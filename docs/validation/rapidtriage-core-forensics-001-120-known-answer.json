@@ -791,7 +791,8 @@
       ],
       "expected": {
         "required_assertions": [
-          "Android app-data rows preserve package/path attribution, communication/browser/media linkage hints, encrypted-store limits, schema tracking, and #29 core_accuracy_gates"
+          "Android app-data rows preserve package/path attribution, communication/browser/media linkage hints, encrypted-store limits, schema tracking, and #29 core_accuracy_gates",
+          "Android app-data rows emit android-app-data-report-grade-validation-plan-v1 with source file hash, package/path attribution, read-only SQLite inventory, artifact-family matrix, redaction proof, source locator, acquisition-manifest attribution, trusted Android export diff, app-schema fixture, encrypted/deleted-store corpus, and independent review evidence slots"
         ]
       },
       "notes": "Internal fixture pass; Android backup payload decoding, app schemas, and encrypted/deleted stores remain commercial blockers.",

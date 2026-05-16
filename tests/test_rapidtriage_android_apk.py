@@ -211,6 +211,8 @@ class RapidTriageAndroidApkTests(unittest.TestCase):
             self.assertIn("Android source locator", app_data_gates["#29"]["satisfied_checks"])
             self.assertIn("Android app-data deep parser manifest", app_data_gates["#29"]["satisfied_checks"])
             self.assertIn("Android app-data deep parser source locator", app_data_gates["#29"]["satisfied_checks"])
+            self.assertIn("Android app-data report-grade validation plan", app_data_gates["#29"]["satisfied_checks"])
+            self.assertIn("Android app-data validation ready slots", app_data_gates["#29"]["satisfied_checks"])
             self.assertIn("app-data schema and secret-handling warnings", app_data_gates["#30"]["satisfied_checks"])
             app_data_manifest = app_data["details"]["android_parser_manifest"]
             self.assertEqual(app_data_manifest["qc_prep_item_number"], 47)
@@ -250,6 +252,48 @@ class RapidTriageAndroidApkTests(unittest.TestCase):
                 "trusted-aleapp-or-vendor-export-diff-required",
                 app_data_deep_manifest["commercial_blockers"],
             )
+            app_data_validation_plan = app_data["details"]["android_app_data_report_grade_validation_plan"]
+            self.assertEqual(
+                app_data_validation_plan["profile_version"],
+                "android-app-data-report-grade-validation-plan-v1",
+            )
+            self.assertEqual(app_data_validation_plan["item_number"], 29)
+            self.assertEqual(app_data_validation_plan["gap_id"], "#29")
+            self.assertEqual(app_data_validation_plan["status"], "report-validation-blocked")
+            self.assertFalse(app_data_validation_plan["commercial_grade"])
+            self.assertEqual(len(app_data_validation_plan["manifest_sha256"]), 64)
+            self.assertEqual(
+                app_data["details"]["android_app_data_report_grade_validation_plan_hash"],
+                app_data_validation_plan["manifest_sha256"],
+            )
+            self.assertEqual(
+                {command["id"] for command in app_data_validation_plan["validation_commands"]},
+                {
+                    "source-app-data-manifest",
+                    "android-app-data-inventory-import",
+                    "trusted-android-app-data-export-diff",
+                    "app-schema-fixture-run",
+                },
+            )
+            plan_slots = {slot["id"]: slot for slot in app_data_validation_plan["evidence_slots"]}
+            self.assertEqual(plan_slots["source-app-data-integrity"]["status"], "complete")
+            self.assertEqual(plan_slots["package-path-attribution"]["status"], "complete")
+            self.assertEqual(plan_slots["read-only-sqlite-schema-inventory"]["status"], "complete")
+            self.assertEqual(plan_slots["artifact-family-matrix"]["status"], "complete")
+            self.assertEqual(plan_slots["redaction-policy-enforced"]["status"], "complete")
+            self.assertEqual(plan_slots["source-viewer-locator"]["status"], "complete")
+            self.assertEqual(
+                plan_slots["trusted-android-app-data-export-diff"]["status"],
+                "pending-cross-tool-validate",
+            )
+            self.assertTrue(plan_slots["acquisition-manifest-package-attribution"]["blocking"])
+            self.assertTrue(plan_slots["trusted-android-app-data-export-diff"]["blocking"])
+            self.assertEqual(app_data_validation_plan["ready_slot_count"], 6)
+            self.assertEqual(app_data_validation_plan["blocking_slot_count"], 5)
+            self.assertIn(
+                "trusted-android-app-data-export-diff-required",
+                app_data_validation_plan["commercial_grade_blockers"],
+            )
             app_data_review = app_data["details"]["android_analyst_review_profile"]
             self.assertEqual(app_data_review["profile_version"], "android-analyst-review-profile-v1")
             self.assertEqual(app_data_review["gap_ids"], ["#29", "#30"])
@@ -281,6 +325,14 @@ class RapidTriageAndroidApkTests(unittest.TestCase):
                 "android-app-data-deep-parser-manifest-emitted",
                 app_data_profiles[54]["passed_validation_check_ids"],
             )
+            self.assertEqual(
+                app_data_profiles[54]["implemented_controls"]["android_app_data_report_grade_validation_plan_hash"],
+                app_data_validation_plan["manifest_sha256"],
+            )
+            self.assertIn(
+                "android-app-data-report-grade-validation-plan-emitted",
+                app_data_profiles[54]["passed_validation_check_ids"],
+            )
             self.assertIn("manifest-or-package-context", app_data_uplift["passed_validation_matrix_ids"])
             self.assertIn("app-data-report-grade", app_data_uplift["failed_validation_matrix_ids"])
             self.assertFalse(app_data_uplift["large_data_controls"]["secret_values_extracted"])
@@ -297,6 +349,24 @@ class RapidTriageAndroidApkTests(unittest.TestCase):
             self.assertEqual(
                 app_data_uplift["large_data_controls"]["android_app_data_deep_parser_manifest_hash"],
                 app_data_deep_manifest["manifest_sha256"],
+            )
+            self.assertEqual(
+                app_data_uplift["large_data_controls"][
+                    "android_app_data_report_grade_validation_plan_hash"
+                ],
+                app_data_validation_plan["manifest_sha256"],
+            )
+            self.assertEqual(
+                app_data_uplift["large_data_controls"][
+                    "android_app_data_report_grade_validation_ready_slot_count"
+                ],
+                6,
+            )
+            self.assertEqual(
+                app_data_uplift["large_data_controls"][
+                    "android_app_data_report_grade_validation_blocking_slot_count"
+                ],
+                5,
             )
             self.assertTrue(
                 app_data_uplift["large_data_controls"][

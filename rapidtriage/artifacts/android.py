@@ -96,6 +96,15 @@ ANDROID_TRUSTED_DIFF_BLOCKERS = {
     29: "android-artifact-export-trusted-diff-required",
     30: "apk-tool-analysis-trusted-diff-required",
 }
+ANDROID_APP_DATA_REPORT_GRADE_VALIDATION_PLAN_VERSION = "android-app-data-report-grade-validation-plan-v1"
+ANDROID_APP_DATA_REPORT_GRADE_BLOCKERS = [
+    "trusted-android-app-data-export-diff-required",
+    "android-acquisition-manifest-package-attribution-required",
+    "android-backup-payload-decoder-known-answer-required",
+    "app-specific-schema-version-fixture-required",
+    "encrypted-store-and-deleted-record-validation-required",
+    "independent-android-app-data-review-required",
+]
 ANDROID_QC_PREP_ITEM_NUMBER = 47
 ANDROID_QC_PREP_GOAL = (
     "Deepen Android artifact parser for SMS, call log, contacts, browser, media, app DBs, packages, signatures, and permissions."
@@ -497,6 +506,12 @@ def build_android_app_data_record(path: Path, package: str) -> ArtifactRecord:
     ]
     details["android_parser_manifest"] = build_android_parser_manifest(details)
     details["android_parser_manifest_hash"] = details["android_parser_manifest"]["manifest_sha256"]
+    details["android_app_data_report_grade_validation_plan"] = build_android_app_data_report_grade_validation_plan(
+        details
+    )
+    details["android_app_data_report_grade_validation_plan_hash"] = details[
+        "android_app_data_report_grade_validation_plan"
+    ]["manifest_sha256"]
     details["core_accuracy_gates"] = [
         *android_core_accuracy_gates(29, details),
         *android_core_accuracy_gates(30, details),
@@ -806,6 +821,197 @@ def build_android_app_data_deep_parser_manifest(details: dict[str, object]) -> d
         {key: value for key, value in manifest.items() if key != "manifest_sha256"}
     )
     return manifest
+
+
+def build_android_app_data_report_grade_validation_plan(details: dict[str, object]) -> dict[str, object]:
+    app_data_profile = (
+        details.get("android_app_data_profile") if isinstance(details.get("android_app_data_profile"), dict) else {}
+    )
+    sqlite_inventory = (
+        app_data_profile.get("sqlite_schema_inventory")
+        if isinstance(app_data_profile.get("sqlite_schema_inventory"), dict)
+        else {}
+    )
+    artifact_family_matrix = (
+        app_data_profile.get("artifact_family_matrix")
+        if isinstance(app_data_profile.get("artifact_family_matrix"), dict)
+        else {}
+    )
+    source_layout = (
+        app_data_profile.get("source_layout_profile")
+        if isinstance(app_data_profile.get("source_layout_profile"), dict)
+        else {}
+    )
+    deep_manifest = (
+        details.get("android_app_data_deep_parser_manifest")
+        if isinstance(details.get("android_app_data_deep_parser_manifest"), dict)
+        else {}
+    )
+    parser_manifest = (
+        details.get("android_parser_manifest") if isinstance(details.get("android_parser_manifest"), dict) else {}
+    )
+    hashes = details.get("hashes") if isinstance(details.get("hashes"), dict) else {}
+    validation_checks = details.get("validation_checks") if isinstance(details.get("validation_checks"), dict) else {}
+    source_locator = (
+        deep_manifest.get("source_viewer_locator")
+        if isinstance(deep_manifest.get("source_viewer_locator"), dict)
+        else parser_manifest.get("source_viewer_locator")
+        if isinstance(parser_manifest.get("source_viewer_locator"), dict)
+        else {}
+    )
+    source_path = str(details.get("source_path") or "")
+    source_sha256 = str(hashes.get("sha256") or "")
+    package = str(details.get("package") or "")
+    sqlite_opened = bool(sqlite_inventory.get("opened_readonly"))
+    values_redacted = bool(sqlite_inventory.get("values_redacted", True))
+    secret_values_extracted = bool(validation_checks.get("secret_values_extracted"))
+    positive_families = list(artifact_family_matrix.get("positive_families") or [])
+    evidence_slots = [
+        {
+            "id": "source-app-data-integrity",
+            "label": "Source app-data file hash and size are fixed before reporting",
+            "status": "complete" if source_sha256 else "missing-source-hash",
+            "blocking": not bool(source_sha256),
+            "evidence_refs": [f"source_sha256:{source_sha256}", f"source_path:{source_path}"],
+        },
+        {
+            "id": "package-path-attribution",
+            "label": "Package identity is derived from Android/data, Android/media, or data/data layout",
+            "status": "complete" if package and source_layout else "review-required",
+            "blocking": not bool(package and source_layout),
+            "evidence_refs": [
+                f"package:{package}",
+                f"source_layout:{source_layout.get('layout', '')}",
+                f"relative_path_hint:{source_layout.get('relative_path_hint', '')}",
+            ],
+        },
+        {
+            "id": "read-only-sqlite-schema-inventory",
+            "label": "SQLite app DB candidates are opened read-only for schema and counts only",
+            "status": "complete" if sqlite_opened else "not-applicable-or-not-sqlite",
+            "blocking": False,
+            "evidence_refs": [
+                f"sqlite_opened_readonly:{sqlite_opened}",
+                f"sqlite_table_count:{sqlite_inventory.get('table_count', 0)}",
+                f"sqlite_total_row_count:{sqlite_inventory.get('total_row_count', 0)}",
+            ],
+        },
+        {
+            "id": "artifact-family-matrix",
+            "label": "SMS, call, contact, browser, media, and app DB hints are classified without row values",
+            "status": "complete" if artifact_family_matrix else "missing-family-matrix",
+            "blocking": not bool(artifact_family_matrix),
+            "evidence_refs": [f"positive_families:{','.join(map(str, positive_families))}"],
+        },
+        {
+            "id": "redaction-policy-enforced",
+            "label": "Row values, credentials, cookies, and secrets are not extracted in inventory mode",
+            "status": "complete" if values_redacted and not secret_values_extracted else "failed-redaction-boundary",
+            "blocking": not (values_redacted and not secret_values_extracted),
+            "evidence_refs": [
+                f"values_redacted:{values_redacted}",
+                f"secret_values_extracted:{secret_values_extracted}",
+            ],
+        },
+        {
+            "id": "source-viewer-locator",
+            "label": "GUI/report can jump back to the source file and package context",
+            "status": "complete" if source_locator else "missing-source-viewer-locator",
+            "blocking": not bool(source_locator),
+            "evidence_refs": [
+                f"viewer:{source_locator.get('viewer', '')}" if isinstance(source_locator, dict) else "viewer:",
+                f"manifest_sha256:{deep_manifest.get('manifest_sha256', '')}",
+            ],
+        },
+        {
+            "id": "acquisition-manifest-package-attribution",
+            "label": "Package/path attribution is checked against acquisition manifest or vendor export metadata",
+            "status": "pending-external-acquisition-log",
+            "blocking": True,
+            "evidence_refs": ["expected_tooling:Android acquisition manifest,Cellebrite/XRY/GrayKey/AXIOM,ALEAPP"],
+        },
+        {
+            "id": "trusted-android-app-data-export-diff",
+            "label": "RapidTriage app-data inventory is diffed against ALEAPP or vendor Android export rows",
+            "status": "pending-cross-tool-validate",
+            "blocking": True,
+            "evidence_refs": ["command:rapidtriage cross-tool-validate --backlog-item 29"],
+        },
+        {
+            "id": "app-specific-schema-known-answer",
+            "label": "App DB schemas and version-specific table semantics are validated with known-answer fixtures",
+            "status": "external-corpus-required",
+            "blocking": True,
+            "evidence_refs": ["required:app-specific schema fixture corpus"],
+        },
+        {
+            "id": "encrypted-store-and-deleted-record-validation",
+            "label": "Encrypted stores and deleted rows are validated before decoded-content claims",
+            "status": "external-corpus-required",
+            "blocking": True,
+            "evidence_refs": ["required:encrypted/deleted Android store known-answer corpus"],
+        },
+        {
+            "id": "independent-android-app-data-review",
+            "label": "Independent reviewer signs off on package attribution, schema limits, and trusted diffs",
+            "status": "external-review-required",
+            "blocking": True,
+            "evidence_refs": ["required:independent review report"],
+        },
+    ]
+    ready_slot_ids = [
+        str(slot.get("id"))
+        for slot in evidence_slots
+        if str(slot.get("status", "")).startswith("complete")
+        or str(slot.get("status")) == "not-applicable-or-not-sqlite"
+    ]
+    blocking_slot_ids = [str(slot.get("id")) for slot in evidence_slots if slot.get("blocking")]
+    plan: dict[str, object] = {
+        "profile_version": ANDROID_APP_DATA_REPORT_GRADE_VALIDATION_PLAN_VERSION,
+        "item_number": 29,
+        "gap_id": "#29",
+        "status": "report-validation-blocked",
+        "commercial_grade": False,
+        "artifact_goal": "Android backup/export app, file, SMS, call, contact, browser, media, and app DB evidence validation",
+        "source_path": source_path,
+        "source_format": str(details.get("source_format") or ""),
+        "source_sha256": source_sha256,
+        "package": package,
+        "data_category": str(details.get("data_category") or ""),
+        "validation_commands": [
+            {
+                "id": "source-app-data-manifest",
+                "purpose": "Freeze source file hashes and acquisition/package path metadata",
+                "command": "rapidtriage manifest <android-export-root> --output <case>/android-source-manifest.json",
+            },
+            {
+                "id": "android-app-data-inventory-import",
+                "purpose": "Recreate RapidTriage Android app-data inventory",
+                "command": "rapidtriage artifacts <android-export-root> --kind android-apk --output <case>/android-app-data.json",
+            },
+            {
+                "id": "trusted-android-app-data-export-diff",
+                "purpose": "Compare package/path/category/hash rows with ALEAPP or vendor Android export output",
+                "command": "rapidtriage cross-tool-validate --rapid-output <case>/android-app-data.json --reference-output aleapp=<trusted-android-export.json> --backlog-item 29 --json",
+            },
+            {
+                "id": "app-schema-fixture-run",
+                "purpose": "Attach version-specific app DB known-answer fixtures before decoded-content claims",
+                "command": "rapidtriage commercial-readiness --validation-package <android-app-schema-known-answer.json> --limit 30 --json",
+            },
+        ],
+        "evidence_slots": evidence_slots,
+        "ready_slot_ids": ready_slot_ids,
+        "blocking_slot_ids": blocking_slot_ids,
+        "ready_slot_count": len(ready_slot_ids),
+        "blocking_slot_count": len(blocking_slot_ids),
+        "commercial_grade_blockers": list(ANDROID_APP_DATA_REPORT_GRADE_BLOCKERS),
+        "report_guidance": "Use #29 rows as package/path/schema inventory pivots only until acquisition metadata, trusted diffs, app-schema fixtures, encrypted/deleted-store validation, and independent review are attached.",
+    }
+    plan["manifest_sha256"] = stable_android_json_sha256(
+        {key: value for key, value in plan.items() if key != "manifest_sha256"}
+    )
+    return plan
 
 
 def build_android_apk_deep_analysis_manifest(details: dict[str, object]) -> dict[str, object]:
@@ -1407,9 +1613,9 @@ def android_commercial_uplift_evidence(details: dict[str, object], *, gap_ids: l
         if isinstance(details.get("android_apk_deep_analysis_manifest"), dict)
         else {}
     )
-    apk_deep_manifest = (
-        details.get("android_apk_deep_analysis_manifest")
-        if isinstance(details.get("android_apk_deep_analysis_manifest"), dict)
+    app_data_validation_plan = (
+        details.get("android_app_data_report_grade_validation_plan")
+        if isinstance(details.get("android_app_data_report_grade_validation_plan"), dict)
         else {}
     )
     return {
@@ -1457,6 +1663,15 @@ def android_commercial_uplift_evidence(details: dict[str, object], *, gap_ids: l
             "android_app_data_deep_parser_source_locator_present": isinstance(
                 app_data_deep_manifest.get("source_viewer_locator"), dict
             ),
+            "android_app_data_report_grade_validation_plan_hash": str(
+                app_data_validation_plan.get("manifest_sha256") or ""
+            ),
+            "android_app_data_report_grade_validation_ready_slot_count": int(
+                app_data_validation_plan.get("ready_slot_count") or 0
+            ),
+            "android_app_data_report_grade_validation_blocking_slot_count": int(
+                app_data_validation_plan.get("blocking_slot_count") or 0
+            ),
             "android_apk_deep_analysis_manifest_hash": str(apk_deep_manifest.get("manifest_sha256") or ""),
             "android_apk_deep_analysis_source_locator_present": isinstance(
                 apk_deep_manifest.get("source_viewer_locator"), dict
@@ -1486,6 +1701,11 @@ def android_functional_expansion_profiles(
     apk_deep_manifest = (
         details.get("android_apk_deep_analysis_manifest")
         if isinstance(details.get("android_apk_deep_analysis_manifest"), dict)
+        else {}
+    )
+    app_data_validation_plan = (
+        details.get("android_app_data_report_grade_validation_plan")
+        if isinstance(details.get("android_app_data_report_grade_validation_plan"), dict)
         else {}
     )
     profiles = [
@@ -1539,6 +1759,10 @@ def android_functional_expansion_profiles(
                         app_data_deep_manifest.get("manifest_sha256") or ""
                     ),
                     "android_app_data_deep_parser_manifest_emitted": bool(app_data_deep_manifest),
+                    "android_app_data_report_grade_validation_plan_hash": str(
+                        app_data_validation_plan.get("manifest_sha256") or ""
+                    ),
+                    "android_app_data_report_grade_validation_plan_emitted": bool(app_data_validation_plan),
                     "android_apk_deep_analysis_manifest_hash": str(apk_deep_manifest.get("manifest_sha256") or ""),
                     "android_apk_deep_analysis_manifest_emitted": bool(apk_deep_manifest),
                     "source_viewer_locator_emitted": isinstance(android_manifest.get("source_viewer_locator"), dict),
@@ -1551,6 +1775,8 @@ def android_functional_expansion_profiles(
                         "android-parser-manifest-not-emitted": not android_manifest,
                         "android-app-data-deep-parser-manifest-not-emitted": 29 in gap_ids
                         and not app_data_deep_manifest,
+                        "android-app-data-report-grade-validation-plan-not-emitted": 29 in gap_ids
+                        and not app_data_validation_plan,
                         "android-apk-deep-analysis-manifest-not-emitted": 30 in gap_ids and not apk_deep_manifest,
                         "deleted-record-known-answer-corpus-required": not checks.get("commercial_validation_corpus"),
                     }.items()
@@ -1562,6 +1788,7 @@ def android_functional_expansion_profiles(
                         "android-parser-manifest-emitted": bool(android_manifest),
                         "android-source-locator-emitted": isinstance(android_manifest.get("source_viewer_locator"), dict),
                         "android-app-data-deep-parser-manifest-emitted": bool(app_data_deep_manifest),
+                        "android-app-data-report-grade-validation-plan-emitted": bool(app_data_validation_plan),
                         "android-apk-deep-analysis-manifest-emitted": bool(apk_deep_manifest),
                         "android-secret-boundary-recorded": not checks.get("secret_values_extracted"),
                     }.items()
@@ -1662,6 +1889,15 @@ def android_core_accuracy_gates(number: int, details: dict[str, object]) -> list
         evidence_refs.append(
             f"android_app_data_deep_parser_manifest_sha256:{app_data_deep_manifest['manifest_sha256']}"
         )
+    app_data_validation_plan = (
+        details.get("android_app_data_report_grade_validation_plan")
+        if isinstance(details.get("android_app_data_report_grade_validation_plan"), dict)
+        else {}
+    )
+    if app_data_validation_plan.get("manifest_sha256"):
+        evidence_refs.append(
+            f"android_app_data_report_grade_validation_plan_sha256:{app_data_validation_plan['manifest_sha256']}"
+        )
     apk_deep_manifest = (
         details.get("android_apk_deep_analysis_manifest")
         if isinstance(details.get("android_apk_deep_analysis_manifest"), dict)
@@ -1702,6 +1938,10 @@ def android_core_accuracy_gates(number: int, details: dict[str, object]) -> list
             satisfied.append("Android app-data deep parser manifest")
             if isinstance(app_data_deep_manifest.get("source_viewer_locator"), dict):
                 satisfied.append("Android app-data deep parser source locator")
+        if app_data_validation_plan:
+            satisfied.append("Android app-data report-grade validation plan")
+            if int(app_data_validation_plan.get("ready_slot_count") or 0) >= 5:
+                satisfied.append("Android app-data validation ready slots")
         if trusted_diff.get("status") == "pass":
             satisfied.append("trusted Android artifact export diff pass")
     elif number == 30:
