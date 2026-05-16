@@ -81,7 +81,7 @@
       "title": "Entity view for people/accounts/email/phone/IP/domain",
       "test_files": ["tests/test_rapidtriage_search_analysis.py"],
       "assertions": [
-        "Search analysis extracts supported entity pivots with source/path references, match links, risk flags, merge/split warnings, analysis_analyst_review_profile, #47 core_accuracy_gates, and reportability blockers for missing analyst merge/split and false-positive validation.",
+        "Search analysis extracts supported entity pivots with source/path references, match links, risk flags, entity_report_grade_validation_plan ready/blocking slots, merge/split warnings, analysis_analyst_review_profile, #47 core_accuracy_gates, and reportability blockers for missing analyst merge/split and false-positive validation.",
         "build_analysis_trusted_diff compares entity rows against analyst-reviewed entity rows before satisfying the #47 trusted diff gate."
       ],
       "remaining_external_validation": [

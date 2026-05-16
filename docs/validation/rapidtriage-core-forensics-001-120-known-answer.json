@@ -1182,7 +1182,7 @@
       ],
       "expected": {
         "required_assertions": [
-          "Search analysis preserves entity extraction, source/path references, match links, risk flags, merge/split warning, and #47 core_accuracy_gates."
+          "Search analysis preserves entity extraction, source/path references, match links, risk flags, hash-only entity_citation_manifest source viewer locators, entity_report_grade_validation_plan ready/blocking slots, merge/split warning, and #47 core_accuracy_gates."
         ]
       },
       "notes": "Internal fixture pass; false-positive tuning and analyst-verified merge/split workflow remain required.",

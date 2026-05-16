@@ -96,6 +96,15 @@ CLUSTER_REPORT_GRADE_BLOCKERS = [
     "large-case-cluster-performance-validation-required",
     "cluster-independent-review-required",
 ]
+ENTITY_REPORT_GRADE_VALIDATION_PLAN_VERSION = "search-entity-report-grade-validation-plan-v1"
+ENTITY_REPORT_GRADE_BLOCKERS = [
+    "persistent-entity-review-state-required",
+    "analyst-verified-entity-resolution-required",
+    "entity-merge-split-workflow-required",
+    "entity-review-trusted-diff-required",
+    "entity-false-positive-corpus-required",
+    "entity-independent-review-required",
+]
 
 
 def build_search_analysis(
@@ -252,6 +261,16 @@ def analysis_commercial_uplift_evidence(
         if isinstance(entities.get("entity_citation_manifest"), Mapping)
         else {}
     )
+    entity_validation_plan = (
+        entities.get("entity_report_grade_validation_plan")
+        if isinstance(entities.get("entity_report_grade_validation_plan"), Mapping)
+        else {}
+    )
+    entity_validation_plan = (
+        entities.get("entity_report_grade_validation_plan")
+        if isinstance(entities.get("entity_report_grade_validation_plan"), Mapping)
+        else {}
+    )
     graph_summary = graph.get("summary") if isinstance(graph.get("summary"), Mapping) else {}
     graph_interaction_profile = (
         graph.get("graph_interaction_profile")
@@ -295,6 +314,10 @@ def analysis_commercial_uplift_evidence(
         passed_by_item.setdefault("#46", []).append("cluster report-grade validation plan")
         if int(cluster_validation_plan.get("ready_slot_count") or 0) >= 6:
             passed_by_item["#46"].append("cluster report-grade ready slots")
+    if entity_validation_plan:
+        passed_by_item.setdefault("#47", []).append("entity report-grade validation plan")
+        if int(entity_validation_plan.get("ready_slot_count") or 0) >= 6:
+            passed_by_item["#47"].append("entity report-grade ready slots")
     return {
         "batch_id": "commercial-uplift-046-050",
         "item_numbers": [46, 47, 48, 49, 50],
@@ -306,6 +329,7 @@ def analysis_commercial_uplift_evidence(
             f"cluster_report_grade_validation_plan_sha256:{cluster_validation_plan.get('validation_plan_sha256', '')}",
             f"entities:{entity_summary.get('entity_count', 0)}",
             f"entity_citation_manifest_sha256:{entity_citation_manifest.get('manifest_sha256', '')}",
+            f"entity_report_grade_validation_plan_sha256:{entity_validation_plan.get('validation_plan_sha256', '')}",
             f"graph_edges:{graph_summary.get('edge_count', 0)}",
             f"graph_citation_manifest_sha256:{graph_citation_manifest.get('manifest_sha256', '')}",
             f"timeline_events:{timeline_summary.get('event_count', 0)}",
@@ -323,6 +347,7 @@ def analysis_commercial_uplift_evidence(
             workbook_summary=workbook_summary,
             trusted_diffs=trusted_diffs,
             cluster_validation_plan=cluster_validation_plan,
+            entity_validation_plan=entity_validation_plan,
         ),
         "passed_validation_check_ids_by_item": passed_by_item,
         "failed_validation_check_ids_by_item": failed_by_item,
@@ -367,6 +392,10 @@ def analysis_commercial_uplift_evidence(
             "entity_review_profile_present": bool(entity_review_profile),
             "entity_citation_manifest_present": bool(entity_citation_manifest),
             "entity_citation_manifest_hash": str(entity_citation_manifest.get("manifest_sha256") or ""),
+            "entity_report_grade_validation_plan_present": bool(entity_validation_plan),
+            "entity_report_grade_validation_plan_hash": str(entity_validation_plan.get("validation_plan_sha256") or ""),
+            "entity_report_grade_ready_slot_count": int(entity_validation_plan.get("ready_slot_count") or 0),
+            "entity_report_grade_blocking_slot_count": int(entity_validation_plan.get("blocking_slot_count") or 0),
             "entity_citation_entry_count": int(entity_citation_manifest.get("entity_entry_count") or 0),
             "entity_match_citation_count": int(entity_citation_manifest.get("match_citation_count") or 0),
             "entity_review_queue_count": int(entity_review_profile.get("review_queue_count") or 0),
@@ -427,6 +456,7 @@ def analysis_reportability_decision(
     workbook_summary: Mapping[str, object],
     trusted_diffs: Mapping[int, Mapping[str, object]] | None = None,
     cluster_validation_plan: Mapping[str, object] | None = None,
+    entity_validation_plan: Mapping[str, object] | None = None,
 ) -> dict[str, object]:
     blockers = {str(item) for item in report_grade.get("blockers", []) if str(item)}
     for item_id, checks in failed_by_item.items():
@@ -437,6 +467,7 @@ def analysis_reportability_decision(
         blockers.add("analyst-verified-entity-resolution-not-available")
     trusted_diffs = trusted_diffs or {}
     cluster_validation_plan = cluster_validation_plan or {}
+    entity_validation_plan = entity_validation_plan or {}
     for number, blocker in ANALYSIS_TRUSTED_DIFF_BLOCKERS.items():
         if trusted_diffs.get(number, {}).get("status") != "pass":
             blockers.add(blocker)
@@ -460,6 +491,10 @@ def analysis_reportability_decision(
         ),
         "cluster_report_grade_ready_slot_count": int(cluster_validation_plan.get("ready_slot_count") or 0),
         "cluster_report_grade_blocking_slot_count": int(cluster_validation_plan.get("blocking_slot_count") or 0),
+        "entity_report_grade_validation_plan_present": bool(entity_validation_plan),
+        "entity_report_grade_validation_plan_hash": str(entity_validation_plan.get("validation_plan_sha256") or ""),
+        "entity_report_grade_ready_slot_count": int(entity_validation_plan.get("ready_slot_count") or 0),
+        "entity_report_grade_blocking_slot_count": int(entity_validation_plan.get("blocking_slot_count") or 0),
         "required_before_report": [
             "persist analyst review state for clusters, entity merge/split decisions, graph layouts, and workbook hypotheses",
             "validate graph and timeline joins against full-case indexed source rows with timezone and parser-confidence evidence",
@@ -514,6 +549,11 @@ def analysis_core_accuracy_gates(
     entity_citation_manifest = (
         entities.get("entity_citation_manifest")
         if isinstance(entities.get("entity_citation_manifest"), Mapping)
+        else {}
+    )
+    entity_validation_plan = (
+        entities.get("entity_report_grade_validation_plan")
+        if isinstance(entities.get("entity_report_grade_validation_plan"), Mapping)
         else {}
     )
     graph_summary = graph.get("summary") if isinstance(graph.get("summary"), Mapping) else {}
@@ -625,6 +665,13 @@ def analysis_core_accuracy_gates(
             item47.append("entity source viewer locators")
         if entity_citation_manifest.get("raw_entity_values_serialized") is False:
             item47.append("hash-only entity citation values")
+    if entity_validation_plan:
+        item47.append("entity report-grade validation plan")
+        evidence_refs.append(
+            f"entity_report_grade_validation_plan_sha256:{entity_validation_plan.get('validation_plan_sha256', '')}"
+        )
+        if int(entity_validation_plan.get("ready_slot_count") or 0) >= 6:
+            item47.append("entity report-grade ready slots")
     if int(entity_review_profile.get("merge_split_candidate_count") or 0) > 0:
         item47.append("merge/split review queue")
     if not ANALYSIS_NATIVE_CAPABILITIES["analyst_verified_entity_resolution"]:
@@ -1857,6 +1904,12 @@ def build_entity_view(
     type_counts = Counter(str(item["type"]) for item in entities)
     review_profile = build_entity_review_profile(entities, total_candidate_count=len(buckets), max_entities=max_entities)
     citation_manifest = build_entity_citation_manifest(entities, matches)
+    validation_plan = build_entity_report_grade_validation_plan(
+        entities=entities,
+        matches=matches,
+        entity_review_profile=review_profile,
+        entity_citation_manifest=citation_manifest,
+    )
     return {
         "summary": {
             "entity_count": len(entities),
@@ -1867,12 +1920,16 @@ def build_entity_view(
             "merge_split_candidate_count": int(review_profile.get("merge_split_candidate_count") or 0),
             "entity_citation_entry_count": int(citation_manifest.get("entity_entry_count") or 0),
             "match_citation_count": int(citation_manifest.get("match_citation_count") or 0),
+            "entity_report_grade_ready_slot_count": int(validation_plan.get("ready_slot_count") or 0),
+            "entity_report_grade_blocking_slot_count": int(validation_plan.get("blocking_slot_count") or 0),
             "commercial_gap_ids": ["#47"],
             "commercial_grade_ready": False,
         },
         "entity_review_profile": review_profile,
         "entity_citation_manifest": citation_manifest,
         "entity_citation_manifest_hash": citation_manifest["manifest_sha256"],
+        "entity_report_grade_validation_plan": validation_plan,
+        "entity_report_grade_validation_plan_hash": validation_plan["validation_plan_sha256"],
         "entities": entities,
         "report_grade_assessment": component_report_grade_assessment("#47", "entity-view"),
     }
@@ -2057,6 +2114,181 @@ def build_entity_citation_manifest(
         {key: value for key, value in manifest.items() if key != "manifest_sha256"}
     )
     return manifest
+
+
+def build_entity_report_grade_validation_plan(
+    *,
+    entities: Sequence[Mapping[str, object]],
+    matches: Sequence[Mapping[str, object]],
+    entity_review_profile: Mapping[str, object],
+    entity_citation_manifest: Mapping[str, object],
+    trusted_diff: Mapping[str, object] | None = None,
+) -> dict[str, object]:
+    trusted_diff = trusted_diff or {}
+    review_profile_hash = stable_analysis_sha256(entity_review_profile)
+    citation_manifest_hash = str(entity_citation_manifest.get("manifest_sha256") or "")
+    match_citation_count = int(entity_citation_manifest.get("match_citation_count") or 0)
+    entity_entry_count = int(entity_citation_manifest.get("entity_entry_count") or 0)
+    merge_split_candidate_count = int(entity_review_profile.get("merge_split_candidate_count") or 0)
+
+    def slot(
+        slot_id: str,
+        *,
+        ready: bool,
+        evidence: str,
+        blocker_id: str | None = None,
+        operator_action: str = "",
+    ) -> dict[str, object]:
+        row: dict[str, object] = {
+            "slot_id": slot_id,
+            "status": "complete" if ready else "external-required",
+            "evidence": evidence,
+        }
+        if blocker_id and not ready:
+            row["blocker_id"] = blocker_id
+        if operator_action:
+            row["operator_action"] = operator_action
+        return row
+
+    validation_slots = [
+        slot(
+            "search-entity-pattern-and-structured-extraction",
+            ready=bool(entities),
+            evidence=f"entity_count={len(entities)} match_count={len(matches)}",
+            blocker_id="search-entity-extraction-required",
+            operator_action="Run search analysis so pattern and structured entity candidates are emitted.",
+        ),
+        slot(
+            "search-entity-review-profile-emitted",
+            ready=entity_review_profile.get("profile_version") == "entity-review-profile-v1",
+            evidence=f"entity_review_profile_sha256={review_profile_hash}",
+            blocker_id="search-entity-review-profile-required",
+            operator_action="Regenerate analysis so the entity review profile is available to the reviewer.",
+        ),
+        slot(
+            "search-entity-citation-manifest-emitted",
+            ready=bool(citation_manifest_hash),
+            evidence=f"entity_citation_manifest_sha256={citation_manifest_hash}",
+            blocker_id="search-entity-citation-manifest-required",
+            operator_action="Generate the entity citation manifest before using entity output in a report.",
+        ),
+        slot(
+            "search-entity-source-viewer-locators",
+            ready=match_citation_count > 0,
+            evidence=f"match_citation_count={match_citation_count}",
+            blocker_id="search-entity-source-viewer-locators-required",
+            operator_action="Attach source viewer locators for entity match citations.",
+        ),
+        slot(
+            "search-entity-hash-only-citations",
+            ready=entity_citation_manifest.get("raw_entity_values_serialized") is False,
+            evidence=f"raw_entity_values_serialized={entity_citation_manifest.get('raw_entity_values_serialized')}",
+            blocker_id="search-entity-hash-only-citations-required",
+            operator_action="Keep entity citation manifests hash-only unless a lawful report export explicitly reveals values.",
+        ),
+        slot(
+            "search-entity-merge-split-review-queue",
+            ready=merge_split_candidate_count > 0,
+            evidence=f"merge_split_candidate_count={merge_split_candidate_count}",
+            blocker_id="search-entity-merge-split-review-queue-required",
+            operator_action="Create a merge/split review queue for people, accounts, phones, and emails.",
+        ),
+        slot(
+            "search-entity-persistent-review-state",
+            ready=False,
+            evidence="persistent_entity_review_state=false",
+            blocker_id="persistent-entity-review-state-required",
+            operator_action="Persist analyst merge/split decisions, notes, timestamps, and reviewer identity.",
+        ),
+        slot(
+            "search-entity-analyst-verified-resolution",
+            ready=False,
+            evidence="analyst_verified_entity_resolution=false",
+            blocker_id="analyst-verified-entity-resolution-required",
+            operator_action="Require analyst verification before reporting person/account/entity resolution claims.",
+        ),
+        slot(
+            "search-entity-merge-split-workflow",
+            ready=False,
+            evidence="entity_merge_split_workflow=false",
+            blocker_id="entity-merge-split-workflow-required",
+            operator_action="Add GUI/workflow support for merge, split, undo, and audit of entity decisions.",
+        ),
+        slot(
+            "search-entity-trusted-review-diff",
+            ready=trusted_diff.get("status") == "pass",
+            evidence=f"trusted_diff_status={trusted_diff.get('status', 'missing')}",
+            blocker_id=ANALYSIS_TRUSTED_DIFF_BLOCKERS[47],
+            operator_action="Attach a passing analyst entity review diff.",
+        ),
+        slot(
+            "search-entity-false-positive-corpus",
+            ready=False,
+            evidence="entity_false_positive_corpus_attached=false",
+            blocker_id="entity-false-positive-corpus-required",
+            operator_action="Measure false positives, missed aliases, and normalization drift with known-answer fixtures.",
+        ),
+        slot(
+            "search-entity-independent-review",
+            ready=False,
+            evidence="independent_review_signoff_present=false",
+            blocker_id="entity-independent-review-required",
+            operator_action="Attach independent reviewer signoff before entity resolution wording.",
+        ),
+    ]
+    blockers = sorted(
+        {
+            str(item.get("blocker_id"))
+            for item in validation_slots
+            if item.get("status") != "complete" and item.get("blocker_id")
+        }
+    )
+    plan: dict[str, object] = {
+        "profile_version": ENTITY_REPORT_GRADE_VALIDATION_PLAN_VERSION,
+        "item_number": 47,
+        "gap_id": "#47",
+        "batch_id": "commercial-uplift-046-050",
+        "selected_track": "bounded-hash-only-entity-report-validation",
+        "match_count": len(matches),
+        "entity_count": len(entities),
+        "entity_entry_count": entity_entry_count,
+        "match_citation_count": match_citation_count,
+        "merge_split_candidate_count": merge_split_candidate_count,
+        "entity_review_profile_sha256": review_profile_hash,
+        "entity_citation_manifest_sha256": citation_manifest_hash,
+        "trusted_diff_status": str(trusted_diff.get("status") or "missing"),
+        "ready_slot_count": sum(1 for item in validation_slots if item.get("status") == "complete"),
+        "blocking_slot_count": sum(1 for item in validation_slots if item.get("status") != "complete"),
+        "validation_status": "report-validation-blocked" if blockers else "ready-for-report-review",
+        "commercial_grade": False,
+        "commercial_grade_ready": False,
+        "validation_slots": validation_slots,
+        "blockers": blockers,
+        "commercial_grade_blockers": list(ENTITY_REPORT_GRADE_BLOCKERS),
+        "validation_commands": [
+            "rapidtriage search <case-db-or-output> --keyword <keyword> --output search-results.json",
+            "rapidtriage cross-tool-validate --rapid-output search-results.json --reference-output <analyst-entity-review> --backlog-item 47 --json",
+            "rapidtriage commercial-readiness --validation-package docs/validation/rapidtriage-core-forensics-041-050-known-answer.json --limit 47 --json",
+        ],
+        "report_guidance": {
+            "allowed_use": "bounded-entity-review-pivot",
+            "forbidden_claims": [
+                "entities are analyst-resolved people or accounts",
+                "aliases have been merged or split by a reviewer",
+                "entity extraction false-positive rates are validated",
+                "entity view is commercial-grade for full-case identity resolution",
+            ],
+            "required_disclaimer": (
+                "Entities are pattern/field-based review pivots. Do not report identity-resolution conclusions until "
+                "persistent review state, analyst merge/split workflow, trusted entity diff, false-positive corpus, "
+                "and independent review are attached."
+            ),
+        },
+    }
+    plan["validation_plan_sha256"] = stable_analysis_sha256(
+        {key: value for key, value in plan.items() if key != "validation_plan_sha256"}
+    )
+    return plan
 
 
 def entity_value_shape(entity_type: str, value: str) -> str:

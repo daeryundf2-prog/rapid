@@ -249,6 +249,8 @@ class RapidTriageSearchAnalysisTests(unittest.TestCase):
         self.assertIn("entity citation manifest", analysis_gates["#47"]["satisfied_checks"])
         self.assertIn("entity source viewer locators", analysis_gates["#47"]["satisfied_checks"])
         self.assertIn("hash-only entity citation values", analysis_gates["#47"]["satisfied_checks"])
+        self.assertIn("entity report-grade validation plan", analysis_gates["#47"]["satisfied_checks"])
+        self.assertIn("entity report-grade ready slots", analysis_gates["#47"]["satisfied_checks"])
         self.assertIn("merge/split review queue", analysis_gates["#47"]["satisfied_checks"])
         self.assertIn("relationship edges built", analysis_gates["#48"]["satisfied_checks"])
         self.assertIn("causal-proof limitation warning", analysis_gates["#48"]["satisfied_checks"])
@@ -288,6 +290,8 @@ class RapidTriageSearchAnalysisTests(unittest.TestCase):
         self.assertIn("cluster report-grade ready slots", analysis_uplift["passed_validation_check_ids_by_item"]["#46"])
         self.assertIn("entity extraction across supported types", analysis_uplift["passed_validation_check_ids_by_item"]["#47"])
         self.assertIn("entity review profile", analysis_uplift["passed_validation_check_ids_by_item"]["#47"])
+        self.assertIn("entity report-grade validation plan", analysis_uplift["passed_validation_check_ids_by_item"]["#47"])
+        self.assertIn("entity report-grade ready slots", analysis_uplift["passed_validation_check_ids_by_item"]["#47"])
         self.assertIn("relationship edges built", analysis_uplift["passed_validation_check_ids_by_item"]["#48"])
         self.assertIn("edge source citations", analysis_uplift["passed_validation_check_ids_by_item"]["#48"])
         self.assertIn("timestamp extraction", analysis_uplift["passed_validation_check_ids_by_item"]["#49"])
@@ -313,6 +317,7 @@ class RapidTriageSearchAnalysisTests(unittest.TestCase):
         )
         self.assertEqual(analysis_uplift["reportability_decision"]["review_output_counts"]["hypotheses"], 4)
         self.assertTrue(analysis_uplift["reportability_decision"]["cluster_report_grade_validation_plan_present"])
+        self.assertTrue(analysis_uplift["reportability_decision"]["entity_report_grade_validation_plan_present"])
         self.assertFalse(analysis_uplift["large_data_controls"]["persistent_review_state"])
         self.assertFalse(analysis_uplift["large_data_controls"]["full_case_reindex"])
         self.assertTrue(analysis_uplift["large_data_controls"]["cluster_review_profile_present"])
@@ -324,8 +329,11 @@ class RapidTriageSearchAnalysisTests(unittest.TestCase):
         self.assertTrue(analysis_uplift["large_data_controls"]["representative_first_cluster_review"])
         self.assertTrue(analysis_uplift["large_data_controls"]["entity_review_profile_present"])
         self.assertTrue(analysis_uplift["large_data_controls"]["entity_citation_manifest_present"])
+        self.assertTrue(analysis_uplift["large_data_controls"]["entity_report_grade_validation_plan_present"])
         self.assertGreaterEqual(analysis_uplift["large_data_controls"]["entity_citation_entry_count"], 1)
         self.assertGreaterEqual(analysis_uplift["large_data_controls"]["entity_match_citation_count"], 1)
+        self.assertEqual(analysis_uplift["large_data_controls"]["entity_report_grade_ready_slot_count"], 6)
+        self.assertEqual(analysis_uplift["large_data_controls"]["entity_report_grade_blocking_slot_count"], 6)
         self.assertGreaterEqual(analysis_uplift["large_data_controls"]["entity_review_queue_count"], 1)
         self.assertGreaterEqual(analysis_uplift["large_data_controls"]["merge_split_candidate_count"], 1)
         self.assertFalse(analysis_uplift["large_data_controls"]["analyst_verified_entity_resolution"])
@@ -461,6 +469,40 @@ class RapidTriageSearchAnalysisTests(unittest.TestCase):
         self.assertEqual(
             entity_manifest["entity_entries"][0]["match_citations"][0]["source_viewer_locator"]["viewer"],
             "search-entity-source",
+        )
+        entity_plan = analysis["entities"]["entity_report_grade_validation_plan"]
+        self.assertEqual(entity_plan["profile_version"], "search-entity-report-grade-validation-plan-v1")
+        self.assertEqual(entity_plan["item_number"], 47)
+        self.assertEqual(entity_plan["gap_id"], "#47")
+        self.assertEqual(
+            analysis["entities"]["entity_report_grade_validation_plan_hash"],
+            entity_plan["validation_plan_sha256"],
+        )
+        self.assertEqual(entity_plan["entity_citation_manifest_sha256"], entity_manifest["manifest_sha256"])
+        self.assertGreaterEqual(entity_plan["entity_count"], 1)
+        self.assertGreaterEqual(entity_plan["match_citation_count"], 1)
+        self.assertEqual(entity_plan["ready_slot_count"], 6)
+        self.assertEqual(entity_plan["blocking_slot_count"], 6)
+        self.assertEqual(entity_plan["validation_status"], "report-validation-blocked")
+        self.assertFalse(entity_plan["commercial_grade"])
+        entity_slots = {slot["slot_id"]: slot for slot in entity_plan["validation_slots"]}
+        self.assertEqual(entity_slots["search-entity-pattern-and-structured-extraction"]["status"], "complete")
+        self.assertEqual(entity_slots["search-entity-review-profile-emitted"]["status"], "complete")
+        self.assertEqual(entity_slots["search-entity-citation-manifest-emitted"]["status"], "complete")
+        self.assertEqual(entity_slots["search-entity-source-viewer-locators"]["status"], "complete")
+        self.assertEqual(entity_slots["search-entity-hash-only-citations"]["status"], "complete")
+        self.assertEqual(entity_slots["search-entity-merge-split-review-queue"]["status"], "complete")
+        self.assertEqual(entity_slots["search-entity-persistent-review-state"]["status"], "external-required")
+        self.assertEqual(entity_slots["search-entity-merge-split-workflow"]["status"], "external-required")
+        self.assertIn("persistent-entity-review-state-required", entity_plan["blockers"])
+        self.assertIn("entity-review-trusted-diff-required", entity_plan["blockers"])
+        self.assertEqual(
+            analysis_uplift["large_data_controls"]["entity_report_grade_validation_plan_hash"],
+            entity_plan["validation_plan_sha256"],
+        )
+        self.assertEqual(
+            analysis_uplift["reportability_decision"]["entity_report_grade_validation_plan_hash"],
+            entity_plan["validation_plan_sha256"],
         )
 
         graph = analysis["graph"]
