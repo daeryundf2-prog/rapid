@@ -2377,10 +2377,10 @@
       ],
       "expected": {
         "required_assertions": [
-          "Release artifacts preserve portable ZIP, dependency inventory, Linux packaging targets, Linux smoke requirements, linux-package-evidence-manifest-v1 manifest hash/package evidence slots, package wrapper blocker, trusted Linux package smoke diff helpers/gates, and #103 core_accuracy_gates."
+          "Release artifacts preserve portable ZIP, dependency inventory, Linux packaging targets, Linux smoke requirements, linux-package-evidence-manifest-v1 manifest hash/package evidence slots, linux-package-report-grade-validation-plan-v1 ready/blocking slots, package wrapper blocker, trusted Linux package smoke diff helpers/gates, and #103 core_accuracy_gates."
         ]
       },
-      "notes": "Internal fixture pass; actual deb/rpm/AppImage artifacts and trusted package smoke logs remain external.",
+      "notes": "Internal fixture pass; actual deb/rpm/AppImage artifacts, clean-container build logs, package signing policy, dependency resolution proof, and trusted package smoke logs remain external.",
       "source_manifest": "docs/validation/rapidtriage-core-forensics-101-120-known-answer.json"
     },
     {

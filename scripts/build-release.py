@@ -46,6 +46,17 @@ MACOS_NOTARIZATION_REPORT_GRADE_BLOCKERS = [
     "apple-developer-id-certificate-required",
 ]
 LINUX_PACKAGE_TRUSTED_DIFF_BLOCKER_103 = "trusted-linux-package-smoke-diff-missing"
+LINUX_PACKAGE_REPORT_GRADE_VALIDATION_PLAN_VERSION = "linux-package-report-grade-validation-plan-v1"
+LINUX_PACKAGE_REPORT_GRADE_BLOCKERS = [
+    LINUX_PACKAGE_TRUSTED_DIFF_BLOCKER_103,
+    "deb-build-log-required",
+    "rpm-build-log-required",
+    "appimage-build-log-required",
+    "clean-container-build-log-required",
+    "install-uninstall-smoke-required",
+    "dependency-resolution-proof-required",
+    "package-signing-policy-required",
+]
 AUTO_UPDATE_TRUSTED_DIFF_BLOCKER_104 = "trusted-auto-update-channel-diff-missing"
 RELEASE_PACKAGING_TRUSTED_TOOLS = {
     "authenticode-signature-log",
@@ -1097,6 +1108,172 @@ def build_linux_package_workflow_manifest(
     return manifest
 
 
+def build_linux_package_report_grade_validation_plan(
+    *,
+    package_manifest: dict[str, object],
+    workflow_manifest: dict[str, object],
+    artifacts: list[dict[str, object]],
+    trusted_diff: dict[str, object],
+) -> dict[str, object]:
+    artifact_names = {str(artifact.get("name") or "") for artifact in artifacts if artifact.get("name")}
+    release_artifact_hashes = package_manifest.get("release_artifact_hashes")
+    package_evidence_slots = (
+        package_manifest.get("package_evidence_slots")
+        if isinstance(package_manifest.get("package_evidence_slots"), Mapping)
+        else {}
+    )
+    evidence_slot_matrix = (
+        package_manifest.get("evidence_slot_matrix")
+        if isinstance(package_manifest.get("evidence_slot_matrix"), Mapping)
+        else {}
+    )
+    ready_slots: list[dict[str, object]] = []
+    blocking_slots: list[dict[str, object]] = []
+
+    def add_ready(slot_id: str, evidence: str, source: str) -> None:
+        ready_slots.append(
+            {
+                "slot_id": slot_id,
+                "status": "ready",
+                "evidence": evidence,
+                "source": source,
+                "commercial_claim_material": False,
+            }
+        )
+
+    def add_blocking(slot_id: str, blocker: str, required_evidence: str, owner: str = "release CI") -> None:
+        blocking_slots.append(
+            {
+                "slot_id": slot_id,
+                "status": "external-evidence-required",
+                "blocker": blocker,
+                "required_evidence": required_evidence,
+                "owner": owner,
+                "commercial_claim_material": True,
+            }
+        )
+
+    if "rapidtriage-portable.zip" in artifact_names:
+        add_ready("portable-payload-present", "rapidtriage-portable.zip included in release artifacts", "artifacts")
+    else:
+        add_blocking("portable-payload-present", "portable-payload-missing", "rapidtriage-portable.zip release artifact")
+    if release_artifact_hashes:
+        add_ready("release-artifact-hashes", "release artifact SHA256 inventory captured", "linux-package-evidence-manifest")
+    else:
+        add_blocking("release-artifact-hashes", "release-artifact-hashes-missing", "Release artifact hash inventory")
+    if package_manifest.get("manifest_hash"):
+        add_ready("linux-package-evidence-manifest", "Linux package evidence manifest hash emitted", "release-manifest")
+    else:
+        add_blocking(
+            "linux-package-evidence-manifest",
+            "linux-package-evidence-manifest-hash-missing",
+            "linux-package-evidence-manifest-v1 hash",
+        )
+    if package_manifest.get("evidence_slot_matrix_hash") and evidence_slot_matrix.get("rows"):
+        add_ready("linux-package-evidence-slot-matrix", "Evidence slot matrix rows and hash emitted", "release-manifest")
+    else:
+        add_blocking(
+            "linux-package-evidence-slot-matrix",
+            "linux-package-evidence-slot-matrix-missing",
+            "release-evidence-slot-matrix-v1 rows and hash",
+        )
+    if workflow_manifest.get("manifest_hash"):
+        add_ready("linux-package-workflow-manifest", "Linux package workflow manifest hash emitted", "release-manifest")
+    else:
+        add_blocking(
+            "linux-package-workflow-manifest",
+            "linux-package-workflow-manifest-missing",
+            "linux-package-workflow-manifest-v1 hash",
+        )
+    if workflow_manifest.get("launcher_entries"):
+        add_ready("linux-launcher-and-smoke-scripts", "Linux launcher and smoke script entries declared", "workflow-manifest")
+    else:
+        add_blocking(
+            "linux-launcher-and-smoke-scripts",
+            "linux-launcher-smoke-scripts-missing",
+            "Packaged Linux launcher and smoke scripts",
+        )
+    if workflow_manifest.get("verification_commands"):
+        add_ready("linux-verification-commands", "Linux package verification commands declared", "workflow-manifest")
+    else:
+        add_blocking(
+            "linux-verification-commands",
+            "linux-verification-commands-missing",
+            "deb/rpm/AppImage install, launch, and uninstall verification commands",
+        )
+    if trusted_diff.get("status"):
+        add_ready("trusted-diff-boundary", "Trusted Linux package smoke diff status recorded", "trusted_linux_package_diff")
+    if package_evidence_slots:
+        add_ready("package-slot-disclosure", "deb, rpm, AppImage, dependency, and smoke slots disclosed", "package_evidence_slots")
+
+    if trusted_diff.get("status") != "pass":
+        add_blocking(
+            "trusted-linux-package-smoke-diff",
+            LINUX_PACKAGE_TRUSTED_DIFF_BLOCKER_103,
+            "Trusted Linux package build and smoke evidence diff manifest",
+        )
+    required_external_slots = {
+        "deb_build_log": ("deb-build-log-required", "Clean-container deb build log and generated package SHA256"),
+        "rpm_build_log": ("rpm-build-log-required", "Clean-container rpm build log and generated package SHA256"),
+        "appimage_build_log": (
+            "appimage-build-log-required",
+            "Clean-container AppImage build log and generated package SHA256",
+        ),
+        "install_uninstall_smoke": (
+            "install-uninstall-smoke-required",
+            "Fresh distro install, launch, smoke, and uninstall transcript",
+        ),
+        "dependency_resolution": (
+            "dependency-resolution-proof-required",
+            "Package-manager dependency resolution transcript on target distributions",
+        ),
+    }
+    for slot_name, (blocker, required_evidence) in required_external_slots.items():
+        slot = package_evidence_slots.get(slot_name) if isinstance(package_evidence_slots, Mapping) else {}
+        if not isinstance(slot, Mapping) or slot.get("status") != "attached":
+            add_blocking(slot_name, blocker, required_evidence)
+    add_blocking(
+        "clean-container-build-log",
+        "clean-container-build-log-required",
+        "Container image digest, build command, and package output hashes for deb/rpm/AppImage builds",
+    )
+    add_blocking(
+        "package-signing-policy",
+        "package-signing-policy-required",
+        "Distro package signing policy or explicit unsigned-package limitation approved for the release",
+        owner="release engineer",
+    )
+
+    blockers = sorted({str(slot.get("blocker")) for slot in blocking_slots if slot.get("blocker")})
+    plan_core: dict[str, object] = {
+        "profile_version": LINUX_PACKAGE_REPORT_GRADE_VALIDATION_PLAN_VERSION,
+        "item_number": 103,
+        "commercial_gap_ids": [LINUX_PACKAGE_GAP_ID],
+        "commercial_claim_allowed": False,
+        "reporting_boundary": (
+            "Internal release artifacts prove portable payload, package evidence slots, and workflow readiness only; "
+            "Linux deb/rpm/AppImage distribution claims require the blocking external build and smoke evidence."
+        ),
+        "supported_outputs": package_manifest.get("supported_outputs", []),
+        "target_outputs": package_manifest.get("target_outputs", []),
+        "release_artifact_hashes": release_artifact_hashes or [],
+        "package_evidence_manifest_hash": package_manifest.get("manifest_hash"),
+        "package_workflow_manifest_hash": workflow_manifest.get("manifest_hash"),
+        "evidence_slot_matrix_hash": package_manifest.get("evidence_slot_matrix_hash"),
+        "trusted_diff_status": trusted_diff.get("status"),
+        "trusted_diff_blocker": trusted_diff.get("blocker"),
+        "ready_slots": ready_slots,
+        "blocking_slots": blocking_slots,
+        "ready_slot_count": len(ready_slots),
+        "blocking_slot_count": len(blocking_slots),
+        "external_blocker_catalog": LINUX_PACKAGE_REPORT_GRADE_BLOCKERS,
+        "blockers": blockers,
+    }
+    plan = dict(plan_core)
+    plan["validation_plan_sha256"] = stable_release_sha256(plan_core)
+    return plan
+
+
 def build_operations_document_evidence_manifests(repo: Path, output_dir: Path) -> dict[str, dict[str, object]]:
     document_specs = {
         112: {
@@ -1674,6 +1851,18 @@ def write_release_manifest(output_dir: Path, repo: Path, commercial_readiness: d
         artifacts,
         linux_package_evidence_manifest,
     )
+    linux_package_report_grade_validation_plan = build_linux_package_report_grade_validation_plan(
+        package_manifest=linux_package_evidence_manifest,
+        workflow_manifest=linux_package_workflow_manifest,
+        artifacts=artifacts,
+        trusted_diff=linux_trusted_diff,
+    )
+    linux_package_blockers = sorted(
+        {
+            LINUX_PACKAGE_TRUSTED_DIFF_BLOCKER_103,
+            *[str(blocker) for blocker in linux_package_report_grade_validation_plan.get("blockers", [])],
+        }
+    )
     operations_document_evidence_manifests = build_operations_document_evidence_manifests(repo, output_dir)
     update_manifest_payload: dict[str, object] = {}
     update_manifest_path = output_dir / "update-manifest.json"
@@ -1781,6 +1970,7 @@ def write_release_manifest(output_dir: Path, repo: Path, commercial_readiness: d
                 "core_accuracy_gates": release_packaging_core_accuracy_gate(
                     103,
                     evidence_manifest=linux_package_evidence_manifest,
+                    report_grade_validation_plan=linux_package_report_grade_validation_plan,
                 ),
                 "functional_priority_profile": release_packaging_functional_priority_profile("linux"),
                 "supported_outputs": ["portable zip", "wheel", "sdist"],
@@ -1791,9 +1981,19 @@ def write_release_manifest(output_dir: Path, repo: Path, commercial_readiness: d
                 "evidence_slot_matrix_hash": linux_package_evidence_manifest["evidence_slot_matrix_hash"],
                 "linux_package_workflow_manifest": linux_package_workflow_manifest,
                 "linux_package_workflow_manifest_hash": linux_package_workflow_manifest["manifest_hash"],
+                "linux_package_report_grade_validation_plan": linux_package_report_grade_validation_plan,
+                "linux_package_report_grade_validation_plan_hash": linux_package_report_grade_validation_plan[
+                    "validation_plan_sha256"
+                ],
+                "linux_package_report_grade_ready_slot_count": linux_package_report_grade_validation_plan[
+                    "ready_slot_count"
+                ],
+                "linux_package_report_grade_blocking_slot_count": linux_package_report_grade_validation_plan[
+                    "blocking_slot_count"
+                ],
                 "package_evidence_slots": linux_package_evidence_manifest["package_evidence_slots"],
                 "trusted_linux_package_diff": linux_trusted_diff,
-                "blockers": [LINUX_PACKAGE_TRUSTED_DIFF_BLOCKER_103],
+                "blockers": linux_package_blockers,
             },
             "auto_update_channel": {
                 "status": "manifest-generated",
@@ -2118,7 +2318,14 @@ def build_release_packaging_trusted_diff(
             ]
         )
     if number == 103:
-        compared_fields.extend(["linux_package_evidence_manifest_hash", "package_evidence_slots", "evidence_slot_matrix_hash"])
+        compared_fields.extend(
+            [
+                "linux_package_evidence_manifest_hash",
+                "package_evidence_slots",
+                "evidence_slot_matrix_hash",
+                "linux_package_report_grade_validation_plan_hash",
+            ]
+        )
     if number == 104:
         compared_fields.extend(["auto_update_evidence_manifest_hash", "update_evidence_slots", "evidence_slot_matrix_hash"])
     mismatches = []
@@ -2309,6 +2516,11 @@ def release_packaging_core_accuracy_gate(
             satisfied_checks.append("linux package evidence slots emitted")
         if evidence_manifest.get("evidence_slot_matrix_hash"):
             satisfied_checks.append("linux evidence slot matrix hash emitted")
+    if number == 103 and report_grade_validation_plan:
+        if report_grade_validation_plan.get("validation_plan_sha256"):
+            satisfied_checks.append("linux package report-grade validation plan")
+        if int(report_grade_validation_plan.get("ready_slot_count") or 0) > 0:
+            satisfied_checks.append("linux package report-grade ready slots")
     if number == 104 and evidence_manifest:
         if evidence_manifest.get("release_artifact_hashes"):
             satisfied_checks.append("release artifact hashes captured")

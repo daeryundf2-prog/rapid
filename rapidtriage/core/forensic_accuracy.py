@@ -1720,6 +1720,8 @@ CORE_FORENSIC_ACCURACY_ITEMS: tuple[dict[str, object], ...] = (
             "release artifact hashes captured",
             "linux package evidence manifest hash emitted",
             "linux package evidence slots emitted",
+            "linux package report-grade validation plan",
+            "linux package report-grade ready slots",
             "trusted Linux package smoke diff pass",
         ),
     },

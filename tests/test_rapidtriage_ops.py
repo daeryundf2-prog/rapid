@@ -1783,6 +1783,10 @@ class RapidTriageOpsTests(unittest.TestCase):
                 release_by_number[103]["primary_outputs"],
             )
             self.assertIn(
+                "linux_package.linux_package_report_grade_validation_plan_hash",
+                release_by_number[103]["primary_outputs"],
+            )
+            self.assertIn(
                 "update-manifest.auto_update_evidence_manifest.manifest_hash",
                 release_by_number[104]["primary_outputs"],
             )
@@ -5576,9 +5580,33 @@ class RapidTriageOpsTests(unittest.TestCase):
             self.assertIn("RapidTriage.AppImage", linux_workflow_manifest["target_outputs"])
             self.assertIn("install_uninstall_log", linux_workflow_manifest["evidence_slots"])
             self.assertIn("clean-container-install-uninstall-smoke-not-attached", linux_workflow_manifest["blockers"])
+            linux_report_grade_plan = manifest["package_readiness"]["linux_package"][
+                "linux_package_report_grade_validation_plan"
+            ]
+            self.assertEqual(
+                linux_report_grade_plan["profile_version"],
+                "linux-package-report-grade-validation-plan-v1",
+            )
+            self.assertEqual(
+                manifest["package_readiness"]["linux_package"]["linux_package_report_grade_validation_plan_hash"],
+                linux_report_grade_plan["validation_plan_sha256"],
+            )
+            self.assertGreaterEqual(
+                manifest["package_readiness"]["linux_package"]["linux_package_report_grade_ready_slot_count"],
+                7,
+            )
+            self.assertGreaterEqual(
+                manifest["package_readiness"]["linux_package"]["linux_package_report_grade_blocking_slot_count"],
+                7,
+            )
+            self.assertIn("deb-build-log-required", linux_report_grade_plan["blockers"])
             self.assertIn("deb_build_log", manifest["package_readiness"]["linux_package"]["package_evidence_slots"])
             self.assertIn(
                 "linux package evidence manifest hash emitted",
+                manifest["package_readiness"]["linux_package"]["core_accuracy_gates"][0]["satisfied_checks"],
+            )
+            self.assertIn(
+                "linux package report-grade validation plan",
                 manifest["package_readiness"]["linux_package"]["core_accuracy_gates"][0]["satisfied_checks"],
             )
             self.assertIn(
@@ -5593,6 +5621,7 @@ class RapidTriageOpsTests(unittest.TestCase):
             )
             self.assertEqual(manifest["package_readiness"]["linux_package"]["trusted_linux_package_diff"]["status"], "missing")
             self.assertIn("trusted-linux-package-smoke-diff-missing", manifest["package_readiness"]["linux_package"]["blockers"])
+            self.assertIn("deb-build-log-required", manifest["package_readiness"]["linux_package"]["blockers"])
             self.assertIn("#104", manifest["package_readiness"]["auto_update_channel"]["commercial_gap_ids"])
             self.assertEqual(manifest["package_readiness"]["auto_update_channel"]["core_accuracy_gates"][0]["gap_id"], "#104")
             self.assertEqual(manifest["package_readiness"]["auto_update_channel"]["status"], "manifest-generated")
@@ -5875,6 +5904,22 @@ class RapidTriageOpsTests(unittest.TestCase):
             self.assertIn("macos_notarization_report_grade_validation_plan_hash", macos_diff["compared_fields"])
             self.assertIn("trusted macOS notarization evidence diff pass", macos_gates[0]["satisfied_checks"])
             self.assertIn("macos notarization report-grade ready slots", macos_gates[0]["satisfied_checks"])
+            linux_diff = build_release.build_release_packaging_trusted_diff(
+                103,
+                manifest["package_readiness"]["linux_package"],
+                manifest["package_readiness"]["linux_package"],
+                trusted_tool="linux-package-smoke-log",
+            )
+            linux_gates = build_release.release_packaging_core_accuracy_gate(
+                103,
+                trusted_diff=linux_diff,
+                evidence_manifest=linux_package_manifest,
+                report_grade_validation_plan=linux_report_grade_plan,
+            )
+            self.assertEqual(linux_diff["status"], "pass")
+            self.assertIn("linux_package_report_grade_validation_plan_hash", linux_diff["compared_fields"])
+            self.assertIn("trusted Linux package smoke diff pass", linux_gates[0]["satisfied_checks"])
+            self.assertIn("linux package report-grade ready slots", linux_gates[0]["satisfied_checks"])
             release_notes_diff = build_release.build_operations_document_trusted_diff(
                 112,
                 manifest["package_readiness"]["operations_documents"],

@@ -3451,6 +3451,7 @@ def release_operations_evidence_chain() -> list[dict[str, object]]:
             "primary_outputs": [
                 "release-manifest.package_readiness.linux_package",
                 "linux_package.linux_package_evidence_manifest.manifest_hash",
+                "linux_package.linux_package_report_grade_validation_plan_hash",
                 "linux_package.package_evidence_slots.deb_build_log",
                 "linux_package.package_evidence_slots.rpm_build_log",
                 "linux_package.package_evidence_slots.appimage_build_log",
