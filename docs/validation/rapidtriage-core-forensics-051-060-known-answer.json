@@ -55,7 +55,7 @@
       "status": "pass",
       "backlog_items": [55],
       "evidence_paths": ["docs/validation/core-forensics-051-060-fixture-evidence.json", "tests/test_rapidtriage_api.py"],
-      "expected": {"required_assertions": ["Email preview preserves thread grouping, message order, participant/header fields, conversation source manifest hashes, attachment hash inventory, bounded attachment citation packages, attachment proof manifest hashes, mailbox limitations, trusted thread/export diff gates, and #55 core_accuracy_gates.", "Email viewer reportability decisions block native-mailbox-thread-complete claims until PST/OST/MSG decoding, deleted item recovery, native mailbox attachment extraction, trusted mail client thread export diff, and mailbox corpus validation exists."]},
+      "expected": {"required_assertions": ["Email preview preserves thread grouping, message order, participant/header fields, conversation source manifest hashes, attachment hash inventory, bounded attachment citation packages, attachment proof manifest hashes, email_viewer_report_grade_validation_plan ready/blocking slots, mailbox limitations, trusted thread/export diff gates, and #55 core_accuracy_gates.", "Email viewer reportability decisions block native-mailbox-thread-complete claims until PST/OST/MSG decoding, deleted item recovery, native mailbox attachment extraction, Message-ID graph validation, trusted mail client thread export diff, and mailbox corpus validation exists."]},
       "notes": "Internal fixture pass; native PST/OST/MSG conversation validation remains required."
     },
     {

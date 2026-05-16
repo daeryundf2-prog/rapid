@@ -241,6 +241,15 @@ SQLITE_VIEWER_REPORT_GRADE_BLOCKERS = [
 ]
 EMAIL_VIEWER_TRUSTED_DIFF_BLOCKER = "email-viewer-trusted-thread-export-required"
 EMAIL_VIEWER_TRUSTED_TOOLS = {"mail-client-thread-export", "eml-ground-truth", "mbox-ground-truth", "vendor-mailbox-export"}
+EMAIL_VIEWER_REPORT_GRADE_VALIDATION_PLAN_VERSION = "email-viewer-report-grade-validation-plan-v1"
+EMAIL_VIEWER_REPORT_GRADE_BLOCKERS = [
+    "native-pst-ost-msg-conversation-view-required",
+    "deleted-mailbox-item-recovery-required",
+    "native-mailbox-attachment-extraction-required",
+    "message-id-graph-validation-required",
+    "email-viewer-trusted-thread-export-required",
+    "mailbox-corpus-validation-required",
+]
 MEDIA_TRANSCRIPT_TRUSTED_DIFF_BLOCKER = "media-transcript-trusted-cue-diff-required"
 MEDIA_TRANSCRIPT_TRUSTED_TOOLS = {"transcript-cue-manifest", "asr-alignment-export", "manual-playback-review"}
 PREVIEW_SANDBOX_TRUSTED_DIFF_BLOCKER = "preview-sandbox-trusted-no-exec-manifest-required"
@@ -5233,6 +5242,22 @@ def build_email_preview(source_path: Path, suffix: str, *, run_id: str | None = 
         or diagnostics.get("message_limit_reached")
         or diagnostics.get("message_size_truncated_count")
     )
+    validation_plan = build_email_viewer_report_grade_validation_plan(
+        context="email-preview",
+        source_path=source_path,
+        messages=summaries,
+        conversation=conversation,
+        conversation_manifest=conversation_manifest,
+        attachment_profile=attachment_profile,
+        parse_truncated=parse_truncated,
+    )
+    core_accuracy_gates = email_viewer_core_accuracy_gates(
+        source_path=source_path,
+        messages=summaries,
+        conversation=conversation,
+        conversation_manifest=conversation_manifest,
+        validation_plan=validation_plan,
+    )
     return {
         "preview_type": "email",
         "message": (
@@ -5259,6 +5284,8 @@ def build_email_preview(source_path: Path, suffix: str, *, run_id: str | None = 
             "conversation_view": conversation,
             "email_conversation_manifest": conversation_manifest,
             "email_conversation_manifest_hash": conversation_manifest["manifest_hash"],
+            "email_viewer_report_grade_validation_plan": validation_plan,
+            "email_viewer_report_grade_validation_plan_hash": validation_plan["validation_plan_sha256"],
             "thread_count": len(threads),
             "truncated": parse_truncated,
             "email_conversation_viewer_assessment": source_viewer_component_assessment(
@@ -5270,12 +5297,7 @@ def build_email_preview(source_path: Path, suffix: str, *, run_id: str | None = 
                     "attachment-body-rendering-is-bounded-and-inventory-oriented",
                 ],
             ),
-            "core_accuracy_gates": email_viewer_core_accuracy_gates(
-                source_path=source_path,
-                messages=summaries,
-                conversation=conversation,
-                conversation_manifest=conversation_manifest,
-            ),
+            "core_accuracy_gates": core_accuracy_gates,
             "trusted_email_conversation_diff": {
                 "status": "missing",
                 "blocker_id": EMAIL_VIEWER_TRUSTED_DIFF_BLOCKER,
@@ -5284,12 +5306,7 @@ def build_email_preview(source_path: Path, suffix: str, *, run_id: str | None = 
             "commercial_uplift_evidence": viewer_workflow_commercial_uplift_evidence(
                 item_number=55,
                 component="email-conversation-viewer",
-                core_accuracy_gates=email_viewer_core_accuracy_gates(
-                    source_path=source_path,
-                    messages=summaries,
-                    conversation=conversation,
-                    conversation_manifest=conversation_manifest,
-                ),
+                core_accuracy_gates=core_accuracy_gates,
                 blockers=[
                     "native-pst-ost-msg-conversation-view-not-implemented",
                     "deleted-mailbox-item-recovery-not-implemented",
@@ -5302,7 +5319,12 @@ def build_email_preview(source_path: Path, suffix: str, *, run_id: str | None = 
                     "message-id-graph-validation-required",
                     EMAIL_VIEWER_TRUSTED_DIFF_BLOCKER,
                 ],
-                source_refs=[f"source_path:{source_path}", f"message_count:{len(summaries)}", f"thread_count:{len(threads)}"],
+                source_refs=[
+                    f"source_path:{source_path}",
+                    f"message_count:{len(summaries)}",
+                    f"thread_count:{len(threads)}",
+                    f"email_viewer_report_grade_validation_plan_sha256:{validation_plan['validation_plan_sha256']}",
+                ],
                 controls={
                     "message_limit": EMAIL_PREVIEW_MESSAGE_LIMIT,
                     "body_preview_chars": EMAIL_BODY_PREVIEW_CHARS,
@@ -5314,6 +5336,10 @@ def build_email_preview(source_path: Path, suffix: str, *, run_id: str | None = 
                     "attachment_content_export_max_bytes": EMAIL_ATTACHMENT_EXPORT_MAX_BYTES,
                     "email_parse_diagnostics": diagnostics,
                     "email_conversation_manifest_hash": conversation_manifest["manifest_hash"],
+                    "email_viewer_report_grade_validation_plan_present": True,
+                    "email_viewer_report_grade_validation_plan_hash": validation_plan["validation_plan_sha256"],
+                    "email_viewer_report_grade_ready_slot_count": validation_plan["ready_slot_count"],
+                    "email_viewer_report_grade_blocking_slot_count": validation_plan["blocking_slot_count"],
                     "email_thread_hash_count": conversation_manifest["thread_hash_count"],
                     "email_message_hash_count": conversation_manifest["message_hash_count"],
                 },
@@ -6981,6 +7007,199 @@ def sqlite_viewer_core_accuracy_gates(
     ]
 
 
+def build_email_viewer_report_grade_validation_plan(
+    *,
+    context: str,
+    source_path: Path,
+    messages: Sequence[Mapping[str, object]],
+    conversation: Mapping[str, object],
+    conversation_manifest: Mapping[str, object] | None = None,
+    attachment_manifest: Mapping[str, object] | None = None,
+    attachment_profile: Mapping[str, object] | None = None,
+    parse_truncated: bool = False,
+    content_status: str = "",
+    copy_safe_citation_ready: bool = False,
+    trusted_diff: Mapping[str, object] | None = None,
+) -> dict[str, object]:
+    conversation_manifest = conversation_manifest if isinstance(conversation_manifest, Mapping) else {}
+    attachment_manifest = attachment_manifest if isinstance(attachment_manifest, Mapping) else {}
+    attachment_profile = attachment_profile if isinstance(attachment_profile, Mapping) else {}
+    trusted_diff = trusted_diff if isinstance(trusted_diff, Mapping) else {}
+    threads = conversation.get("threads") if isinstance(conversation.get("threads"), list) else []
+
+    def slot(
+        slot_id: str,
+        *,
+        ready: bool,
+        evidence: str,
+        blocker_id: str | None = None,
+        operator_action: str = "",
+    ) -> dict[str, object]:
+        row: dict[str, object] = {
+            "slot_id": slot_id,
+            "status": "complete" if ready else "external-required",
+            "evidence": evidence,
+        }
+        if blocker_id and not ready:
+            row["blocker_id"] = blocker_id
+        if operator_action:
+            row["operator_action"] = operator_action
+        return row
+
+    message_count = len(messages)
+    thread_count = len(threads)
+    attachment_count = int(attachment_profile.get("attachment_count") or 0)
+    message_hash_count = int(conversation_manifest.get("message_hash_count") or 0)
+    thread_hash_count = int(conversation_manifest.get("thread_hash_count") or 0)
+    conversation_manifest_hash = str(conversation_manifest.get("manifest_hash") or "")
+    attachment_manifest_hash = str(attachment_manifest.get("manifest_hash") or "")
+    validation_slots = [
+        slot(
+            "email-bounded-message-parse",
+            ready=message_count > 0,
+            evidence=f"context={context} message_count={message_count} parse_truncated={parse_truncated}",
+            blocker_id="email-bounded-message-parse-required",
+            operator_action="Parse bounded message/header/body metadata before conversation review.",
+        ),
+        slot(
+            "email-thread-or-attachment-context",
+            ready=thread_count > 0 or bool(attachment_manifest_hash),
+            evidence=f"thread_count={thread_count} attachment_manifest_hash={attachment_manifest_hash}",
+            blocker_id="email-thread-or-attachment-context-required",
+            operator_action="Emit thread context or an attachment-specific source package.",
+        ),
+        slot(
+            "email-participant-header-preservation",
+            ready=bool(messages)
+            and all(message.get("from") is not None and message.get("subject") is not None for message in messages),
+            evidence=f"message_count={message_count}",
+            blocker_id="email-participant-header-preservation-required",
+            operator_action="Preserve From/Subject and core headers for each bounded message.",
+        ),
+        slot(
+            "email-attachment-inventory-or-proof",
+            ready=attachment_count >= 0 and (bool(attachment_profile) or bool(attachment_manifest_hash)),
+            evidence=f"attachment_count={attachment_count} attachment_proof={bool(attachment_manifest_hash)}",
+            blocker_id="email-attachment-inventory-or-proof-required",
+            operator_action="Emit attachment inventory, hashes, or a bounded attachment proof package.",
+        ),
+        slot(
+            "email-conversation-or-attachment-manifest-hashes",
+            ready=(
+                bool(conversation_manifest_hash)
+                and (message_hash_count > 0 or thread_hash_count > 0)
+            )
+            or bool(attachment_manifest_hash),
+            evidence=(
+                f"conversation_manifest_hash={conversation_manifest_hash} message_hash_count={message_hash_count} "
+                f"thread_hash_count={thread_hash_count} attachment_manifest_hash={attachment_manifest_hash}"
+            ),
+            blocker_id="email-conversation-or-attachment-manifest-hashes-required",
+            operator_action="Attach conversation or attachment manifest hashes and row hashes.",
+        ),
+        slot(
+            "email-copy-safe-citation-or-package-endpoint",
+            ready=copy_safe_citation_ready or bool(attachment_profile.get("endpoint")) or bool(attachment_manifest_hash),
+            evidence=(
+                f"copy_safe_citation_ready={copy_safe_citation_ready} endpoint={attachment_profile.get('endpoint', '')} "
+                f"content_status={content_status}"
+            ),
+            blocker_id="email-copy-safe-citation-or-package-endpoint-required",
+            operator_action="Expose a bounded package endpoint or copy-safe citation before report note handoff.",
+        ),
+        slot(
+            "email-native-pst-ost-msg-conversation-view",
+            ready=False,
+            evidence="native_pst_ost_msg_conversation_view=false",
+            blocker_id="native-pst-ost-msg-conversation-view-required",
+            operator_action="Add native MAPI/PST/OST/MSG folder, flag, body, and thread decoding.",
+        ),
+        slot(
+            "email-deleted-mailbox-item-recovery",
+            ready=False,
+            evidence="deleted_mailbox_item_recovery=false",
+            blocker_id="deleted-mailbox-item-recovery-required",
+            operator_action="Validate deleted item/folder recovery against mailbox known-answer corpora.",
+        ),
+        slot(
+            "email-native-mailbox-attachment-extraction",
+            ready=False,
+            evidence="native_mailbox_attachment_extraction=false",
+            blocker_id="native-mailbox-attachment-extraction-required",
+            operator_action="Extract native mailbox attachments with source offsets/properties and byte hashes.",
+        ),
+        slot(
+            "email-message-id-graph-validation",
+            ready=False,
+            evidence="message_id_graph_validation=false",
+            blocker_id="message-id-graph-validation-required",
+            operator_action="Validate Message-ID/In-Reply-To/References graph reconstruction against known-answer threads.",
+        ),
+        slot(
+            "email-trusted-thread-export",
+            ready=trusted_diff.get("status") == "pass",
+            evidence=f"trusted_diff_status={trusted_diff.get('status', 'missing')}",
+            blocker_id=EMAIL_VIEWER_TRUSTED_DIFF_BLOCKER,
+            operator_action="Attach a passing trusted mail-client or vendor mailbox thread export diff.",
+        ),
+        slot(
+            "email-mailbox-corpus-validation",
+            ready=False,
+            evidence="mailbox_corpus_validation=false",
+            blocker_id="mailbox-corpus-validation-required",
+            operator_action="Run corrupt/large/PST/OST/MBOX/MSG fixture corpus validation with expected thread and attachment counts.",
+        ),
+    ]
+    blockers = sorted(
+        str(slot_row.get("blocker_id"))
+        for slot_row in validation_slots
+        if slot_row.get("status") != "complete" and slot_row.get("blocker_id")
+    )
+    ready_slot_count = sum(1 for slot_row in validation_slots if slot_row.get("status") == "complete")
+    plan_core: dict[str, object] = {
+        "profile_version": EMAIL_VIEWER_REPORT_GRADE_VALIDATION_PLAN_VERSION,
+        "item_number": 55,
+        "gap_id": VIEWER_WORKFLOW_GAP_IDS["email"],
+        "batch_id": "commercial-uplift-051-055",
+        "selected_track": "email-conversation-viewer-report-validation",
+        "context": context,
+        "path": str(source_path),
+        "message_count": message_count,
+        "thread_count": thread_count,
+        "attachment_count": attachment_count,
+        "parse_truncated": parse_truncated,
+        "content_status": content_status,
+        "conversation_manifest_hash": conversation_manifest_hash,
+        "attachment_manifest_hash": attachment_manifest_hash,
+        "message_hash_count": message_hash_count,
+        "thread_hash_count": thread_hash_count,
+        "trusted_diff_status": str(trusted_diff.get("status") or "missing"),
+        "ready_slot_count": ready_slot_count,
+        "blocking_slot_count": len(blockers),
+        "validation_status": "report-validation-blocked",
+        "commercial_grade": False,
+        "commercial_grade_ready": False,
+        "validation_slots": validation_slots,
+        "blockers": blockers,
+        "commercial_grade_blockers": list(EMAIL_VIEWER_REPORT_GRADE_BLOCKERS),
+        "validation_commands": [
+            "rapidtriage web -> source-preview for an EML/MBOX source",
+            "GET /api/runs/<run_id>/source-email-attachment?path=<path>&message_index=<n>&attachment_index=<n>",
+            "rapidtriage commercial-readiness --validation-package docs/validation/rapidtriage-core-forensics-051-060-known-answer.json --limit 55 --json",
+        ],
+        "report_guidance": {
+            "allowed_use": "bounded-email-conversation-triage-pivot",
+            "forbidden_claim": "native mailbox thread/deleted-item/attachment-complete analysis",
+            "required_disclaimer": (
+                "Email viewer output is bounded EML/MBOX-style conversation or attachment evidence until native "
+                "PST/OST/MSG decoding, deleted-item recovery, native attachment extraction, Message-ID graph "
+                "validation, trusted mailbox thread diffs, and mailbox corpus validation are attached."
+            ),
+        },
+    }
+    return {**plan_core, "validation_plan_sha256": stable_payload_sha256(plan_core)}
+
+
 def email_viewer_core_accuracy_gates(
     *,
     source_path: Path,
@@ -6989,6 +7208,7 @@ def email_viewer_core_accuracy_gates(
     trusted_diff: Mapping[str, object] | None = None,
     conversation_manifest: Mapping[str, object] | None = None,
     attachment_manifest: Mapping[str, object] | None = None,
+    validation_plan: Mapping[str, object] | None = None,
 ) -> list[dict[str, object]]:
     threads = conversation.get("threads") if isinstance(conversation.get("threads"), list) else []
     satisfied = []
@@ -7010,6 +7230,11 @@ def email_viewer_core_accuracy_gates(
         satisfied.append("email thread hashes")
     if attachment_manifest.get("manifest_hash"):
         satisfied.append("email attachment proof manifest")
+    validation_plan = validation_plan if isinstance(validation_plan, Mapping) else {}
+    if validation_plan.get("validation_plan_sha256"):
+        satisfied.append("email viewer report-grade validation plan")
+    if int(validation_plan.get("ready_slot_count") or 0) >= 6:
+        satisfied.append("email viewer report-grade ready slots")
     satisfied.append("mailbox threading limitation warning")
     trusted_diff = trusted_diff if isinstance(trusted_diff, Mapping) else {}
     if trusted_diff.get("status") == "pass":
@@ -7024,6 +7249,9 @@ def email_viewer_core_accuracy_gates(
                 f"thread_count:{len(threads)}",
                 f"email_conversation_manifest_hash:{conversation_manifest.get('manifest_hash', '')}",
                 f"email_attachment_manifest_hash:{attachment_manifest.get('manifest_hash', '')}",
+                f"email_viewer_report_grade_validation_plan_sha256:{validation_plan.get('validation_plan_sha256', '')}",
+                f"email_viewer_report_grade_ready_slot_count:{validation_plan.get('ready_slot_count', 0)}",
+                f"email_viewer_report_grade_blocking_slot_count:{validation_plan.get('blocking_slot_count', 0)}",
                 f"trusted_diff_status:{trusted_diff.get('status', 'missing')}",
             ],
         )
@@ -7980,6 +8208,36 @@ def build_email_attachment_package(
         content_status=content_status,
         citation_id=citation_id,
     )
+    validation_plan = build_email_viewer_report_grade_validation_plan(
+        context="email-attachment-package",
+        source_path=source_path,
+        messages=[
+            {
+                "index": message_index,
+                "from": str(message.get("from") or ""),
+                "subject": str(message.get("subject") or ""),
+                "attachment_count": 1,
+            }
+        ],
+        conversation={"threads": []},
+        attachment_manifest=proof_manifest,
+        content_status=content_status,
+        copy_safe_citation_ready=True,
+    )
+    core_accuracy_gates = email_viewer_core_accuracy_gates(
+        source_path=source_path,
+        messages=[
+            {
+                "index": message_index,
+                "from": str(message.get("from") or ""),
+                "subject": str(message.get("subject") or ""),
+                "attachment_count": 1,
+            }
+        ],
+        conversation={"threads": []},
+        attachment_manifest=proof_manifest,
+        validation_plan=validation_plan,
+    )
     return {
         "command": "source-email-attachment",
         "profile_version": "email-attachment-package-v1",
@@ -8000,6 +8258,8 @@ def build_email_attachment_package(
         "email_parse_diagnostics": diagnostics,
         "email_attachment_proof_manifest": proof_manifest,
         "email_attachment_proof_manifest_hash": proof_manifest["manifest_hash"],
+        "email_viewer_report_grade_validation_plan": validation_plan,
+        "email_viewer_report_grade_validation_plan_hash": validation_plan["validation_plan_sha256"],
         "copy_safe_citation": {
             "text": (
                 f"Source={source_path.name}; message_index={message_index}; attachment_index={attachment_index}; "
@@ -8021,21 +8281,12 @@ def build_email_attachment_package(
                 "max_inline_content_bytes": EMAIL_ATTACHMENT_EXPORT_MAX_BYTES,
                 "native_pst_ost_msg": False,
                 "email_parse_diagnostics": diagnostics,
+                "email_viewer_report_grade_validation_plan_hash": validation_plan["validation_plan_sha256"],
+                "email_viewer_report_grade_ready_slot_count": validation_plan["ready_slot_count"],
+                "email_viewer_report_grade_blocking_slot_count": validation_plan["blocking_slot_count"],
             },
         ),
-        "core_accuracy_gates": email_viewer_core_accuracy_gates(
-            source_path=source_path,
-            messages=[
-                {
-                    "index": message_index,
-                    "from": str(message.get("from") or ""),
-                    "subject": str(message.get("subject") or ""),
-                    "attachment_count": 1,
-                }
-            ],
-            conversation={"threads": []},
-            attachment_manifest=proof_manifest,
-        ),
+        "core_accuracy_gates": core_accuracy_gates,
     }
 
 

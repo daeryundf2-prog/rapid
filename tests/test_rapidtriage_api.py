@@ -2186,6 +2186,17 @@ class RapidTriageApiTests(unittest.TestCase):
                 eml_preview["email"]["email_conversation_manifest_hash"],
                 eml_preview["email"]["email_conversation_manifest"]["manifest_hash"],
             )
+            email_plan = eml_preview["email"]["email_viewer_report_grade_validation_plan"]
+            self.assertEqual(email_plan["profile_version"], "email-viewer-report-grade-validation-plan-v1")
+            self.assertEqual(email_plan["item_number"], 55)
+            self.assertEqual(email_plan["gap_id"], "#55")
+            self.assertEqual(
+                eml_preview["email"]["email_viewer_report_grade_validation_plan_hash"],
+                email_plan["validation_plan_sha256"],
+            )
+            self.assertEqual(email_plan["ready_slot_count"], 6)
+            self.assertEqual(email_plan["blocking_slot_count"], 6)
+            self.assertIn("native-pst-ost-msg-conversation-view-required", email_plan["blockers"])
             self.assertEqual(
                 eml_preview["email"]["email_conversation_manifest"]["source_viewer_locator"]["viewer"],
                 "source-email-conversation",
@@ -2200,11 +2211,19 @@ class RapidTriageApiTests(unittest.TestCase):
             )
             self.assertIn("email message hashes", eml_preview["email"]["core_accuracy_gates"][0]["satisfied_checks"])
             self.assertIn("email thread hashes", eml_preview["email"]["core_accuracy_gates"][0]["satisfied_checks"])
+            self.assertIn(
+                "email viewer report-grade validation plan",
+                eml_preview["email"]["core_accuracy_gates"][0]["satisfied_checks"],
+            )
             eml_uplift = eml_preview["email"]["commercial_uplift_evidence"]
             self.assertEqual(eml_uplift["item_numbers"], [55])
             self.assertIn("thread grouping", eml_uplift["passed_validation_check_ids"])
+            self.assertIn("email viewer report-grade validation plan", eml_uplift["passed_validation_check_ids"])
             self.assertFalse(eml_uplift["large_data_controls"]["native_pst_ost_msg"])
             self.assertTrue(eml_uplift["large_data_controls"]["attachment_package_endpoint"])
+            self.assertTrue(eml_uplift["large_data_controls"]["email_viewer_report_grade_validation_plan_present"])
+            self.assertEqual(eml_uplift["large_data_controls"]["email_viewer_report_grade_ready_slot_count"], 6)
+            self.assertEqual(eml_uplift["large_data_controls"]["email_viewer_report_grade_blocking_slot_count"], 6)
             self.assertEqual(
                 eml_uplift["reportability_decision"]["decision"],
                 "do-not-report-email-preview-as-native-mailbox-thread-complete",
@@ -2241,11 +2260,18 @@ class RapidTriageApiTests(unittest.TestCase):
                 attachment_payload["email_attachment_proof_manifest"]["manifest_hash"],
             )
             self.assertEqual(
+                attachment_payload["email_viewer_report_grade_validation_plan_hash"],
+                attachment_payload["email_viewer_report_grade_validation_plan"]["validation_plan_sha256"],
+            )
+            self.assertEqual(attachment_payload["email_viewer_report_grade_validation_plan"]["ready_slot_count"], 6)
+            self.assertEqual(attachment_payload["email_viewer_report_grade_validation_plan"]["blocking_slot_count"], 6)
+            self.assertEqual(
                 attachment_payload["email_attachment_proof_manifest"]["source_viewer_locator"]["viewer"],
                 "source-email-attachment",
             )
             self.assertIn("sha256", attachment_payload["copy_safe_citation"]["text"])
             self.assertIn("email attachment proof manifest", attachment_payload["core_accuracy_gates"][0]["satisfied_checks"])
+            self.assertIn("email viewer report-grade validation plan", attachment_payload["core_accuracy_gates"][0]["satisfied_checks"])
             self.assertEqual(attachment_payload["reportability_decision"]["allowed_use"], "bounded-email-conversation-triage-pivot")
             binary_preview_response = client.get(f"/api/runs/{run_id}/source-preview", params={"path": str(binary_path)})
             self.assertEqual(binary_preview_response.status_code, 200, binary_preview_response.text)

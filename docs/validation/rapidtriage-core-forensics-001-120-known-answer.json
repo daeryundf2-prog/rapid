@@ -1352,7 +1352,7 @@
       ],
       "expected": {
         "required_assertions": [
-          "Email preview preserves thread grouping, message order, participant/header fields, attachment hash inventory, bounded attachment citation packages, mailbox limitations, and #55 core_accuracy_gates."
+          "Email preview preserves thread grouping, message order, participant/header fields, attachment hash inventory, bounded attachment citation packages, email_viewer_report_grade_validation_plan ready/blocking slots, mailbox limitations, and #55 core_accuracy_gates."
         ]
       },
       "notes": "Internal fixture pass; native PST/OST/MSG conversation validation remains required.",

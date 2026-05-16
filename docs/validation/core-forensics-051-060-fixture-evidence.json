@@ -46,9 +46,9 @@
       "title": "Email conversation viewer",
       "test_files": ["tests/test_rapidtriage_api.py"],
       "assertions": [
-        "Email source preview emits conversation threads, message order, participants, headers, attachment hash inventory, bounded attachment citation packages, trusted thread/export diff gates, #55 core_accuracy_gates, and reportability blockers for missing PST/OST/MSG decoding, deleted item recovery, native mailbox attachment extraction, and mailbox corpus validation."
+        "Email source preview emits conversation threads, message order, participants, headers, attachment hash inventory, bounded attachment citation packages, email_viewer_report_grade_validation_plan ready/blocking slots, trusted thread/export diff gates, #55 core_accuracy_gates, and reportability blockers for missing PST/OST/MSG decoding, deleted item recovery, native mailbox attachment extraction, Message-ID graph validation, and mailbox corpus validation."
       ],
-      "remaining_external_validation": ["Native PST/OST/MSG threading, deleted items, native mailbox attachment extraction, trusted mail client thread export diff, and mailbox known-answer validation."]
+      "remaining_external_validation": ["Native PST/OST/MSG threading, deleted items, native mailbox attachment extraction, Message-ID graph validation, trusted mail client thread export diff, and mailbox known-answer validation."]
     },
     {
       "item": 56,
