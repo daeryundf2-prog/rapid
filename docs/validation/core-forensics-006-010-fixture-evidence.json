@@ -37,7 +37,9 @@
         "amcache-entry rows preserve path, program name, publisher, SHA1, timestamp source, execution caveat, source hash, and #7 core_accuracy_gates.",
         "amcache-hive native rows preserve bounded path/hash string pivots and keep native schema decode blockers explicit.",
         "amcache-entry and amcache-hive rows emit execution_analyst_review_profile with severity, not-proof-of warnings, populated pivots, correlation targets, and trusted-diff blockers.",
+        "amcache rows emit amcache_schema_version_profile plus stable amcache_row_manifest hashes with required trusted-diff field coverage.",
         "build_execution_artifact_trusted_diff can compare Amcache rows with AmcacheParser/RECmd-style output by executable path, timestamp, SHA1, and semantics warning.",
+        "build_execution_artifact_trusted_diff blocks Amcache commercial evidence when required path, SHA1, or caveat coverage is missing.",
         "Amcache reportability decisions block standalone execution claims."
       ],
       "blockers_kept": [

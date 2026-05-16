@@ -24,6 +24,8 @@ from rapidtriage.artifacts.windows.eventlog import (
     render_event_message,
 )
 from rapidtriage.artifacts.windows.execution import (
+    amcache_row_manifest,
+    amcache_schema_version_profile,
     build_execution_artifact_trusted_diff,
     collect_amcache_candidate_clusters,
     collect_bam_dam_candidate_clusters,
@@ -2825,6 +2827,49 @@ class RapidTriageWindowsArtifactsCollectorTests(unittest.TestCase):
         self.assertGreater(cluster["source_offset"], 0)
         self.assertGreaterEqual(cluster["parser_confidence"], 0.6)
 
+    def test_amcache_schema_profile_and_row_manifest_preserve_required_contract(self) -> None:
+        profile = amcache_schema_version_profile(
+            source_format="reg",
+            source_key=r"HKLM\Software\Microsoft\Windows NT\CurrentVersion\AppCompatFlags\Amcache\InventoryApplicationFile\abc",
+            executable_path=r"C:\Program Files\Example\app.exe",
+            execution_fields={
+                "program_name": "Example App",
+                "publisher": "Example Publisher",
+                "sha1": "0123456789abcdef0123456789abcdef01234567",
+                "file_description": "Example Application Binary",
+                "product_name": "Example Suite",
+            },
+            timestamp_source="InventoryApplicationFile.LastModified",
+            decoded_values={"Publisher": "Example Publisher", "SHA1": "0123456789abcdef0123456789abcdef01234567"},
+            row_cluster_evidence={},
+        )
+
+        self.assertEqual(profile["detected_schema_family"], "inventory-application-file")
+        self.assertIn("sha1", profile["present_fields"])
+        self.assertEqual(profile["missing_expected_fields"], [])
+
+        manifest = amcache_row_manifest(
+            source_path="/evidence/Amcache.reg",
+            source_hashes={"sha256": "a" * 64},
+            source_format="reg",
+            source_key=r"HKLM\...\InventoryApplicationFile\abc",
+            source_index=0,
+            executable_path=r"C:\Program Files\Example\app.exe",
+            sha1_candidates=["0123456789abcdef0123456789abcdef01234567"],
+            timestamp="2024-04-01T02:03:04+00:00",
+            timestamp_source="InventoryApplicationFile.LastModified",
+            source_offset=0,
+            row_cluster_evidence={},
+            schema_version_profile=profile,
+            report_grade={"status": "validation-required", "blockers": ["trusted-tool-diff-required"], "commercial_gap_ids": ["#7"]},
+        )
+
+        self.assertEqual(manifest["manifest_version"], "amcache-row-manifest-v1")
+        self.assertEqual(manifest["schema_version_profile"]["detected_schema_family"], "inventory-application-file")
+        self.assertEqual(manifest["trusted_diff_contract"]["required_fields"], ["executable_path", "sha1", "semantics_warning"])
+        self.assertEqual(len(manifest["manifest_sha256"]), 64)
+        self.assertIn("amcache-trusted-parser-diff-required", manifest["reportability"]["blockers"])
+
     def test_amcache_trusted_diff_accepts_nested_artifact_rows(self) -> None:
         rapid_rows = [
             {
@@ -2869,6 +2914,41 @@ class RapidTriageWindowsArtifactsCollectorTests(unittest.TestCase):
         self.assertTrue(diff["commercial_grade_evidence"])
         self.assertEqual(diff["matched_count"], 1)
         self.assertIn("publisher", diff["compare_fields"])
+        self.assertEqual(diff["required_fields"], ["executable_path", "sha1", "semantics_warning"])
+        self.assertEqual(next(iter(diff["field_coverage"].values()))["rapid_missing_required_fields"], [])
+
+    def test_amcache_trusted_diff_blocks_missing_required_field_coverage(self) -> None:
+        rapid_rows = [
+            {
+                "artifact_type": "amcache-entry",
+                "details": {
+                    "executable_path": r"C:\Program Files\Example\app.exe",
+                    "timestamp": "2024-04-01T02:03:04+00:00",
+                    "sha1": "0123456789abcdef0123456789abcdef01234567",
+                },
+            }
+        ]
+        trusted_rows = [
+            {
+                "Path": r"C:\Program Files\Example\app.exe",
+                "LastModified": "2024-04-01T02:03:04+00:00",
+                "SHA1": "0123456789abcdef0123456789abcdef01234567",
+            }
+        ]
+
+        diff = build_execution_artifact_trusted_diff(
+            rapid_rows,
+            trusted_rows,
+            trusted_tool="AmcacheParser",
+            artifact_family="amcache",
+        )
+
+        self.assertEqual(diff["status"], "pass")
+        self.assertFalse(diff["commercial_grade_evidence"])
+        coverage = next(iter(diff["field_coverage"].values()))
+        self.assertEqual(coverage["rapid_missing_required_fields"], ["semantics_warning"])
+        self.assertEqual(coverage["trusted_missing_required_fields"], ["semantics_warning"])
+        self.assertIn("execution-artifact-trusted-field-coverage-required", diff["reportability_decision"]["blockers"])
 
     def test_amcache_trusted_diff_blocks_metadata_mismatch(self) -> None:
         rapid_rows = [
@@ -4968,8 +5048,13 @@ class RapidTriageWindowsArtifactsCollectorTests(unittest.TestCase):
             self.assertEqual(native_amcache["details"]["amcache_row_cluster_evidence"]["cluster_status"], "bounded-nearby-string-cluster")
             self.assertGreaterEqual(native_amcache["details"]["source_offset"], 0)
             self.assertIn("bounded Amcache row-cluster provenance", native_amcache["details"]["core_accuracy_gates"][0]["satisfied_checks"])
+            self.assertIn("stable Amcache row manifest", native_amcache["details"]["core_accuracy_gates"][0]["satisfied_checks"])
+            self.assertEqual(native_amcache["details"]["amcache_row_manifest"]["manifest_version"], "amcache-row-manifest-v1")
+            self.assertEqual(len(native_amcache["details"]["amcache_row_manifest_hash"]), 64)
+            self.assertIn("sha1", native_amcache["details"]["amcache_schema_version_profile"]["present_fields"])
             hive_amcache = next(artifact for artifact in execution_provider["artifacts"] if artifact["artifact_type"] == "amcache-hive")
             self.assertGreaterEqual(hive_amcache["details"]["amcache_candidate_cluster_count"], 1)
+            self.assertEqual(hive_amcache["details"]["amcache_row_manifest"]["source"]["format"], "amcache-hive")
 
             system_provider = providers["windows-system-artifacts"]
             system_types = {artifact["artifact_type"] for artifact in system_provider["artifacts"]}

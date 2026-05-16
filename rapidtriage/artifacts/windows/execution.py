@@ -16,7 +16,7 @@ from .ese import ESE_SCAN_READ_SIZE, build_ese_string_pivots, probe_ese_database
 from .os_account import decode_reg_export
 from .srum_ese import analyze_srudb_native
 
-PARSER_VERSION = "windows-execution-v10"
+PARSER_VERSION = "windows-execution-v11"
 REGISTRY_EXPORT_EXT = ".reg"
 SRUM_IMPORT_SUFFIXES = {".csv", ".json", ".jsonl", ".ndjson"}
 AMCACHE_HIVE_NAME = "AMCACHE.HVE"
@@ -76,6 +76,40 @@ EXECUTION_REPORT_GRADE_BLOCKERS = [
     "known-answer-execution-artifact-validation-required",
 ]
 EXECUTION_TRUSTED_TOOL_HINTS = ("amcacheparser", "appcompatcacheparser", "shimcacheparser", "srumecmd", "recmd", "velociraptor")
+EXECUTION_DIFF_COMPARE_FIELDS = (
+    "executable_path",
+    "device_path",
+    "timestamp",
+    "timestamp_source",
+    "sha1",
+    "user_sid",
+    "user",
+    "table_family",
+    "url",
+    "network_profile",
+    "interface_luid",
+    "bytes_sent",
+    "bytes_received",
+    "energy_usage",
+    "cpu_time",
+    "program_name",
+    "publisher",
+    "file_description",
+    "product_name",
+    "source_format",
+    "source_key",
+    "source_offset",
+    "cache_order",
+    "os_build",
+    "counter_sha256",
+    "semantics_warning",
+)
+EXECUTION_DIFF_REQUIRED_FIELDS_BY_FAMILY = {
+    "amcache": ("executable_path", "sha1", "semantics_warning"),
+    "shimcache-appcompatcache": ("executable_path", "cache_order", "semantics_warning"),
+    "bam-dam": ("executable_path", "user_sid", "timestamp", "semantics_warning"),
+    "srum": ("executable_path", "timestamp", "table_family"),
+}
 QC_PREP_EXECUTION_ITEM_NUMBERS = {
     "amcache-entry": 22,
     "amcache-hive": 22,
@@ -313,11 +347,39 @@ def build_execution_registry_record(path: Path, key: str, values: Mapping[str, s
         gap_ids=execution_gap_ids(artifact_type),
         extra_blockers=[str(item) for item in execution_metadata.get("commercial_grade_blockers", [])],
     )
+    source_hashes = file_hashes(path)
+    amcache_schema_version = {}
+    amcache_manifest = {}
+    if artifact_type == "amcache-entry":
+        amcache_schema_version = amcache_schema_version_profile(
+            source_format="reg",
+            source_key=key,
+            executable_path=executable_path,
+            execution_fields=execution_fields,
+            timestamp_source=timestamp_source,
+            decoded_values=decoded_values,
+            row_cluster_evidence={},
+        )
+        amcache_manifest = amcache_row_manifest(
+            source_path=str(path.resolve()),
+            source_hashes=source_hashes,
+            source_format="reg",
+            source_key=key,
+            source_index=0,
+            executable_path=executable_path,
+            sha1_candidates=[str(execution_fields.get("sha1") or "")],
+            timestamp=timestamp,
+            timestamp_source=timestamp_source,
+            source_offset=0,
+            row_cluster_evidence={},
+            schema_version_profile=amcache_schema_version,
+            report_grade=report_grade,
+        )
     core_accuracy_gates = execution_core_accuracy_gates(
         artifact_type,
         {
             "source_path": str(path.resolve()),
-            "source_hashes": file_hashes(path),
+            "source_hashes": source_hashes,
             "source_key": key,
             "source_index": 0,
             "source_format": "reg",
@@ -329,6 +391,7 @@ def build_execution_registry_record(path: Path, key: str, values: Mapping[str, s
             "program_name": execution_fields.get("program_name", ""),
             "publisher": execution_fields.get("publisher", ""),
             "sha1": execution_fields.get("sha1", ""),
+            "amcache_row_manifest_hash": amcache_manifest.get("manifest_sha256", ""),
             "validation_checks": validation_checks,
             "decoded_values": decoded_values,
         },
@@ -345,7 +408,7 @@ def build_execution_registry_record(path: Path, key: str, values: Mapping[str, s
             "reportability": "triage",
             "source_path": str(path.resolve()),
             "source_format": "reg",
-            "source_hashes": file_hashes(path),
+            "source_hashes": source_hashes,
             "key": key,
             "hive_hint": key.split("\\", 1)[0],
             "executable_path": executable_path,
@@ -375,9 +438,12 @@ def build_execution_registry_record(path: Path, key: str, values: Mapping[str, s
                 executable_path=executable_path,
                 sha1=str(execution_fields.get("sha1") or ""),
             ) if artifact_type == "amcache-entry" else {},
+            "amcache_schema_version_profile": amcache_schema_version,
+            "amcache_row_manifest": amcache_manifest,
+            "amcache_row_manifest_hash": amcache_manifest.get("manifest_sha256", ""),
             "amcache_report_citation_manifest": amcache_report_citation_manifest(
                 source_path=str(path.resolve()),
-                source_hashes=file_hashes(path),
+                source_hashes=source_hashes,
                 source_format="reg",
                 source_key=key,
                 source_index=0,
@@ -458,10 +524,11 @@ def build_execution_registry_record(path: Path, key: str, values: Mapping[str, s
                 artifact_type,
                 {
                     "source_path": str(path.resolve()),
-                    "source_hashes": file_hashes(path),
+                    "source_hashes": source_hashes,
                     "source_key": key,
                     "source_index": 0,
                     "source_format": "reg",
+                    "amcache_row_manifest_hash": amcache_manifest.get("manifest_sha256", ""),
                     "execution_validation_matrix": execution_validation_matrix(validation_checks),
                     "execution_report_grade_assessment": report_grade,
                 },
@@ -918,6 +985,33 @@ def build_native_amcache_records(path: Path) -> Iterable[ArtifactRecord]:
         gap_ids=["#7"],
         extra_blockers=["native-amcache-schema-decoding-required", "install-and-execution-timestamp-validation-required"],
     )
+    hive_schema_version = amcache_schema_version_profile(
+        source_format="amcache-hive",
+        source_key="Amcache.hve",
+        executable_path=path_candidates[0] if path_candidates else "",
+        execution_fields={
+            "program_name": display_name_for_execution_key(path_candidates[0]) if path_candidates else "",
+            "sha1": sha1_candidates[0] if sha1_candidates else "",
+        },
+        timestamp_source="not_available_native_string_pivot",
+        decoded_values={},
+        row_cluster_evidence={},
+    )
+    hive_manifest = amcache_row_manifest(
+        source_path=str(path.resolve()),
+        source_hashes=source_hashes,
+        source_format="amcache-hive",
+        source_key="Amcache.hve",
+        source_index=0,
+        executable_path=path_candidates[0] if path_candidates else "",
+        sha1_candidates=sha1_candidates,
+        timestamp="",
+        timestamp_source="not_available_native_string_pivot",
+        source_offset=0,
+        row_cluster_evidence={},
+        schema_version_profile=hive_schema_version,
+        report_grade=hive_report_grade,
+    )
     hive_core_accuracy_gates = execution_core_accuracy_gates(
         "amcache-entry",
         {
@@ -926,6 +1020,7 @@ def build_native_amcache_records(path: Path) -> Iterable[ArtifactRecord]:
             "source_format": "amcache-hive",
             "executable_path": path_candidates[0] if path_candidates else "",
             "sha1_candidates": sha1_candidates,
+            "amcache_row_manifest_hash": hive_manifest["manifest_sha256"],
             "validation_checks": hive_validation_checks,
         },
     )
@@ -963,6 +1058,9 @@ def build_native_amcache_records(path: Path) -> Iterable[ArtifactRecord]:
             "amcache_candidate_clusters": amcache_clusters[:100],
             "amcache_candidate_cluster_count": len(amcache_clusters),
             "amcache_hive_evidence": amcache_hive_evidence(path_candidates, sha1_candidates, strings, amcache_clusters),
+            "amcache_schema_version_profile": hive_schema_version,
+            "amcache_row_manifest": hive_manifest,
+            "amcache_row_manifest_hash": hive_manifest["manifest_sha256"],
             "amcache_report_citation_manifest": hive_citation_manifest,
             "amcache_schema_profile": amcache_schema_profile(
                 source_format="amcache-hive",
@@ -985,6 +1083,7 @@ def build_native_amcache_records(path: Path) -> Iterable[ArtifactRecord]:
                     "source_path": str(path.resolve()),
                     "source_hashes": source_hashes,
                     "source_format": "amcache-hive",
+                    "amcache_row_manifest_hash": hive_manifest["manifest_sha256"],
                     "execution_validation_matrix": execution_validation_matrix(hive_validation_checks),
                     "execution_report_grade_assessment": hive_report_grade,
                 },
@@ -1039,6 +1138,34 @@ def build_native_amcache_records(path: Path) -> Iterable[ArtifactRecord]:
             gap_ids=["#7"],
             extra_blockers=["native-amcache-schema-decoding-required", "row-level-timestamp-extraction-required"],
         )
+        row_cluster_evidence = amcache_row_cluster_evidence(cluster)
+        entry_schema_version = amcache_schema_version_profile(
+            source_format="amcache-hive",
+            source_key="Amcache.hve",
+            executable_path=candidate,
+            execution_fields={
+                "program_name": display_name_for_execution_key(candidate),
+                "sha1": row_sha1_candidates[0] if row_sha1_candidates else "",
+            },
+            timestamp_source=timestamp_source,
+            decoded_values={},
+            row_cluster_evidence=row_cluster_evidence,
+        )
+        entry_manifest = amcache_row_manifest(
+            source_path=str(path.resolve()),
+            source_hashes=source_hashes,
+            source_format="amcache-hive",
+            source_key="Amcache.hve",
+            source_index=index,
+            executable_path=candidate,
+            sha1_candidates=row_sha1_candidates,
+            timestamp=timestamp,
+            timestamp_source=timestamp_source,
+            source_offset=int(cluster.get("source_offset") or 0) if isinstance(cluster, Mapping) else 0,
+            row_cluster_evidence=row_cluster_evidence,
+            schema_version_profile=entry_schema_version,
+            report_grade=entry_report_grade,
+        )
         entry_core_accuracy_gates = execution_core_accuracy_gates(
             "amcache-entry",
             {
@@ -1049,10 +1176,10 @@ def build_native_amcache_records(path: Path) -> Iterable[ArtifactRecord]:
                 "executable_path": candidate,
                 "program_name": display_name_for_execution_key(candidate),
                 "sha1_candidates": sha1_candidates,
+                "amcache_row_manifest_hash": entry_manifest["manifest_sha256"],
                 "validation_checks": entry_validation_checks,
             },
         )
-        row_cluster_evidence = amcache_row_cluster_evidence(cluster)
         entry_citation_manifest = amcache_report_citation_manifest(
             source_path=str(path.resolve()),
             source_hashes=source_hashes,
@@ -1106,6 +1233,9 @@ def build_native_amcache_records(path: Path) -> Iterable[ArtifactRecord]:
                     executable_path=candidate,
                     sha1=row_sha1_candidates[0] if row_sha1_candidates else "",
                 ),
+                "amcache_schema_version_profile": entry_schema_version,
+                "amcache_row_manifest": entry_manifest,
+                "amcache_row_manifest_hash": entry_manifest["manifest_sha256"],
                 "amcache_report_citation_manifest": entry_citation_manifest,
                 "timestamp": timestamp,
                 "timestamp_source": timestamp_source,
@@ -1127,6 +1257,7 @@ def build_native_amcache_records(path: Path) -> Iterable[ArtifactRecord]:
                         "source_hashes": source_hashes,
                         "source_index": index,
                         "source_format": "amcache-hive",
+                        "amcache_row_manifest_hash": entry_manifest["manifest_sha256"],
                         "execution_validation_matrix": execution_validation_matrix(entry_validation_checks),
                         "execution_report_grade_assessment": entry_report_grade,
                     },
@@ -2659,6 +2790,190 @@ def amcache_report_citation_manifest(
     return manifest
 
 
+def amcache_schema_version_profile(
+    *,
+    source_format: str,
+    source_key: str,
+    executable_path: str,
+    execution_fields: Mapping[str, object],
+    timestamp_source: str,
+    decoded_values: Mapping[str, str],
+    row_cluster_evidence: Mapping[str, object],
+) -> dict[str, object]:
+    haystack = " ".join(
+        [
+            source_key,
+            source_format,
+            executable_path,
+            " ".join(str(key) for key in decoded_values),
+            " ".join(str(value) for value in decoded_values.values()),
+            " ".join(str(value) for value in row_cluster_evidence.get("metadata_candidates") or []),
+        ]
+    ).lower()
+    if "inventoryapplicationfile" in haystack:
+        schema_family = "inventory-application-file"
+        windows_generation_hint = "windows-10-11"
+        expected_fields = ["path", "sha1", "publisher", "file_description", "product_name"]
+    elif "inventoryapplication" in haystack:
+        schema_family = "inventory-application"
+        windows_generation_hint = "windows-10-11"
+        expected_fields = ["program_name", "publisher"]
+    elif "root\\file" in haystack or "\\file\\" in haystack:
+        schema_family = "root-file"
+        windows_generation_hint = "windows-8-8.1-early-10"
+        expected_fields = ["path", "sha1"]
+    elif source_format == "amcache-hive":
+        schema_family = "native-string-pivot-unresolved"
+        windows_generation_hint = "unknown-native-hive"
+        expected_fields = ["path", "sha1", "schema_marker"]
+    else:
+        schema_family = "registry-export-unclassified"
+        windows_generation_hint = "unknown-export"
+        expected_fields = ["path", "sha1"]
+
+    present_fields: set[str] = set()
+    if executable_path:
+        present_fields.add("path")
+    if str(execution_fields.get("program_name") or ""):
+        present_fields.add("program_name")
+    if str(execution_fields.get("publisher") or ""):
+        present_fields.add("publisher")
+    if str(execution_fields.get("file_description") or ""):
+        present_fields.add("file_description")
+    if str(execution_fields.get("product_name") or ""):
+        present_fields.add("product_name")
+    if str(execution_fields.get("sha1") or "") or row_cluster_evidence.get("sha1_candidates"):
+        present_fields.add("sha1")
+    if "inventoryapplication" in haystack or "root\\file" in haystack or source_format == "amcache-hive":
+        present_fields.add("schema_marker")
+    if timestamp_source and timestamp_source != "not_available_native_string_pivot":
+        present_fields.add("timestamp")
+
+    missing_expected = [field for field in expected_fields if field not in present_fields]
+    confidence = 0.35
+    if schema_family not in {"registry-export-unclassified", "native-string-pivot-unresolved"}:
+        confidence += 0.2
+    confidence += min(0.3, len(present_fields) * 0.05)
+    if row_cluster_evidence.get("cluster_status") == "bounded-nearby-string-cluster":
+        confidence += 0.08
+
+    return {
+        "profile_version": "amcache-schema-version-profile-v1",
+        "commercial_gap_id": "#7",
+        "source_format": source_format,
+        "source_key": source_key,
+        "detected_schema_family": schema_family,
+        "windows_generation_hint": windows_generation_hint,
+        "decode_level": "registry-export-mapped" if source_format == "reg" else "native-string-pivot-only",
+        "expected_fields": expected_fields,
+        "present_fields": sorted(present_fields),
+        "missing_expected_fields": missing_expected,
+        "timestamp_source": timestamp_source,
+        "timestamp_semantics": amcache_timestamp_semantics(timestamp_source, source_format),
+        "row_cluster_status": str(row_cluster_evidence.get("cluster_status") or "not-available"),
+        "confidence": round(min(confidence, 0.9), 2),
+        "validation_required": True,
+        "schema_decode_available": bool(EXECUTION_NATIVE_CAPABILITIES["native_amcache_schema_decode"]),
+        "commercial_grade_blockers": sorted(
+            {
+                "native-amcache-schema-decoding-required",
+                "amcache-windows-version-schema-map-required",
+                "amcache-timestamp-semantics-validation-required",
+            }
+        ),
+    }
+
+
+def amcache_row_manifest(
+    *,
+    source_path: str,
+    source_hashes: Mapping[str, str],
+    source_format: str,
+    source_key: str,
+    source_index: int,
+    executable_path: str,
+    sha1_candidates: Sequence[str],
+    timestamp: str,
+    timestamp_source: str,
+    source_offset: int,
+    row_cluster_evidence: Mapping[str, object],
+    schema_version_profile: Mapping[str, object],
+    report_grade: Mapping[str, object],
+) -> dict[str, object]:
+    required_fields = execution_diff_required_fields("amcache")
+    row_identity = {
+        "source_format": source_format,
+        "source_key": source_key,
+        "source_index": source_index,
+        "source_offset": source_offset,
+        "executable_path": executable_path,
+        "normalized_path": normalize_execution_path(executable_path),
+        "file_name": execution_file_name(executable_path),
+        "sha1_candidates": sorted({str(value).lower() for value in sha1_candidates if str(value)}),
+        "timestamp": timestamp,
+        "timestamp_source": timestamp_source,
+        "timestamp_semantics": amcache_timestamp_semantics(timestamp_source, source_format),
+    }
+    row_manifest: dict[str, object] = {
+        "manifest_version": "amcache-row-manifest-v1",
+        "parser_version": PARSER_VERSION,
+        "commercial_gap_id": "#7",
+        "artifact_type": "amcache-entry",
+        "source": {
+            "path": source_path,
+            "sha256": source_hashes.get("sha256", ""),
+            "format": source_format,
+        },
+        "row_identity": row_identity,
+        "row_identity_hash": stable_execution_json_sha256(row_identity),
+        "schema_version_profile": dict(schema_version_profile),
+        "source_viewer_locator": {
+            "viewer": "registry-export" if source_format == "reg" else "source-hex",
+            "source_key": source_key,
+            "source_offset": source_offset,
+            "length": row_cluster_evidence.get("cluster_window_bytes", AMCACHE_ROW_CLUSTER_WINDOW_BYTES)
+            if row_cluster_evidence
+            else 0,
+        },
+        "trusted_diff_contract": {
+            "profile_version": "execution-artifact-trusted-diff-v1",
+            "artifact_family": "amcache",
+            "compare_fields": list(EXECUTION_DIFF_COMPARE_FIELDS),
+            "required_fields": required_fields,
+        },
+        "validation_summary": {
+            "report_grade_status": str(report_grade.get("status") or ""),
+            "commercial_gap_ids": list(report_grade.get("commercial_gap_ids") or ["#7"]),
+            "native_schema_decode_available": bool(EXECUTION_NATIVE_CAPABILITIES["native_amcache_schema_decode"]),
+            "trusted_parser_diff_required": True,
+            "timestamp_semantics_validated": False,
+            "row_cluster_status": str(row_cluster_evidence.get("cluster_status") or "not-available"),
+        },
+        "reportability": {
+            "allowed_use": "program-presence-install-execution-related-pivot",
+            "standalone_execution_proof": False,
+            "ready_for_court_report": bool(report_grade.get("report_grade_ready")),
+            "validation_required": not bool(report_grade.get("report_grade_ready")),
+            "blockers": sorted(
+                set(str(item) for item in report_grade.get("blockers") or [])
+                | {
+                    "amcache-timestamp-semantics-validation-required",
+                    "amcache-trusted-parser-diff-required",
+                }
+            ),
+        },
+        "large_data_controls": {
+            "bounded_native_string_scan_bytes": MAX_NATIVE_AMCACHE_SCAN_BYTES,
+            "row_cluster_window_bytes": AMCACHE_ROW_CLUSTER_WINDOW_BYTES,
+            "native_row_decode_required_for_commercial_claims": True,
+        },
+    }
+    row_manifest["manifest_sha256"] = stable_execution_json_sha256(
+        {key: value for key, value in row_manifest.items() if key != "manifest_sha256"}
+    )
+    return row_manifest
+
+
 def shimcache_row_cluster_evidence(cluster: Mapping[str, object]) -> dict[str, object]:
     if not cluster:
         return {
@@ -3501,6 +3816,9 @@ def execution_core_accuracy_gates(artifact_type: str, details: Mapping[str, obje
     ]
     if hashes.get("sha256"):
         evidence_refs.append(f"source_sha256:{hashes['sha256']}")
+    amcache_manifest_hash = str(details.get("amcache_row_manifest_hash") or "")
+    if amcache_manifest_hash:
+        evidence_refs.append(f"amcache_row_manifest_sha256:{amcache_manifest_hash}")
 
     if artifact_type == "amcache-hive":
         artifact_type = "amcache-entry"
@@ -3518,6 +3836,8 @@ def execution_core_accuracy_gates(artifact_type: str, details: Mapping[str, obje
             satisfied.append("path/hash/publisher extraction")
         if details.get("source_offset") or checks.get("has_row_cluster_candidate") or checks.get("has_row_cluster_candidates"):
             satisfied.append("bounded Amcache row-cluster provenance")
+        if amcache_manifest_hash:
+            satisfied.append("stable Amcache row manifest")
         if details.get("timestamp_source") or checks.get("has_timestamp") or checks.get("requires_second_parser_validation"):
             satisfied.append("timestamp source labeling")
         satisfied.append("execution caveat wording")
@@ -3642,6 +3962,7 @@ def execution_commercial_uplift_evidence(artifact_type: str, details: Mapping[st
             f"source_index:{details.get('source_index', '')}",
             f"source_sha256:{hashes.get('sha256', '')}",
             f"source_format:{details.get('source_format', '')}",
+            f"amcache_row_manifest_sha256:{details.get('amcache_row_manifest_hash', '')}",
         ],
         "passed_validation_matrix_ids": [
             str(item.get("id")) for item in matrix if isinstance(item, Mapping) and item.get("passed")
@@ -3820,39 +4141,23 @@ def build_execution_artifact_trusted_diff(
     missing = sorted(key for key in rapid_by_key if key not in trusted_by_key)
     extra = sorted(key for key in trusted_by_key if key not in rapid_by_key)
     mismatches: list[dict[str, object]] = []
+    field_coverage: dict[str, object] = {}
     matched = 0
+    required_fields = execution_diff_required_fields(artifact_family)
     for key in sorted(set(rapid_by_key) & set(trusted_by_key)):
         rapid = rapid_by_key[key]
         trusted = trusted_by_key[key]
         field_diffs = []
-        for field in (
-            "executable_path",
-            "device_path",
-            "timestamp",
-            "timestamp_source",
-            "sha1",
-            "user_sid",
-            "user",
-            "table_family",
-            "url",
-            "network_profile",
-            "interface_luid",
-            "bytes_sent",
-            "bytes_received",
-            "energy_usage",
-            "cpu_time",
-            "program_name",
-            "publisher",
-            "file_description",
-            "product_name",
-            "source_format",
-            "source_key",
-            "source_offset",
-            "cache_order",
-            "os_build",
-            "counter_sha256",
-            "semantics_warning",
-        ):
+        missing_rapid = _missing_required_execution_fields(rapid, required_fields)
+        missing_trusted = _missing_required_execution_fields(trusted, required_fields)
+        field_coverage[key] = {
+            "required_fields": required_fields,
+            "rapid_present_fields": sorted(field for field in required_fields if field not in missing_rapid),
+            "trusted_present_fields": sorted(field for field in required_fields if field not in missing_trusted),
+            "rapid_missing_required_fields": missing_rapid,
+            "trusted_missing_required_fields": missing_trusted,
+        }
+        for field in EXECUTION_DIFF_COMPARE_FIELDS:
             left = rapid.get(field, "")
             right = trusted.get(field, "")
             if left or right:
@@ -3869,39 +4174,25 @@ def build_execution_artifact_trusted_diff(
         status = "diffs-present"
     normalized_tool = re.sub(r"[^a-z0-9]+", "", tool_name.lower())
     trusted_tool_recognized = any(hint in normalized_tool for hint in EXECUTION_TRUSTED_TOOL_HINTS)
+    coverage_pass = not any(
+        item.get("rapid_missing_required_fields") or item.get("trusted_missing_required_fields")
+        for item in field_coverage.values()
+        if isinstance(item, Mapping)
+    )
+    commercial_grade_evidence = status == "pass" and trusted_tool_recognized and coverage_pass
+    reportability_blockers = []
+    if not commercial_grade_evidence:
+        reportability_blockers.append("execution-artifact-trusted-diff-required")
+    if not coverage_pass:
+        reportability_blockers.append("execution-artifact-trusted-field-coverage-required")
     return {
         "profile_version": "execution-artifact-trusted-diff-v1",
         "artifact_family": str(artifact_family),
         "trusted_tool": tool_name,
         "trusted_tool_recognized": trusted_tool_recognized,
-        "compare_fields": [
-            "executable_path",
-            "device_path",
-            "timestamp",
-            "timestamp_source",
-            "sha1",
-            "user_sid",
-            "user",
-            "table_family",
-            "url",
-            "network_profile",
-            "interface_luid",
-            "bytes_sent",
-            "bytes_received",
-            "energy_usage",
-            "cpu_time",
-            "program_name",
-            "publisher",
-            "file_description",
-            "product_name",
-            "source_format",
-            "source_key",
-            "source_offset",
-            "cache_order",
-            "os_build",
-            "counter_sha256",
-            "semantics_warning",
-        ],
+        "compare_fields": list(EXECUTION_DIFF_COMPARE_FIELDS),
+        "required_fields": required_fields,
+        "field_coverage": field_coverage,
         "rapid_row_count": len(rapid_by_key),
         "trusted_row_count": len(trusted_by_key),
         "matched_count": matched,
@@ -3909,20 +4200,32 @@ def build_execution_artifact_trusted_diff(
         "missing_in_trusted_count": len(missing),
         "extra_in_trusted_count": len(extra),
         "status": status,
-        "commercial_grade_evidence": status == "pass" and trusted_tool_recognized,
+        "commercial_grade_evidence": commercial_grade_evidence,
         "missing_in_trusted": missing[:100],
         "extra_in_trusted": extra[:100],
         "mismatches": mismatches[:100],
         "reportability_decision": {
-            "decision": "execution-artifact-diff-passed" if status == "pass" else "do-not-report-execution-artifact-as-final",
+            "decision": "execution-artifact-diff-passed" if commercial_grade_evidence else "do-not-report-execution-artifact-as-final",
             "allowed_use": (
                 "support report-grade execution artifact assertions with attached parser corpus/signoff"
-                if status == "pass" and trusted_tool_recognized
+                if commercial_grade_evidence
                 else "triage-only execution pivot until trusted parser diff is clean"
             ),
-            "blockers": [] if status == "pass" and trusted_tool_recognized else ["execution-artifact-trusted-diff-required"],
+            "blockers": reportability_blockers,
         },
     }
+
+
+def execution_diff_required_fields(artifact_family: str) -> list[str]:
+    normalized_family = re.sub(r"[^a-z0-9-]+", "-", str(artifact_family or "").strip().lower()).strip("-")
+    for family, fields in EXECUTION_DIFF_REQUIRED_FIELDS_BY_FAMILY.items():
+        if normalized_family == family or family in normalized_family:
+            return list(fields)
+    return []
+
+
+def _missing_required_execution_fields(row: Mapping[str, str], required_fields: Sequence[str]) -> list[str]:
+    return [field for field in required_fields if not str(row.get(field, "")).strip()]
 
 
 def _normalize_execution_diff_row(row: Mapping[str, object], artifact_family: str) -> tuple[str, dict[str, str]]:
@@ -4039,6 +4342,18 @@ def execution_diff_row_payload(row: Mapping[str, object]) -> Mapping[str, object
         payload.setdefault("source_offset", evidence.get("source_offset", ""))
         payload.setdefault("cache_order", evidence.get("cache_order", ""))
         sha1_candidates = evidence.get("sha1_candidates")
+        if isinstance(sha1_candidates, Sequence) and not isinstance(sha1_candidates, (str, bytes)):
+            payload.setdefault("sha1", next((str(item) for item in sha1_candidates if str(item).strip()), ""))
+    manifest = payload.get("amcache_row_manifest")
+    if isinstance(manifest, Mapping):
+        identity = manifest.get("row_identity") if isinstance(manifest.get("row_identity"), Mapping) else {}
+        payload.setdefault("source_format", identity.get("source_format", ""))
+        payload.setdefault("source_key", identity.get("source_key", ""))
+        payload.setdefault("source_offset", identity.get("source_offset", ""))
+        payload.setdefault("executable_path", identity.get("executable_path", ""))
+        payload.setdefault("timestamp", identity.get("timestamp", ""))
+        payload.setdefault("timestamp_source", identity.get("timestamp_source", ""))
+        sha1_candidates = identity.get("sha1_candidates")
         if isinstance(sha1_candidates, Sequence) and not isinstance(sha1_candidates, (str, bytes)):
             payload.setdefault("sha1", next((str(item) for item in sha1_candidates if str(item).strip()), ""))
     evidence = payload.get("shimcache_evidence")
