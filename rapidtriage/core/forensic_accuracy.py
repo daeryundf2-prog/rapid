@@ -992,6 +992,8 @@ CORE_FORENSIC_ACCURACY_ITEMS: tuple[dict[str, object], ...] = (
             "history row hashes",
             "history source viewer locators",
             "database append-only guardrails",
+            "evidence history report-grade validation plan",
+            "evidence history report-grade ready slots",
             "multi-user/signing limitation warning",
             "trusted evidence history diff pass",
         ),

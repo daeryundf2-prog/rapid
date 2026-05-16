@@ -1977,20 +1977,64 @@ class RapidTriageCaseDatabaseTests(unittest.TestCase):
                 "database append-only guardrails",
                 export["evidence_selection_version_history"]["core_accuracy_gates"][0]["satisfied_checks"],
             )
+            self.assertIn(
+                "evidence history report-grade validation plan",
+                export["evidence_selection_version_history"]["core_accuracy_gates"][0]["satisfied_checks"],
+            )
+            self.assertIn(
+                "evidence history report-grade ready slots",
+                export["evidence_selection_version_history"]["core_accuracy_gates"][0]["satisfied_checks"],
+            )
+            history_plan = export["evidence_selection_version_history"]["evidence_selection_report_grade_validation_plan"]
+            self.assertEqual(
+                history_plan["profile_version"],
+                "evidence-selection-history-report-grade-validation-plan-v1",
+            )
+            self.assertEqual(history_plan["item_number"], 65)
+            self.assertEqual(history_plan["plan_context"], "case-db-report-export")
+            self.assertEqual(history_plan["history_manifest_hash"], history_manifest["manifest_hash"])
+            self.assertEqual(
+                export["evidence_selection_version_history"]["evidence_selection_report_grade_validation_plan_hash"],
+                history_plan["validation_plan_sha256"],
+            )
+            self.assertEqual(history_plan["ready_slot_count"], 6)
+            self.assertEqual(history_plan["blocking_slot_count"], 6)
+            self.assertEqual(export["evidence_selection_version_history"]["report_grade_ready_slot_count"], 6)
+            self.assertEqual(export["evidence_selection_version_history"]["report_grade_blocking_slot_count"], 6)
+            ready_history_slots = {slot["slot_id"] for slot in history_plan["ready_slots"]}
+            blocking_history_slots = {slot["slot_id"] for slot in history_plan["blocking_slots"]}
+            self.assertIn("evidence-history-row-hashes-and-chain", ready_history_slots)
+            self.assertIn("evidence-history-signed-multi-user-history", blocking_history_slots)
+            self.assertIn("signed-multi-user-history-required", export["evidence_selection_version_history"]["blockers"])
             history_uplift = export["evidence_selection_version_history"]["commercial_uplift_evidence"]
             self.assertEqual(history_uplift["item_numbers"], [65])
             self.assertIn("versioned review history rows", history_uplift["passed_validation_check_ids"])
+            self.assertIn(
+                "evidence history report-grade validation plan",
+                history_uplift["passed_validation_check_ids"],
+            )
             self.assertGreaterEqual(history_uplift["large_data_controls"]["row_hash_count"], len(targets))
             self.assertEqual(history_uplift["large_data_controls"]["history_head_hash"], integrity["head_hash"])
             self.assertEqual(history_uplift["large_data_controls"]["history_manifest_hash"], history_manifest["manifest_hash"])
+            self.assertEqual(
+                history_uplift["large_data_controls"]["evidence_selection_report_grade_validation_plan_hash"],
+                history_plan["validation_plan_sha256"],
+            )
+            self.assertEqual(history_uplift["large_data_controls"]["report_grade_ready_slot_count"], 6)
+            self.assertEqual(history_uplift["large_data_controls"]["report_grade_blocking_slot_count"], 6)
             self.assertGreaterEqual(history_uplift["large_data_controls"]["history_viewer_locator_count"], len(targets))
             self.assertTrue(history_uplift["large_data_controls"]["database_enforced_append_only"])
             self.assertEqual(history_uplift["large_data_controls"]["append_only_trigger_count"], 2)
             self.assertIn("trusted-evidence-history-diff-is-required-before-commercial-claim", history_uplift["failed_validation_check_ids"])
+            self.assertIn("signed-multi-user-history-required", history_uplift["failed_validation_check_ids"])
             self.assertFalse(history_uplift["large_data_controls"]["multi_user_signed_history"])
             self.assertEqual(
                 history_uplift["reportability_decision"]["allowed_use"],
                 "evidence-selection-history-triage-pivot",
+            )
+            self.assertEqual(
+                history_uplift["reportability_decision"]["control_snapshot"]["evidence_selection_report_grade_validation_plan_hash"],
+                history_plan["validation_plan_sha256"],
             )
             history_rows = [
                 row
@@ -2002,6 +2046,7 @@ class RapidTriageCaseDatabaseTests(unittest.TestCase):
                 history_rows=history_rows,
                 trusted_diff=history_diff,
                 history_manifest=history_manifest,
+                report_grade_validation_plan=history_plan,
             )
             self.assertEqual(history_diff["status"], "pass")
             self.assertIn("evidence history manifest", history_gates[0]["satisfied_checks"])

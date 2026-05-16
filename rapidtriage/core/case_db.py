@@ -90,6 +90,15 @@ REPORT_CITATION_REPORT_GRADE_BLOCKERS = [
     "jurisdiction-template-review-required",
     "reviewer-signoff-corpus-required",
 ]
+EVIDENCE_SELECTION_REPORT_GRADE_VALIDATION_PLAN_VERSION = "evidence-selection-history-report-grade-validation-plan-v1"
+EVIDENCE_SELECTION_REPORT_GRADE_BLOCKERS = [
+    "signed-multi-user-history-required",
+    "trusted-evidence-history-diff-required",
+    "multi-user-conflict-handling-required",
+    "database-trigger-enforcement-review-required",
+    "reviewer-identity-rbac-corpus-required",
+    "history-replay-corpus-required",
+]
 CASE_DB_SEARCH_SCAN_ROW_LIMIT = 100_000
 CASE_DB_SEARCH_SCAN_OVERSAMPLE = 100
 CASE_DB_SEARCH_MIN_SCAN_ROWS = 10_000
@@ -5560,12 +5569,23 @@ def build_evidence_selection_version_history(items: Sequence[Mapping[str, object
     ]
     integrity_profile = build_evidence_history_integrity_profile(history_rows)
     history_manifest = build_evidence_selection_history_manifest(history_rows, integrity_profile)
+    validation_plan = build_evidence_selection_history_report_grade_validation_plan(
+        history_rows=history_rows,
+        integrity_profile=integrity_profile,
+        history_manifest=history_manifest,
+        plan_context="case-db-report-export",
+    )
     blockers = [
         "selection-history-is-database-append-only-but-not-multi-user-signed-collaboration",
         "review-inclusion-changes-still-require-source-verification-before-reporting",
         "trusted-evidence-history-diff-is-required-before-commercial-claim",
     ]
-    gates = evidence_selection_core_accuracy_gates(history_rows=history_rows, history_manifest=history_manifest)
+    blockers = sorted({*blockers, *EVIDENCE_SELECTION_REPORT_GRADE_BLOCKERS})
+    gates = evidence_selection_core_accuracy_gates(
+        history_rows=history_rows,
+        history_manifest=history_manifest,
+        report_grade_validation_plan=validation_plan,
+    )
     return {
         "component": "evidence-selection-version-history",
         "status": "implemented-baseline-validation-required",
@@ -5575,11 +5595,16 @@ def build_evidence_selection_version_history(items: Sequence[Mapping[str, object
         "integrity_profile": integrity_profile,
         "history_manifest": history_manifest,
         "history_manifest_hash": history_manifest["manifest_hash"],
+        "evidence_selection_report_grade_validation_plan": validation_plan,
+        "evidence_selection_report_grade_validation_plan_hash": validation_plan["validation_plan_sha256"],
+        "report_grade_ready_slot_count": validation_plan["ready_slot_count"],
+        "report_grade_blocking_slot_count": validation_plan["blocking_slot_count"],
         "ready_for_court_report": False,
         "blockers": blockers,
         "recommended_validation": [
             "Review version rows for status, verification, tags, assignee, priority, and include-in-report changes.",
             "Export the Case DB report JSON with the final report so selection history remains reproducible.",
+            "Attach signed multi-user history, trusted history diff, conflict-handling evidence, and reviewer identity/RBAC proof before final signed-history claims.",
         ],
         "core_accuracy_gates": gates,
         "commercial_uplift_evidence": case_report_commercial_uplift_evidence(
@@ -5605,6 +5630,10 @@ def build_evidence_selection_version_history(items: Sequence[Mapping[str, object
                 "append_only_trigger_count": 2,
                 "multi_user_signed_history": False,
                 "conflict_resolution": False,
+                "evidence_selection_report_grade_validation_plan_present": True,
+                "evidence_selection_report_grade_validation_plan_hash": validation_plan["validation_plan_sha256"],
+                "report_grade_ready_slot_count": validation_plan["ready_slot_count"],
+                "report_grade_blocking_slot_count": validation_plan["blocking_slot_count"],
             },
         ),
     }
@@ -5695,6 +5724,121 @@ def build_evidence_selection_history_manifest(
         "commercial_claim_allowed": False,
     }
     return {**manifest_core, "manifest_hash": stable_payload_sha256(manifest_core)}
+
+
+def build_evidence_selection_history_report_grade_validation_plan(
+    *,
+    history_rows: Sequence[Mapping[str, object]],
+    integrity_profile: Mapping[str, object],
+    history_manifest: Mapping[str, object],
+    plan_context: str,
+) -> dict[str, object]:
+    history_rows = list(history_rows)
+    ready_slots = [
+        {
+            "slot_id": "evidence-history-version-rows",
+            "status": "complete",
+            "evidence": {"history_row_count": int(history_manifest.get("history_row_count") or 0)},
+        },
+        {
+            "slot_id": "evidence-history-changed-fields",
+            "status": "complete",
+            "evidence": {"changed_field_counts": dict(integrity_profile.get("changed_field_counts") or {})},
+        },
+        {
+            "slot_id": "evidence-history-previous-current-state",
+            "status": "complete",
+            "evidence": {
+                "rows_with_previous_or_current": sum(
+                    1
+                    for row in history_rows
+                    if row.get("previous") is not None or row.get("current") is not None
+                )
+            },
+        },
+        {
+            "slot_id": "evidence-history-report-inclusion-changes",
+            "status": "complete",
+            "evidence": {
+                "include_in_report_change_count": int(integrity_profile.get("include_in_report_change_count") or 0)
+            },
+        },
+        {
+            "slot_id": "evidence-history-row-hashes-and-chain",
+            "status": "complete",
+            "evidence": {
+                "row_hash_count": int(integrity_profile.get("row_hash_count") or 0),
+                "history_head_hash": integrity_profile.get("head_hash"),
+                "manifest_hash": history_manifest.get("manifest_hash"),
+            },
+        },
+        {
+            "slot_id": "evidence-history-source-locators-and-local-append-only",
+            "status": "complete",
+            "evidence": {
+                "history_viewer_locator_count": int(history_manifest.get("history_viewer_locator_count") or 0),
+                "database_enforced_append_only": bool(
+                    (history_manifest.get("append_only_enforcement") or {}).get("database_enforced_append_only")
+                    if isinstance(history_manifest.get("append_only_enforcement"), Mapping)
+                    else False
+                ),
+            },
+        },
+    ]
+    blocking_slots = [
+        {
+            "slot_id": "evidence-history-signed-multi-user-history",
+            "status": "external-required",
+            "blocker": "signed-multi-user-history-required",
+            "required_evidence": "signed multi-user history export with user identity, timestamps, and immutable history proofs",
+        },
+        {
+            "slot_id": "evidence-history-trusted-diff",
+            "status": "external-required",
+            "blocker": "trusted-evidence-history-diff-required",
+            "required_evidence": "trusted history manifest diff against independently generated review-history output",
+        },
+        {
+            "slot_id": "evidence-history-conflict-handling",
+            "status": "external-required",
+            "blocker": "multi-user-conflict-handling-required",
+            "required_evidence": "multi-user conflict creation, resolution, replay, and audit evidence",
+        },
+        {
+            "slot_id": "evidence-history-database-trigger-review",
+            "status": "external-required",
+            "blocker": "database-trigger-enforcement-review-required",
+            "required_evidence": "independent review proving update/delete trigger enforcement for history rows",
+        },
+        {
+            "slot_id": "evidence-history-reviewer-identity-rbac",
+            "status": "external-required",
+            "blocker": "reviewer-identity-rbac-corpus-required",
+            "required_evidence": "RBAC/reviewer identity corpus linking history rows to authenticated analysts",
+        },
+        {
+            "slot_id": "evidence-history-replay-corpus",
+            "status": "external-required",
+            "blocker": "history-replay-corpus-required",
+            "required_evidence": "known-answer replay corpus for report inclusion, status, tags, notes, assignee, and priority changes",
+        },
+    ]
+    plan_core: dict[str, object] = {
+        "profile_version": EVIDENCE_SELECTION_REPORT_GRADE_VALIDATION_PLAN_VERSION,
+        "item_number": 65,
+        "commercial_gap_ids": ["#65"],
+        "plan_context": plan_context,
+        "history_row_count": len(history_rows),
+        "history_manifest_hash": history_manifest.get("manifest_hash"),
+        "integrity_profile_hash": stable_payload_sha256(dict(integrity_profile)),
+        "ready_slots": ready_slots,
+        "blocking_slots": blocking_slots,
+        "ready_slot_count": len(ready_slots),
+        "blocking_slot_count": len(blocking_slots),
+        "commercial_claim_allowed": False,
+        "reporting_boundary": "This plan makes exported selection history report-verifiable for local review, but it is not signed multi-user history until the external-required slots are attached.",
+    }
+    return {**plan_core, "validation_plan_sha256": stable_payload_sha256(plan_core)}
 
 
 def evidence_history_viewer_locator(history_row: Mapping[str, object]) -> dict[str, object]:
@@ -5936,6 +6080,7 @@ def evidence_selection_core_accuracy_gates(
     history_rows: Sequence[Mapping[str, object]],
     trusted_diff: Mapping[str, object] | None = None,
     history_manifest: Mapping[str, object] | None = None,
+    report_grade_validation_plan: Mapping[str, object] | None = None,
 ) -> list[dict[str, object]]:
     satisfied = ["multi-user/signing limitation warning"]
     if history_rows:
@@ -5958,9 +6103,17 @@ def evidence_selection_core_accuracy_gates(
     append_only = history_manifest.get("append_only_enforcement") if isinstance(history_manifest, Mapping) else None
     if isinstance(append_only, Mapping) and append_only.get("database_enforced_append_only"):
         satisfied.append("database append-only guardrails")
+    if report_grade_validation_plan and report_grade_validation_plan.get("validation_plan_sha256"):
+        satisfied.append("evidence history report-grade validation plan")
+    if report_grade_validation_plan and int(report_grade_validation_plan.get("ready_slot_count") or 0) >= 6:
+        satisfied.append("evidence history report-grade ready slots")
     evidence_refs = [f"review_history_count:{len(history_rows)}"]
     if history_manifest and history_manifest.get("manifest_hash"):
         evidence_refs.append(f"history_manifest_hash:{history_manifest.get('manifest_hash', '')}")
+    if report_grade_validation_plan and report_grade_validation_plan.get("validation_plan_sha256"):
+        evidence_refs.append(
+            f"evidence_selection_report_grade_validation_plan_hash:{report_grade_validation_plan.get('validation_plan_sha256', '')}"
+        )
     if trusted_diff and trusted_diff.get("status") == "pass":
         satisfied.append("trusted evidence history diff pass")
         evidence_refs.append(f"trusted_tool:{trusted_diff.get('trusted_tool', '')}")

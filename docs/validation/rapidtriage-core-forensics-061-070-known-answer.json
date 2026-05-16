@@ -55,8 +55,8 @@
       "status": "pass",
       "backlog_items": [65],
       "evidence_paths": ["docs/validation/core-forensics-061-070-fixture-evidence.json", "tests/test_rapidtriage_case_db.py"],
-      "expected": {"required_assertions": ["Review history preserves version rows, target IDs, changed fields, previous/current state, report inclusion changes, history-viewer locators, per-row hashes, export-time history hash chain/head hash, evidence-selection-history-manifest, database append-only update/delete guards, multi-user warning, trusted history diff status, and #65 core_accuracy_gates.", "Evidence history reportability decisions block multi-user signed-history claims until signed selection history, trusted history manifest diff, and conflict handling exist."]},
-      "notes": "Internal fixture pass; signed multi-user history, trusted history oracle, and conflict handling remain blockers."
+      "expected": {"required_assertions": ["Review history preserves version rows, target IDs, changed fields, previous/current state, report inclusion changes, history-viewer locators, per-row hashes, export-time history hash chain/head hash, evidence-selection-history-manifest, evidence_selection_report_grade_validation_plan hashes/ready slots/blocking slots, database append-only update/delete guards, multi-user warning, trusted history diff status, and #65 core_accuracy_gates.", "Evidence history reportability decisions block multi-user signed-history claims until signed selection history, trusted history manifest diff, conflict handling, trigger review, reviewer identity/RBAC proof, and replay corpus exist."]},
+      "notes": "Internal fixture pass; signed multi-user history, trusted history oracle, conflict handling, independent trigger review, reviewer identity/RBAC proof, and replay corpus remain blockers."
     },
     {
       "id": "core-forensics-066-benchmark-fixture",

@@ -1569,10 +1569,10 @@
       ],
       "expected": {
         "required_assertions": [
-          "Review history preserves version rows, target IDs, changed fields, previous/current state, report inclusion changes, history-viewer locators, per-row hashes, export-time history hash chain/head hash, evidence-selection-history-manifest, database append-only update/delete guards, multi-user warning, trusted history diff status, and #65 core_accuracy_gates."
+          "Review history preserves version rows, target IDs, changed fields, previous/current state, report inclusion changes, history-viewer locators, per-row hashes, export-time history hash chain/head hash, evidence-selection-history-manifest, evidence_selection_report_grade_validation_plan hashes/ready slots/blocking slots, database append-only update/delete guards, multi-user warning, trusted history diff status, and #65 core_accuracy_gates."
         ]
       },
-      "notes": "Internal fixture pass; signed multi-user history, trusted history oracle, and conflict handling remain blockers.",
+      "notes": "Internal fixture pass; signed multi-user history, trusted history oracle, conflict handling, independent trigger review, reviewer identity/RBAC proof, and replay corpus remain blockers.",
       "source_manifest": "docs/validation/rapidtriage-core-forensics-061-070-known-answer.json"
     },
     {
