@@ -2049,6 +2049,10 @@ class RapidTriageOpsTests(unittest.TestCase):
                 final_by_number[116]["primary_outputs"],
             )
             self.assertIn(
+                "operations_documents.document_report_grade_validation_plan_hashes.116",
+                final_by_number[116]["primary_outputs"],
+            )
+            self.assertIn(
                 "operations_documents.document_evidence_manifests.120.manifest_hash",
                 final_by_number[120]["primary_outputs"],
             )
@@ -6004,6 +6008,38 @@ class RapidTriageOpsTests(unittest.TestCase):
                 9,
             )
             self.assertIn("training-delivery-log-required", training_delivery_report_plan["blockers"])
+            quickstart_lab_report_plan = manifest["package_readiness"]["operations_documents"][
+                "document_report_grade_validation_plans"
+            ]["116"]
+            self.assertEqual(
+                quickstart_lab_report_plan["profile_version"],
+                "quickstart-lab-report-grade-validation-plan-v1",
+            )
+            self.assertEqual(
+                len(
+                    manifest["package_readiness"]["operations_documents"][
+                        "document_report_grade_validation_plan_hashes"
+                    ]["116"]
+                ),
+                64,
+            )
+            self.assertEqual(
+                manifest["package_readiness"]["operations_documents"]["document_report_grade_validation_plan_hashes"][
+                    "116"
+                ],
+                quickstart_lab_report_plan["validation_plan_hash"],
+            )
+            self.assertGreaterEqual(
+                manifest["package_readiness"]["operations_documents"]["document_report_grade_ready_slot_counts"]["116"],
+                6,
+            )
+            self.assertGreaterEqual(
+                manifest["package_readiness"]["operations_documents"]["document_report_grade_blocking_slot_counts"][
+                    "116"
+                ],
+                9,
+            )
+            self.assertIn("quickstart-lab-run-log-required", quickstart_lab_report_plan["blockers"])
             self.assertIn(
                 "ci_changelog_gate",
                 manifest["package_readiness"]["operations_documents"]["document_evidence_slots"]["112"],
@@ -6019,6 +6055,10 @@ class RapidTriageOpsTests(unittest.TestCase):
             self.assertIn(
                 "training_delivery_log",
                 manifest["package_readiness"]["operations_documents"]["document_evidence_slots"]["115"],
+            )
+            self.assertIn(
+                "quickstart_lab_run_log",
+                manifest["package_readiness"]["operations_documents"]["document_evidence_slots"]["116"],
             )
             self.assertIn(
                 "operations evidence manifest hash emitted",
@@ -6059,6 +6099,14 @@ class RapidTriageOpsTests(unittest.TestCase):
             self.assertIn(
                 "training delivery report-grade ready slots",
                 manifest["package_readiness"]["operations_documents"]["core_accuracy_gates"][3]["satisfied_checks"],
+            )
+            self.assertIn(
+                "quickstart lab report-grade validation plan",
+                manifest["package_readiness"]["operations_documents"]["core_accuracy_gates"][4]["satisfied_checks"],
+            )
+            self.assertIn(
+                "quickstart lab report-grade ready slots",
+                manifest["package_readiness"]["operations_documents"]["core_accuracy_gates"][4]["satisfied_checks"],
             )
             admin_guide_coverage_manifest = manifest["package_readiness"]["operations_documents"][
                 "admin_guide_coverage_manifest"
@@ -6408,6 +6456,25 @@ class RapidTriageOpsTests(unittest.TestCase):
             self.assertIn(
                 "training delivery report-grade validation plan",
                 training_delivery_gates[3]["satisfied_checks"],
+            )
+            quickstart_lab_diff = build_release.build_operations_document_trusted_diff(
+                116,
+                manifest["package_readiness"]["operations_documents"],
+                manifest["package_readiness"]["operations_documents"],
+                trusted_tool="quickstart-lab-run-log",
+            )
+            quickstart_lab_gates = build_release.operations_documents_core_accuracy_gates(
+                trusted_diffs={116: quickstart_lab_diff},
+                report_grade_validation_plans=manifest["package_readiness"]["operations_documents"][
+                    "document_report_grade_validation_plans"
+                ],
+            )
+            self.assertEqual(quickstart_lab_diff["status"], "pass")
+            self.assertIn("document_report_grade_validation_plan_hashes", quickstart_lab_diff["compared_fields"])
+            self.assertIn("trusted quickstart lab run diff pass", quickstart_lab_gates[4]["satisfied_checks"])
+            self.assertIn(
+                "quickstart lab report-grade validation plan",
+                quickstart_lab_gates[4]["satisfied_checks"],
             )
             admin_diff = build_release.build_operations_document_trusted_diff(
                 117,

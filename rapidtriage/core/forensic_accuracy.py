@@ -1959,6 +1959,8 @@ CORE_FORENSIC_ACCURACY_ITEMS: tuple[dict[str, object], ...] = (
             "ingest/search/review/report steps documented",
             "bundle verification documented",
             "real training run blocker disclosed",
+            "quickstart lab report-grade validation plan",
+            "quickstart lab report-grade ready slots",
             "trusted quickstart lab run diff pass",
         ),
     },

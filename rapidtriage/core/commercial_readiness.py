@@ -3837,6 +3837,7 @@ def final_delivery_evidence_chain() -> list[dict[str, object]]:
             "primary_outputs": [
                 "docs/rapidtriage-training-curriculum.md quickstart lab section",
                 "operations_documents.document_evidence_manifests.116.manifest_hash",
+                "operations_documents.document_report_grade_validation_plan_hashes.116",
                 "operations_documents.document_evidence_slots.116.quickstart_lab_run_log",
             ],
             "trusted_diff": "trusted-quickstart-lab-run-diff",

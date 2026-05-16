@@ -2669,10 +2669,10 @@
       ],
       "expected": {
         "required_assertions": [
-          "Release package preserves quickstart lab, sample workflow command, ingest/search/review/report steps, bundle verification, training-run blocker, and #116 core_accuracy_gates."
+          "Release package preserves quickstart lab, sample workflow command, ingest/search/review/report steps, bundle verification, quickstart-lab-evidence-manifest-v1 manifest hash/evidence slots, quickstart-lab-report-grade-validation-plan-v1 hash/ready/blocking slots, training-run blocker, trusted quickstart lab diff helpers/gates, and #116 core_accuracy_gates."
         ]
       },
-      "notes": "Internal fixture pass; actual analyst lab run remains external.",
+      "notes": "Internal fixture pass; actual analyst lab run, expected-output manifest, reviewer bundle verification transcript, cross-platform run evidence, independent quickstart review, and trusted lab run logs remain external.",
       "source_manifest": "docs/validation/rapidtriage-core-forensics-101-120-known-answer.json"
     },
     {

@@ -309,6 +309,8 @@ class RapidTriageCoreForensicsAccuracyTests(unittest.TestCase):
         self.assertIn("training delivery report-grade ready slots", training["required_checks"])
         self.assertIn("trusted training delivery diff pass", training["required_checks"])
         self.assertIn("sample workflow command recorded", quickstart["required_checks"])
+        self.assertIn("quickstart lab report-grade validation plan", quickstart["required_checks"])
+        self.assertIn("quickstart lab report-grade ready slots", quickstart["required_checks"])
         self.assertIn("trusted quickstart lab run diff pass", quickstart["required_checks"])
         self.assertIn("admin guide packaged", admin_guide["required_checks"])
         self.assertIn("trusted admin deployment proof diff pass", admin_guide["required_checks"])
