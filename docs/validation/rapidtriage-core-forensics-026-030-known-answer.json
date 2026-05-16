@@ -101,6 +101,7 @@
       "expected": {
         "required_assertions": [
           "APK rows preserve manifest, permissions/components, certificate/signature limitation, bounded DEX/native pivots, secret-handling warnings, and #30 core_accuracy_gates",
+          "APK rows emit android-apk-report-grade-validation-plan-v1 with source APK hash, ZIP entry inventory, manifest/package context, permission/component normalization, DEX/native pivot boundary, signing-entry inventory, source locator, trusted APK tool diff, binary-manifest validation, signature-chain/lineage validation, malware-behavior known-answer corpus, and independent review evidence slots",
           "APK/tool trusted diff helper requires package/manifest/DEX/native/tool output equality before satisfying the #30 trusted APK/tool analysis diff pass gate",
           "APK reportability decisions block malware/signature-validated claims until binary manifest, signature-chain, and behavior validation exists"
         ]

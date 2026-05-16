@@ -813,7 +813,8 @@
       ],
       "expected": {
         "required_assertions": [
-          "APK rows preserve manifest, permissions/components, certificate/signature limitation, bounded DEX/native pivots, secret-handling warnings, and #30 core_accuracy_gates"
+          "APK rows preserve manifest, permissions/components, certificate/signature limitation, bounded DEX/native pivots, secret-handling warnings, and #30 core_accuracy_gates",
+          "APK rows emit android-apk-report-grade-validation-plan-v1 with source APK hash, ZIP entry inventory, manifest/package context, permission/component normalization, DEX/native pivot boundary, signing-entry inventory, source locator, trusted APK tool diff, binary-manifest validation, signature-chain/lineage validation, malware-behavior known-answer corpus, and independent review evidence slots"
         ]
       },
       "notes": "Internal fixture pass; binary manifests, signature-chain trust, and malware behavior validation remain required.",

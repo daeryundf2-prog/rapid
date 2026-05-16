@@ -105,6 +105,14 @@ ANDROID_APP_DATA_REPORT_GRADE_BLOCKERS = [
     "encrypted-store-and-deleted-record-validation-required",
     "independent-android-app-data-review-required",
 ]
+ANDROID_APK_REPORT_GRADE_VALIDATION_PLAN_VERSION = "android-apk-report-grade-validation-plan-v1"
+ANDROID_APK_REPORT_GRADE_BLOCKERS = [
+    "trusted-aapt-apkanalyzer-mobsf-diff-required",
+    "binary-android-manifest-decoder-required",
+    "signature-chain-and-lineage-validation-required",
+    "dex-control-flow-and-malware-behavior-known-answer-required",
+    "independent-android-apk-review-required",
+]
 ANDROID_QC_PREP_ITEM_NUMBER = 47
 ANDROID_QC_PREP_GOAL = (
     "Deepen Android artifact parser for SMS, call log, contacts, browser, media, app DBs, packages, signatures, and permissions."
@@ -192,6 +200,10 @@ def build_apk_record(path: Path) -> ArtifactRecord:
     ]
     details["android_parser_manifest"] = build_android_parser_manifest(details)
     details["android_parser_manifest_hash"] = details["android_parser_manifest"]["manifest_sha256"]
+    details["android_apk_report_grade_validation_plan"] = build_android_apk_report_grade_validation_plan(details)
+    details["android_apk_report_grade_validation_plan_hash"] = details["android_apk_report_grade_validation_plan"][
+        "manifest_sha256"
+    ]
     details["core_accuracy_gates"] = android_core_accuracy_gates(30, details)
     details.setdefault(
         "forensic_review",
@@ -1148,6 +1160,194 @@ def build_android_apk_deep_analysis_manifest(details: dict[str, object]) -> dict
     return manifest
 
 
+def build_android_apk_report_grade_validation_plan(details: dict[str, object]) -> dict[str, object]:
+    apk_profile = details.get("apk_analysis_profile") if isinstance(details.get("apk_analysis_profile"), dict) else {}
+    signing_inventory = (
+        details.get("apk_signing_inventory") if isinstance(details.get("apk_signing_inventory"), dict) else {}
+    )
+    deep_manifest = (
+        details.get("android_apk_deep_analysis_manifest")
+        if isinstance(details.get("android_apk_deep_analysis_manifest"), dict)
+        else {}
+    )
+    parser_manifest = (
+        details.get("android_parser_manifest") if isinstance(details.get("android_parser_manifest"), dict) else {}
+    )
+    hashes = details.get("hashes") if isinstance(details.get("hashes"), dict) else {}
+    source_locator = (
+        deep_manifest.get("source_viewer_locator")
+        if isinstance(deep_manifest.get("source_viewer_locator"), dict)
+        else parser_manifest.get("source_viewer_locator")
+        if isinstance(parser_manifest.get("source_viewer_locator"), dict)
+        else {}
+    )
+    source_path = str(details.get("source_path") or "")
+    source_sha256 = str(hashes.get("sha256") or "")
+    package = str(details.get("package") or "")
+    manifest_format = str(details.get("manifest_format") or "")
+    permissions = details.get("permissions") if isinstance(details.get("permissions"), list) else []
+    component_counts = details.get("component_counts") if isinstance(details.get("component_counts"), dict) else {}
+    dex_count = int(details.get("dex_count") or 0)
+    native_library_count = int(details.get("native_library_count") or 0)
+    string_pivots = details.get("string_pivots") if isinstance(details.get("string_pivots"), list) else []
+    evidence_slots = [
+        {
+            "id": "source-apk-integrity",
+            "label": "Source APK hash, size, and path are fixed before reporting",
+            "status": "complete" if source_sha256 else "missing-source-hash",
+            "blocking": not bool(source_sha256),
+            "evidence_refs": [f"source_sha256:{source_sha256}", f"source_path:{source_path}"],
+        },
+        {
+            "id": "zip-entry-inventory",
+            "label": "APK ZIP entries and bounded entry hashes are inventoried",
+            "status": "complete" if details.get("valid_zip") and details.get("entry_hashes") is not None else "review-required",
+            "blocking": not bool(details.get("valid_zip")),
+            "evidence_refs": [
+                f"valid_zip:{bool(details.get('valid_zip'))}",
+                f"entry_hash_count:{len(details.get('entry_hashes') or []) if isinstance(details.get('entry_hashes'), list) else 0}",
+            ],
+        },
+        {
+            "id": "manifest-package-inventory",
+            "label": "Manifest/package/version context is decoded or the binary-manifest limit is disclosed",
+            "status": "complete" if package or manifest_format else "missing-manifest-context",
+            "blocking": not bool(package or manifest_format),
+            "evidence_refs": [f"package:{package}", f"manifest_format:{manifest_format}"],
+        },
+        {
+            "id": "permission-component-inventory",
+            "label": "Permissions and Android components are normalized for triage",
+            "status": "complete" if permissions or component_counts else "missing-permission-component-inventory",
+            "blocking": not bool(permissions or component_counts),
+            "evidence_refs": [
+                f"permission_count:{len(permissions)}",
+                f"component_count:{sum(int(value or 0) for value in component_counts.values()) if component_counts else 0}",
+            ],
+        },
+        {
+            "id": "dex-native-pivot-boundary",
+            "label": "DEX/native files and bounded string pivots are inventoried without behavior verdicts",
+            "status": "complete" if dex_count or native_library_count or string_pivots else "review-required",
+            "blocking": False,
+            "evidence_refs": [
+                f"dex_count:{dex_count}",
+                f"native_library_count:{native_library_count}",
+                f"string_pivot_count:{len(string_pivots)}",
+                f"string_scan_limit:{APK_STRING_SCAN_LIMIT}",
+            ],
+        },
+        {
+            "id": "signing-entry-inventory",
+            "label": "META-INF signing entries are hashed while certificate trust remains blocked",
+            "status": "complete" if signing_inventory else "missing-signing-entry-inventory",
+            "blocking": False,
+            "evidence_refs": [
+                f"signing_entry_count:{signing_inventory.get('entry_count', 0)}",
+                f"certificate_chain_parsed:{signing_inventory.get('certificate_chain_parsed', False)}",
+                f"signer_lineage_verified:{signing_inventory.get('signer_lineage_verified', False)}",
+            ],
+        },
+        {
+            "id": "source-viewer-locator",
+            "label": "GUI/report can jump back to APK source and package context",
+            "status": "complete" if source_locator else "missing-source-viewer-locator",
+            "blocking": not bool(source_locator),
+            "evidence_refs": [
+                f"viewer:{source_locator.get('viewer', '')}" if isinstance(source_locator, dict) else "viewer:",
+                f"manifest_sha256:{deep_manifest.get('manifest_sha256', '')}",
+            ],
+        },
+        {
+            "id": "trusted-apk-tool-diff",
+            "label": "RapidTriage APK inventory is diffed against aapt, apkanalyzer, MobSF, jadx, or androguard",
+            "status": "pending-cross-tool-validate",
+            "blocking": True,
+            "evidence_refs": ["command:rapidtriage cross-tool-validate --backlog-item 30"],
+        },
+        {
+            "id": "binary-android-manifest-decode",
+            "label": "Binary AndroidManifest.xml decode is validated against trusted tooling",
+            "status": "external-tool-required",
+            "blocking": True,
+            "evidence_refs": ["required:aapt/apkanalyzer/apktool binary-manifest diff"],
+        },
+        {
+            "id": "signature-chain-and-lineage-validation",
+            "label": "Certificate chain, signer digest, and signing lineage are validated",
+            "status": "external-tool-required",
+            "blocking": True,
+            "evidence_refs": ["required:apksigner/apkanalyzer signing-certificate diff"],
+        },
+        {
+            "id": "dex-control-flow-and-malware-known-answer",
+            "label": "DEX/native behavior and malware conclusions are validated with known-answer corpora",
+            "status": "external-corpus-required",
+            "blocking": True,
+            "evidence_refs": ["required:malware/app behavior known-answer corpus"],
+        },
+        {
+            "id": "independent-android-apk-review",
+            "label": "Independent reviewer signs off on manifest, signing, DEX/native, and behavior limits",
+            "status": "external-review-required",
+            "blocking": True,
+            "evidence_refs": ["required:independent APK analysis review"],
+        },
+    ]
+    ready_slot_ids = [
+        str(slot.get("id"))
+        for slot in evidence_slots
+        if str(slot.get("status", "")).startswith("complete")
+    ]
+    blocking_slot_ids = [str(slot.get("id")) for slot in evidence_slots if slot.get("blocking")]
+    plan: dict[str, object] = {
+        "profile_version": ANDROID_APK_REPORT_GRADE_VALIDATION_PLAN_VERSION,
+        "item_number": 30,
+        "gap_id": "#30",
+        "status": "report-validation-blocked",
+        "commercial_grade": False,
+        "artifact_goal": "Android APK metadata, manifest, permission, signing, DEX/native, and malware-risk validation",
+        "source_path": source_path,
+        "source_format": str(details.get("source_format") or ""),
+        "source_sha256": source_sha256,
+        "package": package,
+        "version_name": str(details.get("version_name") or ""),
+        "validation_commands": [
+            {
+                "id": "source-apk-manifest",
+                "purpose": "Freeze APK source hash and metadata",
+                "command": "rapidtriage manifest <apk-folder> --output <case>/apk-source-manifest.json",
+            },
+            {
+                "id": "android-apk-inventory-import",
+                "purpose": "Recreate RapidTriage APK inventory",
+                "command": "rapidtriage artifacts <apk-folder> --kind android-apk --output <case>/android-apk.json",
+            },
+            {
+                "id": "trusted-apk-tool-diff",
+                "purpose": "Compare package, manifest, permissions, DEX/native, and signing rows with trusted APK tooling",
+                "command": "rapidtriage cross-tool-validate --rapid-output <case>/android-apk.json --reference-output apkanalyzer=<trusted-apk-output.json> --backlog-item 30 --json",
+            },
+            {
+                "id": "apk-behavior-known-answer-run",
+                "purpose": "Attach malware/behavior known-answer corpus before behavior or maliciousness claims",
+                "command": "rapidtriage commercial-readiness --validation-package <android-apk-known-answer.json> --limit 30 --json",
+            },
+        ],
+        "evidence_slots": evidence_slots,
+        "ready_slot_ids": ready_slot_ids,
+        "blocking_slot_ids": blocking_slot_ids,
+        "ready_slot_count": len(ready_slot_ids),
+        "blocking_slot_count": len(blocking_slot_ids),
+        "commercial_grade_blockers": list(ANDROID_APK_REPORT_GRADE_BLOCKERS),
+        "report_guidance": "Use #30 rows as APK inventory and risk-pivot evidence only until trusted APK tool diffs, binary-manifest validation, signature-chain validation, behavior known answers, and independent review are attached.",
+    }
+    plan["manifest_sha256"] = stable_android_json_sha256(
+        {key: value for key, value in plan.items() if key != "manifest_sha256"}
+    )
+    return plan
+
+
 def stable_android_json_sha256(value: dict[str, object] | list[object] | str) -> str:
     if isinstance(value, str):
         payload = value
@@ -1613,6 +1813,11 @@ def android_commercial_uplift_evidence(details: dict[str, object], *, gap_ids: l
         if isinstance(details.get("android_apk_deep_analysis_manifest"), dict)
         else {}
     )
+    apk_validation_plan = (
+        details.get("android_apk_report_grade_validation_plan")
+        if isinstance(details.get("android_apk_report_grade_validation_plan"), dict)
+        else {}
+    )
     app_data_validation_plan = (
         details.get("android_app_data_report_grade_validation_plan")
         if isinstance(details.get("android_app_data_report_grade_validation_plan"), dict)
@@ -1676,6 +1881,11 @@ def android_commercial_uplift_evidence(details: dict[str, object], *, gap_ids: l
             "android_apk_deep_analysis_source_locator_present": isinstance(
                 apk_deep_manifest.get("source_viewer_locator"), dict
             ),
+            "android_apk_report_grade_validation_plan_hash": str(apk_validation_plan.get("manifest_sha256") or ""),
+            "android_apk_report_grade_validation_ready_slot_count": int(apk_validation_plan.get("ready_slot_count") or 0),
+            "android_apk_report_grade_validation_blocking_slot_count": int(
+                apk_validation_plan.get("blocking_slot_count") or 0
+            ),
             "secret_values_extracted": bool(checks.get("secret_values_extracted")),
             "known_answer_android_corpus_required": True,
         },
@@ -1701,6 +1911,11 @@ def android_functional_expansion_profiles(
     apk_deep_manifest = (
         details.get("android_apk_deep_analysis_manifest")
         if isinstance(details.get("android_apk_deep_analysis_manifest"), dict)
+        else {}
+    )
+    apk_validation_plan = (
+        details.get("android_apk_report_grade_validation_plan")
+        if isinstance(details.get("android_apk_report_grade_validation_plan"), dict)
         else {}
     )
     app_data_validation_plan = (
@@ -1765,6 +1980,10 @@ def android_functional_expansion_profiles(
                     "android_app_data_report_grade_validation_plan_emitted": bool(app_data_validation_plan),
                     "android_apk_deep_analysis_manifest_hash": str(apk_deep_manifest.get("manifest_sha256") or ""),
                     "android_apk_deep_analysis_manifest_emitted": bool(apk_deep_manifest),
+                    "android_apk_report_grade_validation_plan_hash": str(
+                        apk_validation_plan.get("manifest_sha256") or ""
+                    ),
+                    "android_apk_report_grade_validation_plan_emitted": bool(apk_validation_plan),
                     "source_viewer_locator_emitted": isinstance(android_manifest.get("source_viewer_locator"), dict),
                 },
                 "failed_validation_check_ids": [
@@ -1778,6 +1997,8 @@ def android_functional_expansion_profiles(
                         "android-app-data-report-grade-validation-plan-not-emitted": 29 in gap_ids
                         and not app_data_validation_plan,
                         "android-apk-deep-analysis-manifest-not-emitted": 30 in gap_ids and not apk_deep_manifest,
+                        "android-apk-report-grade-validation-plan-not-emitted": 30 in gap_ids
+                        and not apk_validation_plan,
                         "deleted-record-known-answer-corpus-required": not checks.get("commercial_validation_corpus"),
                     }.items()
                     if failed
@@ -1790,6 +2011,7 @@ def android_functional_expansion_profiles(
                         "android-app-data-deep-parser-manifest-emitted": bool(app_data_deep_manifest),
                         "android-app-data-report-grade-validation-plan-emitted": bool(app_data_validation_plan),
                         "android-apk-deep-analysis-manifest-emitted": bool(apk_deep_manifest),
+                        "android-apk-report-grade-validation-plan-emitted": bool(apk_validation_plan),
                         "android-secret-boundary-recorded": not checks.get("secret_values_extracted"),
                     }.items()
                     if passed
@@ -1905,6 +2127,15 @@ def android_core_accuracy_gates(number: int, details: dict[str, object]) -> list
     )
     if apk_deep_manifest.get("manifest_sha256"):
         evidence_refs.append(f"android_apk_deep_analysis_manifest_sha256:{apk_deep_manifest['manifest_sha256']}")
+    apk_validation_plan = (
+        details.get("android_apk_report_grade_validation_plan")
+        if isinstance(details.get("android_apk_report_grade_validation_plan"), dict)
+        else {}
+    )
+    if apk_validation_plan.get("manifest_sha256"):
+        evidence_refs.append(
+            f"android_apk_report_grade_validation_plan_sha256:{apk_validation_plan['manifest_sha256']}"
+        )
     validation = details.get("validation_checks") if isinstance(details.get("validation_checks"), dict) else {}
     risk_flags = details.get("risk_flags") if isinstance(details.get("risk_flags"), list) else []
     trusted_diff = details.get("android_trusted_diff") if isinstance(details.get("android_trusted_diff"), dict) else {}
@@ -1968,6 +2199,10 @@ def android_core_accuracy_gates(number: int, details: dict[str, object]) -> list
             satisfied.append("Android APK deep analysis manifest")
             if isinstance(apk_deep_manifest.get("source_viewer_locator"), dict):
                 satisfied.append("Android APK deep analysis source locator")
+        if apk_validation_plan:
+            satisfied.append("Android APK report-grade validation plan")
+            if int(apk_validation_plan.get("ready_slot_count") or 0) >= 6:
+                satisfied.append("Android APK validation ready slots")
         if trusted_diff.get("status") == "pass":
             satisfied.append("trusted APK/tool analysis diff pass")
     return [build_accuracy_gate(number, satisfied_checks=satisfied, evidence_refs=evidence_refs)]

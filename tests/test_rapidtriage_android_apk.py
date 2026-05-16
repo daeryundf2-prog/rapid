@@ -92,6 +92,8 @@ class RapidTriageAndroidApkTests(unittest.TestCase):
             self.assertIn("Android source locator", apk_gate["satisfied_checks"])
             self.assertIn("Android APK deep analysis manifest", apk_gate["satisfied_checks"])
             self.assertIn("Android APK deep analysis source locator", apk_gate["satisfied_checks"])
+            self.assertIn("Android APK report-grade validation plan", apk_gate["satisfied_checks"])
+            self.assertIn("Android APK validation ready slots", apk_gate["satisfied_checks"])
             android_manifest = details["android_parser_manifest"]
             self.assertEqual(android_manifest["manifest_version"], "android-backup-app-data-parser-manifest-v1")
             self.assertEqual(android_manifest["item_number"], 54)
@@ -121,6 +123,46 @@ class RapidTriageAndroidApkTests(unittest.TestCase):
             self.assertFalse(apk_deep_manifest["capability_statement"]["signature_chain_validation"])
             self.assertFalse(apk_deep_manifest["validation"]["commercial_grade"])
             self.assertIn("trusted-aapt-apkanalyzer-mobsf-diff-required", apk_deep_manifest["commercial_blockers"])
+            apk_validation_plan = details["android_apk_report_grade_validation_plan"]
+            self.assertEqual(
+                apk_validation_plan["profile_version"],
+                "android-apk-report-grade-validation-plan-v1",
+            )
+            self.assertEqual(apk_validation_plan["item_number"], 30)
+            self.assertEqual(apk_validation_plan["gap_id"], "#30")
+            self.assertEqual(apk_validation_plan["status"], "report-validation-blocked")
+            self.assertFalse(apk_validation_plan["commercial_grade"])
+            self.assertEqual(len(apk_validation_plan["manifest_sha256"]), 64)
+            self.assertEqual(
+                details["android_apk_report_grade_validation_plan_hash"],
+                apk_validation_plan["manifest_sha256"],
+            )
+            self.assertEqual(
+                {command["id"] for command in apk_validation_plan["validation_commands"]},
+                {
+                    "source-apk-manifest",
+                    "android-apk-inventory-import",
+                    "trusted-apk-tool-diff",
+                    "apk-behavior-known-answer-run",
+                },
+            )
+            apk_plan_slots = {slot["id"]: slot for slot in apk_validation_plan["evidence_slots"]}
+            self.assertEqual(apk_plan_slots["source-apk-integrity"]["status"], "complete")
+            self.assertEqual(apk_plan_slots["zip-entry-inventory"]["status"], "complete")
+            self.assertEqual(apk_plan_slots["manifest-package-inventory"]["status"], "complete")
+            self.assertEqual(apk_plan_slots["permission-component-inventory"]["status"], "complete")
+            self.assertEqual(apk_plan_slots["dex-native-pivot-boundary"]["status"], "complete")
+            self.assertEqual(apk_plan_slots["signing-entry-inventory"]["status"], "complete")
+            self.assertEqual(apk_plan_slots["source-viewer-locator"]["status"], "complete")
+            self.assertEqual(apk_plan_slots["trusted-apk-tool-diff"]["status"], "pending-cross-tool-validate")
+            self.assertTrue(apk_plan_slots["binary-android-manifest-decode"]["blocking"])
+            self.assertTrue(apk_plan_slots["signature-chain-and-lineage-validation"]["blocking"])
+            self.assertEqual(apk_validation_plan["ready_slot_count"], 7)
+            self.assertEqual(apk_validation_plan["blocking_slot_count"], 5)
+            self.assertIn(
+                "trusted-aapt-apkanalyzer-mobsf-diff-required",
+                apk_validation_plan["commercial_grade_blockers"],
+            )
             apk_review = details["android_analyst_review_profile"]
             self.assertEqual(apk_review["profile_version"], "android-analyst-review-profile-v1")
             self.assertEqual(apk_review["gap_ids"], ["#30"])
@@ -145,6 +187,18 @@ class RapidTriageAndroidApkTests(unittest.TestCase):
                 apk_uplift["large_data_controls"]["android_apk_deep_analysis_manifest_hash"],
                 apk_deep_manifest["manifest_sha256"],
             )
+            self.assertEqual(
+                apk_uplift["large_data_controls"]["android_apk_report_grade_validation_plan_hash"],
+                apk_validation_plan["manifest_sha256"],
+            )
+            self.assertEqual(
+                apk_uplift["large_data_controls"]["android_apk_report_grade_validation_ready_slot_count"],
+                7,
+            )
+            self.assertEqual(
+                apk_uplift["large_data_controls"]["android_apk_report_grade_validation_blocking_slot_count"],
+                5,
+            )
             self.assertTrue(apk_uplift["large_data_controls"]["android_apk_deep_analysis_source_locator_present"])
             self.assertTrue(apk_uplift["large_data_controls"]["android_source_locator_present"])
             apk_profiles = {profile["item_number"]: profile for profile in apk_uplift["functional_priority_profiles"]}
@@ -153,8 +207,16 @@ class RapidTriageAndroidApkTests(unittest.TestCase):
                 apk_profiles[54]["implemented_controls"]["android_apk_deep_analysis_manifest_hash"],
                 apk_deep_manifest["manifest_sha256"],
             )
+            self.assertEqual(
+                apk_profiles[54]["implemented_controls"]["android_apk_report_grade_validation_plan_hash"],
+                apk_validation_plan["manifest_sha256"],
+            )
             self.assertIn(
                 "android-apk-deep-analysis-manifest-emitted",
+                apk_profiles[54]["passed_validation_check_ids"],
+            )
+            self.assertIn(
+                "android-apk-report-grade-validation-plan-emitted",
                 apk_profiles[54]["passed_validation_check_ids"],
             )
             self.assertEqual(

@@ -73,6 +73,7 @@
       "title": "Android app package/data parser",
       "assertions": [
         "APK and app-data rows preserve manifest/permission/component normalization, certificate/signature limitation evidence, bounded DEX/native pivots, secret-handling warnings, android_analyst_review_profile, #30 core_accuracy_gates, and malware/signature reportability blockers.",
+        "APK rows emit android-apk-report-grade-validation-plan-v1 with source APK hash, ZIP entry inventory, manifest/package context, permission/component normalization, DEX/native pivot boundary, signing-entry inventory, source locator, trusted APK tool diff, binary-manifest validation, signature-chain/lineage validation, malware-behavior known-answer corpus, and independent review evidence slots.",
         "build_android_trusted_diff compares APK package/manifest/permission/DEX/native summary rows against aapt/apkanalyzer/MobSF-style output before satisfying the #30 trusted diff gate."
       ],
       "blockers_kept": [
