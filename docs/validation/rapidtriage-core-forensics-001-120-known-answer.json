@@ -725,7 +725,8 @@
       ],
       "expected": {
         "required_assertions": [
-          "vendor export rows preserve source tool/profile hints, source row IDs, hashes, duplicate/deleted warnings, schema compatibility blockers, and #26 core_accuracy_gates"
+          "vendor export rows preserve source tool/profile hints, source row IDs, hashes, duplicate/deleted warnings, schema compatibility blockers, and #26 core_accuracy_gates",
+          "vendor export source rows emit mobile-vendor-export-report-grade-validation-plan-v1 with report-required ready/blocking slots and rerunnable manifest/import/trusted-diff command templates"
         ]
       },
       "notes": "Internal fixture pass; vendor-version schema corpora and original acquisition hash logs remain commercial-grade evidence.",

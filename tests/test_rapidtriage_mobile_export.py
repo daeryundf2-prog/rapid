@@ -204,6 +204,44 @@ class RapidTriageMobileExportTests(unittest.TestCase):
             self.assertTrue(message_mapper["observed"])
             self.assertGreaterEqual(message_mapper["normalized_row_count"], 1)
             self.assertIn("trusted-vendor-mobile-export-diff-required", mapper_manifest["commercial_blockers"])
+            validation_plan = source_record["details"]["mobile_vendor_export_validation_plan"]
+            self.assertEqual(
+                validation_plan["profile_version"],
+                "mobile-vendor-export-report-grade-validation-plan-v1",
+            )
+            self.assertEqual(validation_plan["item_number"], 26)
+            self.assertEqual(validation_plan["gap_id"], "#26")
+            self.assertEqual(validation_plan["source_tool"], "cellebrite")
+            self.assertEqual(validation_plan["source_format"], "csv")
+            self.assertEqual(len(validation_plan["manifest_sha256"]), 64)
+            self.assertEqual(
+                source_record["details"]["mobile_vendor_export_validation_plan_hash"],
+                validation_plan["manifest_sha256"],
+            )
+            self.assertEqual(validation_plan["status"], "report-validation-blocked")
+            command_ids = {command["id"] for command in validation_plan["validation_commands"]}
+            self.assertEqual(
+                command_ids,
+                {
+                    "source-export-manifest",
+                    "mobile-export-import",
+                    "vendor-metadata-sidecar",
+                    "trusted-vendor-mobile-export-diff",
+                },
+            )
+            plan_slots = {slot["id"]: slot for slot in validation_plan["evidence_slots"]}
+            self.assertEqual(plan_slots["source-export-integrity"]["status"], "complete")
+            self.assertEqual(plan_slots["vendor-tool-family-detected"]["status"], "complete")
+            self.assertEqual(plan_slots["vendor-metadata-sidecar"]["status"], "complete")
+            self.assertEqual(plan_slots["vendor-tool-version-and-export-settings"]["status"], "complete")
+            self.assertEqual(plan_slots["original-acquisition-hash-linkage"]["status"], "complete")
+            self.assertEqual(plan_slots["schema-mapper-and-row-identity"]["status"], "complete")
+            self.assertEqual(plan_slots["trusted-vendor-mobile-export-diff"]["status"], "pending-cross-tool-validate")
+            self.assertIn("trusted-vendor-mobile-export-diff", validation_plan["blocking_slot_ids"])
+            self.assertIn(
+                "trusted-vendor-mobile-export-diff-required",
+                validation_plan["commercial_grade_blockers"],
+            )
             self.assertTrue(source_record["details"]["validation_checks"]["vendor_export_settings_verified"])
             self.assertTrue(source_record["details"]["validation_checks"]["original_acquisition_hash_verified"])
             self.assertTrue(source_record["details"]["validation_checks"]["schema_profile_emitted"])
@@ -211,6 +249,7 @@ class RapidTriageMobileExportTests(unittest.TestCase):
             self.assertIn("export schema/source profile", source_gate["satisfied_checks"])
             self.assertIn("vendor schema mapper manifest", source_gate["satisfied_checks"])
             self.assertIn("vendor schema mapper source locator", source_gate["satisfied_checks"])
+            self.assertIn("vendor export validation plan", source_gate["satisfied_checks"])
             self.assertTrue(source_record["details"]["commercial_uplift_evidence"]["large_data_controls"]["source_schema_profile_emitted"])
             self.assertTrue(source_record["details"]["commercial_uplift_evidence"]["large_data_controls"]["vendor_export_manifest_present"])
             self.assertEqual(
@@ -223,6 +262,24 @@ class RapidTriageMobileExportTests(unittest.TestCase):
                 source_record["details"]["commercial_uplift_evidence"]["large_data_controls"][
                     "mobile_vendor_schema_mapper_source_locator_present"
                 ]
+            )
+            self.assertEqual(
+                source_record["details"]["commercial_uplift_evidence"]["large_data_controls"][
+                    "mobile_vendor_export_validation_plan_hash"
+                ],
+                validation_plan["manifest_sha256"],
+            )
+            self.assertEqual(
+                source_record["details"]["commercial_uplift_evidence"]["large_data_controls"][
+                    "mobile_vendor_export_validation_ready_slot_count"
+                ],
+                6,
+            )
+            self.assertEqual(
+                source_record["details"]["commercial_uplift_evidence"]["large_data_controls"][
+                    "mobile_vendor_export_validation_blocking_slot_count"
+                ],
+                1,
             )
             source_functional_profile = source_record["details"]["commercial_uplift_evidence"][
                 "functional_priority_profiles"

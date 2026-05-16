@@ -6,6 +6,7 @@ import datetime as dt
 import hashlib
 import json
 import plistlib
+import shlex
 import sqlite3
 from pathlib import Path
 from typing import Iterable, Mapping, Sequence
@@ -72,6 +73,13 @@ MOBILE_TRUSTED_DIFF_BLOCKERS = {
     27: "ios-backup-manifest-trusted-diff-required",
     28: "ios-keychain-inventory-trusted-diff-required",
 }
+MOBILE_VENDOR_EXPORT_REPORT_GRADE_VALIDATION_PLAN_VERSION = "mobile-vendor-export-report-grade-validation-plan-v1"
+MOBILE_VENDOR_EXPORT_REPORT_GRADE_BLOCKERS = [
+    "trusted-vendor-mobile-export-diff-required",
+    "per-vendor-version-schema-fixtures-required",
+    "deleted-record-semantics-known-answer-required",
+    "original-acquisition-hash-and-export-settings-independent-review-required",
+]
 IOS_QC_PREP_ITEM_NUMBER = 46
 IOS_QC_PREP_GOAL = (
     "Deepen iOS backup parser for Manifest.db, domains, app DB mapping, SMS, media, and encrypted-backup lawful key workflow."
@@ -679,6 +687,17 @@ def collect_mobile_export(path: Path) -> Iterable[ArtifactRecord]:
             source_profile=source_profile,
             vendor_manifest_profile=vendor_manifest_profile,
         )
+        validation_plan = build_mobile_vendor_export_report_grade_validation_plan(
+            path=path,
+            source_format=source_format,
+            source_tool=source_tool,
+            source_hashes=source_hashes,
+            rows=rows,
+            detected_type_counts=detected_type_counts,
+            source_profile=source_profile,
+            vendor_manifest_profile=vendor_manifest_profile,
+            mapper_manifest=mapper_manifest,
+        )
         yield build_record(
             path,
             artifact_type="mobile-export-source",
@@ -697,6 +716,8 @@ def collect_mobile_export(path: Path) -> Iterable[ArtifactRecord]:
                 "mobile_export_source_profile": source_profile,
                 "mobile_vendor_schema_mapper_manifest": mapper_manifest,
                 "mobile_vendor_schema_mapper_manifest_hash": mapper_manifest["manifest_sha256"],
+                "mobile_vendor_export_validation_plan": validation_plan,
+                "mobile_vendor_export_validation_plan_hash": validation_plan["manifest_sha256"],
                 "validation_checks": source_validation_checks(
                     source_format,
                     source_tool,
@@ -1087,6 +1108,248 @@ def build_mobile_vendor_schema_mapper_manifest(
         {key: value for key, value in manifest.items() if key != "manifest_sha256"}
     )
     return manifest
+
+
+def build_mobile_vendor_export_report_grade_validation_plan(
+    *,
+    path: Path,
+    source_format: str,
+    source_tool: str,
+    source_hashes: Mapping[str, str],
+    rows: Sequence[Mapping[str, object]],
+    detected_type_counts: Mapping[str, int],
+    source_profile: Mapping[str, object],
+    vendor_manifest_profile: Mapping[str, object],
+    mapper_manifest: Mapping[str, object],
+) -> dict[str, object]:
+    registry = VENDOR_SCHEMA_REGISTRY.get(source_tool, {})
+    output_root = path.parent / f"{path.stem}-rapidtriage-validation"
+    vendor_version = optional_text(vendor_manifest_profile.get("vendor_tool_version"))
+    source_hash_matches = bool(vendor_manifest_profile.get("source_hash_matches_manifest"))
+    original_hash_present = bool(vendor_manifest_profile.get("original_acquisition_hash_present"))
+    settings_present = bool(vendor_manifest_profile.get("export_settings_present"))
+    manifest_linked = bool(vendor_manifest_profile.get("manifest_present"))
+    known_vendor = bool(registry)
+    emitted_count = int(source_profile.get("emitted_row_count") or sum(detected_type_counts.values()))
+    input_count = int(source_profile.get("input_row_count") or len(rows))
+    metadata_sidecar = discover_vendor_export_manifest(path) or path.with_suffix(path.suffix + ".export-metadata.json")
+    validation_commands = [
+        _mobile_vendor_export_validation_command(
+            "source-export-manifest",
+            ["rapidtriage", "manifest", str(path.parent), "--output", str(output_root / "source-export-manifest.json")],
+            purpose="Hash the vendor export folder and preserve the imported source file inventory.",
+            expected_output=str(output_root / "source-export-manifest.json"),
+            status="ready",
+        ),
+        _mobile_vendor_export_validation_command(
+            "mobile-export-import",
+            [
+                "rapidtriage",
+                "artifacts",
+                str(path.parent),
+                "--kind",
+                "mobile-export",
+                "--output",
+                str(output_root / "rapidtriage-mobile-export.json"),
+            ],
+            purpose="Regenerate RapidTriage mobile export rows from the vendor export folder.",
+            expected_output=str(output_root / "rapidtriage-mobile-export.json"),
+            status="ready",
+        ),
+        _mobile_vendor_export_validation_command(
+            "vendor-metadata-sidecar",
+            [
+                "<analyst>",
+                "create-or-review-export-metadata",
+                str(metadata_sidecar),
+            ],
+            purpose="Attach vendor tool/version, export settings, source SHA-256, and original acquisition hash linkage.",
+            expected_output=str(metadata_sidecar),
+            trusted_tool=True,
+            status="complete" if manifest_linked and source_hash_matches and vendor_version and settings_present else "operator-action-required",
+        ),
+        _mobile_vendor_export_validation_command(
+            "trusted-vendor-mobile-export-diff",
+            [
+                "rapidtriage",
+                "cross-tool-validate",
+                "--rapid-output",
+                str(output_root / "rapidtriage-mobile-export.json"),
+                "--reference-output",
+                f"{source_tool}=<trusted-vendor-export.csv>",
+                "--backlog-item",
+                "26",
+                "--source-evidence",
+                str(path),
+                "--tool-version",
+                f"{source_tool}={vendor_version or '<vendor-version>'}",
+                "--tool-command",
+                f"{source_tool}=<trusted-tool-export-command>",
+                "--corpus-scope",
+                "<vendor-version-and-deleted-record-known-answer-scope>",
+                "--output",
+                str(output_root / "mobile-vendor-trusted-diff.json"),
+                "--json",
+            ],
+            purpose="Compare normalized RapidTriage rows against trusted Cellebrite/XRY/GrayKey/AXIOM export rows.",
+            expected_output=str(output_root / "mobile-vendor-trusted-diff.json"),
+            trusted_tool=True,
+            status="pending-cross-tool-validate",
+        ),
+    ]
+    evidence_slots = [
+        {
+            "id": "source-export-integrity",
+            "label": "Imported vendor export source SHA-256",
+            "status": "complete" if source_hashes.get("sha256") else "pending-source-hash",
+            "required_before_report": True,
+            "sha256": source_hashes.get("sha256", ""),
+        },
+        {
+            "id": "vendor-tool-family-detected",
+            "label": "Cellebrite/XRY/GrayKey/AXIOM family detected",
+            "status": "complete" if known_vendor else "review-required",
+            "required_before_report": True,
+            "source_tool": source_tool,
+            "vendor_family": registry.get("family", source_tool),
+        },
+        {
+            "id": "vendor-metadata-sidecar",
+            "label": "Vendor export metadata sidecar linked to source hash",
+            "status": "complete" if manifest_linked and source_hash_matches else ("review-required" if manifest_linked else "missing"),
+            "required_before_report": True,
+            "manifest_sha256": vendor_manifest_profile.get("manifest_sha256", ""),
+            "source_hash_matches_manifest": source_hash_matches,
+            "validation_status": vendor_manifest_profile.get("validation_status", ""),
+        },
+        {
+            "id": "vendor-tool-version-and-export-settings",
+            "label": "Vendor tool version and export settings recorded",
+            "status": "complete" if vendor_version and settings_present else "pending-vendor-version-or-settings",
+            "required_before_report": True,
+            "vendor_tool_version": vendor_version,
+            "export_settings_present": settings_present,
+        },
+        {
+            "id": "original-acquisition-hash-linkage",
+            "label": "Original device/acquisition hash linkage recorded",
+            "status": "complete" if original_hash_present else "pending-original-acquisition-hash",
+            "required_before_report": True,
+            "original_acquisition_hash_present": original_hash_present,
+        },
+        {
+            "id": "schema-mapper-and-row-identity",
+            "label": "Schema mapper, source row identity, and row caps recorded",
+            "status": "complete" if mapper_manifest.get("manifest_sha256") and emitted_count > 0 else "pending-schema-mapper",
+            "required_before_report": True,
+            "mapper_manifest_sha256": mapper_manifest.get("manifest_sha256", ""),
+            "input_row_count": input_count,
+            "emitted_row_count": emitted_count,
+            "detected_type_counts": dict(detected_type_counts),
+            "max_rows_per_source": MAX_ROWS_PER_SOURCE,
+        },
+        {
+            "id": "trusted-vendor-mobile-export-diff",
+            "label": "Independent trusted vendor export row diff",
+            "status": "pending-cross-tool-validate",
+            "required_before_report": True,
+            "required_fields": [
+                "source_record_id",
+                "timestamp",
+                "sender",
+                "recipient",
+                "message_text_sha256",
+                "contact",
+                "call",
+                "media",
+                "browser",
+            ],
+        },
+        {
+            "id": "per-vendor-version-schema-fixtures",
+            "label": "Per-vendor/version schema known-answer fixtures",
+            "status": "external-corpus-required",
+            "required_before_commercial_grade": True,
+            "minimum_cases": ["cellebrite", "xry", "graykey", "axiom"],
+        },
+        {
+            "id": "deleted-record-semantics-corpus",
+            "label": "Deleted-record and retention-semantics known-answer corpus",
+            "status": "external-corpus-required",
+            "required_before_commercial_grade": True,
+            "minimum_cases": ["live-row", "deleted-row", "edited-row", "attachment-or-media-row"],
+        },
+        {
+            "id": "independent-review-signoff",
+            "label": "Independent analyst review of original acquisition/export procedure",
+            "status": "external-review-required",
+            "required_before_commercial_grade": True,
+            "required_materials": ["tool version log", "export command/log", "original acquisition hash", "trusted diff"],
+        },
+    ]
+    ready_slots = [slot["id"] for slot in evidence_slots if str(slot.get("status", "")).startswith("complete")]
+    blocker_slots = [
+        slot["id"]
+        for slot in evidence_slots
+        if slot.get("required_before_report") and not str(slot.get("status", "")).startswith("complete")
+    ]
+    payload: dict[str, object] = {
+        "profile_version": MOBILE_VENDOR_EXPORT_REPORT_GRADE_VALIDATION_PLAN_VERSION,
+        "item_number": 26,
+        "gap_id": "#26",
+        "source_path": str(path.resolve()),
+        "source_tool": source_tool,
+        "source_format": source_format,
+        "vendor_family": registry.get("family", source_tool),
+        "output_root": str(output_root),
+        "status": "report-validation-blocked" if blocker_slots else "ready-for-report-review",
+        "commercial_grade_ready": False,
+        "source_hashes": dict(source_hashes),
+        "source_profile": dict(source_profile),
+        "vendor_export_manifest_profile": dict(vendor_manifest_profile),
+        "mobile_vendor_schema_mapper_manifest_hash": optional_text(mapper_manifest.get("manifest_sha256")),
+        "validation_commands": validation_commands,
+        "evidence_slots": evidence_slots,
+        "ready_slot_ids": ready_slots,
+        "blocking_slot_ids": blocker_slots,
+        "report_claim_boundary": (
+            "This plan can make one vendor mobile export reviewable when all report-required slots pass; "
+            "it is still not proof of complete device acquisition, deleted-record semantics, encrypted store coverage, "
+            "or vendor-version parser parity without trusted diffs and external known-answer corpora."
+        ),
+        "commercial_grade_blockers": list(MOBILE_VENDOR_EXPORT_REPORT_GRADE_BLOCKERS),
+        "operator_next_steps": [
+            "Preserve the original acquisition hash and vendor export transcript before importing rows.",
+            "Attach or review the export metadata sidecar and confirm the source export SHA-256 matches.",
+            "Regenerate RapidTriage mobile export rows, then run cross-tool validation against the trusted vendor export.",
+            "Attach vendor-version schema fixtures and deleted-record known-answer evidence before using commercial-grade wording.",
+        ],
+    }
+    payload["manifest_sha256"] = stable_mobile_sha256(
+        {key: value for key, value in payload.items() if key != "manifest_sha256"}
+    )
+    return payload
+
+
+def _mobile_vendor_export_validation_command(
+    command_id: str,
+    argv: Sequence[object],
+    *,
+    purpose: str,
+    expected_output: str,
+    trusted_tool: bool = False,
+    status: str = "pending-run",
+) -> dict[str, object]:
+    clean_argv = [str(item) for item in argv if str(item) != ""]
+    return {
+        "id": command_id,
+        "argv": clean_argv,
+        "command": shlex.join(clean_argv),
+        "purpose": purpose,
+        "expected_output": expected_output,
+        "status": status,
+        "trusted_tool_required": trusted_tool,
+    }
 
 
 def build_record(
@@ -5986,9 +6249,9 @@ def mobile_functional_expansion_profiles(
         if isinstance(details.get("mobile_vendor_schema_mapper_manifest"), Mapping)
         else {}
     )
-    vendor_schema_mapper_manifest = (
-        details.get("mobile_vendor_schema_mapper_manifest")
-        if isinstance(details.get("mobile_vendor_schema_mapper_manifest"), Mapping)
+    vendor_validation_plan = (
+        details.get("mobile_vendor_export_validation_plan")
+        if isinstance(details.get("mobile_vendor_export_validation_plan"), Mapping)
         else {}
     )
     ios_parser_manifest = (
@@ -6237,6 +6500,11 @@ def mobile_commercial_uplift_evidence(
         if isinstance(details.get("mobile_vendor_schema_mapper_manifest"), Mapping)
         else {}
     )
+    vendor_validation_plan = (
+        details.get("mobile_vendor_export_validation_plan")
+        if isinstance(details.get("mobile_vendor_export_validation_plan"), Mapping)
+        else {}
+    )
     ios_parser_manifest = (
         details.get("ios_backup_parser_manifest")
         if isinstance(details.get("ios_backup_parser_manifest"), Mapping)
@@ -6308,6 +6576,19 @@ def mobile_commercial_uplift_evidence(
             "mobile_vendor_schema_mapper_source_locator_present": isinstance(
                 vendor_schema_mapper_manifest.get("source_viewer_locator"), Mapping
             ),
+            "mobile_vendor_export_validation_plan_hash": optional_text(
+                vendor_validation_plan.get("manifest_sha256")
+            ),
+            "mobile_vendor_export_validation_ready_slot_count": len(
+                vendor_validation_plan.get("ready_slot_ids") or []
+            )
+            if isinstance(vendor_validation_plan.get("ready_slot_ids"), list)
+            else 0,
+            "mobile_vendor_export_validation_blocking_slot_count": len(
+                vendor_validation_plan.get("blocking_slot_ids") or []
+            )
+            if isinstance(vendor_validation_plan.get("blocking_slot_ids"), list)
+            else 0,
             "ios_backup_parser_manifest_hash": optional_text(ios_parser_manifest.get("manifest_sha256")),
             "ios_backup_source_locator_present": isinstance(
                 ios_parser_manifest.get("source_viewer_locator"), Mapping
@@ -6443,6 +6724,11 @@ def mobile_core_accuracy_gates(
         mapper_hash = optional_text(vendor_schema_mapper.get("manifest_sha256"))
         if mapper_hash:
             evidence_refs.append(f"mobile_vendor_schema_mapper_manifest_sha256:{mapper_hash}")
+    vendor_validation_plan = details.get("mobile_vendor_export_validation_plan")
+    if isinstance(vendor_validation_plan, Mapping):
+        plan_hash = optional_text(vendor_validation_plan.get("manifest_sha256"))
+        if plan_hash:
+            evidence_refs.append(f"mobile_vendor_export_validation_plan_sha256:{plan_hash}")
     record_id = source_record_id(details, source_index)
     if record_id:
         evidence_refs.append(f"source_record_id:{record_id}")
@@ -6488,6 +6774,10 @@ def mobile_core_accuracy_gates(
             satisfied.append("vendor schema mapper manifest")
             if isinstance(vendor_schema_mapper.get("source_viewer_locator"), Mapping):
                 satisfied.append("vendor schema mapper source locator")
+        if isinstance(vendor_validation_plan, Mapping):
+            satisfied.append("vendor export validation plan")
+            if vendor_validation_plan.get("ready_slot_ids"):
+                satisfied.append("vendor export validation ready slots")
         if trusted_diff.get("status") == "pass":
             satisfied.append("trusted vendor mobile export diff pass")
         gates.append(build_accuracy_gate(26, satisfied_checks=satisfied, evidence_refs=evidence_refs))

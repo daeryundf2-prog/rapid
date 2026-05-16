@@ -17,6 +17,7 @@
       "expected": {
         "required_assertions": [
           "vendor export rows preserve source tool/profile hints, source row IDs, hashes, duplicate/deleted warnings, schema compatibility blockers, and #26 core_accuracy_gates",
+          "vendor export source rows emit mobile-vendor-export-report-grade-validation-plan-v1 with report-required ready/blocking slots and rerunnable manifest/import/trusted-diff command templates",
           "vendor mobile export trusted diff helper requires recognized vendor/tool row equality before satisfying the #26 trusted vendor mobile export diff pass gate",
           "vendor export reportability decisions block source-complete claims until export settings, acquisition hashes, schemas, and deleted-row semantics are validated"
         ]

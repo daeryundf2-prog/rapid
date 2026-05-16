@@ -17,6 +17,7 @@
       "title": "Cellebrite/XRY/GrayKey/AXIOM export deep import",
       "assertions": [
         "vendor CSV/JSON rows preserve source tool/profile hints, row IDs, source hashes, deleted/duplicate semantics warnings, schema compatibility blockers, mobile_analyst_review_profile, #26 core_accuracy_gates, and source-complete reportability blockers.",
+        "source summary rows emit mobile-vendor-export-report-grade-validation-plan-v1 with source export, sidecar, tool version/settings, original acquisition hash, schema mapper, trusted diff, vendor-version fixture, deleted-record corpus, and independent signoff evidence slots.",
         "build_mobile_trusted_diff compares RapidTriage vendor export rows against Cellebrite/XRY/GrayKey/AXIOM-style row output and only clears the #26 trusted diff gate on recognized-tool equality."
       ],
       "blockers_kept": [
