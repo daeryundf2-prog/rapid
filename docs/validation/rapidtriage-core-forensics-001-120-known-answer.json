@@ -926,7 +926,8 @@
       ],
       "expected": {
         "required_assertions": [
-          "Extended messenger rows preserve service/profile, message/media/reaction normalization, schema registry, limitations, and #35 core_accuracy_gates"
+          "Extended messenger rows preserve service/profile, message/media/reaction normalization, schema registry, limitations, and #35 core_accuracy_gates",
+          "Extended messenger rows emit extended-messenger-report-grade-validation-plan-v1 with source export/native row integrity, service row citation, message/media/reaction normalization, database schema inventory boundary, service source-track classification, hash-only text policy, source viewer locator, trusted extended messenger export/native DB diff, service schema-version corpus, encrypted/ephemeral authority workflow, media locality validation, reaction/read/edit/delete semantics, service coverage matrix, and independent review evidence slots"
         ]
       },
       "notes": "Internal fixture pass; service-specific encrypted stores and ephemeral/deleted evidence need known-answer corpora.",

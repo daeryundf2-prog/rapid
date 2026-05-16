@@ -1142,6 +1142,8 @@ class RapidTriageMobileExportTests(unittest.TestCase):
             self.assertIn("extended messenger parser manifest", line_gate["satisfied_checks"])
             self.assertIn("extended messenger source row citation", line_gate["satisfied_checks"])
             self.assertIn("extended messenger review viewer controls", line_gate["satisfied_checks"])
+            self.assertIn("extended messenger report-grade validation plan", line_gate["satisfied_checks"])
+            self.assertIn("extended messenger validation ready slots", line_gate["satisfied_checks"])
             self.assertIn("schema/app version registry", line_gate["satisfied_checks"])
             line_profile = line["details"]["extended_messenger_message_review_profile"]
             self.assertEqual(line_profile["service"], "LINE")
@@ -1175,6 +1177,55 @@ class RapidTriageMobileExportTests(unittest.TestCase):
                 line["details"]["extended_messenger_parser_manifest_hash"],
                 line_manifest["manifest_sha256"],
             )
+            line_validation_plan = line["details"]["extended_messenger_report_grade_validation_plan"]
+            self.assertEqual(
+                line_validation_plan["profile_version"],
+                "extended-messenger-report-grade-validation-plan-v1",
+            )
+            self.assertEqual(line_validation_plan["item_number"], 35)
+            self.assertEqual(line_validation_plan["gap_id"], "#35")
+            self.assertEqual(line_validation_plan["qc_prep_item_number"], 41)
+            self.assertEqual(line_validation_plan["service"], "LINE")
+            self.assertFalse(line_validation_plan["commercial_grade"])
+            self.assertEqual(len(line_validation_plan["manifest_sha256"]), 64)
+            self.assertEqual(
+                line["details"]["extended_messenger_report_grade_validation_plan_hash"],
+                line_validation_plan["manifest_sha256"],
+            )
+            self.assertEqual(
+                {command["id"] for command in line_validation_plan["validation_commands"]},
+                {
+                    "source-extended-messenger-manifest",
+                    "extended-messenger-import",
+                    "trusted-extended-messenger-diff",
+                    "extended-messenger-authority-review",
+                    "extended-messenger-known-answer-run",
+                },
+            )
+            line_validation_slots = {slot["id"]: slot for slot in line_validation_plan["evidence_slots"]}
+            self.assertEqual(line_validation_slots["source-export-native-row-integrity"]["status"], "complete")
+            self.assertEqual(line_validation_slots["service-profile-row-citation"]["status"], "complete")
+            self.assertEqual(line_validation_slots["message-media-reaction-normalization"]["status"], "complete")
+            self.assertEqual(
+                line_validation_slots["extended-database-schema-inventory-boundary"]["status"],
+                "not-applicable",
+            )
+            self.assertEqual(line_validation_slots["service-source-track-classification"]["status"], "complete")
+            self.assertEqual(line_validation_slots["hash-only-text-policy"]["status"], "complete")
+            self.assertEqual(line_validation_slots["source-viewer-locator"]["status"], "complete")
+            self.assertEqual(
+                line_validation_slots["trusted-extended-messenger-export-native-db-diff"]["status"],
+                "pending-cross-tool-validate",
+            )
+            self.assertTrue(line_validation_slots["service-schema-version-known-answer"]["blocking"])
+            self.assertTrue(line_validation_slots["media-locality-validation"]["blocking"])
+            self.assertTrue(line_validation_slots["reaction-read-edit-delete-semantics"]["blocking"])
+            self.assertEqual(line_validation_plan["ready_slot_count"], 6)
+            self.assertEqual(line_validation_plan["blocking_slot_count"], 7)
+            self.assertIn(
+                "service-schema-version-known-answer-required",
+                line_validation_plan["commercial_grade_blockers"],
+            )
             line_uplift = line["details"]["chat_app_commercial_uplift_evidence"]
             self.assertEqual(line_uplift["item_numbers"], [35])
             self.assertEqual(line_uplift["qc_prep_item_numbers"], [41])
@@ -1194,10 +1245,26 @@ class RapidTriageMobileExportTests(unittest.TestCase):
                 line_uplift["large_data_controls"]["extended_messenger_parser_manifest_hash"],
                 line_manifest["manifest_sha256"],
             )
+            self.assertEqual(
+                line_uplift["large_data_controls"]["extended_messenger_report_grade_validation_plan_hash"],
+                line_validation_plan["manifest_sha256"],
+            )
+            self.assertEqual(
+                line_uplift["large_data_controls"]["extended_messenger_report_grade_validation_ready_slot_count"],
+                6,
+            )
+            self.assertEqual(
+                line_uplift["large_data_controls"]["extended_messenger_report_grade_validation_blocking_slot_count"],
+                7,
+            )
             self.assertTrue(line_uplift["large_data_controls"]["extended_messenger_source_row_citation_present"])
             self.assertTrue(line_uplift["large_data_controls"]["extended_messenger_review_viewer_controls_present"])
             self.assertIn(
                 "extended-messenger-parser-manifest-emitted",
+                line_uplift["functional_priority_profile"]["passed_validation_check_ids"],
+            )
+            self.assertIn(
+                "extended-messenger-report-grade-validation-plan-emitted",
                 line_uplift["functional_priority_profile"]["passed_validation_check_ids"],
             )
             self.assertIn(
@@ -1209,6 +1276,12 @@ class RapidTriageMobileExportTests(unittest.TestCase):
                     "extended_messenger_parser_manifest_hash"
                 ],
                 line_manifest["manifest_sha256"],
+            )
+            self.assertEqual(
+                line_uplift["functional_priority_profile"]["implemented_controls"][
+                    "extended_messenger_report_grade_validation_plan_hash"
+                ],
+                line_validation_plan["manifest_sha256"],
             )
             self.assertTrue(
                 line_uplift["functional_priority_profile"]["implemented_controls"][
@@ -1227,6 +1300,12 @@ class RapidTriageMobileExportTests(unittest.TestCase):
                 self.assertEqual(manifest["gap_id"], "#35")
                 self.assertEqual(manifest["qc_prep_item_number"], 41)
                 self.assertEqual(manifest["manifest_sha256"], artifact["details"]["extended_messenger_parser_manifest_hash"])
+                validation_plan = artifact["details"]["extended_messenger_report_grade_validation_plan"]
+                self.assertEqual(validation_plan["service"], service)
+                self.assertEqual(
+                    validation_plan["manifest_sha256"],
+                    artifact["details"]["extended_messenger_report_grade_validation_plan_hash"],
+                )
 
             app = next(artifact for artifact in payload["artifacts"] if artifact["artifact_type"] == "mobile-app")
             self.assertEqual(app["details"]["source_tool"], "graykey")

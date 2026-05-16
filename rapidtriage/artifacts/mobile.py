@@ -547,6 +547,16 @@ SIGNAL_REPORT_GRADE_BLOCKERS = [
     "delivery-read-state-semantics-validation-required",
     "independent-signal-review-required",
 ]
+EXTENDED_MESSENGER_REPORT_GRADE_VALIDATION_PLAN_VERSION = "extended-messenger-report-grade-validation-plan-v1"
+EXTENDED_MESSENGER_REPORT_GRADE_BLOCKERS = [
+    "trusted-extended-messenger-export-native-db-diff-required",
+    "service-schema-version-known-answer-required",
+    "encrypted-ephemeral-store-authority-workflow-required",
+    "media-locality-validation-required",
+    "reaction-read-edit-delete-semantics-validation-required",
+    "service-coverage-matrix-required",
+    "independent-extended-messenger-review-required",
+]
 QC_PREP_CHAT_APP_ITEMS = {
     "KakaoTalk": 37,
     "WhatsApp": 38,
@@ -1564,6 +1574,23 @@ def build_record(
             detail_payload.setdefault(
                 "extended_messenger_parser_manifest_hash",
                 detail_payload["extended_messenger_parser_manifest"]["manifest_sha256"],
+            )
+            detail_payload.setdefault(
+                "extended_messenger_report_grade_validation_plan",
+                build_extended_messenger_report_grade_validation_plan(
+                    artifact_type=artifact_type,
+                    service=service,
+                    source_tool=source_tool,
+                    source_format=source_format,
+                    source_index=source_index,
+                    source_hashes=source_hashes,
+                    source_path=path,
+                    details=detail_payload,
+                ),
+            )
+            detail_payload.setdefault(
+                "extended_messenger_report_grade_validation_plan_hash",
+                detail_payload["extended_messenger_report_grade_validation_plan"]["manifest_sha256"],
             )
         detail_payload.setdefault(
             "messenger_export_framework_manifest",
@@ -4789,6 +4816,257 @@ def build_extended_messenger_parser_manifest(
         {key: value for key, value in manifest.items() if key != "manifest_sha256"}
     )
     return manifest
+
+
+def build_extended_messenger_report_grade_validation_plan(
+    *,
+    artifact_type: str,
+    service: str,
+    source_tool: str,
+    source_format: str,
+    source_index: int,
+    source_hashes: Mapping[str, str],
+    source_path: Path,
+    details: Mapping[str, object],
+) -> dict[str, object]:
+    parser_manifest = (
+        details.get("extended_messenger_parser_manifest")
+        if isinstance(details.get("extended_messenger_parser_manifest"), Mapping)
+        else {}
+    )
+    messenger_manifest = (
+        details.get("messenger_export_framework_manifest")
+        if isinstance(details.get("messenger_export_framework_manifest"), Mapping)
+        else {}
+    )
+    message_profile = (
+        details.get("extended_messenger_message_review_profile")
+        if isinstance(details.get("extended_messenger_message_review_profile"), Mapping)
+        else {}
+    )
+    database_profile = (
+        details.get("extended_messenger_database_review_profile")
+        if isinstance(details.get("extended_messenger_database_review_profile"), Mapping)
+        else {}
+    )
+    row_citation = (
+        parser_manifest.get("row_citation")
+        if isinstance(parser_manifest.get("row_citation"), Mapping)
+        else {}
+    )
+    source_locator = (
+        row_citation.get("source_viewer_locator")
+        if isinstance(row_citation.get("source_viewer_locator"), Mapping)
+        else {}
+    )
+    table_summaries = details.get("table_summaries") if isinstance(details.get("table_summaries"), list) else []
+    source_sha256 = optional_text(source_hashes.get("sha256"))
+    message_hash_present = bool(optional_text(details.get("message_text_sha256")))
+    media_or_reaction_present = bool(
+        optional_text(details.get("media_reference_sha256"))
+        or optional_text(details.get("reaction"))
+        or message_profile.get("attachment_metadata_present")
+        or message_profile.get("reaction_present")
+    )
+    service_pivot_present = bool(
+        service
+        or message_profile.get("service_attribution_present")
+        or message_profile.get("thread_or_channel_attribution_present")
+        or message_profile.get("account_or_actor_attribution_present")
+    )
+    database_inventory_present = bool(database_profile) or bool(table_summaries)
+    parser_track_present = bool(parser_manifest.get("parser_tracks"))
+    evidence_slots = [
+        {
+            "id": "source-export-native-row-integrity",
+            "label": "Source extended messenger export/native inventory row has hashable provenance",
+            "status": "complete" if source_sha256 else "missing-source-hash",
+            "blocking": not bool(source_sha256),
+            "evidence_refs": [
+                f"source_tool:{source_tool}",
+                f"source_format:{source_format}",
+                f"source_index:{source_index}",
+                f"source_sha256:{source_sha256}",
+            ],
+        },
+        {
+            "id": "service-profile-row-citation",
+            "label": "Extended messenger service profile and source row citation are fixed",
+            "status": "complete" if row_citation.get("row_hash") else "missing-row-citation",
+            "blocking": not bool(row_citation.get("row_hash")),
+            "evidence_refs": [
+                f"extended_messenger_parser_manifest:{parser_manifest.get('manifest_sha256', '')}",
+                f"row_hash:{row_citation.get('row_hash', '')}",
+            ],
+        },
+        {
+            "id": "message-media-reaction-normalization",
+            "label": "Message, media, reaction, actor, and thread pivots are normalized for review",
+            "status": "complete"
+            if artifact_type == "mobile-message" and (message_hash_present or media_or_reaction_present or service_pivot_present)
+            else "not-applicable",
+            "blocking": artifact_type == "mobile-message"
+            and not (message_hash_present or media_or_reaction_present or service_pivot_present),
+            "evidence_refs": [
+                f"artifact_type:{artifact_type}",
+                f"message_text_sha256_present:{message_hash_present}",
+                f"media_or_reaction_present:{media_or_reaction_present}",
+                f"service_pivot_present:{service_pivot_present}",
+            ],
+        },
+        {
+            "id": "extended-database-schema-inventory-boundary",
+            "label": "Native or app database candidates are schema/row-count inventory until service validation exists",
+            "status": "complete" if artifact_type == "mobile-chat-database" and database_inventory_present else "not-applicable",
+            "blocking": False,
+            "evidence_refs": [
+                f"database_inventory_present:{database_inventory_present}",
+                f"table_summary_count:{len(table_summaries)}",
+            ],
+        },
+        {
+            "id": "service-source-track-classification",
+            "label": "Service-specific source track, native decode boundary, and state-validation track are recorded",
+            "status": "complete" if parser_track_present else "missing-parser-track",
+            "blocking": not parser_track_present,
+            "evidence_refs": [
+                f"service:{service or 'unknown'}",
+                f"parser_track_count:{len(parser_manifest.get('parser_tracks') or [])}",
+                f"source_track:{extended_messenger_source_track(service)}",
+            ],
+        },
+        {
+            "id": "hash-only-text-policy",
+            "label": "Message text is represented with hash/citation controls before report selection",
+            "status": "complete"
+            if parser_manifest.get("large_data_controls", {}).get("raw_text_hash_only_by_default")
+            else "missing-hash-only-policy",
+            "blocking": not bool(parser_manifest.get("large_data_controls", {}).get("raw_text_hash_only_by_default")),
+            "evidence_refs": [
+                f"raw_text_hash_only_by_default:{parser_manifest.get('large_data_controls', {}).get('raw_text_hash_only_by_default', False)}",
+                f"message_text_sha256_present:{message_hash_present}",
+            ],
+        },
+        {
+            "id": "source-viewer-locator",
+            "label": "GUI/report can pivot back to the extended messenger source row or database inventory",
+            "status": "complete" if source_locator else "missing-source-viewer-locator",
+            "blocking": not bool(source_locator),
+            "evidence_refs": [
+                f"viewer:{source_locator.get('viewer', '') if isinstance(source_locator, Mapping) else ''}",
+                f"messenger_manifest:{messenger_manifest.get('manifest_sha256', '')}",
+            ],
+        },
+        {
+            "id": "trusted-extended-messenger-export-native-db-diff",
+            "label": "RapidTriage rows are diffed against service export or trusted native parser output",
+            "status": "pending-cross-tool-validate",
+            "blocking": True,
+            "evidence_refs": ["command:rapidtriage cross-tool-validate --backlog-item 35"],
+        },
+        {
+            "id": "service-schema-version-known-answer",
+            "label": "Service, app version, export schema, and native DB schema semantics are known-answer validated",
+            "status": "external-corpus-required",
+            "blocking": True,
+            "evidence_refs": ["required:per-service schema-version fixtures for WeChat/LINE/Discord/Instagram/etc."],
+        },
+        {
+            "id": "encrypted-ephemeral-store-authority-workflow",
+            "label": "Encrypted or ephemeral stores are authority-gated and limitation-safe",
+            "status": "authority-workflow-required",
+            "blocking": True,
+            "evidence_refs": ["required:lawful authority workflow for encrypted/native stores and ephemeral content"],
+        },
+        {
+            "id": "media-locality-validation",
+            "label": "Media metadata is linked to recovered local bytes and hashes before attachment claims",
+            "status": "external-media-validation-required",
+            "blocking": True,
+            "evidence_refs": ["required:attachment byte, cache, CDN/export, and local path validation"],
+        },
+        {
+            "id": "reaction-read-edit-delete-semantics",
+            "label": "Reaction, read, edit, delete, vanish, and ephemeral semantics are validated per service",
+            "status": "external-corpus-required",
+            "blocking": True,
+            "evidence_refs": ["required:service-specific state semantics corpus"],
+        },
+        {
+            "id": "service-coverage-matrix",
+            "label": "Supported service coverage matrix records tested export/native variants and unsupported variants",
+            "status": "external-corpus-required",
+            "blocking": True,
+            "evidence_refs": ["required:WeChat/LINE/Discord/Instagram plus extended-service coverage matrix"],
+        },
+        {
+            "id": "independent-extended-messenger-review",
+            "label": "Independent reviewer signs off on service scope, schema versions, state semantics, media locality, and wording",
+            "status": "external-review-required",
+            "blocking": True,
+            "evidence_refs": ["required:independent extended messenger validation review"],
+        },
+    ]
+    ready_slot_ids = [
+        str(slot.get("id"))
+        for slot in evidence_slots
+        if str(slot.get("status", "")).startswith("complete")
+    ]
+    blocking_slot_ids = [str(slot.get("id")) for slot in evidence_slots if slot.get("blocking")]
+    plan: dict[str, object] = {
+        "profile_version": EXTENDED_MESSENGER_REPORT_GRADE_VALIDATION_PLAN_VERSION,
+        "item_number": 35,
+        "gap_id": "#35",
+        "batch_id": "commercial-uplift-031-035",
+        "qc_prep_item_number": 41,
+        "service": service or "unknown",
+        "artifact_type": artifact_type,
+        "source_tool": source_tool,
+        "source_format": source_format,
+        "source_index": source_index,
+        "source_path": str(source_path.resolve()),
+        "status": "report-validation-blocked",
+        "commercial_grade": False,
+        "artifact_goal": "Extended messenger service export/native schema, state, media, and coverage validation",
+        "validation_commands": [
+            {
+                "id": "source-extended-messenger-manifest",
+                "purpose": "Hash source export/native DB inventory and preserve service/source locator",
+                "command": "rapidtriage manifest <mobile-export> --json",
+            },
+            {
+                "id": "extended-messenger-import",
+                "purpose": "Recreate RapidTriage extended messenger normalized rows and database inventory",
+                "command": "rapidtriage artifacts <mobile-export> --kind mobile-export --output <case>/extended-messenger-export.json",
+            },
+            {
+                "id": "trusted-extended-messenger-diff",
+                "purpose": "Compare service rows with trusted export/native parser output",
+                "command": "rapidtriage cross-tool-validate --rapid-output <case>/extended-messenger-export.json --reference-output <service>=<trusted-service-output.json> --backlog-item 35 --json",
+            },
+            {
+                "id": "extended-messenger-authority-review",
+                "purpose": "Attach lawful authority and controlled-reveal evidence before encrypted/native-store claims",
+                "command": "rapidtriage forensic-validation-pack --case <case> --artifact extended-messenger-authority --json",
+            },
+            {
+                "id": "extended-messenger-known-answer-run",
+                "purpose": "Attach per-service schema, state, media, and coverage known-answer evidence",
+                "command": "rapidtriage commercial-readiness --validation-package <extended-messenger-known-answer.json> --limit 35 --json",
+            },
+        ],
+        "evidence_slots": evidence_slots,
+        "ready_slot_ids": ready_slot_ids,
+        "blocking_slot_ids": blocking_slot_ids,
+        "ready_slot_count": len(ready_slot_ids),
+        "blocking_slot_count": len(blocking_slot_ids),
+        "commercial_grade_blockers": list(EXTENDED_MESSENGER_REPORT_GRADE_BLOCKERS),
+        "report_guidance": "Use extended messenger rows as service export/native-inventory triage until trusted diff, per-service schema corpus, encrypted/ephemeral authority workflow, media locality, state semantics, service coverage matrix, and independent review are attached.",
+    }
+    plan["manifest_sha256"] = stable_mobile_sha256(
+        {key: value for key, value in plan.items() if key != "manifest_sha256"}
+    )
+    return plan
 
 
 def extended_messenger_source_track(service: str) -> str:
@@ -8734,6 +9012,11 @@ def chat_app_core_accuracy_gates(
         manifest_hash = optional_text(extended_messenger_manifest.get("manifest_sha256"))
         if manifest_hash:
             evidence_refs.append(f"extended_messenger_parser_manifest_sha256:{manifest_hash}")
+    extended_messenger_validation_plan = details.get("extended_messenger_report_grade_validation_plan")
+    if isinstance(extended_messenger_validation_plan, Mapping):
+        validation_plan_hash = optional_text(extended_messenger_validation_plan.get("manifest_sha256"))
+        if validation_plan_hash:
+            evidence_refs.append(f"extended_messenger_report_grade_validation_plan_sha256:{validation_plan_hash}")
     validation = details.get("validation_checks") if isinstance(details.get("validation_checks"), Mapping) else {}
     trusted_diff = details.get("chat_app_trusted_diff") if isinstance(details.get("chat_app_trusted_diff"), Mapping) else {}
     issue_ids = {
@@ -8897,6 +9180,10 @@ def chat_app_core_accuracy_gates(
                     satisfied.append("extended messenger source row citation")
                 if details.get("extended_messenger_parser_manifest", {}).get("large_data_controls", {}).get("viewer_default"):
                     satisfied.append("extended messenger review viewer controls")
+            if isinstance(extended_messenger_validation_plan, Mapping):
+                satisfied.append("extended messenger report-grade validation plan")
+                if int(extended_messenger_validation_plan.get("ready_slot_count") or 0) >= 6:
+                    satisfied.append("extended messenger validation ready slots")
             if details.get("schema_version") is not None or details.get("chat_app_issue_matrix"):
                 satisfied.append("schema/app version registry")
             if details.get("commercial_grade_blockers"):
@@ -9694,6 +9981,11 @@ def chat_app_commercial_uplift_evidence(
         if isinstance(details.get("extended_messenger_parser_manifest"), Mapping)
         else {}
     )
+    extended_messenger_validation_plan = (
+        details.get("extended_messenger_report_grade_validation_plan")
+        if isinstance(details.get("extended_messenger_report_grade_validation_plan"), Mapping)
+        else {}
+    )
     manifest_hash = optional_text(messenger_manifest.get("manifest_sha256"))
     kakaotalk_manifest_hash = optional_text(kakaotalk_manifest.get("manifest_sha256"))
     kakaotalk_validation_plan_hash = optional_text(kakaotalk_validation_plan.get("manifest_sha256"))
@@ -9704,6 +9996,7 @@ def chat_app_commercial_uplift_evidence(
     signal_manifest_hash = optional_text(signal_manifest.get("manifest_sha256"))
     signal_validation_plan_hash = optional_text(signal_validation_plan.get("manifest_sha256"))
     extended_messenger_manifest_hash = optional_text(extended_messenger_manifest.get("manifest_sha256"))
+    extended_messenger_validation_plan_hash = optional_text(extended_messenger_validation_plan.get("manifest_sha256"))
     if manifest_hash:
         source_refs.append(f"messenger_manifest_sha256:{manifest_hash}")
     if kakaotalk_manifest_hash:
@@ -9724,6 +10017,10 @@ def chat_app_commercial_uplift_evidence(
         source_refs.append(f"signal_report_grade_validation_plan_sha256:{signal_validation_plan_hash}")
     if extended_messenger_manifest_hash:
         source_refs.append(f"extended_messenger_parser_manifest_sha256:{extended_messenger_manifest_hash}")
+    if extended_messenger_validation_plan_hash:
+        source_refs.append(
+            f"extended_messenger_report_grade_validation_plan_sha256:{extended_messenger_validation_plan_hash}"
+        )
     return {
         "batch_id": "commercial-uplift-031-035",
         "item_numbers": item_numbers,
@@ -9833,6 +10130,13 @@ def chat_app_commercial_uplift_evidence(
                 and signal_manifest.get("large_data_controls", {}).get("viewer_default")
             ),
             "extended_messenger_parser_manifest_hash": extended_messenger_manifest_hash,
+            "extended_messenger_report_grade_validation_plan_hash": extended_messenger_validation_plan_hash,
+            "extended_messenger_report_grade_validation_ready_slot_count": int(
+                extended_messenger_validation_plan.get("ready_slot_count") or 0
+            ),
+            "extended_messenger_report_grade_validation_blocking_slot_count": int(
+                extended_messenger_validation_plan.get("blocking_slot_count") or 0
+            ),
             "extended_messenger_source_row_citation_present": bool(
                 isinstance(extended_messenger_manifest.get("row_citation"), Mapping)
                 and extended_messenger_manifest.get("row_citation", {}).get("row_hash")
@@ -9925,6 +10229,11 @@ def messenger_export_functional_profile(
         if isinstance(details.get("extended_messenger_parser_manifest"), Mapping)
         else {}
     )
+    extended_messenger_validation_plan = (
+        details.get("extended_messenger_report_grade_validation_plan")
+        if isinstance(details.get("extended_messenger_report_grade_validation_plan"), Mapping)
+        else {}
+    )
     failed_checks: list[str] = []
     if not service or service not in CHAT_APP_GAP_IDS:
         failed_checks.append("messenger-service-profile-not-known")
@@ -9954,6 +10263,8 @@ def messenger_export_functional_profile(
         failed_checks.append("signal-report-grade-validation-plan-not-emitted")
     if chat_app_gap_ids(service) == ["#35"] and not extended_messenger_manifest:
         failed_checks.append("extended-messenger-parser-manifest-not-emitted")
+    if chat_app_gap_ids(service) == ["#35"] and not extended_messenger_validation_plan:
+        failed_checks.append("extended-messenger-report-grade-validation-plan-not-emitted")
     row_citation = messenger_manifest.get("row_citation") if isinstance(messenger_manifest, Mapping) else {}
     kakaotalk_row_citation = kakaotalk_manifest.get("row_citation") if isinstance(kakaotalk_manifest, Mapping) else {}
     whatsapp_row_citation = whatsapp_manifest.get("row_citation") if isinstance(whatsapp_manifest, Mapping) else {}
@@ -9995,6 +10306,7 @@ def messenger_export_functional_profile(
     signal_manifest_hash = optional_text(signal_manifest.get("manifest_sha256"))
     signal_validation_plan_hash = optional_text(signal_validation_plan.get("manifest_sha256"))
     extended_messenger_manifest_hash = optional_text(extended_messenger_manifest.get("manifest_sha256"))
+    extended_messenger_validation_plan_hash = optional_text(extended_messenger_validation_plan.get("manifest_sha256"))
     table_citation_count = int(messenger_manifest.get("table_citation_count") or 0)
     passed_validation_check_ids = [
         "authorized-export-row-normalized",
@@ -10035,6 +10347,8 @@ def messenger_export_functional_profile(
         passed_validation_check_ids.append("signal-source-locator-emitted")
     if extended_messenger_manifest:
         passed_validation_check_ids.append("extended-messenger-parser-manifest-emitted")
+    if extended_messenger_validation_plan:
+        passed_validation_check_ids.append("extended-messenger-report-grade-validation-plan-emitted")
     if isinstance(extended_messenger_row_citation, Mapping) and extended_messenger_row_citation.get("source_viewer_locator"):
         passed_validation_check_ids.append("extended-messenger-source-locator-emitted")
     return {
@@ -10083,6 +10397,7 @@ def messenger_export_functional_profile(
                 isinstance(signal_row_citation, Mapping) and signal_row_citation.get("row_hash")
             ),
             "extended_messenger_parser_manifest_hash": extended_messenger_manifest_hash,
+            "extended_messenger_report_grade_validation_plan_hash": extended_messenger_validation_plan_hash,
             "extended_messenger_row_citation_present": bool(
                 isinstance(extended_messenger_row_citation, Mapping)
                 and extended_messenger_row_citation.get("row_hash")
