@@ -2886,6 +2886,7 @@ def validation_spine_evidence_chain() -> list[dict[str, object]]:
             "produces": "parser_false_positive_false_negative_notes",
             "primary_outputs": [
                 "parser_false_positive_false_negative_notes[].risk_note_hash",
+                "parser_false_positive_false_negative_notes[].fp_fn_report_grade_validation_plan_hash",
                 "parser_false_positive_false_negative_notes[].minimum_quantification_fields",
                 "parser_false_positive_false_negative_notes[].reportability_boundary",
                 "parser_fp_fn_risk_register_profile.register_digest",

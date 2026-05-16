@@ -51,6 +51,7 @@ KNOWN_ANSWER_REPORT_GRADE_BLOCKERS = [
 FIXTURE_CORPUS_TRUSTED_DIFF_BLOCKER_82 = "trusted-fixture-corpus-manifest-diff-missing"
 FIXTURE_CORPUS_REPORT_GRADE_VALIDATION_PLAN_VERSION = "fixture-corpus-report-grade-validation-plan-v1"
 FP_FN_TRUSTED_DIFF_BLOCKER_83 = "trusted-fp-fn-risk-register-diff-missing"
+FP_FN_REPORT_GRADE_VALIDATION_PLAN_VERSION = "parser-fp-fn-report-grade-validation-plan-v1"
 INDEPENDENT_VALIDATION_TRUSTED_DIFF_BLOCKER_84 = "trusted-independent-validation-signoff-diff-missing"
 VALIDATION_PACKAGE_TRUSTED_DIFF_BLOCKER_85 = "trusted-validation-package-manifest-diff-missing"
 VALIDATION_TRUSTED_TOOLS = {
@@ -1302,6 +1303,14 @@ def build_parser_false_positive_false_negative_notes(
         )
         row["risk_note_hash"] = parser_fp_fn_risk_note_hash(row)
         row["commercial_gap_ids"] = [PARSER_FP_FN_GAP_ID]
+        report_grade_validation_plan = build_parser_fp_fn_report_grade_validation_plan(
+            row,
+            trusted_diff=trusted_diff,
+        )
+        row["fp_fn_report_grade_validation_plan"] = report_grade_validation_plan
+        row["fp_fn_report_grade_validation_plan_hash"] = report_grade_validation_plan["validation_plan_hash"]
+        row["report_grade_ready_slot_count"] = report_grade_validation_plan["ready_slot_count"]
+        row["report_grade_blocking_slot_count"] = report_grade_validation_plan["blocking_slot_count"]
         row["functional_priority_profile"] = parser_fp_fn_functional_profile(
             row,
             trusted_diff=trusted_diff,
@@ -1312,7 +1321,7 @@ def build_parser_false_positive_false_negative_notes(
             FP_FN_TRUSTED_DIFF_BLOCKER_83,
             trusted_tool="fp-fn-risk-register",
         )
-        row["blockers"] = [FP_FN_TRUSTED_DIFF_BLOCKER_83] if not trusted_diff or trusted_diff.get("status") != "pass" else []
+        row["blockers"] = list(report_grade_validation_plan["blockers"])
         satisfied = [
             "false positive risks documented",
             "false negative risks documented",
@@ -1322,6 +1331,8 @@ def build_parser_false_positive_false_negative_notes(
             "risk note hash emitted",
             "minimum quantification fields listed",
             "reportability boundary recorded",
+            "FP/FN report-grade validation plan emitted",
+            "FP/FN report-grade ready slots emitted",
         ]
         if trusted_diff and trusted_diff.get("status") == "pass":
             satisfied.append("trusted FP/FN risk register diff pass")
@@ -1329,11 +1340,146 @@ def build_parser_false_positive_false_negative_notes(
             build_accuracy_gate(
                 83,
                 satisfied_checks=satisfied,
-                evidence_refs=[f"parser:{row.get('parser', '')}", f"risk_note_hash:{row.get('risk_note_hash', '')}"],
+                evidence_refs=[
+                    f"parser:{row.get('parser', '')}",
+                    f"risk_note_hash:{row.get('risk_note_hash', '')}",
+                    f"fp_fn_report_grade_validation_plan_hash:{report_grade_validation_plan['validation_plan_hash']}",
+                    f"report_grade_ready_slot_count:{report_grade_validation_plan['ready_slot_count']}",
+                    f"report_grade_blocking_slot_count:{report_grade_validation_plan['blocking_slot_count']}",
+                ],
             )
         ]
         rows.append(row)
     return rows
+
+
+def build_parser_fp_fn_report_grade_validation_plan(
+    row: Mapping[str, object],
+    *,
+    trusted_diff: Mapping[str, object] | None,
+) -> dict[str, object]:
+    false_positive_count = len(row.get("false_positive_risks") or [])
+    false_negative_count = len(row.get("false_negative_risks") or [])
+    minimum_quantification_fields = [str(value) for value in row.get("minimum_quantification_fields") or []]
+    risk_inventory = {
+        "parser": str(row.get("parser") or ""),
+        "false_positive_risks": [str(value) for value in row.get("false_positive_risks") or []],
+        "false_negative_risks": [str(value) for value in row.get("false_negative_risks") or []],
+        "validation_required": str(row.get("validation_required") or ""),
+        "measurement_status": str(row.get("measurement_status") or ""),
+    }
+    ready_slots: list[dict[str, object]] = [
+        {
+            "slot_id": "risk-note-hash",
+            "status": "ready",
+            "evidence_ref": "parser_false_positive_false_negative_notes[].risk_note_hash",
+            "evidence_hash": str(row.get("risk_note_hash") or ""),
+            "description": "Risk note hash binds parser scope, FP/FN risk lists, measurement status, and reportability wording.",
+        },
+        {
+            "slot_id": "risk-inventory",
+            "status": "ready",
+            "evidence_ref": "parser_false_positive_false_negative_notes[].false_positive_risks/false_negative_risks",
+            "evidence_hash": hashlib_json(risk_inventory),
+            "description": "False-positive and false-negative risk inventories are explicitly preserved for review.",
+        },
+        {
+            "slot_id": "minimum-quantification-fields",
+            "status": "ready",
+            "evidence_ref": "parser_false_positive_false_negative_notes[].minimum_quantification_fields",
+            "evidence_hash": hashlib_json({"minimum_quantification_fields": minimum_quantification_fields}),
+            "description": "Minimum measurement fields define what is required before report-grade FP/FN claims.",
+        },
+        {
+            "slot_id": "reportability-boundary",
+            "status": "ready",
+            "evidence_ref": "parser_false_positive_false_negative_notes[].reportability_boundary",
+            "evidence_hash": hashlib_json({"reportability_boundary": str(row.get("reportability_boundary") or "")}),
+            "description": "Report wording boundary prevents qualitative risk notes from being treated as measured rates.",
+        },
+        {
+            "slot_id": "measurement-status-disclosure",
+            "status": "ready",
+            "evidence_ref": "parser_false_positive_false_negative_notes[].measurement_status",
+            "evidence_hash": hashlib_json(
+                {
+                    "measurement_status": str(row.get("measurement_status") or ""),
+                    "false_positive_risk_count": false_positive_count,
+                    "false_negative_risk_count": false_negative_count,
+                }
+            ),
+            "description": "Measurement status discloses whether this parser family has qualitative notes or quantified rates.",
+        },
+        {
+            "slot_id": "trusted-diff-disclosure",
+            "status": "ready",
+            "evidence_ref": "parser_false_positive_false_negative_notes[].trusted_fp_fn_diff.status",
+            "evidence_hash": hashlib_json({"trusted_diff_status": str((trusted_diff or {}).get("status") or "missing")}),
+            "description": "Trusted-diff status is recorded without implying commercial-grade readiness.",
+        },
+    ]
+    blocking_slots: list[dict[str, object]] = [
+        {
+            "slot_id": "trusted-fp-fn-risk-register-diff",
+            "status": "blocked",
+            "blocker": FP_FN_TRUSTED_DIFF_BLOCKER_83
+            if not trusted_diff or trusted_diff.get("status") != "pass"
+            else "trusted-fp-fn-diff-present-but-commercial-retest-required",
+            "required_evidence": "trusted FP/FN risk register diff covering parser, risks, quantification fields, and row hashes",
+        },
+        {
+            "slot_id": "measured-corpus-rates",
+            "status": "blocked",
+            "blocker": "measured-fp-fn-corpus-rates-required",
+            "required_evidence": "corpus_id, parser_version, sample_count, measured FP/FN counts, rates, and reviewer per parser family",
+        },
+        {
+            "slot_id": "parser-version-risk-matrix",
+            "status": "blocked",
+            "blocker": "parser-version-risk-matrix-required",
+            "required_evidence": "versioned matrix tying each parser/app/OS schema to measured FP/FN rates and unsupported cases",
+        },
+        {
+            "slot_id": "independent-risk-register-review",
+            "status": "blocked",
+            "blocker": "independent-fp-fn-risk-register-review-required",
+            "required_evidence": "independent or forensic-lead review of risk wording, measured rates, and accepted limitations",
+        },
+        {
+            "slot_id": "regression-threshold-policy",
+            "status": "blocked",
+            "blocker": "fp-fn-regression-threshold-policy-required",
+            "required_evidence": "release policy defining allowed FP/FN thresholds and parser regression failure conditions",
+        },
+        {
+            "slot_id": "report-wording-signoff",
+            "status": "blocked",
+            "blocker": "fp-fn-report-wording-signoff-required",
+            "required_evidence": "signoff that reports distinguish qualitative risks from measured accuracy claims",
+        },
+    ]
+    plan_core = {
+        "profile_version": FP_FN_REPORT_GRADE_VALIDATION_PLAN_VERSION,
+        "item_number": 83,
+        "gap_id": PARSER_FP_FN_GAP_ID,
+        "commercial_gap_ids": [PARSER_FP_FN_GAP_ID],
+        "parser": str(row.get("parser") or ""),
+        "risk_note_hash": str(row.get("risk_note_hash") or ""),
+        "false_positive_risk_count": false_positive_count,
+        "false_negative_risk_count": false_negative_count,
+        "minimum_quantification_field_count": len(minimum_quantification_fields),
+        "measurement_status": str(row.get("measurement_status") or ""),
+        "trusted_diff_status": str((trusted_diff or {}).get("status") or "missing"),
+        "ready_slots": ready_slots,
+        "blocking_slots": blocking_slots,
+        "ready_slot_count": len(ready_slots),
+        "blocking_slot_count": len(blocking_slots),
+        "blockers": [str(slot.get("blocker") or "") for slot in blocking_slots if slot.get("blocker")],
+        "commercial_claim_allowed": False,
+        "ready_for_court_report": False,
+        "report_use_warning": "Use as internal #83 FP/FN disclosure evidence only; do not claim measured parser accuracy until blocking slots are satisfied.",
+    }
+    return {**plan_core, "validation_plan_hash": hashlib_json(plan_core)}
 
 
 def parser_fp_fn_risk_note_hash(row: Mapping[str, object]) -> str:
@@ -1857,6 +2003,9 @@ def parser_fp_fn_functional_profile(
             "risk_note_hash": str(row.get("risk_note_hash") or ""),
             "minimum_quantification_field_count": len(minimum_quantification_fields),
             "quantification_required": bool(row.get("quantification_required")),
+            "report_grade_validation_plan_hash": str(row.get("fp_fn_report_grade_validation_plan_hash") or ""),
+            "report_grade_ready_slot_count": int(row.get("report_grade_ready_slot_count") or 0),
+            "report_grade_blocking_slot_count": int(row.get("report_grade_blocking_slot_count") or 0),
             "trusted_diff_status": str(trusted_diff.get("status")) if trusted_diff else "missing",
         },
         "passed_validation_check_ids": [
@@ -1864,6 +2013,7 @@ def parser_fp_fn_functional_profile(
             "fp-fn-risk-register-emitted",
             "fp-fn-risk-note-hash-emitted",
             "fp-fn-minimum-quantification-fields-listed",
+            "fp-fn-report-grade-validation-plan-emitted",
             "validation-required-guidance-recorded",
             "reportability-boundary-recorded",
         ],

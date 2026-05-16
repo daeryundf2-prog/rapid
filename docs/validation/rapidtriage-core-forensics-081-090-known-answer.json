@@ -33,8 +33,8 @@
       "status": "pass",
       "backlog_items": [83],
       "evidence_paths": ["docs/validation/core-forensics-081-090-fixture-evidence.json", "tests/test_rapidtriage_ops.py"],
-      "expected": {"required_assertions": ["Parser FP/FN notes preserve false-positive risks, false-negative risks, validation-required guidance, parser scope, quantification warning, risk_note_hash values, minimum quantification fields, reportability boundaries, parser-fp-fn-risk-register-v1 digest, trusted FP/FN risk register diff helpers/gates, and #83 core_accuracy_gates."]},
-      "notes": "Internal fixture pass; quantified FP/FN rates and reviewed risk register remain blockers."
+      "expected": {"required_assertions": ["Parser FP/FN notes preserve false-positive risks, false-negative risks, validation-required guidance, parser scope, quantification warning, risk_note_hash values, minimum quantification fields, reportability boundaries, parser-fp-fn-report-grade-validation-plan-v1 ready/blocking slots, parser-fp-fn-risk-register-v1 digest, trusted FP/FN risk register diff helpers/gates, and #83 core_accuracy_gates."]},
+      "notes": "Internal fixture pass; quantified FP/FN rates, parser-version risk matrix, independent reviewed risk register, regression threshold policy, and report-wording signoff remain blockers."
     },
     {
       "id": "core-forensics-084-independent-validation",

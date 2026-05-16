@@ -899,6 +899,22 @@ class RapidTriageOpsTests(unittest.TestCase):
             self.assertEqual(final_qc["legal_submission_qc_contract"]["profile_version"], "legal-submission-qc-contract-v1")
             self.assertIn("validation-package-attached", final_qc["final_qc_checklist"]["failed_check_ids"])
             self.assertEqual(len(payload["parser_false_positive_false_negative_notes"][0]["risk_note_hash"]), 64)
+            self.assertEqual(
+                payload["parser_false_positive_false_negative_notes"][0]["fp_fn_report_grade_validation_plan"][
+                    "profile_version"
+                ],
+                "parser-fp-fn-report-grade-validation-plan-v1",
+            )
+            self.assertEqual(
+                payload["parser_false_positive_false_negative_notes"][0]["fp_fn_report_grade_validation_plan_hash"],
+                payload["parser_false_positive_false_negative_notes"][0]["fp_fn_report_grade_validation_plan"][
+                    "validation_plan_hash"
+                ],
+            )
+            self.assertEqual(payload["parser_false_positive_false_negative_notes"][0]["report_grade_ready_slot_count"], 6)
+            self.assertEqual(
+                payload["parser_false_positive_false_negative_notes"][0]["report_grade_blocking_slot_count"], 6
+            )
             self.assertEqual(payload["parser_fp_fn_risk_register_profile"]["profile_version"], "parser-fp-fn-risk-register-v1")
             self.assertEqual(len(payload["parser_fp_fn_risk_register_profile"]["register_digest"]), 64)
             self.assertEqual(
@@ -1296,8 +1312,26 @@ class RapidTriageOpsTests(unittest.TestCase):
             self.assertEqual(len(promoted_fp_fn[0]["minimum_quantification_fields"]), 6)
             self.assertTrue(promoted_fp_fn[0]["quantification_required"])
             self.assertIn("reportability_boundary", promoted_fp_fn[0])
+            self.assertEqual(
+                promoted_fp_fn[0]["fp_fn_report_grade_validation_plan"]["profile_version"],
+                "parser-fp-fn-report-grade-validation-plan-v1",
+            )
+            self.assertEqual(
+                promoted_fp_fn[0]["fp_fn_report_grade_validation_plan"]["risk_note_hash"],
+                promoted_fp_fn[0]["risk_note_hash"],
+            )
+            self.assertEqual(
+                promoted_fp_fn[0]["fp_fn_report_grade_validation_plan_hash"],
+                promoted_fp_fn[0]["fp_fn_report_grade_validation_plan"]["validation_plan_hash"],
+            )
             self.assertIn("trusted FP/FN risk register diff pass", promoted_fp_fn[0]["core_accuracy_gates"][0]["satisfied_checks"])
             self.assertIn("risk note hash emitted", promoted_fp_fn[0]["core_accuracy_gates"][0]["satisfied_checks"])
+            self.assertIn(
+                "FP/FN report-grade validation plan emitted",
+                promoted_fp_fn[0]["core_accuracy_gates"][0]["satisfied_checks"],
+            )
+            self.assertNotIn("trusted-fp-fn-risk-register-diff-missing", promoted_fp_fn[0]["blockers"])
+            self.assertIn("trusted-fp-fn-diff-present-but-commercial-retest-required", promoted_fp_fn[0]["blockers"])
             self.assertEqual(promoted_fp_fn[0]["functional_priority_profile"]["status"], "complete")
 
             report = root / "independent-report.md"
@@ -1506,6 +1540,10 @@ class RapidTriageOpsTests(unittest.TestCase):
             )
             self.assertIn("areas[].area_manifest_hash", spine_by_number[82]["primary_outputs"])
             self.assertIn("parser_false_positive_false_negative_notes[].risk_note_hash", spine_by_number[83]["primary_outputs"])
+            self.assertIn(
+                "parser_false_positive_false_negative_notes[].fp_fn_report_grade_validation_plan_hash",
+                spine_by_number[83]["primary_outputs"],
+            )
             self.assertIn("parser_fp_fn_risk_register_profile.register_digest", spine_by_number[83]["primary_outputs"])
             self.assertIn(
                 "independent_validation_report.independent_validation_manifest.report_manifest_hash",

@@ -1330,6 +1330,8 @@ CORE_FORENSIC_ACCURACY_ITEMS: tuple[dict[str, object], ...] = (
             "minimum quantification fields listed",
             "reportability boundary recorded",
             "trusted FP/FN risk register diff pass",
+            "FP/FN report-grade validation plan emitted",
+            "FP/FN report-grade ready slots emitted",
         ),
     },
     {

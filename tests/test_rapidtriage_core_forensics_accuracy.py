@@ -196,6 +196,7 @@ class RapidTriageCoreForensicsAccuracyTests(unittest.TestCase):
         self.assertIn("fixture corpus report-grade validation plan emitted", fixture_corpus["required_checks"])
         self.assertIn("trusted fixture corpus manifest diff pass", fixture_corpus["required_checks"])
         self.assertIn("false positive risks documented", fp_fn["required_checks"])
+        self.assertIn("FP/FN report-grade validation plan emitted", fp_fn["required_checks"])
         self.assertIn("trusted FP/FN risk register diff pass", fp_fn["required_checks"])
         self.assertIn("report hash captured when attached", independent_validation["required_checks"])
         self.assertIn("trusted independent validation signoff diff pass", independent_validation["required_checks"])
