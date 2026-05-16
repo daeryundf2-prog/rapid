@@ -13,6 +13,7 @@ from rapidtriage.artifacts.windows.eventlog import (
     build_evtx_recovery_corpus_diff,
     build_evtx_trusted_tool_record_diff,
     event_semantics_profile,
+    load_event_message_catalog,
     NativeEvtxRecordCandidate,
     native_evtx_commercial_uplift_evidence,
     native_evtx_core_accuracy_gates,
@@ -175,6 +176,62 @@ class RapidTriageWindowsArtifactsCollectorTests(unittest.TestCase):
             ["positional[1]", "positional[2]"],
         )
         self.assertTrue(rendering["provenance"]["provider_message_resource_resolved"])
+
+    def test_evtx_manifest_catalog_renders_value_maps(self) -> None:
+        manifest = """<?xml version="1.0" encoding="utf-8"?>
+<instrumentationManifest xmlns="http://schemas.microsoft.com/win/2004/08/events">
+  <instrumentation>
+    <events>
+      <provider name="Contoso-Test-Provider" guid="{11111111-1111-1111-1111-111111111111}">
+        <templates>
+          <template tid="T_Logon">
+            <data name="LogonType" inType="win:UInt32" map="LogonTypeMap" />
+          </template>
+        </templates>
+        <maps>
+          <valueMap name="LogonTypeMap">
+            <map value="2" message="$(string.LogonType.Interactive)" />
+          </valueMap>
+        </maps>
+        <events>
+          <event value="9001" template="T_Logon" message="$(string.Event.Logon)" />
+        </events>
+      </provider>
+    </events>
+  </instrumentation>
+  <localization>
+    <resources culture="en-US">
+      <stringTable>
+        <string id="Event.Logon" value="Logon type %1 observed." />
+        <string id="LogonType.Interactive" value="Interactive" />
+      </stringTable>
+    </resources>
+  </localization>
+</instrumentationManifest>
+"""
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            manifest_path = Path(tmp_dir) / "provider-manifest.man"
+            manifest_path.write_text(manifest, encoding="utf-8")
+            catalog = load_event_message_catalog(manifest_path)
+
+        rendering = render_event_message(
+            provider_name="Contoso-Test-Provider",
+            event_id="9001",
+            category="authentication",
+            data={"LogonType": "2"},
+            raw_preview="",
+            is_native_evtx=True,
+            message_catalog=catalog,
+        )
+
+        self.assertEqual(rendering["status"], "rendered-provider-catalog-template")
+        self.assertEqual(rendering["message"], "Logon type Interactive observed.")
+        self.assertEqual(rendering["missing_fields"], [])
+        self.assertEqual(rendering["used_fields"][0]["raw_value"], "2")
+        self.assertEqual(rendering["used_fields"][0]["mapped_value"], "Interactive")
+        source = rendering["provenance"]["provider_message_resource_source"]
+        self.assertEqual(source["manifest_template_id"], "T_Logon")
+        self.assertEqual(source["manifest_value_map_fields"], ["LogonType"])
 
     def test_event_semantics_profile_preserves_analyst_pivots_and_validation_steps(self) -> None:
         profile = event_semantics_profile(

@@ -19,7 +19,7 @@ from ...core.forensic_accuracy import build_accuracy_gate
 from ...core.models import ArtifactRecord
 
 EVENT_LOG_ROOT = ("Windows", "System32", "winevt", "Logs")
-PARSER_VERSION = "eventlog-normalized-v18"
+PARSER_VERSION = "eventlog-normalized-v19"
 BUILTIN_RULEPACK_VERSION = "eventlog-builtin-rules-v2"
 EVENT_EXPORT_SUFFIXES = {".xml", ".json", ".jsonl", ".ndjson", ".csv"}
 ETL_SUFFIXES = {".etl"}
@@ -35,6 +35,7 @@ MESSAGE_CATALOG_AUTO_NAME_HINTS = (
 )
 MAX_AUTO_MESSAGE_CATALOGS = 20
 MAX_AUTO_MESSAGE_CATALOG_BYTES = 5 * 1024 * 1024
+MAX_EVENT_MANIFEST_MAP_ENTRIES = 512
 ETL_SCAN_LIMIT = 4 * 1024 * 1024
 ETL_PROVIDER_HINTS = (
     "Microsoft-Windows-Kernel-PnP",
@@ -1113,7 +1114,12 @@ def event_message_manifest_entries(path: Path, text: str) -> list[tuple[str, str
         )
         if not provider_name:
             continue
-        manifest_templates = event_manifest_template_fields(provider)
+        manifest_template_specs = event_manifest_template_field_specs(provider)
+        manifest_templates = {
+            template_id: [str(spec.get("name") or "") for spec in specs if str(spec.get("name") or "")]
+            for template_id, specs in manifest_template_specs.items()
+        }
+        manifest_value_maps = event_manifest_value_maps(provider, string_table)
         for event in provider.iter():
             if strip_namespace(event.tag).lower() != "event":
                 continue
@@ -1134,6 +1140,8 @@ def event_message_manifest_entries(path: Path, text: str) -> list[tuple[str, str
                 message = message_ref
             template_id = str(event.attrib.get("template") or event.attrib.get("Template") or "")
             template_fields = manifest_templates.get(template_id, []) if template_id else []
+            template_field_specs = manifest_template_specs.get(template_id, []) if template_id else []
+            template_field_value_maps = event_manifest_field_value_maps(template_field_specs, manifest_value_maps)
             if template_fields:
                 message = apply_manifest_insertions(message, template_fields)
             entries.append(
@@ -1149,6 +1157,8 @@ def event_message_manifest_entries(path: Path, text: str) -> list[tuple[str, str
                         "resource_id": string_id,
                         "manifest_template_id": template_id,
                         "manifest_template_fields": template_fields,
+                        "manifest_template_field_specs": template_field_specs,
+                        "manifest_field_value_maps": template_field_value_maps,
                         "extraction_tool": "rapidtriage-manifest-loader",
                         "catalog_path": str(path.resolve()),
                         "template_sha256": hashlib.sha256(message.encode("utf-8")).hexdigest(),
@@ -1166,23 +1176,123 @@ def manifest_message_string_id(message_ref: str) -> str:
 
 
 def event_manifest_template_fields(provider: ET.Element) -> dict[str, list[str]]:
-    templates: dict[str, list[str]] = {}
+    return {
+        template_id: [str(spec.get("name") or "") for spec in specs if str(spec.get("name") or "")]
+        for template_id, specs in event_manifest_template_field_specs(provider).items()
+    }
+
+
+def event_manifest_template_field_specs(provider: ET.Element) -> dict[str, list[dict[str, str]]]:
+    templates: dict[str, list[dict[str, str]]] = {}
     for template in provider.iter():
         if strip_namespace(template.tag).lower() != "template":
             continue
         template_id = str(template.attrib.get("tid") or template.attrib.get("Tid") or template.attrib.get("id") or "")
         if not template_id:
             continue
-        fields: list[str] = []
+        fields: list[dict[str, str]] = []
         for child in template:
             if strip_namespace(child.tag).lower() not in {"data", "userdata"}:
                 continue
             name = str(child.attrib.get("name") or child.attrib.get("Name") or "")
             if name:
-                fields.append(name)
+                field_spec = {"name": name}
+                for source_key, output_key in (
+                    ("inType", "in_type"),
+                    ("outType", "out_type"),
+                    ("map", "map"),
+                    ("Map", "map"),
+                ):
+                    value = str(child.attrib.get(source_key) or "")
+                    if value:
+                        field_spec[output_key] = value
+                fields.append(field_spec)
         if fields:
             templates[template_id] = fields
     return templates
+
+
+def event_manifest_value_maps(
+    provider: ET.Element,
+    string_table: Mapping[str, str],
+) -> dict[str, dict[str, object]]:
+    value_maps: dict[str, dict[str, object]] = {}
+    for value_map in provider.iter():
+        map_kind = strip_namespace(value_map.tag).lower()
+        if map_kind not in {"valuemap", "bitmap"}:
+            continue
+        map_name = str(value_map.attrib.get("name") or value_map.attrib.get("Name") or "")
+        if not map_name:
+            continue
+        entries: dict[str, dict[str, str]] = {}
+        for item in value_map:
+            if strip_namespace(item.tag).lower() != "map":
+                continue
+            raw_value = str(item.attrib.get("value") or item.attrib.get("Value") or "")
+            if not raw_value:
+                continue
+            message_ref = str(item.attrib.get("message") or item.attrib.get("Message") or "")
+            label = resolve_manifest_message_ref(message_ref, string_table)
+            if not label:
+                label = str(item.attrib.get("symbol") or item.attrib.get("Symbol") or raw_value)
+            entries[normalize_manifest_map_value(raw_value)] = {
+                "value": raw_value,
+                "label": label,
+                "message_id": message_ref,
+            }
+            if len(entries) >= MAX_EVENT_MANIFEST_MAP_ENTRIES:
+                break
+        if entries:
+            value_maps[map_name] = {
+                "kind": map_kind,
+                "entries": entries,
+                "entry_count": len(entries),
+                "truncated": len(entries) >= MAX_EVENT_MANIFEST_MAP_ENTRIES,
+            }
+    return value_maps
+
+
+def event_manifest_field_value_maps(
+    field_specs: Sequence[Mapping[str, str]],
+    value_maps: Mapping[str, Mapping[str, object]],
+) -> dict[str, dict[str, object]]:
+    field_maps: dict[str, dict[str, object]] = {}
+    for spec in field_specs:
+        field_name = str(spec.get("name") or "")
+        map_name = str(spec.get("map") or "")
+        map_info = value_maps.get(map_name)
+        if not field_name or not isinstance(map_info, Mapping):
+            continue
+        field_map = {
+            "field": field_name,
+            "map": map_name,
+            "kind": str(map_info.get("kind") or ""),
+            "entries": dict(map_info.get("entries") or {}),
+            "entry_count": int(map_info.get("entry_count") or 0),
+            "truncated": bool(map_info.get("truncated")),
+        }
+        field_maps[field_name] = field_map
+        field_maps[normalize_key(field_name)] = field_map
+    return field_maps
+
+
+def resolve_manifest_message_ref(message_ref: str, string_table: Mapping[str, str]) -> str:
+    string_id = manifest_message_string_id(message_ref)
+    if string_id:
+        return str(string_table.get(string_id) or "")
+    return str(message_ref or "")
+
+
+def normalize_manifest_map_value(value: object) -> str:
+    text = str(value or "").strip().lower()
+    if not text:
+        return ""
+    try:
+        if text.startswith("0x"):
+            return str(int(text, 16))
+        return str(int(text, 10))
+    except ValueError:
+        return text
 
 
 def apply_manifest_insertions(message: str, fields: Sequence[str]) -> str:
@@ -4882,7 +4992,13 @@ def render_event_message(
 
     catalog_entry = event_message_catalog_entry(message_catalog or {}, provider_name, event_id)
     if catalog_entry:
-        message, missing_fields, used_fields = render_message_template(str(catalog_entry["message"]), data)
+        message, missing_fields, used_fields = render_message_template(
+            str(catalog_entry["message"]),
+            data,
+            field_value_maps=catalog_entry.get("manifest_field_value_maps")
+            if isinstance(catalog_entry.get("manifest_field_value_maps"), Mapping)
+            else {},
+        )
         validation_required = bool(catalog_entry.get("validation_required", False))
         message_source = "provider-message-catalog"
         return {
@@ -4920,6 +5036,16 @@ def render_event_message(
                     "manifest_template_fields": list(catalog_entry.get("manifest_template_fields") or [])
                     if isinstance(catalog_entry.get("manifest_template_fields"), list)
                     else [],
+                    "manifest_template_field_specs": list(catalog_entry.get("manifest_template_field_specs") or [])
+                    if isinstance(catalog_entry.get("manifest_template_field_specs"), list)
+                    else [],
+                    "manifest_value_map_fields": sorted(
+                        str(key)
+                        for key in (catalog_entry.get("manifest_field_value_maps") or {})
+                        if isinstance(catalog_entry.get("manifest_field_value_maps"), Mapping)
+                        and str(key)
+                        and normalize_key(str(key)) != str(key)
+                    )[:100],
                     "extraction_tool": str(catalog_entry.get("extraction_tool") or ""),
                     "template_sha256": str(catalog_entry.get("template_sha256") or ""),
                 },
@@ -5039,10 +5165,16 @@ def event_message_field_summary(data: Mapping[str, object]) -> dict[str, object]
     }
 
 
-def render_message_template(template: str, data: Mapping[str, object]) -> tuple[str, list[str], list[dict[str, str]]]:
+def render_message_template(
+    template: str,
+    data: Mapping[str, object],
+    *,
+    field_value_maps: Mapping[str, object] | None = None,
+) -> tuple[str, list[str], list[dict[str, str]]]:
     missing_fields: list[str] = []
     used_fields: list[dict[str, str]] = []
     positional_values = event_message_positional_values(data)
+    value_maps = field_value_maps if isinstance(field_value_maps, Mapping) else {}
 
     def replace(match: re.Match[str]) -> str:
         expression = match.group(1)
@@ -5050,8 +5182,12 @@ def render_message_template(template: str, data: Mapping[str, object]) -> tuple[
         for key in keys:
             value = first_data_text(data, key)
             if value:
-                used_fields.append({"expression": expression, "field": key})
-                return value
+                rendered_value, mapping = render_manifest_mapped_value(key, value, value_maps)
+                used_field = {"expression": expression, "field": key}
+                if mapping:
+                    used_field.update(mapping)
+                used_fields.append(used_field)
+                return rendered_value
         missing_fields.append(expression)
         return ""
 
@@ -5068,6 +5204,67 @@ def render_message_template(template: str, data: Mapping[str, object]) -> tuple[
     rendered = re.sub(r"(?<!%)%([1-9]\d*)", replace_position, rendered)
     rendered = rendered.replace("%%", "%")
     return re.sub(r"\s+", " ", rendered).strip(), missing_fields, used_fields
+
+
+def render_manifest_mapped_value(
+    field_name: str,
+    raw_value: str,
+    field_value_maps: Mapping[str, object],
+) -> tuple[str, dict[str, str]]:
+    field_map = field_value_maps.get(field_name) or field_value_maps.get(normalize_key(field_name))
+    if not isinstance(field_map, Mapping):
+        return raw_value, {}
+    entries = field_map.get("entries")
+    if not isinstance(entries, Mapping):
+        return raw_value, {}
+    kind = str(field_map.get("kind") or "valuemap").lower()
+    normalized_value = normalize_manifest_map_value(raw_value)
+    if kind == "bitmap":
+        labels = manifest_bitmap_labels(raw_value, entries)
+        if labels:
+            return ", ".join(labels), {
+                "raw_value": raw_value,
+                "mapped_value": ", ".join(labels),
+                "manifest_map": str(field_map.get("map") or ""),
+                "manifest_map_kind": kind,
+            }
+    entry = entries.get(normalized_value)
+    if isinstance(entry, Mapping) and entry.get("label"):
+        label = str(entry.get("label") or "")
+        return label, {
+            "raw_value": raw_value,
+            "mapped_value": label,
+            "manifest_map": str(field_map.get("map") or ""),
+            "manifest_map_kind": kind,
+        }
+    return raw_value, {}
+
+
+def manifest_bitmap_labels(raw_value: str, entries: Mapping[str, object]) -> list[str]:
+    value = parse_manifest_int(raw_value)
+    if value is None:
+        return []
+    labels: list[str] = []
+    exact_entry = entries.get(str(value))
+    if isinstance(exact_entry, Mapping) and exact_entry.get("label"):
+        labels.append(str(exact_entry.get("label") or ""))
+    for key, entry in entries.items():
+        bit = parse_manifest_int(key)
+        if bit is None or bit == value or bit == 0:
+            continue
+        if value & bit and isinstance(entry, Mapping) and entry.get("label"):
+            labels.append(str(entry.get("label") or ""))
+    return unique_texts(labels)
+
+
+def parse_manifest_int(value: object) -> int | None:
+    text = str(value or "").strip().lower()
+    if not text:
+        return None
+    try:
+        return int(text, 16) if text.startswith("0x") else int(text, 10)
+    except ValueError:
+        return None
 
 
 def event_message_positional_values(data: Mapping[str, object]) -> list[str]:
