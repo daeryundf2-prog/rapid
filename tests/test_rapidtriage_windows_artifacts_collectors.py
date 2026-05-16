@@ -5178,6 +5178,14 @@ class RapidTriageWindowsArtifactsCollectorTests(unittest.TestCase):
                 functional_profiles[47]["implemented_controls"]["storage_citation_count"],
                 chrome["details"]["browser_storage_inventory_count"],
             )
+            self.assertGreaterEqual(
+                functional_profiles[47]["implemented_controls"]["source_context_profile_count"],
+                chrome["details"]["browser_storage_inventory_count"],
+            )
+            self.assertIn("cache_signature_candidate_count", functional_profiles[47]["implemented_controls"])
+            self.assertIn("extension_manifest_candidate_count", functional_profiles[47]["implemented_controls"])
+            self.assertIn("sqlite_schema_inventory_count", functional_profiles[47]["implemented_controls"])
+            self.assertIn("session_structure_candidate_count", functional_profiles[47]["implemented_controls"])
             self.assertIn(
                 "browser-storage-citation-manifest-emitted",
                 functional_profiles[47]["passed_validation_check_ids"],
@@ -5187,6 +5195,18 @@ class RapidTriageWindowsArtifactsCollectorTests(unittest.TestCase):
             self.assertEqual(storage_citation_manifest["item_number"], 47)
             self.assertEqual(len(storage_citation_manifest["manifest_sha256"]), 64)
             self.assertEqual(storage_citation_manifest["citation_row_count"], chrome["details"]["browser_storage_inventory_count"])
+            self.assertEqual(
+                storage_citation_manifest["source_context_profile_hash_count"],
+                chrome["details"]["browser_storage_inventory_count"],
+            )
+            self.assertIn("cache_signature_candidate_count", storage_citation_manifest)
+            self.assertIn("extension_manifest_candidate_count", storage_citation_manifest)
+            self.assertIn("sqlite_schema_inventory_count", storage_citation_manifest)
+            self.assertIn("session_structure_candidate_count", storage_citation_manifest)
+            self.assertEqual(
+                chrome["details"]["commercial_uplift_evidence"]["large_data_controls"]["storage_source_context_hash_count"],
+                storage_citation_manifest["source_context_profile_hash_count"],
+            )
 
             firefox = browser_keys[("firefox", "default-release")]
             self.assertEqual(firefox["artifact_type"], "browser-history")

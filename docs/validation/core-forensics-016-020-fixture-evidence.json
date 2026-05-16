@@ -59,6 +59,7 @@
       "title": "Browser cache/session/extension/sync artifacts",
       "assertions": [
         "browser-storage-inventory rows preserve profile attribution, cache/session/extension/sync/cookie inventory, sample hashes, strict legal warning, secret opt-in gate, #19 core_accuracy_gates, browser_analyst_review_profile, and secret-redacted reportability decisions.",
+        "browser-storage source context profiles preserve bounded extension manifest, cache signature, SQLite header/schema, session structure, source-viewer, and profile-hash evidence without serializing raw secret values.",
         "trusted browser storage diff helpers compare browser, profile, storage type/name, and sensitive-store markers against Hindsight/BrowserHistoryView/native-query rows."
       ],
       "blockers_kept": [

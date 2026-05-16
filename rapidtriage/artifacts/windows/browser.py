@@ -27,7 +27,7 @@ CHROMIUM_BROWSER_ROOTS: Tuple[Tuple[str, Sequence[str]], ...] = (
     ("brave", ("AppData", "Local", "BraveSoftware", "Brave-Browser", "User Data")),
 )
 FIREFOX_PROFILE_ROOT = ("AppData", "Roaming", "Mozilla", "Firefox", "Profiles")
-PARSER_VERSION = "windows-browser-v8"
+PARSER_VERSION = "windows-browser-v9"
 FUNCTIONAL_SOURCE_BATCH_ID = "commercial-uplift-046-050"
 QC_PREP_BROWSER_CACHE_ITEM = 33
 QC_PREP_BROWSER_SESSION_ITEM = 34
@@ -112,6 +112,8 @@ MAX_AI_EXPORT_ARCHIVE_ENTRY_BYTES = 8 * 1024 * 1024
 MAX_BROWSER_INVENTORY_FILES = 5000
 MAX_BROWSER_INVENTORY_SAMPLE_FILES = 6
 MAX_BROWSER_INVENTORY_HASH_BYTES = 16 * 1024 * 1024
+MAX_BROWSER_STORAGE_CONTEXT_FILES = 16
+MAX_BROWSER_STORAGE_CONTEXT_BYTES = 256 * 1024
 MAX_BROWSER_TIMELINE_ROWS = 1000
 MAX_BROWSER_DEEP_FILE_HASH_BYTES = 64 * 1024 * 1024
 WEBCACHE_NAMES = {"webcachev01.dat"}
@@ -192,6 +194,14 @@ BROWSER_STORAGE_LOCATIONS: Tuple[Tuple[str, str, Tuple[str, ...], str, bool], ..
     ("credential", "login-data", ("Login Data",), "browser-credential-store-inventory", True),
     ("storage", "local-storage-leveldb", ("Local Storage", "leveldb"), "browser-local-storage-inventory", True),
     ("storage", "indexeddb", ("IndexedDB",), "browser-indexeddb-inventory", True),
+    ("session", "firefox-sessionstore-backups", ("sessionstore-backups",), "browser-session-restore-inventory", True),
+    ("extension", "firefox-extensions", ("extensions",), "browser-extension-inventory", False),
+    ("cookie", "firefox-cookies", ("cookies.sqlite",), "browser-cookie-store-inventory", True),
+    ("credential", "firefox-logins", ("logins.json",), "browser-credential-store-inventory", True),
+    ("storage", "firefox-webappsstore", ("webappsstore.sqlite",), "browser-local-storage-inventory", True),
+    ("storage", "firefox-storage", ("storage",), "browser-indexeddb-inventory", True),
+    ("session", "safari-last-session", ("LastSession.plist",), "browser-session-restore-inventory", True),
+    ("storage", "safari-local-storage", ("LocalStorage",), "browser-local-storage-inventory", True),
 )
 BROWSER_PRIVACY_WARNING = (
     "Browser cache, session, sync, cookie, and credential stores can contain private communications, "
@@ -2632,6 +2642,11 @@ def build_browser_storage_citation_manifest(
     profile_dir: Path,
     storage_inventory: Sequence[Mapping[str, object]],
 ) -> Dict[str, object]:
+    context_profiles = [
+        row.get("source_context_profile")
+        for row in storage_inventory
+        if isinstance(row.get("source_context_profile"), Mapping)
+    ]
     citations = [
         browser_storage_row_citation(
             browser=browser,
@@ -2659,16 +2674,33 @@ def build_browser_storage_citation_manifest(
         "sample_file_hash_count": sum(
             len(row.get("sample_file_hashes") or []) for row in citations if isinstance(row.get("sample_file_hashes"), list)
         ),
+        "source_context_profile_count": len(context_profiles),
+        "source_context_profile_hash_count": sum(1 for row in citations if row.get("source_context_profile_hash")),
+        "extension_manifest_candidate_count": sum(
+            len(profile.get("extension_manifest_candidates") or []) for profile in context_profiles
+        ),
+        "cache_signature_candidate_count": sum(
+            len(profile.get("cache_signature_candidates") or []) for profile in context_profiles
+        ),
+        "sqlite_schema_inventory_count": sum(
+            len(profile.get("sqlite_schema_inventories") or []) for profile in context_profiles
+        ),
+        "session_structure_candidate_count": sum(
+            len(profile.get("session_structure_candidates") or []) for profile in context_profiles
+        ),
         "storage_type_counts": count_field(storage_inventory, "storage_type"),
         "citations": citations,
         "large_data_controls": {
             "max_browser_inventory_files": MAX_BROWSER_INVENTORY_FILES,
+            "max_browser_storage_context_files_per_store": MAX_BROWSER_STORAGE_CONTEXT_FILES,
+            "max_browser_storage_context_bytes_per_file": MAX_BROWSER_STORAGE_CONTEXT_BYTES,
             "inventory_bounded": len(storage_inventory) > len(citations),
+            "source_context_profiles_bounded": any(bool(profile.get("context_entries_bounded")) for profile in context_profiles),
             "secret_values_redacted_by_default": True,
             "raw_store_open_requires_authority": True,
         },
         "review_workflow": {
-            "default_view": "storage-grouped-by-type",
+            "default_view": "storage-grouped-by-type-with-source-context",
             "source_viewer": "file-or-sqlite-as-applicable",
             "metadata_collapsed_by_default": True,
             "recommended_grouping": ["storage_type", "sensitive", "storage_name"],
@@ -2748,6 +2780,11 @@ def build_browser_storage_depth_manifest(
             "raw_values_extracted": False,
             "metadata_collapsed_by_default": True,
             "sample_hash_file_count": int(storage_review_profile.get("sample_hash_file_count") or 0),
+            "source_context_profile_count": int(storage_review_profile.get("source_context_profile_count") or 0),
+            "extension_manifest_candidate_count": int(storage_review_profile.get("extension_manifest_candidate_count") or 0),
+            "cache_signature_candidate_count": int(storage_review_profile.get("cache_signature_candidate_count") or 0),
+            "sqlite_schema_inventory_count": int(storage_review_profile.get("sqlite_schema_inventory_count") or 0),
+            "session_structure_candidate_count": int(storage_review_profile.get("session_structure_candidate_count") or 0),
         },
         "citation_refs": [
             {
@@ -2761,6 +2798,19 @@ def build_browser_storage_depth_manifest(
                 "manifest_sha256": str(storage_citation_manifest.get("manifest_sha256") or ""),
                 "citation_row_count": int(storage_citation_manifest.get("citation_row_count") or 0),
                 "sample_file_hash_count": int(storage_citation_manifest.get("sample_file_hash_count") or 0),
+                "source_context_profile_hash_count": int(
+                    storage_citation_manifest.get("source_context_profile_hash_count") or 0
+                ),
+                "extension_manifest_candidate_count": int(
+                    storage_citation_manifest.get("extension_manifest_candidate_count") or 0
+                ),
+                "cache_signature_candidate_count": int(
+                    storage_citation_manifest.get("cache_signature_candidate_count") or 0
+                ),
+                "sqlite_schema_inventory_count": int(storage_citation_manifest.get("sqlite_schema_inventory_count") or 0),
+                "session_structure_candidate_count": int(
+                    storage_citation_manifest.get("session_structure_candidate_count") or 0
+                ),
             },
             {
                 "kind": "browser-storage-type-inventory",
@@ -2889,6 +2939,18 @@ def browser_storage_row_citation(
     source_index: int,
 ) -> Dict[str, object]:
     source_path = str(row.get("source_path") or "")
+    source_context = row.get("source_context_profile") if isinstance(row.get("source_context_profile"), Mapping) else {}
+    source_context_summary = {
+        "profile_version": str(source_context.get("profile_version") or ""),
+        "profile_sha256": str(row.get("source_context_profile_hash") or source_context.get("profile_sha256") or ""),
+        "context_file_count": int(source_context.get("context_file_count") or 0),
+        "context_entry_count": int(source_context.get("context_entry_count") or 0),
+        "context_entries_bounded": bool(source_context.get("context_entries_bounded")),
+        "extension_manifest_candidate_count": len(source_context.get("extension_manifest_candidates") or []),
+        "cache_signature_candidate_count": len(source_context.get("cache_signature_candidates") or []),
+        "sqlite_schema_inventory_count": len(source_context.get("sqlite_schema_inventories") or []),
+        "session_structure_candidate_count": len(source_context.get("session_structure_candidates") or []),
+    }
     sample_file_hashes = []
     for sample in row.get("sample_files") or []:
         if not isinstance(sample, Mapping):
@@ -2916,6 +2978,8 @@ def browser_storage_row_citation(
         "sensitive": bool(row.get("sensitive")),
         "inventory_truncated": bool(row.get("inventory_truncated")),
         "sample_file_hashes": sample_file_hashes,
+        "source_context_profile_hash": source_context_summary["profile_sha256"],
+        "source_context_summary": source_context_summary,
     }
     return {
         **citation_payload,
@@ -2926,6 +2990,7 @@ def browser_storage_row_citation(
             "relative_path": str(row.get("relative_path") or ""),
             "source_path": source_path,
             "open_requires_authority": bool(row.get("sensitive")),
+            "source_context_profile_hash": source_context_summary["profile_sha256"],
         },
         "raw_values_extracted": False,
         "validation_status": "storage-inventory-citation-candidate",
@@ -2990,6 +3055,21 @@ def browser_storage_review_profile(storage_inventory: Sequence[Mapping[str, obje
     sensitive_count = sum(1 for row in storage_inventory if row.get("sensitive"))
     total_bytes = sum(int(row.get("total_bytes") or 0) for row in storage_inventory)
     truncated_count = sum(1 for row in storage_inventory if row.get("inventory_truncated"))
+    context_profiles = [
+        row.get("source_context_profile")
+        for row in storage_inventory
+        if isinstance(row.get("source_context_profile"), Mapping)
+    ]
+    extension_manifest_count = sum(
+        len(profile.get("extension_manifest_candidates") or []) for profile in context_profiles
+    )
+    cache_signature_count = sum(len(profile.get("cache_signature_candidates") or []) for profile in context_profiles)
+    sqlite_schema_inventory_count = sum(
+        len(profile.get("sqlite_schema_inventories") or []) for profile in context_profiles
+    )
+    session_structure_count = sum(
+        len(profile.get("session_structure_candidates") or []) for profile in context_profiles
+    )
     priority = "normal"
     if sensitive_count:
         priority = "legal-scope-review"
@@ -3004,9 +3084,14 @@ def browser_storage_review_profile(storage_inventory: Sequence[Mapping[str, obje
         "sample_hash_file_count": sum(
             len(row.get("sample_files") or []) for row in storage_inventory if isinstance(row.get("sample_files"), list)
         ),
+        "source_context_profile_count": len(context_profiles),
+        "extension_manifest_candidate_count": extension_manifest_count,
+        "cache_signature_candidate_count": cache_signature_count,
+        "sqlite_schema_inventory_count": sqlite_schema_inventory_count,
+        "session_structure_candidate_count": session_structure_count,
         "truncated_inventory_count": truncated_count,
         "review_priority": priority,
-        "recommended_view": "group-by-storage-type-then-open-sample-hashes",
+        "recommended_view": "group-by-storage-type-then-review-source-context",
         "secret_values_redacted_by_default": True,
     }
 
@@ -3195,6 +3280,11 @@ def browser_commercial_uplift_evidence(details: Mapping[str, object]) -> Dict[st
         if isinstance(details.get("browser_storage_citation_manifest"), Mapping)
         else {}
     )
+    storage_review_profile = (
+        details.get("browser_storage_review_profile")
+        if isinstance(details.get("browser_storage_review_profile"), Mapping)
+        else {}
+    )
     reportability_decision = browser_reportability_decision(report_grade, details)
     return {
         "batch_id": "commercial-uplift-016-020",
@@ -3235,6 +3325,36 @@ def browser_commercial_uplift_evidence(details: Mapping[str, object]) -> Dict[st
             "unified_timeline_count": int(details.get("unified_timeline_count") or 0),
             "row_citation_manifest_hash": str(citation_manifest.get("manifest_sha256") or ""),
             "row_citation_count": int(citation_manifest.get("citation_row_count") or 0),
+            "storage_citation_manifest_hash": str(storage_citation_manifest.get("manifest_sha256") or ""),
+            "storage_citation_count": int(storage_citation_manifest.get("citation_row_count") or 0),
+            "storage_source_context_profile_count": int(
+                storage_review_profile.get("source_context_profile_count")
+                or storage_citation_manifest.get("source_context_profile_count")
+                or 0
+            ),
+            "storage_source_context_hash_count": int(storage_citation_manifest.get("source_context_profile_hash_count") or 0),
+            "extension_manifest_candidate_count": int(
+                storage_review_profile.get("extension_manifest_candidate_count")
+                or storage_citation_manifest.get("extension_manifest_candidate_count")
+                or 0
+            ),
+            "cache_signature_candidate_count": int(
+                storage_review_profile.get("cache_signature_candidate_count")
+                or storage_citation_manifest.get("cache_signature_candidate_count")
+                or 0
+            ),
+            "sqlite_schema_inventory_count": int(
+                storage_review_profile.get("sqlite_schema_inventory_count")
+                or storage_citation_manifest.get("sqlite_schema_inventory_count")
+                or 0
+            ),
+            "session_structure_candidate_count": int(
+                storage_review_profile.get("session_structure_candidate_count")
+                or storage_citation_manifest.get("session_structure_candidate_count")
+                or 0
+            ),
+            "max_browser_storage_context_files_per_store": MAX_BROWSER_STORAGE_CONTEXT_FILES,
+            "max_browser_storage_context_bytes_per_file": MAX_BROWSER_STORAGE_CONTEXT_BYTES,
             "secret_values_redacted_by_default": True,
             "browser_version_corpus_required_for_commercial_claims": True,
         },
@@ -3349,11 +3469,23 @@ def browser_storage_inventory_functional_profile(
         if isinstance(details.get("browser_storage_citation_manifest"), Mapping)
         else {}
     )
+    review_profile = (
+        details.get("browser_storage_review_profile")
+        if isinstance(details.get("browser_storage_review_profile"), Mapping)
+        else {}
+    )
+    context_profile_count = int(review_profile.get("source_context_profile_count") or 0)
+    extension_manifest_count = int(review_profile.get("extension_manifest_candidate_count") or 0)
+    cache_signature_count = int(review_profile.get("cache_signature_candidate_count") or 0)
+    sqlite_schema_count = int(review_profile.get("sqlite_schema_inventory_count") or 0)
+    session_structure_count = int(review_profile.get("session_structure_candidate_count") or 0)
     failed_checks: List[str] = []
     if inventory_count == 0:
         failed_checks.append("browser-storage-inventory-not-present")
     if not citation_manifest.get("manifest_sha256"):
         failed_checks.append("browser-storage-citation-manifest-not-emitted")
+    if inventory_count and context_profile_count == 0:
+        failed_checks.append("browser-storage-source-context-profiles-not-emitted")
     failed_checks.extend(
         [
             "full-cache-session-extension-schema-decode-not-complete",
@@ -3372,6 +3504,16 @@ def browser_storage_inventory_functional_profile(
         passed_checks.append("browser-storage-citation-manifest-emitted")
     if int(citation_manifest.get("sample_file_hash_count") or 0) > 0:
         passed_checks.append("browser-storage-sample-hashes-cited")
+    if context_profile_count:
+        passed_checks.append("browser-storage-source-context-profiles-emitted")
+    if extension_manifest_count:
+        passed_checks.append("extension-manifest-context-candidates-emitted")
+    if cache_signature_count:
+        passed_checks.append("cache-signature-context-candidates-emitted")
+    if sqlite_schema_count:
+        passed_checks.append("sqlite-storage-schema-or-header-inventory-emitted")
+    if session_structure_count:
+        passed_checks.append("session-structure-context-candidates-emitted")
     return {
         "item_number": 47,
         "batch_id": FUNCTIONAL_SOURCE_BATCH_ID,
@@ -3388,6 +3530,12 @@ def browser_storage_inventory_functional_profile(
             "storage_citation_count": int(citation_manifest.get("citation_row_count") or 0),
             "sensitive_citation_count": int(citation_manifest.get("sensitive_citation_count") or 0),
             "sample_file_hash_count": int(citation_manifest.get("sample_file_hash_count") or 0),
+            "source_context_profile_count": context_profile_count,
+            "source_context_profile_hash_count": int(citation_manifest.get("source_context_profile_hash_count") or 0),
+            "extension_manifest_candidate_count": extension_manifest_count,
+            "cache_signature_candidate_count": cache_signature_count,
+            "sqlite_schema_inventory_count": sqlite_schema_count,
+            "session_structure_candidate_count": session_structure_count,
         },
         "passed_validation_check_ids": passed_checks,
         "failed_validation_check_ids": failed_checks,
@@ -3760,6 +3908,16 @@ def browser_core_accuracy_gates(details: Mapping[str, object]) -> list[dict[str,
         item19.append("storage review prioritization")
     if storage_citation_manifest.get("manifest_sha256"):
         item19.append("storage citation manifest")
+    if int(storage_citation_manifest.get("source_context_profile_hash_count") or 0) > 0:
+        item19.append("storage source context profiles")
+    if int(storage_citation_manifest.get("cache_signature_candidate_count") or 0) > 0:
+        item19.append("cache signature context")
+    if int(storage_citation_manifest.get("extension_manifest_candidate_count") or 0) > 0:
+        item19.append("extension manifest context")
+    if int(storage_citation_manifest.get("sqlite_schema_inventory_count") or 0) > 0:
+        item19.append("sqlite storage context")
+    if int(storage_citation_manifest.get("session_structure_candidate_count") or 0) > 0:
+        item19.append("session structure context")
     if int(storage_citation_manifest.get("sample_file_hash_count") or 0) > 0:
         item19.append("storage sample hash citations")
     if any(str(row.get("storage_type") or "") == "extension" or "extension" in str(row.get("storage_name") or "") for row in storage_inventory):
@@ -5169,6 +5327,13 @@ def inventory_browser_storage_path(
             return {}
         file_count = 1
         total_bytes = int(stat.st_size)
+    context_profile = browser_storage_source_context_profile(
+        profile_dir=profile_dir,
+        source=source,
+        storage_type=storage_type,
+        storage_name=storage_name,
+        sensitive=sensitive,
+    )
     return {
         "storage_type": storage_type,
         "storage_name": storage_name,
@@ -5180,6 +5345,8 @@ def inventory_browser_storage_path(
         "file_count": file_count,
         "total_bytes": total_bytes,
         "sample_files": sample_files,
+        "source_context_profile": context_profile,
+        "source_context_profile_hash": context_profile["profile_sha256"],
         "inventory_truncated": truncated,
         "sensitive": sensitive,
         "raw_values_extracted": False,
@@ -5187,6 +5354,272 @@ def inventory_browser_storage_path(
         "validation_status": "inventory-candidate",
         "commercial_grade_ready": False,
         "commercial_grade_blockers": BROWSER_COMMERCIAL_BLOCKERS,
+    }
+
+
+def browser_storage_source_context_profile(
+    *,
+    profile_dir: Path,
+    source: Path,
+    storage_type: str,
+    storage_name: str,
+    sensitive: bool,
+) -> Dict[str, object]:
+    files = (
+        [source]
+        if source.is_file()
+        else [
+            item
+            for item in sorted(source.rglob("*"), key=lambda path: str(path).lower())
+            if item.is_file()
+        ]
+    )
+    entries: List[Dict[str, object]] = []
+    extension_manifests: List[Dict[str, object]] = []
+    cache_signatures: List[Dict[str, object]] = []
+    sqlite_inventories: List[Dict[str, object]] = []
+    session_structures: List[Dict[str, object]] = []
+    for file_path in files[:MAX_BROWSER_STORAGE_CONTEXT_FILES]:
+        entry = browser_storage_source_entry(profile_dir, file_path, storage_type=storage_type)
+        entries.append(entry)
+        if entry.get("extension_manifest"):
+            extension_manifests.append(dict(entry["extension_manifest"]))
+        if entry.get("cache_signature"):
+            cache_signatures.append(dict(entry["cache_signature"]))
+        if entry.get("sqlite_schema"):
+            sqlite_inventories.append(dict(entry["sqlite_schema"]))
+        if entry.get("structured_preview"):
+            session_structures.append(dict(entry["structured_preview"]))
+    profile: Dict[str, object] = {
+        "profile_version": "browser-storage-source-context-profile-v1",
+        "parser_version": PARSER_VERSION,
+        "storage_type": storage_type,
+        "storage_name": storage_name,
+        "relative_path": relative_profile_path(profile_dir, source),
+        "source_path": str(source.resolve()),
+        "is_file": source.is_file(),
+        "sensitive": sensitive,
+        "raw_values_extracted": False,
+        "context_file_count": len(files),
+        "context_entries_bounded": len(files) > len(entries),
+        "context_entry_count": len(entries),
+        "entries": entries,
+        "extension_manifest_candidates": extension_manifests[:10],
+        "cache_signature_candidates": cache_signatures[:10],
+        "sqlite_schema_inventories": sqlite_inventories[:10],
+        "session_structure_candidates": session_structures[:10],
+        "viewer_guidance": {
+            "default_view": "metadata-first-storage-context",
+            "open_raw_store_requires_authority": sensitive,
+            "collapse_raw_values_by_default": True,
+            "recommended_tabs": ["source locator", "sample hashes", "schema/signature hints", "legal warning"],
+        },
+        "reportability": {
+            "allowed_use": "browser-storage-source-context-triage",
+            "commercial_grade_ready": False,
+            "warning": (
+                "Source context identifies candidate store structure only; validate browser version, schema, "
+                "deleted state, and trusted parser diffs before reporting cache/session/extension/sync conclusions."
+            ),
+            "blockers": list(BROWSER_REPORT_GRADE_BLOCKERS),
+        },
+    }
+    hash_payload = json.loads(json.dumps(profile, ensure_ascii=False, default=str))
+    hash_payload["source_path"] = ""
+    for entry in hash_payload["entries"]:
+        if isinstance(entry, dict):
+            entry["source_path"] = ""
+    profile["profile_sha256"] = stable_browser_sha256(hash_payload)
+    return profile
+
+
+def browser_storage_source_entry(
+    profile_dir: Path,
+    file_path: Path,
+    *,
+    storage_type: str,
+) -> Dict[str, object]:
+    try:
+        stat = file_path.stat()
+    except OSError:
+        stat = None
+    header = read_browser_prefix(file_path, min(MAX_BROWSER_STORAGE_CONTEXT_BYTES, 4096))
+    entry: Dict[str, object] = {
+        "relative_path": relative_profile_path(profile_dir, file_path),
+        "source_path": str(file_path.resolve()),
+        "size": int(stat.st_size) if stat else 0,
+        "modified_at": isoformat_from_timestamp(stat.st_mtime) if stat else "",
+        "file_kind": browser_storage_file_kind(file_path, header),
+        "signature_flags": browser_storage_signature_flags(file_path, header),
+        "source_viewer_locator": {
+            "viewer": browser_storage_viewer_for_file(file_path, header),
+            "relative_path": relative_profile_path(profile_dir, file_path),
+            "open_requires_authority": storage_type in {"cookie", "credential", "session", "storage", "sync"},
+        },
+    }
+    extension_manifest = browser_extension_manifest_context(file_path)
+    if extension_manifest:
+        entry["extension_manifest"] = extension_manifest
+    cache_signature = browser_cache_signature_context(file_path, header)
+    if cache_signature:
+        entry["cache_signature"] = cache_signature
+    sqlite_schema = browser_sqlite_schema_context(file_path, header)
+    if sqlite_schema:
+        entry["sqlite_schema"] = sqlite_schema
+    structured_preview = browser_structured_preview_context(file_path, header)
+    if structured_preview:
+        entry["structured_preview"] = structured_preview
+    entry["entry_hash"] = stable_browser_sha256(
+        {key: value for key, value in entry.items() if key != "source_path"}
+    )
+    return entry
+
+
+def read_browser_prefix(path: Path, limit: int) -> bytes:
+    try:
+        with path.open("rb") as handle:
+            return handle.read(limit)
+    except OSError:
+        return b""
+
+
+def browser_storage_file_kind(path: Path, header: bytes) -> str:
+    lowered_name = path.name.lower()
+    suffix = path.suffix.lower()
+    if header.startswith(b"SQLite format 3\x00"):
+        return "sqlite"
+    if lowered_name == "manifest.json":
+        return "extension-manifest-json"
+    if suffix in {".json", ".log", ".ldb"} and b"{" in header[:256]:
+        return "structured-text-or-leveldb-fragment"
+    if b"HTTP/" in header[:512] or b"content-type:" in header[:1024].lower():
+        return "cache-http-fragment"
+    if suffix in {".plist", ".binarycookies"}:
+        return suffix.removeprefix(".")
+    return suffix.removeprefix(".") or "browser-store-file"
+
+
+def browser_storage_signature_flags(path: Path, header: bytes) -> List[str]:
+    flags: List[str] = []
+    lowered = header[:4096].lower()
+    if header.startswith(b"SQLite format 3\x00"):
+        flags.append("sqlite-header")
+    if b"http/" in lowered:
+        flags.append("http-cache-header")
+    if b"content-type:" in lowered:
+        flags.append("content-type-header")
+    if b"https://" in lowered or b"http://" in lowered:
+        flags.append("url-string-present")
+    if path.name.lower() == "manifest.json":
+        flags.append("extension-manifest-name")
+    if b"session" in lowered:
+        flags.append("session-token-term")
+    return flags
+
+
+def browser_storage_viewer_for_file(path: Path, header: bytes) -> str:
+    if header.startswith(b"SQLite format 3\x00"):
+        return "sqlite-schema-first"
+    if path.name.lower() == "manifest.json":
+        return "json-extension-manifest"
+    if path.suffix.lower() in {".json", ".log", ".ldb"}:
+        return "bounded-text-fragment"
+    if path.suffix.lower() == ".plist":
+        return "plist-metadata"
+    return "file-metadata-and-hex-preview"
+
+
+def browser_extension_manifest_context(path: Path) -> Dict[str, object]:
+    if path.name.lower() != "manifest.json":
+        return {}
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8", errors="replace")[:MAX_BROWSER_STORAGE_CONTEXT_BYTES])
+    except (OSError, json.JSONDecodeError):
+        return {}
+    permissions = payload.get("permissions")
+    host_permissions = payload.get("host_permissions")
+    return {
+        "relative_manifest_path": path.name,
+        "extension_id_hint": path.parent.parent.name if path.parent.parent != path.parent else "",
+        "name": str(payload.get("name") or ""),
+        "version": str(payload.get("version") or ""),
+        "manifest_version": payload.get("manifest_version"),
+        "permission_count": len(permissions) if isinstance(permissions, list) else 0,
+        "host_permission_count": len(host_permissions) if isinstance(host_permissions, list) else 0,
+        "permissions_sample": [str(item) for item in permissions[:10]] if isinstance(permissions, list) else [],
+        "validation_status": "extension-manifest-candidate",
+    }
+
+
+def browser_cache_signature_context(path: Path, header: bytes) -> Dict[str, object]:
+    lowered = header[:4096].lower()
+    if (
+        b"http/" not in lowered
+        and b"content-type:" not in lowered
+        and b"https://" not in lowered
+        and b"http://" not in lowered
+    ):
+        return {}
+    text = header[:4096].decode("utf-8", errors="replace")
+    content_type = ""
+    for line in text.splitlines():
+        if line.lower().startswith("content-type:"):
+            content_type = line.split(":", 1)[1].strip()[:120]
+            break
+    urls = re.findall(r"https?://[^\s\x00\"'<>]{4,200}", text, flags=re.IGNORECASE)
+    return {
+        "relative_path": path.name,
+        "has_http_header": "HTTP/" in text.upper(),
+        "content_type": content_type,
+        "url_candidate_count": len(urls),
+        "url_candidates": urls[:5],
+        "validation_status": "cache-signature-candidate",
+    }
+
+
+def browser_sqlite_schema_context(path: Path, header: bytes) -> Dict[str, object]:
+    if not header.startswith(b"SQLite format 3\x00"):
+        return {}
+    try:
+        with open_sqlite_snapshot(path) as connection:
+            table_rows = connection.execute(
+                "SELECT name FROM sqlite_master WHERE type='table' ORDER BY name LIMIT 25"
+            ).fetchall()
+            tables = [str(row[0]) for row in table_rows]
+    except (sqlite3.DatabaseError, OSError):
+        return {
+            "relative_path": path.name,
+            "sqlite_header_present": True,
+            "opened_readonly": False,
+            "tables": [],
+            "validation_status": "sqlite-header-only",
+        }
+    return {
+        "relative_path": path.name,
+        "sqlite_header_present": True,
+        "opened_readonly": True,
+        "table_count": len(tables),
+        "tables": tables,
+        "validation_status": "sqlite-schema-inventory",
+    }
+
+
+def browser_structured_preview_context(path: Path, header: bytes) -> Dict[str, object]:
+    suffix = path.suffix.lower()
+    lowered = path.name.lower()
+    if lowered == "manifest.json" or suffix not in {".json", ".log", ".ldb", ".plist"}:
+        return {}
+    text = header[:MAX_BROWSER_STORAGE_CONTEXT_BYTES].decode("utf-8", errors="replace")
+    if "{" not in text and suffix != ".plist":
+        return {}
+    keys = sorted(set(re.findall(r'"([A-Za-z0-9_.:-]{2,64})"\s*:', text)))[:20]
+    return {
+        "relative_path": path.name,
+        "format_hint": "plist" if suffix == ".plist" else "json-or-leveldb-fragment",
+        "key_sample": keys,
+        "preview_sha256": hashlib.sha256(text[:512].encode("utf-8", errors="replace")).hexdigest(),
+        "raw_preview_redacted": True,
+        "validation_status": "structured-fragment-candidate",
     }
 
 

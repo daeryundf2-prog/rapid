@@ -349,6 +349,7 @@
             "browser_storage_citation_manifest": {
               "batch_id": "commercial-uplift-046-050",
               "browser": "firefox",
+              "cache_signature_candidate_count": 0,
               "citation_row_count": 0,
               "citations": [],
               "commercial_gap_ids": [
@@ -356,21 +357,25 @@
                 "#42",
                 "#47"
               ],
+              "extension_manifest_candidate_count": 0,
               "gap_id": "#47",
               "inventory_count": 0,
               "item_number": 47,
               "large_data_controls": {
                 "inventory_bounded": false,
                 "max_browser_inventory_files": 5000,
+                "max_browser_storage_context_bytes_per_file": 262144,
+                "max_browser_storage_context_files_per_store": 16,
                 "raw_store_open_requires_authority": true,
-                "secret_values_redacted_by_default": true
+                "secret_values_redacted_by_default": true,
+                "source_context_profiles_bounded": false
               },
               "manifest_sha256": "<DYNAMIC_MANIFEST_HASH>",
               "manifest_version": "browser-storage-citation-manifest-v1",
               "profile": "default-release",
               "profile_dir": "<ROOT>/Users/alice/AppData/Roaming/Mozilla/Firefox/Profiles/default-release",
               "review_workflow": {
-                "default_view": "storage-grouped-by-type",
+                "default_view": "storage-grouped-by-type-with-source-context",
                 "metadata_collapsed_by_default": true,
                 "recommended_grouping": [
                   "storage_type",
@@ -386,6 +391,10 @@
               },
               "sample_file_hash_count": 0,
               "sensitive_citation_count": 0,
+              "session_structure_candidate_count": 0,
+              "source_context_profile_count": 0,
+              "source_context_profile_hash_count": 0,
+              "sqlite_schema_inventory_count": 0,
               "storage_type_counts": [],
               "user": "alice",
               "validation_status": "inventory-implemented-validation-required"
@@ -401,10 +410,15 @@
                   "profile_dir": "<ROOT>/Users/alice/AppData/Roaming/Mozilla/Firefox/Profiles/default-release"
                 },
                 {
+                  "cache_signature_candidate_count": 0,
                   "citation_row_count": 0,
+                  "extension_manifest_candidate_count": 0,
                   "kind": "browser-storage-citation-manifest",
                   "manifest_sha256": "<DYNAMIC_MANIFEST_HASH>",
-                  "sample_file_hash_count": 0
+                  "sample_file_hash_count": 0,
+                  "session_structure_candidate_count": 0,
+                  "source_context_profile_hash_count": 0,
+                  "sqlite_schema_inventory_count": 0
                 },
                 {
                   "kind": "browser-storage-type-inventory",
@@ -427,7 +441,7 @@
                 "password_cookie_session_secret_extraction": false,
                 "sync_engine_state_decode": false
               },
-              "parser_version": "windows-browser-v8",
+              "parser_version": "windows-browser-v9",
               "profile": "default-release",
               "profile_dir": "<ROOT>/Users/alice/AppData/Roaming/Mozilla/Firefox/Profiles/default-release",
               "qc_prep_contracts": [
@@ -489,12 +503,17 @@
                 "attach Hindsight/BrowserHistoryView/Velociraptor or browser-native trusted diff for critical rows"
               ],
               "review_controls": {
+                "cache_signature_candidate_count": 0,
+                "extension_manifest_candidate_count": 0,
                 "metadata_collapsed_by_default": true,
                 "raw_values_extracted": false,
-                "recommended_view": "group-by-storage-type-then-open-sample-hashes",
+                "recommended_view": "group-by-storage-type-then-review-source-context",
                 "review_priority": "normal",
                 "sample_hash_file_count": 0,
-                "secret_values_redacted_by_default": true
+                "secret_values_redacted_by_default": true,
+                "session_structure_candidate_count": 0,
+                "source_context_profile_count": 0,
+                "sqlite_schema_inventory_count": 0
               },
               "storage_scope": {
                 "cache_present": false,
@@ -517,13 +536,18 @@
             "browser_storage_inventory": [],
             "browser_storage_inventory_count": 0,
             "browser_storage_review_profile": {
+              "cache_signature_candidate_count": 0,
+              "extension_manifest_candidate_count": 0,
               "inventory_count": 0,
               "profile_version": "browser-storage-review-profile-v1",
-              "recommended_view": "group-by-storage-type-then-open-sample-hashes",
+              "recommended_view": "group-by-storage-type-then-review-source-context",
               "review_priority": "normal",
               "sample_hash_file_count": 0,
               "secret_values_redacted_by_default": true,
               "sensitive_inventory_count": 0,
+              "session_structure_candidate_count": 0,
+              "source_context_profile_count": 0,
+              "sqlite_schema_inventory_count": 0,
               "storage_type_counts": [],
               "total_bytes": 0,
               "truncated_inventory_count": 0
@@ -563,7 +587,7 @@
                 "firefox_places_history": true,
                 "safari_windows_profile_support": false
               },
-              "parser_version": "windows-browser-v8",
+              "parser_version": "windows-browser-v9",
               "profile": "default-release",
               "reportability": {
                 "allowed_use": "browser-history-download-timeline-triage-pivot",
@@ -778,12 +802,18 @@
                   "implemented_controls": {
                     "browser": "firefox",
                     "cache_session_extension_sync_cookie_credential_inventory": true,
+                    "cache_signature_candidate_count": 0,
+                    "extension_manifest_candidate_count": 0,
                     "inventory_count": 0,
                     "profile": "default-release",
                     "sample_file_hash_count": 0,
                     "secret_values_redacted_by_default": true,
                     "sensitive_citation_count": 0,
                     "sensitive_inventory_count": 0,
+                    "session_structure_candidate_count": 0,
+                    "source_context_profile_count": 0,
+                    "source_context_profile_hash_count": 0,
+                    "sqlite_schema_inventory_count": 0,
                     "storage_citation_count": 0,
                     "storage_citation_manifest_hash": "<DYNAMIC_MANIFEST_HASH>",
                     "trusted_diff_status": "not-attached"
@@ -811,12 +841,22 @@
               ],
               "large_data_controls": {
                 "browser_version_corpus_required_for_commercial_claims": true,
+                "cache_signature_candidate_count": 0,
+                "extension_manifest_candidate_count": 0,
+                "max_browser_storage_context_bytes_per_file": 262144,
+                "max_browser_storage_context_files_per_store": 16,
                 "max_browser_timeline_rows": 1000,
                 "max_storage_inventory_files": 5000,
                 "row_citation_count": 1,
                 "row_citation_manifest_hash": "<DYNAMIC_MANIFEST_HASH>",
                 "secret_values_redacted_by_default": true,
+                "session_structure_candidate_count": 0,
+                "sqlite_schema_inventory_count": 0,
+                "storage_citation_count": 0,
+                "storage_citation_manifest_hash": "<DYNAMIC_MANIFEST_HASH>",
                 "storage_inventory_count": 0,
+                "storage_source_context_hash_count": 0,
+                "storage_source_context_profile_count": 0,
                 "unified_timeline_count": 1
               },
               "next_internal_step": "Finish cache/session schema decoding, deleted-history recovery, Safari parity, and browser-version known-answer validation.",
@@ -1082,7 +1122,7 @@
             ],
             "internet_usage_count": 1,
             "parser": "browser-history",
-            "parser_version": "windows-browser-v8",
+            "parser_version": "windows-browser-v9",
             "privacy_legal_warning": "Browser cache, session, sync, cookie, and credential stores can contain private communications, tokens, identifiers, and regulated personal data. Treat this inventory as legally sensitive, review authority/scope before opening raw files, and do not report secrets from this parser alone.",
             "profile": "default-release",
             "reportability": "triage",
@@ -1393,6 +1433,7 @@
             "browser_storage_citation_manifest": {
               "batch_id": "commercial-uplift-046-050",
               "browser": "chrome",
+              "cache_signature_candidate_count": 0,
               "citation_row_count": 0,
               "citations": [],
               "commercial_gap_ids": [
@@ -1400,21 +1441,25 @@
                 "#42",
                 "#47"
               ],
+              "extension_manifest_candidate_count": 0,
               "gap_id": "#47",
               "inventory_count": 0,
               "item_number": 47,
               "large_data_controls": {
                 "inventory_bounded": false,
                 "max_browser_inventory_files": 5000,
+                "max_browser_storage_context_bytes_per_file": 262144,
+                "max_browser_storage_context_files_per_store": 16,
                 "raw_store_open_requires_authority": true,
-                "secret_values_redacted_by_default": true
+                "secret_values_redacted_by_default": true,
+                "source_context_profiles_bounded": false
               },
               "manifest_sha256": "<DYNAMIC_MANIFEST_HASH>",
               "manifest_version": "browser-storage-citation-manifest-v1",
               "profile": "Default",
               "profile_dir": "<ROOT>/Users/alice/AppData/Local/Google/Chrome/User Data/Default",
               "review_workflow": {
-                "default_view": "storage-grouped-by-type",
+                "default_view": "storage-grouped-by-type-with-source-context",
                 "metadata_collapsed_by_default": true,
                 "recommended_grouping": [
                   "storage_type",
@@ -1430,6 +1475,10 @@
               },
               "sample_file_hash_count": 0,
               "sensitive_citation_count": 0,
+              "session_structure_candidate_count": 0,
+              "source_context_profile_count": 0,
+              "source_context_profile_hash_count": 0,
+              "sqlite_schema_inventory_count": 0,
               "storage_type_counts": [],
               "user": "alice",
               "validation_status": "inventory-implemented-validation-required"
@@ -1445,10 +1494,15 @@
                   "profile_dir": "<ROOT>/Users/alice/AppData/Local/Google/Chrome/User Data/Default"
                 },
                 {
+                  "cache_signature_candidate_count": 0,
                   "citation_row_count": 0,
+                  "extension_manifest_candidate_count": 0,
                   "kind": "browser-storage-citation-manifest",
                   "manifest_sha256": "<DYNAMIC_MANIFEST_HASH>",
-                  "sample_file_hash_count": 0
+                  "sample_file_hash_count": 0,
+                  "session_structure_candidate_count": 0,
+                  "source_context_profile_hash_count": 0,
+                  "sqlite_schema_inventory_count": 0
                 },
                 {
                   "kind": "browser-storage-type-inventory",
@@ -1471,7 +1525,7 @@
                 "password_cookie_session_secret_extraction": false,
                 "sync_engine_state_decode": false
               },
-              "parser_version": "windows-browser-v8",
+              "parser_version": "windows-browser-v9",
               "profile": "Default",
               "profile_dir": "<ROOT>/Users/alice/AppData/Local/Google/Chrome/User Data/Default",
               "qc_prep_contracts": [
@@ -1533,12 +1587,17 @@
                 "attach Hindsight/BrowserHistoryView/Velociraptor or browser-native trusted diff for critical rows"
               ],
               "review_controls": {
+                "cache_signature_candidate_count": 0,
+                "extension_manifest_candidate_count": 0,
                 "metadata_collapsed_by_default": true,
                 "raw_values_extracted": false,
-                "recommended_view": "group-by-storage-type-then-open-sample-hashes",
+                "recommended_view": "group-by-storage-type-then-review-source-context",
                 "review_priority": "normal",
                 "sample_hash_file_count": 0,
-                "secret_values_redacted_by_default": true
+                "secret_values_redacted_by_default": true,
+                "session_structure_candidate_count": 0,
+                "source_context_profile_count": 0,
+                "sqlite_schema_inventory_count": 0
               },
               "storage_scope": {
                 "cache_present": false,
@@ -1561,13 +1620,18 @@
             "browser_storage_inventory": [],
             "browser_storage_inventory_count": 0,
             "browser_storage_review_profile": {
+              "cache_signature_candidate_count": 0,
+              "extension_manifest_candidate_count": 0,
               "inventory_count": 0,
               "profile_version": "browser-storage-review-profile-v1",
-              "recommended_view": "group-by-storage-type-then-open-sample-hashes",
+              "recommended_view": "group-by-storage-type-then-review-source-context",
               "review_priority": "normal",
               "sample_hash_file_count": 0,
               "secret_values_redacted_by_default": true,
               "sensitive_inventory_count": 0,
+              "session_structure_candidate_count": 0,
+              "source_context_profile_count": 0,
+              "sqlite_schema_inventory_count": 0,
               "storage_type_counts": [],
               "total_bytes": 0,
               "truncated_inventory_count": 0
@@ -1609,7 +1673,7 @@
                 "firefox_places_history": true,
                 "safari_windows_profile_support": false
               },
-              "parser_version": "windows-browser-v8",
+              "parser_version": "windows-browser-v9",
               "profile": "Default",
               "reportability": {
                 "allowed_use": "browser-history-download-timeline-triage-pivot",
@@ -1832,12 +1896,18 @@
                   "implemented_controls": {
                     "browser": "chrome",
                     "cache_session_extension_sync_cookie_credential_inventory": true,
+                    "cache_signature_candidate_count": 0,
+                    "extension_manifest_candidate_count": 0,
                     "inventory_count": 0,
                     "profile": "Default",
                     "sample_file_hash_count": 0,
                     "secret_values_redacted_by_default": true,
                     "sensitive_citation_count": 0,
                     "sensitive_inventory_count": 0,
+                    "session_structure_candidate_count": 0,
+                    "source_context_profile_count": 0,
+                    "source_context_profile_hash_count": 0,
+                    "sqlite_schema_inventory_count": 0,
                     "storage_citation_count": 0,
                     "storage_citation_manifest_hash": "<DYNAMIC_MANIFEST_HASH>",
                     "trusted_diff_status": "not-attached"
@@ -1865,12 +1935,22 @@
               ],
               "large_data_controls": {
                 "browser_version_corpus_required_for_commercial_claims": true,
+                "cache_signature_candidate_count": 0,
+                "extension_manifest_candidate_count": 0,
+                "max_browser_storage_context_bytes_per_file": 262144,
+                "max_browser_storage_context_files_per_store": 16,
                 "max_browser_timeline_rows": 1000,
                 "max_storage_inventory_files": 5000,
                 "row_citation_count": 3,
                 "row_citation_manifest_hash": "<DYNAMIC_MANIFEST_HASH>",
                 "secret_values_redacted_by_default": true,
+                "session_structure_candidate_count": 0,
+                "sqlite_schema_inventory_count": 0,
+                "storage_citation_count": 0,
+                "storage_citation_manifest_hash": "<DYNAMIC_MANIFEST_HASH>",
                 "storage_inventory_count": 0,
+                "storage_source_context_hash_count": 0,
+                "storage_source_context_profile_count": 0,
                 "unified_timeline_count": 3
               },
               "next_internal_step": "Finish cache/session schema decoding, deleted-history recovery, Safari parity, and browser-version known-answer validation.",
@@ -2176,7 +2256,7 @@
             ],
             "internet_usage_count": 2,
             "parser": "browser-history",
-            "parser_version": "windows-browser-v8",
+            "parser_version": "windows-browser-v9",
             "privacy_legal_warning": "Browser cache, session, sync, cookie, and credential stores can contain private communications, tokens, identifiers, and regulated personal data. Treat this inventory as legally sensitive, review authority/scope before opening raw files, and do not report secrets from this parser alone.",
             "profile": "Default",
             "reportability": "triage",
@@ -2503,6 +2583,7 @@
             "browser_storage_citation_manifest": {
               "batch_id": "commercial-uplift-046-050",
               "browser": "edge",
+              "cache_signature_candidate_count": 0,
               "citation_row_count": 0,
               "citations": [],
               "commercial_gap_ids": [
@@ -2510,21 +2591,25 @@
                 "#42",
                 "#47"
               ],
+              "extension_manifest_candidate_count": 0,
               "gap_id": "#47",
               "inventory_count": 0,
               "item_number": 47,
               "large_data_controls": {
                 "inventory_bounded": false,
                 "max_browser_inventory_files": 5000,
+                "max_browser_storage_context_bytes_per_file": 262144,
+                "max_browser_storage_context_files_per_store": 16,
                 "raw_store_open_requires_authority": true,
-                "secret_values_redacted_by_default": true
+                "secret_values_redacted_by_default": true,
+                "source_context_profiles_bounded": false
               },
               "manifest_sha256": "<DYNAMIC_MANIFEST_HASH>",
               "manifest_version": "browser-storage-citation-manifest-v1",
               "profile": "Profile 1",
               "profile_dir": "<ROOT>/Users/alice/AppData/Local/Microsoft/Edge/User Data/Profile 1",
               "review_workflow": {
-                "default_view": "storage-grouped-by-type",
+                "default_view": "storage-grouped-by-type-with-source-context",
                 "metadata_collapsed_by_default": true,
                 "recommended_grouping": [
                   "storage_type",
@@ -2540,6 +2625,10 @@
               },
               "sample_file_hash_count": 0,
               "sensitive_citation_count": 0,
+              "session_structure_candidate_count": 0,
+              "source_context_profile_count": 0,
+              "source_context_profile_hash_count": 0,
+              "sqlite_schema_inventory_count": 0,
               "storage_type_counts": [],
               "user": "alice",
               "validation_status": "inventory-implemented-validation-required"
@@ -2555,10 +2644,15 @@
                   "profile_dir": "<ROOT>/Users/alice/AppData/Local/Microsoft/Edge/User Data/Profile 1"
                 },
                 {
+                  "cache_signature_candidate_count": 0,
                   "citation_row_count": 0,
+                  "extension_manifest_candidate_count": 0,
                   "kind": "browser-storage-citation-manifest",
                   "manifest_sha256": "<DYNAMIC_MANIFEST_HASH>",
-                  "sample_file_hash_count": 0
+                  "sample_file_hash_count": 0,
+                  "session_structure_candidate_count": 0,
+                  "source_context_profile_hash_count": 0,
+                  "sqlite_schema_inventory_count": 0
                 },
                 {
                   "kind": "browser-storage-type-inventory",
@@ -2581,7 +2675,7 @@
                 "password_cookie_session_secret_extraction": false,
                 "sync_engine_state_decode": false
               },
-              "parser_version": "windows-browser-v8",
+              "parser_version": "windows-browser-v9",
               "profile": "Profile 1",
               "profile_dir": "<ROOT>/Users/alice/AppData/Local/Microsoft/Edge/User Data/Profile 1",
               "qc_prep_contracts": [
@@ -2643,12 +2737,17 @@
                 "attach Hindsight/BrowserHistoryView/Velociraptor or browser-native trusted diff for critical rows"
               ],
               "review_controls": {
+                "cache_signature_candidate_count": 0,
+                "extension_manifest_candidate_count": 0,
                 "metadata_collapsed_by_default": true,
                 "raw_values_extracted": false,
-                "recommended_view": "group-by-storage-type-then-open-sample-hashes",
+                "recommended_view": "group-by-storage-type-then-review-source-context",
                 "review_priority": "normal",
                 "sample_hash_file_count": 0,
-                "secret_values_redacted_by_default": true
+                "secret_values_redacted_by_default": true,
+                "session_structure_candidate_count": 0,
+                "source_context_profile_count": 0,
+                "sqlite_schema_inventory_count": 0
               },
               "storage_scope": {
                 "cache_present": false,
@@ -2671,13 +2770,18 @@
             "browser_storage_inventory": [],
             "browser_storage_inventory_count": 0,
             "browser_storage_review_profile": {
+              "cache_signature_candidate_count": 0,
+              "extension_manifest_candidate_count": 0,
               "inventory_count": 0,
               "profile_version": "browser-storage-review-profile-v1",
-              "recommended_view": "group-by-storage-type-then-open-sample-hashes",
+              "recommended_view": "group-by-storage-type-then-review-source-context",
               "review_priority": "normal",
               "sample_hash_file_count": 0,
               "secret_values_redacted_by_default": true,
               "sensitive_inventory_count": 0,
+              "session_structure_candidate_count": 0,
+              "source_context_profile_count": 0,
+              "sqlite_schema_inventory_count": 0,
               "storage_type_counts": [],
               "total_bytes": 0,
               "truncated_inventory_count": 0
@@ -2718,7 +2822,7 @@
                 "firefox_places_history": true,
                 "safari_windows_profile_support": false
               },
-              "parser_version": "windows-browser-v8",
+              "parser_version": "windows-browser-v9",
               "profile": "Profile 1",
               "reportability": {
                 "allowed_use": "browser-history-download-timeline-triage-pivot",
@@ -2941,12 +3045,18 @@
                   "implemented_controls": {
                     "browser": "edge",
                     "cache_session_extension_sync_cookie_credential_inventory": true,
+                    "cache_signature_candidate_count": 0,
+                    "extension_manifest_candidate_count": 0,
                     "inventory_count": 0,
                     "profile": "Profile 1",
                     "sample_file_hash_count": 0,
                     "secret_values_redacted_by_default": true,
                     "sensitive_citation_count": 0,
                     "sensitive_inventory_count": 0,
+                    "session_structure_candidate_count": 0,
+                    "source_context_profile_count": 0,
+                    "source_context_profile_hash_count": 0,
+                    "sqlite_schema_inventory_count": 0,
                     "storage_citation_count": 0,
                     "storage_citation_manifest_hash": "<DYNAMIC_MANIFEST_HASH>",
                     "trusted_diff_status": "not-attached"
@@ -2974,12 +3084,22 @@
               ],
               "large_data_controls": {
                 "browser_version_corpus_required_for_commercial_claims": true,
+                "cache_signature_candidate_count": 0,
+                "extension_manifest_candidate_count": 0,
+                "max_browser_storage_context_bytes_per_file": 262144,
+                "max_browser_storage_context_files_per_store": 16,
                 "max_browser_timeline_rows": 1000,
                 "max_storage_inventory_files": 5000,
                 "row_citation_count": 2,
                 "row_citation_manifest_hash": "<DYNAMIC_MANIFEST_HASH>",
                 "secret_values_redacted_by_default": true,
+                "session_structure_candidate_count": 0,
+                "sqlite_schema_inventory_count": 0,
+                "storage_citation_count": 0,
+                "storage_citation_manifest_hash": "<DYNAMIC_MANIFEST_HASH>",
                 "storage_inventory_count": 0,
+                "storage_source_context_hash_count": 0,
+                "storage_source_context_profile_count": 0,
                 "unified_timeline_count": 2
               },
               "next_internal_step": "Finish cache/session schema decoding, deleted-history recovery, Safari parity, and browser-version known-answer validation.",
@@ -3257,7 +3377,7 @@
             ],
             "internet_usage_count": 1,
             "parser": "browser-history",
-            "parser_version": "windows-browser-v8",
+            "parser_version": "windows-browser-v9",
             "privacy_legal_warning": "Browser cache, session, sync, cookie, and credential stores can contain private communications, tokens, identifiers, and regulated personal data. Treat this inventory as legally sensitive, review authority/scope before opening raw files, and do not report secrets from this parser alone.",
             "profile": "Profile 1",
             "reportability": "triage",

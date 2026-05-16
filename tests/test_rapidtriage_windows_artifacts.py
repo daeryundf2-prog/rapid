@@ -992,6 +992,15 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
             self.assertTrue(chrome["details"]["browser_timeline_integrity_profile"]["sorted_descending"])
             self.assertTrue(chrome["details"]["browser_timeline_integrity_profile"]["source_index_complete"])
             self.assertGreaterEqual(chrome["details"]["browser_storage_review_profile"]["sensitive_inventory_count"], 3)
+            self.assertGreaterEqual(chrome["details"]["browser_storage_review_profile"]["source_context_profile_count"], 5)
+            self.assertGreaterEqual(chrome["details"]["browser_storage_review_profile"]["extension_manifest_candidate_count"], 1)
+            self.assertGreaterEqual(chrome["details"]["browser_storage_review_profile"]["cache_signature_candidate_count"], 1)
+            self.assertGreaterEqual(chrome["details"]["browser_storage_review_profile"]["sqlite_schema_inventory_count"], 1)
+            self.assertGreaterEqual(chrome["details"]["browser_storage_review_profile"]["session_structure_candidate_count"], 1)
+            self.assertEqual(
+                chrome["details"]["browser_storage_review_profile"]["recommended_view"],
+                "group-by-storage-type-then-review-source-context",
+            )
             self.assertIn("typed_count", chrome["details"]["history"][0])
             self.assertTrue(chrome["details"]["browser_validation_checks"]["typed_url_metadata_present"])
             chrome_storage_depth = chrome["details"]["browser_storage_depth_manifest"]
@@ -1004,6 +1013,11 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
             self.assertTrue(chrome_storage_depth["storage_scope"]["session_present"])
             self.assertTrue(chrome_storage_depth["storage_scope"]["extension_present"])
             self.assertTrue(chrome_storage_depth["storage_scope"]["sync_present"])
+            self.assertGreaterEqual(chrome_storage_depth["review_controls"]["source_context_profile_count"], 5)
+            self.assertGreaterEqual(chrome_storage_depth["review_controls"]["extension_manifest_candidate_count"], 1)
+            self.assertGreaterEqual(chrome_storage_depth["review_controls"]["cache_signature_candidate_count"], 1)
+            self.assertGreaterEqual(chrome_storage_depth["review_controls"]["sqlite_schema_inventory_count"], 1)
+            self.assertGreaterEqual(chrome_storage_depth["review_controls"]["session_structure_candidate_count"], 1)
             self.assertFalse(chrome_storage_depth["native_depth"]["full_cache_entry_decode"])
             self.assertFalse(chrome_storage_depth["native_depth"]["sync_engine_state_decode"])
             self.assertEqual(
@@ -1151,16 +1165,54 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
             self.assertGreaterEqual(storage_citation_manifest["citation_row_count"], 5)
             self.assertGreaterEqual(storage_citation_manifest["sensitive_citation_count"], 3)
             self.assertGreaterEqual(storage_citation_manifest["sample_file_hash_count"], 1)
+            self.assertGreaterEqual(storage_citation_manifest["source_context_profile_count"], 5)
+            self.assertEqual(
+                storage_citation_manifest["source_context_profile_hash_count"],
+                storage_citation_manifest["citation_row_count"],
+            )
+            self.assertGreaterEqual(storage_citation_manifest["extension_manifest_candidate_count"], 1)
+            self.assertGreaterEqual(storage_citation_manifest["cache_signature_candidate_count"], 1)
+            self.assertGreaterEqual(storage_citation_manifest["sqlite_schema_inventory_count"], 1)
+            self.assertGreaterEqual(storage_citation_manifest["session_structure_candidate_count"], 1)
             self.assertEqual(storage_citation_manifest["citations"][0]["raw_values_extracted"], False)
             self.assertIn("source_viewer_locator", storage_citation_manifest["citations"][0])
+            self.assertIn("source_context_summary", storage_citation_manifest["citations"][0])
+            self.assertEqual(
+                len(storage_citation_manifest["citations"][0]["source_context_profile_hash"]),
+                64,
+            )
+            self.assertTrue(
+                storage_citation_manifest["citations"][0]["source_viewer_locator"]["source_context_profile_hash"]
+            )
             self.assertIn("#19", storage_inventory["details"]["browser_report_grade_assessment"]["commercial_gap_ids"])
             self.assertEqual(storage_inventory["details"]["forensic_review"]["gap_id"], "#19")
+            storage_rows = storage_inventory["details"]["storage_inventory"]
+            source_contexts = [
+                row["source_context_profile"]
+                for row in storage_rows
+                if isinstance(row.get("source_context_profile"), dict)
+            ]
+            self.assertGreaterEqual(len(source_contexts), 5)
+            self.assertTrue(all(len(row["source_context_profile_hash"]) == 64 for row in storage_rows))
+            extension_context = next(profile for profile in source_contexts if profile["storage_type"] == "extension")
+            self.assertEqual(extension_context["profile_version"], "browser-storage-source-context-profile-v1")
+            self.assertFalse(extension_context["raw_values_extracted"])
+            self.assertEqual(extension_context["extension_manifest_candidates"][0]["name"], "Fixture Extension")
+            self.assertEqual(extension_context["extension_manifest_candidates"][0]["permission_count"], 1)
+            cache_context = next(profile for profile in source_contexts if profile["storage_type"] == "cache")
+            self.assertTrue(cache_context["cache_signature_candidates"][0]["has_http_header"])
+            self.assertEqual(cache_context["cache_signature_candidates"][0]["content_type"], "text/html")
+            cookie_context = next(profile for profile in source_contexts if profile["storage_type"] == "cookie")
+            self.assertTrue(cookie_context["sqlite_schema_inventories"][0]["sqlite_header_present"])
+            session_context = next(profile for profile in source_contexts if profile["storage_type"] == "session")
+            self.assertIn("last_url", session_context["session_structure_candidates"][0]["key_sample"])
             storage_depth = storage_inventory["details"]["browser_storage_depth_manifest"]
             self.assertEqual(storage_depth["manifest_version"], "browser-storage-depth-manifest-v1")
             self.assertEqual(storage_depth["item_number"], 19)
             self.assertEqual(storage_depth["qc_prep_item_numbers"], [33, 34])
             self.assertTrue(storage_depth["storage_scope"]["cookie_present"])
             self.assertGreaterEqual(storage_depth["storage_scope"]["sensitive_inventory_count"], 3)
+            self.assertGreaterEqual(storage_depth["review_controls"]["source_context_profile_count"], 5)
             self.assertEqual(storage_depth["reportability"]["allowed_use"], "browser-storage-inventory-triage-pivot")
             self.assertEqual(
                 storage_inventory["details"]["browser_storage_depth_manifest_hash"],
@@ -1177,6 +1229,11 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
             self.assertIn("Password, cookie, and session stores", storage_inventory["details"]["browser_secret_legal_warning"])
             storage_gates = {gate["gap_id"]: gate for gate in storage_inventory["details"]["core_accuracy_gates"]}
             self.assertIn("extension ID/source mapping", storage_gates["#19"]["satisfied_checks"])
+            self.assertIn("storage source context profiles", storage_gates["#19"]["satisfied_checks"])
+            self.assertIn("cache signature context", storage_gates["#19"]["satisfied_checks"])
+            self.assertIn("extension manifest context", storage_gates["#19"]["satisfied_checks"])
+            self.assertIn("sqlite storage context", storage_gates["#19"]["satisfied_checks"])
+            self.assertIn("session structure context", storage_gates["#19"]["satisfied_checks"])
             self.assertIn("deleted/synced content warning", storage_gates["#19"]["satisfied_checks"])
             self.assertIn("sensitive artifact inventory", storage_gates["#42"]["satisfied_checks"])
             self.assertIn("secret values redacted by default", storage_gates["#42"]["satisfied_checks"])

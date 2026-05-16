@@ -78,6 +78,7 @@
       "expected": {
         "required_assertions": [
           "Browser storage inventory preserves profile attribution, cache/session/extension/sync/cookie stores, legal warning, #19 core_accuracy_gates, and secret-redacted reportability decisions",
+          "Browser storage source context profiles preserve extension manifest, cache signature, SQLite header/schema, session structure, source-viewer, and profile-hash evidence without raw secret serialization",
           "trusted browser storage diff helpers pass exact matching rows and block mismatches"
         ]
       },
