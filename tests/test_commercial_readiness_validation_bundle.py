@@ -284,9 +284,18 @@ class CommercialReadinessValidationBundleTests(unittest.TestCase):
                             "package_hash": "c" * 64,
                             "ready_for_review_note": True,
                             "ready_for_court_report": False,
+                            "core_accuracy_gates": {
+                                "remaining_blockers": [
+                                    "source hash was not computed for this source-read run",
+                                ],
+                            },
                         },
                         "reportability_decision": {
                             "decision": "source-preview-is-review-aid-not-standalone-proof",
+                            "required_before_report": [
+                                "verify source file hash",
+                                "record review status and note",
+                            ],
                         },
                     },
                     ensure_ascii=False,
@@ -311,6 +320,13 @@ class CommercialReadinessValidationBundleTests(unittest.TestCase):
                         },
                         "reportability_decision": {
                             "decision": "source-search-hit-is-review-lead-not-standalone-proof",
+                            "required_before_report": [
+                                "open source-read/source viewer for the same locator",
+                                "record review status and analyst note",
+                            ],
+                            "blockers": [
+                                "case search hit must be verified in source viewer before report use",
+                            ],
                         },
                     },
                     ensure_ascii=False,
@@ -327,6 +343,8 @@ class CommercialReadinessValidationBundleTests(unittest.TestCase):
         self.assertEqual(mac_first["evidence_count"], 2)
         self.assertEqual(mac_first["source_review_handoff_ready_count"], 2)
         self.assertEqual(mac_first["source_court_report_ready_count"], 0)
+        self.assertEqual(mac_first["source_required_before_report_count"], 4)
+        self.assertEqual(mac_first["source_reportability_blocker_count"], 2)
         self.assertIn(52, mac_first["supports_backlog_items"])
         self.assertIn(61, mac_first["supports_backlog_items"])
         self.assertIn(64, mac_first["supports_backlog_items"])
@@ -338,9 +356,23 @@ class CommercialReadinessValidationBundleTests(unittest.TestCase):
             rows["source-read"]["source_reportability_decision"],
             "source-preview-is-review-aid-not-standalone-proof",
         )
+        self.assertEqual(rows["source-read"]["source_required_before_report_count"], 2)
+        self.assertIn(
+            "verify source file hash",
+            rows["source-read"]["source_required_before_report"],
+        )
+        self.assertEqual(rows["source-read"]["source_reportability_blocker_count"], 1)
+        self.assertIn(
+            "source hash was not computed for this source-read run",
+            rows["source-read"]["source_reportability_blockers"],
+        )
         self.assertEqual(rows["source-search"]["source_match_count"], 3)
         self.assertTrue(rows["source-search"]["source_searchable"])
         self.assertEqual(rows["source-search"]["source_citation_package_hash"], "s" * 64)
+        self.assertIn(
+            "case search hit must be verified in source viewer before report use",
+            rows["source-search"]["source_reportability_blockers"],
+        )
         self.assertFalse(report["commercial_claim_allowed"])
 
     def test_commercial_readiness_attaches_cloud_export_parser_evidence(self) -> None:

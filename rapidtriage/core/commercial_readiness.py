@@ -553,6 +553,17 @@ MAC_FIRST_EVIDENCE_FILENAMES = {
 MAC_FIRST_EVIDENCE_DISCOVERY_MAX_FILES = 100
 
 
+def _string_list(value: object) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    rows: list[str] = []
+    for item in value:
+        text = str(item).strip()
+        if text and text not in rows:
+            rows.append(text)
+    return rows
+
+
 def _mac_first_evidence_command(raw: Mapping[str, object]) -> str:
     command = str(raw.get("command") or "")
     if command:
@@ -750,6 +761,17 @@ def load_mac_first_evidence(path: Path) -> dict[str, object]:
     reportability_decision = (
         raw.get("reportability_decision") if isinstance(raw.get("reportability_decision"), Mapping) else {}
     )
+    source_accuracy_gates = (
+        source_citation_package.get("core_accuracy_gates")
+        if isinstance(source_citation_package.get("core_accuracy_gates"), Mapping)
+        else {}
+    )
+    source_required_before_report = _string_list(reportability_decision.get("required_before_report"))
+    source_reportability_blockers = [
+        *_string_list(reportability_decision.get("blockers")),
+        *_string_list(source_accuracy_gates.get("remaining_blockers")),
+    ]
+    source_reportability_blockers = list(dict.fromkeys(source_reportability_blockers))
     large_case_summary = large_case.get("summary") if isinstance(large_case.get("summary"), Mapping) else {}
     case_db_profile = large_case.get("case_db_profile") if isinstance(large_case.get("case_db_profile"), Mapping) else {}
     search_diagnostics = (
@@ -806,6 +828,10 @@ def load_mac_first_evidence(path: Path) -> dict[str, object]:
         "source_ready_for_review_note": source_citation_package.get("ready_for_review_note"),
         "source_ready_for_court_report": source_citation_package.get("ready_for_court_report"),
         "source_reportability_decision": str(reportability_decision.get("decision") or ""),
+        "source_required_before_report": source_required_before_report,
+        "source_required_before_report_count": len(source_required_before_report),
+        "source_reportability_blockers": source_reportability_blockers,
+        "source_reportability_blocker_count": len(source_reportability_blockers),
         "cloud_export_artifact_count": cloud_export_summary.get("artifact_count"),
         "cloud_export_artifact_type_counts": cloud_export_summary.get("artifact_type_counts", {}),
         "cloud_export_service_counts": cloud_export_summary.get("service_counts", {}),
@@ -870,6 +896,12 @@ def build_mac_first_evidence_summary(
         ),
         "source_court_report_ready_count": sum(
             1 for row in rows if row.get("source_ready_for_court_report") is True
+        ),
+        "source_required_before_report_count": sum(
+            int(row.get("source_required_before_report_count") or 0) for row in rows
+        ),
+        "source_reportability_blocker_count": sum(
+            int(row.get("source_reportability_blocker_count") or 0) for row in rows
         ),
         "cloud_export_evidence_count": sum(1 for row in rows if row.get("command") == "cloud-export"),
         "cloud_export_artifact_count": sum(
