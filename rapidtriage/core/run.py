@@ -145,7 +145,7 @@ PREVIEW_SANDBOX_TRUSTED_DIFF_BLOCKER_73 = "trusted-preview-no-exec-diff-missing"
 PREVIEW_SANDBOX_REPORT_GRADE_VALIDATION_PLAN_VERSION = "preview-sandbox-report-grade-validation-plan-v1"
 PREVIEW_SANDBOX_REPORT_GRADE_BLOCKERS = [
     "os-level-renderer-sandbox-required",
-    "trusted-preview-no-exec-manifest-required",
+    PREVIEW_SANDBOX_TRUSTED_DIFF_BLOCKER_73,
     "browser-renderer-exploit-corpus-required",
     "malicious-active-content-corpus-required",
     "risky-codec-macro-external-sandbox-required",
@@ -1602,7 +1602,7 @@ def preview_sandbox_report_grade_validation_plan(*, policy_manifest: Mapping[str
         {
             "slot_id": "trusted-no-exec-manifest",
             "status": "blocked",
-            "blocker": "trusted-preview-no-exec-manifest-required",
+            "blocker": PREVIEW_SANDBOX_TRUSTED_DIFF_BLOCKER_73,
             "required_evidence": "trusted no-exec/no-network preview manifest diff for representative active-content files",
         },
         {
