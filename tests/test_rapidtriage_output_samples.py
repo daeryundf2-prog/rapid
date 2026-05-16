@@ -298,6 +298,10 @@ def canonicalize_files(payload: dict[str, Any]) -> dict[str, Any]:
         duplicate["duplicate_content_manifest"] = compact_duplicate_content_manifest(
             duplicate.get("duplicate_content_manifest")
         )
+        duplicate["duplicate_content_report_grade_validation_plan_hash"] = "<DUPLICATE_VALIDATION_PLAN_HASH>"
+        duplicate["duplicate_content_report_grade_validation_plan"] = compact_duplicate_validation_plan(
+            duplicate.get("duplicate_content_report_grade_validation_plan")
+        )
         duplicate["core_accuracy_gates"] = compact_core_accuracy_gates(duplicate.get("core_accuracy_gates"))
     return canonical
 
@@ -316,6 +320,38 @@ def compact_duplicate_content_manifest(value: object) -> object:
         if isinstance(group, dict)
     ]
     return compact
+
+
+def compact_duplicate_validation_plan(value: object) -> object:
+    if not isinstance(value, dict):
+        return value
+    compact = dict(value)
+    compact["duplicate_content_manifest_hash"] = "<DUPLICATE_CONTENT_MANIFEST_HASH>"
+    compact["duplicate_suppression_manifest_hash"] = "<DUPLICATE_SUPPRESSION_MANIFEST_HASH>"
+    compact["review_matrix_hash"] = "<DUPLICATE_REVIEW_MATRIX_HASH>"
+    compact["group_head_hash"] = "<DUPLICATE_GROUP_HEAD_HASH>"
+    compact["fuzzy_text_group_head_hash"] = "<DUPLICATE_FUZZY_TEXT_GROUP_HEAD_HASH>"
+    compact["representative_policy_hash"] = "<DUPLICATE_REPRESENTATIVE_POLICY_HASH>"
+    compact["duplicate_counts_hash"] = "<DUPLICATE_COUNTS_HASH>"
+    compact["validation_plan_hash"] = "<DUPLICATE_VALIDATION_PLAN_HASH>"
+    compact["validation_plan_sha256"] = "<DUPLICATE_VALIDATION_PLAN_HASH>"
+    compact["ready_slots"] = compact_duplicate_validation_slots(compact.get("ready_slots"))
+    compact["blocking_slots"] = compact_duplicate_validation_slots(compact.get("blocking_slots"))
+    return compact
+
+
+def compact_duplicate_validation_slots(value: object) -> object:
+    if not isinstance(value, list):
+        return value
+    rows = []
+    for slot in value:
+        if not isinstance(slot, dict):
+            continue
+        row = dict(slot)
+        if "evidence_hash" in row:
+            row["evidence_hash"] = "<DUPLICATE_SLOT_HASH>"
+        rows.append(row)
+    return rows
 
 
 def compact_hash_cache_manifest(value: object) -> object:

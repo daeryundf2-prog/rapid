@@ -157,7 +157,12 @@
       "perceptual-media-similarity-not-implemented",
       "hashing-is-bounded-to-protect-large-case-responsiveness",
       "operator-must-verify-source-hashes-before-suppressing-duplicates-in-reports",
-      "trusted-duplicate-file-manifest-diff-missing"
+      "trusted-duplicate-file-manifest-diff-missing",
+      "perceptual-media-similarity-required",
+      "analyst-suppression-workflow-validation-required",
+      "large-case-dedupe-performance-validation-required",
+      "near-duplicate-text-known-answer-corpus-required",
+      "cross-run-suppression-version-history-required"
     ],
     "commercial_gap_ids": [
       "#77"
@@ -200,6 +205,127 @@
         "report_suppression_default": "not-suppressed"
       }
     },
+    "duplicate_content_report_grade_validation_plan": {
+      "analyst_override_required": true,
+      "auto_suppression_enabled": false,
+      "blockers": [
+        "trusted-duplicate-file-manifest-diff-missing",
+        "perceptual-media-similarity-required",
+        "analyst-suppression-workflow-validation-required",
+        "large-case-dedupe-performance-validation-required",
+        "near-duplicate-text-known-answer-corpus-required",
+        "cross-run-suppression-version-history-required"
+      ],
+      "blocking_slot_count": 6,
+      "blocking_slots": [
+        {
+          "blocker": "trusted-duplicate-file-manifest-diff-missing",
+          "required_evidence": "independent trusted duplicate manifest diff for exact and fuzzy duplicate groups",
+          "slot_id": "trusted-duplicate-manifest",
+          "status": "blocked"
+        },
+        {
+          "blocker": "perceptual-media-similarity-required",
+          "required_evidence": "image/video perceptual hash corpus with expected similar-media group IDs",
+          "slot_id": "perceptual-media-similarity",
+          "status": "blocked"
+        },
+        {
+          "blocker": "analyst-suppression-workflow-validation-required",
+          "required_evidence": "persisted analyst include/suppress decisions with audit trail and report replay proof",
+          "slot_id": "analyst-suppression-workflow",
+          "status": "blocked"
+        },
+        {
+          "blocker": "large-case-dedupe-performance-validation-required",
+          "required_evidence": "large evidence replay proving bounded hashing, grouping latency, and memory usage",
+          "slot_id": "large-case-dedupe-performance",
+          "status": "blocked"
+        },
+        {
+          "blocker": "near-duplicate-text-known-answer-corpus-required",
+          "required_evidence": "known-answer corpus for fuzzy text true/false positive thresholds",
+          "slot_id": "near-duplicate-text-known-answer-corpus",
+          "status": "blocked"
+        },
+        {
+          "blocker": "cross-run-suppression-version-history-required",
+          "required_evidence": "case-level version history proving suppression decisions survive reruns without drift",
+          "slot_id": "cross-run-suppression-version-history",
+          "status": "blocked"
+        }
+      ],
+      "commercial_claim_allowed": false,
+      "commercial_gap_ids": [
+        "#77"
+      ],
+      "duplicate_content_manifest_hash": "<DUPLICATE_CONTENT_MANIFEST_HASH>",
+      "duplicate_counts_hash": "<DUPLICATE_COUNTS_HASH>",
+      "duplicate_suppression_manifest_hash": "<DUPLICATE_SUPPRESSION_MANIFEST_HASH>",
+      "exact_group_count": 0,
+      "exact_hash_grouping": true,
+      "fuzzy_text_group_count": 0,
+      "fuzzy_text_group_head_hash": "<DUPLICATE_FUZZY_TEXT_GROUP_HEAD_HASH>",
+      "fuzzy_text_grouping": true,
+      "gap_id": "#77",
+      "group_head_hash": "<DUPLICATE_GROUP_HEAD_HASH>",
+      "item_number": 77,
+      "perceptual_media_grouping": false,
+      "profile_version": "duplicate-content-report-grade-validation-plan-v1",
+      "ready_for_court_report": false,
+      "ready_slot_count": 6,
+      "ready_slots": [
+        {
+          "description": "Exact and fuzzy duplicate summaries are archived in duplicate-content-manifest-v1.",
+          "evidence_hash": "<DUPLICATE_SLOT_HASH>",
+          "evidence_ref": "duplicate_content_manifest_hash",
+          "slot_id": "duplicate-content-manifest",
+          "status": "ready"
+        },
+        {
+          "description": "Same-size candidate files are confirmed by bounded SHA-256 exact grouping.",
+          "evidence_hash": "<DUPLICATE_SLOT_HASH>",
+          "evidence_ref": "group_head_hash",
+          "slot_id": "exact-hash-grouping",
+          "status": "ready"
+        },
+        {
+          "description": "Normalized text near-duplicate candidates are grouped without automatic suppression.",
+          "evidence_hash": "<DUPLICATE_SLOT_HASH>",
+          "evidence_ref": "fuzzy_text_group_head_hash",
+          "slot_id": "fuzzy-text-candidate-grouping",
+          "status": "ready"
+        },
+        {
+          "description": "Review matrix rows define the analyst decision required before report suppression.",
+          "evidence_hash": "<DUPLICATE_SLOT_HASH>",
+          "evidence_ref": "review_matrix_hash",
+          "slot_id": "duplicate-suppression-review-matrix",
+          "status": "ready"
+        },
+        {
+          "description": "Representative-first review remains deterministic and suppression-disabled by default.",
+          "evidence_hash": "<DUPLICATE_SLOT_HASH>",
+          "evidence_ref": "representative_policy_hash",
+          "slot_id": "representative-selection-policy",
+          "status": "ready"
+        },
+        {
+          "description": "Exact and fuzzy duplicate group/file counts are hashed for report review.",
+          "evidence_hash": "<DUPLICATE_SLOT_HASH>",
+          "evidence_ref": "duplicate_counts_hash",
+          "slot_id": "duplicate-count-profile",
+          "status": "ready"
+        }
+      ],
+      "report_use_warning": "Use as exact-hash and fuzzy-text duplicate review evidence only; do not auto-suppress or claim perceptual media coverage until blocker slots are satisfied.",
+      "representative_policy_hash": "<DUPLICATE_REPRESENTATIVE_POLICY_HASH>",
+      "review_matrix_hash": "<DUPLICATE_REVIEW_MATRIX_HASH>",
+      "trusted_duplicate_manifest_diff_status": "missing",
+      "validation_plan_hash": "<DUPLICATE_VALIDATION_PLAN_HASH>",
+      "validation_plan_sha256": "<DUPLICATE_VALIDATION_PLAN_HASH>"
+    },
+    "duplicate_content_report_grade_validation_plan_hash": "<DUPLICATE_VALIDATION_PLAN_HASH>",
     "duplicate_file_count": 0,
     "duplicate_group_count": 0,
     "duplicate_suppression_manifest": {
@@ -268,7 +394,9 @@
     "fuzzy_text_duplicate_file_count": 0,
     "fuzzy_text_duplicate_group_count": 0,
     "ready_for_court_report": false,
-    "status": "bounded-sha256-same-size-grouping",
+    "report_grade_blocking_slot_count": 6,
+    "report_grade_ready_slot_count": 6,
+    "status": "bounded-sha256-and-fuzzy-text-validation-plan-emitted",
     "supports": [
       "same-size-candidate-bucketing",
       "bounded-content-sha256-confirmation",

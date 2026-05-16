@@ -1213,6 +1213,7 @@ CORE_FORENSIC_ACCURACY_ITEMS: tuple[dict[str, object], ...] = (
             "duplicate-content manifest hash emitted",
             "not-suppressed policy emitted",
             "suppression verification warning",
+            "duplicate content report-grade validation plan emitted",
             "trusted duplicate file manifest diff pass",
         ),
     },

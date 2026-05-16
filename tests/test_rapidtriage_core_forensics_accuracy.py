@@ -180,6 +180,7 @@ class RapidTriageCoreForensicsAccuracyTests(unittest.TestCase):
         self.assertIn("hash cache report-grade validation plan emitted", hash_cache["required_checks"])
         self.assertIn("trusted hash-cache manifest diff pass", hash_cache["required_checks"])
         self.assertIn("duplicate group counts", duplicate_detection["required_checks"])
+        self.assertIn("duplicate content report-grade validation plan emitted", duplicate_detection["required_checks"])
         self.assertIn("trusted duplicate file manifest diff pass", duplicate_detection["required_checks"])
         self.assertIn("cursor token emitted", pagination["required_checks"])
         self.assertIn("trusted pagination cursor manifest diff pass", pagination["required_checks"])

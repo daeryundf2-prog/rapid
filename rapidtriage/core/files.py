@@ -36,6 +36,15 @@ SIGNATURE_MISMATCH_GAP_ID = "visible-file-signature-mismatch"
 FUNCTIONAL_SCALE_BATCH_ID = "commercial-uplift-031-035"
 DUPLICATE_CONTENT_TRUSTED_DIFF_BLOCKER_77 = "trusted-duplicate-file-manifest-diff-missing"
 DUPLICATE_CONTENT_TRUSTED_TOOLS = {"duplicate-file-manifest", "known-answer-duplicate-group-export", "content-hash-oracle"}
+DUPLICATE_CONTENT_REPORT_GRADE_VALIDATION_PLAN_VERSION = "duplicate-content-report-grade-validation-plan-v1"
+DUPLICATE_CONTENT_REPORT_GRADE_BLOCKERS = [
+    DUPLICATE_CONTENT_TRUSTED_DIFF_BLOCKER_77,
+    "perceptual-media-similarity-required",
+    "analyst-suppression-workflow-validation-required",
+    "large-case-dedupe-performance-validation-required",
+    "near-duplicate-text-known-answer-corpus-required",
+    "cross-run-suppression-version-history-required",
+]
 EXECUTABLE_BITS = stat_module.S_IXUSR | stat_module.S_IXGRP | stat_module.S_IXOTH
 DEFAULT_KNOWN_GOOD_MAX_HASH_BYTES = 64 * 1024 * 1024
 KNOWN_GOOD_HASH_ALGORITHMS = ("md5", "sha1", "sha256")
@@ -1725,31 +1734,45 @@ def duplicate_detection_assessment(
         duplicate_content_manifest=manifest,
         fuzzy_text_groups=fuzzy_text_groups,
     )
+    validation_plan = duplicate_content_report_grade_validation_plan(
+        groups,
+        fuzzy_text_groups=fuzzy_text_groups,
+        duplicate_manifest=manifest,
+        suppression_manifest=suppression_manifest,
+        trusted_diff=trusted_diff,
+    )
     satisfied = [
         "same-size candidate bucketing",
-            "bounded SHA256 confirmation",
-            "duplicate group counts",
-            "fuzzy text duplicate candidate grouping",
-            "representative paths listed",
-            "duplicate-content manifest hash emitted",
-            "duplicate-suppression manifest hash emitted",
-            "duplicate review matrix hash emitted",
-            "not-suppressed policy emitted",
-            "suppression verification warning",
+        "bounded SHA256 confirmation",
+        "duplicate group counts",
+        "fuzzy text duplicate candidate grouping",
+        "representative paths listed",
+        "duplicate-content manifest hash emitted",
+        "duplicate-suppression manifest hash emitted",
+        "duplicate review matrix hash emitted",
+        "not-suppressed policy emitted",
+        "suppression verification warning",
+        "duplicate content report-grade validation plan emitted",
+        "duplicate content report-grade ready slots emitted",
     ]
     if trusted_diff and trusted_diff.get("status") == "pass":
         satisfied.append("trusted duplicate file manifest diff pass")
-    blockers = [
-        "near-duplicate-text-and-media-similarity-are-not-full-file-deduplication",
-        "perceptual-media-similarity-not-implemented",
-        "hashing-is-bounded-to-protect-large-case-responsiveness",
-        "operator-must-verify-source-hashes-before-suppressing-duplicates-in-reports",
-    ]
+    blockers = list(
+        dict.fromkeys(
+            [
+                "near-duplicate-text-and-media-similarity-are-not-full-file-deduplication",
+                "perceptual-media-similarity-not-implemented",
+                "hashing-is-bounded-to-protect-large-case-responsiveness",
+                "operator-must-verify-source-hashes-before-suppressing-duplicates-in-reports",
+                *validation_plan["blockers"],
+            ]
+        )
+    )
     if not trusted_diff or trusted_diff.get("status") != "pass":
-        blockers.append(DUPLICATE_CONTENT_TRUSTED_DIFF_BLOCKER_77)
+        blockers = list(dict.fromkeys([*blockers, DUPLICATE_CONTENT_TRUSTED_DIFF_BLOCKER_77]))
     return {
         "component": "duplicate-file-content-detection",
-        "status": "bounded-sha256-same-size-grouping",
+        "status": "bounded-sha256-and-fuzzy-text-validation-plan-emitted",
         "commercial_gap_ids": [DEDUPLICATE_CONTENT_GAP_ID],
         "functional_priority_profile": duplicate_suppression_functional_profile(
             groups,
@@ -1758,6 +1781,10 @@ def duplicate_detection_assessment(
         "duplicate_content_manifest": manifest,
         "duplicate_suppression_manifest": suppression_manifest,
         "duplicate_suppression_manifest_hash": suppression_manifest["manifest_hash"],
+        "duplicate_content_report_grade_validation_plan": validation_plan,
+        "duplicate_content_report_grade_validation_plan_hash": validation_plan["validation_plan_hash"],
+        "report_grade_ready_slot_count": validation_plan["ready_slot_count"],
+        "report_grade_blocking_slot_count": validation_plan["blocking_slot_count"],
         "duplicate_group_count": len(groups),
         "duplicate_file_count": sum(int(group.get("file_count") or 0) for group in groups),
         "fuzzy_text_duplicate_group_count": len(fuzzy_text_groups),
@@ -1770,6 +1797,7 @@ def duplicate_detection_assessment(
             satisfied_checks=satisfied,
             duplicate_manifest=manifest,
             suppression_manifest=suppression_manifest,
+            validation_plan=validation_plan,
             trusted_diff=trusted_diff,
         ),
         "supports": [
@@ -1782,6 +1810,157 @@ def duplicate_detection_assessment(
             "not-suppressed-until-analyst-review",
         ],
         "blockers": blockers,
+    }
+
+
+def duplicate_content_report_grade_validation_plan(
+    groups: Sequence[Mapping[str, object]],
+    *,
+    fuzzy_text_groups: Sequence[Mapping[str, object]] | None = None,
+    duplicate_manifest: Mapping[str, object],
+    suppression_manifest: Mapping[str, object],
+    trusted_diff: Mapping[str, object] | None = None,
+) -> dict[str, object]:
+    fuzzy_text_groups = fuzzy_text_groups or []
+    duplicate_manifest_hash = str(duplicate_manifest.get("manifest_hash") or "")
+    suppression_manifest_hash = str(suppression_manifest.get("manifest_hash") or "")
+    review_matrix_hash = str(suppression_manifest.get("review_matrix_hash") or "")
+    exact_group_count = int(duplicate_manifest.get("group_count") or len(groups))
+    fuzzy_group_count = int(duplicate_manifest.get("fuzzy_text_group_count") or len(fuzzy_text_groups))
+    representative_policy = {
+        "representative_selection": str(suppression_manifest.get("representative_selection") or ""),
+        "report_suppression_default": str(suppression_manifest.get("report_suppression_default") or ""),
+        "auto_suppression_enabled": bool(suppression_manifest.get("auto_suppression_enabled")),
+        "analyst_override_required": bool(suppression_manifest.get("analyst_override_required")),
+        "collapse_by_default_in_ui": bool(suppression_manifest.get("collapse_by_default_in_ui")),
+    }
+    representative_policy_hash = hashlib.sha256(
+        json.dumps(representative_policy, sort_keys=True).encode("utf-8")
+    ).hexdigest()
+    duplicate_counts = {
+        "exact_group_count": exact_group_count,
+        "duplicate_file_count": int(duplicate_manifest.get("duplicate_file_count") or 0),
+        "fuzzy_group_count": fuzzy_group_count,
+        "fuzzy_text_file_count": int(duplicate_manifest.get("fuzzy_text_file_count") or 0),
+    }
+    duplicate_counts_hash = hashlib.sha256(json.dumps(duplicate_counts, sort_keys=True).encode("utf-8")).hexdigest()
+    ready_slots: list[dict[str, object]] = [
+        {
+            "slot_id": "duplicate-content-manifest",
+            "status": "ready",
+            "evidence_ref": "duplicate_content_manifest_hash",
+            "evidence_hash": duplicate_manifest_hash,
+            "description": "Exact and fuzzy duplicate summaries are archived in duplicate-content-manifest-v1.",
+        },
+        {
+            "slot_id": "exact-hash-grouping",
+            "status": "ready",
+            "evidence_ref": "group_head_hash",
+            "evidence_hash": str(duplicate_manifest.get("group_head_hash") or ""),
+            "description": "Same-size candidate files are confirmed by bounded SHA-256 exact grouping.",
+        },
+        {
+            "slot_id": "fuzzy-text-candidate-grouping",
+            "status": "ready",
+            "evidence_ref": "fuzzy_text_group_head_hash",
+            "evidence_hash": str(duplicate_manifest.get("fuzzy_text_group_head_hash") or ""),
+            "description": "Normalized text near-duplicate candidates are grouped without automatic suppression.",
+        },
+        {
+            "slot_id": "duplicate-suppression-review-matrix",
+            "status": "ready",
+            "evidence_ref": "review_matrix_hash",
+            "evidence_hash": review_matrix_hash,
+            "description": "Review matrix rows define the analyst decision required before report suppression.",
+        },
+        {
+            "slot_id": "representative-selection-policy",
+            "status": "ready",
+            "evidence_ref": "representative_policy_hash",
+            "evidence_hash": representative_policy_hash,
+            "description": "Representative-first review remains deterministic and suppression-disabled by default.",
+        },
+        {
+            "slot_id": "duplicate-count-profile",
+            "status": "ready",
+            "evidence_ref": "duplicate_counts_hash",
+            "evidence_hash": duplicate_counts_hash,
+            "description": "Exact and fuzzy duplicate group/file counts are hashed for report review.",
+        },
+    ]
+    blocking_slots: list[dict[str, object]] = [
+        {
+            "slot_id": "trusted-duplicate-manifest",
+            "status": "blocked",
+            "blocker": DUPLICATE_CONTENT_TRUSTED_DIFF_BLOCKER_77,
+            "required_evidence": "independent trusted duplicate manifest diff for exact and fuzzy duplicate groups",
+        },
+        {
+            "slot_id": "perceptual-media-similarity",
+            "status": "blocked",
+            "blocker": "perceptual-media-similarity-required",
+            "required_evidence": "image/video perceptual hash corpus with expected similar-media group IDs",
+        },
+        {
+            "slot_id": "analyst-suppression-workflow",
+            "status": "blocked",
+            "blocker": "analyst-suppression-workflow-validation-required",
+            "required_evidence": "persisted analyst include/suppress decisions with audit trail and report replay proof",
+        },
+        {
+            "slot_id": "large-case-dedupe-performance",
+            "status": "blocked",
+            "blocker": "large-case-dedupe-performance-validation-required",
+            "required_evidence": "large evidence replay proving bounded hashing, grouping latency, and memory usage",
+        },
+        {
+            "slot_id": "near-duplicate-text-known-answer-corpus",
+            "status": "blocked",
+            "blocker": "near-duplicate-text-known-answer-corpus-required",
+            "required_evidence": "known-answer corpus for fuzzy text true/false positive thresholds",
+        },
+        {
+            "slot_id": "cross-run-suppression-version-history",
+            "status": "blocked",
+            "blocker": "cross-run-suppression-version-history-required",
+            "required_evidence": "case-level version history proving suppression decisions survive reruns without drift",
+        },
+    ]
+    trusted_status = str((trusted_diff or {}).get("status") or "missing")
+    plan_core = {
+        "profile_version": DUPLICATE_CONTENT_REPORT_GRADE_VALIDATION_PLAN_VERSION,
+        "item_number": 77,
+        "gap_id": DEDUPLICATE_CONTENT_GAP_ID,
+        "commercial_gap_ids": [DEDUPLICATE_CONTENT_GAP_ID],
+        "duplicate_content_manifest_hash": duplicate_manifest_hash,
+        "duplicate_suppression_manifest_hash": suppression_manifest_hash,
+        "review_matrix_hash": review_matrix_hash,
+        "group_head_hash": str(duplicate_manifest.get("group_head_hash") or ""),
+        "fuzzy_text_group_head_hash": str(duplicate_manifest.get("fuzzy_text_group_head_hash") or ""),
+        "representative_policy_hash": representative_policy_hash,
+        "duplicate_counts_hash": duplicate_counts_hash,
+        "exact_group_count": exact_group_count,
+        "fuzzy_text_group_count": fuzzy_group_count,
+        "exact_hash_grouping": bool(duplicate_manifest.get("exact_hash_grouping")),
+        "fuzzy_text_grouping": bool(duplicate_manifest.get("fuzzy_text_grouping")),
+        "perceptual_media_grouping": bool(duplicate_manifest.get("perceptual_media_grouping")),
+        "auto_suppression_enabled": bool(suppression_manifest.get("auto_suppression_enabled")),
+        "analyst_override_required": bool(suppression_manifest.get("analyst_override_required")),
+        "trusted_duplicate_manifest_diff_status": trusted_status,
+        "ready_slots": ready_slots,
+        "blocking_slots": blocking_slots,
+        "ready_slot_count": len(ready_slots),
+        "blocking_slot_count": len(blocking_slots),
+        "blockers": list(DUPLICATE_CONTENT_REPORT_GRADE_BLOCKERS),
+        "commercial_claim_allowed": False,
+        "ready_for_court_report": False,
+        "report_use_warning": "Use as exact-hash and fuzzy-text duplicate review evidence only; do not auto-suppress or claim perceptual media coverage until blocker slots are satisfied.",
+    }
+    validation_plan_hash = hashlib.sha256(json.dumps(plan_core, sort_keys=True).encode("utf-8")).hexdigest()
+    return {
+        **plan_core,
+        "validation_plan_hash": validation_plan_hash,
+        "validation_plan_sha256": validation_plan_hash,
     }
 
 
@@ -1896,6 +2075,7 @@ def duplicate_content_core_accuracy_gates(
     satisfied_checks: Sequence[str] | None = None,
     duplicate_manifest: Mapping[str, object] | None = None,
     suppression_manifest: Mapping[str, object] | None = None,
+    validation_plan: Mapping[str, object] | None = None,
     trusted_diff: Mapping[str, object] | None = None,
 ) -> list[dict[str, object]]:
     fuzzy_text_groups = fuzzy_text_groups or []
@@ -1921,6 +2101,7 @@ def duplicate_content_core_accuracy_gates(
     )
     if trusted_diff and trusted_diff.get("status") == "pass" and "trusted duplicate file manifest diff pass" not in satisfied:
         satisfied.append("trusted duplicate file manifest diff pass")
+    validation_plan = validation_plan if isinstance(validation_plan, Mapping) else {}
     return [
         build_accuracy_gate(
             77,
@@ -1931,6 +2112,9 @@ def duplicate_content_core_accuracy_gates(
                 f"fuzzy_text_duplicate_group_count:{len(fuzzy_text_groups)}",
                 f"manifest_hash:{manifest.get('manifest_hash', '')}",
                 f"suppression_manifest_hash:{suppression.get('manifest_hash', '')}",
+                f"duplicate_content_report_grade_validation_plan_hash:{validation_plan.get('validation_plan_hash', '')}",
+                f"duplicate_content_report_grade_ready_slots:{validation_plan.get('ready_slot_count', 0)}",
+                f"duplicate_content_report_grade_blocking_slots:{validation_plan.get('blocking_slot_count', 0)}",
             ],
         )
     ]

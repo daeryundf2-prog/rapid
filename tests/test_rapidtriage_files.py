@@ -224,6 +224,26 @@ class RapidTriageFilesTests(unittest.TestCase):
                 payload["duplicate_detection_assessment"]["duplicate_suppression_manifest_hash"],
                 suppression_manifest["manifest_hash"],
             )
+            duplicate_plan = payload["duplicate_detection_assessment"][
+                "duplicate_content_report_grade_validation_plan"
+            ]
+            self.assertEqual(
+                duplicate_plan["profile_version"],
+                "duplicate-content-report-grade-validation-plan-v1",
+            )
+            self.assertEqual(
+                payload["duplicate_detection_assessment"][
+                    "duplicate_content_report_grade_validation_plan_hash"
+                ],
+                duplicate_plan["validation_plan_hash"],
+            )
+            self.assertEqual(duplicate_plan["ready_slot_count"], 6)
+            self.assertEqual(duplicate_plan["blocking_slot_count"], 6)
+            self.assertIn("exact-hash-grouping", {slot["slot_id"] for slot in duplicate_plan["ready_slots"]})
+            self.assertIn(
+                "perceptual-media-similarity",
+                {slot["slot_id"] for slot in duplicate_plan["blocking_slots"]},
+            )
             duplicate_profile = payload["duplicate_detection_assessment"]["functional_priority_profile"]
             self.assertEqual(duplicate_profile["item_number"], 33)
             self.assertEqual(duplicate_profile["batch_id"], "commercial-uplift-031-035")
@@ -252,6 +272,10 @@ class RapidTriageFilesTests(unittest.TestCase):
             )
             self.assertIn(
                 "fuzzy text duplicate candidate grouping",
+                payload["duplicate_detection_assessment"]["core_accuracy_gates"][0]["satisfied_checks"],
+            )
+            self.assertIn(
+                "duplicate content report-grade validation plan emitted",
                 payload["duplicate_detection_assessment"]["core_accuracy_gates"][0]["satisfied_checks"],
             )
 
@@ -391,6 +415,9 @@ class RapidTriageFilesTests(unittest.TestCase):
 
         self.assertEqual(duplicate_diff["status"], "pass")
         self.assertEqual(duplicate_manifest["profile"], "duplicate-content-manifest-v1")
+        duplicate_plan = promoted_duplicate["duplicate_content_report_grade_validation_plan"]
+        self.assertEqual(duplicate_plan["trusted_duplicate_manifest_diff_status"], "pass")
+        self.assertEqual(duplicate_plan["ready_slot_count"], 6)
         self.assertIn(
             "trusted duplicate file manifest diff pass",
             promoted_duplicate["core_accuracy_gates"][0]["satisfied_checks"],
