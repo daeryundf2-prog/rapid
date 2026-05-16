@@ -33,8 +33,8 @@
       "status": "pass",
       "backlog_items": [93],
       "evidence_paths": ["docs/validation/core-forensics-091-100-fixture-evidence.json", "tests/test_rapidtriage_case_db.py"],
-      "expected": {"required_assertions": ["Report items preserve artifact limitation text, parser-provided limitations, limitation detail metadata, category/scope counts, legal-limitation-wording-manifest-v1 manifest hash, jurisdiction caveat, analyst-review blockers, limitation counts, trusted legal limitation wording diff helpers/gates, and #93 core_accuracy_gates."]},
-      "notes": "Internal fixture pass; jurisdiction-approved legal wording and trusted wording manifests remain blockers."
+      "expected": {"required_assertions": ["Report items preserve artifact limitation text, parser-provided limitations, limitation detail metadata, category/scope counts, legal-limitation-wording-manifest-v1 manifest hash, legal-limitation-report-grade-validation-plan-v1, plan hash/counts, jurisdiction caveat, analyst-review blockers, limitation counts, trusted legal limitation wording diff helpers/gates, and #93 core_accuracy_gates."]},
+      "notes": "Internal fixture pass; jurisdiction-approved legal wording, trusted wording manifests, formal signoff, artifact-family limitation corpus, report-template limitation rendering review, and analyst acknowledgement workflow remain blockers."
     },
     {
       "id": "core-forensics-094-court-exhibit",

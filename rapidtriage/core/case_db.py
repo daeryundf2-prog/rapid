@@ -122,6 +122,15 @@ VALIDATION_WARNING_REPORT_GRADE_BLOCKERS = [
 ]
 VALIDATION_WARNING_TRUSTED_DIFF_BLOCKER_92 = "trusted-validation-warning-checklist-diff-missing"
 LEGAL_LIMITATION_TRUSTED_DIFF_BLOCKER_93 = "trusted-legal-limitation-wording-diff-missing"
+LEGAL_LIMITATION_REPORT_GRADE_VALIDATION_PLAN_VERSION = "legal-limitation-report-grade-validation-plan-v1"
+LEGAL_LIMITATION_REPORT_GRADE_BLOCKERS = [
+    "trusted-legal-limitation-wording-diff-missing",
+    "jurisdiction-approved-wording-required",
+    "formal-legal-review-signoff-required",
+    "artifact-family-limitation-corpus-required",
+    "report-template-limitation-rendering-review-required",
+    "analyst-limitation-acknowledgement-required",
+]
 REPORT_QUALITY_TRUSTED_TOOLS = {
     "parser-confidence-calibration",
     "validation-warning-checklist",
@@ -9082,6 +9091,187 @@ def build_legal_limitation_manifest(
     return {**manifest_core, "manifest_hash": manifest_hash}
 
 
+def build_legal_limitation_report_grade_validation_plan(
+    *,
+    limitations: Sequence[str],
+    limitation_manifest: Mapping[str, object],
+    trusted_diff: Mapping[str, object] | None,
+) -> dict[str, object]:
+    trusted_status = str(trusted_diff.get("status") or "missing") if trusted_diff else "missing"
+    limitation_details = (
+        limitation_manifest.get("limitations")
+        if isinstance(limitation_manifest.get("limitations"), list)
+        else []
+    )
+    category_counts = (
+        limitation_manifest.get("category_counts")
+        if isinstance(limitation_manifest.get("category_counts"), Mapping)
+        else {}
+    )
+    scope_counts = (
+        limitation_manifest.get("scope_counts")
+        if isinstance(limitation_manifest.get("scope_counts"), Mapping)
+        else {}
+    )
+    wording_matrix = (
+        limitation_manifest.get("limitation_wording_matrix")
+        if isinstance(limitation_manifest.get("limitation_wording_matrix"), list)
+        else []
+    )
+    ready_slots = [
+        {
+            "slot_id": "artifact-limitation-text-and-details",
+            "status": "complete",
+            "evidence": {
+                "limitation_count": len(limitations),
+                "detail_count": len(limitation_details),
+            },
+        },
+        {
+            "slot_id": "category-and-scope-counts",
+            "status": "complete",
+            "evidence": {
+                "category_counts": dict(category_counts),
+                "scope_counts": dict(scope_counts),
+            },
+        },
+        {
+            "slot_id": "jurisdiction-and-analyst-review-caveats",
+            "status": "complete",
+            "evidence": {
+                "jurisdiction_review_required": bool(limitation_manifest.get("jurisdiction_review_required")),
+                "analyst_review_required": bool(limitation_manifest.get("analyst_review_required")),
+            },
+        },
+        {
+            "slot_id": "wording-matrix",
+            "status": "complete",
+            "evidence": {
+                "limitation_wording_matrix_hash": str(
+                    limitation_manifest.get("limitation_wording_matrix_hash") or ""
+                ),
+                "wording_count": len(wording_matrix),
+            },
+        },
+        {
+            "slot_id": "legal-limitation-manifest",
+            "status": "complete",
+            "evidence": {
+                "manifest_hash": str(limitation_manifest.get("manifest_hash") or ""),
+                "profile_version": str(limitation_manifest.get("profile_version") or ""),
+            },
+        },
+        {
+            "slot_id": "commercial-claim-boundary",
+            "status": "complete",
+            "evidence": {
+                "commercial_claim_allowed": bool(limitation_manifest.get("commercial_claim_allowed")),
+                "commercial_gap_ids": list(limitation_manifest.get("commercial_gap_ids") or []),
+            },
+        },
+        {
+            "slot_id": "trusted-legal-wording-diff-disclosure",
+            "status": "complete",
+            "evidence": {
+                "trusted_diff_status": trusted_status,
+                "trusted_tool": str((trusted_diff or {}).get("trusted_tool") or ""),
+            },
+        },
+    ]
+    blocking_slots: list[dict[str, object]] = []
+    if len(limitation_details) != len(limitations):
+        blocking_slots.append(
+            {
+                "slot_id": "limitation-detail-completeness",
+                "status": "blocked",
+                "blocker": "limitation-detail-completeness-required",
+                "required_evidence": "limitation detail metadata for every artifact limitation string",
+            }
+        )
+    if not limitations:
+        blocking_slots.append(
+            {
+                "slot_id": "artifact-limitation-text-present",
+                "status": "blocked",
+                "blocker": "artifact-limitation-text-required",
+                "required_evidence": "at least one artifact-specific legal limitation statement per report item",
+            }
+        )
+    if not limitation_manifest.get("manifest_hash") or not limitation_manifest.get("limitation_wording_matrix_hash"):
+        blocking_slots.append(
+            {
+                "slot_id": "legal-limitation-manifest-complete",
+                "status": "blocked",
+                "blocker": "legal-limitation-manifest-required",
+                "required_evidence": "legal limitation manifest hash and wording matrix hash",
+            }
+        )
+    if trusted_status != "pass":
+        blocking_slots.append(
+            {
+                "slot_id": "trusted-legal-limitation-wording-diff",
+                "status": "external-required",
+                "blocker": LEGAL_LIMITATION_TRUSTED_DIFF_BLOCKER_93,
+                "required_evidence": "trusted legal wording diff over limitation text, categories, scopes, manifest hash, and wording matrix",
+            }
+        )
+    blocking_slots.extend(
+        [
+            {
+                "slot_id": "jurisdiction-approved-wording",
+                "status": "external-required",
+                "blocker": "jurisdiction-approved-wording-required",
+                "required_evidence": "jurisdiction-specific approved limitation wording for shipped report templates",
+            },
+            {
+                "slot_id": "formal-legal-review-signoff",
+                "status": "external-required",
+                "blocker": "formal-legal-review-signoff-required",
+                "required_evidence": "formal legal or forensic lead signoff for wording, scope, and admissibility caveats",
+            },
+            {
+                "slot_id": "artifact-family-limitation-corpus",
+                "status": "external-required",
+                "blocker": "artifact-family-limitation-corpus-required",
+                "required_evidence": "fixture corpus proving every artifact family receives an appropriate limitation statement",
+            },
+            {
+                "slot_id": "report-template-limitation-rendering-review",
+                "status": "external-required",
+                "blocker": "report-template-limitation-rendering-review-required",
+                "required_evidence": "final report template review proving limitation text remains visible next to cited artifacts",
+            },
+            {
+                "slot_id": "analyst-limitation-acknowledgement",
+                "status": "external-required",
+                "blocker": "analyst-limitation-acknowledgement-required",
+                "required_evidence": "analyst workflow evidence requiring acknowledgement before final report export",
+            },
+        ]
+    )
+    plan_core: dict[str, object] = {
+        "profile_version": LEGAL_LIMITATION_REPORT_GRADE_VALIDATION_PLAN_VERSION,
+        "item_number": 93,
+        "commercial_gap_ids": [LEGAL_LIMITATION_GAP_ID],
+        "plan_context": "case-db-report-item-legal-limitation",
+        "limitation_count": len(limitations),
+        "legal_limitation_manifest_hash": str(limitation_manifest.get("manifest_hash") or ""),
+        "limitation_wording_matrix_hash": str(limitation_manifest.get("limitation_wording_matrix_hash") or ""),
+        "category_counts": dict(category_counts),
+        "scope_counts": dict(scope_counts),
+        "trusted_diff_status": trusted_status,
+        "ready_slots": ready_slots,
+        "blocking_slots": blocking_slots,
+        "ready_slot_count": len(ready_slots),
+        "blocking_slot_count": len(blocking_slots),
+        "external_blocker_catalog": list(LEGAL_LIMITATION_REPORT_GRADE_BLOCKERS),
+        "blockers": sorted({str(slot.get("blocker") or "") for slot in blocking_slots if slot.get("blocker")}),
+        "commercial_claim_allowed": False,
+        "reporting_boundary": "This plan makes artifact limitation wording auditable in the export payload, but commercial/legal claims require jurisdiction-approved wording, formal legal signoff, artifact-family corpus coverage, report-template rendering review, analyst acknowledgement, and trusted wording manifests.",
+    }
+    return {**plan_core, "validation_plan_sha256": stable_payload_sha256(plan_core)}
+
+
 def build_legal_limitations_assessment(
     enriched: Mapping[str, object],
     *,
@@ -9100,6 +9290,12 @@ def build_legal_limitations_assessment(
         source=source,
         blockers=blockers,
     )
+    legal_limitation_report_grade_validation_plan = build_legal_limitation_report_grade_validation_plan(
+        limitations=limitations,
+        limitation_manifest=limitation_manifest,
+        trusted_diff=trusted_diff,
+    )
+    blockers = sorted({*blockers, *legal_limitation_report_grade_validation_plan["blockers"]})
     return {
         "component": "artifact-legal-limitation-statement",
         "status": "present" if limitations else "missing",
@@ -9111,6 +9307,16 @@ def build_legal_limitations_assessment(
         "legal_limitation_manifest": limitation_manifest,
         "legal_limitation_manifest_hash": limitation_manifest["manifest_hash"],
         "limitation_wording_matrix_hash": limitation_manifest["limitation_wording_matrix_hash"],
+        "legal_limitation_report_grade_validation_plan": legal_limitation_report_grade_validation_plan,
+        "legal_limitation_report_grade_validation_plan_hash": legal_limitation_report_grade_validation_plan[
+            "validation_plan_sha256"
+        ],
+        "legal_limitation_report_grade_ready_slot_count": legal_limitation_report_grade_validation_plan[
+            "ready_slot_count"
+        ],
+        "legal_limitation_report_grade_blocking_slot_count": legal_limitation_report_grade_validation_plan[
+            "blocking_slot_count"
+        ],
         "trusted_legal_limitation_diff": dict(trusted_diff) if trusted_diff else missing_report_quality_trusted_diff(
             LEGAL_LIMITATION_GAP_ID,
             LEGAL_LIMITATION_TRUSTED_DIFF_BLOCKER_93,
@@ -9120,6 +9326,7 @@ def build_legal_limitations_assessment(
             limitations=limitations,
             limitation_manifest=limitation_manifest,
             trusted_diff=trusted_diff,
+            report_grade_validation_plan=legal_limitation_report_grade_validation_plan,
         ),
         "ready_for_court_report": False,
         "blockers": blockers,
@@ -11604,6 +11811,7 @@ def legal_limitation_core_accuracy_gates(
     limitations: Sequence[str],
     limitation_manifest: Mapping[str, object] | None = None,
     trusted_diff: Mapping[str, object] | None = None,
+    report_grade_validation_plan: Mapping[str, object] | None = None,
 ) -> list[dict[str, object]]:
     satisfied = [
         "artifact limitation text emitted",
@@ -11620,6 +11828,10 @@ def legal_limitation_core_accuracy_gates(
         satisfied.append("legal limitation wording manifest hash emitted")
     if limitation_manifest and limitation_manifest.get("limitation_wording_matrix_hash"):
         satisfied.append("limitation wording matrix hash emitted")
+    if report_grade_validation_plan and report_grade_validation_plan.get("validation_plan_sha256"):
+        satisfied.append("legal limitation report-grade validation plan")
+    if report_grade_validation_plan and int(report_grade_validation_plan.get("ready_slot_count") or 0) >= 7:
+        satisfied.append("legal limitation report-grade ready slots")
     if trusted_diff and trusted_diff.get("status") == "pass":
         satisfied.append("trusted legal limitation wording diff pass")
     return [
@@ -11630,6 +11842,7 @@ def legal_limitation_core_accuracy_gates(
                 f"limitation_count:{len(limitations)}",
                 f"legal_limitation_manifest_hash:{(limitation_manifest or {}).get('manifest_hash', '')}",
                 f"limitation_wording_matrix_hash:{(limitation_manifest or {}).get('limitation_wording_matrix_hash', '')}",
+                f"legal_limitation_report_grade_validation_plan_hash:{(report_grade_validation_plan or {}).get('validation_plan_sha256', '')}",
             ],
         )
     ]

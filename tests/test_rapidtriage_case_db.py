@@ -2703,6 +2703,49 @@ class RapidTriageCaseDatabaseTests(unittest.TestCase):
             self.assertTrue(all("legal limitation detail metadata emitted" in item["legal_limitations_assessment"]["core_accuracy_gates"][0]["satisfied_checks"] for item in export["items"]))
             self.assertTrue(all("legal limitation wording manifest hash emitted" in item["legal_limitations_assessment"]["core_accuracy_gates"][0]["satisfied_checks"] for item in export["items"]))
             self.assertTrue(all("limitation wording matrix hash emitted" in item["legal_limitations_assessment"]["core_accuracy_gates"][0]["satisfied_checks"] for item in export["items"]))
+            self.assertTrue(
+                all(
+                    item["legal_limitations_assessment"]["legal_limitation_report_grade_validation_plan"][
+                        "profile_version"
+                    ]
+                    == "legal-limitation-report-grade-validation-plan-v1"
+                    for item in export["items"]
+                )
+            )
+            self.assertTrue(
+                all(
+                    item["legal_limitations_assessment"]["legal_limitation_report_grade_validation_plan_hash"]
+                    == item["legal_limitations_assessment"]["legal_limitation_report_grade_validation_plan"][
+                        "validation_plan_sha256"
+                    ]
+                    for item in export["items"]
+                )
+            )
+            self.assertTrue(
+                all(
+                    item["legal_limitations_assessment"]["legal_limitation_report_grade_ready_slot_count"] >= 7
+                    for item in export["items"]
+                )
+            )
+            self.assertTrue(
+                all(
+                    item["legal_limitations_assessment"]["legal_limitation_report_grade_blocking_slot_count"] >= 6
+                    for item in export["items"]
+                )
+            )
+            first_legal_plan = export["items"][0]["legal_limitations_assessment"][
+                "legal_limitation_report_grade_validation_plan"
+            ]
+            self.assertIn(
+                "artifact-limitation-text-and-details",
+                {slot["slot_id"] for slot in first_legal_plan["ready_slots"]},
+            )
+            self.assertIn(
+                "jurisdiction-approved-wording",
+                {slot["slot_id"] for slot in first_legal_plan["blocking_slots"]},
+            )
+            self.assertIn("jurisdiction-approved-wording-required", export["items"][0]["legal_limitations_assessment"]["blockers"])
+            self.assertTrue(all("legal limitation report-grade validation plan" in item["legal_limitations_assessment"]["core_accuracy_gates"][0]["satisfied_checks"] for item in export["items"]))
             self.assertTrue(all(item["legal_limitations_assessment"]["trusted_legal_limitation_diff"]["status"] == "missing" for item in export["items"]))
             self.assertTrue(all("trusted-legal-limitation-wording-diff-missing" in item["legal_limitations_assessment"]["blockers"] for item in export["items"]))
             legal_assessment = export["items"][0]["legal_limitations_assessment"]
@@ -2711,11 +2754,13 @@ class RapidTriageCaseDatabaseTests(unittest.TestCase):
                 limitations=export["items"][0]["legal_limitations"],
                 limitation_manifest=legal_assessment["legal_limitation_manifest"],
                 trusted_diff=legal_diff,
+                report_grade_validation_plan=first_legal_plan,
             )
             self.assertEqual(legal_diff["status"], "pass")
             self.assertIn("legal_limitation_manifest_hash", legal_diff["compared_fields"])
             self.assertIn("limitation_wording_matrix_hash", legal_diff["compared_fields"])
             self.assertIn("trusted legal limitation wording diff pass", legal_gate[0]["satisfied_checks"])
+            self.assertIn("legal limitation report-grade validation plan", legal_gate[0]["satisfied_checks"])
             self.assertIn("#91", export["summary"]["parser_confidence_gap_ids"])
             self.assertIn("#92", export["summary"]["validation_warning_ux_gap_ids"])
             self.assertIn("#93", export["summary"]["legal_limitation_gap_ids"])

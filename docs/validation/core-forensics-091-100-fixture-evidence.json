@@ -22,8 +22,8 @@
       "item": 93,
       "title": "Legal limitation statement per artifact",
       "test_files": ["tests/test_rapidtriage_case_db.py"],
-      "assertions": ["Report items preserve artifact limitation text, parser-provided limitations, limitation detail metadata, category/scope counts, legal-limitation-wording-manifest-v1 manifest hash, jurisdiction caveat, analyst-review blockers, limitation counts, trusted legal limitation wording diff helpers/gates, and #93 core_accuracy_gates."],
-      "remaining_external_validation": ["Jurisdiction-approved legal wording, trusted wording manifests, and formal signoff."]
+      "assertions": ["Report items preserve artifact limitation text, parser-provided limitations, limitation detail metadata, category/scope counts, legal-limitation-wording-manifest-v1 manifest hash, legal-limitation-report-grade-validation-plan-v1, plan hash/counts, jurisdiction caveat, analyst-review blockers, limitation counts, trusted legal limitation wording diff helpers/gates, and #93 core_accuracy_gates."],
+      "remaining_external_validation": ["Jurisdiction-approved legal wording, trusted wording manifests, formal signoff, artifact-family limitation corpus, report-template limitation rendering review, and analyst acknowledgement workflow."]
     },
     {
       "item": 94,

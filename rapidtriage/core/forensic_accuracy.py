@@ -1523,6 +1523,8 @@ CORE_FORENSIC_ACCURACY_ITEMS: tuple[dict[str, object], ...] = (
             "legal limitation detail metadata emitted",
             "limitation category counts emitted",
             "legal limitation wording manifest hash emitted",
+            "legal limitation report-grade validation plan",
+            "legal limitation report-grade ready slots",
             "trusted legal limitation wording diff pass",
         ),
     },

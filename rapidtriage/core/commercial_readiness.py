@@ -3166,6 +3166,7 @@ def report_quality_evidence_chain() -> list[dict[str, object]]:
                 "items[].legal_limitations_assessment.limitation_details",
                 "items[].legal_limitations_assessment.limitation_category_counts",
                 "items[].legal_limitations_assessment.legal_limitation_manifest.manifest_hash",
+                "items[].legal_limitations_assessment.legal_limitation_report_grade_validation_plan_hash",
             ],
             "trusted_diff": "trusted-legal-limitation-wording-diff",
         },

@@ -2164,10 +2164,10 @@
       ],
       "expected": {
         "required_assertions": [
-          "Report items preserve artifact limitation text, parser-provided limitations, limitation detail metadata, category/scope counts, legal-limitation-wording-manifest-v1 manifest hash, jurisdiction caveat, analyst-review blockers, limitation counts, and #93 core_accuracy_gates."
+          "Report items preserve artifact limitation text, parser-provided limitations, limitation detail metadata, category/scope counts, legal-limitation-wording-manifest-v1 manifest hash, legal-limitation-report-grade-validation-plan-v1, plan hash/counts, jurisdiction caveat, analyst-review blockers, limitation counts, trusted legal limitation wording diff helpers/gates, and #93 core_accuracy_gates."
         ]
       },
-      "notes": "Internal fixture pass; jurisdiction-approved legal wording remains blocker.",
+      "notes": "Internal fixture pass; jurisdiction-approved legal wording, trusted wording manifests, formal signoff, artifact-family limitation corpus, report-template limitation rendering review, and analyst acknowledgement workflow remain blockers.",
       "source_manifest": "docs/validation/rapidtriage-core-forensics-091-100-known-answer.json"
     },
     {
