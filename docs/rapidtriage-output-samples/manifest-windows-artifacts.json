@@ -11402,7 +11402,7 @@
             "host_url": "https://download.example.com/report.zip",
             "modified_at": "2024-03-05T06:18:19+00:00",
             "parser": "windows-ads-stream-inventory",
-            "parser_version": "windows-filesystem-v7",
+            "parser_version": "windows-filesystem-v8",
             "referrer_url": "https://mail.example.com/message/1",
             "reportability": "triage",
             "risk_flags": [
@@ -11460,7 +11460,7 @@
             ],
             "modified_at": "2026-04-11T06:55:53.168849+00:00",
             "parser": "windows-file-signature-mismatch",
-            "parser_version": "windows-filesystem-v7",
+            "parser_version": "windows-filesystem-v8",
             "reportability": "triage",
             "risk_flags": [
               "signature-extension-mismatch"
@@ -11497,7 +11497,7 @@
             ],
             "modified_at": "2026-04-11T06:55:53.169214+00:00",
             "parser": "windows-file-signature-mismatch",
-            "parser_version": "windows-filesystem-v7",
+            "parser_version": "windows-filesystem-v8",
             "reportability": "triage",
             "risk_flags": [
               "signature-extension-mismatch"

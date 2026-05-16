@@ -46,7 +46,7 @@ Commercial-grade still needs:
 ## Trusted Diff Gates Added
 
 - #11: `build_windows_edb_trusted_diff` compares Windows.edb path, URL, content, deleted/index-state, and table-family fields against `esentutl`, `libesedb`, `esedbexport`, WinSearchDBAnalyzer, or equivalent exports.
-- #12: `build_mft_trusted_diff` compares MFT record number, parent reference, path, timestamp, and deleted-state fields against MFTECmd/TSK-style exports.
+- #12: native MFT rows now apply USA sector-trailer restoration before attribute decoding, and `build_mft_trusted_diff` compares MFT record number, parent reference, path, timestamp, and deleted-state fields against MFTECmd/TSK-style exports.
 - #13: `build_usn_trusted_diff` compares USN, FRN, parent FRN, filename/path, reason, and timestamp fields against MFTECmd/UsnJrnl2Csv-style exports. `build_usn_state_replay_trusted_diff` separately compares derived create/rename/delete state transitions against known-answer or trusted replay transition rows so record-level parser agreement is not mistaken for state-machine replay validation.
 - #14: `build_jumplist_trusted_diff` compares AppID, DestList entry/stream ID, target path, timestamp, and MRU/pin fields against JLECmd/LECmd-style exports.
 - #15: `build_shellbag_trusted_diff` compares source key/folder path, bag ID, node ID, timestamp, and source hive fields against ShellBagsExplorer/SBECmd-style exports.

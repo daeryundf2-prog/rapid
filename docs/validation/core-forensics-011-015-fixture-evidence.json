@@ -35,7 +35,7 @@
       "number": 12,
       "title": "$MFT full attribute parser",
       "assertions": [
-        "mft-record rows preserve FILE header, USA validation, standard information timestamps, filename parent reference, resident data evidence, source hashes, #12 core_accuracy_gates, and ntfs_analyst_review_profile.",
+        "mft-record rows preserve FILE header, USA validation, USA sector-trailer fixup application before attribute decoding, standard information timestamps, filename parent reference, resident data evidence, source hashes, #12 core_accuracy_gates, and ntfs_analyst_review_profile.",
         "mft-file inventory rows preserve bounded native record counts, sequence validation counts, timestamp validation counts, and attribute type counts.",
         "trusted MFT parser record diff helpers compare record number, parent reference, path, timestamp, and deleted-state fields against MFTECmd/TSK-style rows.",
         "$MFT reportability decisions block complete path/content claims until attribute-list, runlist, and full-volume diffs are attached."

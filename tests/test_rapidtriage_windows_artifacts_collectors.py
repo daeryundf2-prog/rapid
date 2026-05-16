@@ -53,6 +53,7 @@ from rapidtriage.artifacts.windows.filesystem import (
     decode_mft_runlist,
     ntfs_core_accuracy_gates,
     parse_mft_attribute,
+    parse_mft_record_headers,
     parse_usn_record_at,
     parse_usn_record_scan,
     usn_bounded_mft_replay_preview,
@@ -368,6 +369,74 @@ class RapidTriageWindowsArtifactsCollectorTests(unittest.TestCase):
         self.assertEqual(parsed["attribute_list"]["entries"][0]["lowest_vcn"], 4)
         self.assertEqual(parsed["attribute_list"]["entries"][0]["extension_reference_decoded"]["record_number"], 321)
         self.assertEqual(parsed["attribute_list"]["entries"][0]["extension_reference_decoded"]["sequence_number"], 9)
+
+    def test_mft_usa_fixup_is_applied_before_attribute_decoding(self) -> None:
+        record = bytearray(1024)
+        record[0:4] = b"FILE"
+        record[0x04:0x06] = (0x30).to_bytes(2, "little")
+        record[0x06:0x08] = (3).to_bytes(2, "little")
+        record[0x10:0x12] = (9).to_bytes(2, "little")
+        record[0x12:0x14] = (1).to_bytes(2, "little")
+        record[0x14:0x16] = (0x1A0).to_bytes(2, "little")
+        record[0x16:0x18] = (0x01).to_bytes(2, "little")
+        record[0x1C:0x20] = (1024).to_bytes(4, "little")
+
+        file_name = "Az"
+        encoded_name = file_name.encode("utf-16le")
+        file_name_value = bytearray(66 + len(encoded_name))
+        file_name_value[0:8] = ((1 << 48) | 5).to_bytes(8, "little")
+        file_name_value[64] = len(file_name)
+        file_name_value[65] = 1
+        file_name_value[66 : 66 + len(encoded_name)] = encoded_name
+
+        attribute = bytearray(0x60)
+        attribute[0:4] = (0x30).to_bytes(4, "little")
+        attribute[4:8] = len(attribute).to_bytes(4, "little")
+        attribute[14:16] = (2).to_bytes(2, "little")
+        attribute[16:20] = len(file_name_value).to_bytes(4, "little")
+        attribute[20:22] = (0x18).to_bytes(2, "little")
+        attribute[0x18 : 0x18 + len(file_name_value)] = file_name_value
+        record[0x1A0 : 0x1A0 + len(attribute)] = attribute
+        record[0x200:0x204] = (0xFFFFFFFF).to_bytes(4, "little")
+        record[0x18:0x1C] = (0x208).to_bytes(4, "little")
+
+        original_sector_one_trailer = bytes(record[510:512])
+        original_sector_two_trailer = bytes(record[1022:1024])
+        record[0x30:0x32] = b"\xaa\xbb"
+        record[0x32:0x34] = original_sector_one_trailer
+        record[0x34:0x36] = original_sector_two_trailer
+        record[510:512] = b"\xaa\xbb"
+        record[1022:1024] = b"\xaa\xbb"
+
+        parsed_records = parse_mft_record_headers(bytes(record))
+
+        self.assertEqual(len(parsed_records), 1)
+        parsed = parsed_records[0]
+        self.assertEqual(parsed["file_name_entries"][0]["file_name"], "Az")
+        self.assertTrue(parsed["validation_checks"]["usa_fixup_applied"])
+        self.assertEqual(parsed["usa_fixup_application"]["status"], "applied")
+        self.assertEqual(parsed["usa_fixup_application"]["restored_sector_trailer_count"], 2)
+        self.assertNotEqual(
+            parsed["usa_fixup_application"]["record_sha256_before"],
+            parsed["usa_fixup_application"]["record_sha256_after"],
+        )
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            mft_path = Path(tmp_dir) / "$MFT"
+            mft_path.write_bytes(bytes(record))
+            artifact = build_native_mft_record(mft_path, parsed, 0)
+
+        gate = artifact.details["core_accuracy_gates"][0]
+        self.assertIn("USA fixup applied before attribute decoding", gate["satisfied_checks"])
+        citation_kinds = {
+            item["kind"]
+            for item in artifact.details["ntfs_report_citation_manifest"]["citation_refs"]
+        }
+        self.assertIn("mft-usa-fixup-application", citation_kinds)
+        self.assertTrue(artifact.details["mft_parser_depth_manifest"]["usa_fixup_application"]["applied"])
+        self.assertTrue(
+            artifact.details["ntfs_native_depth_readiness_profile"]["decoded_components"]["usa_fixup_application"]
+        )
 
     def test_usn_v4_extent_record_preserves_extent_cursor_evidence(self) -> None:
         record = bytearray(80)

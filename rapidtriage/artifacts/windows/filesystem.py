@@ -12,7 +12,7 @@ from ...core.forensic_accuracy import build_accuracy_gate
 from ...core.models import ArtifactRecord
 from .common import build_forensic_review
 
-PARSER_VERSION = "windows-filesystem-v7"
+PARSER_VERSION = "windows-filesystem-v8"
 SUPPORTED_SUFFIXES = {".csv", ".json", ".jsonl", ".ndjson"}
 MFT_HINTS = ("mft", "mftexcmd", "$mft")
 USN_HINTS = ("usn", "usnjrnl", "$j")
@@ -1210,6 +1210,7 @@ def build_native_mft_record(
         "base_file_reference": record.get("base_file_reference", 0),
         "record_offset": record.get("record_offset", 0),
         "sequence_validation": dict(record.get("sequence_validation") or {}),
+        "usa_fixup_application": dict(record.get("usa_fixup_application") or {}),
         "attribute_count": record.get("attribute_count", 0),
         "attribute_types": list(record.get("attribute_types") or []),
         "attribute_type_counts": count_values(record.get("attribute_types") or []),
@@ -1236,6 +1237,7 @@ def build_native_mft_record(
                 "timestamp": timestamp,
                 "timestamp_source": timestamp_source,
                 "sequence_validation": dict(record.get("sequence_validation") or {}),
+                "usa_fixup_application": dict(record.get("usa_fixup_application") or {}),
                 "attribute_types": list(record.get("attribute_types") or []),
                 "attribute_list_entries": list(record.get("attribute_list_entries") or [])[:25],
                 "data_attributes": list(record.get("data_attributes") or [])[:10],
@@ -1471,6 +1473,11 @@ def mft_record_evidence(record: Mapping[str, object], file_path: str) -> dict[st
         if isinstance(item, Mapping) and not bool(item.get("resident"))
     ]
     sequence_validation = record.get("sequence_validation") if isinstance(record.get("sequence_validation"), Mapping) else {}
+    usa_fixup_application = (
+        record.get("usa_fixup_application")
+        if isinstance(record.get("usa_fixup_application"), Mapping)
+        else {}
+    )
     timestamp_validation = record.get("timestamp_validation") if isinstance(record.get("timestamp_validation"), Mapping) else {}
     validation_checks = record.get("validation_checks") if isinstance(record.get("validation_checks"), Mapping) else {}
     return {
@@ -1508,12 +1515,16 @@ def mft_record_evidence(record: Mapping[str, object], file_path: str) -> dict[st
         "validation_evidence": {
             "record_validation_status": record.get("validation_status", "unknown"),
             "sequence_fixup_status": sequence_validation.get("status", ""),
+            "usa_fixup_application_status": usa_fixup_application.get("status", ""),
+            "usa_fixup_applied": bool(usa_fixup_application.get("applied")),
+            "usa_restored_sector_trailer_count": usa_fixup_application.get("restored_sector_trailer_count", 0),
             "timestamp_validation_status": timestamp_validation.get("status", ""),
             "critical_checks_passed": [
                 key
                 for key in (
                     "magic_valid",
                     "sequence_fixup_valid",
+                    "usa_fixup_applied",
                     "has_standard_information_attribute",
                     "has_file_name_attribute",
                     "timestamp_fields_present",
@@ -1805,6 +1816,11 @@ def mft_parser_depth_manifest(details: Mapping[str, object]) -> dict[str, object
         if isinstance(details.get("sequence_validation"), Mapping)
         else {}
     )
+    usa_fixup_application = (
+        details.get("usa_fixup_application")
+        if isinstance(details.get("usa_fixup_application"), Mapping)
+        else {}
+    )
     report_grade = (
         details.get("ntfs_report_grade_assessment")
         if isinstance(details.get("ntfs_report_grade_assessment"), Mapping)
@@ -1880,6 +1896,14 @@ def mft_parser_depth_manifest(details: Mapping[str, object]) -> dict[str, object
             "repaired_sector_trailer_count": sequence_validation.get("repaired_sector_trailer_count", 0),
             "warnings": list(sequence_validation.get("warnings") or [])[:25],
         },
+        "usa_fixup_application": {
+            "status": str(usa_fixup_application.get("status") or "not-attached"),
+            "applied": bool(usa_fixup_application.get("applied")),
+            "restored_sector_trailer_count": int(usa_fixup_application.get("restored_sector_trailer_count") or 0),
+            "record_sha256_before": str(usa_fixup_application.get("record_sha256_before") or ""),
+            "record_sha256_after": str(usa_fixup_application.get("record_sha256_after") or ""),
+            "warnings": list(usa_fixup_application.get("warnings") or [])[:25],
+        },
         "attribute_decoding": {
             "attribute_count": int(details.get("attribute_count") or 0),
             "attribute_types": attribute_types,
@@ -1927,6 +1951,11 @@ def mft_parser_depth_manifest(details: Mapping[str, object]) -> dict[str, object
             {
                 "kind": "mft-usa-validation",
                 "status": str(sequence_validation.get("status") or details.get("validation_status") or "unknown"),
+            },
+            {
+                "kind": "mft-usa-fixup-application",
+                "status": str(usa_fixup_application.get("status") or "not-attached"),
+                "restored_sector_trailer_count": int(usa_fixup_application.get("restored_sector_trailer_count") or 0),
             },
             {
                 "kind": "mft-attribute-list",
@@ -3310,6 +3339,27 @@ def ntfs_mft_citation_refs(details: Mapping[str, object]) -> list[dict[str, obje
             },
         }
     ]
+    usa_fixup_application = (
+        details.get("usa_fixup_application")
+        if isinstance(details.get("usa_fixup_application"), Mapping)
+        else {}
+    )
+    if usa_fixup_application:
+        refs.append(
+            {
+                "kind": "mft-usa-fixup-application",
+                "status": str(usa_fixup_application.get("status") or ""),
+                "applied": bool(usa_fixup_application.get("applied")),
+                "restored_sector_trailer_count": int(usa_fixup_application.get("restored_sector_trailer_count") or 0),
+                "record_sha256_before": str(usa_fixup_application.get("record_sha256_before") or ""),
+                "record_sha256_after": str(usa_fixup_application.get("record_sha256_after") or ""),
+                "viewer_locator": {
+                    "viewer": "mft-usa-fixup",
+                    "record_number": str(details.get("record_number") or ""),
+                    "byte_offset": details.get("record_offset", ""),
+                },
+            }
+        )
     file_name_entries = [item for item in details.get("file_name_entries") or [] if isinstance(item, Mapping)]
     if details.get("file_path") or file_name_entries:
         refs.append(
@@ -3671,9 +3721,15 @@ def ntfs_native_depth_readiness_profile(
 def mft_depth_components(details: Mapping[str, object], validation_checks: Mapping[str, object]) -> dict[str, bool]:
     data_attributes = [item for item in details.get("data_attributes") or [] if isinstance(item, Mapping)]
     path_profile = details.get("mft_path_reconstruction_profile") if isinstance(details.get("mft_path_reconstruction_profile"), Mapping) else {}
+    usa_fixup_application = (
+        details.get("usa_fixup_application")
+        if isinstance(details.get("usa_fixup_application"), Mapping)
+        else {}
+    )
     return {
         "file_record_header": bool(validation_checks.get("magic_valid") or details.get("record_number")),
         "usa_sequence_fixup": bool(validation_checks.get("sequence_fixup_valid") or details.get("sequence_validation")),
+        "usa_fixup_application": bool(validation_checks.get("usa_fixup_applied") or usa_fixup_application.get("applied")),
         "standard_information": "$STANDARD_INFORMATION" in list(details.get("attribute_types") or []),
         "file_name_attribute": "$FILE_NAME" in list(details.get("attribute_types") or []),
         "parent_reference_decode": bool(path_profile.get("parent_record_number") not in (None, "")),
@@ -3837,6 +3893,7 @@ def mft_full_parser_profile(artifact_scope: str, details: Mapping[str, object]) 
         "qc_prep_contract": {
             "implemented": [
                 "native FILE record header and USA sequence fixup validation",
+                "USA sector trailer restoration before attribute decoding",
                 "STANDARD_INFORMATION and FILE_NAME attribute decoding",
                 "resident data hashing and nonresident runlist preview",
                 "bounded parent path cache and source locator/citation",
@@ -3845,6 +3902,7 @@ def mft_full_parser_profile(artifact_scope: str, details: Mapping[str, object]) 
             "usable_outputs": ["mft-file", "mft-record"],
             "validated_by_current_tests": [
                 "native MFT fixture record decode",
+                "USA sector trailer restoration before attribute decoding",
                 "attribute list detection without false resolution claim",
                 "nonresident runlist preview decode",
                 "trusted MFT diff pass and mismatch blocking",
@@ -3864,6 +3922,7 @@ def mft_full_parser_profile(artifact_scope: str, details: Mapping[str, object]) 
         "decoded_components": {
             "file_record_header": bool(validation_checks.get("magic_valid") or validation_checks.get("has_native_records") or details.get("record_number")),
             "usa_sequence_fixup": bool(validation_checks.get("sequence_fixup_valid") or validation_checks.get("has_sequence_validation")),
+            "usa_fixup_application": bool(validation_checks.get("usa_fixup_applied")),
             "standard_information": "$STANDARD_INFORMATION" in attribute_type_names or bool(validation_checks.get("has_standard_information_attribute")),
             "file_name_attributes": "$FILE_NAME" in attribute_type_names or bool(validation_checks.get("has_file_name_attribute")),
             "parent_reference_decode": bool(path_profile.get("parent_record_number") not in (None, "")),
@@ -4159,6 +4218,11 @@ def ntfs_core_accuracy_gates(artifact_type: str, details: Mapping[str, object]) 
         satisfied: list[str] = []
         if checks.get("sequence_fixup_valid") or checks.get("has_sequence_validation") or details.get("sequence_validation"):
             satisfied.append("USA validation")
+        if checks.get("usa_fixup_applied") or (
+            isinstance(details.get("usa_fixup_application"), Mapping)
+            and bool(details.get("usa_fixup_application", {}).get("applied"))
+        ):
+            satisfied.append("USA fixup applied before attribute decoding")
         if "$ATTRIBUTE_LIST" in list(details.get("attribute_types") or []):
             satisfied.append("attribute-list extension resolution")
         if details.get("file_path") or details.get("path_candidates") or details.get("parent_reference"):
@@ -4713,10 +4777,11 @@ def parse_mft_record_headers(blob: bytes) -> list[dict[str, object]]:
             first_attribute_offset = int_from(blob, offset + 0x14, 2)
             used_size = int_from(blob, offset + 0x18, 4)
             sequence_validation = validate_mft_update_sequence(record_blob)
-            attributes = parse_mft_attributes(record_blob, first_attribute_offset, used_size)
+            repaired_record_blob, usa_fixup_application = apply_mft_update_sequence_fixup(record_blob)
+            attributes = parse_mft_attributes(repaired_record_blob, first_attribute_offset, used_size)
             timestamp_validation = mft_timestamp_validation(attributes)
             validation_warnings = mft_validation_warnings(
-                record_blob=record_blob,
+                record_blob=repaired_record_blob,
                 first_attribute_offset=first_attribute_offset,
                 used_size=used_size,
                 allocated_size=allocated_size,
@@ -4739,6 +4804,7 @@ def parse_mft_record_headers(blob: bytes) -> list[dict[str, object]]:
                     "allocated_size": allocated_size,
                     "base_file_reference": int_from(blob, offset + 0x20, 8),
                     "sequence_validation": sequence_validation,
+                    "usa_fixup_application": usa_fixup_application,
                     "attribute_count": len(attributes["attributes"]),
                     "attribute_types": attributes["attribute_types"],
                     "attributes": attributes["attributes"],
@@ -4752,6 +4818,7 @@ def parse_mft_record_headers(blob: bytes) -> list[dict[str, object]]:
                     "validation_checks": {
                         "magic_valid": record_blob[:4] == b"FILE",
                         "sequence_fixup_valid": sequence_validation.get("status") == "valid",
+                        "usa_fixup_applied": bool(usa_fixup_application.get("applied")),
                         "has_standard_information_attribute": bool(attributes["standard_information"]),
                         "has_file_name_attribute": bool(attributes["file_name_entries"]),
                         "has_data_attribute": bool(attributes["data_attributes"]),
@@ -4824,6 +4891,81 @@ def validate_mft_update_sequence(record_blob: bytes, *, sector_size: int = 512) 
         "sector_count": sector_count,
         "repaired_sector_trailer_count": repaired_trailers,
     }
+
+
+def apply_mft_update_sequence_fixup(
+    record_blob: bytes,
+    *,
+    sector_size: int = 512,
+) -> tuple[bytes, dict[str, object]]:
+    """Restore NTFS FILE record sector trailers before attribute parsing."""
+
+    usa_offset = int_from(record_blob, 0x04, 2)
+    usa_count = int_from(record_blob, 0x06, 2)
+    profile: dict[str, object] = {
+        "profile_version": "mft-usa-fixup-application-v1",
+        "status": "not-applied",
+        "applied": False,
+        "sector_size": sector_size,
+        "sector_count": len(record_blob) // sector_size if sector_size else 0,
+        "update_sequence_offset": usa_offset,
+        "update_sequence_count": usa_count,
+        "update_sequence_number": "",
+        "restored_sector_trailer_count": 0,
+        "record_sha256_before": hashlib.sha256(record_blob).hexdigest() if record_blob else "",
+        "record_sha256_after": "",
+        "warnings": [],
+    }
+    warnings: list[str] = []
+    if not usa_offset or not usa_count:
+        warnings.append("missing-update-sequence-array")
+    if sector_size <= 0:
+        warnings.append("invalid-sector-size")
+    if usa_offset + usa_count * 2 > len(record_blob):
+        warnings.append("update-sequence-array-out-of-bounds")
+    sector_count = int(profile["sector_count"])
+    if sector_count <= 0:
+        warnings.append("record-smaller-than-sector")
+    if usa_count != sector_count + 1:
+        warnings.append("update-sequence-count-sector-mismatch")
+    if warnings:
+        profile["status"] = "not-applied-invalid-usa"
+        profile["warnings"] = warnings
+        profile["record_sha256_after"] = profile["record_sha256_before"]
+        return record_blob, profile
+
+    update_sequence_number = record_blob[usa_offset : usa_offset + 2]
+    profile["update_sequence_number"] = update_sequence_number.hex()
+    replacement_values = [
+        record_blob[usa_offset + 2 + index * 2 : usa_offset + 4 + index * 2]
+        for index in range(usa_count - 1)
+    ]
+    repaired = bytearray(record_blob)
+    restored = 0
+    for sector_index, replacement in enumerate(replacement_values, start=1):
+        trailer_offset = sector_index * sector_size - 2
+        if trailer_offset + 2 > len(record_blob):
+            warnings.append(f"sector-trailer-out-of-bounds:{sector_index}")
+            break
+        if record_blob[trailer_offset : trailer_offset + 2] != update_sequence_number:
+            warnings.append(f"sector-trailer-update-sequence-mismatch:{sector_index}")
+            break
+        repaired[trailer_offset : trailer_offset + 2] = replacement
+        restored += 1
+
+    if warnings:
+        profile["status"] = "not-applied-trailer-mismatch"
+        profile["warnings"] = warnings
+        profile["record_sha256_after"] = profile["record_sha256_before"]
+        return record_blob, profile
+
+    repaired_blob = bytes(repaired)
+    profile["status"] = "applied"
+    profile["applied"] = True
+    profile["restored_sector_trailer_count"] = restored
+    profile["record_sha256_after"] = hashlib.sha256(repaired_blob).hexdigest()
+    profile["warnings"] = []
+    return repaired_blob, profile
 
 
 def parse_mft_attributes(record_blob: bytes, first_attribute_offset: int, used_size: int) -> dict[str, object]:
