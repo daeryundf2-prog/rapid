@@ -110,8 +110,8 @@
       "status": "pass",
       "backlog_items": [60],
       "evidence_paths": ["docs/validation/core-forensics-051-060-fixture-evidence.json", "tests/test_rapidtriage_search_analysis.py"],
-      "expected": {"required_assertions": ["Search analysis preserves duplicate fingerprints, group counts, representative hit links, hidden duplicate counts, source/path references, collapse review profiles, search-dedup-citation-manifest-v1 member row hashes/source locators, web dedupe cards, near-duplicate warning, trusted duplicate manifest diff gates, and #60 core_accuracy_gates.", "Search deduplication reportability decisions block suppression-ready or content-complete duplicate claims until exact/fuzzy/perceptual/OCR duplicate corpora, trusted duplicate manifest diff, and analyst suppression persistence exist."]},
-      "notes": "Internal fixture pass; persistent Case DB suppression and fuzzy/media duplicate validation remain blockers."
+      "expected": {"required_assertions": ["Search analysis preserves duplicate fingerprints, group counts, representative hit links, hidden duplicate counts, source/path references, collapse review profiles, search-dedup-citation-manifest-v1 member row hashes/source locators, search_dedup_report_grade_validation_plan ready/blocking slots, web dedupe cards, near-duplicate warning, trusted duplicate manifest diff gates, and #60 core_accuracy_gates.", "Search deduplication reportability decisions block suppression-ready or content-complete duplicate claims until exact/fuzzy/perceptual/OCR duplicate corpora, trusted duplicate manifest diff, large-case dedup performance validation, and analyst suppression persistence exist."]},
+      "notes": "Internal fixture pass with search dedup report-grade validation-plan hashes; persistent Case DB suppression, fuzzy/OCR/media duplicate corpora, trusted duplicate manifest diff, and large-case dedup performance validation remain blockers."
     }
   ]
 }

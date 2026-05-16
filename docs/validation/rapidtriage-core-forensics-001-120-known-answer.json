@@ -1462,10 +1462,10 @@
       ],
       "expected": {
         "required_assertions": [
-          "Search analysis preserves duplicate fingerprints, group counts, representative hit links, hidden duplicate counts, source/path references, collapse review profiles, web dedupe cards, near-duplicate warning, and #60 core_accuracy_gates."
+          "Search analysis preserves duplicate fingerprints, group counts, representative hit links, hidden duplicate counts, source/path references, collapse review profiles, search-dedup-citation-manifest-v1 member row hashes/source locators, search_dedup_report_grade_validation_plan ready/blocking slots, web dedupe cards, near-duplicate warning, trusted duplicate manifest diff gates, and #60 core_accuracy_gates."
         ]
       },
-      "notes": "Internal fixture pass; persistent Case DB suppression and fuzzy/media duplicate validation remain blockers.",
+      "notes": "Internal fixture pass with search dedup report-grade validation-plan hashes; persistent Case DB suppression, fuzzy/OCR/media duplicate corpora, trusted duplicate manifest diff, and large-case dedup performance validation remain blockers.",
       "source_manifest": "docs/validation/rapidtriage-core-forensics-051-060-known-answer.json"
     },
     {

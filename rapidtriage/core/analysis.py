@@ -132,6 +132,15 @@ WORKBOOK_REPORT_GRADE_BLOCKERS = [
     "workbook-version-history-required",
     "workbook-rubric-trusted-diff-required",
 ]
+SEARCH_DEDUP_REPORT_GRADE_VALIDATION_PLAN_VERSION = "search-dedup-report-grade-validation-plan-v1"
+SEARCH_DEDUP_REPORT_GRADE_BLOCKERS = [
+    "case-db-duplicate-suppression-state-required",
+    "fuzzy-near-duplicate-text-corpus-required",
+    "perceptual-media-duplicate-corpus-required",
+    "ocr-duplicate-corpus-required",
+    "search-dedup-trusted-duplicate-manifest-required",
+    "large-case-dedup-performance-validation-required",
+]
 
 
 def build_search_analysis(
@@ -719,6 +728,11 @@ def analysis_core_accuracy_gates(
         if isinstance(deduplication.get("search_dedup_manifest"), Mapping)
         else {}
     )
+    dedup_validation_plan = (
+        deduplication.get("search_dedup_report_grade_validation_plan")
+        if isinstance(deduplication.get("search_dedup_report_grade_validation_plan"), Mapping)
+        else {}
+    )
     trusted_diffs = trusted_diffs or {}
     for number, diff in trusted_diffs.items():
         if isinstance(diff, Mapping):
@@ -924,6 +938,13 @@ def analysis_core_accuracy_gates(
         item60.append("duplicate member row hashes")
     if isinstance(dedup_manifest.get("source_viewer_locator"), Mapping):
         item60.append("dedup source viewer locators")
+    if dedup_validation_plan:
+        item60.append("dedup report-grade validation plan")
+        evidence_refs.append(
+            f"dedup_report_grade_validation_plan_sha256:{dedup_validation_plan.get('validation_plan_sha256', '')}"
+        )
+        if int(dedup_validation_plan.get("ready_slot_count") or 0) >= 6:
+            item60.append("dedup report-grade ready slots")
     item60.append("near-duplicate limitation warning")
 
     return [
@@ -1587,10 +1608,19 @@ def build_search_hit_deduplication(
         "max_groups": max_groups,
     }
     dedup_manifest = build_search_dedup_manifest(matches=matches, groups=groups, summary=summary)
+    dedup_review_profile = build_dedup_review_profile(groups=groups, summary=summary)
+    validation_plan = build_search_dedup_report_grade_validation_plan(
+        groups=groups,
+        summary=summary,
+        dedup_manifest=dedup_manifest,
+        dedup_review_profile=dedup_review_profile,
+        trusted_diff=trusted_diff,
+    )
     core_accuracy_gates = search_deduplication_core_accuracy_gates(
         groups=groups,
         summary=summary,
         dedup_manifest=dedup_manifest,
+        validation_plan=validation_plan,
         trusted_diff=trusted_diff,
     )
     return {
@@ -1606,7 +1636,9 @@ def build_search_hit_deduplication(
         "groups": groups,
         "search_dedup_manifest": dedup_manifest,
         "search_dedup_manifest_hash": dedup_manifest["manifest_sha256"],
-        "dedup_review_profile": build_dedup_review_profile(groups=groups, summary=summary),
+        "dedup_review_profile": dedup_review_profile,
+        "search_dedup_report_grade_validation_plan": validation_plan,
+        "search_dedup_report_grade_validation_plan_hash": validation_plan["validation_plan_sha256"],
         "deduplication_assessment": search_deduplication_assessment(),
         "trusted_duplicate_manifest_diff": dict(trusted_diff) if isinstance(trusted_diff, Mapping) else {
             "status": "missing",
@@ -1618,6 +1650,7 @@ def build_search_hit_deduplication(
             groups=groups,
             summary=summary,
             dedup_manifest=dedup_manifest,
+            validation_plan=validation_plan,
             core_accuracy_gates=core_accuracy_gates,
             trusted_diff=trusted_diff,
         ),
@@ -1725,11 +1758,187 @@ def build_search_dedup_manifest(
     return manifest
 
 
+def build_search_dedup_report_grade_validation_plan(
+    *,
+    groups: Sequence[Mapping[str, object]],
+    summary: Mapping[str, object],
+    dedup_manifest: Mapping[str, object],
+    dedup_review_profile: Mapping[str, object],
+    trusted_diff: Mapping[str, object] | None = None,
+) -> dict[str, object]:
+    trusted_diff = trusted_diff if isinstance(trusted_diff, Mapping) else {}
+
+    def slot(
+        slot_id: str,
+        *,
+        ready: bool,
+        evidence: str,
+        blocker_id: str | None = None,
+        operator_action: str = "",
+    ) -> dict[str, object]:
+        row: dict[str, object] = {
+            "slot_id": slot_id,
+            "status": "complete" if ready else "external-required",
+            "evidence": evidence,
+        }
+        if blocker_id and not ready:
+            row["blocker_id"] = blocker_id
+        if operator_action:
+            row["operator_action"] = operator_action
+        return row
+
+    group_count = int(summary.get("duplicate_group_count") or 0)
+    duplicate_match_count = int(summary.get("duplicate_match_count") or 0)
+    unique_fingerprint_count = int(summary.get("unique_fingerprint_count") or 0)
+    member_row_hash_count = int(dedup_manifest.get("member_row_hash_count") or 0)
+    manifest_hash = str(dedup_manifest.get("manifest_sha256") or "")
+    review_group_count = int(dedup_review_profile.get("duplicate_group_count") or 0)
+    validation_slots = [
+        slot(
+            "search-dedup-fingerprint-generation",
+            ready=unique_fingerprint_count >= 0,
+            evidence=f"unique_fingerprint_count={unique_fingerprint_count}",
+            blocker_id="search-dedup-fingerprint-generation-required",
+            operator_action="Generate stable fingerprints for every returned search hit.",
+        ),
+        slot(
+            "search-dedup-group-counts",
+            ready=group_count >= 0 and duplicate_match_count >= 0,
+            evidence=f"duplicate_group_count={group_count} duplicate_match_count={duplicate_match_count}",
+            blocker_id="search-dedup-group-counts-required",
+            operator_action="Emit duplicate group and duplicate match counts.",
+        ),
+        slot(
+            "search-dedup-representative-hit-links",
+            ready=group_count == 0 or any(isinstance(group, Mapping) and group.get("match_indices") for group in groups),
+            evidence=f"group_count={group_count} representative_links={sum(1 for group in groups if isinstance(group, Mapping) and group.get('match_indices'))}",
+            blocker_id="search-dedup-representative-hit-links-required",
+            operator_action="Preserve representative match indices for duplicate review.",
+        ),
+        slot(
+            "search-dedup-citation-manifest-emitted",
+            ready=bool(manifest_hash),
+            evidence=f"search_dedup_manifest_sha256={manifest_hash}",
+            blocker_id="search-dedup-citation-manifest-required",
+            operator_action="Attach a bounded citation manifest before using duplicate groups in report review.",
+        ),
+        slot(
+            "search-dedup-member-row-hashes-and-locators",
+            ready=member_row_hash_count >= max(0, min(duplicate_match_count, 1))
+            and isinstance(dedup_manifest.get("source_viewer_locator"), Mapping),
+            evidence=f"member_row_hash_count={member_row_hash_count} source_viewer_locator={bool(dedup_manifest.get('source_viewer_locator'))}",
+            blocker_id="search-dedup-member-row-hashes-required",
+            operator_action="Emit member row hashes and source-viewer locators for representative and duplicate members.",
+        ),
+        slot(
+            "search-dedup-collapse-review-profile",
+            ready=bool(dedup_review_profile.get("collapse_preview_supported")),
+            evidence=f"review_group_count={review_group_count} collapse_preview_supported={dedup_review_profile.get('collapse_preview_supported', False)}",
+            blocker_id="search-dedup-collapse-review-profile-required",
+            operator_action="Expose collapse preview as analyst review aid, not automatic suppression.",
+        ),
+        slot(
+            "search-dedup-case-db-suppression-state",
+            ready=False,
+            evidence=f"case_db_suppression_state={dedup_review_profile.get('case_db_suppression_state', False)}",
+            blocker_id="case-db-duplicate-suppression-state-required",
+            operator_action="Persist analyst duplicate suppression decisions in the Case DB with immutable audit history.",
+        ),
+        slot(
+            "search-dedup-fuzzy-near-duplicate-text-corpus",
+            ready=False,
+            evidence="fuzzy_near_duplicate_text_corpus=false",
+            blocker_id="fuzzy-near-duplicate-text-corpus-required",
+            operator_action="Validate normalized/fuzzy text duplicate groups against a known-answer corpus.",
+        ),
+        slot(
+            "search-dedup-perceptual-media-duplicate-corpus",
+            ready=False,
+            evidence="perceptual_media_duplicate_corpus=false",
+            blocker_id="perceptual-media-duplicate-corpus-required",
+            operator_action="Validate image/video duplicate grouping against a perceptual media corpus.",
+        ),
+        slot(
+            "search-dedup-ocr-duplicate-corpus",
+            ready=False,
+            evidence="ocr_duplicate_corpus=false",
+            blocker_id="ocr-duplicate-corpus-required",
+            operator_action="Validate OCR-derived duplicate groups against engine/version-specific OCR corpora.",
+        ),
+        slot(
+            "search-dedup-trusted-duplicate-manifest-diff",
+            ready=trusted_diff.get("status") == "pass",
+            evidence=f"trusted_diff_status={trusted_diff.get('status', 'missing')}",
+            blocker_id=ANALYSIS_TRUSTED_DIFF_BLOCKERS[60],
+            operator_action="Attach a passing trusted duplicate-manifest diff before making suppression-ready claims.",
+        ),
+        slot(
+            "search-dedup-large-case-performance-validation",
+            ready=False,
+            evidence="large_case_dedup_performance_validation=false",
+            blocker_id="large-case-dedup-performance-validation-required",
+            operator_action="Run large search-result dedup benchmarks and preserve p95 latency/memory evidence.",
+        ),
+    ]
+    blockers = sorted(
+        {
+            str(slot_row["blocker_id"])
+            for slot_row in validation_slots
+            if slot_row.get("status") != "complete" and slot_row.get("blocker_id")
+        }
+    )
+    plan: dict[str, object] = {
+        "profile_version": SEARCH_DEDUP_REPORT_GRADE_VALIDATION_PLAN_VERSION,
+        "item_number": 60,
+        "gap_id": SEARCH_DEDUP_GAP_ID,
+        "batch_id": "commercial-uplift-056-060",
+        "selected_track": "bounded-search-hit-duplicate-review",
+        "duplicate_group_count": group_count,
+        "duplicate_match_count": duplicate_match_count,
+        "unique_fingerprint_count": unique_fingerprint_count,
+        "search_dedup_manifest_sha256": manifest_hash,
+        "dedup_review_profile_version": str(dedup_review_profile.get("profile_version") or ""),
+        "trusted_diff_status": str(trusted_diff.get("status") or "missing"),
+        "ready_slot_count": sum(1 for slot_row in validation_slots if slot_row.get("status") == "complete"),
+        "blocking_slot_count": sum(1 for slot_row in validation_slots if slot_row.get("status") != "complete"),
+        "validation_status": "report-validation-blocked" if blockers else "ready-for-report-review",
+        "commercial_grade": False,
+        "commercial_grade_ready": False,
+        "validation_slots": validation_slots,
+        "blockers": blockers,
+        "commercial_grade_blockers": list(SEARCH_DEDUP_REPORT_GRADE_BLOCKERS),
+        "validation_commands": [
+            "rapidtriage search <case-db-or-output> --keyword <keyword> --output search-results.json",
+            "rapidtriage cross-tool-validate --rapid-output search-results.json --reference-output <trusted-duplicate-manifest> --backlog-item 60 --json",
+            "rapidtriage commercial-readiness --validation-package docs/validation/rapidtriage-core-forensics-051-060-known-answer.json --limit 60 --json",
+        ],
+        "report_guidance": {
+            "allowed_use": "duplicate-hit-triage-pivot",
+            "forbidden_claims": [
+                "duplicates are safely suppressed",
+                "preview-based duplicate groups are content-complete",
+                "fuzzy/OCR/media duplicates are validated",
+                "deduplication is commercial-grade on large cases",
+            ],
+            "required_disclaimer": (
+                "Search deduplication collapses repeated hits for review routing only. Do not hide, suppress, or report "
+                "duplicate conclusions until Case DB suppression state, fuzzy/text/OCR/media corpora, trusted manifest "
+                "diffs, and large-case performance evidence are attached."
+            ),
+        },
+    }
+    plan["validation_plan_sha256"] = stable_analysis_sha256(
+        {key: value for key, value in plan.items() if key != "validation_plan_sha256"}
+    )
+    return plan
+
+
 def search_deduplication_core_accuracy_gates(
     *,
     groups: Sequence[Mapping[str, object]],
     summary: Mapping[str, object],
     dedup_manifest: Mapping[str, object] | None = None,
+    validation_plan: Mapping[str, object] | None = None,
     trusted_diff: Mapping[str, object] | None = None,
 ) -> list[dict[str, object]]:
     satisfied = []
@@ -1750,6 +1959,11 @@ def search_deduplication_core_accuracy_gates(
         satisfied.append("duplicate member row hashes")
     if isinstance(dedup_manifest.get("source_viewer_locator"), Mapping):
         satisfied.append("dedup source viewer locators")
+    validation_plan = validation_plan if isinstance(validation_plan, Mapping) else {}
+    if validation_plan.get("validation_plan_sha256"):
+        satisfied.append("dedup report-grade validation plan")
+    if int(validation_plan.get("ready_slot_count") or 0) >= 6:
+        satisfied.append("dedup report-grade ready slots")
     satisfied.append("near-duplicate limitation warning")
     trusted_diff = trusted_diff if isinstance(trusted_diff, Mapping) else {}
     if trusted_diff.get("status") == "pass":
@@ -1763,6 +1977,7 @@ def search_deduplication_core_accuracy_gates(
                 f"duplicate_match_count:{summary.get('duplicate_match_count', 0)}",
                 f"unique_fingerprint_count:{summary.get('unique_fingerprint_count', 0)}",
                 f"dedup_manifest_hash:{dedup_manifest.get('manifest_sha256', '')}",
+                f"dedup_report_grade_validation_plan_sha256:{validation_plan.get('validation_plan_sha256', '')}",
                 f"trusted_diff_status:{trusted_diff.get('status', 'missing')}",
             ],
         )
@@ -1774,6 +1989,7 @@ def search_deduplication_commercial_uplift_evidence(
     groups: Sequence[Mapping[str, object]],
     summary: Mapping[str, object],
     dedup_manifest: Mapping[str, object] | None = None,
+    validation_plan: Mapping[str, object] | None = None,
     core_accuracy_gates: Sequence[Mapping[str, object]],
     trusted_diff: Mapping[str, object] | None = None,
 ) -> dict[str, object]:
@@ -1783,6 +1999,7 @@ def search_deduplication_commercial_uplift_evidence(
             passed.extend(str(item) for item in gate.get("satisfied_checks") or [])
     assessment = search_deduplication_assessment()
     dedup_manifest = dedup_manifest if isinstance(dedup_manifest, Mapping) else {}
+    validation_plan = validation_plan if isinstance(validation_plan, Mapping) else {}
     return {
         "batch_id": "commercial-uplift-056-060",
         "item_numbers": [60],
@@ -1791,6 +2008,8 @@ def search_deduplication_commercial_uplift_evidence(
             f"duplicate_group_count:{summary.get('duplicate_group_count', 0)}",
             f"duplicate_match_count:{summary.get('duplicate_match_count', 0)}",
             f"unique_fingerprint_count:{summary.get('unique_fingerprint_count', 0)}",
+            f"search_dedup_manifest_sha256:{dedup_manifest.get('manifest_sha256', '')}",
+            f"search_dedup_report_grade_validation_plan_sha256:{validation_plan.get('validation_plan_sha256', '')}",
         ],
         "reportability_decision": search_deduplication_reportability_decision(
             failed_validation_check_ids=[
@@ -1802,6 +2021,7 @@ def search_deduplication_commercial_uplift_evidence(
             ],
             assessment_blockers=list(assessment["blockers"]),
             summary=summary,
+            validation_plan=validation_plan,
         ),
         "passed_validation_check_ids": sorted(set(passed)),
         "failed_validation_check_ids": [
@@ -1827,6 +2047,10 @@ def search_deduplication_commercial_uplift_evidence(
             "dedup_manifest_hash": str(dedup_manifest.get("manifest_sha256") or ""),
             "dedup_member_row_hash_count": int(dedup_manifest.get("member_row_hash_count") or 0),
             "dedup_source_viewer_locator": bool(dedup_manifest.get("source_viewer_locator")),
+            "dedup_report_grade_validation_plan_present": bool(validation_plan),
+            "dedup_report_grade_validation_plan_hash": str(validation_plan.get("validation_plan_sha256") or ""),
+            "dedup_report_grade_ready_slot_count": int(validation_plan.get("ready_slot_count") or 0),
+            "dedup_report_grade_blocking_slot_count": int(validation_plan.get("blocking_slot_count") or 0),
             "media_perceptual_duplicate_grouping": False,
             "case_db_suppression_state": False,
         },
@@ -1839,9 +2063,12 @@ def search_deduplication_reportability_decision(
     failed_validation_check_ids: Sequence[str],
     assessment_blockers: Sequence[str],
     summary: Mapping[str, object],
+    validation_plan: Mapping[str, object] | None = None,
 ) -> dict[str, object]:
     blockers = {str(item) for item in assessment_blockers if str(item)}
     blockers.update(f"check:{item}" for item in failed_validation_check_ids)
+    validation_plan = validation_plan if isinstance(validation_plan, Mapping) else {}
+    blockers.update(str(item) for item in validation_plan.get("blockers", []) if str(item))
     return {
         "profile_version": "search-deduplication-reportability-decision-v1",
         "commercial_gap_ids": [SEARCH_DEDUP_GAP_ID],
@@ -1850,6 +2077,10 @@ def search_deduplication_reportability_decision(
         "blockers": sorted(blockers),
         "duplicate_group_count": int(summary.get("duplicate_group_count") or 0),
         "duplicate_match_count": int(summary.get("duplicate_match_count") or 0),
+        "dedup_report_grade_validation_plan_present": bool(validation_plan),
+        "dedup_report_grade_validation_plan_hash": str(validation_plan.get("validation_plan_sha256") or ""),
+        "dedup_report_grade_ready_slot_count": int(validation_plan.get("ready_slot_count") or 0),
+        "dedup_report_grade_blocking_slot_count": int(validation_plan.get("blocking_slot_count") or 0),
         "ready_for_court_report": False,
         "required_before_report": [
             "validate exact, fuzzy text, perceptual image/video, and OCR duplicate groups against a large known-answer corpus",
@@ -3917,6 +4148,11 @@ def analysis_analyst_review_profile(
     timeline_summary = timeline.get("summary") if isinstance(timeline.get("summary"), Mapping) else {}
     workbook_summary = workbook.get("summary") if isinstance(workbook.get("summary"), Mapping) else {}
     dedup_summary = deduplication.get("summary") if isinstance(deduplication.get("summary"), Mapping) else {}
+    dedup_validation_plan = (
+        deduplication.get("search_dedup_report_grade_validation_plan")
+        if isinstance(deduplication.get("search_dedup_report_grade_validation_plan"), Mapping)
+        else {}
+    )
     source_counts = Counter(str(match.get("source") or "unknown") for match in matches)
     top_sources = [
         {"source": source, "match_count": count}
@@ -3961,6 +4197,11 @@ def analysis_analyst_review_profile(
             "timeline_event_count": int(timeline_summary.get("event_count") or 0),
             "workbook_hypothesis_count": int(workbook_summary.get("hypothesis_count") or 0),
             "duplicate_group_count": int(dedup_summary.get("duplicate_group_count") or 0),
+            "dedup_report_grade_validation_plan_hash": str(
+                dedup_validation_plan.get("validation_plan_sha256") or ""
+            ),
+            "dedup_report_grade_ready_slot_count": int(dedup_validation_plan.get("ready_slot_count") or 0),
+            "dedup_report_grade_blocking_slot_count": int(dedup_validation_plan.get("blocking_slot_count") or 0),
             "top_sources": top_sources,
         },
         "review_entrypoints": [

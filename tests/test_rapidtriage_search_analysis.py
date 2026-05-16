@@ -287,6 +287,8 @@ class RapidTriageSearchAnalysisTests(unittest.TestCase):
         self.assertIn("dedup citation manifest", analysis_gates["#60"]["satisfied_checks"])
         self.assertIn("duplicate member row hashes", analysis_gates["#60"]["satisfied_checks"])
         self.assertIn("dedup source viewer locators", analysis_gates["#60"]["satisfied_checks"])
+        self.assertIn("dedup report-grade validation plan", analysis_gates["#60"]["satisfied_checks"])
+        self.assertIn("dedup report-grade ready slots", analysis_gates["#60"]["satisfied_checks"])
         analysis_uplift = analysis["commercial_uplift_evidence"]
         self.assertEqual(analysis_uplift["batch_id"], "commercial-uplift-046-050")
         self.assertEqual(analysis_uplift["item_numbers"], [46, 47, 48, 49, 50])
@@ -678,16 +680,48 @@ class RapidTriageSearchAnalysisTests(unittest.TestCase):
         self.assertFalse(dedup_profile["case_db_suppression_state"])
         self.assertEqual(dedup_profile["review_groups"][0]["review_status"], "unreviewed")
         self.assertEqual(dedup_profile["review_groups"][0]["report_suppression_status"], "not-suppressed")
+        dedup_plan = analysis["deduplication"]["search_dedup_report_grade_validation_plan"]
+        self.assertEqual(dedup_plan["profile_version"], "search-dedup-report-grade-validation-plan-v1")
+        self.assertEqual(dedup_plan["item_number"], 60)
+        self.assertEqual(dedup_plan["gap_id"], "#60")
+        self.assertEqual(
+            analysis["deduplication"]["search_dedup_report_grade_validation_plan_hash"],
+            dedup_plan["validation_plan_sha256"],
+        )
+        self.assertEqual(dedup_plan["search_dedup_manifest_sha256"], dedup_manifest["manifest_sha256"])
+        self.assertEqual(dedup_plan["ready_slot_count"], 6)
+        self.assertEqual(dedup_plan["blocking_slot_count"], 6)
+        self.assertEqual(dedup_plan["validation_status"], "report-validation-blocked")
+        self.assertFalse(dedup_plan["commercial_grade"])
+        dedup_slots = {slot["slot_id"]: slot for slot in dedup_plan["validation_slots"]}
+        self.assertEqual(dedup_slots["search-dedup-fingerprint-generation"]["status"], "complete")
+        self.assertEqual(dedup_slots["search-dedup-group-counts"]["status"], "complete")
+        self.assertEqual(dedup_slots["search-dedup-representative-hit-links"]["status"], "complete")
+        self.assertEqual(dedup_slots["search-dedup-citation-manifest-emitted"]["status"], "complete")
+        self.assertEqual(dedup_slots["search-dedup-member-row-hashes-and-locators"]["status"], "complete")
+        self.assertEqual(dedup_slots["search-dedup-collapse-review-profile"]["status"], "complete")
+        self.assertEqual(dedup_slots["search-dedup-case-db-suppression-state"]["status"], "external-required")
+        self.assertEqual(dedup_slots["search-dedup-trusted-duplicate-manifest-diff"]["status"], "external-required")
+        self.assertIn("case-db-duplicate-suppression-state-required", dedup_plan["blockers"])
+        self.assertIn("search-dedup-trusted-duplicate-manifest-required", dedup_plan["blockers"])
         dedup_uplift = analysis["deduplication"]["commercial_uplift_evidence"]
         self.assertEqual(dedup_uplift["batch_id"], "commercial-uplift-056-060")
         self.assertEqual(dedup_uplift["item_numbers"], [60])
         self.assertIn("duplicate fingerprint generation", dedup_uplift["passed_validation_check_ids"])
         self.assertIn("collapse preview profile", dedup_uplift["passed_validation_check_ids"])
+        self.assertIn("dedup report-grade validation plan", dedup_uplift["passed_validation_check_ids"])
+        self.assertIn("dedup report-grade ready slots", dedup_uplift["passed_validation_check_ids"])
         self.assertIn("persistent-dedup-suppression-workflow", dedup_uplift["failed_validation_check_ids"])
         self.assertTrue(dedup_uplift["large_data_controls"]["collapse_preview_supported"])
         self.assertEqual(dedup_uplift["large_data_controls"]["dedup_manifest_hash"], dedup_manifest["manifest_sha256"])
         self.assertGreaterEqual(dedup_uplift["large_data_controls"]["dedup_member_row_hash_count"], 2)
         self.assertTrue(dedup_uplift["large_data_controls"]["dedup_source_viewer_locator"])
+        self.assertEqual(
+            dedup_uplift["large_data_controls"]["dedup_report_grade_validation_plan_hash"],
+            dedup_plan["validation_plan_sha256"],
+        )
+        self.assertEqual(dedup_uplift["large_data_controls"]["dedup_report_grade_ready_slot_count"], 6)
+        self.assertEqual(dedup_uplift["large_data_controls"]["dedup_report_grade_blocking_slot_count"], 6)
         self.assertFalse(dedup_uplift["large_data_controls"]["case_db_suppression_state"])
         self.assertEqual(
             dedup_uplift["reportability_decision"]["decision"],
@@ -702,6 +736,18 @@ class RapidTriageSearchAnalysisTests(unittest.TestCase):
         self.assertIn(
             "check:search-dedup-trusted-duplicate-manifest-required",
             dedup_uplift["reportability_decision"]["blockers"],
+        )
+        self.assertEqual(
+            dedup_uplift["reportability_decision"]["dedup_report_grade_validation_plan_hash"],
+            dedup_plan["validation_plan_sha256"],
+        )
+        self.assertIn(
+            "case-db-duplicate-suppression-state-required",
+            dedup_uplift["reportability_decision"]["blockers"],
+        )
+        self.assertEqual(
+            analysis_review["source_field_values"]["dedup_report_grade_validation_plan_hash"],
+            dedup_plan["validation_plan_sha256"],
         )
         self.assertFalse(analysis["deduplication"]["deduplication_assessment"]["ready_for_court_report"])
 

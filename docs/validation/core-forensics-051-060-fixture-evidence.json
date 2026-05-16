@@ -91,9 +91,9 @@
       "title": "Search hit deduplication",
       "test_files": ["tests/test_rapidtriage_search_analysis.py"],
       "assertions": [
-        "Search analysis preserves duplicate fingerprints, duplicate group counts, representative hits, hidden duplicate counts, source/path refs, collapse review profiles, web dedupe cards, near-duplicate warnings, trusted duplicate manifest gates, #60 core_accuracy_gates, and reportability blockers for missing exact/fuzzy/perceptual/OCR duplicate corpora plus analyst suppression persistence."
+        "Search analysis preserves duplicate fingerprints, duplicate group counts, representative hits, hidden duplicate counts, source/path refs, collapse review profiles, search_dedup_report_grade_validation_plan ready/blocking slots, web dedupe cards, near-duplicate warnings, trusted duplicate manifest gates, #60 core_accuracy_gates, and reportability blockers for missing exact/fuzzy/perceptual/OCR duplicate corpora plus analyst suppression persistence."
       ],
-      "remaining_external_validation": ["Persistent Case DB suppression workflow, fuzzy near-duplicate text grouping, trusted duplicate manifest diff, and media duplicate validation."]
+      "remaining_external_validation": ["Persistent Case DB suppression workflow, fuzzy near-duplicate text corpus, perceptual media duplicate corpus, OCR duplicate corpus, trusted duplicate manifest diff, and large-case dedup performance validation."]
     }
   ]
 }
