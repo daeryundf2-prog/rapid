@@ -1892,6 +1892,20 @@ def apply_schema(connection: sqlite3.Connection) -> None:
         WHERE id NOT IN (SELECT rowid FROM file_record_fts)
         """
     )
+    connection.execute(
+        """
+        INSERT OR REPLACE INTO event_fts(rowid, event_type, timestamp, target, description, source)
+        SELECT
+            id,
+            event_type,
+            timestamp,
+            target,
+            description,
+            source
+        FROM event
+        WHERE id NOT IN (SELECT rowid FROM event_fts)
+        """
+    )
     current_version = get_schema_version(connection)
     if current_version not in (0, SCHEMA_VERSION):
         raise CaseDatabaseError(f"unsupported case DB schema version: {current_version}")
@@ -2019,6 +2033,22 @@ def case_db_query_plan_profile(connection: sqlite3.Connection, *, fts_tables: Se
             (
                 "indexed_document_fts_match",
                 "EXPLAIN QUERY PLAN SELECT rowid FROM indexed_document_fts WHERE indexed_document_fts MATCH ? LIMIT 10",
+                ("password",),
+            )
+        )
+    if "file_record_fts" in fts_tables:
+        statements.append(
+            (
+                "file_record_fts_match",
+                "EXPLAIN QUERY PLAN SELECT rowid FROM file_record_fts WHERE file_record_fts MATCH ? LIMIT 10",
+                ("password",),
+            )
+        )
+    if "event_fts" in fts_tables:
+        statements.append(
+            (
+                "event_fts_match",
+                "EXPLAIN QUERY PLAN SELECT rowid FROM event_fts WHERE event_fts MATCH ? LIMIT 10",
                 ("password",),
             )
         )
@@ -3280,13 +3310,16 @@ def build_case_search_execution_plan(
         uses_scan_cap=not artifact_uses_fts,
         notes=("artifact and indicator rows share this backend; source filters are applied after matching",),
     )
+    timeline_requested = case_search_source_requested(source_filter, "timeline")
+    timeline_uses_fts = timeline_requested and event_fts_has_rows(connection, case_id)
     add_source(
         source="timeline",
-        requested=case_search_source_requested(source_filter, "timeline"),
-        backend="bounded-scan",
+        requested=timeline_requested,
+        backend="sqlite-fts5" if timeline_uses_fts else "bounded-scan",
         table_name="event",
-        uses_scan_cap=True,
-        notes=("timeline scan is capped until event FTS/cursor indexing is available",),
+        fts_table="event_fts" if timeline_uses_fts else "",
+        uses_scan_cap=not timeline_uses_fts,
+        notes=("timeline event type/time/target/description/source search uses FTS5 when event_fts rows are present",),
     )
     return {
         "profile_version": "case-search-large-case-plan-v1",
@@ -3585,6 +3618,10 @@ def search_events(
     limit: int,
     scan_candidate_limit: int,
 ) -> list[dict[str, object]]:
+    if event_fts_has_rows(connection, case_id):
+        fts_matches = search_events_fts(connection, case_id, keywords, limit)
+        if fts_matches:
+            return fts_matches[:limit] if limit else fts_matches
     rows = connection.execute(
         """
         SELECT citation_id, id, event_type, timestamp, target, description, source
@@ -3617,6 +3654,77 @@ def search_events(
         )
         if limit and len(matches) >= limit:
             break
+    return matches
+
+
+def event_fts_has_rows(connection: sqlite3.Connection, case_id: str) -> bool:
+    try:
+        row = connection.execute(
+            """
+            SELECT 1
+            FROM event_fts
+            JOIN event ON event_fts.rowid = event.id
+            WHERE event.case_id = ?
+            LIMIT 1
+            """,
+            (case_id,),
+        ).fetchone()
+    except sqlite3.OperationalError:
+        return False
+    return row is not None
+
+
+def search_events_fts(
+    connection: sqlite3.Connection,
+    case_id: str,
+    keywords: list[str],
+    limit: int,
+) -> list[dict[str, object]]:
+    query = build_fts_query(keywords)
+    try:
+        rows = connection.execute(
+            """
+            SELECT
+                event.citation_id,
+                event.id,
+                event.event_type,
+                event.timestamp,
+                event.target,
+                event.description,
+                event.source,
+                snippet(event_fts, 3, '[', ']', ' ... ', 24) AS snippet
+            FROM event_fts
+            JOIN event ON event_fts.rowid = event.id
+            WHERE event.case_id = ?
+              AND event_fts MATCH ?
+            ORDER BY rank
+            LIMIT ?
+            """,
+            (case_id, query, limit or -1),
+        ).fetchall()
+    except sqlite3.OperationalError:
+        return []
+    matches = []
+    for row in rows:
+        haystack = " ".join(str(row[key] or "") for key in ("event_type", "timestamp", "target", "description", "source"))
+        matches.append(
+            {
+                "source": "timeline",
+                "citation_id": str(row["citation_id"]),
+                "target_type": "event",
+                "target_id": str(row["id"]),
+                "title": str(row["description"] or row["event_type"]),
+                "kind": str(row["event_type"]),
+                "timestamp": str(row["timestamp"]),
+                "path": str(row["target"] or ""),
+                "matched_keywords": matched_keywords(haystack, keywords),
+                "preview": str(row["snippet"] or row["description"] or row["target"] or row["event_type"]),
+                "metadata": {
+                    "timeline_source": str(row["source"] or ""),
+                    "search_backend": "sqlite-fts5",
+                },
+            }
+        )
     return matches
 
 
@@ -9998,6 +10106,43 @@ CREATE TABLE IF NOT EXISTS event (
     FOREIGN KEY (artifact_id) REFERENCES artifact(id) ON DELETE SET NULL,
     FOREIGN KEY (file_record_id) REFERENCES file_record(id) ON DELETE SET NULL
 );
+
+CREATE VIRTUAL TABLE IF NOT EXISTS event_fts USING fts5(
+    event_type,
+    timestamp,
+    target,
+    description,
+    source
+);
+
+CREATE TRIGGER IF NOT EXISTS event_fts_ai AFTER INSERT ON event BEGIN
+    INSERT INTO event_fts(rowid, event_type, timestamp, target, description, source)
+    VALUES (
+        new.id,
+        new.event_type,
+        new.timestamp,
+        new.target,
+        new.description,
+        new.source
+    );
+END;
+
+CREATE TRIGGER IF NOT EXISTS event_fts_ad AFTER DELETE ON event BEGIN
+    DELETE FROM event_fts WHERE rowid = old.id;
+END;
+
+CREATE TRIGGER IF NOT EXISTS event_fts_au AFTER UPDATE ON event BEGIN
+    DELETE FROM event_fts WHERE rowid = old.id;
+    INSERT INTO event_fts(rowid, event_type, timestamp, target, description, source)
+    VALUES (
+        new.id,
+        new.event_type,
+        new.timestamp,
+        new.target,
+        new.description,
+        new.source
+    );
+END;
 
 CREATE TABLE IF NOT EXISTS indexed_document (
     id INTEGER PRIMARY KEY AUTOINCREMENT,

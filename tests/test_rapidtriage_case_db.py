@@ -67,6 +67,7 @@ REQUIRED_TABLES = {
     "artifact",
     "artifact_fts",
     "event",
+    "event_fts",
     "indexed_document",
     "indexed_document_fts",
     "review_mark",
@@ -131,6 +132,7 @@ class RapidTriageCaseDatabaseTests(unittest.TestCase):
             self.assertEqual(second["large_sqlite_fts_optimization"]["core_accuracy_gates"][0]["gap_id"], "#74")
             self.assertIn("file_record_fts", second["large_sqlite_fts_optimization"]["fts_tables"])
             self.assertIn("artifact_fts", second["large_sqlite_fts_optimization"]["fts_tables"])
+            self.assertIn("event_fts", second["large_sqlite_fts_optimization"]["fts_tables"])
             self.assertEqual(
                 second["large_sqlite_fts_optimization"]["query_plan_profile"]["profile_version"],
                 "case-db-query-plan-profile-v1",
@@ -543,6 +545,14 @@ class RapidTriageCaseDatabaseTests(unittest.TestCase):
                         self.assertEqual(payload["summary"]["match_count"], 1)
                         self.assertEqual(source_plan["backend"], "sqlite-fts5")
                         self.assertEqual(source_plan["fts_table"], "file_record_fts")
+                        self.assertEqual(source_plan["scan_candidate_limit"], None)
+                        self.assertEqual(source_plan["partial_coverage_warning"], False)
+                        self.assertEqual(payload["matches"][0]["path"], "/evidence/needle-after-cap.txt")
+                        self.assertEqual(payload["matches"][0]["metadata"]["search_backend"], "sqlite-fts5")
+                    elif source == "timeline":
+                        self.assertEqual(payload["summary"]["match_count"], 1)
+                        self.assertEqual(source_plan["backend"], "sqlite-fts5")
+                        self.assertEqual(source_plan["fts_table"], "event_fts")
                         self.assertEqual(source_plan["scan_candidate_limit"], None)
                         self.assertEqual(source_plan["partial_coverage_warning"], False)
                         self.assertEqual(payload["matches"][0]["path"], "/evidence/needle-after-cap.txt")
