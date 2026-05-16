@@ -220,6 +220,7 @@ class RapidTriageCoreForensicsAccuracyTests(unittest.TestCase):
         self.assertIn("immutable audit report-grade validation plan", immutable_audit["required_checks"])
         self.assertIn("trusted audit hash-chain manifest diff pass", immutable_audit["required_checks"])
         self.assertIn("stable payload hash generated", reproducibility["required_checks"])
+        self.assertIn("report reproducibility report-grade validation plan", reproducibility["required_checks"])
         self.assertIn("trusted report replay manifest diff pass", reproducibility["required_checks"])
         self.assertIn("source path preserved", provenance["required_checks"])
         self.assertIn("trusted report provenance manifest diff pass", provenance["required_checks"])

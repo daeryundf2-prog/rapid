@@ -3038,6 +3038,7 @@ def forensic_integrity_evidence_chain() -> list[dict[str, object]]:
                 "case-db-report-export.reproducibility",
                 "reproducibility.stable_payload_sha256",
                 "reproducibility.report_replay_manifest.manifest_hash",
+                "reproducibility.report_reproducibility_report_grade_validation_plan_hash",
                 "reproducibility.report_replay_manifest.item_row_hashes",
                 "reproducibility.report_replay_manifest.citation_row_hashes",
             ],

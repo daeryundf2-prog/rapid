@@ -2397,6 +2397,32 @@ class RapidTriageCaseDatabaseTests(unittest.TestCase):
             )
             self.assertEqual(len(export["reproducibility"]["report_replay_manifest"]["row_hash_set_hash"]), 64)
             self.assertEqual(len(export["reproducibility"]["report_replay_manifest"]["replay_contract_hash"]), 64)
+            reproducibility_plan = export["reproducibility"]["report_reproducibility_report_grade_validation_plan"]
+            self.assertEqual(
+                reproducibility_plan["profile_version"],
+                "report-reproducibility-report-grade-validation-plan-v1",
+            )
+            self.assertEqual(reproducibility_plan["item_number"], 89)
+            self.assertEqual(reproducibility_plan["plan_context"], "case-db-report-export")
+            self.assertEqual(
+                reproducibility_plan["report_replay_manifest_hash"],
+                export["reproducibility"]["report_replay_manifest"]["manifest_hash"],
+            )
+            self.assertEqual(
+                export["reproducibility"]["report_reproducibility_report_grade_validation_plan_hash"],
+                reproducibility_plan["validation_plan_sha256"],
+            )
+            self.assertEqual(reproducibility_plan["ready_slot_count"], 6)
+            self.assertGreaterEqual(reproducibility_plan["blocking_slot_count"], 6)
+            self.assertEqual(export["reproducibility"]["report_grade_ready_slot_count"], 6)
+            self.assertEqual(
+                export["reproducibility"]["report_grade_blocking_slot_count"],
+                reproducibility_plan["blocking_slot_count"],
+            )
+            reproducibility_ready_slots = {slot["slot_id"] for slot in reproducibility_plan["ready_slots"]}
+            reproducibility_blocking_slots = {slot["slot_id"] for slot in reproducibility_plan["blocking_slots"]}
+            self.assertIn("report-replay-manifest", reproducibility_ready_slots)
+            self.assertIn("report-trusted-replay-manifest-diff", reproducibility_blocking_slots)
             self.assertIn(
                 "report replay manifest hash emitted",
                 export["reproducibility"]["core_accuracy_gates"][0]["satisfied_checks"],
@@ -2405,8 +2431,13 @@ class RapidTriageCaseDatabaseTests(unittest.TestCase):
                 "item/citation row hashes emitted",
                 export["reproducibility"]["core_accuracy_gates"][0]["satisfied_checks"],
             )
+            self.assertIn(
+                "report reproducibility report-grade validation plan",
+                export["reproducibility"]["core_accuracy_gates"][0]["satisfied_checks"],
+            )
             self.assertEqual(export["reproducibility"]["trusted_reproducibility_diff"]["status"], "missing")
             self.assertIn("trusted-report-replay-manifest-diff-missing", export["reproducibility"]["blockers"])
+            self.assertIn("cross-platform-byte-for-byte-replay-required", export["reproducibility"]["blockers"])
             reproducibility_diff = build_report_reproducibility_trusted_diff(
                 export["reproducibility"],
                 export["reproducibility"],
@@ -2417,6 +2448,7 @@ class RapidTriageCaseDatabaseTests(unittest.TestCase):
                 citation_count=export["reproducibility"]["citation_count"],
                 report_replay_manifest=export["reproducibility"]["report_replay_manifest"],
                 trusted_diff=reproducibility_diff,
+                report_grade_validation_plan=reproducibility_plan,
             )
             self.assertEqual(reproducibility_diff["status"], "pass")
             self.assertIn("manifest_hash", reproducibility_diff["compared_fields"])
@@ -2424,6 +2456,7 @@ class RapidTriageCaseDatabaseTests(unittest.TestCase):
             self.assertIn("replay_contract_hash", reproducibility_diff["compared_fields"])
             self.assertIn("row hash set hash emitted", reproducibility_gates[0]["satisfied_checks"])
             self.assertIn("replay contract hash emitted", reproducibility_gates[0]["satisfied_checks"])
+            self.assertIn("report reproducibility report-grade validation plan", reproducibility_gates[0]["satisfied_checks"])
             self.assertIn("trusted report replay manifest diff pass", reproducibility_gates[0]["satisfied_checks"])
             self.assertTrue(all("provenance" in item for item in export["items"]))
             self.assertTrue(all("#90" in item["provenance"]["commercial_gap_ids"] for item in export["items"]))

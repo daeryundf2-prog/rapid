@@ -81,9 +81,9 @@
       "title": "Report reproducibility",
       "test_files": ["tests/test_rapidtriage_case_db.py", "tests/test_rapidtriage_ops.py"],
       "assertions": [
-        "Report exports preserve stable payload hash, deterministic sorting, item/citation counts, item/citation row digests, report-replay-manifest-v1 manifest hash, volatile-field disclosure, replay warnings, trusted report replay manifest diff helpers/gates, and #89 core_accuracy_gates."
+        "Report exports preserve stable payload hash, deterministic sorting, item/citation counts, item/citation row digests, report-replay-manifest-v1 manifest hash, report-reproducibility-report-grade-validation-plan-v1, plan hash/counts, volatile-field disclosure, replay warnings, trusted report replay manifest diff helpers/gates, and #89 core_accuracy_gates."
       ],
-      "remaining_external_validation": ["Cross-platform same-input byte-level replay tests and trusted report replay manifests."]
+      "remaining_external_validation": ["Cross-platform same-input byte-level replay tests, repeat-run logs, template/schema version locks, volatile-field normalization review, release-build replay evidence, and trusted report replay manifests."]
     },
     {
       "item": 90,

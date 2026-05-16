@@ -66,6 +66,15 @@ IMMUTABLE_AUDIT_REPORT_GRADE_BLOCKERS = [
     "audit-retention-policy-required",
 ]
 REPORT_REPRODUCIBILITY_GAP_ID = "#89"
+REPORT_REPRODUCIBILITY_REPORT_GRADE_VALIDATION_PLAN_VERSION = "report-reproducibility-report-grade-validation-plan-v1"
+REPORT_REPRODUCIBILITY_REPORT_GRADE_BLOCKERS = [
+    "trusted-report-replay-manifest-diff-missing",
+    "cross-platform-byte-for-byte-replay-required",
+    "same-input-repeat-run-log-required",
+    "report-template-version-lock-required",
+    "volatile-field-normalization-review-required",
+    "release-build-replay-evidence-required",
+]
 SOURCE_PROVENANCE_GAP_ID = "#90"
 CUSTODY_TRUSTED_DIFF_BLOCKER_86 = "trusted-custody-event-manifest-diff-missing"
 ACQUISITION_HASH_TRUSTED_DIFF_BLOCKER_87 = "trusted-acquisition-hash-manifest-diff-missing"
@@ -8015,9 +8024,19 @@ def build_report_reproducibility_manifest(
         deterministic_sort=deterministic_sort,
         volatile_fields=volatile_fields,
     )
+    reproducibility_report_grade_validation_plan = build_report_reproducibility_report_grade_validation_plan(
+        stable_hash=stable_hash,
+        item_count=len(items),
+        citation_count=len(citation_index),
+        deterministic_sort=deterministic_sort,
+        volatile_fields=volatile_fields,
+        report_replay_manifest=replay_manifest,
+        trusted_diff=trusted_diff,
+    )
     blockers = []
     if not trusted_diff or trusted_diff.get("status") != "pass":
         blockers.append(REPORT_REPRODUCIBILITY_TRUSTED_DIFF_BLOCKER_89)
+    blockers = sorted({*blockers, *reproducibility_report_grade_validation_plan["blockers"]})
     return {
         "status": "deterministic-export-manifest",
         "commercial_gap_ids": [REPORT_REPRODUCIBILITY_GAP_ID],
@@ -8028,6 +8047,12 @@ def build_report_reproducibility_manifest(
         "volatile_fields": volatile_fields,
         "report_replay_manifest": replay_manifest,
         "report_replay_manifest_hash": replay_manifest["manifest_hash"],
+        "report_reproducibility_report_grade_validation_plan": reproducibility_report_grade_validation_plan,
+        "report_reproducibility_report_grade_validation_plan_hash": reproducibility_report_grade_validation_plan[
+            "validation_plan_sha256"
+        ],
+        "report_grade_ready_slot_count": reproducibility_report_grade_validation_plan["ready_slot_count"],
+        "report_grade_blocking_slot_count": reproducibility_report_grade_validation_plan["blocking_slot_count"],
         "trusted_reproducibility_diff": dict(trusted_diff) if trusted_diff else missing_integrity_trusted_diff(
             REPORT_REPRODUCIBILITY_GAP_ID,
             REPORT_REPRODUCIBILITY_TRUSTED_DIFF_BLOCKER_89,
@@ -8039,9 +8064,168 @@ def build_report_reproducibility_manifest(
             citation_count=len(citation_index),
             report_replay_manifest=replay_manifest,
             trusted_diff=trusted_diff,
+            report_grade_validation_plan=reproducibility_report_grade_validation_plan,
         ),
         "blockers": blockers,
     }
+
+
+def build_report_reproducibility_report_grade_validation_plan(
+    *,
+    stable_hash: str,
+    item_count: int,
+    citation_count: int,
+    deterministic_sort: str,
+    volatile_fields: Sequence[str],
+    report_replay_manifest: Mapping[str, object],
+    trusted_diff: Mapping[str, object] | None,
+) -> dict[str, object]:
+    trusted_status = str(trusted_diff.get("status") or "missing") if trusted_diff else "missing"
+    ready_slots = [
+        {
+            "slot_id": "report-stable-payload-hash",
+            "status": "complete",
+            "evidence": {"stable_payload_sha256": stable_hash},
+        },
+        {
+            "slot_id": "report-deterministic-ordering",
+            "status": "complete",
+            "evidence": {"deterministic_sort": deterministic_sort},
+        },
+        {
+            "slot_id": "report-item-citation-row-hashes",
+            "status": "complete",
+            "evidence": {
+                "item_count": item_count,
+                "citation_count": citation_count,
+                "item_row_hash_count": len(report_replay_manifest.get("item_row_hashes") or []),
+                "citation_row_hash_count": len(report_replay_manifest.get("citation_row_hashes") or []),
+            },
+        },
+        {
+            "slot_id": "report-replay-manifest",
+            "status": "complete",
+            "evidence": {
+                "manifest_hash": report_replay_manifest.get("manifest_hash"),
+                "row_hash_set_hash": report_replay_manifest.get("row_hash_set_hash"),
+            },
+        },
+        {
+            "slot_id": "report-replay-contract",
+            "status": "complete",
+            "evidence": {
+                "replay_contract_hash": report_replay_manifest.get("replay_contract_hash"),
+                "volatile_fields": list(volatile_fields),
+            },
+        },
+        {
+            "slot_id": "report-reproducibility-trusted-diff-disclosure",
+            "status": "complete",
+            "evidence": {
+                "trusted_diff_status": trusted_status,
+                "trusted_tool": str((trusted_diff or {}).get("trusted_tool") or ""),
+            },
+        },
+    ]
+    blocking_slots: list[dict[str, object]] = []
+    if not stable_hash:
+        blocking_slots.append(
+            {
+                "slot_id": "report-stable-payload-hash-present",
+                "status": "blocked",
+                "blocker": "stable-payload-hash-required",
+                "required_evidence": "stable payload SHA-256 for the deterministic report export",
+            }
+        )
+    if len(report_replay_manifest.get("item_row_hashes") or []) != item_count:
+        blocking_slots.append(
+            {
+                "slot_id": "report-item-row-hash-completeness",
+                "status": "blocked",
+                "blocker": "report-item-row-hash-completeness-required",
+                "required_evidence": "row hash for every stable report item",
+            }
+        )
+    if len(report_replay_manifest.get("citation_row_hashes") or []) != citation_count:
+        blocking_slots.append(
+            {
+                "slot_id": "report-citation-row-hash-completeness",
+                "status": "blocked",
+                "blocker": "report-citation-row-hash-completeness-required",
+                "required_evidence": "row hash for every citation index row",
+            }
+        )
+    if not report_replay_manifest.get("manifest_hash") or not report_replay_manifest.get("replay_contract_hash"):
+        blocking_slots.append(
+            {
+                "slot_id": "report-replay-manifest-complete",
+                "status": "blocked",
+                "blocker": "report-replay-manifest-completeness-required",
+                "required_evidence": "report replay manifest hash and replay contract hash",
+            }
+        )
+    if trusted_status != "pass":
+        blocking_slots.append(
+            {
+                "slot_id": "report-trusted-replay-manifest-diff",
+                "status": "external-required",
+                "blocker": REPORT_REPRODUCIBILITY_TRUSTED_DIFF_BLOCKER_89,
+                "required_evidence": "trusted report replay manifest diff over stable hash, counts, row hashes, and replay contract",
+            }
+        )
+    blocking_slots.extend(
+        [
+            {
+                "slot_id": "cross-platform-byte-for-byte-replay",
+                "status": "external-required",
+                "blocker": "cross-platform-byte-for-byte-replay-required",
+                "required_evidence": "same input produces byte-equivalent JSON/Markdown/report artifacts on supported OS targets",
+            },
+            {
+                "slot_id": "same-input-repeat-run-log",
+                "status": "external-required",
+                "blocker": "same-input-repeat-run-log-required",
+                "required_evidence": "two or more same-input rerun logs showing identical stable payload/replay manifest hashes",
+            },
+            {
+                "slot_id": "report-template-version-lock",
+                "status": "external-required",
+                "blocker": "report-template-version-lock-required",
+                "required_evidence": "versioned report templates and schema version lock for the shipped build",
+            },
+            {
+                "slot_id": "volatile-field-normalization-review",
+                "status": "external-required",
+                "blocker": "volatile-field-normalization-review-required",
+                "required_evidence": "review of generated_at, path, environment, and case-updated fields excluded or normalized for replay",
+            },
+            {
+                "slot_id": "release-build-replay-evidence",
+                "status": "external-required",
+                "blocker": "release-build-replay-evidence-required",
+                "required_evidence": "release-build replay evidence tied to the final packaged binary/version",
+            },
+        ]
+    )
+    plan_core: dict[str, object] = {
+        "profile_version": REPORT_REPRODUCIBILITY_REPORT_GRADE_VALIDATION_PLAN_VERSION,
+        "item_number": 89,
+        "commercial_gap_ids": [REPORT_REPRODUCIBILITY_GAP_ID],
+        "plan_context": "case-db-report-export",
+        "stable_payload_sha256": stable_hash,
+        "report_replay_manifest_hash": report_replay_manifest.get("manifest_hash"),
+        "row_hash_set_hash": report_replay_manifest.get("row_hash_set_hash"),
+        "replay_contract_hash": report_replay_manifest.get("replay_contract_hash"),
+        "trusted_diff_status": trusted_status,
+        "ready_slots": ready_slots,
+        "blocking_slots": blocking_slots,
+        "ready_slot_count": len(ready_slots),
+        "blocking_slot_count": len(blocking_slots),
+        "blockers": sorted({str(slot.get("blocker") or "") for slot in blocking_slots if slot.get("blocker")}),
+        "commercial_claim_allowed": False,
+        "reporting_boundary": "This plan makes one Case DB export replay-verifiable, but commercial reproducibility requires cross-platform byte-level replay, repeated run logs, template/schema locks, volatile-field review, release-build evidence, and trusted replay diffs.",
+    }
+    return {**plan_core, "validation_plan_sha256": stable_payload_sha256(plan_core)}
 
 
 def build_report_item_validation_assessment(
@@ -9864,6 +10048,7 @@ def report_reproducibility_core_accuracy_gates(
     citation_count: int,
     report_replay_manifest: Mapping[str, object] | None = None,
     trusted_diff: Mapping[str, object] | None = None,
+    report_grade_validation_plan: Mapping[str, object] | None = None,
 ) -> list[dict[str, object]]:
     satisfied = [
         "stable payload hash generated",
@@ -9882,6 +10067,10 @@ def report_reproducibility_core_accuracy_gates(
         satisfied.append("row hash set hash emitted")
     if report_replay_manifest and report_replay_manifest.get("replay_contract_hash"):
         satisfied.append("replay contract hash emitted")
+    if report_grade_validation_plan and report_grade_validation_plan.get("validation_plan_sha256"):
+        satisfied.append("report reproducibility report-grade validation plan")
+    if report_grade_validation_plan and int(report_grade_validation_plan.get("ready_slot_count") or 0) >= 6:
+        satisfied.append("report reproducibility report-grade ready slots")
     if trusted_diff and trusted_diff.get("status") == "pass":
         satisfied.append("trusted report replay manifest diff pass")
     return [
@@ -9894,6 +10083,7 @@ def report_reproducibility_core_accuracy_gates(
                 f"citation_count:{citation_count}",
                 f"report_replay_manifest_hash:{(report_replay_manifest or {}).get('manifest_hash', '')}",
                 f"row_hash_set_hash:{(report_replay_manifest or {}).get('row_hash_set_hash', '')}",
+                f"report_reproducibility_report_grade_validation_plan_hash:{(report_grade_validation_plan or {}).get('validation_plan_sha256', '')}",
             ],
         )
     ]

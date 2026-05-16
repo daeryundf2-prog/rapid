@@ -1443,6 +1443,8 @@ CORE_FORENSIC_ACCURACY_ITEMS: tuple[dict[str, object], ...] = (
             "volatile fields disclosed",
             "report replay manifest hash emitted",
             "item/citation row hashes emitted",
+            "report reproducibility report-grade validation plan",
+            "report reproducibility report-grade ready slots",
             "cross-platform replay limitation warning",
             "trusted report replay manifest diff pass",
         ),

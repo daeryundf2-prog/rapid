@@ -2079,10 +2079,10 @@
       ],
       "expected": {
         "required_assertions": [
-          "Report export preserves stable payload hash, deterministic sorting, item/citation counts, item/citation row digests, report-replay-manifest-v1 manifest hash, volatile-field disclosure, replay warning, and #89 core_accuracy_gates."
+          "Report export preserves stable payload hash, deterministic sorting, item/citation counts, item/citation row digests, report-replay-manifest-v1 manifest hash, report-reproducibility-report-grade-validation-plan-v1, plan hash/counts, volatile-field disclosure, replay warning, and #89 core_accuracy_gates."
         ]
       },
-      "notes": "Internal fixture pass; cross-platform same-input replay validation remains blocker.",
+      "notes": "Internal fixture pass; cross-platform same-input replay validation, repeat-run logs, template/schema version locks, volatile-field normalization review, release-build replay evidence, and trusted report replay manifests remain blockers.",
       "source_manifest": "docs/validation/rapidtriage-core-forensics-081-090-known-answer.json"
     },
     {
