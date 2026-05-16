@@ -1874,6 +1874,8 @@ CORE_FORENSIC_ACCURACY_ITEMS: tuple[dict[str, object], ...] = (
             "migration rehearsal requirement recorded",
             "backup restore evidence manifest hash emitted",
             "backup restore rehearsal evidence slots emitted",
+            "backup restore report-grade validation plan",
+            "backup restore report-grade ready slots",
             "trusted backup/restore rehearsal diff pass",
         ),
     },

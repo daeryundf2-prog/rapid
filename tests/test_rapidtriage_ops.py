@@ -2007,6 +2007,10 @@ class RapidTriageOpsTests(unittest.TestCase):
                 continuity_by_number[111]["primary_outputs"],
             )
             self.assertIn(
+                "case-backup.backup_restore_report_grade_validation_plan_hash",
+                continuity_by_number[111]["primary_outputs"],
+            )
+            self.assertIn(
                 "operations_documents.document_evidence_manifests.112.manifest_hash",
                 continuity_by_number[112]["primary_outputs"],
             )
@@ -6516,6 +6520,18 @@ class RapidTriageOpsTests(unittest.TestCase):
                 backup_payload["backup_restore_continuity_manifest"]["manifest_hash"],
             )
             self.assertEqual(
+                backup_payload["backup_restore_report_grade_validation_plan"]["profile_version"],
+                "backup-restore-report-grade-validation-plan-v1",
+            )
+            self.assertEqual(len(backup_payload["backup_restore_report_grade_validation_plan_hash"]), 64)
+            self.assertEqual(
+                backup_payload["backup_restore_report_grade_validation_plan_hash"],
+                backup_payload["backup_restore_report_grade_validation_plan"]["validation_plan_hash"],
+            )
+            self.assertGreaterEqual(backup_payload["backup_restore_report_grade_ready_slot_count"], 8)
+            self.assertGreaterEqual(backup_payload["backup_restore_report_grade_blocking_slot_count"], 7)
+            self.assertIn("restore-drill-log-required", backup_payload["blockers"])
+            self.assertEqual(
                 backup_payload["backup_restore_evidence_manifest"]["rehearsal_evidence_matrix"]["profile_version"],
                 "backup-restore-rehearsal-evidence-matrix-v1",
             )
@@ -6529,6 +6545,11 @@ class RapidTriageOpsTests(unittest.TestCase):
                     "backup_restore_continuity_manifest_emitted"
                 ]
             )
+            self.assertTrue(
+                backup_payload["functional_priority_profile"]["implemented_controls"][
+                    "backup_restore_report_grade_validation_plan_emitted"
+                ]
+            )
             self.assertIn("restore_drill_log", backup_payload["rehearsal_evidence_slots"])
             self.assertIn(
                 "backup restore evidence manifest hash emitted",
@@ -6540,6 +6561,14 @@ class RapidTriageOpsTests(unittest.TestCase):
             )
             self.assertIn(
                 "backup restore rehearsal evidence matrix hash emitted",
+                backup_payload["core_accuracy_gates"][0]["satisfied_checks"],
+            )
+            self.assertIn(
+                "backup restore report-grade validation plan",
+                backup_payload["core_accuracy_gates"][0]["satisfied_checks"],
+            )
+            self.assertIn(
+                "backup restore report-grade ready slots",
                 backup_payload["core_accuracy_gates"][0]["satisfied_checks"],
             )
             self.assertEqual(backup_payload["trusted_backup_restore_diff"]["status"], "missing")
@@ -6571,6 +6600,17 @@ class RapidTriageOpsTests(unittest.TestCase):
             self.assertEqual(len(restore_payload["backup_restore_evidence_manifest_hash"]), 64)
             self.assertEqual(len(restore_payload["backup_restore_evidence_matrix_hash"]), 64)
             self.assertEqual(
+                restore_payload["backup_restore_report_grade_validation_plan"]["profile_version"],
+                "backup-restore-report-grade-validation-plan-v1",
+            )
+            self.assertEqual(len(restore_payload["backup_restore_report_grade_validation_plan_hash"]), 64)
+            self.assertEqual(
+                restore_payload["backup_restore_report_grade_validation_plan_hash"],
+                restore_payload["backup_restore_report_grade_validation_plan"]["validation_plan_hash"],
+            )
+            self.assertGreaterEqual(restore_payload["backup_restore_report_grade_ready_slot_count"], 8)
+            self.assertGreaterEqual(restore_payload["backup_restore_report_grade_blocking_slot_count"], 7)
+            self.assertEqual(
                 restore_payload["backup_restore_continuity_manifest"]["profile_version"],
                 "backup-restore-continuity-manifest-v1",
             )
@@ -6589,8 +6629,17 @@ class RapidTriageOpsTests(unittest.TestCase):
                 "continuity hash verification recorded",
                 restore_payload["core_accuracy_gates"][0]["satisfied_checks"],
             )
+            self.assertIn(
+                "backup restore report-grade validation plan",
+                restore_payload["core_accuracy_gates"][0]["satisfied_checks"],
+            )
+            self.assertIn(
+                "backup restore report-grade ready slots",
+                restore_payload["core_accuracy_gates"][0]["satisfied_checks"],
+            )
             self.assertEqual(restore_payload["trusted_backup_restore_diff"]["status"], "missing")
             self.assertIn("trusted-backup-restore-rehearsal-diff-missing", restore_payload["blockers"])
+            self.assertIn("migration-corpus-run-required", restore_payload["blockers"])
             self.assertTrue(restore_payload["hash_verified"])
             self.assertEqual(restore_payload["schema"]["current_schema_version"], 1)
             self.assertEqual(restore_payload["migration_readiness"]["expected_schema_version"], 1)
@@ -6602,10 +6651,13 @@ class RapidTriageOpsTests(unittest.TestCase):
                 restored=True,
                 hash_verified=restore_payload["hash_verified"],
                 trusted_diff=backup_diff,
+                report_grade_validation_plan=restore_payload["backup_restore_report_grade_validation_plan"],
             )
             self.assertEqual(backup_diff["status"], "pass")
             self.assertIn("backup_restore_evidence_matrix_hash", backup_diff["compared_fields"])
+            self.assertIn("backup_restore_report_grade_validation_plan_hash", backup_diff["compared_fields"])
             self.assertIn("trusted backup/restore rehearsal diff pass", backup_gates[0]["satisfied_checks"])
+            self.assertIn("backup restore report-grade validation plan", backup_gates[0]["satisfied_checks"])
 
     def test_dependency_monitoring_script_writes_vulnerability_policy_baseline(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:

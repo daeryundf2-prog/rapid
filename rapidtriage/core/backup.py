@@ -22,6 +22,16 @@ BACKUP_MANIFEST_NAME = "rapidtriage-case-backup-manifest.json"
 BACKUP_RESTORE_MIGRATION_GAP_ID = "#111"
 BACKUP_RESTORE_TRUSTED_DIFF_BLOCKER_111 = "trusted-backup-restore-rehearsal-diff-missing"
 BACKUP_RESTORE_TRUSTED_TOOLS = {"backup-restore-rehearsal-log", "migration-corpus-run", "scheduled-backup-drill"}
+BACKUP_RESTORE_REPORT_GRADE_VALIDATION_PLAN_VERSION = "backup-restore-report-grade-validation-plan-v1"
+BACKUP_RESTORE_REPORT_GRADE_BLOCKERS = [
+    BACKUP_RESTORE_TRUSTED_DIFF_BLOCKER_111,
+    "restore-drill-log-required",
+    "migration-corpus-run-required",
+    "scheduled-backup-drill-required",
+    "cross-version-restore-smoke-required",
+    "release-host-backup-restore-smoke-required",
+    "independent-backup-restore-review-required",
+]
 FUNCTIONAL_OPS_BATCH_ID = "commercial-uplift-061-065"
 
 
@@ -110,6 +120,19 @@ def build_case_backup(
     manifest["backup_restore_continuity_manifest"] = continuity_manifest
     manifest["backup_restore_continuity_manifest_hash"] = continuity_manifest["manifest_hash"]
     manifest["rehearsal_evidence_slots"] = backup_evidence_manifest["rehearsal_evidence_slots"]
+    report_grade_plan = build_backup_restore_report_grade_validation_plan(
+        payload=manifest,
+        evidence_manifest=backup_evidence_manifest,
+        continuity_manifest=continuity_manifest,
+        trusted_diff=trusted_diff,
+        restored=False,
+        hash_verified=False,
+    )
+    manifest["backup_restore_report_grade_validation_plan"] = report_grade_plan
+    manifest["backup_restore_report_grade_validation_plan_hash"] = report_grade_plan["validation_plan_hash"]
+    manifest["backup_restore_report_grade_ready_slot_count"] = report_grade_plan["ready_slot_count"]
+    manifest["backup_restore_report_grade_blocking_slot_count"] = report_grade_plan["blocking_slot_count"]
+    manifest["blockers"] = sorted({*manifest["blockers"], *report_grade_plan["blockers"]})
     manifest["core_accuracy_gates"] = backup_restore_core_accuracy_gates(
         copied=copied,
         schema=inspect_case_database_schema(source),
@@ -118,6 +141,7 @@ def build_case_backup(
         trusted_diff=trusted_diff,
         evidence_manifest=backup_evidence_manifest,
         continuity_manifest=continuity_manifest,
+        report_grade_validation_plan=report_grade_plan,
     )
     (destination_dir / BACKUP_MANIFEST_NAME).write_text(json.dumps(manifest, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     return manifest
@@ -207,6 +231,19 @@ def restore_case_backup(
     payload["backup_restore_continuity_manifest"] = continuity_manifest
     payload["backup_restore_continuity_manifest_hash"] = continuity_manifest["manifest_hash"]
     payload["rehearsal_evidence_slots"] = backup_evidence_manifest["rehearsal_evidence_slots"]
+    report_grade_plan = build_backup_restore_report_grade_validation_plan(
+        payload=payload,
+        evidence_manifest=backup_evidence_manifest,
+        continuity_manifest=continuity_manifest,
+        trusted_diff=trusted_diff,
+        restored=True,
+        hash_verified=bool(payload["hash_verified"]),
+    )
+    payload["backup_restore_report_grade_validation_plan"] = report_grade_plan
+    payload["backup_restore_report_grade_validation_plan_hash"] = report_grade_plan["validation_plan_hash"]
+    payload["backup_restore_report_grade_ready_slot_count"] = report_grade_plan["ready_slot_count"]
+    payload["backup_restore_report_grade_blocking_slot_count"] = report_grade_plan["blocking_slot_count"]
+    payload["blockers"] = sorted({*payload["blockers"], *report_grade_plan["blockers"]})
     payload["core_accuracy_gates"] = backup_restore_core_accuracy_gates(
         copied=[database_file],
         schema=inspect_case_database_schema(destination),
@@ -215,6 +252,7 @@ def restore_case_backup(
         trusted_diff=trusted_diff,
         evidence_manifest=backup_evidence_manifest,
         continuity_manifest=continuity_manifest,
+        report_grade_validation_plan=report_grade_plan,
     )
     return payload
 
@@ -310,6 +348,7 @@ def backup_restore_functional_profile(
             "table_inventory_recorded": schema.get("table_count") is not None,
             "restore_hash_verified": bool(restored and hash_verified),
             "backup_restore_continuity_manifest_emitted": True,
+            "backup_restore_report_grade_validation_plan_emitted": True,
             "migration_rehearsal_required": True,
         },
         "evidence_counts": {
@@ -332,6 +371,7 @@ def backup_restore_core_accuracy_gates(
     trusted_diff: Mapping[str, object] | None = None,
     evidence_manifest: Mapping[str, object] | None = None,
     continuity_manifest: Mapping[str, object] | None = None,
+    report_grade_validation_plan: Mapping[str, object] | None = None,
 ) -> list[dict[str, object]]:
     satisfied = ["backup manifest generated", "migration rehearsal requirement recorded"]
     if any(item.get("hashes") for item in copied):
@@ -354,6 +394,11 @@ def backup_restore_core_accuracy_gates(
             satisfied.append("continuity hash verification recorded")
     if trusted_diff and trusted_diff.get("status") == "pass":
         satisfied.append("trusted backup/restore rehearsal diff pass")
+    if report_grade_validation_plan:
+        if report_grade_validation_plan.get("validation_plan_hash"):
+            satisfied.append("backup restore report-grade validation plan")
+        if int(report_grade_validation_plan.get("ready_slot_count") or 0) > 0:
+            satisfied.append("backup restore report-grade ready slots")
     evidence_refs = [
         f"copied_count:{len(copied)}",
         f"schema_version:{schema.get('current_schema_version')}",
@@ -362,6 +407,16 @@ def backup_restore_core_accuracy_gates(
     ]
     if continuity_manifest and continuity_manifest.get("manifest_hash"):
         evidence_refs.append(f"backup_restore_continuity_manifest_sha256:{continuity_manifest['manifest_hash']}")
+    if report_grade_validation_plan and report_grade_validation_plan.get("validation_plan_hash"):
+        evidence_refs.append(
+            f"backup_restore_report_grade_validation_plan_sha256:{report_grade_validation_plan['validation_plan_hash']}"
+        )
+        evidence_refs.append(
+            f"backup_restore_report_grade_ready_slots:{report_grade_validation_plan.get('ready_slot_count')}"
+        )
+        evidence_refs.append(
+            f"backup_restore_report_grade_blocking_slots:{report_grade_validation_plan.get('blocking_slot_count')}"
+        )
     return [
         build_accuracy_gate(
             111,
@@ -395,6 +450,7 @@ def build_backup_restore_trusted_diff(
         "backup_restore_evidence_manifest_hash",
         "backup_restore_evidence_matrix_hash",
         "backup_restore_continuity_manifest_hash",
+        "backup_restore_report_grade_validation_plan_hash",
         "rehearsal_evidence_slots",
     ]
     mismatches = []
@@ -420,6 +476,166 @@ def normalize_backup_restore_value(value: object) -> object:
     if isinstance(value, Mapping):
         return json.dumps(dict(value), ensure_ascii=False, sort_keys=True, default=str)
     return value
+
+
+def build_backup_restore_report_grade_validation_plan(
+    *,
+    payload: Mapping[str, object],
+    evidence_manifest: Mapping[str, object],
+    continuity_manifest: Mapping[str, object],
+    trusted_diff: Mapping[str, object],
+    restored: bool,
+    hash_verified: bool,
+) -> dict[str, object]:
+    command = str(payload.get("command") or "")
+    schema = payload.get("schema") if isinstance(payload.get("schema"), Mapping) else {}
+    migration_readiness = (
+        payload.get("migration_readiness") if isinstance(payload.get("migration_readiness"), Mapping) else {}
+    )
+    file_hashes = (
+        continuity_manifest.get("file_hashes") if isinstance(continuity_manifest.get("file_hashes"), list) else []
+    )
+    ready_slots = [
+        {
+            "slot_id": "backup-restore-command-payload-json",
+            "status": "ready",
+            "evidence_ref": f"rapidtriage {command} --json",
+            "evidence_hash": stable_backup_sha256(
+                {
+                    "command": command,
+                    "restored": restored,
+                    "hash_verified": hash_verified,
+                    "copied_count": payload.get("copied_count", len(file_hashes)),
+                    "schema": schema,
+                    "migration_readiness": migration_readiness,
+                }
+            ),
+        },
+        {
+            "slot_id": "backup-restore-evidence-manifest",
+            "status": "ready",
+            "evidence_ref": f"{command}.backup_restore_evidence_manifest_hash",
+            "evidence_hash": str(evidence_manifest.get("manifest_hash") or ""),
+        },
+        {
+            "slot_id": "backup-restore-continuity-manifest",
+            "status": "ready",
+            "evidence_ref": f"{command}.backup_restore_continuity_manifest_hash",
+            "evidence_hash": str(continuity_manifest.get("manifest_hash") or ""),
+        },
+        {
+            "slot_id": "backup-restore-file-hash-inventory",
+            "status": "ready",
+            "evidence_ref": f"{command}.backup_restore_continuity_manifest.file_hashes",
+            "evidence_hash": stable_backup_sha256(file_hashes),
+        },
+        {
+            "slot_id": "backup-restore-schema-migration-readiness",
+            "status": "ready",
+            "evidence_ref": f"{command}.schema + {command}.migration_readiness",
+            "evidence_hash": stable_backup_sha256({"schema": schema, "migration_readiness": migration_readiness}),
+        },
+        {
+            "slot_id": "backup-restore-hash-verification-boundary",
+            "status": "ready" if restored and hash_verified else "ready-with-backup-only-boundary",
+            "evidence_ref": f"{command}.hash_verified",
+            "evidence_hash": stable_backup_sha256({"restored": restored, "hash_verified": hash_verified}),
+        },
+        {
+            "slot_id": "backup-restore-rehearsal-evidence-matrix",
+            "status": "ready",
+            "evidence_ref": f"{command}.backup_restore_evidence_matrix_hash",
+            "evidence_hash": str(evidence_manifest.get("rehearsal_evidence_matrix_hash") or ""),
+        },
+        {
+            "slot_id": "trusted-backup-restore-diff-boundary",
+            "status": "ready" if trusted_diff.get("status") == "pass" else "ready-with-blocker",
+            "evidence_ref": f"{command}.trusted_backup_restore_diff",
+            "evidence_hash": stable_backup_sha256(trusted_diff),
+        },
+    ]
+    blocking_slots = []
+    if trusted_diff.get("status") != "pass":
+        blocking_slots.append(
+            {
+                "slot_id": "trusted-backup-restore-rehearsal-diff",
+                "status": "blocking",
+                "blocker": BACKUP_RESTORE_TRUSTED_DIFF_BLOCKER_111,
+                "required_evidence": "trusted restore rehearsal log comparing backup, restore, schema, hashes, and evidence slots",
+            }
+        )
+    for slot_id, blocker, required_evidence in (
+        (
+            "restore-drill-log",
+            "restore-drill-log-required",
+            "restore drill transcript with source/backup/restored SHA256 comparison",
+        ),
+        (
+            "migration-corpus-run",
+            "migration-corpus-run-required",
+            "multi-version case database migration corpus run against supported release versions",
+        ),
+        (
+            "scheduled-backup-drill",
+            "scheduled-backup-drill-required",
+            "scheduled backup and restore drill from a production-scale or representative large case",
+        ),
+        (
+            "cross-version-restore-smoke",
+            "cross-version-restore-smoke-required",
+            "restore smoke proving older backup manifests open under the target RapidForensic version",
+        ),
+        (
+            "release-host-backup-restore-smoke",
+            "release-host-backup-restore-smoke-required",
+            "backup and restore smoke produced from the signed/notarized/release package",
+        ),
+        (
+            "independent-backup-restore-review",
+            "independent-backup-restore-review-required",
+            "independent reviewer confirmation of backup, restore, and migration evidence reproducibility",
+        ),
+    ):
+        blocking_slots.append(
+            {
+                "slot_id": slot_id,
+                "status": "blocking",
+                "current_attachment_status": "not-attached",
+                "blocker": blocker,
+                "required_evidence": required_evidence,
+            }
+        )
+    blockers = sorted({str(slot["blocker"]) for slot in blocking_slots if slot.get("blocker")})
+    plan: dict[str, object] = {
+        "profile_version": BACKUP_RESTORE_REPORT_GRADE_VALIDATION_PLAN_VERSION,
+        "item_number": 111,
+        "commercial_gap_ids": [BACKUP_RESTORE_MIGRATION_GAP_ID],
+        "commercial_claim_allowed": False,
+        "command": command,
+        "restored": restored,
+        "hash_verified": hash_verified,
+        "file_hash_count": len(file_hashes),
+        "schema_snapshot_hash": stable_backup_sha256(schema),
+        "migration_readiness_hash": stable_backup_sha256(migration_readiness),
+        "backup_restore_evidence_manifest_hash": str(evidence_manifest.get("manifest_hash") or ""),
+        "backup_restore_continuity_manifest_hash": str(continuity_manifest.get("manifest_hash") or ""),
+        "backup_restore_evidence_matrix_hash": str(evidence_manifest.get("rehearsal_evidence_matrix_hash") or ""),
+        "trusted_diff_status": str(trusted_diff.get("status") or ""),
+        "trusted_diff_blocker": trusted_diff.get("blocker"),
+        "ready_slots": ready_slots,
+        "blocking_slots": blocking_slots,
+        "ready_slot_count": len(ready_slots),
+        "blocking_slot_count": len(blocking_slots),
+        "external_blocker_catalog": list(BACKUP_RESTORE_REPORT_GRADE_BLOCKERS),
+        "blockers": blockers,
+        "reporting_boundary": (
+            "Local backup/restore is usable with manifest, hashes, schema inventory, and restore hash checks; "
+            "commercial continuity claims require restore drills, migration corpus runs, release-host smoke, "
+            "and independent review evidence."
+        ),
+    }
+    plan["validation_plan_hash"] = stable_backup_sha256(plan)
+    return plan
 
 
 def stable_backup_sha256(payload: object) -> str:

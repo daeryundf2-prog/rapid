@@ -3705,6 +3705,8 @@ def operations_continuity_evidence_chain() -> list[dict[str, object]]:
                 "case-backup/case-restore payloads",
                 "case-backup.backup_restore_evidence_manifest.manifest_hash",
                 "case-restore.backup_restore_evidence_manifest.manifest_hash",
+                "case-backup.backup_restore_report_grade_validation_plan_hash",
+                "case-restore.backup_restore_report_grade_validation_plan_hash",
                 "case-restore.rehearsal_evidence_slots.restore_drill_log",
                 "case-backup.migration_readiness",
             ],

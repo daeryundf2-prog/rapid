@@ -2559,10 +2559,10 @@
       ],
       "expected": {
         "required_assertions": [
-          "Backup and restore commands preserve backup manifest, database hashes, schema inventory, restore hash verification, migration rehearsal requirement, and #111 core_accuracy_gates."
+          "Backup and restore commands preserve backup manifest, database hashes, schema inventory, restore hash verification, migration rehearsal requirement, backup-restore-rehearsal-manifest-v1 manifest hash/evidence slots, backup-restore-report-grade-validation-plan-v1 ready/blocking slots, trusted backup/restore rehearsal diff helpers/gates, and #111 core_accuracy_gates."
         ]
       },
-      "notes": "Internal fixture pass; scheduled backups and migration corpus remain external.",
+      "notes": "Internal fixture pass; scheduled backups, migration corpus, release-host backup/restore smoke, independent review, and trusted restore rehearsal logs remain external.",
       "source_manifest": "docs/validation/rapidtriage-core-forensics-101-120-known-answer.json"
     },
     {

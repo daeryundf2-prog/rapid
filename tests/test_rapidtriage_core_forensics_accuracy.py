@@ -289,6 +289,8 @@ class RapidTriageCoreForensicsAccuracyTests(unittest.TestCase):
         self.assertIn("collaboration audit report-grade ready slots", collaboration_audit["required_checks"])
         self.assertIn("trusted collaboration audit diff pass", collaboration_audit["required_checks"])
         self.assertIn("restore hash verified", backup_restore["required_checks"])
+        self.assertIn("backup restore report-grade validation plan", backup_restore["required_checks"])
+        self.assertIn("backup restore report-grade ready slots", backup_restore["required_checks"])
         self.assertIn("trusted backup/restore rehearsal diff pass", backup_restore["required_checks"])
         self.assertIn("release notes template packaged", release_notes["required_checks"])
         self.assertIn("trusted release notes CI gate diff pass", release_notes["required_checks"])
