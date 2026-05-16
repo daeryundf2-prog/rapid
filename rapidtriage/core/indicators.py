@@ -40,6 +40,15 @@ IOC_TI_REPORT_GRADE_BLOCKERS = [
     "trusted-ioc-ti-enrichment-diff-is-required-before-commercial-claim",
 ]
 IOC_TI_TRUSTED_DIFF_BLOCKER_63 = "trusted-ioc-ti-enrichment-diff-missing"
+IOC_TI_REPORT_GRADE_VALIDATION_PLAN_VERSION = "ioc-ti-report-grade-validation-plan-v1"
+IOC_TI_REPORT_GRADE_VALIDATION_BLOCKERS = [
+    "signed-ti-feed-package-required",
+    "stix-taxii-provider-validation-required",
+    "confidence-decay-policy-required",
+    "trusted-ioc-ti-enrichment-diff-required",
+    "external-ti-api-governance-required",
+    "ioc-ti-false-positive-correlation-corpus-required",
+]
 
 
 class IndicatorSummaryError(ValueError):
@@ -114,6 +123,15 @@ def build_indicator_summary(
         max_indicators=max_indicators,
         max_sources_per_indicator=max_sources_per_indicator,
     )
+    validation_plan = build_ioc_ti_report_grade_validation_plan(
+        plan_context="indicator-summary",
+        indicators=indicators,
+        ti_feed_sources=ti_feed_sources,
+        enrichment_manifest=enrichment_manifest,
+        max_indicators=max_indicators,
+        max_sources_per_indicator=max_sources_per_indicator,
+        trusted_diff=None,
+    )
 
     type_counts = Counter(str(item["type"]) for item in indicators)
     rule_counts = Counter(rule for item in indicators for rule in item.get("matched_rules", []))
@@ -122,8 +140,13 @@ def build_indicator_summary(
         indicators=indicators,
         ti_feed_sources=ti_feed_sources,
         enrichment_manifest=enrichment_manifest,
+        validation_plan=validation_plan,
     )
-    assessment = ti_enrichment_assessment(ti_feed_sources=ti_feed_sources, enrichment_manifest=enrichment_manifest)
+    assessment = ti_enrichment_assessment(
+        ti_feed_sources=ti_feed_sources,
+        enrichment_manifest=enrichment_manifest,
+        validation_plan=validation_plan,
+    )
     return {
         "command": "indicators",
         "generated_at": dt.datetime.now().isoformat(),
@@ -155,6 +178,10 @@ def build_indicator_summary(
         "ioc_scanner_manifest_hash": ioc_scanner_manifest["manifest_hash"],
         "ioc_ti_enrichment_manifest": enrichment_manifest,
         "ioc_ti_enrichment_manifest_hash": enrichment_manifest["manifest_hash"],
+        "ioc_ti_report_grade_validation_plan": validation_plan,
+        "ioc_ti_report_grade_validation_plan_hash": validation_plan["validation_plan_sha256"],
+        "report_grade_ready_slot_count": validation_plan["ready_slot_count"],
+        "report_grade_blocking_slot_count": validation_plan["blocking_slot_count"],
         "ti_enrichment_assessment": assessment,
         "core_accuracy_gates": core_accuracy_gates,
         "commercial_uplift_evidence": ioc_ti_commercial_uplift_evidence(
@@ -165,6 +192,7 @@ def build_indicator_summary(
             max_indicators=max_indicators,
             max_sources_per_indicator=max_sources_per_indicator,
             enrichment_manifest=enrichment_manifest,
+            validation_plan=validation_plan,
         ),
         "indicators": indicators,
     }
@@ -646,12 +674,26 @@ def build_indicator_ti_enrichment_package(
         max_indicators=limit,
         max_sources_per_indicator=DEFAULT_MAX_SOURCES_PER_INDICATOR,
     )
+    validation_plan = build_ioc_ti_report_grade_validation_plan(
+        plan_context="api-review-package",
+        indicators=reviewed_for_manifest,
+        ti_feed_sources=ti_feed_sources,
+        enrichment_manifest=enrichment_manifest,
+        max_indicators=limit,
+        max_sources_per_indicator=DEFAULT_MAX_SOURCES_PER_INDICATOR,
+        trusted_diff=None,
+    )
     core_accuracy_gates = ioc_ti_core_accuracy_gates(
         indicators=reviewed_for_manifest,
         ti_feed_sources=ti_feed_sources,
         enrichment_manifest=enrichment_manifest,
+        validation_plan=validation_plan,
     )
-    assessment = ti_enrichment_assessment(ti_feed_sources=ti_feed_sources, enrichment_manifest=enrichment_manifest)
+    assessment = ti_enrichment_assessment(
+        ti_feed_sources=ti_feed_sources,
+        enrichment_manifest=enrichment_manifest,
+        validation_plan=validation_plan,
+    )
     uplift = ioc_ti_commercial_uplift_evidence(
         indicators=reviewed_for_manifest,
         ti_feed_sources=ti_feed_sources,
@@ -660,6 +702,7 @@ def build_indicator_ti_enrichment_package(
         max_indicators=limit,
         max_sources_per_indicator=DEFAULT_MAX_SOURCES_PER_INDICATOR,
         enrichment_manifest=enrichment_manifest,
+        validation_plan=validation_plan,
     )
     return {
         "command": "indicator-ti-enrichment",
@@ -685,6 +728,10 @@ def build_indicator_ti_enrichment_package(
         "ti_feed_sources": ti_feed_sources,
         "ioc_ti_enrichment_manifest": enrichment_manifest,
         "ioc_ti_enrichment_manifest_hash": enrichment_manifest["manifest_hash"],
+        "ioc_ti_report_grade_validation_plan": validation_plan,
+        "ioc_ti_report_grade_validation_plan_hash": validation_plan["validation_plan_sha256"],
+        "report_grade_ready_slot_count": validation_plan["ready_slot_count"],
+        "report_grade_blocking_slot_count": validation_plan["blocking_slot_count"],
         "ti_enrichment_assessment": assessment,
         "core_accuracy_gates": core_accuracy_gates,
         "commercial_uplift_evidence": uplift,
@@ -766,6 +813,7 @@ def ti_enrichment_assessment(
     *,
     ti_feed_sources: Sequence[Mapping[str, object]],
     enrichment_manifest: Mapping[str, object] | None = None,
+    validation_plan: Mapping[str, object] | None = None,
 ) -> dict[str, object]:
     return {
         "component": "ioc-ti-enrichment-plugin",
@@ -774,6 +822,10 @@ def ti_enrichment_assessment(
         "feed_count": len(ti_feed_sources),
         "ioc_ti_enrichment_manifest_hash": str(enrichment_manifest.get("manifest_hash") or "") if enrichment_manifest else "",
         "indicator_row_hash_count": int(enrichment_manifest.get("indicator_row_hash_count") or 0) if enrichment_manifest else 0,
+        "ioc_ti_report_grade_validation_plan": validation_plan if isinstance(validation_plan, Mapping) else {},
+        "ioc_ti_report_grade_validation_plan_hash": str(validation_plan.get("validation_plan_sha256") or "") if isinstance(validation_plan, Mapping) else "",
+        "report_grade_ready_slot_count": int(validation_plan.get("ready_slot_count") or 0) if isinstance(validation_plan, Mapping) else 0,
+        "report_grade_blocking_slot_count": int(validation_plan.get("blocking_slot_count") or 0) if isinstance(validation_plan, Mapping) else 0,
         "ready_for_court_report": False,
         "blockers": list(IOC_TI_REPORT_GRADE_BLOCKERS),
         "recommended_validation": [
@@ -784,6 +836,7 @@ def ti_enrichment_assessment(
             indicators=[],
             ti_feed_sources=ti_feed_sources,
             enrichment_manifest=enrichment_manifest,
+            validation_plan=validation_plan,
         ),
     }
 
@@ -960,6 +1013,185 @@ def build_ioc_ti_enrichment_manifest(
     return {**manifest_core, "manifest_hash": stable_ioc_ti_sha256(manifest_core)}
 
 
+def build_ioc_ti_report_grade_validation_plan(
+    *,
+    plan_context: str,
+    indicators: Sequence[Mapping[str, object]],
+    ti_feed_sources: Sequence[Mapping[str, object]],
+    enrichment_manifest: Mapping[str, object],
+    max_indicators: int,
+    max_sources_per_indicator: int,
+    trusted_diff: Mapping[str, object] | None = None,
+) -> dict[str, object]:
+    trusted_diff = trusted_diff if isinstance(trusted_diff, Mapping) else {}
+    enriched_count = sum(1 for indicator in indicators if indicator.get("ti_enrichment"))
+    matched_on_count = sum(
+        1
+        for indicator in indicators
+        if isinstance(indicator.get("ti_enrichment"), Mapping) and indicator["ti_enrichment"].get("matched_on")
+    )
+    feed_manifest_hash_count = int(enrichment_manifest.get("feed_manifest_hash_count") or 0)
+    indicator_row_hash_count = int(enrichment_manifest.get("indicator_row_hash_count") or 0)
+
+    def slot(
+        slot_id: str,
+        *,
+        ready: bool,
+        evidence: str,
+        blocker_id: str | None = None,
+        operator_action: str = "",
+    ) -> dict[str, object]:
+        row: dict[str, object] = {
+            "slot_id": slot_id,
+            "status": "complete" if ready else "external-required",
+            "evidence": evidence,
+        }
+        if blocker_id and not ready:
+            row["blocker_id"] = blocker_id
+        if operator_action:
+            row["operator_action"] = operator_action
+        return row
+
+    validation_slots = [
+        slot(
+            "ioc-ti-local-only-boundary-recorded",
+            ready=True,
+            evidence="local_only=true no_external_calls=true",
+            blocker_id="ioc-ti-local-only-boundary-required",
+            operator_action="Preserve the local-only/no-external-call warning with every TI enrichment output.",
+        ),
+        slot(
+            "ioc-ti-enrichment-manifest-emitted",
+            ready=bool(enrichment_manifest.get("manifest_hash")),
+            evidence=f"ioc_ti_enrichment_manifest_hash={enrichment_manifest.get('manifest_hash', '')}",
+            blocker_id="ioc-ti-enrichment-manifest-required",
+            operator_action="Attach the enrichment manifest before reviewing IOC/TI labels.",
+        ),
+        slot(
+            "ioc-ti-indicator-row-hashes",
+            ready=indicator_row_hash_count >= max(0, min(len(indicators), 1)),
+            evidence=f"indicator_row_hash_count={indicator_row_hash_count} indicator_count={len(indicators)}",
+            blocker_id="ioc-ti-indicator-row-hashes-required",
+            operator_action="Preserve per-indicator row hashes and source locators for review.",
+        ),
+        slot(
+            "ioc-ti-feed-provenance-recorded",
+            ready=bool(ti_feed_sources),
+            evidence=f"ti_feed_count={len(ti_feed_sources)}",
+            blocker_id="ioc-ti-feed-provenance-required",
+            operator_action="Record feed name, version, path, SHA-256, size, and row hashes.",
+        ),
+        slot(
+            "ioc-ti-feed-manifest-hashes",
+            ready=feed_manifest_hash_count >= max(0, min(len(ti_feed_sources), 1)),
+            evidence=f"feed_manifest_hash_count={feed_manifest_hash_count}",
+            blocker_id="ioc-ti-feed-manifest-hashes-required",
+            operator_action="Attach feed manifests for every local TI feed used.",
+        ),
+        slot(
+            "ioc-ti-match-mode-recorded",
+            ready=enriched_count == 0 or matched_on_count >= enriched_count,
+            evidence=f"enriched_indicator_count={enriched_count} matched_on_count={matched_on_count}",
+            blocker_id="ioc-ti-match-mode-required",
+            operator_action="Record exact or URL-host-domain match mode for enriched indicators.",
+        ),
+        slot(
+            "ioc-ti-signed-feed-package",
+            ready=False,
+            evidence="signed_ti_feed_package=false",
+            blocker_id="signed-ti-feed-package-required",
+            operator_action="Attach signed feed package provenance, freshness, and retention metadata.",
+        ),
+        slot(
+            "ioc-ti-stix-taxii-provider-validation",
+            ready=False,
+            evidence="stix_taxii_provider_validation=false",
+            blocker_id="stix-taxii-provider-validation-required",
+            operator_action="Validate STIX/TAXII/provider-native import semantics against known provider exports.",
+        ),
+        slot(
+            "ioc-ti-confidence-decay-policy",
+            ready=False,
+            evidence="confidence_decay_policy=false",
+            blocker_id="confidence-decay-policy-required",
+            operator_action="Document feed age, revocation, scoring, and confidence decay before report-grade use.",
+        ),
+        slot(
+            "ioc-ti-trusted-enrichment-diff",
+            ready=trusted_diff.get("status") == "pass",
+            evidence=f"trusted_diff_status={trusted_diff.get('status', 'missing')}",
+            blocker_id="trusted-ioc-ti-enrichment-diff-required",
+            operator_action="Attach a trusted IOC/TI enrichment diff before commercial verdict claims.",
+        ),
+        slot(
+            "ioc-ti-external-api-governance",
+            ready=False,
+            evidence="external_ti_api_governance=false external_calls=false",
+            blocker_id="external-ti-api-governance-required",
+            operator_action="Define external API authority, logging, rate-limit, and evidence-sharing controls before live TI use.",
+        ),
+        slot(
+            "ioc-ti-false-positive-correlation-corpus",
+            ready=False,
+            evidence=f"max_indicators={max_indicators} max_sources_per_indicator={max_sources_per_indicator} fp_corpus=false",
+            blocker_id="ioc-ti-false-positive-correlation-corpus-required",
+            operator_action="Validate IOC/TI false positives against benign corpora and source-context correlation cases.",
+        ),
+    ]
+    blockers = sorted(
+        {
+            str(slot_row["blocker_id"])
+            for slot_row in validation_slots
+            if slot_row.get("status") != "complete" and slot_row.get("blocker_id")
+        }
+    )
+    plan_core: dict[str, object] = {
+        "profile_version": IOC_TI_REPORT_GRADE_VALIDATION_PLAN_VERSION,
+        "item_number": 63,
+        "gap_id": IOC_TI_GAP_ID,
+        "batch_id": "commercial-uplift-061-065",
+        "plan_context": plan_context,
+        "selected_track": "offline-ioc-ti-enrichment-gate",
+        "indicator_count": len(indicators),
+        "enriched_indicator_count": enriched_count,
+        "ti_feed_count": len(ti_feed_sources),
+        "max_indicators": max_indicators,
+        "max_sources_per_indicator": max_sources_per_indicator,
+        "ioc_ti_enrichment_manifest_sha256": str(enrichment_manifest.get("manifest_hash") or ""),
+        "indicator_row_hash_count": indicator_row_hash_count,
+        "feed_manifest_hash_count": feed_manifest_hash_count,
+        "trusted_diff_status": str(trusted_diff.get("status") or "missing"),
+        "ready_slot_count": sum(1 for slot_row in validation_slots if slot_row.get("status") == "complete"),
+        "blocking_slot_count": sum(1 for slot_row in validation_slots if slot_row.get("status") != "complete"),
+        "validation_status": "report-validation-blocked" if blockers else "ready-for-report-review",
+        "commercial_grade": False,
+        "commercial_grade_ready": False,
+        "validation_slots": validation_slots,
+        "blockers": blockers,
+        "commercial_grade_blockers": list(IOC_TI_REPORT_GRADE_VALIDATION_BLOCKERS),
+        "validation_commands": [
+            "rapidtriage indicators <run-output> --ti-feed <local-feed.json> --json",
+            "rapidtriage cross-tool-validate --rapid-output rapidtriage-indicators.json --reference-output <trusted-ioc-ti-manifest> --backlog-item 63 --json",
+            "rapidtriage commercial-readiness --validation-package docs/validation/rapidtriage-core-forensics-061-070-known-answer.json --limit 63 --json",
+        ],
+        "report_guidance": {
+            "allowed_use": "offline-ioc-ti-triage-pivot",
+            "forbidden_claims": [
+                "IOC/TI match proves maliciousness",
+                "local feed match is a live TI verdict",
+                "feed freshness and confidence are validated",
+                "external TI API governance is enabled",
+            ],
+            "required_disclaimer": (
+                "IOC/TI enrichment is an offline triage label. Do not report maliciousness or live TI verdicts "
+                "until signed feed provenance, provider/schema validation, confidence decay, source-context "
+                "correlation, and trusted enrichment diff evidence are attached."
+            ),
+        },
+    }
+    return {**plan_core, "validation_plan_sha256": stable_ioc_ti_sha256(plan_core)}
+
+
 def build_ioc_ti_trusted_diff(
     rapid_indicators: Sequence[Mapping[str, object]],
     trusted_indicators: Sequence[Mapping[str, object]],
@@ -1012,6 +1244,7 @@ def ioc_ti_core_accuracy_gates(
     ti_feed_sources: Sequence[Mapping[str, object]],
     trusted_diff: Mapping[str, object] | None = None,
     enrichment_manifest: Mapping[str, object] | None = None,
+    validation_plan: Mapping[str, object] | None = None,
 ) -> list[dict[str, object]]:
     satisfied = ["local-only/no-external-call warning"]
     if any(item.get("sources") for item in indicators):
@@ -1028,6 +1261,10 @@ def ioc_ti_core_accuracy_gates(
         satisfied.append("indicator row hashes")
     if any(isinstance(item.get("ti_feed_manifest"), Mapping) or item.get("ti_feed_manifest_hash") for item in ti_feed_sources):
         satisfied.append("feed manifest hashes")
+    if validation_plan and validation_plan.get("validation_plan_sha256"):
+        satisfied.append("ioc-ti report-grade validation plan")
+    if validation_plan and int(validation_plan.get("ready_slot_count") or 0) >= 6:
+        satisfied.append("ioc-ti report-grade ready slots")
     evidence_refs = [
         f"indicator_count:{len(indicators)}",
         f"ti_feed_count:{len(ti_feed_sources)}",
@@ -1035,6 +1272,8 @@ def ioc_ti_core_accuracy_gates(
     ]
     if enrichment_manifest and enrichment_manifest.get("manifest_hash"):
         evidence_refs.append(f"ioc_ti_enrichment_manifest_hash:{enrichment_manifest.get('manifest_hash', '')}")
+    if validation_plan and validation_plan.get("validation_plan_sha256"):
+        evidence_refs.append(f"ioc_ti_report_grade_validation_plan_hash:{validation_plan['validation_plan_sha256']}")
     if trusted_diff and trusted_diff.get("status") == "pass":
         satisfied.append("trusted IOC/TI enrichment diff pass")
         evidence_refs.append(f"trusted_tool:{trusted_diff.get('trusted_tool', '')}")
@@ -1056,6 +1295,7 @@ def ioc_ti_commercial_uplift_evidence(
     max_indicators: int,
     max_sources_per_indicator: int,
     enrichment_manifest: Mapping[str, object] | None = None,
+    validation_plan: Mapping[str, object] | None = None,
 ) -> dict[str, object]:
     passed = []
     for gate in core_accuracy_gates:
@@ -1082,16 +1322,25 @@ def ioc_ti_commercial_uplift_evidence(
             commercial_blockers=list(assessment.get("blockers") or []),
             indicator_count=len(indicators),
             ti_feed_count=len(ti_feed_sources),
+            validation_plan=validation_plan,
         ),
         "passed_validation_check_ids": sorted(set(passed)),
-        "failed_validation_check_ids": [
+        "failed_validation_check_ids": sorted(set([
             "signed-feed-package-validation",
             "stix-taxii-import",
             "confidence-decay-workflow",
             "external-ti-api-governance",
             IOC_TI_TRUSTED_DIFF_BLOCKER_63,
-        ],
-        "commercial_blockers": list(assessment.get("blockers") or []),
+            *[str(item) for item in (validation_plan.get("blockers") if isinstance(validation_plan, Mapping) else []) or []],
+        ])),
+        "commercial_blockers": sorted(
+            set(
+                [
+                    *[str(item) for item in assessment.get("blockers") or []],
+                    *IOC_TI_REPORT_GRADE_VALIDATION_BLOCKERS,
+                ]
+            )
+        ),
         "large_data_controls": {
             "max_indicators": max_indicators,
             "max_sources_per_indicator": max_sources_per_indicator,
@@ -1102,6 +1351,10 @@ def ioc_ti_commercial_uplift_evidence(
             "ioc_ti_enrichment_manifest_hash": str(enrichment_manifest.get("manifest_hash") or "") if enrichment_manifest else "",
             "indicator_row_hash_count": int(enrichment_manifest.get("indicator_row_hash_count") or 0) if enrichment_manifest else 0,
             "feed_manifest_hash_count": int(enrichment_manifest.get("feed_manifest_hash_count") or 0) if enrichment_manifest else 0,
+            "ioc_ti_report_grade_validation_plan_present": isinstance(validation_plan, Mapping),
+            "ioc_ti_report_grade_validation_plan_hash": str(validation_plan.get("validation_plan_sha256") or "") if isinstance(validation_plan, Mapping) else "",
+            "ioc_ti_report_grade_ready_slot_count": int(validation_plan.get("ready_slot_count") or 0) if isinstance(validation_plan, Mapping) else 0,
+            "ioc_ti_report_grade_blocking_slot_count": int(validation_plan.get("blocking_slot_count") or 0) if isinstance(validation_plan, Mapping) else 0,
             "signed_feed_packages": False,
             "trusted_enrichment_diff": False,
         },
@@ -1115,9 +1368,12 @@ def ioc_ti_reportability_decision(
     commercial_blockers: Sequence[str],
     indicator_count: int,
     ti_feed_count: int,
+    validation_plan: Mapping[str, object] | None = None,
 ) -> dict[str, object]:
     blockers = {str(item) for item in commercial_blockers if str(item)}
     blockers.update(f"check:{item}" for item in failed_validation_check_ids)
+    if isinstance(validation_plan, Mapping):
+        blockers.update(str(item) for item in validation_plan.get("blockers") or [])
     return {
         "profile_version": "ioc-ti-reportability-decision-v1",
         "commercial_gap_ids": [IOC_TI_GAP_ID],
@@ -1126,6 +1382,10 @@ def ioc_ti_reportability_decision(
         "blockers": sorted(blockers),
         "indicator_count": indicator_count,
         "ti_feed_count": ti_feed_count,
+        "ioc_ti_report_grade_validation_plan_present": isinstance(validation_plan, Mapping),
+        "ioc_ti_report_grade_validation_plan_hash": str(validation_plan.get("validation_plan_sha256") or "") if isinstance(validation_plan, Mapping) else "",
+        "ioc_ti_report_grade_ready_slot_count": int(validation_plan.get("ready_slot_count") or 0) if isinstance(validation_plan, Mapping) else 0,
+        "ioc_ti_report_grade_blocking_slot_count": int(validation_plan.get("blocking_slot_count") or 0) if isinstance(validation_plan, Mapping) else 0,
         "ready_for_court_report": False,
         "required_before_report": [
             "attach signed feed package provenance, versioning, and freshness evidence",

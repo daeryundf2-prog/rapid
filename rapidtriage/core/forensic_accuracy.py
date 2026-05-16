@@ -952,6 +952,8 @@ CORE_FORENSIC_ACCURACY_ITEMS: tuple[dict[str, object], ...] = (
             "offline feed provenance",
             "match mode recorded",
             "local-only/no-external-call warning",
+            "ioc-ti report-grade validation plan",
+            "ioc-ti report-grade ready slots",
             "trusted IOC/TI enrichment diff pass",
         ),
     },

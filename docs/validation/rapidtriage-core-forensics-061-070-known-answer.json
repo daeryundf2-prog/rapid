@@ -33,8 +33,8 @@
       "status": "pass",
       "backlog_items": [63],
       "evidence_paths": ["docs/validation/core-forensics-061-070-fixture-evidence.json", "tests/test_rapidtriage_indicators.py", "tests/test_rapidtriage_api.py"],
-      "expected": {"required_assertions": ["Indicator output preserves source links, local rule matches, offline feed provenance with feed hash/size, feed/indicator/enrichment manifests, feed row hashes, indicator row hashes, API/web local enrichment review package fields, match mode, local-only warning, trusted IOC/TI diff status, and #63 core_accuracy_gates.", "IOC/TI reportability decisions block live TI verdict claims until signed feed provenance, STIX/TAXII/provider validation, confidence decay, trusted enrichment diff, and API governance exist."]},
-      "notes": "Internal fixture pass; signed/STIX/TAXII feed validation and trusted enrichment oracle remain blockers."
+      "expected": {"required_assertions": ["Indicator output preserves source links, local rule matches, offline feed provenance with feed hash/size, feed/indicator/enrichment manifests, feed row hashes, indicator row hashes, API/web local enrichment review package fields, match mode, local-only warning, ioc_ti_report_grade_validation_plan hashes/ready slots/blocking slots, trusted IOC/TI diff status, and #63 core_accuracy_gates.", "IOC/TI reportability decisions block live TI verdict claims until signed feed provenance, STIX/TAXII/provider validation, confidence decay, source-correlation corpus validation, trusted enrichment diff, and API governance exist."]},
+      "notes": "Internal fixture pass with #63 report-grade validation-plan hashes; signed/STIX/TAXII feed validation, confidence decay, trusted enrichment oracle, source-correlation corpus, and external API governance remain blockers."
     },
     {
       "id": "core-forensics-064-citation-fixture",

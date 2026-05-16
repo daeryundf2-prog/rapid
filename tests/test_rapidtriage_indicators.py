@@ -86,11 +86,33 @@ class RapidTriageIndicatorsTests(unittest.TestCase):
             self.assertIn("ioc-ti enrichment manifest", manual_payload["core_accuracy_gates"][0]["satisfied_checks"])
             self.assertIn("indicator row hashes", manual_payload["core_accuracy_gates"][0]["satisfied_checks"])
             self.assertIn("feed manifest hashes", manual_payload["core_accuracy_gates"][0]["satisfied_checks"])
+            self.assertIn("ioc-ti report-grade validation plan", manual_payload["core_accuracy_gates"][0]["satisfied_checks"])
+            self.assertIn("ioc-ti report-grade ready slots", manual_payload["core_accuracy_gates"][0]["satisfied_checks"])
             enrichment_manifest = manual_payload["ioc_ti_enrichment_manifest"]
             self.assertEqual(enrichment_manifest["manifest_version"], "ioc-ti-enrichment-manifest-v1")
             self.assertEqual(manual_payload["ioc_ti_enrichment_manifest_hash"], enrichment_manifest["manifest_hash"])
             self.assertGreaterEqual(enrichment_manifest["indicator_row_hash_count"], 1)
             self.assertEqual(enrichment_manifest["feed_manifest_hash_count"], 1)
+            ioc_ti_plan = manual_payload["ioc_ti_report_grade_validation_plan"]
+            self.assertEqual(ioc_ti_plan["profile_version"], "ioc-ti-report-grade-validation-plan-v1")
+            self.assertEqual(ioc_ti_plan["item_number"], 63)
+            self.assertEqual(ioc_ti_plan["gap_id"], "#63")
+            self.assertEqual(ioc_ti_plan["plan_context"], "indicator-summary")
+            self.assertEqual(ioc_ti_plan["ioc_ti_enrichment_manifest_sha256"], enrichment_manifest["manifest_hash"])
+            self.assertEqual(ioc_ti_plan["validation_plan_sha256"], manual_payload["ioc_ti_report_grade_validation_plan_hash"])
+            self.assertEqual(manual_payload["report_grade_ready_slot_count"], 6)
+            self.assertEqual(manual_payload["report_grade_blocking_slot_count"], 6)
+            self.assertEqual(ioc_ti_plan["ready_slot_count"], 6)
+            self.assertEqual(ioc_ti_plan["blocking_slot_count"], 6)
+            self.assertEqual(ioc_ti_plan["validation_status"], "report-validation-blocked")
+            self.assertFalse(ioc_ti_plan["commercial_grade"])
+            ioc_ti_slots = {slot["slot_id"]: slot for slot in ioc_ti_plan["validation_slots"]}
+            self.assertEqual(ioc_ti_slots["ioc-ti-local-only-boundary-recorded"]["status"], "complete")
+            self.assertEqual(ioc_ti_slots["ioc-ti-feed-provenance-recorded"]["status"], "complete")
+            self.assertEqual(ioc_ti_slots["ioc-ti-feed-manifest-hashes"]["status"], "complete")
+            self.assertEqual(ioc_ti_slots["ioc-ti-trusted-enrichment-diff"]["status"], "external-required")
+            self.assertIn("signed-ti-feed-package-required", ioc_ti_plan["blockers"])
+            self.assertIn("trusted-ioc-ti-enrichment-diff-required", ioc_ti_plan["blockers"])
             ioc_uplift = manual_payload["commercial_uplift_evidence"]
             self.assertEqual(ioc_uplift["batch_id"], "commercial-uplift-061-065")
             self.assertEqual(ioc_uplift["item_numbers"], [63])
@@ -101,12 +123,22 @@ class RapidTriageIndicatorsTests(unittest.TestCase):
                 ioc_uplift["large_data_controls"]["ioc_ti_enrichment_manifest_hash"],
                 enrichment_manifest["manifest_hash"],
             )
+            self.assertEqual(
+                ioc_uplift["large_data_controls"]["ioc_ti_report_grade_validation_plan_hash"],
+                ioc_ti_plan["validation_plan_sha256"],
+            )
+            self.assertEqual(ioc_uplift["large_data_controls"]["ioc_ti_report_grade_ready_slot_count"], 6)
+            self.assertEqual(ioc_uplift["large_data_controls"]["ioc_ti_report_grade_blocking_slot_count"], 6)
             self.assertGreaterEqual(ioc_uplift["large_data_controls"]["indicator_row_hash_count"], 1)
             self.assertEqual(
                 ioc_uplift["reportability_decision"]["decision"],
                 "do-not-report-ioc-enrichment-as-live-ti-verdict",
             )
             self.assertEqual(ioc_uplift["reportability_decision"]["allowed_use"], "offline-ioc-ti-triage-pivot")
+            self.assertEqual(
+                ioc_uplift["reportability_decision"]["ioc_ti_report_grade_validation_plan_hash"],
+                ioc_ti_plan["validation_plan_sha256"],
+            )
             self.assertFalse(manual_payload["indicator_native_capabilities"]["external_ti_api_calls"])
             self.assertEqual(manual_payload["ti_feed_sources"][0]["name"], "unit-ti-plugin")
             self.assertEqual(manual_payload["ti_feed_sources"][0]["version"], "2026.04")
@@ -164,9 +196,23 @@ class RapidTriageIndicatorsTests(unittest.TestCase):
                 enrichment_package["ioc_ti_enrichment_manifest_hash"],
                 enrichment_package["ioc_ti_enrichment_manifest"]["manifest_hash"],
             )
+            package_plan = enrichment_package["ioc_ti_report_grade_validation_plan"]
+            self.assertEqual(package_plan["profile_version"], "ioc-ti-report-grade-validation-plan-v1")
+            self.assertEqual(package_plan["plan_context"], "api-review-package")
+            self.assertEqual(package_plan["ioc_ti_enrichment_manifest_sha256"], enrichment_package["ioc_ti_enrichment_manifest_hash"])
+            self.assertEqual(
+                enrichment_package["ioc_ti_report_grade_validation_plan_hash"],
+                package_plan["validation_plan_sha256"],
+            )
+            self.assertEqual(enrichment_package["report_grade_ready_slot_count"], 6)
+            self.assertEqual(enrichment_package["report_grade_blocking_slot_count"], 6)
             self.assertEqual(
                 enrichment_package["reportability_decision"]["allowed_use"],
                 "offline-ioc-ti-triage-pivot",
+            )
+            self.assertEqual(
+                enrichment_package["reportability_decision"]["ioc_ti_report_grade_validation_plan_hash"],
+                package_plan["validation_plan_sha256"],
             )
             self.assertTrue(
                 any(item.get("ti_review_status") == "feed-match-review-required" for item in enrichment_package["indicators"])

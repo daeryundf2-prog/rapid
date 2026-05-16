@@ -1527,10 +1527,10 @@
       ],
       "expected": {
         "required_assertions": [
-          "Indicator output preserves source links, local rule matches, offline feed provenance with feed hash/size, feed/indicator/enrichment manifests, feed row hashes, indicator row hashes, API/web local enrichment review package fields, match mode, local-only warning, trusted IOC/TI diff status, and #63 core_accuracy_gates."
+          "Indicator output preserves source links, local rule matches, offline feed provenance with feed hash/size, feed/indicator/enrichment manifests, feed row hashes, indicator row hashes, API/web local enrichment review package fields, match mode, local-only warning, ioc_ti_report_grade_validation_plan hashes/ready slots/blocking slots, trusted IOC/TI diff status, and #63 core_accuracy_gates."
         ]
       },
-      "notes": "Internal fixture pass; signed/STIX/TAXII feed validation remains blocker.",
+      "notes": "Internal fixture pass with #63 report-grade validation-plan hashes; signed/STIX/TAXII feed validation, confidence decay, trusted enrichment oracle, source-correlation corpus, and external API governance remain blockers.",
       "source_manifest": "docs/validation/rapidtriage-core-forensics-061-070-known-answer.json"
     },
     {

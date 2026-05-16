@@ -27,9 +27,9 @@
       "title": "IOC/TI enrichment plugin",
       "test_files": ["tests/test_rapidtriage_indicators.py", "tests/test_rapidtriage_api.py"],
       "assertions": [
-        "Indicator summaries preserve source links, local rules, offline feed provenance with feed hash/size, feed/indicator/enrichment manifests, feed row hashes, indicator row hashes, matched_on mode, local-only warning, API/web local enrichment review packages, trusted IOC/TI diff helper/gate, #63 core_accuracy_gates, and reportability blockers for missing signed feed provenance, STIX/TAXII/provider validation, confidence decay, and API governance."
+        "Indicator summaries preserve source links, local rules, offline feed provenance with feed hash/size, feed/indicator/enrichment manifests, feed row hashes, indicator row hashes, matched_on mode, local-only warning, API/web local enrichment review packages, ioc_ti_report_grade_validation_plan hashes/ready slots/blocking slots, trusted IOC/TI diff helper/gate, #63 core_accuracy_gates, and reportability blockers for missing signed feed provenance, STIX/TAXII/provider validation, confidence decay, trusted enrichment diff, source-correlation corpus, and API governance."
       ],
-      "remaining_external_validation": ["Signed feeds, STIX/TAXII import, confidence decay, trusted enrichment manifest, and feed trust workflow."]
+      "remaining_external_validation": ["Signed feed packages, STIX/TAXII/provider validation, confidence decay, trusted enrichment manifest, feed trust workflow, false-positive/source-correlation corpus, and external TI governance."]
     },
     {
       "item": 64,
