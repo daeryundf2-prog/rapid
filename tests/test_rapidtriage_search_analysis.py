@@ -1053,6 +1053,12 @@ class RapidTriageSearchAnalysisTests(unittest.TestCase):
                 fuzzy["advanced_search_profile"]["query_hit_manifest_hash"],
                 fuzzy["advanced_search_query_hit_manifest_hash"],
             )
+            self.assertEqual(
+                fuzzy["advanced_search_profile"]["report_grade_validation_plan_hash"],
+                fuzzy["advanced_search_report_grade_validation_plan_hash"],
+            )
+            self.assertEqual(fuzzy["advanced_search_profile"]["report_grade_ready_slot_count"], 6)
+            self.assertEqual(fuzzy["advanced_search_profile"]["report_grade_blocking_slot_count"], 6)
             self.assertTrue(fuzzy["advanced_search_profile"]["source_verification_required"])
             self.assertIn("fuzzy-results-are-typo-tolerant-triage-not-exact-proof", fuzzy["advanced_search_profile"]["review_warnings"])
             self.assertEqual(fuzzy["advanced_search_profile"]["query_validation"][0]["query"], "password")
@@ -1062,12 +1068,35 @@ class RapidTriageSearchAnalysisTests(unittest.TestCase):
             self.assertIn("advanced search query-hit manifest", fuzzy["core_accuracy_gates"][0]["satisfied_checks"])
             self.assertIn("search hit row hashes", fuzzy["core_accuracy_gates"][0]["satisfied_checks"])
             self.assertIn("advanced search source locators", fuzzy["core_accuracy_gates"][0]["satisfied_checks"])
+            self.assertIn("advanced search report-grade validation plan", fuzzy["core_accuracy_gates"][0]["satisfied_checks"])
+            self.assertIn("advanced search report-grade ready slots", fuzzy["core_accuracy_gates"][0]["satisfied_checks"])
             query_manifest = fuzzy["advanced_search_query_hit_manifest"]
             self.assertEqual(query_manifest["manifest_version"], "advanced-search-query-hit-manifest-v1")
             self.assertEqual(query_manifest["manifest_hash"], fuzzy["advanced_search_query_hit_manifest_hash"])
             self.assertEqual(query_manifest["match_count"], 1)
             self.assertEqual(query_manifest["hit_row_hash_count"], 1)
             self.assertEqual(query_manifest["source_locator_count"], 1)
+            search_plan = fuzzy["advanced_search_report_grade_validation_plan"]
+            self.assertEqual(search_plan["profile_version"], "advanced-search-report-grade-validation-plan-v1")
+            self.assertEqual(search_plan["item_number"], 61)
+            self.assertEqual(search_plan["gap_id"], "#61")
+            self.assertEqual(search_plan["advanced_search_query_hit_manifest_sha256"], query_manifest["manifest_hash"])
+            self.assertEqual(search_plan["validation_plan_sha256"], fuzzy["advanced_search_report_grade_validation_plan_hash"])
+            self.assertEqual(search_plan["ready_slot_count"], 6)
+            self.assertEqual(search_plan["blocking_slot_count"], 6)
+            self.assertEqual(search_plan["validation_status"], "report-validation-blocked")
+            self.assertFalse(search_plan["commercial_grade"])
+            search_slots = {slot["slot_id"]: slot for slot in search_plan["validation_slots"]}
+            self.assertEqual(search_slots["advanced-search-query-mode-options-recorded"]["status"], "complete")
+            self.assertEqual(search_slots["advanced-search-query-validation-recorded"]["status"], "complete")
+            self.assertEqual(search_slots["advanced-search-query-hit-manifest-emitted"]["status"], "complete")
+            self.assertEqual(search_slots["advanced-search-hit-row-hashes"]["status"], "complete")
+            self.assertEqual(search_slots["advanced-search-source-viewer-locators"]["status"], "complete")
+            self.assertEqual(search_slots["advanced-search-review-profile-and-warnings"]["status"], "complete")
+            self.assertEqual(search_slots["advanced-search-source-row-hash-verification"]["status"], "external-required")
+            self.assertEqual(search_slots["advanced-search-trusted-query-hit-diff"]["status"], "external-required")
+            self.assertIn("source-row-hash-verification-required", search_plan["blockers"])
+            self.assertIn("trusted-advanced-search-query-hit-diff-required", search_plan["blockers"])
             backend_contract = fuzzy["search_backend_contract"]
             self.assertEqual(backend_contract["profile_version"], "search-backend-contract-v1")
             self.assertEqual(backend_contract["qc_prep_item_numbers"], [48, 49, 50, 51, 52, 53, 54, 55])
@@ -1104,11 +1133,25 @@ class RapidTriageSearchAnalysisTests(unittest.TestCase):
             self.assertEqual(search_uplift["large_data_controls"]["hit_row_hash_count"], 1)
             self.assertEqual(search_uplift["large_data_controls"]["source_locator_count"], 1)
             self.assertEqual(
+                search_uplift["large_data_controls"]["advanced_search_report_grade_validation_plan_hash"],
+                search_plan["validation_plan_sha256"],
+            )
+            self.assertEqual(search_uplift["large_data_controls"]["advanced_search_report_grade_ready_slot_count"], 6)
+            self.assertEqual(
+                search_uplift["large_data_controls"]["advanced_search_report_grade_blocking_slot_count"],
+                6,
+            )
+            self.assertEqual(
                 search_uplift["reportability_decision"]["decision"],
                 "do-not-report-advanced-search-hit-as-source-proof",
             )
             self.assertEqual(search_uplift["reportability_decision"]["allowed_use"], "advanced-search-triage-pivot")
             self.assertIn("check:query-builder-ux-validation", search_uplift["reportability_decision"]["blockers"])
+            self.assertIn("source-row-hash-verification-required", search_uplift["reportability_decision"]["blockers"])
+            self.assertEqual(
+                search_uplift["reportability_decision"]["advanced_search_report_grade_validation_plan_hash"],
+                search_plan["validation_plan_sha256"],
+            )
             self.assertIn("trusted-advanced-search-query-hit-diff-missing", search_uplift["failed_validation_check_ids"])
             self.assertTrue(fuzzy["search_native_capabilities"]["regex_search"])
             self.assertEqual(fuzzy["matches"][0]["search_match"]["mode"], "fuzzy")

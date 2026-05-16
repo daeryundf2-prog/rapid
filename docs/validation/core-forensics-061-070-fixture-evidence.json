@@ -9,9 +9,9 @@
       "title": "Fuzzy search/stemming/regex proximity search",
       "test_files": ["tests/test_rapidtriage_search_analysis.py"],
       "assertions": [
-        "Search output preserves query mode/options, fuzzy/stem/regex behavior, proximity metadata, source pointers, advanced_search_profile query validation, regex validity warnings, web mode/fuzzy/proximity controls, trusted query-hit diff helper/gate, verification warnings, #61 core_accuracy_gates, and reportability blockers for missing source-row hash verification plus regex/fuzzy/proximity false-positive review."
+        "Search output preserves query mode/options, fuzzy/stem/regex behavior, proximity metadata, source pointers, advanced_search_profile query validation, regex validity warnings, web mode/fuzzy/proximity controls, trusted query-hit diff helper/gate, verification warnings, advanced_search_report_grade_validation_plan ready/blocking slots, #61 core_accuracy_gates, and reportability blockers for missing source-row hash verification plus regex/fuzzy/proximity false-positive review."
       ],
-      "remaining_external_validation": ["Large multilingual query relevance corpus, trusted query-hit manifest, tuned false-positive/false-negative metrics, and full browser query-builder validation."]
+      "remaining_external_validation": ["Source-row hash verification for cited hits, multilingual relevance corpus, false-positive/false-negative metrics, trusted query-hit manifest diff, browser query-builder validation, and large-case search performance validation."]
     },
     {
       "item": 62,

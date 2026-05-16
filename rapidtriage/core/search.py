@@ -32,6 +32,15 @@ SEARCH_REPORT_GRADE_BLOCKERS = [
     "trusted-advanced-search-query-hit-diff-is-required-before-commercial-claim",
 ]
 SEARCH_TRUSTED_DIFF_BLOCKER_61 = "trusted-advanced-search-query-hit-diff-missing"
+ADVANCED_SEARCH_REPORT_GRADE_VALIDATION_PLAN_VERSION = "advanced-search-report-grade-validation-plan-v1"
+ADVANCED_SEARCH_REPORT_GRADE_BLOCKERS = [
+    "source-row-hash-verification-required",
+    "multilingual-relevance-corpus-required",
+    "regex-fuzzy-proximity-false-positive-corpus-required",
+    "trusted-advanced-search-query-hit-diff-required",
+    "browser-query-builder-ux-validation-required",
+    "large-case-search-performance-validation-required",
+]
 
 
 class SearchError(ValueError):
@@ -117,11 +126,6 @@ def run_unified_search(
         for keyword in match.get("matched_keywords", []):
             keyword_counts[str(keyword)] = keyword_counts.get(str(keyword), 0) + 1
 
-    core_accuracy_gates = search_core_accuracy_gates(
-        matches=matches,
-        options=search_options,
-        query_hit_manifest=query_hit_manifest,
-    )
     report_grade = search_report_grade_assessment()
     advanced_profile = advanced_search_profile(
         keywords=normalized,
@@ -131,6 +135,24 @@ def run_unified_search(
         include_analysis=include_analysis,
         limit=limit,
         query_hit_manifest=query_hit_manifest,
+    )
+    validation_plan = build_advanced_search_report_grade_validation_plan(
+        keywords=normalized,
+        matches=matches,
+        options=search_options,
+        limit=limit,
+        advanced_profile=advanced_profile,
+        query_hit_manifest=query_hit_manifest,
+        trusted_diff=None,
+    )
+    advanced_profile["report_grade_validation_plan_hash"] = validation_plan["validation_plan_sha256"]
+    advanced_profile["report_grade_ready_slot_count"] = validation_plan["ready_slot_count"]
+    advanced_profile["report_grade_blocking_slot_count"] = validation_plan["blocking_slot_count"]
+    core_accuracy_gates = search_core_accuracy_gates(
+        matches=matches,
+        options=search_options,
+        query_hit_manifest=query_hit_manifest,
+        validation_plan=validation_plan,
     )
     search_backend_contract = build_search_backend_contract(
         keywords=normalized,
@@ -178,6 +200,8 @@ def run_unified_search(
         "advanced_search_profile": advanced_profile,
         "advanced_search_query_hit_manifest": query_hit_manifest,
         "advanced_search_query_hit_manifest_hash": query_hit_manifest["manifest_hash"],
+        "advanced_search_report_grade_validation_plan": validation_plan,
+        "advanced_search_report_grade_validation_plan_hash": validation_plan["validation_plan_sha256"],
         "search_backend_contract": search_backend_contract,
         "search_backend_contract_hash": search_backend_contract["contract_hash"],
         "search_native_capabilities": dict(SEARCH_NATIVE_CAPABILITIES),
@@ -199,6 +223,7 @@ def run_unified_search(
             report_grade=report_grade,
             limit=limit,
             query_hit_manifest=query_hit_manifest,
+            validation_plan=validation_plan,
         ),
     }
     if include_analysis:
@@ -509,6 +534,187 @@ def search_source_verification_summary(matches: Sequence[Mapping[str, object]]) 
     }
 
 
+def build_advanced_search_report_grade_validation_plan(
+    *,
+    keywords: Sequence[str],
+    matches: Sequence[Mapping[str, object]],
+    options: Mapping[str, object],
+    limit: int,
+    advanced_profile: Mapping[str, object],
+    query_hit_manifest: Mapping[str, object],
+    trusted_diff: Mapping[str, object] | None = None,
+) -> dict[str, object]:
+    trusted_diff = trusted_diff if isinstance(trusted_diff, Mapping) else {}
+    query_validation = (
+        advanced_profile.get("query_validation")
+        if isinstance(advanced_profile.get("query_validation"), list)
+        else []
+    )
+    source_summary = search_source_verification_summary(matches)
+    mode = str(options.get("search_mode") or "")
+
+    def slot(
+        slot_id: str,
+        *,
+        ready: bool,
+        evidence: str,
+        blocker_id: str | None = None,
+        operator_action: str = "",
+    ) -> dict[str, object]:
+        row: dict[str, object] = {
+            "slot_id": slot_id,
+            "status": "complete" if ready else "external-required",
+            "evidence": evidence,
+        }
+        if blocker_id and not ready:
+            row["blocker_id"] = blocker_id
+        if operator_action:
+            row["operator_action"] = operator_action
+        return row
+
+    manifest_hash = str(query_hit_manifest.get("manifest_hash") or "")
+    hit_row_hash_count = int(query_hit_manifest.get("hit_row_hash_count") or 0)
+    source_locator_count = int(query_hit_manifest.get("source_locator_count") or 0)
+    validation_slots = [
+        slot(
+            "advanced-search-query-mode-options-recorded",
+            ready=mode in {"exact", "fuzzy", "regex"},
+            evidence=f"search_mode={mode} fuzzy_distance={int(options.get('fuzzy_distance') or 0)} proximity_window={int(options.get('proximity_window') or 0)}",
+            blocker_id="advanced-search-query-options-required",
+            operator_action="Record query mode, fuzzy distance, and proximity window with every result package.",
+        ),
+        slot(
+            "advanced-search-query-validation-recorded",
+            ready=bool(query_validation) and all(bool(row.get("valid")) for row in query_validation if isinstance(row, Mapping)),
+            evidence=f"query_count={len(keywords)} invalid_query_count={sum(1 for row in query_validation if isinstance(row, Mapping) and not row.get('valid'))}",
+            blocker_id="advanced-search-query-validation-required",
+            operator_action="Preserve regex/fuzzy/stemming validation warnings with the result set.",
+        ),
+        slot(
+            "advanced-search-query-hit-manifest-emitted",
+            ready=bool(manifest_hash),
+            evidence=f"advanced_search_query_hit_manifest_sha256={manifest_hash}",
+            blocker_id="advanced-search-query-hit-manifest-required",
+            operator_action="Attach a query-hit manifest before using advanced search results in review notes.",
+        ),
+        slot(
+            "advanced-search-hit-row-hashes",
+            ready=hit_row_hash_count >= max(0, min(len(matches), 1)),
+            evidence=f"hit_row_hash_count={hit_row_hash_count} match_count={len(matches)}",
+            blocker_id="advanced-search-hit-row-hashes-required",
+            operator_action="Emit stable hit row hashes for returned search results.",
+        ),
+        slot(
+            "advanced-search-source-viewer-locators",
+            ready=source_locator_count >= max(0, min(len(matches), 1)),
+            evidence=f"source_locator_count={source_locator_count}",
+            blocker_id="advanced-search-source-viewer-locators-required",
+            operator_action="Attach source-viewer locators for hit verification.",
+        ),
+        slot(
+            "advanced-search-review-profile-and-warnings",
+            ready=bool(advanced_profile.get("review_warnings")),
+            evidence=f"profile_version={advanced_profile.get('profile_version', '')} warning_count={len(advanced_profile.get('review_warnings') or [])}",
+            blocker_id="advanced-search-review-profile-required",
+            operator_action="Expose fuzzy/regex/proximity review warnings to the analyst before report selection.",
+        ),
+        slot(
+            "advanced-search-source-row-hash-verification",
+            ready=int(source_summary.get("source_hash_count") or 0) >= len(matches) and bool(matches),
+            evidence=f"source_hash_count={source_summary.get('source_hash_count', 0)} match_count={len(matches)}",
+            blocker_id="source-row-hash-verification-required",
+            operator_action="Open source rows and preserve source hashes for every report candidate.",
+        ),
+        slot(
+            "advanced-search-multilingual-relevance-corpus",
+            ready=False,
+            evidence="multilingual_relevance_corpus=false",
+            blocker_id="multilingual-relevance-corpus-required",
+            operator_action="Validate advanced search relevance across Korean/English and domain-specific corpora.",
+        ),
+        slot(
+            "advanced-search-regex-fuzzy-proximity-fp-corpus",
+            ready=False,
+            evidence="regex_fuzzy_proximity_false_positive_corpus=false",
+            blocker_id="regex-fuzzy-proximity-false-positive-corpus-required",
+            operator_action="Attach false-positive/false-negative measurements for regex, fuzzy, stemming, and proximity modes.",
+        ),
+        slot(
+            "advanced-search-trusted-query-hit-diff",
+            ready=trusted_diff.get("status") == "pass",
+            evidence=f"trusted_diff_status={trusted_diff.get('status', 'missing')}",
+            blocker_id="trusted-advanced-search-query-hit-diff-required",
+            operator_action="Attach a trusted query-hit manifest diff before commercial completeness claims.",
+        ),
+        slot(
+            "advanced-search-browser-query-builder-ux-validation",
+            ready=False,
+            evidence="browser_query_builder_ux_validation=false",
+            blocker_id="browser-query-builder-ux-validation-required",
+            operator_action="Run browser E2E validation for mode/fuzzy/proximity controls and result warnings.",
+        ),
+        slot(
+            "advanced-search-large-case-performance-validation",
+            ready=False,
+            evidence=f"result_limit={limit} large_case_search_performance_validation=false",
+            blocker_id="large-case-search-performance-validation-required",
+            operator_action="Attach large-case latency/memory evidence for exact, regex, fuzzy, and proximity modes.",
+        ),
+    ]
+    blockers = sorted(
+        {
+            str(slot_row["blocker_id"])
+            for slot_row in validation_slots
+            if slot_row.get("status") != "complete" and slot_row.get("blocker_id")
+        }
+    )
+    plan: dict[str, object] = {
+        "profile_version": ADVANCED_SEARCH_REPORT_GRADE_VALIDATION_PLAN_VERSION,
+        "item_number": 61,
+        "gap_id": SEARCH_FEATURE_GAP_ID,
+        "batch_id": "commercial-uplift-061-065",
+        "selected_track": "advanced-search-query-gate",
+        "search_mode": mode,
+        "query_count": len(keywords),
+        "match_count": len(matches),
+        "result_limit": limit,
+        "advanced_search_query_hit_manifest_sha256": manifest_hash,
+        "source_verification_summary": source_summary,
+        "trusted_diff_status": str(trusted_diff.get("status") or "missing"),
+        "ready_slot_count": sum(1 for slot_row in validation_slots if slot_row.get("status") == "complete"),
+        "blocking_slot_count": sum(1 for slot_row in validation_slots if slot_row.get("status") != "complete"),
+        "validation_status": "report-validation-blocked" if blockers else "ready-for-report-review",
+        "commercial_grade": False,
+        "commercial_grade_ready": False,
+        "validation_slots": validation_slots,
+        "blockers": blockers,
+        "commercial_grade_blockers": list(ADVANCED_SEARCH_REPORT_GRADE_BLOCKERS),
+        "validation_commands": [
+            "rapidtriage search <case-db-or-output> --keyword <keyword> --search-mode fuzzy --fuzzy-distance 2 --output search-results.json",
+            "rapidtriage cross-tool-validate --rapid-output search-results.json --reference-output <trusted-query-hit-manifest> --backlog-item 61 --json",
+            "rapidtriage commercial-readiness --validation-package docs/validation/rapidtriage-core-forensics-061-070-known-answer.json --limit 61 --json",
+        ],
+        "report_guidance": {
+            "allowed_use": "advanced-search-triage-pivot",
+            "forbidden_claims": [
+                "advanced search hit is source proof",
+                "regex/fuzzy/proximity results are complete without FP/FN review",
+                "query builder UX is validated",
+                "advanced search is commercial-grade on large multilingual corpora",
+            ],
+            "required_disclaimer": (
+                "Advanced search modes are analyst triage aids. Do not cite a hit until the source row is opened, "
+                "hash/pointer evidence is preserved, query false positives are reviewed, and a trusted query-hit diff "
+                "or relevance corpus supports the claim."
+            ),
+        },
+    }
+    plan["validation_plan_sha256"] = stable_search_sha256(
+        {key: value for key, value in plan.items() if key != "validation_plan_sha256"}
+    )
+    return plan
+
+
 def search_commercial_uplift_evidence(
     *,
     matches: Sequence[Mapping[str, object]],
@@ -517,6 +723,7 @@ def search_commercial_uplift_evidence(
     report_grade: Mapping[str, object],
     limit: int,
     query_hit_manifest: Mapping[str, object] | None = None,
+    validation_plan: Mapping[str, object] | None = None,
 ) -> dict[str, object]:
     passed = []
     for gate in core_accuracy_gates:
@@ -531,6 +738,7 @@ def search_commercial_uplift_evidence(
             f"search_mode:{options.get('search_mode', '')}",
             f"proximity_window:{options.get('proximity_window', 0)}",
             f"advanced_search_manifest_hash:{query_hit_manifest.get('manifest_hash', '') if query_hit_manifest else ''}",
+            f"advanced_search_report_grade_validation_plan_sha256:{validation_plan.get('validation_plan_sha256', '') if validation_plan else ''}",
         ],
         "reportability_decision": search_reportability_decision(
             failed_validation_check_ids=[
@@ -542,6 +750,7 @@ def search_commercial_uplift_evidence(
             commercial_blockers=list(report_grade.get("blockers") or []),
             options=options,
             match_count=len(matches),
+            validation_plan=validation_plan,
         ),
         "passed_validation_check_ids": sorted(set(passed)),
         "failed_validation_check_ids": [
@@ -562,6 +771,20 @@ def search_commercial_uplift_evidence(
             "advanced_search_manifest_hash": str(query_hit_manifest.get("manifest_hash") or "") if query_hit_manifest else "",
             "hit_row_hash_count": int(query_hit_manifest.get("hit_row_hash_count") or 0) if query_hit_manifest else 0,
             "source_locator_count": int(query_hit_manifest.get("source_locator_count") or 0) if query_hit_manifest else 0,
+            "advanced_search_report_grade_validation_plan_present": bool(validation_plan),
+            "advanced_search_report_grade_validation_plan_hash": str(
+                validation_plan.get("validation_plan_sha256") or ""
+            )
+            if validation_plan
+            else "",
+            "advanced_search_report_grade_ready_slot_count": int(validation_plan.get("ready_slot_count") or 0)
+            if validation_plan
+            else 0,
+            "advanced_search_report_grade_blocking_slot_count": int(
+                validation_plan.get("blocking_slot_count") or 0
+            )
+            if validation_plan
+            else 0,
         },
         "reporting_status": "implemented-baseline-validation-required",
     }
@@ -661,9 +884,12 @@ def search_reportability_decision(
     commercial_blockers: Sequence[str],
     options: Mapping[str, object],
     match_count: int,
+    validation_plan: Mapping[str, object] | None = None,
 ) -> dict[str, object]:
     blockers = {str(item) for item in commercial_blockers if str(item)}
     blockers.update(f"check:{item}" for item in failed_validation_check_ids)
+    validation_plan = validation_plan if isinstance(validation_plan, Mapping) else {}
+    blockers.update(str(item) for item in validation_plan.get("blockers", []) if str(item))
     return {
         "profile_version": "advanced-search-reportability-decision-v1",
         "commercial_gap_ids": [SEARCH_FEATURE_GAP_ID],
@@ -672,6 +898,10 @@ def search_reportability_decision(
         "blockers": sorted(blockers),
         "search_mode": str(options.get("search_mode") or ""),
         "match_count": match_count,
+        "advanced_search_report_grade_validation_plan_present": bool(validation_plan),
+        "advanced_search_report_grade_validation_plan_hash": str(validation_plan.get("validation_plan_sha256") or ""),
+        "advanced_search_report_grade_ready_slot_count": int(validation_plan.get("ready_slot_count") or 0),
+        "advanced_search_report_grade_blocking_slot_count": int(validation_plan.get("blocking_slot_count") or 0),
         "ready_for_court_report": False,
         "required_before_report": [
             "open and hash-verify source rows for every report candidate",
@@ -1281,6 +1511,7 @@ def search_core_accuracy_gates(
     options: Mapping[str, object],
     trusted_diff: Mapping[str, object] | None = None,
     query_hit_manifest: Mapping[str, object] | None = None,
+    validation_plan: Mapping[str, object] | None = None,
 ) -> list[dict[str, object]]:
     satisfied = ["query mode and options recorded", "source verification limitation warning"]
     mode = normalize_search_mode(str(options.get("search_mode") or "exact"))
@@ -1310,6 +1541,14 @@ def search_core_accuracy_gates(
         for match in matches
     ):
         satisfied.append("advanced search source locators")
+    validation_plan = validation_plan if isinstance(validation_plan, Mapping) else {}
+    if validation_plan.get("validation_plan_sha256"):
+        satisfied.append("advanced search report-grade validation plan")
+        evidence_refs.append(
+            f"advanced_search_report_grade_validation_plan_sha256:{validation_plan.get('validation_plan_sha256', '')}"
+        )
+    if int(validation_plan.get("ready_slot_count") or 0) >= 6:
+        satisfied.append("advanced search report-grade ready slots")
     if trusted_diff and trusted_diff.get("status") == "pass":
         satisfied.append("trusted advanced-search query-hit diff pass")
         evidence_refs.append(f"trusted_tool:{trusted_diff.get('trusted_tool', '')}")
