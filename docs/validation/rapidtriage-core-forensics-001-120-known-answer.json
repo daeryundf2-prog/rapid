@@ -2206,10 +2206,10 @@
       ],
       "expected": {
         "required_assertions": [
-          "Validation packages preserve tool inventory, availability/path/command/version/capture errors, version-output hashes, per-tool row hashes, external-tool-version-manifest-v1 manifest hashes, limitation warnings, trusted external tool transcript diff helpers/gates, and #95 core_accuracy_gates."
+          "Validation packages preserve tool inventory, availability/path/command/version/capture errors, version-output hashes, per-tool row hashes, external-tool-version-manifest-v1 manifest hashes, external-tool-version-report-grade-validation-plan-v1, plan hash/counts, limitation warnings, trusted external tool transcript diff helpers/gates, and #95 core_accuracy_gates."
         ]
       },
-      "notes": "Internal fixture pass; per-run tool transcripts remain blocker.",
+      "notes": "Internal fixture pass; per-run external parser/import command transcripts, trusted transcript manifests, original tool logs, parser/import transcript corpus, acquisition-tool linkage, and release environment inventory signoff remain blockers.",
       "source_manifest": "docs/validation/rapidtriage-core-forensics-091-100-known-answer.json"
     },
     {

@@ -238,6 +238,7 @@ class RapidTriageCoreForensicsAccuracyTests(unittest.TestCase):
         self.assertIn("court exhibit report-grade validation plan", court_exhibit["required_checks"])
         self.assertIn("trusted court exhibit manifest diff pass", court_exhibit["required_checks"])
         self.assertIn("tool inventory emitted", external_tool["required_checks"])
+        self.assertIn("external tool version report-grade validation plan", external_tool["required_checks"])
         self.assertIn("trusted external tool transcript diff pass", external_tool["required_checks"])
         self.assertIn("write-blocker field recorded", acquisition_metadata["required_checks"])
         self.assertIn("trusted acquisition handoff diff pass", acquisition_metadata["required_checks"])

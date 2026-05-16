@@ -1025,6 +1025,44 @@ class RapidTriageOpsTests(unittest.TestCase):
                 payload["external_tool_version_assessment"]["external_tool_capture_matrix_hash"],
                 payload["external_tool_version_assessment"]["external_tool_version_manifest"]["capture_matrix_hash"],
             )
+            self.assertEqual(
+                payload["external_tool_version_assessment"]["external_tool_version_report_grade_validation_plan"][
+                    "profile_version"
+                ],
+                "external-tool-version-report-grade-validation-plan-v1",
+            )
+            self.assertEqual(
+                payload["external_tool_version_assessment"]["external_tool_version_report_grade_validation_plan_hash"],
+                payload["external_tool_version_assessment"]["external_tool_version_report_grade_validation_plan"][
+                    "validation_plan_hash"
+                ],
+            )
+            self.assertGreaterEqual(
+                payload["external_tool_version_assessment"]["external_tool_version_report_grade_ready_slot_count"],
+                7,
+            )
+            self.assertGreaterEqual(
+                payload["external_tool_version_assessment"]["external_tool_version_report_grade_blocking_slot_count"],
+                6,
+            )
+            self.assertIn(
+                "tool-inventory-and-row-hashes",
+                {
+                    slot["slot_id"]
+                    for slot in payload["external_tool_version_assessment"][
+                        "external_tool_version_report_grade_validation_plan"
+                    ]["ready_slots"]
+                },
+            )
+            self.assertIn(
+                "per-run-external-parser-version-capture",
+                {
+                    slot["slot_id"]
+                    for slot in payload["external_tool_version_assessment"][
+                        "external_tool_version_report_grade_validation_plan"
+                    ]["blocking_slots"]
+                },
+            )
             self.assertTrue(all(len(item["tool_version_row_hash"]) == 64 for item in payload["external_tool_versions"]))
             self.assertTrue(all(len(item["command_argv_hash"]) == 64 for item in payload["external_tool_versions"]))
             self.assertTrue(all(len(item["capture_state_hash"]) == 64 for item in payload["external_tool_versions"]))
@@ -1046,6 +1084,10 @@ class RapidTriageOpsTests(unittest.TestCase):
             )
             self.assertIn(
                 "external tool capture matrix hash emitted",
+                promoted_tools["core_accuracy_gates"][0]["satisfied_checks"],
+            )
+            self.assertIn(
+                "external tool version report-grade validation plan",
                 promoted_tools["core_accuracy_gates"][0]["satisfied_checks"],
             )
             self.assertIn(
@@ -1675,6 +1717,10 @@ class RapidTriageOpsTests(unittest.TestCase):
             self.assertIn(
                 "court_exhibit_index.court_exhibit_report_grade_validation_plan_hash",
                 quality_by_number[94]["primary_outputs"],
+            )
+            self.assertIn(
+                "external_tool_version_assessment.external_tool_version_report_grade_validation_plan_hash",
+                quality_by_number[95]["primary_outputs"],
             )
             self.assertEqual(quality_by_number[95]["trusted_diff_required"], "trusted-external-tool-transcript-diff")
             acquisition_quality = payload["acquisition_quality_progress"]

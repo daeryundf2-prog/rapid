@@ -1563,6 +1563,8 @@ CORE_FORENSIC_ACCURACY_ITEMS: tuple[dict[str, object], ...] = (
             "capture error recorded",
             "tool row hashes emitted",
             "external tool version manifest hash emitted",
+            "external tool version report-grade validation plan",
+            "external tool version report-grade ready slots",
             "per-run limitation warning",
             "trusted external tool transcript diff pass",
         ),

@@ -73,6 +73,15 @@ INDEPENDENT_VALIDATION_MINIMUM_SECTIONS = [
 ]
 EXTERNAL_TOOL_VERSION_GAP_ID = "#95"
 EXTERNAL_TOOL_VERSION_TRUSTED_DIFF_BLOCKER_95 = "trusted-external-tool-version-transcript-diff-missing"
+EXTERNAL_TOOL_VERSION_REPORT_GRADE_VALIDATION_PLAN_VERSION = "external-tool-version-report-grade-validation-plan-v1"
+EXTERNAL_TOOL_VERSION_REPORT_GRADE_BLOCKERS = [
+    "trusted-external-tool-version-transcript-diff-missing",
+    "per-run-external-parser-version-capture-required",
+    "original-tool-logs-required",
+    "parser-import-command-transcript-corpus-required",
+    "acquisition-tool-version-linkage-required",
+    "release-environment-inventory-signoff-required",
+]
 EXTERNAL_TOOL_VERSION_TRUSTED_TOOLS = {"external-tool-transcript", "release-environment-inventory", "operator-tool-log"}
 DEPLOYMENT_OPERATIONS_GAP_IDS = [
     "#101",
@@ -3210,9 +3219,187 @@ def build_external_tool_version_manifest(tools: Sequence[Mapping[str, object]]) 
     return {**manifest_core, "capture_matrix": capture_matrix, "manifest_hash": manifest_hash}
 
 
+def build_external_tool_version_report_grade_validation_plan(
+    *,
+    tools: Sequence[Mapping[str, object]],
+    tool_manifest: Mapping[str, object],
+    trusted_diff: Mapping[str, object] | None,
+) -> dict[str, object]:
+    trusted_status = str(trusted_diff.get("status") or "missing") if trusted_diff else "missing"
+    row_hashes = [str(item.get("tool_version_row_hash") or "") for item in tools]
+    command_hashes = [str(item.get("command_argv_hash") or "") for item in tools]
+    capture_state_hashes = [str(item.get("capture_state_hash") or "") for item in tools]
+    capture_matrix = (
+        tool_manifest.get("capture_matrix")
+        if isinstance(tool_manifest.get("capture_matrix"), Mapping)
+        else {}
+    )
+    ready_slots = [
+        {
+            "slot_id": "tool-inventory-and-row-hashes",
+            "status": "complete",
+            "evidence": {
+                "tool_count": len(tools),
+                "row_hash_count": sum(1 for value in row_hashes if value),
+            },
+        },
+        {
+            "slot_id": "command-argv-hashes",
+            "status": "complete",
+            "evidence": {"command_argv_hash_count": sum(1 for value in command_hashes if value)},
+        },
+        {
+            "slot_id": "capture-state-and-version-output",
+            "status": "complete",
+            "evidence": {
+                "capture_state_hash_count": sum(1 for value in capture_state_hashes if value),
+                "version_output_hash_count": sum(1 for item in tools if item.get("version_output_sha256")),
+                "capture_error_count": int(tool_manifest.get("capture_error_count") or 0),
+            },
+        },
+        {
+            "slot_id": "external-tool-capture-matrix",
+            "status": "complete",
+            "evidence": {
+                "capture_matrix_hash": str(tool_manifest.get("capture_matrix_hash") or ""),
+                "matrix_row_count": int(capture_matrix.get("tool_count") or 0),
+            },
+        },
+        {
+            "slot_id": "external-tool-version-manifest",
+            "status": "complete",
+            "evidence": {
+                "manifest_hash": str(tool_manifest.get("manifest_hash") or ""),
+                "available_count": int(tool_manifest.get("available_count") or 0),
+                "missing_count": int(tool_manifest.get("missing_count") or 0),
+            },
+        },
+        {
+            "slot_id": "capture-environment",
+            "status": "complete",
+            "evidence": dict(tool_manifest.get("capture_environment") or {}),
+        },
+        {
+            "slot_id": "trusted-external-tool-transcript-diff-disclosure",
+            "status": "complete",
+            "evidence": {
+                "trusted_diff_status": trusted_status,
+                "trusted_tool": str((trusted_diff or {}).get("trusted_tool") or ""),
+            },
+        },
+    ]
+    blocking_slots: list[dict[str, object]] = []
+    if not tools:
+        blocking_slots.append(
+            {
+                "slot_id": "external-tool-inventory-present",
+                "status": "blocked",
+                "blocker": "external-tool-inventory-required",
+                "required_evidence": "tool version inventory rows for release validation",
+            }
+        )
+    if len([value for value in row_hashes if value]) != len(tools):
+        blocking_slots.append(
+            {
+                "slot_id": "tool-version-row-hash-completeness",
+                "status": "blocked",
+                "blocker": "tool-version-row-hash-completeness-required",
+                "required_evidence": "row hash for every external tool version record",
+            }
+        )
+    if len([value for value in command_hashes if value]) != len(tools):
+        blocking_slots.append(
+            {
+                "slot_id": "tool-command-argv-hash-completeness",
+                "status": "blocked",
+                "blocker": "tool-command-argv-hash-completeness-required",
+                "required_evidence": "command argv hash for every external tool version record",
+            }
+        )
+    if not tool_manifest.get("manifest_hash") or not tool_manifest.get("capture_matrix_hash"):
+        blocking_slots.append(
+            {
+                "slot_id": "external-tool-version-manifest-complete",
+                "status": "blocked",
+                "blocker": "external-tool-version-manifest-required",
+                "required_evidence": "external tool version manifest hash and capture matrix hash",
+            }
+        )
+    if trusted_status != "pass":
+        blocking_slots.append(
+            {
+                "slot_id": "trusted-external-tool-version-transcript-diff",
+                "status": "external-required",
+                "blocker": EXTERNAL_TOOL_VERSION_TRUSTED_DIFF_BLOCKER_95,
+                "required_evidence": "trusted transcript diff over tool availability, paths, commands, version output, errors, and row hashes",
+            }
+        )
+    blocking_slots.extend(
+        [
+            {
+                "slot_id": "per-run-external-parser-version-capture",
+                "status": "external-required",
+                "blocker": "per-run-external-parser-version-capture-required",
+                "required_evidence": "version and command capture for every external parser/import executed during the case run",
+            },
+            {
+                "slot_id": "original-tool-logs",
+                "status": "external-required",
+                "blocker": "original-tool-logs-required",
+                "required_evidence": "operator-preserved original stdout/stderr/log files for external acquisition and parser tools",
+            },
+            {
+                "slot_id": "parser-import-command-transcript-corpus",
+                "status": "external-required",
+                "blocker": "parser-import-command-transcript-corpus-required",
+                "required_evidence": "fixture corpus of parser/import command transcripts across supported external tools",
+            },
+            {
+                "slot_id": "acquisition-tool-version-linkage",
+                "status": "external-required",
+                "blocker": "acquisition-tool-version-linkage-required",
+                "required_evidence": "linkage between acquisition metadata, source hashes, and external tool version rows",
+            },
+            {
+                "slot_id": "release-environment-inventory-signoff",
+                "status": "external-required",
+                "blocker": "release-environment-inventory-signoff-required",
+                "required_evidence": "release environment inventory reviewed and signed off for supported OS/tool combinations",
+            },
+        ]
+    )
+    plan_core: dict[str, object] = {
+        "profile_version": EXTERNAL_TOOL_VERSION_REPORT_GRADE_VALIDATION_PLAN_VERSION,
+        "item_number": 95,
+        "commercial_gap_ids": [EXTERNAL_TOOL_VERSION_GAP_ID],
+        "plan_context": "validation-package-external-tool-version-capture",
+        "tool_count": len(tools),
+        "available_count": int(tool_manifest.get("available_count") or 0),
+        "missing_count": int(tool_manifest.get("missing_count") or 0),
+        "capture_error_count": int(tool_manifest.get("capture_error_count") or 0),
+        "external_tool_version_manifest_hash": str(tool_manifest.get("manifest_hash") or ""),
+        "external_tool_capture_matrix_hash": str(tool_manifest.get("capture_matrix_hash") or ""),
+        "trusted_diff_status": trusted_status,
+        "ready_slots": ready_slots,
+        "blocking_slots": blocking_slots,
+        "ready_slot_count": len(ready_slots),
+        "blocking_slot_count": len(blocking_slots),
+        "external_blocker_catalog": list(EXTERNAL_TOOL_VERSION_REPORT_GRADE_BLOCKERS),
+        "blockers": sorted({str(slot.get("blocker") or "") for slot in blocking_slots if slot.get("blocker")}),
+        "commercial_claim_allowed": False,
+        "reporting_boundary": "This plan makes release validation tool versions auditable, but commercial claims require per-run capture for every external parser/import, original tool logs, parser transcript corpus, acquisition-tool linkage, release environment signoff, and trusted transcripts.",
+    }
+    return {**plan_core, "validation_plan_hash": hashlib_json(plan_core)}
+
+
 def build_external_tool_version_assessment(*, trusted_diff: Mapping[str, object] | None = None) -> dict[str, object]:
     tools = build_external_tool_versions()
     tool_manifest = build_external_tool_version_manifest(tools)
+    report_grade_validation_plan = build_external_tool_version_report_grade_validation_plan(
+        tools=tools,
+        tool_manifest=tool_manifest,
+        trusted_diff=trusted_diff,
+    )
     satisfied = [
         "tool inventory emitted",
         "tool path captured when available",
@@ -3222,6 +3409,8 @@ def build_external_tool_version_assessment(*, trusted_diff: Mapping[str, object]
         "tool row hashes emitted",
         "external tool version manifest hash emitted",
         "external tool capture matrix hash emitted",
+        "external tool version report-grade validation plan",
+        "external tool version report-grade ready slots",
     ]
     if trusted_diff and trusted_diff.get("status") == "pass":
         satisfied.append("trusted external tool transcript diff pass")
@@ -3231,6 +3420,7 @@ def build_external_tool_version_assessment(*, trusted_diff: Mapping[str, object]
     ]
     if not trusted_diff or trusted_diff.get("status") != "pass":
         blockers.append(EXTERNAL_TOOL_VERSION_TRUSTED_DIFF_BLOCKER_95)
+    blockers = sorted({*blockers, *report_grade_validation_plan["blockers"]})
     return {
         "component": "external-tool-version-capture",
         "status": "release-validation-tool-preflight",
@@ -3246,6 +3436,12 @@ def build_external_tool_version_assessment(*, trusted_diff: Mapping[str, object]
         "external_tool_version_manifest_hash": tool_manifest["manifest_hash"],
         "external_tool_capture_matrix": tool_manifest["capture_matrix"],
         "external_tool_capture_matrix_hash": tool_manifest["capture_matrix_hash"],
+        "external_tool_version_report_grade_validation_plan": report_grade_validation_plan,
+        "external_tool_version_report_grade_validation_plan_hash": report_grade_validation_plan[
+            "validation_plan_hash"
+        ],
+        "external_tool_version_report_grade_ready_slot_count": report_grade_validation_plan["ready_slot_count"],
+        "external_tool_version_report_grade_blocking_slot_count": report_grade_validation_plan["blocking_slot_count"],
         "trusted_external_tool_version_diff": dict(trusted_diff) if trusted_diff else missing_external_tool_version_trusted_diff(),
         "core_accuracy_gates": [
             build_accuracy_gate(
@@ -3255,6 +3451,7 @@ def build_external_tool_version_assessment(*, trusted_diff: Mapping[str, object]
                     f"tool_count:{len(tools)}",
                     f"external_tool_version_manifest_hash:{tool_manifest['manifest_hash']}",
                     f"external_tool_capture_matrix_hash:{tool_manifest['capture_matrix_hash']}",
+                    f"external_tool_version_report_grade_validation_plan_hash:{report_grade_validation_plan['validation_plan_hash']}",
                 ],
             )
         ],

@@ -3195,6 +3195,7 @@ def report_quality_evidence_chain() -> list[dict[str, object]]:
                 "external_tool_versions[].version_output_sha256",
                 "external_tool_versions[].tool_version_row_hash",
                 "external_tool_version_assessment.external_tool_version_manifest.manifest_hash",
+                "external_tool_version_assessment.external_tool_version_report_grade_validation_plan_hash",
                 "external_tool_version_assessment.trusted_external_tool_version_diff",
             ],
             "trusted_diff": "trusted-external-tool-transcript-diff",
