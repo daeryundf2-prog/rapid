@@ -64,9 +64,9 @@
       "title": "Video/audio preview and transcript",
       "test_files": ["tests/test_rapidtriage_api.py"],
       "assertions": [
-        "Media source preview preserves metadata, source hashes, transcript sidecars, cue timestamps, bounded cue citation packages, verification warnings, trusted transcript cue/alignment gates, #57 core_accuracy_gates, and reportability blockers for missing safe playback, ASR execution, waveform/thumb generation, and transcript alignment corpus."
+        "Media source preview preserves metadata, source hashes, transcript sidecars, cue timestamps, bounded cue citation packages, media_transcript_report_grade_validation_plan ready/blocking slots, verification warnings, trusted transcript cue/alignment gates, #57 core_accuracy_gates, and reportability blockers for missing safe playback, ASR execution/alignment, waveform/thumb generation, transcript alignment corpus, and selected-cue report export integration."
       ],
-      "remaining_external_validation": ["Safe playback sandbox, ASR engine execution, waveform/thumbnails, trusted transcript cue/alignment diff, and transcript alignment validation."]
+      "remaining_external_validation": ["Safe playback sandbox, ASR execution/alignment, waveform/thumb generation, trusted cue/alignment diff, transcript alignment corpus, and selected-cue report export integration."]
     },
     {
       "item": 58,

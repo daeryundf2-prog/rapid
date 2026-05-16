@@ -77,8 +77,8 @@
       "status": "pass",
       "backlog_items": [57],
       "evidence_paths": ["docs/validation/core-forensics-051-060-fixture-evidence.json", "tests/test_rapidtriage_api.py"],
-      "expected": {"required_assertions": ["Media preview preserves media metadata, source hashes, transcript sidecars, cue timestamps, media-transcript-source-manifest-v1 sidecar/cue hashes, bounded cue citation packages, media-cue-proof-manifest-v1, verification warning, trusted transcript cue/alignment diff gates, and #57 core_accuracy_gates.", "Media transcript reportability decisions block playback/ASR-validated claims until safe playback, ASR execution, waveform/thumb generation, trusted cue/alignment diff, and transcript alignment corpus evidence exists."]},
-      "notes": "Internal fixture pass; playback sandbox and ASR/transcript validation remain future work."
+      "expected": {"required_assertions": ["Media preview preserves media metadata, source hashes, transcript sidecars, cue timestamps, media-transcript-source-manifest-v1 sidecar/cue hashes, bounded cue citation packages, media-cue-proof-manifest-v1, media_transcript_report_grade_validation_plan ready/blocking slots, verification warning, trusted transcript cue/alignment diff gates, and #57 core_accuracy_gates.", "Media transcript reportability decisions block playback/ASR-validated claims until safe playback, ASR execution/alignment, waveform/thumb generation, trusted cue/alignment diff, transcript alignment corpus evidence, and selected-cue report export integration exist."]},
+      "notes": "Internal fixture pass; playback sandbox, ASR/manual alignment, waveform/thumb previews, trusted cue diff, alignment corpus, and selected-cue export remain blockers."
     },
     {
       "id": "core-forensics-058-ocr-queue-fixture",

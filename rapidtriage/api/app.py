@@ -262,6 +262,15 @@ IMAGE_GALLERY_REPORT_GRADE_BLOCKERS = [
 ]
 MEDIA_TRANSCRIPT_TRUSTED_DIFF_BLOCKER = "media-transcript-trusted-cue-diff-required"
 MEDIA_TRANSCRIPT_TRUSTED_TOOLS = {"transcript-cue-manifest", "asr-alignment-export", "manual-playback-review"}
+MEDIA_TRANSCRIPT_REPORT_GRADE_VALIDATION_PLAN_VERSION = "media-transcript-report-grade-validation-plan-v1"
+MEDIA_TRANSCRIPT_REPORT_GRADE_BLOCKERS = [
+    "safe-playback-sandbox-required",
+    "asr-execution-or-alignment-required",
+    "waveform-thumbnail-preview-required",
+    MEDIA_TRANSCRIPT_TRUSTED_DIFF_BLOCKER,
+    "transcript-alignment-corpus-required",
+    "selected-cue-report-export-integration-required",
+]
 PREVIEW_SANDBOX_TRUSTED_DIFF_BLOCKER = "preview-sandbox-trusted-no-exec-manifest-required"
 PREVIEW_SANDBOX_TRUSTED_TOOLS = {"no-exec-preview-manifest", "browser-sandbox-review", "active-content-test-corpus"}
 SQLITE_FTS_TRUSTED_DIFF_BLOCKER = "large-sqlite-fts-trusted-query-plan-diff-required"
@@ -7809,6 +7818,7 @@ def media_viewer_core_accuracy_gates(
     transcript_manifest: Mapping[str, object] | None = None,
     cue_manifest: Mapping[str, object] | None = None,
     trusted_diff: Mapping[str, object] | None = None,
+    validation_plan: Mapping[str, object] | None = None,
 ) -> list[dict[str, object]]:
     satisfied = []
     if metadata:
@@ -7831,6 +7841,11 @@ def media_viewer_core_accuracy_gates(
     cue_manifest = cue_manifest if isinstance(cue_manifest, Mapping) else {}
     if cue_manifest.get("manifest_hash"):
         satisfied.append("media cue proof manifest")
+    validation_plan = validation_plan if isinstance(validation_plan, Mapping) else {}
+    if validation_plan.get("validation_plan_sha256"):
+        satisfied.append("media transcript report-grade validation plan")
+    if int(validation_plan.get("ready_slot_count") or 0) >= 6:
+        satisfied.append("media transcript report-grade ready slots")
     satisfied.append("playback/transcript verification warning")
     trusted_diff = trusted_diff if isinstance(trusted_diff, Mapping) else {}
     if trusted_diff.get("status") == "pass":
@@ -7844,6 +7859,9 @@ def media_viewer_core_accuracy_gates(
                 f"transcript_sidecar_count:{len(sidecars)}",
                 f"media_transcript_manifest_hash:{transcript_manifest.get('manifest_hash', '')}",
                 f"media_cue_manifest_hash:{cue_manifest.get('manifest_hash', '')}",
+                f"media_transcript_report_grade_validation_plan_sha256:{validation_plan.get('validation_plan_sha256', '')}",
+                f"media_transcript_report_grade_ready_slot_count:{validation_plan.get('ready_slot_count', 0)}",
+                f"media_transcript_report_grade_blocking_slot_count:{validation_plan.get('blocking_slot_count', 0)}",
                 f"trusted_diff_status:{trusted_diff.get('status', 'missing')}",
             ],
         )
@@ -7863,6 +7881,198 @@ def image_tag_suggestions(details: Mapping[str, object]) -> list[str]:
     if not details.get("decoded"):
         tags.append("decode-warning")
     return tags
+
+
+def build_media_transcript_report_grade_validation_plan(
+    *,
+    context: str,
+    source_path: Path,
+    metadata: Mapping[str, object],
+    sidecars: Sequence[Mapping[str, object]],
+    source_hashes: Mapping[str, object] | None = None,
+    transcript_manifest: Mapping[str, object] | None = None,
+    cue_manifest: Mapping[str, object] | None = None,
+    cue_package_profile: Mapping[str, object] | None = None,
+    copy_safe_citation_ready: bool = False,
+    trusted_diff: Mapping[str, object] | None = None,
+) -> dict[str, object]:
+    source_hashes = source_hashes if isinstance(source_hashes, Mapping) else {}
+    transcript_manifest = transcript_manifest if isinstance(transcript_manifest, Mapping) else {}
+    cue_manifest = cue_manifest if isinstance(cue_manifest, Mapping) else {}
+    cue_package_profile = cue_package_profile if isinstance(cue_package_profile, Mapping) else {}
+    trusted_diff = trusted_diff if isinstance(trusted_diff, Mapping) else {}
+
+    def slot(
+        slot_id: str,
+        *,
+        ready: bool,
+        evidence: str,
+        blocker_id: str | None = None,
+        operator_action: str = "",
+    ) -> dict[str, object]:
+        row: dict[str, object] = {
+            "slot_id": slot_id,
+            "status": "complete" if ready else "external-required",
+            "evidence": evidence,
+        }
+        if blocker_id and not ready:
+            row["blocker_id"] = blocker_id
+        if operator_action:
+            row["operator_action"] = operator_action
+        return row
+
+    sidecar_count = len(sidecars)
+    cue_count = sum(len(item.get("cues") or []) for item in sidecars)
+    transcript_manifest_hash = str(transcript_manifest.get("manifest_hash") or "")
+    cue_manifest_hash = str(cue_manifest.get("manifest_hash") or "")
+    sidecar_row_hash_count = int(transcript_manifest.get("sidecar_row_hash_count") or 0)
+    transcript_cue_hash_count = int(transcript_manifest.get("cue_hash_count") or 0)
+    cue_profile_count = int(cue_package_profile.get("cue_count") or 0)
+    cue_row = cue_manifest.get("cue") if isinstance(cue_manifest.get("cue"), Mapping) else {}
+    source_sha256 = str(source_hashes.get("sha256") or cue_row.get("source_sha256") or "")
+    validation_slots = [
+        slot(
+            "media-metadata-and-source-hash",
+            ready=bool(metadata) and (bool(source_sha256) or source_path.exists()),
+            evidence=(
+                f"metadata_keys={sorted(str(key) for key in metadata.keys())} "
+                f"source_sha256={source_sha256} source_exists={source_path.exists()}"
+            ),
+            blocker_id="media-metadata-and-source-hash-required",
+            operator_action="Capture bounded media metadata and source hashes before transcript review.",
+        ),
+        slot(
+            "media-transcript-sidecar-import",
+            ready=sidecar_count > 0,
+            evidence=f"sidecar_count={sidecar_count}",
+            blocker_id="media-transcript-sidecar-import-required",
+            operator_action="Import adjacent transcript sidecars or attach a trusted transcript export.",
+        ),
+        slot(
+            "media-cue-timestamp-preservation",
+            ready=cue_count > 0 or bool(cue_manifest_hash),
+            evidence=f"cue_count={cue_count} cue_manifest_hash={cue_manifest_hash}",
+            blocker_id="media-cue-timestamp-preservation-required",
+            operator_action="Preserve cue start/end timestamps and text hashes for citation.",
+        ),
+        slot(
+            "media-transcript-or-cue-manifest-hashes",
+            ready=(bool(transcript_manifest_hash) and (sidecar_row_hash_count > 0 or transcript_cue_hash_count > 0))
+            or bool(cue_manifest_hash),
+            evidence=(
+                f"transcript_manifest_hash={transcript_manifest_hash} sidecar_row_hash_count={sidecar_row_hash_count} "
+                f"transcript_cue_hash_count={transcript_cue_hash_count} cue_manifest_hash={cue_manifest_hash}"
+            ),
+            blocker_id="media-transcript-or-cue-manifest-hashes-required",
+            operator_action="Attach transcript/cue manifests with row hashes for reproducible review.",
+        ),
+        slot(
+            "media-cue-package-or-profile",
+            ready=cue_profile_count > 0 or bool(cue_manifest_hash),
+            evidence=f"cue_profile_count={cue_profile_count} cue_manifest_hash={cue_manifest_hash}",
+            blocker_id="media-cue-package-or-profile-required",
+            operator_action="Expose a bounded cue package/profile before report handoff.",
+        ),
+        slot(
+            "media-copy-safe-citation-or-warning",
+            ready=copy_safe_citation_ready or bool(cue_package_profile) or bool(transcript_manifest_hash),
+            evidence=(
+                f"copy_safe_citation_ready={copy_safe_citation_ready} "
+                f"cue_package_profile={bool(cue_package_profile)} transcript_manifest_hash={transcript_manifest_hash}"
+            ),
+            blocker_id="media-copy-safe-citation-or-warning-required",
+            operator_action="Emit copy-safe cue citation text or a warning-backed cue profile.",
+        ),
+        slot(
+            "media-safe-playback-sandbox",
+            ready=False,
+            evidence="safe_playback_sandbox=false",
+            blocker_id="safe-playback-sandbox-required",
+            operator_action="Add safe playback/waveform preview sandboxing and browser-test active media handling.",
+        ),
+        slot(
+            "media-asr-execution-or-alignment",
+            ready=False,
+            evidence="asr_execution_or_alignment=false",
+            blocker_id="asr-execution-or-alignment-required",
+            operator_action="Run ASR or manual cue alignment validation with tool/version logs.",
+        ),
+        slot(
+            "media-waveform-thumbnail-preview",
+            ready=False,
+            evidence="waveform_thumbnail_preview=false",
+            blocker_id="waveform-thumbnail-preview-required",
+            operator_action="Generate bounded waveform/video thumbnail previews without executing untrusted active content.",
+        ),
+        slot(
+            "media-trusted-transcript-cue-diff",
+            ready=trusted_diff.get("status") == "pass",
+            evidence=f"trusted_diff_status={trusted_diff.get('status', 'missing')}",
+            blocker_id=MEDIA_TRANSCRIPT_TRUSTED_DIFF_BLOCKER,
+            operator_action="Attach a passing trusted transcript cue/alignment manifest diff.",
+        ),
+        slot(
+            "media-transcript-alignment-corpus",
+            ready=False,
+            evidence="transcript_alignment_corpus=false",
+            blocker_id="transcript-alignment-corpus-required",
+            operator_action="Validate cue parsing and alignment against a known-answer transcript/media corpus.",
+        ),
+        slot(
+            "media-selected-cue-report-export",
+            ready=False,
+            evidence="selected_cue_report_export_integration=false",
+            blocker_id="selected-cue-report-export-integration-required",
+            operator_action="Wire selected cue packages into report/exhibit exports with manifest hashes.",
+        ),
+    ]
+    blockers = sorted(
+        str(slot_row.get("blocker_id"))
+        for slot_row in validation_slots
+        if slot_row.get("status") != "complete" and slot_row.get("blocker_id")
+    )
+    ready_slot_count = sum(1 for slot_row in validation_slots if slot_row.get("status") == "complete")
+    plan_core: dict[str, object] = {
+        "profile_version": MEDIA_TRANSCRIPT_REPORT_GRADE_VALIDATION_PLAN_VERSION,
+        "item_number": 57,
+        "gap_id": VIEWER_WORKFLOW_GAP_IDS["media"],
+        "batch_id": "commercial-uplift-056-060",
+        "selected_track": "media-transcript-review-report-validation",
+        "context": context,
+        "path": str(source_path),
+        "source_sha256": source_sha256,
+        "metadata_sha256": stable_payload_sha256(dict(metadata)),
+        "sidecar_count": sidecar_count,
+        "cue_count": cue_count,
+        "transcript_manifest_hash": transcript_manifest_hash,
+        "cue_manifest_hash": cue_manifest_hash,
+        "sidecar_row_hash_count": sidecar_row_hash_count,
+        "transcript_cue_hash_count": transcript_cue_hash_count,
+        "trusted_diff_status": str(trusted_diff.get("status") or "missing"),
+        "ready_slot_count": ready_slot_count,
+        "blocking_slot_count": len(blockers),
+        "validation_status": "report-validation-blocked",
+        "commercial_grade": False,
+        "commercial_grade_ready": False,
+        "validation_slots": validation_slots,
+        "blockers": blockers,
+        "commercial_grade_blockers": list(MEDIA_TRANSCRIPT_REPORT_GRADE_BLOCKERS),
+        "validation_commands": [
+            "rapidtriage web -> source-preview for an audio/video source",
+            "GET /api/runs/<run_id>/source-media-cue?path=<path>&sidecar_index=<n>&cue_index=<n>",
+            "rapidtriage commercial-readiness --validation-package docs/validation/rapidtriage-core-forensics-051-060-known-answer.json --limit 57 --json",
+        ],
+        "report_guidance": {
+            "allowed_use": "media-transcript-sidecar-triage-pivot",
+            "forbidden_claim": "safe playback, ASR, waveform, or transcript-alignment-complete analysis",
+            "required_disclaimer": (
+                "Media transcript output is bounded sidecar/cue metadata until safe playback sandboxing, ASR/manual "
+                "alignment evidence, waveform/thumbnail previews, trusted cue diffs, alignment corpus validation, "
+                "and selected-cue report export integration are attached."
+            ),
+        },
+    }
+    return {**plan_core, "validation_plan_sha256": stable_payload_sha256(plan_core)}
 
 
 def build_media_preview(source_path: Path, *, mime_type: str, run_id: str | None = None) -> Dict[str, object]:
@@ -7888,6 +8098,25 @@ def build_media_preview(source_path: Path, *, mime_type: str, run_id: str | None
         "blocker_id": MEDIA_TRANSCRIPT_TRUSTED_DIFF_BLOCKER,
         "required_tools": sorted(MEDIA_TRANSCRIPT_TRUSTED_TOOLS),
     }
+    cue_package_profile = media_cue_package_profile(run_id=run_id, source_path=source_path, sidecars=sidecars)
+    validation_plan = build_media_transcript_report_grade_validation_plan(
+        context="media-preview",
+        source_path=source_path,
+        metadata=metadata,
+        sidecars=sidecars,
+        source_hashes=source_hashes,
+        transcript_manifest=transcript_manifest,
+        cue_package_profile=cue_package_profile,
+        trusted_diff=trusted_diff,
+    )
+    core_accuracy_gates = media_viewer_core_accuracy_gates(
+        source_path=source_path,
+        metadata=metadata,
+        sidecars=sidecars,
+        transcript_manifest=transcript_manifest,
+        trusted_diff=trusted_diff,
+        validation_plan=validation_plan,
+    )
     return {
         "preview_type": "media",
         "message": "Media metadata preview is available.",
@@ -7917,25 +8146,16 @@ def build_media_preview(source_path: Path, *, mime_type: str, run_id: str | None
             "transcript_sidecars": sidecars,
             "media_transcript_manifest": transcript_manifest,
             "media_transcript_manifest_hash": transcript_manifest["manifest_hash"],
-            "cue_package_profile": media_cue_package_profile(run_id=run_id, source_path=source_path, sidecars=sidecars),
+            "media_transcript_report_grade_validation_plan": validation_plan,
+            "media_transcript_report_grade_validation_plan_hash": validation_plan["validation_plan_sha256"],
+            "cue_package_profile": cue_package_profile,
             "media_transcript_assessment": media_transcript_assessment(sidecars=sidecars),
-            "core_accuracy_gates": media_viewer_core_accuracy_gates(
-                source_path=source_path,
-                metadata=metadata,
-                sidecars=sidecars,
-                transcript_manifest=transcript_manifest,
-                trusted_diff=trusted_diff,
-            ),
+            "core_accuracy_gates": core_accuracy_gates,
             "trusted_media_transcript_diff": trusted_diff,
             "commercial_uplift_evidence": viewer_workflow_commercial_uplift_evidence(
                 item_number=57,
                 component="video-audio-preview-and-transcript",
-                core_accuracy_gates=media_viewer_core_accuracy_gates(
-                    source_path=source_path,
-                    metadata=metadata,
-                    sidecars=sidecars,
-                    transcript_manifest=transcript_manifest,
-                ),
+                core_accuracy_gates=core_accuracy_gates,
                 blockers=[
                     "media-playback-and-transcoding-not-performed-inline",
                     "automatic-speech-recognition-not-executed-by-viewer",
@@ -7943,7 +8163,11 @@ def build_media_preview(source_path: Path, *, mime_type: str, run_id: str | None
                     "selected-cue-report-export-not-implemented",
                     MEDIA_TRANSCRIPT_TRUSTED_DIFF_BLOCKER,
                 ],
-                source_refs=[f"source_path:{source_path}", f"transcript_sidecar_count:{len(sidecars)}"],
+                source_refs=[
+                    f"source_path:{source_path}",
+                    f"transcript_sidecar_count:{len(sidecars)}",
+                    f"media_transcript_report_grade_validation_plan_sha256:{validation_plan.get('validation_plan_sha256', '')}",
+                ],
                 controls={
                     "source_hashes_captured": source_path.stat().st_size <= 128 * 1024 * 1024,
                     "transcript_sidecar_count": len(sidecars),
@@ -7955,6 +8179,10 @@ def build_media_preview(source_path: Path, *, mime_type: str, run_id: str | None
                     "media_transcript_manifest_hash": transcript_manifest["manifest_hash"],
                     "transcript_sidecar_row_hash_count": transcript_manifest["sidecar_row_hash_count"],
                     "transcript_cue_hash_count": transcript_manifest["cue_hash_count"],
+                    "media_transcript_report_grade_validation_plan_present": bool(validation_plan.get("validation_plan_sha256")),
+                    "media_transcript_report_grade_validation_plan_hash": str(validation_plan.get("validation_plan_sha256") or ""),
+                    "media_transcript_report_grade_ready_slot_count": int(validation_plan.get("ready_slot_count") or 0),
+                    "media_transcript_report_grade_blocking_slot_count": int(validation_plan.get("blocking_slot_count") or 0),
                 },
             ),
             "limitations": [
@@ -8123,6 +8351,30 @@ def build_media_cue_package(
         cue_text=cue_text,
         source_hashes=source_hashes,
     )
+    metadata: dict[str, object] = {
+        "duration_seconds": None,
+        "audio_channels": None,
+        "sample_rate": None,
+        "frame_count": None,
+    }
+    if source_path.suffix.lower() == ".wav":
+        metadata.update(read_wav_metadata(source_path))
+    validation_plan = build_media_transcript_report_grade_validation_plan(
+        context="media-cue-package",
+        source_path=source_path,
+        metadata=metadata,
+        sidecars=sidecars,
+        source_hashes=source_hashes,
+        cue_manifest=cue_proof_manifest,
+        copy_safe_citation_ready=True,
+    )
+    core_accuracy_gates = media_viewer_core_accuracy_gates(
+        source_path=source_path,
+        metadata=metadata,
+        sidecars=sidecars,
+        cue_manifest=cue_proof_manifest,
+        validation_plan=validation_plan,
+    )
     return {
         "command": "source-media-cue",
         "profile_version": "media-cue-citation-package-v1",
@@ -8144,6 +8396,9 @@ def build_media_cue_package(
         "source_hash_status": "computed" if source_hashes else "available-on-demand",
         "media_cue_proof_manifest": cue_proof_manifest,
         "media_cue_proof_manifest_hash": cue_proof_manifest["manifest_hash"],
+        "media_transcript_report_grade_validation_plan": validation_plan,
+        "media_transcript_report_grade_validation_plan_hash": validation_plan["validation_plan_sha256"],
+        "core_accuracy_gates": core_accuracy_gates,
         "copy_safe_citation": {
             "text": (
                 f"Source={source_path.name}; sidecar={sidecar.get('name', '')}; cue={cue_index}; "
@@ -8165,6 +8420,9 @@ def build_media_cue_package(
                 "source_hashes_included": bool(source_hashes),
                 "playback_executed_inline": False,
                 "asr_executed_inline": False,
+                "media_transcript_report_grade_validation_plan_hash": validation_plan["validation_plan_sha256"],
+                "media_transcript_report_grade_ready_slot_count": validation_plan["ready_slot_count"],
+                "media_transcript_report_grade_blocking_slot_count": validation_plan["blocking_slot_count"],
             },
         ),
     }

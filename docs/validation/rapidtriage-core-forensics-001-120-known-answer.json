@@ -1395,10 +1395,10 @@
       ],
       "expected": {
         "required_assertions": [
-          "Media preview preserves media metadata, source hashes, transcript sidecars, cue timestamps, bounded cue citation packages, verification warning, and #57 core_accuracy_gates."
+          "Media preview preserves media metadata, source hashes, transcript sidecars, cue timestamps, bounded cue citation packages, media_transcript_report_grade_validation_plan ready/blocking slots, verification warning, and #57 core_accuracy_gates."
         ]
       },
-      "notes": "Internal fixture pass; playback sandbox and ASR/transcript validation remain future work.",
+      "notes": "Internal fixture pass; playback sandbox, ASR/manual alignment, waveform/thumb previews, trusted cue diff, alignment corpus, and selected-cue export remain blockers.",
       "source_manifest": "docs/validation/rapidtriage-core-forensics-051-060-known-answer.json"
     },
     {

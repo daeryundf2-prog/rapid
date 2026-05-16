@@ -2599,6 +2599,17 @@ class RapidTriageApiTests(unittest.TestCase):
                 "source-media-transcript",
             )
             self.assertEqual(media_preview["media"]["media_transcript_manifest"]["cue_hash_count"], 1)
+            media_plan = media_preview["media"]["media_transcript_report_grade_validation_plan"]
+            self.assertEqual(media_plan["profile_version"], "media-transcript-report-grade-validation-plan-v1")
+            self.assertEqual(media_plan["item_number"], 57)
+            self.assertEqual(media_plan["gap_id"], "#57")
+            self.assertEqual(
+                media_preview["media"]["media_transcript_report_grade_validation_plan_hash"],
+                media_plan["validation_plan_sha256"],
+            )
+            self.assertEqual(media_plan["ready_slot_count"], 6)
+            self.assertEqual(media_plan["blocking_slot_count"], 6)
+            self.assertIn("media-transcript-trusted-cue-diff-required", media_plan["blockers"])
             self.assertEqual(
                 len(media_preview["media"]["media_transcript_manifest"]["sidecars"][0]["sidecar_row_hash"]),
                 64,
@@ -2606,11 +2617,14 @@ class RapidTriageApiTests(unittest.TestCase):
             media_uplift = media_preview["media"]["commercial_uplift_evidence"]
             self.assertEqual(media_uplift["item_numbers"], [57])
             self.assertIn("transcript sidecars imported", media_uplift["passed_validation_check_ids"])
+            self.assertIn("media transcript report-grade validation plan", media_uplift["passed_validation_check_ids"])
             self.assertFalse(media_uplift["large_data_controls"]["playback_executed_inline"])
             self.assertEqual(
                 media_uplift["large_data_controls"]["media_transcript_manifest_hash"],
                 media_preview["media"]["media_transcript_manifest_hash"],
             )
+            self.assertTrue(media_uplift["large_data_controls"]["media_transcript_report_grade_validation_plan_present"])
+            self.assertEqual(media_uplift["large_data_controls"]["media_transcript_report_grade_ready_slot_count"], 6)
             self.assertEqual(media_uplift["large_data_controls"]["transcript_cue_hash_count"], 1)
             self.assertEqual(media_preview["media"]["trusted_media_transcript_diff"]["status"], "missing")
             self.assertIn(
@@ -2654,6 +2668,13 @@ class RapidTriageApiTests(unittest.TestCase):
             self.assertEqual(media_cue["media_cue_proof_manifest"]["source_viewer_locator"]["viewer"], "source-media-cue")
             self.assertEqual(media_cue["media_cue_proof_manifest"]["cue"]["cue_index"], 1)
             self.assertEqual(len(media_cue["media_cue_proof_manifest"]["cue"]["cue_hash"]), 64)
+            self.assertEqual(
+                media_cue["media_transcript_report_grade_validation_plan_hash"],
+                media_cue["media_transcript_report_grade_validation_plan"]["validation_plan_sha256"],
+            )
+            self.assertEqual(media_cue["media_transcript_report_grade_validation_plan"]["ready_slot_count"], 6)
+            self.assertEqual(media_cue["media_transcript_report_grade_validation_plan"]["blocking_slot_count"], 6)
+            self.assertIn("media transcript report-grade validation plan", media_cue["core_accuracy_gates"][0]["satisfied_checks"])
             self.assertIn("text_sha256", media_cue["copy_safe_citation"]["text"])
             filtered_search_response = client.get(
                 f"/api/runs/{run_id}/search",
