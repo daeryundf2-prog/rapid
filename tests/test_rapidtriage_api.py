@@ -2415,11 +2415,29 @@ class RapidTriageApiTests(unittest.TestCase):
                 "source-image-gallery",
             )
             self.assertTrue(image_preview["image"]["image_gallery_manifest"]["image_row_hash"])
+            image_plan = image_preview["image"]["image_gallery_report_grade_validation_plan"]
+            self.assertEqual(image_plan["profile_version"], "image-gallery-report-grade-validation-plan-v1")
+            self.assertEqual(image_plan["item_number"], 56)
+            self.assertEqual(image_plan["gap_id"], "#56")
+            self.assertEqual(
+                image_preview["image"]["image_gallery_report_grade_validation_plan_hash"],
+                image_plan["validation_plan_sha256"],
+            )
+            self.assertEqual(image_plan["ready_slot_count"], 6)
+            self.assertEqual(image_plan["blocking_slot_count"], 6)
+            self.assertIn("ml-visual-similarity-clustering-required", image_plan["blockers"])
             self.assertIn("image gallery source manifest", image_preview["image"]["core_accuracy_gates"][0]["satisfied_checks"])
+            self.assertIn(
+                "image gallery report-grade validation plan",
+                image_preview["image"]["core_accuracy_gates"][0]["satisfied_checks"],
+            )
             image_uplift = image_preview["image"]["commercial_uplift_evidence"]
             self.assertEqual(image_uplift["item_numbers"], [56])
             self.assertIn("perceptual similarity bucket", image_uplift["passed_validation_check_ids"])
+            self.assertIn("image gallery report-grade validation plan", image_uplift["passed_validation_check_ids"])
             self.assertFalse(image_uplift["large_data_controls"]["dedicated_virtualized_gallery"])
+            self.assertTrue(image_uplift["large_data_controls"]["image_gallery_report_grade_validation_plan_present"])
+            self.assertEqual(image_uplift["large_data_controls"]["image_gallery_report_grade_ready_slot_count"], 6)
             self.assertEqual(
                 image_uplift["reportability_decision"]["allowed_use"],
                 "image-gallery-metadata-triage-pivot",
@@ -2471,9 +2489,17 @@ class RapidTriageApiTests(unittest.TestCase):
                 image_gallery["image_gallery_page_manifest"]["source_viewer_locator"]["viewer"],
                 "source-image-gallery-page",
             )
+            self.assertEqual(
+                image_gallery["image_gallery_report_grade_validation_plan_hash"],
+                image_gallery["image_gallery_report_grade_validation_plan"]["validation_plan_sha256"],
+            )
+            self.assertEqual(image_gallery["image_gallery_report_grade_validation_plan"]["ready_slot_count"], 6)
+            self.assertEqual(image_gallery["image_gallery_report_grade_validation_plan"]["blocking_slot_count"], 6)
             self.assertGreaterEqual(image_gallery["image_gallery_page_manifest"]["image_row_hash_count"], 1)
+            self.assertIn("image gallery report-grade validation plan", image_gallery["core_accuracy_gates"][0]["satisfied_checks"])
             self.assertIn("keyboard_triage", image_gallery)
             self.assertFalse(image_gallery["large_data_controls"]["persistent_tags"])
+            self.assertEqual(image_gallery["large_data_controls"]["image_gallery_report_grade_ready_slot_count"], 6)
             self.assertEqual(image_gallery["reportability_decision"]["allowed_use"], "image-gallery-metadata-triage-pivot")
             ocr_queue_response = client.get(
                 f"/api/runs/{run_id}/source-ocr-queue",

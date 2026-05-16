@@ -55,9 +55,9 @@
       "title": "Image gallery review mode",
       "test_files": ["tests/test_rapidtriage_media_image.py", "tests/test_rapidtriage_api.py"],
       "assertions": [
-        "Image rows/previews preserve metadata, hashes, thumbnails, perceptual hash buckets, bounded folder gallery pages, bucket filters, tag/report hints, visual limitations, trusted image gallery manifest gates, #56 core_accuracy_gates, and reportability blockers for missing virtualized gallery, persistent tags, ML similarity, sensitive/deepfake classifier validation, and trusted image manifest evidence."
+        "Image rows/previews preserve metadata, hashes, thumbnails, perceptual hash buckets, bounded folder gallery pages, bucket filters, tag/report hints, image_gallery_report_grade_validation_plan ready/blocking slots, visual limitations, trusted image gallery manifest gates, #56 core_accuracy_gates, and reportability blockers for missing virtualized gallery, persistent tags, ML similarity, sensitive/deepfake classifier validation, trusted image manifest evidence, and selected-image report export."
       ],
-      "remaining_external_validation": ["Dedicated virtualized gallery, persistent tags, ML visual similarity corpus, sensitive/deepfake classifier validation, and trusted image gallery manifest diff."]
+      "remaining_external_validation": ["Dedicated virtualized gallery, persistent tags, ML visual similarity corpus, sensitive/deepfake classifier validation, trusted image gallery manifest diff, and selected-image report export."]
     },
     {
       "item": 57,

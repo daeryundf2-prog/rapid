@@ -1374,10 +1374,10 @@
       ],
       "expected": {
         "required_assertions": [
-          "Image rows/previews preserve metadata, hashes, thumbnail metadata, perceptual similarity bucket, bounded folder gallery pages, bucket filters, tag/report hints, classifier limitation, and #56 core_accuracy_gates."
+          "Image rows/previews preserve metadata, hashes, thumbnail metadata, perceptual similarity bucket, bounded folder gallery pages, bucket filters, tag/report hints, image_gallery_report_grade_validation_plan ready/blocking slots, classifier limitation, and #56 core_accuracy_gates."
         ]
       },
-      "notes": "Internal fixture pass; dedicated gallery UI and ML similarity validation remain blockers.",
+      "notes": "Internal fixture pass; dedicated gallery UI, persistent tags, ML/sensitive classifier validation, trusted gallery diff, and selected export remain blockers.",
       "source_manifest": "docs/validation/rapidtriage-core-forensics-051-060-known-answer.json"
     },
     {

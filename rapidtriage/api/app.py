@@ -250,6 +250,16 @@ EMAIL_VIEWER_REPORT_GRADE_BLOCKERS = [
     "email-viewer-trusted-thread-export-required",
     "mailbox-corpus-validation-required",
 ]
+IMAGE_GALLERY_TRUSTED_DIFF_BLOCKER = "image-gallery-trusted-manifest-diff-required"
+IMAGE_GALLERY_REPORT_GRADE_VALIDATION_PLAN_VERSION = "image-gallery-report-grade-validation-plan-v1"
+IMAGE_GALLERY_REPORT_GRADE_BLOCKERS = [
+    "dedicated-virtualized-gallery-ui-required",
+    "persistent-gallery-tags-required",
+    "ml-visual-similarity-clustering-required",
+    "sensitive-deepfake-classifier-validation-required",
+    IMAGE_GALLERY_TRUSTED_DIFF_BLOCKER,
+    "selected-image-report-export-required",
+]
 MEDIA_TRANSCRIPT_TRUSTED_DIFF_BLOCKER = "media-transcript-trusted-cue-diff-required"
 MEDIA_TRANSCRIPT_TRUSTED_TOOLS = {"transcript-cue-manifest", "asr-alignment-export", "manual-playback-review"}
 PREVIEW_SANDBOX_TRUSTED_DIFF_BLOCKER = "preview-sandbox-trusted-no-exec-manifest-required"
@@ -5815,6 +5825,19 @@ def build_image_preview(source_path: Path, *, image_url: str, run_id: str | None
         ocr_queue_page = source_ocr_queue_profile(run_id=run_id, source_path=source_path)
         translation_review = source_ocr_translation_profile(run_id=run_id, source_path=source_path, details=details)
         gallery_manifest = details.get("image_gallery_manifest") if isinstance(details.get("image_gallery_manifest"), dict) else {}
+        validation_plan = build_image_gallery_report_grade_validation_plan(
+            context="image-preview",
+            source_path=source_path,
+            details=details,
+            gallery_manifest=gallery_manifest,
+            gallery_page_profile=gallery_page,
+        )
+        core_accuracy_gates = image_viewer_core_accuracy_gates(
+            source_path=source_path,
+            details=details,
+            gallery_manifest=gallery_manifest,
+            validation_plan=validation_plan,
+        )
         image_payload = {
             "decoded": bool(details.get("decoded")),
             "width": details.get("width"),
@@ -5843,16 +5866,31 @@ def build_image_preview(source_path: Path, *, image_url: str, run_id: str | None
             "image_gallery_manifest": gallery_manifest,
             "image_gallery_manifest_hash": str(gallery_manifest.get("manifest_hash") or ""),
             "gallery_review_assessment": image_gallery_review_assessment(details),
-            "core_accuracy_gates": image_viewer_core_accuracy_gates(source_path=source_path, details=details, gallery_manifest=gallery_manifest),
+            "image_gallery_report_grade_validation_plan": validation_plan,
+            "image_gallery_report_grade_validation_plan_hash": validation_plan["validation_plan_sha256"],
+            "core_accuracy_gates": core_accuracy_gates,
             "commercial_uplift_evidence": image_viewer_commercial_uplift_evidence(
                 source_path=source_path,
                 details=details,
                 gallery_manifest=gallery_manifest,
+                validation_plan=validation_plan,
             ),
             "ocr_queue_assessment": details.get("ocr_queue_assessment") if isinstance(details.get("ocr_queue_assessment"), dict) else {},
             "korean_ocr_translation_workflow": details.get("korean_ocr_translation_workflow") if isinstance(details.get("korean_ocr_translation_workflow"), dict) else {},
         }
     except Exception as exc:
+        validation_plan = build_image_gallery_report_grade_validation_plan(
+            context="image-preview-error",
+            source_path=source_path,
+            details={},
+            gallery_manifest={},
+            gallery_page_profile=image_gallery_page_profile(run_id=run_id, source_path=source_path, details={}),
+        )
+        core_accuracy_gates = image_viewer_core_accuracy_gates(
+            source_path=source_path,
+            details={},
+            validation_plan=validation_plan,
+        )
         image_payload = {
             "decoded": False,
             "error": str(exc),
@@ -5870,8 +5908,14 @@ def build_image_preview(source_path: Path, *, image_url: str, run_id: str | None
             "ocr_queue_profile": source_ocr_queue_profile(run_id=run_id, source_path=source_path),
             "korean_ocr_translation_profile": source_ocr_translation_profile(run_id=run_id, source_path=source_path, details={}),
             "gallery_review_assessment": image_gallery_review_assessment({}),
-            "core_accuracy_gates": image_viewer_core_accuracy_gates(source_path=source_path, details={}),
-            "commercial_uplift_evidence": image_viewer_commercial_uplift_evidence(source_path=source_path, details={}),
+            "image_gallery_report_grade_validation_plan": validation_plan,
+            "image_gallery_report_grade_validation_plan_hash": validation_plan["validation_plan_sha256"],
+            "core_accuracy_gates": core_accuracy_gates,
+            "commercial_uplift_evidence": image_viewer_commercial_uplift_evidence(
+                source_path=source_path,
+                details={},
+                validation_plan=validation_plan,
+            ),
         }
     return {
         "preview_type": "image",
@@ -6365,6 +6409,29 @@ def build_image_gallery_page(
         similarity_bucket=similarity_bucket,
         bucket_counts=bucket_counts,
     )
+    page_controls = {
+        "max_page_items": IMAGE_GALLERY_MAX_ITEMS,
+        "bounded_folder_scan": True,
+        "inline_originals_not_copied": True,
+        "thumbnail_metadata_only": True,
+        "keyboard_triage": True,
+        "persistent_tags": False,
+    }
+    page_details = image_gallery_page_details_for_validation(page_items)
+    validation_plan = build_image_gallery_report_grade_validation_plan(
+        context="image-gallery-page",
+        source_path=anchor_path,
+        details=page_details,
+        page_manifest=gallery_manifest,
+        page_items=page_items,
+        page_controls=page_controls,
+    )
+    core_accuracy_gates = image_viewer_core_accuracy_gates(
+        source_path=anchor_path,
+        details=page_details,
+        gallery_manifest=gallery_manifest,
+        validation_plan=validation_plan,
+    )
     return {
         "command": "source-image-gallery",
         "profile_version": "image-gallery-page-v1",
@@ -6381,15 +6448,17 @@ def build_image_gallery_page(
         "bucket_counts": bucket_counts,
         "image_gallery_page_manifest": gallery_manifest,
         "image_gallery_page_manifest_hash": gallery_manifest["manifest_hash"],
+        "image_gallery_report_grade_validation_plan": validation_plan,
+        "image_gallery_report_grade_validation_plan_hash": validation_plan["validation_plan_sha256"],
+        "core_accuracy_gates": core_accuracy_gates,
         "items": page_items,
         "large_data_controls": {
-            "max_page_items": IMAGE_GALLERY_MAX_ITEMS,
-            "bounded_folder_scan": True,
-            "inline_originals_not_copied": True,
-            "thumbnail_metadata_only": True,
-            "persistent_tags": False,
+            **page_controls,
             "image_gallery_page_manifest_hash": gallery_manifest["manifest_hash"],
             "image_row_hash_count": gallery_manifest["image_row_hash_count"],
+            "image_gallery_report_grade_validation_plan_hash": validation_plan["validation_plan_sha256"],
+            "image_gallery_report_grade_ready_slot_count": validation_plan["ready_slot_count"],
+            "image_gallery_report_grade_blocking_slot_count": validation_plan["blocking_slot_count"],
         },
         "keyboard_triage": {
             "suggested_shortcuts": ["left/right: move image", "r: mark relevant", "x: reject", "i: include in report"],
@@ -6408,6 +6477,9 @@ def build_image_gallery_page(
                 "similarity_bucket_filter": bool(similarity_bucket),
                 "max_page_items": IMAGE_GALLERY_MAX_ITEMS,
                 "persistent_tags": False,
+                "image_gallery_report_grade_validation_plan_hash": validation_plan["validation_plan_sha256"],
+                "image_gallery_report_grade_ready_slot_count": validation_plan["ready_slot_count"],
+                "image_gallery_report_grade_blocking_slot_count": validation_plan["blocking_slot_count"],
             },
         ),
     }
@@ -6503,14 +6575,243 @@ def build_image_gallery_page_manifest(
     return {**manifest_core, "manifest_hash": stable_payload_sha256(manifest_core)}
 
 
+def image_gallery_page_details_for_validation(items: Sequence[Mapping[str, object]]) -> dict[str, object]:
+    first_hash = next((str(item.get("sha256") or "") for item in items if item.get("sha256")), "")
+    first_bucket = next((str(item.get("similarity_bucket") or "") for item in items if item.get("similarity_bucket")), "")
+    thumbnail_ready = any(bool(item.get("thumbnail_available")) or item.get("decoded") is not None for item in items)
+    return {
+        "decoded": any(bool(item.get("decoded")) for item in items) if items else False,
+        "width": next((item.get("width") for item in items if item.get("width") is not None), None),
+        "height": next((item.get("height") for item in items if item.get("height") is not None), None),
+        "hashes": {"sha256": first_hash} if first_hash else {},
+        "similarity_bucket": first_bucket,
+        "thumbnail_preview": {"available": thumbnail_ready} if items else {},
+        "gallery_review_mode": bool(items),
+        "tag_suggestions": next((list(item.get("tag_suggestions") or []) for item in items if item.get("tag_suggestions")), []),
+    }
+
+
+def build_image_gallery_report_grade_validation_plan(
+    *,
+    context: str,
+    source_path: Path,
+    details: Mapping[str, object],
+    gallery_manifest: Mapping[str, object] | None = None,
+    page_manifest: Mapping[str, object] | None = None,
+    page_items: Sequence[Mapping[str, object]] | None = None,
+    gallery_page_profile: Mapping[str, object] | None = None,
+    page_controls: Mapping[str, object] | None = None,
+    trusted_diff: Mapping[str, object] | None = None,
+) -> dict[str, object]:
+    gallery_manifest = gallery_manifest if isinstance(gallery_manifest, Mapping) else {}
+    page_manifest = page_manifest if isinstance(page_manifest, Mapping) else {}
+    page_items = list(page_items or [])
+    gallery_page_profile = gallery_page_profile if isinstance(gallery_page_profile, Mapping) else {}
+    page_controls = page_controls if isinstance(page_controls, Mapping) else {}
+    trusted_diff = trusted_diff if isinstance(trusted_diff, Mapping) else {}
+
+    def slot(
+        slot_id: str,
+        *,
+        ready: bool,
+        evidence: str,
+        blocker_id: str | None = None,
+        operator_action: str = "",
+    ) -> dict[str, object]:
+        row: dict[str, object] = {
+            "slot_id": slot_id,
+            "status": "complete" if ready else "external-required",
+            "evidence": evidence,
+        }
+        if blocker_id and not ready:
+            row["blocker_id"] = blocker_id
+        if operator_action:
+            row["operator_action"] = operator_action
+        return row
+
+    hashes = details.get("hashes") if isinstance(details.get("hashes"), Mapping) else {}
+    source_sha256 = str(hashes.get("sha256") or "")
+    page_sha_count = sum(1 for item in page_items if item.get("sha256"))
+    source_manifest_hash = str(gallery_manifest.get("manifest_hash") or "")
+    source_row_hash = str(gallery_manifest.get("image_row_hash") or "")
+    page_manifest_hash = str(page_manifest.get("manifest_hash") or "")
+    page_row_hash_count = int(page_manifest.get("image_row_hash_count") or 0)
+    similarity_bucket = str(details.get("similarity_bucket") or "")
+    page_similarity_count = sum(1 for item in page_items if item.get("similarity_bucket"))
+    tag_suggestions = details.get("tag_suggestions") if isinstance(details.get("tag_suggestions"), Sequence) else []
+    validation_slots = [
+        slot(
+            "image-metadata-and-source-hash",
+            ready=bool(source_sha256) or page_sha_count > 0 or details.get("width") is not None,
+            evidence=f"source_sha256={source_sha256} page_sha_count={page_sha_count} width={details.get('width', '')}",
+            blocker_id="image-metadata-and-source-hash-required",
+            operator_action="Capture image dimensions and source hashes before gallery review.",
+        ),
+        slot(
+            "image-thumbnail-or-preview-metadata",
+            ready=bool(details.get("thumbnail_preview")) or details.get("decoded") is not None or any(item.get("thumbnail_available") for item in page_items),
+            evidence=(
+                f"thumbnail_preview={bool(details.get('thumbnail_preview'))} decoded_present={details.get('decoded') is not None} "
+                f"page_thumbnail_count={sum(1 for item in page_items if item.get('thumbnail_available'))}"
+            ),
+            blocker_id="image-thumbnail-or-preview-metadata-required",
+            operator_action="Emit thumbnail or preview metadata for each reviewable image row.",
+        ),
+        slot(
+            "image-perceptual-bucket",
+            ready=bool(similarity_bucket) or page_similarity_count > 0,
+            evidence=f"similarity_bucket={similarity_bucket} page_similarity_count={page_similarity_count}",
+            blocker_id="image-perceptual-bucket-required",
+            operator_action="Compute a perceptual triage bucket before image comparison review.",
+        ),
+        slot(
+            "image-source-or-page-manifest-hashes",
+            ready=(bool(source_manifest_hash) and bool(source_row_hash)) or (bool(page_manifest_hash) and page_row_hash_count > 0),
+            evidence=(
+                f"source_manifest_hash={source_manifest_hash} source_row_hash={source_row_hash} "
+                f"page_manifest_hash={page_manifest_hash} page_row_hash_count={page_row_hash_count}"
+            ),
+            blocker_id="image-source-or-page-manifest-hashes-required",
+            operator_action="Attach source/page manifests with row hashes for report reproducibility.",
+        ),
+        slot(
+            "image-bounded-gallery-page-or-profile",
+            ready=bool(page_manifest_hash)
+            or bool(gallery_page_profile.get("supports_folder_gallery_page"))
+            or bool(page_controls.get("bounded_folder_scan")),
+            evidence=(
+                f"page_manifest_hash={page_manifest_hash} supports_folder_gallery_page={gallery_page_profile.get('supports_folder_gallery_page', False)} "
+                f"bounded_folder_scan={page_controls.get('bounded_folder_scan', False)}"
+            ),
+            blocker_id="image-bounded-gallery-page-or-profile-required",
+            operator_action="Expose a bounded gallery page/profile so large folders do not overload the reviewer.",
+        ),
+        slot(
+            "image-tag-report-selection-hints",
+            ready=bool(tag_suggestions)
+            or bool(details.get("gallery_review_mode"))
+            or any(item.get("tag_suggestions") for item in page_items)
+            or bool(page_controls.get("keyboard_triage")),
+            evidence=(
+                f"tag_suggestions={len(tag_suggestions)} page_tag_rows={sum(1 for item in page_items if item.get('tag_suggestions'))} "
+                f"keyboard_triage={page_controls.get('keyboard_triage', False)}"
+            ),
+            blocker_id="image-tag-report-selection-hints-required",
+            operator_action="Emit tag/report-selection hints or keyboard-triage metadata for reviewer handoff.",
+        ),
+        slot(
+            "image-dedicated-virtualized-gallery-ui",
+            ready=False,
+            evidence="dedicated_virtualized_gallery_ui=false",
+            blocker_id="dedicated-virtualized-gallery-ui-required",
+            operator_action="Build and browser-test a true virtualized grid with persisted viewport and keyboard navigation.",
+        ),
+        slot(
+            "image-persistent-gallery-tags",
+            ready=False,
+            evidence="persistent_gallery_tags=false",
+            blocker_id="persistent-gallery-tags-required",
+            operator_action="Persist relevant/rejected/include tags into Case DB review history with audit evidence.",
+        ),
+        slot(
+            "image-ml-visual-similarity-clustering",
+            ready=False,
+            evidence="ml_visual_similarity_clustering=false",
+            blocker_id="ml-visual-similarity-clustering-required",
+            operator_action="Validate ML/perceptual clustering against a labeled visual similarity corpus.",
+        ),
+        slot(
+            "image-sensitive-deepfake-classifier-validation",
+            ready=False,
+            evidence="sensitive_deepfake_classifier_validation=false",
+            blocker_id="sensitive-deepfake-classifier-validation-required",
+            operator_action="Attach sensitive media and deepfake classifier validation with known-answer false positive/negative rates.",
+        ),
+        slot(
+            "image-trusted-gallery-manifest-diff",
+            ready=trusted_diff.get("status") == "pass",
+            evidence=f"trusted_diff_status={trusted_diff.get('status', 'missing')}",
+            blocker_id=IMAGE_GALLERY_TRUSTED_DIFF_BLOCKER,
+            operator_action="Compare Rapid image gallery manifests against a trusted external manifest before court use.",
+        ),
+        slot(
+            "image-selected-report-export",
+            ready=False,
+            evidence="selected_image_report_export=false",
+            blocker_id="selected-image-report-export-required",
+            operator_action="Export selected gallery rows into report/exhibit packages with citation manifests.",
+        ),
+    ]
+    blockers = sorted(
+        str(slot_row.get("blocker_id"))
+        for slot_row in validation_slots
+        if slot_row.get("status") != "complete" and slot_row.get("blocker_id")
+    )
+    ready_slot_count = sum(1 for slot_row in validation_slots if slot_row.get("status") == "complete")
+    plan_core: dict[str, object] = {
+        "profile_version": IMAGE_GALLERY_REPORT_GRADE_VALIDATION_PLAN_VERSION,
+        "item_number": 56,
+        "gap_id": VIEWER_WORKFLOW_GAP_IDS["gallery"],
+        "batch_id": "commercial-uplift-056-060",
+        "selected_track": "image-gallery-review-report-validation",
+        "context": context,
+        "path": str(source_path),
+        "source_sha256": source_sha256,
+        "source_manifest_hash": source_manifest_hash,
+        "source_row_hash": source_row_hash,
+        "page_manifest_hash": page_manifest_hash,
+        "page_row_hash_count": page_row_hash_count,
+        "returned_item_count": len(page_items),
+        "page_sha_count": page_sha_count,
+        "similarity_bucket": similarity_bucket,
+        "page_similarity_count": page_similarity_count,
+        "trusted_diff_status": str(trusted_diff.get("status") or "missing"),
+        "ready_slot_count": ready_slot_count,
+        "blocking_slot_count": len(blockers),
+        "validation_status": "report-validation-blocked",
+        "commercial_grade": False,
+        "commercial_grade_ready": False,
+        "validation_slots": validation_slots,
+        "blockers": blockers,
+        "commercial_grade_blockers": list(IMAGE_GALLERY_REPORT_GRADE_BLOCKERS),
+        "validation_commands": [
+            "rapidtriage web -> source-preview for an image source",
+            "GET /api/runs/<run_id>/source-image-gallery?path=<path>&offset=<n>&limit=<n>",
+            "rapidtriage commercial-readiness --validation-package docs/validation/rapidtriage-core-forensics-051-060-known-answer.json --limit 56 --json",
+        ],
+        "report_guidance": {
+            "allowed_use": "image-gallery-metadata-triage-pivot",
+            "forbidden_claim": "ML visual similarity, sensitive/deepfake, or selected-image report-complete analysis",
+            "required_disclaimer": (
+                "Image gallery output is bounded metadata, hash, thumbnail, and perceptual-bucket triage until a "
+                "virtualized gallery UI, persisted tags, ML similarity corpus, sensitive/deepfake classifier validation, "
+                "trusted image manifest diff, and selected-image report export evidence are attached."
+            ),
+        },
+    }
+    return {**plan_core, "validation_plan_sha256": stable_payload_sha256(plan_core)}
+
+
 def image_viewer_commercial_uplift_evidence(
     *,
     source_path: Path,
     details: Mapping[str, object],
     gallery_manifest: Mapping[str, object] | None = None,
+    validation_plan: Mapping[str, object] | None = None,
 ) -> dict[str, object]:
     gallery_manifest = gallery_manifest if isinstance(gallery_manifest, Mapping) else {}
-    gates = image_viewer_core_accuracy_gates(source_path=source_path, details=details, gallery_manifest=gallery_manifest)
+    validation_plan = validation_plan if isinstance(validation_plan, Mapping) else build_image_gallery_report_grade_validation_plan(
+        context="image-preview",
+        source_path=source_path,
+        details=details,
+        gallery_manifest=gallery_manifest,
+    )
+    gates = image_viewer_core_accuracy_gates(
+        source_path=source_path,
+        details=details,
+        gallery_manifest=gallery_manifest,
+        validation_plan=validation_plan,
+    )
     blockers = [
         "dedicated-large-gallery-virtualization-and-bulk-tagging-remain-limited",
         "similarity-is-perceptual-hash-bucket-not-ml-validated",
@@ -6526,6 +6827,7 @@ def image_viewer_commercial_uplift_evidence(
             f"source_path:{source_path}",
             f"perceptual_hash:{details.get('perceptual_hash', '')}",
             f"similarity_bucket:{details.get('similarity_bucket', '')}",
+            f"image_gallery_report_grade_validation_plan_sha256:{validation_plan.get('validation_plan_sha256', '')}",
         ],
         controls={
             "thumbnail_preview": bool(details.get("thumbnail_preview")),
@@ -6536,6 +6838,10 @@ def image_viewer_commercial_uplift_evidence(
             "image_gallery_manifest_present": bool(gallery_manifest.get("manifest_hash")),
             "image_gallery_manifest_hash": str(gallery_manifest.get("manifest_hash") or ""),
             "image_gallery_row_hash": str(gallery_manifest.get("image_row_hash") or ""),
+            "image_gallery_report_grade_validation_plan_present": bool(validation_plan.get("validation_plan_sha256")),
+            "image_gallery_report_grade_validation_plan_hash": str(validation_plan.get("validation_plan_sha256") or ""),
+            "image_gallery_report_grade_ready_slot_count": int(validation_plan.get("ready_slot_count") or 0),
+            "image_gallery_report_grade_blocking_slot_count": int(validation_plan.get("blocking_slot_count") or 0),
             "dedicated_virtualized_gallery": False,
             "persistent_gallery_tags": False,
         },
@@ -7456,6 +7762,7 @@ def image_viewer_core_accuracy_gates(
     source_path: Path,
     details: Mapping[str, object],
     gallery_manifest: Mapping[str, object] | None = None,
+    validation_plan: Mapping[str, object] | None = None,
 ) -> list[dict[str, object]]:
     satisfied = []
     if details.get("width") is not None or details.get("hashes"):
@@ -7469,6 +7776,11 @@ def image_viewer_core_accuracy_gates(
         satisfied.append("image gallery source manifest")
     if gallery_manifest.get("image_row_hash"):
         satisfied.append("image gallery row hash")
+    validation_plan = validation_plan if isinstance(validation_plan, Mapping) else {}
+    if validation_plan.get("validation_plan_sha256"):
+        satisfied.append("image gallery report-grade validation plan")
+    if int(validation_plan.get("ready_slot_count") or 0) >= 6:
+        satisfied.append("image gallery report-grade ready slots")
     satisfied.append("tag/report selection hints")
     if not details.get("media_native_capabilities", {}).get("deepfake_detection", False):
         satisfied.append("visual-classifier limitation warning")
@@ -7481,6 +7793,9 @@ def image_viewer_core_accuracy_gates(
                 f"perceptual_hash:{details.get('perceptual_hash', '')}",
                 f"similarity_bucket:{details.get('similarity_bucket', '')}",
                 f"image_gallery_manifest_hash:{gallery_manifest.get('manifest_hash', '')}",
+                f"image_gallery_report_grade_validation_plan_sha256:{validation_plan.get('validation_plan_sha256', '')}",
+                f"image_gallery_report_grade_ready_slot_count:{validation_plan.get('ready_slot_count', 0)}",
+                f"image_gallery_report_grade_blocking_slot_count:{validation_plan.get('blocking_slot_count', 0)}",
             ],
         )
     ]

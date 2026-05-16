@@ -66,8 +66,8 @@
       "status": "pass",
       "backlog_items": [56],
       "evidence_paths": ["docs/validation/core-forensics-051-060-fixture-evidence.json", "tests/test_rapidtriage_media_image.py", "tests/test_rapidtriage_api.py"],
-      "expected": {"required_assertions": ["Image rows/previews preserve metadata, hashes, thumbnail metadata, perceptual similarity bucket, source manifest row hashes, bounded folder gallery pages, page manifest row hashes, bucket filters, tag/report hints, classifier limitation, trusted image gallery manifest diff gates, and #56 core_accuracy_gates.", "Image gallery reportability decisions block ML/sensitive-media-complete claims until virtualized gallery, persistent tags, ML similarity, sensitive/deepfake classifier validation, and trusted image manifest evidence exists."]},
-      "notes": "Internal fixture pass; dedicated gallery UI and ML similarity validation remain blockers."
+      "expected": {"required_assertions": ["Image rows/previews preserve metadata, hashes, thumbnail metadata, perceptual similarity bucket, source manifest row hashes, bounded folder gallery pages, page manifest row hashes, bucket filters, tag/report hints, image_gallery_report_grade_validation_plan ready/blocking slots, classifier limitation, trusted image gallery manifest diff gates, and #56 core_accuracy_gates.", "Image gallery reportability decisions block ML/sensitive-media-complete claims until virtualized gallery, persistent tags, ML similarity, sensitive/deepfake classifier validation, trusted image manifest evidence, and selected-image report export exist."]},
+      "notes": "Internal fixture pass; dedicated gallery UI, persistent tags, ML/sensitive classifier validation, trusted gallery diff, and selected export remain blockers."
     },
     {
       "id": "core-forensics-057-media-transcript-fixture",
