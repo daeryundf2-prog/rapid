@@ -132,6 +132,52 @@ class RapidTriageCloudCollectTests(unittest.TestCase):
                 self.assertEqual(payload["summary"]["response_parser_manifest_count"], 1)
                 self.assertEqual(acquisition_manifest["response_parser_manifest_count"], 1)
                 self.assertEqual(len(acquisition_manifest["response_parser_manifest_hashes"]), 1)
+                report_plan = payload["cloud_api_report_grade_validation_plan"]
+                self.assertEqual(
+                    report_plan["profile_version"],
+                    "cloud-api-report-grade-validation-plan-v1",
+                )
+                self.assertEqual(report_plan["item_number"], 40)
+                self.assertEqual(report_plan["gap_id"], "#40")
+                self.assertEqual(report_plan["functional_uplift_item_number"], 56)
+                self.assertEqual(report_plan["provider"], "google")
+                self.assertEqual(report_plan["ready_slot_count"], 8)
+                self.assertEqual(report_plan["blocking_slot_count"], 7)
+                self.assertEqual(
+                    payload["summary"]["cloud_api_report_grade_validation_plan_hash"],
+                    report_plan["validation_plan_sha256"],
+                )
+                self.assertEqual(
+                    payload["summary"]["cloud_api_report_grade_ready_slot_count"],
+                    report_plan["ready_slot_count"],
+                )
+                self.assertEqual(
+                    payload["summary"]["cloud_api_report_grade_blocking_slot_count"],
+                    report_plan["blocking_slot_count"],
+                )
+                plan_slots = {slot["slot_id"]: slot for slot in report_plan["validation_slots"]}
+                self.assertEqual(plan_slots["cloud-api-source-manifest-hash"]["status"], "complete")
+                self.assertEqual(plan_slots["cloud-api-acquisition-manifest"]["status"], "complete")
+                self.assertEqual(plan_slots["cloud-api-request-profile-inventory"]["status"], "complete")
+                self.assertEqual(plan_slots["cloud-api-response-hash-sidecar-boundary"]["status"], "complete")
+                self.assertEqual(plan_slots["cloud-api-response-parser-manifest"]["status"], "complete")
+                self.assertEqual(plan_slots["cloud-api-credential-redaction-boundary"]["status"], "complete")
+                self.assertEqual(plan_slots["cloud-api-provider-scope-profile"]["status"], "complete")
+                self.assertEqual(plan_slots["cloud-api-oauth-consent-legal-authority"]["status"], "complete")
+                self.assertEqual(plan_slots["cloud-api-oauth-device-flow-capture"]["status"], "external-required")
+                self.assertEqual(plan_slots["cloud-api-pagination-delta-execution"]["status"], "declared-not-executed")
+                self.assertEqual(
+                    plan_slots["cloud-api-retry-throttle-backoff-validation"]["status"],
+                    "declared-not-provider-validated",
+                )
+                self.assertEqual(
+                    plan_slots["cloud-api-provider-native-response-diff"]["blocker_id"],
+                    "cloud-api-provider-native-response-diff-required",
+                )
+                self.assertIn(
+                    "independent-cloud-api-acquisition-review-required",
+                    report_plan["blockers"],
+                )
                 self.assertEqual(
                     acquisition_manifest["request_locators"][0]["source_viewer"],
                     "cloud-api-response-row",
@@ -140,12 +186,30 @@ class RapidTriageCloudCollectTests(unittest.TestCase):
                     functional_profile["implemented_controls"]["cloud_api_acquisition_manifest_hash"],
                     acquisition_manifest["manifest_sha256"],
                 )
+                self.assertEqual(
+                    functional_profile["implemented_controls"]["cloud_api_report_grade_validation_plan_hash"],
+                    report_plan["validation_plan_sha256"],
+                )
+                self.assertEqual(
+                    functional_profile["implemented_controls"]["cloud_api_report_grade_ready_slot_count"],
+                    8,
+                )
+                self.assertEqual(
+                    functional_profile["implemented_controls"]["cloud_api_report_grade_blocking_slot_count"],
+                    7,
+                )
                 self.assertTrue(functional_profile["implemented_controls"]["response_parser_manifests_emitted"])
                 self.assertIn(
                     "cloud-api-response-parser-manifests-emitted",
                     functional_profile["passed_validation_check_ids"],
                 )
+                self.assertIn(
+                    "cloud-api-report-grade-validation-plan-emitted",
+                    functional_profile["passed_validation_check_ids"],
+                )
                 self.assertEqual(functional_profile["evidence_counts"]["response_parser_manifest_count"], 1)
+                self.assertEqual(functional_profile["evidence_counts"]["report_grade_ready_slot_count"], 8)
+                self.assertEqual(functional_profile["evidence_counts"]["report_grade_blocking_slot_count"], 7)
                 self.assertEqual(
                     payload["cloud_api_collection_strategy_profile"]["selected_track"],
                     "manifest-driven-bounded-api-collection",
@@ -170,6 +234,8 @@ class RapidTriageCloudCollectTests(unittest.TestCase):
                 self.assertIn("request acquisition profile", api_gate["satisfied_checks"])
                 self.assertIn("response hash/provenance", api_gate["satisfied_checks"])
                 self.assertIn("cloud API acquisition manifest", api_gate["satisfied_checks"])
+                self.assertIn("cloud API report-grade validation plan", api_gate["satisfied_checks"])
+                self.assertIn("cloud API report-grade ready slots", api_gate["satisfied_checks"])
                 self.assertIn("response parser/source viewer manifest", api_gate["satisfied_checks"])
                 self.assertIn("pagination/backoff limitation warning", api_gate["satisfied_checks"])
                 self.assertIn("provider OAuth/scope/legal warning", api_gate["satisfied_checks"])
@@ -179,6 +245,16 @@ class RapidTriageCloudCollectTests(unittest.TestCase):
                     "response_parser_manifest_sha256:",
                     "\n".join(api_uplift["source_refs"]),
                 )
+                self.assertIn(
+                    "cloud_api_report_grade_validation_plan_sha256:",
+                    "\n".join(api_uplift["source_refs"]),
+                )
+                self.assertEqual(
+                    api_uplift["large_data_controls"]["cloud_api_report_grade_validation_plan_hash"],
+                    report_plan["validation_plan_sha256"],
+                )
+                self.assertEqual(api_uplift["large_data_controls"]["cloud_api_report_grade_ready_slot_count"], 8)
+                self.assertEqual(api_uplift["large_data_controls"]["cloud_api_report_grade_blocking_slot_count"], 7)
                 self.assertIn("#41", payload["credential_handling"]["commercial_gap_ids"])
                 self.assertIn("#41", payload["credential_handling"]["credential_security_assessment"]["commercial_gap_ids"])
                 self.assertEqual(payload["credential_handling"]["forensic_review"]["gap_id"], "#41")
@@ -354,6 +430,18 @@ class RapidTriageCloudCollectTests(unittest.TestCase):
                 self.assertEqual(payload["cloud_api_acquisition_manifest"]["dry_run"], True)
                 self.assertEqual(payload["cloud_api_acquisition_manifest"]["request_locator_count"], 1)
                 self.assertEqual(payload["summary"]["response_parser_manifest_count"], 1)
+                report_plan = payload["cloud_api_report_grade_validation_plan"]
+                self.assertEqual(report_plan["profile_version"], "cloud-api-report-grade-validation-plan-v1")
+                self.assertEqual(report_plan["ready_slot_count"], 6)
+                self.assertEqual(report_plan["blocking_slot_count"], 9)
+                self.assertEqual(
+                    payload["summary"]["cloud_api_report_grade_validation_plan_hash"],
+                    report_plan["validation_plan_sha256"],
+                )
+                plan_slots = {slot["slot_id"]: slot for slot in report_plan["validation_slots"]}
+                self.assertEqual(plan_slots["cloud-api-response-hash-sidecar-boundary"]["status"], "complete")
+                self.assertEqual(plan_slots["cloud-api-provider-scope-profile"]["status"], "external-required")
+                self.assertEqual(plan_slots["cloud-api-oauth-consent-legal-authority"]["status"], "external-required")
                 response_manifest = payload["requests"][0]["cloud_api_response_parser_manifest"]
                 self.assertEqual(response_manifest["parsed_status"], "dry-run-no-response")
                 self.assertEqual(response_manifest["source_viewer_locator"]["viewer"], "cloud-api-response-row")

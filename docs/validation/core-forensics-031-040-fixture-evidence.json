@@ -149,12 +149,14 @@
       "title": "Cloud API acquisition workflow",
       "assertions": [
         "Cloud API collection payloads preserve manifest validation, credential redaction, response hash/provenance, pagination/backoff limitations, OAuth/scope/legal warnings, cloud_api_analyst_review_profile, #40 core_accuracy_gates, and provider-complete acquisition reportability blockers.",
+        "Cloud API collection payloads emit cloud_api_report_grade_validation_plan with source/acquisition/request/response/credential/scope/OAuth/pagination/retry/provider-diff/legal-hold/schema/independent-review slots and ready/blocking counts.",
         "build_cloud_api_trusted_diff compares collected API response rows against provider native/admin/API rows before satisfying the #40 trusted diff gate."
       ],
       "blockers_kept": [
         "provider-specific OAuth/device flow",
         "pagination/backoff/delta known-answer corpus",
-        "legal hold/export workflow"
+        "legal hold/export workflow",
+        "provider-native response diff and independent acquisition review"
       ]
     }
   ]

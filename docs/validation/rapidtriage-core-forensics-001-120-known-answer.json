@@ -1034,7 +1034,8 @@
       ],
       "expected": {
         "required_assertions": [
-          "Cloud API collection preserves manifest validation, credential redaction, response hash/provenance, API limitation warnings, and #40 core_accuracy_gates"
+          "Cloud API collection preserves manifest validation, credential redaction, response hash/provenance, API limitation warnings, and #40 core_accuracy_gates",
+          "Cloud API collection emits cloud_api_report_grade_validation_plan with stable hash, report-grade evidence slots, and ready/blocking counts"
         ]
       },
       "notes": "Internal fixture pass; provider OAuth/device flow, pagination/delta, and legal-hold workflows remain validation-gated.",

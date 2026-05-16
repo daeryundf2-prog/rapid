@@ -234,6 +234,7 @@
       "expected": {
         "required_assertions": [
           "Cloud API collection preserves manifest validation, credential redaction, response hash/provenance, response-sidecar boundary, cloud_api_response_parser_manifest row citation/source viewer controls, API limitation warnings, and #40 core_accuracy_gates",
+          "Cloud API collection emits cloud_api_report_grade_validation_plan with stable hash, source/acquisition/request/response/credential/scope/OAuth/pagination/retry/provider-diff/legal-hold/schema/independent-review slots, and ready/blocking counts",
           "Cloud API trusted diff helper requires provider native/admin/API row equality before satisfying the #40 trusted cloud API/provider response diff pass gate",
           "Cloud API reportability decisions block provider-complete acquisition claims until OAuth scope/consent, pagination/delta, legal hold, and provider schema validation exists"
         ]

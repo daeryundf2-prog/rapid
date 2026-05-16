@@ -42,6 +42,19 @@ CLOUD_API_REPORT_GRADE_BLOCKERS = [
     "legal-hold-export-workflow-not-implemented",
     "known-answer-cloud-api-corpus-required",
 ]
+CLOUD_API_REPORT_GRADE_VALIDATION_PLAN_VERSION = "cloud-api-report-grade-validation-plan-v1"
+CLOUD_API_REPORT_GRADE_VALIDATION_BLOCKERS = [
+    "cloud-api-provider-oauth-device-flow-required",
+    "cloud-api-provider-scope-consent-legal-authority-required",
+    "cloud-api-original-manifest-hash-required",
+    "cloud-api-response-hash-and-sidecar-required",
+    "cloud-api-pagination-delta-execution-required",
+    "cloud-api-retry-throttle-backoff-validation-required",
+    "cloud-api-provider-native-response-diff-required",
+    "cloud-api-legal-hold-export-package-required",
+    "cloud-api-provider-schema-version-tracking-required",
+    "independent-cloud-api-acquisition-review-required",
+]
 CLOUD_API_TRUSTED_DIFF_BLOCKER = "cloud-api-provider-response-diff-required"
 CLOUD_API_TRUSTED_DIFF_TOOLS = {
     "provider-native-export",
@@ -221,6 +234,21 @@ def run_cloud_api_collection(
     )
     summary["cloud_api_acquisition_manifest_hash"] = acquisition_manifest["manifest_sha256"]
     summary["response_parser_manifest_count"] = acquisition_manifest["response_parser_manifest_count"]
+    report_grade_validation_plan = cloud_api_report_grade_validation_plan(
+        manifest_path=manifest_path,
+        output_dir=output_dir,
+        summary=summary,
+        credential_handling=credential_handling,
+        requests=collected,
+        provider_scope_profile=provider_scope_profile,
+        acquisition_manifest=acquisition_manifest,
+        collection_strategy_profile=collection_strategy_profile,
+    )
+    summary["cloud_api_report_grade_validation_plan_hash"] = report_grade_validation_plan[
+        "validation_plan_sha256"
+    ]
+    summary["cloud_api_report_grade_ready_slot_count"] = report_grade_validation_plan["ready_slot_count"]
+    summary["cloud_api_report_grade_blocking_slot_count"] = report_grade_validation_plan["blocking_slot_count"]
     payload = {
         "command": "cloud-collect",
         "generated_at": dt.datetime.now(dt.timezone.utc).isoformat(),
@@ -239,6 +267,7 @@ def run_cloud_api_collection(
         "cloud_api_report_grade_assessment": api_report_grade,
         "cloud_api_collection_strategy_profile": collection_strategy_profile,
         "cloud_api_acquisition_manifest": acquisition_manifest,
+        "cloud_api_report_grade_validation_plan": report_grade_validation_plan,
         "commercial_uplift_evidence": cloud_api_commercial_uplift_evidence(
             manifest_path=manifest_path,
             output_dir=output_dir,
@@ -247,6 +276,7 @@ def run_cloud_api_collection(
             requests=collected,
             provider_scope_profile=provider_scope_profile,
             report_grade=api_report_grade,
+            report_grade_validation_plan=report_grade_validation_plan,
         ),
         "functional_priority_profile": cloud_api_acquisition_functional_profile(
             manifest_path=manifest_path,
@@ -255,6 +285,7 @@ def run_cloud_api_collection(
             credential_handling=credential_handling,
             requests=collected,
             provider_scope_profile=provider_scope_profile,
+            report_grade_validation_plan=report_grade_validation_plan,
         ),
         "cloud_api_native_capabilities": dict(CLOUD_API_NATIVE_CAPABILITIES),
         "core_accuracy_gates": cloud_api_core_accuracy_gates(
@@ -263,6 +294,7 @@ def run_cloud_api_collection(
             summary=summary,
             credential_handling=credential_handling,
             requests=collected,
+            report_grade_validation_plan=report_grade_validation_plan,
         ),
         "forensic_review": cloud_api_forensic_review(
             gap_id="#40",
@@ -991,6 +1023,254 @@ def cloud_api_acquisition_manifest(
     return manifest
 
 
+def cloud_api_report_grade_validation_plan(
+    *,
+    manifest_path: Path,
+    output_dir: Path,
+    summary: Mapping[str, object],
+    credential_handling: Mapping[str, object],
+    requests: Iterable[Mapping[str, object]],
+    provider_scope_profile: Mapping[str, object],
+    acquisition_manifest: Mapping[str, object],
+    collection_strategy_profile: Mapping[str, object],
+) -> dict[str, object]:
+    request_rows = list(requests)
+    request_count = len(request_rows)
+    dry_run = bool(summary.get("dry_run"))
+    response_hash_count = sum(1 for row in request_rows if row.get("response_sha256"))
+    response_manifest_count = sum(
+        1 for row in request_rows if isinstance(row.get("cloud_api_response_parser_manifest"), Mapping)
+    )
+    request_profile_count = sum(
+        1 for row in request_rows if isinstance(row.get("request_acquisition_profile"), Mapping)
+    )
+    credential_authority_manifest = (
+        credential_handling.get("credential_authority_manifest")
+        if isinstance(credential_handling.get("credential_authority_manifest"), Mapping)
+        else {}
+    )
+    trusted_diff = summary.get("cloud_api_trusted_diff") if isinstance(summary.get("cloud_api_trusted_diff"), Mapping) else {}
+    pagination_declared = bool(collection_strategy_profile.get("pagination_policy_declared"))
+    retry_declared = bool(collection_strategy_profile.get("request_retry_policy_declared"))
+    acquisition_hash = text_value(acquisition_manifest.get("manifest_sha256") or "")
+
+    def slot(
+        slot_id: str,
+        status: str,
+        evidence: list[str],
+        *,
+        blocker: str = "",
+        blocking: bool = False,
+        external: bool = False,
+        required: str = "",
+    ) -> dict[str, object]:
+        return {
+            "slot_id": slot_id,
+            "status": status,
+            "ready": status == "complete",
+            "blocking": blocking,
+            "external_evidence_required": external,
+            "blocker_id": blocker,
+            "evidence": evidence,
+            "required_before_report": required,
+        }
+
+    slots = [
+        slot(
+            "cloud-api-source-manifest-hash",
+            "complete" if compute_sha256(manifest_path) else "missing",
+            [f"manifest_sha256:{compute_sha256(manifest_path)}"],
+            blocker="cloud-api-original-manifest-hash-required",
+            blocking=not bool(compute_sha256(manifest_path)),
+        ),
+        slot(
+            "cloud-api-acquisition-manifest",
+            "complete" if acquisition_hash else "missing",
+            [f"cloud_api_acquisition_manifest_sha256:{acquisition_hash}"] if acquisition_hash else [],
+            blocker="cloud-api-acquisition-manifest-required",
+            blocking=not bool(acquisition_hash),
+        ),
+        slot(
+            "cloud-api-request-profile-inventory",
+            "complete" if request_count > 0 and request_profile_count == request_count else "incomplete",
+            [f"request_profiles:{request_profile_count}/{request_count}"],
+            blocker="cloud-api-request-profile-inventory-required",
+            blocking=request_count == 0 or request_profile_count != request_count,
+        ),
+        slot(
+            "cloud-api-response-hash-sidecar-boundary",
+            "complete" if dry_run or response_hash_count > 0 else "missing",
+            [f"response_hash_count:{response_hash_count}", f"dry_run:{dry_run}"],
+            blocker="cloud-api-response-hash-and-sidecar-required",
+            blocking=not dry_run and response_hash_count == 0,
+        ),
+        slot(
+            "cloud-api-response-parser-manifest",
+            "complete" if request_count > 0 and response_manifest_count == request_count else "incomplete",
+            [f"response_parser_manifests:{response_manifest_count}/{request_count}"],
+            blocker="cloud-api-response-parser-manifest-required",
+            blocking=request_count == 0 or response_manifest_count != request_count,
+        ),
+        slot(
+            "cloud-api-credential-redaction-boundary",
+            "complete"
+            if bool(credential_handling.get("headers_redacted"))
+            and not bool(credential_handling.get("tokens_written_to_output"))
+            else "failed",
+            [
+                f"headers_redacted:{bool(credential_handling.get('headers_redacted'))}",
+                f"tokens_written_to_output:{bool(credential_handling.get('tokens_written_to_output'))}",
+            ],
+            blocker="cloud-api-credential-redaction-required",
+            blocking=not bool(credential_handling.get("headers_redacted"))
+            or bool(credential_handling.get("tokens_written_to_output")),
+        ),
+        slot(
+            "cloud-api-provider-scope-profile",
+            "complete" if bool(provider_scope_profile.get("scope_inventory_captured")) else "external-required",
+            [
+                f"provider:{provider_scope_profile.get('provider', '')}",
+                f"scope_count:{int(provider_scope_profile.get('scope_count') or 0)}",
+            ],
+            blocker="cloud-api-provider-scope-consent-legal-authority-required",
+            blocking=not bool(provider_scope_profile.get("scope_inventory_captured")),
+            external=not bool(provider_scope_profile.get("scope_inventory_captured")),
+            required="Attach provider/admin scope inventory when the manifest did not declare scopes.",
+        ),
+        slot(
+            "cloud-api-oauth-consent-legal-authority",
+            "complete"
+            if bool(credential_authority_manifest.get("oauth_consent_record_present"))
+            and bool(provider_scope_profile.get("legal_authority_record_present"))
+            else "external-required",
+            [
+                f"oauth_consent_record_present:{bool(credential_authority_manifest.get('oauth_consent_record_present'))}",
+                f"legal_authority_record_present:{bool(provider_scope_profile.get('legal_authority_record_present'))}",
+            ],
+            blocker="cloud-api-provider-scope-consent-legal-authority-required",
+            blocking=not (
+                bool(credential_authority_manifest.get("oauth_consent_record_present"))
+                and bool(provider_scope_profile.get("legal_authority_record_present"))
+            ),
+            external=not (
+                bool(credential_authority_manifest.get("oauth_consent_record_present"))
+                and bool(provider_scope_profile.get("legal_authority_record_present"))
+            ),
+            required="Attach OAuth consent, granted scopes, account owner, and legal authority records.",
+        ),
+        slot(
+            "cloud-api-oauth-device-flow-capture",
+            "external-required",
+            [f"provider_specific_oauth_flow:{CLOUD_API_NATIVE_CAPABILITIES['provider_specific_oauth_flow']}"],
+            blocker="cloud-api-provider-oauth-device-flow-required",
+            blocking=True,
+            external=True,
+            required="Capture provider-specific OAuth/device-flow consent and access-token provenance.",
+        ),
+        slot(
+            "cloud-api-pagination-delta-execution",
+            "declared-not-executed" if pagination_declared else "not-declared",
+            [f"pagination_declared:{pagination_declared}"],
+            blocker="cloud-api-pagination-delta-execution-required",
+            blocking=True,
+            external=True,
+            required="Exercise next-link/page/delta-token behavior against provider known-answer fixtures.",
+        ),
+        slot(
+            "cloud-api-retry-throttle-backoff-validation",
+            "declared-not-provider-validated" if retry_declared else "not-declared",
+            [f"retry_declared:{retry_declared}"],
+            blocker="cloud-api-retry-throttle-backoff-validation-required",
+            blocking=True,
+            external=True,
+            required="Validate rate-limit, retry, throttle, and backoff behavior against provider responses.",
+        ),
+        slot(
+            "cloud-api-provider-native-response-diff",
+            "complete" if trusted_diff.get("status") == "pass" else "external-required",
+            [
+                f"trusted_diff_status:{trusted_diff.get('status', 'missing')}",
+                f"trusted_tool:{trusted_diff.get('trusted_tool', '')}",
+            ],
+            blocker="cloud-api-provider-native-response-diff-required",
+            blocking=trusted_diff.get("status") != "pass",
+            external=trusted_diff.get("status") != "pass",
+            required="Attach a passing provider-native/admin/API row diff for sampled responses.",
+        ),
+        slot(
+            "cloud-api-legal-hold-export-package",
+            "external-required",
+            [f"provider_export_manifest_present:{bool(provider_scope_profile.get('provider_export_manifest_present'))}"],
+            blocker="cloud-api-legal-hold-export-package-required",
+            blocking=True,
+            external=True,
+            required="Attach legal hold/eDiscovery/export package evidence when provider completeness is claimed.",
+        ),
+        slot(
+            "cloud-api-provider-schema-version-tracking",
+            "external-required",
+            [f"services:{','.join(sorted({text_value(row.get('service') or '') for row in request_rows if row.get('service')}))}"],
+            blocker="cloud-api-provider-schema-version-tracking-required",
+            blocking=True,
+            external=True,
+            required="Record provider API version, response schema version, and parser compatibility matrix.",
+        ),
+        slot(
+            "independent-cloud-api-acquisition-review",
+            "external-required",
+            ["independent_review:false"],
+            blocker="independent-cloud-api-acquisition-review-required",
+            blocking=True,
+            external=True,
+            required="Attach independent reviewer signoff before court/report-grade provider-complete wording.",
+        ),
+    ]
+    ready_slot_count = sum(1 for item in slots if item["ready"])
+    blocking_slot_count = sum(1 for item in slots if item["blocking"])
+    blocker_ids = sorted({str(item["blocker_id"]) for item in slots if item["blocking"] and item["blocker_id"]})
+    plan: dict[str, object] = {
+        "profile_version": CLOUD_API_REPORT_GRADE_VALIDATION_PLAN_VERSION,
+        "item_number": 40,
+        "gap_id": "#40",
+        "batch_id": "commercial-uplift-036-040",
+        "functional_uplift_item_number": 56,
+        "manifest_path": str(manifest_path.resolve()),
+        "manifest_sha256": compute_sha256(manifest_path),
+        "output_dir": str(output_dir.resolve()),
+        "dry_run": dry_run,
+        "request_count": int(summary.get("request_count") or 0),
+        "collected_count": int(summary.get("collected_count") or 0),
+        "validated_count": int(summary.get("validated_count") or 0),
+        "provider": text_value(provider_scope_profile.get("provider") or "not-declared"),
+        "scope_inventory_captured": bool(provider_scope_profile.get("scope_inventory_captured")),
+        "cloud_api_acquisition_manifest_sha256": acquisition_hash,
+        "response_parser_manifest_count": response_manifest_count,
+        "ready_slot_count": ready_slot_count,
+        "blocking_slot_count": blocking_slot_count,
+        "validation_status": "report-validation-blocked",
+        "commercial_grade": False,
+        "validation_slots": slots,
+        "blockers": blocker_ids,
+        "validation_commands": [
+            "source-cloud-api-manifest-hash-and-authority-review",
+            "provider-oauth-consent-scope-device-flow-capture",
+            "provider-pagination-delta-retry-throttle-known-answer-run",
+            "provider-native-admin-api-response-diff",
+            "legal-hold-export-package-validation",
+            "independent-cloud-api-acquisition-review",
+        ],
+        "report_guidance": (
+            "Use collected response rows as triage pivots until OAuth authority, scope consent, "
+            "pagination/delta, provider-native diff, legal-hold package, schema version, and independent "
+            "review evidence are attached."
+        ),
+    }
+    plan["validation_plan_sha256"] = stable_cloud_api_json_sha256(
+        {key: value for key, value in plan.items() if key != "validation_plan_sha256"}
+    )
+    return plan
+
+
 def stable_cloud_api_json_sha256(value: Mapping[str, object] | list[object] | str) -> str:
     if isinstance(value, str):
         payload = value
@@ -1266,9 +1546,11 @@ def cloud_api_commercial_uplift_evidence(
     requests: list[dict[str, object]],
     provider_scope_profile: Mapping[str, object],
     report_grade: Mapping[str, object],
+    report_grade_validation_plan: Mapping[str, object] | None = None,
 ) -> dict[str, object]:
     matrix = cloud_api_validation_matrix(summary, credential_handling)
     trusted_diff = summary.get("cloud_api_trusted_diff") if isinstance(summary.get("cloud_api_trusted_diff"), Mapping) else {}
+    report_grade_validation_plan = report_grade_validation_plan or {}
     passed_validation_matrix_ids = [str(item.get("id")) for item in matrix if item.get("passed")]
     failed_validation_matrix_ids = [str(item.get("id")) for item in matrix if not item.get("passed")]
     return {
@@ -1288,6 +1570,7 @@ def cloud_api_commercial_uplift_evidence(
             f"manifest_sha256:{compute_sha256(manifest_path)}",
             f"output_dir:{output_dir.resolve()}",
             f"cloud_api_acquisition_manifest_sha256:{summary.get('cloud_api_acquisition_manifest_hash', '')}",
+            f"cloud_api_report_grade_validation_plan_sha256:{summary.get('cloud_api_report_grade_validation_plan_hash', '')}",
             *[f"response_sha256:{request.get('response_sha256')}" for request in requests[:5] if request.get("response_sha256")],
             *[
                 f"response_parser_manifest_sha256:{request.get('cloud_api_response_parser_manifest', {}).get('manifest_sha256')}"
@@ -1319,6 +1602,15 @@ def cloud_api_commercial_uplift_evidence(
             "collected_count": int(summary.get("collected_count") or 0),
             "dry_run": bool(summary.get("dry_run")),
             "cloud_api_acquisition_manifest_hash": str(summary.get("cloud_api_acquisition_manifest_hash") or ""),
+            "cloud_api_report_grade_validation_plan_hash": str(
+                summary.get("cloud_api_report_grade_validation_plan_hash") or ""
+            ),
+            "cloud_api_report_grade_ready_slot_count": int(
+                report_grade_validation_plan.get("ready_slot_count") or 0
+            ),
+            "cloud_api_report_grade_blocking_slot_count": int(
+                report_grade_validation_plan.get("blocking_slot_count") or 0
+            ),
             "response_parser_manifest_count": int(summary.get("response_parser_manifest_count") or 0),
             "provider_scope_inventory_captured": bool(provider_scope_profile.get("scope_inventory_captured")),
             "provider_scope_profile_present": bool(provider_scope_profile),
@@ -1339,8 +1631,10 @@ def cloud_api_acquisition_functional_profile(
     credential_handling: Mapping[str, object],
     requests: Iterable[Mapping[str, object]],
     provider_scope_profile: Mapping[str, object],
+    report_grade_validation_plan: Mapping[str, object] | None = None,
 ) -> dict[str, object]:
     request_rows = list(requests)
+    report_grade_validation_plan = report_grade_validation_plan or {}
     response_hash_count = sum(1 for row in request_rows if row.get("response_sha256"))
     response_manifest_count = sum(
         1 for row in request_rows if isinstance(row.get("cloud_api_response_parser_manifest"), Mapping)
@@ -1384,6 +1678,18 @@ def cloud_api_acquisition_functional_profile(
             "provider_scope_inventory_captured": bool(provider_scope_profile.get("scope_inventory_captured")),
             "cloud_api_acquisition_manifest_emitted": bool(summary.get("cloud_api_acquisition_manifest_hash")),
             "cloud_api_acquisition_manifest_hash": str(summary.get("cloud_api_acquisition_manifest_hash") or ""),
+            "cloud_api_report_grade_validation_plan_emitted": bool(
+                summary.get("cloud_api_report_grade_validation_plan_hash")
+            ),
+            "cloud_api_report_grade_validation_plan_hash": str(
+                summary.get("cloud_api_report_grade_validation_plan_hash") or ""
+            ),
+            "cloud_api_report_grade_ready_slot_count": int(
+                report_grade_validation_plan.get("ready_slot_count") or 0
+            ),
+            "cloud_api_report_grade_blocking_slot_count": int(
+                report_grade_validation_plan.get("blocking_slot_count") or 0
+            ),
             "response_parser_manifests_emitted": response_manifest_count == len(request_rows)
             if request_rows
             else False,
@@ -1396,11 +1702,16 @@ def cloud_api_acquisition_functional_profile(
             "response_hash_count": response_hash_count,
             "response_parser_manifest_count": response_manifest_count,
             "redacted_request_count": redacted_count,
+            "report_grade_ready_slot_count": int(report_grade_validation_plan.get("ready_slot_count") or 0),
+            "report_grade_blocking_slot_count": int(report_grade_validation_plan.get("blocking_slot_count") or 0),
         },
         "passed_validation_check_ids": [
             check
             for check, passed in {
                 "cloud-api-acquisition-manifest-emitted": bool(summary.get("cloud_api_acquisition_manifest_hash")),
+                "cloud-api-report-grade-validation-plan-emitted": bool(
+                    summary.get("cloud_api_report_grade_validation_plan_hash")
+                ),
                 "cloud-api-response-parser-manifests-emitted": response_manifest_count == len(request_rows)
                 if request_rows
                 else False,
@@ -1615,7 +1926,9 @@ def cloud_api_core_accuracy_gates(
     summary: Mapping[str, object],
     credential_handling: Mapping[str, object],
     requests: list[dict[str, object]],
+    report_grade_validation_plan: Mapping[str, object] | None = None,
 ) -> list[dict[str, object]]:
+    report_grade_validation_plan = report_grade_validation_plan or {}
     evidence_refs = [
         f"manifest_path:{manifest_path.resolve()}",
         f"manifest_sha256:{compute_sha256(manifest_path)}",
@@ -1623,6 +1936,10 @@ def cloud_api_core_accuracy_gates(
     ]
     if summary.get("cloud_api_acquisition_manifest_hash"):
         evidence_refs.append(f"cloud_api_acquisition_manifest_sha256:{summary['cloud_api_acquisition_manifest_hash']}")
+    if summary.get("cloud_api_report_grade_validation_plan_hash"):
+        evidence_refs.append(
+            f"cloud_api_report_grade_validation_plan_sha256:{summary['cloud_api_report_grade_validation_plan_hash']}"
+        )
     for request in requests[:5]:
         if request.get("response_sha256"):
             evidence_refs.append(f"response_sha256:{request['response_sha256']}")
@@ -1654,6 +1971,10 @@ def cloud_api_core_accuracy_gates(
         satisfied.append("response hash/provenance")
     if summary.get("cloud_api_acquisition_manifest_hash"):
         satisfied.append("cloud API acquisition manifest")
+    if summary.get("cloud_api_report_grade_validation_plan_hash"):
+        satisfied.append("cloud API report-grade validation plan")
+    if int(report_grade_validation_plan.get("ready_slot_count") or 0) >= 6:
+        satisfied.append("cloud API report-grade ready slots")
     if summary.get("response_parser_manifest_count") or any(
         isinstance(request.get("cloud_api_response_parser_manifest"), Mapping) for request in requests
     ):

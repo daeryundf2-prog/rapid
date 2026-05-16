@@ -473,7 +473,7 @@ EML, EMLX, MBOX, and Maildir rows include headers, message IDs, body previews an
 
 ## Authorized Cloud API Collection
 
-When you already have lawful API authorization, `cloud-collect` can fetch selected JSON endpoints from a request manifest, save raw responses, hash each response, and write a collection/audit record without storing the Bearer token in output files. Token handling is environment-variable based by default; output metadata records `credential_handling`, redacts Authorization/API-key headers, and records `tokens_written_to_output=false`.
+When you already have lawful API authorization, `cloud-collect` can fetch selected JSON endpoints from a request manifest, save raw responses, hash each response, and write a collection/audit record without storing the Bearer token in output files. Token handling is environment-variable based by default; output metadata records `credential_handling`, redacts Authorization/API-key headers, and records `tokens_written_to_output=false`. The output also includes `cloud_api_report_grade_validation_plan`, which separates ready evidence such as source manifest hash, acquisition manifest, request profiles, response hashes/sidecars, parser manifests, credential redaction, and declared scope/authority from blockers such as OAuth/device-flow capture, pagination/delta execution, retry/throttle validation, provider-native response diff, legal-hold export package, schema version, and independent review.
 
 Example manifest:
 
