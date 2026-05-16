@@ -2185,10 +2185,10 @@
       ],
       "expected": {
         "required_assertions": [
-          "Reviewer bundles preserve exhibit IDs, exhibit row hashes, selected evidence hashes, selected-evidence manifest hashes, generated output hashes, source references, signing slots, court-exhibit-package-manifest-v1 manifest hashes, verification steps, trusted court exhibit manifest diff helpers/gates, and #94 core_accuracy_gates."
+          "Reviewer bundles preserve exhibit IDs, exhibit row hashes, selected evidence hashes, selected-evidence manifest hashes, generated output hashes, source references, signing slots, court-exhibit-package-manifest-v1 manifest hashes, court-exhibit-report-grade-validation-plan-v1, plan hash/counts, verification steps, trusted court exhibit manifest diff helpers/gates, and #94 core_accuracy_gates."
         ]
       },
-      "notes": "Internal fixture pass; signed/notarized exhibit manifests remain blocker.",
+      "notes": "Internal fixture pass; signed/notarized exhibit manifests, jurisdiction-specific forms, independent package review, controlled source-file copy bundles, and final archive signature attestation remain blockers.",
       "source_manifest": "docs/validation/rapidtriage-core-forensics-091-100-known-answer.json"
     },
     {

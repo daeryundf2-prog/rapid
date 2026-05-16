@@ -3180,6 +3180,7 @@ def report_quality_evidence_chain() -> list[dict[str, object]]:
                 "court_exhibit_index.exhibits[].exhibit_row_hash",
                 "court_exhibit_index.court_exhibit_manifest.selected_evidence_manifest_hash",
                 "court_exhibit_index.court_exhibit_manifest.manifest_hash",
+                "court_exhibit_index.court_exhibit_report_grade_validation_plan_hash",
                 "court_exhibit_index.signing_slots.external_signature",
             ],
             "trusted_diff": "trusted-court-exhibit-manifest-diff",

@@ -1543,6 +1543,8 @@ CORE_FORENSIC_ACCURACY_ITEMS: tuple[dict[str, object], ...] = (
             "source references preserved",
             "external signing slot emitted",
             "court exhibit package manifest hash emitted",
+            "court exhibit report-grade validation plan",
+            "court exhibit report-grade ready slots",
             "verification steps emitted",
             "trusted court exhibit manifest diff pass",
         ),

@@ -29,8 +29,8 @@
       "item": 94,
       "title": "Court exhibit export package",
       "test_files": ["tests/test_rapidtriage_final_roadmap.py"],
-      "assertions": ["Reviewer bundles preserve exhibit IDs, exhibit row hashes, selected evidence hashes, selected-evidence manifest hashes, generated output hashes, source references, signing slots, court-exhibit-package-manifest-v1 manifest hashes, verification steps, trusted court exhibit manifest diff helpers/gates, and #94 core_accuracy_gates."],
-      "remaining_external_validation": ["Signed/notarized exhibit manifests and court-specific forms."]
+      "assertions": ["Reviewer bundles preserve exhibit IDs, exhibit row hashes, selected evidence hashes, selected-evidence manifest hashes, generated output hashes, source references, signing slots, court-exhibit-package-manifest-v1 manifest hashes, court-exhibit-report-grade-validation-plan-v1, plan hash/counts, verification steps, trusted court exhibit manifest diff helpers/gates, and #94 core_accuracy_gates."],
+      "remaining_external_validation": ["Signed/notarized exhibit manifests, jurisdiction-specific forms, independent package review, controlled source-file copy bundles, and final archive signature attestation."]
     },
     {
       "item": 95,

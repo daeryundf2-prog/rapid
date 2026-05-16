@@ -235,6 +235,7 @@ class RapidTriageCoreForensicsAccuracyTests(unittest.TestCase):
         self.assertIn("legal limitation report-grade validation plan", legal_limitation["required_checks"])
         self.assertIn("trusted legal limitation wording diff pass", legal_limitation["required_checks"])
         self.assertIn("exhibit IDs assigned", court_exhibit["required_checks"])
+        self.assertIn("court exhibit report-grade validation plan", court_exhibit["required_checks"])
         self.assertIn("trusted court exhibit manifest diff pass", court_exhibit["required_checks"])
         self.assertIn("tool inventory emitted", external_tool["required_checks"])
         self.assertIn("trusted external tool transcript diff pass", external_tool["required_checks"])

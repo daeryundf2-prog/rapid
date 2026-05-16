@@ -44,8 +44,8 @@
       "status": "pass",
       "backlog_items": [94],
       "evidence_paths": ["docs/validation/core-forensics-091-100-fixture-evidence.json", "tests/test_rapidtriage_final_roadmap.py"],
-      "expected": {"required_assertions": ["Reviewer bundles preserve exhibit IDs, exhibit row hashes, selected evidence hashes, selected-evidence manifest hashes, generated output hashes, source references, signing slots, court-exhibit-package-manifest-v1 manifest hashes, verification steps, trusted court exhibit manifest diff helpers/gates, and #94 core_accuracy_gates."]},
-      "notes": "Internal fixture pass; signed/notarized exhibit manifests remain blocker."
+      "expected": {"required_assertions": ["Reviewer bundles preserve exhibit IDs, exhibit row hashes, selected evidence hashes, selected-evidence manifest hashes, generated output hashes, source references, signing slots, court-exhibit-package-manifest-v1 manifest hashes, court-exhibit-report-grade-validation-plan-v1, plan hash/counts, verification steps, trusted court exhibit manifest diff helpers/gates, and #94 core_accuracy_gates."]},
+      "notes": "Internal fixture pass; signed/notarized exhibit manifests, jurisdiction-specific forms, independent package review, controlled source-file copy bundles, and final archive signature attestation remain blockers."
     },
     {
       "id": "core-forensics-095-external-tool-versions",

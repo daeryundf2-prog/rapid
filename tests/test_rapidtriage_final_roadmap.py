@@ -278,19 +278,41 @@ class RapidTriageFinalRoadmapTests(unittest.TestCase):
             self.assertEqual(len(court_exhibit["court_exhibit_manifest_hash"]), 64)
             self.assertTrue(court_exhibit["court_exhibit_manifest"]["selected_evidence_manifest_hash"])
             self.assertTrue(all(len(item["exhibit_row_hash"]) == 64 for item in court_exhibit["exhibits"]))
+            self.assertEqual(
+                court_exhibit["court_exhibit_report_grade_validation_plan"]["profile_version"],
+                "court-exhibit-report-grade-validation-plan-v1",
+            )
+            self.assertEqual(
+                court_exhibit["court_exhibit_report_grade_validation_plan_hash"],
+                court_exhibit["court_exhibit_report_grade_validation_plan"]["validation_plan_sha256"],
+            )
+            self.assertGreaterEqual(court_exhibit["court_exhibit_report_grade_ready_slot_count"], 7)
+            self.assertGreaterEqual(court_exhibit["court_exhibit_report_grade_blocking_slot_count"], 6)
+            self.assertIn(
+                "exhibit-rows-and-row-hashes",
+                {slot["slot_id"] for slot in court_exhibit["court_exhibit_report_grade_validation_plan"]["ready_slots"]},
+            )
+            self.assertIn(
+                "signed-or-notarized-exhibit-manifest",
+                {slot["slot_id"] for slot in court_exhibit["court_exhibit_report_grade_validation_plan"]["blocking_slots"]},
+            )
             self.assertIn("external_signature", court_exhibit["signing_slots"])
             self.assertEqual(court_exhibit["trusted_court_exhibit_diff"]["status"], "missing")
             self.assertIn("trusted-court-exhibit-manifest-diff-missing", court_exhibit["blockers"])
+            self.assertIn("signed-or-notarized-exhibit-manifest-required", court_exhibit["blockers"])
             court_diff = build_court_exhibit_trusted_diff(court_exhibit, court_exhibit)
             court_gates = court_exhibit_core_accuracy_gates(
                 exhibits=court_exhibit["exhibits"],
                 output_hashes=court_exhibit["output_hashes"],
                 exhibit_manifest=court_exhibit["court_exhibit_manifest"],
                 trusted_diff=court_diff,
+                report_grade_validation_plan=court_exhibit["court_exhibit_report_grade_validation_plan"],
             )
             self.assertEqual(court_diff["status"], "pass")
             self.assertIn("court_exhibit_manifest_hash", court_diff["compared_fields"])
+            self.assertIn("court_exhibit_report_grade_validation_plan_hash", court_diff["compared_fields"])
             self.assertIn("court exhibit package manifest hash emitted", court_gates[0]["satisfied_checks"])
+            self.assertIn("court exhibit report-grade validation plan", court_gates[0]["satisfied_checks"])
             self.assertIn("external signing slot emitted", court_gates[0]["satisfied_checks"])
             self.assertIn("trusted court exhibit manifest diff pass", court_gates[0]["satisfied_checks"])
             self.assertIn("#100", tamper_bundle["commercial_gap_ids"])

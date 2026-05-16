@@ -19,8 +19,23 @@ COURT_EXHIBIT_EXPORT_GAP_ID = "#94"
 TAMPER_EVIDENT_AUDIT_BUNDLE_GAP_ID = "#100"
 COURT_EXHIBIT_TRUSTED_DIFF_BLOCKER_94 = "trusted-court-exhibit-manifest-diff-missing"
 TAMPER_EVIDENT_TRUSTED_DIFF_BLOCKER_100 = "trusted-tamper-signature-attestation-diff-missing"
+COURT_EXHIBIT_REPORT_GRADE_VALIDATION_PLAN_VERSION = "court-exhibit-report-grade-validation-plan-v1"
+COURT_EXHIBIT_REPORT_GRADE_BLOCKERS = [
+    "trusted-court-exhibit-manifest-diff-missing",
+    "signed-or-notarized-exhibit-manifest-required",
+    "jurisdiction-specific-court-form-required",
+    "independent-court-exhibit-package-review-required",
+    "source-file-copy-bundle-required",
+    "final-archive-signature-attestation-required",
+]
 COURT_EXHIBIT_TRUSTED_TOOLS = {"court-exhibit-checklist", "selected-evidence-manifest", "signed-exhibit-index"}
 TAMPER_EVIDENT_TRUSTED_TOOLS = {"external-signature-attestation", "notarization-log", "tamper-bundle-recompute"}
+
+
+def stable_payload_sha256(payload: object) -> str:
+    return hashlib.sha256(
+        json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"), default=str).encode("utf-8")
+    ).hexdigest()
 
 
 class BundleError(ValueError):
@@ -339,6 +354,7 @@ def build_court_exhibit_index(
     blockers = []
     if not trusted_diff or trusted_diff.get("status") != "pass":
         blockers.append(COURT_EXHIBIT_TRUSTED_DIFF_BLOCKER_94)
+    blockers = sorted({*blockers, *COURT_EXHIBIT_REPORT_GRADE_BLOCKERS[1:]})
     exhibit_manifest = build_court_exhibit_package_manifest(
         case_id=str(manifest.get("case_id") or ""),
         selected=selected,
@@ -346,6 +362,19 @@ def build_court_exhibit_index(
         output_hashes=output_hashes,
         blockers=blockers,
     )
+    verification_steps = [
+        "Verify archive SHA256 from rapidtriage-bundle-manifest.json.",
+        "Verify each generated output hash before handoff.",
+        "Cross-check each exhibit path/hash against the authoritative source evidence.",
+    ]
+    court_exhibit_report_grade_validation_plan = build_court_exhibit_report_grade_validation_plan(
+        exhibits=exhibit_items,
+        output_hashes=output_hashes,
+        exhibit_manifest=exhibit_manifest,
+        trusted_diff=trusted_diff,
+        verification_steps=verification_steps,
+    )
+    blockers = sorted({*blockers, *court_exhibit_report_grade_validation_plan["blockers"]})
     return {
         "command": "court-exhibit-index",
         "generated_at": dt.datetime.now(dt.timezone.utc).isoformat(),
@@ -360,6 +389,16 @@ def build_court_exhibit_index(
         "output_hashes": output_hashes,
         "court_exhibit_manifest": exhibit_manifest,
         "court_exhibit_manifest_hash": exhibit_manifest["manifest_hash"],
+        "court_exhibit_report_grade_validation_plan": court_exhibit_report_grade_validation_plan,
+        "court_exhibit_report_grade_validation_plan_hash": court_exhibit_report_grade_validation_plan[
+            "validation_plan_sha256"
+        ],
+        "court_exhibit_report_grade_ready_slot_count": court_exhibit_report_grade_validation_plan[
+            "ready_slot_count"
+        ],
+        "court_exhibit_report_grade_blocking_slot_count": court_exhibit_report_grade_validation_plan[
+            "blocking_slot_count"
+        ],
         "signing_slots": exhibit_manifest["signing_slots"],
         "trusted_court_exhibit_diff": dict(trusted_diff) if trusted_diff else missing_court_exhibit_trusted_diff(),
         "core_accuracy_gates": court_exhibit_core_accuracy_gates(
@@ -367,14 +406,11 @@ def build_court_exhibit_index(
             output_hashes=output_hashes,
             exhibit_manifest=exhibit_manifest,
             trusted_diff=trusted_diff,
+            report_grade_validation_plan=court_exhibit_report_grade_validation_plan,
         ),
         "blockers": blockers,
         "custody_note": "This index documents selected report exhibits and generated bundle outputs. It does not include original evidence images.",
-        "verification_steps": [
-            "Verify archive SHA256 from rapidtriage-bundle-manifest.json.",
-            "Verify each generated output hash before handoff.",
-            "Cross-check each exhibit path/hash against the authoritative source evidence.",
-        ],
+        "verification_steps": verification_steps,
     }
 
 
@@ -423,6 +459,181 @@ def build_court_exhibit_package_manifest(
         json.dumps(manifest_core, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
     ).hexdigest()
     return {**manifest_core, "manifest_hash": manifest_hash}
+
+
+def build_court_exhibit_report_grade_validation_plan(
+    *,
+    exhibits: Sequence[Mapping[str, object]],
+    output_hashes: Sequence[Mapping[str, object]],
+    exhibit_manifest: Mapping[str, object],
+    trusted_diff: Mapping[str, object] | None,
+    verification_steps: Sequence[str],
+) -> dict[str, object]:
+    trusted_status = str(trusted_diff.get("status") or "missing") if trusted_diff else "missing"
+    signing_slots = (
+        exhibit_manifest.get("signing_slots")
+        if isinstance(exhibit_manifest.get("signing_slots"), Mapping)
+        else {}
+    )
+    output_hash_manifest = (
+        exhibit_manifest.get("output_hash_manifest")
+        if isinstance(exhibit_manifest.get("output_hash_manifest"), list)
+        else []
+    )
+    ready_slots = [
+        {
+            "slot_id": "exhibit-rows-and-row-hashes",
+            "status": "complete",
+            "evidence": {
+                "exhibit_count": len(exhibits),
+                "exhibit_row_hash_count": sum(1 for item in exhibits if item.get("exhibit_row_hash")),
+            },
+        },
+        {
+            "slot_id": "selected-evidence-manifest",
+            "status": "complete",
+            "evidence": {
+                "selected_evidence_manifest_hash": str(
+                    exhibit_manifest.get("selected_evidence_manifest_hash") or ""
+                ),
+            },
+        },
+        {
+            "slot_id": "generated-output-hashes",
+            "status": "complete",
+            "evidence": {
+                "output_hash_count": len(output_hashes),
+                "output_hash_manifest_count": len(output_hash_manifest),
+            },
+        },
+        {
+            "slot_id": "court-exhibit-package-manifest",
+            "status": "complete",
+            "evidence": {
+                "court_exhibit_manifest_hash": str(exhibit_manifest.get("manifest_hash") or ""),
+                "package_claim_allowed": bool(exhibit_manifest.get("commercial_claim_allowed")),
+            },
+        },
+        {
+            "slot_id": "signing-slots",
+            "status": "complete",
+            "evidence": {
+                "signing_slot_names": sorted(str(name) for name in signing_slots.keys()),
+                "external_signature_status": str(
+                    (signing_slots.get("external_signature") or {}).get("status")
+                    if isinstance(signing_slots.get("external_signature"), Mapping)
+                    else ""
+                ),
+            },
+        },
+        {
+            "slot_id": "verification-steps",
+            "status": "complete",
+            "evidence": {
+                "verification_step_count": len(verification_steps),
+                "verification_steps": list(verification_steps),
+            },
+        },
+        {
+            "slot_id": "trusted-court-exhibit-diff-disclosure",
+            "status": "complete",
+            "evidence": {
+                "trusted_diff_status": trusted_status,
+                "trusted_tool": str((trusted_diff or {}).get("trusted_tool") or ""),
+            },
+        },
+    ]
+    blocking_slots: list[dict[str, object]] = []
+    if not exhibits:
+        blocking_slots.append(
+            {
+                "slot_id": "selected-exhibits-present",
+                "status": "blocked",
+                "blocker": "selected-exhibits-required",
+                "required_evidence": "at least one selected exhibit row for package export",
+            }
+        )
+    if not output_hashes:
+        blocking_slots.append(
+            {
+                "slot_id": "generated-output-hashes-present",
+                "status": "blocked",
+                "blocker": "generated-output-hashes-required",
+                "required_evidence": "hashes for generated report, reviewer, selected-evidence, and manifest outputs",
+            }
+        )
+    if not exhibit_manifest.get("manifest_hash") or not exhibit_manifest.get("selected_evidence_manifest_hash"):
+        blocking_slots.append(
+            {
+                "slot_id": "court-exhibit-manifest-complete",
+                "status": "blocked",
+                "blocker": "court-exhibit-manifest-required",
+                "required_evidence": "court exhibit manifest hash and selected evidence manifest hash",
+            }
+        )
+    if trusted_status != "pass":
+        blocking_slots.append(
+            {
+                "slot_id": "trusted-court-exhibit-manifest-diff",
+                "status": "external-required",
+                "blocker": COURT_EXHIBIT_TRUSTED_DIFF_BLOCKER_94,
+                "required_evidence": "trusted court exhibit checklist diff over exhibit rows, output hashes, and manifest hash",
+            }
+        )
+    blocking_slots.extend(
+        [
+            {
+                "slot_id": "signed-or-notarized-exhibit-manifest",
+                "status": "external-required",
+                "blocker": "signed-or-notarized-exhibit-manifest-required",
+                "required_evidence": "detached signature, notarization receipt, or lab signing record for the final exhibit index/archive",
+            },
+            {
+                "slot_id": "jurisdiction-specific-court-form",
+                "status": "external-required",
+                "blocker": "jurisdiction-specific-court-form-required",
+                "required_evidence": "operator-provided court exhibit cover sheet or jurisdiction-specific filing form",
+            },
+            {
+                "slot_id": "independent-court-exhibit-package-review",
+                "status": "external-required",
+                "blocker": "independent-court-exhibit-package-review-required",
+                "required_evidence": "independent reviewer signoff for selected evidence, generated outputs, and citation linkage",
+            },
+            {
+                "slot_id": "source-file-copy-bundle",
+                "status": "external-required",
+                "blocker": "source-file-copy-bundle-required",
+                "required_evidence": "controlled copy/export of cited source files or evidence ranges with hashes",
+            },
+            {
+                "slot_id": "final-archive-signature-attestation",
+                "status": "external-required",
+                "blocker": "final-archive-signature-attestation-required",
+                "required_evidence": "final ZIP/archive hash signed after all outputs and exhibit indexes are written",
+            },
+        ]
+    )
+    plan_core: dict[str, object] = {
+        "profile_version": COURT_EXHIBIT_REPORT_GRADE_VALIDATION_PLAN_VERSION,
+        "item_number": 94,
+        "commercial_gap_ids": [COURT_EXHIBIT_EXPORT_GAP_ID],
+        "plan_context": "reviewer-bundle-court-exhibit-index",
+        "exhibit_count": len(exhibits),
+        "output_hash_count": len(output_hashes),
+        "court_exhibit_manifest_hash": str(exhibit_manifest.get("manifest_hash") or ""),
+        "selected_evidence_manifest_hash": str(exhibit_manifest.get("selected_evidence_manifest_hash") or ""),
+        "trusted_diff_status": trusted_status,
+        "ready_slots": ready_slots,
+        "blocking_slots": blocking_slots,
+        "ready_slot_count": len(ready_slots),
+        "blocking_slot_count": len(blocking_slots),
+        "external_blocker_catalog": list(COURT_EXHIBIT_REPORT_GRADE_BLOCKERS),
+        "blockers": sorted({str(slot.get("blocker") or "") for slot in blocking_slots if slot.get("blocker")}),
+        "commercial_claim_allowed": False,
+        "reporting_boundary": "This plan makes the reviewer bundle exhibit index auditable, but court-ready claims require trusted manifest review, signed/notarized exhibit manifests, jurisdiction-specific forms, independent package review, controlled source-file copy bundles, and final archive signature attestation.",
+    }
+    return {**plan_core, "validation_plan_sha256": stable_payload_sha256(plan_core)}
 
 
 def build_tamper_evident_audit_bundle(
@@ -497,6 +708,7 @@ def court_exhibit_core_accuracy_gates(
     output_hashes: Sequence[Mapping[str, object]],
     exhibit_manifest: Mapping[str, object] | None = None,
     trusted_diff: Mapping[str, object] | None = None,
+    report_grade_validation_plan: Mapping[str, object] | None = None,
 ) -> list[dict[str, object]]:
     satisfied = ["verification steps emitted"]
     if exhibits and all(item.get("exhibit_id") for item in exhibits):
@@ -515,6 +727,10 @@ def court_exhibit_core_accuracy_gates(
         satisfied.append("external signing slot emitted")
     if exhibit_manifest and exhibit_manifest.get("manifest_hash"):
         satisfied.append("court exhibit package manifest hash emitted")
+    if report_grade_validation_plan and report_grade_validation_plan.get("validation_plan_sha256"):
+        satisfied.append("court exhibit report-grade validation plan")
+    if report_grade_validation_plan and int(report_grade_validation_plan.get("ready_slot_count") or 0) >= 7:
+        satisfied.append("court exhibit report-grade ready slots")
     if trusted_diff and trusted_diff.get("status") == "pass":
         satisfied.append("trusted court exhibit manifest diff pass")
     return [
@@ -525,6 +741,7 @@ def court_exhibit_core_accuracy_gates(
                 f"exhibit_count:{len(exhibits)}",
                 f"output_hash_count:{len(output_hashes)}",
                 f"court_exhibit_manifest_hash:{(exhibit_manifest or {}).get('manifest_hash', '')}",
+                f"court_exhibit_report_grade_validation_plan_hash:{(report_grade_validation_plan or {}).get('validation_plan_sha256', '')}",
             ],
         )
     ]
@@ -547,7 +764,13 @@ def build_court_exhibit_trusted_diff(
     trusted_tool: str = "court-exhibit-checklist",
 ) -> dict[str, object]:
     mismatches = []
-    for field in ("exhibits", "output_hashes", "court_exhibit_manifest_hash"):
+    compared_fields = (
+        "exhibits",
+        "output_hashes",
+        "court_exhibit_manifest_hash",
+        "court_exhibit_report_grade_validation_plan_hash",
+    )
+    for field in compared_fields:
         rapid_value = normalize_court_exhibit_value(rapid_index.get(field))
         trusted_value = normalize_court_exhibit_value(trusted_index.get(field))
         if rapid_value != trusted_value:
@@ -557,7 +780,7 @@ def build_court_exhibit_trusted_diff(
         "status": status,
         "trusted_tool": trusted_tool,
         "commercial_gap_ids": [COURT_EXHIBIT_EXPORT_GAP_ID],
-        "compared_fields": ["exhibits", "output_hashes", "court_exhibit_manifest_hash"],
+        "compared_fields": list(compared_fields),
         "mismatches": mismatches,
         "blocker": None if status == "pass" else COURT_EXHIBIT_TRUSTED_DIFF_BLOCKER_94,
     }
