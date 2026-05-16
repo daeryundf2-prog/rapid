@@ -4778,6 +4778,14 @@ class RapidTriageOpsTests(unittest.TestCase):
             self.assertIn("transition log recorded", canceled.to_dict()["job_queue_assessment"]["core_accuracy_gates"][0]["satisfied_checks"])
             self.assertIn("job persistence manifest hash emitted", canceled.to_dict()["job_queue_assessment"]["core_accuracy_gates"][0]["satisfied_checks"])
             self.assertIn("job execution manifest hash emitted", canceled.to_dict()["job_queue_assessment"]["core_accuracy_gates"][0]["satisfied_checks"])
+            self.assertIn(
+                "job queue report-grade validation plan emitted",
+                canceled.to_dict()["job_queue_assessment"]["core_accuracy_gates"][0]["satisfied_checks"],
+            )
+            self.assertIn(
+                "job queue report-grade ready slots emitted",
+                canceled.to_dict()["job_queue_assessment"]["core_accuracy_gates"][0]["satisfied_checks"],
+            )
             self.assertEqual(canceled.to_dict()["transition_log_profile"]["profile_version"], "job-transition-log-profile-v1")
             self.assertGreater(canceled.to_dict()["transition_log_profile"]["transition_count"], 0)
             self.assertEqual(canceled.to_dict()["job_persistence_manifest"]["profile_version"], "job-persistence-manifest-v1")
@@ -4793,6 +4801,48 @@ class RapidTriageOpsTests(unittest.TestCase):
             self.assertGreater(canceled.to_dict()["job_queue_execution_manifest"]["step_row_count"], 0)
             self.assertRegex(canceled.to_dict()["job_queue_execution_manifest"]["transition_head_hash"], r"^[0-9a-f]{64}$")
             self.assertRegex(canceled.to_dict()["job_queue_execution_manifest"]["step_head_hash"], r"^[0-9a-f]{64}$")
+            assessment = canceled.to_dict()["job_queue_assessment"]
+            validation_plan = assessment["job_queue_report_grade_validation_plan"]
+            self.assertEqual(validation_plan["profile_version"], "job-queue-report-grade-validation-plan-v1")
+            self.assertEqual(validation_plan["item_number"], 69)
+            self.assertEqual(validation_plan["gap_id"], "#69")
+            self.assertEqual(len(validation_plan["validation_plan_hash"]), 64)
+            self.assertEqual(validation_plan["ready_slot_count"], 6)
+            self.assertEqual(validation_plan["blocking_slot_count"], 6)
+            self.assertFalse(validation_plan["commercial_claim_allowed"])
+            self.assertTrue(validation_plan["local_threadpool_only"])
+            self.assertFalse(validation_plan["distributed_queue"])
+            self.assertIn("distributed-worker-execution-required", validation_plan["blockers"])
+            self.assertIn(
+                "job-execution-transition-rows",
+                {slot["slot_id"] for slot in validation_plan["ready_slots"]},
+            )
+            self.assertIn(
+                "job-external-trusted-transition-log",
+                {slot["slot_id"] for slot in validation_plan["blocking_slots"]},
+            )
+            self.assertEqual(
+                assessment["job_queue_report_grade_validation_plan_hash"],
+                validation_plan["validation_plan_hash"],
+            )
+            self.assertEqual(assessment["report_grade_ready_slot_count"], 6)
+            self.assertEqual(assessment["report_grade_blocking_slot_count"], 6)
+            self.assertEqual(
+                validation_plan["persistence_manifest_hash"],
+                canceled.to_dict()["job_persistence_manifest"]["manifest_hash"],
+            )
+            self.assertEqual(
+                validation_plan["execution_manifest_hash"],
+                canceled.to_dict()["job_queue_execution_manifest"]["manifest_hash"],
+            )
+            self.assertEqual(
+                validation_plan["transition_head_hash"],
+                canceled.to_dict()["transition_log_profile"]["head_hash"],
+            )
+            self.assertEqual(
+                validation_plan["step_head_hash"],
+                canceled.to_dict()["job_queue_execution_manifest"]["step_head_hash"],
+            )
             self.assertEqual(
                 canceled.to_dict()["job_queue_assessment"]["persistence_manifest"]["manifest_hash"],
                 canceled.to_dict()["job_persistence_manifest"]["manifest_hash"],
@@ -4865,9 +4915,11 @@ class RapidTriageOpsTests(unittest.TestCase):
             self.assertEqual(queue_uplift["item_numbers"], [69])
             self.assertIn("transition log recorded", queue_uplift["passed_validation_check_ids"])
             self.assertIn("job execution manifest emitted", queue_uplift["passed_validation_check_ids"])
+            self.assertIn("job queue report-grade validation plan emitted", queue_uplift["passed_validation_check_ids"])
             self.assertIn("local-threadpool limitation", " ".join(queue_uplift["large_data_controls"]))
             self.assertIn("progress percent", " ".join(queue_uplift["large_data_controls"]))
             self.assertIn("execution manifest hashes", " ".join(queue_uplift["large_data_controls"]))
+            self.assertIn("report-grade validation plan", " ".join(queue_uplift["large_data_controls"]))
             self.assertIn("trusted-job-transition-log-diff-missing", queue_uplift["remaining_external_validation"])
             self.assertEqual(
                 queue_uplift["reportability_decision"]["decision"],
@@ -4882,10 +4934,12 @@ class RapidTriageOpsTests(unittest.TestCase):
                 cancellation_requested=job_payload["cancellation_requested"],
                 persistence_manifest=job_payload["job_persistence_manifest"],
                 execution_manifest=job_payload["job_queue_execution_manifest"],
+                validation_plan=validation_plan,
                 trusted_diff=job_diff,
             )
             self.assertEqual(job_diff["status"], "pass")
             self.assertIn("trusted job transition-log diff pass", job_gates[0]["satisfied_checks"])
+            self.assertIn("job queue report-grade validation plan emitted", job_gates[0]["satisfied_checks"])
             cancel_diff = build_cancellation_retry_trusted_diff(job_payload, job_payload)
             cancel_assessment = cancellation_retry_assessment(canceled, trusted_diff=cancel_diff)
             self.assertEqual(cancel_diff["status"], "pass")

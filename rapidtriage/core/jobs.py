@@ -26,6 +26,15 @@ PERFORMANCE_BATCH_ID = "commercial-uplift-066-070"
 FUNCTIONAL_JOB_BATCH_ID = "commercial-uplift-026-030"
 JOB_QUEUE_TRUSTED_DIFF_BLOCKER_69 = "trusted-job-transition-log-diff-missing"
 CANCELLATION_RETRY_TRUSTED_DIFF_BLOCKER_80 = "trusted-cancellation-retry-transition-diff-missing"
+JOB_QUEUE_REPORT_GRADE_VALIDATION_PLAN_VERSION = "job-queue-report-grade-validation-plan-v1"
+JOB_QUEUE_REPORT_GRADE_BLOCKERS = [
+    "distributed-worker-execution-required",
+    "external-trusted-transition-log-required",
+    "parser-level-progress-percent-required",
+    "resource-telemetry-under-load-required",
+    "cooperative-cancellation-load-validation-required",
+    "multi-worker-retry-idempotency-validation-required",
+]
 CANCELLATION_RETRY_TRUSTED_TOOLS = {
     "cancellation-retry-transition-manifest",
     "job-store-transition-oracle",
@@ -840,6 +849,137 @@ def job_queue_execution_manifest(job: RunJob) -> Dict[str, object]:
     return {**manifest_core, "manifest_hash": manifest_hash}
 
 
+def job_queue_report_grade_validation_plan(
+    job: RunJob,
+    *,
+    persistence_manifest: Mapping[str, object],
+    execution_manifest: Mapping[str, object],
+    transition_profile: Mapping[str, object],
+) -> Dict[str, object]:
+    cancel_retry_state = {
+        "cancellation_requested": job.cancellation_requested,
+        "retry_of_run_id": job.retry_of_run_id or "",
+        "retry_attempt": int(job.retry_attempt or 0),
+        "status": job.status,
+    }
+    cancel_retry_state_hash = hashlib.sha256(
+        json.dumps(cancel_retry_state, sort_keys=True).encode("utf-8")
+    ).hexdigest()
+    limitation_hash = hashlib.sha256(b"local-threadpool-state-file").hexdigest()
+    ready_slots: list[dict[str, object]] = [
+        {
+            "slot_id": "job-status-state-file",
+            "status": "ready",
+            "evidence_ref": "job_persistence_manifest.manifest_hash",
+            "evidence_hash": str(persistence_manifest.get("manifest_hash") or ""),
+            "description": "Persisted state-file manifest records job status, steps, outputs, and retry state.",
+        },
+        {
+            "slot_id": "job-transition-log-profile",
+            "status": "ready",
+            "evidence_ref": "transition_log_profile.head_hash",
+            "evidence_hash": str(transition_profile.get("head_hash") or ""),
+            "description": "Append-intent transition log profile records status, cancel, retry, and step events.",
+        },
+        {
+            "slot_id": "job-execution-transition-rows",
+            "status": "ready",
+            "evidence_ref": "job_queue_execution_manifest.transition_head_hash",
+            "evidence_hash": str(execution_manifest.get("transition_head_hash") or ""),
+            "description": "Execution manifest hashes replayable transition rows.",
+        },
+        {
+            "slot_id": "job-execution-step-rows",
+            "status": "ready",
+            "evidence_ref": "job_queue_execution_manifest.step_head_hash",
+            "evidence_hash": str(execution_manifest.get("step_head_hash") or ""),
+            "description": "Execution manifest hashes prepare/triage/persist/finalize step rows.",
+        },
+        {
+            "slot_id": "job-cancel-retry-state",
+            "status": "ready",
+            "evidence_ref": "cancel_retry_state_hash",
+            "evidence_hash": cancel_retry_state_hash,
+            "description": "Job payload records cancellation request state and retry lineage.",
+        },
+        {
+            "slot_id": "job-local-threadpool-limitation",
+            "status": "ready",
+            "evidence_ref": "local_threadpool_limitation_hash",
+            "evidence_hash": limitation_hash,
+            "description": "Local threadpool limitation is explicit to avoid distributed-scheduler overclaims.",
+        },
+    ]
+    blocking_slots: list[dict[str, object]] = [
+        {
+            "slot_id": "job-distributed-worker-execution",
+            "status": "blocked",
+            "blocker": "distributed-worker-execution-required",
+            "required_evidence": "multi-worker queue execution logs with worker identity, lease, retry, and replay manifests",
+        },
+        {
+            "slot_id": "job-external-trusted-transition-log",
+            "status": "blocked",
+            "blocker": "external-trusted-transition-log-required",
+            "required_evidence": "trusted external transition-log oracle diff with matching transition and step hashes",
+        },
+        {
+            "slot_id": "job-parser-level-progress-percent",
+            "status": "blocked",
+            "blocker": "parser-level-progress-percent-required",
+            "required_evidence": "per-parser percentage progress for long-running evidence jobs",
+        },
+        {
+            "slot_id": "job-resource-telemetry-under-load",
+            "status": "blocked",
+            "blocker": "resource-telemetry-under-load-required",
+            "required_evidence": "CPU, memory, queue depth, and throughput telemetry under representative large cases",
+        },
+        {
+            "slot_id": "job-cooperative-cancellation-load",
+            "status": "blocked",
+            "blocker": "cooperative-cancellation-load-validation-required",
+            "required_evidence": "cooperative cancellation tests against long-running parser workloads with partial-output review",
+        },
+        {
+            "slot_id": "job-multi-worker-retry-idempotency",
+            "status": "blocked",
+            "blocker": "multi-worker-retry-idempotency-validation-required",
+            "required_evidence": "multi-worker retry/idempotency replay that proves failed or canceled jobs do not duplicate outputs",
+        },
+    ]
+    plan_core = {
+        "profile_version": JOB_QUEUE_REPORT_GRADE_VALIDATION_PLAN_VERSION,
+        "item_number": 69,
+        "gap_id": BACKGROUND_JOB_GAP_ID,
+        "commercial_gap_ids": [BACKGROUND_JOB_GAP_ID],
+        "run_id": job.run_id,
+        "job_status": job.status,
+        "persistence_manifest_hash": str(persistence_manifest.get("manifest_hash") or ""),
+        "execution_manifest_hash": str(execution_manifest.get("manifest_hash") or ""),
+        "transition_head_hash": str(transition_profile.get("head_hash") or ""),
+        "step_head_hash": str(execution_manifest.get("step_head_hash") or ""),
+        "transition_count": int(transition_profile.get("transition_count") or 0),
+        "step_count": len(job.steps),
+        "cancellation_requested": job.cancellation_requested,
+        "retry_of_run_id": job.retry_of_run_id,
+        "retry_attempt": int(job.retry_attempt or 0),
+        "distributed_queue": False,
+        "local_threadpool_only": True,
+        "parser_level_progress_percent_complete": False,
+        "ready_slots": ready_slots,
+        "blocking_slots": blocking_slots,
+        "ready_slot_count": len(ready_slots),
+        "blocking_slot_count": len(blocking_slots),
+        "blockers": list(JOB_QUEUE_REPORT_GRADE_BLOCKERS),
+        "commercial_claim_allowed": False,
+        "ready_for_court_report": False,
+        "report_use_warning": "Use as local background-job triage evidence only; do not claim distributed parser scheduling until blocking slots are satisfied.",
+    }
+    validation_plan_hash = hashlib.sha256(json.dumps(plan_core, sort_keys=True).encode("utf-8")).hexdigest()
+    return {**plan_core, "validation_plan_hash": validation_plan_hash}
+
+
 def job_step_persistence_row(step: Mapping[str, object], *, index: int) -> Dict[str, object]:
     status = str(step.get("status") or "pending")
     terminal = status in {"completed", "failed", "skipped", "canceled"}
@@ -860,6 +1000,12 @@ def job_queue_assessment(job: RunJob) -> Dict[str, object]:
     transition_profile = job_transition_log_profile(job.transition_log)
     persistence_manifest = job_persistence_manifest(job)
     execution_manifest = job_queue_execution_manifest(job)
+    validation_plan = job_queue_report_grade_validation_plan(
+        job,
+        persistence_manifest=persistence_manifest,
+        execution_manifest=execution_manifest,
+        transition_profile=transition_profile,
+    )
     return {
         "component": "background-job-queue",
         "status": "implemented-baseline-validation-required",
@@ -871,6 +1017,10 @@ def job_queue_assessment(job: RunJob) -> Dict[str, object]:
         "persistence_manifest": persistence_manifest,
         "execution_manifest": execution_manifest,
         "execution_manifest_hash": execution_manifest["manifest_hash"],
+        "job_queue_report_grade_validation_plan": validation_plan,
+        "job_queue_report_grade_validation_plan_hash": validation_plan["validation_plan_hash"],
+        "report_grade_ready_slot_count": validation_plan["ready_slot_count"],
+        "report_grade_blocking_slot_count": validation_plan["blocking_slot_count"],
         "ready_for_court_report": False,
         "supports": [
             "queued-running-completed-failed-canceled-status",
@@ -885,6 +1035,7 @@ def job_queue_assessment(job: RunJob) -> Dict[str, object]:
             "job-queue-is-local-process-threadpool-not-distributed-worker-system",
             "per-parser-progress-percent-and-resource-telemetry-remain-limited",
             JOB_QUEUE_TRUSTED_DIFF_BLOCKER_69,
+            *JOB_QUEUE_REPORT_GRADE_BLOCKERS,
         ],
         "commercial_uplift_evidence": job_queue_commercial_uplift_evidence(
             validation_ids=[
@@ -895,6 +1046,8 @@ def job_queue_assessment(job: RunJob) -> Dict[str, object]:
                 "cancel/retry state recorded",
                 "job persistence manifest emitted",
                 "job execution manifest emitted",
+                "job queue report-grade validation plan emitted",
+                "job queue report-grade ready slots emitted",
             ],
             large_data_controls=[
                 "queued/running/completed/failed/canceled state is persisted per job",
@@ -902,6 +1055,7 @@ def job_queue_assessment(job: RunJob) -> Dict[str, object]:
                 "job transition log records status, step, cancel, retry, and restart-recovery events",
                 "job persistence manifest records progress percent, terminal steps, output keys, and transition head hash",
                 "job execution manifest hashes transition rows and step rows for replay review",
+                "job queue report-grade validation plan separates ready local evidence from distributed-worker blockers",
                 "queued cancel and failed/canceled retry are visible in the job payload",
                 "local-threadpool limitation is explicit to prevent distributed-scale overclaims",
             ],
@@ -915,13 +1069,21 @@ def job_queue_assessment(job: RunJob) -> Dict[str, object]:
             transition_count=int(transition_profile.get("transition_count") or 0),
             persistence_manifest=persistence_manifest,
             execution_manifest=execution_manifest,
+            validation_plan=validation_plan,
         ),
     }
 
 
 def job_queue_functional_priority_profile(job: RunJob) -> dict[str, object]:
+    transition_profile = job_transition_log_profile(job.transition_log)
     persistence_manifest = job_persistence_manifest(job)
     execution_manifest = job_queue_execution_manifest(job)
+    validation_plan = job_queue_report_grade_validation_plan(
+        job,
+        persistence_manifest=persistence_manifest,
+        execution_manifest=execution_manifest,
+        transition_profile=transition_profile,
+    )
     return {
         "batch_id": FUNCTIONAL_JOB_BATCH_ID,
         "item_number": 27,
@@ -949,15 +1111,20 @@ def job_queue_functional_priority_profile(job: RunJob) -> dict[str, object]:
             "output_key_count": len(persistence_manifest["output_keys"]),
             "transition_head_hash": persistence_manifest["transition_head_hash"],
             "local_threadpool_not_distributed_queue": True,
+            "job_queue_report_grade_validation_plan_hash": validation_plan["validation_plan_hash"],
+            "report_grade_ready_slot_count": validation_plan["ready_slot_count"],
+            "report_grade_blocking_slot_count": validation_plan["blocking_slot_count"],
         },
         "blockers": [
             JOB_QUEUE_TRUSTED_DIFF_BLOCKER_69,
             "distributed-worker-queue-not-implemented",
             "parser-level-progress-percent-and-resource-telemetry-remain-limited",
+            *JOB_QUEUE_REPORT_GRADE_BLOCKERS,
         ],
         "validation_evidence": [
             "job-payload-emits-functional-priority-profile",
             "api-state-persistence-test-restores-completed-job",
+            "job-queue-report-grade-validation-plan-emitted",
         ],
     }
 
@@ -1027,6 +1194,7 @@ def job_queue_core_accuracy_gates(
     transition_count: int = 0,
     persistence_manifest: Mapping[str, object] | None = None,
     execution_manifest: Mapping[str, object] | None = None,
+    validation_plan: Mapping[str, object] | None = None,
     trusted_diff: Mapping[str, object] | None = None,
 ) -> list[dict[str, object]]:
     satisfied = ["local-threadpool limitation warning"]
@@ -1044,6 +1212,10 @@ def job_queue_core_accuracy_gates(
         satisfied.append("job persistence manifest hash emitted")
     if execution_manifest and execution_manifest.get("manifest_hash"):
         satisfied.append("job execution manifest hash emitted")
+    if validation_plan and validation_plan.get("validation_plan_hash"):
+        satisfied.append("job queue report-grade validation plan emitted")
+    if validation_plan and int(validation_plan.get("ready_slot_count") or 0) > 0:
+        satisfied.append("job queue report-grade ready slots emitted")
     evidence_refs = [
         f"job_status:{status}",
         f"step_count:{len(steps)}",
@@ -1051,6 +1223,7 @@ def job_queue_core_accuracy_gates(
         f"transition_count:{transition_count}",
         f"persistence_manifest_hash:{(persistence_manifest or {}).get('manifest_hash', '')}",
         f"execution_manifest_hash:{(execution_manifest or {}).get('manifest_hash', '')}",
+        f"job_queue_report_grade_validation_plan_hash:{(validation_plan or {}).get('validation_plan_hash', '')}",
     ]
     if trusted_diff and trusted_diff.get("status") == "pass":
         satisfied.append("trusted job transition-log diff pass")
@@ -1084,8 +1257,10 @@ def job_queue_commercial_uplift_evidence(
         "large_data_controls": list(large_data_controls),
         "remaining_external_validation": [
             "distributed worker execution",
+            "externally trusted transition logs",
             "parser-level progress percentage and resource telemetry under load",
             "cooperative cancellation validation on long-running parser workloads",
+            "multi-worker retry idempotency validation",
             JOB_QUEUE_TRUSTED_DIFF_BLOCKER_69,
         ],
     }
@@ -1098,8 +1273,10 @@ def job_queue_reportability_decision(
 ) -> Dict[str, object]:
     blockers = {
         "distributed worker execution",
+        "externally trusted transition logs",
         "parser-level progress percentage and resource telemetry under load",
         "cooperative cancellation validation on long-running parser workloads",
+        "multi-worker retry idempotency validation",
         JOB_QUEUE_TRUSTED_DIFF_BLOCKER_69,
     }
     return {

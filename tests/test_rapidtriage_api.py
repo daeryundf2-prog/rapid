@@ -3321,6 +3321,12 @@ class RapidTriageApiTests(unittest.TestCase):
             self.assertEqual(len(job_profile["controls"]["execution_manifest_hash"]), 64)
             self.assertRegex(job_profile["controls"]["execution_transition_head_hash"], r"^[0-9a-f]{64}$")
             self.assertRegex(job_profile["controls"]["execution_step_head_hash"], r"^[0-9a-f]{64}$")
+            self.assertRegex(
+                job_profile["controls"]["job_queue_report_grade_validation_plan_hash"],
+                r"^[0-9a-f]{64}$",
+            )
+            self.assertEqual(job_profile["controls"]["report_grade_ready_slot_count"], 6)
+            self.assertEqual(job_profile["controls"]["report_grade_blocking_slot_count"], 6)
             self.assertGreaterEqual(job_profile["controls"]["progress_percent"], 0)
             self.assertGreaterEqual(job_profile["controls"]["completed_step_count"], 1)
             self.assertFalse(job_profile["ready_for_commercial_claim"])

@@ -99,8 +99,8 @@
       "status": "pass",
       "backlog_items": [69],
       "evidence_paths": ["docs/validation/core-forensics-061-070-fixture-evidence.json", "tests/test_rapidtriage_ops.py"],
-      "expected": {"required_assertions": ["Job payloads preserve status, step progress, state persistence, append-intent transition logs, transition head hashes, execution manifest transition/step row hashes, cancel/retry state, local-threadpool limitation, trusted transition-log diff status, #69 core_accuracy_gates, and #69 commercial_uplift_evidence.", "Job queue reportability decisions block distributed parser-scheduler claims until distributed worker, externally trusted transition logs, parser-level progress, resource telemetry, cancellation, and retry validation under load exists."]},
-      "notes": "Internal fixture pass; distributed workers, trusted transition logs, and parser-level progress telemetry remain blockers."
+      "expected": {"required_assertions": ["Job payloads preserve status, step progress, state persistence, append-intent transition logs, transition head hashes, execution manifest transition/step row hashes, cancel/retry state, local-threadpool limitation, job_queue_report_grade_validation_plan hashes/ready slots/blocking slots, trusted transition-log diff status, #69 core_accuracy_gates, and #69 commercial_uplift_evidence.", "Job queue reportability decisions block distributed parser-scheduler claims until distributed workers, externally trusted transition logs, parser-level progress, resource telemetry, cancellation, and retry validation under load exist."]},
+      "notes": "Internal fixture pass; distributed workers, trusted transition logs, parser-level progress telemetry, resource telemetry, cancellation under load, and multi-worker retry idempotency remain blockers."
     },
     {
       "id": "core-forensics-070-checkpoint-fixture",

@@ -81,9 +81,9 @@
       "title": "Background job queue",
       "test_files": ["tests/test_rapidtriage_ops.py"],
       "assertions": [
-        "Job payloads preserve job status, step progress, state-file persistence assessment, append-intent transition logs, transition head hashes, execution manifest transition/step row hashes, cancel/retry state, trusted transition-log diff helper/gate, #69 core_accuracy_gates, #69 commercial_uplift_evidence, and reportability blockers for missing distributed workers, parser-level progress, resource telemetry, cancellation, and retry validation under load."
+        "Job payloads preserve job status, step progress, state-file persistence assessment, append-intent transition logs, transition head hashes, execution manifest transition/step row hashes, cancel/retry state, job_queue_report_grade_validation_plan hashes/ready slots/blocking slots, trusted transition-log diff helper/gate, #69 core_accuracy_gates, #69 commercial_uplift_evidence, and reportability blockers for missing distributed workers, trusted transition logs, parser-level progress, resource telemetry, cancellation, and retry validation under load."
       ],
-      "remaining_external_validation": ["Distributed workers, externally trusted transition logs, parser-level progress percentages, and cancellation validation under load."]
+      "remaining_external_validation": ["Distributed workers, externally trusted transition logs, parser-level progress percentages, resource telemetry under load, cancellation validation under load, and multi-worker retry idempotency validation."]
     },
     {
       "item": 70,

@@ -1653,10 +1653,10 @@
       ],
       "expected": {
         "required_assertions": [
-          "Job payloads preserve status, step progress, state persistence, append-intent transition logs, transition head hashes, cancel/retry state, local-threadpool limitation, #69 core_accuracy_gates, and #69 commercial_uplift_evidence."
+          "Job payloads preserve status, step progress, state persistence, append-intent transition logs, transition head hashes, execution manifest transition/step row hashes, cancel/retry state, local-threadpool limitation, job_queue_report_grade_validation_plan hashes/ready slots/blocking slots, #69 core_accuracy_gates, and #69 commercial_uplift_evidence."
         ]
       },
-      "notes": "Internal fixture pass; distributed workers and parser-level progress telemetry remain blockers.",
+      "notes": "Internal fixture pass; distributed workers, trusted transition logs, parser-level progress telemetry, resource telemetry, cancellation under load, and multi-worker retry idempotency remain blockers.",
       "source_manifest": "docs/validation/rapidtriage-core-forensics-061-070-known-answer.json"
     },
     {
