@@ -82,9 +82,9 @@
       "title": "Korean OCR/translation workflow hardening",
       "test_files": ["tests/test_rapidtriage_ocr_queue.py", "tests/test_rapidtriage_media_image.py", "tests/test_rapidtriage_api.py"],
       "assertions": [
-        "OCR/media flows preserve Korean hints, quality metrics, translation sidecars, confidence/engine metadata, source-viewer side-by-side OCR/translation review packages, human-review warnings, trusted Korean OCR/translation review gates, #59 core_accuracy_gates, and reportability blockers for missing Korean OCR calibration plus certified translation review."
+        "OCR/media flows preserve Korean hints, quality metrics, translation sidecars, confidence/engine metadata, source-viewer side-by-side OCR/translation review packages, human-review warnings, trusted Korean OCR/translation review gates, korean_ocr_translation_report_grade_validation_plan ready/blocking slots, source_ocr_translation_report_grade_validation_plan ready/blocking slots, #59 core_accuracy_gates, and reportability blockers for missing Korean OCR engine execution, machine translation execution, confidence calibration, trusted review diffs, and certified translation review."
       ],
-      "remaining_external_validation": ["Korean OCR calibration corpus, trusted Korean OCR/translation review diff, certified translation workflow, and reviewer signoff persistence."]
+      "remaining_external_validation": ["Built-in Korean OCR engine execution, machine translation worker execution, OCR engine/version/language-pack logs, Korean OCR confidence calibration corpus, trusted Korean OCR/translation review diff, certified translation workflow, and reviewer signoff persistence."]
     },
     {
       "item": 60,

@@ -81,6 +81,15 @@ MEDIA_REPORT_GRADE_BLOCKERS = [
     "native-ocr-and-translation-engine-execution-not-bundled",
     "deepfake-and-sensitive-media-classification-not-implemented",
 ]
+KOREAN_OCR_TRANSLATION_REPORT_GRADE_VALIDATION_PLAN_VERSION = "korean-ocr-translation-report-grade-validation-plan-v1"
+KOREAN_OCR_TRANSLATION_REPORT_GRADE_VALIDATION_BLOCKERS = [
+    "built-in-korean-ocr-engine-execution-required",
+    "machine-translation-worker-required",
+    "ocr-engine-version-and-language-pack-log-required",
+    "confidence-calibration-corpus-required",
+    "certified-translation-or-reviewer-signoff-required",
+    "korean-ocr-translation-trusted-review-diff-required",
+]
 MEDIA_TRUSTED_DIFF_BLOCKERS = {
     56: "image-gallery-trusted-manifest-diff-required",
     58: "ocr-sidecar-trusted-engine-log-diff-required",
@@ -1158,6 +1167,18 @@ def build_image_record(path: Path) -> ArtifactRecord:
     }
     details.update(build_ocr_and_classifier_validation(resolved))
     details["media_trusted_diffs"] = missing_media_trusted_diffs()
+    details["korean_ocr_translation_report_grade_validation_plan"] = build_korean_ocr_translation_report_grade_validation_plan(
+        context="media-image-details",
+        source_path=resolved,
+        source_hashes=details["hashes"] if isinstance(details.get("hashes"), Mapping) else {},
+        workflow=details.get("korean_ocr_translation_workflow") if isinstance(details.get("korean_ocr_translation_workflow"), Mapping) else {},
+        ocr_sidecar=details.get("ocr_sidecar") if isinstance(details.get("ocr_sidecar"), Mapping) else {},
+        translation_sidecar=details.get("translation_sidecar") if isinstance(details.get("translation_sidecar"), Mapping) else {},
+        trusted_diffs=details["media_trusted_diffs"],
+    )
+    details["korean_ocr_translation_report_grade_validation_plan_hash"] = details[
+        "korean_ocr_translation_report_grade_validation_plan"
+    ]["validation_plan_sha256"]
     if not has_plausible_image_signature(resolved):
         image = None
     else:
@@ -1389,6 +1410,184 @@ def korean_ocr_translation_workflow(
     }
 
 
+def build_korean_ocr_translation_report_grade_validation_plan(
+    *,
+    context: str,
+    source_path: Path,
+    source_hashes: Mapping[str, object] | None = None,
+    workflow: Mapping[str, object] | None = None,
+    ocr_sidecar: Mapping[str, object] | None = None,
+    translation_sidecar: Mapping[str, object] | None = None,
+    review_manifest: Mapping[str, object] | None = None,
+    trusted_diffs: Mapping[str, object] | None = None,
+) -> dict[str, object]:
+    source_hashes = source_hashes if isinstance(source_hashes, Mapping) else {}
+    workflow = workflow if isinstance(workflow, Mapping) else {}
+    ocr_sidecar = ocr_sidecar if isinstance(ocr_sidecar, Mapping) else {}
+    translation_sidecar = translation_sidecar if isinstance(translation_sidecar, Mapping) else {}
+    review_manifest = review_manifest if isinstance(review_manifest, Mapping) else {}
+    trusted_diffs = trusted_diffs if isinstance(trusted_diffs, Mapping) else {}
+
+    def slot(
+        slot_id: str,
+        *,
+        ready: bool,
+        evidence: str,
+        blocker_id: str | None = None,
+        operator_action: str = "",
+    ) -> dict[str, object]:
+        row: dict[str, object] = {
+            "slot_id": slot_id,
+            "status": "complete" if ready else "external-required",
+            "evidence": evidence,
+        }
+        if blocker_id and not ready:
+            row["blocker_id"] = blocker_id
+        if operator_action:
+            row["operator_action"] = operator_action
+        return row
+
+    language_hints = workflow.get("language_hints") if isinstance(workflow.get("language_hints"), list) else []
+    ocr_text_hash = str(ocr_sidecar.get("text_sha256") or "")
+    ocr_source_hash = str(ocr_sidecar.get("source_sha256") or ocr_sidecar.get("sha256") or "")
+    translation_text_hash = str(translation_sidecar.get("text_sha256") or "")
+    translation_source_hash = str(translation_sidecar.get("source_sha256") or translation_sidecar.get("sha256") or "")
+    quality_metrics = ocr_sidecar.get("quality_metrics") if isinstance(ocr_sidecar.get("quality_metrics"), Mapping) else {}
+    metadata = ocr_sidecar.get("metadata") if isinstance(ocr_sidecar.get("metadata"), Mapping) else {}
+    trusted_diff_59 = trusted_diffs.get("59") if isinstance(trusted_diffs.get("59"), Mapping) else {}
+    validation_slots = [
+        slot(
+            "korean-ocr-translation-workflow-profile",
+            ready=bool(workflow.get("commercial_gap_ids")) or bool(language_hints),
+            evidence=f"workflow_gap_ids={workflow.get('commercial_gap_ids', [])} language_hints={language_hints}",
+            blocker_id="korean-ocr-translation-workflow-profile-required",
+            operator_action="Emit the #59 workflow profile before report review.",
+        ),
+        slot(
+            "korean-language-hint-detection",
+            ready=bool(language_hints) or bool(workflow.get("korean_detected_or_expected")),
+            evidence=f"language_hints={language_hints} korean_detected_or_expected={workflow.get('korean_detected_or_expected', False)}",
+            blocker_id="korean-language-hint-detection-required",
+            operator_action="Preserve Korean/English language hints from sidecars or filenames.",
+        ),
+        slot(
+            "ocr-sidecar-text-provenance",
+            ready=bool(ocr_text_hash and ocr_source_hash),
+            evidence=f"ocr_text_sha256={ocr_text_hash} ocr_source_sha256={ocr_source_hash}",
+            blocker_id="ocr-sidecar-text-provenance-required",
+            operator_action="Attach OCR sidecar file hash and bounded text hash.",
+        ),
+        slot(
+            "translation-sidecar-text-provenance",
+            ready=bool(translation_text_hash and translation_source_hash) or not bool(workflow.get("translation_required")),
+            evidence=f"translation_required={workflow.get('translation_required', False)} translation_text_sha256={translation_text_hash} translation_source_sha256={translation_source_hash}",
+            blocker_id="translation-sidecar-text-provenance-required",
+            operator_action="Attach translation sidecar hash or explicitly record that translation is not required.",
+        ),
+        slot(
+            "ocr-quality-confidence-metadata",
+            ready=bool(quality_metrics) or bool(metadata) or ocr_sidecar.get("language_hint"),
+            evidence=f"quality_metrics_present={bool(quality_metrics)} metadata_present={bool(metadata)} confidence={ocr_sidecar.get('confidence', '')}",
+            blocker_id="ocr-quality-confidence-metadata-required",
+            operator_action="Preserve confidence, language, and quality metrics for Korean OCR review.",
+        ),
+        slot(
+            "side-by-side-review-citation",
+            ready=bool(review_manifest.get("manifest_hash")) or bool(ocr_sidecar or translation_sidecar),
+            evidence=f"review_manifest_hash={review_manifest.get('manifest_hash', '')} sidecars_present={bool(ocr_sidecar or translation_sidecar)}",
+            blocker_id="side-by-side-review-citation-required",
+            operator_action="Expose a side-by-side source viewer package with row hashes before citing OCR/translation text.",
+        ),
+        slot(
+            "built-in-korean-ocr-engine-execution",
+            ready=False,
+            evidence="native_korean_ocr_execution=false",
+            blocker_id="built-in-korean-ocr-engine-execution-required",
+            operator_action="Run a native Korean OCR worker or attach external OCR logs tied to source hashes.",
+        ),
+        slot(
+            "machine-translation-worker",
+            ready=False,
+            evidence="machine_translation_execution=false",
+            blocker_id="machine-translation-worker-required",
+            operator_action="Run a translation worker or attach external translation logs tied to OCR text hashes.",
+        ),
+        slot(
+            "ocr-engine-version-and-language-pack-log",
+            ready=False,
+            evidence="ocr_engine_version_and_language_pack_log=false",
+            blocker_id="ocr-engine-version-and-language-pack-log-required",
+            operator_action="Capture OCR engine path/version and Korean language-pack versions.",
+        ),
+        slot(
+            "confidence-calibration-corpus",
+            ready=False,
+            evidence="confidence_calibration_corpus=false",
+            blocker_id="confidence-calibration-corpus-required",
+            operator_action="Validate OCR language/confidence claims against known-answer Korean OCR fixtures.",
+        ),
+        slot(
+            "certified-translation-or-reviewer-signoff",
+            ready=False,
+            evidence="certified_translation_or_reviewer_signoff=false",
+            blocker_id="certified-translation-or-reviewer-signoff-required",
+            operator_action="Attach certified translation evidence or reviewer signoff before report reliance.",
+        ),
+        slot(
+            "trusted-korean-ocr-translation-review-diff",
+            ready=trusted_diff_59.get("status") == "pass",
+            evidence=f"trusted_diff_status={trusted_diff_59.get('status', 'missing')}",
+            blocker_id=MEDIA_TRUSTED_DIFF_BLOCKERS[59],
+            operator_action="Compare OCR/translation rows against trusted Korean review manifests.",
+        ),
+    ]
+    blockers = sorted(
+        str(slot_row.get("blocker_id"))
+        for slot_row in validation_slots
+        if slot_row.get("status") != "complete" and slot_row.get("blocker_id")
+    )
+    ready_slot_count = sum(1 for slot_row in validation_slots if slot_row.get("status") == "complete")
+    plan_core: dict[str, object] = {
+        "profile_version": KOREAN_OCR_TRANSLATION_REPORT_GRADE_VALIDATION_PLAN_VERSION,
+        "item_number": 59,
+        "gap_id": "#59",
+        "batch_id": "commercial-uplift-056-060",
+        "selected_track": "korean-ocr-translation-report-validation",
+        "context": context,
+        "source_path": str(source_path),
+        "source_sha256": str(source_hashes.get("sha256") or ""),
+        "language_hints": list(language_hints),
+        "korean_detected_or_expected": bool(workflow.get("korean_detected_or_expected")),
+        "translation_required": bool(workflow.get("translation_required")),
+        "ocr_text_sha256": ocr_text_hash,
+        "translation_text_sha256": translation_text_hash,
+        "review_manifest_hash": str(review_manifest.get("manifest_hash") or ""),
+        "trusted_diff_status": str(trusted_diff_59.get("status") or "missing"),
+        "ready_slot_count": ready_slot_count,
+        "blocking_slot_count": len(blockers),
+        "validation_status": "report-validation-blocked",
+        "commercial_grade": False,
+        "commercial_grade_ready": False,
+        "validation_slots": validation_slots,
+        "blockers": blockers,
+        "commercial_grade_blockers": list(KOREAN_OCR_TRANSLATION_REPORT_GRADE_VALIDATION_BLOCKERS),
+        "validation_commands": [
+            "rapidtriage artifacts <case-root> --kind media-image",
+            "GET /api/runs/<run_id>/source-ocr-translation?path=<image-path>&include_text=true",
+            "rapidtriage commercial-readiness --validation-package docs/validation/rapidtriage-core-forensics-051-060-known-answer.json --limit 59 --json",
+        ],
+        "report_guidance": {
+            "allowed_use": "side-by-side-korean-ocr-translation-triage-pivot",
+            "forbidden_claim": "native Korean OCR, machine translation, or certified translation completeness",
+            "required_disclaimer": (
+                "Korean OCR/translation sidecars are review aids until OCR/translation execution logs, engine versions, "
+                "confidence calibration, certified translation or reviewer signoff, and trusted Korean review diffs are attached."
+            ),
+        },
+    }
+    return {**plan_core, "validation_plan_sha256": stable_payload_sha256(plan_core)}
+
+
 def build_image_gallery_manifest(*, details: Mapping[str, object], source_path: Path) -> dict[str, object]:
     hashes = details.get("hashes") if isinstance(details.get("hashes"), Mapping) else {}
     thumbnail = details.get("thumbnail_preview") if isinstance(details.get("thumbnail_preview"), Mapping) else {}
@@ -1501,6 +1700,21 @@ def media_core_accuracy_gates(*, details: dict[str, object], source_path: Path) 
     for number in (56, 58, 59):
         diff = trusted_diffs.get(str(number)) if isinstance(trusted_diffs.get(str(number)), Mapping) else {}
         evidence_refs.append(f"trusted_diff_{number}_status:{diff.get('status', 'missing')}")
+    korean_translation_plan = (
+        details.get("korean_ocr_translation_report_grade_validation_plan")
+        if isinstance(details.get("korean_ocr_translation_report_grade_validation_plan"), Mapping)
+        else {}
+    )
+    if korean_translation_plan.get("validation_plan_sha256"):
+        evidence_refs.append(
+            f"korean_ocr_translation_report_grade_validation_plan_sha256:{korean_translation_plan.get('validation_plan_sha256')}"
+        )
+        evidence_refs.append(
+            f"korean_ocr_translation_report_grade_ready_slot_count:{korean_translation_plan.get('ready_slot_count', 0)}"
+        )
+        evidence_refs.append(
+            f"korean_ocr_translation_report_grade_blocking_slot_count:{korean_translation_plan.get('blocking_slot_count', 0)}"
+        )
 
     item56: list[str] = []
     if details.get("hashes") and (details.get("width") is not None or details.get("decoded") is not None):
@@ -1559,6 +1773,10 @@ def media_core_accuracy_gates(*, details: dict[str, object], source_path: Path) 
         item59.append("human translation validation warning")
     if trusted_media_diff_passed(trusted_diffs, 59):
         item59.append(MEDIA_TRUSTED_DIFF_CHECKS[59])
+    if korean_translation_plan.get("validation_plan_sha256"):
+        item59.append("Korean OCR/translation report-grade validation plan")
+    if int(korean_translation_plan.get("ready_slot_count") or 0) >= 6:
+        item59.append("Korean OCR/translation ready slots")
 
     return [
         build_accuracy_gate(56, satisfied_checks=item56, evidence_refs=evidence_refs),
@@ -1577,6 +1795,11 @@ def media_image_commercial_uplift_evidence(*, details: Mapping[str, object], sou
     translation_sidecar = details.get("translation_sidecar") if isinstance(details.get("translation_sidecar"), Mapping) else {}
     trusted_diffs = details.get("media_trusted_diffs") if isinstance(details.get("media_trusted_diffs"), Mapping) else {}
     gallery_manifest = details.get("image_gallery_manifest") if isinstance(details.get("image_gallery_manifest"), Mapping) else {}
+    korean_translation_plan = (
+        details.get("korean_ocr_translation_report_grade_validation_plan")
+        if isinstance(details.get("korean_ocr_translation_report_grade_validation_plan"), Mapping)
+        else {}
+    )
     exif_gps_profile = details.get("exif_gps_profile") if isinstance(details.get("exif_gps_profile"), Mapping) else {}
     exif_map_review_profile = (
         details.get("exif_map_review_profile") if isinstance(details.get("exif_map_review_profile"), Mapping) else {}
@@ -1592,6 +1815,7 @@ def media_image_commercial_uplift_evidence(*, details: Mapping[str, object], sou
             f"exif_gps:{exif_gps_profile.get('latitude')},{exif_gps_profile.get('longitude')}" if exif_gps_profile.get("has_gps") else "exif_gps:not-present",
             f"ocr_sidecar:{ocr_sidecar.get('source_path', '')}",
             f"translation_sidecar:{translation_sidecar.get('source_path', '')}",
+            f"korean_ocr_translation_report_grade_validation_plan_sha256:{korean_translation_plan.get('validation_plan_sha256', '')}",
         ],
         "reportability_decision": media_image_reportability_decision(
             failed_by_item={
@@ -1656,6 +1880,14 @@ def media_image_commercial_uplift_evidence(*, details: Mapping[str, object], sou
             "exif_map_review_status": str(exif_map_review_profile.get("status") or "no-gps-marker"),
             "ocr_sidecar_imported": bool(ocr_sidecar),
             "translation_sidecar_imported": bool(translation_sidecar),
+            "korean_ocr_translation_report_grade_validation_plan_present": bool(
+                korean_translation_plan.get("validation_plan_sha256")
+            ),
+            "korean_ocr_translation_report_grade_validation_plan_hash": str(
+                korean_translation_plan.get("validation_plan_sha256") or ""
+            ),
+            "korean_ocr_translation_report_grade_ready_slot_count": int(korean_translation_plan.get("ready_slot_count") or 0),
+            "korean_ocr_translation_report_grade_blocking_slot_count": int(korean_translation_plan.get("blocking_slot_count") or 0),
             "native_ocr_execution": False,
             "machine_translation_execution": False,
         },

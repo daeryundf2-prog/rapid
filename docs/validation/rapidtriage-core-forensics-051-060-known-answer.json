@@ -99,8 +99,8 @@
       "status": "pass",
       "backlog_items": [59],
       "evidence_paths": ["docs/validation/core-forensics-051-060-fixture-evidence.json", "tests/test_rapidtriage_ocr_queue.py", "tests/test_rapidtriage_media_image.py", "tests/test_rapidtriage_api.py"],
-      "expected": {"required_assertions": ["OCR/media flows preserve Korean hints, quality metrics, translation sidecars, confidence/engine metadata, source-viewer side-by-side OCR/translation review packages, source-ocr-translation-review-manifest-v1 row hashes/source locator, human-review warning, trusted Korean OCR/translation review diff gates, and #59 core_accuracy_gates.", "Korean OCR/translation reportability decisions block certified-translation claims until OCR calibration, trusted Korean OCR review diff, and human-certified translation review evidence exists."]},
-      "notes": "Internal fixture pass; human-certified translation and OCR calibration remain blockers."
+      "expected": {"required_assertions": ["OCR/media flows preserve Korean hints, quality metrics, translation sidecars, confidence/engine metadata, source-viewer side-by-side OCR/translation review packages, source-ocr-translation-review-manifest-v1 row hashes/source locator, korean_ocr_translation_report_grade_validation_plan ready/blocking slots, source_ocr_translation_report_grade_validation_plan ready/blocking slots, human-review warning, trusted Korean OCR/translation review diff gates, and #59 core_accuracy_gates.", "Korean OCR/translation reportability decisions block certified-translation claims until OCR calibration, trusted Korean OCR review diff, and human-certified translation review evidence exists."]},
+      "notes": "Internal fixture pass with Korean OCR/translation report-grade validation-plan hashes; built-in Korean OCR, machine translation, engine/version logs, confidence calibration, trusted review diffs, and certified translation review remain external blockers."
     },
     {
       "id": "core-forensics-060-search-dedup-fixture",

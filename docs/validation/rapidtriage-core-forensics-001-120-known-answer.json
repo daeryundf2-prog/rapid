@@ -1441,10 +1441,10 @@
       ],
       "expected": {
         "required_assertions": [
-          "OCR/media flows preserve Korean hints, quality metrics, translation sidecars, confidence/engine metadata, source-viewer side-by-side OCR/translation review packages, human-review warning, and #59 core_accuracy_gates."
+          "OCR/media flows preserve Korean hints, quality metrics, translation sidecars, confidence/engine metadata, source-viewer side-by-side OCR/translation review packages, korean_ocr_translation_report_grade_validation_plan ready/blocking slots, source_ocr_translation_report_grade_validation_plan ready/blocking slots, human-review warning, and #59 core_accuracy_gates."
         ]
       },
-      "notes": "Internal fixture pass; human-certified translation and OCR calibration remain blockers.",
+      "notes": "Internal fixture pass with Korean OCR/translation report-grade validation-plan hashes; built-in Korean OCR, machine translation, engine/version logs, confidence calibration, trusted review diffs, and certified translation review remain external blockers.",
       "source_manifest": "docs/validation/rapidtriage-core-forensics-051-060-known-answer.json"
     },
     {

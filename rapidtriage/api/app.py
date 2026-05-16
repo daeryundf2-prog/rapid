@@ -6165,7 +6165,7 @@ def build_source_ocr_queue_page_manifest(
 
 def build_source_ocr_translation_package(*, run_id: str, source_path: Path, include_text: bool) -> Dict[str, object]:
     try:
-        from ..artifacts.media import build_image_record
+        from ..artifacts.media import build_image_record, build_korean_ocr_translation_report_grade_validation_plan
 
         details = build_image_record(source_path).details
     except Exception as exc:
@@ -6205,6 +6205,17 @@ def build_source_ocr_translation_package(*, run_id: str, source_path: Path, incl
         side_by_side_review=side_by_side_review,
         workflow=workflow,
     )
+    trusted_diffs = details.get("media_trusted_diffs") if isinstance(details.get("media_trusted_diffs"), Mapping) else {}
+    validation_plan = build_korean_ocr_translation_report_grade_validation_plan(
+        context="source-ocr-translation-review",
+        source_path=source_path,
+        source_hashes=source_hashes,
+        workflow=workflow,
+        ocr_sidecar=ocr_sidecar,
+        translation_sidecar=translation_sidecar,
+        review_manifest=review_manifest,
+        trusted_diffs=trusted_diffs,
+    )
     core_gates = [
         gate
         for gate in details.get("core_accuracy_gates", [])
@@ -6226,7 +6237,22 @@ def build_source_ocr_translation_package(*, run_id: str, source_path: Path, incl
                 ],
             )
         ]
-    core_gates = augment_ocr_translation_core_gates(core_gates, review_manifest)
+    core_gates = augment_ocr_translation_core_gates(core_gates, review_manifest, validation_plan=validation_plan)
+    commercial_uplift = (
+        dict(details.get("commercial_uplift_evidence"))
+        if isinstance(details.get("commercial_uplift_evidence"), Mapping)
+        else {}
+    )
+    if commercial_uplift:
+        controls = (
+            dict(commercial_uplift.get("large_data_controls"))
+            if isinstance(commercial_uplift.get("large_data_controls"), Mapping)
+            else {}
+        )
+        controls["source_ocr_translation_report_grade_validation_plan_hash"] = validation_plan["validation_plan_sha256"]
+        controls["source_ocr_translation_report_grade_ready_slot_count"] = validation_plan["ready_slot_count"]
+        controls["source_ocr_translation_report_grade_blocking_slot_count"] = validation_plan["blocking_slot_count"]
+        commercial_uplift["large_data_controls"] = controls
     return {
         "command": "source-ocr-translation",
         "profile_version": "source-ocr-translation-review-v1",
@@ -6245,6 +6271,8 @@ def build_source_ocr_translation_package(*, run_id: str, source_path: Path, incl
         "side_by_side_review": side_by_side_review,
         "source_ocr_translation_review_manifest": review_manifest,
         "source_ocr_translation_review_manifest_hash": review_manifest["manifest_hash"],
+        "source_ocr_translation_report_grade_validation_plan": validation_plan,
+        "source_ocr_translation_report_grade_validation_plan_hash": validation_plan["validation_plan_sha256"],
         "review_profile": {
             "status": "side-by-side-review-ready" if ocr_sidecar or translation_sidecar else "ocr-and-translation-sidecars-missing",
             "supports_side_by_side_review": True,
@@ -6259,10 +6287,13 @@ def build_source_ocr_translation_package(*, run_id: str, source_path: Path, incl
                 "attach certified translation or reviewer signoff before citing translated text",
                 "compare against trusted Korean OCR/translation review diff evidence",
             ],
+            "report_grade_validation_plan_hash": validation_plan["validation_plan_sha256"],
+            "report_grade_ready_slot_count": validation_plan["ready_slot_count"],
+            "report_grade_blocking_slot_count": validation_plan["blocking_slot_count"],
         },
         "workflow": workflow,
         "core_accuracy_gates": core_gates,
-        "commercial_uplift_evidence": details.get("commercial_uplift_evidence") if isinstance(details.get("commercial_uplift_evidence"), Mapping) else {},
+        "commercial_uplift_evidence": commercial_uplift,
         "reportability_decision": viewer_workflow_reportability_decision(
             item_number=59,
             component="korean-ocr-translation-review",
@@ -6279,6 +6310,9 @@ def build_source_ocr_translation_package(*, run_id: str, source_path: Path, incl
                 "native_korean_ocr_execution": False,
                 "machine_translation_execution": False,
                 "review_manifest_hash": review_manifest["manifest_hash"],
+                "report_grade_validation_plan_hash": validation_plan["validation_plan_sha256"],
+                "report_grade_ready_slot_count": validation_plan["ready_slot_count"],
+                "report_grade_blocking_slot_count": validation_plan["blocking_slot_count"],
             },
         ),
         "copy_safe_citation": {
@@ -6295,7 +6329,9 @@ def build_source_ocr_translation_package(*, run_id: str, source_path: Path, incl
 def augment_ocr_translation_core_gates(
     core_gates: Sequence[Mapping[str, object]],
     review_manifest: Mapping[str, object],
+    validation_plan: Mapping[str, object] | None = None,
 ) -> list[dict[str, object]]:
+    validation_plan = validation_plan if isinstance(validation_plan, Mapping) else {}
     output: list[dict[str, object]] = []
     for gate in core_gates:
         copied = dict(gate)
@@ -6308,6 +6344,13 @@ def augment_ocr_translation_core_gates(
             satisfied.append("side-by-side review row hashes")
         if isinstance(review_manifest.get("source_viewer_locator"), Mapping) and "source viewer locator emitted" not in satisfied:
             satisfied.append("source viewer locator emitted")
+        if validation_plan.get("validation_plan_sha256") and "Korean OCR/translation report-grade validation plan" not in satisfied:
+            satisfied.append("Korean OCR/translation report-grade validation plan")
+            evidence_refs.append(
+                f"korean_ocr_translation_report_grade_validation_plan_sha256:{validation_plan.get('validation_plan_sha256')}"
+            )
+        if int(validation_plan.get("ready_slot_count") or 0) >= 6 and "Korean OCR/translation ready slots" not in satisfied:
+            satisfied.append("Korean OCR/translation ready slots")
         copied["satisfied_checks"] = satisfied
         copied["evidence_refs"] = evidence_refs
         output.append(copied)

@@ -142,6 +142,8 @@ class RapidTriageMediaImageTests(unittest.TestCase):
             self.assertIn("sidecar import and hashes", media_gates["#58"]["satisfied_checks"])
             self.assertIn("Korean language hinting", media_gates["#59"]["satisfied_checks"])
             self.assertIn("translation sidecar import", media_gates["#59"]["satisfied_checks"])
+            self.assertIn("Korean OCR/translation report-grade validation plan", media_gates["#59"]["satisfied_checks"])
+            self.assertIn("Korean OCR/translation ready slots", media_gates["#59"]["satisfied_checks"])
             self.assertTrue(details["media_native_capabilities"]["image_gallery_review_metadata"])
             self.assertGreaterEqual(details["parser_confidence"], 0.8)
             self.assertTrue(details["ocr_candidate"])
@@ -159,7 +161,13 @@ class RapidTriageMediaImageTests(unittest.TestCase):
             self.assertEqual(media_uplift["large_data_controls"]["image_gallery_manifest_hash"], details["image_gallery_manifest_hash"])
             self.assertIn("sidecar import and hashes", media_uplift["passed_validation_check_ids_by_item"]["#58"])
             self.assertIn("Korean language hinting", media_uplift["passed_validation_check_ids_by_item"]["#59"])
+            self.assertIn(
+                "Korean OCR/translation report-grade validation plan",
+                media_uplift["passed_validation_check_ids_by_item"]["#59"],
+            )
             self.assertFalse(media_uplift["large_data_controls"]["native_ocr_execution"])
+            self.assertTrue(media_uplift["large_data_controls"]["korean_ocr_translation_report_grade_validation_plan_present"])
+            self.assertEqual(media_uplift["large_data_controls"]["korean_ocr_translation_report_grade_ready_slot_count"], 6)
             self.assertEqual(
                 media_uplift["reportability_decision"]["decision"],
                 "do-not-report-media-image-output-as-gallery-ocr-or-translation-complete",
@@ -179,6 +187,12 @@ class RapidTriageMediaImageTests(unittest.TestCase):
             self.assertEqual(details["translation_plan"]["status"], "sidecar-imported")
             self.assertIn("#59", details["translation_plan"]["commercial_gap_ids"])
             self.assertIn("#59", details["korean_ocr_translation_workflow"]["commercial_gap_ids"])
+            translation_plan = details["korean_ocr_translation_report_grade_validation_plan"]
+            self.assertEqual(translation_plan["profile_version"], "korean-ocr-translation-report-grade-validation-plan-v1")
+            self.assertEqual(details["korean_ocr_translation_report_grade_validation_plan_hash"], translation_plan["validation_plan_sha256"])
+            self.assertEqual(translation_plan["ready_slot_count"], 6)
+            self.assertEqual(translation_plan["blocking_slot_count"], 6)
+            self.assertIn("certified-translation-or-reviewer-signoff-required", translation_plan["blockers"])
             self.assertEqual(details["translation_sidecar"]["target_language"], "en")
             self.assertIn("text_sha256", details["translation_sidecar"])
             self.assertEqual(details["ocr_sidecar"]["language_hint"], "ko+en")

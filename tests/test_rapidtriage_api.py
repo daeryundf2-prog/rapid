@@ -2462,6 +2462,11 @@ class RapidTriageApiTests(unittest.TestCase):
             self.assertTrue(image_preview["image"]["gallery_page_profile"]["supports_folder_gallery_page"])
             self.assertIn("source-image-gallery", image_preview["image"]["gallery_page_profile"]["default_page_url"])
             self.assertTrue(image_uplift["large_data_controls"]["bounded_gallery_page"])
+            self.assertEqual(
+                image_preview["image"]["korean_ocr_translation_report_grade_validation_plan_hash"],
+                image_preview["image"]["korean_ocr_translation_report_grade_validation_plan"]["validation_plan_sha256"],
+            )
+            self.assertEqual(image_preview["image"]["korean_ocr_translation_report_grade_validation_plan"]["ready_slot_count"], 6)
             self.assertEqual(image_preview["image"]["ocr_plan"]["status"], "sidecar-imported")
             self.assertEqual(image_preview["image"]["translation_plan"]["status"], "sidecar-imported")
             self.assertTrue(image_preview["image"]["korean_ocr_translation_workflow"]["korean_detected_or_expected"])
@@ -2570,6 +2575,11 @@ class RapidTriageApiTests(unittest.TestCase):
             self.assertIn("translation sidecar import", translation_review["core_accuracy_gates"][0]["satisfied_checks"])
             self.assertIn("OCR/translation review manifest", translation_review["core_accuracy_gates"][0]["satisfied_checks"])
             self.assertIn("side-by-side review row hashes", translation_review["core_accuracy_gates"][0]["satisfied_checks"])
+            self.assertIn(
+                "Korean OCR/translation report-grade validation plan",
+                translation_review["core_accuracy_gates"][0]["satisfied_checks"],
+            )
+            self.assertIn("Korean OCR/translation ready slots", translation_review["core_accuracy_gates"][0]["satisfied_checks"])
             self.assertEqual(
                 translation_review["source_ocr_translation_review_manifest"]["manifest_version"],
                 "source-ocr-translation-review-manifest-v1",
@@ -2583,11 +2593,25 @@ class RapidTriageApiTests(unittest.TestCase):
                 "source-ocr-translation-review",
             )
             self.assertEqual(translation_review["source_ocr_translation_review_manifest"]["review_side_hash_count"], 2)
+            self.assertEqual(
+                translation_review["source_ocr_translation_report_grade_validation_plan_hash"],
+                translation_review["source_ocr_translation_report_grade_validation_plan"]["validation_plan_sha256"],
+            )
+            self.assertEqual(translation_review["source_ocr_translation_report_grade_validation_plan"]["ready_slot_count"], 6)
+            self.assertEqual(translation_review["source_ocr_translation_report_grade_validation_plan"]["blocking_slot_count"], 6)
             self.assertTrue(translation_review["review_profile"]["supports_side_by_side_review"])
             self.assertFalse(translation_review["review_profile"]["certified_translation"])
             self.assertEqual(
+                translation_review["review_profile"]["report_grade_validation_plan_hash"],
+                translation_review["source_ocr_translation_report_grade_validation_plan_hash"],
+            )
+            self.assertEqual(
                 translation_review["reportability_decision"]["control_snapshot"]["review_manifest_hash"],
                 translation_review["source_ocr_translation_review_manifest_hash"],
+            )
+            self.assertEqual(
+                translation_review["reportability_decision"]["control_snapshot"]["report_grade_ready_slot_count"],
+                6,
             )
             self.assertIn("ocr_sha256", translation_review["copy_safe_citation"]["text"])
             media_preview_response = client.get(f"/api/runs/{run_id}/source-preview", params={"path": str(media_path)})
