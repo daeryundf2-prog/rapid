@@ -10,6 +10,7 @@ from unittest.mock import patch
 from rapidtriage.core.archive_image import ArchiveImageExtractionResult, extract_archive_image_to_directory
 from rapidtriage.core.disk_image import (
     DiskImageExtractionResult,
+    build_raw_split_report_grade_validation_plan,
     build_split_set_profile,
     discover_split_image_parts,
     extract_raw_image_to_directory,
@@ -694,6 +695,51 @@ DOS Partition Table
             self.assertEqual(metadata["split_set_profile"]["missing_segment_numbers"], [2])
             self.assertFalse(metadata["split_set_profile"]["contiguous"])
 
+    def test_raw_split_report_grade_validation_plan_tracks_slots_and_blockers(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            first = root / "case.001"
+            second = root / "case.002"
+            first.write_bytes(b"raw-a")
+            second.write_bytes(b"raw-b")
+            split_profile = build_split_set_profile([first, second], selected_path=first)
+
+            plan = build_raw_split_report_grade_validation_plan(
+                first,
+                image_paths=[first, second],
+                output_dir=root / "validation",
+                expected_partition_start_sector=2048,
+                expected_files=["Windows/System32/config/SAM"],
+                source_integrity=[
+                    {"path": str(first), "sha256": "a" * 64},
+                    {"path": str(second), "sha256": "b" * 64},
+                ],
+                split_set_profile=split_profile,
+                tool_preflight=[
+                    {"tool": "mmls", "available": True, "version": "mmls 1.0"},
+                    {"tool": "tsk_recover", "available": True, "version": "tsk_recover 1.0"},
+                ],
+                partition_table=[{"partition_number": 1, "start_sector": 2048, "filesystem_guess": "ntfs"}],
+            )
+
+            self.assertEqual(plan["profile_version"], "raw-split-report-grade-validation-plan-v1")
+            self.assertEqual(plan["gap_id"], "#23")
+            self.assertEqual(plan["status"], "report-validation-blocked")
+            command_ids = {row["id"] for row in plan["validation_commands"]}
+            self.assertIn("trusted-partition-enumeration", command_ids)
+            self.assertIn("trusted-filesystem-stats", command_ids)
+            self.assertIn("read-only-recovery", command_ids)
+            self.assertIn("trusted-workflow-diff", command_ids)
+            slot_status = {slot["id"]: slot["status"] for slot in plan["evidence_slots"]}
+            self.assertEqual(slot_status["split-part-inventory"], "complete")
+            self.assertEqual(slot_status["per-part-source-hashes"], "complete")
+            self.assertEqual(slot_status["gap-order-size-review"], "complete")
+            self.assertEqual(slot_status["partition-selection-and-fsstat"], "complete")
+            self.assertEqual(slot_status["read-only-recovery-provenance"], "pending-read-only-recovery")
+            self.assertIn("trusted-recovery-diff", plan["blocking_slot_ids"])
+            self.assertEqual(plan["expected_files"][0]["description"], "Windows/System32/config/SAM")
+            self.assertEqual(len(plan["manifest_sha256"]), 64)
+
     def test_extract_raw_image_runs_mmls_and_tsk_recover(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             root = Path(tmp_dir)
@@ -749,6 +795,13 @@ DOS Partition Table
             self.assertEqual(raw_uplift["large_data_controls"]["split_set_contiguous"], True)
             self.assertEqual(metadata["split_set_profile"]["part_count"], 2)
             self.assertTrue(metadata["split_set_profile"]["selected_is_first_segment"])
+            validation_plan = metadata["report_grade_validation_plan"]
+            self.assertEqual(validation_plan["profile_version"], "raw-split-report-grade-validation-plan-v1")
+            self.assertEqual(validation_plan["gap_id"], "#23")
+            self.assertIn("trusted-workflow-diff", {row["id"] for row in validation_plan["validation_commands"]})
+            self.assertIn("trusted-recovery-diff", validation_plan["blocking_slot_ids"])
+            self.assertIn("partition-selection-and-fsstat", validation_plan["ready_slot_ids"])
+            self.assertEqual(len(validation_plan["manifest_sha256"]), 64)
             self.assertEqual(metadata["recovered_root_manifest"]["visited_file_count"], 1)
             self.assertEqual(metadata["recovered_root_manifest"]["hashed_file_count"], 1)
             self.assertEqual(metadata["recovered_root_manifest"]["files"][0]["relative_path"], "evidence.txt")

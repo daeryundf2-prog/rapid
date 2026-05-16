@@ -227,6 +227,14 @@ class RapidTriageEvidenceAdapterTests(unittest.TestCase):
             self.assertIn("split-set provenance profile", raw_gate["satisfied_checks"])
             self.assertIn("encrypted volume limitation warning", raw_gate["satisfied_checks"])
             self.assertEqual(result["split_set_profile"]["part_count"], 1)
+            raw_plan = result["raw_split_validation_plan"]
+            self.assertEqual(raw_plan["profile_version"], "raw-split-report-grade-validation-plan-v1")
+            self.assertEqual(raw_plan["gap_id"], "#23")
+            self.assertIn("source-part-hashes", {row["id"] for row in raw_plan["validation_commands"]})
+            self.assertIn("trusted-workflow-diff", {row["id"] for row in raw_plan["validation_commands"]})
+            self.assertIn("partition-selection-and-fsstat", raw_plan["blocking_slot_ids"])
+            self.assertIn("trusted-recovery-diff", raw_plan["blocking_slot_ids"])
+            self.assertEqual(len(raw_plan["manifest_sha256"]), 64)
             raw_review = result["image_analyst_review_profile"]
             self.assertEqual(raw_review["gap_id"], "#23")
             self.assertEqual(raw_review["artifact_type"], "raw-split-workflow")

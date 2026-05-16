@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+import shlex
 import shutil
 import subprocess
 from dataclasses import dataclass, field
@@ -29,6 +30,7 @@ from .vsc import build_vsc_image_workflow_handoff
 RAW_IMAGE_SUFFIXES = (".dd", ".raw", ".img", ".001", ".000", ".0000", ".0001", ".00001", ".ima")
 RAW_IMAGE_REQUIRED_TOOLS = ("mmls", "tsk_recover")
 RAW_SPLIT_WORKFLOW_MANIFEST_VERSION = "raw-split-integrated-workflow-manifest-v1"
+RAW_SPLIT_REPORT_GRADE_VALIDATION_PLAN_VERSION = "raw-split-report-grade-validation-plan-v1"
 RAW_IMAGE_NATIVE_CAPABILITIES = {
     "split_segment_discovery": True,
     "split_gap_warning": True,
@@ -103,6 +105,19 @@ class DiskImageExtractionResult:
                 partition_start_sector=self.partition_start_sector,
                 run_outputs=None,
                 status_context="extraction-result",
+            ),
+            "report_grade_validation_plan": build_raw_split_report_grade_validation_plan(
+                self.source_path,
+                image_paths=self.image_paths,
+                output_dir=self.stage_dir / "validation",
+                expected_partition_start_sector=self.partition_start_sector,
+                source_integrity=self.source_integrity,
+                split_set_profile=self.split_set_profile,
+                tool_preflight=self.tool_preflight,
+                partition_table=self.partition_table,
+                command_history=self.command_history,
+                recovered_root_manifest=self.recovered_root_manifest,
+                recovery_mode=self.recovery_mode,
             ),
             "vsc_workflow_handoff": build_vsc_image_workflow_handoff(
                 current_root=self.extract_dir,
@@ -432,6 +447,278 @@ def build_raw_split_integrated_workflow_manifest(
     }
     payload["manifest_sha256"] = stable_manifest_sha256(payload)
     return payload
+
+
+def build_raw_split_report_grade_validation_plan(
+    source_path: Path,
+    *,
+    image_paths: Sequence[Path] | None = None,
+    output_dir: Path | str | None = None,
+    expected_partition_start_sector: int | None = None,
+    expected_files: Sequence[str] | None = None,
+    source_integrity: Sequence[dict[str, object]] | dict[str, object] | None = None,
+    split_set_profile: dict[str, object] | None = None,
+    tool_preflight: Sequence[dict[str, object]] | None = None,
+    partition_table: Sequence[dict[str, object]] | None = None,
+    command_history: Sequence[dict[str, object]] | None = None,
+    recovered_root_manifest: dict[str, object] | None = None,
+    recovery_mode: str | None = None,
+) -> dict[str, object]:
+    """Create the #23 report-grade validation handoff for RAW/split images."""
+
+    source = source_path.expanduser().resolve()
+    parts = tuple(Path(path).expanduser().resolve() for path in (image_paths or ()))
+    if not parts and source.is_file() and is_raw_image_path(source):
+        parts = tuple(discover_split_image_parts(source))
+    if not parts:
+        parts = (source,)
+    output_root = Path(output_dir).expanduser().resolve() if output_dir else Path("rapidforensic-raw-split-validation")
+    split_profile = dict(split_set_profile or build_split_set_profile(parts, selected_path=source))
+    source_rows = _raw_source_integrity_rows(source_integrity)
+    if not source_rows and all(path.is_file() for path in parts):
+        source_rows = [describe_source_integrity(path) for path in parts]
+    tool_rows = [dict(row) for row in tool_preflight or []]
+    partition_rows = [dict(row) for row in partition_table or []]
+    command_rows = [dict(row) for row in command_history or []]
+    recovered_manifest = dict(recovered_root_manifest or {})
+    expected_file_rows = [
+        {
+            "id": f"expected-file-{index + 1:03d}",
+            "description": str(item),
+            "status": "pending-trusted-comparison",
+        }
+        for index, item in enumerate(expected_files or [])
+        if str(item).strip()
+    ]
+    tsk_recover_argv = ["tsk_recover", "-e", "-a"]
+    if expected_partition_start_sector is not None:
+        tsk_recover_argv.extend(["-o", str(expected_partition_start_sector)])
+    tsk_recover_argv.extend([*[str(path) for path in parts], str(output_root / "filesystem")])
+    fsstat_argv = ["fsstat"]
+    if expected_partition_start_sector is not None:
+        fsstat_argv.extend(["-o", str(expected_partition_start_sector)])
+    fsstat_argv.extend(str(path) for path in parts)
+    validation_commands = [
+        _raw_validation_command(
+            "source-part-hashes",
+            ["rapidtriage", "e01-hash", str(source), "--output-dir", str(output_root / "source-hash"), "--json"],
+            purpose="Compute full source or split-part hashes with checkpoint evidence.",
+            expected_output=str(output_root / "source-hash" / "e01-streaming-hash.json"),
+        ),
+        _raw_validation_command(
+            "evidence-preflight",
+            ["rapidtriage", "evidence", str(source), "--output", str(output_root / "rapidtriage-evidence-preflight.json"), "--json"],
+            purpose="Record RAW/split adapter readiness, split inventory, FDE hints, and dependency versions.",
+            expected_output=str(output_root / "rapidtriage-evidence-preflight.json"),
+        ),
+        _raw_validation_command(
+            "trusted-partition-enumeration",
+            ["mmls", *[str(path) for path in parts]],
+            purpose="Preserve Sleuth Kit partition table transcript used for automatic or manual partition selection.",
+            expected_output=str(output_root / "mmls-partitions.txt"),
+            trusted_tool=True,
+        ),
+        _raw_validation_command(
+            "trusted-filesystem-stats",
+            fsstat_argv,
+            purpose="Preserve filesystem metadata transcript for the selected partition or whole-image fallback.",
+            expected_output=str(output_root / "fsstat-selected-filesystem.txt"),
+            trusted_tool=True,
+            status="pending-partition-selection" if expected_partition_start_sector is None else "pending-run",
+        ),
+        _raw_validation_command(
+            "read-only-recovery",
+            tsk_recover_argv,
+            purpose="Recover supported filesystem content read-only with deleted-file expectations preserved.",
+            expected_output=str(output_root / "filesystem"),
+            trusted_tool=True,
+        ),
+        _raw_validation_command(
+            "trusted-workflow-diff",
+            [
+                "rapidtriage",
+                "image-workflow-validate",
+                "--item-number",
+                "23",
+                "--rapid-output",
+                str(output_root / "rapidtriage-disk-image.json"),
+                "--trusted-output",
+                str(output_root / "trusted-raw-workflow.csv"),
+                "--trusted-tool",
+                "sleuthkit",
+                "--output",
+                str(output_root / "raw-trusted-diff.json"),
+                "--json",
+            ],
+            purpose="Compare split order, selected partition, recovery mode, and recovered file hashes against trusted rows.",
+            expected_output=str(output_root / "raw-trusted-diff.json"),
+            trusted_tool=True,
+        ),
+    ]
+    source_hash_complete = bool(source_rows) and all(row.get("sha256") for row in source_rows)
+    split_complete = bool(split_profile.get("part_count"))
+    split_warnings = list(split_profile.get("warnings") or [])
+    partition_ready = bool(partition_rows and expected_partition_start_sector is not None)
+    recovered_count = int(
+        recovered_manifest.get("visited_file_count")
+        or recovered_manifest.get("hashed_file_count")
+        or recovered_manifest.get("file_count")
+        or 0
+    )
+    recovery_command_seen = any(row.get("purpose") == "read-only-filesystem-recovery" for row in command_rows)
+    evidence_slots = [
+        {
+            "id": "split-part-inventory",
+            "label": "Split part inventory and order",
+            "status": "complete" if split_complete else "pending-source-scan",
+            "required_before_report": True,
+            "part_count": split_profile.get("part_count", 0),
+            "segment_numbers": list(split_profile.get("segment_numbers") or []),
+        },
+        {
+            "id": "per-part-source-hashes",
+            "label": "Per-part source hash evidence",
+            "status": "complete" if source_hash_complete else "pending-source-part-hashes",
+            "required_before_report": True,
+            "hash_count": sum(1 for row in source_rows if row.get("sha256")),
+        },
+        {
+            "id": "gap-order-size-review",
+            "label": "Gap/order/size anomaly review",
+            "status": "review-required" if split_warnings else ("complete" if split_complete else "pending-source-scan"),
+            "required_before_report": True,
+            "warnings": split_warnings,
+            "contiguous": split_profile.get("contiguous"),
+            "starts_at_expected_segment": split_profile.get("starts_at_expected_segment"),
+        },
+        {
+            "id": "partition-selection-and-fsstat",
+            "label": "Partition selection plus filesystem stats",
+            "status": "complete" if partition_ready else "pending-mmls-fsstat",
+            "required_before_report": True,
+            "selected_start_sector": expected_partition_start_sector,
+            "partition_row_count": len(partition_rows),
+            "selection_policy": "largest supported filesystem from mmls unless analyst override is documented",
+        },
+        {
+            "id": "read-only-recovery-provenance",
+            "label": "tsk_recover command and recovered-root manifest",
+            "status": "complete" if recovery_command_seen and recovered_count else "pending-read-only-recovery",
+            "required_before_report": True,
+            "recovered_file_count": recovered_count,
+            "deleted_file_expectation": "-e flag should be present in recovery command history",
+        },
+        {
+            "id": "trusted-recovery-diff",
+            "label": "Trusted recovered path/hash diff",
+            "status": "pending-image-workflow-validate",
+            "required_before_report": True,
+            "required_fields": [
+                "source_sha256",
+                "selected_start_sector",
+                "workflow",
+                "split_part_count",
+                "split_segment_numbers",
+                "recovered_file_count",
+                "recovered_file_sha256",
+            ],
+        },
+        {
+            "id": "damaged-gapped-corpus",
+            "label": "Damaged/gapped split-set known-answer corpus",
+            "status": "external-corpus-required",
+            "required_before_commercial_grade": True,
+            "minimum_cases": ["single-raw", "contiguous-split", "missing-segment", "out-of-order-selection", "damaged-segment"],
+        },
+        {
+            "id": "encrypted-volume-workflow",
+            "label": "Encrypted-volume unlock and decrypted export evidence",
+            "status": "external-unlock-required-if-detected",
+            "required_before_commercial_grade": True,
+            "accepted_evidence": ["lawful unlock log", "decrypted export hash", "rerun on decrypted root"],
+        },
+    ]
+    ready_slots = [slot["id"] for slot in evidence_slots if str(slot.get("status", "")).startswith("complete")]
+    blocker_slots = [
+        slot["id"]
+        for slot in evidence_slots
+        if slot.get("required_before_report") and not str(slot.get("status", "")).startswith("complete")
+    ]
+    payload: dict[str, object] = {
+        "profile_version": RAW_SPLIT_REPORT_GRADE_VALIDATION_PLAN_VERSION,
+        "item_number": 23,
+        "gap_id": "#23",
+        "source_path": str(source),
+        "image_paths": [str(path) for path in parts],
+        "output_root": str(output_root),
+        "status": "report-validation-blocked" if blocker_slots else "ready-for-report-review",
+        "commercial_grade_ready": False,
+        "recovery_mode": recovery_mode or ("partition-offset" if expected_partition_start_sector is not None else "unknown"),
+        "expected_partition_start_sector": expected_partition_start_sector,
+        "expected_files": expected_file_rows,
+        "source_integrity": source_rows,
+        "split_set_profile": split_profile,
+        "tool_preflight": tool_rows,
+        "partition_table": partition_rows,
+        "command_history": command_rows,
+        "recovered_root_manifest": recovered_manifest,
+        "validation_commands": validation_commands,
+        "evidence_slots": evidence_slots,
+        "ready_slot_ids": ready_slots,
+        "blocking_slot_ids": blocker_slots,
+        "partition_selection_policy": {
+            "automatic": "prefer the largest supported NTFS/exFAT/ext/XFS/HFS/APFS-like filesystem row from mmls",
+            "manual_override": "allowed only when analyst records requested start sector and trusted partition transcript",
+            "whole_image_fallback": "allowed when no partition table is present; fsstat and trusted diff still required",
+        },
+        "report_claim_boundary": (
+            "This plan can make one RAW/split recovery reviewable when report-required slots pass; "
+            "native commercial-grade filesystem claims still require broad damaged/gapped corpus and encrypted-volume validation."
+        ),
+        "commercial_grade_blockers": list(RAW_IMAGE_REPORT_GRADE_BLOCKERS),
+        "operator_next_steps": [
+            "Run source-part-hashes and evidence-preflight first.",
+            "Preserve mmls and fsstat transcripts for the selected partition or whole-image fallback.",
+            "Run read-only-recovery and attach recovered-root manifest plus command history.",
+            "Run trusted-workflow-diff before citing recovered paths, hashes, or timestamps in a final report.",
+        ],
+    }
+    payload["manifest_sha256"] = stable_manifest_sha256(payload)
+    return payload
+
+
+def _raw_validation_command(
+    command_id: str,
+    argv: Sequence[str],
+    *,
+    purpose: str,
+    expected_output: str,
+    trusted_tool: bool = False,
+    status: str = "pending-run",
+) -> dict[str, object]:
+    clean_argv = [str(item) for item in argv if str(item) != ""]
+    return {
+        "id": command_id,
+        "argv": clean_argv,
+        "command": " ".join(shlex.quote(item) for item in clean_argv),
+        "purpose": purpose,
+        "expected_output": expected_output,
+        "status": status,
+        "trusted_tool_required": trusted_tool,
+    }
+
+
+def _raw_source_integrity_rows(
+    source_integrity: Sequence[dict[str, object]] | dict[str, object] | None,
+) -> list[dict[str, object]]:
+    if source_integrity is None:
+        return []
+    if isinstance(source_integrity, dict):
+        parts = source_integrity.get("parts")
+        if isinstance(parts, list):
+            return [dict(row) for row in parts if isinstance(row, dict)]
+        return [dict(source_integrity)]
+    return [dict(row) for row in source_integrity if isinstance(row, dict)]
 
 
 def is_raw_image_path(path: Path) -> bool:

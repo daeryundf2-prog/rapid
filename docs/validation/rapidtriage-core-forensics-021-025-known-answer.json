@@ -61,7 +61,7 @@
       ],
       "expected": {
         "required_assertions": [
-          "RAW/split adapter and extraction metadata preserve split ordering/gap checks, partition parsing, tsk_recover audit, deleted-file expectations, encrypted warnings, and #23 core_accuracy_gates",
+          "RAW/split adapter and extraction metadata preserve split ordering/gap checks, partition parsing, tsk_recover audit, deleted-file expectations, encrypted warnings, raw-split-report-grade-validation-plan-v1, and #23 core_accuracy_gates",
           "RAW/split trusted recovery diff helper requires recovered path/hash equality before satisfying the #23 trusted RAW/split image recovery diff pass gate",
           "RAW/split reportability decisions block native-complete filesystem claims until large split-set, native parser, and encrypted-volume validation exists"
         ]

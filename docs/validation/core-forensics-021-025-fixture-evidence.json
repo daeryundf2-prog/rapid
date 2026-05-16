@@ -51,7 +51,7 @@
       "number": 23,
       "title": "RAW/split image robust partition/filesystem handling",
       "assertions": [
-        "RAW/split evidence adapter and extraction metadata preserve split discovery, source hashes, partition parsing, tsk_recover audit commands, deleted-file recovery expectations, encrypted-volume warnings, #23 core_accuracy_gates, image_analyst_review_profile, and native-filesystem reportability blockers.",
+        "RAW/split evidence adapter and extraction metadata preserve split discovery, source hashes, partition parsing, tsk_recover audit commands, deleted-file recovery expectations, encrypted-volume warnings, raw-split-report-grade-validation-plan-v1, #23 core_accuracy_gates, image_analyst_review_profile, and native-filesystem reportability blockers.",
         "build_image_workflow_trusted_diff compares RAW/split source, partition, recovery mode, and recovered path/hash rows against TSK/known-answer output before satisfying the #23 trusted diff gate."
       ],
       "blockers_kept": [

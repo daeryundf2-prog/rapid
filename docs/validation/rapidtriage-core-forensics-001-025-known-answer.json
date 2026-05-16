@@ -556,7 +556,7 @@
       ],
       "expected": {
         "required_assertions": [
-          "RAW/split adapter and extraction metadata preserve split ordering/gap checks, partition parsing, tsk_recover audit, deleted-file expectations, encrypted warnings, and #23 core_accuracy_gates"
+          "RAW/split adapter and extraction metadata preserve split ordering/gap checks, partition parsing, tsk_recover audit, deleted-file expectations, encrypted warnings, raw-split-report-grade-validation-plan-v1, and #23 core_accuracy_gates"
         ]
       },
       "notes": "Internal fixture pass; large damaged split-set and filesystem known-answer validation remain required.",

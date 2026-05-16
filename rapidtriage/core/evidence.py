@@ -10,7 +10,14 @@ from typing import Mapping, Protocol
 from .audit import compute_sha256
 from .archive_image import ARCHIVE_IMAGE_SUFFIXES, ARCHIVE_IMAGE_TOOLS, missing_archive_image_tools
 from .carving import DEFAULT_MAX_CANDIDATES, DEFAULT_MAX_SCAN_BYTES, SIGNATURES
-from .disk_image import RAW_IMAGE_REQUIRED_TOOLS, RAW_IMAGE_SUFFIXES, build_split_set_profile, discover_split_image_parts, missing_raw_image_tools
+from .disk_image import (
+    RAW_IMAGE_REQUIRED_TOOLS,
+    RAW_IMAGE_SUFFIXES,
+    build_raw_split_report_grade_validation_plan,
+    build_split_set_profile,
+    discover_split_image_parts,
+    missing_raw_image_tools,
+)
 from .e01 import (
     E01_REPORT_GRADE_BLOCKERS,
     E01_SUFFIXES,
@@ -80,6 +87,7 @@ class EvidenceAdapterResult:
     ingest_workflow: dict[str, object] | None = None
     image_analyst_review_profile: dict[str, object] | None = None
     e01_intake_profile: dict[str, object] | None = None
+    raw_split_validation_plan: dict[str, object] | None = None
     recovery_unlock_profile: dict[str, object] | None = None
 
     def to_dict(self) -> dict[str, object]:
@@ -542,6 +550,13 @@ class RawImageAdapter:
             "split_part_count": len(split_parts),
         } if split_parts else (describe_source_integrity(source) if source.is_file() else None)
         tool_preflight = collect_tool_preflight(RAW_IMAGE_REQUIRED_TOOLS) if supported else None
+        raw_validation_plan = build_raw_split_report_grade_validation_plan(
+            source,
+            image_paths=split_parts or None,
+            source_integrity=source_integrity,
+            split_set_profile=split_set_profile,
+            tool_preflight=tool_preflight or [],
+        ) if supported and source.is_file() else None
         return EvidenceAdapterResult(
             adapter=self.name,
             source_path=str(source),
@@ -643,6 +658,7 @@ class RawImageAdapter:
                 },
             ),
             split_set_profile=split_set_profile,
+            raw_split_validation_plan=raw_validation_plan,
             image_analyst_review_profile=image_workflow_analyst_review_profile(
                 23,
                 {
