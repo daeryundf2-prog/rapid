@@ -40,6 +40,7 @@
       "expected": {
         "required_assertions": [
           "E01 adapter and extraction metadata preserve source integrity, tool/command evidence, partition offset, read-only recovery, limitations, and #22 core_accuracy_gates",
+          "E01 known-answer and smoke outputs emit a report-grade validation plan with full-source hash, ewfverify, dependency-preflight, smoke, trusted-diff, corrupt/encrypted corpus, and platform-matrix evidence slots",
           "E01/Ex01 trusted workflow diff helper requires trusted image workflow equality before satisfying the #22 trusted E01/Ex01 workflow diff pass gate",
           "E01/Ex01 reportability decisions block native-complete image claims until trusted-tool and corrupt/encrypted corpus validation exists"
         ]

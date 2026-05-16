@@ -38,6 +38,7 @@
       "title": "E01/Ex01 fully integrated workflow",
       "assertions": [
         "E01 evidence adapter and extraction metadata preserve source integrity, tool preflight/commands, partition selection, read-only recovery provenance, limitation reporting, #22 core_accuracy_gates, image_analyst_review_profile, and native-complete reportability blockers.",
+        "E01 known-answer and smoke workflows emit e01-ex01-report-grade-validation-plan-v1 with e01-hash, ewfverify, dependency-preflight, workflow-smoke, trusted-workflow-diff, corrupt/encrypted corpus, and platform-matrix evidence slots.",
         "build_image_workflow_trusted_diff compares E01/Ex01 source hash, partition, recovery workflow, and recovered-file provenance against trusted image workflow rows before satisfying the #22 trusted diff gate."
       ],
       "blockers_kept": [

@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import hashlib
 import re
+import shlex
 import shutil
 import subprocess
 from dataclasses import dataclass, field
@@ -18,6 +19,7 @@ E01_SUFFIXES = (".e01", ".ex01")
 DIRECT_IMAGE_HASH_LIMIT_BYTES = 128 * 1024 * 1024
 E01_STAGE_CHECKPOINT_NAME = "rapidtriage-e01-stage-status.json"
 E01_INTEGRATED_WORKFLOW_MANIFEST_VERSION = "e01-ex01-integrated-workflow-manifest-v1"
+E01_REPORT_GRADE_VALIDATION_PLAN_VERSION = "e01-ex01-report-grade-validation-plan-v1"
 TOOL_PREFLIGHT_PROFILES: dict[str, dict[str, object]] = {
     "ewfmount": {
         "purpose": "Expose E01/Ex01 evidence as a read-only raw image through libewf.",
@@ -59,6 +61,7 @@ E01_REPORT_GRADE_BLOCKERS = [
     "deleted-corrupt-filesystem-recovery-delegated-to-sleuthkit",
     "large-known-answer-e01-ex01-corpus-required",
 ]
+E01_VALIDATION_TOOLS = ("ewfverify", "fls", "fsstat")
 E01_FAILURE_GUIDANCE: dict[str, dict[str, object]] = {
     "missing-tool": {
         "title": "Required E01 tool is missing",
@@ -1962,6 +1965,12 @@ def build_windows11_e01_known_answer_manifest(
         for index, item in enumerate(expected_artifacts or [])
         if str(item).strip()
     ]
+    validation_command_values = list(default_windows11_e01_validation_commands(source))
+    validation_command_values.extend(
+        str(command)
+        for command in validation_commands or []
+        if str(command).strip() and str(command) not in validation_command_values
+    )
     command_rows = [
         {
             "id": f"validation-command-{index + 1:03d}",
@@ -1969,7 +1978,7 @@ def build_windows11_e01_known_answer_manifest(
             "purpose": "known-answer-validation",
             "status": "not-run",
         }
-        for index, command in enumerate(validation_commands or default_windows11_e01_validation_commands(source))
+        for index, command in enumerate(validation_command_values)
         if str(command).strip()
     ]
     partition_rows = []
@@ -2032,6 +2041,15 @@ def build_windows11_e01_known_answer_manifest(
             ],
         },
         "validation_commands": command_rows,
+        "report_grade_validation_plan": build_e01_report_grade_validation_plan(
+            source,
+            case_id=case_id,
+            expected_partition_start_sector=expected_partition_start_sector,
+            expected_artifacts=expected_artifacts,
+            validation_commands=validation_commands,
+            source_integrity=source_integrity,
+            segment_set_profile=segment_profile,
+        ),
         "trusted_diff_targets": [
             "libewf/ewfverify source integrity transcript",
             "mmls partition table transcript",
@@ -2074,10 +2092,234 @@ def build_windows11_e01_known_answer_manifest(
 def default_windows11_e01_validation_commands(source: Path) -> list[str]:
     source_arg = str(source)
     return [
+        f"rapidtriage e01-hash {json.dumps(source_arg)} --output-dir rapidforensic-e01-validation/source-hash --json",
         f"rapidtriage evidence {json.dumps(source_arg)} --json",
         f"rapidtriage run {json.dumps(source_arg)} --mode hacking --output-dir rapidforensic-e01-smoke --read-only",
+        "rapidtriage image-workflow-validate --item-number 22 --rapid-output rapidforensic-e01-smoke/run/rapidtriage-e01.json --trusted-output rapidforensic-e01-validation/trusted-e01-workflow.csv --trusted-tool ewfverify --output rapidforensic-e01-validation/e01-trusted-diff.json --json",
         "rapidtriage commercial-readiness --json",
     ]
+
+
+def build_e01_report_grade_validation_plan(
+    source_path: Path,
+    *,
+    case_id: str = "windows11-e01-validation",
+    output_dir: Path | str | None = None,
+    expected_partition_start_sector: int | None = None,
+    expected_artifacts: Sequence[str] | None = None,
+    validation_commands: Sequence[str] | None = None,
+    source_integrity: Mapping[str, object] | None = None,
+    segment_set_profile: Mapping[str, object] | None = None,
+    tool_preflight: Sequence[Mapping[str, object]] | None = None,
+    preflight_summary: Mapping[str, object] | None = None,
+) -> dict[str, object]:
+    """Create the #22 report-grade validation handoff.
+
+    The plan is executable guidance: it tells the analyst which machine-readable
+    artifacts to produce before E01/Ex01 output can be cited as report-grade.
+    It does not mark #22 commercial-grade by itself.
+    """
+
+    source = source_path.expanduser().resolve()
+    output_root = Path(output_dir).expanduser().resolve() if output_dir else Path("rapidforensic-e01-validation")
+    expected_artifact_rows = [
+        {
+            "id": f"expected-artifact-{index + 1:03d}",
+            "description": str(item),
+            "status": "pending-trusted-comparison",
+        }
+        for index, item in enumerate(expected_artifacts or [])
+        if str(item).strip()
+    ]
+    segment_profile = dict(segment_set_profile or {})
+    integrity = dict(source_integrity or {})
+    preflight = dict(preflight_summary or {})
+    tool_rows = [dict(row) for row in tool_preflight or []]
+    smoke_argv = [
+        "rapidtriage",
+        "e01-smoke",
+        str(source),
+        "--output-dir",
+        str(output_root / "smoke"),
+        "--case-id",
+        case_id,
+    ]
+    if expected_partition_start_sector is not None:
+        smoke_argv.extend(["--expected-partition-start-sector", str(expected_partition_start_sector)])
+    command_rows = [
+        _e01_validation_command(
+            "source-full-hash",
+            ["rapidtriage", "e01-hash", str(source), "--output-dir", str(output_root / "source-hash"), "--json"],
+            purpose="Compute full source-image hashes with checkpoint evidence.",
+            expected_output=str(output_root / "source-hash" / "e01-streaming-hash.json"),
+        ),
+        _e01_validation_command(
+            "dependency-preflight",
+            ["rapidtriage", "evidence", str(source), "--output", str(output_root / "rapidtriage-evidence-preflight.json"), "--json"],
+            purpose="Record E01 adapter, dependency versions, segment inventory, and blocker guidance.",
+            expected_output=str(output_root / "rapidtriage-evidence-preflight.json"),
+        ),
+        _e01_validation_command(
+            "trusted-ewfverify",
+            ["ewfverify", str(source)],
+            purpose="Preserve libewf/acquisition validation transcript for source integrity comparison.",
+            expected_output=str(output_root / "ewfverify-transcript.txt"),
+            trusted_tool=True,
+        ),
+        _e01_validation_command(
+            "workflow-smoke",
+            smoke_argv,
+            purpose="Run the end-to-end smoke workflow and preserve stage status, extraction, analysis, and report outputs.",
+            expected_output=str(output_root / "smoke" / "rapidforensic-e01-smoke.json"),
+        ),
+        _e01_validation_command(
+            "trusted-workflow-diff",
+            [
+                "rapidtriage",
+                "image-workflow-validate",
+                "--item-number",
+                "22",
+                "--rapid-output",
+                str(output_root / "smoke" / "run" / "rapidtriage-e01.json"),
+                "--trusted-output",
+                str(output_root / "trusted-e01-workflow.csv"),
+                "--trusted-tool",
+                "ewfverify",
+                "--output",
+                str(output_root / "e01-trusted-diff.json"),
+                "--json",
+            ],
+            purpose="Compare RapidForensic source/partition/recovered-file provenance against trusted workflow rows.",
+            expected_output=str(output_root / "e01-trusted-diff.json"),
+            trusted_tool=True,
+        ),
+    ]
+    for index, command in enumerate(validation_commands or [], start=1):
+        if not str(command).strip():
+            continue
+        command_rows.append(
+            {
+                "id": f"custom-validation-command-{index:03d}",
+                "command": str(command),
+                "argv": [],
+                "purpose": "Analyst-provided known-answer validation command.",
+                "expected_output": "",
+                "status": "pending-run",
+                "trusted_tool_required": False,
+            }
+        )
+    evidence_slots = [
+        {
+            "id": "full-source-hash",
+            "label": "Full E01/Ex01 source hash evidence",
+            "status": "available-from-preflight" if integrity.get("hash_status") == "computed" else "pending-e01-hash-run",
+            "required_before_report": True,
+            "accepted_artifacts": ["e01-streaming-hash.json", "acquisition hash log", "ewfverify transcript"],
+        },
+        {
+            "id": "segment-inventory",
+            "label": "EWF segment inventory and order",
+            "status": "complete" if segment_profile.get("segment_count") else "pending-source-scan",
+            "required_before_report": True,
+            "warnings": list(segment_profile.get("warnings") or []),
+        },
+        {
+            "id": "dependency-version-matrix",
+            "label": "libewf/Sleuth Kit path and version matrix",
+            "status": "complete" if preflight.get("direct_extract_ready") and not preflight.get("version_unverified_tools") else "pending-preflight",
+            "required_before_report": True,
+            "tool_count": len(tool_rows),
+            "optional_validation_tools": list(E01_VALIDATION_TOOLS),
+        },
+        {
+            "id": "partition-and-recovery-diff",
+            "label": "Trusted partition/recovered-file diff",
+            "status": "pending-image-workflow-validate",
+            "required_before_report": True,
+            "required_fields": [
+                "source_sha256",
+                "selected_start_sector",
+                "workflow",
+                "segment_count",
+                "segment_numbers",
+                "recovered_file_count",
+                "recovered_file_sha256",
+            ],
+        },
+        {
+            "id": "corrupt-encrypted-corpus",
+            "label": "Malformed/corrupt/encrypted E01 corpus coverage",
+            "status": "external-corpus-required",
+            "required_before_commercial_grade": True,
+            "minimum_cases": ["clean", "split", "missing-segment", "corrupt", "encrypted-or-locked"],
+        },
+        {
+            "id": "platform-tool-matrix",
+            "label": "macOS/Linux/Windows tool behavior matrix",
+            "status": "external-run-required",
+            "required_before_commercial_grade": True,
+            "platforms": ["macOS", "Windows WSL2", "Linux"],
+        },
+    ]
+    ready_slots = [slot["id"] for slot in evidence_slots if str(slot.get("status", "")).startswith(("complete", "available"))]
+    blocker_slots = [
+        slot["id"]
+        for slot in evidence_slots
+        if slot.get("required_before_report") and not str(slot.get("status", "")).startswith(("complete", "available"))
+    ]
+    payload: dict[str, object] = {
+        "profile_version": E01_REPORT_GRADE_VALIDATION_PLAN_VERSION,
+        "item_number": 22,
+        "gap_id": "#22",
+        "case_id": case_id,
+        "source_path": str(source),
+        "output_root": str(output_root),
+        "status": "report-validation-blocked" if blocker_slots else "ready-for-report-review",
+        "commercial_grade_ready": False,
+        "expected_partition_start_sector": expected_partition_start_sector,
+        "expected_artifacts": expected_artifact_rows,
+        "source_integrity": integrity,
+        "segment_set_profile": segment_profile,
+        "dependency_preflight": preflight,
+        "tool_preflight": tool_rows,
+        "validation_commands": command_rows,
+        "evidence_slots": evidence_slots,
+        "ready_slot_ids": ready_slots,
+        "blocking_slot_ids": blocker_slots,
+        "report_claim_boundary": (
+            "This plan can make one E01/Ex01 case reviewable when all report-required slots pass; "
+            "commercial-grade product claims still require external corpus and platform matrix evidence."
+        ),
+        "commercial_grade_blockers": list(E01_REPORT_GRADE_BLOCKERS),
+        "operator_next_steps": [
+            "Run source-full-hash and dependency-preflight first.",
+            "Run trusted-ewfverify or preserve the acquisition suite validation transcript.",
+            "Run workflow-smoke, then normalize trusted rows and run trusted-workflow-diff.",
+            "Attach this plan, command transcripts, output hashes, and reviewer signoff to the validation package.",
+        ],
+    }
+    payload["manifest_sha256"] = stable_manifest_sha256(payload)
+    return payload
+
+
+def _e01_validation_command(
+    command_id: str,
+    argv: Sequence[str],
+    *,
+    purpose: str,
+    expected_output: str,
+    trusted_tool: bool = False,
+) -> dict[str, object]:
+    clean_argv = [str(item) for item in argv if str(item) != ""]
+    return {
+        "id": command_id,
+        "argv": clean_argv,
+        "command": " ".join(shlex.quote(item) for item in clean_argv),
+        "purpose": purpose,
+        "expected_output": expected_output,
+        "status": "pending-run",
+        "trusted_tool_required": trusted_tool,
+    }
 
 
 def stable_manifest_sha256(payload: Mapping[str, object]) -> str:

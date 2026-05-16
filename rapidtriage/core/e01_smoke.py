@@ -7,7 +7,12 @@ from typing import Sequence
 
 from .audit import compute_sha256
 from .docs import write_result
-from .e01 import build_windows11_e01_known_answer_manifest, e01_failure_guidance, is_e01_path
+from .e01 import (
+    build_e01_report_grade_validation_plan,
+    build_windows11_e01_known_answer_manifest,
+    e01_failure_guidance,
+    is_e01_path,
+)
 from .evidence import identify_evidence
 from .run import RunModeError, run_triage_mode
 
@@ -16,6 +21,7 @@ E01_SMOKE_OUTPUT_NAME = "rapidforensic-e01-smoke.json"
 E01_KNOWN_ANSWER_OUTPUT_NAME = "windows11-e01-known-answer.json"
 E01_EVIDENCE_PREFLIGHT_OUTPUT_NAME = "rapidtriage-evidence-preflight.json"
 E01_STAGE_STATUS_OUTPUT_NAME = "rapidforensic-e01-workflow-stage-status.json"
+E01_VALIDATION_PLAN_OUTPUT_NAME = "rapidforensic-e01-validation-plan.json"
 
 
 def _output_status(path: Path) -> dict[str, object]:
@@ -94,6 +100,7 @@ def run_windows11_e01_smoke(
     evidence_path = output_dir / E01_EVIDENCE_PREFLIGHT_OUTPUT_NAME
     smoke_path = output_dir / E01_SMOKE_OUTPUT_NAME
     stage_status_path = output_dir / E01_STAGE_STATUS_OUTPUT_NAME
+    validation_plan_path = output_dir / E01_VALIDATION_PLAN_OUTPUT_NAME
     run_dir = output_dir / "run"
 
     expected_artifacts = list(expected_artifacts or [])
@@ -134,6 +141,32 @@ def run_windows11_e01_smoke(
                 "detected_format": evidence.get("detected_format"),
                 "missing_tools": evidence.get("missing_tools") or [],
                 "support_level": evidence.get("support_level"),
+            },
+        )
+    )
+
+    validation_plan = build_e01_report_grade_validation_plan(
+        source,
+        case_id=case_id,
+        output_dir=output_dir / "validation",
+        expected_partition_start_sector=expected_partition_start_sector,
+        expected_artifacts=expected_artifacts,
+        validation_commands=validation_commands,
+        source_integrity=evidence.get("source_integrity") if isinstance(evidence.get("source_integrity"), Mapping) else None,
+        segment_set_profile=evidence.get("segment_set_profile") if isinstance(evidence.get("segment_set_profile"), Mapping) else None,
+        tool_preflight=evidence.get("tool_preflight") if isinstance(evidence.get("tool_preflight"), list) else None,
+        preflight_summary=evidence.get("preflight_summary") if isinstance(evidence.get("preflight_summary"), Mapping) else None,
+    )
+    write_result(validation_plan, validation_plan_path)
+    stages.append(
+        _stage(
+            "report-grade-validation-plan",
+            "Report-grade E01 validation evidence plan",
+            "complete",
+            output_path=validation_plan_path,
+            details={
+                "manifest_sha256": validation_plan.get("manifest_sha256"),
+                "blocking_slot_ids": validation_plan.get("blocking_slot_ids", []),
             },
         )
     )
@@ -221,6 +254,7 @@ def run_windows11_e01_smoke(
         "qc_links": {
             "known_answer_manifest": str(known_answer_path),
             "evidence_preflight": str(evidence_path),
+            "validation_plan": str(validation_plan_path),
             "smoke_report": str(smoke_path),
         },
     }
@@ -228,6 +262,7 @@ def run_windows11_e01_smoke(
     outputs: dict[str, object] = {
         "known_answer_manifest": _output_status(known_answer_path),
         "evidence_preflight": _output_status(evidence_path),
+        "validation_plan": _output_status(validation_plan_path),
         "stage_status": _output_status(stage_status_path),
     }
     if run_payload and isinstance(run_payload.get("outputs"), Mapping):
@@ -246,6 +281,7 @@ def run_windows11_e01_smoke(
         "stage_status": stage_status_payload,
         "known_answer_manifest": known_answer,
         "evidence_preflight": evidence,
+        "report_grade_validation_plan": validation_plan,
         "run_summary": run_payload.get("summary", {}) if run_payload else {},
         "run_error": run_error,
         "outputs": outputs,

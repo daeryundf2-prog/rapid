@@ -637,7 +637,8 @@
       ],
       "expected": {
         "required_assertions": [
-          "E01 adapter and extraction metadata preserve source integrity, tool/command evidence, partition offset, read-only recovery, limitations, and #22 core_accuracy_gates"
+          "E01 adapter and extraction metadata preserve source integrity, tool/command evidence, partition offset, read-only recovery, limitations, and #22 core_accuracy_gates",
+          "E01 known-answer and smoke outputs emit a report-grade validation plan with full-source hash, ewfverify, dependency-preflight, smoke, trusted-diff, corrupt/encrypted corpus, and platform-matrix evidence slots"
         ]
       },
       "notes": "Internal fixture pass; real E01/Ex01 corpora, corrupt/encrypted images, and independent libewf/Sleuth Kit matrix remain required.",

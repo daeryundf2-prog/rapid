@@ -6,7 +6,7 @@ RapidTriage is currently strongest when you give it a mounted folder, exported f
 
 For AD1, AFF/AFF4, XVA, proprietary mobile packages, and memory dumps, use `Check evidence support` or `rapidtriage evidence` first. If RapidTriage says the source must be mounted/exported, do that with your trusted forensic workflow and select the resulting folder. For raw/split, archive, and virtual-disk inputs, the same support check shows whether Sleuth Kit, 7-Zip/bsdtar, or qemu-img are available for direct extraction. For mobile cases, RapidTriage can now import already-exported Cellebrite/XRY/GrayKey/AXIOM-style CSV/JSON folders.
 
-For image/container preflight, JSON output now includes source integrity, missing tools, external tool path/version preflight where applicable, safety notes, limitations, fallback guidance, and a `commercial_grade_ready` flag. Large images may defer full SHA256 hashing in preflight so the UI does not freeze; preserve full acquisition hashes from the imaging workflow and compare them in the case record.
+For image/container preflight, JSON output now includes source integrity, missing tools, external tool path/version preflight where applicable, safety notes, limitations, fallback guidance, and a `commercial_grade_ready` flag. Large images may defer full SHA256 hashing in preflight so the UI does not freeze; preserve full acquisition hashes from the imaging workflow and compare them in the case record. For E01/Ex01 report-grade preparation, `e01-known-answer` and `e01-smoke` also emit an `e01-ex01-report-grade-validation-plan-v1` object that lists the exact `e01-hash`, `ewfverify`, preflight, smoke, and trusted-diff commands plus the evidence slots still blocking report use.
 
 Use:
 
@@ -152,6 +152,7 @@ For QC-prep and large-case validation evidence, use the helper commands below. T
 rapidtriage macos-live-smoke --output-dir ./qc/macos-live --overwrite --json
 rapidtriage macos-live-smoke --output-dir ./qc/macos-live --case-db ./case.db --overwrite --json
 rapidtriage e01-hash ./case.E01 --output-dir ./qc/e01-hash --json
+rapidtriage e01-smoke ./case.E01 --output-dir ./qc/e01-smoke --case-id CASE-001 --plan-only --json
 rapidtriage known-answer-qc --manifest ./known-answer.json --trusted-manifest ./trusted-known-answer.json --output-dir ./qc/known-answer --json
 rapidtriage sqlite-fts-benchmark --output-dir ./qc/fts-100k --record-count 100000 --json
 rapidtriage large-case-readiness --case-db ./case.db --benchmark ./qc/fts-100k/sqlite-fts-benchmark.json --output ./qc/large-case-readiness.json --json

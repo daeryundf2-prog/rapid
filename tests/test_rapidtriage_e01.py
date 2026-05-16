@@ -17,6 +17,7 @@ from rapidtriage.core.disk_image import (
 from rapidtriage.core.e01 import (
     E01ExtractionError,
     E01ExtractionResult,
+    build_e01_report_grade_validation_plan,
     build_e01_segment_set_profile,
     build_windows11_e01_known_answer_manifest,
     build_image_workflow_trusted_diff,
@@ -64,10 +65,59 @@ class RapidTriageE01Tests(unittest.TestCase):
             self.assertEqual(manifest["expected"]["partitions"][0]["start_sector"], 2048)
             self.assertEqual(len(manifest["expected"]["high_value_artifacts"]), 2)
             self.assertEqual(manifest["validation_commands"][0]["status"], "not-run")
+            self.assertIn("e01-hash", manifest["validation_commands"][0]["command"])
+            validation_plan = manifest["report_grade_validation_plan"]
+            self.assertEqual(validation_plan["profile_version"], "e01-ex01-report-grade-validation-plan-v1")
+            self.assertEqual(validation_plan["gap_id"], "#22")
+            self.assertIn("source-full-hash", {row["id"] for row in validation_plan["validation_commands"]})
+            self.assertIn("trusted-workflow-diff", {row["id"] for row in validation_plan["validation_commands"]})
+            self.assertIn("partition-and-recovery-diff", validation_plan["blocking_slot_ids"])
+            self.assertEqual(len(validation_plan["manifest_sha256"]), 64)
             self.assertEqual(manifest["core_accuracy_gates"][0]["gap_id"], "#22")
             self.assertIn("source hash and segment integrity", manifest["core_accuracy_gates"][0]["satisfied_checks"])
             self.assertIn("partition offset correctness", manifest["core_accuracy_gates"][0]["satisfied_checks"])
             self.assertEqual(len(manifest["manifest_sha256"]), 64)
+
+    def test_e01_report_grade_validation_plan_preserves_commands_slots_and_blockers(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            e01_path = root / "case.E01"
+            e01_path.write_bytes(b"EVF-validation-plan")
+
+            plan = build_e01_report_grade_validation_plan(
+                e01_path,
+                output_dir=root / "validation",
+                case_id="CASE-PLAN",
+                expected_partition_start_sector=2048,
+                expected_artifacts=["Security.evtx event 4624"],
+                source_integrity={"hash_status": "computed", "sha256": "a" * 64},
+                segment_set_profile={"segment_count": 1, "warnings": []},
+                tool_preflight=[
+                    {"tool": "ewfmount", "available": True, "version": "ewfmount 1.0"},
+                    {"tool": "mmls", "available": True, "version": "mmls 1.0"},
+                    {"tool": "tsk_recover", "available": True, "version": "tsk_recover 1.0"},
+                ],
+                preflight_summary={"direct_extract_ready": True, "version_unverified_tools": []},
+            )
+
+            self.assertEqual(plan["profile_version"], "e01-ex01-report-grade-validation-plan-v1")
+            self.assertEqual(plan["status"], "report-validation-blocked")
+            command_ids = {row["id"] for row in plan["validation_commands"]}
+            self.assertIn("source-full-hash", command_ids)
+            self.assertIn("trusted-ewfverify", command_ids)
+            self.assertIn("trusted-workflow-diff", command_ids)
+            source_hash_command = next(row for row in plan["validation_commands"] if row["id"] == "source-full-hash")
+            self.assertEqual(source_hash_command["argv"][1], "e01-hash")
+            self.assertIn("e01-streaming-hash.json", source_hash_command["expected_output"])
+            slot_status = {slot["id"]: slot["status"] for slot in plan["evidence_slots"]}
+            self.assertEqual(slot_status["full-source-hash"], "available-from-preflight")
+            self.assertEqual(slot_status["segment-inventory"], "complete")
+            self.assertEqual(slot_status["dependency-version-matrix"], "complete")
+            self.assertEqual(slot_status["partition-and-recovery-diff"], "pending-image-workflow-validate")
+            self.assertIn("partition-and-recovery-diff", plan["blocking_slot_ids"])
+            self.assertIn("corrupt-encrypted-corpus", [slot["id"] for slot in plan["evidence_slots"]])
+            self.assertEqual(plan["expected_artifacts"][0]["description"], "Security.evtx event 4624")
+            self.assertEqual(len(plan["manifest_sha256"]), 64)
 
     def test_e01_known_answer_cli_writes_manifest(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -118,16 +168,25 @@ class RapidTriageE01Tests(unittest.TestCase):
             self.assertFalse(payload["commercial_grade_ready"])
             self.assertTrue((output_dir / "windows11-e01-known-answer.json").is_file())
             self.assertTrue((output_dir / "rapidtriage-evidence-preflight.json").is_file())
+            self.assertTrue((output_dir / "rapidforensic-e01-validation-plan.json").is_file())
             self.assertTrue((output_dir / "rapidforensic-e01-smoke.json").is_file())
             self.assertTrue((output_dir / "rapidforensic-e01-workflow-stage-status.json").is_file())
             stage_status = {stage["id"]: stage["status"] for stage in payload["stages"]}
             self.assertEqual(stage_status["known-answer-manifest"], "complete")
             self.assertEqual(stage_status["evidence-preflight"], "complete")
+            self.assertEqual(stage_status["report-grade-validation-plan"], "complete")
             self.assertEqual(stage_status["triage-run"], "blocked")
             self.assertEqual(payload["stage_status"]["schema"], "rapidforensic-e01-workflow-stage-status-v1")
             self.assertEqual(payload["stage_status"]["stage_counts"]["blocked"], 1)
             self.assertEqual(payload["stage_status"]["blocked_stage_ids"], ["triage-run"])
+            self.assertEqual(
+                payload["stage_status"]["qc_links"]["validation_plan"],
+                str((output_dir / "rapidforensic-e01-validation-plan.json").resolve()),
+            )
             self.assertEqual(payload["outputs"]["stage_status"]["exists"], True)
+            self.assertEqual(payload["outputs"]["validation_plan"]["exists"], True)
+            self.assertEqual(payload["report_grade_validation_plan"]["profile_version"], "e01-ex01-report-grade-validation-plan-v1")
+            self.assertIn("trusted-workflow-diff", {row["id"] for row in payload["report_grade_validation_plan"]["validation_commands"]})
             self.assertEqual(payload["known_answer_manifest"]["expected"]["partitions"][0]["start_sector"], 2048)
             self.assertIn("failure_guidance", payload["run_error"])
             self.assertIsNone(payload["outputs"]["smoke_report"]["sha256"])
@@ -159,6 +218,7 @@ class RapidTriageE01Tests(unittest.TestCase):
             self.assertEqual(payload["status"], "blocked")
             self.assertEqual(payload["outputs"]["known_answer_manifest"]["exists"], True)
             self.assertEqual(payload["outputs"]["evidence_preflight"]["exists"], True)
+            self.assertEqual(payload["outputs"]["validation_plan"]["exists"], True)
             self.assertEqual(payload["outputs"]["stage_status"]["exists"], True)
             self.assertEqual(payload["outputs"]["smoke_report"]["exists"], True)
 
