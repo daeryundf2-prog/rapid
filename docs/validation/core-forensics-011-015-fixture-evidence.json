@@ -65,10 +65,10 @@
       "number": 14,
       "title": "JumpList DestList deep parser",
       "assertions": [
-        "jumplist-automatic rows preserve CFB stream inventory, DestList header/entry candidates, embedded LNK linkage, AppID hash provenance, deleted-entry warning, source hashes, #14 core_accuracy_gates, and jumplist_analyst_review_profile.",
-        "jumplist_evidence links destination target paths back to stream and DestList candidate metadata.",
+        "jumplist-automatic rows preserve CFB stream inventory, DestList header/entry candidates, selected layout profiles, stable entry citation hashes, embedded LNK linkage, AppID hash provenance, deleted-entry warning, source hashes, #14 core_accuracy_gates, and jumplist_analyst_review_profile.",
+        "jumplist_evidence links destination target paths back to stream, DestList candidate metadata, layout candidates, and citation hashes.",
         "trusted JumpList DestList diff helpers compare AppID, entry/stream ID, target path, timestamp, and MRU/pin fields against JLECmd/LECmd-style rows.",
-        "JumpList reportability decisions keep DestList semantics as recent-destination triage pivots."
+        "JumpList reportability decisions keep DestList semantics as recent-destination triage pivots until OS-version layout semantics are externally validated."
       ],
       "blockers_kept": [
         "OS-version-specific DestList field semantics",

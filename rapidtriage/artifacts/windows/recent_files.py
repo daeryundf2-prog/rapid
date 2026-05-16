@@ -14,7 +14,7 @@ from ...core.models import ArtifactRecord
 from .common import build_forensic_review, isoformat_from_timestamp, iter_windows_user_homes
 
 RECENT_ROOT = ("AppData", "Roaming", "Microsoft", "Windows", "Recent")
-PARSER_VERSION = "windows-recent-files-v6"
+PARSER_VERSION = "windows-recent-files-v7"
 MAX_JUMPLIST_EMBEDDED_LNKS = 50
 MAX_OLE_STREAMS = 128
 MAX_OLE_STREAM_BYTES = 8 * 1024 * 1024
@@ -719,7 +719,13 @@ def jumplist_evidence(
                 "lnk_offset": destination.get("lnk_offset", 0),
                 "has_tracker_data": bool(destination.get("has_tracker_data")),
                 "destlist_entry_offset_candidate": destination.get("destlist_entry_offset_candidate"),
+                "destlist_layout_candidate": destination.get("destlist_layout_candidate", ""),
                 "destlist_validation_status": destination.get("destlist_validation_status", ""),
+                "destlist_entry_citation_hash": (
+                    destination.get("destlist_entry_citation", {}).get("citation_hash")
+                    if isinstance(destination.get("destlist_entry_citation"), Mapping)
+                    else ""
+                ),
                 "filetime_candidates": list(destination.get("destlist_filetime_candidates") or [])[:4],
             }
             for destination in destinations[:50]
@@ -1031,7 +1037,13 @@ def jumplist_destlist_depth_manifest(details: Mapping[str, object]) -> dict[str,
                     "stream_path": str(item.get("stream_path") or ""),
                     "destlist_entry_index_candidate": item.get("destlist_entry_index_candidate", ""),
                     "destlist_entry_offset_candidate": item.get("destlist_entry_offset_candidate", ""),
+                    "destlist_layout_candidate": str(item.get("destlist_layout_candidate") or ""),
                     "destlist_validation_status": str(item.get("destlist_validation_status") or ""),
+                    "destlist_entry_citation_hash": (
+                        item.get("destlist_entry_citation", {}).get("citation_hash")
+                        if isinstance(item.get("destlist_entry_citation"), Mapping)
+                        else ""
+                    ),
                     "has_tracker_data": bool(item.get("has_tracker_data")),
                 }
                 for item in destinations[:25]
@@ -1330,7 +1342,7 @@ def best_destlist_entry_candidate(
     source: dict[str, object],
     lnk_stream_names: set[str],
 ) -> dict[str, object] | None:
-    layout_candidates: list[tuple[int, str, int, str, int]] = []
+    layout_candidates: list[dict[str, object]] = []
     for layout_name, fixed_size in DESTLIST_ENTRY_LAYOUTS:
         if offset + fixed_size > len(data):
             continue
@@ -1346,16 +1358,49 @@ def best_destlist_entry_candidate(
             score += 2
         if "\\" in path or "/" in path:
             score += 2
-        if matched_lnk_stream_candidates(data[offset : offset + fixed_size], lnk_stream_names):
+        matched_streams_for_layout = matched_lnk_stream_candidates(data[offset : offset + fixed_size], lnk_stream_names)
+        if matched_streams_for_layout:
             score += 2
-        layout_candidates.append((score, layout_name, fixed_size, path, end - offset))
+        layout_candidates.append(
+            {
+                "layout_candidate": layout_name,
+                "fixed_header_size_candidate": fixed_size,
+                "path_char_count_candidate": path_char_count,
+                "path_candidate": path,
+                "entry_size_candidate": end - offset,
+                "layout_score": score,
+                "matched_lnk_stream_candidate_count": len(matched_streams_for_layout),
+            }
+        )
     if not layout_candidates:
         return None
-    _, layout_name, fixed_size, path, entry_size = sorted(layout_candidates, key=lambda item: item[0], reverse=True)[0]
+    selected_layout = sorted(
+        layout_candidates,
+        key=lambda item: (
+            int(item["layout_score"]),
+            int(item["fixed_header_size_candidate"]),
+        ),
+        reverse=True,
+    )[0]
+    layout_name = str(selected_layout["layout_candidate"])
+    fixed_size = int(selected_layout["fixed_header_size_candidate"])
+    path = str(selected_layout["path_candidate"])
+    entry_size = int(selected_layout["entry_size_candidate"])
     prefix = data[offset : offset + fixed_size]
     matched_streams = matched_lnk_stream_candidates(prefix, lnk_stream_names)
     filetime_candidates = destlist_filetime_candidates(prefix)
     validation_status = "candidate-linked-lnk-stream" if matched_streams else "candidate-unlinked"
+    citation = {
+        **source,
+        "entry_index": index,
+        "entry_offset": offset,
+        "entry_size": entry_size,
+        "layout_candidate": layout_name,
+        "path_candidate": path,
+        "matched_lnk_stream_candidates": matched_streams,
+        "entry_prefix_sha256": sha256_bytes(prefix),
+        "entry_sha256": sha256_bytes(data[offset : offset + entry_size]),
+    }
     return {
         **source,
         "index": index,
@@ -1363,7 +1408,20 @@ def best_destlist_entry_candidate(
         "entry_size_candidate": entry_size,
         "layout_candidate": layout_name,
         "fixed_header_size_candidate": fixed_size,
+        "layout_selection_profile": {
+            "profile_version": "destlist-layout-selection-v1",
+            "selected_layout": layout_name,
+            "selected_layout_score": int(selected_layout["layout_score"]),
+            "layout_candidates": layout_candidates,
+            "selection_basis": [
+                "UTF-16 path length field fits selected fixed header size",
+                "path contains separator when present",
+                "numeric field matches embedded LNK stream name when present",
+            ],
+            "os_version_semantics_validated": False,
+        },
         "path_candidate": path,
+        "path_char_count_candidate": int(selected_layout["path_char_count_candidate"]),
         "droid_guid_candidates": destlist_guid_candidates(prefix),
         "hostname_candidates": destlist_hostname_candidates(prefix),
         "filetime_candidates": filetime_candidates,
@@ -1371,6 +1429,17 @@ def best_destlist_entry_candidate(
         "matched_lnk_stream_candidates": matched_streams,
         "validation_status": validation_status,
         "parser_confidence": destlist_entry_confidence(path, matched_streams, filetime_candidates),
+        "entry_prefix_sha256": citation["entry_prefix_sha256"],
+        "entry_sha256": citation["entry_sha256"],
+        "destlist_entry_citation": {
+            **citation,
+            "citation_hash": recent_stable_sha256(citation),
+            "reportability": "candidate-destlist-entry-citation",
+            "commercial_blockers": [
+                "destlist-os-version-specific-field-validation-required",
+                "jumplist-destlist-trusted-diff-required",
+            ],
+        },
     }
 
 
@@ -1499,6 +1568,8 @@ def enrich_destinations_with_destlist_candidates(
                 "destlist_hostname_candidates": match.get("hostname_candidates", []),
                 "destlist_filetime_candidates": match.get("filetime_candidates", []),
                 "destlist_validation_status": match.get("validation_status", ""),
+                "destlist_layout_candidate": match.get("layout_candidate", ""),
+                "destlist_entry_citation": match.get("destlist_entry_citation", {}),
             }
         )
 

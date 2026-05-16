@@ -352,7 +352,7 @@
       ],
       "expected": {
         "required_assertions": [
-          "CFB streams, DestList header/entry candidates, embedded LNK linkage, and AppID hash provenance are emitted",
+          "CFB streams, DestList header/entry candidates, selected layout profiles, entry citation hashes, embedded LNK linkage, and AppID hash provenance are emitted",
           "#14 core_accuracy_gates are present on JumpList rows"
         ]
       },

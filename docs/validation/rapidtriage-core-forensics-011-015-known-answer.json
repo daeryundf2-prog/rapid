@@ -84,10 +84,10 @@
       ],
       "expected": {
         "required_assertions": [
-          "CFB streams, DestList header/entry candidates, embedded LNK linkage, and AppID hash provenance are emitted",
+          "CFB streams, DestList header/entry candidates, selected layout profiles, entry citation hashes, embedded LNK linkage, and AppID hash provenance are emitted",
           "#14 core_accuracy_gates are present on JumpList rows",
           "trusted JumpList DestList diff helpers pass exact matching rows and block mismatches",
-          "JumpList reportability decisions block final DestList semantics until version-specific and deleted-entry validation is attached"
+          "JumpList reportability decisions block final DestList semantics until version-specific layout, deleted-entry, and AppID validation is attached"
         ]
       },
       "notes": "Internal fixture pass; JLECmd/LECmd cross-tool corpus, deleted entries, and AppID mapping validation remain required."

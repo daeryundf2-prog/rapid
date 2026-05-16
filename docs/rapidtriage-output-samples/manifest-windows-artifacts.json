@@ -3698,8 +3698,10 @@
                 "destination_count": 1,
                 "destination_preview": [
                   {
+                    "destlist_entry_citation_hash": "",
                     "destlist_entry_index_candidate": "",
                     "destlist_entry_offset_candidate": "",
+                    "destlist_layout_candidate": "",
                     "destlist_validation_status": "",
                     "has_tracker_data": true,
                     "stream_path": "",
@@ -3730,7 +3732,7 @@
               "item_number": 14,
               "manifest_sha256": "<DYNAMIC_MANIFEST_HASH>",
               "manifest_version": "jumplist-destlist-depth-manifest-v1",
-              "parser_version": "windows-recent-files-v6",
+              "parser_version": "windows-recent-files-v7",
               "qc_prep_contract": {
                 "implemented": [
                   "CFB/OLE stream inventory with bounded stream limits",
@@ -3808,7 +3810,9 @@
               },
               "destinations": [
                 {
+                  "destlist_entry_citation_hash": "",
                   "destlist_entry_offset_candidate": null,
+                  "destlist_layout_candidate": "",
                   "destlist_validation_status": "",
                   "filetime_candidates": [],
                   "has_tracker_data": true,
@@ -3843,7 +3847,7 @@
             "ole_streams": [],
             "parser": "windows-recent-files",
             "parser_confidence": 0.65,
-            "parser_version": "windows-recent-files-v6",
+            "parser_version": "windows-recent-files-v7",
             "recent_native_capabilities": {
               "appid_hash_mapping": false,
               "destlist_account_metadata_decode": false,
@@ -4317,8 +4321,10 @@
                 "destination_count": 1,
                 "destination_preview": [
                   {
+                    "destlist_entry_citation_hash": "",
                     "destlist_entry_index_candidate": "",
                     "destlist_entry_offset_candidate": "",
+                    "destlist_layout_candidate": "",
                     "destlist_validation_status": "",
                     "has_tracker_data": true,
                     "stream_path": "",
@@ -4349,7 +4355,7 @@
               "item_number": 14,
               "manifest_sha256": "<DYNAMIC_MANIFEST_HASH>",
               "manifest_version": "jumplist-destlist-depth-manifest-v1",
-              "parser_version": "windows-recent-files-v6",
+              "parser_version": "windows-recent-files-v7",
               "qc_prep_contract": {
                 "implemented": [
                   "CFB/OLE stream inventory with bounded stream limits",
@@ -4427,7 +4433,9 @@
               },
               "destinations": [
                 {
+                  "destlist_entry_citation_hash": "",
                   "destlist_entry_offset_candidate": null,
+                  "destlist_layout_candidate": "",
                   "destlist_validation_status": "",
                   "filetime_candidates": [],
                   "has_tracker_data": true,
@@ -4462,7 +4470,7 @@
             "ole_streams": [],
             "parser": "windows-recent-files",
             "parser_confidence": 0.65,
-            "parser_version": "windows-recent-files-v6",
+            "parser_version": "windows-recent-files-v7",
             "recent_native_capabilities": {
               "appid_hash_mapping": false,
               "destlist_account_metadata_decode": false,
@@ -4964,7 +4972,7 @@
               },
               "manifest_sha256": "<DYNAMIC_MANIFEST_HASH>",
               "manifest_version": "lnk-metadata-depth-manifest-v1",
-              "parser_version": "windows-recent-files-v6",
+              "parser_version": "windows-recent-files-v7",
               "qc_prep_contract": {
                 "commercial_blockers": [
                   "complete shell item semantic decoding",
@@ -5045,7 +5053,7 @@
             "lnk_parse_status": "parsed",
             "modified_at": "2024-03-05T06:07:08+00:00",
             "parser": "windows-recent-files",
-            "parser_version": "windows-recent-files-v6",
+            "parser_version": "windows-recent-files-v7",
             "property_store_blocks": [],
             "recent_native_capabilities": {
               "appid_hash_mapping": false,

@@ -1381,6 +1381,58 @@ class RapidTriageWindowsArtifactsCollectorTests(unittest.TestCase):
         self.assertEqual(metadata["destlist_unlinked_entry_candidates"][0]["path_candidate"], path)
         self.assertTrue(metadata["destlist_validation_checks"]["deleted_or_unlinked_entry_review_available"])
 
+    def test_jumplist_destlist_records_layout_and_entry_citation(self) -> None:
+        path = r"C:\Users\alice\Documents\case.txt"
+        encoded_path = path.encode("utf-16le")
+        entry = bytearray(130 + len(encoded_path))
+        entry[96:100] = (7).to_bytes(4, "little")
+        entry[128:130] = len(path).to_bytes(2, "little")
+        entry[130:] = encoded_path
+        destlist = bytearray(32)
+        destlist[0:4] = (3).to_bytes(4, "little")
+        destlist[4:8] = (1).to_bytes(4, "little")
+        destlist.extend(entry)
+
+        metadata = parse_destlist_metadata(
+            [
+                {
+                    "name": "DestList",
+                    "path": "Root Entry/DestList",
+                    "index": 1,
+                    "size": len(destlist),
+                    "start_sector": 3,
+                    "data": bytes(destlist),
+                },
+                {
+                    "name": "7",
+                    "path": "Root Entry/7",
+                    "index": 2,
+                    "size": 128,
+                    "start_sector": 9,
+                    "data": b"not-a-real-lnk",
+                },
+            ]
+        )
+
+        candidate = metadata["destlist_entry_candidates"][0]
+        citation = candidate["destlist_entry_citation"]
+        layout_profile = candidate["layout_selection_profile"]
+
+        self.assertEqual(metadata["destlist_parse_status"], "parsed-candidate")
+        self.assertEqual(candidate["layout_candidate"], "win10-plus-fixed130")
+        self.assertEqual(candidate["path_candidate"], path)
+        self.assertEqual(candidate["matched_lnk_stream_candidates"][0]["stream_name_candidate"], "7")
+        self.assertEqual(candidate["validation_status"], "candidate-linked-lnk-stream")
+        self.assertEqual(layout_profile["profile_version"], "destlist-layout-selection-v1")
+        self.assertEqual(layout_profile["selected_layout"], "win10-plus-fixed130")
+        self.assertTrue(layout_profile["selected_layout_score"] >= 6)
+        self.assertFalse(layout_profile["os_version_semantics_validated"])
+        self.assertEqual(citation["layout_candidate"], "win10-plus-fixed130")
+        self.assertEqual(citation["path_candidate"], path)
+        self.assertEqual(len(citation["citation_hash"]), 64)
+        self.assertEqual(len(candidate["entry_sha256"]), 64)
+        self.assertTrue(metadata["destlist_validation_checks"]["all_candidates_link_to_lnk_stream"])
+
     def test_prefetch_mam_compression_status_is_detected_without_false_scca_claim(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             pf = Path(tmp_dir) / "COMPRESSED.EXE-12345678.pf"
