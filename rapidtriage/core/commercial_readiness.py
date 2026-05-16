@@ -3419,6 +3419,7 @@ def release_operations_evidence_chain() -> list[dict[str, object]]:
             "primary_outputs": [
                 "release-manifest.package_readiness.windows_signed_installer",
                 "windows_signed_installer.windows_signing_evidence_manifest.manifest_hash",
+                "windows_signed_installer.windows_signing_report_grade_validation_plan_hash",
                 "windows_signed_installer.signing_slots.signature_log",
                 "windows_signed_installer.signing_slots.timestamp_authority",
                 "windows_signed_installer.signing_slots.fresh_windows_smoke",

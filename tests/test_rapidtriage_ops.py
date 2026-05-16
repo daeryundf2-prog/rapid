@@ -1767,6 +1767,10 @@ class RapidTriageOpsTests(unittest.TestCase):
                 release_by_number[101]["primary_outputs"],
             )
             self.assertIn(
+                "windows_signed_installer.windows_signing_report_grade_validation_plan_hash",
+                release_by_number[101]["primary_outputs"],
+            )
+            self.assertIn(
                 "macos_notarized_package.macos_notarization_evidence_manifest.manifest_hash",
                 release_by_number[102]["primary_outputs"],
             )
@@ -5380,11 +5384,43 @@ class RapidTriageOpsTests(unittest.TestCase):
             self.assertIn("rapidtriage-setup.exe", windows_workflow_manifest["target_outputs"])
             self.assertIn("installer_wrapper_log", windows_workflow_manifest["evidence_slots"])
             self.assertIn("authenticode-signature-not-attached", windows_workflow_manifest["blockers"])
+            windows_report_grade_plan = manifest["package_readiness"]["windows_signed_installer"][
+                "windows_signing_report_grade_validation_plan"
+            ]
+            self.assertEqual(
+                windows_report_grade_plan["profile_version"],
+                "windows-signing-report-grade-validation-plan-v1",
+            )
+            self.assertEqual(
+                manifest["package_readiness"]["windows_signed_installer"][
+                    "windows_signing_report_grade_validation_plan_hash"
+                ],
+                windows_report_grade_plan["validation_plan_sha256"],
+            )
+            self.assertGreaterEqual(
+                manifest["package_readiness"]["windows_signed_installer"][
+                    "windows_signing_report_grade_ready_slot_count"
+                ],
+                7,
+            )
+            self.assertGreaterEqual(
+                manifest["package_readiness"]["windows_signed_installer"][
+                    "windows_signing_report_grade_blocking_slot_count"
+                ],
+                6,
+            )
+            self.assertIn("authenticode-signature-required", windows_report_grade_plan["blockers"])
             self.assertTrue(windows_signing_manifest["release_artifact_hashes"])
             self.assertIn("signature_log", manifest["package_readiness"]["windows_signed_installer"]["signing_slots"])
             self.assertIn(
                 "windows signing evidence manifest hash emitted",
                 manifest["package_readiness"]["windows_signed_installer"]["core_accuracy_gates"][0]["satisfied_checks"],
+            )
+            self.assertIn(
+                "windows signing report-grade validation plan",
+                manifest["package_readiness"]["windows_signed_installer"]["core_accuracy_gates"][0][
+                    "satisfied_checks"
+                ],
             )
             self.assertIn(
                 "windows evidence slot matrix hash emitted",
@@ -5407,6 +5443,10 @@ class RapidTriageOpsTests(unittest.TestCase):
             self.assertEqual(manifest["package_readiness"]["windows_signed_installer"]["trusted_windows_signing_diff"]["status"], "missing")
             self.assertIn(
                 "trusted-windows-signing-evidence-diff-missing",
+                manifest["package_readiness"]["windows_signed_installer"]["blockers"],
+            )
+            self.assertIn(
+                "authenticode-signature-required",
                 manifest["package_readiness"]["windows_signed_installer"]["blockers"],
             )
             self.assertIn("#102", manifest["package_readiness"]["macos_notarized_package"]["commercial_gap_ids"])
@@ -5768,10 +5808,17 @@ class RapidTriageOpsTests(unittest.TestCase):
                 packaging_plan["platform_packages"]["windows"],
                 trusted_tool="authenticode-signature-log",
             )
-            windows_gates = build_release.release_packaging_core_accuracy_gate(101, trusted_diff=windows_diff)
+            windows_gates = build_release.release_packaging_core_accuracy_gate(
+                101,
+                trusted_diff=windows_diff,
+                evidence_manifest=windows_signing_manifest,
+                report_grade_validation_plan=windows_report_grade_plan,
+            )
             self.assertEqual(windows_diff["status"], "pass")
             self.assertIn("evidence_slot_matrix_hash", windows_diff["compared_fields"])
+            self.assertIn("windows_signing_report_grade_validation_plan_hash", windows_diff["compared_fields"])
             self.assertIn("trusted Windows Authenticode evidence diff pass", windows_gates[0]["satisfied_checks"])
+            self.assertIn("windows signing report-grade ready slots", windows_gates[0]["satisfied_checks"])
             release_notes_diff = build_release.build_operations_document_trusted_diff(
                 112,
                 manifest["package_readiness"]["operations_documents"],

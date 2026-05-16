@@ -23,6 +23,16 @@ MACOS_NOTARIZED_PACKAGE_GAP_ID = "#102"
 LINUX_PACKAGE_GAP_ID = "#103"
 AUTO_UPDATE_CHANNEL_GAP_ID = "#104"
 WINDOWS_SIGNING_TRUSTED_DIFF_BLOCKER_101 = "trusted-windows-signing-evidence-diff-missing"
+WINDOWS_SIGNING_REPORT_GRADE_VALIDATION_PLAN_VERSION = "windows-signing-report-grade-validation-plan-v1"
+WINDOWS_SIGNING_REPORT_GRADE_BLOCKERS = [
+    WINDOWS_SIGNING_TRUSTED_DIFF_BLOCKER_101,
+    "authenticode-signature-required",
+    "timestamp-authority-proof-required",
+    "fresh-windows-smoke-required",
+    "installer-wrapper-build-log-required",
+    "certificate-chain-verification-required",
+    "windows-defender-smartscreen-review-required",
+]
 MACOS_NOTARIZATION_TRUSTED_DIFF_BLOCKER_102 = "trusted-macos-notarization-evidence-diff-missing"
 LINUX_PACKAGE_TRUSTED_DIFF_BLOCKER_103 = "trusted-linux-package-smoke-diff-missing"
 AUTO_UPDATE_TRUSTED_DIFF_BLOCKER_104 = "trusted-auto-update-channel-diff-missing"
@@ -404,6 +414,173 @@ def build_windows_installer_workflow_manifest(
     }
     manifest["manifest_hash"] = stable_release_sha256(manifest)
     return manifest
+
+
+def build_windows_signing_report_grade_validation_plan(
+    *,
+    signing_manifest: dict[str, object],
+    workflow_manifest: dict[str, object],
+    artifacts: list[dict[str, object]],
+    trusted_diff: dict[str, object],
+) -> dict[str, object]:
+    artifact_names = {str(artifact.get("name") or "") for artifact in artifacts if artifact.get("name")}
+    release_artifact_hashes = signing_manifest.get("release_artifact_hashes")
+    signing_slots = signing_manifest.get("signing_slots") if isinstance(signing_manifest.get("signing_slots"), Mapping) else {}
+    evidence_slot_matrix = (
+        signing_manifest.get("evidence_slot_matrix")
+        if isinstance(signing_manifest.get("evidence_slot_matrix"), Mapping)
+        else {}
+    )
+    ready_slots: list[dict[str, object]] = []
+    blocking_slots: list[dict[str, object]] = []
+
+    def add_ready(slot_id: str, evidence: str, source: str) -> None:
+        ready_slots.append(
+            {
+                "slot_id": slot_id,
+                "status": "ready",
+                "evidence": evidence,
+                "source": source,
+                "commercial_claim_material": False,
+            }
+        )
+
+    def add_blocking(slot_id: str, blocker: str, required_evidence: str, owner: str = "release engineer") -> None:
+        blocking_slots.append(
+            {
+                "slot_id": slot_id,
+                "status": "external-evidence-required",
+                "blocker": blocker,
+                "required_evidence": required_evidence,
+                "owner": owner,
+                "commercial_claim_material": True,
+            }
+        )
+
+    if "rapidtriage-portable.zip" in artifact_names:
+        add_ready("portable-payload-present", "rapidtriage-portable.zip included in release artifacts", "artifacts")
+    else:
+        add_blocking("portable-payload-present", "portable-payload-missing", "rapidtriage-portable.zip release artifact")
+    if release_artifact_hashes:
+        add_ready("release-artifact-hashes", "release artifact SHA256 inventory captured", "windows-signing-evidence-manifest")
+    else:
+        add_blocking("release-artifact-hashes", "release-artifact-hashes-missing", "Release artifact hash inventory")
+    if signing_manifest.get("manifest_hash"):
+        add_ready("windows-signing-evidence-manifest", "Windows signing evidence manifest hash emitted", "release-manifest")
+    else:
+        add_blocking(
+            "windows-signing-evidence-manifest",
+            "windows-signing-evidence-manifest-hash-missing",
+            "windows-signing-evidence-manifest-v1 hash",
+        )
+    if signing_manifest.get("evidence_slot_matrix_hash") and evidence_slot_matrix.get("rows"):
+        add_ready("windows-signing-evidence-slot-matrix", "Evidence slot matrix rows and hash emitted", "release-manifest")
+    else:
+        add_blocking(
+            "windows-signing-evidence-slot-matrix",
+            "windows-signing-evidence-slot-matrix-missing",
+            "release-evidence-slot-matrix-v1 rows and hash",
+        )
+    if workflow_manifest.get("manifest_hash"):
+        add_ready("windows-installer-workflow-manifest", "Installer workflow manifest hash emitted", "release-manifest")
+    else:
+        add_blocking(
+            "windows-installer-workflow-manifest",
+            "windows-installer-workflow-manifest-missing",
+            "windows-installer-workflow-manifest-v1 hash",
+        )
+    if workflow_manifest.get("launcher_entries"):
+        add_ready("windows-launcher-and-smoke-scripts", "Windows launcher and smoke script entries declared", "workflow-manifest")
+    else:
+        add_blocking(
+            "windows-launcher-and-smoke-scripts",
+            "windows-launcher-smoke-scripts-missing",
+            "Packaged Windows launcher and smoke scripts",
+        )
+    if workflow_manifest.get("verification_commands"):
+        add_ready("windows-verification-commands", "Windows release verification commands declared", "workflow-manifest")
+    else:
+        add_blocking(
+            "windows-verification-commands",
+            "windows-verification-commands-missing",
+            "Fresh Windows signing and smoke verification commands",
+        )
+    if trusted_diff.get("status"):
+        add_ready("trusted-diff-boundary", "Trusted Windows signing diff status recorded", "trusted_windows_signing_diff")
+    if signing_slots:
+        add_ready("signing-slot-disclosure", "Authenticode, timestamp, and Windows smoke slots disclosed", "signing_slots")
+
+    if trusted_diff.get("status") != "pass":
+        add_blocking(
+            "trusted-windows-signing-diff",
+            WINDOWS_SIGNING_TRUSTED_DIFF_BLOCKER_101,
+            "Trusted Authenticode signing evidence diff manifest",
+        )
+    required_external_slots = {
+        "signature_log": (
+            "authenticode-signature-required",
+            "Get-AuthenticodeSignature transcript for every Windows installer artifact",
+        ),
+        "timestamp_authority": (
+            "timestamp-authority-proof-required",
+            "Timestamp authority proof bound to each Authenticode signature",
+        ),
+        "fresh_windows_smoke": (
+            "fresh-windows-smoke-required",
+            "Fresh Windows 11 install/run smoke summary and logs",
+        ),
+    }
+    for slot_name, (blocker, required_evidence) in required_external_slots.items():
+        slot = signing_slots.get(slot_name) if isinstance(signing_slots, Mapping) else {}
+        if not isinstance(slot, Mapping) or slot.get("status") != "attached":
+            add_blocking(slot_name, blocker, required_evidence)
+    workflow_slots = workflow_manifest.get("evidence_slots") if isinstance(workflow_manifest.get("evidence_slots"), Mapping) else {}
+    installer_slot = workflow_slots.get("installer_wrapper_log") if isinstance(workflow_slots, Mapping) else {}
+    if not isinstance(installer_slot, Mapping) or installer_slot.get("status") != "attached":
+        add_blocking(
+            "installer-wrapper-log",
+            "installer-wrapper-build-log-required",
+            "MSI/EXE wrapper build transcript, output hashes, and installer metadata",
+        )
+    add_blocking(
+        "certificate-chain-verification",
+        "certificate-chain-verification-required",
+        "Certificate chain validation transcript for the Windows signing certificate",
+    )
+    add_blocking(
+        "windows-defender-smartscreen-review",
+        "windows-defender-smartscreen-review-required",
+        "Windows Defender and SmartScreen reputation/safety review notes for signed artifacts",
+        owner="release QA",
+    )
+
+    blockers = sorted({str(slot.get("blocker")) for slot in blocking_slots if slot.get("blocker")})
+    plan_core: dict[str, object] = {
+        "profile_version": WINDOWS_SIGNING_REPORT_GRADE_VALIDATION_PLAN_VERSION,
+        "item_number": 101,
+        "commercial_gap_ids": [WINDOWS_SIGNED_INSTALLER_GAP_ID],
+        "commercial_claim_allowed": False,
+        "reporting_boundary": (
+            "Internal release artifacts prove payload inventory, evidence-slot disclosure, and workflow readiness only; "
+            "a signed Windows installer claim requires the blocking external evidence to be attached."
+        ),
+        "target_outputs": signing_manifest.get("target_outputs", []),
+        "release_artifact_hashes": release_artifact_hashes or [],
+        "signing_evidence_manifest_hash": signing_manifest.get("manifest_hash"),
+        "installer_workflow_manifest_hash": workflow_manifest.get("manifest_hash"),
+        "evidence_slot_matrix_hash": signing_manifest.get("evidence_slot_matrix_hash"),
+        "trusted_diff_status": trusted_diff.get("status"),
+        "trusted_diff_blocker": trusted_diff.get("blocker"),
+        "ready_slots": ready_slots,
+        "blocking_slots": blocking_slots,
+        "ready_slot_count": len(ready_slots),
+        "blocking_slot_count": len(blocking_slots),
+        "external_blocker_catalog": WINDOWS_SIGNING_REPORT_GRADE_BLOCKERS,
+        "blockers": blockers,
+    }
+    plan = dict(plan_core)
+    plan["validation_plan_sha256"] = stable_release_sha256(plan_core)
+    return plan
 
 
 def build_windows_portable_mode_manifest(output_dir: Path) -> dict[str, object]:
@@ -1268,6 +1445,18 @@ def write_release_manifest(output_dir: Path, repo: Path, commercial_readiness: d
         artifacts,
         windows_signing_evidence_manifest,
     )
+    windows_signing_report_grade_validation_plan = build_windows_signing_report_grade_validation_plan(
+        signing_manifest=windows_signing_evidence_manifest,
+        workflow_manifest=windows_installer_workflow_manifest,
+        artifacts=artifacts,
+        trusted_diff=windows_trusted_diff,
+    )
+    windows_signing_blockers = sorted(
+        {
+            WINDOWS_SIGNING_TRUSTED_DIFF_BLOCKER_101,
+            *[str(blocker) for blocker in windows_signing_report_grade_validation_plan.get("blockers", [])],
+        }
+    )
     macos_trusted_diff = missing_release_packaging_trusted_diff(102)
     macos_notarization_evidence_manifest = build_macos_notarization_evidence_manifest(artifacts, macos_trusted_diff)
     macos_package_workflow_manifest = build_macos_package_workflow_manifest(
@@ -1329,6 +1518,7 @@ def write_release_manifest(output_dir: Path, repo: Path, commercial_readiness: d
                 "core_accuracy_gates": release_packaging_core_accuracy_gate(
                     101,
                     evidence_manifest=windows_signing_evidence_manifest,
+                    report_grade_validation_plan=windows_signing_report_grade_validation_plan,
                 ),
                 "functional_priority_profile": release_packaging_functional_priority_profile("windows"),
                 "required_evidence": ["Authenticode signature", "timestamp authority", "fresh Windows smoke test"],
@@ -1337,9 +1527,19 @@ def write_release_manifest(output_dir: Path, repo: Path, commercial_readiness: d
                 "evidence_slot_matrix_hash": windows_signing_evidence_manifest["evidence_slot_matrix_hash"],
                 "windows_installer_workflow_manifest": windows_installer_workflow_manifest,
                 "windows_installer_workflow_manifest_hash": windows_installer_workflow_manifest["manifest_hash"],
+                "windows_signing_report_grade_validation_plan": windows_signing_report_grade_validation_plan,
+                "windows_signing_report_grade_validation_plan_hash": windows_signing_report_grade_validation_plan[
+                    "validation_plan_sha256"
+                ],
+                "windows_signing_report_grade_ready_slot_count": windows_signing_report_grade_validation_plan[
+                    "ready_slot_count"
+                ],
+                "windows_signing_report_grade_blocking_slot_count": windows_signing_report_grade_validation_plan[
+                    "blocking_slot_count"
+                ],
                 "signing_slots": windows_signing_evidence_manifest["signing_slots"],
                 "trusted_windows_signing_diff": windows_trusted_diff,
-                "blockers": [WINDOWS_SIGNING_TRUSTED_DIFF_BLOCKER_101],
+                "blockers": windows_signing_blockers,
             },
             "macos_notarized_package": {
                 "status": "external-required",
@@ -1684,7 +1884,14 @@ def build_release_packaging_trusted_diff(
     }
     compared_fields = ["status", "required_evidence", "target_outputs", "artifacts", "signature_policy"]
     if number == 101:
-        compared_fields.extend(["windows_signing_evidence_manifest_hash", "signing_slots", "evidence_slot_matrix_hash"])
+        compared_fields.extend(
+            [
+                "windows_signing_evidence_manifest_hash",
+                "signing_slots",
+                "evidence_slot_matrix_hash",
+                "windows_signing_report_grade_validation_plan_hash",
+            ]
+        )
     if number == 102:
         compared_fields.extend(["macos_notarization_evidence_manifest_hash", "notarization_slots", "evidence_slot_matrix_hash"])
     if number == 103:
@@ -1809,6 +2016,7 @@ def release_packaging_core_accuracy_gate(
     *,
     trusted_diff: dict[str, object] | None = None,
     evidence_manifest: dict[str, object] | None = None,
+    report_grade_validation_plan: dict[str, object] | None = None,
 ) -> list[dict[str, object]]:
     checks = {
         101: [
@@ -1850,6 +2058,11 @@ def release_packaging_core_accuracy_gate(
             satisfied_checks.append("windows signing evidence slots emitted")
         if evidence_manifest.get("evidence_slot_matrix_hash"):
             satisfied_checks.append("windows evidence slot matrix hash emitted")
+    if number == 101 and report_grade_validation_plan:
+        if report_grade_validation_plan.get("validation_plan_sha256"):
+            satisfied_checks.append("windows signing report-grade validation plan")
+        if int(report_grade_validation_plan.get("ready_slot_count") or 0) > 0:
+            satisfied_checks.append("windows signing report-grade ready slots")
     if number == 102 and evidence_manifest:
         if evidence_manifest.get("release_artifact_hashes"):
             satisfied_checks.append("release artifact hashes captured")

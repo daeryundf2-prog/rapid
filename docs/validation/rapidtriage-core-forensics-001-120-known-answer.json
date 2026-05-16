@@ -2333,10 +2333,10 @@
       ],
       "expected": {
         "required_assertions": [
-          "Release manifest and packaging plan preserve Windows installer targets, Authenticode/timestamp requirements, Windows smoke requirements, release artifact hashes, windows-signing-evidence-manifest-v1 manifest hash/signing slots, external signing blocker, trusted Windows signing diff helpers/gates, and #101 core_accuracy_gates."
+          "Release manifest preserves Windows installer targets, Authenticode/timestamp requirements, Windows smoke requirements, release artifact hashes, windows-signing-evidence-manifest-v1 manifest hash/signing slots, windows-signing-report-grade-validation-plan-v1 ready/blocking slots, external signing blocker, trusted Windows signing diff helpers/gates, and #101 core_accuracy_gates; packaging plan preserves the Windows target package boundary."
         ]
       },
-      "notes": "Internal fixture pass; actual Authenticode signing remains external.",
+      "notes": "Internal fixture pass; actual Authenticode signing, timestamp proof, certificate-chain verification, SmartScreen review, fresh Windows smoke logs, and trusted signing attestations remain external.",
       "source_manifest": "docs/validation/rapidtriage-core-forensics-101-120-known-answer.json"
     },
     {

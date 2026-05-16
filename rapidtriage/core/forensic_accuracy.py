@@ -1680,6 +1680,8 @@ CORE_FORENSIC_ACCURACY_ITEMS: tuple[dict[str, object], ...] = (
             "release artifact hashes captured",
             "windows signing evidence manifest hash emitted",
             "windows signing evidence slots emitted",
+            "windows signing report-grade validation plan",
+            "windows signing report-grade ready slots",
             "trusted Windows Authenticode evidence diff pass",
         ),
     },
