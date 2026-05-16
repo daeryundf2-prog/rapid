@@ -530,6 +530,7 @@ rapidtriage case-db-report ./case.db --case-id CASE-001 --output case-db-report-
 
 That export keeps review citations, target citations, parser/source/hash context, and analyst review state together so report drafting does not depend on re-opening raw JSON tables.
 If a report candidate was reviewed from `source-read --json`, the export also keeps the structured source-viewer citation package, locator, source hash, and snippet hash beside the report item and citation-index row.
+The report citation manager also emits `report_citation_report_grade_validation_plan`. It shows which citation-manager pieces are internally ready for report drafting, such as review/source citation pairs, copy-safe citation strings, row hashes, source locators, source-reference coverage, and the citation-index manifest, and which pieces still block court/exhibit wording, such as source-hash/parser-version completeness, trusted citation-index diff, exhibit numbering UI, jurisdiction template review, and reviewer signoff corpus.
 
 When generating a case report in the web review board, choose the template that matches the audience:
 

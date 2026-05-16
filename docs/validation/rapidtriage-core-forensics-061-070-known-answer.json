@@ -44,8 +44,8 @@
       "status": "pass",
       "backlog_items": [64],
       "evidence_paths": ["docs/validation/core-forensics-061-070-fixture-evidence.json", "tests/test_rapidtriage_case_db.py"],
-      "expected": {"required_assertions": ["Case DB report export preserves review/source citation IDs, copy-safe citation strings, citation row hashes, source-viewer locators, source references, source-hash/parser-version coverage profile, report-citation-index-manifest, citation rows head hash, citation counts, report-use warnings, trusted citation-index diff status, and #64 core_accuracy_gates.", "Citation manager reportability decisions block court exhibit claims until review/source citations, source hashes, parser versions, exhibit numbering, trusted citation manifest diff, manifests, and reviewer sign-off exist."]},
-      "notes": "Internal fixture pass; exhibit numbering, trusted citation manifest diff, and jurisdiction-specific packaging remain blockers."
+      "expected": {"required_assertions": ["Case DB report export preserves review/source citation IDs, copy-safe citation strings, citation row hashes, source-viewer locators, source references, source-hash/parser-version coverage profile, report-citation-index-manifest, citation rows head hash, report_citation_report_grade_validation_plan hashes/ready slots/blocking slots, citation counts, report-use warnings, trusted citation-index diff status, and #64 core_accuracy_gates.", "Citation manager reportability decisions block court exhibit claims until review/source citations, source hashes, parser versions, report-grade validation-plan slots, exhibit numbering, trusted citation manifest diff, jurisdiction template review, manifests, and reviewer sign-off exist."]},
+      "notes": "Internal fixture pass; exhibit numbering, trusted citation manifest diff, source-hash/parser-version completeness, reviewer signoff corpus, and jurisdiction-specific packaging remain blockers."
     },
     {
       "id": "core-forensics-065-evidence-history-fixture",

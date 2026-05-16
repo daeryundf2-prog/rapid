@@ -970,6 +970,8 @@ CORE_FORENSIC_ACCURACY_ITEMS: tuple[dict[str, object], ...] = (
             "citation index manifest",
             "citation row hashes",
             "citation source viewer locators",
+            "report citation report-grade validation plan",
+            "report citation report-grade ready slots",
             "citation count summary",
             "report-use verification warning",
             "trusted citation index diff pass",

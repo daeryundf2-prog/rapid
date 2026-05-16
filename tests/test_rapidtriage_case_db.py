@@ -1868,21 +1868,65 @@ class RapidTriageCaseDatabaseTests(unittest.TestCase):
             self.assertIn("citation index manifest", export["report_citation_manager"]["core_accuracy_gates"][0]["satisfied_checks"])
             self.assertIn("citation row hashes", export["report_citation_manager"]["core_accuracy_gates"][0]["satisfied_checks"])
             self.assertIn("citation source viewer locators", export["report_citation_manager"]["core_accuracy_gates"][0]["satisfied_checks"])
+            self.assertIn(
+                "report citation report-grade validation plan",
+                export["report_citation_manager"]["core_accuracy_gates"][0]["satisfied_checks"],
+            )
+            self.assertIn(
+                "report citation report-grade ready slots",
+                export["report_citation_manager"]["core_accuracy_gates"][0]["satisfied_checks"],
+            )
+            citation_plan = export["report_citation_manager"]["report_citation_report_grade_validation_plan"]
+            self.assertEqual(
+                citation_plan["profile_version"],
+                "report-citation-report-grade-validation-plan-v1",
+            )
+            self.assertEqual(citation_plan["item_number"], 64)
+            self.assertEqual(citation_plan["plan_context"], "case-db-report-export")
+            self.assertEqual(citation_plan["citation_index_manifest_hash"], citation_manifest["manifest_hash"])
+            self.assertEqual(
+                export["report_citation_manager"]["report_citation_report_grade_validation_plan_hash"],
+                citation_plan["validation_plan_sha256"],
+            )
+            self.assertEqual(citation_plan["ready_slot_count"], 6)
+            self.assertEqual(citation_plan["blocking_slot_count"], 6)
+            self.assertEqual(export["report_citation_manager"]["report_grade_ready_slot_count"], 6)
+            self.assertEqual(export["report_citation_manager"]["report_grade_blocking_slot_count"], 6)
+            ready_slots = {slot["slot_id"] for slot in citation_plan["ready_slots"]}
+            blocking_slots = {slot["slot_id"] for slot in citation_plan["blocking_slots"]}
+            self.assertIn("report-citation-index-manifest", ready_slots)
+            self.assertIn("report-citation-trusted-index-diff", blocking_slots)
+            self.assertIn("source-hash-completeness-validation-required", export["report_citation_manager"]["blockers"])
             citation_uplift = export["report_citation_manager"]["commercial_uplift_evidence"]
             self.assertEqual(citation_uplift["batch_id"], "commercial-uplift-061-065")
             self.assertEqual(citation_uplift["item_numbers"], [64])
             self.assertIn("citation count summary", citation_uplift["passed_validation_check_ids"])
+            self.assertIn(
+                "report citation report-grade validation plan",
+                citation_uplift["passed_validation_check_ids"],
+            )
             self.assertEqual(
                 citation_uplift["large_data_controls"]["citation_index_manifest_hash"],
                 citation_manifest["manifest_hash"],
             )
+            self.assertEqual(
+                citation_uplift["large_data_controls"]["report_citation_report_grade_validation_plan_hash"],
+                citation_plan["validation_plan_sha256"],
+            )
+            self.assertEqual(citation_uplift["large_data_controls"]["report_grade_ready_slot_count"], 6)
+            self.assertEqual(citation_uplift["large_data_controls"]["report_grade_blocking_slot_count"], 6)
             self.assertEqual(citation_uplift["large_data_controls"]["citation_row_hash_count"], len(export["citation_index"]))
             self.assertEqual(citation_uplift["large_data_controls"]["source_viewer_locator_count"], len(export["citation_index"]))
             self.assertIn("trusted-citation-index-diff-is-required-before-commercial-claim", citation_uplift["failed_validation_check_ids"])
+            self.assertIn("trusted-citation-index-diff-required", citation_uplift["failed_validation_check_ids"])
             self.assertFalse(citation_uplift["large_data_controls"]["exhibit_numbering_ui"])
             self.assertEqual(
                 citation_uplift["reportability_decision"]["decision"],
                 "do-not-report-citation-index-as-court-exhibit-complete",
+            )
+            self.assertEqual(
+                citation_uplift["reportability_decision"]["control_snapshot"]["report_citation_report_grade_validation_plan_hash"],
+                citation_plan["validation_plan_sha256"],
             )
             citation_diff = build_citation_manager_trusted_diff(export["citation_index"], export["citation_index"])
             citation_gates = citation_manager_core_accuracy_gates(
@@ -1890,6 +1934,7 @@ class RapidTriageCaseDatabaseTests(unittest.TestCase):
                 has_source_reference=True,
                 trusted_diff=citation_diff,
                 citation_index_manifest=citation_manifest,
+                report_grade_validation_plan=citation_plan,
             )
             self.assertEqual(citation_diff["status"], "pass")
             self.assertIn("citation index manifest", citation_gates[0]["satisfied_checks"])

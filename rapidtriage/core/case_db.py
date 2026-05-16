@@ -81,6 +81,15 @@ REVIEW_WORKFLOW_REPORT_GRADE_BLOCKERS = [
     "reviewer-sop-signoff-required",
     REVIEW_WORKFLOW_TRUSTED_DIFF_BLOCKER,
 ]
+REPORT_CITATION_REPORT_GRADE_VALIDATION_PLAN_VERSION = "report-citation-report-grade-validation-plan-v1"
+REPORT_CITATION_REPORT_GRADE_BLOCKERS = [
+    "source-hash-completeness-validation-required",
+    "parser-version-completeness-validation-required",
+    "trusted-citation-index-diff-required",
+    "exhibit-numbering-ui-required",
+    "jurisdiction-template-review-required",
+    "reviewer-signoff-corpus-required",
+]
 CASE_DB_SEARCH_SCAN_ROW_LIMIT = 100_000
 CASE_DB_SEARCH_SCAN_OVERSAMPLE = 100
 CASE_DB_SEARCH_MIN_SCAN_ROWS = 10_000
@@ -5211,16 +5220,24 @@ def build_report_citation_index(items: Sequence[Mapping[str, object]]) -> list[d
 def build_report_citation_manager(citation_index: Sequence[Mapping[str, object]]) -> dict[str, object]:
     coverage_profile = build_report_citation_coverage_profile(citation_index)
     citation_index_manifest = build_report_citation_index_manifest(citation_index)
+    validation_plan = build_report_citation_report_grade_validation_plan(
+        citation_index=citation_index,
+        coverage_profile=coverage_profile,
+        citation_index_manifest=citation_index_manifest,
+        plan_context="case-db-report-export",
+    )
     gates = citation_manager_core_accuracy_gates(
         citation_count=len(citation_index),
         has_source_reference=any(bool(item.get("source_reference")) for item in citation_index),
         citation_index_manifest=citation_index_manifest,
+        report_grade_validation_plan=validation_plan,
     )
     blockers = [
         "citation-index-depends-on-imported-source-reference-completeness",
         "analyst-must-verify-source-hashes-parser-confidence-and-review-history-before-report-use",
         "trusted-citation-index-diff-is-required-before-commercial-claim",
     ]
+    blockers = sorted({*blockers, *REPORT_CITATION_REPORT_GRADE_BLOCKERS})
     return {
         "component": "report-citation-manager",
         "status": "implemented-baseline-validation-required",
@@ -5229,11 +5246,16 @@ def build_report_citation_manager(citation_index: Sequence[Mapping[str, object]]
         "coverage_profile": coverage_profile,
         "citation_index_manifest": citation_index_manifest,
         "citation_index_manifest_hash": citation_index_manifest["manifest_hash"],
+        "report_citation_report_grade_validation_plan": validation_plan,
+        "report_citation_report_grade_validation_plan_hash": validation_plan["validation_plan_sha256"],
+        "report_grade_ready_slot_count": validation_plan["ready_slot_count"],
+        "report_grade_blocking_slot_count": validation_plan["blocking_slot_count"],
         "ready_for_court_report": False,
         "blockers": blockers,
         "recommended_validation": [
             "Confirm every report item has both a review citation and source-record citation.",
             "Preserve the exported citation index with the report and source hash manifest.",
+            "Attach a trusted citation-index diff, exhibit numbering review, jurisdiction template review, and reviewer sign-off before court package use.",
         ],
         "core_accuracy_gates": gates,
         "commercial_uplift_evidence": case_report_commercial_uplift_evidence(
@@ -5256,6 +5278,10 @@ def build_report_citation_manager(citation_index: Sequence[Mapping[str, object]]
                 "parser_version_present_count": coverage_profile["parser_version_present_count"],
                 "exhibit_numbering_ui": False,
                 "source_hash_completeness_validation": False,
+                "report_citation_report_grade_validation_plan_present": True,
+                "report_citation_report_grade_validation_plan_hash": validation_plan["validation_plan_sha256"],
+                "report_grade_ready_slot_count": validation_plan["ready_slot_count"],
+                "report_grade_blocking_slot_count": validation_plan["blocking_slot_count"],
             },
         ),
     }
@@ -5387,6 +5413,113 @@ def build_report_citation_index_manifest(citation_index: Sequence[Mapping[str, o
         "commercial_claim_allowed": False,
     }
     return {**manifest_core, "manifest_hash": stable_payload_sha256(manifest_core)}
+
+
+def build_report_citation_report_grade_validation_plan(
+    *,
+    citation_index: Sequence[Mapping[str, object]],
+    coverage_profile: Mapping[str, object],
+    citation_index_manifest: Mapping[str, object],
+    plan_context: str,
+) -> dict[str, object]:
+    citation_index = list(citation_index)
+    ready_slots = [
+        {
+            "slot_id": "report-citation-review-source-pairs",
+            "status": "complete",
+            "evidence": {
+                "review_decision_count": int(citation_index_manifest.get("review_decision_count") or 0),
+                "source_record_count": int(citation_index_manifest.get("source_record_count") or 0),
+            },
+        },
+        {
+            "slot_id": "report-citation-copy-safe-strings",
+            "status": "complete",
+            "evidence": {"copy_safe_citation_count": int(coverage_profile.get("copy_safe_citation_count") or 0)},
+        },
+        {
+            "slot_id": "report-citation-row-hashes",
+            "status": "complete",
+            "evidence": {"citation_row_hash_count": int(citation_index_manifest.get("citation_row_hash_count") or 0)},
+        },
+        {
+            "slot_id": "report-citation-source-viewer-locators",
+            "status": "complete",
+            "evidence": {"source_viewer_locator_count": int(citation_index_manifest.get("source_viewer_locator_count") or 0)},
+        },
+        {
+            "slot_id": "report-citation-source-reference-coverage-profile",
+            "status": "complete",
+            "evidence": {
+                "source_reference_count": int(coverage_profile.get("source_reference_count") or 0),
+                "source_hash_present_count": int(coverage_profile.get("source_hash_present_count") or 0),
+                "parser_version_present_count": int(coverage_profile.get("parser_version_present_count") or 0),
+            },
+        },
+        {
+            "slot_id": "report-citation-index-manifest",
+            "status": "complete",
+            "evidence": {
+                "manifest_version": citation_index_manifest.get("manifest_version"),
+                "manifest_hash": citation_index_manifest.get("manifest_hash"),
+                "citation_rows_head_hash": citation_index_manifest.get("citation_rows_head_hash"),
+            },
+        },
+    ]
+    blocking_slots = [
+        {
+            "slot_id": "report-citation-source-hash-completeness",
+            "status": "external-required",
+            "blocker": "source-hash-completeness-validation-required",
+            "required_evidence": "trusted per-parser source-hash completeness matrix for every reported source row",
+        },
+        {
+            "slot_id": "report-citation-parser-version-completeness",
+            "status": "external-required",
+            "blocker": "parser-version-completeness-validation-required",
+            "required_evidence": "trusted parser-version completeness matrix covering every citation source row",
+        },
+        {
+            "slot_id": "report-citation-trusted-index-diff",
+            "status": "external-required",
+            "blocker": "trusted-citation-index-diff-required",
+            "required_evidence": "trusted citation-index manifest diff against an independently produced report checklist",
+        },
+        {
+            "slot_id": "report-citation-exhibit-numbering-ui",
+            "status": "external-required",
+            "blocker": "exhibit-numbering-ui-required",
+            "required_evidence": "analyst UI evidence for exhibit numbering, renumbering, and citation preservation",
+        },
+        {
+            "slot_id": "report-citation-jurisdiction-template-review",
+            "status": "external-required",
+            "blocker": "jurisdiction-template-review-required",
+            "required_evidence": "jurisdiction-specific citation wording/template review and signoff",
+        },
+        {
+            "slot_id": "report-citation-reviewer-signoff-corpus",
+            "status": "external-required",
+            "blocker": "reviewer-signoff-corpus-required",
+            "required_evidence": "reviewer signoff corpus proving citation text, source locators, hashes, and limitations are reproducible",
+        },
+    ]
+    plan_core: dict[str, object] = {
+        "profile_version": REPORT_CITATION_REPORT_GRADE_VALIDATION_PLAN_VERSION,
+        "item_number": 64,
+        "commercial_gap_ids": ["#64"],
+        "plan_context": plan_context,
+        "citation_count": len(citation_index),
+        "citation_index_manifest_hash": citation_index_manifest.get("manifest_hash"),
+        "citation_coverage_profile_hash": stable_payload_sha256(dict(coverage_profile)),
+        "ready_slots": ready_slots,
+        "blocking_slots": blocking_slots,
+        "ready_slot_count": len(ready_slots),
+        "blocking_slot_count": len(blocking_slots),
+        "commercial_claim_allowed": False,
+        "reporting_boundary": "This plan makes the citation manager report-verifiable as a triage/export index, but it is not a court exhibit package until the external-required slots are attached.",
+    }
+    return {**plan_core, "validation_plan_sha256": stable_payload_sha256(plan_core)}
 
 
 def citation_source_reference_has_hash(source_reference: Mapping[str, object]) -> bool:
@@ -5762,6 +5895,7 @@ def citation_manager_core_accuracy_gates(
     has_source_reference: bool,
     trusted_diff: Mapping[str, object] | None = None,
     citation_index_manifest: Mapping[str, object] | None = None,
+    report_grade_validation_plan: Mapping[str, object] | None = None,
 ) -> list[dict[str, object]]:
     satisfied = ["citation count summary", "report-use verification warning"]
     if citation_count:
@@ -5774,9 +5908,17 @@ def citation_manager_core_accuracy_gates(
         satisfied.append("citation row hashes")
     if citation_index_manifest and int(citation_index_manifest.get("source_viewer_locator_count") or 0) > 0:
         satisfied.append("citation source viewer locators")
+    if report_grade_validation_plan and report_grade_validation_plan.get("validation_plan_sha256"):
+        satisfied.append("report citation report-grade validation plan")
+    if report_grade_validation_plan and int(report_grade_validation_plan.get("ready_slot_count") or 0) >= 6:
+        satisfied.append("report citation report-grade ready slots")
     evidence_refs = [f"citation_count:{citation_count}", f"has_source_reference:{has_source_reference}"]
     if citation_index_manifest and citation_index_manifest.get("manifest_hash"):
         evidence_refs.append(f"citation_index_manifest_hash:{citation_index_manifest.get('manifest_hash', '')}")
+    if report_grade_validation_plan and report_grade_validation_plan.get("validation_plan_sha256"):
+        evidence_refs.append(
+            f"report_citation_report_grade_validation_plan_hash:{report_grade_validation_plan.get('validation_plan_sha256', '')}"
+        )
     if trusted_diff and trusted_diff.get("status") == "pass":
         satisfied.append("trusted citation index diff pass")
         evidence_refs.append(f"trusted_tool:{trusted_diff.get('trusted_tool', '')}")

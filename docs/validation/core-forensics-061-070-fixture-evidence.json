@@ -36,9 +36,9 @@
       "title": "Report citation manager",
       "test_files": ["tests/test_rapidtriage_case_db.py"],
       "assertions": [
-        "Case DB report exports preserve citation IDs, copy-safe citation strings, citation row hashes, source-viewer locators, source references, source-hash/parser-version coverage profile, report-citation-index-manifest hashes, citation rows head hash, citation counts, report-use warnings, trusted citation-index diff helper/gate, #64 core_accuracy_gates, and reportability blockers for missing source hashes, parser versions, exhibit numbering, manifests, and reviewer sign-off."
+        "Case DB report exports preserve citation IDs, copy-safe citation strings, citation row hashes, source-viewer locators, source references, source-hash/parser-version coverage profile, report-citation-index-manifest hashes, citation rows head hash, report_citation_report_grade_validation_plan hashes/ready slots/blocking slots, citation counts, report-use warnings, trusted citation-index diff helper/gate, #64 core_accuracy_gates, and reportability blockers for missing source hashes, parser versions, trusted citation-index diffs, exhibit numbering, jurisdiction templates, and reviewer sign-off."
       ],
-      "remaining_external_validation": ["Exhibit numbering UI, trusted citation manifest, jurisdiction templates, and full source-hash completeness validation."]
+      "remaining_external_validation": ["Exhibit numbering UI, trusted citation manifest, jurisdiction templates, reviewer signoff corpus, and full source-hash/parser-version completeness validation."]
     },
     {
       "item": 65,
