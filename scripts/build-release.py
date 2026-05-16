@@ -80,6 +80,7 @@ SUPPORT_SLA_GAP_ID = "#114"
 TRAINING_CURRICULUM_GAP_ID = "#115"
 RELEASE_NOTES_REPORT_GRADE_VALIDATION_PLAN_VERSION = "release-notes-report-grade-validation-plan-v1"
 LTS_HOTFIX_REPORT_GRADE_VALIDATION_PLAN_VERSION = "lts-hotfix-report-grade-validation-plan-v1"
+SUPPORT_SLA_REPORT_GRADE_VALIDATION_PLAN_VERSION = "support-sla-report-grade-validation-plan-v1"
 OPERATIONS_DOCUMENT_TRUSTED_DIFF_BLOCKERS = {
     112: "trusted-release-notes-ci-gate-diff-missing",
     113: "trusted-lts-hotfix-policy-diff-missing",
@@ -115,6 +116,17 @@ LTS_HOTFIX_REPORT_GRADE_BLOCKERS = [
     "lts-branch-policy-review-required",
     "release-host-hotfix-smoke-required",
     "independent-lts-policy-review-required",
+]
+SUPPORT_SLA_REPORT_GRADE_BLOCKERS = [
+    OPERATIONS_DOCUMENT_TRUSTED_DIFF_BLOCKERS[114],
+    "staffed-support-attestation-required",
+    "contractual-sla-execution-required",
+    "secure-intake-runbook-signoff-required",
+    "escalation-rota-required",
+    "emergency-parser-hotfix-drill-required",
+    "support-ticket-sample-required",
+    "release-host-support-flow-smoke-required",
+    "independent-support-sla-review-required",
 ]
 ANALYST_QUICKSTART_LAB_GAP_ID = "#116"
 ADMIN_DEPLOYMENT_GUIDE_GAP_ID = "#117"
@@ -1867,6 +1879,176 @@ def build_lts_hotfix_report_grade_validation_plan(
     return plan
 
 
+def build_support_sla_report_grade_validation_plan(
+    *,
+    evidence_manifest: dict[str, object],
+    support_process_readiness_manifest: dict[str, object],
+    trusted_diff: dict[str, object],
+) -> dict[str, object]:
+    document_hashes = evidence_manifest.get("document_hashes") if isinstance(evidence_manifest.get("document_hashes"), list) else []
+    evidence_slots = evidence_manifest.get("evidence_slots") if isinstance(evidence_manifest.get("evidence_slots"), dict) else {}
+    readiness_checks = (
+        support_process_readiness_manifest.get("readiness_checks")
+        if isinstance(support_process_readiness_manifest.get("readiness_checks"), dict)
+        else {}
+    )
+    ready_slots = [
+        {
+            "slot_id": "support-sla-document",
+            "status": "ready",
+            "evidence_ref": "docs/rapidtriage-support-sla.md",
+            "evidence_hash": stable_release_sha256(document_hashes),
+        },
+        {
+            "slot_id": "support-sla-evidence-manifest",
+            "status": "ready",
+            "evidence_ref": "release-manifest.package_readiness.operations_documents.document_evidence_manifest_hashes.114",
+            "evidence_hash": str(evidence_manifest.get("manifest_hash") or ""),
+        },
+        {
+            "slot_id": "support-sla-document-evidence-matrix",
+            "status": "ready",
+            "evidence_ref": "release-manifest.package_readiness.operations_documents.document_evidence_matrix_hashes.114",
+            "evidence_hash": str(evidence_manifest.get("document_evidence_matrix_hash") or ""),
+        },
+        {
+            "slot_id": "support-process-readiness-manifest",
+            "status": "ready",
+            "evidence_ref": "support-process-readiness-manifest.json",
+            "evidence_hash": str(support_process_readiness_manifest.get("manifest_hash") or ""),
+        },
+        {
+            "slot_id": "severity-levels-and-response-targets",
+            "status": "ready",
+            "evidence_ref": "support-process-readiness-manifest.readiness_checks.severity_levels,response_targets",
+            "evidence_hash": stable_release_sha256(
+                {
+                    "severity_levels": readiness_checks.get("severity_levels", {}),
+                    "response_targets": readiness_checks.get("response_targets", {}),
+                }
+            ),
+        },
+        {
+            "slot_id": "secure-intake-and-escalation",
+            "status": "ready",
+            "evidence_ref": "support-process-readiness-manifest.readiness_checks.secure_intake,escalation",
+            "evidence_hash": stable_release_sha256(
+                {
+                    "secure_intake": readiness_checks.get("secure_intake", {}),
+                    "escalation": readiness_checks.get("escalation", {}),
+                }
+            ),
+        },
+        {
+            "slot_id": "staffed-support-attestation-boundary",
+            "status": "ready-with-blocker",
+            "evidence_ref": "release-manifest.package_readiness.operations_documents.document_evidence_slots.114.staffed_support_attestation",
+            "evidence_hash": stable_release_sha256(evidence_slots.get("staffed_support_attestation", {})),
+        },
+        {
+            "slot_id": "secure-intake-review-boundary",
+            "status": "ready-with-blocker",
+            "evidence_ref": "release-manifest.package_readiness.operations_documents.document_evidence_slots.114.secure_intake_review",
+            "evidence_hash": stable_release_sha256(evidence_slots.get("secure_intake_review", {})),
+        },
+        {
+            "slot_id": "trusted-support-sla-diff-boundary",
+            "status": "ready" if trusted_diff.get("status") == "pass" else "ready-with-blocker",
+            "evidence_ref": "release-manifest.package_readiness.operations_documents.trusted_operations_document_diffs.114",
+            "evidence_hash": stable_release_sha256(trusted_diff),
+        },
+    ]
+    blocking_slots = []
+    if trusted_diff.get("status") != "pass":
+        blocking_slots.append(
+            {
+                "slot_id": "trusted-support-desk-sla-diff",
+                "status": "blocking",
+                "blocker": OPERATIONS_DOCUMENT_TRUSTED_DIFF_BLOCKERS[114],
+                "required_evidence": "trusted support desk SLA attestation comparing staffing, response targets, secure intake, escalation, and hotfix delivery records",
+            }
+        )
+    for slot_id, blocker, required_evidence in (
+        (
+            "staffed-support-attestation",
+            "staffed-support-attestation-required",
+            "staffed support desk owner list, coverage window, escalation owners, and on-call acceptance",
+        ),
+        (
+            "contractual-sla-execution",
+            "contractual-sla-execution-required",
+            "contractual SLA or internal service commitment proving response and patch-delivery targets are operational",
+        ),
+        (
+            "secure-intake-runbook-signoff",
+            "secure-intake-runbook-signoff-required",
+            "secure evidence intake runbook signoff covering authorization, encryption, custody, and retention",
+        ),
+        (
+            "escalation-rota",
+            "escalation-rota-required",
+            "support escalation rota tying Sev1-Sev4 triage to forensic, security, and release owners",
+        ),
+        (
+            "emergency-parser-hotfix-drill",
+            "emergency-parser-hotfix-drill-required",
+            "emergency parser hotfix drill log proving intake, fix, validation, release notes, and rollback timing",
+        ),
+        (
+            "support-ticket-sample",
+            "support-ticket-sample-required",
+            "redacted support ticket sample showing severity assignment, response target, custody warning, and closure evidence",
+        ),
+        (
+            "release-host-support-flow-smoke",
+            "release-host-support-flow-smoke-required",
+            "release-host smoke proving support intake links, SLA wording, and evidence-handling warning are present in shipped artifacts",
+        ),
+        (
+            "independent-support-sla-review",
+            "independent-support-sla-review-required",
+            "independent reviewer confirmation that SLA claims are staffed, enforceable, and do not overclaim commercial support",
+        ),
+    ):
+        blocking_slots.append(
+            {
+                "slot_id": slot_id,
+                "status": "blocking",
+                "current_attachment_status": "not-attached",
+                "blocker": blocker,
+                "required_evidence": required_evidence,
+            }
+        )
+    blockers = sorted({str(slot["blocker"]) for slot in blocking_slots if slot.get("blocker")})
+    plan: dict[str, object] = {
+        "profile_version": SUPPORT_SLA_REPORT_GRADE_VALIDATION_PLAN_VERSION,
+        "item_number": 114,
+        "commercial_gap_ids": [SUPPORT_SLA_GAP_ID],
+        "commercial_claim_allowed": False,
+        "document_count": len(document_hashes),
+        "evidence_slot_count": len(evidence_slots),
+        "support_sla_evidence_manifest_hash": str(evidence_manifest.get("manifest_hash") or ""),
+        "operations_document_evidence_matrix_hash": str(evidence_manifest.get("document_evidence_matrix_hash") or ""),
+        "support_process_readiness_manifest_hash": str(support_process_readiness_manifest.get("manifest_hash") or ""),
+        "readiness_checks_hash": stable_release_sha256(readiness_checks),
+        "trusted_diff_status": str(trusted_diff.get("status") or ""),
+        "trusted_diff_blocker": trusted_diff.get("blocker"),
+        "ready_slots": ready_slots,
+        "blocking_slots": blocking_slots,
+        "ready_slot_count": len(ready_slots),
+        "blocking_slot_count": len(blocking_slots),
+        "external_blocker_catalog": list(SUPPORT_SLA_REPORT_GRADE_BLOCKERS),
+        "blockers": blockers,
+        "reporting_boundary": (
+            "The support SLA template and readiness manifest are packaged; commercial support claims require "
+            "staffed desk attestation, contractual SLA execution, secure intake signoff, escalation rota, "
+            "emergency hotfix drill evidence, support ticket samples, release-host smoke, and independent review."
+        ),
+    }
+    plan["validation_plan_hash"] = stable_release_sha256(plan)
+    return plan
+
+
 def build_operations_document_evidence_matrix(
     *,
     number: int,
@@ -2341,19 +2523,27 @@ def write_release_manifest(output_dir: Path, repo: Path, commercial_readiness: d
         evidence_manifest=operations_document_evidence_manifests["113"],
         trusted_diff=trusted_operations_document_diffs["113"],
     )
+    support_sla_report_grade_validation_plan = build_support_sla_report_grade_validation_plan(
+        evidence_manifest=operations_document_evidence_manifests["114"],
+        support_process_readiness_manifest=support_process_readiness_manifest,
+        trusted_diff=trusted_operations_document_diffs["114"],
+    )
     operations_document_report_grade_validation_plans = {
         "112": release_notes_report_grade_validation_plan,
         "113": lts_hotfix_report_grade_validation_plan,
+        "114": support_sla_report_grade_validation_plan,
     }
     operations_document_report_grade_validation_plan_hashes = {
         "112": release_notes_report_grade_validation_plan["validation_plan_hash"],
         "113": lts_hotfix_report_grade_validation_plan["validation_plan_hash"],
+        "114": support_sla_report_grade_validation_plan["validation_plan_hash"],
     }
     operations_documents_blockers = sorted(
         {
             *[OPERATIONS_DOCUMENT_TRUSTED_DIFF_BLOCKERS[number] for number in range(112, 118)],
             *[str(blocker) for blocker in release_notes_report_grade_validation_plan.get("blockers", [])],
             *[str(blocker) for blocker in lts_hotfix_report_grade_validation_plan.get("blockers", [])],
+            *[str(blocker) for blocker in support_sla_report_grade_validation_plan.get("blockers", [])],
         }
     )
     update_manifest_payload: dict[str, object] = {}
@@ -2549,10 +2739,12 @@ def write_release_manifest(output_dir: Path, repo: Path, commercial_readiness: d
                 "document_report_grade_ready_slot_counts": {
                     "112": release_notes_report_grade_validation_plan["ready_slot_count"],
                     "113": lts_hotfix_report_grade_validation_plan["ready_slot_count"],
+                    "114": support_sla_report_grade_validation_plan["ready_slot_count"],
                 },
                 "document_report_grade_blocking_slot_counts": {
                     "112": release_notes_report_grade_validation_plan["blocking_slot_count"],
                     "113": lts_hotfix_report_grade_validation_plan["blocking_slot_count"],
+                    "114": support_sla_report_grade_validation_plan["blocking_slot_count"],
                 },
                 "admin_guide_coverage_manifest": admin_guide_coverage_manifest,
                 "admin_guide_coverage_manifest_hash": admin_guide_coverage_manifest["manifest_hash"],
@@ -3200,6 +3392,10 @@ def operations_documents_core_accuracy_gates(
         113: (
             "LTS/hotfix report-grade validation plan",
             "LTS/hotfix report-grade ready slots",
+        ),
+        114: (
+            "support SLA report-grade validation plan",
+            "support SLA report-grade ready slots",
         ),
     }
     gates = []

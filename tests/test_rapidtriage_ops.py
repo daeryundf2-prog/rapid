@@ -2023,6 +2023,10 @@ class RapidTriageOpsTests(unittest.TestCase):
                 continuity_by_number[113]["primary_outputs"],
             )
             self.assertIn(
+                "operations_documents.document_report_grade_validation_plan_hashes.114",
+                continuity_by_number[114]["primary_outputs"],
+            )
+            self.assertIn(
                 "operations_documents.document_evidence_manifests.115.manifest_hash",
                 continuity_by_number[115]["primary_outputs"],
             )
@@ -5932,6 +5936,38 @@ class RapidTriageOpsTests(unittest.TestCase):
                 8,
             )
             self.assertIn("maintained-branch-proof-required", lts_hotfix_report_plan["blockers"])
+            support_sla_report_plan = manifest["package_readiness"]["operations_documents"][
+                "document_report_grade_validation_plans"
+            ]["114"]
+            self.assertEqual(
+                support_sla_report_plan["profile_version"],
+                "support-sla-report-grade-validation-plan-v1",
+            )
+            self.assertEqual(
+                len(
+                    manifest["package_readiness"]["operations_documents"][
+                        "document_report_grade_validation_plan_hashes"
+                    ]["114"]
+                ),
+                64,
+            )
+            self.assertEqual(
+                manifest["package_readiness"]["operations_documents"]["document_report_grade_validation_plan_hashes"][
+                    "114"
+                ],
+                support_sla_report_plan["validation_plan_hash"],
+            )
+            self.assertGreaterEqual(
+                manifest["package_readiness"]["operations_documents"]["document_report_grade_ready_slot_counts"]["114"],
+                9,
+            )
+            self.assertGreaterEqual(
+                manifest["package_readiness"]["operations_documents"]["document_report_grade_blocking_slot_counts"][
+                    "114"
+                ],
+                9,
+            )
+            self.assertIn("staffed-support-attestation-required", support_sla_report_plan["blockers"])
             self.assertIn(
                 "ci_changelog_gate",
                 manifest["package_readiness"]["operations_documents"]["document_evidence_slots"]["112"],
@@ -5939,6 +5975,10 @@ class RapidTriageOpsTests(unittest.TestCase):
             self.assertIn(
                 "maintained_branch_proof",
                 manifest["package_readiness"]["operations_documents"]["document_evidence_slots"]["113"],
+            )
+            self.assertIn(
+                "staffed_support_attestation",
+                manifest["package_readiness"]["operations_documents"]["document_evidence_slots"]["114"],
             )
             self.assertIn(
                 "operations evidence manifest hash emitted",
@@ -5963,6 +6003,14 @@ class RapidTriageOpsTests(unittest.TestCase):
             self.assertIn(
                 "LTS/hotfix report-grade ready slots",
                 manifest["package_readiness"]["operations_documents"]["core_accuracy_gates"][1]["satisfied_checks"],
+            )
+            self.assertIn(
+                "support SLA report-grade validation plan",
+                manifest["package_readiness"]["operations_documents"]["core_accuracy_gates"][2]["satisfied_checks"],
+            )
+            self.assertIn(
+                "support SLA report-grade ready slots",
+                manifest["package_readiness"]["operations_documents"]["core_accuracy_gates"][2]["satisfied_checks"],
             )
             admin_guide_coverage_manifest = manifest["package_readiness"]["operations_documents"][
                 "admin_guide_coverage_manifest"
@@ -6278,6 +6326,22 @@ class RapidTriageOpsTests(unittest.TestCase):
             self.assertIn("document_report_grade_validation_plan_hashes", lts_diff["compared_fields"])
             self.assertIn("trusted LTS/hotfix policy diff pass", lts_gates[1]["satisfied_checks"])
             self.assertIn("LTS/hotfix report-grade validation plan", lts_gates[1]["satisfied_checks"])
+            support_sla_diff = build_release.build_operations_document_trusted_diff(
+                114,
+                manifest["package_readiness"]["operations_documents"],
+                manifest["package_readiness"]["operations_documents"],
+                trusted_tool="support-desk-sla-attestation",
+            )
+            support_sla_gates = build_release.operations_documents_core_accuracy_gates(
+                trusted_diffs={114: support_sla_diff},
+                report_grade_validation_plans=manifest["package_readiness"]["operations_documents"][
+                    "document_report_grade_validation_plans"
+                ],
+            )
+            self.assertEqual(support_sla_diff["status"], "pass")
+            self.assertIn("document_report_grade_validation_plan_hashes", support_sla_diff["compared_fields"])
+            self.assertIn("trusted support desk SLA diff pass", support_sla_gates[2]["satisfied_checks"])
+            self.assertIn("support SLA report-grade validation plan", support_sla_gates[2]["satisfied_checks"])
             admin_diff = build_release.build_operations_document_trusted_diff(
                 117,
                 manifest["package_readiness"]["operations_documents"],

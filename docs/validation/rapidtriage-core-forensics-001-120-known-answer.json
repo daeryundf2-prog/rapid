@@ -2625,10 +2625,10 @@
       ],
       "expected": {
         "required_assertions": [
-          "Validation package and release ZIP preserve SLA document, severity levels, response targets, secure intake requirement, staffed support blocker, and #114 core_accuracy_gates."
+          "Validation package and release ZIP preserve SLA document, severity levels, response targets, secure intake requirement, support-sla-evidence-manifest-v1 manifest hash/evidence slots, support-sla-report-grade-validation-plan-v1 hash/ready/blocking slots, staffed support blocker, trusted support SLA diff helpers/gates, and #114 core_accuracy_gates."
         ]
       },
-      "notes": "Internal fixture pass; staffed support desk remains external.",
+      "notes": "Internal fixture pass; staffed support desk, contractual SLA execution, support ticket samples, release-host support-flow smoke, independent SLA review, and trusted support desk attestation remain external.",
       "source_manifest": "docs/validation/rapidtriage-core-forensics-101-120-known-answer.json"
     },
     {

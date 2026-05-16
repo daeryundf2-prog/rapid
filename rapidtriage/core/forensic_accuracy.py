@@ -1925,6 +1925,8 @@ CORE_FORENSIC_ACCURACY_ITEMS: tuple[dict[str, object], ...] = (
             "response targets emitted",
             "secure intake requirement emitted",
             "staffed support blocker disclosed",
+            "support SLA report-grade validation plan",
+            "support SLA report-grade ready slots",
             "trusted support desk SLA diff pass",
         ),
     },

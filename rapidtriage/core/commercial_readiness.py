@@ -3743,6 +3743,7 @@ def operations_continuity_evidence_chain() -> list[dict[str, object]]:
             "primary_outputs": [
                 "docs/rapidtriage-support-sla.md",
                 "operations_documents.document_evidence_manifests.114.manifest_hash",
+                "operations_documents.document_report_grade_validation_plan_hashes.114",
                 "operations_documents.document_evidence_slots.114.staffed_support_attestation",
             ],
             "trusted_diff": "trusted-support-desk-sla-diff",

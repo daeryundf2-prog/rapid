@@ -301,6 +301,8 @@ class RapidTriageCoreForensicsAccuracyTests(unittest.TestCase):
         self.assertIn("LTS/hotfix report-grade ready slots", lts_policy["required_checks"])
         self.assertIn("trusted LTS/hotfix policy diff pass", lts_policy["required_checks"])
         self.assertIn("staffed support blocker disclosed", support_sla["required_checks"])
+        self.assertIn("support SLA report-grade validation plan", support_sla["required_checks"])
+        self.assertIn("support SLA report-grade ready slots", support_sla["required_checks"])
         self.assertIn("trusted support desk SLA diff pass", support_sla["required_checks"])
         self.assertIn("training curriculum packaged", training["required_checks"])
         self.assertIn("trusted training delivery diff pass", training["required_checks"])
