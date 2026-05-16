@@ -11,7 +11,7 @@ from typing import Iterable, Mapping, Sequence
 from ...core.forensic_accuracy import build_accuracy_gate
 from ...core.models import ArtifactRecord
 
-PARSER_VERSION = "registry-normalized-v11"
+PARSER_VERSION = "registry-normalized-v12"
 REGISTRY_EXPORT_PATTERN = re.compile(r"^\[(?P<key>.+)]$")
 REGISTRY_VALUE_PATTERN = re.compile(r'^(?P<name>@|"[^"]+")=(?P<value>.*)$')
 REGISTRY_HIVE_SIGNATURE = b"regf"
@@ -479,11 +479,13 @@ def build_registry_hive_cell_record(
     name = str(candidate.get("name") or "")
     risk_flags = registry_cell_risk_flags(candidate)
     recovery_evidence = registry_recovery_evidence(candidate, "deleted-or-free-cell")
+    recovery_identity_profile = registry_recovery_identity_profile(candidate, recovery_evidence)
     recovery_profile = registry_recovery_validation_profile(
         candidate,
         recovery_evidence,
         "deleted-or-free-cell",
         validation_checks=[],
+        recovery_identity_profile=recovery_identity_profile,
     )
     return ArtifactRecord(
         provider=WindowsRegistryProvider.name,
@@ -543,6 +545,7 @@ def build_registry_hive_cell_record(
             "value_data_offset": candidate.get("value_data_offset", 0),
             "value_data_inline": candidate.get("value_data_inline", False),
             "risk_flags": risk_flags,
+            "registry_recovery_identity_profile": recovery_identity_profile,
             "risk_score": min(100, len(risk_flags) * 20 + (20 if candidate.get("allocation_status") == "free-or-deleted-candidate" else 0)),
             "raw_preview": f"{candidate.get('cell_kind', 'cell')} {name}".strip(),
         },
@@ -558,11 +561,13 @@ def build_registry_deleted_cell_record(
     name = str(candidate.get("name") or "")
     risk_flags = registry_cell_risk_flags(candidate)
     recovery_evidence = registry_recovery_evidence(candidate, "deleted-or-free-cell")
+    recovery_identity_profile = registry_recovery_identity_profile(candidate, recovery_evidence)
     recovery_profile = registry_recovery_validation_profile(
         candidate,
         recovery_evidence,
         "deleted-or-free-cell",
         validation_checks=[],
+        recovery_identity_profile=recovery_identity_profile,
     )
     return ArtifactRecord(
         provider=WindowsRegistryProvider.name,
@@ -599,6 +604,7 @@ def build_registry_deleted_cell_record(
             "evidence_strength": "registry-deleted-cell-candidate",
             "registry_recovery_evidence": recovery_evidence,
             "registry_recovery_validation_profile": recovery_profile,
+            "registry_recovery_identity_profile": recovery_identity_profile,
             "validation_required": True,
             "validation_guidance": "Positive-size hive cells can represent free space that still contains old nk/vk structures; validate with a dedicated registry parser before final testimony.",
             "cell_kind": candidate.get("cell_kind", ""),
@@ -1013,12 +1019,18 @@ def build_registry_key_recovery_records(
             recovered_path=recovered_key_path,
             allocator_neighbor_context=registry_allocator_neighbor_context(candidate, candidates),
         )
+        recovery_identity_profile = registry_recovery_identity_profile(
+            candidate,
+            recovery_evidence,
+            recovered_path=recovered_key_path,
+        )
         recovery_profile = registry_recovery_validation_profile(
             candidate,
             recovery_evidence,
             "deleted-or-free-key-cell",
             validation_checks=validation_matrix,
             transaction_log_evidence=transaction_log_evidence,
+            recovery_identity_profile=recovery_identity_profile,
         )
         report_citation_manifest = registry_report_citation_manifest(
             artifact_type="registry-key-recovery-candidate",
@@ -1034,8 +1046,13 @@ def build_registry_key_recovery_records(
                 "hbin_offset": candidate.get("hbin_offset", 0),
                 "allocation_status": candidate.get("allocation_status", ""),
                 "candidate_kind": "deleted-or-free-key-cell",
+                "cell_signature": candidate.get("cell_signature", ""),
+                "cell_size": candidate.get("cell_size", 0),
                 "last_written_at": candidate.get("last_written_at", ""),
                 "parent_cell_offset": candidate.get("parent_cell_offset", 0),
+                "recovery_identity_hash": recovery_identity_profile["identity_hash"],
+                "allocator_context_hash": recovery_identity_profile["allocator_context_hash"],
+                "allocator_neighbor_context_hash": recovery_identity_profile["allocator_neighbor_context_hash"],
             },
             validation_matrix=validation_matrix,
             report_grade_assessment=report_grade_assessment,
@@ -1056,6 +1073,7 @@ def build_registry_key_recovery_records(
                 "transaction_log_evidence": transaction_log_evidence,
                 "recovery_evidence": recovery_evidence,
                 "recovery_profile": recovery_profile,
+                "recovery_identity_profile": recovery_identity_profile,
                 "allocator_neighbor_context": recovery_evidence.get("allocator_neighbor_context", {}),
             },
         )
@@ -1091,6 +1109,7 @@ def build_registry_key_recovery_records(
                 "evidence_strength": "registry-deleted-key-candidate",
                 "registry_recovery_evidence": recovery_evidence,
                 "registry_recovery_validation_profile": recovery_profile,
+                "registry_recovery_identity_profile": recovery_identity_profile,
                 "registry_recovery_reportability_decision": recovery_profile["reportability_decision"],
                 "registry_transaction_log_evidence": dict(transaction_log_evidence),
                 "registry_transaction_replay_profile": registry_transaction_replay_profile(
@@ -1150,6 +1169,7 @@ def build_registry_key_recovery_records(
                         "registry_validation_matrix": validation_matrix,
                         "registry_report_grade_assessment": report_grade_assessment,
                         "recovery_profile": recovery_profile,
+                        "recovery_identity_profile": recovery_identity_profile,
                         "transaction_log_evidence": transaction_log_evidence,
                     },
                 ),
@@ -1232,12 +1252,20 @@ def build_registry_value_recovery_records(
             decoded_data_present=bool(decoded_data),
             allocator_neighbor_context=registry_allocator_neighbor_context(candidate, candidates),
         )
+        recovery_identity_profile = registry_recovery_identity_profile(
+            candidate,
+            recovery_evidence,
+            parent_path=parent_path,
+            parent_confidence=parent_confidence,
+            decoded_data_preview=decoded_data,
+        )
         recovery_profile = registry_recovery_validation_profile(
             candidate,
             recovery_evidence,
             "deleted-or-free-value-cell",
             validation_checks=validation_matrix,
             transaction_log_evidence=transaction_log_evidence,
+            recovery_identity_profile=recovery_identity_profile,
         )
         report_citation_manifest = registry_report_citation_manifest(
             artifact_type="registry-value-recovery-candidate",
@@ -1260,6 +1288,11 @@ def build_registry_value_recovery_records(
                 "hbin_offset": candidate.get("hbin_offset", 0),
                 "allocation_status": candidate.get("allocation_status", ""),
                 "candidate_kind": "deleted-or-free-value-cell",
+                "cell_signature": candidate.get("cell_signature", ""),
+                "cell_size": candidate.get("cell_size", 0),
+                "recovery_identity_hash": recovery_identity_profile["identity_hash"],
+                "allocator_context_hash": recovery_identity_profile["allocator_context_hash"],
+                "allocator_neighbor_context_hash": recovery_identity_profile["allocator_neighbor_context_hash"],
             },
             validation_matrix=validation_matrix,
             report_grade_assessment=report_grade_assessment,
@@ -1282,6 +1315,7 @@ def build_registry_value_recovery_records(
                 "transaction_log_evidence": transaction_log_evidence,
                 "recovery_evidence": recovery_evidence,
                 "recovery_profile": recovery_profile,
+                "recovery_identity_profile": recovery_identity_profile,
                 "allocator_neighbor_context": recovery_evidence.get("allocator_neighbor_context", {}),
             },
         )
@@ -1318,6 +1352,7 @@ def build_registry_value_recovery_records(
                 "evidence_strength": "registry-deleted-value-candidate",
                 "registry_recovery_evidence": recovery_evidence,
                 "registry_recovery_validation_profile": recovery_profile,
+                "registry_recovery_identity_profile": recovery_identity_profile,
                 "registry_recovery_reportability_decision": recovery_profile["reportability_decision"],
                 "registry_transaction_log_evidence": dict(transaction_log_evidence),
                 "registry_transaction_replay_profile": registry_transaction_replay_profile(
@@ -1379,6 +1414,7 @@ def build_registry_value_recovery_records(
                         "registry_validation_matrix": validation_matrix,
                         "registry_report_grade_assessment": report_grade_assessment,
                         "recovery_profile": recovery_profile,
+                        "recovery_identity_profile": recovery_identity_profile,
                         "transaction_log_evidence": transaction_log_evidence,
                     },
                 ),
@@ -1454,6 +1490,10 @@ def registry_recovery_evidence(
     neighbor_context = dict(allocator_neighbor_context or {})
     if neighbor_context:
         evidence_reasons.append("allocator:neighbor-context-recorded")
+    allocator_context_hash = stable_registry_json_sha256(allocator_context)
+    allocator_neighbor_context_hash = (
+        stable_registry_json_sha256(neighbor_context) if neighbor_context else ""
+    )
     return {
         "candidate_kind": candidate_kind,
         "cell_kind": str(candidate.get("cell_kind") or ""),
@@ -1470,9 +1510,72 @@ def registry_recovery_evidence(
         "parent_path": parent_path,
         "decoded_data_present": decoded_data_present,
         "allocator_context": allocator_context,
+        "allocator_context_hash": allocator_context_hash,
         "allocator_neighbor_context": neighbor_context,
+        "allocator_neighbor_context_hash": allocator_neighbor_context_hash,
         "validation_required": True,
         "evidence_reasons": sorted(set(evidence_reasons)),
+    }
+
+
+def registry_recovery_identity_profile(
+    candidate: Mapping[str, object],
+    recovery_evidence: Mapping[str, object],
+    *,
+    recovered_path: str = "",
+    parent_path: str = "",
+    parent_confidence: str = "",
+    decoded_data_preview: str = "",
+) -> dict[str, object]:
+    cell_kind = str(candidate.get("cell_kind") or "")
+    candidate_class = (
+        "deleted-key-cell"
+        if cell_kind == "key-node"
+        else "deleted-value-cell"
+        if cell_kind == "value"
+        else "deleted-generic-cell"
+    )
+    identity = {
+        "cell_offset": int(candidate.get("cell_offset") or 0),
+        "cell_relative_offset": int(candidate.get("cell_relative_offset") or 0),
+        "hbin_offset": int(candidate.get("hbin_offset") or 0),
+        "cell_size": int(candidate.get("cell_size") or 0),
+        "cell_kind": cell_kind,
+        "cell_signature": str(candidate.get("cell_signature") or ""),
+        "allocation_status": str(candidate.get("allocation_status") or ""),
+        "candidate_class": candidate_class,
+        "candidate_kind": str(recovery_evidence.get("candidate_kind") or ""),
+        "name": str(candidate.get("name") or ""),
+        "name_sha256": sha256_text(str(candidate.get("name") or "")) if candidate.get("name") else "",
+        "value_type": str(candidate.get("value_type") or ""),
+        "value_data_size": int(candidate.get("value_data_size") or 0),
+        "value_data_offset": int(candidate.get("value_data_offset") or 0),
+        "decoded_data_preview_sha256": sha256_text(decoded_data_preview) if decoded_data_preview else "",
+        "key_path_candidate": recovered_path,
+        "parent_key_path_candidate": parent_path,
+        "parent_key_confidence": parent_confidence,
+        "allocator_context_hash": str(recovery_evidence.get("allocator_context_hash") or ""),
+        "allocator_neighbor_context_hash": str(recovery_evidence.get("allocator_neighbor_context_hash") or ""),
+    }
+    return {
+        "profile_version": "registry-recovery-identity-profile-v1",
+        "identity": identity,
+        "identity_hash": stable_registry_json_sha256(identity),
+        "allocator_context_hash": identity["allocator_context_hash"],
+        "allocator_neighbor_context_hash": identity["allocator_neighbor_context_hash"],
+        "commercial_diff_required_fields": [
+            "cell_offset",
+            "candidate_class",
+            "cell_signature",
+            "cell_size",
+            "hbin_offset",
+            "allocation_status",
+            "name",
+        ],
+        "reporting_constraint": (
+            "Treat this hash as a stable recovery-candidate identity only; it proves row consistency, "
+            "not deletion truth, until an oracle/second-parser diff and transaction context are attached."
+        ),
     }
 
 
@@ -1545,6 +1648,7 @@ def registry_recovery_validation_profile(
     *,
     validation_checks: Sequence[Mapping[str, object]],
     transaction_log_evidence: Mapping[str, object] | None = None,
+    recovery_identity_profile: Mapping[str, object] | None = None,
 ) -> dict[str, object]:
     cell_kind = str(candidate.get("cell_kind") or "")
     signature = str(candidate.get("cell_signature") or "")
@@ -1603,6 +1707,10 @@ def registry_recovery_validation_profile(
         "allocator_neighbor_context": dict(recovery_evidence.get("allocator_neighbor_context") or {})
         if isinstance(recovery_evidence.get("allocator_neighbor_context"), Mapping)
         else {},
+        "allocator_context_hash": str(recovery_evidence.get("allocator_context_hash") or ""),
+        "allocator_neighbor_context_hash": str(recovery_evidence.get("allocator_neighbor_context_hash") or ""),
+        "recovery_identity_profile": dict(recovery_identity_profile or {}),
+        "recovery_identity_hash": str((recovery_identity_profile or {}).get("identity_hash") or ""),
         "failed_validation_checks": failed_checks,
         "independent_validation_status": "required",
         "false_positive_controls": [
@@ -1726,6 +1834,13 @@ def registry_core_accuracy_gates(
             item5_checks.append("allocator reportability context")
         if isinstance(details.get("allocator_neighbor_context"), Mapping) and details["allocator_neighbor_context"]:
             item5_checks.append("allocator neighbor context")
+        recovery_identity_profile = (
+            details.get("recovery_identity_profile")
+            if isinstance(details.get("recovery_identity_profile"), Mapping)
+            else {}
+        )
+        if recovery_identity_profile.get("identity_hash"):
+            item5_checks.append("stable recovery identity hash")
         if isinstance(details.get("transaction_log_evidence"), Mapping) and details["transaction_log_evidence"].get("status"):
             item5_checks.append("transaction-log context disclosure")
         if details.get("recovery_profile"):
@@ -1754,6 +1869,11 @@ def registry_commercial_uplift_evidence(
     recovery_profile = (
         details.get("recovery_profile")
         if isinstance(details.get("recovery_profile"), Mapping)
+        else {}
+    )
+    recovery_identity_profile = (
+        details.get("recovery_identity_profile")
+        if isinstance(details.get("recovery_identity_profile"), Mapping)
         else {}
     )
     transaction_log_evidence = (
@@ -1799,6 +1919,12 @@ def registry_commercial_uplift_evidence(
         "passed_validation_matrix_ids": passed_matrix,
         "failed_validation_matrix_ids": failed_matrix,
         "recovery_profile_version": str(recovery_profile.get("profile_version") or ""),
+        "recovery_identity_hash": str(recovery_identity_profile.get("identity_hash") or ""),
+        "recovery_identity_profile_version": str(recovery_identity_profile.get("profile_version") or ""),
+        "allocator_context_hash": str(recovery_identity_profile.get("allocator_context_hash") or ""),
+        "allocator_neighbor_context_hash": str(
+            recovery_identity_profile.get("allocator_neighbor_context_hash") or ""
+        ),
         "recovery_reportability_decision": dict(recovery_profile.get("reportability_decision") or {}),
         "transaction_log_status": str(transaction_log_evidence.get("status") or ""),
         "key_tree_diff": {
@@ -2137,6 +2263,30 @@ def build_registry_deleted_cell_diff(
     """Compare deleted/free registry cell candidates with a labeled corpus or second parser."""
 
     oracle_name = str(oracle or "").strip()
+    compare_fields = [
+        "candidate_class",
+        "cell_signature",
+        "cell_size",
+        "hbin_offset",
+        "allocation_status",
+        "name",
+        "value_type",
+        "value_data_size",
+        "data_preview_sha256",
+        "parent_key_path",
+        "parent_key_confidence",
+        "allocator_context_hash",
+        "allocator_neighbor_context_hash",
+        "recovery_identity_hash",
+    ]
+    required_commercial_fields = [
+        "candidate_class",
+        "cell_signature",
+        "cell_size",
+        "hbin_offset",
+        "allocation_status",
+        "name",
+    ]
     rapid_by_offset = {
         key: normalized
         for candidate in rapid_candidates
@@ -2157,7 +2307,7 @@ def build_registry_deleted_cell_diff(
         rapid = rapid_by_offset[key]
         oracle_row = oracle_by_offset[key]
         field_diffs = []
-        for field in ("candidate_class", "name", "data_preview_sha256", "parent_key_path"):
+        for field in compare_fields:
             left = rapid.get(field, "")
             right = oracle_row.get(field, "")
             if left or right:
@@ -2174,11 +2324,39 @@ def build_registry_deleted_cell_diff(
     elif missing_in_oracle or extra_in_oracle or mismatches:
         status = "diffs-present"
     recognized_oracle = bool(re.search(r"(hand|labeled|oracle|regripper|registry|recmd|python)", oracle_name, re.I))
+    rapid_present_fields = sorted(
+        field for field in compare_fields if any(row.get(field, "") for row in rapid_by_offset.values())
+    )
+    oracle_present_fields = sorted(
+        field for field in compare_fields if any(row.get(field, "") for row in oracle_by_offset.values())
+    )
+    missing_oracle_required_fields = [
+        field
+        for field in required_commercial_fields
+        if any(row.get(field, "") for row in rapid_by_offset.values())
+        and not any(row.get(field, "") for row in oracle_by_offset.values())
+    ]
+    commercial_grade_evidence = (
+        status == "pass"
+        and recognized_oracle
+        and not missing_oracle_required_fields
+    )
+    blockers = []
+    if not commercial_grade_evidence:
+        blockers.append("registry-deleted-cell-cross-tool-diff-required")
+    if missing_oracle_required_fields:
+        blockers.append("registry-deleted-cell-oracle-field-coverage-required")
     return {
         "profile_version": "registry-deleted-cell-diff-v1",
         "oracle": oracle_name,
         "oracle_recognized": recognized_oracle,
-        "compare_fields": ["cell_offset", "candidate_class", "name", "data_preview_sha256", "parent_key_path"],
+        "compare_fields": ["cell_offset", *compare_fields],
+        "required_commercial_fields": ["cell_offset", *required_commercial_fields],
+        "field_coverage": {
+            "rapid_present_fields": rapid_present_fields,
+            "oracle_present_fields": oracle_present_fields,
+            "missing_oracle_required_fields": missing_oracle_required_fields,
+        },
         "rapid_candidate_count": len(rapid_by_offset),
         "oracle_candidate_count": len(oracle_by_offset),
         "matched_count": matched_count,
@@ -2186,18 +2364,18 @@ def build_registry_deleted_cell_diff(
         "missing_in_oracle_count": len(missing_in_oracle),
         "extra_in_oracle_count": len(extra_in_oracle),
         "status": status,
-        "commercial_grade_evidence": status == "pass" and recognized_oracle,
+        "commercial_grade_evidence": commercial_grade_evidence,
         "missing_in_oracle": missing_in_oracle[:100],
         "extra_in_oracle": extra_in_oracle[:100],
         "mismatches": mismatches[:100],
         "reportability_decision": {
-            "decision": "deleted-cell-diff-passed" if status == "pass" else "do-not-report-deleted-cell-as-fact",
+            "decision": "deleted-cell-diff-passed" if commercial_grade_evidence else "do-not-report-deleted-cell-as-fact",
             "allowed_use": (
                 "support report-grade deleted-cell assertions with attached transaction-log/reviewer evidence"
-                if status == "pass" and recognized_oracle
+                if commercial_grade_evidence
                 else "triage-only deleted-cell pivot until offset oracle diff is clean"
             ),
-            "blockers": [] if status == "pass" and recognized_oracle else ["registry-deleted-cell-cross-tool-diff-required"],
+            "blockers": blockers,
         },
     }
 
@@ -2296,27 +2474,93 @@ def _normalize_registry_bool_string(value: object, *, default: bool | None) -> s
 
 def _normalize_registry_deleted_cell_candidate(candidate: Mapping[str, object]) -> tuple[str, dict[str, str]]:
     candidate = _registry_row_payload(candidate)
-    offset = str(candidate.get("cell_offset") or candidate.get("offset") or candidate.get("byte_offset") or "").strip()
+    citation_manifest = candidate.get("registry_report_citation_manifest")
+    row_identity = (
+        citation_manifest.get("row_identity")
+        if isinstance(citation_manifest, Mapping) and isinstance(citation_manifest.get("row_identity"), Mapping)
+        else {}
+    )
+    recovery_profile = (
+        candidate.get("registry_recovery_validation_profile")
+        if isinstance(candidate.get("registry_recovery_validation_profile"), Mapping)
+        else {}
+    )
+    recovery_evidence = (
+        candidate.get("registry_recovery_evidence")
+        if isinstance(candidate.get("registry_recovery_evidence"), Mapping)
+        else {}
+    )
+    recovery_identity = (
+        candidate.get("registry_recovery_identity_profile")
+        if isinstance(candidate.get("registry_recovery_identity_profile"), Mapping)
+        else recovery_profile.get("recovery_identity_profile")
+        if isinstance(recovery_profile.get("recovery_identity_profile"), Mapping)
+        else {}
+    )
+    recovery_identity_values = (
+        recovery_identity.get("identity")
+        if isinstance(recovery_identity.get("identity"), Mapping)
+        else {}
+    )
+    offset = str(
+        candidate.get("cell_offset")
+        or row_identity.get("cell_offset")
+        or recovery_identity_values.get("cell_offset")
+        or candidate.get("offset")
+        or candidate.get("byte_offset")
+        or ""
+    ).strip()
     if not offset:
         return "", {}
     key = _normalize_registry_numeric_string(offset)
     data_preview = str(candidate.get("decoded_data_preview") or candidate.get("data_preview") or "")
+    data_preview_sha256 = str(
+        row_identity.get("decoded_data_preview_sha256")
+        or recovery_identity_values.get("decoded_data_preview_sha256")
+        or candidate.get("decoded_data_preview_sha256")
+        or candidate.get("data_preview_sha256")
+        or ""
+    )
+    if not data_preview_sha256 and data_preview:
+        data_preview_sha256 = hashlib.sha256(data_preview.encode("utf-8", errors="replace")).hexdigest()
     candidate_class = str(
         candidate.get("candidate_class")
+        or recovery_profile.get("candidate_class")
+        or row_identity.get("candidate_class")
+        or recovery_identity_values.get("candidate_class")
         or candidate.get("candidate_kind")
+        or row_identity.get("candidate_kind")
         or candidate.get("cell_kind")
+        or ""
+    )
+    if candidate_class == "deleted-or-free-value-cell":
+        candidate_class = "deleted-value-cell"
+    elif candidate_class == "deleted-or-free-key-cell":
+        candidate_class = "deleted-key-cell"
+    parent_key_path = str(
+        candidate.get("parent_key_path_candidate")
+        or row_identity.get("parent_key_path_candidate")
+        or recovery_identity_values.get("parent_key_path_candidate")
+        or candidate.get("parent_key_path")
+        or recovery_evidence.get("parent_path")
         or ""
     )
     return key, {
         "cell_offset": key,
         "candidate_class": candidate_class,
-        "name": str(candidate.get("name") or candidate.get("value_name") or ""),
-        "data_preview_sha256": hashlib.sha256(data_preview.encode("utf-8", errors="replace")).hexdigest()
-        if data_preview
-        else "",
-        "parent_key_path": normalize_registry_key_path(
-            str(candidate.get("parent_key_path_candidate") or candidate.get("parent_key_path") or "")
-        ),
+        "cell_signature": str(candidate.get("cell_signature") or row_identity.get("cell_signature") or recovery_identity_values.get("cell_signature") or recovery_profile.get("cell_signature") or recovery_evidence.get("cell_signature") or ""),
+        "cell_size": _normalize_registry_numeric_string(str(candidate.get("cell_size") or row_identity.get("cell_size") or recovery_identity_values.get("cell_size") or "")) if str(candidate.get("cell_size") or row_identity.get("cell_size") or recovery_identity_values.get("cell_size") or "") else "",
+        "hbin_offset": _normalize_registry_numeric_string(str(candidate.get("hbin_offset") or row_identity.get("hbin_offset") or recovery_identity_values.get("hbin_offset") or "")) if str(candidate.get("hbin_offset") or row_identity.get("hbin_offset") or recovery_identity_values.get("hbin_offset") or "") else "",
+        "allocation_status": str(candidate.get("allocation_status") or row_identity.get("allocation_status") or recovery_identity_values.get("allocation_status") or recovery_profile.get("allocation_status") or recovery_evidence.get("allocation_status") or ""),
+        "name": str(candidate.get("name") or row_identity.get("name") or recovery_identity_values.get("name") or candidate.get("value_name") or ""),
+        "value_type": str(candidate.get("value_type") or row_identity.get("value_type") or recovery_identity_values.get("value_type") or ""),
+        "value_data_size": _normalize_registry_numeric_string(str(candidate.get("value_data_size") or row_identity.get("value_data_size") or recovery_identity_values.get("value_data_size") or "")) if str(candidate.get("value_data_size") or row_identity.get("value_data_size") or recovery_identity_values.get("value_data_size") or "") else "",
+        "data_preview_sha256": data_preview_sha256,
+        "parent_key_path": normalize_registry_key_path(parent_key_path),
+        "parent_key_confidence": str(candidate.get("parent_key_confidence") or row_identity.get("parent_key_confidence") or recovery_identity_values.get("parent_key_confidence") or recovery_profile.get("parent_confidence") or recovery_evidence.get("parent_confidence") or ""),
+        "allocator_context_hash": str(candidate.get("allocator_context_hash") or row_identity.get("allocator_context_hash") or recovery_identity_values.get("allocator_context_hash") or recovery_profile.get("allocator_context_hash") or recovery_evidence.get("allocator_context_hash") or ""),
+        "allocator_neighbor_context_hash": str(candidate.get("allocator_neighbor_context_hash") or row_identity.get("allocator_neighbor_context_hash") or recovery_identity_values.get("allocator_neighbor_context_hash") or recovery_profile.get("allocator_neighbor_context_hash") or recovery_evidence.get("allocator_neighbor_context_hash") or ""),
+        "recovery_identity_hash": str(candidate.get("recovery_identity_hash") or row_identity.get("recovery_identity_hash") or recovery_identity.get("identity_hash") or recovery_profile.get("recovery_identity_hash") or ""),
     }
 
 
@@ -4415,6 +4659,9 @@ def registry_report_citation_manifest(
                 "candidate_class": recovery_profile.get("candidate_class", ""),
                 "confidence": recovery_profile.get("confidence", 0),
                 "independent_validation_status": recovery_profile.get("independent_validation_status", ""),
+                "recovery_identity_hash": recovery_profile.get("recovery_identity_hash", ""),
+                "allocator_context_hash": recovery_profile.get("allocator_context_hash", ""),
+                "allocator_neighbor_context_hash": recovery_profile.get("allocator_neighbor_context_hash", ""),
                 "reportability_decision": recovery_profile.get("reportability_decision", {}),
                 "source_viewer_locator": {
                     "viewer": "registry-recovery-context",

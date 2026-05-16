@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import hashlib
 import shutil
 import tempfile
 import unittest
@@ -3996,6 +3997,7 @@ class RapidTriageWindowsArtifactsCollectorTests(unittest.TestCase):
                 value_recovery.details["registry_recovery_evidence"]["allocator_context"]["validation_status"],
                 "free-cell-candidate-validation-required",
             )
+            self.assertEqual(len(value_recovery.details["registry_recovery_evidence"]["allocator_context_hash"]), 64)
             self.assertEqual(
                 value_recovery.details["registry_recovery_evidence"]["allocator_neighbor_context"][
                     "profile_version"
@@ -4043,6 +4045,19 @@ class RapidTriageWindowsArtifactsCollectorTests(unittest.TestCase):
                     "allocator_neighbor_context_present"
                 ]
             )
+            self.assertEqual(
+                value_recovery.details["registry_recovery_validation_profile"]["recovery_identity_hash"],
+                value_recovery.details["registry_recovery_identity_profile"]["identity_hash"],
+            )
+            value_identity = value_recovery.details["registry_recovery_identity_profile"]
+            self.assertEqual(value_identity["profile_version"], "registry-recovery-identity-profile-v1")
+            self.assertEqual(value_identity["identity"]["candidate_class"], "deleted-value-cell")
+            self.assertEqual(value_identity["identity"]["parent_key_confidence"], "key-value-list")
+            self.assertEqual(
+                value_identity["identity"]["decoded_data_preview_sha256"],
+                hashlib.sha256(b"1").hexdigest(),
+            )
+            self.assertIn("cell_signature", value_identity["commercial_diff_required_fields"])
             self.assertIn(
                 "allocator-neighbor-context-review",
                 value_recovery.details["registry_recovery_validation_profile"]["false_positive_controls"],
@@ -4075,6 +4090,7 @@ class RapidTriageWindowsArtifactsCollectorTests(unittest.TestCase):
             self.assertIn("parent-key confirmation", value_gate["satisfied_checks"])
             self.assertIn("allocator reportability context", value_gate["satisfied_checks"])
             self.assertIn("allocator neighbor context", value_gate["satisfied_checks"])
+            self.assertIn("stable recovery identity hash", value_gate["satisfied_checks"])
             self.assertIn("transaction-log context disclosure", value_gate["satisfied_checks"])
             self.assertIn("reportability blocked until independent confirmation", value_gate["satisfied_checks"])
             self.assertEqual(value_gate["missing_required_checks"], ["trusted deleted-cell offset diff pass"])
@@ -4089,6 +4105,8 @@ class RapidTriageWindowsArtifactsCollectorTests(unittest.TestCase):
                 "registry-deleted-cell-validation-v1",
             )
             self.assertEqual(value_uplift["transaction_log_status"], "present-not-replayed")
+            self.assertEqual(value_uplift["recovery_identity_hash"], value_identity["identity_hash"])
+            self.assertEqual(value_uplift["allocator_context_hash"], value_identity["allocator_context_hash"])
             self.assertEqual(
                 value_uplift["recovery_reportability_decision"]["allowed_use"],
                 "triage-pivot-only",
@@ -4113,6 +4131,9 @@ class RapidTriageWindowsArtifactsCollectorTests(unittest.TestCase):
                 value_recovery.details["registry_report_citation_manifest_hash"],
                 value_manifest["manifest_sha256"],
             )
+            self.assertEqual(value_manifest["row_identity"]["recovery_identity_hash"], value_identity["identity_hash"])
+            self.assertEqual(value_manifest["row_identity"]["cell_signature"], "vk")
+            self.assertGreater(value_manifest["row_identity"]["cell_size"], 0)
             self.assertEqual(
                 value_manifest["row_identity"]["parent_key_path_candidate"],
                 "HKEY_CURRENT_USER\\Software\\Run",
@@ -4158,6 +4179,12 @@ class RapidTriageWindowsArtifactsCollectorTests(unittest.TestCase):
                 key_recovery.details["registry_report_citation_manifest_hash"],
                 key_recovery_manifest["manifest_sha256"],
             )
+            self.assertEqual(
+                key_recovery_manifest["row_identity"]["recovery_identity_hash"],
+                key_recovery.details["registry_recovery_identity_profile"]["identity_hash"],
+            )
+            self.assertEqual(key_recovery_manifest["row_identity"]["cell_signature"], "nk")
+            self.assertGreater(key_recovery_manifest["row_identity"]["cell_size"], 0)
             self.assertIn(
                 "registry-recovery-validation",
                 {item["kind"] for item in key_recovery_manifest["citation_refs"]},
@@ -4309,18 +4336,32 @@ class RapidTriageWindowsArtifactsCollectorTests(unittest.TestCase):
             {
                 "cell_offset": "0x3000",
                 "candidate_class": "deleted-value-cell",
+                "cell_signature": "vk",
+                "cell_size": "0x40",
+                "hbin_offset": "0x1000",
+                "allocation_status": "free-or-deleted-candidate",
                 "name": "SecurityUpdater",
+                "value_type": "REG_SZ",
+                "value_data_size": 1,
                 "decoded_data_preview": "1",
                 "parent_key_path_candidate": r"HKCU\Software\Run",
+                "parent_key_confidence": "key-value-list",
             }
         ]
         oracle = [
             {
                 "offset": 12288,
                 "candidate_class": "deleted-value-cell",
+                "cell_signature": "vk",
+                "cell_size": 64,
+                "hbin_offset": 4096,
+                "allocation_status": "free-or-deleted-candidate",
                 "value_name": "SecurityUpdater",
+                "value_type": "REG_SZ",
+                "value_data_size": 1,
                 "data_preview": "1",
                 "parent_key_path": r"HKEY_CURRENT_USER\Software\Run",
+                "parent_key_confidence": "key-value-list",
             }
         ]
 
@@ -4330,6 +4371,9 @@ class RapidTriageWindowsArtifactsCollectorTests(unittest.TestCase):
         self.assertTrue(diff["oracle_recognized"])
         self.assertTrue(diff["commercial_grade_evidence"])
         self.assertEqual(diff["matched_count"], 1)
+        self.assertIn("cell_size", diff["compare_fields"])
+        self.assertIn("allocator_context_hash", diff["compare_fields"])
+        self.assertEqual(diff["field_coverage"]["missing_oracle_required_fields"], [])
         self.assertEqual(diff["reportability_decision"]["decision"], "deleted-cell-diff-passed")
 
     def test_registry_deleted_cell_diff_blocks_offset_or_data_mismatch(self) -> None:
