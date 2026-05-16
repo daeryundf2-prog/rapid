@@ -53,6 +53,7 @@ FIXTURE_CORPUS_REPORT_GRADE_VALIDATION_PLAN_VERSION = "fixture-corpus-report-gra
 FP_FN_TRUSTED_DIFF_BLOCKER_83 = "trusted-fp-fn-risk-register-diff-missing"
 FP_FN_REPORT_GRADE_VALIDATION_PLAN_VERSION = "parser-fp-fn-report-grade-validation-plan-v1"
 INDEPENDENT_VALIDATION_TRUSTED_DIFF_BLOCKER_84 = "trusted-independent-validation-signoff-diff-missing"
+INDEPENDENT_VALIDATION_REPORT_GRADE_VALIDATION_PLAN_VERSION = "independent-validation-report-grade-validation-plan-v1"
 VALIDATION_PACKAGE_TRUSTED_DIFF_BLOCKER_85 = "trusted-validation-package-manifest-diff-missing"
 VALIDATION_TRUSTED_TOOLS = {
     "known-answer-manifest",
@@ -1665,12 +1666,19 @@ def build_independent_validation_report(
             report_manifest=missing_manifest,
             trusted_diff=trusted_diff,
         )
+        report_grade_validation_plan = build_independent_validation_report_grade_validation_plan(
+            report_manifest=missing_manifest,
+            package_manifest=package_manifest,
+            trusted_diff=trusted_diff,
+        )
         satisfied = [
             "independent report status recorded",
             "required signoffs listed",
             "minimum report sections listed",
             "independent validation manifest emitted",
             "independent validation package manifest emitted",
+            "independent validation report-grade validation plan emitted",
+            "independent validation report-grade ready slots emitted",
             "not-attached blocker recorded",
         ]
         if trusted_diff and trusted_diff.get("status") == "pass":
@@ -1684,6 +1692,7 @@ def build_independent_validation_report(
                 report_hash="",
                 report_manifest=missing_manifest,
                 package_manifest=package_manifest,
+                report_grade_validation_plan=report_grade_validation_plan,
                 trusted_diff=trusted_diff,
             ),
             "report_path": "",
@@ -1695,13 +1704,17 @@ def build_independent_validation_report(
             "independent_validation_manifest": missing_manifest,
             "independent_validation_package_manifest": package_manifest,
             "independent_validation_package_manifest_hash": package_manifest["manifest_hash"],
+            "independent_validation_report_grade_validation_plan": report_grade_validation_plan,
+            "independent_validation_report_grade_validation_plan_hash": report_grade_validation_plan["validation_plan_hash"],
+            "report_grade_ready_slot_count": report_grade_validation_plan["ready_slot_count"],
+            "report_grade_blocking_slot_count": report_grade_validation_plan["blocking_slot_count"],
             "ready_for_court_report": False,
             "trusted_independent_validation_diff": dict(trusted_diff) if trusted_diff else missing_validation_trusted_diff(
                 INDEPENDENT_VALIDATION_GAP_ID,
                 INDEPENDENT_VALIDATION_TRUSTED_DIFF_BLOCKER_84,
                 trusted_tool="independent-validation-signoff",
             ),
-            "blockers": [INDEPENDENT_VALIDATION_TRUSTED_DIFF_BLOCKER_84],
+            "blockers": list(report_grade_validation_plan["blockers"]),
             "core_accuracy_gates": [
                 build_accuracy_gate(
                     84,
@@ -1710,6 +1723,9 @@ def build_independent_validation_report(
                         "status:not-attached",
                         f"report_manifest_hash:{missing_manifest['report_manifest_hash']}",
                         f"package_manifest_hash:{package_manifest['manifest_hash']}",
+                        f"independent_validation_report_grade_validation_plan_hash:{report_grade_validation_plan['validation_plan_hash']}",
+                        f"report_grade_ready_slot_count:{report_grade_validation_plan['ready_slot_count']}",
+                        f"report_grade_blocking_slot_count:{report_grade_validation_plan['blocking_slot_count']}",
                     ],
                 )
             ],
@@ -1730,6 +1746,11 @@ def build_independent_validation_report(
         report_manifest=report_manifest,
         trusted_diff=trusted_diff,
     )
+    report_grade_validation_plan = build_independent_validation_report_grade_validation_plan(
+        report_manifest=report_manifest,
+        package_manifest=package_manifest,
+        trusted_diff=trusted_diff,
+    )
     satisfied = [
         "independent report status recorded",
         "report hash captured when attached",
@@ -1738,12 +1759,13 @@ def build_independent_validation_report(
         "minimum report section presence checked",
         "independent validation manifest emitted",
         "independent validation package manifest emitted",
+        "independent validation report-grade validation plan emitted",
+        "independent validation report-grade ready slots emitted",
         "report manifest hash emitted",
         "not-attached blocker recorded",
     ]
     if trusted_diff and trusted_diff.get("status") == "pass":
         satisfied.append("trusted independent validation signoff diff pass")
-    blockers = [] if trusted_diff and trusted_diff.get("status") == "pass" else [INDEPENDENT_VALIDATION_TRUSTED_DIFF_BLOCKER_84]
     return {
         "status": "attached",
         "commercial_gap_ids": [INDEPENDENT_VALIDATION_GAP_ID],
@@ -1753,6 +1775,7 @@ def build_independent_validation_report(
             report_hash=report_hash,
             report_manifest=report_manifest,
             package_manifest=package_manifest,
+            report_grade_validation_plan=report_grade_validation_plan,
             trusted_diff=trusted_diff,
         ),
         "report_path": str(resolved),
@@ -1765,13 +1788,17 @@ def build_independent_validation_report(
         "independent_validation_manifest": report_manifest,
         "independent_validation_package_manifest": package_manifest,
         "independent_validation_package_manifest_hash": package_manifest["manifest_hash"],
-        "ready_for_court_report": bool(trusted_diff and trusted_diff.get("status") == "pass"),
+        "independent_validation_report_grade_validation_plan": report_grade_validation_plan,
+        "independent_validation_report_grade_validation_plan_hash": report_grade_validation_plan["validation_plan_hash"],
+        "report_grade_ready_slot_count": report_grade_validation_plan["ready_slot_count"],
+        "report_grade_blocking_slot_count": report_grade_validation_plan["blocking_slot_count"],
+        "ready_for_court_report": bool(report_grade_validation_plan.get("ready_for_court_report")),
         "trusted_independent_validation_diff": dict(trusted_diff) if trusted_diff else missing_validation_trusted_diff(
             INDEPENDENT_VALIDATION_GAP_ID,
             INDEPENDENT_VALIDATION_TRUSTED_DIFF_BLOCKER_84,
             trusted_tool="independent-validation-signoff",
         ),
-        "blockers": blockers,
+        "blockers": list(report_grade_validation_plan["blockers"]),
         "core_accuracy_gates": [
             build_accuracy_gate(
                 84,
@@ -1781,6 +1808,9 @@ def build_independent_validation_report(
                     f"sha256:{report_hash}",
                     f"report_manifest_hash:{report_manifest['report_manifest_hash']}",
                     f"package_manifest_hash:{package_manifest['manifest_hash']}",
+                    f"independent_validation_report_grade_validation_plan_hash:{report_grade_validation_plan['validation_plan_hash']}",
+                    f"report_grade_ready_slot_count:{report_grade_validation_plan['ready_slot_count']}",
+                    f"report_grade_blocking_slot_count:{report_grade_validation_plan['blocking_slot_count']}",
                 ],
             )
         ],
@@ -1899,6 +1929,142 @@ def independent_validation_package_manifest(
         ],
     }
     return {**manifest_core, "manifest_hash": hashlib_json(manifest_core)}
+
+
+def build_independent_validation_report_grade_validation_plan(
+    *,
+    report_manifest: Mapping[str, object],
+    package_manifest: Mapping[str, object],
+    trusted_diff: Mapping[str, object] | None,
+) -> dict[str, object]:
+    report_status = str(report_manifest.get("status") or "")
+    report_attached = report_status == "attached"
+    report_hash = str(report_manifest.get("sha256") or "")
+    report_manifest_hash = str(report_manifest.get("report_manifest_hash") or "")
+    package_manifest_hash = str(package_manifest.get("manifest_hash") or "")
+    minimum_present_count = int(report_manifest.get("minimum_sections_present_count") or 0)
+    minimum_required_count = int(report_manifest.get("minimum_sections_required_count") or 0)
+    minimum_sections_complete = minimum_required_count > 0 and minimum_present_count >= minimum_required_count
+    signoff_slots = report_manifest.get("signoff_slots") if isinstance(report_manifest.get("signoff_slots"), list) else []
+    trusted_status = str(trusted_diff.get("status") or "missing") if trusted_diff else "missing"
+    ready_slots = [
+        {
+            "slot_id": "independent-report-status",
+            "status": "ready",
+            "evidence_ref": "independent_validation_report.status",
+            "evidence_hash": hashlib_json({"status": report_status}),
+            "description": "The validation package states whether an independent report was attached for this release.",
+        },
+        {
+            "slot_id": "report-manifest-hash",
+            "status": "ready",
+            "evidence_ref": "independent_validation_report.independent_validation_manifest.report_manifest_hash",
+            "evidence_hash": report_manifest_hash,
+            "description": "Report manifest binds path, SHA256, size, section presence, and signoff-slot inventory.",
+        },
+        {
+            "slot_id": "package-manifest-hash",
+            "status": "ready",
+            "evidence_ref": "independent_validation_report.independent_validation_package_manifest_hash",
+            "evidence_hash": package_manifest_hash,
+            "description": "Package manifest binds the #84 release-gate decision to trusted-diff and section completeness metadata.",
+        },
+        {
+            "slot_id": "minimum-section-presence",
+            "status": "ready",
+            "evidence_ref": "independent_validation_report.minimum_section_presence",
+            "evidence_hash": str(report_manifest.get("minimum_section_presence_hash") or ""),
+            "description": "Required report sections are listed and checked without relying on free-form report prose at review time.",
+        },
+        {
+            "slot_id": "signoff-slot-inventory",
+            "status": "ready",
+            "evidence_ref": "independent_validation_report.signoff_slots",
+            "evidence_hash": str(report_manifest.get("signoff_status_hash") or ""),
+            "description": "Required independent reviewer, forensic lead, and release owner signoff slots are enumerated.",
+        },
+        {
+            "slot_id": "trusted-diff-disclosure",
+            "status": "ready",
+            "evidence_ref": "independent_validation_report.trusted_independent_validation_diff.status",
+            "evidence_hash": hashlib_json({"trusted_diff_status": trusted_status}),
+            "description": "Trusted signoff-diff status is emitted so commercial claims cannot hide missing external review.",
+        },
+    ]
+    blocking_slots = []
+    if not report_attached:
+        blocking_slots.append(
+            {
+                "slot_id": "signed-independent-report",
+                "status": "blocked",
+                "blocker": "independent-validation-report-not-attached",
+                "required_evidence": "signed independent validation report file attached with hash and size",
+            }
+        )
+    if report_attached and not report_hash:
+        blocking_slots.append(
+            {
+                "slot_id": "report-file-hash",
+                "status": "blocked",
+                "blocker": "independent-validation-report-hash-missing",
+                "required_evidence": "SHA256 hash for the attached independent validation report",
+            }
+        )
+    if not minimum_sections_complete:
+        blocking_slots.append(
+            {
+                "slot_id": "minimum-report-sections",
+                "status": "blocked",
+                "blocker": "independent-validation-minimum-sections-incomplete",
+                "required_evidence": "scope/datasets, tool version, known-answer table, FP/FN notes, and legal wording review sections",
+            }
+        )
+    if trusted_status != "pass":
+        blocking_slots.append(
+            {
+                "slot_id": "trusted-independent-validation-signoff-diff",
+                "status": "blocked",
+                "blocker": INDEPENDENT_VALIDATION_TRUSTED_DIFF_BLOCKER_84,
+                "required_evidence": "trusted independent-validation-signoff diff matching report hash, section hash, package hash, and signoff status",
+            }
+        )
+        blocking_slots.append(
+            {
+                "slot_id": "signoff-role-attachment",
+                "status": "blocked",
+                "blocker": "independent-validation-signoff-roles-not-attached",
+                "required_evidence": "independent reviewer, forensic lead, and release owner signoff evidence or trusted signoff manifest",
+            }
+        )
+    manifest_core = {
+        "profile_version": INDEPENDENT_VALIDATION_REPORT_GRADE_VALIDATION_PLAN_VERSION,
+        "item_number": 84,
+        "gap_id": INDEPENDENT_VALIDATION_GAP_ID,
+        "commercial_gap_ids": [INDEPENDENT_VALIDATION_GAP_ID],
+        "report_status": report_status,
+        "report_attached": report_attached,
+        "report_sha256_present": bool(report_hash),
+        "report_manifest_hash": report_manifest_hash,
+        "package_manifest_hash": package_manifest_hash,
+        "minimum_sections_complete": minimum_sections_complete,
+        "minimum_sections_present_count": minimum_present_count,
+        "minimum_sections_required_count": minimum_required_count,
+        "required_signoff_roles": INDEPENDENT_VALIDATION_REQUIRED_SIGNOFFS,
+        "signoff_slot_count": len(signoff_slots),
+        "trusted_diff_status": trusted_status,
+        "ready_slots": ready_slots,
+        "blocking_slots": blocking_slots,
+        "ready_slot_count": len(ready_slots),
+        "blocking_slot_count": len(blocking_slots),
+        "blockers": [str(slot["blocker"]) for slot in blocking_slots],
+        "commercial_claim_allowed": report_attached and minimum_sections_complete and trusted_status == "pass",
+        "ready_for_court_report": report_attached and minimum_sections_complete and trusted_status == "pass",
+        "report_use_warning": (
+            "Use as #84 independent-validation intake evidence only; do not claim court/report-grade "
+            "validation until the signed report, minimum sections, and trusted signoff diff are present."
+        ),
+    }
+    return {**manifest_core, "validation_plan_hash": hashlib_json(manifest_core)}
 
 
 def known_answer_manifest_functional_profile(
@@ -2033,6 +2199,7 @@ def independent_validation_functional_profile(
     report_hash: str,
     report_manifest: Mapping[str, object],
     package_manifest: Mapping[str, object],
+    report_grade_validation_plan: Mapping[str, object],
     trusted_diff: Mapping[str, object] | None,
 ) -> dict[str, object]:
     failed_checks = []
@@ -2044,6 +2211,8 @@ def independent_validation_functional_profile(
         failed_checks.append("independent-validation-report-manifest-hash-missing")
     if not package_manifest.get("manifest_hash"):
         failed_checks.append("independent-validation-package-manifest-hash-missing")
+    if not report_grade_validation_plan.get("validation_plan_hash"):
+        failed_checks.append("independent-validation-report-grade-validation-plan-hash-missing")
     if report_attached and int(report_manifest.get("minimum_sections_present_count") or 0) < int(
         report_manifest.get("minimum_sections_required_count") or 0
     ):
@@ -2063,6 +2232,9 @@ def independent_validation_functional_profile(
             "signoff_status_hash": str(report_manifest.get("signoff_status_hash") or ""),
             "package_manifest_hash": str(package_manifest.get("manifest_hash") or ""),
             "package_manifest_profile": str(package_manifest.get("profile_version") or ""),
+            "report_grade_validation_plan_hash": str(report_grade_validation_plan.get("validation_plan_hash") or ""),
+            "report_grade_ready_slot_count": int(report_grade_validation_plan.get("ready_slot_count") or 0),
+            "report_grade_blocking_slot_count": int(report_grade_validation_plan.get("blocking_slot_count") or 0),
             "minimum_sections_present_count": int(report_manifest.get("minimum_sections_present_count") or 0),
             "minimum_sections_required_count": int(report_manifest.get("minimum_sections_required_count") or 0),
             "required_signoffs": INDEPENDENT_VALIDATION_REQUIRED_SIGNOFFS,
@@ -2076,6 +2248,7 @@ def independent_validation_functional_profile(
             "minimum-report-section-presence-checked",
             "required-signoffs-listed",
             "minimum-report-sections-listed",
+            "independent-validation-report-grade-validation-plan-emitted",
         ],
         "failed_validation_check_ids": failed_checks,
         "reportability_decision": {

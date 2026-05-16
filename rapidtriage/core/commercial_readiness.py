@@ -2900,6 +2900,7 @@ def validation_spine_evidence_chain() -> list[dict[str, object]]:
             "primary_outputs": [
                 "independent_validation_report.sha256",
                 "independent_validation_report.independent_validation_manifest.report_manifest_hash",
+                "independent_validation_report.independent_validation_report_grade_validation_plan_hash",
                 "independent_validation_report.minimum_section_presence",
                 "independent_validation_report.signoff_slots",
             ],

@@ -1973,7 +1973,7 @@
       ],
       "expected": {
         "required_assertions": [
-          "Independent validation report output preserves status, required signoffs, signoff slots, minimum sections, minimum-section presence checks, optional report hash/size, independent-validation-report-manifest-v1 report manifest hash, not-attached blocker, and #84 core_accuracy_gates."
+          "Independent validation report output preserves status, required signoffs, signoff slots, minimum sections, minimum-section presence checks, optional report hash/size, independent-validation-report-manifest-v1 report manifest hash, independent-validation-report-grade-validation-plan-v1 ready/blocking slots, not-attached blocker, trusted independent validation signoff diff helpers/gates, and #84 core_accuracy_gates."
         ]
       },
       "notes": "Internal fixture pass; actual third-party signed validation remains operator-owned.",

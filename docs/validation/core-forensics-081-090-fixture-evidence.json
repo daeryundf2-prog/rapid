@@ -36,7 +36,7 @@
       "title": "Independent validation report",
       "test_files": ["tests/test_rapidtriage_ops.py", "tests/test_rapidtriage_final_roadmap.py"],
       "assertions": [
-        "Validation output preserves independent report status, required signoffs, signoff slots, minimum sections, minimum-section presence checks, optional report hash/size, independent-validation-report-manifest-v1 report manifest hash, not-attached blocker, trusted independent validation signoff diff helpers/gates, and #84 core_accuracy_gates."
+        "Validation output preserves independent report status, required signoffs, signoff slots, minimum sections, minimum-section presence checks, optional report hash/size, independent-validation-report-manifest-v1 report manifest hash, independent-validation-report-grade-validation-plan-v1 ready/blocking slots, not-attached blocker, trusted independent validation signoff diff helpers/gates, and #84 core_accuracy_gates."
       ],
       "remaining_external_validation": ["Actual independent signed validation report and trusted signoff manifest for the release."]
     },

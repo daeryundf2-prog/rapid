@@ -199,6 +199,10 @@ class RapidTriageCoreForensicsAccuracyTests(unittest.TestCase):
         self.assertIn("FP/FN report-grade validation plan emitted", fp_fn["required_checks"])
         self.assertIn("trusted FP/FN risk register diff pass", fp_fn["required_checks"])
         self.assertIn("report hash captured when attached", independent_validation["required_checks"])
+        self.assertIn(
+            "independent validation report-grade validation plan emitted",
+            independent_validation["required_checks"],
+        )
         self.assertIn("trusted independent validation signoff diff pass", independent_validation["required_checks"])
         self.assertIn("artifact hash manifest generated", validation_package["required_checks"])
         self.assertIn("trusted validation package manifest diff pass", validation_package["required_checks"])

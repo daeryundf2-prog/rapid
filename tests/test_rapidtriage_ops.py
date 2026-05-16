@@ -963,8 +963,22 @@ class RapidTriageOpsTests(unittest.TestCase):
                 payload["independent_validation_report"]["independent_validation_package_manifest"]["manifest_hash"],
             )
             self.assertEqual(
+                payload["independent_validation_report"]["independent_validation_report_grade_validation_plan"]["profile_version"],
+                "independent-validation-report-grade-validation-plan-v1",
+            )
+            self.assertEqual(
+                payload["independent_validation_report"]["independent_validation_report_grade_validation_plan_hash"],
+                payload["independent_validation_report"]["independent_validation_report_grade_validation_plan"]["validation_plan_hash"],
+            )
+            self.assertEqual(payload["independent_validation_report"]["report_grade_ready_slot_count"], 6)
+            self.assertEqual(payload["independent_validation_report"]["report_grade_blocking_slot_count"], 4)
+            self.assertEqual(
                 payload["independent_validation_report"]["functional_priority_profile"]["implemented_controls"]["package_manifest_hash"],
                 payload["independent_validation_report"]["independent_validation_package_manifest"]["manifest_hash"],
+            )
+            self.assertEqual(
+                payload["independent_validation_report"]["functional_priority_profile"]["implemented_controls"]["report_grade_validation_plan_hash"],
+                payload["independent_validation_report"]["independent_validation_report_grade_validation_plan_hash"],
             )
             self.assertIn(
                 "release-owner",
@@ -978,6 +992,7 @@ class RapidTriageOpsTests(unittest.TestCase):
             self.assertEqual(payload["independent_validation_report"]["core_accuracy_gates"][0]["gap_id"], "#84")
             self.assertEqual(payload["independent_validation_report"]["trusted_independent_validation_diff"]["status"], "missing")
             self.assertIn("trusted-independent-validation-signoff-diff-missing", payload["independent_validation_report"]["blockers"])
+            self.assertIn("independent-validation-report-not-attached", payload["independent_validation_report"]["blockers"])
             self.assertIn("#95", payload["external_tool_version_assessment"]["commercial_gap_ids"])
             self.assertEqual(payload["external_tool_version_assessment"]["core_accuracy_gates"][0]["gap_id"], "#95")
             self.assertEqual(payload["external_tool_version_assessment"]["trusted_external_tool_version_diff"]["status"], "missing")
@@ -1359,6 +1374,16 @@ class RapidTriageOpsTests(unittest.TestCase):
                 promoted_independent["functional_priority_profile"]["implemented_controls"]["package_manifest_hash"],
                 promoted_independent["independent_validation_package_manifest"]["manifest_hash"],
             )
+            self.assertEqual(
+                promoted_independent["independent_validation_report_grade_validation_plan"]["profile_version"],
+                "independent-validation-report-grade-validation-plan-v1",
+            )
+            self.assertEqual(
+                promoted_independent["functional_priority_profile"]["implemented_controls"]["report_grade_validation_plan_hash"],
+                promoted_independent["independent_validation_report_grade_validation_plan_hash"],
+            )
+            self.assertEqual(promoted_independent["report_grade_ready_slot_count"], 6)
+            self.assertEqual(promoted_independent["report_grade_blocking_slot_count"], 0)
             self.assertTrue(promoted_independent["independent_validation_package_manifest"]["minimum_sections_complete"])
             self.assertEqual(
                 promoted_independent["independent_validation_manifest"]["minimum_sections_present_count"],
@@ -1373,6 +1398,10 @@ class RapidTriageOpsTests(unittest.TestCase):
             )
             self.assertIn(
                 "report manifest hash emitted",
+                promoted_independent["core_accuracy_gates"][0]["satisfied_checks"],
+            )
+            self.assertIn(
+                "independent validation report-grade validation plan emitted",
                 promoted_independent["core_accuracy_gates"][0]["satisfied_checks"],
             )
 
@@ -1547,6 +1576,10 @@ class RapidTriageOpsTests(unittest.TestCase):
             self.assertIn("parser_fp_fn_risk_register_profile.register_digest", spine_by_number[83]["primary_outputs"])
             self.assertIn(
                 "independent_validation_report.independent_validation_manifest.report_manifest_hash",
+                spine_by_number[84]["primary_outputs"],
+            )
+            self.assertIn(
+                "independent_validation_report.independent_validation_report_grade_validation_plan_hash",
                 spine_by_number[84]["primary_outputs"],
             )
             self.assertIn("validation_package_manifest.package_manifest_hash", spine_by_number[85]["primary_outputs"])

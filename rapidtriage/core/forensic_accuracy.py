@@ -1347,6 +1347,8 @@ CORE_FORENSIC_ACCURACY_ITEMS: tuple[dict[str, object], ...] = (
             "minimum report sections listed",
             "minimum report section presence checked",
             "independent validation manifest emitted",
+            "independent validation report-grade validation plan emitted",
+            "independent validation report-grade ready slots emitted",
             "report manifest hash emitted",
             "not-attached blocker recorded",
             "trusted independent validation signoff diff pass",
