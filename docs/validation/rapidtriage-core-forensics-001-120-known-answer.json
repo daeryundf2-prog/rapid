@@ -2100,10 +2100,10 @@
       ],
       "expected": {
         "required_assertions": [
-          "Report items preserve source paths, source/record hashes, parser/version/confidence, offset/source-index fields when available, review/reportability fields, provenance row hashes, report-provenance-row-manifest-v1 manifest hashes, and #90 core_accuracy_gates."
+          "Report items preserve source paths, source/record hashes, parser/version/confidence, offset/source-index fields when available, review/reportability fields, provenance row hashes, report-provenance-row-manifest-v1 manifest hashes, source-provenance-report-grade-validation-plan-v1, plan hash/counts, and #90 core_accuracy_gates."
         ]
       },
-      "notes": "Internal fixture pass; completeness validation across every parser remains blocker.",
+      "notes": "Internal fixture pass; all-parser provenance corpus, trusted provenance manifests, final report template review, source-viewer round-trip evidence, offset locator trusted diffs, and parser-version release locks remain blockers.",
       "source_manifest": "docs/validation/rapidtriage-core-forensics-081-090-known-answer.json"
     },
     {

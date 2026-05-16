@@ -1463,6 +1463,8 @@ CORE_FORENSIC_ACCURACY_ITEMS: tuple[dict[str, object], ...] = (
             "review/reportability fields preserved",
             "provenance row hash emitted",
             "provenance manifest hash emitted",
+            "source provenance report-grade validation plan",
+            "source provenance report-grade ready slots",
             "trusted report provenance manifest diff pass",
         ),
     },

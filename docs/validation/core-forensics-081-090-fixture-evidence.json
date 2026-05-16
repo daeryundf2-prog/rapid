@@ -90,9 +90,9 @@
       "title": "Report item source provenance completeness",
       "test_files": ["tests/test_rapidtriage_case_db.py"],
       "assertions": [
-        "Report items preserve source path, source/record hashes, parser/version/confidence, offset/source-index fields when available, review/reportability fields, provenance row hashes, report-provenance-row-manifest-v1 manifest hashes, trusted report provenance manifest diff helpers/gates, and #90 core_accuracy_gates."
+        "Report items preserve source path, source/record hashes, parser/version/confidence, offset/source-index fields when available, review/reportability fields, provenance row hashes, report-provenance-row-manifest-v1 manifest hashes, source-provenance-report-grade-validation-plan-v1, plan hash/counts, trusted report provenance manifest diff helpers/gates, and #90 core_accuracy_gates."
       ],
-      "remaining_external_validation": ["Completeness validation across every parser, trusted provenance manifests, and final report template review."]
+      "remaining_external_validation": ["Completeness validation across every parser, trusted provenance manifests, final report template review, source-viewer round-trip evidence, offset locator trusted diffs, and parser-version release locks."]
     }
   ]
 }

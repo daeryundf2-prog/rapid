@@ -2466,9 +2466,45 @@ class RapidTriageCaseDatabaseTests(unittest.TestCase):
             self.assertTrue(all(len(item["provenance"]["provenance_manifest_hash"]) == 64 for item in export["items"]))
             self.assertTrue(all(len(item["provenance"]["provenance_manifest"]["field_presence_hash"]) == 64 for item in export["items"]))
             self.assertTrue(all(item["provenance"]["provenance_manifest"]["completeness_score"] > 0 for item in export["items"]))
+            self.assertTrue(
+                all(
+                    item["provenance"]["source_provenance_report_grade_validation_plan"]["profile_version"]
+                    == "source-provenance-report-grade-validation-plan-v1"
+                    for item in export["items"]
+                )
+            )
+            self.assertTrue(
+                all(
+                    item["provenance"]["source_provenance_report_grade_validation_plan"]["item_number"] == 90
+                    for item in export["items"]
+                )
+            )
+            self.assertTrue(
+                all(
+                    item["provenance"]["source_provenance_report_grade_validation_plan_hash"]
+                    == item["provenance"]["source_provenance_report_grade_validation_plan"]["validation_plan_sha256"]
+                    for item in export["items"]
+                )
+            )
+            self.assertTrue(all(item["provenance"]["report_grade_ready_slot_count"] >= 7 for item in export["items"]))
+            self.assertTrue(all(item["provenance"]["report_grade_blocking_slot_count"] >= 6 for item in export["items"]))
+            first_provenance_plan = export["items"][0]["provenance"]["source_provenance_report_grade_validation_plan"]
+            self.assertIn(
+                "source-path-and-locator",
+                {slot["slot_id"] for slot in first_provenance_plan["ready_slots"]},
+            )
+            self.assertIn(
+                "all-parser-provenance-corpus",
+                {slot["slot_id"] for slot in first_provenance_plan["blocking_slots"]},
+            )
+            self.assertIn(
+                "all-parser-provenance-corpus-required",
+                export["items"][0]["provenance"]["blockers"],
+            )
             self.assertTrue(all("provenance row hash emitted" in item["provenance"]["core_accuracy_gates"][0]["satisfied_checks"] for item in export["items"]))
             self.assertTrue(all("provenance manifest hash emitted" in item["provenance"]["core_accuracy_gates"][0]["satisfied_checks"] for item in export["items"]))
             self.assertTrue(all("provenance field-presence hash emitted" in item["provenance"]["core_accuracy_gates"][0]["satisfied_checks"] for item in export["items"]))
+            self.assertTrue(all("source provenance report-grade validation plan" in item["provenance"]["core_accuracy_gates"][0]["satisfied_checks"] for item in export["items"]))
             self.assertTrue(all(item["provenance"]["trusted_provenance_diff"]["status"] == "missing" for item in export["items"]))
             self.assertTrue(all("trusted-report-provenance-manifest-diff-missing" in item["provenance"]["blockers"] for item in export["items"]))
             self.assertIn("#90", export["summary"]["forensic_integrity_gap_ids"])
@@ -2488,12 +2524,14 @@ class RapidTriageCaseDatabaseTests(unittest.TestCase):
                 reportability=provenance_rows[0]["reportability"],
                 provenance_manifest=provenance_rows[0]["provenance_manifest"],
                 trusted_diff=provenance_diff,
+                report_grade_validation_plan=first_provenance_plan,
             )
             self.assertEqual(provenance_diff["status"], "pass")
             self.assertIn("manifest_hash", provenance_diff["compared_fields"])
             self.assertIn("field_presence_hash", provenance_diff["compared_fields"])
             self.assertIn("completeness_score", provenance_diff["compared_fields"])
             self.assertIn("trusted report provenance manifest diff pass", provenance_gate[0]["satisfied_checks"])
+            self.assertIn("source provenance report-grade validation plan", provenance_gate[0]["satisfied_checks"])
             self.assertEqual(export["forensic_integrity_matrix"]["profile_version"], "forensic-integrity-matrix-v1")
             self.assertEqual(export["forensic_integrity_matrix"]["item_numbers"], [86, 87, 88, 89, 90])
             self.assertEqual(len(export["forensic_integrity_matrix"]["matrix_hash"]), 64)
@@ -2502,6 +2540,12 @@ class RapidTriageCaseDatabaseTests(unittest.TestCase):
                 export["forensic_integrity_matrix"]["matrix_hash"],
             )
             self.assertTrue(export["forensic_integrity_matrix"]["all_primary_hashes_present"])
+            self.assertTrue(
+                all(
+                    row["source_provenance_report_grade_validation_plan_hash"]
+                    for row in export["forensic_integrity_matrix"]["provenance_rows"]
+                )
+            )
             self.assertTrue(all("validation_assessment" in item for item in export["items"]))
             self.assertTrue(all("#91" in item["validation_assessment"]["commercial_gap_ids"] for item in export["items"]))
             self.assertTrue(all("#92" in item["validation_assessment"]["commercial_gap_ids"] for item in export["items"]))

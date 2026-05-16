@@ -3052,6 +3052,7 @@ def forensic_integrity_evidence_chain() -> list[dict[str, object]]:
                 "case-db-report-export.items[].provenance",
                 "items[].provenance.provenance_row_hash",
                 "items[].provenance.provenance_manifest.manifest_hash",
+                "items[].provenance.source_provenance_report_grade_validation_plan_hash",
                 "items[].provenance.source_path",
                 "items[].provenance.parser_version",
                 "items[].provenance.record_offset",

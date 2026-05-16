@@ -223,6 +223,7 @@ class RapidTriageCoreForensicsAccuracyTests(unittest.TestCase):
         self.assertIn("report reproducibility report-grade validation plan", reproducibility["required_checks"])
         self.assertIn("trusted report replay manifest diff pass", reproducibility["required_checks"])
         self.assertIn("source path preserved", provenance["required_checks"])
+        self.assertIn("source provenance report-grade validation plan", provenance["required_checks"])
         self.assertIn("trusted report provenance manifest diff pass", provenance["required_checks"])
         self.assertIn("parser confidence preserved", parser_confidence["required_checks"])
         self.assertIn("trusted parser confidence calibration diff pass", parser_confidence["required_checks"])

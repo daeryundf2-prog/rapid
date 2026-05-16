@@ -110,8 +110,8 @@
       "status": "pass",
       "backlog_items": [90],
       "evidence_paths": ["docs/validation/core-forensics-081-090-fixture-evidence.json", "tests/test_rapidtriage_case_db.py"],
-      "expected": {"required_assertions": ["Report items preserve source paths, source/record hashes, parser/version/confidence, offset/source-index fields when available, review/reportability fields, provenance row hashes, report-provenance-row-manifest-v1 manifest hashes, trusted report provenance manifest diff helpers/gates, and #90 core_accuracy_gates."]},
-      "notes": "Internal fixture pass; completeness validation across every parser and trusted provenance manifests remain blockers."
+      "expected": {"required_assertions": ["Report items preserve source paths, source/record hashes, parser/version/confidence, offset/source-index fields when available, review/reportability fields, provenance row hashes, report-provenance-row-manifest-v1 manifest hashes, source-provenance-report-grade-validation-plan-v1, plan hash/counts, trusted report provenance manifest diff helpers/gates, and #90 core_accuracy_gates."]},
+      "notes": "Internal fixture pass; all-parser provenance corpus, trusted provenance manifests, final report template review, source-viewer round-trip evidence, offset locator trusted diffs, and parser-version release locks remain blockers."
     }
   ]
 }

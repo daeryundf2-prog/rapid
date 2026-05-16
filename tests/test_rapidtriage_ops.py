@@ -1646,6 +1646,10 @@ class RapidTriageOpsTests(unittest.TestCase):
                 "reproducibility.report_reproducibility_report_grade_validation_plan_hash",
                 integrity_by_number[89]["primary_outputs"],
             )
+            self.assertIn(
+                "items[].provenance.source_provenance_report_grade_validation_plan_hash",
+                integrity_by_number[90]["primary_outputs"],
+            )
             self.assertEqual(integrity_by_number[90]["trusted_diff_required"], "trusted-report-provenance-manifest-diff")
             report_quality = payload["report_quality_progress"]
             self.assertEqual(report_quality["version"], "report-quality-progress-v1")

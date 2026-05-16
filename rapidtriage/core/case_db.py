@@ -76,6 +76,15 @@ REPORT_REPRODUCIBILITY_REPORT_GRADE_BLOCKERS = [
     "release-build-replay-evidence-required",
 ]
 SOURCE_PROVENANCE_GAP_ID = "#90"
+SOURCE_PROVENANCE_REPORT_GRADE_VALIDATION_PLAN_VERSION = "source-provenance-report-grade-validation-plan-v1"
+SOURCE_PROVENANCE_REPORT_GRADE_BLOCKERS = [
+    "trusted-report-provenance-manifest-diff-missing",
+    "all-parser-provenance-corpus-required",
+    "final-report-template-provenance-review-required",
+    "source-citation-viewer-roundtrip-required",
+    "offset-locator-trusted-diff-required",
+    "parser-version-release-lock-required",
+]
 CUSTODY_TRUSTED_DIFF_BLOCKER_86 = "trusted-custody-event-manifest-diff-missing"
 ACQUISITION_HASH_TRUSTED_DIFF_BLOCKER_87 = "trusted-acquisition-hash-manifest-diff-missing"
 IMMUTABLE_AUDIT_TRUSTED_DIFF_BLOCKER_88 = "trusted-audit-hash-chain-manifest-diff-missing"
@@ -6739,6 +6748,7 @@ def build_custody_report_grade_validation_plan(
         "blocking_slots": blocking_slots,
         "ready_slot_count": len(ready_slots),
         "blocking_slot_count": len(blocking_slots),
+        "external_blocker_catalog": list(SOURCE_PROVENANCE_REPORT_GRADE_BLOCKERS),
         "blockers": sorted({str(slot.get("blocker") or "") for slot in blocking_slots if slot.get("blocker")}),
         "commercial_claim_allowed": False,
         "reporting_boundary": "This plan makes Case DB custody exports auditable, but court/commercial custody claims still require external handoff, acquisition-device, write-blocker, policy, and trusted-manifest evidence.",
@@ -7462,6 +7472,216 @@ def build_report_provenance_row_manifest(row: Mapping[str, object]) -> dict[str,
         json.dumps(manifest_core, ensure_ascii=False, sort_keys=True).encode("utf-8")
     ).hexdigest()
     return {**manifest_core, "manifest_hash": manifest_hash}
+
+
+def build_source_provenance_report_grade_validation_plan(
+    provenance: Mapping[str, object],
+    provenance_manifest: Mapping[str, object],
+    *,
+    trusted_diff: Mapping[str, object] | None,
+) -> dict[str, object]:
+    trusted_status = str(trusted_diff.get("status") or "missing") if trusted_diff else "missing"
+    source_locator = provenance.get("source_locator") if isinstance(provenance.get("source_locator"), Mapping) else {}
+    source_viewer_locator = (
+        provenance.get("source_viewer_locator")
+        if isinstance(provenance.get("source_viewer_locator"), Mapping)
+        else {}
+    )
+    hashes = provenance.get("hashes") if isinstance(provenance.get("hashes"), Mapping) else {}
+    record_hashes = provenance.get("record_hashes") if isinstance(provenance.get("record_hashes"), Mapping) else {}
+    parser_manifest_hashes = (
+        provenance.get("parser_manifest_hashes")
+        if isinstance(provenance.get("parser_manifest_hashes"), Mapping)
+        else {}
+    )
+    ready_slots = [
+        {
+            "slot_id": "source-path-and-locator",
+            "status": "complete",
+            "evidence": {
+                "source_path": str(provenance.get("source_path") or ""),
+                "source_locator_hash": str(provenance.get("source_locator_hash") or ""),
+                "source_locator_present": bool(source_locator),
+                "source_viewer_locator_present": bool(source_viewer_locator),
+            },
+        },
+        {
+            "slot_id": "source-and-record-hashes",
+            "status": "complete",
+            "evidence": {
+                "source_hash_algorithms": sorted(str(key) for key in hashes.keys()),
+                "record_hash_algorithms": sorted(str(key) for key in record_hashes.keys()),
+                "row_citation_hash": str(provenance.get("row_citation_hash") or ""),
+            },
+        },
+        {
+            "slot_id": "parser-identity-and-confidence",
+            "status": "complete",
+            "evidence": {
+                "parser": str(provenance.get("parser") or ""),
+                "parser_version": str(provenance.get("parser_version") or ""),
+                "parser_confidence": provenance.get("parser_confidence"),
+                "parser_manifest_hash_count": len(parser_manifest_hashes),
+            },
+        },
+        {
+            "slot_id": "offset-source-index-and-citation",
+            "status": "complete",
+            "evidence": {
+                "record_offset": provenance.get("record_offset"),
+                "source_index": provenance.get("source_index"),
+                "source_citation_package_hash": str(provenance.get("source_citation_package_hash") or ""),
+                "source_read_citation_id": str(provenance.get("source_read_citation_id") or ""),
+            },
+        },
+        {
+            "slot_id": "review-and-reportability-state",
+            "status": "complete",
+            "evidence": {
+                "review_status": str(provenance.get("review_status") or ""),
+                "verification_status": str(provenance.get("verification_status") or ""),
+                "reportability": str(provenance.get("reportability") or ""),
+                "evidence_strength": str(provenance.get("evidence_strength") or ""),
+            },
+        },
+        {
+            "slot_id": "provenance-row-and-field-presence-manifest",
+            "status": "complete",
+            "evidence": {
+                "provenance_row_hash": str(provenance_manifest.get("provenance_row_hash") or ""),
+                "manifest_hash": str(provenance_manifest.get("manifest_hash") or ""),
+                "field_presence_hash": str(provenance_manifest.get("field_presence_hash") or ""),
+                "completeness_score": provenance_manifest.get("completeness_score"),
+            },
+        },
+        {
+            "slot_id": "trusted-provenance-diff-disclosure",
+            "status": "complete",
+            "evidence": {
+                "trusted_diff_status": trusted_status,
+                "trusted_tool": str((trusted_diff or {}).get("trusted_tool") or ""),
+            },
+        },
+    ]
+    blocking_slots: list[dict[str, object]] = []
+    if not provenance.get("source_path") and not source_locator:
+        blocking_slots.append(
+            {
+                "slot_id": "source-path-or-locator",
+                "status": "blocked",
+                "blocker": "source-path-or-locator-required",
+                "required_evidence": "source path or structured source locator for every report item",
+            }
+        )
+    if not hashes and not record_hashes:
+        blocking_slots.append(
+            {
+                "slot_id": "source-or-record-hash",
+                "status": "blocked",
+                "blocker": "source-or-record-hash-required",
+                "required_evidence": "source SHA-256 or record/content hash for every report item",
+            }
+        )
+    if not provenance.get("parser") or not provenance.get("parser_version"):
+        blocking_slots.append(
+            {
+                "slot_id": "parser-version",
+                "status": "blocked",
+                "blocker": "parser-version-required",
+                "required_evidence": "parser name and parser version for every report item",
+            }
+        )
+    if not provenance.get("review_status") or not provenance.get("reportability"):
+        blocking_slots.append(
+            {
+                "slot_id": "review-reportability",
+                "status": "blocked",
+                "blocker": "review-reportability-required",
+                "required_evidence": "review status and reportability decision for every report item",
+            }
+        )
+    if not provenance_manifest.get("manifest_hash") or not provenance_manifest.get("provenance_row_hash"):
+        blocking_slots.append(
+            {
+                "slot_id": "provenance-manifest-complete",
+                "status": "blocked",
+                "blocker": "provenance-manifest-completeness-required",
+                "required_evidence": "provenance row hash, field-presence hash, and manifest hash",
+            }
+        )
+    if float(provenance_manifest.get("completeness_score") or 0.0) < 1.0:
+        blocking_slots.append(
+            {
+                "slot_id": "required-field-completeness",
+                "status": "blocked",
+                "blocker": "provenance-required-field-completeness-required",
+                "required_evidence": "all required provenance fields present in each row manifest",
+            }
+        )
+    if trusted_status != "pass":
+        blocking_slots.append(
+            {
+                "slot_id": "trusted-report-provenance-manifest-diff",
+                "status": "external-required",
+                "blocker": SOURCE_PROVENANCE_TRUSTED_DIFF_BLOCKER_90,
+                "required_evidence": "trusted provenance manifest diff over source path, hashes, parser, offset, review, and reportability fields",
+            }
+        )
+    blocking_slots.extend(
+        [
+            {
+                "slot_id": "all-parser-provenance-corpus",
+                "status": "external-required",
+                "blocker": "all-parser-provenance-corpus-required",
+                "required_evidence": "fixture corpus proving provenance completeness across every parser family",
+            },
+            {
+                "slot_id": "final-report-template-provenance-review",
+                "status": "external-required",
+                "blocker": "final-report-template-provenance-review-required",
+                "required_evidence": "final report template review proving source provenance is visible for every cited item",
+            },
+            {
+                "slot_id": "source-citation-viewer-roundtrip",
+                "status": "external-required",
+                "blocker": "source-citation-viewer-roundtrip-required",
+                "required_evidence": "source viewer round-trip from report citation back to original source and hash",
+            },
+            {
+                "slot_id": "offset-locator-trusted-diff",
+                "status": "external-required",
+                "blocker": "offset-locator-trusted-diff-required",
+                "required_evidence": "trusted diff for parser offsets, source indexes, and viewer locators",
+            },
+            {
+                "slot_id": "parser-version-release-lock",
+                "status": "external-required",
+                "blocker": "parser-version-release-lock-required",
+                "required_evidence": "release-build parser/version inventory locked to the report export",
+            },
+        ]
+    )
+    plan_core: dict[str, object] = {
+        "profile_version": SOURCE_PROVENANCE_REPORT_GRADE_VALIDATION_PLAN_VERSION,
+        "item_number": 90,
+        "commercial_gap_ids": [SOURCE_PROVENANCE_GAP_ID],
+        "plan_context": "case-db-report-item-provenance",
+        "target_citation_id": str(provenance.get("target_citation_id") or ""),
+        "review_citation_id": str(provenance.get("review_citation_id") or ""),
+        "provenance_manifest_hash": str(provenance_manifest.get("manifest_hash") or ""),
+        "provenance_row_hash": str(provenance_manifest.get("provenance_row_hash") or ""),
+        "field_presence_hash": str(provenance_manifest.get("field_presence_hash") or ""),
+        "completeness_score": provenance_manifest.get("completeness_score"),
+        "trusted_diff_status": trusted_status,
+        "ready_slots": ready_slots,
+        "blocking_slots": blocking_slots,
+        "ready_slot_count": len(ready_slots),
+        "blocking_slot_count": len(blocking_slots),
+        "blockers": sorted({str(slot.get("blocker") or "") for slot in blocking_slots if slot.get("blocker")}),
+        "commercial_claim_allowed": False,
+        "reporting_boundary": "This plan makes one report item source-provenance-reviewable, but commercial completeness requires all-parser corpus coverage, final report template review, citation viewer round-trip evidence, offset trusted diffs, parser-version release locks, and trusted provenance manifests.",
+    }
+    return {**plan_core, "validation_plan_sha256": stable_payload_sha256(plan_core)}
 
 
 def parser_confidence_band(parser_confidence: object) -> str:
@@ -9780,11 +10000,23 @@ def build_report_item_provenance(
         "evidence_strength": str(source_reference.get("evidence_strength") or metadata.get("evidence_strength") or ""),
     }
     provenance_manifest = build_report_provenance_row_manifest(provenance)
+    source_provenance_report_grade_validation_plan = build_source_provenance_report_grade_validation_plan(
+        provenance,
+        provenance_manifest,
+        trusted_diff=trusted_diff,
+    )
+    blockers = sorted({*blockers, *source_provenance_report_grade_validation_plan["blockers"]})
     return {
         **provenance,
         "provenance_row_hash": provenance_manifest["provenance_row_hash"],
         "provenance_manifest": provenance_manifest,
         "provenance_manifest_hash": provenance_manifest["manifest_hash"],
+        "source_provenance_report_grade_validation_plan": source_provenance_report_grade_validation_plan,
+        "source_provenance_report_grade_validation_plan_hash": source_provenance_report_grade_validation_plan[
+            "validation_plan_sha256"
+        ],
+        "report_grade_ready_slot_count": source_provenance_report_grade_validation_plan["ready_slot_count"],
+        "report_grade_blocking_slot_count": source_provenance_report_grade_validation_plan["blocking_slot_count"],
         "trusted_provenance_diff": dict(trusted_diff) if trusted_diff else missing_integrity_trusted_diff(
             SOURCE_PROVENANCE_GAP_ID,
             SOURCE_PROVENANCE_TRUSTED_DIFF_BLOCKER_90,
@@ -9804,6 +10036,7 @@ def build_report_item_provenance(
             reportability=str(source_reference.get("reportability") or metadata.get("reportability") or ""),
             provenance_manifest=provenance_manifest,
             trusted_diff=trusted_diff,
+            report_grade_validation_plan=source_provenance_report_grade_validation_plan,
         ),
     }
 
@@ -9824,9 +10057,14 @@ def build_forensic_integrity_matrix(
             "target_citation_id": str(provenance.get("target_citation_id") or ""),
             "review_citation_id": str(provenance.get("review_citation_id") or ""),
             "provenance_manifest_hash": str(provenance.get("provenance_manifest_hash") or ""),
+            "source_provenance_report_grade_validation_plan_hash": str(
+                provenance.get("source_provenance_report_grade_validation_plan_hash") or ""
+            ),
             "field_presence_hash": str(manifest.get("field_presence_hash") or ""),
             "completeness_score": optional_float(manifest.get("completeness_score")) or 0.0,
             "missing_required_fields": list(manifest.get("missing_required_fields") or []),
+            "report_grade_ready_slot_count": int(provenance.get("report_grade_ready_slot_count") or 0),
+            "report_grade_blocking_slot_count": int(provenance.get("report_grade_blocking_slot_count") or 0),
         }
         provenance_rows.append({**row, "row_hash": stable_payload_sha256(row)})
     source_rows = [
@@ -10103,6 +10341,7 @@ def report_item_provenance_core_accuracy_gates(
     reportability: str,
     provenance_manifest: Mapping[str, object] | None = None,
     trusted_diff: Mapping[str, object] | None = None,
+    report_grade_validation_plan: Mapping[str, object] | None = None,
 ) -> list[dict[str, object]]:
     satisfied = []
     if source_path:
@@ -10121,6 +10360,10 @@ def report_item_provenance_core_accuracy_gates(
         satisfied.append("provenance manifest hash emitted")
     if provenance_manifest and provenance_manifest.get("field_presence_hash"):
         satisfied.append("provenance field-presence hash emitted")
+    if report_grade_validation_plan and report_grade_validation_plan.get("validation_plan_sha256"):
+        satisfied.append("source provenance report-grade validation plan")
+    if report_grade_validation_plan and int(report_grade_validation_plan.get("ready_slot_count") or 0) >= 7:
+        satisfied.append("source provenance report-grade ready slots")
     if trusted_diff and trusted_diff.get("status") == "pass":
         satisfied.append("trusted report provenance manifest diff pass")
     return [
@@ -10134,6 +10377,7 @@ def report_item_provenance_core_accuracy_gates(
                 f"review_status:{review_status}",
                 f"reportability:{reportability}",
                 f"provenance_manifest_hash:{(provenance_manifest or {}).get('manifest_hash', '')}",
+                f"source_provenance_report_grade_validation_plan_hash:{(report_grade_validation_plan or {}).get('validation_plan_sha256', '')}",
             ],
         )
     ]
