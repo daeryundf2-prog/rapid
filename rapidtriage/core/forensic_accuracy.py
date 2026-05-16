@@ -1976,6 +1976,8 @@ CORE_FORENSIC_ACCURACY_ITEMS: tuple[dict[str, object], ...] = (
             "auth/network guidance documented",
             "backup/restore guidance documented",
             "deployment proof blocker disclosed",
+            "admin deployment report-grade validation plan",
+            "admin deployment report-grade ready slots",
             "trusted admin deployment proof diff pass",
         ),
     },

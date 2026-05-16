@@ -2691,10 +2691,10 @@
       ],
       "expected": {
         "required_assertions": [
-          "Release package preserves admin guide, install/update/auth/backup guidance, deployment proof blocker, and #117 core_accuracy_gates."
+          "Release package preserves admin guide, install/update/auth/backup guidance, admin-deployment-evidence-manifest-v1 manifest hash/evidence slots, admin-deployment-report-grade-validation-plan-v1 hash/ready/blocking slots, deployment proof blocker, trusted admin deployment diff helpers/gates, and #117 core_accuracy_gates."
         ]
       },
-      "notes": "Internal fixture pass; fresh deployment proof remains external.",
+      "notes": "Internal fixture pass; fresh deployment proof, operator acceptance signoff, clean-machine install smoke, upgrade/rollback drill, auth/network proof, backup/restore drill, logging policy proof, security deployment review, and trusted admin deployment attestations remain external.",
       "source_manifest": "docs/validation/rapidtriage-core-forensics-101-120-known-answer.json"
     },
     {

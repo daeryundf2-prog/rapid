@@ -3849,6 +3849,7 @@ def final_delivery_evidence_chain() -> list[dict[str, object]]:
             "primary_outputs": [
                 "docs/rapidtriage-admin-deployment-guide.md",
                 "operations_documents.document_evidence_manifests.117.manifest_hash",
+                "operations_documents.document_report_grade_validation_plan_hashes.117",
                 "operations_documents.document_evidence_slots.117.fresh_deployment_proof",
             ],
             "trusted_diff": "trusted-admin-deployment-proof-diff",

@@ -2053,6 +2053,10 @@ class RapidTriageOpsTests(unittest.TestCase):
                 final_by_number[116]["primary_outputs"],
             )
             self.assertIn(
+                "operations_documents.document_report_grade_validation_plan_hashes.117",
+                final_by_number[117]["primary_outputs"],
+            )
+            self.assertIn(
                 "operations_documents.document_evidence_manifests.120.manifest_hash",
                 final_by_number[120]["primary_outputs"],
             )
@@ -6040,6 +6044,38 @@ class RapidTriageOpsTests(unittest.TestCase):
                 9,
             )
             self.assertIn("quickstart-lab-run-log-required", quickstart_lab_report_plan["blockers"])
+            admin_deployment_report_plan = manifest["package_readiness"]["operations_documents"][
+                "document_report_grade_validation_plans"
+            ]["117"]
+            self.assertEqual(
+                admin_deployment_report_plan["profile_version"],
+                "admin-deployment-report-grade-validation-plan-v1",
+            )
+            self.assertEqual(
+                len(
+                    manifest["package_readiness"]["operations_documents"][
+                        "document_report_grade_validation_plan_hashes"
+                    ]["117"]
+                ),
+                64,
+            )
+            self.assertEqual(
+                manifest["package_readiness"]["operations_documents"]["document_report_grade_validation_plan_hashes"][
+                    "117"
+                ],
+                admin_deployment_report_plan["validation_plan_hash"],
+            )
+            self.assertGreaterEqual(
+                manifest["package_readiness"]["operations_documents"]["document_report_grade_ready_slot_counts"]["117"],
+                8,
+            )
+            self.assertGreaterEqual(
+                manifest["package_readiness"]["operations_documents"]["document_report_grade_blocking_slot_counts"][
+                    "117"
+                ],
+                9,
+            )
+            self.assertIn("fresh-admin-deployment-proof-required", admin_deployment_report_plan["blockers"])
             self.assertIn(
                 "ci_changelog_gate",
                 manifest["package_readiness"]["operations_documents"]["document_evidence_slots"]["112"],
@@ -6059,6 +6095,10 @@ class RapidTriageOpsTests(unittest.TestCase):
             self.assertIn(
                 "quickstart_lab_run_log",
                 manifest["package_readiness"]["operations_documents"]["document_evidence_slots"]["116"],
+            )
+            self.assertIn(
+                "fresh_deployment_proof",
+                manifest["package_readiness"]["operations_documents"]["document_evidence_slots"]["117"],
             )
             self.assertIn(
                 "operations evidence manifest hash emitted",
@@ -6107,6 +6147,14 @@ class RapidTriageOpsTests(unittest.TestCase):
             self.assertIn(
                 "quickstart lab report-grade ready slots",
                 manifest["package_readiness"]["operations_documents"]["core_accuracy_gates"][4]["satisfied_checks"],
+            )
+            self.assertIn(
+                "admin deployment report-grade validation plan",
+                manifest["package_readiness"]["operations_documents"]["core_accuracy_gates"][5]["satisfied_checks"],
+            )
+            self.assertIn(
+                "admin deployment report-grade ready slots",
+                manifest["package_readiness"]["operations_documents"]["core_accuracy_gates"][5]["satisfied_checks"],
             )
             admin_guide_coverage_manifest = manifest["package_readiness"]["operations_documents"][
                 "admin_guide_coverage_manifest"
@@ -6482,9 +6530,16 @@ class RapidTriageOpsTests(unittest.TestCase):
                 manifest["package_readiness"]["operations_documents"],
                 trusted_tool="admin-deployment-proof",
             )
-            admin_gates = build_release.operations_documents_core_accuracy_gates(trusted_diffs={117: admin_diff})
+            admin_gates = build_release.operations_documents_core_accuracy_gates(
+                trusted_diffs={117: admin_diff},
+                report_grade_validation_plans=manifest["package_readiness"]["operations_documents"][
+                    "document_report_grade_validation_plans"
+                ],
+            )
             self.assertEqual(admin_diff["status"], "pass")
+            self.assertIn("document_report_grade_validation_plan_hashes", admin_diff["compared_fields"])
             self.assertIn("trusted admin deployment proof diff pass", admin_gates[5]["satisfied_checks"])
+            self.assertIn("admin deployment report-grade validation plan", admin_gates[5]["satisfied_checks"])
 
             verify = subprocess.run(
                 [

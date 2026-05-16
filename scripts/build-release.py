@@ -83,6 +83,7 @@ LTS_HOTFIX_REPORT_GRADE_VALIDATION_PLAN_VERSION = "lts-hotfix-report-grade-valid
 SUPPORT_SLA_REPORT_GRADE_VALIDATION_PLAN_VERSION = "support-sla-report-grade-validation-plan-v1"
 TRAINING_DELIVERY_REPORT_GRADE_VALIDATION_PLAN_VERSION = "training-delivery-report-grade-validation-plan-v1"
 QUICKSTART_LAB_REPORT_GRADE_VALIDATION_PLAN_VERSION = "quickstart-lab-report-grade-validation-plan-v1"
+ADMIN_DEPLOYMENT_REPORT_GRADE_VALIDATION_PLAN_VERSION = "admin-deployment-report-grade-validation-plan-v1"
 OPERATIONS_DOCUMENT_TRUSTED_DIFF_BLOCKERS = {
     112: "trusted-release-notes-ci-gate-diff-missing",
     113: "trusted-lts-hotfix-policy-diff-missing",
@@ -151,6 +152,17 @@ QUICKSTART_LAB_REPORT_GRADE_BLOCKERS = [
     "report-export-verification-required",
     "lab-data-hash-manifest-required",
     "independent-quickstart-review-required",
+]
+ADMIN_DEPLOYMENT_REPORT_GRADE_BLOCKERS = [
+    OPERATIONS_DOCUMENT_TRUSTED_DIFF_BLOCKERS[117],
+    "fresh-admin-deployment-proof-required",
+    "operator-acceptance-signoff-required",
+    "clean-machine-install-smoke-required",
+    "upgrade-rollback-drill-required",
+    "auth-network-configuration-proof-required",
+    "backup-restore-drill-required",
+    "logging-policy-proof-required",
+    "security-hardening-deployment-review-required",
 ]
 ANALYST_QUICKSTART_LAB_GAP_ID = "#116"
 ADMIN_DEPLOYMENT_GUIDE_GAP_ID = "#117"
@@ -2342,6 +2354,160 @@ def build_quickstart_lab_report_grade_validation_plan(
     return plan
 
 
+def build_admin_deployment_report_grade_validation_plan(
+    *,
+    evidence_manifest: dict[str, object],
+    admin_guide_coverage_manifest: dict[str, object],
+    trusted_diff: dict[str, object],
+) -> dict[str, object]:
+    document_hashes = evidence_manifest.get("document_hashes") if isinstance(evidence_manifest.get("document_hashes"), list) else []
+    evidence_slots = evidence_manifest.get("evidence_slots") if isinstance(evidence_manifest.get("evidence_slots"), dict) else {}
+    coverage = (
+        admin_guide_coverage_manifest.get("coverage")
+        if isinstance(admin_guide_coverage_manifest.get("coverage"), dict)
+        else {}
+    )
+    ready_slots = [
+        {
+            "slot_id": "admin-deployment-guide-document",
+            "status": "ready",
+            "evidence_ref": "docs/rapidtriage-admin-deployment-guide.md",
+            "evidence_hash": stable_release_sha256(document_hashes),
+        },
+        {
+            "slot_id": "admin-deployment-evidence-manifest",
+            "status": "ready",
+            "evidence_ref": "release-manifest.package_readiness.operations_documents.document_evidence_manifest_hashes.117",
+            "evidence_hash": str(evidence_manifest.get("manifest_hash") or ""),
+        },
+        {
+            "slot_id": "admin-deployment-document-evidence-matrix",
+            "status": "ready",
+            "evidence_ref": "release-manifest.package_readiness.operations_documents.document_evidence_matrix_hashes.117",
+            "evidence_hash": str(evidence_manifest.get("document_evidence_matrix_hash") or ""),
+        },
+        {
+            "slot_id": "admin-guide-coverage-manifest",
+            "status": "ready",
+            "evidence_ref": "admin-guide-coverage-manifest.json",
+            "evidence_hash": str(admin_guide_coverage_manifest.get("manifest_hash") or ""),
+        },
+        {
+            "slot_id": "install-update-auth-backup-coverage",
+            "status": "ready",
+            "evidence_ref": "admin-guide-coverage-manifest.coverage",
+            "evidence_hash": stable_release_sha256(coverage),
+        },
+        {
+            "slot_id": "fresh-deployment-proof-boundary",
+            "status": "ready-with-blocker",
+            "evidence_ref": "release-manifest.package_readiness.operations_documents.document_evidence_slots.117.fresh_deployment_proof",
+            "evidence_hash": stable_release_sha256(evidence_slots.get("fresh_deployment_proof", {})),
+        },
+        {
+            "slot_id": "operator-acceptance-signoff-boundary",
+            "status": "ready-with-blocker",
+            "evidence_ref": "release-manifest.package_readiness.operations_documents.document_evidence_slots.117.operator_acceptance_signoff",
+            "evidence_hash": stable_release_sha256(evidence_slots.get("operator_acceptance_signoff", {})),
+        },
+        {
+            "slot_id": "trusted-admin-deployment-diff-boundary",
+            "status": "ready" if trusted_diff.get("status") == "pass" else "ready-with-blocker",
+            "evidence_ref": "release-manifest.package_readiness.operations_documents.trusted_operations_document_diffs.117",
+            "evidence_hash": stable_release_sha256(trusted_diff),
+        },
+    ]
+    blocking_slots = []
+    if trusted_diff.get("status") != "pass":
+        blocking_slots.append(
+            {
+                "slot_id": "trusted-admin-deployment-proof-diff",
+                "status": "blocking",
+                "blocker": OPERATIONS_DOCUMENT_TRUSTED_DIFF_BLOCKERS[117],
+                "required_evidence": "trusted admin deployment proof comparing install, update, auth/network, backup, logging, policy, and security deployment evidence",
+            }
+        )
+    for slot_id, blocker, required_evidence in (
+        (
+            "fresh-admin-deployment-proof",
+            "fresh-admin-deployment-proof-required",
+            "fresh-machine deployment proof with OS, package, config, auth/network, backup, logging, and smoke results",
+        ),
+        (
+            "operator-acceptance-signoff",
+            "operator-acceptance-signoff-required",
+            "operator acceptance signoff confirming deployment guide usability and environment-specific assumptions",
+        ),
+        (
+            "clean-machine-install-smoke",
+            "clean-machine-install-smoke-required",
+            "clean-machine install smoke transcript for supported desktop/server targets",
+        ),
+        (
+            "upgrade-rollback-drill",
+            "upgrade-rollback-drill-required",
+            "upgrade and rollback drill proving config, case database, backups, and logs survive version movement",
+        ),
+        (
+            "auth-network-configuration-proof",
+            "auth-network-configuration-proof-required",
+            "auth, bind address, firewall, TLS/reverse proxy, and enterprise network deployment proof",
+        ),
+        (
+            "backup-restore-drill",
+            "backup-restore-drill-required",
+            "admin backup/restore drill tied to case DB, evidence metadata, audit logs, and recovery timing",
+        ),
+        (
+            "logging-policy-proof",
+            "logging-policy-proof-required",
+            "logging, retention, redaction, and support bundle policy proof for deployed admin environment",
+        ),
+        (
+            "security-hardening-deployment-review",
+            "security-hardening-deployment-review-required",
+            "security review proving the deployment guide enables least privilege, local-only mode, sandboxing, and safe exports",
+        ),
+    ):
+        blocking_slots.append(
+            {
+                "slot_id": slot_id,
+                "status": "blocking",
+                "current_attachment_status": "not-attached",
+                "blocker": blocker,
+                "required_evidence": required_evidence,
+            }
+        )
+    blockers = sorted({str(slot["blocker"]) for slot in blocking_slots if slot.get("blocker")})
+    plan: dict[str, object] = {
+        "profile_version": ADMIN_DEPLOYMENT_REPORT_GRADE_VALIDATION_PLAN_VERSION,
+        "item_number": 117,
+        "commercial_gap_ids": [ADMIN_DEPLOYMENT_GUIDE_GAP_ID],
+        "commercial_claim_allowed": False,
+        "document_count": len(document_hashes),
+        "evidence_slot_count": len(evidence_slots),
+        "admin_deployment_evidence_manifest_hash": str(evidence_manifest.get("manifest_hash") or ""),
+        "operations_document_evidence_matrix_hash": str(evidence_manifest.get("document_evidence_matrix_hash") or ""),
+        "admin_guide_coverage_manifest_hash": str(admin_guide_coverage_manifest.get("manifest_hash") or ""),
+        "coverage_hash": stable_release_sha256(coverage),
+        "trusted_diff_status": str(trusted_diff.get("status") or ""),
+        "trusted_diff_blocker": trusted_diff.get("blocker"),
+        "ready_slots": ready_slots,
+        "blocking_slots": blocking_slots,
+        "ready_slot_count": len(ready_slots),
+        "blocking_slot_count": len(blocking_slots),
+        "external_blocker_catalog": list(ADMIN_DEPLOYMENT_REPORT_GRADE_BLOCKERS),
+        "blockers": blockers,
+        "reporting_boundary": (
+            "The admin deployment guide and coverage manifest are packaged; report-grade deployment claims "
+            "require fresh deployment proof, operator signoff, clean-machine install smoke, upgrade/rollback "
+            "drills, auth/network proof, backup/restore drill, logging policy proof, and security review."
+        ),
+    }
+    plan["validation_plan_hash"] = stable_release_sha256(plan)
+    return plan
+
+
 def build_operations_document_evidence_matrix(
     *,
     number: int,
@@ -2829,12 +2995,18 @@ def write_release_manifest(output_dir: Path, repo: Path, commercial_readiness: d
         evidence_manifest=operations_document_evidence_manifests["116"],
         trusted_diff=trusted_operations_document_diffs["116"],
     )
+    admin_deployment_report_grade_validation_plan = build_admin_deployment_report_grade_validation_plan(
+        evidence_manifest=operations_document_evidence_manifests["117"],
+        admin_guide_coverage_manifest=admin_guide_coverage_manifest,
+        trusted_diff=trusted_operations_document_diffs["117"],
+    )
     operations_document_report_grade_validation_plans = {
         "112": release_notes_report_grade_validation_plan,
         "113": lts_hotfix_report_grade_validation_plan,
         "114": support_sla_report_grade_validation_plan,
         "115": training_delivery_report_grade_validation_plan,
         "116": quickstart_lab_report_grade_validation_plan,
+        "117": admin_deployment_report_grade_validation_plan,
     }
     operations_document_report_grade_validation_plan_hashes = {
         "112": release_notes_report_grade_validation_plan["validation_plan_hash"],
@@ -2842,6 +3014,7 @@ def write_release_manifest(output_dir: Path, repo: Path, commercial_readiness: d
         "114": support_sla_report_grade_validation_plan["validation_plan_hash"],
         "115": training_delivery_report_grade_validation_plan["validation_plan_hash"],
         "116": quickstart_lab_report_grade_validation_plan["validation_plan_hash"],
+        "117": admin_deployment_report_grade_validation_plan["validation_plan_hash"],
     }
     operations_documents_blockers = sorted(
         {
@@ -2851,6 +3024,7 @@ def write_release_manifest(output_dir: Path, repo: Path, commercial_readiness: d
             *[str(blocker) for blocker in support_sla_report_grade_validation_plan.get("blockers", [])],
             *[str(blocker) for blocker in training_delivery_report_grade_validation_plan.get("blockers", [])],
             *[str(blocker) for blocker in quickstart_lab_report_grade_validation_plan.get("blockers", [])],
+            *[str(blocker) for blocker in admin_deployment_report_grade_validation_plan.get("blockers", [])],
         }
     )
     update_manifest_payload: dict[str, object] = {}
@@ -3049,6 +3223,7 @@ def write_release_manifest(output_dir: Path, repo: Path, commercial_readiness: d
                     "114": support_sla_report_grade_validation_plan["ready_slot_count"],
                     "115": training_delivery_report_grade_validation_plan["ready_slot_count"],
                     "116": quickstart_lab_report_grade_validation_plan["ready_slot_count"],
+                    "117": admin_deployment_report_grade_validation_plan["ready_slot_count"],
                 },
                 "document_report_grade_blocking_slot_counts": {
                     "112": release_notes_report_grade_validation_plan["blocking_slot_count"],
@@ -3056,6 +3231,7 @@ def write_release_manifest(output_dir: Path, repo: Path, commercial_readiness: d
                     "114": support_sla_report_grade_validation_plan["blocking_slot_count"],
                     "115": training_delivery_report_grade_validation_plan["blocking_slot_count"],
                     "116": quickstart_lab_report_grade_validation_plan["blocking_slot_count"],
+                    "117": admin_deployment_report_grade_validation_plan["blocking_slot_count"],
                 },
                 "admin_guide_coverage_manifest": admin_guide_coverage_manifest,
                 "admin_guide_coverage_manifest_hash": admin_guide_coverage_manifest["manifest_hash"],
@@ -3715,6 +3891,10 @@ def operations_documents_core_accuracy_gates(
         116: (
             "quickstart lab report-grade validation plan",
             "quickstart lab report-grade ready slots",
+        ),
+        117: (
+            "admin deployment report-grade validation plan",
+            "admin deployment report-grade ready slots",
         ),
     }
     gates = []

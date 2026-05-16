@@ -313,6 +313,8 @@ class RapidTriageCoreForensicsAccuracyTests(unittest.TestCase):
         self.assertIn("quickstart lab report-grade ready slots", quickstart["required_checks"])
         self.assertIn("trusted quickstart lab run diff pass", quickstart["required_checks"])
         self.assertIn("admin guide packaged", admin_guide["required_checks"])
+        self.assertIn("admin deployment report-grade validation plan", admin_guide["required_checks"])
+        self.assertIn("admin deployment report-grade ready slots", admin_guide["required_checks"])
         self.assertIn("trusted admin deployment proof diff pass", admin_guide["required_checks"])
         self.assertIn("independent AppSec blocker disclosed", security_hardening["required_checks"])
         self.assertIn("trusted independent AppSec review diff pass", security_hardening["required_checks"])
