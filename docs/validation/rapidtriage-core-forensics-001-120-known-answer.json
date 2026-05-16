@@ -2581,10 +2581,10 @@
       ],
       "expected": {
         "required_assertions": [
-          "Release package preserves release notes template, known-limits/validation/migration sections, CI changelog blocker, and #112 core_accuracy_gates."
+          "Release package preserves release notes template, known-limits/validation/migration sections, release-notes-discipline-evidence-manifest-v1 manifest hash/evidence slots, release-notes-report-grade-validation-plan-v1 ready/blocking slots, CI changelog blocker, trusted release-note CI gate diff helpers/gates, and #112 core_accuracy_gates."
         ]
       },
-      "notes": "Internal fixture pass; CI changelog enforcement remains external.",
+      "notes": "Internal fixture pass; CI changelog enforcement, release owner review, migration/validation state review, release-host smoke log, checksum publication review, independent wording review, and trusted release-note attestation remain external.",
       "source_manifest": "docs/validation/rapidtriage-core-forensics-101-120-known-answer.json"
     },
     {

@@ -1891,6 +1891,8 @@ CORE_FORENSIC_ACCURACY_ITEMS: tuple[dict[str, object], ...] = (
             "validation state section required",
             "migration notes section required",
             "CI changelog blocker disclosed",
+            "release notes report-grade validation plan",
+            "release notes report-grade ready slots",
             "trusted release notes CI gate diff pass",
         ),
     },

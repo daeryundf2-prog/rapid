@@ -3719,6 +3719,7 @@ def operations_continuity_evidence_chain() -> list[dict[str, object]]:
             "primary_outputs": [
                 "release-manifest.package_readiness.operations_documents",
                 "operations_documents.document_evidence_manifests.112.manifest_hash",
+                "operations_documents.document_report_grade_validation_plan_hashes.112",
                 "operations_documents.document_evidence_slots.112.ci_changelog_gate",
             ],
             "trusted_diff": "trusted-release-notes-ci-gate-diff",

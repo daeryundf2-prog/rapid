@@ -78,6 +78,7 @@ RELEASE_NOTES_CHANGELOG_GAP_ID = "#112"
 LTS_HOTFIX_POLICY_GAP_ID = "#113"
 SUPPORT_SLA_GAP_ID = "#114"
 TRAINING_CURRICULUM_GAP_ID = "#115"
+RELEASE_NOTES_REPORT_GRADE_VALIDATION_PLAN_VERSION = "release-notes-report-grade-validation-plan-v1"
 OPERATIONS_DOCUMENT_TRUSTED_DIFF_BLOCKERS = {
     112: "trusted-release-notes-ci-gate-diff-missing",
     113: "trusted-lts-hotfix-policy-diff-missing",
@@ -94,6 +95,16 @@ OPERATIONS_DOCUMENT_TRUSTED_TOOLS = {
     "quickstart-lab-run-log",
     "admin-deployment-proof",
 }
+RELEASE_NOTES_REPORT_GRADE_BLOCKERS = [
+    OPERATIONS_DOCUMENT_TRUSTED_DIFF_BLOCKERS[112],
+    "ci-changelog-gate-required",
+    "release-owner-review-required",
+    "migration-note-review-required",
+    "validation-state-review-required",
+    "checksum-publication-review-required",
+    "release-host-smoke-log-required",
+    "independent-release-notes-review-required",
+]
 ANALYST_QUICKSTART_LAB_GAP_ID = "#116"
 ADMIN_DEPLOYMENT_GUIDE_GAP_ID = "#117"
 SECURITY_HARDENING_REVIEW_GAP_ID = "#118"
@@ -1563,6 +1574,159 @@ def build_operations_document_evidence_manifests(repo: Path, output_dir: Path) -
     return manifests
 
 
+def build_release_notes_report_grade_validation_plan(
+    *,
+    evidence_manifest: dict[str, object],
+    release_discipline_manifest: dict[str, object],
+    trusted_diff: dict[str, object],
+) -> dict[str, object]:
+    document_hashes = evidence_manifest.get("document_hashes") if isinstance(evidence_manifest.get("document_hashes"), list) else []
+    evidence_slots = evidence_manifest.get("evidence_slots") if isinstance(evidence_manifest.get("evidence_slots"), dict) else {}
+    section_checks = (
+        release_discipline_manifest.get("section_checks")
+        if isinstance(release_discipline_manifest.get("section_checks"), dict)
+        else {}
+    )
+    ready_slots = [
+        {
+            "slot_id": "release-notes-template-document",
+            "status": "ready",
+            "evidence_ref": "docs/rapidtriage-release-notes-template.md",
+            "evidence_hash": stable_release_sha256(
+                [item for item in document_hashes if item.get("path") == "docs/rapidtriage-release-notes-template.md"]
+            ),
+        },
+        {
+            "slot_id": "known-limitations-document",
+            "status": "ready",
+            "evidence_ref": "docs/rapidtriage-known-limitations.md",
+            "evidence_hash": stable_release_sha256(
+                [item for item in document_hashes if item.get("path") == "docs/rapidtriage-known-limitations.md"]
+            ),
+        },
+        {
+            "slot_id": "release-notes-evidence-manifest",
+            "status": "ready",
+            "evidence_ref": "release-manifest.package_readiness.operations_documents.document_evidence_manifest_hashes.112",
+            "evidence_hash": str(evidence_manifest.get("manifest_hash") or ""),
+        },
+        {
+            "slot_id": "release-notes-document-evidence-matrix",
+            "status": "ready",
+            "evidence_ref": "release-manifest.package_readiness.operations_documents.document_evidence_matrix_hashes.112",
+            "evidence_hash": str(evidence_manifest.get("document_evidence_matrix_hash") or ""),
+        },
+        {
+            "slot_id": "release-discipline-manifest",
+            "status": "ready",
+            "evidence_ref": "release-discipline-manifest.json",
+            "evidence_hash": str(release_discipline_manifest.get("manifest_hash") or ""),
+        },
+        {
+            "slot_id": "required-release-sections",
+            "status": "ready",
+            "evidence_ref": "release-discipline-manifest.section_checks",
+            "evidence_hash": stable_release_sha256(section_checks),
+        },
+        {
+            "slot_id": "checksum-and-manifest-file-status",
+            "status": "ready",
+            "evidence_ref": "release-discipline-manifest.required_file_statuses",
+            "evidence_hash": stable_release_sha256(release_discipline_manifest.get("required_file_statuses", [])),
+        },
+        {
+            "slot_id": "trusted-release-notes-diff-boundary",
+            "status": "ready" if trusted_diff.get("status") == "pass" else "ready-with-blocker",
+            "evidence_ref": "release-manifest.package_readiness.operations_documents.trusted_operations_document_diffs.112",
+            "evidence_hash": stable_release_sha256(trusted_diff),
+        },
+    ]
+    blocking_slots = []
+    if trusted_diff.get("status") != "pass":
+        blocking_slots.append(
+            {
+                "slot_id": "trusted-release-notes-ci-gate-diff",
+                "status": "blocking",
+                "blocker": OPERATIONS_DOCUMENT_TRUSTED_DIFF_BLOCKERS[112],
+                "required_evidence": "trusted CI gate output comparing release notes, known limits, validation state, migration notes, and checksums",
+            }
+        )
+    for slot_id, blocker, required_evidence in (
+        (
+            "ci-changelog-gate",
+            "ci-changelog-gate-required",
+            "CI job proving release notes include changes, known limits, validation state, migration notes, and checksum references",
+        ),
+        (
+            "release-owner-review",
+            "release-owner-review-required",
+            "release owner signoff for changelog completeness and blocked commercial claims",
+        ),
+        (
+            "migration-note-review",
+            "migration-note-review-required",
+            "review proving migration notes are accurate for Case DB and artifact schema changes",
+        ),
+        (
+            "validation-state-review",
+            "validation-state-review-required",
+            "review proving validation status and known limitations match attached release evidence",
+        ),
+        (
+            "checksum-publication-review",
+            "checksum-publication-review-required",
+            "review proving release manifest and SHA256SUMS are published with the release notes",
+        ),
+        (
+            "release-host-smoke-log",
+            "release-host-smoke-log-required",
+            "release-host smoke log attached to the release notes before report-grade distribution claims",
+        ),
+        (
+            "independent-release-notes-review",
+            "independent-release-notes-review-required",
+            "independent reviewer confirmation that release notes do not overclaim validation or commercial parity",
+        ),
+    ):
+        blocking_slots.append(
+            {
+                "slot_id": slot_id,
+                "status": "blocking",
+                "current_attachment_status": "not-attached",
+                "blocker": blocker,
+                "required_evidence": required_evidence,
+            }
+        )
+    blockers = sorted({str(slot["blocker"]) for slot in blocking_slots if slot.get("blocker")})
+    plan: dict[str, object] = {
+        "profile_version": RELEASE_NOTES_REPORT_GRADE_VALIDATION_PLAN_VERSION,
+        "item_number": 112,
+        "commercial_gap_ids": [RELEASE_NOTES_CHANGELOG_GAP_ID],
+        "commercial_claim_allowed": False,
+        "document_count": len(document_hashes),
+        "evidence_slot_count": len(evidence_slots),
+        "section_checks_hash": stable_release_sha256(section_checks),
+        "release_notes_evidence_manifest_hash": str(evidence_manifest.get("manifest_hash") or ""),
+        "operations_document_evidence_matrix_hash": str(evidence_manifest.get("document_evidence_matrix_hash") or ""),
+        "release_discipline_manifest_hash": str(release_discipline_manifest.get("manifest_hash") or ""),
+        "trusted_diff_status": str(trusted_diff.get("status") or ""),
+        "trusted_diff_blocker": trusted_diff.get("blocker"),
+        "ready_slots": ready_slots,
+        "blocking_slots": blocking_slots,
+        "ready_slot_count": len(ready_slots),
+        "blocking_slot_count": len(blocking_slots),
+        "external_blocker_catalog": list(RELEASE_NOTES_REPORT_GRADE_BLOCKERS),
+        "blockers": blockers,
+        "reporting_boundary": (
+            "Release notes templates and packaged evidence are present; report-grade release claims require an "
+            "enforced CI changelog gate, owner review, migration/validation state review, checksum publication, "
+            "release-host smoke evidence, and independent wording review."
+        ),
+    }
+    plan["validation_plan_hash"] = stable_release_sha256(plan)
+    return plan
+
+
 def build_operations_document_evidence_matrix(
     *,
     number: int,
@@ -2025,6 +2189,26 @@ def write_release_manifest(output_dir: Path, repo: Path, commercial_readiness: d
         }
     )
     operations_document_evidence_manifests = build_operations_document_evidence_manifests(repo, output_dir)
+    trusted_operations_document_diffs = {
+        str(number): missing_operations_document_trusted_diff(number) for number in range(112, 118)
+    }
+    release_notes_report_grade_validation_plan = build_release_notes_report_grade_validation_plan(
+        evidence_manifest=operations_document_evidence_manifests["112"],
+        release_discipline_manifest=release_discipline_manifest,
+        trusted_diff=trusted_operations_document_diffs["112"],
+    )
+    operations_document_report_grade_validation_plans = {
+        "112": release_notes_report_grade_validation_plan,
+    }
+    operations_document_report_grade_validation_plan_hashes = {
+        "112": release_notes_report_grade_validation_plan["validation_plan_hash"],
+    }
+    operations_documents_blockers = sorted(
+        {
+            *[OPERATIONS_DOCUMENT_TRUSTED_DIFF_BLOCKERS[number] for number in range(112, 118)],
+            *[str(blocker) for blocker in release_notes_report_grade_validation_plan.get("blockers", [])],
+        }
+    )
     update_manifest_payload: dict[str, object] = {}
     update_manifest_path = output_dir / "update-manifest.json"
     if update_manifest_path.is_file():
@@ -2201,6 +2385,7 @@ def write_release_manifest(output_dir: Path, repo: Path, commercial_readiness: d
                 ],
                 "core_accuracy_gates": operations_documents_core_accuracy_gates(
                     evidence_manifests=operations_document_evidence_manifests,
+                    report_grade_validation_plans=operations_document_report_grade_validation_plans,
                 ),
                 "functional_priority_profiles": release_operations_functional_priority_profiles(),
                 "document_evidence_manifests": operations_document_evidence_manifests,
@@ -2211,6 +2396,14 @@ def write_release_manifest(output_dir: Path, repo: Path, commercial_readiness: d
                 "document_evidence_matrix_hashes": {
                     number: manifest["document_evidence_matrix_hash"]
                     for number, manifest in operations_document_evidence_manifests.items()
+                },
+                "document_report_grade_validation_plans": operations_document_report_grade_validation_plans,
+                "document_report_grade_validation_plan_hashes": operations_document_report_grade_validation_plan_hashes,
+                "document_report_grade_ready_slot_counts": {
+                    "112": release_notes_report_grade_validation_plan["ready_slot_count"],
+                },
+                "document_report_grade_blocking_slot_counts": {
+                    "112": release_notes_report_grade_validation_plan["blocking_slot_count"],
                 },
                 "admin_guide_coverage_manifest": admin_guide_coverage_manifest,
                 "admin_guide_coverage_manifest_hash": admin_guide_coverage_manifest["manifest_hash"],
@@ -2224,10 +2417,8 @@ def write_release_manifest(output_dir: Path, repo: Path, commercial_readiness: d
                     number: manifest["evidence_slots"]
                     for number, manifest in operations_document_evidence_manifests.items()
                 },
-                "trusted_operations_document_diffs": {
-                    str(number): missing_operations_document_trusted_diff(number) for number in range(112, 118)
-                },
-                "blockers": [OPERATIONS_DOCUMENT_TRUSTED_DIFF_BLOCKERS[number] for number in range(112, 118)],
+                "trusted_operations_document_diffs": trusted_operations_document_diffs,
+                "blockers": operations_documents_blockers,
                 "documents": [
                     "docs/rapidtriage-release-notes-template.md",
                     "docs/rapidtriage-lts-hotfix-policy.md",
@@ -2808,6 +2999,7 @@ def build_operations_document_trusted_diff(
         "commercial_gap_ids",
         "document_evidence_manifest_hashes",
         "document_evidence_matrix_hashes",
+        "document_report_grade_validation_plan_hashes",
         "document_evidence_slots",
     ]
     mismatches = []
@@ -2830,6 +3022,7 @@ def build_operations_document_trusted_diff(
 def operations_documents_core_accuracy_gates(
     trusted_diffs: dict[int, dict[str, object]] | None = None,
     evidence_manifests: dict[str, dict[str, object]] | None = None,
+    report_grade_validation_plans: dict[str, dict[str, object]] | None = None,
 ) -> list[dict[str, object]]:
     checks_by_item = {
         112: ["release notes template packaged", "known limits section required", "validation state section required", "migration notes section required", "CI changelog blocker disclosed"],
@@ -2850,23 +3043,47 @@ def operations_documents_core_accuracy_gates(
         116: "trusted quickstart lab run diff pass",
         117: "trusted admin deployment proof diff pass",
     }
+    report_grade_checks = {
+        112: (
+            "release notes report-grade validation plan",
+            "release notes report-grade ready slots",
+        ),
+    }
     gates = []
     for number, checks in checks_by_item.items():
         satisfied = list(checks)
         evidence_manifest = (evidence_manifests or {}).get(str(number), {})
+        report_grade_plan = (report_grade_validation_plans or {}).get(str(number), {})
         if evidence_manifest.get("manifest_hash"):
             satisfied.append("operations evidence manifest hash emitted")
         if evidence_manifest.get("evidence_slots"):
             satisfied.append("operations evidence slots emitted")
         if evidence_manifest.get("document_evidence_matrix_hash"):
             satisfied.append("operations document evidence matrix hash emitted")
+        if report_grade_plan and number in report_grade_checks:
+            plan_check, ready_check = report_grade_checks[number]
+            if report_grade_plan.get("validation_plan_hash"):
+                satisfied.append(plan_check)
+            if int(report_grade_plan.get("ready_slot_count") or 0) > 0:
+                satisfied.append(ready_check)
         if trusted_diffs and trusted_diffs.get(number, {}).get("status") == "pass" and number in trusted_checks:
             satisfied.append(trusted_checks[number])
+        evidence_refs = ["rapidtriage-portable.zip", "docs operations package", "scripts/check-dependencies.py"]
+        if report_grade_plan.get("validation_plan_hash"):
+            evidence_refs.append(
+                f"operations_document_{number}_report_grade_validation_plan_sha256:{report_grade_plan['validation_plan_hash']}"
+            )
+            evidence_refs.append(
+                f"operations_document_{number}_report_grade_ready_slots:{report_grade_plan.get('ready_slot_count')}"
+            )
+            evidence_refs.append(
+                f"operations_document_{number}_report_grade_blocking_slots:{report_grade_plan.get('blocking_slot_count')}"
+            )
         gates.append(
             build_accuracy_gate(
                 number,
                 satisfied_checks=satisfied,
-                evidence_refs=["rapidtriage-portable.zip", "docs operations package", "scripts/check-dependencies.py"],
+                evidence_refs=evidence_refs,
             )
         )
     return gates

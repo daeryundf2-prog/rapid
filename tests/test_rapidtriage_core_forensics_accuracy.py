@@ -293,6 +293,8 @@ class RapidTriageCoreForensicsAccuracyTests(unittest.TestCase):
         self.assertIn("backup restore report-grade ready slots", backup_restore["required_checks"])
         self.assertIn("trusted backup/restore rehearsal diff pass", backup_restore["required_checks"])
         self.assertIn("release notes template packaged", release_notes["required_checks"])
+        self.assertIn("release notes report-grade validation plan", release_notes["required_checks"])
+        self.assertIn("release notes report-grade ready slots", release_notes["required_checks"])
         self.assertIn("trusted release notes CI gate diff pass", release_notes["required_checks"])
         self.assertIn("hotfix criteria documented", lts_policy["required_checks"])
         self.assertIn("trusted LTS/hotfix policy diff pass", lts_policy["required_checks"])
