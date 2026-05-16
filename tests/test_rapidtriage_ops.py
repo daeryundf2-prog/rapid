@@ -818,6 +818,16 @@ class RapidTriageOpsTests(unittest.TestCase):
             self.assertEqual(artifact_manifest["artifact_count"], 2)
             self.assertEqual(payload["validation_package_assessment"]["trusted_validation_package_diff"]["status"], "missing")
             self.assertIn("trusted-validation-package-manifest-diff-missing", payload["validation_package_assessment"]["blockers"])
+            self.assertEqual(
+                payload["validation_package_assessment"]["validation_package_report_grade_validation_plan"]["profile_version"],
+                "validation-package-report-grade-validation-plan-v1",
+            )
+            self.assertEqual(
+                payload["validation_package_assessment"]["validation_package_report_grade_validation_plan_hash"],
+                payload["validation_package_assessment"]["validation_package_report_grade_validation_plan"]["validation_plan_hash"],
+            )
+            self.assertEqual(payload["validation_package_assessment"]["report_grade_ready_slot_count"], 6)
+            self.assertEqual(payload["validation_package_assessment"]["report_grade_blocking_slot_count"], 4)
             self.assertIn("#81", payload["known_answer_validation"]["commercial_gap_ids"])
             self.assertEqual(payload["known_answer_validation"]["functional_priority_profile"]["item_number"], 36)
             self.assertEqual(
@@ -1056,6 +1066,16 @@ class RapidTriageOpsTests(unittest.TestCase):
             self.assertEqual(artifact_manifest["validation_package_manifest"]["profile_version"], "validation-package-manifest-v1")
             self.assertEqual(len(artifact_manifest["validation_package_manifest"]["package_manifest_hash"]), 64)
             self.assertEqual(artifact_manifest["package_manifest_hash"], artifact_manifest["validation_package_manifest"]["package_manifest_hash"])
+            self.assertEqual(
+                artifact_manifest["validation_package_report_grade_validation_plan"]["profile_version"],
+                "validation-package-report-grade-validation-plan-v1",
+            )
+            self.assertEqual(
+                artifact_manifest["validation_package_report_grade_validation_plan_hash"],
+                artifact_manifest["validation_package_report_grade_validation_plan"]["validation_plan_hash"],
+            )
+            self.assertEqual(artifact_manifest["report_grade_ready_slot_count"], 6)
+            self.assertEqual(artifact_manifest["report_grade_blocking_slot_count"], 4)
             self.assertGreaterEqual(len(artifact_manifest["validation_package_manifest"]["reproduction_commands"]), 2)
             self.assertEqual(artifact_manifest["trusted_validation_package_diff"]["status"], "missing")
             self.assertIn("trusted-validation-package-manifest-diff-missing", artifact_manifest["blockers"])
@@ -1417,8 +1437,18 @@ class RapidTriageOpsTests(unittest.TestCase):
             self.assertIn("package_manifest_hash", package_diff["compared_fields"])
             self.assertEqual(len(promoted_manifest["validation_package_manifest"]["package_manifest_hash"]), 64)
             self.assertEqual(len(promoted_assessment["validation_package_manifest"]["package_manifest_hash"]), 64)
+            self.assertEqual(
+                promoted_manifest["validation_package_report_grade_validation_plan"]["profile_version"],
+                "validation-package-report-grade-validation-plan-v1",
+            )
+            self.assertEqual(promoted_manifest["report_grade_ready_slot_count"], 6)
+            self.assertEqual(promoted_manifest["report_grade_blocking_slot_count"], 3)
             self.assertIn(
                 "trusted validation package manifest diff pass",
+                promoted_manifest["core_accuracy_gates"][0]["satisfied_checks"],
+            )
+            self.assertIn(
+                "validation package report-grade validation plan emitted",
                 promoted_manifest["core_accuracy_gates"][0]["satisfied_checks"],
             )
             self.assertIn(
@@ -1427,6 +1457,10 @@ class RapidTriageOpsTests(unittest.TestCase):
             )
             self.assertIn(
                 "trusted validation package manifest diff pass",
+                promoted_assessment["core_accuracy_gates"][0]["satisfied_checks"],
+            )
+            self.assertIn(
+                "validation package report-grade validation plan emitted",
                 promoted_assessment["core_accuracy_gates"][0]["satisfied_checks"],
             )
 
@@ -1583,6 +1617,10 @@ class RapidTriageOpsTests(unittest.TestCase):
                 spine_by_number[84]["primary_outputs"],
             )
             self.assertIn("validation_package_manifest.package_manifest_hash", spine_by_number[85]["primary_outputs"])
+            self.assertIn(
+                "validation_package_assessment.validation_package_report_grade_validation_plan_hash",
+                spine_by_number[85]["primary_outputs"],
+            )
             self.assertEqual(spine_by_number[85]["trusted_diff_required"], "trusted-validation-package-manifest-diff")
             forensic_integrity = payload["forensic_integrity_progress"]
             self.assertEqual(forensic_integrity["version"], "forensic-integrity-progress-v1")

@@ -45,7 +45,7 @@
       "title": "Tool validation package automation",
       "test_files": ["tests/test_rapidtriage_ops.py"],
       "assertions": [
-        "Validation package outputs preserve JSON, Markdown, artifact hash manifest, validation-package-manifest-v1, artifact hash rows, package_manifest_hash, reproduction commands, known-answer/fixture sections, limitation warnings, trusted validation package manifest diff helpers/gates, and #85 core_accuracy_gates."
+        "Validation package outputs preserve JSON, Markdown, artifact hash manifest, validation-package-manifest-v1, artifact hash rows, package_manifest_hash, validation-package-report-grade-validation-plan-v1 ready/blocking slots, reproduction commands, known-answer/fixture sections, limitation warnings, trusted validation package manifest diff helpers/gates, and #85 core_accuracy_gates."
       ],
       "remaining_external_validation": ["Operator-attached test logs, release evidence, trusted validation package manifests, and independent review."]
     },

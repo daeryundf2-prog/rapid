@@ -55,6 +55,7 @@ FP_FN_REPORT_GRADE_VALIDATION_PLAN_VERSION = "parser-fp-fn-report-grade-validati
 INDEPENDENT_VALIDATION_TRUSTED_DIFF_BLOCKER_84 = "trusted-independent-validation-signoff-diff-missing"
 INDEPENDENT_VALIDATION_REPORT_GRADE_VALIDATION_PLAN_VERSION = "independent-validation-report-grade-validation-plan-v1"
 VALIDATION_PACKAGE_TRUSTED_DIFF_BLOCKER_85 = "trusted-validation-package-manifest-diff-missing"
+VALIDATION_PACKAGE_REPORT_GRADE_VALIDATION_PLAN_VERSION = "validation-package-report-grade-validation-plan-v1"
 VALIDATION_TRUSTED_TOOLS = {
     "known-answer-manifest",
     "fixture-corpus-manifest",
@@ -855,8 +856,18 @@ def build_validation_package_assessment(
         [],
         required_output_presence=required_output_presence,
     )
+    report_grade_validation_plan = build_validation_package_report_grade_validation_plan(
+        package_manifest=package_manifest,
+        trusted_diff=trusted_diff,
+    )
     if trusted_diff and trusted_diff.get("status") == "pass":
         satisfied.append("trusted validation package manifest diff pass")
+    satisfied.extend(
+        [
+            "validation package report-grade validation plan emitted",
+            "validation package report-grade ready slots emitted",
+        ]
+    )
     blockers = [
         "package-generation-does-not-prove-tests-were-run-unless-evidence-is-attached",
         "independent-lab-validation-remains-operator-owned",
@@ -864,6 +875,7 @@ def build_validation_package_assessment(
     ]
     if not trusted_diff or trusted_diff.get("status") != "pass":
         blockers.append(VALIDATION_PACKAGE_TRUSTED_DIFF_BLOCKER_85)
+    blockers = list(dict.fromkeys([*blockers, *report_grade_validation_plan["blockers"]]))
     return {
         "component": "tool-validation-package",
         "status": "json-markdown-hash-manifest-generated",
@@ -872,6 +884,10 @@ def build_validation_package_assessment(
         "outputs": [VALIDATION_JSON_NAME, VALIDATION_MARKDOWN_NAME, VALIDATION_ARTIFACTS_NAME],
         "validation_package_manifest": package_manifest,
         "package_manifest_hash": package_manifest["package_manifest_hash"],
+        "validation_package_report_grade_validation_plan": report_grade_validation_plan,
+        "validation_package_report_grade_validation_plan_hash": report_grade_validation_plan["validation_plan_hash"],
+        "report_grade_ready_slot_count": report_grade_validation_plan["ready_slot_count"],
+        "report_grade_blocking_slot_count": report_grade_validation_plan["blocking_slot_count"],
         "ready_for_court_report": False,
         "trusted_validation_package_diff": dict(trusted_diff) if trusted_diff else missing_validation_trusted_diff(
             VALIDATION_PACKAGE_GAP_ID,
@@ -888,6 +904,9 @@ def build_validation_package_assessment(
                     VALIDATION_MARKDOWN_NAME,
                     VALIDATION_ARTIFACTS_NAME,
                     f"package_manifest_hash:{package_manifest['package_manifest_hash']}",
+                    f"validation_package_report_grade_validation_plan_hash:{report_grade_validation_plan['validation_plan_hash']}",
+                    f"report_grade_ready_slot_count:{report_grade_validation_plan['ready_slot_count']}",
+                    f"report_grade_blocking_slot_count:{report_grade_validation_plan['blocking_slot_count']}",
                 ],
             )
         ],
@@ -2276,6 +2295,10 @@ def build_validation_artifact_manifest(
             }
         )
     package_manifest = build_validation_package_manifest_profile(output_dir, artifacts)
+    report_grade_validation_plan = build_validation_package_report_grade_validation_plan(
+        package_manifest=package_manifest,
+        trusted_diff=trusted_diff,
+    )
     satisfied = [
         "validation JSON output generated",
         "validation Markdown output generated",
@@ -2288,6 +2311,12 @@ def build_validation_artifact_manifest(
     ]
     if trusted_diff and trusted_diff.get("status") == "pass":
         satisfied.append("trusted validation package manifest diff pass")
+    satisfied.extend(
+        [
+            "validation package report-grade validation plan emitted",
+            "validation package report-grade ready slots emitted",
+        ]
+    )
     return {
         "command": "validation-artifact-manifest",
         "generated_at": now_iso(),
@@ -2297,13 +2326,17 @@ def build_validation_artifact_manifest(
         "artifacts": artifacts,
         "validation_package_manifest": package_manifest,
         "package_manifest_hash": package_manifest["package_manifest_hash"],
+        "validation_package_report_grade_validation_plan": report_grade_validation_plan,
+        "validation_package_report_grade_validation_plan_hash": report_grade_validation_plan["validation_plan_hash"],
+        "report_grade_ready_slot_count": report_grade_validation_plan["ready_slot_count"],
+        "report_grade_blocking_slot_count": report_grade_validation_plan["blocking_slot_count"],
         "reproduction_commands": package_manifest["reproduction_commands"],
         "trusted_validation_package_diff": dict(trusted_diff) if trusted_diff else missing_validation_trusted_diff(
             VALIDATION_PACKAGE_GAP_ID,
             VALIDATION_PACKAGE_TRUSTED_DIFF_BLOCKER_85,
             trusted_tool="validation-package-manifest",
         ),
-        "blockers": [VALIDATION_PACKAGE_TRUSTED_DIFF_BLOCKER_85] if not trusted_diff or trusted_diff.get("status") != "pass" else [],
+        "blockers": list(report_grade_validation_plan["blockers"]),
         "core_accuracy_gates": [
             build_accuracy_gate(
                 85,
@@ -2312,6 +2345,9 @@ def build_validation_artifact_manifest(
                     f"artifact_count:{len(artifacts)}",
                     f"output_dir:{output_dir}",
                     f"package_manifest_hash:{package_manifest['package_manifest_hash']}",
+                    f"validation_package_report_grade_validation_plan_hash:{report_grade_validation_plan['validation_plan_hash']}",
+                    f"report_grade_ready_slot_count:{report_grade_validation_plan['ready_slot_count']}",
+                    f"report_grade_blocking_slot_count:{report_grade_validation_plan['blocking_slot_count']}",
                 ],
             )
         ],
@@ -2373,6 +2409,153 @@ def build_validation_package_manifest_profile(
         "commercial_claim_allowed": False,
     }
     return {**manifest_core, "package_manifest_hash": hashlib_json(manifest_core)}
+
+
+def build_validation_package_report_grade_validation_plan(
+    *,
+    package_manifest: Mapping[str, object],
+    trusted_diff: Mapping[str, object] | None,
+) -> dict[str, object]:
+    required_output_presence = (
+        package_manifest.get("required_output_presence")
+        if isinstance(package_manifest.get("required_output_presence"), Mapping)
+        else {}
+    )
+    missing_outputs = [
+        name for name in VALIDATION_PACKAGE_REQUIRED_OUTPUTS
+        if not bool(required_output_presence.get(name))
+    ]
+    required_section_presence = (
+        package_manifest.get("required_section_presence_declared")
+        if isinstance(package_manifest.get("required_section_presence_declared"), Mapping)
+        else {}
+    )
+    missing_sections = [
+        section for section in VALIDATION_PACKAGE_REQUIRED_SECTIONS
+        if not bool(required_section_presence.get(section))
+    ]
+    artifact_count = int(package_manifest.get("artifact_count") or 0)
+    trusted_status = str(trusted_diff.get("status") or "missing") if trusted_diff else "missing"
+    ready_slots = [
+        {
+            "slot_id": "required-output-presence",
+            "status": "ready",
+            "evidence_ref": "validation_package_manifest.required_output_presence_hash",
+            "evidence_hash": str(package_manifest.get("required_output_presence_hash") or ""),
+            "description": "Required JSON, Markdown, and artifact-manifest outputs are checked before the package is treated as release evidence.",
+        },
+        {
+            "slot_id": "artifact-set-hash",
+            "status": "ready",
+            "evidence_ref": "validation_package_manifest.artifact_set_hash",
+            "evidence_hash": str(package_manifest.get("artifact_set_hash") or ""),
+            "description": "Generated validation-package artifacts are bound by path-independent SHA256 rows when present.",
+        },
+        {
+            "slot_id": "package-manifest-hash",
+            "status": "ready",
+            "evidence_ref": "validation_package_manifest.package_manifest_hash",
+            "evidence_hash": str(package_manifest.get("package_manifest_hash") or ""),
+            "description": "Package manifest hash binds output presence, required sections, artifact rows, and reproduction commands.",
+        },
+        {
+            "slot_id": "required-section-declaration",
+            "status": "ready",
+            "evidence_ref": "validation_package_manifest.required_section_presence_declared",
+            "evidence_hash": hashlib_json({"required_section_presence_declared": dict(required_section_presence)}),
+            "description": "Validation-package sections for known answers, fixtures, FP/FN notes, independent validation, QC, and package assessment are declared.",
+        },
+        {
+            "slot_id": "reproduction-commands",
+            "status": "ready",
+            "evidence_ref": "validation_package_manifest.reproduction_commands",
+            "evidence_hash": hashlib_json({"reproduction_commands": list(package_manifest.get("reproduction_commands") or [])}),
+            "description": "Reproduction commands are emitted so an operator can regenerate the package and commercial-readiness report.",
+        },
+        {
+            "slot_id": "trusted-diff-disclosure",
+            "status": "ready",
+            "evidence_ref": "validation_package_assessment.trusted_validation_package_diff.status",
+            "evidence_hash": hashlib_json({"trusted_diff_status": trusted_status}),
+            "description": "Trusted validation-package diff status is explicit; a generated package is not treated as independently validated by default.",
+        },
+    ]
+    blocking_slots = []
+    if missing_outputs:
+        blocking_slots.append(
+            {
+                "slot_id": "required-outputs-present",
+                "status": "blocked",
+                "blocker": "validation-package-required-outputs-missing",
+                "required_evidence": ", ".join(missing_outputs),
+            }
+        )
+    if missing_sections:
+        blocking_slots.append(
+            {
+                "slot_id": "required-sections-declared",
+                "status": "blocked",
+                "blocker": "validation-package-required-sections-missing",
+                "required_evidence": ", ".join(missing_sections),
+            }
+        )
+    if trusted_status != "pass":
+        blocking_slots.append(
+            {
+                "slot_id": "trusted-validation-package-manifest-diff",
+                "status": "blocked",
+                "blocker": VALIDATION_PACKAGE_TRUSTED_DIFF_BLOCKER_85,
+                "required_evidence": "trusted validation-package manifest diff covering output presence, artifact set hash, package hash, and required sections",
+            }
+        )
+    blocking_slots.extend(
+        [
+            {
+                "slot_id": "operator-test-log-attachment",
+                "status": "blocked",
+                "blocker": "validation-package-test-logs-not-attached",
+                "required_evidence": "unit/integration/build/smoke command logs attached to the package for the shipped release",
+            },
+            {
+                "slot_id": "release-evidence-attachment",
+                "status": "blocked",
+                "blocker": "validation-package-release-evidence-not-attached",
+                "required_evidence": "release artifact hashes, platform smoke results, and dependency/SBOM evidence attached",
+            },
+            {
+                "slot_id": "independent-review-attachment",
+                "status": "blocked",
+                "blocker": "validation-package-independent-review-not-attached",
+                "required_evidence": "independent review or lab signoff tying the validation package to the shipped build",
+            },
+        ]
+    )
+    manifest_core = {
+        "profile_version": VALIDATION_PACKAGE_REPORT_GRADE_VALIDATION_PLAN_VERSION,
+        "item_number": 85,
+        "gap_id": VALIDATION_PACKAGE_GAP_ID,
+        "commercial_gap_ids": [VALIDATION_PACKAGE_GAP_ID],
+        "required_output_presence": dict(required_output_presence),
+        "missing_required_outputs": missing_outputs,
+        "required_section_presence_declared": dict(required_section_presence),
+        "missing_required_sections": missing_sections,
+        "artifact_count": artifact_count,
+        "package_manifest_hash": str(package_manifest.get("package_manifest_hash") or ""),
+        "artifact_set_hash": str(package_manifest.get("artifact_set_hash") or ""),
+        "trusted_diff_status": trusted_status,
+        "ready_slots": ready_slots,
+        "blocking_slots": blocking_slots,
+        "ready_slot_count": len(ready_slots),
+        "blocking_slot_count": len(blocking_slots),
+        "blockers": [str(slot["blocker"]) for slot in blocking_slots],
+        "commercial_claim_allowed": False,
+        "ready_for_court_report": False,
+        "report_use_warning": (
+            "A generated validation package is internal release evidence only until test logs, release evidence, "
+            "trusted package diff, and independent review are attached."
+        ),
+    }
+    return {**manifest_core, "validation_plan_hash": hashlib_json(manifest_core)}
 
 
 def build_validation_legal_defensibility_matrix(

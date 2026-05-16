@@ -1994,7 +1994,7 @@
       ],
       "expected": {
         "required_assertions": [
-          "Validation package outputs preserve JSON, Markdown, artifact hash manifest, validation-package-manifest-v1, artifact hash rows, package_manifest_hash, reproduction commands, known-answer/fixture sections, package limitation warning, and #85 core_accuracy_gates."
+          "Validation package outputs preserve JSON, Markdown, artifact hash manifest, validation-package-manifest-v1, artifact hash rows, package_manifest_hash, validation-package-report-grade-validation-plan-v1 ready/blocking slots, reproduction commands, known-answer/fixture sections, package limitation warning, trusted validation package manifest diff helpers/gates, and #85 core_accuracy_gates."
         ]
       },
       "notes": "Internal fixture pass; attached release test logs and independent review remain blockers.",

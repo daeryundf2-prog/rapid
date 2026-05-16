@@ -205,6 +205,10 @@ class RapidTriageCoreForensicsAccuracyTests(unittest.TestCase):
         )
         self.assertIn("trusted independent validation signoff diff pass", independent_validation["required_checks"])
         self.assertIn("artifact hash manifest generated", validation_package["required_checks"])
+        self.assertIn(
+            "validation package report-grade validation plan emitted",
+            validation_package["required_checks"],
+        )
         self.assertIn("trusted validation package manifest diff pass", validation_package["required_checks"])
         self.assertIn("custody event inventory", custody["required_checks"])
         self.assertIn("trusted custody event manifest diff pass", custody["required_checks"])

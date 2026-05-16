@@ -2913,6 +2913,7 @@ def validation_spine_evidence_chain() -> list[dict[str, object]]:
             "primary_outputs": [
                 "rapidtriage-validation-artifacts.json",
                 "validation_package_manifest.package_manifest_hash",
+                "validation_package_assessment.validation_package_report_grade_validation_plan_hash",
                 "validation_package_manifest.artifact_hashes",
                 "validation_package_manifest.reproduction_commands",
             ],

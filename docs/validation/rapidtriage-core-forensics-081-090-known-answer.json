@@ -55,7 +55,7 @@
       "status": "pass",
       "backlog_items": [85],
       "evidence_paths": ["docs/validation/core-forensics-081-090-fixture-evidence.json", "tests/test_rapidtriage_ops.py"],
-      "expected": {"required_assertions": ["Validation package outputs preserve JSON, Markdown, artifact hash manifest, validation-package-manifest-v1, artifact hash rows, package_manifest_hash, reproduction commands, known-answer/fixture sections, package limitation warning, trusted validation package manifest diff helpers/gates, and #85 core_accuracy_gates."]},
+      "expected": {"required_assertions": ["Validation package outputs preserve JSON, Markdown, artifact hash manifest, validation-package-manifest-v1, artifact hash rows, package_manifest_hash, validation-package-report-grade-validation-plan-v1 ready/blocking slots, reproduction commands, known-answer/fixture sections, package limitation warning, trusted validation package manifest diff helpers/gates, and #85 core_accuracy_gates."]},
       "notes": "Internal fixture pass; attached release test logs, trusted package manifests, and independent review remain blockers."
     },
     {

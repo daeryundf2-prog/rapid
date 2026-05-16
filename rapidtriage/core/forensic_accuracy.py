@@ -1366,6 +1366,8 @@ CORE_FORENSIC_ACCURACY_ITEMS: tuple[dict[str, object], ...] = (
             "artifact hash manifest generated",
             "validation package manifest profile emitted",
             "package manifest hash emitted",
+            "validation package report-grade validation plan emitted",
+            "validation package report-grade ready slots emitted",
             "reproduction commands recorded",
             "known-answer/fixture sections included",
             "package generation limitation warning",
