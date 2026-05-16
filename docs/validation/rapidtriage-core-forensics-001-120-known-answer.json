@@ -1224,7 +1224,7 @@
       ],
       "expected": {
         "required_assertions": [
-          "Search analysis preserves timestamp extraction, UTC normalization, source match anchors, date buckets, timezone/skew warning, and #49 core_accuracy_gates."
+          "Search analysis preserves timestamp extraction, UTC normalization, source match anchors, date buckets, timeline_citation_manifest event source viewer locators, timeline_report_grade_validation_plan ready/blocking slots, timezone/skew warning, and #49 core_accuracy_gates."
         ]
       },
       "notes": "Internal fixture pass; full Case DB timeline join and clock/timezone corpus validation remain required.",

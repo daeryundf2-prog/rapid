@@ -114,6 +114,15 @@ GRAPH_REPORT_GRADE_BLOCKERS = [
     "large-case-graph-performance-validation-required",
     "graph-independent-review-required",
 ]
+TIMELINE_REPORT_GRADE_VALIDATION_PLAN_VERSION = "search-timeline-report-grade-validation-plan-v1"
+TIMELINE_REPORT_GRADE_BLOCKERS = [
+    "full-case-timeline-join-required",
+    "timezone-skew-validation-required",
+    "cursor-paged-timeline-required",
+    "timeline-review-annotation-overlay-required",
+    "timeline-known-answer-trusted-diff-required",
+    "large-case-timeline-validation-required",
+]
 
 
 def build_search_analysis(
@@ -275,11 +284,6 @@ def analysis_commercial_uplift_evidence(
         if isinstance(entities.get("entity_report_grade_validation_plan"), Mapping)
         else {}
     )
-    entity_validation_plan = (
-        entities.get("entity_report_grade_validation_plan")
-        if isinstance(entities.get("entity_report_grade_validation_plan"), Mapping)
-        else {}
-    )
     graph_summary = graph.get("summary") if isinstance(graph.get("summary"), Mapping) else {}
     graph_interaction_profile = (
         graph.get("graph_interaction_profile")
@@ -305,6 +309,11 @@ def analysis_commercial_uplift_evidence(
     timeline_citation_manifest = (
         timeline.get("timeline_citation_manifest")
         if isinstance(timeline.get("timeline_citation_manifest"), Mapping)
+        else {}
+    )
+    timeline_validation_plan = (
+        timeline.get("timeline_report_grade_validation_plan")
+        if isinstance(timeline.get("timeline_report_grade_validation_plan"), Mapping)
         else {}
     )
     workbook_summary = workbook.get("summary") if isinstance(workbook.get("summary"), Mapping) else {}
@@ -336,6 +345,10 @@ def analysis_commercial_uplift_evidence(
         passed_by_item.setdefault("#48", []).append("graph report-grade validation plan")
         if int(graph_validation_plan.get("ready_slot_count") or 0) >= 6:
             passed_by_item["#48"].append("graph report-grade ready slots")
+    if timeline_validation_plan:
+        passed_by_item.setdefault("#49", []).append("timeline report-grade validation plan")
+        if int(timeline_validation_plan.get("ready_slot_count") or 0) >= 6:
+            passed_by_item["#49"].append("timeline report-grade ready slots")
     return {
         "batch_id": "commercial-uplift-046-050",
         "item_numbers": [46, 47, 48, 49, 50],
@@ -353,6 +366,7 @@ def analysis_commercial_uplift_evidence(
             f"graph_report_grade_validation_plan_sha256:{graph_validation_plan.get('validation_plan_sha256', '')}",
             f"timeline_events:{timeline_summary.get('event_count', 0)}",
             f"timeline_citation_manifest_sha256:{timeline_citation_manifest.get('manifest_sha256', '')}",
+            f"timeline_report_grade_validation_plan_sha256:{timeline_validation_plan.get('validation_plan_sha256', '')}",
             f"hypotheses:{workbook_summary.get('hypothesis_count', 0)}",
             f"workbook_citation_manifest_sha256:{workbook_citation_manifest.get('manifest_sha256', '')}",
         ],
@@ -368,6 +382,7 @@ def analysis_commercial_uplift_evidence(
             cluster_validation_plan=cluster_validation_plan,
             entity_validation_plan=entity_validation_plan,
             graph_validation_plan=graph_validation_plan,
+            timeline_validation_plan=timeline_validation_plan,
         ),
         "passed_validation_check_ids_by_item": passed_by_item,
         "failed_validation_check_ids_by_item": failed_by_item,
@@ -441,6 +456,14 @@ def analysis_commercial_uplift_evidence(
             "timeline_correlation_profile_present": bool(timeline_correlation_profile),
             "timeline_citation_manifest_present": bool(timeline_citation_manifest),
             "timeline_citation_manifest_hash": str(timeline_citation_manifest.get("manifest_sha256") or ""),
+            "timeline_report_grade_validation_plan_present": bool(timeline_validation_plan),
+            "timeline_report_grade_validation_plan_hash": str(
+                timeline_validation_plan.get("validation_plan_sha256") or ""
+            ),
+            "timeline_report_grade_ready_slot_count": int(timeline_validation_plan.get("ready_slot_count") or 0),
+            "timeline_report_grade_blocking_slot_count": int(
+                timeline_validation_plan.get("blocking_slot_count") or 0
+            ),
             "timeline_event_citation_count": int(timeline_citation_manifest.get("event_citation_count") or 0),
             "timeline_source_viewer_locator_count": int(
                 timeline_citation_manifest.get("source_viewer_locator_count") or 0
@@ -482,6 +505,7 @@ def analysis_reportability_decision(
     cluster_validation_plan: Mapping[str, object] | None = None,
     entity_validation_plan: Mapping[str, object] | None = None,
     graph_validation_plan: Mapping[str, object] | None = None,
+    timeline_validation_plan: Mapping[str, object] | None = None,
 ) -> dict[str, object]:
     blockers = {str(item) for item in report_grade.get("blockers", []) if str(item)}
     for item_id, checks in failed_by_item.items():
@@ -494,6 +518,7 @@ def analysis_reportability_decision(
     cluster_validation_plan = cluster_validation_plan or {}
     entity_validation_plan = entity_validation_plan or {}
     graph_validation_plan = graph_validation_plan or {}
+    timeline_validation_plan = timeline_validation_plan or {}
     for number, blocker in ANALYSIS_TRUSTED_DIFF_BLOCKERS.items():
         if trusted_diffs.get(number, {}).get("status") != "pass":
             blockers.add(blocker)
@@ -525,6 +550,12 @@ def analysis_reportability_decision(
         "graph_report_grade_validation_plan_hash": str(graph_validation_plan.get("validation_plan_sha256") or ""),
         "graph_report_grade_ready_slot_count": int(graph_validation_plan.get("ready_slot_count") or 0),
         "graph_report_grade_blocking_slot_count": int(graph_validation_plan.get("blocking_slot_count") or 0),
+        "timeline_report_grade_validation_plan_present": bool(timeline_validation_plan),
+        "timeline_report_grade_validation_plan_hash": str(
+            timeline_validation_plan.get("validation_plan_sha256") or ""
+        ),
+        "timeline_report_grade_ready_slot_count": int(timeline_validation_plan.get("ready_slot_count") or 0),
+        "timeline_report_grade_blocking_slot_count": int(timeline_validation_plan.get("blocking_slot_count") or 0),
         "required_before_report": [
             "persist analyst review state for clusters, entity merge/split decisions, graph layouts, and workbook hypotheses",
             "validate graph and timeline joins against full-case indexed source rows with timezone and parser-confidence evidence",
@@ -611,6 +642,11 @@ def analysis_core_accuracy_gates(
     timeline_citation_manifest = (
         timeline.get("timeline_citation_manifest")
         if isinstance(timeline.get("timeline_citation_manifest"), Mapping)
+        else {}
+    )
+    timeline_validation_plan = (
+        timeline.get("timeline_report_grade_validation_plan")
+        if isinstance(timeline.get("timeline_report_grade_validation_plan"), Mapping)
         else {}
     )
     workbook_summary = workbook.get("summary") if isinstance(workbook.get("summary"), Mapping) else {}
@@ -779,6 +815,13 @@ def analysis_core_accuracy_gates(
             item49.append("timeline event source viewer locators")
         if timeline_citation_manifest.get("clock_skew_overlay_supported") is False:
             item49.append("clock-skew blocker recorded")
+    if timeline_validation_plan:
+        item49.append("timeline report-grade validation plan")
+        evidence_refs.append(
+            f"timeline_report_grade_validation_plan_sha256:{timeline_validation_plan.get('validation_plan_sha256', '')}"
+        )
+        if int(timeline_validation_plan.get("ready_slot_count") or 0) >= 6:
+            item49.append("timeline report-grade ready slots")
     item49.append("timezone/skew limitation warning")
     if trusted_diffs.get(49, {}).get("status") == "pass":
         item49.append("trusted timeline known-answer diff pass")
@@ -2951,6 +2994,11 @@ def build_correlated_timeline(
         truncated=truncated,
     )
     citation_manifest = build_timeline_citation_manifest(events=events, original_event_count=original_event_count)
+    validation_plan = build_timeline_report_grade_validation_plan(
+        events=events,
+        timeline_correlation_profile=correlation_profile,
+        timeline_citation_manifest=citation_manifest,
+    )
     return {
         "summary": {
             "event_count": len(events),
@@ -2962,6 +3010,8 @@ def build_correlated_timeline(
             "missing_timezone_count": int(correlation_profile.get("missing_timezone_count") or 0),
             "event_citation_count": int(citation_manifest.get("event_citation_count") or 0),
             "source_viewer_locator_count": int(citation_manifest.get("source_viewer_locator_count") or 0),
+            "timeline_report_grade_ready_slot_count": int(validation_plan.get("ready_slot_count") or 0),
+            "timeline_report_grade_blocking_slot_count": int(validation_plan.get("blocking_slot_count") or 0),
             "commercial_gap_ids": ["#49"],
             "commercial_grade_ready": False,
         },
@@ -2970,6 +3020,8 @@ def build_correlated_timeline(
         "timeline_correlation_profile": correlation_profile,
         "timeline_citation_manifest": citation_manifest,
         "timeline_citation_manifest_hash": citation_manifest["manifest_sha256"],
+        "timeline_report_grade_validation_plan": validation_plan,
+        "timeline_report_grade_validation_plan_hash": validation_plan["validation_plan_sha256"],
         "report_grade_assessment": component_report_grade_assessment("#49", "correlated-timeline"),
     }
 
@@ -3098,6 +3150,185 @@ def build_timeline_citation_manifest(
         {key: value for key, value in manifest.items() if key != "manifest_sha256"}
     )
     return manifest
+
+
+def build_timeline_report_grade_validation_plan(
+    *,
+    events: Sequence[Mapping[str, object]],
+    timeline_correlation_profile: Mapping[str, object],
+    timeline_citation_manifest: Mapping[str, object],
+    trusted_diff: Mapping[str, object] | None = None,
+) -> dict[str, object]:
+    trusted_diff = trusted_diff or {}
+    correlation_profile_hash = stable_analysis_sha256(timeline_correlation_profile)
+    citation_manifest_hash = str(timeline_citation_manifest.get("manifest_sha256") or "")
+    event_citation_count = int(timeline_citation_manifest.get("event_citation_count") or 0)
+    source_viewer_locator_count = int(timeline_citation_manifest.get("source_viewer_locator_count") or 0)
+    event_page_count = int(timeline_correlation_profile.get("event_page_count") or 0)
+    missing_timezone_count = int(timeline_correlation_profile.get("missing_timezone_count") or 0)
+    timezone_counts = (
+        timeline_correlation_profile.get("timezone_counts")
+        if isinstance(timeline_correlation_profile.get("timezone_counts"), Mapping)
+        else {}
+    )
+
+    def slot(
+        slot_id: str,
+        *,
+        ready: bool,
+        evidence: str,
+        blocker_id: str | None = None,
+        operator_action: str = "",
+    ) -> dict[str, object]:
+        row: dict[str, object] = {
+            "slot_id": slot_id,
+            "status": "complete" if ready else "external-required",
+            "evidence": evidence,
+        }
+        if blocker_id and not ready:
+            row["blocker_id"] = blocker_id
+        if operator_action:
+            row["operator_action"] = operator_action
+        return row
+
+    utc_normalized = bool(events) and all(
+        "+" in str(event.get("timestamp", "")) or str(event.get("timestamp", "")).endswith("Z")
+        for event in events
+        if isinstance(event, Mapping)
+    )
+    validation_slots = [
+        slot(
+            "search-timeline-timestamp-extraction",
+            ready=bool(events),
+            evidence=f"event_count={len(events)}",
+            blocker_id="search-timeline-events-required",
+            operator_action="Run search analysis on timestamp-bearing results so timeline events are emitted.",
+        ),
+        slot(
+            "search-timeline-utc-normalization",
+            ready=utc_normalized,
+            evidence=f"utc_normalized={utc_normalized} missing_timezone_count={missing_timezone_count}",
+            blocker_id="search-timeline-utc-normalization-required",
+            operator_action="Normalize source timestamps while preserving the original source timezone assumption.",
+        ),
+        slot(
+            "search-timeline-correlation-profile-emitted",
+            ready=timeline_correlation_profile.get("profile_version") == "timeline-correlation-review-v1",
+            evidence=f"timeline_correlation_profile_sha256={correlation_profile_hash}",
+            blocker_id="search-timeline-correlation-profile-required",
+            operator_action="Regenerate analysis so timeline page/timezone metadata is available to reviewers.",
+        ),
+        slot(
+            "search-timeline-citation-manifest-emitted",
+            ready=bool(citation_manifest_hash),
+            evidence=f"timeline_citation_manifest_sha256={citation_manifest_hash}",
+            blocker_id="search-timeline-citation-manifest-required",
+            operator_action="Generate the timeline citation manifest before using timeline output in a report.",
+        ),
+        slot(
+            "search-timeline-event-source-viewer-locators",
+            ready=event_citation_count > 0 and source_viewer_locator_count > 0,
+            evidence=f"event_citation_count={event_citation_count} source_viewer_locator_count={source_viewer_locator_count}",
+            blocker_id="search-timeline-event-source-viewer-locators-required",
+            operator_action="Attach source viewer locators for every report candidate timeline event.",
+        ),
+        slot(
+            "search-timeline-timezone-and-cursor-metadata",
+            ready=event_page_count >= 1 and bool(timezone_counts),
+            evidence=f"event_page_count={event_page_count} timezone_count_keys={len(timezone_counts)}",
+            blocker_id="search-timeline-timezone-cursor-metadata-required",
+            operator_action="Emit bounded cursor/page metadata and timezone distribution for timeline review.",
+        ),
+        slot(
+            "search-timeline-full-case-join",
+            ready=False,
+            evidence="full_case_join_supported=false",
+            blocker_id="full-case-timeline-join-required",
+            operator_action="Join all Case DB artifact families before calling this case chronology.",
+        ),
+        slot(
+            "search-timeline-timezone-skew-validation",
+            ready=False,
+            evidence="clock_skew_overlay_supported=false",
+            blocker_id="timezone-skew-validation-required",
+            operator_action="Validate timezone assumptions and device clock skew against known-answer evidence.",
+        ),
+        slot(
+            "search-timeline-cursor-paged-api",
+            ready=False,
+            evidence="cursor_api_supported=false",
+            blocker_id="cursor-paged-timeline-required",
+            operator_action="Expose cursor-paged timeline APIs before opening large case-wide timelines.",
+        ),
+        slot(
+            "search-timeline-review-annotation-overlay",
+            ready=False,
+            evidence="review_annotation_overlay_supported=false",
+            blocker_id="timeline-review-annotation-overlay-required",
+            operator_action="Persist analyst annotations, reviewed state, and source-row decisions on timeline events.",
+        ),
+        slot(
+            "search-timeline-known-answer-trusted-diff",
+            ready=trusted_diff.get("status") == "pass",
+            evidence=f"trusted_diff_status={trusted_diff.get('status', 'missing')}",
+            blocker_id=ANALYSIS_TRUSTED_DIFF_BLOCKERS[49],
+            operator_action="Attach a passing trusted timeline-order/source-citation diff before report use.",
+        ),
+        slot(
+            "search-timeline-large-case-validation",
+            ready=False,
+            evidence="large_case_timeline_validation=false",
+            blocker_id="large-case-timeline-validation-required",
+            operator_action="Run large-case timeline validation and capture p95 latency, memory, and failure thresholds.",
+        ),
+    ]
+    blockers = sorted(
+        str(slot_row.get("blocker_id"))
+        for slot_row in validation_slots
+        if slot_row.get("status") != "complete" and slot_row.get("blocker_id")
+    )
+    ready_slot_count = sum(1 for slot_row in validation_slots if slot_row.get("status") == "complete")
+    plan: dict[str, object] = {
+        "profile_version": TIMELINE_REPORT_GRADE_VALIDATION_PLAN_VERSION,
+        "item_number": 49,
+        "gap_id": "#49",
+        "batch_id": "commercial-uplift-046-050",
+        "selected_track": "bounded-source-anchored-timeline-report-validation",
+        "event_count": len(events),
+        "event_citation_count": event_citation_count,
+        "source_viewer_locator_count": source_viewer_locator_count,
+        "event_page_count": event_page_count,
+        "missing_timezone_count": missing_timezone_count,
+        "timeline_correlation_profile_sha256": correlation_profile_hash,
+        "timeline_citation_manifest_sha256": citation_manifest_hash,
+        "trusted_diff_status": str(trusted_diff.get("status") or "missing"),
+        "ready_slot_count": ready_slot_count,
+        "blocking_slot_count": len(blockers),
+        "validation_status": "report-validation-blocked",
+        "commercial_grade": False,
+        "commercial_grade_ready": False,
+        "validation_slots": validation_slots,
+        "blockers": blockers,
+        "commercial_grade_blockers": list(TIMELINE_REPORT_GRADE_BLOCKERS),
+        "validation_commands": [
+            "rapidtriage search <case> --query <keyword> --json",
+            "rapidtriage cross-tool-validate --rapid-output search-results.json --reference-output <timeline-known-answer> --backlog-item 49 --json",
+            "rapidtriage commercial-readiness --validation-package docs/validation/rapidtriage-core-forensics-041-050-known-answer.json --limit 49 --json",
+        ],
+        "report_guidance": {
+            "allowed_use": "bounded-search-result-timeline-triage-pivot",
+            "forbidden_claim": "complete case chronology or validated device clock-skew finding",
+            "required_disclaimer": (
+                "Timeline rows are bounded to retained search hits and require full-case joins, timezone/skew "
+                "validation, cursor-paged review, annotation state, trusted diffs, and large-case validation "
+                "before report-grade chronology claims."
+            ),
+        },
+    }
+    plan["validation_plan_sha256"] = stable_analysis_sha256(
+        {key: value for key, value in plan.items() if key != "validation_plan_sha256"}
+    )
+    return plan
 
 
 def timestamp_timezone_label(timestamp: str) -> str:

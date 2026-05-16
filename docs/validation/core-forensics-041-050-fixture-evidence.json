@@ -105,7 +105,7 @@
       "title": "Unified timeline correlation",
       "test_files": ["tests/test_rapidtriage_search_analysis.py"],
       "assertions": [
-        "Search analysis extracts timestamp anchors, normalizes UTC timestamps, generates date buckets, preserves source match anchors, emits analysis_analyst_review_profile, #49 core_accuracy_gates, and reportability blockers for missing full-case timeline joins plus timezone/skew validation.",
+        "Search analysis extracts timestamp anchors, normalizes UTC timestamps, generates date buckets, preserves source match anchors, emits timeline_citation_manifest event source viewer locators, timeline_report_grade_validation_plan ready/blocking slots, #49 core_accuracy_gates, and reportability blockers for missing full-case timeline joins plus timezone/skew validation.",
         "build_analysis_trusted_diff compares timeline rows against known-answer timeline rows before satisfying the #49 trusted diff gate."
       ],
       "remaining_external_validation": [

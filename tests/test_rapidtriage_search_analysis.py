@@ -270,6 +270,8 @@ class RapidTriageSearchAnalysisTests(unittest.TestCase):
         self.assertIn("timeline citation manifest", analysis_gates["#49"]["satisfied_checks"])
         self.assertIn("timeline event source viewer locators", analysis_gates["#49"]["satisfied_checks"])
         self.assertIn("clock-skew blocker recorded", analysis_gates["#49"]["satisfied_checks"])
+        self.assertIn("timeline report-grade validation plan", analysis_gates["#49"]["satisfied_checks"])
+        self.assertIn("timeline report-grade ready slots", analysis_gates["#49"]["satisfied_checks"])
         self.assertIn("draft hypotheses generated", analysis_gates["#50"]["satisfied_checks"])
         self.assertIn("workbook review profile", analysis_gates["#50"]["satisfied_checks"])
         self.assertIn("hypothesis review queue", analysis_gates["#50"]["satisfied_checks"])
@@ -300,6 +302,8 @@ class RapidTriageSearchAnalysisTests(unittest.TestCase):
         self.assertIn("graph report-grade ready slots", analysis_uplift["passed_validation_check_ids_by_item"]["#48"])
         self.assertIn("timestamp extraction", analysis_uplift["passed_validation_check_ids_by_item"]["#49"])
         self.assertIn("timeline correlation profile", analysis_uplift["passed_validation_check_ids_by_item"]["#49"])
+        self.assertIn("timeline report-grade validation plan", analysis_uplift["passed_validation_check_ids_by_item"]["#49"])
+        self.assertIn("timeline report-grade ready slots", analysis_uplift["passed_validation_check_ids_by_item"]["#49"])
         self.assertIn("draft hypotheses generated", analysis_uplift["passed_validation_check_ids_by_item"]["#50"])
         self.assertIn("workbook review profile", analysis_uplift["passed_validation_check_ids_by_item"]["#50"])
         self.assertIn("persistent-cluster-review-state", analysis_uplift["failed_validation_check_ids_by_item"]["#46"])
@@ -323,6 +327,7 @@ class RapidTriageSearchAnalysisTests(unittest.TestCase):
         self.assertTrue(analysis_uplift["reportability_decision"]["cluster_report_grade_validation_plan_present"])
         self.assertTrue(analysis_uplift["reportability_decision"]["entity_report_grade_validation_plan_present"])
         self.assertTrue(analysis_uplift["reportability_decision"]["graph_report_grade_validation_plan_present"])
+        self.assertTrue(analysis_uplift["reportability_decision"]["timeline_report_grade_validation_plan_present"])
         self.assertFalse(analysis_uplift["large_data_controls"]["persistent_review_state"])
         self.assertFalse(analysis_uplift["large_data_controls"]["full_case_reindex"])
         self.assertTrue(analysis_uplift["large_data_controls"]["cluster_review_profile_present"])
@@ -355,6 +360,9 @@ class RapidTriageSearchAnalysisTests(unittest.TestCase):
         self.assertFalse(analysis_uplift["large_data_controls"]["graph_saved_layout_supported"])
         self.assertTrue(analysis_uplift["large_data_controls"]["timeline_correlation_profile_present"])
         self.assertTrue(analysis_uplift["large_data_controls"]["timeline_citation_manifest_present"])
+        self.assertTrue(analysis_uplift["large_data_controls"]["timeline_report_grade_validation_plan_present"])
+        self.assertEqual(analysis_uplift["large_data_controls"]["timeline_report_grade_ready_slot_count"], 6)
+        self.assertEqual(analysis_uplift["large_data_controls"]["timeline_report_grade_blocking_slot_count"], 6)
         self.assertGreaterEqual(analysis_uplift["large_data_controls"]["timeline_event_citation_count"], 1)
         self.assertGreaterEqual(analysis_uplift["large_data_controls"]["timeline_source_viewer_locator_count"], 1)
         self.assertGreaterEqual(analysis_uplift["large_data_controls"]["timeline_event_page_count"], 1)
@@ -597,6 +605,40 @@ class RapidTriageSearchAnalysisTests(unittest.TestCase):
         self.assertIn(
             "search-timeline-citation-manifest-emitted",
             timeline_manifest["passed_validation_check_ids"],
+        )
+        timeline_plan = analysis["timeline"]["timeline_report_grade_validation_plan"]
+        self.assertEqual(timeline_plan["profile_version"], "search-timeline-report-grade-validation-plan-v1")
+        self.assertEqual(timeline_plan["item_number"], 49)
+        self.assertEqual(timeline_plan["gap_id"], "#49")
+        self.assertEqual(
+            analysis["timeline"]["timeline_report_grade_validation_plan_hash"],
+            timeline_plan["validation_plan_sha256"],
+        )
+        self.assertEqual(timeline_plan["timeline_citation_manifest_sha256"], timeline_manifest["manifest_sha256"])
+        self.assertGreaterEqual(timeline_plan["event_count"], 1)
+        self.assertGreaterEqual(timeline_plan["event_citation_count"], 1)
+        self.assertEqual(timeline_plan["ready_slot_count"], 6)
+        self.assertEqual(timeline_plan["blocking_slot_count"], 6)
+        self.assertEqual(timeline_plan["validation_status"], "report-validation-blocked")
+        self.assertFalse(timeline_plan["commercial_grade"])
+        timeline_slots = {slot["slot_id"]: slot for slot in timeline_plan["validation_slots"]}
+        self.assertEqual(timeline_slots["search-timeline-timestamp-extraction"]["status"], "complete")
+        self.assertEqual(timeline_slots["search-timeline-utc-normalization"]["status"], "complete")
+        self.assertEqual(timeline_slots["search-timeline-correlation-profile-emitted"]["status"], "complete")
+        self.assertEqual(timeline_slots["search-timeline-citation-manifest-emitted"]["status"], "complete")
+        self.assertEqual(timeline_slots["search-timeline-event-source-viewer-locators"]["status"], "complete")
+        self.assertEqual(timeline_slots["search-timeline-timezone-and-cursor-metadata"]["status"], "complete")
+        self.assertEqual(timeline_slots["search-timeline-full-case-join"]["status"], "external-required")
+        self.assertEqual(timeline_slots["search-timeline-cursor-paged-api"]["status"], "external-required")
+        self.assertIn("full-case-timeline-join-required", timeline_plan["blockers"])
+        self.assertIn("timeline-known-answer-trusted-diff-required", timeline_plan["blockers"])
+        self.assertEqual(
+            analysis_uplift["large_data_controls"]["timeline_report_grade_validation_plan_hash"],
+            timeline_plan["validation_plan_sha256"],
+        )
+        self.assertEqual(
+            analysis_uplift["reportability_decision"]["timeline_report_grade_validation_plan_hash"],
+            timeline_plan["validation_plan_sha256"],
         )
         self.assertEqual(analysis["deduplication"]["groups"][0]["match_count"], 2)
         self.assertEqual(analysis["deduplication"]["groups"][0]["representative_index"], 1)

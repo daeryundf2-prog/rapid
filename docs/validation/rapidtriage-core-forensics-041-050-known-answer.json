@@ -176,7 +176,7 @@
       ],
       "expected": {
         "required_assertions": [
-          "Search analysis preserves timestamp extraction, UTC normalization, source match anchors, date buckets, timeline_citation_manifest event source viewer locators, timezone/skew warning, and #49 core_accuracy_gates.",
+          "Search analysis preserves timestamp extraction, UTC normalization, source match anchors, date buckets, timeline_citation_manifest event source viewer locators, timeline_report_grade_validation_plan ready/blocking slots, timezone/skew warning, and #49 core_accuracy_gates.",
           "Search analysis trusted diff helper requires timeline known-answer row equality before satisfying the #49 trusted timeline known-answer diff pass gate.",
           "Search analysis reportability decisions block full timeline claims until full-case joins, timezone/skew validation, and cursor-paged timeline evidence exists."
         ]
