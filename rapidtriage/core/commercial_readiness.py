@@ -3280,6 +3280,7 @@ def acquisition_quality_evidence_chain() -> list[dict[str, object]]:
                 "acquisition_metadata.evidence_sources[].acquisition_evidence_source_row_hash",
                 "acquisition_metadata.acquisition_metadata_handoff_manifest.manifest_hash",
                 "acquisition_metadata.validation_assessment.ready_for_submission",
+                "acquisition_metadata.acquisition_metadata_report_grade_validation_plan_hash",
                 "acquisition_metadata.trusted_acquisition_metadata_diff",
             ],
             "trusted_diff": "trusted-acquisition-metadata-handoff-diff",

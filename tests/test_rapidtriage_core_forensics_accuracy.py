@@ -241,6 +241,7 @@ class RapidTriageCoreForensicsAccuracyTests(unittest.TestCase):
         self.assertIn("external tool version report-grade validation plan", external_tool["required_checks"])
         self.assertIn("trusted external tool transcript diff pass", external_tool["required_checks"])
         self.assertIn("write-blocker field recorded", acquisition_metadata["required_checks"])
+        self.assertIn("acquisition metadata report-grade validation plan", acquisition_metadata["required_checks"])
         self.assertIn("trusted acquisition handoff diff pass", acquisition_metadata["required_checks"])
         self.assertIn("UTC assumption disclosed", timezone_validation["required_checks"])
         self.assertIn("trusted timezone normalization matrix diff pass", timezone_validation["required_checks"])

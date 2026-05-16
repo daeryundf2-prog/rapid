@@ -1582,6 +1582,8 @@ CORE_FORENSIC_ACCURACY_ITEMS: tuple[dict[str, object], ...] = (
             "acquisition metadata row hashes emitted",
             "evidence source row hashes emitted",
             "acquisition handoff manifest hash emitted",
+            "acquisition metadata report-grade validation plan",
+            "acquisition metadata report-grade ready slots",
             "missing required fields listed",
             "submission readiness flag emitted",
             "trusted acquisition handoff diff pass",

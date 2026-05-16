@@ -1732,6 +1732,10 @@ class RapidTriageOpsTests(unittest.TestCase):
             self.assertEqual(acquisition_quality["evidence_chain"][0]["component"], "write-blocker-acquisition-metadata")
             acquisition_by_number = {item["number"]: item for item in acquisition_quality["items"]}
             self.assertEqual(acquisition_by_number[96]["produces"], "case-db-report-export.acquisition_metadata")
+            self.assertIn(
+                "acquisition_metadata.acquisition_metadata_report_grade_validation_plan_hash",
+                acquisition_by_number[96]["primary_outputs"],
+            )
             self.assertEqual(acquisition_by_number[100]["trusted_diff_required"], "trusted-tamper-signature-attestation-diff")
             release_operations = payload["release_operations_progress"]
             self.assertEqual(release_operations["version"], "release-operations-progress-v1")

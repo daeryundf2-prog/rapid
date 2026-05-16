@@ -141,6 +141,17 @@ TIMEZONE_NORMALIZATION_GAP_ID = "#97"
 CLOCK_SKEW_ANALYSIS_GAP_ID = "#98"
 EVIDENCE_CONTAMINATION_WARNING_GAP_ID = "#99"
 ACQUISITION_METADATA_TRUSTED_DIFF_BLOCKER_96 = "trusted-acquisition-metadata-handoff-diff-missing"
+ACQUISITION_METADATA_REPORT_GRADE_VALIDATION_PLAN_VERSION = "acquisition-metadata-report-grade-validation-plan-v1"
+ACQUISITION_METADATA_REPORT_GRADE_BLOCKERS = [
+    "trusted-acquisition-metadata-handoff-diff-missing",
+    "acquisition-required-fields-missing",
+    "write-blocker-device-log-required",
+    "signed-acquisition-handoff-required",
+    "original-acquisition-notes-required",
+    "whole-source-hash-verification-log-required",
+    "acquisition-tool-version-linkage-required",
+    "source-read-only-policy-signoff-required",
+]
 TIMEZONE_VALIDATION_TRUSTED_DIFF_BLOCKER_97 = "trusted-timezone-normalization-matrix-diff-missing"
 CLOCK_SKEW_TRUSTED_DIFF_BLOCKER_98 = "trusted-clock-skew-baseline-diff-missing"
 CONTAMINATION_WARNING_TRUSTED_DIFF_BLOCKER_99 = "trusted-contamination-checklist-diff-missing"
@@ -9431,6 +9442,209 @@ def build_acquisition_field_completion_matrix(
     return {**matrix_core, "matrix_hash": stable_payload_sha256(matrix_core)}
 
 
+def build_acquisition_metadata_report_grade_validation_plan(
+    *,
+    records: Sequence[Mapping[str, object]],
+    evidence_sources: Sequence[Mapping[str, object]],
+    required_fields: Sequence[str],
+    missing_required_fields: Sequence[str],
+    handoff_manifest: Mapping[str, object],
+    input_manifest: Mapping[str, object],
+    trusted_diff: Mapping[str, object],
+) -> dict[str, object]:
+    trusted_status = str(trusted_diff.get("status") or "missing")
+    record_row_hashes = [str(item.get("acquisition_metadata_row_hash") or "") for item in records]
+    evidence_source_hashes = [
+        str(item.get("acquisition_evidence_source_row_hash") or "") for item in evidence_sources
+    ]
+    ready_slots = [
+        {
+            "slot_id": "acquisition-metadata-record-inventory",
+            "status": "complete",
+            "evidence": {
+                "record_count": len(records),
+                "record_row_hash_count": sum(1 for value in record_row_hashes if value),
+            },
+        },
+        {
+            "slot_id": "evidence-source-linkage-inventory",
+            "status": "complete",
+            "evidence": {
+                "evidence_source_count": len(evidence_sources),
+                "evidence_source_row_hash_count": sum(1 for value in evidence_source_hashes if value),
+            },
+        },
+        {
+            "slot_id": "acquisition-field-completion-matrix",
+            "status": "complete",
+            "evidence": {
+                "required_field_count": len(required_fields),
+                "missing_required_fields": list(missing_required_fields),
+                "matrix_hash": str(handoff_manifest.get("field_completion_matrix_hash") or ""),
+            },
+        },
+        {
+            "slot_id": "acquisition-handoff-manifest",
+            "status": "complete",
+            "evidence": {"manifest_hash": str(handoff_manifest.get("manifest_hash") or "")},
+        },
+        {
+            "slot_id": "acquisition-input-manifest",
+            "status": "complete",
+            "evidence": {
+                "manifest_hash": str(input_manifest.get("manifest_hash") or ""),
+                "ready_for_submission": bool(input_manifest.get("ready_for_submission")),
+            },
+        },
+        {
+            "slot_id": "required-field-gap-disclosure",
+            "status": "complete",
+            "evidence": {
+                "missing_required_field_count": len(missing_required_fields),
+                "missing_required_fields": list(missing_required_fields),
+            },
+        },
+        {
+            "slot_id": "trusted-acquisition-handoff-diff-disclosure",
+            "status": "complete",
+            "evidence": {
+                "trusted_diff_status": trusted_status,
+                "trusted_tool": str(trusted_diff.get("trusted_tool") or ""),
+            },
+        },
+    ]
+    blocking_slots: list[dict[str, object]] = []
+    if not records:
+        blocking_slots.append(
+            {
+                "slot_id": "acquisition-metadata-record-present",
+                "status": "blocked",
+                "blocker": "acquisition-metadata-record-not-created",
+                "required_evidence": "at least one acquisition metadata record linked to the case",
+            }
+        )
+    if missing_required_fields:
+        blocking_slots.append(
+            {
+                "slot_id": "required-acquisition-fields-complete",
+                "status": "blocked",
+                "blocker": "acquisition-required-fields-missing",
+                "required_evidence": "operator, timestamps, source identifier, write-blocker, and whole-source hash fields",
+                "missing_required_fields": list(missing_required_fields),
+            }
+        )
+    if len([value for value in record_row_hashes if value]) != len(records):
+        blocking_slots.append(
+            {
+                "slot_id": "acquisition-metadata-row-hash-completeness",
+                "status": "blocked",
+                "blocker": "acquisition-metadata-row-hash-completeness-required",
+                "required_evidence": "row hash for every acquisition metadata record",
+            }
+        )
+    if len([value for value in evidence_source_hashes if value]) != len(evidence_sources):
+        blocking_slots.append(
+            {
+                "slot_id": "acquisition-evidence-source-row-hash-completeness",
+                "status": "blocked",
+                "blocker": "acquisition-evidence-source-row-hash-completeness-required",
+                "required_evidence": "row hash for every evidence source linked to acquisition metadata",
+            }
+        )
+    if not handoff_manifest.get("manifest_hash") or not handoff_manifest.get("field_completion_matrix_hash"):
+        blocking_slots.append(
+            {
+                "slot_id": "acquisition-handoff-manifest-complete",
+                "status": "blocked",
+                "blocker": "acquisition-handoff-manifest-required",
+                "required_evidence": "handoff manifest hash and field-completion matrix hash",
+            }
+        )
+    if not input_manifest.get("manifest_hash"):
+        blocking_slots.append(
+            {
+                "slot_id": "acquisition-input-manifest-complete",
+                "status": "blocked",
+                "blocker": "acquisition-input-manifest-required",
+                "required_evidence": "input manifest hash for GUI/API acquisition metadata capture",
+            }
+        )
+    if trusted_status != "pass":
+        blocking_slots.append(
+            {
+                "slot_id": "trusted-acquisition-metadata-handoff-diff",
+                "status": "external-required",
+                "blocker": ACQUISITION_METADATA_TRUSTED_DIFF_BLOCKER_96,
+                "required_evidence": "trusted signed handoff/write-blocker log diff covering records, missing fields, and manifest hashes",
+            }
+        )
+    blocking_slots.extend(
+        [
+            {
+                "slot_id": "write-blocker-device-log",
+                "status": "external-required",
+                "blocker": "write-blocker-device-log-required",
+                "required_evidence": "write-blocker device model, serial, firmware/status, and read-only verification log",
+            },
+            {
+                "slot_id": "signed-acquisition-handoff",
+                "status": "external-required",
+                "blocker": "signed-acquisition-handoff-required",
+                "required_evidence": "examiner/operator signed acquisition handoff form",
+            },
+            {
+                "slot_id": "original-acquisition-notes",
+                "status": "external-required",
+                "blocker": "original-acquisition-notes-required",
+                "required_evidence": "operator-preserved acquisition notes and collection timestamps",
+            },
+            {
+                "slot_id": "whole-source-hash-verification-log",
+                "status": "external-required",
+                "blocker": "whole-source-hash-verification-log-required",
+                "required_evidence": "hash verification log proving whole-source hash came from acquisition/imaging output",
+            },
+            {
+                "slot_id": "acquisition-tool-version-linkage",
+                "status": "external-required",
+                "blocker": "acquisition-tool-version-linkage-required",
+                "required_evidence": "linkage between acquisition metadata, external tool-version capture, and source hash manifest",
+            },
+            {
+                "slot_id": "source-read-only-policy-signoff",
+                "status": "external-required",
+                "blocker": "source-read-only-policy-signoff-required",
+                "required_evidence": "lab policy/signoff that the evidence source was handled read-only",
+            },
+        ]
+    )
+    plan_core: dict[str, object] = {
+        "profile_version": ACQUISITION_METADATA_REPORT_GRADE_VALIDATION_PLAN_VERSION,
+        "item_number": 96,
+        "commercial_gap_ids": [WRITE_BLOCKER_ACQUISITION_METADATA_GAP_ID],
+        "plan_context": "case-db-acquisition-write-blocker-metadata",
+        "record_count": len(records),
+        "evidence_source_count": len(evidence_sources),
+        "required_fields": list(required_fields),
+        "missing_required_fields": list(missing_required_fields),
+        "acquisition_metadata_handoff_manifest_hash": str(handoff_manifest.get("manifest_hash") or ""),
+        "acquisition_field_completion_matrix_hash": str(
+            handoff_manifest.get("field_completion_matrix_hash") or ""
+        ),
+        "acquisition_metadata_input_manifest_hash": str(input_manifest.get("manifest_hash") or ""),
+        "trusted_diff_status": trusted_status,
+        "ready_slots": ready_slots,
+        "blocking_slots": blocking_slots,
+        "ready_slot_count": len(ready_slots),
+        "blocking_slot_count": len(blocking_slots),
+        "external_blocker_catalog": list(ACQUISITION_METADATA_REPORT_GRADE_BLOCKERS),
+        "blockers": sorted({str(slot.get("blocker") or "") for slot in blocking_slots if slot.get("blocker")}),
+        "commercial_claim_allowed": False,
+        "reporting_boundary": "This plan makes acquisition/write-blocker metadata auditable, but commercial claims require signed handoff evidence, write-blocker device logs, original notes, source-hash verification logs, tool-version linkage, read-only policy signoff, and trusted diffs.",
+    }
+    return {**plan_core, "validation_plan_hash": stable_payload_sha256(plan_core)}
+
+
 def build_acquisition_metadata_record(
     connection: sqlite3.Connection,
     case_id: str,
@@ -9525,6 +9739,16 @@ def build_acquisition_metadata_record(
         missing_required_fields=missing,
         trusted_diff=trusted_diff,
     )
+    report_grade_validation_plan = build_acquisition_metadata_report_grade_validation_plan(
+        records=acquisition_records,
+        evidence_sources=evidence_sources,
+        required_fields=required_fields,
+        missing_required_fields=missing,
+        handoff_manifest=handoff_manifest,
+        input_manifest=input_manifest,
+        trusted_diff=trusted_diff,
+    )
+    blockers = sorted({*blockers, *report_grade_validation_plan["blockers"]})
     return {
         "status": status,
         "commercial_gap_ids": [WRITE_BLOCKER_ACQUISITION_METADATA_GAP_ID],
@@ -9548,6 +9772,12 @@ def build_acquisition_metadata_record(
         "acquisition_field_completion_matrix_hash": handoff_manifest["field_completion_matrix_hash"],
         "acquisition_metadata_input_manifest": input_manifest,
         "acquisition_metadata_input_manifest_hash": input_manifest["manifest_hash"],
+        "acquisition_metadata_report_grade_validation_plan": report_grade_validation_plan,
+        "acquisition_metadata_report_grade_validation_plan_hash": report_grade_validation_plan[
+            "validation_plan_hash"
+        ],
+        "acquisition_metadata_report_grade_ready_slot_count": report_grade_validation_plan["ready_slot_count"],
+        "acquisition_metadata_report_grade_blocking_slot_count": report_grade_validation_plan["blocking_slot_count"],
         "blockers": blockers,
         "summary": {
             "evidence_source_count": len(evidence_sources),
@@ -9556,6 +9786,9 @@ def build_acquisition_metadata_record(
             "acquisition_metadata_handoff_manifest_hash": handoff_manifest["manifest_hash"],
             "acquisition_field_completion_matrix_hash": handoff_manifest["field_completion_matrix_hash"],
             "acquisition_metadata_input_manifest_hash": input_manifest["manifest_hash"],
+            "acquisition_metadata_report_grade_validation_plan_hash": report_grade_validation_plan[
+                "validation_plan_hash"
+            ],
             "commercial_gap_ids": [WRITE_BLOCKER_ACQUISITION_METADATA_GAP_ID],
         },
         "validation_assessment": {
@@ -9569,11 +9802,19 @@ def build_acquisition_metadata_record(
             "acquisition_metadata_handoff_manifest_hash": handoff_manifest["manifest_hash"],
             "acquisition_field_completion_matrix_hash": handoff_manifest["field_completion_matrix_hash"],
             "acquisition_metadata_input_manifest_hash": input_manifest["manifest_hash"],
+            "acquisition_metadata_report_grade_validation_plan_hash": report_grade_validation_plan[
+                "validation_plan_hash"
+            ],
+            "acquisition_metadata_report_grade_ready_slot_count": report_grade_validation_plan["ready_slot_count"],
+            "acquisition_metadata_report_grade_blocking_slot_count": report_grade_validation_plan[
+                "blocking_slot_count"
+            ],
             "core_accuracy_gates": acquisition_metadata_core_accuracy_gates(
                 records=acquisition_records,
                 missing_required_fields=missing,
                 handoff_manifest=handoff_manifest,
                 input_manifest=input_manifest,
+                report_grade_validation_plan=report_grade_validation_plan,
                 trusted_diff=trusted_diff,
             ),
             "trusted_acquisition_metadata_diff": trusted_diff,
@@ -11854,6 +12095,7 @@ def acquisition_metadata_core_accuracy_gates(
     missing_required_fields: Sequence[str],
     handoff_manifest: Mapping[str, object] | None = None,
     input_manifest: Mapping[str, object] | None = None,
+    report_grade_validation_plan: Mapping[str, object] | None = None,
     trusted_diff: Mapping[str, object] | None = None,
 ) -> list[dict[str, object]]:
     satisfied = ["missing required fields listed", "submission readiness flag emitted"]
@@ -11873,6 +12115,10 @@ def acquisition_metadata_core_accuracy_gates(
         satisfied.append("acquisition field completion matrix hash emitted")
     if input_manifest and input_manifest.get("manifest_hash"):
         satisfied.append("acquisition metadata input manifest hash emitted")
+    if report_grade_validation_plan and report_grade_validation_plan.get("validation_plan_hash"):
+        satisfied.append("acquisition metadata report-grade validation plan")
+    if report_grade_validation_plan and report_grade_validation_plan.get("ready_slot_count"):
+        satisfied.append("acquisition metadata report-grade ready slots")
     if trusted_diff and trusted_diff.get("status") == "pass":
         satisfied.append("trusted acquisition handoff diff pass")
     return [
@@ -11885,6 +12131,7 @@ def acquisition_metadata_core_accuracy_gates(
                 f"acquisition_metadata_handoff_manifest_hash:{(handoff_manifest or {}).get('manifest_hash', '')}",
                 f"acquisition_field_completion_matrix_hash:{(handoff_manifest or {}).get('field_completion_matrix_hash', '')}",
                 f"acquisition_metadata_input_manifest_hash:{(input_manifest or {}).get('manifest_hash', '')}",
+                f"acquisition_metadata_report_grade_validation_plan_hash:{(report_grade_validation_plan or {}).get('validation_plan_hash', '')}",
             ],
         )
     ]

@@ -66,8 +66,8 @@
       "status": "pass",
       "backlog_items": [96],
       "evidence_paths": ["docs/validation/core-forensics-091-100-fixture-evidence.json", "tests/test_rapidtriage_case_db.py"],
-      "expected": {"required_assertions": ["Case DB report exports preserve operator/source metadata, write-blocker field, whole-source hash field, acquisition metadata row hashes, evidence-source row hashes, acquisition-metadata-handoff-manifest-v1 manifest hashes, missing required fields, readiness flag, trusted acquisition-handoff diff helpers/gates, and #96 core_accuracy_gates."]},
-      "notes": "Internal fixture pass; write-blocker device integration, trusted handoff manifests, and signed handoff forms remain blockers."
+      "expected": {"required_assertions": ["Case DB report exports preserve operator/source metadata, write-blocker field, whole-source hash field, acquisition metadata row hashes, evidence-source row hashes, acquisition-metadata-handoff-manifest-v1 manifest hashes, acquisition-metadata-input-manifest-v1 manifest hashes, acquisition-metadata-report-grade-validation-plan-v1, plan hash/counts, missing required fields, readiness flag, trusted acquisition-handoff diff helpers/gates, and #96 core_accuracy_gates."]},
+      "notes": "Internal fixture pass; write-blocker device logs/integration, trusted handoff manifests, signed handoff forms, original acquisition notes, source hash verification logs, acquisition tool-version linkage, and read-only policy signoff remain blockers."
     },
     {
       "id": "core-forensics-097-timezone-validation",

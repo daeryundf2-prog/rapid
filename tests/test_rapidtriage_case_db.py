@@ -266,6 +266,31 @@ class RapidTriageCaseDatabaseTests(unittest.TestCase):
             self.assertEqual(len(export["acquisition_metadata"]["acquisition_metadata_input_manifest_hash"]), 64)
             self.assertTrue(export["acquisition_metadata"]["acquisition_metadata_input_manifest"]["ready_for_submission"])
             self.assertEqual(
+                export["acquisition_metadata"]["acquisition_metadata_report_grade_validation_plan"][
+                    "profile_version"
+                ],
+                "acquisition-metadata-report-grade-validation-plan-v1",
+            )
+            self.assertEqual(
+                export["acquisition_metadata"]["acquisition_metadata_report_grade_validation_plan_hash"],
+                export["acquisition_metadata"]["acquisition_metadata_report_grade_validation_plan"][
+                    "validation_plan_hash"
+                ],
+            )
+            self.assertGreaterEqual(
+                export["acquisition_metadata"]["acquisition_metadata_report_grade_ready_slot_count"],
+                7,
+            )
+            self.assertIn(
+                "signed-acquisition-handoff",
+                {
+                    slot["slot_id"]
+                    for slot in export["acquisition_metadata"][
+                        "acquisition_metadata_report_grade_validation_plan"
+                    ]["blocking_slots"]
+                },
+            )
+            self.assertEqual(
                 export["acquisition_metadata"]["functional_priority_profile"]["implemented_controls"]["acquisition_metadata_input_manifest_hash"],
                 export["acquisition_metadata"]["acquisition_metadata_input_manifest"]["manifest_hash"],
             )
@@ -2798,6 +2823,35 @@ class RapidTriageCaseDatabaseTests(unittest.TestCase):
                 "write_blocker",
                 export["acquisition_metadata"]["acquisition_metadata_input_manifest"]["missing_required_fields"],
             )
+            self.assertEqual(
+                export["acquisition_metadata"]["acquisition_metadata_report_grade_validation_plan"][
+                    "profile_version"
+                ],
+                "acquisition-metadata-report-grade-validation-plan-v1",
+            )
+            self.assertEqual(
+                export["acquisition_metadata"]["acquisition_metadata_report_grade_validation_plan_hash"],
+                export["acquisition_metadata"]["acquisition_metadata_report_grade_validation_plan"][
+                    "validation_plan_hash"
+                ],
+            )
+            self.assertGreaterEqual(
+                export["acquisition_metadata"]["acquisition_metadata_report_grade_ready_slot_count"],
+                7,
+            )
+            self.assertGreaterEqual(
+                export["acquisition_metadata"]["acquisition_metadata_report_grade_blocking_slot_count"],
+                7,
+            )
+            self.assertIn(
+                "required-acquisition-fields-complete",
+                {
+                    slot["slot_id"]
+                    for slot in export["acquisition_metadata"][
+                        "acquisition_metadata_report_grade_validation_plan"
+                    ]["blocking_slots"]
+                },
+            )
             self.assertTrue(
                 all(
                     len(source["acquisition_evidence_source_row_hash"]) == 64
@@ -2814,6 +2868,9 @@ class RapidTriageCaseDatabaseTests(unittest.TestCase):
                 missing_required_fields=export["acquisition_metadata"]["missing_required_fields"],
                 handoff_manifest=export["acquisition_metadata"]["acquisition_metadata_handoff_manifest"],
                 input_manifest=export["acquisition_metadata"]["acquisition_metadata_input_manifest"],
+                report_grade_validation_plan=export["acquisition_metadata"][
+                    "acquisition_metadata_report_grade_validation_plan"
+                ],
                 trusted_diff=acquisition_diff,
             )
             self.assertEqual(acquisition_diff["status"], "pass")
@@ -2822,6 +2879,7 @@ class RapidTriageCaseDatabaseTests(unittest.TestCase):
             self.assertIn("acquisition field completion matrix hash emitted", acquisition_gates[0]["satisfied_checks"])
             self.assertIn("acquisition handoff manifest hash emitted", acquisition_gates[0]["satisfied_checks"])
             self.assertIn("acquisition metadata input manifest hash emitted", acquisition_gates[0]["satisfied_checks"])
+            self.assertIn("acquisition metadata report-grade validation plan", acquisition_gates[0]["satisfied_checks"])
             self.assertIn("trusted acquisition handoff diff pass", acquisition_gates[0]["satisfied_checks"])
             self.assertIn("timezone_validation", export)
             self.assertIn("#97", export["summary"]["timezone_validation_gap_ids"])
