@@ -87,6 +87,15 @@ ANALYSIS_TRUSTED_TOOLS = {
     "independent-review-export",
 }
 SEARCH_DEDUP_GAP_ID = "#60"
+CLUSTER_REPORT_GRADE_VALIDATION_PLAN_VERSION = "search-cluster-report-grade-validation-plan-v1"
+CLUSTER_REPORT_GRADE_BLOCKERS = [
+    "persistent-cluster-review-state-required",
+    "near-duplicate-text-media-clustering-required",
+    "cluster-review-trusted-diff-required",
+    "cluster-false-positive-corpus-required",
+    "large-case-cluster-performance-validation-required",
+    "cluster-independent-review-required",
+]
 
 
 def build_search_analysis(
@@ -227,6 +236,11 @@ def analysis_commercial_uplift_evidence(
         if isinstance(clusters.get("cluster_citation_manifest"), Mapping)
         else {}
     )
+    cluster_validation_plan = (
+        clusters.get("cluster_report_grade_validation_plan")
+        if isinstance(clusters.get("cluster_report_grade_validation_plan"), Mapping)
+        else {}
+    )
     entity_summary = entities.get("summary") if isinstance(entities.get("summary"), Mapping) else {}
     entity_review_profile = (
         entities.get("entity_review_profile")
@@ -277,6 +291,10 @@ def analysis_commercial_uplift_evidence(
         for number, blocker in ANALYSIS_TRUSTED_DIFF_BLOCKERS.items()
         if trusted_diffs.get(number, {}).get("status") != "pass"
     ]
+    if cluster_validation_plan:
+        passed_by_item.setdefault("#46", []).append("cluster report-grade validation plan")
+        if int(cluster_validation_plan.get("ready_slot_count") or 0) >= 6:
+            passed_by_item["#46"].append("cluster report-grade ready slots")
     return {
         "batch_id": "commercial-uplift-046-050",
         "item_numbers": [46, 47, 48, 49, 50],
@@ -285,6 +303,7 @@ def analysis_commercial_uplift_evidence(
             f"matches:{len(matches)}",
             f"clusters:{cluster_summary.get('cluster_count', 0)}",
             f"cluster_citation_manifest_sha256:{cluster_citation_manifest.get('manifest_sha256', '')}",
+            f"cluster_report_grade_validation_plan_sha256:{cluster_validation_plan.get('validation_plan_sha256', '')}",
             f"entities:{entity_summary.get('entity_count', 0)}",
             f"entity_citation_manifest_sha256:{entity_citation_manifest.get('manifest_sha256', '')}",
             f"graph_edges:{graph_summary.get('edge_count', 0)}",
@@ -303,6 +322,7 @@ def analysis_commercial_uplift_evidence(
             timeline_summary=timeline_summary,
             workbook_summary=workbook_summary,
             trusted_diffs=trusted_diffs,
+            cluster_validation_plan=cluster_validation_plan,
         ),
         "passed_validation_check_ids_by_item": passed_by_item,
         "failed_validation_check_ids_by_item": failed_by_item,
@@ -330,6 +350,12 @@ def analysis_commercial_uplift_evidence(
             "cluster_review_profile_present": bool(cluster_review_profile),
             "cluster_citation_manifest_present": bool(cluster_citation_manifest),
             "cluster_citation_manifest_hash": str(cluster_citation_manifest.get("manifest_sha256") or ""),
+            "cluster_report_grade_validation_plan_present": bool(cluster_validation_plan),
+            "cluster_report_grade_validation_plan_hash": str(
+                cluster_validation_plan.get("validation_plan_sha256") or ""
+            ),
+            "cluster_report_grade_ready_slot_count": int(cluster_validation_plan.get("ready_slot_count") or 0),
+            "cluster_report_grade_blocking_slot_count": int(cluster_validation_plan.get("blocking_slot_count") or 0),
             "cluster_citation_entry_count": int(cluster_citation_manifest.get("cluster_entry_count") or 0),
             "cluster_representative_citation_count": int(
                 cluster_citation_manifest.get("representative_citation_count") or 0
@@ -400,6 +426,7 @@ def analysis_reportability_decision(
     timeline_summary: Mapping[str, object],
     workbook_summary: Mapping[str, object],
     trusted_diffs: Mapping[int, Mapping[str, object]] | None = None,
+    cluster_validation_plan: Mapping[str, object] | None = None,
 ) -> dict[str, object]:
     blockers = {str(item) for item in report_grade.get("blockers", []) if str(item)}
     for item_id, checks in failed_by_item.items():
@@ -409,6 +436,7 @@ def analysis_reportability_decision(
     if not ANALYSIS_NATIVE_CAPABILITIES["analyst_verified_entity_resolution"]:
         blockers.add("analyst-verified-entity-resolution-not-available")
     trusted_diffs = trusted_diffs or {}
+    cluster_validation_plan = cluster_validation_plan or {}
     for number, blocker in ANALYSIS_TRUSTED_DIFF_BLOCKERS.items():
         if trusted_diffs.get(number, {}).get("status") != "pass":
             blockers.add(blocker)
@@ -426,6 +454,12 @@ def analysis_reportability_decision(
             "timeline_events": int(timeline_summary.get("event_count") or 0),
             "hypotheses": int(workbook_summary.get("hypothesis_count") or 0),
         },
+        "cluster_report_grade_validation_plan_present": bool(cluster_validation_plan),
+        "cluster_report_grade_validation_plan_hash": str(
+            cluster_validation_plan.get("validation_plan_sha256") or ""
+        ),
+        "cluster_report_grade_ready_slot_count": int(cluster_validation_plan.get("ready_slot_count") or 0),
+        "cluster_report_grade_blocking_slot_count": int(cluster_validation_plan.get("blocking_slot_count") or 0),
         "required_before_report": [
             "persist analyst review state for clusters, entity merge/split decisions, graph layouts, and workbook hypotheses",
             "validate graph and timeline joins against full-case indexed source rows with timezone and parser-confidence evidence",
@@ -464,6 +498,11 @@ def analysis_core_accuracy_gates(
     cluster_citation_manifest = (
         clusters.get("cluster_citation_manifest")
         if isinstance(clusters.get("cluster_citation_manifest"), Mapping)
+        else {}
+    )
+    cluster_validation_plan = (
+        clusters.get("cluster_report_grade_validation_plan")
+        if isinstance(clusters.get("cluster_report_grade_validation_plan"), Mapping)
         else {}
     )
     entity_summary = entities.get("summary") if isinstance(entities.get("summary"), Mapping) else {}
@@ -552,6 +591,13 @@ def analysis_core_accuracy_gates(
         evidence_refs.append(f"cluster_citation_manifest_sha256:{cluster_citation_manifest.get('manifest_sha256', '')}")
         if int(cluster_citation_manifest.get("representative_citation_count") or 0) > 0:
             item46.append("representative source viewer locators")
+    if cluster_validation_plan:
+        item46.append("cluster report-grade validation plan")
+        evidence_refs.append(
+            f"cluster_report_grade_validation_plan_sha256:{cluster_validation_plan.get('validation_plan_sha256', '')}"
+        )
+        if int(cluster_validation_plan.get("ready_slot_count") or 0) >= 6:
+            item46.append("cluster report-grade ready slots")
     if "truncated" in cluster_summary:
         item46.append("truncation disclosure")
     if not ANALYSIS_NATIVE_CAPABILITIES["ml_semantic_clustering"]:
@@ -751,6 +797,12 @@ def build_result_clusters(
             break
     review_profile = build_cluster_review_profile(clusters, candidate_bucket_count=len(buckets), max_clusters=max_clusters)
     citation_manifest = build_cluster_citation_manifest(clusters, matches)
+    validation_plan = build_cluster_report_grade_validation_plan(
+        clusters=clusters,
+        matches=matches,
+        cluster_review_profile=review_profile,
+        cluster_citation_manifest=citation_manifest,
+    )
     return {
         "summary": {
             "cluster_count": len(clusters),
@@ -767,6 +819,8 @@ def build_result_clusters(
         "cluster_review_profile": review_profile,
         "cluster_citation_manifest": citation_manifest,
         "cluster_citation_manifest_hash": citation_manifest["manifest_sha256"],
+        "cluster_report_grade_validation_plan": validation_plan,
+        "cluster_report_grade_validation_plan_hash": validation_plan["validation_plan_sha256"],
         "clusters": clusters,
         "report_grade_assessment": component_report_grade_assessment("#46", "large-result-clustering"),
     }
@@ -942,6 +996,182 @@ def build_cluster_citation_manifest(
         {key: value for key, value in manifest.items() if key != "manifest_sha256"}
     )
     return manifest
+
+
+def build_cluster_report_grade_validation_plan(
+    *,
+    clusters: Sequence[Mapping[str, object]],
+    matches: Sequence[Mapping[str, object]],
+    cluster_review_profile: Mapping[str, object],
+    cluster_citation_manifest: Mapping[str, object],
+    trusted_diff: Mapping[str, object] | None = None,
+) -> dict[str, object]:
+    trusted_diff = trusted_diff or {}
+    review_profile_hash = stable_analysis_sha256(cluster_review_profile)
+    citation_manifest_hash = str(cluster_citation_manifest.get("manifest_sha256") or "")
+    representative_citation_count = int(cluster_citation_manifest.get("representative_citation_count") or 0)
+    cluster_entry_count = int(cluster_citation_manifest.get("cluster_entry_count") or 0)
+
+    def slot(
+        slot_id: str,
+        *,
+        ready: bool,
+        evidence: str,
+        blocker_id: str | None = None,
+        operator_action: str = "",
+    ) -> dict[str, object]:
+        row: dict[str, object] = {
+            "slot_id": slot_id,
+            "status": "complete" if ready else "external-required",
+            "evidence": evidence,
+        }
+        if blocker_id and not ready:
+            row["blocker_id"] = blocker_id
+        if operator_action:
+            row["operator_action"] = operator_action
+        return row
+
+    validation_slots = [
+        slot(
+            "search-cluster-bounded-generation",
+            ready=bool(clusters),
+            evidence=f"cluster_count={len(clusters)} match_count={len(matches)}",
+            blocker_id="search-cluster-generation-required",
+            operator_action="Run search analysis on the result set so bounded clusters are emitted.",
+        ),
+        slot(
+            "search-cluster-review-profile-emitted",
+            ready=cluster_review_profile.get("profile_version") == "large-result-cluster-review-v1",
+            evidence=f"cluster_review_profile_sha256={review_profile_hash}",
+            blocker_id="search-cluster-review-profile-required",
+            operator_action="Regenerate analysis so the cluster review profile is available to the reviewer.",
+        ),
+        slot(
+            "search-cluster-citation-manifest-emitted",
+            ready=bool(citation_manifest_hash),
+            evidence=f"cluster_citation_manifest_sha256={citation_manifest_hash}",
+            blocker_id="search-cluster-citation-manifest-required",
+            operator_action="Generate the citation manifest before using cluster output in a report.",
+        ),
+        slot(
+            "search-cluster-representative-source-viewer-locators",
+            ready=representative_citation_count > 0,
+            evidence=f"representative_citation_count={representative_citation_count}",
+            blocker_id="search-cluster-source-viewer-locators-required",
+            operator_action="Attach representative source viewer locators for every report candidate cluster.",
+        ),
+        slot(
+            "search-cluster-truncation-controls",
+            ready="max_clusters" in cluster_review_profile and "review_queue_count" in cluster_review_profile,
+            evidence=(
+                f"max_clusters={cluster_review_profile.get('max_clusters', '')} "
+                f"review_queue_count={cluster_review_profile.get('review_queue_count', '')}"
+            ),
+            blocker_id="search-cluster-truncation-controls-required",
+            operator_action="Record max-cluster and review-queue caps before large-case use.",
+        ),
+        slot(
+            "search-cluster-representative-first-review",
+            ready=bool(cluster_review_profile.get("representative_first_review")),
+            evidence=f"representative_first_review={bool(cluster_review_profile.get('representative_first_review'))}",
+            blocker_id="search-cluster-representative-first-review-required",
+            operator_action="Enable representative-first review before using clusters as a triage queue.",
+        ),
+        slot(
+            "search-cluster-persistent-review-state",
+            ready=False,
+            evidence="persistent_review_state=false",
+            blocker_id="persistent-cluster-review-state-required",
+            operator_action="Persist analyst cluster review decisions, promoted/noise state, notes, and timestamps.",
+        ),
+        slot(
+            "search-cluster-near-duplicate-text-media",
+            ready=False,
+            evidence="near_duplicate_text_media_clustering=false",
+            blocker_id="near-duplicate-text-media-clustering-required",
+            operator_action="Validate near-duplicate text/media clustering before semantic clustering claims.",
+        ),
+        slot(
+            "search-cluster-trusted-review-diff",
+            ready=trusted_diff.get("status") == "pass",
+            evidence=f"trusted_diff_status={trusted_diff.get('status', 'missing')}",
+            blocker_id=ANALYSIS_TRUSTED_DIFF_BLOCKERS[46],
+            operator_action="Attach a passing hand-labeled cluster review diff.",
+        ),
+        slot(
+            "search-cluster-false-positive-corpus",
+            ready=False,
+            evidence="false_positive_noise_corpus_attached=false",
+            blocker_id="cluster-false-positive-corpus-required",
+            operator_action="Measure high-volume/noise cluster false-positive rates with a known-answer corpus.",
+        ),
+        slot(
+            "search-cluster-large-case-performance-validation",
+            ready=False,
+            evidence="large_case_cluster_performance_validation=false",
+            blocker_id="large-case-cluster-performance-validation-required",
+            operator_action="Validate cluster generation latency and memory on large result sets.",
+        ),
+        slot(
+            "search-cluster-independent-review",
+            ready=False,
+            evidence="independent_review_signoff_present=false",
+            blocker_id="cluster-independent-review-required",
+            operator_action="Attach independent reviewer signoff before reviewed-cluster wording.",
+        ),
+    ]
+    blockers = sorted(
+        {
+            str(item.get("blocker_id"))
+            for item in validation_slots
+            if item.get("status") != "complete" and item.get("blocker_id")
+        }
+    )
+    plan: dict[str, object] = {
+        "profile_version": CLUSTER_REPORT_GRADE_VALIDATION_PLAN_VERSION,
+        "item_number": 46,
+        "gap_id": "#46",
+        "batch_id": "commercial-uplift-046-050",
+        "selected_track": "bounded-representative-first-cluster-report-validation",
+        "match_count": len(matches),
+        "cluster_count": len(clusters),
+        "cluster_entry_count": cluster_entry_count,
+        "representative_citation_count": representative_citation_count,
+        "cluster_review_profile_sha256": review_profile_hash,
+        "cluster_citation_manifest_sha256": citation_manifest_hash,
+        "trusted_diff_status": str(trusted_diff.get("status") or "missing"),
+        "ready_slot_count": sum(1 for item in validation_slots if item.get("status") == "complete"),
+        "blocking_slot_count": sum(1 for item in validation_slots if item.get("status") != "complete"),
+        "validation_status": "report-validation-blocked" if blockers else "ready-for-report-review",
+        "commercial_grade": False,
+        "commercial_grade_ready": False,
+        "validation_slots": validation_slots,
+        "blockers": blockers,
+        "commercial_grade_blockers": list(CLUSTER_REPORT_GRADE_BLOCKERS),
+        "validation_commands": [
+            "rapidtriage search <case-db-or-output> --keyword <keyword> --output search-results.json",
+            "rapidtriage cross-tool-validate --rapid-output search-results.json --reference-output <hand-labeled-cluster-review> --backlog-item 46 --json",
+            "rapidtriage commercial-readiness --validation-package docs/validation/rapidtriage-core-forensics-041-050-known-answer.json --limit 46 --json",
+        ],
+        "report_guidance": {
+            "allowed_use": "bounded-large-result-cluster-review-pivot",
+            "forbidden_claims": [
+                "cluster decisions are analyst-reviewed",
+                "near-duplicate text/media clustering is validated",
+                "high-volume clusters have measured false-positive rates",
+                "cluster output is commercial-grade for large cases",
+            ],
+            "required_disclaimer": (
+                "Clusters are representative-first triage pivots. Do not report cluster conclusions until persistent "
+                "review state, near-duplicate validation, trusted review diff, false-positive corpus, large-case "
+                "performance evidence, and independent review are attached."
+            ),
+        },
+    }
+    plan["validation_plan_sha256"] = stable_analysis_sha256(
+        {key: value for key, value in plan.items() if key != "validation_plan_sha256"}
+    )
+    return plan
 
 
 def build_analysis_trusted_diff(

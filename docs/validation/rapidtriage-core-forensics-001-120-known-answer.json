@@ -1161,7 +1161,7 @@
       ],
       "expected": {
         "required_assertions": [
-          "Search analysis preserves bounded clusters, representative match links, source/keyword grouping, truncation disclosure, review-state warning, and #46 core_accuracy_gates."
+          "Search analysis preserves bounded clusters, representative match links, source/keyword grouping, cluster_citation_manifest source viewer locators, cluster_report_grade_validation_plan ready/blocking slots, truncation disclosure, review-state warning, and #46 core_accuracy_gates."
         ]
       },
       "notes": "Internal fixture pass; persistent review state and large-case near-duplicate clustering remain blockers.",

@@ -241,6 +241,8 @@ class RapidTriageSearchAnalysisTests(unittest.TestCase):
         self.assertIn("representative-first review queue", analysis_gates["#46"]["satisfied_checks"])
         self.assertIn("cluster citation manifest", analysis_gates["#46"]["satisfied_checks"])
         self.assertIn("representative source viewer locators", analysis_gates["#46"]["satisfied_checks"])
+        self.assertIn("cluster report-grade validation plan", analysis_gates["#46"]["satisfied_checks"])
+        self.assertIn("cluster report-grade ready slots", analysis_gates["#46"]["satisfied_checks"])
         self.assertIn("entity extraction across supported types", analysis_gates["#47"]["satisfied_checks"])
         self.assertIn("match reference links", analysis_gates["#47"]["satisfied_checks"])
         self.assertIn("entity review profile", analysis_gates["#47"]["satisfied_checks"])
@@ -282,6 +284,8 @@ class RapidTriageSearchAnalysisTests(unittest.TestCase):
         self.assertEqual(analysis_uplift["item_numbers"], [46, 47, 48, 49, 50])
         self.assertIn("bounded cluster generation", analysis_uplift["passed_validation_check_ids_by_item"]["#46"])
         self.assertIn("cluster review profile", analysis_uplift["passed_validation_check_ids_by_item"]["#46"])
+        self.assertIn("cluster report-grade validation plan", analysis_uplift["passed_validation_check_ids_by_item"]["#46"])
+        self.assertIn("cluster report-grade ready slots", analysis_uplift["passed_validation_check_ids_by_item"]["#46"])
         self.assertIn("entity extraction across supported types", analysis_uplift["passed_validation_check_ids_by_item"]["#47"])
         self.assertIn("entity review profile", analysis_uplift["passed_validation_check_ids_by_item"]["#47"])
         self.assertIn("relationship edges built", analysis_uplift["passed_validation_check_ids_by_item"]["#48"])
@@ -308,10 +312,12 @@ class RapidTriageSearchAnalysisTests(unittest.TestCase):
             analysis_uplift["reportability_decision"]["blockers"],
         )
         self.assertEqual(analysis_uplift["reportability_decision"]["review_output_counts"]["hypotheses"], 4)
+        self.assertTrue(analysis_uplift["reportability_decision"]["cluster_report_grade_validation_plan_present"])
         self.assertFalse(analysis_uplift["large_data_controls"]["persistent_review_state"])
         self.assertFalse(analysis_uplift["large_data_controls"]["full_case_reindex"])
         self.assertTrue(analysis_uplift["large_data_controls"]["cluster_review_profile_present"])
         self.assertTrue(analysis_uplift["large_data_controls"]["cluster_citation_manifest_present"])
+        self.assertTrue(analysis_uplift["large_data_controls"]["cluster_report_grade_validation_plan_present"])
         self.assertGreaterEqual(analysis_uplift["large_data_controls"]["cluster_citation_entry_count"], 1)
         self.assertGreaterEqual(analysis_uplift["large_data_controls"]["cluster_representative_citation_count"], 1)
         self.assertGreaterEqual(analysis_uplift["large_data_controls"]["cluster_review_queue_count"], 1)
@@ -379,6 +385,42 @@ class RapidTriageSearchAnalysisTests(unittest.TestCase):
         self.assertEqual(
             cluster_manifest["cluster_entries"][0]["representative_citations"][0]["source_viewer_locator"]["viewer"],
             "search-result-source",
+        )
+        cluster_plan = analysis["clusters"]["cluster_report_grade_validation_plan"]
+        self.assertEqual(cluster_plan["profile_version"], "search-cluster-report-grade-validation-plan-v1")
+        self.assertEqual(cluster_plan["item_number"], 46)
+        self.assertEqual(cluster_plan["gap_id"], "#46")
+        self.assertEqual(
+            analysis["clusters"]["cluster_report_grade_validation_plan_hash"],
+            cluster_plan["validation_plan_sha256"],
+        )
+        self.assertEqual(cluster_plan["cluster_citation_manifest_sha256"], cluster_manifest["manifest_sha256"])
+        self.assertGreaterEqual(cluster_plan["cluster_count"], 1)
+        self.assertGreaterEqual(cluster_plan["representative_citation_count"], 1)
+        self.assertEqual(cluster_plan["ready_slot_count"], 6)
+        self.assertEqual(cluster_plan["blocking_slot_count"], 6)
+        self.assertEqual(cluster_plan["validation_status"], "report-validation-blocked")
+        self.assertFalse(cluster_plan["commercial_grade"])
+        cluster_slots = {slot["slot_id"]: slot for slot in cluster_plan["validation_slots"]}
+        self.assertEqual(cluster_slots["search-cluster-bounded-generation"]["status"], "complete")
+        self.assertEqual(cluster_slots["search-cluster-review-profile-emitted"]["status"], "complete")
+        self.assertEqual(cluster_slots["search-cluster-citation-manifest-emitted"]["status"], "complete")
+        self.assertEqual(cluster_slots["search-cluster-representative-source-viewer-locators"]["status"], "complete")
+        self.assertEqual(cluster_slots["search-cluster-truncation-controls"]["status"], "complete")
+        self.assertEqual(cluster_slots["search-cluster-representative-first-review"]["status"], "complete")
+        self.assertEqual(cluster_slots["search-cluster-persistent-review-state"]["status"], "external-required")
+        self.assertEqual(cluster_slots["search-cluster-trusted-review-diff"]["status"], "external-required")
+        self.assertIn("persistent-cluster-review-state-required", cluster_plan["blockers"])
+        self.assertIn("cluster-review-trusted-diff-required", cluster_plan["blockers"])
+        self.assertEqual(
+            analysis_uplift["large_data_controls"]["cluster_report_grade_validation_plan_hash"],
+            cluster_plan["validation_plan_sha256"],
+        )
+        self.assertEqual(analysis_uplift["large_data_controls"]["cluster_report_grade_ready_slot_count"], 6)
+        self.assertEqual(analysis_uplift["large_data_controls"]["cluster_report_grade_blocking_slot_count"], 6)
+        self.assertEqual(
+            analysis_uplift["reportability_decision"]["cluster_report_grade_validation_plan_hash"],
+            cluster_plan["validation_plan_sha256"],
         )
 
         entities = analysis["entities"]["entities"]

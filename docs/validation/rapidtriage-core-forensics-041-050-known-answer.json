@@ -116,7 +116,7 @@
       ],
       "expected": {
         "required_assertions": [
-          "Search analysis preserves bounded clusters, representative match links, source/keyword grouping, cluster_citation_manifest source viewer locators, truncation disclosure, review-state warning, and #46 core_accuracy_gates.",
+          "Search analysis preserves bounded clusters, representative match links, source/keyword grouping, cluster_citation_manifest source viewer locators, cluster_report_grade_validation_plan ready/blocking slots, truncation disclosure, review-state warning, and #46 core_accuracy_gates.",
           "Search analysis trusted diff helper requires hand-labeled cluster review row equality before satisfying the #46 trusted cluster review diff pass gate.",
           "Search analysis reportability decisions block reviewed-cluster claims until persistent review state and near-duplicate text/media validation exists."
         ]

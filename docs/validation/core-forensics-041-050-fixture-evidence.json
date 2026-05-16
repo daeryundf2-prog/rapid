@@ -69,7 +69,7 @@
       "title": "Large-result clustering",
       "test_files": ["tests/test_rapidtriage_search_analysis.py"],
       "assertions": [
-        "Search analysis emits bounded clusters with representative match links, source/keyword grouping, truncation disclosure, analysis_analyst_review_profile, #46 core_accuracy_gates, and reportability blockers for missing persistent review state and near-duplicate validation.",
+        "Search analysis emits bounded clusters with representative match links, source/keyword grouping, cluster_report_grade_validation_plan ready/blocking slots, truncation disclosure, analysis_analyst_review_profile, #46 core_accuracy_gates, and reportability blockers for missing persistent review state and near-duplicate validation.",
         "build_analysis_trusted_diff compares cluster rows against hand-labeled cluster review rows before satisfying the #46 trusted diff gate."
       ],
       "remaining_external_validation": [
