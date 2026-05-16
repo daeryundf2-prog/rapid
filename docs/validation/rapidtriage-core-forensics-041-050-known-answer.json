@@ -16,7 +16,7 @@
       ],
       "expected": {
         "required_assertions": [
-          "Cloud collection preserves token redaction, environment/vault boundary metadata, hash-only credential_authority_manifest evidence, scope/consent warnings, rotation audit warnings, legal warning, and #41 core_accuracy_gates.",
+          "Cloud collection preserves token redaction, environment/vault boundary metadata, hash-only credential_authority_manifest evidence, credential_report_grade_validation_plan ready/blocking slots, scope/consent warnings, rotation audit warnings, legal warning, and #41 core_accuracy_gates.",
           "Cloud credential trusted diff helper requires provider OAuth, vault, native audit, or legal authority row equality before satisfying the #41 trusted credential authority/audit diff pass gate.",
           "Cloud credential reportability decisions block enterprise-vaulted claims until OAuth consent, provider scope inventory, secure token vault, and token rotation audit evidence exists."
         ]

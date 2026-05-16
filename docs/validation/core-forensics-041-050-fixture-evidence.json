@@ -9,11 +9,11 @@
       "title": "Cloud token/credential secure handling",
       "test_files": ["tests/test_rapidtriage_cloud_collect.py"],
       "assertions": [
-        "Cloud collection redacts credential-bearing headers, never writes token values, records environment-variable storage boundaries, emits #41 core_accuracy_gates, and blocks enterprise-vaulted reportability without OAuth consent, scope, vault, and rotation evidence.",
+        "Cloud collection redacts credential-bearing headers, never writes token values, records environment-variable storage boundaries, emits credential_report_grade_validation_plan ready/blocking slots and #41 core_accuracy_gates, and blocks enterprise-vaulted reportability without OAuth consent, scope, vault, and rotation evidence.",
         "build_cloud_credential_trusted_diff compares credential handling rows against provider OAuth, vault, native audit, or legal authority records before satisfying the #41 trusted diff gate."
       ],
       "remaining_external_validation": [
-        "Provider OAuth consent capture, secure enterprise vault integration, token rotation/revocation evidence, and signed legal authority records."
+        "Provider OAuth consent capture, secure enterprise vault integration, controlled reveal workflow, RBAC enforcement, token rotation/revocation evidence, signed legal authority records, trusted authority/vault diff, and independent review."
       ]
     },
     {

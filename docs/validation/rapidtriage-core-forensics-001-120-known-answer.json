@@ -1056,7 +1056,7 @@
       ],
       "expected": {
         "required_assertions": [
-          "Cloud collection preserves token redaction, environment/vault boundary metadata, scope/consent warnings, rotation audit warnings, legal warning, and #41 core_accuracy_gates."
+          "Cloud collection preserves token redaction, environment/vault boundary metadata, credential_report_grade_validation_plan ready/blocking slots, scope/consent warnings, rotation audit warnings, legal warning, and #41 core_accuracy_gates."
         ]
       },
       "notes": "Internal fixture pass; enterprise vault, OAuth consent records, and provider audit evidence remain external blockers.",

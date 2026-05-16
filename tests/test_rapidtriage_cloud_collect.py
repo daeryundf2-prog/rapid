@@ -354,6 +354,97 @@ class RapidTriageCloudCollectTests(unittest.TestCase):
                     "enterprise-token-vault-not-integrated",
                     authority_manifest["failed_validation_check_ids"],
                 )
+                credential_plan = payload["credential_handling"]["credential_report_grade_validation_plan"]
+                self.assertEqual(
+                    credential_plan["profile_version"],
+                    "cloud-credential-report-grade-validation-plan-v1",
+                )
+                self.assertEqual(credential_plan["item_number"], 41)
+                self.assertEqual(credential_plan["gap_id"], "#41")
+                self.assertEqual(credential_plan["provider"], "google")
+                self.assertEqual(credential_plan["ready_slot_count"], 9)
+                self.assertEqual(credential_plan["blocking_slot_count"], 6)
+                self.assertEqual(
+                    payload["credential_handling"]["credential_report_grade_validation_plan_hash"],
+                    credential_plan["validation_plan_sha256"],
+                )
+                credential_slots = {slot["slot_id"]: slot for slot in credential_plan["validation_slots"]}
+                self.assertEqual(credential_slots["cloud-credential-redaction-boundary"]["status"], "complete")
+                self.assertEqual(
+                    credential_slots["cloud-credential-no-raw-secret-serialization"]["status"],
+                    "complete",
+                )
+                self.assertEqual(
+                    credential_slots["cloud-credential-environment-storage-boundary"]["status"],
+                    "complete",
+                )
+                self.assertEqual(credential_slots["cloud-credential-authority-manifest"]["status"], "complete")
+                self.assertEqual(
+                    credential_slots["cloud-credential-provider-scope-inventory"]["status"],
+                    "complete",
+                )
+                self.assertEqual(
+                    credential_slots["cloud-credential-legal-authority-record"]["status"],
+                    "complete",
+                )
+                self.assertEqual(
+                    credential_slots["cloud-credential-oauth-consent-record"]["status"],
+                    "complete",
+                )
+                self.assertEqual(
+                    credential_slots["cloud-credential-external-vault-record"]["status"],
+                    "complete",
+                )
+                self.assertEqual(
+                    credential_slots["cloud-credential-token-rotation-audit-record"]["status"],
+                    "complete",
+                )
+                self.assertEqual(
+                    credential_slots["cloud-credential-enterprise-token-vault-integration"]["status"],
+                    "external-required",
+                )
+                self.assertEqual(
+                    credential_slots["cloud-credential-controlled-reveal-workflow"]["status"],
+                    "external-required",
+                )
+                self.assertEqual(
+                    credential_slots["cloud-credential-rbac-enforcement"]["status"],
+                    "external-required",
+                )
+                self.assertEqual(
+                    credential_slots["cloud-credential-token-rotation-revocation-enforcement"]["status"],
+                    "external-required",
+                )
+                self.assertEqual(
+                    credential_slots["cloud-credential-authority-audit-diff"]["blocker_id"],
+                    "cloud-credential-authority-audit-diff-required",
+                )
+                self.assertIn(
+                    "cloud-credential-independent-review-required",
+                    credential_plan["blockers"],
+                )
+                self.assertIn(
+                    "credential_report_grade_validation_plan_present",
+                    credential_uplift["passed_validation_check_ids"],
+                )
+                self.assertIn(
+                    "credential_report_grade_validation_plan_sha256:",
+                    "\n".join(credential_uplift["source_refs"]),
+                )
+                self.assertEqual(
+                    credential_uplift["large_data_controls"]["credential_report_grade_validation_plan_hash"],
+                    credential_plan["validation_plan_sha256"],
+                )
+                self.assertEqual(
+                    credential_uplift["large_data_controls"]["credential_report_grade_ready_slot_count"],
+                    9,
+                )
+                self.assertEqual(
+                    credential_uplift["large_data_controls"]["credential_report_grade_blocking_slot_count"],
+                    6,
+                )
+                self.assertIn("credential report-grade validation plan", credential_gate["satisfied_checks"])
+                self.assertIn("credential report-grade ready slots", credential_gate["satisfied_checks"])
                 self.assertNotIn("consent-ticket-123", payload_path.read_text(encoding="utf-8"))
                 self.assertNotIn("vault-record-abc", payload_path.read_text(encoding="utf-8"))
                 self.assertNotIn("rotation-audit-789", payload_path.read_text(encoding="utf-8"))
@@ -442,6 +533,35 @@ class RapidTriageCloudCollectTests(unittest.TestCase):
                 self.assertEqual(plan_slots["cloud-api-response-hash-sidecar-boundary"]["status"], "complete")
                 self.assertEqual(plan_slots["cloud-api-provider-scope-profile"]["status"], "external-required")
                 self.assertEqual(plan_slots["cloud-api-oauth-consent-legal-authority"]["status"], "external-required")
+                credential_plan = payload["credential_handling"]["credential_report_grade_validation_plan"]
+                self.assertEqual(
+                    credential_plan["profile_version"],
+                    "cloud-credential-report-grade-validation-plan-v1",
+                )
+                self.assertEqual(credential_plan["ready_slot_count"], 4)
+                self.assertEqual(credential_plan["blocking_slot_count"], 11)
+                credential_slots = {slot["slot_id"]: slot for slot in credential_plan["validation_slots"]}
+                self.assertEqual(credential_slots["cloud-credential-redaction-boundary"]["status"], "complete")
+                self.assertEqual(
+                    credential_slots["cloud-credential-provider-scope-inventory"]["status"],
+                    "external-required",
+                )
+                self.assertEqual(
+                    credential_slots["cloud-credential-legal-authority-record"]["status"],
+                    "external-required",
+                )
+                self.assertEqual(
+                    credential_slots["cloud-credential-oauth-consent-record"]["status"],
+                    "external-required",
+                )
+                self.assertEqual(
+                    credential_slots["cloud-credential-external-vault-record"]["status"],
+                    "external-required",
+                )
+                self.assertEqual(
+                    credential_slots["cloud-credential-token-rotation-audit-record"]["status"],
+                    "external-required",
+                )
                 response_manifest = payload["requests"][0]["cloud_api_response_parser_manifest"]
                 self.assertEqual(response_manifest["parsed_status"], "dry-run-no-response")
                 self.assertEqual(response_manifest["source_viewer_locator"]["viewer"], "cloud-api-response-row")

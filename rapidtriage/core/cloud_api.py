@@ -72,6 +72,18 @@ CLOUD_CREDENTIAL_SECURITY_BLOCKERS = [
     "token-rotation-and-revocation-audit-not-captured",
     "legal-authority-review-required-before-cloud-collection",
 ]
+CLOUD_CREDENTIAL_REPORT_GRADE_VALIDATION_PLAN_VERSION = "cloud-credential-report-grade-validation-plan-v1"
+CLOUD_CREDENTIAL_REPORT_GRADE_VALIDATION_BLOCKERS = [
+    "cloud-credential-oauth-consent-record-required",
+    "cloud-credential-provider-scope-inventory-required",
+    "cloud-credential-legal-authority-record-required",
+    "cloud-credential-enterprise-token-vault-required",
+    "cloud-credential-token-rotation-revocation-audit-required",
+    "cloud-credential-controlled-reveal-workflow-required",
+    "cloud-credential-rbac-enforcement-required",
+    "cloud-credential-authority-audit-diff-required",
+    "cloud-credential-independent-review-required",
+]
 CLOUD_CREDENTIAL_TRUSTED_DIFF_BLOCKER = "cloud-credential-authority-audit-diff-required"
 CLOUD_CREDENTIAL_TRUSTED_TOOLS = {
     "provider-oauth-consent-record",
@@ -204,6 +216,16 @@ def run_cloud_api_collection(
         provider_scope_profile=provider_scope_profile,
         requests=collected,
     )
+    credential_report_grade_validation_plan = cloud_credential_report_grade_validation_plan(
+        manifest_path=manifest_path,
+        credential_handling=credential_handling,
+        provider_scope_profile=provider_scope_profile,
+        requests=collected,
+    )
+    credential_handling["credential_report_grade_validation_plan"] = credential_report_grade_validation_plan
+    credential_handling["credential_report_grade_validation_plan_hash"] = credential_report_grade_validation_plan[
+        "validation_plan_sha256"
+    ]
     credential_handling["core_accuracy_gates"] = cloud_credential_core_accuracy_gates(
         manifest_path=manifest_path,
         credential_handling=credential_handling,
@@ -1524,6 +1546,283 @@ def cloud_credential_authority_manifest(
     return manifest_payload
 
 
+def cloud_credential_report_grade_validation_plan(
+    *,
+    manifest_path: Path,
+    credential_handling: Mapping[str, object],
+    provider_scope_profile: Mapping[str, object],
+    requests: Iterable[Mapping[str, object]],
+) -> dict[str, object]:
+    request_rows = list(requests)
+    authority_profile = (
+        credential_handling.get("credential_authority_profile")
+        if isinstance(credential_handling.get("credential_authority_profile"), Mapping)
+        else {}
+    )
+    authority_manifest = (
+        credential_handling.get("credential_authority_manifest")
+        if isinstance(credential_handling.get("credential_authority_manifest"), Mapping)
+        else {}
+    )
+    trusted_diff = (
+        credential_handling.get("credential_trusted_diff")
+        if isinstance(credential_handling.get("credential_trusted_diff"), Mapping)
+        else {}
+    )
+    sensitive_headers = sorted(
+        {
+            str(header)
+            for request in request_rows
+            for header in (
+                request.get("credential_handling", {}).get("sensitive_header_names", [])
+                if isinstance(request.get("credential_handling"), Mapping)
+                else []
+            )
+            if str(header)
+        }
+    )
+
+    def slot(
+        slot_id: str,
+        status: str,
+        evidence: list[str],
+        *,
+        blocker: str = "",
+        blocking: bool = False,
+        external: bool = False,
+        required: str = "",
+    ) -> dict[str, object]:
+        return {
+            "slot_id": slot_id,
+            "status": status,
+            "ready": status == "complete",
+            "blocking": blocking,
+            "external_evidence_required": external,
+            "blocker_id": blocker,
+            "evidence": evidence,
+            "required_before_report": required,
+        }
+
+    redaction_complete = bool(credential_handling.get("headers_redacted")) and not bool(
+        credential_handling.get("tokens_written_to_output")
+    )
+    no_raw_secret_serialization = authority_manifest.get("raw_secret_values_stored") is False and (
+        authority_manifest.get("token_value_hash_recorded") is False
+    )
+    env_storage_boundary = credential_handling.get("credential_storage") == "environment-variable-only"
+    provider_scope_ready = bool(provider_scope_profile.get("scope_inventory_captured"))
+    legal_ready = bool(authority_manifest.get("legal_authority_record_present")) or bool(
+        provider_scope_profile.get("legal_authority_record_present")
+    )
+    oauth_ready = bool(authority_manifest.get("oauth_consent_record_present"))
+    vault_record_ready = bool(authority_manifest.get("vault_record_present"))
+    rotation_record_ready = bool(authority_manifest.get("token_rotation_audit_record_present"))
+    vault_integrated = bool(credential_handling.get("secure_token_vault_integrated"))
+    rotation_enforced = bool(credential_handling.get("token_rotation_audit_present"))
+    controlled_reveal_workflow = (
+        credential_handling.get("controlled_reveal_policy") not in {"", "disabled-by-default", None}
+        and bool(credential_handling.get("controlled_reveal_audit_integrated"))
+    )
+    rbac_enforced = bool(credential_handling.get("rbac_enforced"))
+    trusted_diff_pass = trusted_diff.get("status") == "pass"
+
+    slots = [
+        slot(
+            "cloud-credential-redaction-boundary",
+            "complete" if redaction_complete else "failed",
+            [
+                f"headers_redacted:{bool(credential_handling.get('headers_redacted'))}",
+                f"tokens_written_to_output:{bool(credential_handling.get('tokens_written_to_output'))}",
+                f"sensitive_header_count:{len(sensitive_headers)}",
+            ],
+            blocker="cloud-credential-redaction-required",
+            blocking=not redaction_complete,
+        ),
+        slot(
+            "cloud-credential-no-raw-secret-serialization",
+            "complete" if no_raw_secret_serialization else "failed",
+            [
+                f"raw_secret_values_stored:{authority_manifest.get('raw_secret_values_stored')}",
+                f"token_value_hash_recorded:{authority_manifest.get('token_value_hash_recorded')}",
+            ],
+            blocker="cloud-credential-no-raw-secret-serialization-required",
+            blocking=not no_raw_secret_serialization,
+        ),
+        slot(
+            "cloud-credential-environment-storage-boundary",
+            "complete" if env_storage_boundary else "external-required",
+            [f"credential_storage:{credential_handling.get('credential_storage', '')}"],
+            blocker="cloud-credential-environment-storage-boundary-required",
+            blocking=not env_storage_boundary,
+            external=not env_storage_boundary,
+            required="Record the runtime token source without serializing the token value.",
+        ),
+        slot(
+            "cloud-credential-authority-manifest",
+            "complete" if authority_manifest.get("authority_manifest_sha256") else "missing",
+            [
+                f"authority_manifest_sha256:{authority_manifest.get('authority_manifest_sha256', '')}",
+                f"authority_profile_version:{authority_profile.get('profile_version', '')}",
+            ],
+            blocker="cloud-credential-authority-manifest-required",
+            blocking=not bool(authority_manifest.get("authority_manifest_sha256")),
+        ),
+        slot(
+            "cloud-credential-provider-scope-inventory",
+            "complete" if provider_scope_ready else "external-required",
+            [
+                f"provider:{provider_scope_profile.get('provider', '')}",
+                f"scope_count:{int(provider_scope_profile.get('scope_count') or 0)}",
+            ],
+            blocker="cloud-credential-provider-scope-inventory-required",
+            blocking=not provider_scope_ready,
+            external=not provider_scope_ready,
+            required="Attach provider/admin scope inventory and granted-scope evidence.",
+        ),
+        slot(
+            "cloud-credential-legal-authority-record",
+            "complete" if legal_ready else "external-required",
+            [
+                f"authority_manifest_legal:{bool(authority_manifest.get('legal_authority_record_present'))}",
+                f"provider_scope_legal:{bool(provider_scope_profile.get('legal_authority_record_present'))}",
+            ],
+            blocker="cloud-credential-legal-authority-record-required",
+            blocking=not legal_ready,
+            external=not legal_ready,
+            required="Attach legal authority or case authorization before report-grade cloud credential claims.",
+        ),
+        slot(
+            "cloud-credential-oauth-consent-record",
+            "complete" if oauth_ready else "external-required",
+            [f"oauth_consent_record_present:{oauth_ready}"],
+            blocker="cloud-credential-oauth-consent-record-required",
+            blocking=not oauth_ready,
+            external=not oauth_ready,
+            required="Attach OAuth consent, account owner, client/app ID, and granted scope evidence.",
+        ),
+        slot(
+            "cloud-credential-external-vault-record",
+            "complete" if vault_record_ready else "external-required",
+            [f"vault_record_present:{vault_record_ready}"],
+            blocker="cloud-credential-enterprise-token-vault-required",
+            blocking=not vault_record_ready,
+            external=not vault_record_ready,
+            required="Attach a hash-only vault or token broker record ID; never serialize the token value.",
+        ),
+        slot(
+            "cloud-credential-token-rotation-audit-record",
+            "complete" if rotation_record_ready else "external-required",
+            [f"token_rotation_audit_record_present:{rotation_record_ready}"],
+            blocker="cloud-credential-token-rotation-revocation-audit-required",
+            blocking=not rotation_record_ready,
+            external=not rotation_record_ready,
+            required="Attach rotation, expiry, revocation, or collection-time access audit evidence.",
+        ),
+        slot(
+            "cloud-credential-enterprise-token-vault-integration",
+            "complete" if vault_integrated else "external-required",
+            [f"secure_token_vault_integrated:{vault_integrated}"],
+            blocker="cloud-credential-enterprise-token-vault-required",
+            blocking=not vault_integrated,
+            external=not vault_integrated,
+            required="Integrate an OS/enterprise secret vault before multi-user or court-ready secret handling claims.",
+        ),
+        slot(
+            "cloud-credential-controlled-reveal-workflow",
+            "complete" if controlled_reveal_workflow else "external-required",
+            [
+                f"controlled_reveal_policy:{credential_handling.get('controlled_reveal_policy', '')}",
+                f"raw_secret_reveal_allowed:{bool(credential_handling.get('raw_secret_reveal_allowed'))}",
+            ],
+            blocker="cloud-credential-controlled-reveal-workflow-required",
+            blocking=not controlled_reveal_workflow,
+            external=not controlled_reveal_workflow,
+            required="Implement gated reveal/export with analyst identity, reason, expiry, and immutable audit.",
+        ),
+        slot(
+            "cloud-credential-rbac-enforcement",
+            "complete" if rbac_enforced else "external-required",
+            [f"rbac_enforced:{rbac_enforced}"],
+            blocker="cloud-credential-rbac-enforcement-required",
+            blocking=not rbac_enforced,
+            external=not rbac_enforced,
+            required="Enforce role-based access before secret reveal, export, or cloud collection execution.",
+        ),
+        slot(
+            "cloud-credential-token-rotation-revocation-enforcement",
+            "complete" if rotation_enforced else "external-required",
+            [f"token_rotation_audit_present:{rotation_enforced}"],
+            blocker="cloud-credential-token-rotation-revocation-audit-required",
+            blocking=not rotation_enforced,
+            external=not rotation_enforced,
+            required="Verify token expiry, rotation, and revocation records against vault/provider audit logs.",
+        ),
+        slot(
+            "cloud-credential-authority-audit-diff",
+            "complete" if trusted_diff_pass else "external-required",
+            [
+                f"trusted_diff_status:{trusted_diff.get('status', 'missing')}",
+                f"trusted_tool:{trusted_diff.get('trusted_tool', '')}",
+            ],
+            blocker="cloud-credential-authority-audit-diff-required",
+            blocking=not trusted_diff_pass,
+            external=not trusted_diff_pass,
+            required="Attach a passing provider OAuth, vault, native-audit, or legal authority diff.",
+        ),
+        slot(
+            "cloud-credential-independent-review",
+            "external-required",
+            ["independent_review:false"],
+            blocker="cloud-credential-independent-review-required",
+            blocking=True,
+            external=True,
+            required="Attach independent reviewer signoff before enterprise-vaulted or report-grade wording.",
+        ),
+    ]
+    ready_slot_count = sum(1 for item in slots if item["ready"])
+    blocking_slot_count = sum(1 for item in slots if item["blocking"])
+    blocker_ids = sorted({str(item["blocker_id"]) for item in slots if item["blocking"] and item["blocker_id"]})
+    plan: dict[str, object] = {
+        "profile_version": CLOUD_CREDENTIAL_REPORT_GRADE_VALIDATION_PLAN_VERSION,
+        "item_number": 41,
+        "gap_id": "#41",
+        "batch_id": "commercial-uplift-041-045",
+        "manifest_path": str(manifest_path.resolve()),
+        "manifest_sha256": compute_sha256(manifest_path),
+        "credential_storage": str(credential_handling.get("credential_storage") or ""),
+        "bearer_token_env": str(credential_handling.get("bearer_token_env") or ""),
+        "provider": text_value(provider_scope_profile.get("provider") or "not-declared"),
+        "request_count": len(request_rows),
+        "request_sensitive_header_names": sensitive_headers,
+        "authority_manifest_sha256": str(authority_manifest.get("authority_manifest_sha256") or ""),
+        "raw_secret_values_stored": bool(authority_manifest.get("raw_secret_values_stored")),
+        "token_value_hash_recorded": bool(authority_manifest.get("token_value_hash_recorded")),
+        "ready_slot_count": ready_slot_count,
+        "blocking_slot_count": blocking_slot_count,
+        "validation_status": "report-validation-blocked",
+        "commercial_grade": False,
+        "validation_slots": slots,
+        "blockers": blocker_ids,
+        "validation_commands": [
+            "verify-cloud-credential-redaction-no-raw-secret-output",
+            "attach-oauth-consent-scope-and-legal-authority-records",
+            "attach-enterprise-vault-and-rotation-audit-records",
+            "execute-controlled-reveal-rbac-audit-test",
+            "run-provider-vault-legal-authority-trusted-diff",
+            "independent-cloud-credential-security-review",
+        ],
+        "report_guidance": (
+            "Use credential handling as redacted triage evidence only until OAuth consent, scope, legal "
+            "authority, vault integration, controlled reveal, RBAC, rotation/revocation, trusted diff, "
+            "and independent-review evidence are attached."
+        ),
+    }
+    plan["validation_plan_sha256"] = stable_cloud_api_json_sha256(
+        {key: value for key, value in plan.items() if key != "validation_plan_sha256"}
+    )
+    return plan
+
+
 def cloud_api_report_grade_assessment() -> dict[str, object]:
     return {
         "status": "validation-required",
@@ -1784,6 +2083,11 @@ def cloud_credential_commercial_uplift_evidence(
         if isinstance(credential_handling.get("credential_authority_manifest"), Mapping)
         else {}
     )
+    report_grade_validation_plan = (
+        credential_handling.get("credential_report_grade_validation_plan")
+        if isinstance(credential_handling.get("credential_report_grade_validation_plan"), Mapping)
+        else {}
+    )
     trusted_diff = (
         credential_handling.get("credential_trusted_diff")
         if isinstance(credential_handling.get("credential_trusted_diff"), Mapping)
@@ -1820,6 +2124,7 @@ def cloud_credential_commercial_uplift_evidence(
             f"credential_storage:{credential_handling.get('credential_storage', '')}",
             f"bearer_token_env:{credential_handling.get('bearer_token_env', '')}",
             f"credential_authority_manifest_sha256:{authority_manifest.get('authority_manifest_sha256', '')}",
+            f"credential_report_grade_validation_plan_sha256:{report_grade_validation_plan.get('validation_plan_sha256', '')}",
         ],
         "credential_strategy_profile": (
             dict(credential_handling["credential_strategy_profile"])
@@ -1834,11 +2139,13 @@ def cloud_credential_commercial_uplift_evidence(
             "controlled_reveal_disabled",
             "credential_authority_profile_present",
             "credential_authority_manifest_present",
+            "credential_report_grade_validation_plan_present",
         ]
         if credential_handling.get("headers_redacted")
         and not credential_handling.get("tokens_written_to_output")
         and authority_profile
         and authority_manifest
+        and report_grade_validation_plan
         else [],
         "failed_validation_check_ids": [
             "provider_oauth_consent_record",
@@ -1865,6 +2172,16 @@ def cloud_credential_commercial_uplift_evidence(
             ),
             "credential_authority_manifest_present": bool(authority_manifest),
             "credential_authority_manifest_hash": str(authority_manifest.get("authority_manifest_sha256") or ""),
+            "credential_report_grade_validation_plan_present": bool(report_grade_validation_plan),
+            "credential_report_grade_validation_plan_hash": str(
+                report_grade_validation_plan.get("validation_plan_sha256") or ""
+            ),
+            "credential_report_grade_ready_slot_count": int(
+                report_grade_validation_plan.get("ready_slot_count") or 0
+            ),
+            "credential_report_grade_blocking_slot_count": int(
+                report_grade_validation_plan.get("blocking_slot_count") or 0
+            ),
             "raw_secret_values_stored": bool(authority_manifest.get("raw_secret_values_stored")),
             "oauth_consent_record_declared": bool(authority_manifest.get("oauth_consent_record_present")),
             "external_vault_record_declared": bool(authority_manifest.get("vault_record_present")),
@@ -2117,6 +2434,18 @@ def cloud_credential_core_accuracy_gates(
         )
         if authority_manifest.get("raw_secret_values_stored") is False:
             satisfied.append("authority manifest stores no raw secrets")
+    report_grade_validation_plan = (
+        credential_handling.get("credential_report_grade_validation_plan")
+        if isinstance(credential_handling.get("credential_report_grade_validation_plan"), Mapping)
+        else {}
+    )
+    if report_grade_validation_plan:
+        satisfied.append("credential report-grade validation plan")
+        evidence_refs.append(
+            f"credential_report_grade_validation_plan_sha256:{report_grade_validation_plan.get('validation_plan_sha256', '')}"
+        )
+        if int(report_grade_validation_plan.get("ready_slot_count") or 0) >= 8:
+            satisfied.append("credential report-grade ready slots")
     if credential_handling.get("controlled_reveal_policy") == "disabled-by-default" and not bool(
         credential_handling.get("raw_secret_reveal_allowed")
     ):
