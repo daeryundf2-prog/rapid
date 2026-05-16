@@ -1590,7 +1590,7 @@
       ],
       "expected": {
         "required_assertions": [
-          "Benchmark output preserves scale matrix, benchmark-scale-proof-manifest with covered/missing 100k/1M/10M targets, ingest/search metrics, raw latency samples, environment profile, release-threshold guardrail profile, metric/environment/threshold hashes, memory/output size, run-summary link, hardware-scale warning, #66 core_accuracy_gates, and #66 commercial_uplift_evidence."
+          "Benchmark output preserves scale matrix, benchmark-scale-proof-manifest with covered/missing 100k/1M/10M targets, ingest/search metrics, raw latency samples, environment profile, release-threshold guardrail profile, metric/environment/threshold hashes, memory/output size, run-summary link, benchmark_report_grade_validation_plan hashes/ready slots/blocking slots, hardware-scale warning, #66 core_accuracy_gates, and #66 commercial_uplift_evidence."
         ]
       },
       "notes": "Internal fixture pass; published hardware matrix remains required.",

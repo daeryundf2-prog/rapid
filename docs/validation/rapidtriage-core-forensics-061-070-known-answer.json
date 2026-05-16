@@ -66,7 +66,7 @@
       "status": "pass",
       "backlog_items": [66],
       "evidence_paths": ["docs/validation/core-forensics-061-070-fixture-evidence.json", "tests/test_rapidtriage_ops.py"],
-      "expected": {"required_assertions": ["Benchmark output preserves scale matrix, benchmark-scale-proof-manifest with covered/missing 100k/1M/10M targets, ingest/search metrics, raw latency samples, environment profile, release-threshold guardrail profile, metric/environment/threshold hashes, memory/output size, run-summary link, hardware-scale warning, trusted threshold diff status, #66 core_accuracy_gates, and #66 commercial_uplift_evidence.", "Benchmark reportability decisions block published scale-proof claims until hardware, OS, dependency, evidence-size, wall-time, memory, p95, trusted threshold manifest, and independent reproduction evidence exists."]},
+      "expected": {"required_assertions": ["Benchmark output preserves scale matrix, benchmark-scale-proof-manifest with covered/missing 100k/1M/10M targets, ingest/search metrics, raw latency samples, environment profile, release-threshold guardrail profile, metric/environment/threshold hashes, memory/output size, run-summary link, benchmark_report_grade_validation_plan hashes/ready slots/blocking slots, hardware-scale warning, trusted threshold diff status, #66 core_accuracy_gates, and #66 commercial_uplift_evidence.", "Benchmark reportability decisions block published scale-proof claims until hardware, OS, dependency, evidence-size, wall-time, memory, p95, trusted threshold manifest, release-approved comparison, and independent reproduction evidence exists."]},
       "notes": "Internal fixture pass; published hardware matrix and trusted threshold manifest remain required."
     },
     {

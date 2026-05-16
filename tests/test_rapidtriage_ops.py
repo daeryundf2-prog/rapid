@@ -571,6 +571,30 @@ class RapidTriageOpsTests(unittest.TestCase):
                 payload["benchmark_scale_proof_manifest"]["evidence_paths"]["run_summary"],
                 payload["outputs"]["run_summary"],
             )
+            validation_plan = payload["benchmark_report_grade_validation_plan"]
+            self.assertEqual(
+                validation_plan["profile_version"],
+                "benchmark-scale-report-grade-validation-plan-v1",
+            )
+            self.assertEqual(validation_plan["item_number"], 66)
+            self.assertEqual(validation_plan["scale_proof_manifest_hash"], payload["benchmark_scale_proof_manifest_hash"])
+            self.assertEqual(payload["benchmark_report_grade_validation_plan_hash"], validation_plan["validation_plan_hash"])
+            self.assertEqual(payload["report_grade_ready_slot_count"], 6)
+            self.assertEqual(payload["report_grade_blocking_slot_count"], 6)
+            self.assertIn("benchmark-scale-target-matrix", {slot["id"] for slot in validation_plan["ready_slots"]})
+            self.assertIn(
+                "benchmark-10m-representative-hardware-run",
+                {slot["id"] for slot in validation_plan["blocking_slots"]},
+            )
+            self.assertIn("10m-representative-hardware-run-required", validation_plan["blockers"])
+            self.assertIn(
+                "benchmark report-grade validation plan emitted",
+                payload["core_accuracy_gates"][0]["satisfied_checks"],
+            )
+            self.assertIn(
+                "benchmark report-grade ready slots emitted",
+                payload["core_accuracy_gates"][0]["satisfied_checks"],
+            )
             uplift = payload["commercial_uplift_evidence"]
             self.assertEqual(uplift["batch_id"], "commercial-uplift-066-070")
             self.assertEqual(uplift["item_numbers"], [66])
@@ -579,11 +603,23 @@ class RapidTriageOpsTests(unittest.TestCase):
             self.assertTrue(uplift["validated"])
             self.assertFalse(uplift["commercial_grade_ready"])
             self.assertIn("p50/p95 search latency", " ".join(uplift["large_data_controls"]))
+            self.assertIn("report-grade validation plan", " ".join(uplift["large_data_controls"]))
             self.assertIn("published 100k/1M/10M hardware and OS benchmark matrix", uplift["remaining_external_validation"])
+            self.assertIn("independent reproduction log for each target scale", uplift["remaining_external_validation"])
             self.assertIn("trusted-benchmark-hardware-threshold-diff-missing", uplift["remaining_external_validation"])
             self.assertEqual(
                 uplift["reportability_decision"]["decision"],
                 "do-not-report-benchmark-as-published-scale-proof",
+            )
+            self.assertEqual(
+                payload["functional_priority_profile"]["controls"]["benchmark_report_grade_validation_plan_hash"],
+                validation_plan["validation_plan_hash"],
+            )
+            self.assertEqual(payload["functional_priority_profile"]["controls"]["report_grade_ready_slot_count"], 6)
+            self.assertEqual(payload["functional_priority_profile"]["controls"]["report_grade_blocking_slot_count"], 6)
+            self.assertEqual(
+                payload["benchmark_report_grade_assessment"]["benchmark_report_grade_validation_plan_hash"],
+                validation_plan["validation_plan_hash"],
             )
             trusted_diff = build_benchmark_trusted_diff(payload["metrics"], payload["metrics"])
             trusted_gates = benchmark_core_accuracy_gates(
@@ -593,10 +629,12 @@ class RapidTriageOpsTests(unittest.TestCase):
                     "benchmark_scale_proof_manifest_hash": payload["benchmark_scale_proof_manifest_hash"],
                 },
                 run_summary_path=Path(payload["outputs"]["run_summary"]),
+                validation_plan=validation_plan,
                 trusted_diff=trusted_diff,
             )
             self.assertEqual(trusted_diff["status"], "pass")
             self.assertIn("benchmark scale proof manifest emitted", trusted_gates[0]["satisfied_checks"])
+            self.assertIn("benchmark report-grade validation plan emitted", trusted_gates[0]["satisfied_checks"])
             self.assertIn("trusted benchmark threshold diff pass", trusted_gates[0]["satisfied_checks"])
 
     def test_stress_plan_command_writes_large_case_runbook(self) -> None:

@@ -1012,6 +1012,8 @@ CORE_FORENSIC_ACCURACY_ITEMS: tuple[dict[str, object], ...] = (
             "release threshold profile emitted",
             "benchmark command manifest hash emitted",
             "benchmark scale proof manifest emitted",
+            "benchmark report-grade validation plan emitted",
+            "benchmark report-grade ready slots emitted",
             "hardware-scale limitation warning",
             "trusted benchmark threshold diff pass",
         ),
