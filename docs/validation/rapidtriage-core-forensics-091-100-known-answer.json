@@ -22,8 +22,8 @@
       "status": "pass",
       "backlog_items": [92],
       "evidence_paths": ["docs/validation/core-forensics-091-100-fixture-evidence.json", "tests/test_rapidtriage_case_db.py"],
-      "expected": {"required_assertions": ["Report exports preserve warning reasons, summary warning counts, warning detail metadata, severity/category counts, UX badges, validation-warning-checklist-manifest-v1 manifest hash, report guidance, validation-required state, warning UX limitation, trusted validation warning checklist diff helpers/gates, and #92 core_accuracy_gates."]},
-      "notes": "Internal fixture pass; full web badge coverage and trusted warning checklists remain blockers."
+      "expected": {"required_assertions": ["Report exports preserve warning reasons, summary warning counts, warning detail metadata, severity/category counts, UX badges, validation-warning-checklist-manifest-v1 manifest hash, validation-warning-report-grade-validation-plan-v1, plan hash/counts, report guidance, validation-required state, warning UX limitation, trusted validation warning checklist diff helpers/gates, and #92 core_accuracy_gates."]},
+      "notes": "Internal fixture pass; all-table warning badge coverage, end-to-end warning UX checks, trusted warning checklists, final report-template warning review, action playbook review, and accessibility warning-badge review remain blockers."
     },
     {
       "id": "core-forensics-093-legal-limitations",

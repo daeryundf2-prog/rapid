@@ -1664,6 +1664,10 @@ class RapidTriageOpsTests(unittest.TestCase):
                 "items[].validation_assessment.parser_confidence_report_grade_validation_plan_hash",
                 quality_by_number[91]["primary_outputs"],
             )
+            self.assertIn(
+                "items[].validation_assessment.validation_warning_report_grade_validation_plan_hash",
+                quality_by_number[92]["primary_outputs"],
+            )
             self.assertEqual(quality_by_number[95]["trusted_diff_required"], "trusted-external-tool-transcript-diff")
             acquisition_quality = payload["acquisition_quality_progress"]
             self.assertEqual(acquisition_quality["version"], "acquisition-quality-progress-v1")

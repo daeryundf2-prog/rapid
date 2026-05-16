@@ -1503,6 +1503,8 @@ CORE_FORENSIC_ACCURACY_ITEMS: tuple[dict[str, object], ...] = (
             "warning detail metadata emitted",
             "warning UX badges emitted",
             "validation warning checklist manifest hash emitted",
+            "validation warning report-grade validation plan",
+            "validation warning report-grade ready slots",
             "trusted validation warning checklist diff pass",
         ),
     },

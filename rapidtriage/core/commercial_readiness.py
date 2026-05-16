@@ -3152,6 +3152,7 @@ def report_quality_evidence_chain() -> list[dict[str, object]]:
                 "items[].validation_assessment.warning_details",
                 "items[].validation_assessment.warning_ux_badges",
                 "items[].validation_assessment.validation_warning_checklist_manifest.manifest_hash",
+                "items[].validation_assessment.validation_warning_report_grade_validation_plan_hash",
                 "case-db-report-export.summary.validation_warning_count",
             ],
             "trusted_diff": "trusted-validation-warning-checklist-diff",

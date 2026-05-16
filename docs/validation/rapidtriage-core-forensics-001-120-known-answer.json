@@ -2143,10 +2143,10 @@
       ],
       "expected": {
         "required_assertions": [
-          "Report exports preserve warning reasons, summary warning counts, warning detail metadata, severity/category counts, UX badges, validation-warning-checklist-manifest-v1 manifest hash, report guidance, validation-required state, warning UX limitation, and #92 core_accuracy_gates."
+          "Report exports preserve warning reasons, summary warning counts, warning detail metadata, severity/category counts, UX badges, validation-warning-checklist-manifest-v1 manifest hash, validation-warning-report-grade-validation-plan-v1, plan hash/counts, report guidance, validation-required state, warning UX limitation, and #92 core_accuracy_gates."
         ]
       },
-      "notes": "Internal fixture pass; full web badge coverage remains blocker.",
+      "notes": "Internal fixture pass; all-table warning badge coverage, end-to-end warning UX checks, trusted warning checklists, final report-template warning review, action playbook review, and accessibility warning-badge review remain blockers.",
       "source_manifest": "docs/validation/rapidtriage-core-forensics-091-100-known-answer.json"
     },
     {

@@ -15,8 +15,8 @@
       "item": 92,
       "title": "Validation-required warning UX",
       "test_files": ["tests/test_rapidtriage_case_db.py"],
-      "assertions": ["Report exports preserve warning reasons, summary warning counts, warning detail metadata, severity/category counts, UX badges, validation-warning-checklist-manifest-v1 manifest hash, guidance, validation-required state, warning UX limitation, trusted validation warning checklist diff helpers/gates, and #92 core_accuracy_gates."],
-      "remaining_external_validation": ["End-to-end web badge checks and trusted warning checklists across every large result table."]
+      "assertions": ["Report exports preserve warning reasons, summary warning counts, warning detail metadata, severity/category counts, UX badges, validation-warning-checklist-manifest-v1 manifest hash, validation-warning-report-grade-validation-plan-v1, plan hash/counts, guidance, validation-required state, warning UX limitation, trusted validation warning checklist diff helpers/gates, and #92 core_accuracy_gates."],
+      "remaining_external_validation": ["All-table warning badge coverage, end-to-end warning UX checks, trusted warning checklists, final report-template warning review, action playbook review, and accessibility warning-badge review."]
     },
     {
       "item": 93,

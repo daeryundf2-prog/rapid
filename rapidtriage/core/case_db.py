@@ -111,6 +111,15 @@ PARSER_CONFIDENCE_REPORT_GRADE_BLOCKERS = [
     "release-parser-confidence-policy-lock-required",
 ]
 PARSER_CONFIDENCE_TRUSTED_DIFF_BLOCKER_91 = "trusted-parser-confidence-calibration-diff-missing"
+VALIDATION_WARNING_REPORT_GRADE_VALIDATION_PLAN_VERSION = "validation-warning-report-grade-validation-plan-v1"
+VALIDATION_WARNING_REPORT_GRADE_BLOCKERS = [
+    "trusted-validation-warning-checklist-diff-missing",
+    "all-table-warning-badge-coverage-required",
+    "warning-ux-e2e-required",
+    "report-template-warning-rendering-review-required",
+    "warning-action-playbook-review-required",
+    "accessibility-warning-badge-review-required",
+]
 VALIDATION_WARNING_TRUSTED_DIFF_BLOCKER_92 = "trusted-validation-warning-checklist-diff-missing"
 LEGAL_LIMITATION_TRUSTED_DIFF_BLOCKER_93 = "trusted-legal-limitation-wording-diff-missing"
 REPORT_QUALITY_TRUSTED_TOOLS = {
@@ -8065,6 +8074,191 @@ def build_validation_warning_checklist_manifest(warnings: Sequence[str]) -> dict
     return {**manifest_core, "manifest_hash": manifest_hash}
 
 
+def build_validation_warning_report_grade_validation_plan(
+    *,
+    warnings: Sequence[str],
+    warning_manifest: Mapping[str, object],
+    trusted_diff: Mapping[str, object] | None,
+) -> dict[str, object]:
+    trusted_status = str(trusted_diff.get("status") or "missing") if trusted_diff else "missing"
+    warning_details = (
+        warning_manifest.get("warnings")
+        if isinstance(warning_manifest.get("warnings"), list)
+        else []
+    )
+    ux_badges = (
+        warning_manifest.get("ux_badges")
+        if isinstance(warning_manifest.get("ux_badges"), list)
+        else []
+    )
+    severity_counts = (
+        warning_manifest.get("severity_counts")
+        if isinstance(warning_manifest.get("severity_counts"), Mapping)
+        else {}
+    )
+    category_counts = (
+        warning_manifest.get("category_counts")
+        if isinstance(warning_manifest.get("category_counts"), Mapping)
+        else {}
+    )
+    action_matrix = (
+        warning_manifest.get("warning_action_matrix")
+        if isinstance(warning_manifest.get("warning_action_matrix"), list)
+        else []
+    )
+    ready_slots = [
+        {
+            "slot_id": "warning-reasons-and-details",
+            "status": "complete",
+            "evidence": {
+                "warning_count": len(warnings),
+                "detail_count": len(warning_details),
+            },
+        },
+        {
+            "slot_id": "severity-and-category-counts",
+            "status": "complete",
+            "evidence": {
+                "severity_counts": dict(severity_counts),
+                "category_counts": dict(category_counts),
+            },
+        },
+        {
+            "slot_id": "warning-ux-badges",
+            "status": "complete",
+            "evidence": {
+                "ux_badges": list(ux_badges),
+                "badge_count": len(ux_badges),
+            },
+        },
+        {
+            "slot_id": "warning-action-matrix",
+            "status": "complete",
+            "evidence": {
+                "warning_action_matrix_hash": str(warning_manifest.get("warning_action_matrix_hash") or ""),
+                "action_count": len(action_matrix),
+            },
+        },
+        {
+            "slot_id": "validation-required-state",
+            "status": "complete",
+            "evidence": {
+                "validation_required": bool(warning_manifest.get("validation_required")),
+                "commercial_claim_allowed": bool(warning_manifest.get("commercial_claim_allowed")),
+            },
+        },
+        {
+            "slot_id": "warning-checklist-manifest",
+            "status": "complete",
+            "evidence": {
+                "manifest_hash": str(warning_manifest.get("manifest_hash") or ""),
+                "trusted_checklist_required": bool(warning_manifest.get("trusted_checklist_required")),
+            },
+        },
+        {
+            "slot_id": "trusted-warning-checklist-diff-disclosure",
+            "status": "complete",
+            "evidence": {
+                "trusted_diff_status": trusted_status,
+                "trusted_tool": str((trusted_diff or {}).get("trusted_tool") or ""),
+            },
+        },
+    ]
+    blocking_slots: list[dict[str, object]] = []
+    if len(warning_details) != len(warnings):
+        blocking_slots.append(
+            {
+                "slot_id": "warning-detail-completeness",
+                "status": "blocked",
+                "blocker": "warning-detail-completeness-required",
+                "required_evidence": "warning detail metadata for every warning reason",
+            }
+        )
+    if warnings and not ux_badges:
+        blocking_slots.append(
+            {
+                "slot_id": "warning-badge-presence",
+                "status": "blocked",
+                "blocker": "warning-badge-presence-required",
+                "required_evidence": "UX badge for every validation warning family",
+            }
+        )
+    if not warning_manifest.get("manifest_hash") or not warning_manifest.get("warning_action_matrix_hash"):
+        blocking_slots.append(
+            {
+                "slot_id": "warning-checklist-manifest-complete",
+                "status": "blocked",
+                "blocker": "validation-warning-checklist-manifest-required",
+                "required_evidence": "warning checklist manifest hash and action matrix hash",
+            }
+        )
+    if trusted_status != "pass":
+        blocking_slots.append(
+            {
+                "slot_id": "trusted-validation-warning-checklist-diff",
+                "status": "external-required",
+                "blocker": VALIDATION_WARNING_TRUSTED_DIFF_BLOCKER_92,
+                "required_evidence": "trusted warning checklist diff over warning reasons, badges, actions, and severity/category counts",
+            }
+        )
+    blocking_slots.extend(
+        [
+            {
+                "slot_id": "all-table-warning-badge-coverage",
+                "status": "external-required",
+                "blocker": "all-table-warning-badge-coverage-required",
+                "required_evidence": "warning badges visible in every artifact/search/report table that can expose partial evidence",
+            },
+            {
+                "slot_id": "warning-ux-e2e",
+                "status": "external-required",
+                "blocker": "warning-ux-e2e-required",
+                "required_evidence": "end-to-end UX checks proving warnings persist from table row to detail view to report export",
+            },
+            {
+                "slot_id": "report-template-warning-rendering-review",
+                "status": "external-required",
+                "blocker": "report-template-warning-rendering-review-required",
+                "required_evidence": "final report template review proving warning badges/text are visible and not collapsed away",
+            },
+            {
+                "slot_id": "warning-action-playbook-review",
+                "status": "external-required",
+                "blocker": "warning-action-playbook-review-required",
+                "required_evidence": "forensic lead review of recommended actions and escalation wording per warning family",
+            },
+            {
+                "slot_id": "accessibility-warning-badge-review",
+                "status": "external-required",
+                "blocker": "accessibility-warning-badge-review-required",
+                "required_evidence": "accessibility review for warning badge color, text, and keyboard/screen-reader exposure",
+            },
+        ]
+    )
+    plan_core: dict[str, object] = {
+        "profile_version": VALIDATION_WARNING_REPORT_GRADE_VALIDATION_PLAN_VERSION,
+        "item_number": 92,
+        "commercial_gap_ids": [VALIDATION_WARNING_UX_GAP_ID],
+        "plan_context": "case-db-report-item-validation-warning-ux",
+        "warning_count": len(warnings),
+        "warning_manifest_hash": str(warning_manifest.get("manifest_hash") or ""),
+        "warning_action_matrix_hash": str(warning_manifest.get("warning_action_matrix_hash") or ""),
+        "ux_badges": list(ux_badges),
+        "severity_counts": dict(severity_counts),
+        "category_counts": dict(category_counts),
+        "trusted_diff_status": trusted_status,
+        "ready_slots": ready_slots,
+        "blocking_slots": blocking_slots,
+        "ready_slot_count": len(ready_slots),
+        "blocking_slot_count": len(blocking_slots),
+        "external_blocker_catalog": list(VALIDATION_WARNING_REPORT_GRADE_BLOCKERS),
+        "blockers": sorted({str(slot.get("blocker") or "") for slot in blocking_slots if slot.get("blocker")}),
+        "commercial_claim_allowed": False,
+        "reporting_boundary": "This plan makes validation warnings visible in the export payload, but commercial UX claims require all-table badge coverage, e2e warning persistence, report-template review, action-playbook review, accessibility review, and trusted checklist manifests.",
+    }
+    return {**plan_core, "validation_plan_sha256": stable_payload_sha256(plan_core)}
+
+
 def custody_workflow_functional_profile(
     *,
     evidence_sources: Sequence[Mapping[str, object]],
@@ -8696,6 +8890,11 @@ def build_report_item_validation_assessment(
         confidence_manifest=confidence_manifest,
         trusted_diff=parser_confidence_trusted_diff,
     )
+    validation_warning_report_grade_validation_plan = build_validation_warning_report_grade_validation_plan(
+        warnings=warnings,
+        warning_manifest=warning_manifest,
+        trusted_diff=validation_warning_trusted_diff,
+    )
     blockers = [
         blocker
         for blocker, diff in (
@@ -8704,7 +8903,13 @@ def build_report_item_validation_assessment(
         )
         if not diff or diff.get("status") != "pass"
     ]
-    blockers = sorted({*blockers, *parser_confidence_report_grade_validation_plan["blockers"]})
+    blockers = sorted(
+        {
+            *blockers,
+            *parser_confidence_report_grade_validation_plan["blockers"],
+            *validation_warning_report_grade_validation_plan["blockers"],
+        }
+    )
     return {
         "commercial_gap_ids": [PARSER_CONFIDENCE_GAP_ID, VALIDATION_WARNING_UX_GAP_ID],
         "parser_confidence": parser_confidence,
@@ -8735,6 +8940,16 @@ def build_report_item_validation_assessment(
         "validation_warning_checklist_manifest": warning_manifest,
         "validation_warning_manifest_hash": warning_manifest["manifest_hash"],
         "warning_action_matrix_hash": warning_manifest["warning_action_matrix_hash"],
+        "validation_warning_report_grade_validation_plan": validation_warning_report_grade_validation_plan,
+        "validation_warning_report_grade_validation_plan_hash": validation_warning_report_grade_validation_plan[
+            "validation_plan_sha256"
+        ],
+        "validation_warning_report_grade_ready_slot_count": validation_warning_report_grade_validation_plan[
+            "ready_slot_count"
+        ],
+        "validation_warning_report_grade_blocking_slot_count": validation_warning_report_grade_validation_plan[
+            "blocking_slot_count"
+        ],
         "trusted_parser_confidence_diff": dict(parser_confidence_trusted_diff)
         if parser_confidence_trusted_diff
         else missing_report_quality_trusted_diff(
@@ -8765,6 +8980,7 @@ def build_report_item_validation_assessment(
                 warnings=warnings,
                 warning_manifest=warning_manifest,
                 trusted_diff=validation_warning_trusted_diff,
+                report_grade_validation_plan=validation_warning_report_grade_validation_plan,
             ),
         ],
         "guidance": "Resolve validation warnings and verify source evidence before using this item as a final report conclusion.",
@@ -11345,6 +11561,7 @@ def validation_warning_ux_core_accuracy_gates(
     warnings: Sequence[str],
     warning_manifest: Mapping[str, object] | None = None,
     trusted_diff: Mapping[str, object] | None = None,
+    report_grade_validation_plan: Mapping[str, object] | None = None,
 ) -> list[dict[str, object]]:
     satisfied = [
         "validation warning reasons emitted",
@@ -11361,6 +11578,10 @@ def validation_warning_ux_core_accuracy_gates(
         satisfied.append("validation warning checklist manifest hash emitted")
     if warning_manifest and warning_manifest.get("warning_action_matrix_hash"):
         satisfied.append("warning action matrix hash emitted")
+    if report_grade_validation_plan and report_grade_validation_plan.get("validation_plan_sha256"):
+        satisfied.append("validation warning report-grade validation plan")
+    if report_grade_validation_plan and int(report_grade_validation_plan.get("ready_slot_count") or 0) >= 7:
+        satisfied.append("validation warning report-grade ready slots")
     if trusted_diff and trusted_diff.get("status") == "pass":
         satisfied.append("trusted validation warning checklist diff pass")
     return [
@@ -11372,6 +11593,7 @@ def validation_warning_ux_core_accuracy_gates(
                 f"warning_manifest_hash:{(warning_manifest or {}).get('manifest_hash', '')}",
                 f"warning_action_matrix_hash:{(warning_manifest or {}).get('warning_action_matrix_hash', '')}",
                 f"ux_badges:{','.join((warning_manifest or {}).get('ux_badges', []) if isinstance((warning_manifest or {}).get('ux_badges'), list) else [])}",
+                f"validation_warning_report_grade_validation_plan_hash:{(report_grade_validation_plan or {}).get('validation_plan_sha256', '')}",
             ],
         )
     ]
