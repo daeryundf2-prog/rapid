@@ -402,6 +402,27 @@ CHAT_APP_FIELD_ALIASES = {
     "schema_version": ("schema_version", "SchemaVersion", "schema", "Schema"),
     "source_record_id": ("source_record_id", "SourceRecordId", "RecordId", "record_id"),
 }
+CHAT_APP_SERVICES = {
+    "discord",
+    "facebook",
+    "imessage",
+    "instagram",
+    "kakaotalk",
+    "line",
+    "matrix",
+    "messenger",
+    "session",
+    "signal",
+    "skype",
+    "slack",
+    "telegram",
+    "threema",
+    "viber",
+    "wechat",
+    "whatsapp",
+    "wickr",
+    "wire",
+}
 EMAIL_FIELD_ALIASES = {
     "message_id": ("message_id", "MessageId", "InternetMessageId", "internet_message_id", "Message-ID"),
     "subject": ("subject", "Subject"),
@@ -916,6 +937,10 @@ def rows_from_mapping(item: Mapping[str, object]) -> Iterable[dict[str, object]]
     yield from nested_ai_transcript_rows(item, flattened)
     yield from nested_mobile_export_rows(item, flattened)
     yield from nested_mobile_app_rows(item, flattened)
+    yield from nested_chat_app_rows(item, flattened)
+    yield from nested_email_rows(item, flattened)
+    yield from nested_cloud_export_rows(item, flattened)
+    yield from nested_cloud_api_rows(item, flattened)
 
 
 def nested_browser_rows(
@@ -1049,11 +1074,19 @@ def nested_mobile_export_rows(
     item: Mapping[str, object],
     flattened_parent: Mapping[str, object],
 ) -> Iterable[dict[str, object]]:
+    artifact_hint = row_family_hint(flattened_parent)
+    source_tool = first_value(
+        flattened_parent,
+        ("source_tool", "details.source_tool", "vendor_tool", "details.vendor_tool", "tool", "details.tool"),
+    )
+    mobile_source = normalize_mobile_identifier(source_tool)
+    if not re.search(
+        r"\b(mobile|cellebrite|xry|graykey|axiom|ufed|ios|android|phone|backup)\b",
+        artifact_hint,
+    ) and mobile_source not in {"cellebrite", "xry", "graykey", "axiom", "ufed", "magnet-axiom", "rapidtriage"}:
+        return
     parent_values = {
-        "source_tool": first_value(
-            flattened_parent,
-            ("source_tool", "details.source_tool", "vendor_tool", "details.vendor_tool", "tool", "details.tool"),
-        ),
+        "source_tool": source_tool,
         "service": first_value(
             flattened_parent,
             ("service", "details.service", "app", "details.app", "platform", "details.platform"),
@@ -1192,6 +1225,184 @@ def nested_mobile_app_rows(
                 if value not in (None, ""):
                     row.setdefault(key, value)
             yield row
+
+
+def nested_chat_app_rows(
+    item: Mapping[str, object],
+    flattened_parent: Mapping[str, object],
+) -> Iterable[dict[str, object]]:
+    artifact_hint = row_family_hint(flattened_parent)
+    service = normalize_mobile_identifier(
+        first_value(flattened_parent, ("service", "details.service", "app", "details.app", "platform", "details.platform"))
+    )
+    if re.search(r"\b(mobile-export|mobile-vendor|ios-backup|android-backup|vendor-export)\b", artifact_hint):
+        return
+    if not re.search(
+        r"\b(kakaotalk|whatsapp|telegram|signal|wechat|line|discord|instagram|facebook|messenger|chat|slack|matrix|viber|skype)\b",
+        artifact_hint,
+    ) and service not in CHAT_APP_SERVICES:
+        return
+    parent_values = {
+        "service": first_value(
+            flattened_parent,
+            ("service", "details.service", "app", "details.app", "platform", "details.platform"),
+        ),
+        "profile": first_value(flattened_parent, ("profile", "details.profile", "account", "details.account")),
+        "conversation_id": first_value(
+            flattened_parent,
+            ("conversation_id", "details.conversation_id", "chat_id", "details.chat_id", "thread_id", "details.thread_id"),
+        ),
+        "conversation_title": first_value(
+            flattened_parent,
+            ("conversation_title", "details.conversation_title", "chat_name", "details.chat_name"),
+        ),
+    }
+    for nested in first_nested_list(
+        item,
+        (
+            ("details", "messages"),
+            ("messages",),
+            ("details", "message_rows"),
+            ("message_rows",),
+            ("details", "chat_messages"),
+            ("chat_messages",),
+        ),
+    ):
+        if not isinstance(nested, Mapping):
+            continue
+        row = flatten_mapping(nested)
+        row.setdefault("artifact_type", "chat-message")
+        for key, value in parent_values.items():
+            if value not in (None, ""):
+                row.setdefault(key, value)
+        yield row
+
+
+def nested_email_rows(
+    item: Mapping[str, object],
+    flattened_parent: Mapping[str, object],
+) -> Iterable[dict[str, object]]:
+    artifact_hint = row_family_hint(flattened_parent)
+    has_mailbox_context = bool(
+        first_value(flattened_parent, ("mailbox", "details.mailbox", "mailbox_name", "details.mailbox_name"))
+        or first_value(flattened_parent, ("folder", "details.folder", "folder_path", "details.folder_path"))
+    )
+    if not re.search(r"\b(email|mail|mbox|eml|emlx|pst|ost|msg|gmail)\b", artifact_hint) and not has_mailbox_context:
+        return
+    parent_values = {
+        "mailbox": first_value(flattened_parent, ("mailbox", "details.mailbox", "mailbox_name", "details.mailbox_name")),
+        "folder": first_value(flattened_parent, ("folder", "details.folder", "folder_path", "details.folder_path")),
+        "source_path": first_value(flattened_parent, ("source_path", "details.source_path", "path", "details.path")),
+    }
+    for nested in first_nested_list(
+        item,
+        (
+            ("details", "messages"),
+            ("messages",),
+            ("details", "email_messages"),
+            ("email_messages",),
+            ("details", "mailbox_messages"),
+            ("mailbox_messages",),
+            ("details", "exported_messages"),
+            ("exported_messages",),
+        ),
+    ):
+        if not isinstance(nested, Mapping):
+            continue
+        row = flatten_mapping(nested)
+        row.setdefault("artifact_type", "email-message")
+        for key, value in parent_values.items():
+            if value not in (None, ""):
+                row.setdefault(key, value)
+        yield row
+
+
+def nested_cloud_export_rows(
+    item: Mapping[str, object],
+    flattened_parent: Mapping[str, object],
+) -> Iterable[dict[str, object]]:
+    artifact_hint = row_family_hint(flattened_parent)
+    provider = first_value(
+        flattened_parent,
+        ("provider", "details.provider", "cloud_family", "details.cloud_family", "service", "details.service"),
+    )
+    product = first_value(
+        flattened_parent,
+        ("product", "details.product", "workload", "details.workload", "app", "details.app"),
+    )
+    if not re.search(
+        r"\b(cloud|takeout|icloud|m365|onedrive|teams|sharepoint|purview|drive|google)\b",
+        artifact_hint,
+    ) and not (provider and product):
+        return
+    parent_values = {
+        "provider": provider,
+        "product": product,
+    }
+    for nested in first_nested_list(
+        item,
+        (
+            ("details", "rows"),
+            ("rows",),
+            ("details", "files"),
+            ("files",),
+            ("details", "items"),
+            ("items",),
+            ("details", "events"),
+            ("events",),
+            ("details", "messages"),
+            ("messages",),
+            ("details", "audit_rows"),
+            ("audit_rows",),
+        ),
+    ):
+        if not isinstance(nested, Mapping):
+            continue
+        row = flatten_mapping(nested)
+        row.setdefault("artifact_type", "cloud-export-row")
+        for key, value in parent_values.items():
+            if value not in (None, ""):
+                row.setdefault(key, value)
+        yield row
+
+
+def nested_cloud_api_rows(
+    item: Mapping[str, object],
+    flattened_parent: Mapping[str, object],
+) -> Iterable[dict[str, object]]:
+    artifact_hint = row_family_hint(flattened_parent)
+    endpoint = first_value(flattened_parent, ("endpoint", "details.endpoint", "url", "details.url"))
+    provider = first_value(flattened_parent, ("provider", "details.provider", "service", "details.service"))
+    if not re.search(r"\b(cloud-api|api-response|oauth|graph-api|provider-api|api|collection)\b", artifact_hint) and not (
+        endpoint and provider
+    ):
+        return
+    parent_values = {
+        "provider": provider,
+        "endpoint": endpoint,
+        "method": first_value(flattened_parent, ("method", "details.method", "http_method", "details.http_method")),
+    }
+    for nested in first_nested_list(
+        item,
+        (
+            ("details", "responses"),
+            ("responses",),
+            ("details", "pages"),
+            ("pages",),
+            ("details", "requests"),
+            ("requests",),
+            ("details", "api_rows"),
+            ("api_rows",),
+        ),
+    ):
+        if not isinstance(nested, Mapping):
+            continue
+        row = flatten_mapping(nested)
+        row.setdefault("artifact_type", "cloud-api-response")
+        for key, value in parent_values.items():
+            if value not in (None, ""):
+                row.setdefault(key, value)
+        yield row
 
 
 def nested_usn_state_replay_rows(
@@ -1342,6 +1553,12 @@ def first_value(row: Mapping[str, object], fields: Iterable[str]) -> object | No
         if value is not None and str(value).strip():
             return value
     return None
+
+
+def row_family_hint(row: Mapping[str, object]) -> str:
+    return normalize_mobile_identifier(
+        first_value(row, ("artifact_type", "ArtifactType", "artifact_family", "ArtifactFamily", "source_type", "SourceType"))
+    )
 
 
 def compare_datasets(
@@ -2693,11 +2910,12 @@ def has_ai_transcript_signal(row: Mapping[str, object]) -> bool:
     )
     if re.search(r"\b(ai-service|ai-transcript|ai-conversation|chatgpt|claude|gemini|perplexity|copilot)\b", artifact_hint):
         return True
-    service = first_value(row, AI_TRANSCRIPT_FIELD_ALIASES["ai_service"])
+    service = normalize_mobile_identifier(first_value(row, AI_TRANSCRIPT_FIELD_ALIASES["ai_service"]))
     question = first_value(row, AI_TRANSCRIPT_FIELD_ALIASES["question"])
     answer = first_value(row, AI_TRANSCRIPT_FIELD_ALIASES["answer"])
     pair_id = first_value(row, AI_TRANSCRIPT_FIELD_ALIASES["pair_id"])
-    return bool(service and (pair_id or (question and answer)))
+    known_ai_services = {"chatgpt", "openai", "claude", "anthropic", "gemini", "bard", "perplexity", "copilot"}
+    return bool(service in known_ai_services and (pair_id or (question and answer)))
 
 
 def chat_app_key_variants(row: Mapping[str, object]) -> list[str]:

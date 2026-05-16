@@ -4236,6 +4236,176 @@ class RapidTriageOpsTests(unittest.TestCase):
             self.assertEqual(field_comparison["missing_common_field_count"], 0)
             self.assertIn("response_hash", field_comparison["compared_canonical_fields"])
 
+    def test_cross_tool_validate_expands_nested_messaging_email_cloud_rows(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+
+            chat_rapid = root / "rapid-chat-nested.json"
+            chat_trusted = root / "chat-export.csv"
+            chat_rapid.write_text(
+                json.dumps(
+                    [
+                        {
+                            "artifact_type": "chat-export-source",
+                            "details": {
+                                "service": "Telegram",
+                                "conversation_id": "chat-9",
+                                "messages": [
+                                    {
+                                        "message_id": "m-009",
+                                        "timestamp": "2024-04-01T09:10:11+00:00",
+                                        "sender": "@alice",
+                                        "recipient": "@bob",
+                                        "message_text_hash": "4" * 64,
+                                        "read_state": "read",
+                                    }
+                                ],
+                            },
+                        }
+                    ]
+                ),
+                encoding="utf-8",
+            )
+            chat_trusted.write_text(
+                "Service,ConversationId,MessageId,Timestamp,Sender,Recipient,MessageTextHash,ReadState\n"
+                f"telegram,chat-9,m-009,2024-04-01T09:10:11+00:00,@alice,@bob,{('4' * 64)},read\n",
+                encoding="utf-8",
+            )
+
+            email_rapid = root / "rapid-email-nested.json"
+            email_trusted = root / "email-export.csv"
+            email_rapid.write_text(
+                json.dumps(
+                    [
+                        {
+                            "artifact_type": "email-mailbox-export",
+                            "details": {
+                                "mailbox": "case.pst",
+                                "folder": "Inbox",
+                                "messages": [
+                                    {
+                                        "message_id": "<nested-001@example.test>",
+                                        "subject": "Nested Case",
+                                        "sent_at": "2024-04-02T09:10:11+00:00",
+                                        "sender": "carol@example.test",
+                                        "recipient": "dan@example.test",
+                                        "attachment_count": 1,
+                                        "body_hash": "5" * 64,
+                                    }
+                                ],
+                            },
+                        }
+                    ]
+                ),
+                encoding="utf-8",
+            )
+            email_trusted.write_text(
+                "InternetMessageId,Subject,Date,From,To,Mailbox,Folder,AttachmentCount,BodyHash\n"
+                f"nested-001@example.test,nested case,2024-04-02T09:10:11+00:00,carol@example.test,"
+                f"dan@example.test,case.pst,Inbox,1,{('5' * 64)}\n",
+                encoding="utf-8",
+            )
+
+            cloud_rapid = root / "rapid-cloud-nested.json"
+            cloud_trusted = root / "takeout-nested.csv"
+            cloud_rapid.write_text(
+                json.dumps(
+                    [
+                        {
+                            "artifact_type": "cloud-export-source",
+                            "details": {
+                                "provider": "google",
+                                "product": "drive",
+                                "files": [
+                                    {
+                                        "record_id": "rec-2",
+                                        "item_id": "file-10",
+                                        "timestamp": "2024-04-03T09:10:11+00:00",
+                                        "actor": "alice@example.test",
+                                        "target": "/Drive/nested.docx",
+                                        "action": "create",
+                                        "hash": "6" * 64,
+                                        "size": 8192,
+                                    }
+                                ],
+                            },
+                        }
+                    ]
+                ),
+                encoding="utf-8",
+            )
+            cloud_trusted.write_text(
+                "Provider,Product,CloudRecordId,ItemId,Timestamp,Actor,Target,Action,Hash,Size\n"
+                f"google,drive,rec-2,file-10,2024-04-03T09:10:11+00:00,alice@example.test,"
+                f"/Drive/nested.docx,create,{('6' * 64)},8192\n",
+                encoding="utf-8",
+            )
+
+            api_rapid = root / "rapid-api-nested.json"
+            api_trusted = root / "api-nested.csv"
+            api_rapid.write_text(
+                json.dumps(
+                    [
+                        {
+                            "artifact_type": "cloud-api-collection",
+                            "details": {
+                                "provider": "m365",
+                                "endpoint": "https://graph.microsoft.com/v1.0/users",
+                                "method": "GET",
+                                "responses": [
+                                    {
+                                        "request_id": "req-2",
+                                        "status_code": 200,
+                                        "response_hash": "7" * 64,
+                                        "item_count": 12,
+                                        "page_token": "next-2",
+                                    }
+                                ],
+                            },
+                        }
+                    ]
+                ),
+                encoding="utf-8",
+            )
+            api_trusted.write_text(
+                "RequestId,Provider,Endpoint,Method,StatusCode,ResponseHash,ItemCount,PageToken\n"
+                f"req-2,m365,https://graph.microsoft.com/v1.0/users,GET,200,{('7' * 64)},12,next-2\n",
+                encoding="utf-8",
+            )
+
+            checks = [
+                (chat_rapid, chat_trusted, "service-export", "32", "chat_app_field_comparison", "message_text_hash"),
+                (email_rapid, email_trusted, "readpst", "36", "email_field_comparison", "body_hash"),
+                (cloud_rapid, cloud_trusted, "takeout", "37", "cloud_export_field_comparison", "record_id"),
+                (api_rapid, api_trusted, "graph-api", "40", "cloud_api_field_comparison", "response_hash"),
+            ]
+            for rapid_output, trusted_output, tool_name, backlog_item, comparison_key, expected_field in checks:
+                stdout = io.StringIO()
+                with contextlib.redirect_stdout(stdout):
+                    exit_code = main(
+                        [
+                            "cross-tool-validate",
+                            "--rapid-output",
+                            str(rapid_output),
+                            "--reference-output",
+                            f"{tool_name}={trusted_output}",
+                            "--backlog-item",
+                            backlog_item,
+                            "--min-overlap",
+                            "1.0",
+                            "--json",
+                        ]
+                    )
+
+                self.assertEqual(exit_code, 0)
+                payload = json.loads(stdout.getvalue())
+                field_comparison = payload["comparisons"][0][comparison_key]
+                self.assertEqual(payload["status"], "pass")
+                self.assertGreaterEqual(field_comparison["common_record_count"], 1)
+                self.assertEqual(field_comparison["mismatch_count"], 0)
+                self.assertEqual(field_comparison["missing_common_field_count"], 0)
+                self.assertIn(expected_field, field_comparison["compared_canonical_fields"])
+
     def test_image_workflow_validate_command_emits_trusted_diff(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             root = Path(tmp_dir)
