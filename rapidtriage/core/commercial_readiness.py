@@ -3582,6 +3582,7 @@ def enterprise_governance_evidence_chain() -> list[dict[str, object]]:
             "primary_outputs": [
                 "enterprise-policy.license_activation",
                 "enterprise-policy.license_activation.license_evidence_manifest.manifest_hash",
+                "enterprise-policy.license_activation.license_report_grade_validation_plan_hash",
                 "enterprise-policy.license_activation.license_evidence_slots.license_authority_review",
                 "enterprise-policy.license_activation.license_evidence_slots.offline_activation_smoke",
             ],

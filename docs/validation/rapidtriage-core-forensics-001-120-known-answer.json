@@ -2471,10 +2471,10 @@
       ],
       "expected": {
         "required_assertions": [
-          "Enterprise policy preserves license requirement state, offline license hash when present, no network activation, no evidence touch, license-activation-evidence-manifest-v1 manifest hash/evidence slots, paid activation blocker, trusted license authority diff helpers/gates, and #107 core_accuracy_gates."
+          "Enterprise policy preserves license requirement state, offline license hash when present, no network activation, no evidence touch, license-activation-evidence-manifest-v1 manifest hash/evidence slots, license-activation-report-grade-validation-plan-v1 ready/blocking slots, paid activation/key-custody blockers, trusted license authority diff helpers/gates, and #107 core_accuracy_gates."
         ]
       },
-      "notes": "Internal fixture pass; paid activation and trusted license authority review remain optional external work.",
+      "notes": "Internal fixture pass; release-host offline activation smoke, evidence-touch audit, paid-flow decision signoff, key custody review, and trusted license authority review remain external.",
       "source_manifest": "docs/validation/rapidtriage-core-forensics-101-120-known-answer.json"
     },
     {

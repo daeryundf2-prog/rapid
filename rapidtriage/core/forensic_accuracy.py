@@ -1798,6 +1798,8 @@ CORE_FORENSIC_ACCURACY_ITEMS: tuple[dict[str, object], ...] = (
             "paid activation blocker disclosed",
             "license evidence manifest hash emitted",
             "license evidence slots emitted",
+            "license report-grade validation plan",
+            "license report-grade ready slots",
             "trusted license authority diff pass",
         ),
     },

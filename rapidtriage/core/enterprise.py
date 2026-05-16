@@ -25,6 +25,16 @@ LOCAL_ONLY_REPORT_GRADE_BLOCKERS = [
     "independent-network-egress-review-required",
 ]
 LICENSE_TRUSTED_DIFF_BLOCKER_107 = "trusted-license-authority-diff-missing"
+LICENSE_REPORT_GRADE_VALIDATION_PLAN_VERSION = "license-activation-report-grade-validation-plan-v1"
+LICENSE_REPORT_GRADE_BLOCKERS = [
+    LICENSE_TRUSTED_DIFF_BLOCKER_107,
+    "offline-activation-smoke-required",
+    "license-evidence-touch-audit-required",
+    "paid-flow-decision-signoff-required",
+    "release-host-license-policy-smoke-required",
+    "independent-license-authority-review-required",
+    "license-key-custody-review-required",
+]
 RBAC_TRUSTED_DIFF_BLOCKER_108 = "trusted-rbac-enforcement-diff-missing"
 MULTI_USER_TRUSTED_DIFF_BLOCKER_109 = "trusted-multi-user-server-review-diff-missing"
 COLLABORATION_AUDIT_TRUSTED_DIFF_BLOCKER_110 = "trusted-collaboration-audit-diff-missing"
@@ -266,6 +276,33 @@ def build_enterprise_policy() -> dict[str, object]:
         trusted_diff=policy["license_activation"]["trusted_license_diff"],
         evidence_manifest=policy["license_activation"]["license_evidence_manifest"],
     )
+    policy["license_activation"]["license_report_grade_validation_plan"] = (
+        build_license_activation_report_grade_validation_plan(
+            license_activation=policy["license_activation"],
+            license_record=license_record,
+            evidence_manifest=policy["license_activation"]["license_evidence_manifest"],
+            trusted_diff=policy["license_activation"]["trusted_license_diff"],
+        )
+    )
+    policy["license_activation"]["license_report_grade_validation_plan_hash"] = policy["license_activation"][
+        "license_report_grade_validation_plan"
+    ]["validation_plan_hash"]
+    policy["license_activation"]["license_report_grade_ready_slot_count"] = policy["license_activation"][
+        "license_report_grade_validation_plan"
+    ]["ready_slot_count"]
+    policy["license_activation"]["license_report_grade_blocking_slot_count"] = policy["license_activation"][
+        "license_report_grade_validation_plan"
+    ]["blocking_slot_count"]
+    license_report_blockers = policy["license_activation"]["license_report_grade_validation_plan"]["blockers"]
+    policy["license_activation"]["blockers"] = sorted(
+        {*policy["license_activation"].get("blockers", []), *license_report_blockers}
+    )
+    policy["license_activation"]["core_accuracy_gates"] = license_activation_core_accuracy_gates(
+        license_record,
+        trusted_diff=policy["license_activation"]["trusted_license_diff"],
+        evidence_manifest=policy["license_activation"]["license_evidence_manifest"],
+        report_grade_validation_plan=policy["license_activation"]["license_report_grade_validation_plan"],
+    )
     attach_enterprise_control_manifest(
         policy["rbac"],
         item_number=108,
@@ -388,6 +425,147 @@ def build_license_record(raw_path: str) -> dict[str, object]:
         "size_bytes": len(data),
         "validation": "hash-recorded-no-network-activation",
     }
+
+
+def build_license_activation_report_grade_validation_plan(
+    *,
+    license_activation: Mapping[str, object],
+    license_record: Mapping[str, object],
+    evidence_manifest: Mapping[str, object],
+    trusted_diff: Mapping[str, object],
+) -> dict[str, object]:
+    license_status = str(license_record.get("status") or license_activation.get("status") or "not-required")
+    license_sha256 = str(license_record.get("sha256") or license_activation.get("license_sha256") or "")
+    ready_slots = [
+        {
+            "slot_id": "enterprise-policy-license-json",
+            "status": "ready",
+            "evidence_ref": "rapidtriage enterprise-policy --json.license_activation",
+            "evidence_hash": stable_enterprise_sha256("enterprise-policy command emits license activation policy JSON"),
+        },
+        {
+            "slot_id": "license-evidence-manifest",
+            "status": "ready",
+            "evidence_ref": "enterprise-policy.license_activation.license_evidence_manifest_hash",
+            "evidence_hash": str(evidence_manifest.get("manifest_hash") or ""),
+        },
+        {
+            "slot_id": "offline-license-record",
+            "status": "ready",
+            "evidence_ref": "enterprise-policy.license_activation.status/license_sha256/license_size_bytes",
+            "evidence_hash": stable_enterprise_sha256(
+                {
+                    "status": license_status,
+                    "sha256_present": bool(license_sha256),
+                    "size_bytes": int(license_activation.get("license_size_bytes") or 0),
+                    "validation": license_activation.get("validation", ""),
+                }
+            ),
+        },
+        {
+            "slot_id": "no-network-activation-boundary",
+            "status": "ready",
+            "evidence_ref": "enterprise-policy.license_activation.network_activation",
+            "evidence_hash": stable_enterprise_sha256(bool(license_activation.get("network_activation"))),
+        },
+        {
+            "slot_id": "no-evidence-touch-boundary",
+            "status": "ready",
+            "evidence_ref": "enterprise-policy.license_activation.evidence_touch",
+            "evidence_hash": stable_enterprise_sha256(bool(license_activation.get("evidence_touch"))),
+        },
+        {
+            "slot_id": "control-evidence-matrix",
+            "status": "ready",
+            "evidence_ref": "enterprise-policy.license_activation.control_evidence_matrix_hash",
+            "evidence_hash": str(evidence_manifest.get("control_evidence_matrix_hash") or ""),
+        },
+        {
+            "slot_id": "trusted-diff-boundary",
+            "status": "ready" if trusted_diff.get("status") == "pass" else "ready-with-blocker",
+            "evidence_ref": "enterprise-policy.license_activation.trusted_license_diff",
+            "evidence_hash": stable_enterprise_sha256(trusted_diff),
+        },
+    ]
+    blocking_slots = []
+    if trusted_diff.get("status") != "pass":
+        blocking_slots.append(
+            {
+                "slot_id": "trusted-license-authority-diff",
+                "status": "blocking",
+                "blocker": LICENSE_TRUSTED_DIFF_BLOCKER_107,
+                "required_evidence": "trusted license authority review proving activation state, hash recording, and no evidence access",
+            }
+        )
+    for slot_id, blocker, required_evidence in (
+        (
+            "offline-activation-smoke",
+            "offline-activation-smoke-required",
+            "release-host smoke proving offline license validation records hash/size without network activation",
+        ),
+        (
+            "license-evidence-touch-audit",
+            "license-evidence-touch-audit-required",
+            "audit log or harness proving license checks never read evidence content paths",
+        ),
+        (
+            "paid-flow-decision-signoff",
+            "paid-flow-decision-signoff-required",
+            "operator signoff that paid activation is disabled, optional, or separately implemented before commercial claims",
+        ),
+        (
+            "release-host-license-policy-smoke",
+            "release-host-license-policy-smoke-required",
+            "enterprise-policy license JSON produced from the actual release package and host",
+        ),
+        (
+            "independent-license-authority-review",
+            "independent-license-authority-review-required",
+            "independent reviewer/lab confirmation of license authority behavior and limitations",
+        ),
+        (
+            "license-key-custody-review",
+            "license-key-custody-review-required",
+            "key custody/signing procedure review if paid or signed license activation is enabled",
+        ),
+    ):
+        blocking_slots.append(
+            {
+                "slot_id": slot_id,
+                "status": "blocking",
+                "current_attachment_status": "not-attached",
+                "blocker": blocker,
+                "required_evidence": required_evidence,
+            }
+        )
+    blockers = sorted({str(slot["blocker"]) for slot in blocking_slots if slot.get("blocker")})
+    plan: dict[str, object] = {
+        "profile_version": LICENSE_REPORT_GRADE_VALIDATION_PLAN_VERSION,
+        "item_number": 107,
+        "commercial_gap_ids": [LICENSE_ACTIVATION_GAP_ID],
+        "commercial_claim_allowed": False,
+        "license_required": bool(license_activation.get("required")),
+        "activation_mode": license_activation.get("mode", ""),
+        "license_status": license_status,
+        "license_sha256_present": bool(license_sha256),
+        "license_size_bytes": int(license_activation.get("license_size_bytes") or 0),
+        "validation": license_activation.get("validation", ""),
+        "network_activation": bool(license_activation.get("network_activation")),
+        "evidence_touch": bool(license_activation.get("evidence_touch")),
+        "license_evidence_manifest_hash": str(evidence_manifest.get("manifest_hash") or ""),
+        "control_evidence_matrix_hash": str(evidence_manifest.get("control_evidence_matrix_hash") or ""),
+        "trusted_diff_status": str(trusted_diff.get("status") or ""),
+        "trusted_diff_blocker": trusted_diff.get("blocker"),
+        "ready_slots": ready_slots,
+        "blocking_slots": blocking_slots,
+        "ready_slot_count": len(ready_slots),
+        "blocking_slot_count": len(blocking_slots),
+        "external_blocker_catalog": list(LICENSE_REPORT_GRADE_BLOCKERS),
+        "blockers": blockers,
+        "reporting_boundary": "Offline license handling is implemented and usable; commercial activation claims require release-host smoke, authority review, evidence-touch audit, and key-custody evidence.",
+    }
+    plan["validation_plan_hash"] = stable_enterprise_sha256(plan)
+    return plan
 
 
 def build_permission_matrix(roles: dict[str, list[str]]) -> list[dict[str, object]]:
@@ -937,7 +1115,12 @@ def build_enterprise_trusted_diff(
             "local_only_report_grade_validation_plan_hash",
             "control_evidence_matrix_hash",
         ],
-        107: ["license_evidence_manifest_hash", "license_evidence_slots", "control_evidence_matrix_hash"],
+        107: [
+            "license_evidence_manifest_hash",
+            "license_evidence_slots",
+            "license_report_grade_validation_plan_hash",
+            "control_evidence_matrix_hash",
+        ],
         108: ["rbac_evidence_manifest_hash", "rbac_evidence_slots", "control_evidence_matrix_hash"],
         109: ["multi_user_evidence_manifest_hash", "multi_user_evidence_slots", "control_evidence_matrix_hash"],
         110: [
@@ -1051,6 +1234,7 @@ def license_activation_core_accuracy_gates(
     license_record: dict[str, object],
     trusted_diff: Mapping[str, object] | None = None,
     evidence_manifest: Mapping[str, object] | None = None,
+    report_grade_validation_plan: Mapping[str, object] | None = None,
 ) -> list[dict[str, object]]:
     satisfied = [
         "license requirement state recorded",
@@ -1067,13 +1251,29 @@ def license_activation_core_accuracy_gates(
             satisfied.append("license evidence slots emitted")
         if evidence_manifest.get("control_evidence_matrix_hash"):
             satisfied.append("license control evidence matrix hash emitted")
+    if report_grade_validation_plan:
+        if report_grade_validation_plan.get("validation_plan_hash"):
+            satisfied.append("license report-grade validation plan")
+        if int(report_grade_validation_plan.get("ready_slot_count") or 0) > 0:
+            satisfied.append("license report-grade ready slots")
     if trusted_diff and trusted_diff.get("status") == "pass":
         satisfied.append("trusted license authority diff pass")
+    evidence_refs = [f"license_status:{license_record.get('status', 'not-required')}"]
+    if report_grade_validation_plan and report_grade_validation_plan.get("validation_plan_hash"):
+        evidence_refs.append(
+            f"license_report_grade_validation_plan_sha256:{report_grade_validation_plan['validation_plan_hash']}"
+        )
+        evidence_refs.append(
+            f"license_report_grade_ready_slots:{report_grade_validation_plan.get('ready_slot_count')}"
+        )
+        evidence_refs.append(
+            f"license_report_grade_blocking_slots:{report_grade_validation_plan.get('blocking_slot_count')}"
+        )
     return [
         build_accuracy_gate(
             107,
             satisfied_checks=satisfied,
-            evidence_refs=[f"license_status:{license_record.get('status', 'not-required')}"],
+            evidence_refs=evidence_refs,
         )
     ]
 

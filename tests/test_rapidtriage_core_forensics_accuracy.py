@@ -273,6 +273,8 @@ class RapidTriageCoreForensicsAccuracyTests(unittest.TestCase):
         self.assertIn("local-only report-grade ready slots", local_only["required_checks"])
         self.assertIn("trusted local-only deployment policy diff pass", local_only["required_checks"])
         self.assertIn("network activation disabled recorded", license_activation["required_checks"])
+        self.assertIn("license report-grade validation plan", license_activation["required_checks"])
+        self.assertIn("license report-grade ready slots", license_activation["required_checks"])
         self.assertIn("trusted license authority diff pass", license_activation["required_checks"])
         self.assertIn("role matrix emitted", rbac["required_checks"])
         self.assertIn("trusted RBAC enforcement diff pass", rbac["required_checks"])

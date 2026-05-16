@@ -277,6 +277,27 @@ class RapidTriageOpsTests(unittest.TestCase):
             "license control evidence matrix hash emitted",
             payload["license_activation"]["core_accuracy_gates"][0]["satisfied_checks"],
         )
+        self.assertIn(
+            "license report-grade validation plan",
+            payload["license_activation"]["core_accuracy_gates"][0]["satisfied_checks"],
+        )
+        self.assertIn(
+            "license report-grade ready slots",
+            payload["license_activation"]["core_accuracy_gates"][0]["satisfied_checks"],
+        )
+        license_plan = payload["license_activation"]["license_report_grade_validation_plan"]
+        self.assertEqual(
+            license_plan["profile_version"],
+            "license-activation-report-grade-validation-plan-v1",
+        )
+        self.assertEqual(len(payload["license_activation"]["license_report_grade_validation_plan_hash"]), 64)
+        self.assertEqual(
+            payload["license_activation"]["license_report_grade_validation_plan_hash"],
+            license_plan["validation_plan_hash"],
+        )
+        self.assertGreaterEqual(payload["license_activation"]["license_report_grade_ready_slot_count"], 7)
+        self.assertGreaterEqual(payload["license_activation"]["license_report_grade_blocking_slot_count"], 7)
+        self.assertIn("offline-activation-smoke-required", payload["license_activation"]["blockers"])
         self.assertFalse(payload["license_activation"]["required"])
         self.assertEqual(payload["license_activation"]["status"], "operator-provided-file")
         self.assertEqual(len(payload["license_activation"]["license_sha256"]), 64)
@@ -292,9 +313,11 @@ class RapidTriageOpsTests(unittest.TestCase):
         license_gates = license_activation_core_accuracy_gates(
             payload["license_activation"],
             trusted_diff=license_diff,
+            report_grade_validation_plan=license_plan,
         )
         self.assertEqual(license_diff["status"], "pass")
         self.assertIn("control_evidence_matrix_hash", license_diff["compared_fields"])
+        self.assertIn("license_report_grade_validation_plan_hash", license_diff["compared_fields"])
         self.assertIn("trusted license authority diff pass", license_gates[0]["satisfied_checks"])
         self.assertIn("#108", payload["rbac"]["commercial_gap_ids"])
         self.assertEqual(payload["rbac"]["core_accuracy_gates"][0]["gap_id"], "#108")
@@ -1851,6 +1874,10 @@ class RapidTriageOpsTests(unittest.TestCase):
             )
             self.assertIn(
                 "enterprise-policy.license_activation.license_evidence_manifest.manifest_hash",
+                enterprise_by_number[107]["primary_outputs"],
+            )
+            self.assertIn(
+                "enterprise-policy.license_activation.license_report_grade_validation_plan_hash",
                 enterprise_by_number[107]["primary_outputs"],
             )
             self.assertIn(
