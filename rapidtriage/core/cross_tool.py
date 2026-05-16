@@ -914,6 +914,8 @@ def rows_from_mapping(item: Mapping[str, object]) -> Iterable[dict[str, object]]
     yield from nested_usn_state_replay_rows(item, flattened)
     yield from nested_browser_rows(item, flattened)
     yield from nested_ai_transcript_rows(item, flattened)
+    yield from nested_mobile_export_rows(item, flattened)
+    yield from nested_mobile_app_rows(item, flattened)
 
 
 def nested_browser_rows(
@@ -1041,6 +1043,155 @@ def pair_ai_conversation_rows(rows: Sequence[Mapping[str, object]]) -> list[dict
         )
         pending_question = None
     return pairs
+
+
+def nested_mobile_export_rows(
+    item: Mapping[str, object],
+    flattened_parent: Mapping[str, object],
+) -> Iterable[dict[str, object]]:
+    parent_values = {
+        "source_tool": first_value(
+            flattened_parent,
+            ("source_tool", "details.source_tool", "vendor_tool", "details.vendor_tool", "tool", "details.tool"),
+        ),
+        "service": first_value(
+            flattened_parent,
+            ("service", "details.service", "app", "details.app", "platform", "details.platform"),
+        ),
+        "conversation_id": first_value(
+            flattened_parent,
+            ("conversation_id", "details.conversation_id", "chat_id", "details.chat_id", "thread_id", "details.thread_id"),
+        ),
+        "source_path": first_value(flattened_parent, ("source_path", "details.source_path", "path", "details.path")),
+    }
+    nested_groups: tuple[tuple[str, tuple[tuple[str, ...], ...]], ...] = (
+        (
+            "mobile-export-message",
+            (
+                ("details", "messages"),
+                ("messages",),
+                ("details", "message_rows"),
+                ("message_rows",),
+                ("details", "mobile_messages"),
+                ("mobile_messages",),
+            ),
+        ),
+        (
+            "mobile-export-contact",
+            (
+                ("details", "contacts"),
+                ("contacts",),
+                ("details", "contact_rows"),
+                ("contact_rows",),
+            ),
+        ),
+        (
+            "mobile-export-call",
+            (
+                ("details", "calls"),
+                ("calls",),
+                ("details", "call_logs"),
+                ("call_logs",),
+            ),
+        ),
+        (
+            "mobile-export-media",
+            (
+                ("details", "media"),
+                ("media",),
+                ("details", "attachments"),
+                ("attachments",),
+            ),
+        ),
+        (
+            "ios-backup-file",
+            (
+                ("details", "ios_backup_files"),
+                ("ios_backup_files",),
+                ("details", "manifest_files"),
+                ("manifest_files",),
+            ),
+        ),
+        (
+            "ios-keychain-inventory",
+            (
+                ("details", "keychain_rows"),
+                ("keychain_rows",),
+                ("details", "keychain_inventory"),
+                ("keychain_inventory",),
+            ),
+        ),
+    )
+    for artifact_type, paths in nested_groups:
+        for nested in first_nested_list(item, paths):
+            if not isinstance(nested, Mapping):
+                continue
+            row = flatten_mapping(nested)
+            row.setdefault("artifact_type", artifact_type)
+            for key, value in parent_values.items():
+                if value not in (None, ""):
+                    row.setdefault(key, value)
+            yield row
+
+
+def nested_mobile_app_rows(
+    item: Mapping[str, object],
+    flattened_parent: Mapping[str, object],
+) -> Iterable[dict[str, object]]:
+    parent_values = {
+        "package_name": first_value(
+            flattened_parent,
+            ("package_name", "details.package_name", "bundle_id", "details.bundle_id", "application_id", "details.application_id"),
+        ),
+        "app_label": first_value(flattened_parent, ("app_label", "details.app_label", "name", "details.name")),
+        "version_name": first_value(
+            flattened_parent,
+            ("version_name", "details.version_name", "version", "details.version"),
+        ),
+        "version_code": first_value(
+            flattened_parent,
+            ("version_code", "details.version_code", "build", "details.build"),
+        ),
+        "apk_sha256": first_value(flattened_parent, ("apk_sha256", "details.apk_sha256", "sha256", "details.sha256")),
+        "cert_sha256": first_value(
+            flattened_parent,
+            ("cert_sha256", "details.cert_sha256", "certificate_sha256", "details.certificate_sha256"),
+        ),
+    }
+    nested_groups: tuple[tuple[str, tuple[tuple[str, ...], ...]], ...] = (
+        (
+            "mobile-app",
+            (
+                ("details", "apps"),
+                ("apps",),
+                ("details", "app_rows"),
+                ("app_rows",),
+                ("details", "android_apps"),
+                ("android_apps",),
+            ),
+        ),
+        (
+            "android-app-data",
+            (
+                ("details", "app_data_rows"),
+                ("app_data_rows",),
+                ("details", "databases"),
+                ("databases",),
+                ("details", "tables"),
+                ("tables",),
+            ),
+        ),
+    )
+    for artifact_type, paths in nested_groups:
+        for nested in first_nested_list(item, paths):
+            if not isinstance(nested, Mapping):
+                continue
+            row = flatten_mapping(nested)
+            row.setdefault("artifact_type", artifact_type)
+            for key, value in parent_values.items():
+                if value not in (None, ""):
+                    row.setdefault(key, value)
+            yield row
 
 
 def nested_usn_state_replay_rows(
@@ -2325,16 +2476,16 @@ def mobile_app_key_variants(row: Mapping[str, object]) -> list[str]:
     database = ntfs_path_value(row, MOBILE_APP_FIELD_ALIASES["database"])
     table_name = normalize_mobile_identifier(first_value(row, MOBILE_APP_FIELD_ALIASES["table_name"]))
     keys: list[str] = []
+    if database and table_name:
+        return [normalize_key(f"mobile-app-db:{database}:{table_name}")]
+    if app_data_path:
+        return [normalize_key(f"mobile-app-data:{app_data_path}")]
     if package_name:
         keys.append(normalize_key(f"mobile-app:{package_name}"))
     if apk_sha256:
         keys.append(normalize_key(f"mobile-apk:{apk_sha256}"))
     if cert_sha256 and package_name:
         keys.append(normalize_key(f"mobile-app-cert:{package_name}:{cert_sha256}"))
-    if app_data_path:
-        keys.append(normalize_key(f"mobile-app-data:{app_data_path}"))
-    if database and table_name:
-        keys.append(normalize_key(f"mobile-app-db:{database}:{table_name}"))
     return list(dict.fromkeys(keys))
 
 

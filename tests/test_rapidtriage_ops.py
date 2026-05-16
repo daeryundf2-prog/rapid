@@ -3760,6 +3760,70 @@ class RapidTriageOpsTests(unittest.TestCase):
             manifest = payload["cross_tool_validation_assessment"]["trusted_tool_diff_manifest"]
             self.assertIn("mobile_export_field_comparison", manifest["comparison_summaries"][0]["field_diffs"])
 
+    def test_cross_tool_validate_expands_nested_mobile_export_rows(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            rapid = root / "rapid-mobile-nested.json"
+            cellebrite = root / "cellebrite.csv"
+            rapid.write_text(
+                json.dumps(
+                    [
+                        {
+                            "artifact_type": "mobile-export-source",
+                            "details": {
+                                "source_tool": "rapidtriage",
+                                "service": "WhatsApp",
+                                "messages": [
+                                    {
+                                        "source_record_id": "msg-002",
+                                        "conversation_id": "chat-8",
+                                        "message_id": "m-002",
+                                        "timestamp": "2024-04-02T09:10:11+00:00",
+                                        "sender": "+82 10-2222-3333",
+                                        "recipient": "bob@example.test",
+                                        "message_text_hash": "e" * 64,
+                                        "media_hash": "f" * 64,
+                                    }
+                                ],
+                            },
+                        }
+                    ]
+                ),
+                encoding="utf-8",
+            )
+            cellebrite.write_text(
+                "SourceTool,SourceRecordId,Service,ConversationId,MessageId,Timestamp,Sender,Recipient,MessageTextHash,MediaHash\n"
+                f"Cellebrite,msg-002,whatsapp,chat-8,m-002,2024-04-02T09:10:11+00:00,+821022223333,"
+                f"bob@example.test,{('e' * 64)},{('f' * 64)}\n",
+                encoding="utf-8",
+            )
+
+            stdout = io.StringIO()
+            with contextlib.redirect_stdout(stdout):
+                exit_code = main(
+                    [
+                        "cross-tool-validate",
+                        "--rapid-output",
+                        str(rapid),
+                        "--reference-output",
+                        f"cellebrite={cellebrite}",
+                        "--backlog-item",
+                        "26",
+                        "--min-overlap",
+                        "1.0",
+                        "--json",
+                    ]
+                )
+
+            self.assertEqual(exit_code, 0)
+            payload = json.loads(stdout.getvalue())
+            field_comparison = payload["comparisons"][0]["mobile_export_field_comparison"]
+            self.assertEqual(payload["status"], "pass")
+            self.assertGreaterEqual(field_comparison["common_record_count"], 1)
+            self.assertEqual(field_comparison["mismatch_count"], 0)
+            self.assertEqual(field_comparison["missing_common_field_count"], 0)
+            self.assertIn("message_text_hash", field_comparison["compared_canonical_fields"])
+
     def test_cross_tool_validate_compares_android_app_rows(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             root = Path(tmp_dir)
@@ -3820,6 +3884,131 @@ class RapidTriageOpsTests(unittest.TestCase):
             self.assertIn("package_name", field_comparison["compared_canonical_fields"])
             manifest = payload["cross_tool_validation_assessment"]["trusted_tool_diff_manifest"]
             self.assertIn("mobile_app_field_comparison", manifest["comparison_summaries"][0]["field_diffs"])
+
+    def test_cross_tool_validate_expands_nested_android_manifest_rows(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            rapid = root / "rapid-apk-nested.json"
+            apktool = root / "apktool.csv"
+            rapid.write_text(
+                json.dumps(
+                    [
+                        {
+                            "artifact_type": "android-app-analysis",
+                            "details": {
+                                "apk_manifest": {
+                                    "package_name": "com.example.nested",
+                                    "app_label": "Nested App",
+                                    "version_name": "2.0.0",
+                                    "version_code": 99,
+                                    "permission": [
+                                        "android.permission.INTERNET",
+                                        "android.permission.ACCESS_FINE_LOCATION",
+                                    ],
+                                    "dangerous_permission_count": 1,
+                                    "cert_sha256": "1" * 64,
+                                    "apk_sha256": "2" * 64,
+                                    "dex_count": 3,
+                                    "native_library_count": 2,
+                                }
+                            },
+                        }
+                    ]
+                ),
+                encoding="utf-8",
+            )
+            apktool.write_text(
+                "PackageName,AppLabel,VersionName,VersionCode,Permissions,DangerousPermissionCount,CertSHA256,ApkSHA256,DexCount,NativeLibraryCount\n"
+                "com.example.nested,nested app,2.0.0,99,android.permission.INTERNET|android.permission.ACCESS_FINE_LOCATION,"
+                f"1,{('1' * 64)},{('2' * 64)},3,2\n",
+                encoding="utf-8",
+            )
+
+            stdout = io.StringIO()
+            with contextlib.redirect_stdout(stdout):
+                exit_code = main(
+                    [
+                        "cross-tool-validate",
+                        "--rapid-output",
+                        str(rapid),
+                        "--reference-output",
+                        f"apktool={apktool}",
+                        "--backlog-item",
+                        "30",
+                        "--min-overlap",
+                        "1.0",
+                        "--json",
+                    ]
+                )
+
+            self.assertEqual(exit_code, 0)
+            payload = json.loads(stdout.getvalue())
+            field_comparison = payload["comparisons"][0]["mobile_app_field_comparison"]
+            self.assertEqual(payload["status"], "pass")
+            self.assertGreaterEqual(field_comparison["common_record_count"], 1)
+            self.assertEqual(field_comparison["mismatch_count"], 0)
+            self.assertEqual(field_comparison["missing_common_field_count"], 0)
+            self.assertIn("permission", field_comparison["compared_canonical_fields"])
+
+    def test_cross_tool_validate_expands_nested_android_app_data_rows(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            rapid = root / "rapid-app-data-nested.json"
+            aleapp = root / "aleapp.csv"
+            rapid.write_text(
+                json.dumps(
+                    [
+                        {
+                            "artifact_type": "android-app-data-source",
+                            "package_name": "com.example.chat",
+                            "details": {
+                                "app_data_rows": [
+                                    {
+                                        "database": "/data/data/com.example.chat/databases/messages.db",
+                                        "table_name": "messages",
+                                        "indicator": "https://case.example/item/7",
+                                        "risk_model": "network-artifact-pivot",
+                                    }
+                                ]
+                            },
+                        }
+                    ]
+                ),
+                encoding="utf-8",
+            )
+            aleapp.write_text(
+                "PackageName,Database,TableName,Indicator,RiskModel\n"
+                "com.example.chat,/data/data/com.example.chat/databases/messages.db,messages,"
+                "https://case.example/item/7,network-artifact-pivot\n",
+                encoding="utf-8",
+            )
+
+            stdout = io.StringIO()
+            with contextlib.redirect_stdout(stdout):
+                exit_code = main(
+                    [
+                        "cross-tool-validate",
+                        "--rapid-output",
+                        str(rapid),
+                        "--reference-output",
+                        f"aleapp={aleapp}",
+                        "--backlog-item",
+                        "29",
+                        "--min-overlap",
+                        "1.0",
+                        "--json",
+                    ]
+                )
+
+            self.assertEqual(exit_code, 0)
+            payload = json.loads(stdout.getvalue())
+            field_comparison = payload["comparisons"][0]["mobile_app_field_comparison"]
+            self.assertEqual(payload["status"], "pass")
+            self.assertGreaterEqual(field_comparison["common_record_count"], 1)
+            self.assertEqual(field_comparison["mismatch_count"], 0)
+            self.assertEqual(field_comparison["missing_common_field_count"], 0)
+            self.assertIn("database", field_comparison["compared_canonical_fields"])
+            self.assertIn("table_name", field_comparison["compared_canonical_fields"])
 
     def test_cross_tool_validate_compares_chat_app_rows(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
