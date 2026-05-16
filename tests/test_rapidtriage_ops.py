@@ -460,6 +460,39 @@ class RapidTriageOpsTests(unittest.TestCase):
             "collaboration audit control evidence matrix hash emitted",
             payload["collaboration_audit_trail"]["core_accuracy_gates"][0]["satisfied_checks"],
         )
+        self.assertIn(
+            "collaboration audit report-grade validation plan",
+            payload["collaboration_audit_trail"]["core_accuracy_gates"][0]["satisfied_checks"],
+        )
+        self.assertIn(
+            "collaboration audit report-grade ready slots",
+            payload["collaboration_audit_trail"]["core_accuracy_gates"][0]["satisfied_checks"],
+        )
+        collaboration_plan = payload["collaboration_audit_trail"]["collaboration_audit_report_grade_validation_plan"]
+        self.assertEqual(
+            collaboration_plan["profile_version"],
+            "collaboration-audit-report-grade-validation-plan-v1",
+        )
+        self.assertEqual(
+            len(payload["collaboration_audit_trail"]["collaboration_audit_report_grade_validation_plan_hash"]),
+            64,
+        )
+        self.assertEqual(
+            payload["collaboration_audit_trail"]["collaboration_audit_report_grade_validation_plan_hash"],
+            collaboration_plan["validation_plan_hash"],
+        )
+        self.assertGreaterEqual(
+            payload["collaboration_audit_trail"]["collaboration_audit_report_grade_ready_slot_count"],
+            7,
+        )
+        self.assertGreaterEqual(
+            payload["collaboration_audit_trail"]["collaboration_audit_report_grade_blocking_slot_count"],
+            7,
+        )
+        self.assertIn(
+            "append-only-audit-enforcement-required",
+            payload["collaboration_audit_trail"]["blockers"],
+        )
         self.assertEqual(payload["collaboration_audit_trail"]["status"], "case-db-audit-events-with-export-hash-chain")
         self.assertEqual(payload["multi_user_case_server"]["status"], "not-enabled")
         self.assertEqual(payload["collaboration_audit_trail"]["trusted_collaboration_audit_diff"]["status"], "missing")
@@ -470,9 +503,13 @@ class RapidTriageOpsTests(unittest.TestCase):
             payload["collaboration_audit_trail"],
             trusted_tool="collaboration-audit-review",
         )
-        collaboration_gates = collaboration_audit_core_accuracy_gates(trusted_diff=collaboration_diff)
+        collaboration_gates = collaboration_audit_core_accuracy_gates(
+            trusted_diff=collaboration_diff,
+            report_grade_validation_plan=collaboration_plan,
+        )
         self.assertEqual(collaboration_diff["status"], "pass")
         self.assertIn("control_evidence_matrix_hash", collaboration_diff["compared_fields"])
+        self.assertIn("collaboration_audit_report_grade_validation_plan_hash", collaboration_diff["compared_fields"])
         self.assertIn("trusted collaboration audit diff pass", collaboration_gates[0]["satisfied_checks"])
         self.assertIn("#118", payload["security_hardening"]["commercial_gap_ids"])
         self.assertIn("#119", payload["security_hardening"]["commercial_gap_ids"])
@@ -1946,6 +1983,10 @@ class RapidTriageOpsTests(unittest.TestCase):
             )
             self.assertIn(
                 "enterprise-policy.collaboration_audit_trail.collaboration_audit_evidence_manifest.manifest_hash",
+                enterprise_by_number[110]["primary_outputs"],
+            )
+            self.assertIn(
+                "enterprise-policy.collaboration_audit_trail.collaboration_audit_report_grade_validation_plan_hash",
                 enterprise_by_number[110]["primary_outputs"],
             )
             self.assertEqual(enterprise_by_number[110]["trusted_diff_required"], "trusted-collaboration-audit-diff")

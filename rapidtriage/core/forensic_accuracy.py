@@ -1855,6 +1855,8 @@ CORE_FORENSIC_ACCURACY_ITEMS: tuple[dict[str, object], ...] = (
             "multi-user conflict blocker disclosed",
             "collaboration audit evidence manifest hash emitted",
             "collaboration audit evidence slots emitted",
+            "collaboration audit report-grade validation plan",
+            "collaboration audit report-grade ready slots",
             "trusted collaboration audit diff pass",
         ),
     },

@@ -2537,10 +2537,10 @@
       ],
       "expected": {
         "required_assertions": [
-          "Enterprise policy preserves audit scope, recorded fields, tamper-evidence linkage, identity caveat, collaboration-audit-evidence-manifest-v1 manifest hash/evidence slots, multi-user conflict blocker, trusted collaboration audit diff helpers/gates, and #110 core_accuracy_gates."
+          "Enterprise policy preserves audit scope, recorded fields, tamper-evidence linkage, identity caveat, collaboration-audit-evidence-manifest-v1 manifest hash/evidence slots, collaboration-audit-report-grade-validation-plan-v1 ready/blocking slots, append-only/identity/conflict blockers, trusted collaboration audit diff helpers/gates, and #110 core_accuracy_gates."
         ]
       },
-      "notes": "Internal fixture pass; multi-user identity/conflict handling and trusted collaboration audit review remain external.",
+      "notes": "Internal fixture pass; multi-user identities, database-enforced append-only audit, conflict handling tests, release-host collaboration audit smoke, and trusted collaboration audit review remain external.",
       "source_manifest": "docs/validation/rapidtriage-core-forensics-101-120-known-answer.json"
     },
     {

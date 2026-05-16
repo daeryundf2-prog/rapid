@@ -3621,6 +3621,7 @@ def enterprise_governance_evidence_chain() -> list[dict[str, object]]:
             "primary_outputs": [
                 "enterprise-policy.collaboration_audit_trail",
                 "enterprise-policy.collaboration_audit_trail.collaboration_audit_evidence_manifest.manifest_hash",
+                "enterprise-policy.collaboration_audit_trail.collaboration_audit_report_grade_validation_plan_hash",
                 "enterprise-policy.collaboration_audit_trail.collaboration_audit_evidence_slots.audit_append_only_review",
                 "enterprise-policy.collaboration_audit_trail.collaboration_audit_evidence_slots.identity_attribution_review",
             ],

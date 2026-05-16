@@ -58,6 +58,16 @@ MULTI_USER_REPORT_GRADE_BLOCKERS = [
     "release-host-multi-user-smoke-required",
 ]
 COLLABORATION_AUDIT_TRUSTED_DIFF_BLOCKER_110 = "trusted-collaboration-audit-diff-missing"
+COLLABORATION_AUDIT_REPORT_GRADE_VALIDATION_PLAN_VERSION = "collaboration-audit-report-grade-validation-plan-v1"
+COLLABORATION_AUDIT_REPORT_GRADE_BLOCKERS = [
+    COLLABORATION_AUDIT_TRUSTED_DIFF_BLOCKER_110,
+    "append-only-audit-enforcement-required",
+    "identity-attribution-review-required",
+    "collaboration-conflict-test-required",
+    "multi-user-conflict-handling-required",
+    "release-host-collaboration-audit-smoke-required",
+    "independent-collaboration-audit-review-required",
+]
 ENTERPRISE_TRUSTED_TOOLS = {
     "local-only-deployment-policy",
     "license-authority-review",
@@ -426,6 +436,35 @@ def build_enterprise_policy() -> dict[str, object]:
     policy["collaboration_audit_trail"]["core_accuracy_gates"] = collaboration_audit_core_accuracy_gates(
         trusted_diff=policy["collaboration_audit_trail"]["trusted_collaboration_audit_diff"],
         evidence_manifest=policy["collaboration_audit_trail"]["collaboration_audit_evidence_manifest"],
+    )
+    policy["collaboration_audit_trail"]["collaboration_audit_report_grade_validation_plan"] = (
+        build_collaboration_audit_report_grade_validation_plan(
+            collaboration_audit=policy["collaboration_audit_trail"],
+            evidence_manifest=policy["collaboration_audit_trail"]["collaboration_audit_evidence_manifest"],
+            trusted_diff=policy["collaboration_audit_trail"]["trusted_collaboration_audit_diff"],
+        )
+    )
+    policy["collaboration_audit_trail"]["collaboration_audit_report_grade_validation_plan_hash"] = policy[
+        "collaboration_audit_trail"
+    ]["collaboration_audit_report_grade_validation_plan"]["validation_plan_hash"]
+    policy["collaboration_audit_trail"]["collaboration_audit_report_grade_ready_slot_count"] = policy[
+        "collaboration_audit_trail"
+    ]["collaboration_audit_report_grade_validation_plan"]["ready_slot_count"]
+    policy["collaboration_audit_trail"]["collaboration_audit_report_grade_blocking_slot_count"] = policy[
+        "collaboration_audit_trail"
+    ]["collaboration_audit_report_grade_validation_plan"]["blocking_slot_count"]
+    collaboration_report_blockers = policy["collaboration_audit_trail"][
+        "collaboration_audit_report_grade_validation_plan"
+    ]["blockers"]
+    policy["collaboration_audit_trail"]["blockers"] = sorted(
+        {*policy["collaboration_audit_trail"].get("blockers", []), *collaboration_report_blockers}
+    )
+    policy["collaboration_audit_trail"]["core_accuracy_gates"] = collaboration_audit_core_accuracy_gates(
+        trusted_diff=policy["collaboration_audit_trail"]["trusted_collaboration_audit_diff"],
+        evidence_manifest=policy["collaboration_audit_trail"]["collaboration_audit_evidence_manifest"],
+        report_grade_validation_plan=policy["collaboration_audit_trail"][
+            "collaboration_audit_report_grade_validation_plan"
+        ],
     )
     attach_enterprise_control_manifest(
         policy["security_hardening"],
@@ -919,6 +958,140 @@ def build_multi_user_report_grade_validation_plan(
         "external_blocker_catalog": list(MULTI_USER_REPORT_GRADE_BLOCKERS),
         "blockers": blockers,
         "reporting_boundary": "Multi-user server remains intentionally disabled; commercial shared-case claims require implementation, identity, locking, concurrency, and independent security evidence.",
+    }
+    plan["validation_plan_hash"] = stable_enterprise_sha256(plan)
+    return plan
+
+
+def build_collaboration_audit_report_grade_validation_plan(
+    *,
+    collaboration_audit: Mapping[str, object],
+    evidence_manifest: Mapping[str, object],
+    trusted_diff: Mapping[str, object],
+) -> dict[str, object]:
+    recorded_fields = (
+        collaboration_audit.get("recorded_fields")
+        if isinstance(collaboration_audit.get("recorded_fields"), list)
+        else []
+    )
+    ready_slots = [
+        {
+            "slot_id": "enterprise-policy-collaboration-audit-json",
+            "status": "ready",
+            "evidence_ref": "rapidtriage enterprise-policy --json.collaboration_audit_trail",
+            "evidence_hash": stable_enterprise_sha256("enterprise-policy command emits collaboration audit JSON"),
+        },
+        {
+            "slot_id": "collaboration-audit-evidence-manifest",
+            "status": "ready",
+            "evidence_ref": "enterprise-policy.collaboration_audit_trail.collaboration_audit_evidence_manifest_hash",
+            "evidence_hash": str(evidence_manifest.get("manifest_hash") or ""),
+        },
+        {
+            "slot_id": "audit-scope-and-fields",
+            "status": "ready",
+            "evidence_ref": "enterprise-policy.collaboration_audit_trail.scope/recorded_fields",
+            "evidence_hash": stable_enterprise_sha256(
+                {"scope": collaboration_audit.get("scope", ""), "recorded_fields": recorded_fields}
+            ),
+        },
+        {
+            "slot_id": "tamper-evidence-linkage",
+            "status": "ready",
+            "evidence_ref": "enterprise-policy.collaboration_audit_trail.tamper_evidence",
+            "evidence_hash": stable_enterprise_sha256(collaboration_audit.get("tamper_evidence", "")),
+        },
+        {
+            "slot_id": "identity-model-caveat",
+            "status": "ready",
+            "evidence_ref": "enterprise-policy.collaboration_audit_trail.identity_model",
+            "evidence_hash": stable_enterprise_sha256(collaboration_audit.get("identity_model", "")),
+        },
+        {
+            "slot_id": "control-evidence-matrix",
+            "status": "ready",
+            "evidence_ref": "enterprise-policy.collaboration_audit_trail.control_evidence_matrix_hash",
+            "evidence_hash": str(evidence_manifest.get("control_evidence_matrix_hash") or ""),
+        },
+        {
+            "slot_id": "trusted-diff-boundary",
+            "status": "ready" if trusted_diff.get("status") == "pass" else "ready-with-blocker",
+            "evidence_ref": "enterprise-policy.collaboration_audit_trail.trusted_collaboration_audit_diff",
+            "evidence_hash": stable_enterprise_sha256(trusted_diff),
+        },
+    ]
+    blocking_slots = []
+    if trusted_diff.get("status") != "pass":
+        blocking_slots.append(
+            {
+                "slot_id": "trusted-collaboration-audit-diff",
+                "status": "blocking",
+                "blocker": COLLABORATION_AUDIT_TRUSTED_DIFF_BLOCKER_110,
+                "required_evidence": "trusted collaboration audit review comparing scope, fields, tamper-evidence, and identity model",
+            }
+        )
+    for slot_id, blocker, required_evidence in (
+        (
+            "append-only-audit-enforcement",
+            "append-only-audit-enforcement-required",
+            "database or storage enforcement proof that audit events cannot be silently updated or deleted",
+        ),
+        (
+            "identity-attribution-review",
+            "identity-attribution-review-required",
+            "review proving each collaborative audit event is bound to an authenticated user identity",
+        ),
+        (
+            "collaboration-conflict-test",
+            "collaboration-conflict-test-required",
+            "collaboration conflict handling test for simultaneous review/export activity",
+        ),
+        (
+            "multi-user-conflict-handling",
+            "multi-user-conflict-handling-required",
+            "multi-user conflict resolution evidence before claiming shared reviewer audit completeness",
+        ),
+        (
+            "release-host-collaboration-audit-smoke",
+            "release-host-collaboration-audit-smoke-required",
+            "collaboration audit export/hash-chain smoke produced from the actual release package",
+        ),
+        (
+            "independent-collaboration-audit-review",
+            "independent-collaboration-audit-review-required",
+            "independent reviewer/lab confirmation of append-only audit behavior and conflict handling",
+        ),
+    ):
+        blocking_slots.append(
+            {
+                "slot_id": slot_id,
+                "status": "blocking",
+                "current_attachment_status": "not-attached",
+                "blocker": blocker,
+                "required_evidence": required_evidence,
+            }
+        )
+    blockers = sorted({str(slot["blocker"]) for slot in blocking_slots if slot.get("blocker")})
+    plan: dict[str, object] = {
+        "profile_version": COLLABORATION_AUDIT_REPORT_GRADE_VALIDATION_PLAN_VERSION,
+        "item_number": 110,
+        "commercial_gap_ids": [COLLABORATION_AUDIT_TRAIL_GAP_ID],
+        "commercial_claim_allowed": False,
+        "status": collaboration_audit.get("status", ""),
+        "recorded_field_count": len(recorded_fields),
+        "identity_model": collaboration_audit.get("identity_model", ""),
+        "multi_user_conflict_handling": collaboration_audit.get("multi_user_conflict_handling", ""),
+        "collaboration_audit_evidence_manifest_hash": str(evidence_manifest.get("manifest_hash") or ""),
+        "control_evidence_matrix_hash": str(evidence_manifest.get("control_evidence_matrix_hash") or ""),
+        "trusted_diff_status": str(trusted_diff.get("status") or ""),
+        "trusted_diff_blocker": trusted_diff.get("blocker"),
+        "ready_slots": ready_slots,
+        "blocking_slots": blocking_slots,
+        "ready_slot_count": len(ready_slots),
+        "blocking_slot_count": len(blocking_slots),
+        "external_blocker_catalog": list(COLLABORATION_AUDIT_REPORT_GRADE_BLOCKERS),
+        "blockers": blockers,
+        "reporting_boundary": "Local Case DB audit/export hash-chain scope is usable; commercial collaboration audit claims require append-only enforcement, identity attribution, conflict handling, and independent review evidence.",
     }
     plan["validation_plan_hash"] = stable_enterprise_sha256(plan)
     return plan
@@ -1481,6 +1654,7 @@ def build_enterprise_trusted_diff(
         110: [
             "collaboration_audit_evidence_manifest_hash",
             "collaboration_audit_evidence_slots",
+            "collaboration_audit_report_grade_validation_plan_hash",
             "control_evidence_matrix_hash",
         ],
     }[number]
@@ -1728,6 +1902,7 @@ def multi_user_case_server_core_accuracy_gates(
 def collaboration_audit_core_accuracy_gates(
     trusted_diff: Mapping[str, object] | None = None,
     evidence_manifest: Mapping[str, object] | None = None,
+    report_grade_validation_plan: Mapping[str, object] | None = None,
 ) -> list[dict[str, object]]:
     satisfied = [
         "audit trail scope recorded",
@@ -1743,13 +1918,29 @@ def collaboration_audit_core_accuracy_gates(
             satisfied.append("collaboration audit evidence slots emitted")
         if evidence_manifest.get("control_evidence_matrix_hash"):
             satisfied.append("collaboration audit control evidence matrix hash emitted")
+    if report_grade_validation_plan:
+        if report_grade_validation_plan.get("validation_plan_hash"):
+            satisfied.append("collaboration audit report-grade validation plan")
+        if int(report_grade_validation_plan.get("ready_slot_count") or 0) > 0:
+            satisfied.append("collaboration audit report-grade ready slots")
     if trusted_diff and trusted_diff.get("status") == "pass":
         satisfied.append("trusted collaboration audit diff pass")
+    evidence_refs = ["enterprise_policy.collaboration_audit_trail"]
+    if report_grade_validation_plan and report_grade_validation_plan.get("validation_plan_hash"):
+        evidence_refs.append(
+            f"collaboration_audit_report_grade_validation_plan_sha256:{report_grade_validation_plan['validation_plan_hash']}"
+        )
+        evidence_refs.append(
+            f"collaboration_audit_report_grade_ready_slots:{report_grade_validation_plan.get('ready_slot_count')}"
+        )
+        evidence_refs.append(
+            f"collaboration_audit_report_grade_blocking_slots:{report_grade_validation_plan.get('blocking_slot_count')}"
+        )
     return [
         build_accuracy_gate(
             110,
             satisfied_checks=satisfied,
-            evidence_refs=["enterprise_policy.collaboration_audit_trail"],
+            evidence_refs=evidence_refs,
         )
     ]
 
