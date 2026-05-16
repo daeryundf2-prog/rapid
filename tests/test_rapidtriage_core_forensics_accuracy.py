@@ -166,6 +166,7 @@ class RapidTriageCoreForensicsAccuracyTests(unittest.TestCase):
         self.assertIn("trusted memory cap/RSS diff pass", memory_cap["required_checks"])
         self.assertIn("active content execution blocked", preview_sandbox["required_checks"])
         self.assertIn("preview policy row hashes emitted", preview_sandbox["required_checks"])
+        self.assertIn("preview sandbox report-grade validation plan emitted", preview_sandbox["required_checks"])
         self.assertIn("trusted preview sandbox/no-exec diff pass", preview_sandbox["required_checks"])
         self.assertIn("query plan row hashes emitted", sqlite_performance["required_checks"])
         self.assertIn("SQLite performance pragmas applied", sqlite_performance["required_checks"])

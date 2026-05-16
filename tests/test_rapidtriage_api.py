@@ -1813,6 +1813,28 @@ class RapidTriageApiTests(unittest.TestCase):
                 preview_payload["viewer_sandbox"]["source_preview_sandbox_manifest_hash"],
                 source_sandbox_manifest["manifest_hash"],
             )
+            preview_validation_plan = preview_payload["viewer_sandbox"][
+                "preview_sandbox_report_grade_validation_plan"
+            ]
+            self.assertEqual(
+                preview_validation_plan["profile_version"],
+                "preview-sandbox-report-grade-validation-plan-v1",
+            )
+            self.assertEqual(
+                preview_payload["viewer_sandbox"]["preview_sandbox_report_grade_validation_plan_hash"],
+                preview_validation_plan["validation_plan_sha256"],
+            )
+            self.assertEqual(preview_validation_plan["ready_slot_count"], 6)
+            self.assertEqual(preview_validation_plan["blocking_slot_count"], 6)
+            self.assertEqual(preview_validation_plan["source_preview_sandbox_manifest_hash"], source_sandbox_manifest["manifest_hash"])
+            self.assertIn(
+                "active-content-blocking",
+                {slot["slot_id"] for slot in preview_validation_plan["ready_slots"]},
+            )
+            self.assertIn(
+                "os-level-renderer-sandbox",
+                {slot["slot_id"] for slot in preview_validation_plan["blocking_slots"]},
+            )
             self.assertEqual(preview_payload["viewer_sandbox"]["core_accuracy_gates"][0]["gap_id"], "#73")
             self.assertIn("read-only bounded preview", preview_payload["viewer_sandbox"]["core_accuracy_gates"][0]["satisfied_checks"])
             self.assertIn(
@@ -1821,6 +1843,10 @@ class RapidTriageApiTests(unittest.TestCase):
             )
             self.assertIn(
                 "preview policy row hashes emitted",
+                preview_payload["viewer_sandbox"]["core_accuracy_gates"][0]["satisfied_checks"],
+            )
+            self.assertIn(
+                "preview sandbox report-grade validation plan emitted",
                 preview_payload["viewer_sandbox"]["core_accuracy_gates"][0]["satisfied_checks"],
             )
             active_html = root / "Users" / "alice" / "Desktop" / "active.html"

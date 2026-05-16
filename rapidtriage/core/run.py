@@ -142,6 +142,15 @@ MEMORY_CAP_REPORT_GRADE_BLOCKERS = [
     "allocation-level-enforcement-validation-required",
 ]
 PREVIEW_SANDBOX_TRUSTED_DIFF_BLOCKER_73 = "trusted-preview-no-exec-diff-missing"
+PREVIEW_SANDBOX_REPORT_GRADE_VALIDATION_PLAN_VERSION = "preview-sandbox-report-grade-validation-plan-v1"
+PREVIEW_SANDBOX_REPORT_GRADE_BLOCKERS = [
+    "os-level-renderer-sandbox-required",
+    "trusted-preview-no-exec-manifest-required",
+    "browser-renderer-exploit-corpus-required",
+    "malicious-active-content-corpus-required",
+    "risky-codec-macro-external-sandbox-required",
+    "browser-e2e-preview-sandbox-required",
+]
 LARGE_SQLITE_FTS_TRUSTED_DIFF_BLOCKER_74 = "trusted-large-sqlite-fts-query-plan-diff-missing"
 SCHEDULER_TRUSTED_DIFF_BLOCKER_75 = "trusted-parser-scheduler-manifest-diff-missing"
 DEFAULT_INCREMENTAL_HASH_MAX_BYTES = 16 * 1024 * 1024
@@ -1308,7 +1317,149 @@ def build_preview_sandbox_run_policy_manifest(*, outputs: Mapping[str, Path]) ->
     manifest_core["manifest_hash"] = hashlib.sha256(
         json.dumps(manifest_core, sort_keys=True).encode("utf-8")
     ).hexdigest()
-    return manifest_core
+    validation_plan = preview_sandbox_report_grade_validation_plan(policy_manifest=manifest_core)
+    return {
+        **manifest_core,
+        "preview_sandbox_report_grade_validation_plan": validation_plan,
+        "preview_sandbox_report_grade_validation_plan_hash": validation_plan["validation_plan_hash"],
+        "report_grade_ready_slot_count": validation_plan["ready_slot_count"],
+        "report_grade_blocking_slot_count": validation_plan["blocking_slot_count"],
+    }
+
+
+def preview_sandbox_report_grade_validation_plan(*, policy_manifest: Mapping[str, object]) -> dict[str, object]:
+    policy = policy_manifest.get("policy") if isinstance(policy_manifest.get("policy"), Mapping) else {}
+    policy_manifest_hash = str(policy_manifest.get("manifest_hash") or "")
+    policy_hash = str(policy_manifest.get("policy_hash") or "")
+    row_head_hash = str(policy_manifest.get("preview_policy_row_head_hash") or "")
+    row_count = int(policy_manifest.get("preview_policy_row_count") or 0)
+    active_content_blocked_count = int(policy_manifest.get("active_content_blocked_count") or 0)
+    no_exec_contract = {
+        "executes_content": bool(policy.get("executes_content")),
+        "external_network_access": bool(policy.get("external_network_access")),
+        "renderer_strategy": str(policy.get("renderer_strategy") or ""),
+        "original_file_opening": str(policy.get("original_file_opening") or ""),
+    }
+    no_exec_contract_hash = hashlib.sha256(
+        json.dumps(no_exec_contract, sort_keys=True).encode("utf-8")
+    ).hexdigest()
+    ready_slots: list[dict[str, object]] = [
+        {
+            "slot_id": "run-policy-manifest",
+            "status": "ready",
+            "evidence_ref": "preview_sandbox_policy_manifest_hash",
+            "evidence_hash": policy_manifest_hash,
+            "description": "Run outputs expose the no-exec preview policy manifest.",
+        },
+        {
+            "slot_id": "preview-policy-row-hashes",
+            "status": "ready",
+            "evidence_ref": "preview_policy_row_head_hash",
+            "evidence_hash": row_head_hash,
+            "description": "Previewable output rows are individually hashed for reviewer traceability.",
+        },
+        {
+            "slot_id": "no-exec-no-network-contract",
+            "status": "ready",
+            "evidence_ref": "no_exec_contract_hash",
+            "evidence_hash": no_exec_contract_hash,
+            "description": "Preview policy records no active execution and no external network access.",
+        },
+        {
+            "slot_id": "active-content-blocking-policy",
+            "status": "ready",
+            "evidence_ref": "active_content_blocked_count",
+            "evidence_hash": hashlib.sha256(str(active_content_blocked_count).encode("ascii")).hexdigest(),
+            "description": "Active-content-capable output types are flagged for blocked rendering.",
+        },
+        {
+            "slot_id": "bounded-renderer-policy",
+            "status": "ready",
+            "evidence_ref": "policy_hash",
+            "evidence_hash": policy_hash,
+            "description": "The policy fixes escaped bounded rendering and user-controlled downloads.",
+        },
+        {
+            "slot_id": "source-preview-endpoint-contract",
+            "status": "ready",
+            "evidence_ref": "source_preview_endpoint",
+            "evidence_hash": hashlib.sha256(
+                str(policy_manifest.get("source_preview_endpoint") or "").encode("utf-8")
+            ).hexdigest(),
+            "description": "The source-preview endpoint contract is recorded for audit/replay.",
+        },
+    ]
+    blocking_slots: list[dict[str, object]] = [
+        {
+            "slot_id": "os-level-renderer-sandbox",
+            "status": "blocked",
+            "blocker": "os-level-renderer-sandbox-required",
+            "required_evidence": "Windows/macOS/Linux renderer sandbox proof for risky codecs, Office macros, and HTML/SVG rendering",
+        },
+        {
+            "slot_id": "trusted-no-exec-manifest",
+            "status": "blocked",
+            "blocker": "trusted-preview-no-exec-manifest-required",
+            "required_evidence": "trusted no-exec/no-network preview manifest diff for representative active-content files",
+        },
+        {
+            "slot_id": "browser-renderer-exploit-corpus",
+            "status": "blocked",
+            "blocker": "browser-renderer-exploit-corpus-required",
+            "required_evidence": "browser/renderer exploit corpus proving previews fail closed without script/network execution",
+        },
+        {
+            "slot_id": "malicious-active-content-corpus",
+            "status": "blocked",
+            "blocker": "malicious-active-content-corpus-required",
+            "required_evidence": "HTML/SVG/JS/Office macro corpus with expected blocked-render outcomes",
+        },
+        {
+            "slot_id": "risky-codec-macro-external-sandbox",
+            "status": "blocked",
+            "blocker": "risky-codec-macro-external-sandbox-required",
+            "required_evidence": "external sandbox workflow for media codecs, Office macros, embedded scripts, and unknown binaries",
+        },
+        {
+            "slot_id": "browser-e2e-preview-sandbox",
+            "status": "blocked",
+            "blocker": "browser-e2e-preview-sandbox-required",
+            "required_evidence": "browser E2E evidence that preview pages do not execute active content or contact networks",
+        },
+    ]
+    plan_core = {
+        "profile_version": PREVIEW_SANDBOX_REPORT_GRADE_VALIDATION_PLAN_VERSION,
+        "item_number": 73,
+        "gap_id": PREVIEW_SANDBOX_GAP_ID,
+        "commercial_gap_ids": [PREVIEW_SANDBOX_GAP_ID],
+        "scope": "run-preview-policy",
+        "policy_manifest_hash": policy_manifest_hash,
+        "policy_hash": policy_hash,
+        "preview_policy_row_count": row_count,
+        "preview_policy_row_head_hash": row_head_hash,
+        "active_content_blocked_count": active_content_blocked_count,
+        "no_exec_contract_hash": no_exec_contract_hash,
+        "read_only_preview": bool(policy.get("read_only_preview")),
+        "executes_content": bool(policy.get("executes_content")),
+        "external_network_access": bool(policy.get("external_network_access")),
+        "active_content_blocking": bool(policy.get("active_content_blocking")),
+        "renderer_strategy": str(policy.get("renderer_strategy") or ""),
+        "os_sandbox_enabled_for_risky_codecs": bool(policy.get("os_sandbox_enabled_for_risky_codecs")),
+        "ready_slots": ready_slots,
+        "blocking_slots": blocking_slots,
+        "ready_slot_count": len(ready_slots),
+        "blocking_slot_count": len(blocking_slots),
+        "blockers": list(PREVIEW_SANDBOX_REPORT_GRADE_BLOCKERS),
+        "commercial_claim_allowed": False,
+        "ready_for_court_report": False,
+        "report_use_warning": "Use preview output only as bounded triage rendering until OS renderer sandbox and trusted no-exec corpus evidence are attached.",
+    }
+    validation_plan_hash = hashlib.sha256(json.dumps(plan_core, sort_keys=True).encode("utf-8")).hexdigest()
+    return {
+        **plan_core,
+        "validation_plan_hash": validation_plan_hash,
+        "validation_plan_sha256": validation_plan_hash,
+    }
 
 
 def preview_sandbox_run_output_policy_row(name: str, path: Path, *, sequence: int) -> dict[str, object]:
@@ -4330,6 +4481,11 @@ def build_processing_summary(
         if isinstance(safety.get("preview_sandbox_policy"), Mapping)
         else {}
     )
+    preview_sandbox_validation_plan = (
+        preview_sandbox_policy.get("preview_sandbox_report_grade_validation_plan")
+        if isinstance(preview_sandbox_policy.get("preview_sandbox_report_grade_validation_plan"), Mapping)
+        else {}
+    )
     sqlite_fts_optimization = (
         safety.get("sqlite_fts_optimization")
         if isinstance(safety.get("sqlite_fts_optimization"), Mapping)
@@ -4411,10 +4567,16 @@ def build_processing_summary(
         "memory_cap_enforcement": memory_cap_enforcement,
         "preview_sandboxing": {
             "component": "preview-sandboxing",
-            "status": "run-policy-manifest-emitted",
+            "status": "run-policy-manifest-and-validation-plan-emitted",
             "commercial_gap_ids": [PREVIEW_SANDBOX_GAP_ID],
             "preview_sandbox_policy_manifest": dict(preview_sandbox_policy),
             "preview_sandbox_policy_manifest_hash": str(preview_sandbox_policy.get("manifest_hash") or ""),
+            "preview_sandbox_report_grade_validation_plan": dict(preview_sandbox_validation_plan),
+            "preview_sandbox_report_grade_validation_plan_hash": str(
+                preview_sandbox_validation_plan.get("validation_plan_hash") or ""
+            ),
+            "report_grade_ready_slot_count": int(preview_sandbox_validation_plan.get("ready_slot_count") or 0),
+            "report_grade_blocking_slot_count": int(preview_sandbox_validation_plan.get("blocking_slot_count") or 0),
             "ready_for_court_report": False,
             "core_accuracy_gates": [
                 build_accuracy_gate(
@@ -4426,18 +4588,20 @@ def build_processing_summary(
                         "active content blocking policy emitted",
                         "preview policy row hashes emitted",
                         "OS sandbox limitation warning",
+                        "preview sandbox report-grade validation plan emitted",
+                        "preview sandbox report-grade ready slots emitted",
                     ],
                     evidence_refs=[
                         "run-summary:processing.preview_sandboxing",
                         f"preview_sandbox_policy_hash:{preview_sandbox_policy.get('manifest_hash', '')}",
+                        (
+                            "preview_sandbox_report_grade_validation_plan_hash:"
+                            f"{preview_sandbox_validation_plan.get('validation_plan_hash', '')}"
+                        ),
                     ],
                 )
             ],
-            "blockers": [
-                PREVIEW_SANDBOX_TRUSTED_DIFF_BLOCKER_73,
-                "separate-os-sandbox-for-risky-codecs-macros-not-enabled",
-                "browser-renderer-exploit-corpus-not-attached",
-            ],
+            "blockers": list(preview_sandbox_validation_plan.get("blockers") or PREVIEW_SANDBOX_REPORT_GRADE_BLOCKERS),
         },
         "parallel_parser_scheduler": artifact_scheduler.get("assessment")
         if isinstance(artifact_scheduler.get("assessment"), Mapping)
@@ -4535,6 +4699,11 @@ def build_runtime_defensibility_profiles(
     preview_sandbox_policy: Mapping[str, object] | None = None,
     sqlite_fts_optimization: Mapping[str, object] | None = None,
 ) -> dict[str, object]:
+    preview_sandbox_validation_plan = (
+        (preview_sandbox_policy or {}).get("preview_sandbox_report_grade_validation_plan")
+        if isinstance((preview_sandbox_policy or {}).get("preview_sandbox_report_grade_validation_plan"), Mapping)
+        else {}
+    )
     profiles = [
         build_runtime_defensibility_profile(
             item_number=71,
@@ -4602,7 +4771,7 @@ def build_runtime_defensibility_profiles(
         build_runtime_defensibility_profile(
             item_number=73,
             component="preview-sandboxing",
-            status="implemented-api-viewer-contract-validation-required",
+            status="implemented-api-viewer-report-grade-plan-validation-required",
             controls={
                 "source_preview_contract_available": True,
                 "read_only_bounded_preview_metadata": True,
@@ -4612,13 +4781,18 @@ def build_runtime_defensibility_profiles(
                 "preview_policy_row_count": int((preview_sandbox_policy or {}).get("preview_policy_row_count") or 0),
                 "preview_policy_row_head_hash": str((preview_sandbox_policy or {}).get("preview_policy_row_head_hash") or ""),
                 "active_content_blocked_count": int((preview_sandbox_policy or {}).get("active_content_blocked_count") or 0),
+                "preview_sandbox_report_grade_validation_plan_hash": str(
+                    preview_sandbox_validation_plan.get("validation_plan_hash") or ""
+                ),
+                "preview_sandbox_report_grade_ready_slot_count": int(
+                    preview_sandbox_validation_plan.get("ready_slot_count") or 0
+                ),
+                "preview_sandbox_report_grade_blocking_slot_count": int(
+                    preview_sandbox_validation_plan.get("blocking_slot_count") or 0
+                ),
                 "risky_codec_or_macro_os_sandbox": False,
             },
-            blockers=[
-                PREVIEW_SANDBOX_TRUSTED_DIFF_BLOCKER_73,
-                "separate-os-sandbox-for-risky-codecs-macros-not-enabled",
-                "browser-renderer-exploit-corpus-not-attached",
-            ],
+            blockers=list(preview_sandbox_validation_plan.get("blockers") or PREVIEW_SANDBOX_REPORT_GRADE_BLOCKERS),
         ),
         build_runtime_defensibility_profile(
             item_number=74,

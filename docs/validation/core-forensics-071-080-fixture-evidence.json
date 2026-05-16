@@ -27,9 +27,9 @@
       "title": "Preview sandboxing",
       "test_files": ["tests/test_rapidtriage_api.py"],
       "assertions": [
-        "Source preview metadata records read-only bounded rendering, active-content blocking, no network execution, preview caps, preview-sandbox policy profiles, source policy row hashes, escaped bounded renderer strategy, trusted no-exec diff helpers/gates, and #73 core_accuracy_gates."
+        "Source preview metadata records read-only bounded rendering, active-content blocking, no network execution, preview caps, preview-sandbox policy profiles, source policy row hashes, escaped bounded renderer strategy, preview sandbox report-grade validation-plan hashes/ready slots/blocking slots, trusted no-exec diff helpers/gates, and #73 core_accuracy_gates."
       ],
-      "remaining_external_validation": ["Separate OS sandbox for risky renderers/codecs, trusted no-exec manifests, and malicious active-content corpus validation."]
+      "remaining_external_validation": ["Separate OS sandbox for risky renderers/codecs, trusted no-exec manifests, malicious active-content corpus validation, browser exploit corpus, risky codec/macro sandbox workflow, and browser E2E no-exec/no-network validation."]
     },
     {
       "item": 74,

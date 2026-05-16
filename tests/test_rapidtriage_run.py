@@ -658,8 +658,33 @@ class RapidTriageRunTests(unittest.TestCase):
                 summary_payload["processing"]["preview_sandboxing"]["preview_sandbox_policy_manifest_hash"],
                 preview_policy["manifest_hash"],
             )
+            preview_validation_plan = preview_policy["preview_sandbox_report_grade_validation_plan"]
+            self.assertEqual(
+                preview_validation_plan["profile_version"],
+                "preview-sandbox-report-grade-validation-plan-v1",
+            )
+            self.assertEqual(
+                preview_policy["preview_sandbox_report_grade_validation_plan_hash"],
+                preview_validation_plan["validation_plan_hash"],
+            )
+            self.assertEqual(
+                summary_payload["processing"]["preview_sandboxing"][
+                    "preview_sandbox_report_grade_validation_plan_hash"
+                ],
+                preview_validation_plan["validation_plan_hash"],
+            )
+            self.assertEqual(preview_validation_plan["ready_slot_count"], 6)
+            self.assertEqual(preview_validation_plan["blocking_slot_count"], 6)
+            self.assertIn("run-policy-manifest", {slot["slot_id"] for slot in preview_validation_plan["ready_slots"]})
+            self.assertIn("os-level-renderer-sandbox", {slot["slot_id"] for slot in preview_validation_plan["blocking_slots"]})
             self.assertIn(
                 "preview policy row hashes emitted",
+                summary_payload["processing"]["preview_sandboxing"]["core_accuracy_gates"][0][
+                    "satisfied_checks"
+                ],
+            )
+            self.assertIn(
+                "preview sandbox report-grade validation plan emitted",
                 summary_payload["processing"]["preview_sandboxing"]["core_accuracy_gates"][0][
                     "satisfied_checks"
                 ],
@@ -730,6 +755,14 @@ class RapidTriageRunTests(unittest.TestCase):
             self.assertEqual(
                 runtime_by_number[73]["controls"]["preview_policy_row_head_hash"],
                 preview_policy["preview_policy_row_head_hash"],
+            )
+            self.assertEqual(
+                runtime_by_number[73]["controls"]["preview_sandbox_report_grade_validation_plan_hash"],
+                preview_validation_plan["validation_plan_hash"],
+            )
+            self.assertEqual(
+                runtime_by_number[73]["controls"]["preview_sandbox_report_grade_ready_slot_count"],
+                6,
             )
             self.assertEqual(runtime_by_number[74]["component"], "large-sqlite-fts-optimization")
             self.assertTrue(runtime_by_number[74]["controls"]["bounded_sqlite_preview_contract"])

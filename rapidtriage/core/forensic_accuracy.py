@@ -1141,6 +1141,7 @@ CORE_FORENSIC_ACCURACY_ITEMS: tuple[dict[str, object], ...] = (
             "preview caps recorded",
             "OS sandbox limitation warning",
             "preview policy row hashes emitted",
+            "preview sandbox report-grade validation plan emitted",
             "trusted preview sandbox/no-exec diff pass",
         ),
     },

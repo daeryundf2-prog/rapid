@@ -1737,10 +1737,10 @@
       ],
       "expected": {
         "required_assertions": [
-          "Source previews preserve read-only bounded preview metadata, active-content blocking, no network execution, cap metadata, preview-sandbox policy profiles, source policy row hashes, escaped bounded renderer strategy, OS sandbox warning, and #73 core_accuracy_gates."
+          "Source previews preserve read-only bounded preview metadata, active-content blocking, no network execution, cap metadata, preview-sandbox policy profiles, source policy row hashes, escaped bounded renderer strategy, preview sandbox report-grade validation-plan hashes/ready slots/blocking slots, OS sandbox warning, and #73 core_accuracy_gates."
         ]
       },
-      "notes": "Internal fixture pass; renderer/codecs/macros still require external sandbox validation.",
+      "notes": "Internal fixture pass; OS renderer sandboxing, browser exploit corpus, malicious active-content corpus, risky codec/macro sandbox, browser E2E validation, and trusted no-exec preview manifests still require external sandbox validation.",
       "source_manifest": "docs/validation/rapidtriage-core-forensics-071-080-known-answer.json"
     },
     {
