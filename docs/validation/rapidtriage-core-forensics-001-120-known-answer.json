@@ -2290,10 +2290,10 @@
       ],
       "expected": {
         "required_assertions": [
-          "Report exports preserve contamination warnings, contamination warning row hashes, warning count, output-under-evidence checks, contamination-checklist-manifest-v1 manifest hashes, write-blocker limitation, review-required flag, trusted contamination-checklist diff helpers/gates, and #99 core_accuracy_gates."
+          "Report exports preserve contamination warnings, contamination warning row hashes, warning count, output-under-evidence checks, contamination-checklist-manifest-v1 manifest hashes, contamination-warning-report-grade-validation-plan-v1 plan hashes/counts, write-blocker limitation, review-required flag, trusted contamination-checklist diff helpers/gates, and #99 core_accuracy_gates."
         ]
       },
-      "notes": "Internal fixture pass; acquisition-time mtime and write-blocker integration remain blockers.",
+      "notes": "Internal fixture pass; acquisition-time mtime baseline, write-blocker integration, source read-only proof, output-path policy enforcement, trusted contamination checklist, known-answer contamination corpus, and reviewer signoff remain blockers.",
       "source_manifest": "docs/validation/rapidtriage-core-forensics-091-100-known-answer.json"
     },
     {

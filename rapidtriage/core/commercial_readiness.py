@@ -3323,6 +3323,7 @@ def acquisition_quality_evidence_chain() -> list[dict[str, object]]:
                 "contamination_warnings.warnings[].contamination_warning_row_hash",
                 "contamination_warnings.contamination_checklist_manifest.manifest_hash",
                 "contamination_warnings.validation_assessment.checks[]",
+                "contamination_warnings.contamination_report_grade_validation_plan_hash",
                 "contamination_warnings.trusted_contamination_warning_diff",
             ],
             "trusted_diff": "trusted-contamination-checklist-diff",

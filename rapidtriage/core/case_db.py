@@ -175,6 +175,16 @@ CLOCK_SKEW_REPORT_GRADE_BLOCKERS = [
     "clock-skew-known-answer-corpus-required",
 ]
 CONTAMINATION_WARNING_TRUSTED_DIFF_BLOCKER_99 = "trusted-contamination-checklist-diff-missing"
+CONTAMINATION_WARNING_REPORT_GRADE_VALIDATION_PLAN_VERSION = "contamination-warning-report-grade-validation-plan-v1"
+CONTAMINATION_WARNING_REPORT_GRADE_BLOCKERS = [
+    "trusted-contamination-checklist-diff-missing",
+    "acquisition-time-mtime-baseline-required",
+    "write-blocker-integration-required",
+    "source-read-only-proof-required",
+    "output-path-policy-enforcement-required",
+    "contamination-known-answer-corpus-required",
+    "reviewer-signoff-workflow-required",
+]
 ACQUISITION_QUALITY_TRUSTED_TOOLS = {
     "signed-acquisition-handoff",
     "write-blocker-log",
@@ -10827,6 +10837,191 @@ def build_contamination_acquisition_context_manifest(
     return {**manifest_core, "manifest_hash": stable_payload_sha256(manifest_core)}
 
 
+def build_contamination_report_grade_validation_plan(
+    *,
+    warnings: Sequence[Mapping[str, object]],
+    evidence_source_count: int,
+    contamination_manifest: Mapping[str, object],
+    acquisition_context_manifest: Mapping[str, object],
+    trusted_diff: Mapping[str, object],
+) -> dict[str, object]:
+    trusted_status = str(trusted_diff.get("status") or "missing")
+    warning_row_hashes = [str(warning.get("contamination_warning_row_hash") or "") for warning in warnings]
+    ready_slots = [
+        {
+            "slot_id": "contamination-warning-records",
+            "status": "complete",
+            "evidence": {
+                "warning_count": len(warnings),
+                "evidence_source_count": evidence_source_count,
+            },
+        },
+        {
+            "slot_id": "contamination-warning-row-hashes",
+            "status": "complete",
+            "evidence": {
+                "warning_row_hash_count": sum(1 for value in warning_row_hashes if value),
+                "warning_count": len(warnings),
+            },
+        },
+        {
+            "slot_id": "contamination-checklist-manifest",
+            "status": "complete",
+            "evidence": {"manifest_hash": str(contamination_manifest.get("manifest_hash") or "")},
+        },
+        {
+            "slot_id": "warning-review-matrix",
+            "status": "complete",
+            "evidence": {
+                "matrix_hash": str(contamination_manifest.get("warning_review_matrix_hash") or ""),
+                "warning_count": int(
+                    (
+                        contamination_manifest.get("warning_review_matrix")
+                        if isinstance(contamination_manifest.get("warning_review_matrix"), Mapping)
+                        else {}
+                    ).get("warning_count")
+                    or 0
+                ),
+            },
+        },
+        {
+            "slot_id": "contamination-acquisition-context-manifest",
+            "status": "complete",
+            "evidence": {
+                "manifest_hash": str(acquisition_context_manifest.get("manifest_hash") or ""),
+                "missing_write_blocker_count": int(
+                    acquisition_context_manifest.get("missing_write_blocker_count") or 0
+                ),
+            },
+        },
+        {
+            "slot_id": "write-blocker-limitation-disclosure",
+            "status": "complete",
+            "evidence": {
+                "write_blocker_integration": str(contamination_manifest.get("write_blocker_integration") or ""),
+                "operator_warning": str(acquisition_context_manifest.get("operator_warning") or ""),
+            },
+        },
+        {
+            "slot_id": "trusted-contamination-diff-disclosure",
+            "status": "complete",
+            "evidence": {
+                "trusted_diff_status": trusted_status,
+                "trusted_tool": str(trusted_diff.get("trusted_tool") or ""),
+            },
+        },
+    ]
+    blocking_slots: list[dict[str, object]] = []
+    if evidence_source_count == 0:
+        blocking_slots.append(
+            {
+                "slot_id": "evidence-sources-present",
+                "status": "blocked",
+                "blocker": "evidence-sources-present-required",
+                "required_evidence": "at least one evidence source before contamination review",
+            }
+        )
+    if len([value for value in warning_row_hashes if value]) != len(warnings):
+        blocking_slots.append(
+            {
+                "slot_id": "contamination-warning-row-hash-completeness",
+                "status": "blocked",
+                "blocker": "contamination-warning-row-hash-completeness-required",
+                "required_evidence": "row hash for every exported contamination warning",
+            }
+        )
+    if not contamination_manifest.get("manifest_hash") or not contamination_manifest.get("warning_review_matrix_hash"):
+        blocking_slots.append(
+            {
+                "slot_id": "contamination-checklist-manifest-complete",
+                "status": "blocked",
+                "blocker": "contamination-checklist-manifest-required",
+                "required_evidence": "contamination checklist manifest hash and warning-review matrix hash",
+            }
+        )
+    if not acquisition_context_manifest.get("manifest_hash"):
+        blocking_slots.append(
+            {
+                "slot_id": "contamination-acquisition-context-manifest-complete",
+                "status": "blocked",
+                "blocker": "contamination-acquisition-context-manifest-required",
+                "required_evidence": "acquisition-context manifest linking warnings to acquisition metadata/write-blocker fields",
+            }
+        )
+    if trusted_status != "pass":
+        blocking_slots.append(
+            {
+                "slot_id": "trusted-contamination-checklist-diff",
+                "status": "external-required",
+                "blocker": CONTAMINATION_WARNING_TRUSTED_DIFF_BLOCKER_99,
+                "required_evidence": "trusted contamination checklist diff covering warnings, manifests, review matrix, and acquisition context",
+            }
+        )
+    blocking_slots.extend(
+        [
+            {
+                "slot_id": "acquisition-time-mtime-baseline",
+                "status": "external-required",
+                "blocker": "acquisition-time-mtime-baseline-required",
+                "required_evidence": "acquisition-time source mtime baseline and post-run comparison for each evidence source",
+            },
+            {
+                "slot_id": "write-blocker-integration",
+                "status": "external-required",
+                "blocker": "write-blocker-integration-required",
+                "required_evidence": "write-blocker device/log integration proving source media was not writable during acquisition/review",
+            },
+            {
+                "slot_id": "source-read-only-proof",
+                "status": "external-required",
+                "blocker": "source-read-only-proof-required",
+                "required_evidence": "read-only mount/device policy proof for every original evidence source",
+            },
+            {
+                "slot_id": "output-path-policy-enforcement",
+                "status": "external-required",
+                "blocker": "output-path-policy-enforcement-required",
+                "required_evidence": "enforced output path policy preventing generated files under evidence roots",
+            },
+            {
+                "slot_id": "contamination-known-answer-corpus",
+                "status": "external-required",
+                "blocker": "contamination-known-answer-corpus-required",
+                "required_evidence": "known-answer corpus for writable source, output-under-evidence, zero-byte, stat-failure, mtime-change, and missing write-blocker cases",
+            },
+            {
+                "slot_id": "reviewer-signoff-workflow",
+                "status": "external-required",
+                "blocker": "reviewer-signoff-workflow-required",
+                "required_evidence": "analyst/reviewer signoff on contamination warnings before report submission",
+            },
+        ]
+    )
+    plan_core: dict[str, object] = {
+        "profile_version": CONTAMINATION_WARNING_REPORT_GRADE_VALIDATION_PLAN_VERSION,
+        "item_number": 99,
+        "commercial_gap_ids": [EVIDENCE_CONTAMINATION_WARNING_GAP_ID],
+        "plan_context": "case-db-evidence-contamination-validation",
+        "warning_count": len(warnings),
+        "evidence_source_count": evidence_source_count,
+        "contamination_checklist_manifest_hash": str(contamination_manifest.get("manifest_hash") or ""),
+        "warning_review_matrix_hash": str(contamination_manifest.get("warning_review_matrix_hash") or ""),
+        "contamination_acquisition_context_manifest_hash": str(
+            acquisition_context_manifest.get("manifest_hash") or ""
+        ),
+        "trusted_diff_status": trusted_status,
+        "ready_slots": ready_slots,
+        "blocking_slots": blocking_slots,
+        "ready_slot_count": len(ready_slots),
+        "blocking_slot_count": len(blocking_slots),
+        "external_blocker_catalog": list(CONTAMINATION_WARNING_REPORT_GRADE_BLOCKERS),
+        "blockers": sorted({str(slot.get("blocker") or "") for slot in blocking_slots if slot.get("blocker")}),
+        "commercial_claim_allowed": False,
+        "reporting_boundary": "This plan makes contamination warnings auditable, but commercial claims require acquisition-time mtime baselines, write-blocker integration, source read-only proof, enforced output path policy, trusted checklist diffs, known-answer corpus, and reviewer signoff.",
+    }
+    return {**plan_core, "validation_plan_hash": stable_payload_sha256(plan_core)}
+
+
 def build_evidence_contamination_warnings(
     connection: sqlite3.Connection,
     case_id: str,
@@ -10938,6 +11133,14 @@ def build_evidence_contamination_warnings(
         warnings=warnings,
         trusted_diff=trusted_diff,
     )
+    report_grade_validation_plan = build_contamination_report_grade_validation_plan(
+        warnings=warnings,
+        evidence_source_count=len(rows),
+        contamination_manifest=contamination_manifest,
+        acquisition_context_manifest=acquisition_context_manifest,
+        trusted_diff=trusted_diff,
+    )
+    blockers = sorted({*blockers, *report_grade_validation_plan["blockers"]})
     return {
         "status": "warnings-present" if warnings else "no-obvious-contamination",
         "commercial_gap_ids": [EVIDENCE_CONTAMINATION_WARNING_GAP_ID],
@@ -10952,6 +11155,9 @@ def build_evidence_contamination_warnings(
             "contamination_checklist_manifest_hash": contamination_manifest["manifest_hash"],
             "warning_review_matrix_hash": contamination_manifest["warning_review_matrix_hash"],
             "contamination_acquisition_context_manifest_hash": acquisition_context_manifest["manifest_hash"],
+            "contamination_report_grade_validation_plan_hash": report_grade_validation_plan["validation_plan_hash"],
+            "contamination_report_grade_ready_slot_count": report_grade_validation_plan["ready_slot_count"],
+            "contamination_report_grade_blocking_slot_count": report_grade_validation_plan["blocking_slot_count"],
             "commercial_gap_ids": [EVIDENCE_CONTAMINATION_WARNING_GAP_ID],
         },
         "warnings": warnings,
@@ -10960,6 +11166,10 @@ def build_evidence_contamination_warnings(
         "warning_review_matrix_hash": contamination_manifest["warning_review_matrix_hash"],
         "contamination_acquisition_context_manifest": acquisition_context_manifest,
         "contamination_acquisition_context_manifest_hash": acquisition_context_manifest["manifest_hash"],
+        "contamination_report_grade_validation_plan": report_grade_validation_plan,
+        "contamination_report_grade_validation_plan_hash": report_grade_validation_plan["validation_plan_hash"],
+        "contamination_report_grade_ready_slot_count": report_grade_validation_plan["ready_slot_count"],
+        "contamination_report_grade_blocking_slot_count": report_grade_validation_plan["blocking_slot_count"],
         "trusted_contamination_warning_diff": trusted_diff,
         "blockers": blockers,
         "validation_assessment": {
@@ -10975,10 +11185,14 @@ def build_evidence_contamination_warnings(
             "contamination_checklist_manifest_hash": contamination_manifest["manifest_hash"],
             "warning_review_matrix_hash": contamination_manifest["warning_review_matrix_hash"],
             "contamination_acquisition_context_manifest_hash": acquisition_context_manifest["manifest_hash"],
+            "contamination_report_grade_validation_plan_hash": report_grade_validation_plan["validation_plan_hash"],
+            "contamination_report_grade_ready_slot_count": report_grade_validation_plan["ready_slot_count"],
+            "contamination_report_grade_blocking_slot_count": report_grade_validation_plan["blocking_slot_count"],
             "core_accuracy_gates": contamination_warning_core_accuracy_gates(
                 warnings=warnings,
                 contamination_manifest=contamination_manifest,
                 acquisition_context_manifest=acquisition_context_manifest,
+                report_grade_validation_plan=report_grade_validation_plan,
                 trusted_diff=trusted_diff,
             ),
             "trusted_contamination_warning_diff": trusted_diff,
@@ -12640,6 +12854,7 @@ def contamination_warning_core_accuracy_gates(
     warnings: Sequence[Mapping[str, object]],
     contamination_manifest: Mapping[str, object] | None = None,
     acquisition_context_manifest: Mapping[str, object] | None = None,
+    report_grade_validation_plan: Mapping[str, object] | None = None,
     trusted_diff: Mapping[str, object] | None = None,
 ) -> list[dict[str, object]]:
     satisfied = [
@@ -12657,6 +12872,10 @@ def contamination_warning_core_accuracy_gates(
         satisfied.append("contamination warning review matrix hash emitted")
     if acquisition_context_manifest and acquisition_context_manifest.get("manifest_hash"):
         satisfied.append("contamination acquisition context manifest hash emitted")
+    if report_grade_validation_plan and report_grade_validation_plan.get("validation_plan_hash"):
+        satisfied.append("contamination report-grade validation plan")
+    if report_grade_validation_plan and report_grade_validation_plan.get("ready_slot_count"):
+        satisfied.append("contamination report-grade ready slots")
     if trusted_diff and trusted_diff.get("status") == "pass":
         satisfied.append("trusted contamination checklist diff pass")
     return [
@@ -12668,6 +12887,7 @@ def contamination_warning_core_accuracy_gates(
                 f"contamination_checklist_manifest_hash:{(contamination_manifest or {}).get('manifest_hash', '')}",
                 f"warning_review_matrix_hash:{(contamination_manifest or {}).get('warning_review_matrix_hash', '')}",
                 f"contamination_acquisition_context_manifest_hash:{(acquisition_context_manifest or {}).get('manifest_hash', '')}",
+                f"contamination_report_grade_validation_plan_hash:{(report_grade_validation_plan or {}).get('validation_plan_hash', '')}",
             ],
         )
     ]

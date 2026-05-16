@@ -64,8 +64,8 @@
       "item": 99,
       "title": "Evidence contamination warning",
       "test_files": ["tests/test_rapidtriage_case_db.py"],
-      "assertions": ["Report exports preserve contamination warning records, contamination warning row hashes, warning counts, output-under-evidence checks, contamination-checklist-manifest-v1 manifest hashes, write-blocker limitation, review-required flag, trusted contamination-checklist diff helpers/gates, and #99 core_accuracy_gates."],
-      "remaining_external_validation": ["Persistent acquisition-time mtime comparison, trusted contamination checklist, and write-blocker integration."]
+      "assertions": ["Report exports preserve contamination warning records, contamination warning row hashes, warning counts, output-under-evidence checks, contamination-checklist-manifest-v1 manifest hashes, contamination-warning-report-grade-validation-plan-v1 plan hashes/counts, write-blocker limitation, review-required flag, trusted contamination-checklist diff helpers/gates, and #99 core_accuracy_gates."],
+      "remaining_external_validation": ["Acquisition-time mtime baseline, write-blocker integration, source read-only proof, output-path policy enforcement, trusted contamination checklist, known-answer contamination corpus, and reviewer signoff."]
     },
     {
       "item": 100,

@@ -250,6 +250,7 @@ class RapidTriageCoreForensicsAccuracyTests(unittest.TestCase):
         self.assertIn("clock skew report-grade validation plan", clock_skew["required_checks"])
         self.assertIn("trusted clock-skew baseline diff pass", clock_skew["required_checks"])
         self.assertIn("write-blocker integration limitation emitted", contamination["required_checks"])
+        self.assertIn("contamination report-grade validation plan", contamination["required_checks"])
         self.assertIn("trusted contamination checklist diff pass", contamination["required_checks"])
         self.assertIn("previous-entry hash chain generated", tamper_bundle["required_checks"])
         self.assertIn("trusted tamper signature attestation diff pass", tamper_bundle["required_checks"])

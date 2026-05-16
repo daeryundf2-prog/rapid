@@ -1639,6 +1639,8 @@ CORE_FORENSIC_ACCURACY_ITEMS: tuple[dict[str, object], ...] = (
             "warning count summarized",
             "output-under-evidence checks emitted",
             "contamination checklist manifest hash emitted",
+            "contamination report-grade validation plan",
+            "contamination report-grade ready slots",
             "write-blocker integration limitation emitted",
             "review-required flag emitted",
             "trusted contamination checklist diff pass",

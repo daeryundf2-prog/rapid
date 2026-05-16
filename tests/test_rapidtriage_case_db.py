@@ -3043,6 +3043,25 @@ class RapidTriageCaseDatabaseTests(unittest.TestCase):
                 export["contamination_warnings"]["functional_priority_profile"]["implemented_controls"]["contamination_acquisition_context_manifest_hash"],
                 export["contamination_warnings"]["contamination_acquisition_context_manifest"]["manifest_hash"],
             )
+            self.assertEqual(
+                export["contamination_warnings"]["contamination_report_grade_validation_plan"]["profile_version"],
+                "contamination-warning-report-grade-validation-plan-v1",
+            )
+            self.assertEqual(
+                export["contamination_warnings"]["contamination_report_grade_validation_plan_hash"],
+                export["contamination_warnings"]["contamination_report_grade_validation_plan"]["validation_plan_hash"],
+            )
+            self.assertGreaterEqual(export["contamination_warnings"]["contamination_report_grade_ready_slot_count"], 7)
+            self.assertGreaterEqual(export["contamination_warnings"]["contamination_report_grade_blocking_slot_count"], 6)
+            self.assertIn(
+                "write-blocker-integration",
+                {
+                    slot["slot_id"]
+                    for slot in export["contamination_warnings"]["contamination_report_grade_validation_plan"][
+                        "blocking_slots"
+                    ]
+                },
+            )
             self.assertIn("trusted-contamination-checklist-diff-missing", export["contamination_warnings"]["blockers"])
             contamination_diff = build_contamination_warning_trusted_diff(
                 export["contamination_warnings"],
@@ -3052,6 +3071,7 @@ class RapidTriageCaseDatabaseTests(unittest.TestCase):
                 warnings=export["contamination_warnings"]["warnings"],
                 contamination_manifest=export["contamination_warnings"]["contamination_checklist_manifest"],
                 acquisition_context_manifest=export["contamination_warnings"]["contamination_acquisition_context_manifest"],
+                report_grade_validation_plan=export["contamination_warnings"]["contamination_report_grade_validation_plan"],
                 trusted_diff=contamination_diff,
             )
             self.assertEqual(contamination_diff["status"], "pass")
@@ -3061,6 +3081,7 @@ class RapidTriageCaseDatabaseTests(unittest.TestCase):
             self.assertIn("contamination checklist manifest hash emitted", contamination_gates[0]["satisfied_checks"])
             self.assertIn("contamination warning review matrix hash emitted", contamination_gates[0]["satisfied_checks"])
             self.assertIn("contamination acquisition context manifest hash emitted", contamination_gates[0]["satisfied_checks"])
+            self.assertIn("contamination report-grade validation plan", contamination_gates[0]["satisfied_checks"])
             self.assertIn("trusted contamination checklist diff pass", contamination_gates[0]["satisfied_checks"])
 
             output_path = root / "case-db-report.json"
