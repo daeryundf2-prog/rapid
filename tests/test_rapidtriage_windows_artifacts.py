@@ -2949,6 +2949,7 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
                 bam["details"]["bam_dam_decode_profile"]["reportability_decision"]["decision"],
                 "report-only-with-correlation",
             )
+            self.assertFalse(bam["details"]["bam_dam_decode_profile"]["standalone_execution_proof"])
             self.assertTrue(bam["details"]["validation_checks"]["has_timestamp"])
             self.assertFalse(bam["details"]["commercial_grade_ready"])
             self.assertIn("native-system-hive-bam-decoding-required", bam["details"]["commercial_grade_blockers"])
@@ -2961,6 +2962,13 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
             self.assertIn("device path normalization", bam_gate["satisfied_checks"])
             self.assertIn("FILETIME validity", bam_gate["satisfied_checks"])
             self.assertIn("ControlSet attribution", bam_gate["satisfied_checks"])
+            self.assertIn("stable BAM/DAM row manifest", bam_gate["satisfied_checks"])
+            bam_row_manifest = bam["details"]["bam_dam_row_manifest"]
+            self.assertEqual(bam_row_manifest["manifest_version"], "bam-dam-row-manifest-v1")
+            self.assertEqual(bam_row_manifest["row_identity"]["control_set"], "CurrentControlSet")
+            self.assertFalse(bam_row_manifest["row_identity"]["standalone_execution_proof"])
+            self.assertIn("source_key", bam_row_manifest["trusted_diff_contract"]["required_fields"])
+            self.assertEqual(bam["details"]["bam_dam_row_manifest_hash"], bam_row_manifest["manifest_sha256"])
             bam_manifest = bam["details"]["bam_dam_report_citation_manifest"]
             self.assertEqual(
                 bam_manifest["manifest_version"],
@@ -3007,6 +3015,10 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
             self.assertEqual(native_bam_manifest["source"]["format"], "system-hive-native-bam-dam-scan")
             self.assertEqual(native_bam_manifest["row_identity"]["user_sid"], "S-1-5-21-1000")
             self.assertFalse(native_bam_manifest["reportability"]["standalone_execution_proof"])
+            native_bam_row_manifest = native_bam["details"]["bam_dam_row_manifest"]
+            self.assertEqual(native_bam_row_manifest["source"]["format"], "system-hive-native-bam-dam-scan")
+            self.assertEqual(native_bam_row_manifest["row_identity"]["artifact_scope"], "bam")
+            self.assertEqual(native_bam["details"]["bam_dam_row_manifest_hash"], native_bam_row_manifest["manifest_sha256"])
             self.assertEqual(
                 native_bam["details"]["bam_dam_report_citation_manifest_hash"],
                 native_bam_manifest["manifest_sha256"],

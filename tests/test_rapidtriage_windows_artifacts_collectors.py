@@ -26,6 +26,7 @@ from rapidtriage.artifacts.windows.eventlog import (
 from rapidtriage.artifacts.windows.execution import (
     amcache_row_manifest,
     amcache_schema_version_profile,
+    bam_dam_row_manifest,
     build_execution_artifact_trusted_diff,
     collect_amcache_candidate_clusters,
     collect_bam_dam_candidate_clusters,
@@ -3184,6 +3185,41 @@ class RapidTriageWindowsArtifactsCollectorTests(unittest.TestCase):
         self.assertIn("Services\\bam", " ".join(cluster["nearby_metadata_candidates"]))
         self.assertGreaterEqual(cluster["parser_confidence"], 0.6)
 
+    def test_bam_dam_row_manifest_preserves_correlation_and_source_contract(self) -> None:
+        manifest = bam_dam_row_manifest(
+            source_path="/evidence/SYSTEM",
+            source_hashes={"sha256": "d" * 64},
+            source_format="system-hive-native-bam-dam-scan",
+            source_key=r"SYSTEM\CurrentControlSet\Services\bam\State\UserSettings\S-1-5-21-1000",
+            source_index=3,
+            executable_path=r"\Device\HarddiskVolume3\Users\alice\AppData\Roaming\evil.exe",
+            user_sid="S-1-5-21-1000",
+            timestamp="2024-04-01T06:07:08+00:00",
+            timestamp_source="native-bam-dam-nearby-string-timestamp-candidate",
+            source_offset=12288,
+            row_cluster_evidence={
+                "cluster_status": "bounded-native-string-cluster",
+                "cluster_window_bytes": 4096,
+                "nearby_offsets": [12288, 12312],
+            },
+            decode_profile={
+                "profile_version": "bam-dam-decode-v1",
+                "standalone_execution_proof": False,
+            },
+            report_grade={"status": "validation-required", "report_grade_ready": False, "blockers": []},
+        )
+
+        self.assertEqual(manifest["manifest_version"], "bam-dam-row-manifest-v1")
+        self.assertEqual(manifest["row_identity"]["control_set"], "CurrentControlSet")
+        self.assertEqual(manifest["row_identity"]["artifact_scope"], "bam")
+        self.assertFalse(manifest["row_identity"]["standalone_execution_proof"])
+        self.assertTrue(manifest["row_identity"]["correlation_required"])
+        self.assertIn("source_key", manifest["trusted_diff_contract"]["required_fields"])
+        self.assertIn("source_offset", manifest["trusted_diff_contract"]["required_fields"])
+        self.assertFalse(manifest["reportability"]["standalone_execution_proof"])
+        self.assertIn("cross-artifact-correlation-required", manifest["reportability"]["blockers"])
+        self.assertEqual(len(manifest["manifest_sha256"]), 64)
+
     def test_bam_dam_trusted_diff_accepts_nested_artifact_rows_with_sid_and_device_path(self) -> None:
         rapid_rows = [
             {
@@ -3226,6 +3262,47 @@ class RapidTriageWindowsArtifactsCollectorTests(unittest.TestCase):
         self.assertTrue(diff["commercial_grade_evidence"])
         self.assertEqual(diff["matched_count"], 1)
         self.assertIn("device_path", diff["compare_fields"])
+        self.assertIn("source_key", diff["required_fields"])
+        self.assertEqual(next(iter(diff["field_coverage"].values()))["rapid_missing_required_fields"], [])
+
+    def test_bam_dam_trusted_diff_accepts_row_manifest_only_rows(self) -> None:
+        manifest = bam_dam_row_manifest(
+            source_path="/evidence/SYSTEM",
+            source_hashes={"sha256": "d" * 64},
+            source_format="system-hive-native-bam-dam-scan",
+            source_key=r"SYSTEM\CurrentControlSet\Services\bam\State\UserSettings\S-1-5-21-1000",
+            source_index=0,
+            executable_path=r"\Device\HarddiskVolume3\Users\alice\AppData\Roaming\evil.exe",
+            user_sid="S-1-5-21-1000",
+            timestamp="2024-04-01T06:07:08+00:00",
+            timestamp_source="native-bam-dam-nearby-string-timestamp-candidate",
+            source_offset=12288,
+            row_cluster_evidence={},
+            decode_profile={"profile_version": "bam-dam-decode-v1"},
+            report_grade={"status": "validation-required", "report_grade_ready": False, "blockers": []},
+        )
+        trusted_rows = [
+            {
+                "SourceFormat": "system-hive-native-bam-dam-scan",
+                "SourceKey": r"SYSTEM\CurrentControlSet\Services\bam\State\UserSettings\S-1-5-21-1000",
+                "SourceOffset": 12288,
+                "DevicePath": r"\Device\HarddiskVolume3\Users\alice\AppData\Roaming\evil.exe",
+                "UserSid": "S-1-5-21-1000",
+                "LastExecution": "2024-04-01T06:07:08+00:00",
+                "TimestampSource": "native-bam-dam-nearby-string-timestamp-candidate",
+                "Warning": "BAM/DAM is a strong recent-execution pivot but should be correlated with Prefetch, SRUM, UserAssist, and event logs.",
+            }
+        ]
+
+        diff = build_execution_artifact_trusted_diff(
+            [{"artifact_type": "bam-entry", "details": {"bam_dam_row_manifest": manifest}}],
+            trusted_rows,
+            trusted_tool="RECmd",
+            artifact_family="bam-dam",
+        )
+
+        self.assertEqual(diff["status"], "pass")
+        self.assertTrue(diff["commercial_grade_evidence"])
 
     def test_bam_dam_trusted_diff_blocks_sid_mismatch(self) -> None:
         rapid_rows = [

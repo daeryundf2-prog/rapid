@@ -66,8 +66,10 @@
       "title": "BAM/DAM execution parser",
       "assertions": [
         "bam-entry rows preserve SID, device path, FILETIME timestamp, CurrentControlSet attribution, execution semantics warning, #9 core_accuracy_gates, and correlate-before-testimony reportability decisions.",
-        "bam-entry rows emit execution_analyst_review_profile with high severity, SID/device/timestamp pivots, SRUM/Prefetch correlation targets, and native SYSTEM hive decoding blockers."
-        ,"build_execution_artifact_trusted_diff can compare BAM/DAM rows with trusted SYSTEM hive/BAM parser output by path, SID, timestamp, and semantics warning."
+        "bam-entry rows emit execution_analyst_review_profile with high severity, SID/device/timestamp pivots, SRUM/Prefetch correlation targets, and native SYSTEM hive decoding blockers.",
+        "bam-entry rows emit bam_dam_row_manifest and bam_dam_row_manifest_hash with ControlSet/source-key/source-offset identity, SID, device path, timestamp semantics, source-viewer locators, and explicit standalone_execution_proof=false.",
+        "build_execution_artifact_trusted_diff can compare BAM/DAM rows with trusted SYSTEM hive/BAM parser output by path, SID, timestamp, source key/offset, and semantics warning.",
+        "build_execution_artifact_trusted_diff blocks BAM/DAM commercial evidence when required source identity or correlation-warning coverage is missing."
       ],
       "blockers_kept": [
         "native SYSTEM hive BAM/DAM binary value interpretation",

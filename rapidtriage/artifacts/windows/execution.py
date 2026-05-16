@@ -16,7 +16,7 @@ from .ese import ESE_SCAN_READ_SIZE, build_ese_string_pivots, probe_ese_database
 from .os_account import decode_reg_export
 from .srum_ese import analyze_srudb_native
 
-PARSER_VERSION = "windows-execution-v12"
+PARSER_VERSION = "windows-execution-v13"
 REGISTRY_EXPORT_EXT = ".reg"
 SRUM_IMPORT_SUFFIXES = {".csv", ".json", ".jsonl", ".ndjson"}
 AMCACHE_HIVE_NAME = "AMCACHE.HVE"
@@ -107,7 +107,7 @@ EXECUTION_DIFF_COMPARE_FIELDS = (
 EXECUTION_DIFF_REQUIRED_FIELDS_BY_FAMILY = {
     "amcache": ("executable_path", "sha1", "semantics_warning"),
     "shimcache-appcompatcache": ("executable_path", "cache_order", "semantics_warning"),
-    "bam-dam": ("executable_path", "user_sid", "timestamp", "semantics_warning"),
+    "bam-dam": ("executable_path", "user_sid", "timestamp", "source_key", "source_offset", "semantics_warning"),
     "srum": ("executable_path", "timestamp", "table_family"),
 }
 QC_PREP_EXECUTION_ITEM_NUMBERS = {
@@ -352,6 +352,7 @@ def build_execution_registry_record(path: Path, key: str, values: Mapping[str, s
     amcache_manifest = {}
     shimcache_layout = {}
     shimcache_manifest = {}
+    bam_dam_manifest = {}
     if artifact_type == "amcache-entry":
         amcache_schema_version = amcache_schema_version_profile(
             source_format="reg",
@@ -404,6 +405,29 @@ def build_execution_registry_record(path: Path, key: str, values: Mapping[str, s
             layout_profile=shimcache_layout,
             report_grade=report_grade,
         )
+    if artifact_type == "bam-entry":
+        bam_dam_manifest = bam_dam_row_manifest(
+            source_path=str(path.resolve()),
+            source_hashes=source_hashes,
+            source_format="reg",
+            source_key=key,
+            source_index=0,
+            executable_path=executable_path,
+            user_sid=user_sid,
+            timestamp=timestamp,
+            timestamp_source=timestamp_source,
+            source_offset=0,
+            row_cluster_evidence={},
+            decode_profile=bam_dam_decode_profile(
+                validation_checks=validation_checks,
+                report_grade=report_grade,
+                executable_path=executable_path,
+                user_sid=user_sid,
+                timestamp=timestamp,
+                timestamp_source=timestamp_source,
+            ),
+            report_grade=report_grade,
+        )
     core_accuracy_gates = execution_core_accuracy_gates(
         artifact_type,
         {
@@ -422,6 +446,7 @@ def build_execution_registry_record(path: Path, key: str, values: Mapping[str, s
             "sha1": execution_fields.get("sha1", ""),
             "amcache_row_manifest_hash": amcache_manifest.get("manifest_sha256", ""),
             "shimcache_row_manifest_hash": shimcache_manifest.get("manifest_sha256", ""),
+            "bam_dam_row_manifest_hash": bam_dam_manifest.get("manifest_sha256", ""),
             "validation_checks": validation_checks,
             "decoded_values": decoded_values,
         },
@@ -531,6 +556,8 @@ def build_execution_registry_record(path: Path, key: str, values: Mapping[str, s
                 timestamp=timestamp,
                 timestamp_source=timestamp_source,
             ) if artifact_type == "bam-entry" else {},
+            "bam_dam_row_manifest": bam_dam_manifest,
+            "bam_dam_row_manifest_hash": bam_dam_manifest.get("manifest_sha256", ""),
             "bam_dam_report_citation_manifest": bam_dam_report_citation_manifest(
                 source_path=str(path.resolve()),
                 source_hashes=file_hashes(path),
@@ -563,6 +590,7 @@ def build_execution_registry_record(path: Path, key: str, values: Mapping[str, s
                     "source_format": "reg",
                     "amcache_row_manifest_hash": amcache_manifest.get("manifest_sha256", ""),
                     "shimcache_row_manifest_hash": shimcache_manifest.get("manifest_sha256", ""),
+                    "bam_dam_row_manifest_hash": bam_dam_manifest.get("manifest_sha256", ""),
                     "execution_validation_matrix": execution_validation_matrix(validation_checks),
                     "execution_report_grade_assessment": report_grade,
                 },
@@ -899,6 +927,31 @@ def build_native_bam_dam_records(path: Path) -> Iterable[ArtifactRecord]:
             gap_ids=["#9"],
             extra_blockers=["native-system-hive-bam-decoding-required", "bam-dam-filetime-row-validation-required"],
         )
+        row_cluster_evidence = bam_dam_row_cluster_evidence(cluster)
+        decode_profile = bam_dam_decode_profile(
+            validation_checks=row_checks,
+            report_grade=row_report_grade,
+            executable_path=executable_path,
+            user_sid=user_sid,
+            timestamp=timestamp,
+            timestamp_source="native-bam-dam-nearby-string-timestamp-candidate" if timestamp else "not_available_native_string_pivot",
+            source_format="system-hive-native-bam-dam-scan",
+        )
+        bam_dam_manifest = bam_dam_row_manifest(
+            source_path=str(path.resolve()),
+            source_hashes=source_hashes,
+            source_format="system-hive-native-bam-dam-scan",
+            source_key=source_key,
+            source_index=index,
+            executable_path=executable_path,
+            user_sid=user_sid,
+            timestamp=timestamp,
+            timestamp_source="native-bam-dam-nearby-string-timestamp-candidate" if timestamp else "not_available_native_string_pivot",
+            source_offset=int(cluster.get("source_offset") or 0),
+            row_cluster_evidence=row_cluster_evidence,
+            decode_profile=decode_profile,
+            report_grade=row_report_grade,
+        )
         core_accuracy_gates = execution_core_accuracy_gates(
             "bam-entry",
             {
@@ -911,10 +964,10 @@ def build_native_bam_dam_records(path: Path) -> Iterable[ArtifactRecord]:
                 "device_path": executable_path,
                 "user_sid": user_sid,
                 "timestamp": timestamp,
+                "bam_dam_row_manifest_hash": bam_dam_manifest.get("manifest_sha256", ""),
                 "validation_checks": row_checks,
             },
         )
-        row_cluster_evidence = bam_dam_row_cluster_evidence(cluster)
         citation_manifest = bam_dam_report_citation_manifest(
             source_path=str(path.resolve()),
             source_hashes=source_hashes,
@@ -965,15 +1018,9 @@ def build_native_bam_dam_records(path: Path) -> Iterable[ArtifactRecord]:
                         str(value) for value in cluster.get("nearby_metadata_candidates", [])
                     ] if isinstance(cluster.get("nearby_metadata_candidates"), list) else [],
                 ),
-                "bam_dam_decode_profile": bam_dam_decode_profile(
-                    validation_checks=row_checks,
-                    report_grade=row_report_grade,
-                    executable_path=executable_path,
-                    user_sid=user_sid,
-                    timestamp=timestamp,
-                    timestamp_source="native-bam-dam-nearby-string-timestamp-candidate" if timestamp else "not_available_native_string_pivot",
-                    source_format="system-hive-native-bam-dam-scan",
-                ),
+                "bam_dam_decode_profile": decode_profile,
+                "bam_dam_row_manifest": bam_dam_manifest,
+                "bam_dam_row_manifest_hash": bam_dam_manifest.get("manifest_sha256", ""),
                 "bam_dam_report_citation_manifest": citation_manifest,
                 "bam_dam_report_citation_manifest_hash": citation_manifest["manifest_sha256"],
                 "evidence_strength": "recent-execution-indicator-candidate",
@@ -990,6 +1037,7 @@ def build_native_bam_dam_records(path: Path) -> Iterable[ArtifactRecord]:
                         "source_hashes": source_hashes,
                         "source_index": index,
                         "source_format": "system-hive-native-bam-dam-scan",
+                        "bam_dam_row_manifest_hash": bam_dam_manifest.get("manifest_sha256", ""),
                         "execution_validation_matrix": execution_validation_matrix(row_checks),
                         "execution_report_grade_assessment": row_report_grade,
                     },
@@ -3743,6 +3791,7 @@ def bam_dam_decode_profile(
             "path": bool(executable_path),
             "filetime_timestamp": timestamp_source == "bam_value_filetime" and bool(timestamp),
             "native_system_hive_binary_decode": bool(EXECUTION_NATIVE_CAPABILITIES["native_bam_system_hive_decode"]),
+            "correlation_required": bool(validation_checks.get("requires_correlation", True)),
         },
         "timestamp_semantics": "bam-dam-last-execution-filetime-candidate"
         if timestamp_source == "bam_value_filetime"
@@ -3771,7 +3820,7 @@ def bam_dam_decode_profile(
             "correlate recent-execution claims with Prefetch, SRUM, Amcache, UserAssist, and Event Logs",
             "test broad Windows versions and disabled/rotated BAM edge cases",
         ],
-        "standalone_execution_proof": True,
+        "standalone_execution_proof": False,
         "report_grade_ready": bool(report_grade.get("report_grade_ready")),
         "commercial_grade_ready": False,
         "commercial_grade_blockers": list(report_grade.get("blockers") or []),
@@ -3815,6 +3864,124 @@ def bam_dam_row_cluster_evidence(cluster: Mapping[str, object]) -> dict[str, obj
             "ControlSet validation, and cross-artifact correlation."
         ),
     }
+
+
+def bam_dam_row_manifest(
+    *,
+    source_path: str,
+    source_hashes: Mapping[str, str],
+    source_format: str,
+    source_key: str,
+    source_index: int,
+    executable_path: str,
+    user_sid: str,
+    timestamp: str,
+    timestamp_source: str,
+    source_offset: int,
+    row_cluster_evidence: Mapping[str, object],
+    decode_profile: Mapping[str, object],
+    report_grade: Mapping[str, object],
+) -> dict[str, object]:
+    normalized_path = normalize_execution_path(executable_path)
+    artifact_scope = bam_dam_artifact_scope(source_key)
+    row_identity = {
+        "source_format": source_format,
+        "source_key": source_key,
+        "source_index": source_index,
+        "source_offset": source_offset,
+        "control_set": bam_dam_control_set(source_key),
+        "artifact_scope": artifact_scope,
+        "user_sid": user_sid,
+        "executable_path": executable_path,
+        "device_path": executable_path if executable_path.lower().startswith("\\device\\") else "",
+        "normalized_path": normalized_path,
+        "file_name": execution_file_name(executable_path),
+        "timestamp": timestamp,
+        "timestamp_source": timestamp_source,
+        "timestamp_semantics": "bam-dam-last-execution-filetime-candidate"
+        if timestamp_source == "bam_value_filetime"
+        else "timestamp-candidate-validation-required",
+        "standalone_execution_proof": False,
+        "correlation_required": True,
+    }
+    source_locator = {
+        "viewer": "registry-export" if source_format == "reg" else "source-hex",
+        "source_key": source_key,
+        "source_offset": source_offset,
+        "cluster_window_bytes": row_cluster_evidence.get("cluster_window_bytes", 0)
+        if row_cluster_evidence
+        else 0,
+    }
+    trusted_diff_contract = {
+        "required_fields": execution_diff_required_fields("bam-dam"),
+        "compare_fields": list(EXECUTION_DIFF_COMPARE_FIELDS),
+        "trusted_tools": ["RECmd", "Velociraptor", "SYSTEM hive BAM/DAM parser"],
+        "must_match": [
+            "normalized path or device path",
+            "user SID",
+            "last-execution timestamp and timestamp source",
+            "ControlSet/source key",
+            "correlation warning wording",
+        ],
+    }
+    manifest: dict[str, object] = {
+        "manifest_version": "bam-dam-row-manifest-v1",
+        "parser_version": PARSER_VERSION,
+        "artifact_type": "bam-entry",
+        "source": {
+            "path": source_path,
+            "sha256": source_hashes.get("sha256", ""),
+            "format": source_format,
+            "viewer_locator": source_locator,
+        },
+        "row_identity": row_identity,
+        "row_identity_hash": stable_execution_json_sha256(row_identity),
+        "decode_profile": dict(decode_profile),
+        "row_cluster_evidence": dict(row_cluster_evidence),
+        "trusted_diff_contract": trusted_diff_contract,
+        "validation_summary": {
+            "report_grade_status": str(report_grade.get("status") or ""),
+            "commercial_gap_ids": list(report_grade.get("commercial_gap_ids") or ["#9"]),
+            "binary_filetime_validated": timestamp_source == "bam_value_filetime" and bool(timestamp),
+            "native_system_hive_binary_decode_available": bool(EXECUTION_NATIVE_CAPABILITIES["native_bam_system_hive_decode"]),
+            "controlset_attributed": bool(bam_dam_control_set(source_key)),
+            "sid_present": bool(user_sid),
+            "device_path_present": bool(row_identity["device_path"]),
+            "trusted_parser_diff_required": True,
+        },
+        "reportability": {
+            "allowed_use": "recent-execution-pivot-corroborate-before-testimony",
+            "standalone_execution_proof": False,
+            "ready_for_court_report": bool(report_grade.get("report_grade_ready")),
+            "validation_required": not bool(report_grade.get("report_grade_ready")),
+            "blockers": sorted(
+                set(str(item) for item in report_grade.get("blockers") or [])
+                | {
+                    "bam-dam-trusted-parser-diff-required",
+                    "cross-artifact-correlation-required",
+                    "controlset-sid-path-timestamp-validation-required",
+                }
+            ),
+        },
+    }
+    manifest["manifest_sha256"] = stable_execution_json_sha256(
+        {key: value for key, value in manifest.items() if key != "manifest_sha256"}
+    )
+    return manifest
+
+
+def bam_dam_artifact_scope(source_key: str) -> str:
+    lowered = source_key.lower()
+    if "\\services\\dam\\" in lowered:
+        return "dam"
+    if "\\services\\bam\\" in lowered:
+        return "bam"
+    return "bam-dam"
+
+
+def bam_dam_control_set(source_key: str) -> str:
+    match = re.search(r"\\(CurrentControlSet|ControlSet\d{3})\\", f"\\{source_key}", re.IGNORECASE)
+    return match.group(1) if match else ""
 
 
 def bam_dam_report_citation_manifest(
@@ -4079,6 +4246,9 @@ def execution_core_accuracy_gates(artifact_type: str, details: Mapping[str, obje
     shimcache_manifest_hash = str(details.get("shimcache_row_manifest_hash") or "")
     if shimcache_manifest_hash:
         evidence_refs.append(f"shimcache_row_manifest_sha256:{shimcache_manifest_hash}")
+    bam_dam_manifest_hash = str(details.get("bam_dam_row_manifest_hash") or "")
+    if bam_dam_manifest_hash:
+        evidence_refs.append(f"bam_dam_row_manifest_sha256:{bam_dam_manifest_hash}")
 
     if artifact_type == "amcache-hive":
         artifact_type = "amcache-entry"
@@ -4138,6 +4308,8 @@ def execution_core_accuracy_gates(artifact_type: str, details: Mapping[str, obje
             satisfied.append("FILETIME validity")
         if details.get("source_offset") is not None or checks.get("has_source_offset"):
             satisfied.append("bounded native BAM/DAM path provenance")
+        if bam_dam_manifest_hash:
+            satisfied.append("stable BAM/DAM row manifest")
         if "CurrentControlSet" in str(details.get("source_key") or ""):
             satisfied.append("ControlSet attribution")
         satisfied.append("execution-semantics warning")
@@ -4213,20 +4385,24 @@ def execution_commercial_uplift_evidence(artifact_type: str, details: Mapping[st
     gap_ids = execution_gap_ids(artifact_type)
     item_numbers = [int(gap_id.lstrip("#")) for gap_id in gap_ids if gap_id.lstrip("#").isdigit()]
     qc_prep_item_number = QC_PREP_EXECUTION_ITEM_NUMBERS.get(artifact_type, 25 if artifact_type.startswith("srum-") else 0)
+    source_refs = [
+        f"source_path:{details.get('source_path', '')}",
+        f"source_index:{details.get('source_index', '')}",
+        f"source_sha256:{hashes.get('sha256', '')}",
+        f"source_format:{details.get('source_format', '')}",
+        f"amcache_row_manifest_sha256:{details.get('amcache_row_manifest_hash', '')}",
+        f"shimcache_row_manifest_sha256:{details.get('shimcache_row_manifest_hash', '')}",
+    ]
+    bam_dam_manifest_hash = str(details.get("bam_dam_row_manifest_hash") or "")
+    if bam_dam_manifest_hash:
+        source_refs.append(f"bam_dam_row_manifest_sha256:{bam_dam_manifest_hash}")
     return {
         "batch_id": "commercial-uplift-006-010",
         "item_numbers": item_numbers,
         "qc_prep_item_numbers": [qc_prep_item_number] if qc_prep_item_number else [],
         "implementation_track": "native-parser-depth",
         "objective": "Expose execution-artifact validation evidence, commercial blockers, and large-data limits on each #7-#10 / QC-prep #22-#25 row.",
-        "source_refs": [
-            f"source_path:{details.get('source_path', '')}",
-            f"source_index:{details.get('source_index', '')}",
-            f"source_sha256:{hashes.get('sha256', '')}",
-            f"source_format:{details.get('source_format', '')}",
-            f"amcache_row_manifest_sha256:{details.get('amcache_row_manifest_hash', '')}",
-            f"shimcache_row_manifest_sha256:{details.get('shimcache_row_manifest_hash', '')}",
-        ],
+        "source_refs": source_refs,
         "passed_validation_matrix_ids": [
             str(item.get("id")) for item in matrix if isinstance(item, Mapping) and item.get("passed")
         ],
@@ -4653,6 +4829,23 @@ def execution_diff_row_payload(row: Mapping[str, object]) -> Mapping[str, object
         payload.setdefault("user_sid", evidence.get("user_sid", ""))
         payload.setdefault("execution_caveat", evidence.get("execution_caveat", ""))
         payload.setdefault("timestamp_source", evidence.get("timestamp_source", ""))
+    manifest = payload.get("bam_dam_row_manifest")
+    if isinstance(manifest, Mapping):
+        identity = manifest.get("row_identity") if isinstance(manifest.get("row_identity"), Mapping) else {}
+        reportability = manifest.get("reportability") if isinstance(manifest.get("reportability"), Mapping) else {}
+        payload.setdefault("source_format", identity.get("source_format", ""))
+        payload.setdefault("source_key", identity.get("source_key", ""))
+        payload.setdefault("source_offset", identity.get("source_offset", ""))
+        payload.setdefault("executable_path", identity.get("executable_path", ""))
+        payload.setdefault("device_path", identity.get("device_path", ""))
+        payload.setdefault("user_sid", identity.get("user_sid", ""))
+        payload.setdefault("timestamp", identity.get("timestamp", ""))
+        payload.setdefault("timestamp_source", identity.get("timestamp_source", ""))
+        if reportability:
+            payload.setdefault(
+                "execution_caveat",
+                "BAM/DAM is a strong recent-execution pivot but should be correlated with Prefetch, SRUM, UserAssist, and event logs.",
+            )
     evidence = payload.get("srum_usage_evidence")
     if isinstance(evidence, Mapping):
         payload.setdefault("table_family", evidence.get("table_family", ""))

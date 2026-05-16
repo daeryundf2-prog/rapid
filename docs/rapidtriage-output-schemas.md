@@ -612,6 +612,8 @@ Current cloud API collection manifests carry `command`, `generated_at`, `manifes
 
 ## Windows artifact collector rows
 
+Execution rows in this sample include validation-gated row manifests for core Windows execution pivots. #9 `bam-entry` rows now carry `bam_dam_row_manifest` and `bam_dam_row_manifest_hash`, preserving ControlSet/source key/source offset, SID, device path, timestamp semantics, required trusted-diff field coverage, and `standalone_execution_proof=false` for GUI/report consumers.
+
 The `manifest-windows-artifacts.json` sample also fixes the current artifact row shape for:
 
 - `windows-browser-artifacts`

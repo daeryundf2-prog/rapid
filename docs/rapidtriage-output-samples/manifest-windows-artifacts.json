@@ -5235,7 +5235,7 @@
           "supported": false,
           "details": {
             "parser": "windows-srum-ese-inventory",
-            "parser_version": "windows-execution-v12",
+            "parser_version": "windows-execution-v13",
             "coverage_status": "ese-header-string-scan",
             "reportability": "inventory-only",
             "source_path": "<ROOT>/Windows/System32/sru/SRUDB.dat",
@@ -5566,7 +5566,7 @@
             },
             "srum_report_citation_manifest": {
               "manifest_version": "srum-report-citation-manifest-v1",
-              "parser_version": "windows-execution-v12",
+              "parser_version": "windows-execution-v13",
               "artifact_type": "srum-database-file",
               "source": {
                 "path": "<ROOT>/Windows/System32/sru/SRUDB.dat",
@@ -6106,7 +6106,7 @@
           "supported": true,
           "details": {
             "parser": "windows-srum-ese-string-pivot",
-            "parser_version": "windows-execution-v12",
+            "parser_version": "windows-execution-v13",
             "coverage_status": "native-ese-string-pivot",
             "reportability": "triage",
             "source_path": "<ROOT>/Windows/System32/sru/SRUDB.dat",
@@ -6297,7 +6297,7 @@
             },
             "srum_report_citation_manifest": {
               "manifest_version": "srum-report-citation-manifest-v1",
-              "parser_version": "windows-execution-v12",
+              "parser_version": "windows-execution-v13",
               "artifact_type": "srum-database-pivot",
               "source": {
                 "path": "<ROOT>/Windows/System32/sru/SRUDB.dat",
@@ -6661,7 +6661,7 @@
           "supported": true,
           "details": {
             "parser": "windows-srum-ese-string-pivot",
-            "parser_version": "windows-execution-v12",
+            "parser_version": "windows-execution-v13",
             "coverage_status": "native-ese-string-pivot",
             "reportability": "triage",
             "source_path": "<ROOT>/Windows/System32/sru/SRUDB.dat",
@@ -6852,7 +6852,7 @@
             },
             "srum_report_citation_manifest": {
               "manifest_version": "srum-report-citation-manifest-v1",
-              "parser_version": "windows-execution-v12",
+              "parser_version": "windows-execution-v13",
               "artifact_type": "srum-database-pivot",
               "source": {
                 "path": "<ROOT>/Windows/System32/sru/SRUDB.dat",
@@ -7216,7 +7216,7 @@
           "supported": true,
           "details": {
             "parser": "windows-srum-ese-string-pivot",
-            "parser_version": "windows-execution-v12",
+            "parser_version": "windows-execution-v13",
             "coverage_status": "native-ese-string-pivot",
             "reportability": "triage",
             "source_path": "<ROOT>/Windows/System32/sru/SRUDB.dat",
@@ -7407,7 +7407,7 @@
             },
             "srum_report_citation_manifest": {
               "manifest_version": "srum-report-citation-manifest-v1",
-              "parser_version": "windows-execution-v12",
+              "parser_version": "windows-execution-v13",
               "artifact_type": "srum-database-pivot",
               "source": {
                 "path": "<ROOT>/Windows/System32/sru/SRUDB.dat",
@@ -7768,7 +7768,7 @@
           "supported": true,
           "details": {
             "parser": "windows-srum-ese-string-pivot",
-            "parser_version": "windows-execution-v12",
+            "parser_version": "windows-execution-v13",
             "coverage_status": "native-ese-string-pivot",
             "reportability": "triage",
             "source_path": "<ROOT>/Windows/System32/sru/SRUDB.dat",
@@ -7959,7 +7959,7 @@
             },
             "srum_report_citation_manifest": {
               "manifest_version": "srum-report-citation-manifest-v1",
-              "parser_version": "windows-execution-v12",
+              "parser_version": "windows-execution-v13",
               "artifact_type": "srum-database-pivot",
               "source": {
                 "path": "<ROOT>/Windows/System32/sru/SRUDB.dat",
@@ -8320,7 +8320,7 @@
           "supported": true,
           "details": {
             "parser": "windows-srum-ese-row-candidate",
-            "parser_version": "windows-execution-v12",
+            "parser_version": "windows-execution-v13",
             "coverage_status": "native-ese-string-row-candidate",
             "reportability": "review",
             "source_path": "<ROOT>/Windows/System32/sru/SRUDB.dat",
@@ -8572,7 +8572,7 @@
             },
             "srum_report_citation_manifest": {
               "manifest_version": "srum-report-citation-manifest-v1",
-              "parser_version": "windows-execution-v12",
+              "parser_version": "windows-execution-v13",
               "artifact_type": "srum-row-candidate",
               "source": {
                 "path": "<ROOT>/Windows/System32/sru/SRUDB.dat",
@@ -9001,7 +9001,7 @@
           "supported": true,
           "details": {
             "parser": "windows-srum-ese-table-candidate",
-            "parser_version": "windows-execution-v12",
+            "parser_version": "windows-execution-v13",
             "coverage_status": "native-ese-table-string-candidate",
             "reportability": "triage",
             "source_path": "<ROOT>/Windows/System32/sru/SRUDB.dat",
@@ -9190,7 +9190,7 @@
             },
             "srum_report_citation_manifest": {
               "manifest_version": "srum-report-citation-manifest-v1",
-              "parser_version": "windows-execution-v12",
+              "parser_version": "windows-execution-v13",
               "artifact_type": "srum-table-candidate",
               "source": {
                 "path": "<ROOT>/Windows/System32/sru/SRUDB.dat",
@@ -9531,7 +9531,7 @@
           "supported": true,
           "details": {
             "parser": "windows-srum-ese-table-candidate",
-            "parser_version": "windows-execution-v12",
+            "parser_version": "windows-execution-v13",
             "coverage_status": "native-ese-table-string-candidate",
             "reportability": "triage",
             "source_path": "<ROOT>/Windows/System32/sru/SRUDB.dat",
@@ -9711,7 +9711,7 @@
             },
             "srum_report_citation_manifest": {
               "manifest_version": "srum-report-citation-manifest-v1",
-              "parser_version": "windows-execution-v12",
+              "parser_version": "windows-execution-v13",
               "artifact_type": "srum-table-candidate",
               "source": {
                 "path": "<ROOT>/Windows/System32/sru/SRUDB.dat",
@@ -10051,7 +10051,7 @@
           "supported": true,
           "details": {
             "parser": "windows-srum-ese-table-candidate",
-            "parser_version": "windows-execution-v12",
+            "parser_version": "windows-execution-v13",
             "coverage_status": "native-ese-table-string-candidate",
             "reportability": "triage",
             "source_path": "<ROOT>/Windows/System32/sru/SRUDB.dat",
@@ -10233,7 +10233,7 @@
             },
             "srum_report_citation_manifest": {
               "manifest_version": "srum-report-citation-manifest-v1",
-              "parser_version": "windows-execution-v12",
+              "parser_version": "windows-execution-v13",
               "artifact_type": "srum-table-candidate",
               "source": {
                 "path": "<ROOT>/Windows/System32/sru/SRUDB.dat",
@@ -10573,7 +10573,7 @@
           "supported": true,
           "details": {
             "parser": "windows-execution-summary",
-            "parser_version": "windows-execution-v12",
+            "parser_version": "windows-execution-v13",
             "coverage_status": "mapped",
             "reportability": "triage",
             "source_path": "<ROOT>",
