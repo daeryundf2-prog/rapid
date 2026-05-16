@@ -3595,6 +3595,7 @@ def enterprise_governance_evidence_chain() -> list[dict[str, object]]:
             "primary_outputs": [
                 "enterprise-policy.rbac",
                 "enterprise-policy.rbac.rbac_evidence_manifest.manifest_hash",
+                "enterprise-policy.rbac.rbac_report_grade_validation_plan_hash",
                 "enterprise-policy.rbac.rbac_evidence_slots.per_action_enforcement_test",
                 "enterprise-policy.rbac.rbac_evidence_slots.export_control_review",
             ],

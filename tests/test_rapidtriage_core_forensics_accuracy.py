@@ -277,6 +277,8 @@ class RapidTriageCoreForensicsAccuracyTests(unittest.TestCase):
         self.assertIn("license report-grade ready slots", license_activation["required_checks"])
         self.assertIn("trusted license authority diff pass", license_activation["required_checks"])
         self.assertIn("role matrix emitted", rbac["required_checks"])
+        self.assertIn("rbac report-grade validation plan", rbac["required_checks"])
+        self.assertIn("rbac report-grade ready slots", rbac["required_checks"])
         self.assertIn("trusted RBAC enforcement diff pass", rbac["required_checks"])
         self.assertIn("multi-user disabled state recorded", multi_user["required_checks"])
         self.assertIn("trusted multi-user server review diff pass", multi_user["required_checks"])

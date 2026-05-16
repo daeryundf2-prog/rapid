@@ -36,6 +36,16 @@ LICENSE_REPORT_GRADE_BLOCKERS = [
     "license-key-custody-review-required",
 ]
 RBAC_TRUSTED_DIFF_BLOCKER_108 = "trusted-rbac-enforcement-diff-missing"
+RBAC_REPORT_GRADE_VALIDATION_PLAN_VERSION = "rbac-enforcement-report-grade-validation-plan-v1"
+RBAC_REPORT_GRADE_BLOCKERS = [
+    RBAC_TRUSTED_DIFF_BLOCKER_108,
+    "per-action-rbac-enforcement-test-required",
+    "export-control-enforcement-test-required",
+    "role-matrix-signoff-required",
+    "multi-user-identity-binding-required",
+    "release-host-rbac-smoke-required",
+    "independent-rbac-review-required",
+]
 MULTI_USER_TRUSTED_DIFF_BLOCKER_109 = "trusted-multi-user-server-review-diff-missing"
 COLLABORATION_AUDIT_TRUSTED_DIFF_BLOCKER_110 = "trusted-collaboration-audit-diff-missing"
 ENTERPRISE_TRUSTED_TOOLS = {
@@ -323,6 +333,29 @@ def build_enterprise_policy() -> dict[str, object]:
         trusted_diff=policy["rbac"]["trusted_rbac_diff"],
         evidence_manifest=policy["rbac"]["rbac_evidence_manifest"],
     )
+    policy["rbac"]["rbac_report_grade_validation_plan"] = build_rbac_report_grade_validation_plan(
+        rbac=policy["rbac"],
+        evidence_manifest=policy["rbac"]["rbac_evidence_manifest"],
+        trusted_diff=policy["rbac"]["trusted_rbac_diff"],
+    )
+    policy["rbac"]["rbac_report_grade_validation_plan_hash"] = policy["rbac"][
+        "rbac_report_grade_validation_plan"
+    ]["validation_plan_hash"]
+    policy["rbac"]["rbac_report_grade_ready_slot_count"] = policy["rbac"][
+        "rbac_report_grade_validation_plan"
+    ]["ready_slot_count"]
+    policy["rbac"]["rbac_report_grade_blocking_slot_count"] = policy["rbac"][
+        "rbac_report_grade_validation_plan"
+    ]["blocking_slot_count"]
+    rbac_report_blockers = policy["rbac"]["rbac_report_grade_validation_plan"]["blockers"]
+    policy["rbac"]["blockers"] = sorted({*policy["rbac"].get("blockers", []), *rbac_report_blockers})
+    policy["rbac"]["core_accuracy_gates"] = rbac_core_accuracy_gates(
+        configured_role,
+        active_permissions,
+        trusted_diff=policy["rbac"]["trusted_rbac_diff"],
+        evidence_manifest=policy["rbac"]["rbac_evidence_manifest"],
+        report_grade_validation_plan=policy["rbac"]["rbac_report_grade_validation_plan"],
+    )
     attach_enterprise_control_manifest(
         policy["multi_user_case_server"],
         item_number=109,
@@ -577,6 +610,144 @@ def build_permission_matrix(roles: dict[str, list[str]]) -> list[dict[str, objec
         }
         for permission in permissions
     ]
+
+
+def build_rbac_report_grade_validation_plan(
+    *,
+    rbac: Mapping[str, object],
+    evidence_manifest: Mapping[str, object],
+    trusted_diff: Mapping[str, object],
+) -> dict[str, object]:
+    active_permissions = rbac.get("active_permissions") if isinstance(rbac.get("active_permissions"), list) else []
+    permission_matrix = rbac.get("permission_matrix") if isinstance(rbac.get("permission_matrix"), list) else []
+    export_controls = rbac.get("export_controls") if isinstance(rbac.get("export_controls"), Mapping) else {}
+    ready_slots = [
+        {
+            "slot_id": "enterprise-policy-rbac-json",
+            "status": "ready",
+            "evidence_ref": "rapidtriage enterprise-policy --json.rbac",
+            "evidence_hash": stable_enterprise_sha256("enterprise-policy command emits RBAC policy JSON"),
+        },
+        {
+            "slot_id": "rbac-evidence-manifest",
+            "status": "ready",
+            "evidence_ref": "enterprise-policy.rbac.rbac_evidence_manifest_hash",
+            "evidence_hash": str(evidence_manifest.get("manifest_hash") or ""),
+        },
+        {
+            "slot_id": "role-permission-matrix",
+            "status": "ready",
+            "evidence_ref": "enterprise-policy.rbac.permission_matrix",
+            "evidence_hash": stable_enterprise_sha256(permission_matrix),
+        },
+        {
+            "slot_id": "active-role-permissions",
+            "status": "ready",
+            "evidence_ref": "enterprise-policy.rbac.active_role/active_permissions",
+            "evidence_hash": stable_enterprise_sha256(
+                {
+                    "active_role": rbac.get("active_role", ""),
+                    "active_role_supported": bool(rbac.get("active_role_supported")),
+                    "active_permissions": active_permissions,
+                }
+            ),
+        },
+        {
+            "slot_id": "export-control-policy",
+            "status": "ready",
+            "evidence_ref": "enterprise-policy.rbac.export_controls",
+            "evidence_hash": stable_enterprise_sha256(export_controls),
+        },
+        {
+            "slot_id": "control-evidence-matrix",
+            "status": "ready",
+            "evidence_ref": "enterprise-policy.rbac.control_evidence_matrix_hash",
+            "evidence_hash": str(evidence_manifest.get("control_evidence_matrix_hash") or ""),
+        },
+        {
+            "slot_id": "trusted-diff-boundary",
+            "status": "ready" if trusted_diff.get("status") == "pass" else "ready-with-blocker",
+            "evidence_ref": "enterprise-policy.rbac.trusted_rbac_diff",
+            "evidence_hash": stable_enterprise_sha256(trusted_diff),
+        },
+    ]
+    blocking_slots = []
+    if trusted_diff.get("status") != "pass":
+        blocking_slots.append(
+            {
+                "slot_id": "trusted-rbac-enforcement-diff",
+                "status": "blocking",
+                "blocker": RBAC_TRUSTED_DIFF_BLOCKER_108,
+                "required_evidence": "trusted RBAC enforcement test comparing role, permission, matrix, and export-control behavior",
+            }
+        )
+    for slot_id, blocker, required_evidence in (
+        (
+            "per-action-rbac-enforcement-test",
+            "per-action-rbac-enforcement-test-required",
+            "server/API test proving run, review, export, configure, and backup actions enforce permissions",
+        ),
+        (
+            "export-control-enforcement-test",
+            "export-control-enforcement-test-required",
+            "viewer/analyst/admin export-control smoke proving evidence metadata and report export boundaries",
+        ),
+        (
+            "role-matrix-signoff",
+            "role-matrix-signoff-required",
+            "operator signoff for supported roles, permissions, and commercial deployment defaults",
+        ),
+        (
+            "multi-user-identity-binding",
+            "multi-user-identity-binding-required",
+            "identity-provider or authenticated user binding evidence before multi-user RBAC claims",
+        ),
+        (
+            "release-host-rbac-smoke",
+            "release-host-rbac-smoke-required",
+            "enterprise-policy RBAC JSON and permission smoke produced from the actual release package",
+        ),
+        (
+            "independent-rbac-review",
+            "independent-rbac-review-required",
+            "independent reviewer/lab confirmation of per-action RBAC enforcement and export controls",
+        ),
+    ):
+        blocking_slots.append(
+            {
+                "slot_id": slot_id,
+                "status": "blocking",
+                "current_attachment_status": "not-attached",
+                "blocker": blocker,
+                "required_evidence": required_evidence,
+            }
+        )
+    blockers = sorted({str(slot["blocker"]) for slot in blocking_slots if slot.get("blocker")})
+    plan: dict[str, object] = {
+        "profile_version": RBAC_REPORT_GRADE_VALIDATION_PLAN_VERSION,
+        "item_number": 108,
+        "commercial_gap_ids": [RBAC_GAP_ID],
+        "commercial_claim_allowed": False,
+        "active_role": rbac.get("active_role", ""),
+        "active_role_supported": bool(rbac.get("active_role_supported")),
+        "active_permission_count": len(active_permissions),
+        "permission_matrix_row_count": len(permission_matrix),
+        "export_control_count": len(export_controls),
+        "enforcement_scope": rbac.get("enforcement_scope", ""),
+        "rbac_evidence_manifest_hash": str(evidence_manifest.get("manifest_hash") or ""),
+        "control_evidence_matrix_hash": str(evidence_manifest.get("control_evidence_matrix_hash") or ""),
+        "trusted_diff_status": str(trusted_diff.get("status") or ""),
+        "trusted_diff_blocker": trusted_diff.get("blocker"),
+        "ready_slots": ready_slots,
+        "blocking_slots": blocking_slots,
+        "ready_slot_count": len(ready_slots),
+        "blocking_slot_count": len(blocking_slots),
+        "external_blocker_catalog": list(RBAC_REPORT_GRADE_BLOCKERS),
+        "blockers": blockers,
+        "reporting_boundary": "Local role policy is implemented and usable; commercial RBAC claims require per-action enforcement, identity binding, export-control, and independent review evidence.",
+    }
+    plan["validation_plan_hash"] = stable_enterprise_sha256(plan)
+    return plan
 
 
 def stable_enterprise_sha256(payload: object) -> str:
@@ -1121,7 +1292,12 @@ def build_enterprise_trusted_diff(
             "license_report_grade_validation_plan_hash",
             "control_evidence_matrix_hash",
         ],
-        108: ["rbac_evidence_manifest_hash", "rbac_evidence_slots", "control_evidence_matrix_hash"],
+        108: [
+            "rbac_evidence_manifest_hash",
+            "rbac_evidence_slots",
+            "rbac_report_grade_validation_plan_hash",
+            "control_evidence_matrix_hash",
+        ],
         109: ["multi_user_evidence_manifest_hash", "multi_user_evidence_slots", "control_evidence_matrix_hash"],
         110: [
             "collaboration_audit_evidence_manifest_hash",
@@ -1283,6 +1459,7 @@ def rbac_core_accuracy_gates(
     active_permissions: list[str],
     trusted_diff: Mapping[str, object] | None = None,
     evidence_manifest: Mapping[str, object] | None = None,
+    report_grade_validation_plan: Mapping[str, object] | None = None,
 ) -> list[dict[str, object]]:
     satisfied = [
         "role matrix emitted",
@@ -1298,13 +1475,27 @@ def rbac_core_accuracy_gates(
             satisfied.append("rbac evidence slots emitted")
         if evidence_manifest.get("control_evidence_matrix_hash"):
             satisfied.append("rbac control evidence matrix hash emitted")
+    if report_grade_validation_plan:
+        if report_grade_validation_plan.get("validation_plan_hash"):
+            satisfied.append("rbac report-grade validation plan")
+        if int(report_grade_validation_plan.get("ready_slot_count") or 0) > 0:
+            satisfied.append("rbac report-grade ready slots")
     if trusted_diff and trusted_diff.get("status") == "pass":
         satisfied.append("trusted RBAC enforcement diff pass")
+    evidence_refs = [f"active_role:{active_role}", f"permission_count:{len(active_permissions)}"]
+    if report_grade_validation_plan and report_grade_validation_plan.get("validation_plan_hash"):
+        evidence_refs.append(
+            f"rbac_report_grade_validation_plan_sha256:{report_grade_validation_plan['validation_plan_hash']}"
+        )
+        evidence_refs.append(f"rbac_report_grade_ready_slots:{report_grade_validation_plan.get('ready_slot_count')}")
+        evidence_refs.append(
+            f"rbac_report_grade_blocking_slots:{report_grade_validation_plan.get('blocking_slot_count')}"
+        )
     return [
         build_accuracy_gate(
             108,
             satisfied_checks=satisfied,
-            evidence_refs=[f"active_role:{active_role}", f"permission_count:{len(active_permissions)}"],
+            evidence_refs=evidence_refs,
         )
     ]
 

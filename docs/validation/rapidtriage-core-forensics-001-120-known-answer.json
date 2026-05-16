@@ -2493,10 +2493,10 @@
       ],
       "expected": {
         "required_assertions": [
-          "Enterprise policy preserves role matrix, active role, active permissions, export controls, rbac-enforcement-evidence-manifest-v1 manifest hash/evidence slots, per-action enforcement blocker, trusted RBAC enforcement diff helpers/gates, and #108 core_accuracy_gates."
+          "Enterprise policy preserves role matrix, active role, active permissions, export controls, rbac-enforcement-evidence-manifest-v1 manifest hash/evidence slots, rbac-enforcement-report-grade-validation-plan-v1 ready/blocking slots, per-action/export-control/identity blockers, trusted RBAC enforcement diff helpers/gates, and #108 core_accuracy_gates."
         ]
       },
-      "notes": "Internal fixture pass; per-action server RBAC and trusted enforcement logs remain external work.",
+      "notes": "Internal fixture pass; per-action server RBAC, export-control enforcement smoke, identity binding, release-host RBAC smoke, and trusted enforcement logs remain external.",
       "source_manifest": "docs/validation/rapidtriage-core-forensics-101-120-known-answer.json"
     },
     {

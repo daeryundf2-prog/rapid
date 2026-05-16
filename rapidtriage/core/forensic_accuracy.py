@@ -1817,6 +1817,8 @@ CORE_FORENSIC_ACCURACY_ITEMS: tuple[dict[str, object], ...] = (
             "per-action enforcement blocker disclosed",
             "rbac evidence manifest hash emitted",
             "rbac evidence slots emitted",
+            "rbac report-grade validation plan",
+            "rbac report-grade ready slots",
             "trusted RBAC enforcement diff pass",
         ),
     },

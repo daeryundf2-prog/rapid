@@ -334,6 +334,21 @@ class RapidTriageOpsTests(unittest.TestCase):
             "rbac control evidence matrix hash emitted",
             payload["rbac"]["core_accuracy_gates"][0]["satisfied_checks"],
         )
+        self.assertIn(
+            "rbac report-grade validation plan",
+            payload["rbac"]["core_accuracy_gates"][0]["satisfied_checks"],
+        )
+        self.assertIn("rbac report-grade ready slots", payload["rbac"]["core_accuracy_gates"][0]["satisfied_checks"])
+        rbac_plan = payload["rbac"]["rbac_report_grade_validation_plan"]
+        self.assertEqual(rbac_plan["profile_version"], "rbac-enforcement-report-grade-validation-plan-v1")
+        self.assertEqual(len(payload["rbac"]["rbac_report_grade_validation_plan_hash"]), 64)
+        self.assertEqual(
+            payload["rbac"]["rbac_report_grade_validation_plan_hash"],
+            rbac_plan["validation_plan_hash"],
+        )
+        self.assertGreaterEqual(payload["rbac"]["rbac_report_grade_ready_slot_count"], 7)
+        self.assertGreaterEqual(payload["rbac"]["rbac_report_grade_blocking_slot_count"], 7)
+        self.assertIn("per-action-rbac-enforcement-test-required", payload["rbac"]["blockers"])
         self.assertEqual(payload["rbac"]["active_role"], "viewer")
         self.assertTrue(payload["rbac"]["active_role_supported"])
         self.assertNotIn("backup_restore", payload["rbac"]["active_permissions"])
@@ -349,9 +364,11 @@ class RapidTriageOpsTests(unittest.TestCase):
             payload["rbac"]["active_role"],
             payload["rbac"]["active_permissions"],
             trusted_diff=rbac_diff,
+            report_grade_validation_plan=rbac_plan,
         )
         self.assertEqual(rbac_diff["status"], "pass")
         self.assertIn("control_evidence_matrix_hash", rbac_diff["compared_fields"])
+        self.assertIn("rbac_report_grade_validation_plan_hash", rbac_diff["compared_fields"])
         self.assertIn("trusted RBAC enforcement diff pass", rbac_gates[0]["satisfied_checks"])
         self.assertIn("#109", payload["multi_user_case_server"]["commercial_gap_ids"])
         self.assertEqual(payload["multi_user_case_server"]["core_accuracy_gates"][0]["gap_id"], "#109")
@@ -1882,6 +1899,10 @@ class RapidTriageOpsTests(unittest.TestCase):
             )
             self.assertIn(
                 "enterprise-policy.rbac.rbac_evidence_manifest.manifest_hash",
+                enterprise_by_number[108]["primary_outputs"],
+            )
+            self.assertIn(
+                "enterprise-policy.rbac.rbac_report_grade_validation_plan_hash",
                 enterprise_by_number[108]["primary_outputs"],
             )
             self.assertIn(
