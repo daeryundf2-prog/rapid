@@ -580,12 +580,20 @@ def _cloud_export_evidence_summary(raw: Mapping[str, object]) -> dict[str, objec
         artifacts = []
     artifact_type_counts: dict[str, int] = {}
     service_counts: dict[str, int] = {}
+    ai_service_counts: dict[str, int] = {}
     manifest_hashes: set[str] = set()
     archive_manifest_hashes: set[str] = set()
     commercial_blockers: list[str] = []
+    reportability_blockers: list[str] = []
+    required_before_report: list[str] = []
     supported_items: set[int] = set()
     ai_conversation_count = 0
     ai_complete_pair_count = 0
+    ai_orphan_question_count = 0
+    ai_orphan_answer_count = 0
+    ai_incomplete_conversation_count = 0
+    ai_completeness_scores: list[float] = []
+    ready_for_court_report_count = 0
 
     for artifact in artifacts:
         if not isinstance(artifact, Mapping):
@@ -602,10 +610,26 @@ def _cloud_export_evidence_summary(raw: Mapping[str, object]) -> dict[str, objec
         if artifact_type == "ai-service-export-conversation":
             supported_items.add(21)
             ai_conversation_count += 1
+            if service_key:
+                ai_service_counts[service_key] = ai_service_counts.get(service_key, 0) + 1
             try:
                 ai_complete_pair_count += int(details.get("complete_pair_count") or 0)
             except (TypeError, ValueError):
                 pass
+            try:
+                ai_orphan_question_count += int(details.get("orphan_question_count") or 0)
+            except (TypeError, ValueError):
+                pass
+            try:
+                ai_orphan_answer_count += int(details.get("orphan_answer_count") or 0)
+            except (TypeError, ValueError):
+                pass
+            try:
+                ai_completeness_scores.append(float(details.get("transcript_completeness_score") or 0.0))
+            except (TypeError, ValueError):
+                ai_completeness_scores.append(0.0)
+            if str(details.get("transcript_validation_status") or "").lower() != "complete":
+                ai_incomplete_conversation_count += 1
         if "google" in family or "google" in service_key or "gmail" in service_key:
             supported_items.add(37)
         if "apple" in family or "icloud" in family or "icloud" in service_key:
@@ -632,18 +656,40 @@ def _cloud_export_evidence_summary(raw: Mapping[str, object]) -> dict[str, objec
                 text = str(blocker)
                 if text and text not in commercial_blockers:
                     commercial_blockers.append(text)
+        uplift = details.get("commercial_uplift_evidence") if isinstance(details.get("commercial_uplift_evidence"), Mapping) else {}
+        reportability = (
+            uplift.get("reportability_decision")
+            if isinstance(uplift.get("reportability_decision"), Mapping)
+            else {}
+        )
+        if reportability.get("ready_for_court_report") is True:
+            ready_for_court_report_count += 1
+        for blocker in _string_list(reportability.get("blockers")):
+            if blocker not in reportability_blockers:
+                reportability_blockers.append(blocker)
+        for requirement in _string_list(reportability.get("required_before_report")):
+            if requirement not in required_before_report:
+                required_before_report.append(requirement)
 
     summary = raw.get("summary") if isinstance(raw.get("summary"), Mapping) else {}
     return {
         "artifact_count": summary.get("artifact_count", len(artifacts)),
         "artifact_type_counts": dict(sorted(artifact_type_counts.items())),
         "service_counts": dict(sorted(service_counts.items())),
+        "ai_service_counts": dict(sorted(ai_service_counts.items())),
         "parser_manifest_hash_count": len(manifest_hashes),
         "archive_manifest_hash_count": len(archive_manifest_hashes),
         "ai_conversation_count": ai_conversation_count,
         "ai_complete_pair_count": ai_complete_pair_count,
+        "ai_orphan_question_count": ai_orphan_question_count,
+        "ai_orphan_answer_count": ai_orphan_answer_count,
+        "ai_incomplete_conversation_count": ai_incomplete_conversation_count,
+        "ai_min_completeness_score": min(ai_completeness_scores) if ai_completeness_scores else None,
+        "ready_for_court_report_count": ready_for_court_report_count,
         "supported_backlog_items": sorted(supported_items),
         "commercial_grade_blockers": commercial_blockers,
+        "reportability_blockers": reportability_blockers,
+        "required_before_report": required_before_report,
     }
 
 
@@ -835,10 +881,20 @@ def load_mac_first_evidence(path: Path) -> dict[str, object]:
         "cloud_export_artifact_count": cloud_export_summary.get("artifact_count"),
         "cloud_export_artifact_type_counts": cloud_export_summary.get("artifact_type_counts", {}),
         "cloud_export_service_counts": cloud_export_summary.get("service_counts", {}),
+        "cloud_export_ai_service_counts": cloud_export_summary.get("ai_service_counts", {}),
         "cloud_export_parser_manifest_hash_count": cloud_export_summary.get("parser_manifest_hash_count"),
         "cloud_export_archive_manifest_hash_count": cloud_export_summary.get("archive_manifest_hash_count"),
         "cloud_export_ai_conversation_count": cloud_export_summary.get("ai_conversation_count"),
         "cloud_export_ai_complete_pair_count": cloud_export_summary.get("ai_complete_pair_count"),
+        "cloud_export_ai_orphan_question_count": cloud_export_summary.get("ai_orphan_question_count"),
+        "cloud_export_ai_orphan_answer_count": cloud_export_summary.get("ai_orphan_answer_count"),
+        "cloud_export_ai_incomplete_conversation_count": cloud_export_summary.get("ai_incomplete_conversation_count"),
+        "cloud_export_ai_min_completeness_score": cloud_export_summary.get("ai_min_completeness_score"),
+        "cloud_export_ready_for_court_report_count": cloud_export_summary.get("ready_for_court_report_count"),
+        "cloud_export_reportability_blockers": cloud_export_summary.get("reportability_blockers", []),
+        "cloud_export_reportability_blocker_count": len(cloud_export_summary.get("reportability_blockers", [])),
+        "cloud_export_required_before_report": cloud_export_summary.get("required_before_report", []),
+        "cloud_export_required_before_report_count": len(cloud_export_summary.get("required_before_report", [])),
         "image_workflow_status": str(raw.get("status") or "") if command == "image-workflow-validate" else "",
         "image_workflow_gap_id": str(raw.get("gap_id") or "") if command == "image-workflow-validate" else "",
         "image_workflow_trusted_tool": str(raw.get("trusted_tool") or "") if command == "image-workflow-validate" else "",
@@ -912,6 +968,15 @@ def build_mac_first_evidence_summary(
         ),
         "cloud_export_ai_conversation_count": sum(
             int(row.get("cloud_export_ai_conversation_count") or 0) for row in rows
+        ),
+        "cloud_export_ai_incomplete_conversation_count": sum(
+            int(row.get("cloud_export_ai_incomplete_conversation_count") or 0) for row in rows
+        ),
+        "cloud_export_reportability_blocker_count": sum(
+            int(row.get("cloud_export_reportability_blocker_count") or 0) for row in rows
+        ),
+        "cloud_export_required_before_report_count": sum(
+            int(row.get("cloud_export_required_before_report_count") or 0) for row in rows
         ),
         "image_workflow_evidence_count": sum(1 for row in rows if row.get("command") == "image-workflow-validate"),
         "image_workflow_pass_count": sum(

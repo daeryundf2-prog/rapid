@@ -394,6 +394,17 @@ class CommercialReadinessValidationBundleTests(unittest.TestCase):
                                     "commercial_grade_blockers": [
                                         "google-takeout-provider-diff-required",
                                     ],
+                                    "commercial_uplift_evidence": {
+                                        "reportability_decision": {
+                                            "ready_for_court_report": False,
+                                            "blockers": [
+                                                "provider-export-scope-not-verified",
+                                            ],
+                                            "required_before_report": [
+                                                "attach provider export/API scope",
+                                            ],
+                                        },
+                                    },
                                 },
                             },
                             {
@@ -428,6 +439,21 @@ class CommercialReadinessValidationBundleTests(unittest.TestCase):
                                     "commercial_grade_blockers": [
                                         "trusted-ai-export-diff-required",
                                     ],
+                                    "orphan_question_count": 1,
+                                    "orphan_answer_count": 0,
+                                    "transcript_completeness_score": 0.5,
+                                    "transcript_validation_status": "partial",
+                                    "commercial_uplift_evidence": {
+                                        "reportability_decision": {
+                                            "ready_for_court_report": False,
+                                            "blockers": [
+                                                "trusted-ai-export-diff-required",
+                                            ],
+                                            "required_before_report": [
+                                                "validate rows against provider-native views",
+                                            ],
+                                        },
+                                    },
                                 },
                             },
                         ],
@@ -445,6 +471,9 @@ class CommercialReadinessValidationBundleTests(unittest.TestCase):
         self.assertEqual(mac_first["cloud_export_artifact_count"], 4)
         self.assertEqual(mac_first["cloud_export_parser_manifest_hash_count"], 4)
         self.assertEqual(mac_first["cloud_export_ai_conversation_count"], 1)
+        self.assertEqual(mac_first["cloud_export_ai_incomplete_conversation_count"], 1)
+        self.assertEqual(mac_first["cloud_export_reportability_blocker_count"], 2)
+        self.assertEqual(mac_first["cloud_export_required_before_report_count"], 2)
         self.assertIn(21, mac_first["supports_backlog_items"])
         self.assertIn(37, mac_first["supports_backlog_items"])
         self.assertIn(38, mac_first["supports_backlog_items"])
@@ -455,7 +484,16 @@ class CommercialReadinessValidationBundleTests(unittest.TestCase):
         self.assertEqual(row["cloud_export_artifact_count"], 4)
         self.assertEqual(row["cloud_export_archive_manifest_hash_count"], 1)
         self.assertEqual(row["cloud_export_ai_complete_pair_count"], 2)
+        self.assertEqual(row["cloud_export_ai_orphan_question_count"], 1)
+        self.assertEqual(row["cloud_export_ai_orphan_answer_count"], 0)
+        self.assertEqual(row["cloud_export_ai_incomplete_conversation_count"], 1)
+        self.assertEqual(row["cloud_export_ai_min_completeness_score"], 0.5)
+        self.assertEqual(row["cloud_export_ready_for_court_report_count"], 0)
         self.assertEqual(row["cloud_export_service_counts"]["gmail-takeout"], 1)
+        self.assertEqual(row["cloud_export_ai_service_counts"]["chatgpt"], 1)
+        self.assertIn("provider-export-scope-not-verified", row["cloud_export_reportability_blockers"])
+        self.assertIn("trusted-ai-export-diff-required", row["cloud_export_reportability_blockers"])
+        self.assertIn("attach provider export/API scope", row["cloud_export_required_before_report"])
         self.assertFalse(report["commercial_claim_allowed"])
 
     def test_commercial_readiness_discovers_mac_first_evidence_from_directory(self) -> None:

@@ -129,6 +129,12 @@ The sample JSON uses a few placeholders so the examples stay stable across machi
 - Output: JSON from `rapidtriage large-case-readiness`.
 - `profile_version`: `large-case-readiness-v1`.
 - `item_numbers`: large-case readiness targets covered by the report: #66, #67, #74, #78, and #79.
+
+### Mac-First Cloud Export Evidence Attachment
+
+- `commercial-readiness --mac-first-evidence cloud-export-artifacts.json` summarizes preparatory provider export evidence without converting it into a commercial-grade pass.
+- Cloud rows include `cloud_export_service_counts`, `cloud_export_ai_service_counts`, parser/archive manifest hash counts, AI conversation and complete-pair counts, orphan question/answer counts, `cloud_export_ai_min_completeness_score`, `cloud_export_ai_incomplete_conversation_count`, `cloud_export_reportability_blockers[]`, and `cloud_export_required_before_report[]`.
+- These fields are evidence triage controls for #21/#37/#38/#39. They are designed to make incomplete AI transcript pairing, missing provider scope, original export hash gaps, and trusted provider/export diff blockers visible before a user relies on a Gmail/iCloud/M365/AI export row in a report.
 - `status`: `internal-evidence-present` only when attached evidence passes the local checks; otherwise `needs-large-case-evidence`.
 - `checks[]`: stable pass/fail rows for attached SQLite FTS benchmark JSON, 100k/1M/10M coverage, seeded hit-count parity, p95 threshold, Case DB attachment, FTS tables, hot-path indexes, search diagnostics, and search-index health.
 - `benchmarks[]`: normalized summary of each `sqlite-fts-benchmark` JSON with record count, p50/p95 latency, expected-vs-returned hit counts, query-plan hash, and proof manifest hash.
