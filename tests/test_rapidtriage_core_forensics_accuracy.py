@@ -189,6 +189,7 @@ class RapidTriageCoreForensicsAccuracyTests(unittest.TestCase):
         self.assertIn("failed/canceled retry support", cancellation_retry["required_checks"])
         self.assertIn("trusted cancellation/retry transition diff pass", cancellation_retry["required_checks"])
         self.assertIn("known-answer manifest ingested", known_answer["required_checks"])
+        self.assertIn("known-answer report-grade validation plan emitted", known_answer["required_checks"])
         self.assertIn("trusted known-answer manifest diff pass", known_answer["required_checks"])
         self.assertTrue(known_answer["accuracy_controls"]["legal_or_authority_gate_required"])
         self.assertIn("parser areas inventoried", fixture_corpus["required_checks"])

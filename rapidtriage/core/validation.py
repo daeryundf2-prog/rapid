@@ -39,6 +39,15 @@ PARSER_FP_FN_GAP_ID = "#83"
 INDEPENDENT_VALIDATION_GAP_ID = "#84"
 VALIDATION_PACKAGE_GAP_ID = "#85"
 KNOWN_ANSWER_TRUSTED_DIFF_BLOCKER_81 = "trusted-known-answer-manifest-diff-missing"
+KNOWN_ANSWER_REPORT_GRADE_VALIDATION_PLAN_VERSION = "known-answer-report-grade-validation-plan-v1"
+KNOWN_ANSWER_REPORT_GRADE_BLOCKERS = [
+    KNOWN_ANSWER_TRUSTED_DIFF_BLOCKER_81,
+    "public-cfreds-cftt-corpus-run-required",
+    "parser-scope-coverage-map-required",
+    "independent-expected-answer-review-required",
+    "dataset-chain-of-custody-required",
+    "release-signoff-required",
+]
 FIXTURE_CORPUS_TRUSTED_DIFF_BLOCKER_82 = "trusted-fixture-corpus-manifest-diff-missing"
 FP_FN_TRUSTED_DIFF_BLOCKER_83 = "trusted-fp-fn-risk-register-diff-missing"
 INDEPENDENT_VALIDATION_TRUSTED_DIFF_BLOCKER_84 = "trusted-independent-validation-signoff-diff-missing"
@@ -451,12 +460,27 @@ def build_known_answer_validation(
         trusted_diff=trusted_diff,
     )
     satisfied.append("known-answer pipeline manifest hash emitted")
+    report_grade_validation_plan = build_known_answer_report_grade_validation_plan(
+        manifest_path=manifest_path,
+        datasets=datasets,
+        status_counts=status_counts,
+        manifest_status=manifest_status,
+        manifest_digest=manifest_digest,
+        dataset_evidence_matrix=dataset_evidence_matrix,
+        pipeline_manifest=pipeline_manifest,
+        trusted_diff=trusted_diff,
+    )
+    satisfied.append("known-answer report-grade validation plan emitted")
+    satisfied.append("known-answer report-grade ready slots emitted")
     blockers = [
         "known-answer-manifest-not-attached" if manifest_path is None else "review-open-known-answer-results",
         "public-corpus-coverage-must-match-claimed-parser-scope",
     ]
     if not trusted_diff or trusted_diff.get("status") != "pass":
         blockers.append(KNOWN_ANSWER_TRUSTED_DIFF_BLOCKER_81)
+    for blocker in report_grade_validation_plan["blockers"]:
+        if blocker not in blockers:
+            blockers.append(blocker)
     return {
         "status": manifest_status,
         "commercial_gap_ids": [KNOWN_ANSWER_TEST_GAP_ID],
@@ -466,12 +490,17 @@ def build_known_answer_validation(
             status_counts=status_counts,
             manifest_status=manifest_status,
             pipeline_manifest=pipeline_manifest,
+            report_grade_validation_plan=report_grade_validation_plan,
             trusted_diff=trusted_diff,
         ),
         "manifest_path": str(manifest_path.expanduser().resolve()) if manifest_path else "",
         "manifest_digest": manifest_digest,
         "known_answer_pipeline_manifest": pipeline_manifest,
         "known_answer_pipeline_manifest_hash": pipeline_manifest["manifest_hash"],
+        "known_answer_report_grade_validation_plan": report_grade_validation_plan,
+        "known_answer_report_grade_validation_plan_hash": report_grade_validation_plan["validation_plan_hash"],
+        "report_grade_ready_slot_count": report_grade_validation_plan["ready_slot_count"],
+        "report_grade_blocking_slot_count": report_grade_validation_plan["blocking_slot_count"],
         "dataset_evidence_matrix": dataset_evidence_matrix,
         "dataset_evidence_matrix_hash": dataset_evidence_matrix["matrix_hash"],
         "manifest_error": manifest_error,
@@ -483,18 +512,7 @@ def build_known_answer_validation(
             KNOWN_ANSWER_TRUSTED_DIFF_BLOCKER_81,
             trusted_tool="known-answer-manifest",
         ),
-        "recommended_public_corpora": [
-            {
-                "name": "NIST CFReDS",
-                "purpose": "public digital forensic reference datasets for known-answer validation",
-                "required_evidence": "dataset ID, source hash, expected-answer document, RapidTriage output, diff, reviewer sign-off",
-            },
-            {
-                "name": "NIST CFTT",
-                "purpose": "tool-testing methodology and test assertions for forensic functions",
-                "required_evidence": "test assertion, expected result, observed result, pass/fail, limitation note",
-            },
-        ],
+        "recommended_public_corpora": known_answer_recommended_public_corpora(),
         "release_gate": "known-answer manifest should be attached for any parser claimed report-grade",
         "ready_for_court_report": manifest_status == "all-passed",
         "core_accuracy_gates": [
@@ -508,11 +526,29 @@ def build_known_answer_validation(
                     f"manifest_digest:{manifest_digest}",
                     f"dataset_evidence_matrix_hash:{dataset_evidence_matrix['matrix_hash']}",
                     f"pipeline_manifest_hash:{pipeline_manifest['manifest_hash']}",
+                    f"known_answer_report_grade_validation_plan_hash:{report_grade_validation_plan['validation_plan_hash']}",
+                    f"report_grade_ready_slot_count:{report_grade_validation_plan['ready_slot_count']}",
+                    f"report_grade_blocking_slot_count:{report_grade_validation_plan['blocking_slot_count']}",
                 ],
             )
         ],
         "blockers": blockers,
     }
+
+
+def known_answer_recommended_public_corpora() -> list[dict[str, str]]:
+    return [
+        {
+            "name": "NIST CFReDS",
+            "purpose": "public digital forensic reference datasets for known-answer validation",
+            "required_evidence": "dataset ID, source hash, expected-answer document, RapidTriage output, diff, reviewer sign-off",
+        },
+        {
+            "name": "NIST CFTT",
+            "purpose": "tool-testing methodology and test assertions for forensic functions",
+            "required_evidence": "test assertion, expected result, observed result, pass/fail, limitation note",
+        },
+    ]
 
 
 def build_known_answer_pipeline_manifest(
@@ -579,6 +615,150 @@ def build_known_answer_pipeline_manifest(
         "commercial_claim_allowed": False,
     }
     return {**manifest_core, "manifest_hash": hashlib_json(manifest_core)}
+
+
+def build_known_answer_report_grade_validation_plan(
+    *,
+    manifest_path: Path | None,
+    datasets: Sequence[Mapping[str, object]],
+    status_counts: Mapping[str, int],
+    manifest_status: str,
+    manifest_digest: str,
+    dataset_evidence_matrix: Mapping[str, object],
+    pipeline_manifest: Mapping[str, object],
+    trusted_diff: Mapping[str, object] | None,
+) -> dict[str, object]:
+    expected_assertion_count = sum(int(item.get("expected_assertion_count") or 0) for item in datasets)
+    evidence_path_count = sum(len(item.get("evidence_paths") or []) for item in datasets)
+    evidence_hash_count = sum(int(item.get("evidence_hash_count") or 0) for item in datasets)
+    evidence_hash_rows = []
+    for item in datasets:
+        for evidence_file in item.get("evidence_files") or []:
+            if not isinstance(evidence_file, Mapping):
+                continue
+            evidence_hash_rows.append(
+                {
+                    "dataset_id": str(item.get("id") or ""),
+                    "path": str(evidence_file.get("path") or ""),
+                    "exists": bool(evidence_file.get("exists")),
+                    "sha256": str(evidence_file.get("sha256") or ""),
+                    "size": int(evidence_file.get("size") or 0),
+                }
+            )
+    ready_slots: list[dict[str, object]] = [
+        {
+            "slot_id": "known-answer-manifest-digest",
+            "status": "ready",
+            "evidence_ref": "known_answer_validation.manifest_digest",
+            "evidence_hash": manifest_digest,
+            "description": "Manifest digest binds dataset IDs, statuses, expected assertions, and evidence hashes.",
+        },
+        {
+            "slot_id": "dataset-evidence-matrix",
+            "status": "ready",
+            "evidence_ref": "known_answer_validation.dataset_evidence_matrix_hash",
+            "evidence_hash": str(dataset_evidence_matrix.get("matrix_hash") or ""),
+            "description": "Dataset evidence matrix records per-dataset status, assertions, evidence presence, and row hashes.",
+        },
+        {
+            "slot_id": "known-answer-pipeline-manifest",
+            "status": "ready",
+            "evidence_ref": "known_answer_validation.known_answer_pipeline_manifest_hash",
+            "evidence_hash": str(pipeline_manifest.get("manifest_hash") or ""),
+            "description": "Pipeline manifest maps #81 validation data into release-gate and parser-coverage evidence.",
+        },
+        {
+            "slot_id": "dataset-status-counts",
+            "status": "ready",
+            "evidence_ref": "known_answer_validation.status_counts",
+            "evidence_hash": hashlib_json({"manifest_status": manifest_status, "status_counts": dict(status_counts)}),
+            "description": "Status counts make pass/open/fail datasets reportable without recomputing the manifest.",
+        },
+        {
+            "slot_id": "evidence-file-hash-rows",
+            "status": "ready",
+            "evidence_ref": "known_answer_validation.datasets[].evidence_files[].sha256",
+            "evidence_hash": hashlib_json({"evidence_hash_rows": evidence_hash_rows}),
+            "description": "Evidence files are represented by path, existence, size, and SHA256 rows.",
+        },
+        {
+            "slot_id": "public-corpus-guidance",
+            "status": "ready",
+            "evidence_ref": "known_answer_validation.recommended_public_corpora",
+            "evidence_hash": hashlib_json({"corpora": known_answer_recommended_public_corpora()}),
+            "description": "CFReDS/CFTT guidance is emitted so operators know what external evidence remains required.",
+        },
+    ]
+    blocking_slots: list[dict[str, object]] = [
+        {
+            "slot_id": "trusted-known-answer-manifest-diff",
+            "status": "blocked",
+            "blocker": KNOWN_ANSWER_TRUSTED_DIFF_BLOCKER_81
+            if not trusted_diff or trusted_diff.get("status") != "pass"
+            else "trusted-diff-present-but-commercial-retest-required",
+            "required_evidence": "trusted known-answer manifest diff covering dataset status, assertions, evidence hashes, and dataset hashes",
+        },
+        {
+            "slot_id": "public-cfreds-cftt-corpus-run",
+            "status": "blocked",
+            "blocker": "public-cfreds-cftt-corpus-run-required",
+            "required_evidence": "real CFReDS/CFTT run outputs for each parser claimed report-grade",
+        },
+        {
+            "slot_id": "parser-scope-coverage-map",
+            "status": "blocked",
+            "blocker": "parser-scope-coverage-map-required",
+            "required_evidence": "claim-by-claim map from parser features to known-answer datasets and unsupported limitations",
+        },
+        {
+            "slot_id": "independent-expected-answer-review",
+            "status": "blocked",
+            "blocker": "independent-expected-answer-review-required",
+            "required_evidence": "reviewer signoff that expected answers are independent of RapidTriage output",
+        },
+        {
+            "slot_id": "dataset-chain-of-custody",
+            "status": "blocked",
+            "blocker": "dataset-chain-of-custody-required",
+            "required_evidence": "dataset source, acquisition hash, transfer, and storage history for each validation corpus",
+        },
+        {
+            "slot_id": "release-signoff",
+            "status": "blocked",
+            "blocker": "release-signoff-required",
+            "required_evidence": "release-owner signoff tying known-answer results to the shipped build/version",
+        },
+    ]
+    plan_core = {
+        "profile_version": KNOWN_ANSWER_REPORT_GRADE_VALIDATION_PLAN_VERSION,
+        "item_number": 81,
+        "gap_id": KNOWN_ANSWER_TEST_GAP_ID,
+        "commercial_gap_ids": [KNOWN_ANSWER_TEST_GAP_ID],
+        "manifest_attached": manifest_path is not None,
+        "manifest_path_hash": hashlib.sha256(
+            str(manifest_path.expanduser().resolve() if manifest_path else "").encode("utf-8", errors="replace")
+        ).hexdigest(),
+        "manifest_status": manifest_status,
+        "manifest_digest": manifest_digest,
+        "dataset_count": len(datasets),
+        "status_counts": dict(status_counts),
+        "expected_assertion_count": expected_assertion_count,
+        "evidence_path_count": evidence_path_count,
+        "evidence_hash_count": evidence_hash_count,
+        "dataset_evidence_matrix_hash": str(dataset_evidence_matrix.get("matrix_hash") or ""),
+        "pipeline_manifest_hash": str(pipeline_manifest.get("manifest_hash") or ""),
+        "coverage_item_count": len(pipeline_manifest.get("coverage_by_item") or []),
+        "trusted_diff_status": str((trusted_diff or {}).get("status") or "missing"),
+        "ready_slots": ready_slots,
+        "blocking_slots": blocking_slots,
+        "ready_slot_count": len(ready_slots),
+        "blocking_slot_count": len(blocking_slots),
+        "blockers": [str(slot.get("blocker") or "") for slot in blocking_slots if slot.get("blocker")],
+        "commercial_claim_allowed": False,
+        "ready_for_court_report": False,
+        "report_use_warning": "Use as internal #81 known-answer control evidence only; do not claim report-grade accuracy until blocking slots are satisfied.",
+    }
+    return {**plan_core, "validation_plan_hash": hashlib_json(plan_core)}
 
 
 def known_answer_dataset_evidence_matrix(datasets: Sequence[Mapping[str, object]]) -> dict[str, object]:
@@ -1408,6 +1588,7 @@ def known_answer_manifest_functional_profile(
     status_counts: Mapping[str, int],
     manifest_status: str,
     pipeline_manifest: Mapping[str, object],
+    report_grade_validation_plan: Mapping[str, object],
     trusted_diff: Mapping[str, object] | None,
 ) -> dict[str, object]:
     evidence_path_count = sum(len(item.get("evidence_paths") or []) for item in datasets)
@@ -1448,6 +1629,9 @@ def known_answer_manifest_functional_profile(
             "dataset_evidence_matrix_hash": str(pipeline_manifest.get("dataset_evidence_matrix_hash") or ""),
             "pipeline_manifest_hash": str(pipeline_manifest.get("manifest_hash") or ""),
             "pipeline_manifest_profile": str(pipeline_manifest.get("profile_version") or ""),
+            "report_grade_validation_plan_hash": str(report_grade_validation_plan.get("validation_plan_hash") or ""),
+            "report_grade_ready_slot_count": int(report_grade_validation_plan.get("ready_slot_count") or 0),
+            "report_grade_blocking_slot_count": int(report_grade_validation_plan.get("blocking_slot_count") or 0),
             "trusted_diff_status": str(pipeline_manifest.get("trusted_diff_status") or ""),
         },
         "passed_validation_check_ids": [
@@ -1457,6 +1641,7 @@ def known_answer_manifest_functional_profile(
             "known-answer-expected-assertions-preserved",
             "known-answer-manifest-digest-emitted",
             "known-answer-dataset-evidence-matrix-emitted",
+            "known-answer-report-grade-validation-plan-emitted",
         ],
         "failed_validation_check_ids": failed_checks,
         "reportability_decision": {

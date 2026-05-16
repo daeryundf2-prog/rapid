@@ -11,8 +11,8 @@
       "status": "pass",
       "backlog_items": [81],
       "evidence_paths": ["docs/validation/core-forensics-081-090-fixture-evidence.json", "tests/test_rapidtriage_ops.py", "tests/test_rapidtriage_core_forensics_accuracy.py"],
-      "expected": {"required_assertions": ["Validation output preserves manifest ingestion, dataset counts, expected assertions, evidence-path checks, evidence file SHA256 values, dataset hashes, manifest digest, public corpus guidance, release gate, trusted known-answer manifest diff helpers/gates, and #81 core_accuracy_gates."]},
-      "notes": "Internal fixture pass; public CFReDS/CFTT corpus execution, trusted known-answer manifests, and reviewer signoff remain blockers."
+      "expected": {"required_assertions": ["Validation output preserves manifest ingestion, dataset counts, expected assertions, evidence-path checks, evidence file SHA256 values, dataset hashes, manifest digest, known-answer-report-grade-validation-plan-v1 ready/blocking slots, public corpus guidance, release gate, trusted known-answer manifest diff helpers/gates, and #81 core_accuracy_gates."]},
+      "notes": "Internal fixture pass; public CFReDS/CFTT corpus execution, trusted known-answer manifests, parser-scope coverage maps, chain-of-custody rows, independent expected-answer review, and release signoff remain blockers."
     },
     {
       "id": "core-forensics-082-fixture-corpus",

@@ -2860,6 +2860,7 @@ def validation_spine_evidence_chain() -> list[dict[str, object]]:
             "primary_outputs": [
                 "known_answer_validation.datasets",
                 "known_answer_validation.manifest_digest",
+                "known_answer_validation.known_answer_report_grade_validation_plan_hash",
                 "datasets[].dataset_hash",
                 "datasets[].evidence_files[].sha256",
             ],

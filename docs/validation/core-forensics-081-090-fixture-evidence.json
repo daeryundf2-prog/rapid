@@ -9,9 +9,9 @@
       "title": "NIST CFReDS/CFTT based known-answer tests",
       "test_files": ["tests/test_rapidtriage_ops.py", "tests/test_rapidtriage_core_forensics_accuracy.py"],
       "assertions": [
-        "Validation output preserves known-answer manifest ingestion, dataset status counts, expected assertions, evidence path checks, evidence file SHA256 values, dataset hashes, manifest digest, public corpus guidance, report-grade release gate, trusted known-answer manifest diff helpers/gates, and #81 core_accuracy_gates."
+        "Validation output preserves known-answer manifest ingestion, dataset status counts, expected assertions, evidence path checks, evidence file SHA256 values, dataset hashes, manifest digest, known-answer-report-grade-validation-plan-v1 ready/blocking slots, public corpus guidance, report-grade release gate, trusted known-answer manifest diff helpers/gates, and #81 core_accuracy_gates."
       ],
-      "remaining_external_validation": ["Real CFReDS/CFTT corpus runs, trusted known-answer manifests, and reviewer signoff for each report-grade parser claim."]
+      "remaining_external_validation": ["Real CFReDS/CFTT corpus runs, trusted known-answer manifests, parser-scope coverage maps, chain-of-custody rows, independent expected-answer review, and release signoff for each report-grade parser claim."]
     },
     {
       "item": 82,

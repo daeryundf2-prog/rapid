@@ -1291,6 +1291,8 @@ CORE_FORENSIC_ACCURACY_ITEMS: tuple[dict[str, object], ...] = (
             "public corpus guidance emitted",
             "report-grade release gate recorded",
             "trusted known-answer manifest diff pass",
+            "known-answer report-grade validation plan emitted",
+            "known-answer report-grade ready slots emitted",
         ),
     },
     {

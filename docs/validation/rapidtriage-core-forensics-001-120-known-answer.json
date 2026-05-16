@@ -1909,10 +1909,10 @@
       ],
       "expected": {
         "required_assertions": [
-          "Validation output preserves manifest ingestion, dataset counts, expected assertions, evidence-path checks, evidence file SHA256 values, dataset hashes, manifest digest, public corpus guidance, release gate, and #81 core_accuracy_gates."
+          "Validation output preserves manifest ingestion, dataset counts, expected assertions, evidence-path checks, evidence file SHA256 values, dataset hashes, manifest digest, known-answer-report-grade-validation-plan-v1 ready/blocking slots, public corpus guidance, release gate, trusted known-answer manifest diff helpers/gates, and #81 core_accuracy_gates."
         ]
       },
-      "notes": "Internal fixture pass; public CFReDS/CFTT corpus execution remains blocker.",
+      "notes": "Internal fixture pass; public CFReDS/CFTT corpus execution, trusted known-answer manifests, parser-scope coverage maps, chain-of-custody rows, independent expected-answer review, and release signoff remain blockers.",
       "source_manifest": "docs/validation/rapidtriage-core-forensics-081-090-known-answer.json"
     },
     {

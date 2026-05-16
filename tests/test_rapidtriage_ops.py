@@ -831,6 +831,22 @@ class RapidTriageOpsTests(unittest.TestCase):
                 payload["known_answer_validation"]["functional_priority_profile"]["implemented_controls"]["pipeline_manifest_hash"],
                 payload["known_answer_validation"]["known_answer_pipeline_manifest"]["manifest_hash"],
             )
+            self.assertEqual(
+                payload["known_answer_validation"]["known_answer_report_grade_validation_plan"]["profile_version"],
+                "known-answer-report-grade-validation-plan-v1",
+            )
+            self.assertEqual(
+                payload["known_answer_validation"]["known_answer_report_grade_validation_plan_hash"],
+                payload["known_answer_validation"]["known_answer_report_grade_validation_plan"]["validation_plan_hash"],
+            )
+            self.assertEqual(payload["known_answer_validation"]["report_grade_ready_slot_count"], 6)
+            self.assertEqual(payload["known_answer_validation"]["report_grade_blocking_slot_count"], 6)
+            self.assertEqual(
+                payload["known_answer_validation"]["functional_priority_profile"]["implemented_controls"][
+                    "report_grade_validation_plan_hash"
+                ],
+                payload["known_answer_validation"]["known_answer_report_grade_validation_plan_hash"],
+            )
             self.assertIn(
                 "known-answer-manifest-not-attached",
                 payload["known_answer_validation"]["functional_priority_profile"]["failed_validation_check_ids"],
@@ -838,6 +854,10 @@ class RapidTriageOpsTests(unittest.TestCase):
             self.assertEqual(payload["known_answer_validation"]["core_accuracy_gates"][0]["gap_id"], "#81")
             self.assertIn(
                 "known-answer pipeline manifest hash emitted",
+                payload["known_answer_validation"]["core_accuracy_gates"][0]["satisfied_checks"],
+            )
+            self.assertIn(
+                "known-answer report-grade validation plan emitted",
                 payload["known_answer_validation"]["core_accuracy_gates"][0]["satisfied_checks"],
             )
             self.assertEqual(payload["known_answer_validation"]["trusted_known_answer_diff"]["status"], "missing")
@@ -1198,12 +1218,35 @@ class RapidTriageOpsTests(unittest.TestCase):
             self.assertEqual(promoted_known["known_answer_pipeline_manifest"]["trusted_diff_status"], "pass")
             self.assertEqual(len(promoted_known["known_answer_pipeline_manifest"]["manifest_hash"]), 64)
             self.assertEqual(
+                promoted_known["known_answer_report_grade_validation_plan"]["profile_version"],
+                "known-answer-report-grade-validation-plan-v1",
+            )
+            self.assertEqual(
+                promoted_known["known_answer_report_grade_validation_plan"]["manifest_digest"],
+                promoted_known["manifest_digest"],
+            )
+            self.assertEqual(
+                promoted_known["known_answer_report_grade_validation_plan"]["pipeline_manifest_hash"],
+                promoted_known["known_answer_pipeline_manifest"]["manifest_hash"],
+            )
+            self.assertEqual(
+                promoted_known["known_answer_report_grade_validation_plan_hash"],
+                promoted_known["known_answer_report_grade_validation_plan"]["validation_plan_hash"],
+            )
+            self.assertEqual(len(promoted_known["known_answer_report_grade_validation_plan_hash"]), 64)
+            self.assertEqual(
                 promoted_known["functional_priority_profile"]["implemented_controls"]["pipeline_manifest_hash"],
                 promoted_known["known_answer_pipeline_manifest"]["manifest_hash"],
             )
             self.assertIn("trusted known-answer manifest diff pass", promoted_known["core_accuracy_gates"][0]["satisfied_checks"])
             self.assertIn("known-answer pipeline manifest hash emitted", promoted_known["core_accuracy_gates"][0]["satisfied_checks"])
+            self.assertIn(
+                "known-answer report-grade validation plan emitted",
+                promoted_known["core_accuracy_gates"][0]["satisfied_checks"],
+            )
             self.assertIn("evidence file hashes recorded", promoted_known["core_accuracy_gates"][0]["satisfied_checks"])
+            self.assertNotIn("trusted-known-answer-manifest-diff-missing", promoted_known["blockers"])
+            self.assertIn("trusted-diff-present-but-commercial-retest-required", promoted_known["blockers"])
             self.assertEqual(promoted_known["functional_priority_profile"]["status"], "complete")
 
             fixture_corpus = build_parser_fixture_corpus(Path.cwd())
@@ -1423,6 +1466,10 @@ class RapidTriageOpsTests(unittest.TestCase):
             spine_by_number = {item["number"]: item for item in validation_spine["items"]}
             self.assertEqual(spine_by_number[81]["produces"], "known_answer_validation.datasets")
             self.assertIn("known_answer_validation.manifest_digest", spine_by_number[81]["primary_outputs"])
+            self.assertIn(
+                "known_answer_validation.known_answer_report_grade_validation_plan_hash",
+                spine_by_number[81]["primary_outputs"],
+            )
             self.assertIn("datasets[].evidence_files[].sha256", spine_by_number[81]["primary_outputs"])
             self.assertIn("parser_fixture_corpus.fixture_corpus_digest", spine_by_number[82]["primary_outputs"])
             self.assertIn("areas[].area_manifest_hash", spine_by_number[82]["primary_outputs"])
