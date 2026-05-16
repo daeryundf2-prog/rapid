@@ -196,7 +196,7 @@
       ],
       "expected": {
         "required_assertions": [
-          "Search analysis preserves draft hypotheses, evidence cluster links, review questions/tasks, report-readiness flags, workbook_citation_manifest hypothesis source locators, persistence/versioning warning, and #50 core_accuracy_gates.",
+          "Search analysis preserves draft hypotheses, evidence cluster links, review questions/tasks, report-readiness flags, workbook_citation_manifest hypothesis source locators, workbook_report_grade_validation_plan ready/blocking slots, persistence/versioning warning, and #50 core_accuracy_gates.",
           "Search analysis trusted diff helper requires workbook rubric row equality before satisfying the #50 trusted workbook rubric diff pass gate.",
           "Search analysis reportability decisions block workbook findings until editable persistence, evidence attachments, reviewer assignment, and version history exists."
         ]

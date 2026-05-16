@@ -123,6 +123,15 @@ TIMELINE_REPORT_GRADE_BLOCKERS = [
     "timeline-known-answer-trusted-diff-required",
     "large-case-timeline-validation-required",
 ]
+WORKBOOK_REPORT_GRADE_VALIDATION_PLAN_VERSION = "search-workbook-report-grade-validation-plan-v1"
+WORKBOOK_REPORT_GRADE_BLOCKERS = [
+    "editable-persistent-workbook-required",
+    "source-row-evidence-attachment-workflow-required",
+    "reviewer-assignment-workflow-required",
+    "report-section-export-required",
+    "workbook-version-history-required",
+    "workbook-rubric-trusted-diff-required",
+]
 
 
 def build_search_analysis(
@@ -327,6 +336,11 @@ def analysis_commercial_uplift_evidence(
         if isinstance(workbook.get("workbook_citation_manifest"), Mapping)
         else {}
     )
+    workbook_validation_plan = (
+        workbook.get("workbook_report_grade_validation_plan")
+        if isinstance(workbook.get("workbook_report_grade_validation_plan"), Mapping)
+        else {}
+    )
     trusted_diffs = trusted_diffs or {}
     trusted_diff_blockers = [
         blocker
@@ -349,6 +363,10 @@ def analysis_commercial_uplift_evidence(
         passed_by_item.setdefault("#49", []).append("timeline report-grade validation plan")
         if int(timeline_validation_plan.get("ready_slot_count") or 0) >= 6:
             passed_by_item["#49"].append("timeline report-grade ready slots")
+    if workbook_validation_plan:
+        passed_by_item.setdefault("#50", []).append("workbook report-grade validation plan")
+        if int(workbook_validation_plan.get("ready_slot_count") or 0) >= 6:
+            passed_by_item["#50"].append("workbook report-grade ready slots")
     return {
         "batch_id": "commercial-uplift-046-050",
         "item_numbers": [46, 47, 48, 49, 50],
@@ -369,6 +387,7 @@ def analysis_commercial_uplift_evidence(
             f"timeline_report_grade_validation_plan_sha256:{timeline_validation_plan.get('validation_plan_sha256', '')}",
             f"hypotheses:{workbook_summary.get('hypothesis_count', 0)}",
             f"workbook_citation_manifest_sha256:{workbook_citation_manifest.get('manifest_sha256', '')}",
+            f"workbook_report_grade_validation_plan_sha256:{workbook_validation_plan.get('validation_plan_sha256', '')}",
         ],
         "reportability_decision": analysis_reportability_decision(
             report_grade=report_grade,
@@ -383,6 +402,7 @@ def analysis_commercial_uplift_evidence(
             entity_validation_plan=entity_validation_plan,
             graph_validation_plan=graph_validation_plan,
             timeline_validation_plan=timeline_validation_plan,
+            workbook_validation_plan=workbook_validation_plan,
         ),
         "passed_validation_check_ids_by_item": passed_by_item,
         "failed_validation_check_ids_by_item": failed_by_item,
@@ -476,6 +496,14 @@ def analysis_commercial_uplift_evidence(
             "workbook_review_profile_present": bool(workbook_review_profile),
             "workbook_citation_manifest_present": bool(workbook_citation_manifest),
             "workbook_citation_manifest_hash": str(workbook_citation_manifest.get("manifest_sha256") or ""),
+            "workbook_report_grade_validation_plan_present": bool(workbook_validation_plan),
+            "workbook_report_grade_validation_plan_hash": str(
+                workbook_validation_plan.get("validation_plan_sha256") or ""
+            ),
+            "workbook_report_grade_ready_slot_count": int(workbook_validation_plan.get("ready_slot_count") or 0),
+            "workbook_report_grade_blocking_slot_count": int(
+                workbook_validation_plan.get("blocking_slot_count") or 0
+            ),
             "workbook_hypothesis_citation_count": int(
                 workbook_citation_manifest.get("hypothesis_citation_count") or 0
             ),
@@ -506,6 +534,7 @@ def analysis_reportability_decision(
     entity_validation_plan: Mapping[str, object] | None = None,
     graph_validation_plan: Mapping[str, object] | None = None,
     timeline_validation_plan: Mapping[str, object] | None = None,
+    workbook_validation_plan: Mapping[str, object] | None = None,
 ) -> dict[str, object]:
     blockers = {str(item) for item in report_grade.get("blockers", []) if str(item)}
     for item_id, checks in failed_by_item.items():
@@ -519,6 +548,7 @@ def analysis_reportability_decision(
     entity_validation_plan = entity_validation_plan or {}
     graph_validation_plan = graph_validation_plan or {}
     timeline_validation_plan = timeline_validation_plan or {}
+    workbook_validation_plan = workbook_validation_plan or {}
     for number, blocker in ANALYSIS_TRUSTED_DIFF_BLOCKERS.items():
         if trusted_diffs.get(number, {}).get("status") != "pass":
             blockers.add(blocker)
@@ -556,6 +586,12 @@ def analysis_reportability_decision(
         ),
         "timeline_report_grade_ready_slot_count": int(timeline_validation_plan.get("ready_slot_count") or 0),
         "timeline_report_grade_blocking_slot_count": int(timeline_validation_plan.get("blocking_slot_count") or 0),
+        "workbook_report_grade_validation_plan_present": bool(workbook_validation_plan),
+        "workbook_report_grade_validation_plan_hash": str(
+            workbook_validation_plan.get("validation_plan_sha256") or ""
+        ),
+        "workbook_report_grade_ready_slot_count": int(workbook_validation_plan.get("ready_slot_count") or 0),
+        "workbook_report_grade_blocking_slot_count": int(workbook_validation_plan.get("blocking_slot_count") or 0),
         "required_before_report": [
             "persist analyst review state for clusters, entity merge/split decisions, graph layouts, and workbook hypotheses",
             "validate graph and timeline joins against full-case indexed source rows with timezone and parser-confidence evidence",
@@ -658,6 +694,11 @@ def analysis_core_accuracy_gates(
     workbook_citation_manifest = (
         workbook.get("workbook_citation_manifest")
         if isinstance(workbook.get("workbook_citation_manifest"), Mapping)
+        else {}
+    )
+    workbook_validation_plan = (
+        workbook.get("workbook_report_grade_validation_plan")
+        if isinstance(workbook.get("workbook_report_grade_validation_plan"), Mapping)
         else {}
     )
     cluster_rows = clusters.get("clusters") if isinstance(clusters.get("clusters"), list) else []
@@ -852,6 +893,13 @@ def analysis_core_accuracy_gates(
             item50.append("hypothesis citation source locators")
         if workbook_citation_manifest.get("version_history_supported") is False:
             item50.append("workbook version-history blocker")
+    if workbook_validation_plan:
+        item50.append("workbook report-grade validation plan")
+        evidence_refs.append(
+            f"workbook_report_grade_validation_plan_sha256:{workbook_validation_plan.get('validation_plan_sha256', '')}"
+        )
+        if int(workbook_validation_plan.get("ready_slot_count") or 0) >= 6:
+            item50.append("workbook report-grade ready slots")
     if not ANALYSIS_NATIVE_CAPABILITIES["full_case_reindex"]:
         item50.append("persistence/versioning limitation warning")
     if trusted_diffs.get(50, {}).get("status") == "pass":
@@ -3444,6 +3492,11 @@ def build_hypothesis_workbook(
         ],
     )
     citation_manifest = build_workbook_citation_manifest(hypotheses=hypotheses, clusters=clusters)
+    validation_plan = build_workbook_report_grade_validation_plan(
+        hypotheses=hypotheses,
+        workbook_review_profile=review_profile,
+        workbook_citation_manifest=citation_manifest,
+    )
     return {
         "summary": {
             "hypothesis_count": len(hypotheses),
@@ -3453,6 +3506,8 @@ def build_hypothesis_workbook(
             "evidence_attachment_count": int(review_profile.get("evidence_attachment_count") or 0),
             "hypothesis_citation_count": int(citation_manifest.get("hypothesis_citation_count") or 0),
             "evidence_cluster_ref_count": int(citation_manifest.get("evidence_cluster_ref_count") or 0),
+            "workbook_report_grade_ready_slot_count": int(validation_plan.get("ready_slot_count") or 0),
+            "workbook_report_grade_blocking_slot_count": int(validation_plan.get("blocking_slot_count") or 0),
             "commercial_gap_ids": ["#50"],
             "commercial_grade_ready": False,
         },
@@ -3460,6 +3515,8 @@ def build_hypothesis_workbook(
         "workbook_review_profile": review_profile,
         "workbook_citation_manifest": citation_manifest,
         "workbook_citation_manifest_hash": citation_manifest["manifest_sha256"],
+        "workbook_report_grade_validation_plan": validation_plan,
+        "workbook_report_grade_validation_plan_hash": validation_plan["validation_plan_sha256"],
         "report_grade_assessment": component_report_grade_assessment("#50", "hypothesis-workbook"),
         "review_questions": list(review_profile["review_questions"]),
         "next_actions": [
@@ -3605,6 +3662,180 @@ def build_workbook_citation_manifest(
         {key: value for key, value in manifest.items() if key != "manifest_sha256"}
     )
     return manifest
+
+
+def build_workbook_report_grade_validation_plan(
+    *,
+    hypotheses: Sequence[Mapping[str, object]],
+    workbook_review_profile: Mapping[str, object],
+    workbook_citation_manifest: Mapping[str, object],
+    trusted_diff: Mapping[str, object] | None = None,
+) -> dict[str, object]:
+    trusted_diff = trusted_diff or {}
+    review_profile_hash = stable_analysis_sha256(workbook_review_profile)
+    citation_manifest_hash = str(workbook_citation_manifest.get("manifest_sha256") or "")
+    hypothesis_citation_count = int(workbook_citation_manifest.get("hypothesis_citation_count") or 0)
+    evidence_cluster_ref_count = int(workbook_citation_manifest.get("evidence_cluster_ref_count") or 0)
+    review_queue_count = int(workbook_review_profile.get("review_queue_count") or 0)
+    review_question_count = int(workbook_review_profile.get("review_question_count") or 0)
+    evidence_attachment_count = int(workbook_review_profile.get("evidence_attachment_count") or 0)
+
+    def slot(
+        slot_id: str,
+        *,
+        ready: bool,
+        evidence: str,
+        blocker_id: str | None = None,
+        operator_action: str = "",
+    ) -> dict[str, object]:
+        row: dict[str, object] = {
+            "slot_id": slot_id,
+            "status": "complete" if ready else "external-required",
+            "evidence": evidence,
+        }
+        if blocker_id and not ready:
+            row["blocker_id"] = blocker_id
+        if operator_action:
+            row["operator_action"] = operator_action
+        return row
+
+    validation_slots = [
+        slot(
+            "search-workbook-draft-hypotheses-generated",
+            ready=bool(hypotheses),
+            evidence=f"hypothesis_count={len(hypotheses)}",
+            blocker_id="search-workbook-draft-hypotheses-required",
+            operator_action="Run search analysis so draft hypotheses are generated from search pivots.",
+        ),
+        slot(
+            "search-workbook-review-profile-emitted",
+            ready=workbook_review_profile.get("profile_version") == "hypothesis-workbook-review-v1",
+            evidence=f"workbook_review_profile_sha256={review_profile_hash}",
+            blocker_id="search-workbook-review-profile-required",
+            operator_action="Regenerate analysis so review queue and required actions are available.",
+        ),
+        slot(
+            "search-workbook-citation-manifest-emitted",
+            ready=bool(citation_manifest_hash),
+            evidence=f"workbook_citation_manifest_sha256={citation_manifest_hash}",
+            blocker_id="search-workbook-citation-manifest-required",
+            operator_action="Generate the workbook citation manifest before using workbook output in a report.",
+        ),
+        slot(
+            "search-workbook-hypothesis-source-viewer-locators",
+            ready=hypothesis_citation_count > 0,
+            evidence=f"hypothesis_citation_count={hypothesis_citation_count}",
+            blocker_id="search-workbook-hypothesis-source-viewer-locators-required",
+            operator_action="Attach source viewer locators for workbook hypothesis review.",
+        ),
+        slot(
+            "search-workbook-evidence-cluster-refs",
+            ready=evidence_cluster_ref_count > 0,
+            evidence=f"evidence_cluster_ref_count={evidence_cluster_ref_count}",
+            blocker_id="search-workbook-evidence-cluster-refs-required",
+            operator_action="Attach evidence cluster references to draft hypotheses.",
+        ),
+        slot(
+            "search-workbook-review-queue-and-questions",
+            ready=review_queue_count > 0 and review_question_count > 0,
+            evidence=(
+                f"review_queue_count={review_queue_count} review_question_count={review_question_count} "
+                f"evidence_attachment_count={evidence_attachment_count}"
+            ),
+            blocker_id="search-workbook-review-queue-required",
+            operator_action="Emit review queue, analyst questions, and evidence counts for each hypothesis.",
+        ),
+        slot(
+            "search-workbook-editable-persistent-workbook",
+            ready=False,
+            evidence="editable_workbook_supported=false persistent_workbook_supported=false",
+            blocker_id="editable-persistent-workbook-required",
+            operator_action="Persist analyst edits, status, notes, and workbook state in the Case DB.",
+        ),
+        slot(
+            "search-workbook-source-row-evidence-attachment",
+            ready=False,
+            evidence="source_row_evidence_attachment_workflow=false",
+            blocker_id="source-row-evidence-attachment-workflow-required",
+            operator_action="Attach verified source-row citations instead of cluster references before report export.",
+        ),
+        slot(
+            "search-workbook-reviewer-assignment-workflow",
+            ready=False,
+            evidence="reviewer_assignment_workflow=false",
+            blocker_id="reviewer-assignment-workflow-required",
+            operator_action="Persist reviewer assignments, decision state, and conflict-aware handoffs.",
+        ),
+        slot(
+            "search-workbook-report-section-export",
+            ready=False,
+            evidence="report_section_export_supported=false",
+            blocker_id="report-section-export-required",
+            operator_action="Export reviewed workbook sections with source citations and limitation wording.",
+        ),
+        slot(
+            "search-workbook-version-history",
+            ready=False,
+            evidence="version_history_supported=false",
+            blocker_id="workbook-version-history-required",
+            operator_action="Record version history and immutable reviewer decision changes.",
+        ),
+        slot(
+            "search-workbook-trusted-rubric-diff",
+            ready=trusted_diff.get("status") == "pass",
+            evidence=f"trusted_diff_status={trusted_diff.get('status', 'missing')}",
+            blocker_id=ANALYSIS_TRUSTED_DIFF_BLOCKERS[50],
+            operator_action="Attach a passing trusted workbook rubric diff before report use.",
+        ),
+    ]
+    blockers = sorted(
+        str(slot_row.get("blocker_id"))
+        for slot_row in validation_slots
+        if slot_row.get("status") != "complete" and slot_row.get("blocker_id")
+    )
+    ready_slot_count = sum(1 for slot_row in validation_slots if slot_row.get("status") == "complete")
+    plan: dict[str, object] = {
+        "profile_version": WORKBOOK_REPORT_GRADE_VALIDATION_PLAN_VERSION,
+        "item_number": 50,
+        "gap_id": "#50",
+        "batch_id": "commercial-uplift-046-050",
+        "selected_track": "bounded-draft-hypothesis-workbook-report-validation",
+        "hypothesis_count": len(hypotheses),
+        "review_queue_count": review_queue_count,
+        "review_question_count": review_question_count,
+        "evidence_attachment_count": evidence_attachment_count,
+        "hypothesis_citation_count": hypothesis_citation_count,
+        "evidence_cluster_ref_count": evidence_cluster_ref_count,
+        "workbook_review_profile_sha256": review_profile_hash,
+        "workbook_citation_manifest_sha256": citation_manifest_hash,
+        "trusted_diff_status": str(trusted_diff.get("status") or "missing"),
+        "ready_slot_count": ready_slot_count,
+        "blocking_slot_count": len(blockers),
+        "validation_status": "report-validation-blocked",
+        "commercial_grade": False,
+        "commercial_grade_ready": False,
+        "validation_slots": validation_slots,
+        "blockers": blockers,
+        "commercial_grade_blockers": list(WORKBOOK_REPORT_GRADE_BLOCKERS),
+        "validation_commands": [
+            "rapidtriage search <case> --query <keyword> --json",
+            "rapidtriage cross-tool-validate --rapid-output search-results.json --reference-output <workbook-rubric-known-answer> --backlog-item 50 --json",
+            "rapidtriage commercial-readiness --validation-package docs/validation/rapidtriage-core-forensics-041-050-known-answer.json --limit 50 --json",
+        ],
+        "report_guidance": {
+            "allowed_use": "bounded-draft-hypothesis-review-workbook",
+            "forbidden_claim": "analyst-reviewed finding or final report section",
+            "required_disclaimer": (
+                "Workbook hypotheses are draft review aids and require editable Case DB persistence, verified "
+                "source-row evidence attachments, reviewer assignment state, report-section export, version "
+                "history, and trusted rubric validation before report-grade finding claims."
+            ),
+        },
+    }
+    plan["validation_plan_sha256"] = stable_analysis_sha256(
+        {key: value for key, value in plan.items() if key != "validation_plan_sha256"}
+    )
+    return plan
 
 
 def add_hypothesis(

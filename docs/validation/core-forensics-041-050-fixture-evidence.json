@@ -117,7 +117,7 @@
       "title": "Incident hypothesis/workbook feature",
       "test_files": ["tests/test_rapidtriage_search_analysis.py"],
       "assertions": [
-        "Search analysis generates draft hypotheses with cluster evidence links, review questions/tasks, report-readiness flags, persistence warnings, analysis_analyst_review_profile, #50 core_accuracy_gates, and reportability blockers for missing editable workbook persistence, evidence attachments, reviewer assignment, and version history.",
+        "Search analysis generates draft hypotheses with cluster evidence links, review questions/tasks, report-readiness flags, workbook_citation_manifest hypothesis source locators, workbook_report_grade_validation_plan ready/blocking slots, persistence warnings, #50 core_accuracy_gates, and reportability blockers for missing editable workbook persistence, evidence attachments, reviewer assignment, and version history.",
         "build_analysis_trusted_diff compares workbook hypothesis rows against rubric-reviewed workbook rows before satisfying the #50 trusted diff gate."
       ],
       "remaining_external_validation": [

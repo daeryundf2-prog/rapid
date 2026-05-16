@@ -1245,7 +1245,7 @@
       ],
       "expected": {
         "required_assertions": [
-          "Search analysis preserves draft hypotheses, evidence cluster links, review questions/tasks, report-readiness flags, persistence/versioning warning, and #50 core_accuracy_gates."
+          "Search analysis preserves draft hypotheses, evidence cluster links, review questions/tasks, report-readiness flags, workbook_citation_manifest hypothesis source locators, workbook_report_grade_validation_plan ready/blocking slots, persistence/versioning warning, and #50 core_accuracy_gates."
         ]
       },
       "notes": "Internal fixture pass; editable persistent workbook, evidence attachments, reviewer assignment, and report section export remain blockers.",

@@ -278,6 +278,8 @@ class RapidTriageSearchAnalysisTests(unittest.TestCase):
         self.assertIn("workbook citation manifest", analysis_gates["#50"]["satisfied_checks"])
         self.assertIn("hypothesis citation source locators", analysis_gates["#50"]["satisfied_checks"])
         self.assertIn("workbook version-history blocker", analysis_gates["#50"]["satisfied_checks"])
+        self.assertIn("workbook report-grade validation plan", analysis_gates["#50"]["satisfied_checks"])
+        self.assertIn("workbook report-grade ready slots", analysis_gates["#50"]["satisfied_checks"])
         self.assertIn("persistence/versioning limitation warning", analysis_gates["#50"]["satisfied_checks"])
         self.assertIn("duplicate fingerprint generation", analysis_gates["#60"]["satisfied_checks"])
         self.assertIn("duplicate group counts", analysis_gates["#60"]["satisfied_checks"])
@@ -306,6 +308,8 @@ class RapidTriageSearchAnalysisTests(unittest.TestCase):
         self.assertIn("timeline report-grade ready slots", analysis_uplift["passed_validation_check_ids_by_item"]["#49"])
         self.assertIn("draft hypotheses generated", analysis_uplift["passed_validation_check_ids_by_item"]["#50"])
         self.assertIn("workbook review profile", analysis_uplift["passed_validation_check_ids_by_item"]["#50"])
+        self.assertIn("workbook report-grade validation plan", analysis_uplift["passed_validation_check_ids_by_item"]["#50"])
+        self.assertIn("workbook report-grade ready slots", analysis_uplift["passed_validation_check_ids_by_item"]["#50"])
         self.assertIn("persistent-cluster-review-state", analysis_uplift["failed_validation_check_ids_by_item"]["#46"])
         self.assertEqual(
             analysis_uplift["reportability_decision"]["decision"],
@@ -328,6 +332,7 @@ class RapidTriageSearchAnalysisTests(unittest.TestCase):
         self.assertTrue(analysis_uplift["reportability_decision"]["entity_report_grade_validation_plan_present"])
         self.assertTrue(analysis_uplift["reportability_decision"]["graph_report_grade_validation_plan_present"])
         self.assertTrue(analysis_uplift["reportability_decision"]["timeline_report_grade_validation_plan_present"])
+        self.assertTrue(analysis_uplift["reportability_decision"]["workbook_report_grade_validation_plan_present"])
         self.assertFalse(analysis_uplift["large_data_controls"]["persistent_review_state"])
         self.assertFalse(analysis_uplift["large_data_controls"]["full_case_reindex"])
         self.assertTrue(analysis_uplift["large_data_controls"]["cluster_review_profile_present"])
@@ -370,6 +375,9 @@ class RapidTriageSearchAnalysisTests(unittest.TestCase):
         self.assertFalse(analysis_uplift["large_data_controls"]["timeline_clock_skew_overlay_supported"])
         self.assertTrue(analysis_uplift["large_data_controls"]["workbook_review_profile_present"])
         self.assertTrue(analysis_uplift["large_data_controls"]["workbook_citation_manifest_present"])
+        self.assertTrue(analysis_uplift["large_data_controls"]["workbook_report_grade_validation_plan_present"])
+        self.assertEqual(analysis_uplift["large_data_controls"]["workbook_report_grade_ready_slot_count"], 6)
+        self.assertEqual(analysis_uplift["large_data_controls"]["workbook_report_grade_blocking_slot_count"], 6)
         self.assertGreaterEqual(analysis_uplift["large_data_controls"]["workbook_hypothesis_citation_count"], 1)
         self.assertGreaterEqual(analysis_uplift["large_data_controls"]["workbook_evidence_cluster_ref_count"], 1)
         self.assertGreaterEqual(analysis_uplift["large_data_controls"]["workbook_review_queue_count"], 1)
@@ -726,6 +734,41 @@ class RapidTriageSearchAnalysisTests(unittest.TestCase):
         self.assertIn(
             "search-workbook-citation-manifest-emitted",
             workbook_manifest["passed_validation_check_ids"],
+        )
+        workbook_plan = workbook["workbook_report_grade_validation_plan"]
+        self.assertEqual(workbook_plan["profile_version"], "search-workbook-report-grade-validation-plan-v1")
+        self.assertEqual(workbook_plan["item_number"], 50)
+        self.assertEqual(workbook_plan["gap_id"], "#50")
+        self.assertEqual(
+            workbook["workbook_report_grade_validation_plan_hash"],
+            workbook_plan["validation_plan_sha256"],
+        )
+        self.assertEqual(workbook_plan["workbook_citation_manifest_sha256"], workbook_manifest["manifest_sha256"])
+        self.assertGreaterEqual(workbook_plan["hypothesis_count"], 1)
+        self.assertGreaterEqual(workbook_plan["hypothesis_citation_count"], 1)
+        self.assertGreaterEqual(workbook_plan["evidence_cluster_ref_count"], 1)
+        self.assertEqual(workbook_plan["ready_slot_count"], 6)
+        self.assertEqual(workbook_plan["blocking_slot_count"], 6)
+        self.assertEqual(workbook_plan["validation_status"], "report-validation-blocked")
+        self.assertFalse(workbook_plan["commercial_grade"])
+        workbook_slots = {slot["slot_id"]: slot for slot in workbook_plan["validation_slots"]}
+        self.assertEqual(workbook_slots["search-workbook-draft-hypotheses-generated"]["status"], "complete")
+        self.assertEqual(workbook_slots["search-workbook-review-profile-emitted"]["status"], "complete")
+        self.assertEqual(workbook_slots["search-workbook-citation-manifest-emitted"]["status"], "complete")
+        self.assertEqual(workbook_slots["search-workbook-hypothesis-source-viewer-locators"]["status"], "complete")
+        self.assertEqual(workbook_slots["search-workbook-evidence-cluster-refs"]["status"], "complete")
+        self.assertEqual(workbook_slots["search-workbook-review-queue-and-questions"]["status"], "complete")
+        self.assertEqual(workbook_slots["search-workbook-editable-persistent-workbook"]["status"], "external-required")
+        self.assertEqual(workbook_slots["search-workbook-version-history"]["status"], "external-required")
+        self.assertIn("editable-persistent-workbook-required", workbook_plan["blockers"])
+        self.assertIn("workbook-rubric-trusted-diff-required", workbook_plan["blockers"])
+        self.assertEqual(
+            analysis_uplift["large_data_controls"]["workbook_report_grade_validation_plan_hash"],
+            workbook_plan["validation_plan_sha256"],
+        )
+        self.assertEqual(
+            analysis_uplift["reportability_decision"]["workbook_report_grade_validation_plan_hash"],
+            workbook_plan["validation_plan_sha256"],
         )
 
     def test_analysis_trusted_diffs_control_reviewed_finding_gates(self) -> None:
