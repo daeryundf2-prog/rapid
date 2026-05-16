@@ -1802,10 +1802,10 @@
       ],
       "expected": {
         "required_assertions": [
-          "Hash outputs preserve MD5/SHA1/SHA256, path-size-mtime-inode cache metadata, hit/miss/invalidation counters, hash-cache-manifest-v1 path-hash entries, content-addressed persistence rows, explicit snapshot export/import support, manifest hash, hash-cache assessment, automatic persistent-cache warning, trusted hash-cache manifest diff helpers/gates, and #76 core_accuracy_gates."
+          "Hash outputs preserve MD5/SHA1/SHA256, path-size-mtime-inode cache metadata, hit/miss/invalidation counters, hash-cache-manifest-v1 path-hash entries, content-addressed persistence rows, explicit snapshot export/import support, manifest hash, hash-cache assessment, hash cache report-grade validation-plan hashes/ready slots/blocking slots, automatic persistent-cache warning, trusted hash-cache manifest diff helpers/gates, and #76 core_accuracy_gates."
         ]
       },
-      "notes": "Internal fixture pass; automatic on-disk cache wiring and large-case hit-ratio validation remain blockers.",
+      "notes": "Internal fixture pass; automatic on-disk cache wiring, trusted hash-cache manifests, large-case hit-ratio validation, cross-platform cache-key semantics, content-addressed lookup mode, and multi-run stale-cache replay remain blockers.",
       "source_manifest": "docs/validation/rapidtriage-core-forensics-071-080-known-answer.json"
     },
     {

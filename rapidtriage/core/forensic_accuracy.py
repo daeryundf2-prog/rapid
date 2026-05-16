@@ -1194,6 +1194,7 @@ CORE_FORENSIC_ACCURACY_ITEMS: tuple[dict[str, object], ...] = (
             "persistent snapshot manifest emitted",
             "content-addressed cache rows emitted",
             "automatic persistent cache limitation warning",
+            "hash cache report-grade validation plan emitted",
             "trusted hash-cache manifest diff pass",
         ),
     },

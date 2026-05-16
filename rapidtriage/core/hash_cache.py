@@ -12,6 +12,15 @@ HASH_ALGORITHMS = ("md5", "sha1", "sha256")
 HASH_CACHE_GAP_ID = "#76"
 HASH_CACHE_TRUSTED_DIFF_BLOCKER_76 = "trusted-hash-cache-manifest-diff-missing"
 HASH_CACHE_TRUSTED_TOOLS = {"hash-cache-manifest", "content-addressed-cache-oracle", "known-answer-hash-cache-export"}
+HASH_CACHE_REPORT_GRADE_VALIDATION_PLAN_VERSION = "hash-cache-report-grade-validation-plan-v1"
+HASH_CACHE_REPORT_GRADE_BLOCKERS = [
+    HASH_CACHE_TRUSTED_DIFF_BLOCKER_76,
+    "automatic-on-disk-cache-wiring-required",
+    "large-case-hit-ratio-validation-required",
+    "cross-platform-cache-key-semantics-required",
+    "content-addressed-lookup-mode-required",
+    "multi-run-stale-cache-replay-required",
+]
 _HASH_CACHE: dict[tuple[str, int, int, int, int], dict[str, str]] = {}
 _HASH_CACHE_STATS = {
     "hits": 0,
@@ -282,6 +291,10 @@ def hash_cache_assessment(
     trusted_diff: Mapping[str, object] | None = None,
 ) -> dict[str, object]:
     manifest = dict(cache_manifest) if cache_manifest else build_hash_cache_manifest()
+    validation_plan = hash_cache_report_grade_validation_plan(
+        cache_manifest=manifest,
+        trusted_diff=trusted_diff,
+    )
     satisfied = [
         "MD5/SHA1/SHA256 captured",
         "path-size-mtime-inode cache key recorded",
@@ -292,19 +305,26 @@ def hash_cache_assessment(
         "persistent snapshot manifest emitted",
         "content-addressed cache rows emitted",
         "automatic persistent cache limitation warning",
+        "hash cache report-grade validation plan emitted",
+        "hash cache report-grade ready slots emitted",
     ]
     if trusted_diff and trusted_diff.get("status") == "pass":
         satisfied.append("trusted hash-cache manifest diff pass")
-    blockers = [
-        "automatic-on-disk-cache-not-enabled-without-explicit-snapshot-import",
-        "cache-lookup-still-uses-path-size-mtime-key-with-content-addressed-export-evidence",
-        "large-scale-hash-cache-hit-ratio-validation-remains-required",
-    ]
+    blockers = list(
+        dict.fromkeys(
+            [
+                "automatic-on-disk-cache-not-enabled-without-explicit-snapshot-import",
+                "cache-lookup-still-uses-path-size-mtime-key-with-content-addressed-export-evidence",
+                "large-scale-hash-cache-hit-ratio-validation-remains-required",
+                *validation_plan["blockers"],
+            ]
+        )
+    )
     if not trusted_diff or trusted_diff.get("status") != "pass":
-        blockers.append(HASH_CACHE_TRUSTED_DIFF_BLOCKER_76)
+        blockers = list(dict.fromkeys([*blockers, HASH_CACHE_TRUSTED_DIFF_BLOCKER_76]))
     return {
         "component": "file-hash-cache",
-        "status": "in-process-path-size-mtime-cache",
+        "status": "in-process-path-size-mtime-cache-validation-plan-emitted",
         "commercial_gap_ids": [HASH_CACHE_GAP_ID],
         "algorithm_count": len(HASH_ALGORITHMS),
         "algorithms": list(HASH_ALGORITHMS),
@@ -317,6 +337,10 @@ def hash_cache_assessment(
         "events_head_hash": str(manifest.get("events_head_hash") or ""),
         "persistence_manifest_hash": str(manifest.get("persistence_manifest_hash") or ""),
         "hash_cache_manifest": manifest,
+        "hash_cache_report_grade_validation_plan": validation_plan,
+        "hash_cache_report_grade_validation_plan_hash": validation_plan["validation_plan_hash"],
+        "report_grade_ready_slot_count": validation_plan["ready_slot_count"],
+        "report_grade_blocking_slot_count": validation_plan["blocking_slot_count"],
         "ready_for_court_report": False,
         "trusted_hash_cache_diff": dict(trusted_diff) if trusted_diff else missing_hash_cache_trusted_diff(),
         "core_accuracy_gates": [
@@ -329,10 +353,179 @@ def hash_cache_assessment(
                     f"miss_count:{_HASH_CACHE_STATS['misses']}",
                     f"manifest_hash:{manifest.get('manifest_hash', '')}",
                     f"persistence_manifest_hash:{manifest.get('persistence_manifest_hash', '')}",
+                    f"hash_cache_report_grade_validation_plan_hash:{validation_plan['validation_plan_hash']}",
+                    f"hash_cache_report_grade_ready_slots:{validation_plan['ready_slot_count']}",
+                    f"hash_cache_report_grade_blocking_slots:{validation_plan['blocking_slot_count']}",
                 ],
             )
         ],
         "blockers": blockers,
+    }
+
+
+def hash_cache_report_grade_validation_plan(
+    *,
+    cache_manifest: Mapping[str, object],
+    trusted_diff: Mapping[str, object] | None = None,
+) -> dict[str, object]:
+    manifest = dict(cache_manifest)
+    policy = manifest.get("policy") if isinstance(manifest.get("policy"), Mapping) else {}
+    persistence_manifest = (
+        manifest.get("persistence_manifest") if isinstance(manifest.get("persistence_manifest"), Mapping) else {}
+    )
+    stats = manifest.get("stats") if isinstance(manifest.get("stats"), Mapping) else {}
+    invalidation_proof = (
+        manifest.get("invalidation_proof") if isinstance(manifest.get("invalidation_proof"), Mapping) else {}
+    )
+    key_policy = {
+        "cache_key_fields": list(manifest.get("cache_key_fields") or []),
+        "scope": str(policy.get("scope") or ""),
+        "persistence_mode": str(policy.get("persistence_mode") or ""),
+        "stale_entry_invalidation": str(policy.get("stale_entry_invalidation") or ""),
+        "path_disclosure": str(policy.get("path_disclosure") or ""),
+    }
+    key_policy_hash = hashlib.sha256(json.dumps(key_policy, sort_keys=True).encode("utf-8")).hexdigest()
+    counter_profile = {
+        "entries": int(manifest.get("entry_count") or 0),
+        "events": int(manifest.get("event_count") or 0),
+        "hits": int(stats.get("hits") or 0),
+        "misses": int(stats.get("misses") or 0),
+        "invalidations": int(stats.get("invalidations") or 0),
+        "same_path_invalidation_events": int(invalidation_proof.get("same_path_invalidation_events") or 0),
+    }
+    counter_profile_hash = hashlib.sha256(json.dumps(counter_profile, sort_keys=True).encode("utf-8")).hexdigest()
+    snapshot_contract = {
+        "snapshot_format": str(persistence_manifest.get("snapshot_format") or ""),
+        "persistence_mode": str(persistence_manifest.get("persistence_mode") or ""),
+        "content_address_key": str(persistence_manifest.get("content_address_key") or ""),
+        "row_count": int(persistence_manifest.get("row_count") or 0),
+        "export_import_contract_declared": bool(policy.get("export_import_contract_declared")),
+    }
+    snapshot_contract_hash = hashlib.sha256(
+        json.dumps(snapshot_contract, sort_keys=True).encode("utf-8")
+    ).hexdigest()
+    ready_slots: list[dict[str, object]] = [
+        {
+            "slot_id": "hash-cache-run-manifest",
+            "status": "ready",
+            "evidence_ref": "hash_cache_manifest_hash",
+            "evidence_hash": str(manifest.get("manifest_hash") or ""),
+            "description": "File-scan outputs archive the hash cache manifest used for review.",
+        },
+        {
+            "slot_id": "cache-key-policy",
+            "status": "ready",
+            "evidence_ref": "key_policy_hash",
+            "evidence_hash": key_policy_hash,
+            "description": "Path, size, mtime, inode, device, scope, and invalidation policy are fixed.",
+        },
+        {
+            "slot_id": "hit-miss-invalidation-counters",
+            "status": "ready",
+            "evidence_ref": "counter_profile_hash",
+            "evidence_hash": counter_profile_hash,
+            "description": "Hit, miss, invalidation, entry, and event counts are preserved for cache review.",
+        },
+        {
+            "slot_id": "content-addressed-persistence-rows",
+            "status": "ready",
+            "evidence_ref": "persistence_manifest_hash",
+            "evidence_hash": str(manifest.get("persistence_manifest_hash") or ""),
+            "description": "Explicit snapshots include SHA-256 content-addressed persistence rows.",
+        },
+        {
+            "slot_id": "explicit-snapshot-export-import-contract",
+            "status": "ready",
+            "evidence_ref": "snapshot_contract_hash",
+            "evidence_hash": snapshot_contract_hash,
+            "description": "The manifest declares the snapshot profile and export/import persistence mode.",
+        },
+        {
+            "slot_id": "same-path-invalidation-proof",
+            "status": "ready",
+            "evidence_ref": "invalidation_proof_hash",
+            "evidence_hash": hashlib.sha256(
+                json.dumps(invalidation_proof, sort_keys=True).encode("utf-8")
+            ).hexdigest(),
+            "description": "Same-path stale entry invalidation evidence is hashed for regression review.",
+        },
+    ]
+    blocking_slots: list[dict[str, object]] = [
+        {
+            "slot_id": "trusted-hash-cache-manifest",
+            "status": "blocked",
+            "blocker": HASH_CACHE_TRUSTED_DIFF_BLOCKER_76,
+            "required_evidence": "independent trusted hash-cache manifest diff across hits, misses, and invalidations",
+        },
+        {
+            "slot_id": "automatic-on-disk-cache",
+            "status": "blocked",
+            "blocker": "automatic-on-disk-cache-wiring-required",
+            "required_evidence": "automatic startup/load/save cache store with safe invalidation and case-boundary controls",
+        },
+        {
+            "slot_id": "large-case-hit-ratio",
+            "status": "blocked",
+            "blocker": "large-case-hit-ratio-validation-required",
+            "required_evidence": "large-case replay proving hit ratio, saved wall time, and stale-cache safety",
+        },
+        {
+            "slot_id": "cross-platform-cache-key-semantics",
+            "status": "blocked",
+            "blocker": "cross-platform-cache-key-semantics-required",
+            "required_evidence": "Windows, macOS, and Linux path/mtime/inode/device semantics comparison",
+        },
+        {
+            "slot_id": "content-addressed-lookup-mode",
+            "status": "blocked",
+            "blocker": "content-addressed-lookup-mode-required",
+            "required_evidence": "lookup mode that can reuse hashes by trusted content address when path metadata changes safely",
+        },
+        {
+            "slot_id": "multi-run-stale-cache-replay",
+            "status": "blocked",
+            "blocker": "multi-run-stale-cache-replay-required",
+            "required_evidence": "multi-run corpus proving stale entries are invalidated without false cache hits",
+        },
+    ]
+    trusted_status = str((trusted_diff or {}).get("status") or "missing")
+    plan_core = {
+        "profile_version": HASH_CACHE_REPORT_GRADE_VALIDATION_PLAN_VERSION,
+        "item_number": 76,
+        "gap_id": HASH_CACHE_GAP_ID,
+        "commercial_gap_ids": [HASH_CACHE_GAP_ID],
+        "hash_cache_manifest_hash": str(manifest.get("manifest_hash") or ""),
+        "cache_session_id": str(manifest.get("cache_session_id") or ""),
+        "entry_count": counter_profile["entries"],
+        "event_count": counter_profile["events"],
+        "hit_count": counter_profile["hits"],
+        "miss_count": counter_profile["misses"],
+        "invalidation_count": counter_profile["invalidations"],
+        "entries_head_hash": str(manifest.get("entries_head_hash") or ""),
+        "events_head_hash": str(manifest.get("events_head_hash") or ""),
+        "persistence_manifest_hash": str(manifest.get("persistence_manifest_hash") or ""),
+        "persistence_row_head_hash": str(persistence_manifest.get("row_head_hash") or ""),
+        "key_policy_hash": key_policy_hash,
+        "counter_profile_hash": counter_profile_hash,
+        "snapshot_contract_hash": snapshot_contract_hash,
+        "explicit_snapshot_export_import": True,
+        "automatic_on_disk_cache": False,
+        "large_case_hit_ratio_validated": False,
+        "trusted_hash_cache_diff_status": trusted_status,
+        "ready_slots": ready_slots,
+        "blocking_slots": blocking_slots,
+        "ready_slot_count": len(ready_slots),
+        "blocking_slot_count": len(blocking_slots),
+        "blockers": list(HASH_CACHE_REPORT_GRADE_BLOCKERS),
+        "commercial_claim_allowed": False,
+        "ready_for_court_report": False,
+        "report_use_warning": "Use as process-local hash-cache evidence with explicit snapshots only; do not claim automatic large-case cache acceleration until blocker slots are satisfied.",
+    }
+    validation_plan_hash = hashlib.sha256(json.dumps(plan_core, sort_keys=True).encode("utf-8")).hexdigest()
+    return {
+        **plan_core,
+        "validation_plan_hash": validation_plan_hash,
+        "validation_plan_sha256": validation_plan_hash,
     }
 
 

@@ -86,6 +86,20 @@ class RapidTriageFilesTests(unittest.TestCase):
                 "hash-cache manifest hash emitted",
                 payload["hash_cache_assessment"]["core_accuracy_gates"][0]["satisfied_checks"],
             )
+            hash_plan = payload["hash_cache_assessment"]["hash_cache_report_grade_validation_plan"]
+            self.assertEqual(hash_plan["profile_version"], "hash-cache-report-grade-validation-plan-v1")
+            self.assertEqual(
+                payload["hash_cache_assessment"]["hash_cache_report_grade_validation_plan_hash"],
+                hash_plan["validation_plan_hash"],
+            )
+            self.assertEqual(hash_plan["ready_slot_count"], 6)
+            self.assertEqual(hash_plan["blocking_slot_count"], 6)
+            self.assertIn("cache-key-policy", {slot["slot_id"] for slot in hash_plan["ready_slots"]})
+            self.assertIn("large-case-hit-ratio", {slot["slot_id"] for slot in hash_plan["blocking_slots"]})
+            self.assertIn(
+                "hash cache report-grade validation plan emitted",
+                payload["hash_cache_assessment"]["core_accuracy_gates"][0]["satisfied_checks"],
+            )
             self.assertEqual(payload["hash_cache_assessment"]["trusted_hash_cache_diff"]["status"], "missing")
             self.assertIn(
                 "trusted-hash-cache-manifest-diff-missing",
@@ -318,6 +332,11 @@ class RapidTriageFilesTests(unittest.TestCase):
             self.assertEqual(restored_manifest["stats"]["hits"], 1)
 
         hash_assessment = hash_cache_assessment(cache_manifest=hash_manifest)
+        hash_plan = hash_assessment["hash_cache_report_grade_validation_plan"]
+        self.assertEqual(hash_plan["hit_count"], 1)
+        self.assertEqual(hash_plan["miss_count"], 1)
+        self.assertEqual(hash_plan["ready_slot_count"], 6)
+        self.assertIn("same-path-invalidation-proof", {slot["slot_id"] for slot in hash_plan["ready_slots"]})
         hash_diff = build_hash_cache_trusted_diff(hash_assessment, hash_assessment)
         promoted_hash = hash_cache_assessment(trusted_diff=hash_diff)
 

@@ -288,6 +288,10 @@ def canonicalize_files(payload: dict[str, Any]) -> dict[str, Any]:
         cache["events_head_hash"] = "<HASH_CACHE_EVENTS_HEAD_HASH>"
         cache["persistence_manifest_hash"] = "<HASH_CACHE_PERSISTENCE_MANIFEST_HASH>"
         cache["hash_cache_manifest"] = compact_hash_cache_manifest(cache.get("hash_cache_manifest"))
+        cache["hash_cache_report_grade_validation_plan_hash"] = "<HASH_CACHE_VALIDATION_PLAN_HASH>"
+        cache["hash_cache_report_grade_validation_plan"] = compact_hash_cache_validation_plan(
+            cache.get("hash_cache_report_grade_validation_plan")
+        )
         cache["core_accuracy_gates"] = compact_core_accuracy_gates(cache.get("core_accuracy_gates"))
     duplicate = canonical.get("duplicate_detection_assessment")
     if isinstance(duplicate, dict):
@@ -375,6 +379,40 @@ def compact_hash_cache_persistence_manifest(value: dict[str, Any]) -> dict[str, 
         if isinstance(row, dict)
     ]
     return compact
+
+
+def compact_hash_cache_validation_plan(value: object) -> object:
+    if not isinstance(value, dict):
+        return value
+    compact = dict(value)
+    compact["cache_session_id"] = "<HASH_CACHE_SESSION_ID>"
+    compact["hash_cache_manifest_hash"] = "<HASH_CACHE_MANIFEST_HASH>"
+    compact["entries_head_hash"] = "<HASH_CACHE_ENTRIES_HEAD_HASH>"
+    compact["events_head_hash"] = "<HASH_CACHE_EVENTS_HEAD_HASH>"
+    compact["persistence_manifest_hash"] = "<HASH_CACHE_PERSISTENCE_MANIFEST_HASH>"
+    compact["persistence_row_head_hash"] = "<HASH_CACHE_PERSISTENCE_ROW_HEAD_HASH>"
+    compact["key_policy_hash"] = "<HASH_CACHE_KEY_POLICY_HASH>"
+    compact["counter_profile_hash"] = "<HASH_CACHE_COUNTER_PROFILE_HASH>"
+    compact["snapshot_contract_hash"] = "<HASH_CACHE_SNAPSHOT_CONTRACT_HASH>"
+    compact["validation_plan_hash"] = "<HASH_CACHE_VALIDATION_PLAN_HASH>"
+    compact["validation_plan_sha256"] = "<HASH_CACHE_VALIDATION_PLAN_HASH>"
+    compact["ready_slots"] = compact_hash_cache_validation_slots(compact.get("ready_slots"))
+    compact["blocking_slots"] = compact_hash_cache_validation_slots(compact.get("blocking_slots"))
+    return compact
+
+
+def compact_hash_cache_validation_slots(value: object) -> object:
+    if not isinstance(value, list):
+        return value
+    compacted = []
+    for slot in value:
+        if not isinstance(slot, dict):
+            continue
+        row = dict(slot)
+        if "evidence_hash" in row:
+            row["evidence_hash"] = "<HASH_CACHE_SLOT_HASH>"
+        compacted.append(row)
+    return compacted
 
 
 def mask_dynamic_manifest_hashes(value: Any) -> Any:

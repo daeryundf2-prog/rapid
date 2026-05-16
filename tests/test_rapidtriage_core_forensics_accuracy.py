@@ -177,6 +177,7 @@ class RapidTriageCoreForensicsAccuracyTests(unittest.TestCase):
         self.assertIn("parser scheduler report-grade validation plan emitted", parser_scheduler["required_checks"])
         self.assertIn("trusted scheduler manifest diff pass", parser_scheduler["required_checks"])
         self.assertIn("hit/miss counters emitted", hash_cache["required_checks"])
+        self.assertIn("hash cache report-grade validation plan emitted", hash_cache["required_checks"])
         self.assertIn("trusted hash-cache manifest diff pass", hash_cache["required_checks"])
         self.assertIn("duplicate group counts", duplicate_detection["required_checks"])
         self.assertIn("trusted duplicate file manifest diff pass", duplicate_detection["required_checks"])
