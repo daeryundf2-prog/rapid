@@ -1140,7 +1140,7 @@
       ],
       "expected": {
         "required_assertions": [
-          "Mobile correlation summary preserves app/service schema registry, source app/version attribution, schema compatibility warnings, migration warnings, release-gate disclosure, and #45 core_accuracy_gates."
+          "Mobile correlation summary preserves app/service schema registry, source app/version attribution, schema compatibility warnings, mobile_schema_version_manifest source viewer locators, mobile_schema_report_grade_validation_plan ready/blocking slots, migration warnings, release-gate disclosure, and #45 core_accuracy_gates."
         ]
       },
       "notes": "Internal fixture pass; per-app schema migration fixture matrix remains required for commercial-grade claims.",

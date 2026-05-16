@@ -433,6 +433,8 @@ For #43 report use, `mobile-correlation-summary` rows also include `mobile_timel
 
 For #44 actor review, the same summary rows include `mobile_actor_report_grade_validation_plan`. This separates safe review pivots (actor view built, hash-only actor citations, source locators, review queue caps) from identity-complete blockers (device-wide identity resolution, persisted merge/split decisions, cross-app dedupe, trusted actor diff, known-answer corpus, independent review).
 
+For #45 schema-version review, the same summary rows include `mobile_schema_report_grade_validation_plan`. This separates safe schema/release-gate pivots (registry built, compatibility profile, schema manifest, source locators, release gates, fixture IDs) from commercial parser-support blockers (version fixture corpus, migration matrix, trusted migration diff, release policy approval, upgrade/deleted-state corpus, independent review).
+
 ## Image Similarity Triage
 
 Use image triage when a case has many screenshots, photos, or scanned documents and you need stable grouping signals before deeper review/OCR:

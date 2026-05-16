@@ -1880,6 +1880,39 @@ class RapidTriageMobileExportTests(unittest.TestCase):
                 "schema-version-registry-known-answer-not-attached",
                 schema_manifest["failed_validation_check_ids"],
             )
+            schema_plan = messenger_summary["details"]["mobile_schema_report_grade_validation_plan"]
+            self.assertEqual(schema_plan["profile_version"], "mobile-schema-report-grade-validation-plan-v1")
+            self.assertEqual(schema_plan["item_number"], 45)
+            self.assertEqual(schema_plan["gap_id"], "#45")
+            self.assertEqual(
+                messenger_summary["details"]["mobile_schema_report_grade_validation_plan_hash"],
+                schema_plan["validation_plan_sha256"],
+            )
+            self.assertEqual(len(schema_plan["schema_compatibility_profile_sha256"]), 64)
+            self.assertEqual(schema_plan["schema_version_manifest_sha256"], schema_manifest["manifest_sha256"])
+            self.assertGreaterEqual(schema_plan["schema_entry_count"], 1)
+            self.assertGreaterEqual(schema_plan["schema_manifest_entry_count"], 1)
+            self.assertGreaterEqual(schema_plan["schema_unvalidated_entry_count"], 1)
+            self.assertTrue(schema_plan["release_gate_blocked"])
+            self.assertTrue(schema_plan["known_answer_fixture_required"])
+            self.assertTrue(schema_plan["schema_migration_matrix_required"])
+            self.assertEqual(schema_plan["ready_slot_count"], 6)
+            self.assertEqual(schema_plan["blocking_slot_count"], 6)
+            self.assertEqual(schema_plan["validation_status"], "report-validation-blocked")
+            self.assertFalse(schema_plan["commercial_grade"])
+            schema_slots = {slot["slot_id"]: slot for slot in schema_plan["validation_slots"]}
+            self.assertEqual(schema_slots["mobile-schema-version-registry-built"]["status"], "complete")
+            self.assertEqual(schema_slots["mobile-schema-compatibility-profile-emitted"]["status"], "complete")
+            self.assertEqual(schema_slots["mobile-schema-version-manifest-emitted"]["status"], "complete")
+            self.assertEqual(schema_slots["mobile-schema-source-viewer-locators"]["status"], "complete")
+            self.assertEqual(schema_slots["mobile-schema-release-gates-recorded"]["status"], "complete")
+            self.assertEqual(schema_slots["mobile-schema-fixture-ids-emitted"]["status"], "complete")
+            self.assertEqual(schema_slots["mobile-schema-version-fixture-corpus"]["status"], "external-required")
+            self.assertEqual(schema_slots["mobile-schema-migration-matrix"]["status"], "external-required")
+            self.assertEqual(schema_slots["mobile-schema-trusted-migration-diff"]["status"], "external-required")
+            self.assertIn("mobile-schema-version-fixture-corpus-required", schema_plan["blockers"])
+            self.assertIn("mobile-schema-migration-matrix-required", schema_plan["blockers"])
+            self.assertIn("mobile-schema-migration-diff-required", schema_plan["blockers"])
             self.assertFalse(
                 messenger_summary["details"]["validation_checks"]["schema_version_registry_known_answer_validated"]
             )
@@ -1911,6 +1944,8 @@ class RapidTriageMobileExportTests(unittest.TestCase):
             self.assertIn("schema compatibility profile", correlation_gates["#45"]["satisfied_checks"])
             self.assertIn("schema version manifest", correlation_gates["#45"]["satisfied_checks"])
             self.assertIn("schema source viewer locators", correlation_gates["#45"]["satisfied_checks"])
+            self.assertIn("schema report-grade validation plan", correlation_gates["#45"]["satisfied_checks"])
+            self.assertIn("schema report-grade ready slots", correlation_gates["#45"]["satisfied_checks"])
             self.assertIn("source app/version attribution", correlation_gates["#45"]["satisfied_checks"])
             self.assertIn("schema release gates recorded", correlation_gates["#45"]["satisfied_checks"])
             self.assertIn("release-gate limitation disclosure", correlation_gates["#45"]["satisfied_checks"])
@@ -1939,6 +1974,14 @@ class RapidTriageMobileExportTests(unittest.TestCase):
             self.assertIn("timeline_correlation_profile_built", correlation_uplift["passed_validation_check_ids"])
             self.assertIn("schema_version_registry_built", correlation_uplift["passed_validation_check_ids"])
             self.assertIn("schema_compatibility_profile_built", correlation_uplift["passed_validation_check_ids"])
+            self.assertIn(
+                "mobile_schema_report_grade_validation_plan_present",
+                correlation_uplift["passed_validation_check_ids"],
+            )
+            self.assertIn(
+                "mobile_schema_report_grade_ready_slots",
+                correlation_uplift["passed_validation_check_ids"],
+            )
             self.assertIn(
                 "correlation_validated_against_known_answer",
                 correlation_uplift["failed_validation_check_ids"],
@@ -2019,6 +2062,20 @@ class RapidTriageMobileExportTests(unittest.TestCase):
             )
             self.assertGreaterEqual(correlation_uplift["large_data_controls"]["schema_version_manifest_entry_count"], 1)
             self.assertTrue(correlation_uplift["large_data_controls"]["schema_version_manifest_release_gate_blocked"])
+            self.assertTrue(correlation_uplift["large_data_controls"]["schema_report_grade_validation_plan_present"])
+            self.assertEqual(
+                correlation_uplift["large_data_controls"]["schema_report_grade_validation_plan_hash"],
+                schema_plan["validation_plan_sha256"],
+            )
+            self.assertEqual(correlation_uplift["large_data_controls"]["schema_report_grade_ready_slot_count"], 6)
+            self.assertEqual(correlation_uplift["large_data_controls"]["schema_report_grade_blocking_slot_count"], 6)
+            self.assertTrue(
+                correlation_uplift["reportability_decision"]["schema_report_grade_validation_plan_present"]
+            )
+            self.assertEqual(
+                correlation_uplift["reportability_decision"]["schema_report_grade_validation_plan_hash"],
+                schema_plan["validation_plan_sha256"],
+            )
             self.assertIn(
                 "mobile-correlation-vendor-timeline-diff-required",
                 correlation_uplift["reportability_decision"]["blockers"],
