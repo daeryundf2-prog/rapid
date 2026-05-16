@@ -1250,6 +1250,8 @@ CORE_FORENSIC_ACCURACY_ITEMS: tuple[dict[str, object], ...] = (
             "UI row-window manifest hash emitted",
             "UI row-window id emitted",
             "true virtual scroller limitation warning",
+            "UI virtualization report-grade validation plan emitted",
+            "UI virtualization report-grade ready slots emitted",
             "trusted UI virtualization manifest diff pass",
         ),
     },

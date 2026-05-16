@@ -41,6 +41,7 @@ if HAS_FASTAPI:
         build_sqlite_viewer_trusted_diff,
         build_ui_virtualization_trusted_diff,
         build_ui_virtualization_manifest,
+        build_ui_virtualization_report_grade_validation_plan,
         email_viewer_core_accuracy_gates,
         create_app,
         hex_viewer_core_accuracy_gates,
@@ -2991,6 +2992,34 @@ class RapidTriageApiTests(unittest.TestCase):
                 "UI row-window manifest hash emitted",
                 paged_files["pagination"]["ui_virtualization"]["core_accuracy_gates"][0]["satisfied_checks"],
             )
+            self.assertIn(
+                "UI virtualization report-grade validation plan emitted",
+                paged_files["pagination"]["ui_virtualization"]["core_accuracy_gates"][0]["satisfied_checks"],
+            )
+            self.assertIn(
+                "UI virtualization report-grade ready slots emitted",
+                paged_files["pagination"]["ui_virtualization"]["core_accuracy_gates"][0]["satisfied_checks"],
+            )
+            self.assertEqual(
+                paged_files["pagination"]["ui_virtualization"]["ui_virtualization_report_grade_validation_plan"][
+                    "profile"
+                ],
+                "ui-virtualization-report-grade-validation-plan-v1",
+            )
+            self.assertEqual(
+                paged_files["pagination"]["ui_virtualization"]["ui_virtualization_report_grade_validation_plan_hash"],
+                paged_files["pagination"]["ui_virtualization"]["ui_virtualization_report_grade_validation_plan"][
+                    "validation_plan_sha256"
+                ],
+            )
+            self.assertEqual(
+                paged_files["pagination"]["ui_virtualization"]["ui_virtualization_report_grade_validation_plan"][
+                    "row_window_manifest_hash"
+                ],
+                paged_files["pagination"]["ui_virtualization"]["row_window_manifest"]["manifest_hash"],
+            )
+            self.assertEqual(paged_files["pagination"]["ui_virtualization"]["report_grade_ready_slot_count"], 6)
+            self.assertEqual(paged_files["pagination"]["ui_virtualization"]["report_grade_blocking_slot_count"], 6)
             self.assertEqual(
                 paged_files["pagination"]["ui_virtualization"]["functional_priority_profile"]["item_number"],
                 25,
@@ -3033,6 +3062,9 @@ class RapidTriageApiTests(unittest.TestCase):
                 api_pagination=True,
                 row_window_manifest=paged_files["pagination"]["ui_virtualization"]["row_window_manifest"],
                 trusted_diff=ui_diff,
+                validation_plan=paged_files["pagination"]["ui_virtualization"][
+                    "ui_virtualization_report_grade_validation_plan"
+                ],
             )
             manual_ui_manifest = build_ui_virtualization_manifest(
                 label="candidates",
@@ -3040,14 +3072,28 @@ class RapidTriageApiTests(unittest.TestCase):
                 visible=paged_files["pagination"]["ui_virtualization"]["visible_rows"],
                 api_pagination=True,
             )
+            manual_ui_validation_plan = build_ui_virtualization_report_grade_validation_plan(
+                label="candidates",
+                total=paged_files["pagination"]["ui_virtualization"]["total_rows"],
+                visible=paged_files["pagination"]["ui_virtualization"]["visible_rows"],
+                api_pagination=True,
+                row_window_manifest=paged_files["pagination"]["ui_virtualization"]["row_window_manifest"],
+                trusted_diff=paged_files["pagination"]["ui_virtualization"]["trusted_ui_virtualization_diff"],
+                performance_profile=paged_files["pagination"]["ui_virtualization"]["functional_priority_profile"],
+            )
             self.assertEqual(
                 manual_ui_manifest["manifest_hash"],
                 paged_files["pagination"]["ui_virtualization"]["row_window_manifest"]["manifest_hash"],
+            )
+            self.assertEqual(
+                manual_ui_validation_plan["validation_plan_sha256"],
+                paged_files["pagination"]["ui_virtualization"]["ui_virtualization_report_grade_validation_plan_hash"],
             )
             self.assertEqual(pagination_diff["status"], "pass")
             self.assertIn("trusted pagination cursor manifest diff pass", pagination_gates[0]["satisfied_checks"])
             self.assertEqual(ui_diff["status"], "pass")
             self.assertIn("trusted UI virtualization manifest diff pass", ui_gates[0]["satisfied_checks"])
+            self.assertIn("UI virtualization report-grade validation plan emitted", ui_gates[0]["satisfied_checks"])
             cursor_files_response = client.get(
                 f"/api/runs/{run_id}/files",
                 params={"cursor": paged_files["pagination"]["cursor"], "limit": 2},

@@ -1866,10 +1866,10 @@
       ],
       "expected": {
         "required_assertions": [
-          "API pagination and web UI preserve bounded DOM row windows, ui-virtualization-manifest-v1 row-window IDs/manifest hashes, visible-row disclosure, previous/next 300-row windows, keyboard/filter flow, API pagination links, virtual-scroller warning, and #79 core_accuracy_gates."
+          "API pagination and web UI preserve bounded DOM row windows, ui-virtualization-manifest-v1 row-window IDs/manifest hashes, visible-row disclosure, previous/next 300-row windows, keyboard/filter flow, API pagination links, virtual-scroller warning, ui-virtualization-report-grade-validation-plan-v1 ready/blocking slots, trusted UI virtualization manifest diff helpers/gates, and #79 core_accuracy_gates."
         ]
       },
-      "notes": "Internal fixture pass; true virtual scroller, trusted browser row-window manifests, persisted viewport restoration across reloads, and browser e2e performance evidence remain blockers.",
+      "notes": "Internal fixture pass; true recycling virtual scroller, trusted browser row-window manifests, persisted viewport restoration across reloads, browser 100k/1M row-window e2e performance evidence, memory profile, and cross-client virtualization compatibility remain blockers.",
       "source_manifest": "docs/validation/rapidtriage-core-forensics-071-080-known-answer.json"
     },
     {

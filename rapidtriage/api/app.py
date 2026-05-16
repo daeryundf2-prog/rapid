@@ -306,6 +306,15 @@ PAGINATION_CURSOR_REPORT_GRADE_BLOCKERS = [
 ]
 UI_VIRTUALIZATION_TRUSTED_DIFF_BLOCKER_79 = "trusted-ui-virtualization-manifest-diff-missing"
 UI_VIRTUALIZATION_TRUSTED_TOOLS = {"ui-virtualization-manifest", "browser-e2e-row-window-export", "large-table-render-oracle"}
+UI_VIRTUALIZATION_REPORT_GRADE_VALIDATION_PLAN_VERSION = "ui-virtualization-report-grade-validation-plan-v1"
+UI_VIRTUALIZATION_REPORT_GRADE_BLOCKERS = [
+    UI_VIRTUALIZATION_TRUSTED_DIFF_BLOCKER_79,
+    "true-recycling-virtual-scroller-required",
+    "persisted-viewport-restoration-required",
+    "browser-e2e-100k-row-window-validation-required",
+    "browser-memory-profile-required",
+    "cross-client-virtualization-compatibility-required",
+]
 WORKBENCH_SMOKE_CONTRACT_VERSION = "single-case-workbench-smoke-v1"
 BROWSER_E2E_PERFORMANCE_CONTRACT_VERSION = "browser-e2e-performance-contract-v1"
 WORKBENCH_SMOKE_SELECTORS = {
@@ -2202,6 +2211,21 @@ def ui_virtualization_metadata(
         visible=visible,
         api_pagination=api_pagination,
     )
+    functional_priority_profile = browser_e2e_performance_profile(
+        label=label,
+        total=total,
+        visible=visible,
+        api_pagination=api_pagination,
+    )
+    validation_plan = build_ui_virtualization_report_grade_validation_plan(
+        label=label,
+        total=total,
+        visible=visible,
+        api_pagination=api_pagination,
+        row_window_manifest=row_window_manifest,
+        trusted_diff=trusted_diff,
+        performance_profile=functional_priority_profile,
+    )
     return {
         "component": "ui-virtualization",
         "status": "bounded-visible-row-window",
@@ -2213,12 +2237,11 @@ def ui_virtualization_metadata(
         "row_window_id": row_window_manifest["row_window_id"],
         "manifest_hash": row_window_manifest["manifest_hash"],
         "row_window_manifest": row_window_manifest,
-        "functional_priority_profile": browser_e2e_performance_profile(
-            label=label,
-            total=total,
-            visible=visible,
-            api_pagination=api_pagination,
-        ),
+        "functional_priority_profile": functional_priority_profile,
+        "ui_virtualization_report_grade_validation_plan": validation_plan,
+        "ui_virtualization_report_grade_validation_plan_hash": validation_plan["validation_plan_sha256"],
+        "report_grade_ready_slot_count": validation_plan["ready_slot_count"],
+        "report_grade_blocking_slot_count": validation_plan["blocking_slot_count"],
         "ready_for_court_report": False,
         "trusted_ui_virtualization_diff": dict(trusted_diff) if trusted_diff else missing_ui_virtualization_trusted_diff(),
         "core_accuracy_gates": ui_virtualization_core_accuracy_gates(
@@ -2228,6 +2251,7 @@ def ui_virtualization_metadata(
             api_pagination=api_pagination,
             row_window_manifest=row_window_manifest,
             trusted_diff=trusted_diff,
+            validation_plan=validation_plan,
         ),
         "blockers": blockers,
     }
@@ -2268,6 +2292,114 @@ def build_ui_virtualization_manifest(
     }
     manifest_hash = hashlib.sha256(json.dumps(manifest_core, sort_keys=True).encode("utf-8")).hexdigest()
     return {**manifest_core, "manifest_hash": manifest_hash}
+
+
+def build_ui_virtualization_report_grade_validation_plan(
+    *,
+    label: str,
+    total: int,
+    visible: int,
+    api_pagination: bool,
+    row_window_manifest: Mapping[str, object],
+    trusted_diff: Mapping[str, object] | None = None,
+    performance_profile: Mapping[str, object] | None = None,
+) -> dict[str, object]:
+    trusted_diff = trusted_diff if isinstance(trusted_diff, Mapping) else missing_ui_virtualization_trusted_diff()
+    performance_profile = performance_profile if isinstance(performance_profile, Mapping) else {}
+    ready_slots = [
+        {
+            "slot": "row-window-manifest",
+            "status": "ready",
+            "evidence": row_window_manifest.get("manifest_hash", ""),
+            "description": "Stable manifest hash binds the visible row window, row count, and pagination controls.",
+        },
+        {
+            "slot": "visible-row-disclosure",
+            "status": "ready",
+            "evidence": f"{max(0, int(visible))}/{max(0, int(total))}",
+            "description": "The UI/API discloses that only a bounded subset is rendered at once.",
+        },
+        {
+            "slot": "bounded-dom-api-pagination-contract",
+            "status": "ready",
+            "evidence": f"api_pagination:{bool(api_pagination)}",
+            "description": "Large result sets are navigated through API windows instead of a full DOM dump.",
+        },
+        {
+            "slot": "keyboard-and-window-controls",
+            "status": "ready",
+            "evidence": json.dumps(row_window_manifest.get("viewport_state_policy", {}), sort_keys=True),
+            "description": "Previous/next controls and keyboard navigation are part of the row-window contract.",
+        },
+        {
+            "slot": "commercial-limitation-disclosure",
+            "status": "ready",
+            "evidence": "dom_recycling_virtual_scroller:false",
+            "description": "The output explicitly prevents overstating bounded windows as a full recycling virtual scroller.",
+        },
+        {
+            "slot": "functional-profile-linkage",
+            "status": "ready",
+            "evidence": performance_profile.get("component", "browser-e2e-performance-validation"),
+            "description": "Browser E2E performance blockers are linked to the same virtualization evidence.",
+        },
+    ]
+    blocking_slots = [
+        {
+            "slot": "trusted-browser-row-window-manifest",
+            "status": "blocked",
+            "blocker": UI_VIRTUALIZATION_TRUSTED_DIFF_BLOCKER_79
+            if trusted_diff.get("status") != "pass"
+            else "trusted-diff-present-but-commercial-retest-required",
+        },
+        {
+            "slot": "true-recycling-virtual-scroller",
+            "status": "blocked",
+            "blocker": "true-recycling-virtual-scroller-required",
+        },
+        {
+            "slot": "persisted-viewport-restoration",
+            "status": "blocked",
+            "blocker": "persisted-viewport-restoration-required",
+        },
+        {
+            "slot": "browser-e2e-100k-row-window-validation",
+            "status": "blocked",
+            "blocker": "browser-e2e-100k-row-window-validation-required",
+        },
+        {
+            "slot": "browser-memory-profile",
+            "status": "blocked",
+            "blocker": "browser-memory-profile-required",
+        },
+        {
+            "slot": "cross-client-virtualization-compatibility",
+            "status": "blocked",
+            "blocker": "cross-client-virtualization-compatibility-required",
+        },
+    ]
+    plan_core = {
+        "profile": UI_VIRTUALIZATION_REPORT_GRADE_VALIDATION_PLAN_VERSION,
+        "profile_version": UI_VIRTUALIZATION_REPORT_GRADE_VALIDATION_PLAN_VERSION,
+        "item_number": 79,
+        "gap_id": "#79",
+        "label": label,
+        "total_rows": max(0, int(total)),
+        "visible_rows": max(0, int(visible)),
+        "api_pagination": bool(api_pagination),
+        "row_window_id": row_window_manifest.get("row_window_id", ""),
+        "row_window_manifest_hash": row_window_manifest.get("manifest_hash", ""),
+        "trusted_diff_status": trusted_diff.get("status", "missing"),
+        "performance_profile_component": performance_profile.get("component", "browser-e2e-performance-validation"),
+        "ready_slots": ready_slots,
+        "blocking_slots": blocking_slots,
+        "ready_slot_count": len(ready_slots),
+        "blocking_slot_count": len(blocking_slots),
+        "commercial_claim_allowed": False,
+        "blockers": list(UI_VIRTUALIZATION_REPORT_GRADE_BLOCKERS),
+    }
+    validation_plan_sha256 = hashlib.sha256(json.dumps(plan_core, sort_keys=True).encode("utf-8")).hexdigest()
+    return {**plan_core, "validation_plan_sha256": validation_plan_sha256}
 
 
 def browser_e2e_performance_profile(
@@ -2322,6 +2454,7 @@ def ui_virtualization_core_accuracy_gates(
     api_pagination: bool,
     row_window_manifest: Mapping[str, object] | None = None,
     trusted_diff: Mapping[str, object] | None = None,
+    validation_plan: Mapping[str, object] | None = None,
 ) -> list[dict[str, object]]:
     manifest = row_window_manifest or build_ui_virtualization_manifest(
         label=label,
@@ -2341,6 +2474,10 @@ def ui_virtualization_core_accuracy_gates(
         satisfied.append("API pagination link preserved")
     if trusted_diff and trusted_diff.get("status") == "pass":
         satisfied.append("trusted UI virtualization manifest diff pass")
+    validation_plan = validation_plan if isinstance(validation_plan, Mapping) else {}
+    if validation_plan.get("validation_plan_sha256"):
+        satisfied.append("UI virtualization report-grade validation plan emitted")
+        satisfied.append("UI virtualization report-grade ready slots emitted")
     return [
         build_accuracy_gate(
             79,
@@ -2351,6 +2488,9 @@ def ui_virtualization_core_accuracy_gates(
                 f"visible_rows:{visible}",
                 f"manifest_hash:{manifest.get('manifest_hash', '')}",
                 f"row_window_id:{manifest.get('row_window_id', '')}",
+                f"ui_virtualization_report_grade_validation_plan_sha256:{validation_plan.get('validation_plan_sha256', '')}",
+                f"ui_virtualization_report_grade_ready_slot_count:{validation_plan.get('ready_slot_count', 0)}",
+                f"ui_virtualization_report_grade_blocking_slot_count:{validation_plan.get('blocking_slot_count', 0)}",
             ],
         )
     ]

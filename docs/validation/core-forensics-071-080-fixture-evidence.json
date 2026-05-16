@@ -81,9 +81,9 @@
       "title": "UI virtualization for massive result tables",
       "test_files": ["tests/test_rapidtriage_api.py", "rapidtriage/web/static/app.js"],
       "assertions": [
-        "API pagination and web UI metadata preserve bounded visible row windows, ui-virtualization-manifest-v1 row-window IDs/manifest hashes, visible-row disclosure, previous/next 300-row windows, keyboard/filter workflow, API pagination links, trusted UI virtualization manifest diff helpers/gates, and #79 core_accuracy_gates."
+        "API pagination and web UI metadata preserve bounded visible row windows, ui-virtualization-manifest-v1 row-window IDs/manifest hashes, visible-row disclosure, previous/next 300-row windows, keyboard/filter workflow, API pagination links, ui-virtualization-report-grade-validation-plan-v1 ready/blocking slots, trusted UI virtualization manifest diff helpers/gates, and #79 core_accuracy_gates."
       ],
-      "remaining_external_validation": ["Full recycling virtual scroller, trusted browser row-window manifests, persisted viewport restoration across reloads, and browser e2e performance evidence."]
+      "remaining_external_validation": ["Full recycling virtual scroller, trusted browser row-window manifests, persisted viewport restoration across reloads, browser 100k/1M row-window e2e performance evidence, memory profile, and cross-client virtualization compatibility."]
     },
     {
       "item": 80,
