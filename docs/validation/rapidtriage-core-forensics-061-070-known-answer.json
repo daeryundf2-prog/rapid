@@ -88,8 +88,8 @@
       "status": "pass",
       "backlog_items": [68],
       "evidence_paths": ["docs/validation/core-forensics-061-070-fixture-evidence.json", "tests/test_rapidtriage_run.py"],
-      "expected": {"required_assertions": ["Run fingerprint output preserves fingerprint, path/size/mtime metadata, bounded per-file SHA-256 hashes, incremental reuse plan counts, per-path reuse decision row hashes, changed-source reuse behavior, truncation disclosure, trusted reuse diff status, limitation warning, #68 core_accuracy_gates, and #68 commercial_uplift_evidence.", "Incremental indexing reportability decisions block content-hash-complete claims until full large-file delta reuse, row-level stage reuse, trusted reuse manifests, and large-case replay validation exist."]},
-      "notes": "Internal fixture pass; full large-file content-hash delta reindexing and trusted reuse manifests remain blockers."
+      "expected": {"required_assertions": ["Run fingerprint output preserves fingerprint, path/size/mtime metadata, bounded per-file SHA-256 hashes, incremental reuse plan counts, per-path reuse decision row hashes, changed-source reuse behavior, truncation disclosure, trusted reuse diff status, incremental_indexing_report_grade_validation_plan hashes/ready slots/blocking slots, limitation warning, #68 core_accuracy_gates, and #68 commercial_uplift_evidence.", "Incremental indexing reportability decisions block content-hash-complete claims until full large-file delta reuse, row-level stage reuse, trusted reuse manifests, multi-million-file replay, Case DB dedup validation, cross-platform fingerprint semantics, and large-case replay validation exist."]},
+      "notes": "Internal fixture pass; full large-file content-hash delta reindexing, row-level stage delta reuse, trusted reuse manifests, Case DB dedup validation, and cross-platform fingerprint semantics remain blockers."
     },
     {
       "id": "core-forensics-069-job-queue-fixture",

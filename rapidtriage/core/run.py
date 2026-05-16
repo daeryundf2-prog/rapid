@@ -102,6 +102,15 @@ PERFORMANCE_BATCH_ID = "commercial-uplift-066-070"
 FUNCTIONAL_LARGE_DATA_BATCH_ID = "commercial-uplift-026-030"
 RUNTIME_DEFENSIBILITY_BATCH_ID = "commercial-uplift-071-075"
 INCREMENTAL_TRUSTED_DIFF_BLOCKER_68 = "trusted-incremental-reuse-manifest-diff-missing"
+INCREMENTAL_INDEXING_REPORT_GRADE_VALIDATION_PLAN_VERSION = "incremental-indexing-report-grade-validation-plan-v1"
+INCREMENTAL_INDEXING_REPORT_GRADE_BLOCKERS = [
+    "full-large-file-content-hash-delta-required",
+    "row-level-stage-delta-reindex-required",
+    "trusted-incremental-reuse-manifest-required",
+    "multi-million-file-replay-validation-required",
+    "case-db-stage-dedup-validation-required",
+    "cross-platform-fingerprint-semantics-required",
+]
 CHECKPOINT_TRUSTED_DIFF_BLOCKER_70 = "trusted-checkpoint-resume-manifest-diff-missing"
 PARSER_CRASH_TRUSTED_DIFF_BLOCKER_71 = "trusted-parser-crash-corpus-diff-missing"
 MEMORY_CAP_TRUSTED_DIFF_BLOCKER_72 = "trusted-memory-cap-rss-diff-missing"
@@ -2037,8 +2046,20 @@ def refresh_incremental_fingerprint_manifest(payload: Dict[str, object], *, reus
     summary = payload.get("summary") if isinstance(payload.get("summary"), Mapping) else {}
     manifest = build_incremental_indexing_manifest(payload)
     decision_manifest = build_incremental_reuse_decision_manifest(payload, reuse_disabled=reuse_disabled)
+    validation_plan = build_incremental_indexing_validation_plan(
+        payload,
+        manifest=manifest,
+        decision_manifest=decision_manifest,
+        reuse_disabled=reuse_disabled,
+    )
     payload["incremental_indexing_manifest"] = manifest
     payload["incremental_reuse_decision_manifest"] = decision_manifest
+    payload["incremental_indexing_report_grade_validation_plan"] = validation_plan
+    payload["incremental_indexing_report_grade_validation_plan_hash"] = str(
+        validation_plan.get("validation_plan_hash") or ""
+    )
+    payload["report_grade_ready_slot_count"] = int(validation_plan.get("ready_slot_count") or 0)
+    payload["report_grade_blocking_slot_count"] = int(validation_plan.get("blocking_slot_count") or 0)
     payload["incremental_indexing_assessment"] = incremental_indexing_assessment(
         scanned_files=int(summary.get("scanned_file_count") or 0),
         max_files=int(summary.get("max_files") or 0),
@@ -2047,6 +2068,7 @@ def refresh_incremental_fingerprint_manifest(payload: Dict[str, object], *, reus
         content_skipped_files=int(summary.get("content_hash_skipped_file_count") or 0),
         manifest_hash=str(manifest.get("manifest_hash") or ""),
         decision_manifest_hash=str(decision_manifest.get("manifest_hash") or ""),
+        validation_plan=validation_plan,
     )
     payload["core_accuracy_gates"] = incremental_indexing_core_accuracy_gates(
         scanned_files=int(summary.get("scanned_file_count") or 0),
@@ -2057,6 +2079,7 @@ def refresh_incremental_fingerprint_manifest(payload: Dict[str, object], *, reus
         content_hashed_files=int(summary.get("content_hashed_file_count") or 0),
         manifest_hash=str(manifest.get("manifest_hash") or ""),
         decision_manifest_hash=str(decision_manifest.get("manifest_hash") or ""),
+        validation_plan=validation_plan,
     )
 
 
@@ -2202,6 +2225,147 @@ def build_incremental_reuse_decision_manifest(
     return {
         **manifest_core,
         "manifest_hash": hashlib.sha256(json.dumps(manifest_core, sort_keys=True).encode("utf-8")).hexdigest(),
+    }
+
+
+def build_incremental_indexing_validation_plan(
+    fingerprint_payload: Mapping[str, object],
+    *,
+    manifest: Mapping[str, object],
+    decision_manifest: Mapping[str, object],
+    reuse_disabled: bool,
+) -> dict[str, object]:
+    summary = fingerprint_payload.get("summary") if isinstance(fingerprint_payload.get("summary"), Mapping) else {}
+    content_policy = (
+        fingerprint_payload.get("content_hash_policy")
+        if isinstance(fingerprint_payload.get("content_hash_policy"), Mapping)
+        else {}
+    )
+
+    def slot_hash(slot_core: Mapping[str, object]) -> str:
+        return hashlib.sha256(json.dumps(dict(slot_core), sort_keys=True).encode("utf-8")).hexdigest()
+
+    ready_slots: list[dict[str, object]] = []
+    for slot_id, evidence_ref, evidence_hash, report_use in (
+        (
+            "incremental-input-fingerprint",
+            "rapidtriage-run-fingerprint.json:fingerprint",
+            str(fingerprint_payload.get("fingerprint") or ""),
+            "Identifies the bounded source state used to permit or deny whole-stage reuse.",
+        ),
+        (
+            "incremental-file-record-head-hash",
+            "incremental_indexing_manifest.file_record_head_hash",
+            str(manifest.get("file_record_head_hash") or ""),
+            "Summarizes path/size/mtime/content-hash rows without embedding every row in reports.",
+        ),
+        (
+            "incremental-content-hash-policy",
+            "incremental_indexing_manifest.content_hash_policy_hash",
+            str(manifest.get("content_hash_policy_hash") or ""),
+            "Discloses that large files beyond the configured byte cap are metadata-only deltas.",
+        ),
+        (
+            "incremental-reuse-plan",
+            "incremental_indexing_manifest.reuse_plan_hash",
+            str(manifest.get("reuse_plan_hash") or ""),
+            "Shows whether the run is fresh, safe whole-stage reuse, or rebuild-required.",
+        ),
+        (
+            "incremental-reuse-decision-rows",
+            "incremental_reuse_decision_manifest.decision_row_head_hash",
+            str(decision_manifest.get("decision_row_head_hash") or ""),
+            "Hashes per-path reuse/rebuild decisions for reviewer traceability.",
+        ),
+        (
+            "incremental-safety-rebuild-policy",
+            "incremental_reuse_decision_manifest.decision_policy",
+            hashlib.sha256(
+                json.dumps(dict(decision_manifest.get("decision_policy") or {}), sort_keys=True).encode("utf-8")
+            ).hexdigest(),
+            "Confirms changed inputs force rebuild instead of stale-output reuse.",
+        ),
+    ):
+        slot_core = {
+            "slot_id": slot_id,
+            "status": "ready" if evidence_hash else "ready-empty",
+            "evidence_ref": evidence_ref,
+            "evidence_hash": evidence_hash,
+            "report_use": report_use,
+        }
+        ready_slots.append({**slot_core, "slot_hash": slot_hash(slot_core)})
+
+    blocking_slots: list[dict[str, object]] = []
+    for slot_id, blocker, required_evidence in (
+        (
+            "incremental-full-large-file-content-delta",
+            "full-large-file-content-hash-delta-required",
+            "Run evidence where files above the bounded content hash cap are fully hashed and selectively reindexed.",
+        ),
+        (
+            "incremental-row-level-stage-delta",
+            "row-level-stage-delta-reindex-required",
+            "Parser/output evidence proving changed rows are updated without rebuilding unaffected rows.",
+        ),
+        (
+            "incremental-trusted-reuse-manifest",
+            "trusted-incremental-reuse-manifest-required",
+            "Diff against an independent trusted reuse manifest for identical and changed inputs.",
+        ),
+        (
+            "incremental-multi-million-file-replay",
+            "multi-million-file-replay-validation-required",
+            "Replay logs for unchanged and changed roots at large corpus scale.",
+        ),
+        (
+            "incremental-case-db-dedup-validation",
+            "case-db-stage-dedup-validation-required",
+            "Case DB import evidence proving resumed runs do not duplicate indexed artifacts.",
+        ),
+        (
+            "incremental-cross-platform-fingerprint-semantics",
+            "cross-platform-fingerprint-semantics-required",
+            "macOS, Windows, and Linux path/mtime/Unicode semantics comparison for identical evidence.",
+        ),
+    ):
+        slot_core = {
+            "slot_id": slot_id,
+            "status": "blocking-commercial-grade",
+            "blocker": blocker,
+            "required_evidence": required_evidence,
+        }
+        blocking_slots.append({**slot_core, "slot_hash": slot_hash(slot_core)})
+
+    plan_core = {
+        "profile_version": INCREMENTAL_INDEXING_REPORT_GRADE_VALIDATION_PLAN_VERSION,
+        "item_number": 68,
+        "gap_id": INCREMENTAL_INDEXING_GAP_ID,
+        "commercial_gap_ids": [INCREMENTAL_INDEXING_GAP_ID],
+        "fingerprint": str(fingerprint_payload.get("fingerprint") or ""),
+        "incremental_indexing_manifest_hash": str(manifest.get("manifest_hash") or ""),
+        "incremental_reuse_decision_manifest_hash": str(decision_manifest.get("manifest_hash") or ""),
+        "content_hash_policy_hash": str(manifest.get("content_hash_policy_hash") or ""),
+        "content_hash_policy_profile": str(content_policy.get("profile_version") or ""),
+        "scanned_file_count": int(summary.get("scanned_file_count") or 0),
+        "content_hashed_file_count": int(summary.get("content_hashed_file_count") or 0),
+        "content_hash_skipped_file_count": int(summary.get("content_hash_skipped_file_count") or 0),
+        "reuse_disabled": reuse_disabled,
+        "row_level_delta_reindexing": False,
+        "whole_stage_reuse_only": True,
+        "ready_slots": ready_slots,
+        "blocking_slots": blocking_slots,
+        "ready_slot_count": len(ready_slots),
+        "blocking_slot_count": len(blocking_slots),
+        "blockers": list(INCREMENTAL_INDEXING_REPORT_GRADE_BLOCKERS),
+        "commercial_claim_allowed": False,
+        "report_use_warning": (
+            "Use this as evidence of bounded fingerprint-controlled whole-stage reuse only; "
+            "do not describe it as content-complete row-level incremental indexing."
+        ),
+    }
+    return {
+        **plan_core,
+        "validation_plan_hash": hashlib.sha256(json.dumps(plan_core, sort_keys=True).encode("utf-8")).hexdigest(),
     }
 
 
@@ -2550,7 +2714,12 @@ def incremental_indexing_assessment(
     content_skipped_files: int = 0,
     manifest_hash: str = "",
     decision_manifest_hash: str = "",
+    validation_plan: Mapping[str, object] | None = None,
 ) -> dict[str, object]:
+    plan = validation_plan or {}
+    validation_plan_hash = str(plan.get("validation_plan_hash") or "")
+    ready_slot_count = int(plan.get("ready_slot_count") or 0)
+    blocking_slot_count = int(plan.get("blocking_slot_count") or 0)
     return {
         "component": "incremental-indexing",
         "status": "fingerprint-based-reuse-enabled",
@@ -2562,16 +2731,22 @@ def incremental_indexing_assessment(
         "content_hash_skipped_file_count": content_skipped_files,
         "incremental_indexing_manifest_hash": manifest_hash,
         "incremental_reuse_decision_manifest_hash": decision_manifest_hash,
+        "incremental_indexing_report_grade_validation_plan_hash": validation_plan_hash,
+        "report_grade_ready_slot_count": ready_slot_count,
+        "report_grade_blocking_slot_count": blocking_slot_count,
         "ready_for_court_report": False,
         "blockers": [
             "large-files-above-content-hash-policy-still-use-metadata-only-delta",
             "changed-source-disables-stage-reuse-instead-of-row-level-incremental-reindex",
             "case-db-deduplication-and-reindex-policy-require-large-corpus-validation",
             INCREMENTAL_TRUSTED_DIFF_BLOCKER_68,
+            *INCREMENTAL_INDEXING_REPORT_GRADE_BLOCKERS,
         ],
         "recommended_validation": [
             "Preserve rapidtriage-run-fingerprint.json with resumed run outputs.",
             "Rebuild outputs when the fingerprint changes or when bounded fingerprint truncation is unacceptable.",
+            "Attach an independent reuse-manifest diff and multi-million-file replay before making a commercial-grade incremental-indexing claim.",
+            "Treat row-level delta reuse as unimplemented until parser output rows can be selectively updated with trusted validation.",
         ],
         "commercial_uplift_evidence": performance_commercial_uplift_evidence(
             item_number=68,
@@ -2579,15 +2754,20 @@ def incremental_indexing_assessment(
                 "input fingerprint emitted",
                 "path/size/mtime metadata captured",
                 "bounded per-file content hashes captured",
+                "incremental indexing report-grade validation plan emitted",
+                "incremental indexing report-grade ready slots emitted",
                 "per-file reindex limitation warning",
             ],
             large_data_controls=[
                 "bounded per-file SHA-256 records allow changed-file reuse planning",
                 "scan counts and fingerprint truncation status are visible",
                 "changed-source reuse behavior is safety-first rebuild rather than silent reuse",
+                "report-grade validation slots separate usable whole-stage reuse evidence from commercial-grade row-level delta requirements",
             ],
             external_validation=[
                 "full content-hash delta index and large-case validation remain required",
+                "row-level stage delta reindex validation remains required",
+                "case-db deduplication validation remains required",
                 INCREMENTAL_TRUSTED_DIFF_BLOCKER_68,
             ],
         ),
@@ -2600,6 +2780,7 @@ def incremental_indexing_assessment(
             content_hashed_files=content_hashed_files,
             manifest_hash=manifest_hash,
             decision_manifest_hash=decision_manifest_hash,
+            validation_plan=plan,
         ),
     }
 
@@ -2748,6 +2929,7 @@ def incremental_indexing_core_accuracy_gates(
     content_hashed_files: int = 0,
     manifest_hash: str = "",
     decision_manifest_hash: str = "",
+    validation_plan: Mapping[str, object] | None = None,
     trusted_diff: Mapping[str, object] | None = None,
 ) -> list[dict[str, object]]:
     satisfied = ["input fingerprint emitted", "path/size/mtime metadata captured", "per-file reindex limitation warning"]
@@ -2757,6 +2939,14 @@ def incremental_indexing_core_accuracy_gates(
         satisfied.append("incremental indexing manifest hash emitted")
     if decision_manifest_hash:
         satisfied.append("reuse decision manifest emitted")
+    plan = validation_plan or {}
+    validation_plan_hash = str(plan.get("validation_plan_hash") or "")
+    ready_slot_count = int(plan.get("ready_slot_count") or 0)
+    blocking_slot_count = int(plan.get("blocking_slot_count") or 0)
+    if validation_plan_hash:
+        satisfied.append("incremental indexing report-grade validation plan emitted")
+    if ready_slot_count:
+        satisfied.append("incremental indexing report-grade ready slots emitted")
     if reuse_disabled:
         satisfied.append("changed-source reuse disabled")
     if truncated or max_files:
@@ -2772,6 +2962,10 @@ def incremental_indexing_core_accuracy_gates(
         evidence_refs.append(f"incremental_manifest_hash:{manifest_hash}")
     if decision_manifest_hash:
         evidence_refs.append(f"reuse_decision_manifest_hash:{decision_manifest_hash}")
+    if validation_plan_hash:
+        evidence_refs.append(f"incremental_report_grade_validation_plan_hash:{validation_plan_hash}")
+        evidence_refs.append(f"incremental_report_grade_ready_slots:{ready_slot_count}")
+        evidence_refs.append(f"incremental_report_grade_blocking_slots:{blocking_slot_count}")
     if trusted_diff and trusted_diff.get("status") == "pass":
         satisfied.append("trusted incremental reuse diff pass")
         evidence_refs.append(f"trusted_tool:{trusted_diff.get('trusted_tool', '')}")
@@ -3534,6 +3728,11 @@ def build_processing_summary(
         if isinstance(input_fingerprint.get("incremental_reuse_decision_manifest"), Mapping)
         else {}
     )
+    incremental_validation_plan = (
+        input_fingerprint.get("incremental_indexing_report_grade_validation_plan")
+        if isinstance(input_fingerprint.get("incremental_indexing_report_grade_validation_plan"), Mapping)
+        else {}
+    )
     profile_label = infer_processing_profile_label(
         read_only=read_only,
         dry_run=dry_run,
@@ -3580,12 +3779,20 @@ def build_processing_summary(
             "incremental_indexing_manifest_hash": str(incremental_manifest.get("manifest_hash") or ""),
             "incremental_reuse_decision_manifest": dict(reuse_decision_manifest),
             "incremental_reuse_decision_manifest_hash": str(reuse_decision_manifest.get("manifest_hash") or ""),
+            "incremental_indexing_report_grade_validation_plan": dict(incremental_validation_plan),
+            "incremental_indexing_report_grade_validation_plan_hash": str(
+                incremental_validation_plan.get("validation_plan_hash") or ""
+            ),
+            "report_grade_ready_slot_count": int(incremental_validation_plan.get("ready_slot_count") or 0),
+            "report_grade_blocking_slot_count": int(incremental_validation_plan.get("blocking_slot_count") or 0),
             "commercial_uplift_evidence": performance_commercial_uplift_evidence(
                 item_number=68,
                 validation_ids=[
                     "input fingerprint emitted",
                     "path/size/mtime metadata captured",
                     "reuse decision manifest emitted",
+                    "incremental indexing report-grade validation plan emitted",
+                    "incremental indexing report-grade ready slots emitted",
                     "per-file reindex limitation warning",
                 ],
                 large_data_controls=[
@@ -3593,10 +3800,13 @@ def build_processing_summary(
                     "per-path reuse/rebuild decisions are hashed for reviewer traceability",
                     "changed-source runs disable reuse instead of silently trusting stale outputs",
                     "resume state is surfaced in the run summary for analyst review",
+                    "report-grade validation slots identify remaining row-level delta and large-corpus blockers",
                 ],
                 external_validation=[
                     "content-hash per-file incremental reindexing",
+                    "row-level stage delta indexing",
                     "large-case changed-source validation",
+                    "case-db deduplication validation",
                     INCREMENTAL_TRUSTED_DIFF_BLOCKER_68,
                 ],
             ),
@@ -3702,6 +3912,7 @@ def build_processing_summary(
             else {},
             incremental_manifest=incremental_manifest,
             reuse_decision_manifest=reuse_decision_manifest,
+            incremental_validation_plan=incremental_validation_plan,
             resume=resume,
             resume_effective=bool(safety.get("resume_effective")),
             reused_output_count=len(reused_outputs),
@@ -3967,6 +4178,7 @@ def build_functional_large_data_profiles(
     memory_cap_stage_telemetry: Mapping[str, object],
     incremental_manifest: Mapping[str, object],
     reuse_decision_manifest: Mapping[str, object],
+    incremental_validation_plan: Mapping[str, object],
     resume: bool,
     resume_effective: bool,
     reused_output_count: int,
@@ -4056,6 +4268,11 @@ def build_functional_large_data_profiles(
                 "incremental_reuse_decision_row_head_hash": str(
                     reuse_decision_manifest.get("decision_row_head_hash") or ""
                 ),
+                "incremental_indexing_report_grade_validation_plan_hash": str(
+                    incremental_validation_plan.get("validation_plan_hash") or ""
+                ),
+                "report_grade_ready_slot_count": int(incremental_validation_plan.get("ready_slot_count") or 0),
+                "report_grade_blocking_slot_count": int(incremental_validation_plan.get("blocking_slot_count") or 0),
                 "reuse_decision_row_count": int(reuse_decision_manifest.get("decision_row_count") or 0),
                 "file_record_head_hash": str(incremental_manifest.get("file_record_head_hash") or ""),
                 "content_hashed_file_count": int(incremental_manifest.get("content_hashed_file_count") or 0),
@@ -4064,8 +4281,7 @@ def build_functional_large_data_profiles(
             },
             blockers=[
                 INCREMENTAL_TRUSTED_DIFF_BLOCKER_68,
-                "per-file-content-hash-reindexing-not-complete",
-                "large-case-changed-source-replay-validation-not-attached",
+                *INCREMENTAL_INDEXING_REPORT_GRADE_BLOCKERS,
             ],
         ),
     ]

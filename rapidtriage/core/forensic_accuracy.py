@@ -1050,6 +1050,8 @@ CORE_FORENSIC_ACCURACY_ITEMS: tuple[dict[str, object], ...] = (
             "changed-source reuse disabled",
             "truncation disclosure",
             "reuse decision manifest emitted",
+            "incremental indexing report-grade validation plan emitted",
+            "incremental indexing report-grade ready slots emitted",
             "per-file reindex limitation warning",
             "trusted incremental reuse diff pass",
         ),

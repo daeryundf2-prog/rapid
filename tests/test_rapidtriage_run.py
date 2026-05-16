@@ -443,6 +443,10 @@ class RapidTriageRunTests(unittest.TestCase):
             self.assertEqual(incremental_uplift["batch_id"], "commercial-uplift-066-070")
             self.assertEqual(incremental_uplift["item_numbers"], [68])
             self.assertIn("bounded fingerprint", " ".join(incremental_uplift["large_data_controls"]))
+            self.assertIn(
+                "incremental indexing report-grade validation plan emitted",
+                incremental_uplift["passed_validation_check_ids"],
+            )
             self.assertEqual(
                 incremental_uplift["reportability_decision"]["decision"],
                 "do-not-report-incremental-indexing-as-content-hash-complete",
@@ -729,7 +733,33 @@ class RapidTriageRunTests(unittest.TestCase):
                     "incremental_reuse_decision_manifest_hash"
                 ],
             )
+            summary_incremental_plan = summary_payload["processing"]["incremental_indexing"][
+                "incremental_indexing_report_grade_validation_plan"
+            ]
+            self.assertEqual(
+                summary_incremental_plan["profile_version"],
+                "incremental-indexing-report-grade-validation-plan-v1",
+            )
+            self.assertEqual(summary_incremental_plan["item_number"], 68)
+            self.assertEqual(summary_incremental_plan["gap_id"], "#68")
+            self.assertEqual(len(summary_incremental_plan["validation_plan_hash"]), 64)
+            self.assertEqual(summary_incremental_plan["ready_slot_count"], 6)
+            self.assertEqual(summary_incremental_plan["blocking_slot_count"], 6)
+            self.assertEqual(
+                summary_payload["processing"]["incremental_indexing"][
+                    "incremental_indexing_report_grade_validation_plan_hash"
+                ],
+                summary_incremental_plan["validation_plan_hash"],
+            )
+            self.assertEqual(summary_payload["processing"]["incremental_indexing"]["report_grade_ready_slot_count"], 6)
+            self.assertEqual(summary_payload["processing"]["incremental_indexing"]["report_grade_blocking_slot_count"], 6)
             self.assertGreater(profile_by_number[30]["controls"]["reuse_decision_row_count"], 0)
+            self.assertEqual(
+                profile_by_number[30]["controls"]["incremental_indexing_report_grade_validation_plan_hash"],
+                summary_incremental_plan["validation_plan_hash"],
+            )
+            self.assertEqual(profile_by_number[30]["controls"]["report_grade_ready_slot_count"], 6)
+            self.assertEqual(profile_by_number[30]["controls"]["report_grade_blocking_slot_count"], 6)
             self.assertIn("#75", summary_payload["safety"]["artifact_scheduler"]["commercial_gap_ids"])
             self.assertEqual(summary_payload["processing"]["parser_crash_isolation"]["core_accuracy_gates"][0]["gap_id"], "#71")
             self.assertEqual(summary_payload["processing"]["memory_cap_enforcement"]["core_accuracy_gates"][0]["gap_id"], "#72")
@@ -811,11 +841,60 @@ class RapidTriageRunTests(unittest.TestCase):
                 fingerprint["incremental_indexing_assessment"]["incremental_indexing_manifest_hash"],
                 fingerprint["incremental_indexing_manifest"]["manifest_hash"],
             )
+            validation_plan = fingerprint["incremental_indexing_report_grade_validation_plan"]
+            self.assertEqual(
+                validation_plan["profile_version"],
+                "incremental-indexing-report-grade-validation-plan-v1",
+            )
+            self.assertEqual(validation_plan["item_number"], 68)
+            self.assertEqual(validation_plan["gap_id"], "#68")
+            self.assertEqual(
+                validation_plan["incremental_indexing_manifest_hash"],
+                fingerprint["incremental_indexing_manifest"]["manifest_hash"],
+            )
+            self.assertEqual(
+                validation_plan["incremental_reuse_decision_manifest_hash"],
+                fingerprint["incremental_reuse_decision_manifest"]["manifest_hash"],
+            )
+            self.assertEqual(len(validation_plan["validation_plan_hash"]), 64)
+            self.assertEqual(validation_plan["ready_slot_count"], 6)
+            self.assertEqual(validation_plan["blocking_slot_count"], 6)
+            self.assertIn(
+                "incremental-reuse-decision-rows",
+                {slot["slot_id"] for slot in validation_plan["ready_slots"]},
+            )
+            self.assertIn(
+                "incremental-row-level-stage-delta",
+                {slot["slot_id"] for slot in validation_plan["blocking_slots"]},
+            )
+            self.assertIn("row-level-stage-delta-reindex-required", validation_plan["blockers"])
+            self.assertEqual(
+                fingerprint["incremental_indexing_report_grade_validation_plan_hash"],
+                validation_plan["validation_plan_hash"],
+            )
+            self.assertEqual(fingerprint["report_grade_ready_slot_count"], 6)
+            self.assertEqual(fingerprint["report_grade_blocking_slot_count"], 6)
+            self.assertEqual(
+                fingerprint["incremental_indexing_assessment"][
+                    "incremental_indexing_report_grade_validation_plan_hash"
+                ],
+                validation_plan["validation_plan_hash"],
+            )
+            self.assertEqual(fingerprint["incremental_indexing_assessment"]["report_grade_ready_slot_count"], 6)
+            self.assertEqual(fingerprint["incremental_indexing_assessment"]["report_grade_blocking_slot_count"], 6)
             self.assertIn(
                 "incremental indexing manifest hash emitted",
                 fingerprint["core_accuracy_gates"][0]["satisfied_checks"],
             )
             self.assertIn("reuse decision manifest emitted", fingerprint["core_accuracy_gates"][0]["satisfied_checks"])
+            self.assertIn(
+                "incremental indexing report-grade validation plan emitted",
+                fingerprint["core_accuracy_gates"][0]["satisfied_checks"],
+            )
+            self.assertIn(
+                "incremental indexing report-grade ready slots emitted",
+                fingerprint["core_accuracy_gates"][0]["satisfied_checks"],
+            )
             self.assertGreater(fingerprint["summary"]["content_hashed_file_count"], 0)
             self.assertGreater(len(fingerprint["files"]), 0)
             self.assertTrue(any(item.get("sha256") for item in fingerprint["files"]))
@@ -834,10 +913,15 @@ class RapidTriageRunTests(unittest.TestCase):
                 truncated=fingerprint["summary"]["truncated"],
                 fingerprint=fingerprint["fingerprint"],
                 reuse_disabled=False,
+                validation_plan=validation_plan,
                 trusted_diff=fingerprint_diff,
             )
             self.assertEqual(fingerprint_diff["status"], "pass")
             self.assertIn("trusted incremental reuse diff pass", fingerprint_gates[0]["satisfied_checks"])
+            self.assertIn(
+                "incremental indexing report-grade validation plan emitted",
+                fingerprint_gates[0]["satisfied_checks"],
+            )
             self.assertIn(
                 "trusted-checkpoint-resume-manifest-diff-missing",
                 checkpoints["commercial_uplift_evidence"]["remaining_external_validation"],
@@ -900,8 +984,21 @@ class RapidTriageRunTests(unittest.TestCase):
                 any(row["relative_path"] == "Users/alice/Documents/wire-transfer-notes.txt" for row in changed_rows)
             )
             self.assertEqual(len(decision_manifest["manifest_hash"]), 64)
+            validation_plan = fingerprint["incremental_indexing_report_grade_validation_plan"]
+            self.assertEqual(validation_plan["profile_version"], "incremental-indexing-report-grade-validation-plan-v1")
+            self.assertTrue(validation_plan["reuse_disabled"])
+            self.assertEqual(validation_plan["ready_slot_count"], 6)
+            self.assertEqual(validation_plan["blocking_slot_count"], 6)
+            self.assertEqual(
+                validation_plan["incremental_reuse_decision_manifest_hash"],
+                decision_manifest["manifest_hash"],
+            )
             self.assertIn("changed-source reuse disabled", fingerprint["core_accuracy_gates"][0]["satisfied_checks"])
             self.assertIn("reuse decision manifest emitted", fingerprint["core_accuracy_gates"][0]["satisfied_checks"])
+            self.assertIn(
+                "incremental indexing report-grade validation plan emitted",
+                fingerprint["core_accuracy_gates"][0]["satisfied_checks"],
+            )
 
     def test_search_command_finds_keyword_across_completed_run_outputs(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
