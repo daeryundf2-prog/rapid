@@ -36,9 +36,9 @@
       ],
       "expected": {
         "required_assertions": [
-          "Browser storage inventory preserves sensitive artifact inventory, secret redaction, per-store browser_secret_authority_manifest reveal/audit slots, strict legal warning, opt-in reveal warning, audit/scope review requirement, and #42 core_accuracy_gates.",
+          "Browser storage inventory preserves sensitive artifact inventory, secret redaction, per-store browser_secret_authority_manifest reveal/audit slots, browser_secret_report_grade_validation_plan ready/blocking slots, strict legal warning, opt-in reveal warning, audit/scope review requirement, and #42 core_accuracy_gates.",
           "Browser secret trusted diff helper requires native store, DPAPI/keychain, legal authority, or audit-log row equality before satisfying the #42 trusted browser secret authority diff pass gate.",
-          "Browser secret reportability decisions block decrypted or revealed secret claims until lawful reveal authority, DPAPI/keychain/browser-version validation, and audit evidence exists."
+          "Browser secret reportability decisions block decrypted or revealed secret claims until lawful reveal authority, controlled reveal audit, DPAPI/keychain/browser-version validation, RBAC reveal enforcement, trusted diff, and independent-review evidence exists."
         ]
       },
       "notes": "Internal fixture pass; lawful DPAPI/keychain reveal workflows and browser-version corpora remain validation-gated."

@@ -21,11 +21,11 @@
       "title": "Browser password/cookie/session artifact handling with strict legal warning",
       "test_files": ["tests/test_rapidtriage_windows_artifacts.py"],
       "assertions": [
-        "Browser storage inventory identifies sensitive stores, keeps secret values redacted, records strict legal warnings, emits #42 core_accuracy_gates, and blocks decrypted/revealed secret reportability without lawful reveal, DPAPI/keychain, browser-version, and audit evidence.",
+        "Browser storage inventory identifies sensitive stores, keeps secret values redacted, records strict legal warnings, emits browser_secret_report_grade_validation_plan ready/blocking slots and #42 core_accuracy_gates, and blocks decrypted/revealed secret reportability without lawful reveal, controlled audit, DPAPI/keychain, browser-version, RBAC, trusted diff, and independent-review evidence.",
         "build_browser_secret_trusted_diff compares sensitive store rows against native store, DPAPI/keychain, legal authority, or audit records before satisfying the #42 trusted diff gate."
       ],
       "remaining_external_validation": [
-        "DPAPI/keychain/browser-version known-answer fixtures and audited opt-in reveal workflow."
+        "DPAPI/keychain/browser-version known-answer fixtures, RBAC-controlled reveal enforcement, trusted authority diff, independent review, and audited opt-in reveal workflow."
       ]
     },
     {

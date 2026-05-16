@@ -1242,6 +1242,8 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
             self.assertIn("audit and scope review requirement", storage_gates["#42"]["satisfied_checks"])
             self.assertIn("browser secret authority profile", storage_gates["#42"]["satisfied_checks"])
             self.assertIn("browser secret authority manifest", storage_gates["#42"]["satisfied_checks"])
+            self.assertIn("browser secret report-grade validation plan", storage_gates["#42"]["satisfied_checks"])
+            self.assertIn("browser secret report-grade ready slots", storage_gates["#42"]["satisfied_checks"])
             self.assertIn("no raw secret serialization", storage_gates["#42"]["satisfied_checks"])
             self.assertIn("controlled reveal disabled by default", storage_gates["#42"]["satisfied_checks"])
             authority_profile = storage_inventory["details"]["browser_secret_authority_profile"]
@@ -1267,6 +1269,30 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
             self.assertIn("lawful-secret-reveal-authority-not-attached", authority_manifest["failed_validation_check_ids"])
             self.assertEqual(authority_manifest["entries"][0]["controlled_reveal_status"], "blocked-by-default")
             self.assertTrue(authority_manifest["entries"][0]["source_viewer_locator"]["open_requires_authority"])
+            report_grade_plan = storage_inventory["details"]["browser_secret_report_grade_validation_plan"]
+            self.assertEqual(report_grade_plan["profile_version"], "browser-secret-report-grade-validation-plan-v1")
+            self.assertEqual(report_grade_plan["item_number"], 42)
+            self.assertEqual(report_grade_plan["gap_id"], "#42")
+            self.assertEqual(report_grade_plan["ready_slot_count"], 7)
+            self.assertEqual(report_grade_plan["blocking_slot_count"], 7)
+            self.assertEqual(report_grade_plan["validation_status"], "report-validation-blocked")
+            self.assertFalse(report_grade_plan["commercial_grade"])
+            self.assertEqual(
+                storage_inventory["details"]["browser_secret_report_grade_validation_plan_hash"],
+                report_grade_plan["validation_plan_sha256"],
+            )
+            slot_status = {slot["slot_id"]: slot["status"] for slot in report_grade_plan["validation_slots"]}
+            self.assertEqual(slot_status["browser-secret-redaction-boundary"], "complete")
+            self.assertEqual(slot_status["browser-secret-no-raw-secret-serialization"], "complete")
+            self.assertEqual(slot_status["browser-secret-strict-legal-warning"], "complete")
+            self.assertEqual(slot_status["browser-secret-authority-manifest"], "complete")
+            self.assertEqual(slot_status["browser-secret-lawful-authority-record"], "external-required")
+            self.assertEqual(slot_status["browser-secret-controlled-reveal-audit-log"], "external-required")
+            self.assertEqual(slot_status["browser-secret-dpapi-keychain-known-answer"], "external-required")
+            self.assertEqual(slot_status["browser-secret-browser-version-corpus"], "external-required")
+            self.assertEqual(slot_status["browser-secret-rbac-controlled-reveal-workflow"], "external-required")
+            self.assertEqual(slot_status["browser-secret-trusted-authority-diff"], "external-required")
+            self.assertIn("browser-secret-independent-review-required", report_grade_plan["blockers"])
             secret_uplift = storage_inventory["details"]["secret_handling_commercial_uplift_evidence"]
             self.assertEqual(secret_uplift["batch_id"], "commercial-uplift-041-045")
             self.assertEqual(secret_uplift["item_numbers"], [42])
@@ -1275,12 +1301,21 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
             self.assertIn("strict_legal_warning_present", secret_uplift["passed_control_ids"])
             self.assertIn("browser-secret-authority-profile-present", secret_uplift["passed_control_ids"])
             self.assertIn("browser-secret-authority-manifest-present", secret_uplift["passed_control_ids"])
+            self.assertIn("browser-secret-report-grade-validation-plan-present", secret_uplift["passed_control_ids"])
+            self.assertIn("browser-secret-report-grade-ready-slots", secret_uplift["passed_control_ids"])
             self.assertIn("raw-secret-values-not-serialized", secret_uplift["passed_control_ids"])
             self.assertIn("controlled-reveal-disabled-by-default", secret_uplift["passed_control_ids"])
             self.assertTrue(secret_uplift["large_data_controls"]["secret_values_redacted_by_default"])
             self.assertFalse(secret_uplift["large_data_controls"]["dpapi_keychain_integration"])
             self.assertTrue(secret_uplift["large_data_controls"]["browser_secret_authority_profile_present"])
             self.assertTrue(secret_uplift["large_data_controls"]["browser_secret_authority_manifest_present"])
+            self.assertTrue(secret_uplift["large_data_controls"]["browser_secret_report_grade_validation_plan_present"])
+            self.assertEqual(
+                secret_uplift["large_data_controls"]["browser_secret_report_grade_validation_plan_hash"],
+                report_grade_plan["validation_plan_sha256"],
+            )
+            self.assertEqual(secret_uplift["large_data_controls"]["browser_secret_report_grade_ready_slot_count"], 7)
+            self.assertEqual(secret_uplift["large_data_controls"]["browser_secret_report_grade_blocking_slot_count"], 7)
             self.assertFalse(secret_uplift["large_data_controls"]["raw_secret_values_serialized"])
             self.assertGreaterEqual(secret_uplift["large_data_controls"]["per_store_reveal_entry_count"], 3)
             self.assertTrue(secret_uplift["large_data_controls"]["controlled_reveal_disabled_by_default"])
@@ -1296,6 +1331,11 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
             self.assertFalse(secret_uplift["reportability_decision"]["dpapi_keychain_integration"])
             self.assertTrue(secret_uplift["reportability_decision"]["browser_secret_authority_profile_present"])
             self.assertTrue(secret_uplift["reportability_decision"]["browser_secret_authority_manifest_present"])
+            self.assertTrue(secret_uplift["reportability_decision"]["browser_secret_report_grade_validation_plan_present"])
+            self.assertEqual(
+                secret_uplift["reportability_decision"]["browser_secret_report_grade_validation_plan_hash"],
+                report_grade_plan["validation_plan_sha256"],
+            )
             self.assertEqual(secret_uplift["reportability_decision"]["controlled_reveal_policy"], "disabled-by-default")
             storage_uplift = storage_inventory["details"]["commercial_uplift_evidence"]
             self.assertEqual(storage_uplift["batch_id"], "commercial-uplift-016-020")

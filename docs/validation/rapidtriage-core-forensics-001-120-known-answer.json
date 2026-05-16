@@ -1077,7 +1077,7 @@
       ],
       "expected": {
         "required_assertions": [
-          "Browser storage inventory preserves sensitive artifact inventory, secret redaction, strict legal warning, opt-in reveal warning, audit/scope review requirement, and #42 core_accuracy_gates."
+          "Browser storage inventory preserves sensitive artifact inventory, secret redaction, browser_secret_report_grade_validation_plan ready/blocking slots, strict legal warning, opt-in reveal warning, audit/scope review requirement, and #42 core_accuracy_gates."
         ]
       },
       "notes": "Internal fixture pass; lawful DPAPI/keychain reveal workflows and browser-version corpora remain validation-gated.",

@@ -249,6 +249,16 @@ BROWSER_REPORT_GRADE_BLOCKERS = [
     "browser-timeline-trusted-diff-required",
 ]
 BROWSER_SECRET_TRUSTED_DIFF_BLOCKER = "browser-secret-authority-diff-required"
+BROWSER_SECRET_REPORT_GRADE_VALIDATION_PLAN_VERSION = "browser-secret-report-grade-validation-plan-v1"
+BROWSER_SECRET_REPORT_GRADE_VALIDATION_BLOCKERS = [
+    "browser-secret-lawful-authority-record-required",
+    "browser-secret-controlled-reveal-audit-required",
+    "browser-secret-dpapi-keychain-known-answer-required",
+    "browser-secret-browser-version-corpus-required",
+    "browser-secret-rbac-enforcement-required",
+    BROWSER_SECRET_TRUSTED_DIFF_BLOCKER,
+    "browser-secret-independent-review-required",
+]
 BROWSER_TRUSTED_TOOLS = {"browserhistoryview", "hindsight", "sqlite", "browser native query", "velociraptor"}
 BROWSER_SECRET_TRUSTED_TOOLS = {
     "browser-native-store-inventory",
@@ -2474,6 +2484,16 @@ def build_browser_storage_inventory_record(
         storage_inventory=storage_inventory,
         checks=secret_validation_checks,
     )
+    secret_report_grade_validation_plan = browser_secret_report_grade_validation_plan(
+        browser=browser,
+        profile=profile,
+        user=user,
+        profile_dir=profile_dir,
+        storage_inventory=storage_inventory,
+        checks=secret_validation_checks,
+        authority_profile=secret_authority_profile,
+        authority_manifest=secret_authority_manifest,
+    )
     validation_context = {
         "storage_inventory_present": bool(storage_inventory),
         "sensitive_storage_inventory_present": sensitive_count > 0,
@@ -2535,11 +2555,16 @@ def build_browser_storage_inventory_record(
                     "secret_validation_checks": secret_validation_checks,
                     "browser_secret_authority_profile": secret_authority_profile,
                     "browser_secret_authority_manifest": secret_authority_manifest,
+                    "browser_secret_report_grade_validation_plan": secret_report_grade_validation_plan,
                 }
             ),
             "secret_handling_validation_checks": secret_validation_checks,
             "browser_secret_authority_profile": secret_authority_profile,
             "browser_secret_authority_manifest": secret_authority_manifest,
+            "browser_secret_report_grade_validation_plan": secret_report_grade_validation_plan,
+            "browser_secret_report_grade_validation_plan_hash": secret_report_grade_validation_plan[
+                "validation_plan_sha256"
+            ],
             "browser_secret_handling_assessment": browser_secret_handling_assessment(secret_validation_checks),
             "secret_handling_commercial_uplift_evidence": browser_secret_commercial_uplift_evidence(
                 {
@@ -2552,6 +2577,7 @@ def build_browser_storage_inventory_record(
                     "secret_handling_validation_checks": secret_validation_checks,
                     "browser_secret_authority_profile": secret_authority_profile,
                     "browser_secret_authority_manifest": secret_authority_manifest,
+                    "browser_secret_report_grade_validation_plan": secret_report_grade_validation_plan,
                     "browser_secret_handling_assessment": browser_secret_handling_assessment(secret_validation_checks),
                 }
             ),
@@ -4114,6 +4140,11 @@ def browser_core_accuracy_gates(details: Mapping[str, object]) -> list[dict[str,
             if isinstance(details.get("browser_secret_authority_manifest"), Mapping)
             else {}
         )
+        report_grade_validation_plan = (
+            details.get("browser_secret_report_grade_validation_plan")
+            if isinstance(details.get("browser_secret_report_grade_validation_plan"), Mapping)
+            else {}
+        )
         if authority_profile:
             item42.append("browser secret authority profile")
         if authority_manifest:
@@ -4121,6 +4152,14 @@ def browser_core_accuracy_gates(details: Mapping[str, object]) -> list[dict[str,
             evidence_refs.append(
                 f"browser_secret_authority_manifest_sha256:{authority_manifest.get('manifest_sha256', '')}"
             )
+        if report_grade_validation_plan:
+            item42.append("browser secret report-grade validation plan")
+            evidence_refs.append(
+                "browser_secret_report_grade_validation_plan_sha256:"
+                f"{report_grade_validation_plan.get('validation_plan_sha256', '')}"
+            )
+        if int(report_grade_validation_plan.get("ready_slot_count") or 0) >= 7:
+            item42.append("browser secret report-grade ready slots")
         if authority_manifest.get("raw_secret_values_serialized") is False:
             item42.append("no raw secret serialization")
         if authority_profile.get("controlled_reveal_policy") == "disabled-by-default" and not authority_profile.get(
@@ -4779,6 +4818,207 @@ def browser_secret_authority_manifest(
     return manifest
 
 
+def browser_secret_report_grade_validation_plan(
+    *,
+    browser: str,
+    profile: str,
+    user: str,
+    profile_dir: Path,
+    storage_inventory: Sequence[Mapping[str, object]],
+    checks: Mapping[str, object],
+    authority_profile: Mapping[str, object],
+    authority_manifest: Mapping[str, object],
+    trusted_diff: Mapping[str, object] | None = None,
+) -> Dict[str, object]:
+    sensitive_rows = [row for row in storage_inventory if row.get("sensitive")]
+    trusted_diff = trusted_diff or {}
+
+    def slot(
+        slot_id: str,
+        *,
+        ready: bool,
+        evidence: str,
+        blocker_id: str | None = None,
+        operator_action: str = "",
+    ) -> Dict[str, object]:
+        row: Dict[str, object] = {
+            "slot_id": slot_id,
+            "status": "complete" if ready else "external-required",
+            "evidence": evidence,
+        }
+        if blocker_id and not ready:
+            row["blocker_id"] = blocker_id
+        if operator_action:
+            row["operator_action"] = operator_action
+        return row
+
+    entries = authority_manifest.get("entries")
+    if not isinstance(entries, list):
+        entries = []
+    per_store_locators_present = all(
+        isinstance(entry, Mapping) and isinstance(entry.get("source_viewer_locator"), Mapping)
+        for entry in entries
+    )
+    raw_secret_values_serialized = bool(authority_manifest.get("raw_secret_values_serialized"))
+    raw_secret_values_extracted = bool(checks.get("raw_secret_values_extracted"))
+    validation_slots = [
+        slot(
+            "browser-secret-sensitive-store-inventory",
+            ready=bool(sensitive_rows),
+            evidence=f"sensitive_store_count={len(sensitive_rows)}",
+            blocker_id="browser-secret-sensitive-store-inventory-required",
+            operator_action="Collect browser profile storage inventory before requesting any reveal authority.",
+        ),
+        slot(
+            "browser-secret-redaction-boundary",
+            ready=not raw_secret_values_extracted,
+            evidence=f"raw_secret_values_extracted={raw_secret_values_extracted}",
+            blocker_id="browser-secret-redaction-boundary-failed",
+            operator_action="Remove raw secret values from generated artifacts and preserve only hashes/metadata.",
+        ),
+        slot(
+            "browser-secret-no-raw-secret-serialization",
+            ready=not raw_secret_values_serialized,
+            evidence=f"raw_secret_values_serialized={raw_secret_values_serialized}",
+            blocker_id="browser-secret-raw-secret-serialization-present",
+            operator_action="Regenerate the report bundle with raw secret serialization disabled.",
+        ),
+        slot(
+            "browser-secret-strict-legal-warning",
+            ready=bool(checks.get("strict_legal_warning_present")),
+            evidence=f"strict_legal_warning_present={bool(checks.get('strict_legal_warning_present'))}",
+            blocker_id="browser-secret-strict-legal-warning-required",
+            operator_action="Show the strict legal warning before opening sensitive browser stores.",
+        ),
+        slot(
+            "browser-secret-authority-manifest",
+            ready=bool(authority_manifest.get("manifest_sha256")),
+            evidence=f"manifest_sha256={authority_manifest.get('manifest_sha256', '')}",
+            blocker_id="browser-secret-authority-manifest-required",
+            operator_action="Generate a per-store authority manifest with stable hash evidence.",
+        ),
+        slot(
+            "browser-secret-per-store-source-viewer-locators",
+            ready=per_store_locators_present and len(entries) == len(sensitive_rows),
+            evidence=f"locator_count={len(entries)} sensitive_store_count={len(sensitive_rows)}",
+            blocker_id="browser-secret-source-viewer-locator-required",
+            operator_action="Attach source viewer locators for each sensitive store before review.",
+        ),
+        slot(
+            "browser-secret-controlled-reveal-default-deny",
+            ready=authority_profile.get("controlled_reveal_policy") == "disabled-by-default"
+            and not bool(authority_profile.get("raw_secret_reveal_allowed")),
+            evidence=(
+                f"controlled_reveal_policy={authority_profile.get('controlled_reveal_policy', '')} "
+                f"raw_secret_reveal_allowed={bool(authority_profile.get('raw_secret_reveal_allowed'))}"
+            ),
+            blocker_id="browser-secret-controlled-reveal-default-deny-required",
+            operator_action="Keep browser secret reveal disabled unless a scoped authority packet is attached.",
+        ),
+        slot(
+            "browser-secret-lawful-authority-record",
+            ready=False,
+            evidence="lawful_authority_record_present=false",
+            blocker_id="browser-secret-lawful-authority-record-required",
+            operator_action="Attach a signed case-scope/legal authority record for any controlled reveal.",
+        ),
+        slot(
+            "browser-secret-controlled-reveal-audit-log",
+            ready=False,
+            evidence="controlled_reveal_audit_log_present=false",
+            blocker_id="browser-secret-controlled-reveal-audit-required",
+            operator_action="Record per-store analyst, reason, timestamp, and output hash before revealing any secret.",
+        ),
+        slot(
+            "browser-secret-dpapi-keychain-known-answer",
+            ready=False,
+            evidence="dpapi_keychain_known_answer_validated=false",
+            blocker_id="browser-secret-dpapi-keychain-known-answer-required",
+            operator_action="Validate DPAPI/keychain handling against lawful known-answer fixtures for the target OS.",
+        ),
+        slot(
+            "browser-secret-browser-version-corpus",
+            ready=False,
+            evidence="browser_version_known_answer_validated=false",
+            blocker_id="browser-secret-browser-version-corpus-required",
+            operator_action="Attach browser-version-specific cookie/password/session known-answer corpus results.",
+        ),
+        slot(
+            "browser-secret-rbac-controlled-reveal-workflow",
+            ready=False,
+            evidence="role_scoped_reveal_enforcement=false",
+            blocker_id="browser-secret-rbac-enforcement-required",
+            operator_action="Enforce role-scoped reveal approval before enabling any raw secret workflow.",
+        ),
+        slot(
+            "browser-secret-trusted-authority-diff",
+            ready=trusted_diff.get("status") == "pass",
+            evidence=f"trusted_diff_status={trusted_diff.get('status', 'missing')}",
+            blocker_id=BROWSER_SECRET_TRUSTED_DIFF_BLOCKER,
+            operator_action="Attach a passing native-store, DPAPI/keychain, legal-authority, or audit-log trusted diff.",
+        ),
+        slot(
+            "browser-secret-independent-review",
+            ready=False,
+            evidence="independent_review_signoff_present=false",
+            blocker_id="browser-secret-independent-review-required",
+            operator_action="Attach independent reviewer signoff before report-grade secret handling claims.",
+        ),
+    ]
+    blockers = sorted(
+        {
+            str(item.get("blocker_id"))
+            for item in validation_slots
+            if item.get("status") != "complete" and item.get("blocker_id")
+        }
+    )
+    plan: Dict[str, object] = {
+        "profile_version": BROWSER_SECRET_REPORT_GRADE_VALIDATION_PLAN_VERSION,
+        "item_number": 42,
+        "gap_id": "#42",
+        "batch_id": "commercial-uplift-041-045",
+        "qc_prep_item_number": QC_PREP_BROWSER_SECRET_ITEM,
+        "qc_prep_item_goal": QC_PREP_BROWSER_SECRET_GOAL,
+        "browser": browser,
+        "profile": profile,
+        "user": user,
+        "profile_dir": str(profile_dir.resolve()),
+        "sensitive_store_count": len(sensitive_rows),
+        "authority_manifest_sha256": str(authority_manifest.get("manifest_sha256") or ""),
+        "raw_secret_values_extracted": raw_secret_values_extracted,
+        "raw_secret_values_serialized": raw_secret_values_serialized,
+        "controlled_reveal_policy": str(authority_profile.get("controlled_reveal_policy") or ""),
+        "trusted_diff_status": str(trusted_diff.get("status") or "missing"),
+        "ready_slot_count": sum(1 for item in validation_slots if item.get("status") == "complete"),
+        "blocking_slot_count": sum(1 for item in validation_slots if item.get("status") != "complete"),
+        "validation_status": "report-validation-blocked",
+        "commercial_grade": False,
+        "validation_slots": validation_slots,
+        "blockers": blockers,
+        "validation_commands": [
+            "rapidtriage artifacts <mounted-profile-root> --kind browser --output browser-artifacts.json",
+            "rapidtriage commercial-readiness --validation-package docs/validation/rapidtriage-core-forensics-041-050-known-answer.json --limit 45 --json",
+        ],
+        "report_guidance": {
+            "allowed_use": "browser-secret-store-inventory-triage-pivot",
+            "forbidden_claims": [
+                "passwords decrypted",
+                "cookies revealed",
+                "session tokens extracted",
+                "browser secrets are court-ready without authority/audit evidence",
+            ],
+            "required_disclaimer": (
+                "Browser password/cookie/session stores are inventoried only. Do not reveal or report secret values "
+                "without lawful authority, controlled audit, DPAPI/keychain validation, trusted diff, and independent review."
+            ),
+        },
+    }
+    plan["validation_plan_sha256"] = stable_browser_sha256(
+        {key: value for key, value in plan.items() if key != "validation_plan_sha256"}
+    )
+    return plan
+
+
 def browser_secret_handling_assessment(checks: Mapping[str, object]) -> Dict[str, object]:
     return {
         "status": "inventory-only-validation-required",
@@ -4812,6 +5052,9 @@ def browser_secret_commercial_uplift_evidence(details: Mapping[str, object]) -> 
     authority_manifest = details.get("browser_secret_authority_manifest")
     if not isinstance(authority_manifest, Mapping):
         authority_manifest = {}
+    report_grade_validation_plan = details.get("browser_secret_report_grade_validation_plan")
+    if not isinstance(report_grade_validation_plan, Mapping):
+        report_grade_validation_plan = {}
     storage_inventory = details.get("storage_inventory")
     if not isinstance(storage_inventory, list):
         storage_inventory = []
@@ -4852,6 +5095,14 @@ def browser_secret_commercial_uplift_evidence(details: Mapping[str, object]) -> 
         passed_control_ids.append("raw-secret-values-not-serialized")
     else:
         failed_control_ids.append("raw-secret-values-not-serialized")
+    if report_grade_validation_plan:
+        passed_control_ids.append("browser-secret-report-grade-validation-plan-present")
+    else:
+        failed_control_ids.append("browser-secret-report-grade-validation-plan-present")
+    if int(report_grade_validation_plan.get("ready_slot_count") or 0) >= 7:
+        passed_control_ids.append("browser-secret-report-grade-ready-slots")
+    else:
+        failed_control_ids.append("browser-secret-report-grade-ready-slots")
     if authority_profile.get("controlled_reveal_policy") == "disabled-by-default" and not authority_profile.get(
         "raw_secret_reveal_allowed"
     ):
@@ -4875,9 +5126,11 @@ def browser_secret_commercial_uplift_evidence(details: Mapping[str, object]) -> 
             f"source_path:{details.get('source_path', '')}",
             f"browser:{details.get('browser', '')}",
             f"profile:{details.get('profile', '')}",
+            f"browser_secret_report_grade_validation_plan_sha256:{report_grade_validation_plan.get('validation_plan_sha256', '')}",
         ],
         "browser_secret_authority_profile": dict(authority_profile),
         "browser_secret_authority_manifest": dict(authority_manifest),
+        "browser_secret_report_grade_validation_plan": dict(report_grade_validation_plan),
         "passed_control_ids": passed_control_ids,
         "failed_control_ids": failed_control_ids,
         "trusted_diff": dict(trusted_diff) if trusted_diff else {
@@ -4898,6 +5151,16 @@ def browser_secret_commercial_uplift_evidence(details: Mapping[str, object]) -> 
             "browser_secret_authority_profile_present": bool(authority_profile),
             "browser_secret_authority_manifest_present": bool(authority_manifest),
             "browser_secret_authority_manifest_hash": str(authority_manifest.get("manifest_sha256") or ""),
+            "browser_secret_report_grade_validation_plan_present": bool(report_grade_validation_plan),
+            "browser_secret_report_grade_validation_plan_hash": str(
+                report_grade_validation_plan.get("validation_plan_sha256") or ""
+            ),
+            "browser_secret_report_grade_ready_slot_count": int(
+                report_grade_validation_plan.get("ready_slot_count") or 0
+            ),
+            "browser_secret_report_grade_blocking_slot_count": int(
+                report_grade_validation_plan.get("blocking_slot_count") or 0
+            ),
             "raw_secret_values_serialized": bool(authority_manifest.get("raw_secret_values_serialized")),
             "per_store_reveal_entry_count": int(authority_manifest.get("entry_count") or 0),
             "controlled_reveal_disabled_by_default": authority_profile.get("controlled_reveal_policy")
@@ -4935,6 +5198,11 @@ def browser_secret_reportability_decision(
         if isinstance(details.get("browser_secret_authority_manifest"), Mapping)
         else {}
     )
+    report_grade_validation_plan = (
+        details.get("browser_secret_report_grade_validation_plan")
+        if isinstance(details.get("browser_secret_report_grade_validation_plan"), Mapping)
+        else {}
+    )
     return {
         "profile_version": "browser-secret-reportability-decision-v1",
         "commercial_gap_ids": ["#42"],
@@ -4951,6 +5219,10 @@ def browser_secret_reportability_decision(
         "dpapi_keychain_integration": False,
         "browser_secret_authority_profile_present": bool(authority_profile),
         "browser_secret_authority_manifest_present": bool(authority_manifest),
+        "browser_secret_report_grade_validation_plan_present": bool(report_grade_validation_plan),
+        "browser_secret_report_grade_validation_plan_hash": str(
+            report_grade_validation_plan.get("validation_plan_sha256") or ""
+        ),
         "controlled_reveal_policy": str(authority_profile.get("controlled_reveal_policy") or ""),
         "raw_secret_reveal_allowed": bool(authority_profile.get("raw_secret_reveal_allowed")),
         "ready_for_court_report": False,
