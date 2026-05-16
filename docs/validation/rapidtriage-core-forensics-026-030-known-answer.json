@@ -38,6 +38,7 @@
       "expected": {
         "required_assertions": [
           "iOS Manifest.db/plist rows preserve domain/fileID mapping, plist consistency, authority gates, app DB candidates, deleted-record warnings, and #27 core_accuracy_gates",
+          "iOS backup source rows emit ios-backup-report-grade-validation-plan-v1 with Manifest.db hash, read-only Files-table proof, required backup file checks, keychain linkage inventory, app database candidate mapping, authority review, trusted diff, app schema, deleted-record corpus, and independent signoff slots",
           "iOS backup trusted diff helper requires Manifest/file mapping equality before satisfying the #27 trusted iOS backup manifest diff pass gate",
           "iOS backup reportability decisions block decrypted-complete backup claims until encryption, app schema, and deleted-record validation exists"
         ]

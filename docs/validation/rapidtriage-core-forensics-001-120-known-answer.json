@@ -747,7 +747,8 @@
       ],
       "expected": {
         "required_assertions": [
-          "iOS Manifest.db/plist rows preserve domain/fileID mapping, plist consistency, authority gates, app DB candidates, deleted-record warnings, and #27 core_accuracy_gates"
+          "iOS Manifest.db/plist rows preserve domain/fileID mapping, plist consistency, authority gates, app DB candidates, deleted-record warnings, and #27 core_accuracy_gates",
+          "iOS backup source rows emit ios-backup-report-grade-validation-plan-v1 with Manifest.db hash, read-only Files-table proof, required backup file checks, keychain linkage inventory, app database candidate mapping, authority review, trusted diff, app schema, deleted-record corpus, and independent signoff slots"
         ]
       },
       "notes": "Internal fixture pass; encrypted backups, app database schemas, and deleted records remain validation blockers.",

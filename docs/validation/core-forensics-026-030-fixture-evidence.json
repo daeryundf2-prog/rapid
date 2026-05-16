@@ -31,6 +31,7 @@
       "title": "iOS backup parser",
       "assertions": [
         "iOS Manifest.db and plist rows preserve domain/fileID mapping, Info/Status plist consistency, encrypted-backup authority gating, app DB candidate detection, deleted-record warnings, mobile_analyst_review_profile, #27 core_accuracy_gates, and decrypted-complete reportability blockers.",
+        "iOS backup source rows emit ios-backup-report-grade-validation-plan-v1 with Manifest.db hash, read-only Files-table proof, required plist/root checks, keychain linkage inventory, app database candidate mapping, encrypted-backup authority review, trusted parser diff, app-schema fixture, deleted-record corpus, and independent signoff evidence slots.",
         "build_mobile_trusted_diff compares iOS backup fileID/domain/logical path rows against iLEAPP/backup manifest rows before satisfying the #27 trusted diff gate."
       ],
       "blockers_kept": [

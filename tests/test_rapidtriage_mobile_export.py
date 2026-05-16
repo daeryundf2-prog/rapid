@@ -1021,11 +1021,55 @@ class RapidTriageMobileExportTests(unittest.TestCase):
             self.assertIn("trusted-ios-backup-parser-diff-required", deep_manifest["commercial_blockers"])
             self.assertIn("iOS backup deep parser manifest", source_ios_gate["satisfied_checks"])
             self.assertIn("iOS backup deep parser source locator", source_ios_gate["satisfied_checks"])
+            ios_validation_plan = ios_source["details"]["ios_backup_report_grade_validation_plan"]
+            self.assertEqual(
+                ios_validation_plan["profile_version"],
+                "ios-backup-report-grade-validation-plan-v1",
+            )
+            self.assertEqual(ios_validation_plan["item_number"], 27)
+            self.assertEqual(ios_validation_plan["gap_id"], "#27")
+            self.assertEqual(ios_validation_plan["status"], "report-validation-blocked")
+            self.assertEqual(len(ios_validation_plan["manifest_sha256"]), 64)
+            self.assertEqual(
+                ios_source["details"]["ios_backup_report_grade_validation_plan_hash"],
+                ios_validation_plan["manifest_sha256"],
+            )
+            self.assertEqual(
+                [command["id"] for command in ios_validation_plan["validation_commands"]],
+                [
+                    "source-backup-manifest",
+                    "ios-backup-import",
+                    "encrypted-backup-authority-review",
+                    "trusted-ios-backup-parser-diff",
+                ],
+            )
+            ios_plan_slots = {slot["id"]: slot for slot in ios_validation_plan["evidence_slots"]}
+            self.assertEqual(ios_plan_slots["manifest-db-source-integrity"]["status"], "complete")
+            self.assertEqual(ios_plan_slots["manifest-files-table-readonly-open"]["status"], "complete")
+            self.assertEqual(ios_plan_slots["backup-root-required-files"]["status"], "complete")
+            self.assertEqual(ios_plan_slots["plist-device-status-metadata"]["status"], "complete")
+            self.assertEqual(ios_plan_slots["keychain-linkage-inventory"]["status"], "complete")
+            self.assertEqual(ios_plan_slots["app-database-candidate-map"]["status"], "complete")
+            self.assertEqual(ios_plan_slots["encrypted-backup-authority"]["status"], "complete")
+            self.assertEqual(ios_plan_slots["trusted-ios-backup-parser-diff"]["status"], "pending-cross-tool-validate")
+            self.assertIn("trusted-ios-backup-parser-diff", ios_validation_plan["blocking_slot_ids"])
+            self.assertIn(
+                "trusted-ios-backup-parser-diff-required",
+                ios_validation_plan["commercial_grade_blockers"],
+            )
+            self.assertIn("iOS backup report-grade validation plan", source_ios_gate["satisfied_checks"])
+            self.assertIn("iOS backup validation ready slots", source_ios_gate["satisfied_checks"])
             source_uplift = ios_source["details"]["commercial_uplift_evidence"]
             self.assertEqual(
                 source_uplift["large_data_controls"]["ios_backup_deep_parser_manifest_hash"],
                 deep_manifest["manifest_sha256"],
             )
+            self.assertEqual(
+                source_uplift["large_data_controls"]["ios_backup_report_grade_validation_plan_hash"],
+                ios_validation_plan["manifest_sha256"],
+            )
+            self.assertEqual(source_uplift["large_data_controls"]["ios_backup_report_grade_validation_ready_slot_count"], 7)
+            self.assertEqual(source_uplift["large_data_controls"]["ios_backup_report_grade_validation_blocking_slot_count"], 1)
             self.assertTrue(source_uplift["large_data_controls"]["ios_backup_deep_parser_source_locator_present"])
             source_ios_profiles = {
                 profile["item_number"]: profile for profile in source_uplift["functional_priority_profiles"]
@@ -1036,6 +1080,14 @@ class RapidTriageMobileExportTests(unittest.TestCase):
             )
             self.assertIn(
                 "ios-backup-deep-parser-manifest-emitted",
+                source_ios_profiles[53]["passed_validation_check_ids"],
+            )
+            self.assertEqual(
+                source_ios_profiles[53]["implemented_controls"]["ios_backup_report_grade_validation_plan_hash"],
+                ios_validation_plan["manifest_sha256"],
+            )
+            self.assertIn(
+                "ios-backup-report-grade-validation-plan-emitted",
                 source_ios_profiles[53]["passed_validation_check_ids"],
             )
 

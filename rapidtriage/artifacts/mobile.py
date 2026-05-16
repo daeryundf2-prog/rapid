@@ -80,6 +80,14 @@ MOBILE_VENDOR_EXPORT_REPORT_GRADE_BLOCKERS = [
     "deleted-record-semantics-known-answer-required",
     "original-acquisition-hash-and-export-settings-independent-review-required",
 ]
+IOS_BACKUP_REPORT_GRADE_VALIDATION_PLAN_VERSION = "ios-backup-report-grade-validation-plan-v1"
+IOS_BACKUP_REPORT_GRADE_BLOCKERS = [
+    "trusted-ios-backup-parser-diff-required",
+    "encrypted-backup-unlock-workflow-evidence-required",
+    "application-database-schema-known-answer-required",
+    "deleted-record-semantics-known-answer-required",
+    "independent-ios-backup-review-required",
+]
 IOS_QC_PREP_ITEM_NUMBER = 46
 IOS_QC_PREP_GOAL = (
     "Deepen iOS backup parser for Manifest.db, domains, app DB mapping, SMS, media, and encrypted-backup lawful key workflow."
@@ -5239,6 +5247,15 @@ def collect_ios_manifest_db(path: Path) -> Iterable[ArtifactRecord]:
     validation["status_plist_present"] = bool(root_profile["required_files"].get("Status.plist", {}).get("present"))
     validation["required_backup_files_present"] = bool(root_profile.get("required_files_present"))
     validation["ios_backup_deep_parser_manifest_emitted"] = True
+    report_grade_validation_plan = build_ios_backup_report_grade_validation_plan(
+        manifest_path=path,
+        source_hashes=source_hashes,
+        manifest_rows=manifest_rows,
+        validation=validation,
+        scope_profile=scope_profile,
+        root_profile=root_profile,
+        deep_parser_manifest=deep_parser_manifest,
+    )
     yield build_record(
         path,
         artifact_type="ios-backup-source",
@@ -5254,6 +5271,8 @@ def collect_ios_manifest_db(path: Path) -> Iterable[ArtifactRecord]:
             "ios_backup_root_profile": root_profile,
             "ios_backup_deep_parser_manifest": deep_parser_manifest,
             "ios_backup_deep_parser_manifest_hash": deep_parser_manifest["manifest_sha256"],
+            "ios_backup_report_grade_validation_plan": report_grade_validation_plan,
+            "ios_backup_report_grade_validation_plan_hash": report_grade_validation_plan["manifest_sha256"],
             "validation_checks": validation,
             "commercial_grade_blockers": [
                 "Requires known-answer validation across encrypted/unencrypted backup variants.",
@@ -5609,6 +5628,237 @@ def build_ios_backup_deep_parser_manifest(
         {key: value for key, value in manifest.items() if key != "manifest_sha256"}
     )
     return manifest
+
+
+def build_ios_backup_report_grade_validation_plan(
+    *,
+    manifest_path: Path,
+    source_hashes: Mapping[str, str],
+    manifest_rows: Sequence[Mapping[str, object]],
+    validation: Mapping[str, object],
+    scope_profile: Mapping[str, object],
+    root_profile: Mapping[str, object],
+    deep_parser_manifest: Mapping[str, object],
+) -> dict[str, object]:
+    backup_root = manifest_path.parent
+    output_root = backup_root / "ios-backup-rapidtriage-validation"
+    encrypted_state = optional_text(root_profile.get("encrypted_backup_state"))
+    encrypted_or_unknown = encrypted_state not in {"", "not-indicated"}
+    required_files = root_profile.get("required_files") if isinstance(root_profile.get("required_files"), Mapping) else {}
+    keychain_file = root_profile.get("keychain_file") if isinstance(root_profile.get("keychain_file"), Mapping) else {}
+    manifest_row_count = int(scope_profile.get("manifest_row_count") or len(manifest_rows))
+    app_candidates = (
+        deep_parser_manifest.get("app_database_candidates")
+        if isinstance(deep_parser_manifest.get("app_database_candidates"), Mapping)
+        else {}
+    )
+    validation_commands = [
+        _mobile_vendor_export_validation_command(
+            "source-backup-manifest",
+            ["rapidtriage", "manifest", str(backup_root), "--output", str(output_root / "source-backup-manifest.json")],
+            purpose="Hash the authorized iOS backup root and preserve Manifest.db/plist/keychain source inventory.",
+            expected_output=str(output_root / "source-backup-manifest.json"),
+            status="ready",
+        ),
+        _mobile_vendor_export_validation_command(
+            "ios-backup-import",
+            [
+                "rapidtriage",
+                "artifacts",
+                str(backup_root),
+                "--kind",
+                "mobile-export",
+                "--output",
+                str(output_root / "rapidtriage-ios-backup.json"),
+            ],
+            purpose="Regenerate RapidTriage iOS backup Manifest.db, plist, and keychain inventory rows.",
+            expected_output=str(output_root / "rapidtriage-ios-backup.json"),
+            status="ready",
+        ),
+        _mobile_vendor_export_validation_command(
+            "encrypted-backup-authority-review",
+            [
+                "<analyst>",
+                "attach-encrypted-backup-authority-and-unlock-log",
+                str(backup_root),
+            ],
+            purpose="Attach lawful authority and unlock transcript only if the backup is encrypted or protected payloads are decoded.",
+            expected_output=str(output_root / "encrypted-backup-authority-review.json"),
+            trusted_tool=True,
+            status="complete" if not encrypted_or_unknown else "authority-required",
+        ),
+        _mobile_vendor_export_validation_command(
+            "trusted-ios-backup-parser-diff",
+            [
+                "rapidtriage",
+                "cross-tool-validate",
+                "--rapid-output",
+                str(output_root / "rapidtriage-ios-backup.json"),
+                "--reference-output",
+                "ileapp=<iLEAPP-ios-backup.csv-or-json>",
+                "--reference-output",
+                "cellebrite=<Cellebrite-ios-backup.csv-or-json>",
+                "--backlog-item",
+                "27",
+                "--source-evidence",
+                str(manifest_path),
+                "--tool-version",
+                "ileapp=<version>",
+                "--tool-command",
+                "ileapp=<command>",
+                "--corpus-scope",
+                "<ios-version-encrypted-unencrypted-deleted-record-known-answer-scope>",
+                "--output",
+                str(output_root / "ios-backup-trusted-diff.json"),
+                "--json",
+            ],
+            purpose="Compare Manifest.db file/domain/path rows and app database candidates against trusted iOS parsers.",
+            expected_output=str(output_root / "ios-backup-trusted-diff.json"),
+            trusted_tool=True,
+            status="pending-cross-tool-validate",
+        ),
+    ]
+    evidence_slots = [
+        {
+            "id": "manifest-db-source-integrity",
+            "label": "Manifest.db SHA-256 and read-only source identity",
+            "status": "complete" if source_hashes.get("sha256") else "pending-source-hash",
+            "required_before_report": True,
+            "sha256": source_hashes.get("sha256", ""),
+        },
+        {
+            "id": "manifest-files-table-readonly-open",
+            "label": "Manifest.db Files table opened read-only",
+            "status": "complete"
+            if validation.get("opened_readonly") and validation.get("files_table_present")
+            else "review-required",
+            "required_before_report": True,
+            "manifest_row_count": manifest_row_count,
+            "row_limit": MAX_IOS_BACKUP_FILES,
+            "truncated_by_row_limit": bool(scope_profile.get("truncated_by_row_limit")),
+        },
+        {
+            "id": "backup-root-required-files",
+            "label": "Manifest.db, Info.plist, and Status.plist presence and hashes",
+            "status": "complete" if root_profile.get("required_files_present") else "missing-required-files",
+            "required_before_report": True,
+            "required_files": dict(required_files),
+            "missing_required_files": list(root_profile.get("missing_required_files") or []),
+        },
+        {
+            "id": "plist-device-status-metadata",
+            "label": "Info/Status plist device and backup status metadata",
+            "status": "complete"
+            if validation.get("info_plist_present") and validation.get("status_plist_present")
+            else "review-required",
+            "required_before_report": True,
+            "device_name": optional_text(root_profile.get("device_name")),
+            "product_version": optional_text(root_profile.get("product_version")),
+            "snapshot_state": optional_text(root_profile.get("snapshot_state")),
+            "is_full_backup": bool(root_profile.get("is_full_backup")),
+        },
+        {
+            "id": "keychain-linkage-inventory",
+            "label": "keychain-2.db presence recorded without secret reveal",
+            "status": "complete" if keychain_file.get("present") else "not-present-or-not-exported",
+            "required_before_report": False,
+            "keychain_file": dict(keychain_file),
+            "secret_values_revealed": False,
+        },
+        {
+            "id": "app-database-candidate-map",
+            "label": "App database/message/media candidate map from Manifest.db",
+            "status": "complete" if deep_parser_manifest.get("manifest_sha256") else "pending-deep-parser-manifest",
+            "required_before_report": True,
+            "deep_parser_manifest_sha256": optional_text(deep_parser_manifest.get("manifest_sha256")),
+            "candidate_count": int(app_candidates.get("candidate_count") or 0),
+            "message_store_candidate_count": int(app_candidates.get("message_store_candidate_count") or 0),
+        },
+        {
+            "id": "encrypted-backup-authority",
+            "label": "Encrypted/protected backup lawful authority and unlock transcript",
+            "status": "complete" if not encrypted_or_unknown else "authority-required",
+            "required_before_report": encrypted_or_unknown,
+            "encrypted_backup_state": encrypted_state or "not-indicated",
+            "protected_payload_decode_performed": False,
+        },
+        {
+            "id": "trusted-ios-backup-parser-diff",
+            "label": "Trusted iLEAPP/Cellebrite/AXIOM Manifest.db row diff",
+            "status": "pending-cross-tool-validate",
+            "required_before_report": True,
+            "required_fields": [
+                "file_id",
+                "domain",
+                "relative_path",
+                "logical_path",
+                "protection_class",
+                "file_size",
+                "app_database_candidate",
+            ],
+        },
+        {
+            "id": "app-database-schema-known-answer",
+            "label": "SMS/media/app DB schema known-answer corpus",
+            "status": "external-corpus-required",
+            "required_before_commercial_grade": True,
+            "minimum_cases": ["sms.db", "Photos/media", "Safari/browser", "third-party AppDomain database"],
+        },
+        {
+            "id": "deleted-record-semantics-corpus",
+            "label": "Deleted/edited row and protected-data class known-answer corpus",
+            "status": "external-corpus-required",
+            "required_before_commercial_grade": True,
+            "minimum_cases": ["live row", "deleted row", "WAL/SHM residue", "protected class boundary"],
+        },
+        {
+            "id": "independent-ios-backup-review",
+            "label": "Independent review of backup acquisition, unlock, and parser diff procedure",
+            "status": "external-review-required",
+            "required_before_commercial_grade": True,
+            "required_materials": ["backup acquisition log", "Manifest.db hash", "trusted diff", "authority record if encrypted"],
+        },
+    ]
+    ready_slots = [slot["id"] for slot in evidence_slots if str(slot.get("status", "")).startswith("complete")]
+    blocker_slots = [
+        slot["id"]
+        for slot in evidence_slots
+        if slot.get("required_before_report") and not str(slot.get("status", "")).startswith("complete")
+    ]
+    payload: dict[str, object] = {
+        "profile_version": IOS_BACKUP_REPORT_GRADE_VALIDATION_PLAN_VERSION,
+        "item_number": 27,
+        "gap_id": "#27",
+        "source_path": str(manifest_path.resolve()),
+        "backup_root": str(backup_root.resolve()),
+        "source_hashes": dict(source_hashes),
+        "status": "report-validation-blocked" if blocker_slots else "ready-for-report-review",
+        "commercial_grade_ready": False,
+        "scope_profile": dict(scope_profile),
+        "root_profile": dict(root_profile),
+        "ios_backup_deep_parser_manifest_hash": optional_text(deep_parser_manifest.get("manifest_sha256")),
+        "validation_commands": validation_commands,
+        "evidence_slots": evidence_slots,
+        "ready_slot_ids": ready_slots,
+        "blocking_slot_ids": blocker_slots,
+        "report_claim_boundary": (
+            "This plan can make Manifest.db/plist inventory reviewable when report-required slots pass; "
+            "it is not proof of decrypted protected file content, app database semantics, deleted-record recovery, "
+            "or complete device acquisition without trusted parser diffs and authority evidence."
+        ),
+        "commercial_grade_blockers": list(IOS_BACKUP_REPORT_GRADE_BLOCKERS),
+        "operator_next_steps": [
+            "Preserve the original iOS backup folder and hash Manifest.db before import.",
+            "Regenerate RapidTriage iOS backup rows from the backup root.",
+            "Run trusted iLEAPP/Cellebrite/AXIOM diff for Manifest.db file/domain/path rows.",
+            "Attach encrypted-backup authority and unlock logs only when protected payload decoding is performed.",
+            "Attach app DB/deleted-record known-answer fixtures before commercial-grade wording.",
+        ],
+    }
+    payload["manifest_sha256"] = stable_mobile_sha256(
+        {key: value for key, value in payload.items() if key != "manifest_sha256"}
+    )
+    return payload
 
 
 def ios_backup_root_file_profile(path: Path) -> dict[str, object]:
@@ -6264,6 +6514,11 @@ def mobile_functional_expansion_profiles(
         if isinstance(details.get("ios_backup_deep_parser_manifest"), Mapping)
         else {}
     )
+    ios_validation_plan = (
+        details.get("ios_backup_report_grade_validation_plan")
+        if isinstance(details.get("ios_backup_report_grade_validation_plan"), Mapping)
+        else {}
+    )
     ios_keychain_deep_manifest = (
         details.get("ios_keychain_deep_inventory_manifest")
         if isinstance(details.get("ios_keychain_deep_inventory_manifest"), Mapping)
@@ -6360,6 +6615,10 @@ def mobile_functional_expansion_profiles(
                         ios_deep_parser_manifest.get("manifest_sha256")
                     ),
                     "ios_backup_deep_parser_manifest_emitted": bool(ios_deep_parser_manifest),
+                    "ios_backup_report_grade_validation_plan_hash": optional_text(
+                        ios_validation_plan.get("manifest_sha256")
+                    ),
+                    "ios_backup_report_grade_validation_plan_emitted": bool(ios_validation_plan),
                     "ios_keychain_deep_inventory_manifest_hash": optional_text(
                         ios_keychain_deep_manifest.get("manifest_sha256")
                     ),
@@ -6376,6 +6635,8 @@ def mobile_functional_expansion_profiles(
                         "ios-backup-parser-manifest-not-emitted": not ios_parser_manifest,
                         "ios-backup-deep-parser-manifest-not-emitted": artifact_type == "ios-backup-source"
                         and not ios_deep_parser_manifest,
+                        "ios-backup-report-grade-validation-plan-not-emitted": artifact_type == "ios-backup-source"
+                        and not ios_validation_plan,
                         "ios-keychain-deep-inventory-manifest-not-emitted": artifact_type == "ios-keychain-inventory"
                         and not ios_keychain_deep_manifest,
                         "keychain-secret-reveal-authority-not-attached": artifact_type == "ios-keychain-inventory"
@@ -6391,6 +6652,7 @@ def mobile_functional_expansion_profiles(
                             ios_parser_manifest.get("source_viewer_locator"), Mapping
                         ),
                         "ios-backup-deep-parser-manifest-emitted": bool(ios_deep_parser_manifest),
+                        "ios-backup-report-grade-validation-plan-emitted": bool(ios_validation_plan),
                         "ios-keychain-deep-inventory-manifest-emitted": bool(ios_keychain_deep_manifest),
                         "ios-protected-values-redacted": not validation_checks.get("secrets_extracted"),
                     }.items()
@@ -6515,6 +6777,11 @@ def mobile_commercial_uplift_evidence(
         if isinstance(details.get("ios_backup_deep_parser_manifest"), Mapping)
         else {}
     )
+    ios_validation_plan = (
+        details.get("ios_backup_report_grade_validation_plan")
+        if isinstance(details.get("ios_backup_report_grade_validation_plan"), Mapping)
+        else {}
+    )
     ios_keychain_deep_manifest = (
         details.get("ios_keychain_deep_inventory_manifest")
         if isinstance(details.get("ios_keychain_deep_inventory_manifest"), Mapping)
@@ -6599,6 +6866,19 @@ def mobile_commercial_uplift_evidence(
             "ios_backup_deep_parser_source_locator_present": isinstance(
                 ios_deep_parser_manifest.get("source_viewer_locator"), Mapping
             ),
+            "ios_backup_report_grade_validation_plan_hash": optional_text(
+                ios_validation_plan.get("manifest_sha256")
+            ),
+            "ios_backup_report_grade_validation_ready_slot_count": len(
+                ios_validation_plan.get("ready_slot_ids") or []
+            )
+            if isinstance(ios_validation_plan.get("ready_slot_ids"), list)
+            else 0,
+            "ios_backup_report_grade_validation_blocking_slot_count": len(
+                ios_validation_plan.get("blocking_slot_ids") or []
+            )
+            if isinstance(ios_validation_plan.get("blocking_slot_ids"), list)
+            else 0,
             "ios_keychain_deep_inventory_manifest_hash": optional_text(
                 ios_keychain_deep_manifest.get("manifest_sha256")
             ),
@@ -6742,6 +7022,11 @@ def mobile_core_accuracy_gates(
         manifest_hash = optional_text(ios_deep_manifest.get("manifest_sha256"))
         if manifest_hash:
             evidence_refs.append(f"ios_backup_deep_parser_manifest_sha256:{manifest_hash}")
+    ios_validation_plan = details.get("ios_backup_report_grade_validation_plan")
+    if isinstance(ios_validation_plan, Mapping):
+        manifest_hash = optional_text(ios_validation_plan.get("manifest_sha256"))
+        if manifest_hash:
+            evidence_refs.append(f"ios_backup_report_grade_validation_plan_sha256:{manifest_hash}")
     ios_keychain_manifest = details.get("ios_keychain_deep_inventory_manifest")
     if isinstance(ios_keychain_manifest, Mapping):
         manifest_hash = optional_text(ios_keychain_manifest.get("manifest_sha256"))
@@ -6798,6 +7083,10 @@ def mobile_core_accuracy_gates(
             satisfied.append("iOS backup deep parser manifest")
             if isinstance(ios_deep_manifest.get("source_viewer_locator"), Mapping):
                 satisfied.append("iOS backup deep parser source locator")
+        if isinstance(ios_validation_plan, Mapping):
+            satisfied.append("iOS backup report-grade validation plan")
+            if ios_validation_plan.get("ready_slot_ids"):
+                satisfied.append("iOS backup validation ready slots")
         if artifact_type == "ios-backup-source" and validation.get("manifest_db_present"):
             satisfied.append("Manifest.db domain/fileID mapping")
         if artifact_type == "ios-backup-metadata" and validation.get("plist_parseable"):
