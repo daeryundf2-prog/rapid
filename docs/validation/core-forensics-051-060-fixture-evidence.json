@@ -73,9 +73,9 @@
       "title": "OCR queue manager",
       "test_files": ["tests/test_rapidtriage_ocr_queue.py", "tests/test_rapidtriage_media_image.py"],
       "assertions": [
-        "OCR queue/manifests and source preview queue pages preserve queue items, sidecar hashes, retry state, metadata, copy-safe queue citations, native OCR warnings, trusted OCR engine/sidecar diff gates, #58 core_accuracy_gates, and reportability blockers for missing OCR engine logs, retry history, version capture, confidence calibration, Case DB queue persistence, and trusted OCR evidence."
+        "OCR queue/manifests and source preview queue pages preserve queue items, sidecar hashes, retry state, metadata, copy-safe queue citations, ocr_queue_report_grade_validation_plan ready/blocking slots, source_ocr_queue_report_grade_validation_plan ready/blocking slots, native OCR warnings, trusted OCR engine/sidecar diff gates, #58 core_accuracy_gates, and reportability blockers for missing OCR engine logs, retry history, version capture, confidence calibration, Case DB queue persistence, and trusted OCR evidence."
       ],
-      "remaining_external_validation": ["Native OCR worker execution, engine/version logs, trusted engine/sidecar diff, and per-case web queue persistence."]
+      "remaining_external_validation": ["Native OCR worker execution, engine retry/version logs, confidence calibration corpus, trusted engine/sidecar diff, and per-case web queue persistence."]
     },
     {
       "item": 59,

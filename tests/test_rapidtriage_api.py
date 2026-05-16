@@ -2529,6 +2529,26 @@ class RapidTriageApiTests(unittest.TestCase):
                 "source-ocr-queue-page",
             )
             self.assertGreaterEqual(ocr_queue["source_ocr_queue_page_manifest"]["page_row_hash_count"], 1)
+            self.assertEqual(
+                ocr_queue["ocr_queue_report_grade_validation_plan"]["profile_version"],
+                "ocr-queue-report-grade-validation-plan-v1",
+            )
+            self.assertEqual(
+                ocr_queue["ocr_queue_report_grade_validation_plan_hash"],
+                ocr_queue["ocr_queue_report_grade_validation_plan"]["validation_plan_sha256"],
+            )
+            self.assertEqual(ocr_queue["ocr_queue_report_grade_validation_plan"]["ready_slot_count"], 6)
+            self.assertEqual(ocr_queue["ocr_queue_report_grade_validation_plan"]["blocking_slot_count"], 6)
+            self.assertEqual(
+                ocr_queue["source_ocr_queue_report_grade_validation_plan_hash"],
+                ocr_queue["source_ocr_queue_report_grade_validation_plan"]["validation_plan_sha256"],
+            )
+            self.assertEqual(ocr_queue["source_ocr_queue_report_grade_validation_plan"]["ready_slot_count"], 6)
+            self.assertIn("OCR queue report-grade validation plan", ocr_queue["core_accuracy_gates"][0]["satisfied_checks"])
+            self.assertEqual(
+                ocr_queue["commercial_uplift_evidence"]["large_data_controls"]["source_ocr_queue_report_grade_ready_slot_count"],
+                6,
+            )
             self.assertIn("sidecar_imported", json.dumps(ocr_queue, ensure_ascii=False).replace("-", "_"))
             self.assertIn("anchor_queue_id", ocr_queue["copy_safe_citation"]["text"])
             translation_response = client.get(

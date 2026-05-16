@@ -47,16 +47,33 @@ class RapidTriageOcrQueueTests(unittest.TestCase):
             self.assertEqual(payload["ocr_queue_manifest_hash"], payload["ocr_queue_manifest"]["manifest_hash"])
             self.assertEqual(payload["ocr_queue_manifest"]["source_viewer_locator"]["viewer"], "source-ocr-queue")
             self.assertEqual(payload["ocr_queue_manifest"]["queue_item_row_hash_count"], 1)
+            queue_plan = payload["ocr_queue_report_grade_validation_plan"]
+            self.assertEqual(queue_plan["profile_version"], "ocr-queue-report-grade-validation-plan-v1")
+            self.assertEqual(queue_plan["item_number"], 58)
+            self.assertEqual(queue_plan["gap_id"], "#58")
+            self.assertEqual(payload["ocr_queue_report_grade_validation_plan_hash"], queue_plan["validation_plan_sha256"])
+            self.assertEqual(queue_plan["ready_slot_count"], 6)
+            self.assertEqual(queue_plan["blocking_slot_count"], 6)
+            self.assertIn("ocr-queue-trusted-engine-log-diff-required", queue_plan["blockers"])
+            self.assertIn("OCR queue report-grade validation plan", queue_gates["#58"]["satisfied_checks"])
+            self.assertIn("OCR queue report-grade ready slots", queue_gates["#58"]["satisfied_checks"])
             queue_uplift = payload["commercial_uplift_evidence"]
             self.assertEqual(queue_uplift["batch_id"], "commercial-uplift-056-060")
             self.assertEqual(queue_uplift["item_numbers"], [58, 59])
             self.assertIn("sidecar import and hashes", queue_uplift["passed_validation_check_ids_by_item"]["#58"])
             self.assertIn("queue manifest hash emitted", queue_uplift["passed_validation_check_ids_by_item"]["#58"])
             self.assertIn("queue item row hashes", queue_uplift["passed_validation_check_ids_by_item"]["#58"])
+            self.assertIn("OCR queue report-grade validation plan", queue_uplift["passed_validation_check_ids_by_item"]["#58"])
             self.assertIn("Korean language hinting", queue_uplift["passed_validation_check_ids_by_item"]["#59"])
             self.assertFalse(queue_uplift["large_data_controls"]["native_ocr_engine_execution"])
             self.assertEqual(queue_uplift["large_data_controls"]["ocr_queue_manifest_hash"], payload["ocr_queue_manifest_hash"])
             self.assertEqual(queue_uplift["large_data_controls"]["queue_item_row_hash_count"], 1)
+            self.assertTrue(queue_uplift["large_data_controls"]["ocr_queue_report_grade_validation_plan_present"])
+            self.assertEqual(queue_uplift["large_data_controls"]["ocr_queue_report_grade_ready_slot_count"], 6)
+            self.assertEqual(
+                queue_uplift["large_data_controls"]["ocr_queue_report_grade_validation_plan_hash"],
+                queue_plan["validation_plan_sha256"],
+            )
             self.assertEqual(payload["trusted_ocr_queue_diffs"]["58"]["status"], "missing")
             self.assertIn(
                 "#58:ocr-queue-trusted-engine-log-diff-required",
@@ -140,6 +157,7 @@ class RapidTriageOcrQueueTests(unittest.TestCase):
             self.assertEqual(payload["items"][0]["attempt_count"], 2)
             self.assertIn("#58", payload["items"][0]["report_grade_assessment"]["commercial_gap_ids"])
             self.assertEqual(payload["core_accuracy_gates"][0]["gap_id"], "#58")
+            self.assertEqual(payload["ocr_queue_report_grade_validation_plan"]["ready_slot_count"], 6)
 
     def test_ocr_queue_trusted_diffs_control_core_accuracy_gates(self) -> None:
         row = {

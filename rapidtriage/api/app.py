@@ -61,7 +61,7 @@ from ..core.source_reader import (
     parse_archived_source_request,
 )
 from ..core.submission import compute_hashes, build_submission_manifest
-from ..core.ocr_queue import OcrQueueError, build_ocr_queue
+from ..core.ocr_queue import OcrQueueError, build_ocr_queue, build_ocr_queue_report_grade_validation_plan
 from ..core.sqlite_wal import SqliteWalPreviewError, build_sqlite_wal_preview
 from ..core.visible_capabilities import build_visible_capability_response
 
@@ -6086,8 +6086,22 @@ def build_source_ocr_queue(*, run_id: str, anchor_path: Path, max_items: int, re
     )
     queue["source_ocr_queue_page_manifest"] = page_manifest
     queue["source_ocr_queue_page_manifest_hash"] = page_manifest["manifest_hash"]
+    page_validation_plan = build_ocr_queue_report_grade_validation_plan(
+        context="source-ocr-queue-page",
+        root=Path(str(queue.get("root") or anchor_path.parent)),
+        items=items,
+        queue_manifest=queue.get("ocr_queue_manifest") if isinstance(queue.get("ocr_queue_manifest"), Mapping) else {},
+        page_manifest=page_manifest,
+        trusted_diffs=queue.get("trusted_ocr_queue_diffs") if isinstance(queue.get("trusted_ocr_queue_diffs"), Mapping) else {},
+    )
+    queue["source_ocr_queue_report_grade_validation_plan"] = page_validation_plan
+    queue["source_ocr_queue_report_grade_validation_plan_hash"] = page_validation_plan["validation_plan_sha256"]
     if isinstance(queue.get("commercial_uplift_evidence"), dict):
-        queue["commercial_uplift_evidence"]["large_data_controls"]["source_ocr_queue_page_manifest_hash"] = page_manifest["manifest_hash"]
+        controls = queue["commercial_uplift_evidence"]["large_data_controls"]
+        controls["source_ocr_queue_page_manifest_hash"] = page_manifest["manifest_hash"]
+        controls["source_ocr_queue_report_grade_validation_plan_hash"] = page_validation_plan["validation_plan_sha256"]
+        controls["source_ocr_queue_report_grade_ready_slot_count"] = page_validation_plan["ready_slot_count"]
+        controls["source_ocr_queue_report_grade_blocking_slot_count"] = page_validation_plan["blocking_slot_count"]
     queue["copy_safe_citation"] = {
         "text": (
             f"OCR queue scope={anchor_path.parent.name}; anchor={anchor_path.name}; "

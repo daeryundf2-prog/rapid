@@ -44,6 +44,15 @@ OCR_QUEUE_REPORT_GRADE_BLOCKERS = [
     "translation-sidecars-are-review-aids-not-certified-translations",
     "sidecar-provenance-and-hashes-must-be-preserved-for-reporting",
 ]
+OCR_QUEUE_REPORT_GRADE_VALIDATION_PLAN_VERSION = "ocr-queue-report-grade-validation-plan-v1"
+OCR_QUEUE_REPORT_GRADE_VALIDATION_BLOCKERS = [
+    "native-ocr-engine-execution-required",
+    "engine-specific-retry-logs-required",
+    "ocr-engine-version-capture-required",
+    "confidence-calibration-corpus-required",
+    "case-db-ocr-job-persistence-required",
+    "ocr-queue-trusted-engine-log-diff-required",
+]
 OCR_QUEUE_TRUSTED_DIFF_BLOCKERS = {
     58: "ocr-queue-trusted-engine-log-diff-required",
     59: "korean-ocr-translation-trusted-review-diff-required",
@@ -116,11 +125,19 @@ def build_ocr_queue(
         status_counts=status_counts,
         language_counts=language_counts,
     )
+    validation_plan = build_ocr_queue_report_grade_validation_plan(
+        context="ocr-queue-command",
+        root=resolved_root,
+        items=items,
+        queue_manifest=queue_manifest,
+        trusted_diffs=trusted_diffs,
+    )
     core_accuracy_gates = ocr_queue_core_accuracy_gates(
         items=items,
         root=resolved_root,
         queue_manifest=queue_manifest,
         trusted_diffs=trusted_diffs,
+        validation_plan=validation_plan,
     )
     return {
         "command": "ocr-queue",
@@ -143,12 +160,15 @@ def build_ocr_queue(
         "trusted_ocr_queue_diffs": trusted_diffs,
         "ocr_queue_manifest": queue_manifest,
         "ocr_queue_manifest_hash": queue_manifest["manifest_hash"],
+        "ocr_queue_report_grade_validation_plan": validation_plan,
+        "ocr_queue_report_grade_validation_plan_hash": validation_plan["validation_plan_sha256"],
         "core_accuracy_gates": core_accuracy_gates,
         "commercial_uplift_evidence": ocr_queue_commercial_uplift_evidence(
             items=items,
             root=resolved_root,
             queue_manifest=queue_manifest,
             core_accuracy_gates=core_accuracy_gates,
+            validation_plan=validation_plan,
         ),
         "items": items,
         "review_guidance": [
@@ -287,6 +307,186 @@ def build_ocr_queue_manifest(
     return {**manifest_core, "manifest_hash": stable_payload_sha256(manifest_core)}
 
 
+def build_ocr_queue_report_grade_validation_plan(
+    *,
+    context: str,
+    root: Path,
+    items: Sequence[Mapping[str, object]],
+    queue_manifest: Mapping[str, object] | None = None,
+    page_manifest: Mapping[str, object] | None = None,
+    trusted_diffs: Mapping[str, object] | None = None,
+) -> dict[str, object]:
+    queue_manifest = queue_manifest if isinstance(queue_manifest, Mapping) else {}
+    page_manifest = page_manifest if isinstance(page_manifest, Mapping) else {}
+    trusted_diffs = trusted_diffs if isinstance(trusted_diffs, Mapping) else {}
+
+    def slot(
+        slot_id: str,
+        *,
+        ready: bool,
+        evidence: str,
+        blocker_id: str | None = None,
+        operator_action: str = "",
+    ) -> dict[str, object]:
+        row: dict[str, object] = {
+            "slot_id": slot_id,
+            "status": "complete" if ready else "external-required",
+            "evidence": evidence,
+        }
+        if blocker_id and not ready:
+            row["blocker_id"] = blocker_id
+        if operator_action:
+            row["operator_action"] = operator_action
+        return row
+
+    item_count = len(items)
+    sidecar_count = sum(1 for item in items if isinstance(item.get("sidecar"), Mapping) and item["sidecar"].get("sha256"))
+    queued_count = sum(1 for item in items if str(item.get("status") or "") == "queued")
+    retry_count = sum(1 for item in items if str(item.get("status") or "") == "failed-retry-queued" or item.get("previous_status"))
+    metadata_count = sum(1 for item in items if isinstance(item.get("sidecar"), Mapping) and item["sidecar"].get("metadata"))
+    confidence_count = sum(1 for item in items if item.get("confidence") is not None)
+    queue_manifest_hash = str(queue_manifest.get("manifest_hash") or "")
+    page_manifest_hash = str(page_manifest.get("manifest_hash") or "")
+    queue_item_row_hash_count = int(queue_manifest.get("queue_item_row_hash_count") or 0)
+    page_row_hash_count = int(page_manifest.get("page_row_hash_count") or 0)
+    trusted_diff_58 = trusted_diffs.get("58") if isinstance(trusted_diffs.get("58"), Mapping) else {}
+    validation_slots = [
+        slot(
+            "ocr-queue-item-generation",
+            ready=item_count > 0,
+            evidence=f"item_count={item_count}",
+            blocker_id="ocr-queue-item-generation-required",
+            operator_action="Build at least one OCR queue item from image candidates.",
+        ),
+        slot(
+            "ocr-sidecar-or-queued-state-preservation",
+            ready=sidecar_count > 0 or queued_count > 0 or retry_count > 0,
+            evidence=f"sidecar_count={sidecar_count} queued_count={queued_count} retry_count={retry_count}",
+            blocker_id="ocr-sidecar-or-queued-state-preservation-required",
+            operator_action="Preserve sidecar hashes or explicit queued/retry states for every item.",
+        ),
+        slot(
+            "ocr-retry-state-profile",
+            ready=bool(queue_manifest.get("options")) or retry_count > 0,
+            evidence=f"options_present={bool(queue_manifest.get('options'))} retry_count={retry_count}",
+            blocker_id="ocr-retry-state-profile-required",
+            operator_action="Record retry options and previous failure state for rerunnable OCR work.",
+        ),
+        slot(
+            "ocr-language-confidence-metadata",
+            ready=metadata_count > 0 or confidence_count > 0 or any(item.get("language_hint") for item in items),
+            evidence=f"metadata_count={metadata_count} confidence_count={confidence_count}",
+            blocker_id="ocr-language-confidence-metadata-required",
+            operator_action="Preserve language hints, confidence, and engine metadata when sidecars provide them.",
+        ),
+        slot(
+            "ocr-queue-manifest-hashes",
+            ready=bool(queue_manifest_hash) and queue_item_row_hash_count > 0,
+            evidence=f"queue_manifest_hash={queue_manifest_hash} queue_item_row_hash_count={queue_item_row_hash_count}",
+            blocker_id="ocr-queue-manifest-hashes-required",
+            operator_action="Attach OCR queue manifest hashes and queue item row hashes.",
+        ),
+        slot(
+            "ocr-source-viewer-or-page-manifest",
+            ready=bool(queue_manifest.get("source_viewer_locator")) or bool(page_manifest_hash),
+            evidence=f"source_viewer_locator={bool(queue_manifest.get('source_viewer_locator'))} page_manifest_hash={page_manifest_hash}",
+            blocker_id="ocr-source-viewer-or-page-manifest-required",
+            operator_action="Expose queue/page source-viewer locators for reviewer navigation.",
+        ),
+        slot(
+            "ocr-native-engine-execution",
+            ready=False,
+            evidence="native_ocr_engine_execution=false",
+            blocker_id="native-ocr-engine-execution-required",
+            operator_action="Run a native OCR worker or attach external engine execution logs with source hashes.",
+        ),
+        slot(
+            "ocr-engine-specific-retry-logs",
+            ready=False,
+            evidence="engine_specific_retry_logs=false",
+            blocker_id="engine-specific-retry-logs-required",
+            operator_action="Persist per-engine retry/failure logs and language-pack remediation details.",
+        ),
+        slot(
+            "ocr-engine-version-capture",
+            ready=False,
+            evidence="ocr_engine_version_capture=false",
+            blocker_id="ocr-engine-version-capture-required",
+            operator_action="Capture OCR engine path/version/language-pack versions for every execution.",
+        ),
+        slot(
+            "ocr-confidence-calibration-corpus",
+            ready=False,
+            evidence="confidence_calibration_corpus=false",
+            blocker_id="confidence-calibration-corpus-required",
+            operator_action="Validate confidence and language hints against a known-answer OCR corpus.",
+        ),
+        slot(
+            "ocr-case-db-job-persistence",
+            ready=False,
+            evidence="case_db_ocr_job_persistence=false",
+            blocker_id="case-db-ocr-job-persistence-required",
+            operator_action="Persist OCR job state, review marks, retries, and engine outputs in Case DB.",
+        ),
+        slot(
+            "ocr-trusted-engine-sidecar-diff",
+            ready=trusted_diff_58.get("status") == "pass",
+            evidence=f"trusted_diff_status={trusted_diff_58.get('status', 'missing')}",
+            blocker_id=OCR_QUEUE_TRUSTED_DIFF_BLOCKERS[58],
+            operator_action="Compare queue rows and sidecar hashes against trusted OCR engine/ground-truth manifests.",
+        ),
+    ]
+    blockers = sorted(
+        str(slot_row.get("blocker_id"))
+        for slot_row in validation_slots
+        if slot_row.get("status") != "complete" and slot_row.get("blocker_id")
+    )
+    ready_slot_count = sum(1 for slot_row in validation_slots if slot_row.get("status") == "complete")
+    plan_core: dict[str, object] = {
+        "profile_version": OCR_QUEUE_REPORT_GRADE_VALIDATION_PLAN_VERSION,
+        "item_number": 58,
+        "gap_id": "#58",
+        "batch_id": "commercial-uplift-056-060",
+        "selected_track": "ocr-queue-manager-report-validation",
+        "context": context,
+        "root": str(root),
+        "item_count": item_count,
+        "sidecar_count": sidecar_count,
+        "queued_count": queued_count,
+        "retry_count": retry_count,
+        "metadata_count": metadata_count,
+        "confidence_count": confidence_count,
+        "queue_manifest_hash": queue_manifest_hash,
+        "page_manifest_hash": page_manifest_hash,
+        "queue_item_row_hash_count": queue_item_row_hash_count,
+        "page_row_hash_count": page_row_hash_count,
+        "trusted_diff_status": str(trusted_diff_58.get("status") or "missing"),
+        "ready_slot_count": ready_slot_count,
+        "blocking_slot_count": len(blockers),
+        "validation_status": "report-validation-blocked",
+        "commercial_grade": False,
+        "commercial_grade_ready": False,
+        "validation_slots": validation_slots,
+        "blockers": blockers,
+        "commercial_grade_blockers": list(OCR_QUEUE_REPORT_GRADE_VALIDATION_BLOCKERS),
+        "validation_commands": [
+            "rapidtriage ocr-queue <image-folder> --json",
+            "GET /api/runs/<run_id>/source-ocr-queue?path=<image-path>&max_items=<n>",
+            "rapidtriage commercial-readiness --validation-package docs/validation/rapidtriage-core-forensics-051-060-known-answer.json --limit 58 --json",
+        ],
+        "report_guidance": {
+            "allowed_use": "ocr-sidecar-and-queue-triage-pivot",
+            "forbidden_claim": "native OCR engine, retry-log, or confidence-calibrated complete analysis",
+            "required_disclaimer": (
+                "OCR queue output is a sidecar/job coordination aid until native or external OCR engine logs, retry "
+                "history, engine versions, confidence calibration, Case DB job persistence, and trusted queue/sidecar "
+                "diff evidence are attached."
+            ),
+        },
+    }
+    return {**plan_core, "validation_plan_sha256": stable_payload_sha256(plan_core)}
+
+
 def build_ocr_queue_item_manifest(item: Mapping[str, object]) -> dict[str, object]:
     sidecar = item.get("sidecar") if isinstance(item.get("sidecar"), Mapping) else {}
     translation = item.get("translation_sidecar") if isinstance(item.get("translation_sidecar"), Mapping) else {}
@@ -334,11 +534,17 @@ def ocr_queue_core_accuracy_gates(
     root: Path,
     queue_manifest: Mapping[str, object] | None = None,
     trusted_diffs: Mapping[str, object] | None = None,
+    validation_plan: Mapping[str, object] | None = None,
 ) -> list[dict[str, object]]:
     evidence_refs = [f"root:{root}", f"candidate_count:{len(items)}"]
     queue_manifest = queue_manifest if isinstance(queue_manifest, Mapping) else {}
     if queue_manifest.get("manifest_hash"):
         evidence_refs.append(f"ocr_queue_manifest_hash:{queue_manifest.get('manifest_hash')}")
+    validation_plan = validation_plan if isinstance(validation_plan, Mapping) else {}
+    if validation_plan.get("validation_plan_sha256"):
+        evidence_refs.append(f"ocr_queue_report_grade_validation_plan_sha256:{validation_plan.get('validation_plan_sha256')}")
+        evidence_refs.append(f"ocr_queue_report_grade_ready_slot_count:{validation_plan.get('ready_slot_count', 0)}")
+        evidence_refs.append(f"ocr_queue_report_grade_blocking_slot_count:{validation_plan.get('blocking_slot_count', 0)}")
     trusted_diffs = trusted_diffs if isinstance(trusted_diffs, Mapping) else {}
     for number in (58, 59):
         diff = trusted_diffs.get(str(number)) if isinstance(trusted_diffs.get(str(number)), Mapping) else {}
@@ -367,6 +573,10 @@ def ocr_queue_core_accuracy_gates(
         item58.append("native OCR limitation warning")
     if trusted_ocr_queue_diff_passed(trusted_diffs, 58):
         item58.append(OCR_QUEUE_TRUSTED_DIFF_CHECKS[58])
+    if validation_plan.get("validation_plan_sha256"):
+        item58.append("OCR queue report-grade validation plan")
+    if int(validation_plan.get("ready_slot_count") or 0) >= 6:
+        item58.append("OCR queue report-grade ready slots")
 
     item59 = []
     if any("ko" in str(item.get("language_hint", "")).lower() or "kor" in str(item.get("language_hint", "")).lower() for item in items):
@@ -394,6 +604,7 @@ def ocr_queue_commercial_uplift_evidence(
     root: Path,
     queue_manifest: Mapping[str, object] | None = None,
     core_accuracy_gates: list[dict[str, object]],
+    validation_plan: Mapping[str, object] | None = None,
 ) -> dict[str, object]:
     passed_by_item = {
         str(gate.get("gap_id")): list(gate.get("satisfied_checks") or [])
@@ -401,11 +612,16 @@ def ocr_queue_commercial_uplift_evidence(
         if str(gate.get("gap_id")) in {"#58", "#59"}
     }
     queue_manifest = queue_manifest if isinstance(queue_manifest, Mapping) else {}
+    validation_plan = validation_plan if isinstance(validation_plan, Mapping) else {}
     return {
         "batch_id": "commercial-uplift-056-060",
         "item_numbers": [58, 59],
         "implementation_track": "ocr-queue-korean-translation-gates",
-        "source_refs": [f"root:{root}", f"candidate_count:{len(items)}"],
+        "source_refs": [
+            f"root:{root}",
+            f"candidate_count:{len(items)}",
+            f"ocr_queue_report_grade_validation_plan_sha256:{validation_plan.get('validation_plan_sha256', '')}",
+        ],
         "reportability_decision": ocr_queue_reportability_decision(
             failed_by_item={
                 "#58": [
@@ -448,6 +664,10 @@ def ocr_queue_commercial_uplift_evidence(
             "failed_retry_queued_count": sum(1 for item in items if str(item.get("status")) == "failed-retry-queued"),
             "ocr_queue_manifest_hash": str(queue_manifest.get("manifest_hash") or ""),
             "queue_item_row_hash_count": int(queue_manifest.get("queue_item_row_hash_count") or 0),
+            "ocr_queue_report_grade_validation_plan_present": bool(validation_plan.get("validation_plan_sha256")),
+            "ocr_queue_report_grade_validation_plan_hash": str(validation_plan.get("validation_plan_sha256") or ""),
+            "ocr_queue_report_grade_ready_slot_count": int(validation_plan.get("ready_slot_count") or 0),
+            "ocr_queue_report_grade_blocking_slot_count": int(validation_plan.get("blocking_slot_count") or 0),
             "native_ocr_engine_execution": False,
             "case_db_job_persistence": False,
         },

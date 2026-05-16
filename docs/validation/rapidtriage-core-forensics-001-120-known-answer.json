@@ -1418,10 +1418,10 @@
       ],
       "expected": {
         "required_assertions": [
-          "OCR queue preserves queue items, sidecar hashes, retry state, engine metadata, native OCR warning, and #58 core_accuracy_gates."
+          "OCR queue preserves queue items, sidecar hashes, retry state, engine metadata, ocr_queue_report_grade_validation_plan ready/blocking slots, source_ocr_queue_report_grade_validation_plan ready/blocking slots, native OCR warning, and #58 core_accuracy_gates."
         ]
       },
-      "notes": "Internal fixture pass; actual OCR worker execution and engine logs remain blockers.",
+      "notes": "Internal fixture pass with OCR queue report-grade validation-plan hashes; actual OCR worker execution, engine logs/version capture, confidence calibration, Case DB job persistence, and trusted engine/sidecar diffs remain blockers.",
       "source_manifest": "docs/validation/rapidtriage-core-forensics-051-060-known-answer.json"
     },
     {
