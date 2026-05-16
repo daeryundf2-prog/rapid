@@ -30,6 +30,16 @@ COURT_EXHIBIT_REPORT_GRADE_BLOCKERS = [
 ]
 COURT_EXHIBIT_TRUSTED_TOOLS = {"court-exhibit-checklist", "selected-evidence-manifest", "signed-exhibit-index"}
 TAMPER_EVIDENT_TRUSTED_TOOLS = {"external-signature-attestation", "notarization-log", "tamper-bundle-recompute"}
+TAMPER_EVIDENT_REPORT_GRADE_VALIDATION_PLAN_VERSION = "tamper-evident-report-grade-validation-plan-v1"
+TAMPER_EVIDENT_REPORT_GRADE_BLOCKERS = [
+    "trusted-tamper-signature-attestation-diff-missing",
+    "detached-signature-required",
+    "notarization-or-release-attestation-required",
+    "independent-recompute-log-required",
+    "archive-hash-manifest-required",
+    "signing-key-custody-record-required",
+    "long-term-verification-policy-required",
+]
 
 
 def stable_payload_sha256(payload: object) -> str:
@@ -670,6 +680,13 @@ def build_tamper_evident_audit_bundle(
         blockers=blockers,
         trusted_diff=trusted_diff,
     )
+    report_grade_validation_plan = build_tamper_evident_report_grade_validation_plan(
+        entries=entries,
+        head_hash=previous_hash,
+        tamper_manifest=tamper_manifest,
+        trusted_diff=trusted_diff,
+    )
+    blockers = sorted({*blockers, *report_grade_validation_plan["blockers"]})
     return {
         "command": "tamper-evident-audit-bundle",
         "generated_at": dt.datetime.now(dt.timezone.utc).isoformat(),
@@ -678,6 +695,9 @@ def build_tamper_evident_audit_bundle(
             "entry_count": len(entries),
             "head_hash": previous_hash,
             "tamper_evident_manifest_hash": tamper_manifest["manifest_hash"],
+            "tamper_evident_report_grade_validation_plan_hash": report_grade_validation_plan["validation_plan_sha256"],
+            "tamper_evident_report_grade_ready_slot_count": report_grade_validation_plan["ready_slot_count"],
+            "tamper_evident_report_grade_blocking_slot_count": report_grade_validation_plan["blocking_slot_count"],
             "commercial_gap_ids": [TAMPER_EVIDENT_AUDIT_BUNDLE_GAP_ID],
         },
         "entries": entries,
@@ -685,12 +705,17 @@ def build_tamper_evident_audit_bundle(
         "tamper_evident_manifest_hash": tamper_manifest["manifest_hash"],
         "verification_matrix_hash": tamper_manifest["verification_matrix_hash"],
         "signing_slots": tamper_manifest["signing_slots"],
+        "tamper_evident_report_grade_validation_plan": report_grade_validation_plan,
+        "tamper_evident_report_grade_validation_plan_hash": report_grade_validation_plan["validation_plan_sha256"],
+        "tamper_evident_report_grade_ready_slot_count": report_grade_validation_plan["ready_slot_count"],
+        "tamper_evident_report_grade_blocking_slot_count": report_grade_validation_plan["blocking_slot_count"],
         "trusted_tamper_evident_diff": trusted_diff,
         "blockers": blockers,
         "core_accuracy_gates": tamper_evident_bundle_core_accuracy_gates(
             entries=entries,
             head_hash=previous_hash,
             tamper_manifest=tamper_manifest,
+            report_grade_validation_plan=report_grade_validation_plan,
             trusted_diff=trusted_diff,
         ),
         "verification_steps": [
@@ -834,6 +859,187 @@ def build_tamper_evident_audit_manifest(
     return {**manifest_core, "manifest_hash": stable_bundle_sha256(manifest_core)}
 
 
+def build_tamper_evident_report_grade_validation_plan(
+    *,
+    entries: Sequence[Mapping[str, object]],
+    head_hash: str,
+    tamper_manifest: Mapping[str, object],
+    trusted_diff: Mapping[str, object],
+) -> dict[str, object]:
+    trusted_status = str(trusted_diff.get("status") or "missing")
+    verification_matrix = (
+        tamper_manifest.get("verification_matrix")
+        if isinstance(tamper_manifest.get("verification_matrix"), Mapping)
+        else {}
+    )
+    ready_slots = [
+        {
+            "slot_id": "generated-output-entry-hashes",
+            "status": "complete",
+            "evidence": {
+                "entry_count": len(entries),
+                "entry_hash_count": sum(1 for item in entries if item.get("entry_hash")),
+            },
+        },
+        {
+            "slot_id": "previous-entry-hash-chain",
+            "status": "complete",
+            "evidence": {
+                "head_hash": head_hash,
+                "chain_links_valid": bool(verification_matrix.get("chain_links_valid", False)),
+            },
+        },
+        {
+            "slot_id": "tamper-evident-audit-manifest",
+            "status": "complete",
+            "evidence": {"manifest_hash": str(tamper_manifest.get("manifest_hash") or "")},
+        },
+        {
+            "slot_id": "tamper-verification-matrix",
+            "status": "complete",
+            "evidence": {
+                "matrix_hash": str(tamper_manifest.get("verification_matrix_hash") or ""),
+                "head_hash_matches_last_entry": bool(verification_matrix.get("head_hash_matches_last_entry", False)),
+            },
+        },
+        {
+            "slot_id": "external-signing-slot",
+            "status": "complete",
+            "evidence": {"signing_slots": dict(tamper_manifest.get("signing_slots") or {})},
+        },
+        {
+            "slot_id": "external-signing-limitation",
+            "status": "complete",
+            "evidence": {
+                "commercial_claim_allowed": bool(tamper_manifest.get("commercial_claim_allowed")),
+                "expected_material": str(
+                    (
+                        (tamper_manifest.get("signing_slots") or {})
+                        .get("external_signature", {})
+                        .get("expected_material", "")
+                    )
+                    if isinstance(tamper_manifest.get("signing_slots"), Mapping)
+                    else ""
+                ),
+            },
+        },
+        {
+            "slot_id": "trusted-tamper-diff-disclosure",
+            "status": "complete",
+            "evidence": {
+                "trusted_diff_status": trusted_status,
+                "trusted_tool": str(trusted_diff.get("trusted_tool") or ""),
+            },
+        },
+    ]
+    blocking_slots: list[dict[str, object]] = []
+    if not entries:
+        blocking_slots.append(
+            {
+                "slot_id": "generated-output-entries-present",
+                "status": "blocked",
+                "blocker": "generated-output-entries-present-required",
+                "required_evidence": "at least one generated output file hashed in the tamper-evident bundle",
+            }
+        )
+    if any(not item.get("entry_hash") for item in entries):
+        blocking_slots.append(
+            {
+                "slot_id": "entry-hash-completeness",
+                "status": "blocked",
+                "blocker": "entry-hash-completeness-required",
+                "required_evidence": "entry hash for every generated output row",
+            }
+        )
+    if not head_hash:
+        blocking_slots.append(
+            {
+                "slot_id": "head-hash-present",
+                "status": "blocked",
+                "blocker": "head-hash-present-required",
+                "required_evidence": "final head hash from the generated output hash chain",
+            }
+        )
+    if not tamper_manifest.get("manifest_hash") or not tamper_manifest.get("verification_matrix_hash"):
+        blocking_slots.append(
+            {
+                "slot_id": "tamper-manifest-complete",
+                "status": "blocked",
+                "blocker": "tamper-manifest-complete-required",
+                "required_evidence": "tamper-evident manifest hash and verification matrix hash",
+            }
+        )
+    if trusted_status != "pass":
+        blocking_slots.append(
+            {
+                "slot_id": "trusted-tamper-signature-attestation-diff",
+                "status": "external-required",
+                "blocker": TAMPER_EVIDENT_TRUSTED_DIFF_BLOCKER_100,
+                "required_evidence": "trusted recompute/signature attestation covering summary, entries, manifest hash, verification matrix, and report-grade plan hash",
+            }
+        )
+    blocking_slots.extend(
+        [
+            {
+                "slot_id": "detached-signature",
+                "status": "external-required",
+                "blocker": "detached-signature-required",
+                "required_evidence": "detached signature over the final archive or tamper-evident manifest",
+            },
+            {
+                "slot_id": "notarization-or-release-attestation",
+                "status": "external-required",
+                "blocker": "notarization-or-release-attestation-required",
+                "required_evidence": "notarization receipt, timestamp authority log, or signed release attestation",
+            },
+            {
+                "slot_id": "independent-recompute-log",
+                "status": "external-required",
+                "blocker": "independent-recompute-log-required",
+                "required_evidence": "independent recomputation log proving entry hashes, previous-entry links, and head hash",
+            },
+            {
+                "slot_id": "archive-hash-manifest",
+                "status": "external-required",
+                "blocker": "archive-hash-manifest-required",
+                "required_evidence": "final archive hash manifest tying the ZIP/archive to this tamper-evident bundle",
+            },
+            {
+                "slot_id": "signing-key-custody-record",
+                "status": "external-required",
+                "blocker": "signing-key-custody-record-required",
+                "required_evidence": "signing key custody, identity, timestamp, and revocation-state record",
+            },
+            {
+                "slot_id": "long-term-verification-policy",
+                "status": "external-required",
+                "blocker": "long-term-verification-policy-required",
+                "required_evidence": "policy for future verification of signatures, hashes, timestamp authorities, and retained manifests",
+            },
+        ]
+    )
+    plan_core: dict[str, object] = {
+        "profile_version": TAMPER_EVIDENT_REPORT_GRADE_VALIDATION_PLAN_VERSION,
+        "item_number": 100,
+        "commercial_gap_ids": [TAMPER_EVIDENT_AUDIT_BUNDLE_GAP_ID],
+        "plan_context": "reviewer-bundle-tamper-evident-audit-bundle",
+        "entry_count": len(entries),
+        "head_hash": head_hash,
+        "tamper_evident_manifest_hash": str(tamper_manifest.get("manifest_hash") or ""),
+        "verification_matrix_hash": str(tamper_manifest.get("verification_matrix_hash") or ""),
+        "trusted_diff_status": trusted_status,
+        "ready_slots": ready_slots,
+        "blocking_slots": blocking_slots,
+        "ready_slot_count": len(ready_slots),
+        "blocking_slot_count": len(blocking_slots),
+        "external_blocker_catalog": list(TAMPER_EVIDENT_REPORT_GRADE_BLOCKERS),
+        "blockers": sorted({str(slot.get("blocker") or "") for slot in blocking_slots if slot.get("blocker")}),
+        "commercial_claim_allowed": False,
+        "reporting_boundary": "This plan makes the export hash chain auditable, but commercial tamper-evidence claims require trusted recompute/signature attestation, detached signing or notarization, archive hash manifests, signing-key custody evidence, and long-term verification policy.",
+    }
+    return {**plan_core, "validation_plan_sha256": stable_bundle_sha256(plan_core)}
+
+
 def build_tamper_verification_matrix(*, entries: Sequence[Mapping[str, object]], head_hash: str) -> dict[str, object]:
     rows = []
     previous = ""
@@ -873,7 +1079,13 @@ def build_tamper_evident_trusted_diff(
     *,
     trusted_tool: str = "external-signature-attestation",
 ) -> dict[str, object]:
-    compared_fields = ["summary", "entries", "tamper_evident_manifest_hash", "verification_matrix_hash"]
+    compared_fields = [
+        "summary",
+        "entries",
+        "tamper_evident_manifest_hash",
+        "verification_matrix_hash",
+        "tamper_evident_report_grade_validation_plan_hash",
+    ]
     mismatches = []
     for field in compared_fields:
         rapid_value = normalize_tamper_evident_value(rapid_bundle.get(field))
@@ -904,6 +1116,7 @@ def tamper_evident_bundle_core_accuracy_gates(
     entries: Sequence[Mapping[str, object]],
     head_hash: str,
     tamper_manifest: Mapping[str, object] | None = None,
+    report_grade_validation_plan: Mapping[str, object] | None = None,
     trusted_diff: Mapping[str, object] | None = None,
 ) -> list[dict[str, object]]:
     satisfied = ["external signing limitation emitted"]
@@ -921,6 +1134,10 @@ def tamper_evident_bundle_core_accuracy_gates(
         satisfied.append("tamper verification matrix hash emitted")
     if tamper_manifest and tamper_manifest.get("signing_slots"):
         satisfied.append("external signing slot emitted")
+    if report_grade_validation_plan and report_grade_validation_plan.get("validation_plan_sha256"):
+        satisfied.append("tamper-evident report-grade validation plan")
+    if report_grade_validation_plan and report_grade_validation_plan.get("ready_slot_count"):
+        satisfied.append("tamper-evident report-grade ready slots")
     if trusted_diff and trusted_diff.get("status") == "pass":
         satisfied.append("trusted tamper signature attestation diff pass")
     return [
@@ -932,6 +1149,7 @@ def tamper_evident_bundle_core_accuracy_gates(
                 f"head_hash:{head_hash}",
                 f"tamper_evident_manifest_hash:{(tamper_manifest or {}).get('manifest_hash', '')}",
                 f"verification_matrix_hash:{(tamper_manifest or {}).get('verification_matrix_hash', '')}",
+                f"tamper_evident_report_grade_validation_plan_hash:{(report_grade_validation_plan or {}).get('validation_plan_sha256', '')}",
             ],
         )
     ]

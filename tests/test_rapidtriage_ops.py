@@ -1748,6 +1748,10 @@ class RapidTriageOpsTests(unittest.TestCase):
                 "contamination_warnings.contamination_report_grade_validation_plan_hash",
                 acquisition_by_number[99]["primary_outputs"],
             )
+            self.assertIn(
+                "tamper_evident_audit_bundle.tamper_evident_report_grade_validation_plan_hash",
+                acquisition_by_number[100]["primary_outputs"],
+            )
             self.assertEqual(acquisition_by_number[100]["trusted_diff_required"], "trusted-tamper-signature-attestation-diff")
             release_operations = payload["release_operations_progress"]
             self.assertEqual(release_operations["version"], "release-operations-progress-v1")

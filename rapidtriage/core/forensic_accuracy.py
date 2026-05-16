@@ -1659,6 +1659,8 @@ CORE_FORENSIC_ACCURACY_ITEMS: tuple[dict[str, object], ...] = (
             "head hash recorded",
             "tamper-evident manifest hash emitted",
             "external signing slot emitted",
+            "tamper-evident report-grade validation plan",
+            "tamper-evident report-grade ready slots",
             "external signing limitation emitted",
             "trusted tamper signature attestation diff pass",
         ),

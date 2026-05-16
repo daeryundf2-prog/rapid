@@ -71,8 +71,8 @@
       "item": 100,
       "title": "Tamper-evident audit bundle",
       "test_files": ["tests/test_rapidtriage_final_roadmap.py"],
-      "assertions": ["Reviewer bundles preserve generated output hashes, previous-entry hash chain, entry hashes, head hash, tamper-evident-audit-manifest-v1 manifest hashes, external signing slots, external signing limitation, trusted signature-attestation diff helpers/gates, and #100 core_accuracy_gates."],
-      "remaining_external_validation": ["External signing/notarization and trusted signature attestations."]
+      "assertions": ["Reviewer bundles preserve generated output hashes, previous-entry hash chain, entry hashes, head hash, tamper-evident-audit-manifest-v1 manifest hashes, tamper-evident-report-grade-validation-plan-v1 plan hashes/counts, external signing slots, external signing limitation, trusted signature-attestation diff helpers/gates, and #100 core_accuracy_gates."],
+      "remaining_external_validation": ["Detached signature, notarization/release attestation, independent recompute log, final archive hash manifest, signing-key custody record, long-term verification policy, and trusted signature attestations."]
     }
   ]
 }

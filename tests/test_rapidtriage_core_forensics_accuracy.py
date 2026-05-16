@@ -253,6 +253,7 @@ class RapidTriageCoreForensicsAccuracyTests(unittest.TestCase):
         self.assertIn("contamination report-grade validation plan", contamination["required_checks"])
         self.assertIn("trusted contamination checklist diff pass", contamination["required_checks"])
         self.assertIn("previous-entry hash chain generated", tamper_bundle["required_checks"])
+        self.assertIn("tamper-evident report-grade validation plan", tamper_bundle["required_checks"])
         self.assertIn("trusted tamper signature attestation diff pass", tamper_bundle["required_checks"])
         self.assertTrue(tamper_bundle["accuracy_controls"]["legal_or_authority_gate_required"])
         self.assertIn("authenticode evidence requirement recorded", windows_installer["required_checks"])

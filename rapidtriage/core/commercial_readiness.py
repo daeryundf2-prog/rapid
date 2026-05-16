@@ -3338,6 +3338,7 @@ def acquisition_quality_evidence_chain() -> list[dict[str, object]]:
                 "tamper_evident_audit_bundle.summary.head_hash",
                 "tamper_evident_audit_bundle.tamper_evident_manifest.manifest_hash",
                 "tamper_evident_audit_bundle.signing_slots.external_signature",
+                "tamper_evident_audit_bundle.tamper_evident_report_grade_validation_plan_hash",
             ],
             "trusted_diff": "trusted-tamper-signature-attestation-diff",
         },

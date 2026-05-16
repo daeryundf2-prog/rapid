@@ -2311,10 +2311,10 @@
       ],
       "expected": {
         "required_assertions": [
-          "Reviewer bundles preserve generated output hashes, previous-entry hash chain, entry hashes, head hash, tamper-evident-audit-manifest-v1 manifest hashes, external signing slots, external signing limitation, trusted signature-attestation diff helpers/gates, and #100 core_accuracy_gates."
+          "Reviewer bundles preserve generated output hashes, previous-entry hash chain, entry hashes, head hash, tamper-evident-audit-manifest-v1 manifest hashes, tamper-evident-report-grade-validation-plan-v1 plan hashes/counts, external signing slots, external signing limitation, trusted signature-attestation diff helpers/gates, and #100 core_accuracy_gates."
         ]
       },
-      "notes": "Internal fixture pass; external signing/notarization remains blocker.",
+      "notes": "Internal fixture pass; detached signature, notarization/release attestation, independent recompute log, final archive hash manifest, signing-key custody record, long-term verification policy, and trusted signature attestations remain blockers.",
       "source_manifest": "docs/validation/rapidtriage-core-forensics-091-100-known-answer.json"
     },
     {

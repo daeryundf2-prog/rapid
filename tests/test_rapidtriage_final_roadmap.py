@@ -331,6 +331,17 @@ class RapidTriageFinalRoadmapTests(unittest.TestCase):
                 "tamper-verification-matrix-v1",
             )
             self.assertIn("external_signature", tamper_bundle["signing_slots"])
+            self.assertEqual(
+                tamper_bundle["tamper_evident_report_grade_validation_plan"]["profile_version"],
+                "tamper-evident-report-grade-validation-plan-v1",
+            )
+            self.assertEqual(
+                tamper_bundle["tamper_evident_report_grade_validation_plan_hash"],
+                tamper_bundle["tamper_evident_report_grade_validation_plan"]["validation_plan_sha256"],
+            )
+            self.assertGreaterEqual(tamper_bundle["tamper_evident_report_grade_ready_slot_count"], 7)
+            self.assertGreaterEqual(tamper_bundle["tamper_evident_report_grade_blocking_slot_count"], 6)
+            self.assertIn("detached-signature-required", tamper_bundle["blockers"])
             self.assertEqual(tamper_bundle["trusted_tamper_evident_diff"]["status"], "missing")
             self.assertIn("trusted-tamper-signature-attestation-diff-missing", tamper_bundle["blockers"])
             tamper_diff = build_tamper_evident_trusted_diff(tamper_bundle, tamper_bundle)
@@ -338,14 +349,17 @@ class RapidTriageFinalRoadmapTests(unittest.TestCase):
                 entries=tamper_bundle["entries"],
                 head_hash=tamper_bundle["summary"]["head_hash"],
                 tamper_manifest=tamper_bundle["tamper_evident_manifest"],
+                report_grade_validation_plan=tamper_bundle["tamper_evident_report_grade_validation_plan"],
                 trusted_diff=tamper_diff,
             )
             self.assertEqual(tamper_diff["status"], "pass")
             self.assertIn("tamper_evident_manifest_hash", tamper_diff["compared_fields"])
             self.assertIn("verification_matrix_hash", tamper_diff["compared_fields"])
+            self.assertIn("tamper_evident_report_grade_validation_plan_hash", tamper_diff["compared_fields"])
             self.assertIn("tamper-evident manifest hash emitted", tamper_gates[0]["satisfied_checks"])
             self.assertIn("tamper verification matrix hash emitted", tamper_gates[0]["satisfied_checks"])
             self.assertIn("external signing slot emitted", tamper_gates[0]["satisfied_checks"])
+            self.assertIn("tamper-evident report-grade validation plan", tamper_gates[0]["satisfied_checks"])
             self.assertIn("trusted tamper signature attestation diff pass", tamper_gates[0]["satisfied_checks"])
             self.assertIn("reviewer", payload["outputs"])
             selected = json.loads((bundle_dir / "rapidtriage-selected-evidence.json").read_text(encoding="utf-8"))
