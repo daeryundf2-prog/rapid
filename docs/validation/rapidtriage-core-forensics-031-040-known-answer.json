@@ -62,6 +62,7 @@
         "required_assertions": [
           "Telegram rows preserve service/profile, chat/user/media attribution, cache/account provenance, limitations, and #33 core_accuracy_gates",
           "Telegram rows emit telegram_parser_manifest with export/cache track, row citation, source viewer locator, account/dialog/media-cache review state, and local-store/deleted blocker evidence",
+          "Telegram rows emit telegram-report-grade-validation-plan-v1 with source export/cache/database integrity, source row citation, message/account/dialog/media normalization, Telegram DB/cache inventory boundary, export/cache strategy classification, hash-only text policy, source viewer locator, trusted Telegram export/native DB diff, local-store decryption authority workflow, export schema-version corpus, account/dialog/peer attribution corpus, secret/edited/deleted semantics corpus, cache media locality validation, and independent review evidence slots",
           "Telegram trusted diff helper requires native export/cache row equality before satisfying the #33 trusted Telegram export/native DB diff pass gate",
           "Telegram reportability decisions block local-store-complete claims until encrypted store, cache/media, and account attribution validation exists"
         ]

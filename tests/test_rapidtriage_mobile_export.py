@@ -734,6 +734,8 @@ class RapidTriageMobileExportTests(unittest.TestCase):
             self.assertIn("Telegram parser manifest", telegram_gate["satisfied_checks"])
             self.assertIn("Telegram source row citation", telegram_gate["satisfied_checks"])
             self.assertIn("Telegram review viewer controls", telegram_gate["satisfied_checks"])
+            self.assertIn("Telegram report-grade validation plan", telegram_gate["satisfied_checks"])
+            self.assertIn("Telegram validation ready slots", telegram_gate["satisfied_checks"])
             self.assertIn("encrypted local store warning", telegram_gate["satisfied_checks"])
             self.assertEqual(
                 telegram["details"]["chat_app_strategy_profile"]["selected_track"],
@@ -764,6 +766,77 @@ class RapidTriageMobileExportTests(unittest.TestCase):
                 telegram["details"]["telegram_parser_manifest_hash"],
                 telegram_parser_manifest["manifest_sha256"],
             )
+            telegram_validation_plan = telegram["details"]["telegram_report_grade_validation_plan"]
+            self.assertEqual(
+                telegram_validation_plan["profile_version"],
+                "telegram-report-grade-validation-plan-v1",
+            )
+            self.assertEqual(telegram_validation_plan["item_number"], 33)
+            self.assertEqual(telegram_validation_plan["gap_id"], "#33")
+            self.assertEqual(telegram_validation_plan["status"], "report-validation-blocked")
+            self.assertFalse(telegram_validation_plan["commercial_grade"])
+            self.assertEqual(len(telegram_validation_plan["manifest_sha256"]), 64)
+            self.assertEqual(
+                telegram["details"]["telegram_report_grade_validation_plan_hash"],
+                telegram_validation_plan["manifest_sha256"],
+            )
+            self.assertEqual(
+                {command["id"] for command in telegram_validation_plan["validation_commands"]},
+                {
+                    "source-telegram-export-cache-manifest",
+                    "telegram-export-import",
+                    "trusted-telegram-diff",
+                    "telegram-local-store-authority-review",
+                    "telegram-known-answer-run",
+                },
+            )
+            telegram_validation_slots = {
+                slot["id"]: slot for slot in telegram_validation_plan["evidence_slots"]
+            }
+            self.assertEqual(
+                telegram_validation_slots["source-export-cache-row-integrity"]["status"],
+                "complete",
+            )
+            self.assertEqual(
+                telegram_validation_slots["service-profile-row-citation"]["status"],
+                "complete",
+            )
+            self.assertEqual(
+                telegram_validation_slots["message-account-dialog-media-normalization"]["status"],
+                "complete",
+            )
+            self.assertEqual(
+                telegram_validation_slots["telegram-database-cache-inventory-boundary"]["status"],
+                "not-applicable",
+            )
+            self.assertEqual(
+                telegram_validation_slots["export-cache-strategy-classification"]["status"],
+                "complete",
+            )
+            self.assertEqual(
+                telegram_validation_slots["hash-only-text-policy"]["status"],
+                "complete",
+            )
+            self.assertEqual(
+                telegram_validation_slots["source-viewer-locator"]["status"],
+                "complete",
+            )
+            self.assertEqual(
+                telegram_validation_slots["trusted-telegram-export-native-db-diff"]["status"],
+                "pending-cross-tool-validate",
+            )
+            self.assertTrue(
+                telegram_validation_slots["local-store-decryption-authority-workflow"]["blocking"]
+            )
+            self.assertTrue(
+                telegram_validation_slots["secret-chat-edited-deleted-semantics"]["blocking"]
+            )
+            self.assertEqual(telegram_validation_plan["ready_slot_count"], 6)
+            self.assertEqual(telegram_validation_plan["blocking_slot_count"], 7)
+            self.assertIn(
+                "local-store-decryption-authority-workflow-required",
+                telegram_validation_plan["commercial_grade_blockers"],
+            )
             self.assertEqual(telegram["details"]["chat_app_commercial_uplift_evidence"]["item_numbers"], [33])
             self.assertEqual(
                 telegram["details"]["chat_app_commercial_uplift_evidence"]["qc_prep_item_numbers"],
@@ -774,6 +847,24 @@ class RapidTriageMobileExportTests(unittest.TestCase):
                     "telegram_parser_manifest_hash"
                 ],
                 telegram_parser_manifest["manifest_sha256"],
+            )
+            self.assertEqual(
+                telegram["details"]["chat_app_commercial_uplift_evidence"]["large_data_controls"][
+                    "telegram_report_grade_validation_plan_hash"
+                ],
+                telegram_validation_plan["manifest_sha256"],
+            )
+            self.assertEqual(
+                telegram["details"]["chat_app_commercial_uplift_evidence"]["large_data_controls"][
+                    "telegram_report_grade_validation_ready_slot_count"
+                ],
+                6,
+            )
+            self.assertEqual(
+                telegram["details"]["chat_app_commercial_uplift_evidence"]["large_data_controls"][
+                    "telegram_report_grade_validation_blocking_slot_count"
+                ],
+                7,
             )
             self.assertTrue(
                 telegram["details"]["chat_app_commercial_uplift_evidence"]["large_data_controls"][
@@ -791,8 +882,20 @@ class RapidTriageMobileExportTests(unittest.TestCase):
                 ]["telegram_parser_manifest_hash"],
                 telegram_parser_manifest["manifest_sha256"],
             )
+            self.assertEqual(
+                telegram["details"]["chat_app_commercial_uplift_evidence"]["functional_priority_profile"][
+                    "implemented_controls"
+                ]["telegram_report_grade_validation_plan_hash"],
+                telegram_validation_plan["manifest_sha256"],
+            )
             self.assertIn(
                 "telegram-parser-manifest-emitted",
+                telegram["details"]["chat_app_commercial_uplift_evidence"]["functional_priority_profile"][
+                    "passed_validation_check_ids"
+                ],
+            )
+            self.assertIn(
+                "telegram-report-grade-validation-plan-emitted",
                 telegram["details"]["chat_app_commercial_uplift_evidence"]["functional_priority_profile"][
                     "passed_validation_check_ids"
                 ],
