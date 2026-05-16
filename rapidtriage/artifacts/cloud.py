@@ -83,6 +83,17 @@ CLOUD_TRUSTED_DIFF_TOOLS = {
         "provider-known-answer",
     },
 }
+GOOGLE_TAKEOUT_REPORT_GRADE_VALIDATION_PLAN_VERSION = "google-takeout-report-grade-validation-plan-v1"
+GOOGLE_TAKEOUT_REPORT_GRADE_VALIDATION_BLOCKERS = [
+    "google-takeout-selected-products-manifest-required",
+    "original-takeout-archive-completeness-required",
+    "provider-native-google-row-diff-required",
+    "gmail-duplicate-thread-timezone-corpus-required",
+    "drive-photos-sidecar-exif-merge-validation-required",
+    "deleted-retention-sharing-semantics-required",
+    "google-provider-schema-version-tracking-required",
+    "independent-google-export-review-required",
+]
 CLOUD_QC_PREP_ITEMS = {
     "google": 43,
     "apple-icloud": 44,
@@ -747,6 +758,29 @@ def build_record(
         detail_payload["google_takeout_parser_manifest_hash"] = detail_payload["google_takeout_parser_manifest"][
             "manifest_sha256"
         ]
+        detail_payload["google_takeout_report_grade_validation_plan"] = (
+            build_google_takeout_report_grade_validation_plan(
+                artifact_type=artifact_type,
+                service=service,
+                source_index=source_index,
+                source_hashes=source_hashes,
+                source_path=str(path.resolve()),
+                details=detail_payload,
+            )
+        )
+        detail_payload["google_takeout_report_grade_validation_plan_hash"] = detail_payload[
+            "google_takeout_report_grade_validation_plan"
+        ]["manifest_sha256"]
+        checks = dict(detail_payload.get("validation_checks") or {})
+        checks.update(
+            {
+                "google_takeout_report_grade_validation_plan_emitted": True,
+                "google_takeout_report_grade_ready_slots": detail_payload[
+                    "google_takeout_report_grade_validation_plan"
+                ].get("ready_slot_count", 0),
+            }
+        )
+        detail_payload["validation_checks"] = checks
     if family == "apple-icloud":
         detail_payload["icloud_export_parser_manifest"] = build_icloud_export_parser_manifest(
             artifact_type=artifact_type,
@@ -2148,6 +2182,11 @@ def cloud_export_import_functional_profile(
         if isinstance(details.get("google_takeout_parser_manifest"), Mapping)
         else {}
     )
+    google_report_plan = (
+        details.get("google_takeout_report_grade_validation_plan")
+        if isinstance(details.get("google_takeout_report_grade_validation_plan"), Mapping)
+        else {}
+    )
     icloud_manifest = (
         details.get("icloud_export_parser_manifest")
         if isinstance(details.get("icloud_export_parser_manifest"), Mapping)
@@ -2171,6 +2210,8 @@ def cloud_export_import_functional_profile(
             "provider-known-answer-corpus-required": not validation_checks.get("provider_known_answer_validated"),
             "cloud-export-import-manifest-not-emitted": not export_manifest,
             "google-takeout-parser-manifest-not-emitted": family == "google" and not google_manifest,
+            "google-takeout-report-grade-validation-plan-not-emitted": family == "google"
+            and not google_report_plan,
             "icloud-export-parser-manifest-not-emitted": family == "apple-icloud" and not icloud_manifest,
             "m365-export-parser-manifest-not-emitted": family == "microsoft-365" and not m365_manifest,
             "trusted-provider-export-diff-required": trusted_diff.get("status") != "pass",
@@ -2207,6 +2248,13 @@ def cloud_export_import_functional_profile(
             "cloud_export_import_manifest_emitted": bool(export_manifest),
             "source_viewer_locator_emitted": isinstance(export_manifest.get("source_viewer_locator"), Mapping),
             "google_takeout_parser_manifest_hash": optional_text(google_manifest.get("manifest_sha256")),
+            "google_takeout_report_grade_validation_plan_hash": optional_text(
+                google_report_plan.get("manifest_sha256")
+            ),
+            "google_takeout_report_grade_ready_slot_count": int(google_report_plan.get("ready_slot_count") or 0),
+            "google_takeout_report_grade_blocking_slot_count": int(
+                google_report_plan.get("blocking_slot_count") or 0
+            ),
             "google_takeout_source_row_citation_present": bool(
                 isinstance(google_manifest.get("row_citation"), Mapping)
                 and google_manifest.get("row_citation", {}).get("row_hash")
@@ -2236,6 +2284,8 @@ def cloud_export_import_functional_profile(
                 "cloud-export-import-manifest-emitted": bool(export_manifest),
                 "cloud-export-source-locator-emitted": isinstance(export_manifest.get("source_viewer_locator"), Mapping),
                 "google-takeout-parser-manifest-emitted": family == "google" and bool(google_manifest),
+                "google-takeout-report-grade-validation-plan-emitted": family == "google"
+                and bool(google_report_plan),
                 "google-takeout-source-locator-emitted": family == "google"
                 and isinstance(google_manifest.get("row_citation"), Mapping)
                 and isinstance(google_manifest.get("row_citation", {}).get("source_viewer_locator"), Mapping),
@@ -2306,6 +2356,15 @@ def cloud_commercial_uplift_evidence(
     )
     if google_manifest.get("manifest_sha256"):
         source_refs.append(f"google_takeout_parser_manifest_sha256:{google_manifest['manifest_sha256']}")
+    google_report_plan = (
+        details.get("google_takeout_report_grade_validation_plan")
+        if isinstance(details.get("google_takeout_report_grade_validation_plan"), Mapping)
+        else {}
+    )
+    if google_report_plan.get("manifest_sha256"):
+        source_refs.append(
+            f"google_takeout_report_grade_validation_plan_sha256:{google_report_plan['manifest_sha256']}"
+        )
     icloud_manifest = (
         details.get("icloud_export_parser_manifest")
         if isinstance(details.get("icloud_export_parser_manifest"), Mapping)
@@ -2398,6 +2457,13 @@ def cloud_commercial_uplift_evidence(
             "cloud_export_import_manifest_hash": optional_text(export_manifest.get("manifest_sha256")),
             "cloud_export_source_locator_present": isinstance(export_manifest.get("source_viewer_locator"), Mapping),
             "google_takeout_parser_manifest_hash": optional_text(google_manifest.get("manifest_sha256")),
+            "google_takeout_report_grade_validation_plan_hash": optional_text(
+                google_report_plan.get("manifest_sha256")
+            ),
+            "google_takeout_report_grade_ready_slot_count": int(google_report_plan.get("ready_slot_count") or 0),
+            "google_takeout_report_grade_blocking_slot_count": int(
+                google_report_plan.get("blocking_slot_count") or 0
+            ),
             "google_takeout_source_row_citation_present": bool(
                 isinstance(google_manifest.get("row_citation"), Mapping)
                 and google_manifest.get("row_citation", {}).get("row_hash")
@@ -2704,6 +2770,268 @@ def build_google_takeout_parser_manifest(
         {key: value for key, value in manifest.items() if key != "manifest_sha256"}
     )
     return manifest
+
+
+def build_google_takeout_report_grade_validation_plan(
+    *,
+    artifact_type: str,
+    service: str,
+    source_index: int,
+    source_hashes: Mapping[str, str],
+    source_path: str,
+    details: Mapping[str, object],
+) -> dict[str, object]:
+    """#37 report-grade evidence slots for Google Takeout/Gmail rows."""
+
+    review_profile = (
+        details.get("google_takeout_review_profile")
+        if isinstance(details.get("google_takeout_review_profile"), Mapping)
+        else {}
+    )
+    parser_manifest = (
+        details.get("google_takeout_parser_manifest")
+        if isinstance(details.get("google_takeout_parser_manifest"), Mapping)
+        else {}
+    )
+    import_manifest = (
+        details.get("cloud_export_import_manifest")
+        if isinstance(details.get("cloud_export_import_manifest"), Mapping)
+        else {}
+    )
+    thread_profile = (
+        details.get("gmail_thread_profile")
+        if isinstance(details.get("gmail_thread_profile"), Mapping)
+        else {}
+    )
+    validation_checks = (
+        details.get("validation_checks")
+        if isinstance(details.get("validation_checks"), Mapping)
+        else {}
+    )
+    product_family = optional_text(review_profile.get("product_family")) or google_takeout_product_family(
+        service=service,
+        artifact_type=artifact_type,
+        source_path=source_path,
+    )
+    row_citation = (
+        parser_manifest.get("row_citation")
+        if isinstance(parser_manifest.get("row_citation"), Mapping)
+        else {}
+    )
+    row_pivots = row_citation.get("row_pivots") if isinstance(row_citation.get("row_pivots"), Mapping) else {}
+    has_source_hash = bool(source_hashes.get("sha256"))
+    has_row_citation = bool(row_citation.get("row_hash"))
+    has_source_viewer = isinstance(row_citation.get("source_viewer_locator"), Mapping)
+    has_product_pivot = bool(review_profile.get("primary_pivot_present") or row_pivots)
+    is_gmail = product_family == "gmail"
+    is_drive_or_photos = product_family in {"drive", "photos"}
+    is_location_or_activity = product_family in {"location", "activity"}
+    has_body_policy = bool(details.get("body_sha256") or details.get("body_preview") or details.get("subject"))
+    has_location_activity_timestamp = bool(details.get("timestamp"))
+
+    def slot(
+        slot_id: str,
+        status: str,
+        *,
+        blocking: bool,
+        evidence: Mapping[str, object] | None = None,
+        required_before_report: Sequence[str] | None = None,
+    ) -> dict[str, object]:
+        return {
+            "id": slot_id,
+            "status": status,
+            "blocking": blocking,
+            "evidence": dict(evidence or {}),
+            "required_before_report": list(required_before_report or []),
+        }
+
+    slots = [
+        slot(
+            "source-takeout-hash-integrity",
+            "complete" if has_source_hash else "missing",
+            blocking=not has_source_hash,
+            evidence={"source_sha256": source_hashes.get("sha256", "")},
+            required_before_report=["preserve the original Takeout archive/file hash"],
+        ),
+        slot(
+            "google-row-citation",
+            "complete" if has_row_citation else "missing",
+            blocking=not has_row_citation,
+            evidence={
+                "row_hash": optional_text(row_citation.get("row_hash")),
+                "source_index": source_index,
+                "artifact_type": artifact_type,
+            },
+            required_before_report=["cite row hash, source index, product family, and source path"],
+        ),
+        slot(
+            "google-product-pivot-inventory",
+            "complete" if has_product_pivot else "missing",
+            blocking=not has_product_pivot,
+            evidence={
+                "product_family": product_family,
+                "present_primary_pivots": list(review_profile.get("present_primary_pivots") or []),
+                "row_pivot_keys": sorted(str(key) for key in row_pivots.keys()),
+            },
+            required_before_report=["verify that product-specific pivot fields identify the row"],
+        ),
+        slot(
+            "google-source-viewer-locator",
+            "complete" if has_source_viewer else "missing",
+            blocking=not has_source_viewer,
+            evidence={"viewer": "google-takeout-product-row" if has_source_viewer else ""},
+            required_before_report=["open the Google product-row viewer before report selection"],
+        ),
+        slot(
+            "gmail-thread-profile",
+            "complete" if is_gmail and thread_profile else ("not-applicable" if not is_gmail else "pending-validation"),
+            blocking=is_gmail and not thread_profile,
+            evidence={
+                "thread_root_id": optional_text(details.get("thread_root_id")),
+                "thread_parent_id": optional_text(details.get("thread_parent_id")),
+                "normalized_thread_subject": optional_text(details.get("normalized_thread_subject")),
+                "thread_profile_hash": stable_cloud_json_sha256(thread_profile) if thread_profile else "",
+            },
+            required_before_report=[
+                "diff Gmail Message-ID, References, and In-Reply-To against native/provider export"
+            ],
+        ),
+        slot(
+            "gmail-body-hash-preview-policy",
+            "complete" if is_gmail and has_body_policy else ("not-applicable" if not is_gmail else "missing"),
+            blocking=is_gmail and not has_body_policy,
+            evidence={
+                "body_sha256": optional_text(details.get("body_sha256")),
+                "subject_present": bool(details.get("subject")),
+                "body_preview_present": bool(details.get("body_preview")),
+            },
+            required_before_report=["use body hash/preview as a review aid, not standalone mailbox proof"],
+        ),
+        slot(
+            "drive-photos-sidecar-exif-merge",
+            "pending-provider-sidecar-validate" if is_drive_or_photos else "not-applicable",
+            blocking=is_drive_or_photos,
+            evidence={
+                "product_family": product_family,
+                "sidecar_merge_status": optional_text(review_profile.get("sidecar_merge_status")),
+            },
+            required_before_report=["merge Drive/Photos metadata sidecars and validate EXIF/timezone semantics"],
+        ),
+        slot(
+            "location-activity-timezone-source",
+            "complete" if is_location_or_activity and has_location_activity_timestamp else (
+                "not-applicable" if not is_location_or_activity else "pending-validation"
+            ),
+            blocking=is_location_or_activity and not has_location_activity_timestamp,
+            evidence={
+                "product_family": product_family,
+                "timestamp": optional_text(details.get("timestamp")),
+                "timezone_semantics_status": optional_text(review_profile.get("timezone_semantics_status")),
+            },
+            required_before_report=["document source timezone and cloud-vs-device timeline semantics"],
+        ),
+        slot(
+            "selected-products-export-scope",
+            "external-scope-manifest-required",
+            blocking=True,
+            evidence={
+                "selected_products_manifest_attached": bool(review_profile.get("selected_products_manifest_attached")),
+                "provider_scope_verified": bool(validation_checks.get("provider_scope_verified")),
+            },
+            required_before_report=["attach selected Takeout products, account owner, and export timestamp"],
+        ),
+        slot(
+            "original-takeout-archive-completeness",
+            "external-archive-proof-required",
+            blocking=True,
+            evidence={
+                "archive_entry_name": optional_text(details.get("archive_entry_name")),
+                "archive_embedded_row": bool(validation_checks.get("archive_embedded_row")),
+                "original_archive_hash_verified": bool(review_profile.get("original_takeout_archive_hash_verified")),
+            },
+            required_before_report=["prove split archive completeness, password state, and original archive SHA256"],
+        ),
+        slot(
+            "provider-native-row-diff",
+            "pending-cross-tool-validate",
+            blocking=True,
+            evidence={"provider_native_diff_status": optional_text(review_profile.get("provider_native_diff_status"))},
+            required_before_report=["diff selected rows against Google Takeout index/admin/API/native output"],
+        ),
+        slot(
+            "duplicate-thread-timezone-corpus",
+            "external-corpus-required",
+            blocking=True,
+            evidence={"product_family": product_family},
+            required_before_report=["validate duplicate suppression, Gmail threading, and timezone semantics on known-answer exports"],
+        ),
+        slot(
+            "deleted-retention-sharing-semantics",
+            "external-provider-policy-required",
+            blocking=True,
+            evidence={
+                "deleted_or_retention_state_status": optional_text(
+                    review_profile.get("deleted_or_retention_state_status")
+                )
+            },
+            required_before_report=["document deleted-state, retention, sharing, and export-scope limitations"],
+        ),
+        slot(
+            "provider-schema-version-tracking",
+            "external-schema-matrix-required",
+            blocking=True,
+            evidence={"parser_version": PARSER_VERSION, "source_format": optional_text(details.get("source_format"))},
+            required_before_report=["track Google product schema versions and parser compatibility for the export date"],
+        ),
+        slot(
+            "independent-google-export-review",
+            "independent-review-required",
+            blocking=True,
+            evidence={"gap_id": "#37"},
+            required_before_report=["attach independent reviewer signoff before commercial/report-grade wording"],
+        ),
+    ]
+    ready_slot_count = sum(1 for item in slots if item["status"] == "complete")
+    blocking_slot_count = sum(1 for item in slots if item["blocking"])
+    plan: dict[str, object] = {
+        "profile_version": GOOGLE_TAKEOUT_REPORT_GRADE_VALIDATION_PLAN_VERSION,
+        "item_number": 37,
+        "gap_id": "#37",
+        "batch_id": "commercial-uplift-036-040",
+        "qc_prep_item_number": 43,
+        "artifact_type": artifact_type,
+        "service": service or "unknown",
+        "product_family": product_family,
+        "source_format": optional_text(details.get("source_format")),
+        "source_path": source_path,
+        "source_index": source_index,
+        "source_sha256": source_hashes.get("sha256", ""),
+        "cloud_export_import_manifest_sha256": optional_text(import_manifest.get("manifest_sha256")),
+        "google_takeout_parser_manifest_sha256": optional_text(parser_manifest.get("manifest_sha256")),
+        "validation_status": "report-validation-blocked",
+        "commercial_grade": False,
+        "validation_commands": [
+            "source-google-takeout-manifest",
+            "google-provider-native-export-or-api-diff",
+            "google-takeout-known-answer-run",
+            "google-product-sidecar-timezone-validation",
+            "independent-google-export-review",
+        ],
+        "evidence_slots": slots,
+        "ready_slot_count": ready_slot_count,
+        "blocking_slot_count": blocking_slot_count,
+        "blockers": list(GOOGLE_TAKEOUT_REPORT_GRADE_VALIDATION_BLOCKERS),
+        "required_before_report": [
+            "attach selected products/export-scope manifest and original archive hash/completeness proof",
+            "diff high-value Gmail/Drive/Photos/Activity/Location rows against Google native/provider/API evidence",
+            "validate Gmail threading, duplicate suppression, timezone semantics, sidecars, deleted/retention/sharing state, and schema versions",
+            "attach independent review before commercial-grade or testimony-grade claims",
+        ],
+    }
+    plan["manifest_sha256"] = stable_cloud_json_sha256(
+        {key: value for key, value in plan.items() if key != "manifest_sha256"}
+    )
+    return plan
 
 
 def build_icloud_export_parser_manifest(
@@ -3136,6 +3464,15 @@ def cloud_core_accuracy_gates(
     )
     if google_manifest.get("manifest_sha256"):
         evidence_refs.append(f"google_takeout_parser_manifest_sha256:{google_manifest['manifest_sha256']}")
+    google_report_plan = (
+        details.get("google_takeout_report_grade_validation_plan")
+        if isinstance(details.get("google_takeout_report_grade_validation_plan"), Mapping)
+        else {}
+    )
+    if google_report_plan.get("manifest_sha256"):
+        evidence_refs.append(
+            f"google_takeout_report_grade_validation_plan_sha256:{google_report_plan['manifest_sha256']}"
+        )
     icloud_manifest = (
         details.get("icloud_export_parser_manifest")
         if isinstance(details.get("icloud_export_parser_manifest"), Mapping)
@@ -3193,6 +3530,10 @@ def cloud_core_accuracy_gates(
                     satisfied.append("Google Takeout source row citation")
                 if isinstance(google_manifest.get("large_data_controls"), Mapping) and google_manifest.get("large_data_controls", {}).get("viewer_default"):
                     satisfied.append("Google Takeout review viewer controls")
+            if google_report_plan:
+                satisfied.append("Google Takeout report-grade validation plan")
+                if int(google_report_plan.get("ready_slot_count") or 0) >= 4:
+                    satisfied.append("Google Takeout report-grade ready slots")
             if trusted_diff.get("status") == "pass" and int(trusted_diff.get("gap_number") or 0) == 37:
                 satisfied.append("trusted Google Takeout/provider diff pass")
         elif number == 38:

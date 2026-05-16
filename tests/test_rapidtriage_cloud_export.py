@@ -200,6 +200,29 @@ class RapidTriageCloudExportTests(unittest.TestCase):
             self.assertTrue(mail_details["validation_checks"]["gmail_thread_profile_emitted"])
             self.assertIn("archive_entry_name", mail_details["google_takeout_parser_manifest"]["row_citation"]["row_pivots"])
             self.assertIn("thread_root_id", mail_details["google_takeout_parser_manifest"]["row_citation"]["row_pivots"])
+            mbox_plan = mail_details["google_takeout_report_grade_validation_plan"]
+            self.assertEqual(
+                mbox_plan["profile_version"],
+                "google-takeout-report-grade-validation-plan-v1",
+            )
+            self.assertEqual(mbox_plan["item_number"], 37)
+            self.assertEqual(mbox_plan["product_family"], "gmail")
+            self.assertEqual(mbox_plan["ready_slot_count"], 6)
+            self.assertEqual(mbox_plan["blocking_slot_count"], 7)
+            self.assertEqual(
+                mail_details["google_takeout_report_grade_validation_plan_hash"],
+                mbox_plan["manifest_sha256"],
+            )
+            mbox_slots = {item["id"]: item for item in mbox_plan["evidence_slots"]}
+            self.assertEqual(mbox_slots["source-takeout-hash-integrity"]["status"], "complete")
+            self.assertEqual(mbox_slots["google-row-citation"]["status"], "complete")
+            self.assertEqual(mbox_slots["gmail-thread-profile"]["status"], "complete")
+            self.assertEqual(mbox_slots["gmail-body-hash-preview-policy"]["status"], "complete")
+            self.assertEqual(mbox_slots["provider-native-row-diff"]["status"], "pending-cross-tool-validate")
+            self.assertIn(
+                "google-takeout-provider-diff-required",
+                mail_details["commercial_uplift_evidence"]["reportability_decision"]["blockers"],
+            )
             archive_reply_mail = next(
                 item
                 for item in payload["artifacts"]
@@ -442,6 +465,46 @@ class RapidTriageCloudExportTests(unittest.TestCase):
                 mail["details"]["google_takeout_parser_manifest_hash"],
                 google_manifest["manifest_sha256"],
             )
+            google_plan = mail["details"]["google_takeout_report_grade_validation_plan"]
+            self.assertEqual(
+                google_plan["profile_version"],
+                "google-takeout-report-grade-validation-plan-v1",
+            )
+            self.assertEqual(google_plan["item_number"], 37)
+            self.assertEqual(google_plan["gap_id"], "#37")
+            self.assertEqual(google_plan["qc_prep_item_number"], 43)
+            self.assertEqual(google_plan["product_family"], "gmail")
+            self.assertEqual(
+                google_plan["google_takeout_parser_manifest_sha256"],
+                google_manifest["manifest_sha256"],
+            )
+            self.assertFalse(google_plan["commercial_grade"])
+            self.assertEqual(
+                mail["details"]["google_takeout_report_grade_validation_plan_hash"],
+                google_plan["manifest_sha256"],
+            )
+            google_slots = {item["id"]: item for item in google_plan["evidence_slots"]}
+            self.assertEqual(google_slots["source-takeout-hash-integrity"]["status"], "complete")
+            self.assertEqual(google_slots["google-row-citation"]["status"], "complete")
+            self.assertEqual(google_slots["google-product-pivot-inventory"]["status"], "complete")
+            self.assertEqual(google_slots["google-source-viewer-locator"]["status"], "complete")
+            self.assertEqual(google_slots["gmail-thread-profile"]["status"], "pending-validation")
+            self.assertTrue(google_slots["gmail-thread-profile"]["blocking"])
+            self.assertEqual(google_slots["gmail-body-hash-preview-policy"]["status"], "complete")
+            self.assertEqual(google_slots["provider-native-row-diff"]["status"], "pending-cross-tool-validate")
+            self.assertEqual(google_slots["duplicate-thread-timezone-corpus"]["status"], "external-corpus-required")
+            self.assertIn(
+                "google-provider-schema-version-tracking-required",
+                google_plan["blockers"],
+            )
+            self.assertEqual(google_plan["ready_slot_count"], 5)
+            self.assertEqual(google_plan["blocking_slot_count"], 8)
+            self.assertIn("Google Takeout report-grade validation plan", google_gate["satisfied_checks"])
+            self.assertIn("Google Takeout report-grade ready slots", google_gate["satisfied_checks"])
+            self.assertIn(
+                f"google_takeout_report_grade_validation_plan_sha256:{google_plan['manifest_sha256']}",
+                google_gate["evidence_refs"],
+            )
             self.assertEqual(mail_uplift["batch_id"], "commercial-uplift-036-040")
             self.assertEqual(mail_uplift["item_numbers"], [37])
             self.assertEqual(mail_uplift["qc_prep_item_numbers"], [43])
@@ -463,6 +526,22 @@ class RapidTriageCloudExportTests(unittest.TestCase):
                 mail_profile["implemented_controls"]["google_takeout_parser_manifest_hash"],
                 google_manifest["manifest_sha256"],
             )
+            self.assertEqual(
+                mail_profile["implemented_controls"]["google_takeout_report_grade_validation_plan_hash"],
+                google_plan["manifest_sha256"],
+            )
+            self.assertEqual(
+                mail_profile["implemented_controls"]["google_takeout_report_grade_ready_slot_count"],
+                5,
+            )
+            self.assertEqual(
+                mail_profile["implemented_controls"]["google_takeout_report_grade_blocking_slot_count"],
+                8,
+            )
+            self.assertIn(
+                "google-takeout-report-grade-validation-plan-emitted",
+                mail_profile["passed_validation_check_ids"],
+            )
             self.assertTrue(mail_profile["implemented_controls"]["google_takeout_source_row_citation_present"])
             self.assertEqual(
                 mail["details"]["cloud_provider_strategy_profile"]["selected_track"],
@@ -481,6 +560,18 @@ class RapidTriageCloudExportTests(unittest.TestCase):
             self.assertEqual(
                 mail_uplift["large_data_controls"]["google_takeout_parser_manifest_hash"],
                 google_manifest["manifest_sha256"],
+            )
+            self.assertEqual(
+                mail_uplift["large_data_controls"]["google_takeout_report_grade_validation_plan_hash"],
+                google_plan["manifest_sha256"],
+            )
+            self.assertEqual(
+                mail_uplift["large_data_controls"]["google_takeout_report_grade_ready_slot_count"],
+                5,
+            )
+            self.assertEqual(
+                mail_uplift["large_data_controls"]["google_takeout_report_grade_blocking_slot_count"],
+                8,
             )
             self.assertTrue(mail_uplift["large_data_controls"]["google_takeout_source_row_citation_present"])
             self.assertTrue(mail_uplift["large_data_controls"]["google_takeout_viewer_controls_present"])
