@@ -755,6 +755,12 @@ def load_mac_first_evidence(path: Path) -> dict[str, object]:
     search_diagnostics = (
         case_db_profile.get("search_diagnostics") if isinstance(case_db_profile.get("search_diagnostics"), Mapping) else {}
     )
+    search_index_health = (
+        case_db_profile.get("search_index_health") if isinstance(case_db_profile.get("search_index_health"), Mapping) else {}
+    )
+    search_index_health_summary = (
+        search_index_health.get("summary") if isinstance(search_index_health.get("summary"), Mapping) else {}
+    )
     cloud_export_summary = _cloud_export_evidence_summary(raw) if command == "cloud-export" else {}
     image_reportability = (
         raw.get("reportability_decision") if isinstance(raw.get("reportability_decision"), Mapping) else {}
@@ -780,6 +786,10 @@ def load_mac_first_evidence(path: Path) -> dict[str, object]:
         "large_case_search_diagnostics_ready": large_case_summary.get("case_db_search_diagnostics_ready"),
         "large_case_search_diagnostics_hash": str(search_diagnostics.get("profile_hash") or ""),
         "large_case_search_diagnostics_fts_table_count": search_diagnostics.get("fts_table_count"),
+        "large_case_search_index_healthy": large_case_summary.get("case_db_search_index_healthy"),
+        "large_case_search_index_health_status": str(search_index_health.get("status") or ""),
+        "large_case_search_index_health_hash": str(search_index_health.get("profile_hash") or ""),
+        "large_case_search_index_missing_rows": search_index_health_summary.get("missing_index_rows"),
         "supported_backlog_items": _mac_first_evidence_target_items(raw),
         "evidence_manifest_hash": str(
             evidence_manifest.get("manifest_sha256") or uplift.get("evidence_manifest_hash") or ""

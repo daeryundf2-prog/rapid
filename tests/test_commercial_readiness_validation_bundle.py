@@ -222,6 +222,8 @@ class CommercialReadinessValidationBundleTests(unittest.TestCase):
                             "largest_benchmark_record_count": 100000,
                             "case_db_attached": True,
                             "case_db_search_diagnostics_ready": True,
+                            "case_db_search_index_healthy": False,
+                            "case_db_search_index_missing_rows": 2,
                         },
                         "case_db_profile": {
                             "attached": True,
@@ -230,6 +232,12 @@ class CommercialReadinessValidationBundleTests(unittest.TestCase):
                                 "ready": True,
                                 "fts_table_count": 2,
                                 "profile_hash": "d" * 64,
+                            },
+                            "search_index_health": {
+                                "profile_version": "case-db-search-index-health-summary-v1",
+                                "status": "needs-rebuild",
+                                "profile_hash": "e" * 64,
+                                "summary": {"missing_index_rows": 2},
                             },
                         },
                         "commercial_grade_blockers": [
@@ -254,6 +262,10 @@ class CommercialReadinessValidationBundleTests(unittest.TestCase):
         self.assertTrue(row["large_case_search_diagnostics_ready"])
         self.assertEqual(row["large_case_search_diagnostics_hash"], "d" * 64)
         self.assertEqual(row["large_case_search_diagnostics_fts_table_count"], 2)
+        self.assertFalse(row["large_case_search_index_healthy"])
+        self.assertEqual(row["large_case_search_index_health_status"], "needs-rebuild")
+        self.assertEqual(row["large_case_search_index_health_hash"], "e" * 64)
+        self.assertEqual(row["large_case_search_index_missing_rows"], 2)
         self.assertIn("attach-10m-record-sqlite-fts-benchmark-json", mac_first["blocker_counts"])
         self.assertFalse(report["commercial_claim_allowed"])
 

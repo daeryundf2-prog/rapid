@@ -47,12 +47,20 @@ class RapidTriageLargeCaseReadinessTests(unittest.TestCase):
             self.assertTrue(payload["case_db_profile"]["attached"])
             self.assertIn("artifact_fts", payload["case_db_profile"]["fts_tables"])
             self.assertTrue(payload["summary"]["case_db_search_diagnostics_ready"])
+            self.assertTrue(payload["summary"]["case_db_search_index_healthy"])
+            self.assertEqual(payload["summary"]["case_db_search_index_missing_rows"], 0)
             self.assertEqual(
                 payload["case_db_profile"]["search_diagnostics"]["profile_version"],
                 "case-db-search-diagnostics-v1",
             )
+            self.assertEqual(
+                payload["case_db_profile"]["search_index_health"]["profile_version"],
+                "case-db-search-index-health-summary-v1",
+            )
+            self.assertEqual(payload["case_db_profile"]["search_index_health"]["status"], "healthy")
             self.assertEqual(payload["case_db_profile"]["search_diagnostics"]["keyword"], "needle")
             self.assertRegex(payload["case_db_profile"]["search_diagnostics"]["profile_hash"], r"^[0-9a-f]{64}$")
+            self.assertRegex(payload["case_db_profile"]["search_index_health"]["profile_hash"], r"^[0-9a-f]{64}$")
             self.assertTrue(
                 all(
                     item["query_plan_available"]
@@ -108,6 +116,43 @@ class RapidTriageLargeCaseReadinessTests(unittest.TestCase):
         self.assertTrue(
             any(check["id"] == "case-db-search-diagnostics-ready" and not check["passed"] for check in payload["checks"])
         )
+
+    def test_large_case_readiness_blocks_absence_claims_on_stale_case_search_index(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            case_db = CaseDatabase(root / "case.db")
+            case_db.initialize()
+            case_db.create_case(case_id="CASE-STALE")
+            with case_db.connect() as connection:
+                file_id = connection.execute(
+                    """
+                    INSERT INTO file_record (citation_id, case_id, path, normalized_path, extension, created_at)
+                    VALUES (?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        "FILE-STALE-1",
+                        "CASE-STALE",
+                        "/evidence/needle.txt",
+                        "/evidence/needle.txt",
+                        ".txt",
+                        "2026-01-01T00:00:00+00:00",
+                    ),
+                ).lastrowid
+                connection.execute("DELETE FROM file_record_fts WHERE rowid = ?", (file_id,))
+
+            payload = build_large_case_readiness_report(case_db_path=root / "case.db", keyword="needle")
+
+        self.assertFalse(payload["summary"]["case_db_search_index_healthy"])
+        self.assertEqual(payload["summary"]["case_db_search_index_missing_rows"], 1)
+        self.assertEqual(payload["case_db_profile"]["search_index_health"]["status"], "needs-rebuild")
+        self.assertEqual(
+            payload["case_db_profile"]["search_index_health"]["summary"]["unhealthy_case_count"],
+            1,
+        )
+        self.assertTrue(
+            any(check["id"] == "case-db-search-index-healthy" and not check["passed"] for check in payload["checks"])
+        )
+        self.assertIn("do not make no-hit or absence claims", " ".join(payload["case_db_profile"]["search_index_health"]["blockers"]))
 
 
 if __name__ == "__main__":

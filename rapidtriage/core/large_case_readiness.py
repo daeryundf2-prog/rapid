@@ -9,7 +9,7 @@ from typing import Mapping, Sequence
 
 from .benchmark import scale_label
 from .benchmark_fts import SQLITE_FTS_BENCHMARK_VERSION
-from .case_db import case_db_fts_optimization_assessment
+from .case_db import case_db_fts_optimization_assessment, case_db_search_index_health
 from .docs import write_result
 from .search_backend import build_search_backend_contract, stable_backend_sha256
 
@@ -93,6 +93,13 @@ def build_large_case_readiness_report(
             "case_db_attached": bool(case_db_profile.get("attached")),
             "case_db_search_diagnostics_ready": bool(
                 ((case_db_profile.get("search_diagnostics") or {}).get("ready"))
+            ),
+            "case_db_search_index_healthy": bool(
+                ((case_db_profile.get("search_index_health") or {}).get("ready_for_large_case_search"))
+            ),
+            "case_db_search_index_missing_rows": int(
+                ((case_db_profile.get("search_index_health") or {}).get("summary") or {}).get("missing_index_rows")
+                or 0
             ),
             "commercial_blocker_count": len(large_case_commercial_blockers(record_counts)),
         },
@@ -186,6 +193,11 @@ def profile_case_db(path: Path, *, keyword: str = "needle") -> dict[str, object]
         }
         assessment = case_db_fts_optimization_assessment(connection)
         search_diagnostics = case_db_search_diagnostics(connection, keyword=keyword, fts_tables=fts_tables)
+        case_ids = [
+            str(row["case_id"])
+            for row in connection.execute("SELECT case_id FROM case_record ORDER BY case_id").fetchall()
+        ]
+        search_index_health = case_db_search_index_health_summary(connection, case_ids=case_ids)
 
     profile_without_hash: dict[str, object] = {
         "attached": True,
@@ -202,10 +214,45 @@ def profile_case_db(path: Path, *, keyword: str = "needle") -> dict[str, object]
         "sqlite_pragmas": pragmas,
         "case_db_fts_optimization": assessment,
         "search_diagnostics": search_diagnostics,
+        "search_index_health": search_index_health,
     }
     profile = dict(profile_without_hash)
     profile["profile_hash"] = stable_backend_sha256(profile_without_hash)
     return profile
+
+
+def case_db_search_index_health_summary(
+    connection: sqlite3.Connection,
+    *,
+    case_ids: Sequence[str],
+) -> dict[str, object]:
+    profiles = [case_db_search_index_health(connection, case_id) for case_id in case_ids]
+    missing_total = sum(int(((profile.get("summary") or {}).get("missing_index_rows")) or 0) for profile in profiles)
+    orphan_total = sum(int(((profile.get("summary") or {}).get("orphan_fts_rows")) or 0) for profile in profiles)
+    error_total = sum(int(((profile.get("summary") or {}).get("error_count")) or 0) for profile in profiles)
+    unhealthy_case_ids = [str(profile.get("case_id") or "") for profile in profiles if profile.get("status") != "healthy"]
+    core: dict[str, object] = {
+        "profile_version": "case-db-search-index-health-summary-v1",
+        "case_count": len(profiles),
+        "status": "healthy" if profiles and not unhealthy_case_ids else "needs-rebuild",
+        "ready_for_large_case_search": bool(profiles) and not unhealthy_case_ids,
+        "summary": {
+            "missing_index_rows": missing_total,
+            "orphan_fts_rows": orphan_total,
+            "error_count": error_total,
+            "unhealthy_case_count": len(unhealthy_case_ids),
+        },
+        "case_ids": list(case_ids),
+        "unhealthy_case_ids": unhealthy_case_ids,
+        "case_profiles": profiles,
+        "blockers": []
+        if profiles and not unhealthy_case_ids
+        else [
+            "run rapidtriage case-db <db> --case-id <case> --rebuild-search-indexes for every unhealthy case",
+            "do not make no-hit or absence claims from this Case DB until search_index_health is healthy",
+        ],
+    }
+    return {**core, "profile_hash": stable_backend_sha256(core)}
 
 
 def safe_table_count(connection: sqlite3.Connection, table_name: str) -> int:
@@ -373,6 +420,14 @@ def build_large_case_checks(
                 str(((case_db_profile.get("search_diagnostics") or {}).get("profile_hash")) or ""),
             ],
         ),
+        readiness_check(
+            "case-db-search-index-healthy",
+            bool(((case_db_profile.get("search_index_health") or {}).get("ready_for_large_case_search"))),
+            "Every Case DB search index is complete enough for no-hit/absence search claims.",
+            evidence=[
+                str(((case_db_profile.get("search_index_health") or {}).get("profile_hash")) or ""),
+            ],
+        ),
     ]
 
 
@@ -417,5 +472,7 @@ def large_case_next_actions(record_counts: Sequence[int], case_db_profile: Mappi
         actions.append("Attach a real Case DB with imported evidence to profile FTS/index/table counts.")
     elif not ((case_db_profile.get("search_diagnostics") or {}).get("ready")):
         actions.append("Regenerate the Case DB or investigate missing FTS query plans before large-case search claims.")
+    elif not ((case_db_profile.get("search_index_health") or {}).get("ready_for_large_case_search")):
+        actions.append("Run `rapidtriage case-db <db> --case-id <case> --rebuild-search-indexes` for unhealthy cases.")
     actions.append("Repeat this report after every indexing/search change and commit the JSON as validation evidence.")
     return actions
