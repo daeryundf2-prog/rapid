@@ -3608,6 +3608,7 @@ def enterprise_governance_evidence_chain() -> list[dict[str, object]]:
             "primary_outputs": [
                 "enterprise-policy.multi_user_case_server",
                 "enterprise-policy.multi_user_case_server.multi_user_evidence_manifest.manifest_hash",
+                "enterprise-policy.multi_user_case_server.multi_user_report_grade_validation_plan_hash",
                 "enterprise-policy.multi_user_case_server.multi_user_evidence_slots.architecture_security_review",
                 "enterprise-policy.multi_user_case_server.multi_user_evidence_slots.locking_conflict_test",
             ],

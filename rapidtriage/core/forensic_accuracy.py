@@ -1836,6 +1836,8 @@ CORE_FORENSIC_ACCURACY_ITEMS: tuple[dict[str, object], ...] = (
             "security review blocker disclosed",
             "multi-user evidence manifest hash emitted",
             "multi-user evidence slots emitted",
+            "multi-user report-grade validation plan",
+            "multi-user report-grade ready slots",
             "trusted multi-user server review diff pass",
         ),
     },

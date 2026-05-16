@@ -393,6 +393,33 @@ class RapidTriageOpsTests(unittest.TestCase):
             "multi-user control evidence matrix hash emitted",
             payload["multi_user_case_server"]["core_accuracy_gates"][0]["satisfied_checks"],
         )
+        self.assertIn(
+            "multi-user report-grade validation plan",
+            payload["multi_user_case_server"]["core_accuracy_gates"][0]["satisfied_checks"],
+        )
+        self.assertIn(
+            "multi-user report-grade ready slots",
+            payload["multi_user_case_server"]["core_accuracy_gates"][0]["satisfied_checks"],
+        )
+        multi_user_plan = payload["multi_user_case_server"]["multi_user_report_grade_validation_plan"]
+        self.assertEqual(
+            multi_user_plan["profile_version"],
+            "multi-user-server-report-grade-validation-plan-v1",
+        )
+        self.assertEqual(
+            len(payload["multi_user_case_server"]["multi_user_report_grade_validation_plan_hash"]),
+            64,
+        )
+        self.assertEqual(
+            payload["multi_user_case_server"]["multi_user_report_grade_validation_plan_hash"],
+            multi_user_plan["validation_plan_hash"],
+        )
+        self.assertGreaterEqual(payload["multi_user_case_server"]["multi_user_report_grade_ready_slot_count"], 7)
+        self.assertGreaterEqual(payload["multi_user_case_server"]["multi_user_report_grade_blocking_slot_count"], 7)
+        self.assertIn(
+            "multi-user-server-implementation-required",
+            payload["multi_user_case_server"]["blockers"],
+        )
         self.assertTrue(payload["multi_user_case_server"]["required_before_enablement"])
         self.assertEqual(payload["multi_user_case_server"]["trusted_multi_user_diff"]["status"], "missing")
         self.assertIn("trusted-multi-user-server-review-diff-missing", payload["multi_user_case_server"]["blockers"])
@@ -402,9 +429,13 @@ class RapidTriageOpsTests(unittest.TestCase):
             payload["multi_user_case_server"],
             trusted_tool="multi-user-server-security-review",
         )
-        multi_user_gates = multi_user_case_server_core_accuracy_gates(trusted_diff=multi_user_diff)
+        multi_user_gates = multi_user_case_server_core_accuracy_gates(
+            trusted_diff=multi_user_diff,
+            report_grade_validation_plan=multi_user_plan,
+        )
         self.assertEqual(multi_user_diff["status"], "pass")
         self.assertIn("control_evidence_matrix_hash", multi_user_diff["compared_fields"])
+        self.assertIn("multi_user_report_grade_validation_plan_hash", multi_user_diff["compared_fields"])
         self.assertIn("trusted multi-user server review diff pass", multi_user_gates[0]["satisfied_checks"])
         self.assertIn("#110", payload["collaboration_audit_trail"]["commercial_gap_ids"])
         self.assertEqual(payload["collaboration_audit_trail"]["core_accuracy_gates"][0]["gap_id"], "#110")
@@ -1907,6 +1938,10 @@ class RapidTriageOpsTests(unittest.TestCase):
             )
             self.assertIn(
                 "enterprise-policy.multi_user_case_server.multi_user_evidence_manifest.manifest_hash",
+                enterprise_by_number[109]["primary_outputs"],
+            )
+            self.assertIn(
+                "enterprise-policy.multi_user_case_server.multi_user_report_grade_validation_plan_hash",
                 enterprise_by_number[109]["primary_outputs"],
             )
             self.assertIn(

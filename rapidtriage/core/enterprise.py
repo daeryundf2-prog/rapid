@@ -47,6 +47,16 @@ RBAC_REPORT_GRADE_BLOCKERS = [
     "independent-rbac-review-required",
 ]
 MULTI_USER_TRUSTED_DIFF_BLOCKER_109 = "trusted-multi-user-server-review-diff-missing"
+MULTI_USER_REPORT_GRADE_VALIDATION_PLAN_VERSION = "multi-user-server-report-grade-validation-plan-v1"
+MULTI_USER_REPORT_GRADE_BLOCKERS = [
+    MULTI_USER_TRUSTED_DIFF_BLOCKER_109,
+    "multi-user-server-implementation-required",
+    "identity-provider-smoke-required",
+    "case-locking-conflict-test-required",
+    "concurrency-migration-test-required",
+    "security-architecture-review-required",
+    "release-host-multi-user-smoke-required",
+]
 COLLABORATION_AUDIT_TRUSTED_DIFF_BLOCKER_110 = "trusted-collaboration-audit-diff-missing"
 ENTERPRISE_TRUSTED_TOOLS = {
     "local-only-deployment-policy",
@@ -373,6 +383,31 @@ def build_enterprise_policy() -> dict[str, object]:
     policy["multi_user_case_server"]["core_accuracy_gates"] = multi_user_case_server_core_accuracy_gates(
         trusted_diff=policy["multi_user_case_server"]["trusted_multi_user_diff"],
         evidence_manifest=policy["multi_user_case_server"]["multi_user_evidence_manifest"],
+    )
+    policy["multi_user_case_server"]["multi_user_report_grade_validation_plan"] = (
+        build_multi_user_report_grade_validation_plan(
+            multi_user=policy["multi_user_case_server"],
+            evidence_manifest=policy["multi_user_case_server"]["multi_user_evidence_manifest"],
+            trusted_diff=policy["multi_user_case_server"]["trusted_multi_user_diff"],
+        )
+    )
+    policy["multi_user_case_server"]["multi_user_report_grade_validation_plan_hash"] = policy[
+        "multi_user_case_server"
+    ]["multi_user_report_grade_validation_plan"]["validation_plan_hash"]
+    policy["multi_user_case_server"]["multi_user_report_grade_ready_slot_count"] = policy[
+        "multi_user_case_server"
+    ]["multi_user_report_grade_validation_plan"]["ready_slot_count"]
+    policy["multi_user_case_server"]["multi_user_report_grade_blocking_slot_count"] = policy[
+        "multi_user_case_server"
+    ]["multi_user_report_grade_validation_plan"]["blocking_slot_count"]
+    multi_user_report_blockers = policy["multi_user_case_server"]["multi_user_report_grade_validation_plan"]["blockers"]
+    policy["multi_user_case_server"]["blockers"] = sorted(
+        {*policy["multi_user_case_server"].get("blockers", []), *multi_user_report_blockers}
+    )
+    policy["multi_user_case_server"]["core_accuracy_gates"] = multi_user_case_server_core_accuracy_gates(
+        trusted_diff=policy["multi_user_case_server"]["trusted_multi_user_diff"],
+        evidence_manifest=policy["multi_user_case_server"]["multi_user_evidence_manifest"],
+        report_grade_validation_plan=policy["multi_user_case_server"]["multi_user_report_grade_validation_plan"],
     )
     attach_enterprise_control_manifest(
         policy["collaboration_audit_trail"],
@@ -745,6 +780,145 @@ def build_rbac_report_grade_validation_plan(
         "external_blocker_catalog": list(RBAC_REPORT_GRADE_BLOCKERS),
         "blockers": blockers,
         "reporting_boundary": "Local role policy is implemented and usable; commercial RBAC claims require per-action enforcement, identity binding, export-control, and independent review evidence.",
+    }
+    plan["validation_plan_hash"] = stable_enterprise_sha256(plan)
+    return plan
+
+
+def build_multi_user_report_grade_validation_plan(
+    *,
+    multi_user: Mapping[str, object],
+    evidence_manifest: Mapping[str, object],
+    trusted_diff: Mapping[str, object],
+) -> dict[str, object]:
+    guardrails = multi_user.get("guardrails") if isinstance(multi_user.get("guardrails"), list) else []
+    required_before_enablement = (
+        multi_user.get("required_before_enablement")
+        if isinstance(multi_user.get("required_before_enablement"), list)
+        else []
+    )
+    ready_slots = [
+        {
+            "slot_id": "enterprise-policy-multi-user-json",
+            "status": "ready",
+            "evidence_ref": "rapidtriage enterprise-policy --json.multi_user_case_server",
+            "evidence_hash": stable_enterprise_sha256("enterprise-policy command emits multi-user guardrail JSON"),
+        },
+        {
+            "slot_id": "multi-user-evidence-manifest",
+            "status": "ready",
+            "evidence_ref": "enterprise-policy.multi_user_case_server.multi_user_evidence_manifest_hash",
+            "evidence_hash": str(evidence_manifest.get("manifest_hash") or ""),
+        },
+        {
+            "slot_id": "disabled-state-guardrail",
+            "status": "ready",
+            "evidence_ref": "enterprise-policy.multi_user_case_server.enabled/status",
+            "evidence_hash": stable_enterprise_sha256(
+                {
+                    "enabled": bool(multi_user.get("enabled")),
+                    "status": multi_user.get("status", ""),
+                    "reason": multi_user.get("reason", ""),
+                }
+            ),
+        },
+        {
+            "slot_id": "network-and-use-guardrails",
+            "status": "ready",
+            "evidence_ref": "enterprise-policy.multi_user_case_server.guardrails",
+            "evidence_hash": stable_enterprise_sha256(guardrails),
+        },
+        {
+            "slot_id": "enablement-checklist",
+            "status": "ready",
+            "evidence_ref": "enterprise-policy.multi_user_case_server.required_before_enablement",
+            "evidence_hash": stable_enterprise_sha256(required_before_enablement),
+        },
+        {
+            "slot_id": "control-evidence-matrix",
+            "status": "ready",
+            "evidence_ref": "enterprise-policy.multi_user_case_server.control_evidence_matrix_hash",
+            "evidence_hash": str(evidence_manifest.get("control_evidence_matrix_hash") or ""),
+        },
+        {
+            "slot_id": "trusted-diff-boundary",
+            "status": "ready" if trusted_diff.get("status") == "pass" else "ready-with-blocker",
+            "evidence_ref": "enterprise-policy.multi_user_case_server.trusted_multi_user_diff",
+            "evidence_hash": stable_enterprise_sha256(trusted_diff),
+        },
+    ]
+    blocking_slots = []
+    if trusted_diff.get("status") != "pass":
+        blocking_slots.append(
+            {
+                "slot_id": "trusted-multi-user-server-review-diff",
+                "status": "blocking",
+                "blocker": MULTI_USER_TRUSTED_DIFF_BLOCKER_109,
+                "required_evidence": "trusted architecture/security review comparing enabled state, guardrails, and enablement checklist",
+            }
+        )
+    for slot_id, blocker, required_evidence in (
+        (
+            "multi-user-server-implementation",
+            "multi-user-server-implementation-required",
+            "actual shared case server with authentication, authorization, search scalability, and database migrations",
+        ),
+        (
+            "identity-provider-smoke",
+            "identity-provider-smoke-required",
+            "identity provider integration and authenticated session smoke evidence",
+        ),
+        (
+            "case-locking-conflict-test",
+            "case-locking-conflict-test-required",
+            "case locking, conflict resolution, and concurrent reviewer workflow test log",
+        ),
+        (
+            "concurrency-migration-test",
+            "concurrency-migration-test-required",
+            "database migration/concurrency regression suite for multi-user case access",
+        ),
+        (
+            "security-architecture-review",
+            "security-architecture-review-required",
+            "independent security architecture review before enabling shared case server claims",
+        ),
+        (
+            "release-host-multi-user-smoke",
+            "release-host-multi-user-smoke-required",
+            "multi-user enablement/disabled-state smoke produced from the actual release package",
+        ),
+    ):
+        blocking_slots.append(
+            {
+                "slot_id": slot_id,
+                "status": "blocking",
+                "current_attachment_status": "not-attached",
+                "blocker": blocker,
+                "required_evidence": required_evidence,
+            }
+        )
+    blockers = sorted({str(slot["blocker"]) for slot in blocking_slots if slot.get("blocker")})
+    plan: dict[str, object] = {
+        "profile_version": MULTI_USER_REPORT_GRADE_VALIDATION_PLAN_VERSION,
+        "item_number": 109,
+        "commercial_gap_ids": [MULTI_USER_CASE_SERVER_GAP_ID],
+        "commercial_claim_allowed": False,
+        "enabled": bool(multi_user.get("enabled")),
+        "status": multi_user.get("status", ""),
+        "guardrail_count": len(guardrails),
+        "required_before_enablement_count": len(required_before_enablement),
+        "multi_user_evidence_manifest_hash": str(evidence_manifest.get("manifest_hash") or ""),
+        "control_evidence_matrix_hash": str(evidence_manifest.get("control_evidence_matrix_hash") or ""),
+        "trusted_diff_status": str(trusted_diff.get("status") or ""),
+        "trusted_diff_blocker": trusted_diff.get("blocker"),
+        "ready_slots": ready_slots,
+        "blocking_slots": blocking_slots,
+        "ready_slot_count": len(ready_slots),
+        "blocking_slot_count": len(blocking_slots),
+        "external_blocker_catalog": list(MULTI_USER_REPORT_GRADE_BLOCKERS),
+        "blockers": blockers,
+        "reporting_boundary": "Multi-user server remains intentionally disabled; commercial shared-case claims require implementation, identity, locking, concurrency, and independent security evidence.",
     }
     plan["validation_plan_hash"] = stable_enterprise_sha256(plan)
     return plan
@@ -1298,7 +1472,12 @@ def build_enterprise_trusted_diff(
             "rbac_report_grade_validation_plan_hash",
             "control_evidence_matrix_hash",
         ],
-        109: ["multi_user_evidence_manifest_hash", "multi_user_evidence_slots", "control_evidence_matrix_hash"],
+        109: [
+            "multi_user_evidence_manifest_hash",
+            "multi_user_evidence_slots",
+            "multi_user_report_grade_validation_plan_hash",
+            "control_evidence_matrix_hash",
+        ],
         110: [
             "collaboration_audit_evidence_manifest_hash",
             "collaboration_audit_evidence_slots",
@@ -1503,6 +1682,7 @@ def rbac_core_accuracy_gates(
 def multi_user_case_server_core_accuracy_gates(
     trusted_diff: Mapping[str, object] | None = None,
     evidence_manifest: Mapping[str, object] | None = None,
+    report_grade_validation_plan: Mapping[str, object] | None = None,
 ) -> list[dict[str, object]]:
     satisfied = [
         "multi-user disabled state recorded",
@@ -1518,13 +1698,29 @@ def multi_user_case_server_core_accuracy_gates(
             satisfied.append("multi-user evidence slots emitted")
         if evidence_manifest.get("control_evidence_matrix_hash"):
             satisfied.append("multi-user control evidence matrix hash emitted")
+    if report_grade_validation_plan:
+        if report_grade_validation_plan.get("validation_plan_hash"):
+            satisfied.append("multi-user report-grade validation plan")
+        if int(report_grade_validation_plan.get("ready_slot_count") or 0) > 0:
+            satisfied.append("multi-user report-grade ready slots")
     if trusted_diff and trusted_diff.get("status") == "pass":
         satisfied.append("trusted multi-user server review diff pass")
+    evidence_refs = ["enterprise_policy.multi_user_case_server"]
+    if report_grade_validation_plan and report_grade_validation_plan.get("validation_plan_hash"):
+        evidence_refs.append(
+            f"multi_user_report_grade_validation_plan_sha256:{report_grade_validation_plan['validation_plan_hash']}"
+        )
+        evidence_refs.append(
+            f"multi_user_report_grade_ready_slots:{report_grade_validation_plan.get('ready_slot_count')}"
+        )
+        evidence_refs.append(
+            f"multi_user_report_grade_blocking_slots:{report_grade_validation_plan.get('blocking_slot_count')}"
+        )
     return [
         build_accuracy_gate(
             109,
             satisfied_checks=satisfied,
-            evidence_refs=["enterprise_policy.multi_user_case_server"],
+            evidence_refs=evidence_refs,
         )
     ]
 

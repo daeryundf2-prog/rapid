@@ -2515,10 +2515,10 @@
       ],
       "expected": {
         "required_assertions": [
-          "Enterprise policy preserves disabled server state, network guardrails, identity provider requirement, locking/conflict requirement, multi-user-server-evidence-manifest-v1 manifest hash/evidence slots, security review blocker, trusted multi-user server review diff helpers/gates, and #109 core_accuracy_gates."
+          "Enterprise policy preserves disabled server state, network guardrails, identity provider requirement, locking/conflict requirement, multi-user-server-evidence-manifest-v1 manifest hash/evidence slots, multi-user-server-report-grade-validation-plan-v1 ready/blocking slots, server/identity/locking/concurrency blockers, trusted multi-user server review diff helpers/gates, and #109 core_accuracy_gates."
         ]
       },
-      "notes": "Internal fixture pass; actual multi-user server and trusted architecture/security review remain unimplemented.",
+      "notes": "Internal fixture pass; actual multi-user server, identity-provider smoke, locking/conflict tests, concurrency/migration tests, release-host smoke, and trusted architecture/security review remain external.",
       "source_manifest": "docs/validation/rapidtriage-core-forensics-101-120-known-answer.json"
     },
     {
