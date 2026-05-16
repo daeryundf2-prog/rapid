@@ -1880,6 +1880,18 @@ def apply_schema(connection: sqlite3.Connection) -> None:
     ensure_column(connection, "review_mark", "assignee", "TEXT NOT NULL DEFAULT ''")
     ensure_column(connection, "review_mark", "priority", "TEXT NOT NULL DEFAULT 'normal'")
     ensure_column(connection, "review_mark", "due_at", "TEXT NOT NULL DEFAULT ''")
+    connection.execute(
+        """
+        INSERT OR REPLACE INTO file_record_fts(rowid, path, extension, hashes)
+        SELECT
+            id,
+            path,
+            extension,
+            trim(COALESCE(hash_md5, '') || ' ' || COALESCE(hash_sha1, '') || ' ' || COALESCE(hash_sha256, ''))
+        FROM file_record
+        WHERE id NOT IN (SELECT rowid FROM file_record_fts)
+        """
+    )
     current_version = get_schema_version(connection)
     if current_version not in (0, SCHEMA_VERSION):
         raise CaseDatabaseError(f"unsupported case DB schema version: {current_version}")
@@ -2922,6 +2934,10 @@ def search_file_records(
     limit: int,
     scan_candidate_limit: int,
 ) -> list[dict[str, object]]:
+    if file_record_fts_has_rows(connection, case_id):
+        fts_matches = search_file_records_fts(connection, case_id, keywords, limit)
+        if fts_matches:
+            return fts_matches[:limit] if limit else fts_matches
     rows = connection.execute(
         """
         SELECT citation_id, id, path, extension, size_bytes, modified_at, hash_md5, hash_sha1, hash_sha256
@@ -2965,6 +2981,84 @@ def search_file_records(
         )
         if limit and len(matches) >= limit:
             break
+    return matches
+
+
+def file_record_fts_has_rows(connection: sqlite3.Connection, case_id: str) -> bool:
+    try:
+        row = connection.execute(
+            """
+            SELECT 1
+            FROM file_record_fts
+            JOIN file_record ON file_record_fts.rowid = file_record.id
+            WHERE file_record.case_id = ?
+            LIMIT 1
+            """,
+            (case_id,),
+        ).fetchone()
+    except sqlite3.OperationalError:
+        return False
+    return row is not None
+
+
+def search_file_records_fts(
+    connection: sqlite3.Connection,
+    case_id: str,
+    keywords: list[str],
+    limit: int,
+) -> list[dict[str, object]]:
+    query = build_fts_query(keywords)
+    try:
+        rows = connection.execute(
+            """
+            SELECT
+                file_record.citation_id,
+                file_record.id,
+                file_record.path,
+                file_record.extension,
+                file_record.size_bytes,
+                file_record.modified_at,
+                file_record.hash_md5,
+                file_record.hash_sha1,
+                file_record.hash_sha256,
+                snippet(file_record_fts, 0, '[', ']', ' ... ', 24) AS snippet
+            FROM file_record_fts
+            JOIN file_record ON file_record_fts.rowid = file_record.id
+            WHERE file_record.case_id = ?
+              AND file_record_fts MATCH ?
+            ORDER BY rank
+            LIMIT ?
+            """,
+            (case_id, query, limit or -1),
+        ).fetchall()
+    except sqlite3.OperationalError:
+        return []
+    matches = []
+    for row in rows:
+        haystack = " ".join(str(row[key] or "") for key in ("path", "extension", "hash_md5", "hash_sha1", "hash_sha256"))
+        matches.append(
+            {
+                "source": "files",
+                "citation_id": str(row["citation_id"]),
+                "target_type": "file_record",
+                "target_id": str(row["id"]),
+                "title": Path(str(row["path"])).name,
+                "kind": str(row["extension"] or ""),
+                "path": str(row["path"]),
+                "matched_keywords": matched_keywords(haystack, keywords),
+                "preview": str(row["snippet"] or row["path"]),
+                "metadata": {
+                    "size_bytes": optional_int(row["size_bytes"]),
+                    "modified_at": optional_str(row["modified_at"]),
+                    "search_backend": "sqlite-fts5",
+                    "source_hashes": {
+                        key: str(row[column])
+                        for key, column in (("md5", "hash_md5"), ("sha1", "hash_sha1"), ("sha256", "hash_sha256"))
+                        if row[column]
+                    },
+                },
+            }
+        )
     return matches
 
 
@@ -3164,13 +3258,16 @@ def build_case_search_execution_plan(
         uses_scan_cap=False,
         notes=("full-text index over extracted/OCR/document text",),
     )
+    file_requested = case_search_source_requested(source_filter, "files")
+    file_uses_fts = file_requested and file_record_fts_has_rows(connection, case_id)
     add_source(
         source="files",
-        requested=case_search_source_requested(source_filter, "files"),
-        backend="bounded-scan",
+        requested=file_requested,
+        backend="sqlite-fts5" if file_uses_fts else "bounded-scan",
         table_name="file_record",
-        uses_scan_cap=True,
-        notes=("path/extension/hash metadata scan is capped for large-case responsiveness",),
+        fts_table="file_record_fts" if file_uses_fts else "",
+        uses_scan_cap=not file_uses_fts,
+        notes=("file path/extension/hash metadata search uses FTS5 when file_record_fts rows are present",),
     )
     artifact_requested = case_search_source_requested(source_filter, "artifacts", "indicators")
     artifact_uses_fts = artifact_requested and artifact_fts_has_rows(connection, case_id)
@@ -9789,6 +9886,37 @@ CREATE TABLE IF NOT EXISTS file_record (
     FOREIGN KEY (evidence_source_id) REFERENCES evidence_source(id) ON DELETE SET NULL,
     FOREIGN KEY (parent_id) REFERENCES file_record(id) ON DELETE SET NULL
 );
+
+CREATE VIRTUAL TABLE IF NOT EXISTS file_record_fts USING fts5(
+    path,
+    extension,
+    hashes
+);
+
+CREATE TRIGGER IF NOT EXISTS file_record_fts_ai AFTER INSERT ON file_record BEGIN
+    INSERT INTO file_record_fts(rowid, path, extension, hashes)
+    VALUES (
+        new.id,
+        new.path,
+        new.extension,
+        trim(COALESCE(new.hash_md5, '') || ' ' || COALESCE(new.hash_sha1, '') || ' ' || COALESCE(new.hash_sha256, ''))
+    );
+END;
+
+CREATE TRIGGER IF NOT EXISTS file_record_fts_ad AFTER DELETE ON file_record BEGIN
+    DELETE FROM file_record_fts WHERE rowid = old.id;
+END;
+
+CREATE TRIGGER IF NOT EXISTS file_record_fts_au AFTER UPDATE ON file_record BEGIN
+    DELETE FROM file_record_fts WHERE rowid = old.id;
+    INSERT INTO file_record_fts(rowid, path, extension, hashes)
+    VALUES (
+        new.id,
+        new.path,
+        new.extension,
+        trim(COALESCE(new.hash_md5, '') || ' ' || COALESCE(new.hash_sha1, '') || ' ' || COALESCE(new.hash_sha256, ''))
+    );
+END;
 
 CREATE TABLE IF NOT EXISTS hash_record (
     id INTEGER PRIMARY KEY AUTOINCREMENT,

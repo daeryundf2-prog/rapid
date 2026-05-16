@@ -61,6 +61,7 @@ REQUIRED_TABLES = {
     "citation_sequence",
     "evidence_source",
     "file_record",
+    "file_record_fts",
     "hash_record",
     "acquisition_metadata",
     "artifact",
@@ -128,6 +129,7 @@ class RapidTriageCaseDatabaseTests(unittest.TestCase):
                 second["large_sqlite_fts_optimization"]["functional_priority_profile"]["controls"]["wal_when_supported"]
             )
             self.assertEqual(second["large_sqlite_fts_optimization"]["core_accuracy_gates"][0]["gap_id"], "#74")
+            self.assertIn("file_record_fts", second["large_sqlite_fts_optimization"]["fts_tables"])
             self.assertIn("artifact_fts", second["large_sqlite_fts_optimization"]["fts_tables"])
             self.assertEqual(
                 second["large_sqlite_fts_optimization"]["query_plan_profile"]["profile_version"],
@@ -531,16 +533,25 @@ class RapidTriageCaseDatabaseTests(unittest.TestCase):
                     payload = database.search_case(case_id="CASE-SCAN-CAP", keywords=["needle"], limit=10, sources=[source])
 
                     self.assertEqual(payload["options"]["scan_candidate_limit"], 10_000)
-                    self.assertEqual(payload["summary"]["match_count"], 0)
                     self.assertEqual(payload["large_case_search_plan"]["profile_version"], "case-search-large-case-plan-v1")
                     source_plan = {
                         item["source"]: item
                         for item in payload["large_case_search_plan"]["sources"]
                     }[source]
                     self.assertEqual(source_plan["requested"], True)
-                    self.assertEqual(source_plan["backend"], "bounded-scan")
-                    self.assertEqual(source_plan["scan_candidate_limit"], 10_000)
-                    self.assertEqual(source_plan["partial_coverage_warning"], True)
+                    if source == "files":
+                        self.assertEqual(payload["summary"]["match_count"], 1)
+                        self.assertEqual(source_plan["backend"], "sqlite-fts5")
+                        self.assertEqual(source_plan["fts_table"], "file_record_fts")
+                        self.assertEqual(source_plan["scan_candidate_limit"], None)
+                        self.assertEqual(source_plan["partial_coverage_warning"], False)
+                        self.assertEqual(payload["matches"][0]["path"], "/evidence/needle-after-cap.txt")
+                        self.assertEqual(payload["matches"][0]["metadata"]["search_backend"], "sqlite-fts5")
+                    else:
+                        self.assertEqual(payload["summary"]["match_count"], 0)
+                        self.assertEqual(source_plan["backend"], "bounded-scan")
+                        self.assertEqual(source_plan["scan_candidate_limit"], 10_000)
+                        self.assertEqual(source_plan["partial_coverage_warning"], True)
                     self.assertIn("#74", payload["large_case_search_plan"]["commercial_gap_ids"])
 
     def test_case_search_source_filter_skips_unrequested_large_backends(self) -> None:
