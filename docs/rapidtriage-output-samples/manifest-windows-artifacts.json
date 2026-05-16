@@ -24278,6 +24278,13 @@
                 "defender-report-grade-correlation"
               ],
               "implementation_track": "native-parser-depth",
+              "implemented_controls": {
+                "binary_offset_reference_count": 0,
+                "field_citation_count": 5,
+                "line_reference_count": 3,
+                "source_citation_profile_hash": "378fc4965439d610f5cb9296585b7508ec015d76212ed9dfc4a0cfbb2bc70786",
+                "source_citation_profile_present": true
+              },
               "item_numbers": [
                 18
               ],
@@ -24285,7 +24292,9 @@
                 "actual_scan_bytes": 0,
                 "bounded_wmi_scan_bytes": 0,
                 "cross_artifact_correlation_required_for_commercial_claims": true,
-                "native_repository_or_rule_store_decode_required": false
+                "native_repository_or_rule_store_decode_required": false,
+                "source_citation_profile_hash": "378fc4965439d610f5cb9296585b7508ec015d76212ed9dfc4a0cfbb2bc70786",
+                "source_citation_profile_present": true
               },
               "next_internal_step": "Finish TaskCache, Defender/EventLog, Firewall rule-store, WER dump/CAB, and WMI repository correlation validation.",
               "objective": "Expose Windows system artifact semantics, risk-rule evidence, and correlation blockers.",
@@ -24316,8 +24325,9 @@
               "source_refs": [
                 "source_path:<ROOT>/ProgramData/Microsoft/Windows Defender/Support/MPLog-20260426.log",
                 "source_sha256:122bb5f0a02d6904c5818a5d7f2da3553f01bdb37d85500fb4c69afe770ad731",
-                "artifact_type:defender-support-log",
-                "artifact_family:defender"
+                "artifact_type:",
+                "artifact_family:defender",
+                "source_citation_profile_sha256:378fc4965439d610f5cb9296585b7508ec015d76212ed9dfc4a0cfbb2bc70786"
               ],
               "system_trusted_diff": {
                 "status": "not-attached"
@@ -24413,7 +24423,7 @@
             "modified_at": "2024-03-05T06:15:16+00:00",
             "parser": "windows-system-artifacts",
             "parser_confidence": "medium",
-            "parser_version": "windows-system-v7",
+            "parser_version": "windows-system-v8",
             "raw_preview": "2026-04-26T01:02:03.000Z Threat Name: Trojan:Win32/TestLoader\n2026-04-26T01:02:04.000Z Remediation action: Quarantine\n2026-04-26T01:02:05.000Z Exclusion path observed: C:\\Users\\alice\\AppData\\Roaming",
             "reportability": "triage",
             "source_format": "text-log",
@@ -24470,6 +24480,8 @@
                 "windows-system-review"
               ],
               "severity": "high",
+              "source_citation_field_count": 5,
+              "source_citation_profile_hash": "378fc4965439d610f5cb9296585b7508ec015d76212ed9dfc4a0cfbb2bc70786",
               "source_field_values": {
                 "entry_count": 3,
                 "interesting_entries": [
@@ -24491,6 +24503,12 @@
                   "kind": "windows-system-source",
                   "source_path": "<ROOT>/ProgramData/Microsoft/Windows Defender/Support/MPLog-20260426.log",
                   "source_sha256": "122bb5f0a02d6904c5818a5d7f2da3553f01bdb37d85500fb4c69afe770ad731"
+                },
+                {
+                  "artifact_family": "defender",
+                  "field_citation_count": 5,
+                  "kind": "windows-system-source-citation-profile",
+                  "profile_sha256": "378fc4965439d610f5cb9296585b7508ec015d76212ed9dfc4a0cfbb2bc70786"
                 },
                 {
                   "interesting_entry_count": 3,
@@ -24525,7 +24543,7 @@
                 ],
                 "interesting_entry_count": 3
               },
-              "parser_version": "windows-system-v7",
+              "parser_version": "windows-system-v8",
               "reportability": {
                 "allowed_use": "windows-system-artifact-triage-pivot",
                 "blockers": [
@@ -24558,6 +24576,14 @@
                 "source_format": "text-log",
                 "source_path": "<ROOT>/ProgramData/Microsoft/Windows Defender/Support/MPLog-20260426.log",
                 "source_sha256": "122bb5f0a02d6904c5818a5d7f2da3553f01bdb37d85500fb4c69afe770ad731"
+              },
+              "source_citation_profile": {
+                "binary_offset_reference_count": 0,
+                "field_citation_count": 5,
+                "line_reference_count": 3,
+                "profile_sha256": "378fc4965439d610f5cb9296585b7508ec015d76212ed9dfc4a0cfbb2bc70786",
+                "profile_version": "windows-system-source-citation-profile-v1",
+                "viewer": "defender-support-log"
               },
               "validation": {
                 "failed_validation_matrix_ids": [
@@ -24612,6 +24638,121 @@
               ],
               "status": "validation-required"
             },
+            "system_source_citation_profile": {
+              "artifact_family": "defender",
+              "artifact_type": "",
+              "binary_offset_references": [],
+              "commercial_batch_id": "commercial-uplift-016-020",
+              "correlation_targets": [
+                "Defender EVTX",
+                "MpCmdRun logs",
+                "Quarantine metadata",
+                "Defender policy store",
+                "MFT/USN"
+              ],
+              "field_citations": [
+                {
+                  "field": "entry_count",
+                  "reportability": "source-context-candidate",
+                  "structure": "Defender support/policy text line",
+                  "value": "3"
+                },
+                {
+                  "field": "interesting_entry_count",
+                  "reportability": "source-context-candidate",
+                  "structure": "Defender support/policy text line",
+                  "value": "3"
+                },
+                {
+                  "field": "interesting_entries",
+                  "reportability": "source-context-candidate",
+                  "structure": "Defender support/policy text line",
+                  "value": "2026-04-26T01:02:03.000Z Threat Name: Trojan:Win32/TestLoader",
+                  "value_index": 0
+                },
+                {
+                  "field": "interesting_entries",
+                  "reportability": "source-context-candidate",
+                  "structure": "Defender support/policy text line",
+                  "value": "2026-04-26T01:02:04.000Z Remediation action: Quarantine",
+                  "value_index": 1
+                },
+                {
+                  "field": "interesting_entries",
+                  "reportability": "source-context-candidate",
+                  "structure": "Defender support/policy text line",
+                  "value": "2026-04-26T01:02:05.000Z Exclusion path observed: C:\\Users\\alice\\AppData\\Roaming",
+                  "value_index": 2
+                }
+              ],
+              "gap_id": "#18",
+              "item_number": 18,
+              "line_references": [
+                {
+                  "field": "interesting_entries",
+                  "line_number": 1,
+                  "line_preview": "2026-04-26T01:02:03.000Z Threat Name: Trojan:Win32/TestLoader",
+                  "value_sha256": "8cc7cebe66b32d3df94cb613fe8ffea0c5eebcddfb6bab3cb5f2a2c22bd58222"
+                },
+                {
+                  "field": "interesting_entries",
+                  "line_number": 2,
+                  "line_preview": "2026-04-26T01:02:04.000Z Remediation action: Quarantine",
+                  "value_sha256": "00a0ca5d9d2a6487dade318f38e9371b79e7579c5476c0db34cdba35ba0855f3"
+                },
+                {
+                  "field": "interesting_entries",
+                  "line_number": 3,
+                  "line_preview": "2026-04-26T01:02:05.000Z Exclusion path observed: C:\\Users\\alice\\AppData\\Roaming",
+                  "value_sha256": "adfceeb729d09f48b2e907814e37db6adebfc9481adc4e314846a84811c07445"
+                }
+              ],
+              "parser_version": "windows-system-v8",
+              "profile_sha256": "378fc4965439d610f5cb9296585b7508ec015d76212ed9dfc4a0cfbb2bc70786",
+              "profile_version": "windows-system-source-citation-profile-v1",
+              "reportability_decision": {
+                "allowed_use": "windows-system-artifact-triage-pivot",
+                "artifact_family": "defender",
+                "blockers": [
+                  "defender-event-and-mpcmdrun-correlation-not-implemented",
+                  "defender-event-policy-and-quarantine-correlation-required",
+                  "windows-system-cross-artifact-correlation-required",
+                  "windows-system-trusted-artifact-diff-required"
+                ],
+                "commercial_gap_id": "#18",
+                "decision": "do-not-report-system-artifact-as-fully-correlated",
+                "profile_version": "windows-system-reportability-decision-v1",
+                "required_before_report": [
+                  "source hashes and parser version captured",
+                  "artifact-specific event semantics validated",
+                  "registry/event/policy/dump/WMI correlation completed where applicable",
+                  "trusted-tool or known-answer diff attached for critical findings"
+                ]
+              },
+              "semantic_identity_hash": "4a9b56fd6ef06139fe0342666e54ddd514a489a2bb69b50e299d280b4d5c2e7b",
+              "source": {
+                "source_format": "text-log",
+                "source_path": "<ROOT>/ProgramData/Microsoft/Windows Defender/Support/MPLog-20260426.log",
+                "source_sha256": "122bb5f0a02d6904c5818a5d7f2da3553f01bdb37d85500fb4c69afe770ad731",
+                "source_size": 199
+              },
+              "source_viewer_locator": {
+                "binary_offset_mode": false,
+                "bounded_scan_bytes": 199,
+                "line_mode": true,
+                "source_path": "<ROOT>/ProgramData/Microsoft/Windows Defender/Support/MPLog-20260426.log",
+                "source_sha256": "122bb5f0a02d6904c5818a5d7f2da3553f01bdb37d85500fb4c69afe770ad731",
+                "viewer": "defender-support-log"
+              },
+              "validation_summary": {
+                "commercial_blockers": [
+                  "defender-event-and-mpcmdrun-correlation-not-implemented"
+                ],
+                "commercial_grade_ready": false,
+                "validation_required": true
+              }
+            },
+            "system_source_citation_profile_hash": "378fc4965439d610f5cb9296585b7508ec015d76212ed9dfc4a0cfbb2bc70786",
             "system_validation_matrix": [
               {
                 "id": "defender-source-parsed",
@@ -24674,6 +24815,13 @@
                 "firewall-report-grade-correlation"
               ],
               "implementation_track": "native-parser-depth",
+              "implemented_controls": {
+                "binary_offset_reference_count": 0,
+                "field_citation_count": 4,
+                "line_reference_count": 2,
+                "source_citation_profile_hash": "a0d6ea06b64d98852be403ef758361213b08449597bb4e627434266217960d94",
+                "source_citation_profile_present": true
+              },
               "item_numbers": [
                 18
               ],
@@ -24681,7 +24829,9 @@
                 "actual_scan_bytes": 0,
                 "bounded_wmi_scan_bytes": 0,
                 "cross_artifact_correlation_required_for_commercial_claims": true,
-                "native_repository_or_rule_store_decode_required": true
+                "native_repository_or_rule_store_decode_required": true,
+                "source_citation_profile_hash": "a0d6ea06b64d98852be403ef758361213b08449597bb4e627434266217960d94",
+                "source_citation_profile_present": true
               },
               "next_internal_step": "Finish TaskCache, Defender/EventLog, Firewall rule-store, WER dump/CAB, and WMI repository correlation validation.",
               "objective": "Expose Windows system artifact semantics, risk-rule evidence, and correlation blockers.",
@@ -24712,8 +24862,9 @@
               "source_refs": [
                 "source_path:<ROOT>/Windows/System32/LogFiles/Firewall/pfirewall.log",
                 "source_sha256:a96274791ced73ab67dd0987a4e08f5f813c1c5b543fda3cc501d163bd462f3e",
-                "artifact_type:firewall-log",
-                "artifact_family:firewall"
+                "artifact_type:",
+                "artifact_family:firewall",
+                "source_citation_profile_sha256:a0d6ea06b64d98852be403ef758361213b08449597bb4e627434266217960d94"
               ],
               "system_trusted_diff": {
                 "status": "not-attached"
@@ -24803,7 +24954,7 @@
             "modified_at": "2024-03-05T06:16:17+00:00",
             "parser": "windows-system-artifacts",
             "parser_confidence": "medium",
-            "parser_version": "windows-system-v7",
+            "parser_version": "windows-system-v8",
             "raw_preview": "#Version: 1.5\n#Fields: date time action protocol src-ip dst-ip src-port dst-port size\n2026-04-26 01:03:00 DROP TCP 10.0.0.5 203.0.113.9 51512 4444 60\n2026-04-26 01:03:05 ALLOW TCP 10.0.0.5 198.51.100.7 51513 443 120\n",
             "reportability": "triage",
             "sample_entries": [
@@ -24883,6 +25034,8 @@
                 "windows-system-review"
               ],
               "severity": "medium",
+              "source_citation_field_count": 4,
+              "source_citation_profile_hash": "a0d6ea06b64d98852be403ef758361213b08449597bb4e627434266217960d94",
               "source_field_values": {
                 "blocked_count": 1,
                 "entry_count": 2,
@@ -24923,6 +25076,12 @@
                   "kind": "windows-system-source",
                   "source_path": "<ROOT>/Windows/System32/LogFiles/Firewall/pfirewall.log",
                   "source_sha256": "a96274791ced73ab67dd0987a4e08f5f813c1c5b543fda3cc501d163bd462f3e"
+                },
+                {
+                  "artifact_family": "firewall",
+                  "field_citation_count": 4,
+                  "kind": "windows-system-source-citation-profile",
+                  "profile_sha256": "a0d6ea06b64d98852be403ef758361213b08449597bb4e627434266217960d94"
                 },
                 {
                   "blocked_count": 1,
@@ -24977,7 +25136,7 @@
                   }
                 ]
               },
-              "parser_version": "windows-system-v7",
+              "parser_version": "windows-system-v8",
               "reportability": {
                 "allowed_use": "windows-system-artifact-triage-pivot",
                 "blockers": [
@@ -25010,6 +25169,14 @@
                 "source_format": "w3c-log",
                 "source_path": "<ROOT>/Windows/System32/LogFiles/Firewall/pfirewall.log",
                 "source_sha256": "a96274791ced73ab67dd0987a4e08f5f813c1c5b543fda3cc501d163bd462f3e"
+              },
+              "source_citation_profile": {
+                "binary_offset_reference_count": 0,
+                "field_citation_count": 4,
+                "line_reference_count": 2,
+                "profile_sha256": "a0d6ea06b64d98852be403ef758361213b08449597bb4e627434266217960d94",
+                "profile_version": "windows-system-source-citation-profile-v1",
+                "viewer": "firewall-w3c-log"
               },
               "validation": {
                 "failed_validation_matrix_ids": [
@@ -25063,6 +25230,108 @@
               ],
               "status": "validation-required"
             },
+            "system_source_citation_profile": {
+              "artifact_family": "firewall",
+              "artifact_type": "",
+              "binary_offset_references": [],
+              "commercial_batch_id": "commercial-uplift-016-020",
+              "correlation_targets": [
+                "Firewall rule store",
+                "Firewall/Security EVTX",
+                "SRUM",
+                "Process execution",
+                "Browser/network artifacts"
+              ],
+              "field_citations": [
+                {
+                  "field": "entry_count",
+                  "reportability": "source-context-candidate",
+                  "structure": "W3C firewall log row",
+                  "value": "2"
+                },
+                {
+                  "field": "blocked_count",
+                  "reportability": "source-context-candidate",
+                  "structure": "W3C firewall log row",
+                  "value": "1"
+                },
+                {
+                  "field": "sample_entries",
+                  "reportability": "source-context-candidate",
+                  "structure": "W3C firewall log row",
+                  "value": "DROP",
+                  "value_index": 0
+                },
+                {
+                  "field": "sample_entries",
+                  "reportability": "source-context-candidate",
+                  "structure": "W3C firewall log row",
+                  "value": "ALLOW",
+                  "value_index": 1
+                }
+              ],
+              "gap_id": "#18",
+              "item_number": 18,
+              "line_references": [
+                {
+                  "field": "sample_entries",
+                  "line_number": 3,
+                  "line_preview": "2026-04-26 01:03:00 DROP TCP 10.0.0.5 203.0.113.9 51512 4444 60",
+                  "value_sha256": "58ad7e422ac8c05d95f0ada69a2fa073fa4bf9bdbafd878a7a2827cad5cea4a5"
+                },
+                {
+                  "field": "sample_entries",
+                  "line_number": 4,
+                  "line_preview": "2026-04-26 01:03:05 ALLOW TCP 10.0.0.5 198.51.100.7 51513 443 120",
+                  "value_sha256": "e50a4d25fcc279bf86dfba969565611ca2a1a7e8b5ddae191ac18514c8c9d691"
+                }
+              ],
+              "parser_version": "windows-system-v8",
+              "profile_sha256": "a0d6ea06b64d98852be403ef758361213b08449597bb4e627434266217960d94",
+              "profile_version": "windows-system-source-citation-profile-v1",
+              "reportability_decision": {
+                "allowed_use": "windows-system-artifact-triage-pivot",
+                "artifact_family": "firewall",
+                "blockers": [
+                  "firewall-policy-store-correlation-required",
+                  "firewall-rule-store-correlation-not-implemented",
+                  "windows-system-cross-artifact-correlation-required",
+                  "windows-system-trusted-artifact-diff-required"
+                ],
+                "commercial_gap_id": "#18",
+                "decision": "do-not-report-system-artifact-as-fully-correlated",
+                "profile_version": "windows-system-reportability-decision-v1",
+                "required_before_report": [
+                  "source hashes and parser version captured",
+                  "artifact-specific event semantics validated",
+                  "registry/event/policy/dump/WMI correlation completed where applicable",
+                  "trusted-tool or known-answer diff attached for critical findings"
+                ]
+              },
+              "semantic_identity_hash": "88a079d82d89fe5853cb6391654750a3ac24b935d0fe75e246ca247d74a1312b",
+              "source": {
+                "source_format": "w3c-log",
+                "source_path": "<ROOT>/Windows/System32/LogFiles/Firewall/pfirewall.log",
+                "source_sha256": "a96274791ced73ab67dd0987a4e08f5f813c1c5b543fda3cc501d163bd462f3e",
+                "source_size": 216
+              },
+              "source_viewer_locator": {
+                "binary_offset_mode": false,
+                "bounded_scan_bytes": 216,
+                "line_mode": true,
+                "source_path": "<ROOT>/Windows/System32/LogFiles/Firewall/pfirewall.log",
+                "source_sha256": "a96274791ced73ab67dd0987a4e08f5f813c1c5b543fda3cc501d163bd462f3e",
+                "viewer": "firewall-w3c-log"
+              },
+              "validation_summary": {
+                "commercial_blockers": [
+                  "firewall-rule-store-correlation-not-implemented"
+                ],
+                "commercial_grade_ready": false,
+                "validation_required": true
+              }
+            },
+            "system_source_citation_profile_hash": "a0d6ea06b64d98852be403ef758361213b08449597bb4e627434266217960d94",
             "system_validation_matrix": [
               {
                 "id": "firewall-source-parsed",
@@ -25137,6 +25406,13 @@
                 "task-report-grade-correlation"
               ],
               "implementation_track": "native-parser-depth",
+              "implemented_controls": {
+                "binary_offset_reference_count": 0,
+                "field_citation_count": 7,
+                "line_reference_count": 2,
+                "source_citation_profile_hash": "7c853c2b5872d48db71aa4f4652aeb2189308cc6f5d2dce83a1318d65c774e66",
+                "source_citation_profile_present": true
+              },
               "item_numbers": [
                 18
               ],
@@ -25144,7 +25420,9 @@
                 "actual_scan_bytes": 0,
                 "bounded_wmi_scan_bytes": 0,
                 "cross_artifact_correlation_required_for_commercial_claims": true,
-                "native_repository_or_rule_store_decode_required": true
+                "native_repository_or_rule_store_decode_required": true,
+                "source_citation_profile_hash": "7c853c2b5872d48db71aa4f4652aeb2189308cc6f5d2dce83a1318d65c774e66",
+                "source_citation_profile_present": true
               },
               "next_internal_step": "Finish TaskCache, Defender/EventLog, Firewall rule-store, WER dump/CAB, and WMI repository correlation validation.",
               "objective": "Expose Windows system artifact semantics, risk-rule evidence, and correlation blockers.",
@@ -25178,8 +25456,9 @@
               "source_refs": [
                 "source_path:<ROOT>/Windows/System32/Tasks/Microsoft/Windows/UpdateOrchestrator/SecurityUpdater",
                 "source_sha256:67f0d7c2747654b49140ab0a51f30fcf2ff41d4792b2b60bc77725f32b897f79",
-                "artifact_type:task-scheduler-task",
-                "artifact_family:task-scheduler"
+                "artifact_type:",
+                "artifact_family:task-scheduler",
+                "source_citation_profile_sha256:7c853c2b5872d48db71aa4f4652aeb2189308cc6f5d2dce83a1318d65c774e66"
               ],
               "system_trusted_diff": {
                 "status": "not-attached"
@@ -25283,7 +25562,7 @@
             },
             "parser": "windows-system-artifacts",
             "parser_confidence": "high",
-            "parser_version": "windows-system-v7",
+            "parser_version": "windows-system-v8",
             "principal_count": 1,
             "principals": [
               {
@@ -25371,6 +25650,8 @@
                 "windows-system-review"
               ],
               "severity": "high",
+              "source_citation_field_count": 7,
+              "source_citation_profile_hash": "7c853c2b5872d48db71aa4f4652aeb2189308cc6f5d2dce83a1318d65c774e66",
               "source_field_values": {
                 "action_count": 1,
                 "command_line": "powershell.exe -ExecutionPolicy Bypass -File C:\\Users\\alice\\AppData\\Roaming\\updater.ps1",
@@ -25392,6 +25673,12 @@
                   "kind": "windows-system-source",
                   "source_path": "<ROOT>/Windows/System32/Tasks/Microsoft/Windows/UpdateOrchestrator/SecurityUpdater",
                   "source_sha256": "67f0d7c2747654b49140ab0a51f30fcf2ff41d4792b2b60bc77725f32b897f79"
+                },
+                {
+                  "artifact_family": "task-scheduler",
+                  "field_citation_count": 7,
+                  "kind": "windows-system-source-citation-profile",
+                  "profile_sha256": "7c853c2b5872d48db71aa4f4652aeb2189308cc6f5d2dce83a1318d65c774e66"
                 },
                 {
                   "action_count": 1,
@@ -25429,7 +25716,7 @@
                 "task_uri": "\\Microsoft\\Windows\\UpdateOrchestrator\\SecurityUpdater",
                 "trigger_count": 1
               },
-              "parser_version": "windows-system-v7",
+              "parser_version": "windows-system-v8",
               "reportability": {
                 "allowed_use": "windows-system-artifact-triage-pivot",
                 "blockers": [
@@ -25470,6 +25757,14 @@
                 "source_format": "task-xml",
                 "source_path": "<ROOT>/Windows/System32/Tasks/Microsoft/Windows/UpdateOrchestrator/SecurityUpdater",
                 "source_sha256": "67f0d7c2747654b49140ab0a51f30fcf2ff41d4792b2b60bc77725f32b897f79"
+              },
+              "source_citation_profile": {
+                "binary_offset_reference_count": 0,
+                "field_citation_count": 7,
+                "line_reference_count": 2,
+                "profile_sha256": "7c853c2b5872d48db71aa4f4652aeb2189308cc6f5d2dce83a1318d65c774e66",
+                "profile_version": "windows-system-source-citation-profile-v1",
+                "viewer": "task-scheduler-xml"
               },
               "validation": {
                 "failed_validation_matrix_ids": [
@@ -25535,6 +25830,129 @@
               ],
               "status": "validation-required"
             },
+            "system_source_citation_profile": {
+              "artifact_family": "task-scheduler",
+              "artifact_type": "",
+              "binary_offset_references": [],
+              "commercial_batch_id": "commercial-uplift-016-020",
+              "correlation_targets": [
+                "TaskCache Registry",
+                "TaskScheduler EVTX",
+                "Security EVTX",
+                "Prefetch",
+                "Amcache",
+                "MFT/USN"
+              ],
+              "field_citations": [
+                {
+                  "field": "task_uri",
+                  "reportability": "source-context-candidate",
+                  "structure": "RegistrationInfo/URI",
+                  "value": "\\Microsoft\\Windows\\UpdateOrchestrator\\SecurityUpdater"
+                },
+                {
+                  "field": "command_line",
+                  "reportability": "source-context-candidate",
+                  "structure": "Actions/Exec",
+                  "value": "powershell.exe -ExecutionPolicy Bypass -File C:\\Users\\alice\\AppData\\Roaming\\updater.ps1"
+                },
+                {
+                  "field": "executable_name",
+                  "reportability": "source-context-candidate",
+                  "structure": "Actions/Exec/Command",
+                  "value": "powershell.exe"
+                },
+                {
+                  "field": "action_count",
+                  "reportability": "source-context-candidate",
+                  "structure": "Actions",
+                  "value": "1"
+                },
+                {
+                  "field": "trigger_count",
+                  "reportability": "source-context-candidate",
+                  "structure": "Triggers",
+                  "value": "1"
+                },
+                {
+                  "field": "principal_count",
+                  "reportability": "source-context-candidate",
+                  "structure": "Principals",
+                  "value": "1"
+                },
+                {
+                  "field": "hidden",
+                  "reportability": "source-context-candidate",
+                  "structure": "Settings/Hidden",
+                  "value": "False"
+                }
+              ],
+              "gap_id": "#18",
+              "item_number": 18,
+              "line_references": [
+                {
+                  "field": "task_uri",
+                  "line_number": 5,
+                  "line_preview": "<URI>\\Microsoft\\Windows\\UpdateOrchestrator\\SecurityUpdater</URI>",
+                  "value_sha256": "c4aae0bf27103c5ee0326aa892364a19012f67e34ba4e7b21470cb97d1b4f8bf"
+                },
+                {
+                  "field": "executable_name",
+                  "line_number": 19,
+                  "line_preview": "<Command>powershell.exe</Command>",
+                  "value_sha256": "7237e0de5323addc130ed5e08f14e800c4dc4ee79633517ce660c9e5869a7f62"
+                }
+              ],
+              "parser_version": "windows-system-v8",
+              "profile_sha256": "7c853c2b5872d48db71aa4f4652aeb2189308cc6f5d2dce83a1318d65c774e66",
+              "profile_version": "windows-system-source-citation-profile-v1",
+              "reportability_decision": {
+                "allowed_use": "windows-system-artifact-triage-pivot",
+                "artifact_family": "task-scheduler",
+                "blockers": [
+                  "task-cache-registry-correlation-not-implemented",
+                  "task-history-event-correlation-not-implemented",
+                  "task-security-descriptor-validation-not-implemented",
+                  "taskcache-registry-and-eventlog-correlation-required",
+                  "windows-system-cross-artifact-correlation-required",
+                  "windows-system-trusted-artifact-diff-required"
+                ],
+                "commercial_gap_id": "#18",
+                "decision": "do-not-report-system-artifact-as-fully-correlated",
+                "profile_version": "windows-system-reportability-decision-v1",
+                "required_before_report": [
+                  "source hashes and parser version captured",
+                  "artifact-specific event semantics validated",
+                  "registry/event/policy/dump/WMI correlation completed where applicable",
+                  "trusted-tool or known-answer diff attached for critical findings"
+                ]
+              },
+              "semantic_identity_hash": "6d60652f70f541bb8eaf78e709ba45581af57fc67dbaa743d7c33b4a0694d48d",
+              "source": {
+                "source_format": "task-xml",
+                "source_path": "<ROOT>/Windows/System32/Tasks/Microsoft/Windows/UpdateOrchestrator/SecurityUpdater",
+                "source_sha256": "67f0d7c2747654b49140ab0a51f30fcf2ff41d4792b2b60bc77725f32b897f79",
+                "source_size": 685
+              },
+              "source_viewer_locator": {
+                "binary_offset_mode": false,
+                "bounded_scan_bytes": 685,
+                "line_mode": true,
+                "source_path": "<ROOT>/Windows/System32/Tasks/Microsoft/Windows/UpdateOrchestrator/SecurityUpdater",
+                "source_sha256": "67f0d7c2747654b49140ab0a51f30fcf2ff41d4792b2b60bc77725f32b897f79",
+                "viewer": "task-scheduler-xml"
+              },
+              "validation_summary": {
+                "commercial_blockers": [
+                  "task-cache-registry-correlation-not-implemented",
+                  "task-security-descriptor-validation-not-implemented",
+                  "task-history-event-correlation-not-implemented"
+                ],
+                "commercial_grade_ready": false,
+                "validation_required": true
+              }
+            },
+            "system_source_citation_profile_hash": "7c853c2b5872d48db71aa4f4652aeb2189308cc6f5d2dce83a1318d65c774e66",
             "system_validation_matrix": [
               {
                 "id": "task-scheduler-source-parsed",
@@ -25707,7 +26125,7 @@
             "parsed_row_count": 2,
             "parser": "windows-system-artifacts",
             "parser_confidence": "medium",
-            "parser_version": "windows-system-v7",
+            "parser_version": "windows-system-v8",
             "reportability": "triage",
             "request_file_correlation": {
               "correlation_status": "no-source-match",
@@ -25758,6 +26176,13 @@
                 "wer-report-grade-correlation"
               ],
               "implementation_track": "native-parser-depth",
+              "implemented_controls": {
+                "binary_offset_reference_count": 0,
+                "field_citation_count": 7,
+                "line_reference_count": 5,
+                "source_citation_profile_hash": "e9b7258941894a1894aaf362b1d3bec2928f4f35c6f39363d8e42db0396fb1b4",
+                "source_citation_profile_present": true
+              },
               "item_numbers": [
                 18
               ],
@@ -25765,7 +26190,9 @@
                 "actual_scan_bytes": 0,
                 "bounded_wmi_scan_bytes": 0,
                 "cross_artifact_correlation_required_for_commercial_claims": true,
-                "native_repository_or_rule_store_decode_required": false
+                "native_repository_or_rule_store_decode_required": false,
+                "source_citation_profile_hash": "e9b7258941894a1894aaf362b1d3bec2928f4f35c6f39363d8e42db0396fb1b4",
+                "source_citation_profile_present": true
               },
               "next_internal_step": "Finish TaskCache, Defender/EventLog, Firewall rule-store, WER dump/CAB, and WMI repository correlation validation.",
               "objective": "Expose Windows system artifact semantics, risk-rule evidence, and correlation blockers.",
@@ -25798,8 +26225,9 @@
               "source_refs": [
                 "source_path:<ROOT>/ProgramData/Microsoft/Windows/WER/ReportArchive/AppCrash_powershell.exe_123/Report.wer",
                 "source_sha256:83260608bb0ab69fd0500bc550a6d55a26881c92c36dd12f3b35cd13f2c01b36",
-                "artifact_type:wer-report",
-                "artifact_family:wer"
+                "artifact_type:",
+                "artifact_family:wer",
+                "source_citation_profile_sha256:e9b7258941894a1894aaf362b1d3bec2928f4f35c6f39363d8e42db0396fb1b4"
               ],
               "system_trusted_diff": {
                 "status": "not-attached"
@@ -25917,7 +26345,7 @@
             "module": "evil.dll",
             "parser": "windows-system-artifacts",
             "parser_confidence": "high",
-            "parser_version": "windows-system-v7",
+            "parser_version": "windows-system-v8",
             "problem_signature": [
               {
                 "name": "Application Name",
@@ -25997,6 +26425,8 @@
                 "windows-system-review"
               ],
               "severity": "medium",
+              "source_citation_field_count": 7,
+              "source_citation_profile_hash": "e9b7258941894a1894aaf362b1d3bec2928f4f35c6f39363d8e42db0396fb1b4",
               "source_field_values": {
                 "application_name": "powershell.exe",
                 "bucket_id": "123456789",
@@ -26018,6 +26448,12 @@
                   "kind": "windows-system-source",
                   "source_path": "<ROOT>/ProgramData/Microsoft/Windows/WER/ReportArchive/AppCrash_powershell.exe_123/Report.wer",
                   "source_sha256": "83260608bb0ab69fd0500bc550a6d55a26881c92c36dd12f3b35cd13f2c01b36"
+                },
+                {
+                  "artifact_family": "wer",
+                  "field_citation_count": 7,
+                  "kind": "windows-system-source-citation-profile",
+                  "profile_sha256": "e9b7258941894a1894aaf362b1d3bec2928f4f35c6f39363d8e42db0396fb1b4"
                 },
                 {
                   "application_name": "powershell.exe",
@@ -26054,7 +26490,7 @@
                 "report_id": "11111111-2222-3333-4444-555555555555",
                 "report_store": "reportarchive"
               },
-              "parser_version": "windows-system-v7",
+              "parser_version": "windows-system-v8",
               "reportability": {
                 "allowed_use": "windows-system-artifact-triage-pivot",
                 "blockers": [
@@ -26089,6 +26525,14 @@
                 "source_format": "wer",
                 "source_path": "<ROOT>/ProgramData/Microsoft/Windows/WER/ReportArchive/AppCrash_powershell.exe_123/Report.wer",
                 "source_sha256": "83260608bb0ab69fd0500bc550a6d55a26881c92c36dd12f3b35cd13f2c01b36"
+              },
+              "source_citation_profile": {
+                "binary_offset_reference_count": 0,
+                "field_citation_count": 7,
+                "line_reference_count": 5,
+                "profile_sha256": "e9b7258941894a1894aaf362b1d3bec2928f4f35c6f39363d8e42db0396fb1b4",
+                "profile_version": "windows-system-source-citation-profile-v1",
+                "viewer": "wer-key-value-report"
               },
               "validation": {
                 "failed_validation_matrix_ids": [
@@ -26149,6 +26593,147 @@
               ],
               "status": "validation-required"
             },
+            "system_source_citation_profile": {
+              "artifact_family": "wer",
+              "artifact_type": "",
+              "binary_offset_references": [],
+              "commercial_batch_id": "commercial-uplift-016-020",
+              "correlation_targets": [
+                "WER dump/CAB",
+                "ReportQueue/ReportArchive state",
+                "Application EVTX",
+                "Prefetch",
+                "Amcache",
+                "MFT/USN"
+              ],
+              "field_citations": [
+                {
+                  "field": "report_id",
+                  "reportability": "source-context-candidate",
+                  "structure": "Report.wer key/value field",
+                  "value": "11111111-2222-3333-4444-555555555555"
+                },
+                {
+                  "field": "report_store",
+                  "reportability": "source-context-candidate",
+                  "structure": "Report.wer key/value field",
+                  "value": "reportarchive"
+                },
+                {
+                  "field": "application_name",
+                  "reportability": "source-context-candidate",
+                  "structure": "Report.wer key/value field",
+                  "value": "powershell.exe"
+                },
+                {
+                  "field": "fault_module_name",
+                  "reportability": "source-context-candidate",
+                  "structure": "Report.wer key/value field",
+                  "value": "evil.dll"
+                },
+                {
+                  "field": "exception_code",
+                  "reportability": "source-context-candidate",
+                  "structure": "Report.wer key/value field",
+                  "value": "c0000005"
+                },
+                {
+                  "field": "event_time",
+                  "reportability": "source-context-candidate",
+                  "structure": "Report.wer key/value field",
+                  "value": "2026-04-26T01:04:05+00:00"
+                },
+                {
+                  "field": "bucket_id",
+                  "reportability": "source-context-candidate",
+                  "structure": "Report.wer key/value field",
+                  "value": "123456789"
+                }
+              ],
+              "gap_id": "#18",
+              "item_number": 18,
+              "line_references": [
+                {
+                  "field": "report_id",
+                  "line_number": 9,
+                  "line_preview": "ReportIdentifier=11111111-2222-3333-4444-555555555555",
+                  "value_sha256": "16b81fda60c15b0f2a568e81a375548bea1546fa08fb439869dd8a05a63bd74e"
+                },
+                {
+                  "field": "application_name",
+                  "line_number": 3,
+                  "line_preview": "AppName=powershell.exe",
+                  "value_sha256": "7237e0de5323addc130ed5e08f14e800c4dc4ee79633517ce660c9e5869a7f62"
+                },
+                {
+                  "field": "fault_module_name",
+                  "line_number": 5,
+                  "line_preview": "FaultModuleName=evil.dll",
+                  "value_sha256": "24486c2976d45043aeead37a769e94de02d493a33459db33e465140f86deb667"
+                },
+                {
+                  "field": "exception_code",
+                  "line_number": 7,
+                  "line_preview": "ExceptionCode=c0000005",
+                  "value_sha256": "9bef0e784ead8f455d0393d16e32555b0ee094a32c428e35a16d93d41e7b4758"
+                },
+                {
+                  "field": "bucket_id",
+                  "line_number": 10,
+                  "line_preview": "Bucket=123456789",
+                  "value_sha256": "bd47b13c14db7822f4c2aa6e49e7996e030e3fd4e2c82d27291b13663c5cf0da"
+                }
+              ],
+              "parser_version": "windows-system-v8",
+              "profile_sha256": "e9b7258941894a1894aaf362b1d3bec2928f4f35c6f39363d8e42db0396fb1b4",
+              "profile_version": "windows-system-source-citation-profile-v1",
+              "reportability_decision": {
+                "allowed_use": "windows-system-artifact-triage-pivot",
+                "artifact_family": "wer",
+                "blockers": [
+                  "wer-cab-metadata-validation-not-implemented",
+                  "wer-dump-cab-linkage-validation-required",
+                  "wer-dump-file-correlation-not-implemented",
+                  "wer-reportqueue-state-validation-not-implemented",
+                  "windows-system-cross-artifact-correlation-required",
+                  "windows-system-trusted-artifact-diff-required"
+                ],
+                "commercial_gap_id": "#18",
+                "decision": "do-not-report-system-artifact-as-fully-correlated",
+                "profile_version": "windows-system-reportability-decision-v1",
+                "required_before_report": [
+                  "source hashes and parser version captured",
+                  "artifact-specific event semantics validated",
+                  "registry/event/policy/dump/WMI correlation completed where applicable",
+                  "trusted-tool or known-answer diff attached for critical findings"
+                ]
+              },
+              "semantic_identity_hash": "3ccbe5d2254a375930607228de0804ba627fc6dc774c54c035715a523b9a7b69",
+              "source": {
+                "source_format": "wer",
+                "source_path": "<ROOT>/ProgramData/Microsoft/Windows/WER/ReportArchive/AppCrash_powershell.exe_123/Report.wer",
+                "source_sha256": "83260608bb0ab69fd0500bc550a6d55a26881c92c36dd12f3b35cd13f2c01b36",
+                "source_size": 488
+              },
+              "source_viewer_locator": {
+                "binary_offset_mode": false,
+                "bounded_scan_bytes": 488,
+                "line_mode": true,
+                "source_path": "<ROOT>/ProgramData/Microsoft/Windows/WER/ReportArchive/AppCrash_powershell.exe_123/Report.wer",
+                "source_sha256": "83260608bb0ab69fd0500bc550a6d55a26881c92c36dd12f3b35cd13f2c01b36",
+                "viewer": "wer-key-value-report"
+              },
+              "validation_summary": {
+                "commercial_blockers": [
+                  "wer-dump-file-correlation-not-implemented",
+                  "wer-reportqueue-state-validation-not-implemented",
+                  "wer-cab-metadata-validation-not-implemented"
+                ],
+                "commercial_grade_ready": false,
+                "validation_required": true
+              }
+            },
+            "system_source_citation_profile_hash": "e9b7258941894a1894aaf362b1d3bec2928f4f35c6f39363d8e42db0396fb1b4",
             "system_validation_matrix": [
               {
                 "id": "wer-source-parsed",
@@ -26216,6 +26801,13 @@
                 "wmi-native-report-grade"
               ],
               "implementation_track": "native-parser-depth",
+              "implemented_controls": {
+                "binary_offset_reference_count": 0,
+                "field_citation_count": 6,
+                "line_reference_count": 0,
+                "source_citation_profile_hash": "9b0d5daf27a2cbcc10200c3e6966d67dc12f1893336db471a5c12ddcdb7dd2b8",
+                "source_citation_profile_present": true
+              },
               "item_numbers": [
                 18
               ],
@@ -26223,7 +26815,9 @@
                 "actual_scan_bytes": 29,
                 "bounded_wmi_scan_bytes": 8388608,
                 "cross_artifact_correlation_required_for_commercial_claims": true,
-                "native_repository_or_rule_store_decode_required": true
+                "native_repository_or_rule_store_decode_required": true,
+                "source_citation_profile_hash": "9b0d5daf27a2cbcc10200c3e6966d67dc12f1893336db471a5c12ddcdb7dd2b8",
+                "source_citation_profile_present": true
               },
               "next_internal_step": "Finish TaskCache, Defender/EventLog, Firewall rule-store, WER dump/CAB, and WMI repository correlation validation.",
               "objective": "Expose Windows system artifact semantics, risk-rule evidence, and correlation blockers.",
@@ -26253,8 +26847,9 @@
               "source_refs": [
                 "source_path:<ROOT>/Windows/System32/wbem/Repository/OBJECTS.DATA",
                 "source_sha256:460fe33f8af0c81663b71e4c639af092c35bcc4b79c00e4574b1ea2a21741148",
-                "artifact_type:wmi-repository-file",
-                "artifact_family:wmi"
+                "artifact_type:",
+                "artifact_family:wmi",
+                "source_citation_profile_sha256:9b0d5daf27a2cbcc10200c3e6966d67dc12f1893336db471a5c12ddcdb7dd2b8"
               ],
               "system_trusted_diff": {
                 "status": "not-attached"
@@ -26347,7 +26942,7 @@
             "note": "WMI repository file inventoried with bounded string pivots for persistence review; validate findings with a dedicated WMI repository parser.",
             "parser": "windows-system-artifacts",
             "parser_confidence": "low",
-            "parser_version": "windows-system-v7",
+            "parser_version": "windows-system-v8",
             "path_candidates": [],
             "recommended_parsers": [
               "PyWMIPersistenceFinder",
@@ -26418,6 +27013,8 @@
                 "windows-system-review"
               ],
               "severity": "medium",
+              "source_citation_field_count": 6,
+              "source_citation_profile_hash": "9b0d5daf27a2cbcc10200c3e6966d67dc12f1893336db471a5c12ddcdb7dd2b8",
               "source_field_values": {
                 "entry_name": "OBJECTS.DATA",
                 "extracted_string_count": 1,
@@ -26438,6 +27035,12 @@
                   "kind": "windows-system-source",
                   "source_path": "<ROOT>/Windows/System32/wbem/Repository/OBJECTS.DATA",
                   "source_sha256": "460fe33f8af0c81663b71e4c639af092c35bcc4b79c00e4574b1ea2a21741148"
+                },
+                {
+                  "artifact_family": "wmi",
+                  "field_citation_count": 6,
+                  "kind": "windows-system-source-citation-profile",
+                  "profile_sha256": "9b0d5daf27a2cbcc10200c3e6966d67dc12f1893336db471a5c12ddcdb7dd2b8"
                 },
                 {
                   "interesting_string_count": 0,
@@ -26474,7 +27077,7 @@
                 "scan_bytes": 29,
                 "url_candidate_count": 0
               },
-              "parser_version": "windows-system-v7",
+              "parser_version": "windows-system-v8",
               "reportability": {
                 "allowed_use": "windows-system-artifact-triage-pivot",
                 "blockers": [
@@ -26507,6 +27110,14 @@
                 "source_format": "wmi-repository",
                 "source_path": "<ROOT>/Windows/System32/wbem/Repository/OBJECTS.DATA",
                 "source_sha256": "460fe33f8af0c81663b71e4c639af092c35bcc4b79c00e4574b1ea2a21741148"
+              },
+              "source_citation_profile": {
+                "binary_offset_reference_count": 0,
+                "field_citation_count": 6,
+                "line_reference_count": 0,
+                "profile_sha256": "9b0d5daf27a2cbcc10200c3e6966d67dc12f1893336db471a5c12ddcdb7dd2b8",
+                "profile_version": "windows-system-source-citation-profile-v1",
+                "viewer": "wmi-repository-string-offset-view"
               },
               "validation": {
                 "failed_validation_matrix_ids": [
@@ -26562,6 +27173,105 @@
               ],
               "status": "validation-required"
             },
+            "system_source_citation_profile": {
+              "artifact_family": "wmi",
+              "artifact_type": "",
+              "binary_offset_references": [],
+              "commercial_batch_id": "commercial-uplift-016-020",
+              "correlation_targets": [
+                "Native WMI repository parser",
+                "Autoruns",
+                "WMI/PowerShell EVTX",
+                "Registry",
+                "MFT/USN"
+              ],
+              "field_citations": [
+                {
+                  "field": "entry_name",
+                  "reportability": "source-context-candidate",
+                  "structure": "bounded repository string pivot",
+                  "value": "OBJECTS.DATA"
+                },
+                {
+                  "field": "scan_bytes",
+                  "reportability": "source-context-candidate",
+                  "structure": "bounded repository string pivot",
+                  "value": "29"
+                },
+                {
+                  "field": "extracted_string_count",
+                  "reportability": "source-context-candidate",
+                  "structure": "bounded repository string pivot",
+                  "value": "1"
+                },
+                {
+                  "field": "interesting_string_count",
+                  "reportability": "source-context-candidate",
+                  "structure": "bounded repository string pivot",
+                  "value": "0"
+                },
+                {
+                  "field": "path_candidate_count",
+                  "reportability": "source-context-candidate",
+                  "structure": "bounded repository string pivot",
+                  "value": "0"
+                },
+                {
+                  "field": "url_candidate_count",
+                  "reportability": "source-context-candidate",
+                  "structure": "bounded repository string pivot",
+                  "value": "0"
+                }
+              ],
+              "gap_id": "#18",
+              "item_number": 18,
+              "line_references": [],
+              "parser_version": "windows-system-v8",
+              "profile_sha256": "9b0d5daf27a2cbcc10200c3e6966d67dc12f1893336db471a5c12ddcdb7dd2b8",
+              "profile_version": "windows-system-source-citation-profile-v1",
+              "reportability_decision": {
+                "allowed_use": "windows-system-artifact-triage-pivot",
+                "artifact_family": "wmi",
+                "blockers": [
+                  "native-wmi-repository-decoding-not-implemented",
+                  "windows-system-cross-artifact-correlation-required",
+                  "windows-system-trusted-artifact-diff-required",
+                  "wmi-native-consumer-filter-binding-decode-required"
+                ],
+                "commercial_gap_id": "#18",
+                "decision": "do-not-report-system-artifact-as-fully-correlated",
+                "profile_version": "windows-system-reportability-decision-v1",
+                "required_before_report": [
+                  "source hashes and parser version captured",
+                  "artifact-specific event semantics validated",
+                  "registry/event/policy/dump/WMI correlation completed where applicable",
+                  "trusted-tool or known-answer diff attached for critical findings"
+                ]
+              },
+              "semantic_identity_hash": "c0b379c501defe06343d02c00025d6a926266d964bea08466347b18e2f1119a5",
+              "source": {
+                "source_format": "wmi-repository",
+                "source_path": "<ROOT>/Windows/System32/wbem/Repository/OBJECTS.DATA",
+                "source_sha256": "460fe33f8af0c81663b71e4c639af092c35bcc4b79c00e4574b1ea2a21741148",
+                "source_size": 29
+              },
+              "source_viewer_locator": {
+                "binary_offset_mode": true,
+                "bounded_scan_bytes": 8388608,
+                "line_mode": false,
+                "source_path": "<ROOT>/Windows/System32/wbem/Repository/OBJECTS.DATA",
+                "source_sha256": "460fe33f8af0c81663b71e4c639af092c35bcc4b79c00e4574b1ea2a21741148",
+                "viewer": "wmi-repository-string-offset-view"
+              },
+              "validation_summary": {
+                "commercial_blockers": [
+                  "native-wmi-repository-decoding-not-implemented"
+                ],
+                "commercial_grade_ready": false,
+                "validation_required": true
+              }
+            },
+            "system_source_citation_profile_hash": "9b0d5daf27a2cbcc10200c3e6966d67dc12f1893336db471a5c12ddcdb7dd2b8",
             "system_validation_matrix": [
               {
                 "id": "wmi-source-parsed",
@@ -26610,7 +27320,7 @@
             "host_url": "https://download.example.com/report.zip",
             "modified_at": "2024-03-05T06:18:19+00:00",
             "parser": "windows-system-artifacts",
-            "parser_version": "windows-system-v7",
+            "parser_version": "windows-system-v8",
             "raw_preview": "[ZoneTransfer]\nZoneId=3\nReferrerUrl=https://mail.example.com/message/1\nHostUrl=https://download.example.com/report.zip\n",
             "referrer_url": "https://mail.example.com/message/1",
             "source_format": "ini-ads-export",

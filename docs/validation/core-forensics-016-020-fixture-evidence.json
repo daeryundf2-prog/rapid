@@ -44,7 +44,7 @@
       "number": 18,
       "title": "WER/Defender/Firewall/Task Scheduler/WMI deep parser",
       "assertions": [
-        "Task, Defender, Firewall, WER, and WMI rows preserve normalized fields, risk rules where available, source hashes, report-grade blockers, #18 core_accuracy_gates, system_analyst_review_profile, and system-correlation reportability decisions.",
+        "Task, Defender, Firewall, WER, and WMI rows preserve normalized fields, risk rules where available, source hashes, report-grade blockers, #18 core_accuracy_gates, system_source_citation_profile, system_analyst_review_profile, and system-correlation reportability decisions.",
         "trusted system artifact diff helpers compare artifact family, name, command/path, timestamp, and risk/action fields against Velociraptor/Chainsaw/Autoruns-style rows."
       ],
       "blockers_kept": [

@@ -57,7 +57,7 @@
       ],
       "expected": {
         "required_assertions": [
-          "Task/WMI risk semantics, Defender/Firewall/WER normalized fields, source hashes, #18 core_accuracy_gates, and system-correlation reportability decisions are emitted",
+          "Task/WMI risk semantics, Defender/Firewall/WER normalized fields, source hashes, source citation profiles, #18 core_accuracy_gates, and system-correlation reportability decisions are emitted",
           "trusted Windows system artifact diff helpers pass exact matching rows and block mismatches"
         ]
       },

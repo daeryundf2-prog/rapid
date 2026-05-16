@@ -16,7 +16,7 @@ from ...core.forensic_accuracy import build_accuracy_gate
 from ...core.models import ArtifactRecord
 from .common import build_forensic_review, isoformat_from_timestamp, open_sqlite_snapshot
 
-PARSER_VERSION = "windows-system-v7"
+PARSER_VERSION = "windows-system-v8"
 TASKS_ROOT = ("Windows", "System32", "Tasks")
 TASK_SUSPICIOUS_TERMS = (
     "powershell",
@@ -4741,6 +4741,11 @@ def system_commercial_uplift_evidence(artifact_family: str, details: Mapping[str
         if isinstance(details.get("system_trusted_diff"), Mapping)
         else {"status": "not-attached"}
     )
+    citation_profile = (
+        details.get("system_source_citation_profile")
+        if isinstance(details.get("system_source_citation_profile"), Mapping)
+        else {}
+    )
     reportability_decision = system_reportability_decision(artifact_family, report_grade, details)
     return {
         "batch_id": "commercial-uplift-016-020",
@@ -4752,7 +4757,15 @@ def system_commercial_uplift_evidence(artifact_family: str, details: Mapping[str
             f"source_sha256:{hashes.get('sha256', '')}",
             f"artifact_type:{details.get('artifact_type', '')}",
             f"artifact_family:{artifact_family}",
+            f"source_citation_profile_sha256:{citation_profile.get('profile_sha256', '')}",
         ],
+        "implemented_controls": {
+            "source_citation_profile_present": bool(citation_profile),
+            "source_citation_profile_hash": str(citation_profile.get("profile_sha256") or ""),
+            "field_citation_count": len(citation_profile.get("field_citations") or []),
+            "line_reference_count": len(citation_profile.get("line_references") or []),
+            "binary_offset_reference_count": len(citation_profile.get("binary_offset_references") or []),
+        },
         "passed_validation_matrix_ids": [
             str(item.get("id")) for item in matrix if isinstance(item, Mapping) and item.get("passed")
         ],
@@ -4768,6 +4781,8 @@ def system_commercial_uplift_evidence(artifact_family: str, details: Mapping[str
             "actual_scan_bytes": int(details.get("scan_bytes") or 0),
             "cross_artifact_correlation_required_for_commercial_claims": True,
             "native_repository_or_rule_store_decode_required": artifact_family in {"wmi", "firewall", "task-scheduler"},
+            "source_citation_profile_present": bool(citation_profile),
+            "source_citation_profile_hash": str(citation_profile.get("profile_sha256") or ""),
         },
         "next_internal_step": "Finish TaskCache, Defender/EventLog, Firewall rule-store, WER dump/CAB, and WMI repository correlation validation.",
         "external_evidence_required": True,
@@ -4776,6 +4791,10 @@ def system_commercial_uplift_evidence(artifact_family: str, details: Mapping[str
 
 def with_system_deep_parser_manifest(artifact_family: str, details: dict[str, object]) -> dict[str, object]:
     enriched = dict(details)
+    citation_profile = system_source_citation_profile(artifact_family, enriched)
+    enriched["system_source_citation_profile"] = citation_profile
+    enriched["system_source_citation_profile_hash"] = citation_profile["profile_sha256"]
+    enriched["commercial_uplift_evidence"] = system_commercial_uplift_evidence(artifact_family, enriched)
     enriched["system_analyst_review_profile"] = system_analyst_review_profile(artifact_family, enriched)
     manifest = system_deep_parser_manifest(artifact_family, enriched)
     enriched["system_deep_parser_manifest"] = manifest
@@ -4791,6 +4810,11 @@ def system_analyst_review_profile(artifact_family: str, details: Mapping[str, ob
     )
     checks = details.get("validation_checks") if isinstance(details.get("validation_checks"), Mapping) else {}
     semantics = system_manifest_semantics(artifact_family, details)
+    citation_profile = (
+        details.get("system_source_citation_profile")
+        if isinstance(details.get("system_source_citation_profile"), Mapping)
+        else {}
+    )
     family_guidance = {
         "task-scheduler": {
             "severity": "high" if details.get("risk_flags") else "medium",
@@ -4866,6 +4890,8 @@ def system_analyst_review_profile(artifact_family: str, details: Mapping[str, ob
         "analyst_questions": guidance["questions"],
         "primary_pivots": list(source_values.keys())[:12],
         "source_field_values": source_values,
+        "source_citation_profile_hash": str(citation_profile.get("profile_sha256") or ""),
+        "source_citation_field_count": len(citation_profile.get("field_citations") or []),
         "correlation_targets": guidance["correlation_targets"],
         "risk_tags": sorted(set(str(item) for item in details.get("risk_flags") or []) | {"windows-system-review"}),
         "validation_required": True,
@@ -4896,6 +4922,11 @@ def system_deep_parser_manifest(artifact_family: str, details: Mapping[str, obje
         if isinstance(details.get("system_native_capabilities"), Mapping)
         else SYSTEM_NATIVE_CAPABILITIES
     )
+    citation_profile = (
+        details.get("system_source_citation_profile")
+        if isinstance(details.get("system_source_citation_profile"), Mapping)
+        else {}
+    )
     manifest_payload = {
         "manifest_version": "windows-system-deep-parser-manifest-v1",
         "parser_version": PARSER_VERSION,
@@ -4917,6 +4948,18 @@ def system_deep_parser_manifest(artifact_family: str, details: Mapping[str, obje
             "coverage_status": str(details.get("coverage_status") or ""),
             "parser_confidence": str(details.get("parser_confidence") or ""),
             "validation_required": bool(details.get("validation_required", True)),
+        },
+        "source_citation_profile": {
+            "profile_version": str(citation_profile.get("profile_version") or ""),
+            "profile_sha256": str(citation_profile.get("profile_sha256") or ""),
+            "field_citation_count": len(citation_profile.get("field_citations") or []),
+            "line_reference_count": len(citation_profile.get("line_references") or []),
+            "binary_offset_reference_count": len(citation_profile.get("binary_offset_references") or []),
+            "viewer": (
+                citation_profile.get("source_viewer_locator", {}).get("viewer")
+                if isinstance(citation_profile.get("source_viewer_locator"), Mapping)
+                else ""
+            ),
         },
         "validation": {
             "validation_checks": dict(validation_checks),
@@ -5022,6 +5065,20 @@ def system_manifest_citation_refs(
             "source_sha256": str(hashes.get("sha256") or ""),
         }
     ]
+    citation_profile = (
+        details.get("system_source_citation_profile")
+        if isinstance(details.get("system_source_citation_profile"), Mapping)
+        else {}
+    )
+    if citation_profile:
+        refs.append(
+            {
+                "kind": "windows-system-source-citation-profile",
+                "artifact_family": artifact_family,
+                "profile_sha256": str(citation_profile.get("profile_sha256") or ""),
+                "field_citation_count": len(citation_profile.get("field_citations") or []),
+            }
+        )
     if artifact_family == "task-scheduler":
         refs.append(
             {
@@ -5101,6 +5158,271 @@ def system_reportability_decision(
             "trusted-tool or known-answer diff attached for critical findings",
         ],
     }
+
+
+def system_source_citation_profile(artifact_family: str, details: Mapping[str, object]) -> dict[str, object]:
+    hashes = details.get("source_hashes") if isinstance(details.get("source_hashes"), Mapping) else {}
+    source_path = Path(str(details.get("source_path") or "")) if details.get("source_path") else None
+    semantics = system_manifest_semantics(artifact_family, details)
+    field_citations = system_field_citations(artifact_family, semantics, details)
+    line_references = source_line_references(source_path, field_citations)
+    binary_refs = source_binary_offset_references(source_path, field_citations, artifact_family)
+    report_grade = (
+        details.get("system_report_grade_assessment")
+        if isinstance(details.get("system_report_grade_assessment"), Mapping)
+        else {}
+    )
+    profile_payload = {
+        "profile_version": "windows-system-source-citation-profile-v1",
+        "parser_version": PARSER_VERSION,
+        "commercial_batch_id": "commercial-uplift-016-020",
+        "item_number": 18,
+        "gap_id": "#18",
+        "artifact_family": artifact_family,
+        "artifact_type": str(details.get("artifact_type") or ""),
+        "source": {
+            "source_path": str(details.get("source_path") or ""),
+            "source_sha256": str(hashes.get("sha256") or ""),
+            "source_format": str(details.get("source_format") or ""),
+            "source_size": int(details.get("source_size") or 0),
+        },
+        "source_viewer_locator": {
+            "viewer": system_source_viewer(artifact_family, details),
+            "source_path": str(details.get("source_path") or ""),
+            "source_sha256": str(hashes.get("sha256") or ""),
+            "line_mode": artifact_family in {"task-scheduler", "defender", "firewall", "wer"},
+            "binary_offset_mode": artifact_family == "wmi",
+            "bounded_scan_bytes": WMI_SCAN_LIMIT if artifact_family == "wmi" else int(details.get("source_size") or 0),
+        },
+        "field_citations": field_citations,
+        "line_references": line_references,
+        "binary_offset_references": binary_refs,
+        "semantic_identity_hash": stable_windows_system_json_sha256(semantics),
+        "correlation_targets": system_correlation_targets(artifact_family),
+        "reportability_decision": system_reportability_decision(artifact_family, report_grade, details),
+        "validation_summary": {
+            "validation_required": True,
+            "commercial_grade_ready": False,
+            "commercial_blockers": list(report_grade.get("blockers") or SYSTEM_REPORT_GRADE_BLOCKERS),
+        },
+    }
+    hash_payload = dict(profile_payload)
+    hash_payload["source"] = {**profile_payload["source"], "source_path": ""}
+    hash_payload["source_viewer_locator"] = {
+        **profile_payload["source_viewer_locator"],
+        "source_path": "",
+    }
+    profile_payload["profile_sha256"] = stable_windows_system_json_sha256(hash_payload)
+    return profile_payload
+
+
+def system_source_viewer(artifact_family: str, details: Mapping[str, object]) -> str:
+    source_format = str(details.get("source_format") or "")
+    if artifact_family == "task-scheduler":
+        return "task-scheduler-xml"
+    if artifact_family == "firewall":
+        return "firewall-w3c-log"
+    if artifact_family == "wer":
+        return "wer-key-value-report"
+    if artifact_family == "wmi":
+        return "wmi-repository-string-offset-view"
+    if artifact_family == "defender" and source_format == "defender-policy-export":
+        return "defender-policy-export"
+    if artifact_family == "defender":
+        return "defender-support-log"
+    return f"windows-system-{artifact_family}"
+
+
+def system_field_citations(
+    artifact_family: str,
+    semantics: Mapping[str, object],
+    details: Mapping[str, object],
+) -> list[dict[str, object]]:
+    citations: list[dict[str, object]] = []
+    for field, value in semantics.items():
+        if value in ("", None, [], {}):
+            continue
+        if isinstance(value, list):
+            for index, item in enumerate(value[:10]):
+                citation_value = system_citation_value(item)
+                if citation_value:
+                    citations.append(
+                        {
+                            "field": field,
+                            "value": citation_value,
+                            "value_index": index,
+                            "structure": system_field_structure(artifact_family, field),
+                            "reportability": "source-context-candidate",
+                        }
+                    )
+            continue
+        citations.append(
+            {
+                "field": field,
+                "value": system_citation_value(value),
+                "structure": system_field_structure(artifact_family, field),
+                "reportability": "source-context-candidate",
+            }
+        )
+    if artifact_family == "wmi":
+        for field in ("interesting_strings", "path_candidates", "url_candidates"):
+            for index, value in enumerate(list(details.get(field) or [])[:12]):
+                citations.append(
+                    {
+                        "field": field,
+                        "value": system_citation_value(value),
+                        "value_index": index,
+                        "structure": "bounded repository string pivot",
+                        "reportability": "review-only-string-offset-candidate",
+                    }
+                )
+    return [item for item in citations if item.get("value") not in ("", None)]
+
+
+def system_citation_value(value: object) -> str:
+    if isinstance(value, Mapping):
+        for key in (
+            "command",
+            "command_line",
+            "message",
+            "entry",
+            "action",
+            "src-ip",
+            "dst-ip",
+            "app_name",
+            "value",
+            "name",
+        ):
+            candidate = value.get(key)
+            if candidate not in (None, ""):
+                return str(candidate)
+        return json.dumps(value, ensure_ascii=False, sort_keys=True, default=str)[:300]
+    return str(value)
+
+
+def system_field_structure(artifact_family: str, field: str) -> str:
+    if artifact_family == "task-scheduler":
+        mapping = {
+            "task_uri": "RegistrationInfo/URI",
+            "command_line": "Actions/Exec",
+            "executable_name": "Actions/Exec/Command",
+            "action_count": "Actions",
+            "trigger_count": "Triggers",
+            "principal_count": "Principals",
+            "hidden": "Settings/Hidden",
+        }
+        return mapping.get(field, "Task XML")
+    if artifact_family == "firewall":
+        return "W3C firewall log row"
+    if artifact_family == "wer":
+        return "Report.wer key/value field"
+    if artifact_family == "wmi":
+        return "bounded repository string pivot"
+    if artifact_family == "defender":
+        return "Defender support/policy text line"
+    return "Windows system artifact source"
+
+
+def source_line_references(
+    source_path: Path | None,
+    field_citations: Sequence[Mapping[str, object]],
+) -> list[dict[str, object]]:
+    if source_path is None or not source_path.is_file():
+        return []
+    try:
+        text = read_bounded_text(source_path, limit=512 * 1024)
+    except OSError:
+        return []
+    lines = text.splitlines()
+    refs: list[dict[str, object]] = []
+    seen: set[tuple[str, int]] = set()
+    for citation in field_citations:
+        value = str(citation.get("value") or "").strip()
+        if len(value) < 4:
+            continue
+        line_number, line_text = first_line_containing(lines, value)
+        if not line_number:
+            continue
+        key = (str(citation.get("field") or ""), line_number)
+        if key in seen:
+            continue
+        seen.add(key)
+        refs.append(
+            {
+                "field": str(citation.get("field") or ""),
+                "line_number": line_number,
+                "line_preview": line_text[:240],
+                "value_sha256": stable_windows_system_json_sha256(value),
+            }
+        )
+        if len(refs) >= 25:
+            break
+    return refs
+
+
+def first_line_containing(lines: Sequence[str], value: str) -> tuple[int, str]:
+    needle = value.strip().lower()
+    if not needle:
+        return 0, ""
+    for index, line in enumerate(lines, start=1):
+        if needle in line.lower():
+            return index, line.strip()
+    for index, line in enumerate(lines, start=1):
+        tokens = [token for token in re.split(r"[\s=,;|]+", needle) if len(token) >= 4]
+        if tokens and all(token in line.lower() for token in tokens[:4]):
+            return index, line.strip()
+    return 0, ""
+
+
+def source_binary_offset_references(
+    source_path: Path | None,
+    field_citations: Sequence[Mapping[str, object]],
+    artifact_family: str,
+) -> list[dict[str, object]]:
+    if artifact_family != "wmi" or source_path is None or not source_path.is_file():
+        return []
+    blob = read_prefix(source_path, WMI_SCAN_LIMIT)
+    refs: list[dict[str, object]] = []
+    seen: set[tuple[str, int, str]] = set()
+    for citation in field_citations:
+        value = str(citation.get("value") or "")
+        if len(value) < 4:
+            continue
+        for encoding in ("utf-8", "utf-16le"):
+            needle = value.encode(encoding, errors="ignore")
+            if not needle:
+                continue
+            offset = blob.lower().find(needle.lower())
+            if offset < 0:
+                continue
+            key = (str(citation.get("field") or ""), offset, encoding)
+            if key in seen:
+                continue
+            seen.add(key)
+            refs.append(
+                {
+                    "field": str(citation.get("field") or ""),
+                    "offset": offset,
+                    "encoding": encoding,
+                    "length": len(needle),
+                    "value_sha256": stable_windows_system_json_sha256(value),
+                }
+            )
+            break
+        if len(refs) >= 25:
+            break
+    return refs
+
+
+def system_correlation_targets(artifact_family: str) -> list[str]:
+    targets = {
+        "task-scheduler": ["TaskCache Registry", "TaskScheduler EVTX", "Security EVTX", "Prefetch", "Amcache", "MFT/USN"],
+        "defender": ["Defender EVTX", "MpCmdRun logs", "Quarantine metadata", "Defender policy store", "MFT/USN"],
+        "firewall": ["Firewall rule store", "Firewall/Security EVTX", "SRUM", "Process execution", "Browser/network artifacts"],
+        "wer": ["WER dump/CAB", "ReportQueue/ReportArchive state", "Application EVTX", "Prefetch", "Amcache", "MFT/USN"],
+        "wmi": ["Native WMI repository parser", "Autoruns", "WMI/PowerShell EVTX", "Registry", "MFT/USN"],
+    }
+    return targets.get(artifact_family, ["EVTX", "Registry", "MFT/USN"])
 
 
 def system_forensic_review(

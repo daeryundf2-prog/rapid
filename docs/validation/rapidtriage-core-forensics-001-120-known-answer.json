@@ -546,7 +546,7 @@
       ],
       "expected": {
         "required_assertions": [
-          "Task/WMI risk semantics, Defender/Firewall/WER normalized fields, source hashes, and #18 core_accuracy_gates are emitted"
+          "Task/WMI risk semantics, Defender/Firewall/WER normalized fields, source hashes, source citation profiles, and #18 core_accuracy_gates are emitted"
         ]
       },
       "notes": "Internal fixture pass; TaskCache, WMI native decode, Defender/Firewall policy correlation, and WER dump/CAB linkage remain required.",

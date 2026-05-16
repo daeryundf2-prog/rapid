@@ -4511,6 +4511,16 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
             self.assertEqual(wmi_manifest["gap_id"], "#18")
             self.assertEqual(wmi_manifest["artifact_family"], "wmi")
             self.assertEqual(wmi_manifest["normalized_semantics"]["entry_name"], "OBJECTS.DATA")
+            wmi_citation = wmi[0]["details"]["system_source_citation_profile"]
+            self.assertEqual(wmi_citation["source_viewer_locator"]["viewer"], "wmi-repository-string-offset-view")
+            self.assertEqual(wmi[0]["details"]["system_source_citation_profile_hash"], wmi_citation["profile_sha256"])
+            self.assertTrue(wmi_citation["source_viewer_locator"]["binary_offset_mode"])
+            self.assertGreaterEqual(len(wmi_citation["field_citations"]), 3)
+            self.assertTrue(any(ref["field"] == "interesting_strings" for ref in wmi_citation["binary_offset_references"]))
+            self.assertEqual(
+                wmi_manifest["source_citation_profile"]["binary_offset_reference_count"],
+                len(wmi_citation["binary_offset_references"]),
+            )
             self.assertFalse(wmi_manifest["native_depth"]["native_wmi_repository_decode"])
             self.assertIn("wmi-native-report-grade", wmi_manifest["validation"]["failed_validation_matrix_ids"])
             self.assertEqual(wmi[0]["details"]["system_deep_parser_manifest_hash"], wmi_manifest["manifest_sha256"])
@@ -4566,6 +4576,26 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
             self.assertEqual(task_manifest["manifest_version"], "windows-system-deep-parser-manifest-v1")
             self.assertEqual(task_manifest["artifact_family"], "task-scheduler")
             self.assertEqual(task_manifest["normalized_semantics"]["executable_name"], "powershell.exe")
+            task_citation = task["details"]["system_source_citation_profile"]
+            self.assertEqual(task_citation["profile_version"], "windows-system-source-citation-profile-v1")
+            self.assertEqual(task_citation["source_viewer_locator"]["viewer"], "task-scheduler-xml")
+            self.assertEqual(task["details"]["system_source_citation_profile_hash"], task_citation["profile_sha256"])
+            self.assertEqual(task["details"]["system_analyst_review_profile"]["source_citation_profile_hash"], task_citation["profile_sha256"])
+            self.assertGreaterEqual(len(task_citation["field_citations"]), 5)
+            self.assertTrue(any(ref["field"] == "executable_name" for ref in task_citation["line_references"]))
+            self.assertEqual(
+                task_manifest["source_citation_profile"]["profile_sha256"],
+                task_citation["profile_sha256"],
+            )
+            self.assertIn(
+                "windows-system-source-citation-profile",
+                {item["kind"] for item in task_manifest["citation_refs"]},
+            )
+            self.assertTrue(task_uplift["implemented_controls"]["source_citation_profile_present"])
+            self.assertEqual(
+                task_uplift["implemented_controls"]["source_citation_profile_hash"],
+                task_citation["profile_sha256"],
+            )
             self.assertTrue(task_manifest["native_depth"]["task_xml_normalization"])
             self.assertFalse(task_manifest["native_depth"]["taskcache_registry_correlation"])
             self.assertIn("task-report-grade-correlation", task_manifest["validation"]["failed_validation_matrix_ids"])
