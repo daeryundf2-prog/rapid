@@ -1818,6 +1818,38 @@ class RapidTriageMobileExportTests(unittest.TestCase):
                 "mobile-actor-vendor-report-diff-required",
                 actor_citation_manifest["failed_validation_check_ids"],
             )
+            actor_plan = messenger_summary["details"]["mobile_actor_report_grade_validation_plan"]
+            self.assertEqual(actor_plan["profile_version"], "mobile-actor-report-grade-validation-plan-v1")
+            self.assertEqual(actor_plan["item_number"], 44)
+            self.assertEqual(actor_plan["gap_id"], "#44")
+            self.assertEqual(actor_plan["batch_id"], "commercial-uplift-041-045")
+            self.assertEqual(
+                messenger_summary["details"]["mobile_actor_report_grade_validation_plan_hash"],
+                actor_plan["validation_plan_sha256"],
+            )
+            self.assertEqual(len(actor_plan["actor_review_profile_sha256"]), 64)
+            self.assertEqual(actor_plan["actor_citation_manifest_sha256"], actor_citation_manifest["manifest_sha256"])
+            self.assertEqual(actor_plan["actor_count"], messenger_summary["details"]["unified_contact_call_sms_view_count"])
+            self.assertEqual(actor_plan["ready_slot_count"], 6)
+            self.assertEqual(actor_plan["blocking_slot_count"], 6)
+            self.assertEqual(actor_plan["validation_status"], "report-validation-blocked")
+            self.assertFalse(actor_plan["commercial_grade"])
+            actor_slots = {slot["slot_id"]: slot for slot in actor_plan["validation_slots"]}
+            self.assertEqual(actor_slots["mobile-actor-view-built"]["status"], "complete")
+            self.assertEqual(actor_slots["mobile-actor-review-profile-emitted"]["status"], "complete")
+            self.assertEqual(actor_slots["mobile-actor-citation-manifest-emitted"]["status"], "complete")
+            self.assertEqual(actor_slots["mobile-actor-values-hashed"]["status"], "complete")
+            self.assertEqual(actor_slots["mobile-actor-source-viewer-locators"]["status"], "complete")
+            self.assertEqual(
+                actor_slots["mobile-actor-device-wide-identity-resolution"]["status"],
+                "external-required",
+            )
+            self.assertEqual(
+                actor_slots["mobile-actor-merge-split-review-history"]["status"],
+                "external-required",
+            )
+            self.assertIn("mobile-actor-device-wide-identity-resolution-required", actor_plan["blockers"])
+            self.assertIn("mobile-actor-vendor-report-diff-required", actor_plan["blockers"])
             self.assertGreaterEqual(messenger_summary["details"]["schema_version_registry_count"], 1)
             schema_profile = messenger_summary["details"]["mobile_schema_compatibility_profile"]
             self.assertEqual(schema_profile["profile_version"], "mobile-schema-compatibility-v1")
@@ -1871,6 +1903,8 @@ class RapidTriageMobileExportTests(unittest.TestCase):
             self.assertIn("actor citation manifest", correlation_gates["#44"]["satisfied_checks"])
             self.assertIn("actor source viewer locators", correlation_gates["#44"]["satisfied_checks"])
             self.assertIn("actor values hashed in manifest", correlation_gates["#44"]["satisfied_checks"])
+            self.assertIn("actor report-grade validation plan", correlation_gates["#44"]["satisfied_checks"])
+            self.assertIn("actor report-grade ready slots", correlation_gates["#44"]["satisfied_checks"])
             self.assertIn("merge/split review requirement", correlation_gates["#44"]["satisfied_checks"])
             self.assertIn("export-scope limitation warning", correlation_gates["#44"]["satisfied_checks"])
             self.assertIn("app/service schema version registry", correlation_gates["#45"]["satisfied_checks"])
@@ -1894,6 +1928,14 @@ class RapidTriageMobileExportTests(unittest.TestCase):
             )
             self.assertIn("unified_contact_call_sms_view_built", correlation_uplift["passed_validation_check_ids"])
             self.assertIn("actor_review_profile_built", correlation_uplift["passed_validation_check_ids"])
+            self.assertIn(
+                "mobile_actor_report_grade_validation_plan_present",
+                correlation_uplift["passed_validation_check_ids"],
+            )
+            self.assertIn(
+                "mobile_actor_report_grade_ready_slots",
+                correlation_uplift["passed_validation_check_ids"],
+            )
             self.assertIn("timeline_correlation_profile_built", correlation_uplift["passed_validation_check_ids"])
             self.assertIn("schema_version_registry_built", correlation_uplift["passed_validation_check_ids"])
             self.assertIn("schema_compatibility_profile_built", correlation_uplift["passed_validation_check_ids"])
@@ -1949,6 +1991,20 @@ class RapidTriageMobileExportTests(unittest.TestCase):
             self.assertEqual(
                 correlation_uplift["large_data_controls"]["actor_citation_manifest_hash"],
                 actor_citation_manifest["manifest_sha256"],
+            )
+            self.assertTrue(correlation_uplift["large_data_controls"]["actor_report_grade_validation_plan_present"])
+            self.assertEqual(
+                correlation_uplift["large_data_controls"]["actor_report_grade_validation_plan_hash"],
+                actor_plan["validation_plan_sha256"],
+            )
+            self.assertEqual(correlation_uplift["large_data_controls"]["actor_report_grade_ready_slot_count"], 6)
+            self.assertEqual(correlation_uplift["large_data_controls"]["actor_report_grade_blocking_slot_count"], 6)
+            self.assertTrue(
+                correlation_uplift["reportability_decision"]["actor_report_grade_validation_plan_present"]
+            )
+            self.assertEqual(
+                correlation_uplift["reportability_decision"]["actor_report_grade_validation_plan_hash"],
+                actor_plan["validation_plan_sha256"],
             )
             self.assertGreaterEqual(correlation_uplift["large_data_controls"]["actor_citation_entry_count"], 2)
             self.assertFalse(correlation_uplift["large_data_controls"]["raw_actor_values_serialized"])

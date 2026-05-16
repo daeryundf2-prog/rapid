@@ -1119,7 +1119,7 @@
       ],
       "expected": {
         "required_assertions": [
-          "Mobile correlation summary preserves contact/call/SMS actor merge, source row links, participant attribution, dedupe/export-scope warnings, and #44 core_accuracy_gates."
+          "Mobile correlation summary preserves contact/call/SMS actor merge, source row links, participant attribution, mobile_actor_report_grade_validation_plan ready/blocking slots, dedupe/export-scope warnings, and #44 core_accuracy_gates."
         ]
       },
       "notes": "Internal fixture pass; analyst-verified identity resolution and grouped mobile UI remain future work.",

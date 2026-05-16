@@ -34,6 +34,15 @@ MOBILE_TIMELINE_REPORT_GRADE_BLOCKERS = [
     "mobile-correlation-known-answer-corpus-required",
     "mobile-correlation-independent-review-required",
 ]
+MOBILE_ACTOR_REPORT_GRADE_VALIDATION_PLAN_VERSION = "mobile-actor-report-grade-validation-plan-v1"
+MOBILE_ACTOR_REPORT_GRADE_BLOCKERS = [
+    "mobile-actor-device-wide-identity-resolution-required",
+    "mobile-actor-merge-split-review-history-required",
+    "mobile-actor-cross-app-dedupe-required",
+    "mobile-actor-vendor-identity-diff-required",
+    "mobile-actor-known-answer-corpus-required",
+    "mobile-actor-independent-review-required",
+]
 KAKAOTALK_BIGBANG_VERSION = "25.7.2"
 KAKAOTALK_BIGBANG_RELEASE_DATE = "2025-08-13"
 KAKAOTALK_BIGBANG_RELEASE_BUILD = "25.7.2.4641"
@@ -5463,6 +5472,14 @@ def build_mobile_correlation_summary(rows: list[Mapping[str, object]]) -> dict[s
         contact_rows=contact_rows,
         call_rows=call_rows,
     )
+    actor_report_grade_validation_plan = build_mobile_actor_report_grade_validation_plan(
+        actor_rows=unified_actor_view,
+        message_rows=message_rows,
+        contact_rows=contact_rows,
+        call_rows=call_rows,
+        actor_review_profile=actor_review_profile,
+        actor_citation_manifest=actor_citation_manifest,
+    )
     schema_compatibility_profile = build_mobile_schema_compatibility_profile(schema_version_registry)
     schema_version_manifest = build_mobile_schema_version_manifest(
         registry=schema_version_registry,
@@ -5514,6 +5531,10 @@ def build_mobile_correlation_summary(rows: list[Mapping[str, object]]) -> dict[s
         "mobile_actor_review_profile": actor_review_profile,
         "mobile_actor_citation_manifest": actor_citation_manifest,
         "mobile_actor_citation_manifest_hash": actor_citation_manifest["manifest_sha256"],
+        "mobile_actor_report_grade_validation_plan": actor_report_grade_validation_plan,
+        "mobile_actor_report_grade_validation_plan_hash": actor_report_grade_validation_plan[
+            "validation_plan_sha256"
+        ],
         "timeline_correlation_ready": bool(message_rows or media_rows or call_rows),
         "validation_checks": validation_checks,
         "commercial_gap_ids": ["#43", "#44", "#45"],
@@ -5534,6 +5555,7 @@ def build_mobile_correlation_summary(rows: list[Mapping[str, object]]) -> dict[s
             timeline_validation_plan=timeline_report_grade_validation_plan,
             actor_review_profile=actor_review_profile,
             actor_citation_manifest=actor_citation_manifest,
+            actor_validation_plan=actor_report_grade_validation_plan,
             schema_compatibility_profile=schema_compatibility_profile,
             schema_version_manifest=schema_version_manifest,
         ),
@@ -6340,6 +6362,197 @@ def build_mobile_actor_citation_manifest(
     return manifest
 
 
+def build_mobile_actor_report_grade_validation_plan(
+    *,
+    actor_rows: list[Mapping[str, object]],
+    message_rows: list[Mapping[str, object]],
+    contact_rows: list[Mapping[str, object]],
+    call_rows: list[Mapping[str, object]],
+    actor_review_profile: Mapping[str, object],
+    actor_citation_manifest: Mapping[str, object],
+    trusted_diff: Mapping[str, object] | None = None,
+) -> dict[str, object]:
+    trusted_diff = trusted_diff or {}
+    actor_review_profile_hash = stable_mobile_sha256(actor_review_profile)
+    actor_manifest_hash = optional_text(actor_citation_manifest.get("manifest_sha256"))
+    actor_entries = actor_citation_manifest.get("actor_entries")
+    if not isinstance(actor_entries, list):
+        actor_entries = []
+    locators_present = all(
+        isinstance(entry, Mapping) and isinstance(entry.get("source_viewer_locator"), Mapping)
+        for entry in actor_entries
+    )
+
+    def slot(
+        slot_id: str,
+        *,
+        ready: bool,
+        evidence: str,
+        blocker_id: str | None = None,
+        operator_action: str = "",
+    ) -> dict[str, object]:
+        row: dict[str, object] = {
+            "slot_id": slot_id,
+            "status": "complete" if ready else "external-required",
+            "evidence": evidence,
+        }
+        if blocker_id and not ready:
+            row["blocker_id"] = blocker_id
+        if operator_action:
+            row["operator_action"] = operator_action
+        return row
+
+    validation_slots = [
+        slot(
+            "mobile-actor-view-built",
+            ready=bool(actor_rows),
+            evidence=f"actor_count={len(actor_rows)}",
+            blocker_id="mobile-actor-view-required",
+            operator_action="Regenerate mobile correlation so contact/call/SMS/message actor pivots are present.",
+        ),
+        slot(
+            "mobile-actor-review-profile-emitted",
+            ready=actor_review_profile.get("profile_version") == "mobile-actor-review-v1",
+            evidence=f"actor_review_profile_sha256={actor_review_profile_hash}",
+            blocker_id="mobile-actor-review-profile-required",
+            operator_action="Regenerate mobile correlation so the actor review queue is emitted.",
+        ),
+        slot(
+            "mobile-actor-citation-manifest-emitted",
+            ready=bool(actor_manifest_hash),
+            evidence=f"actor_citation_manifest_sha256={actor_manifest_hash}",
+            blocker_id="mobile-actor-citation-manifest-required",
+            operator_action="Generate hashable actor citations before report review.",
+        ),
+        slot(
+            "mobile-actor-values-hashed",
+            ready=actor_citation_manifest.get("raw_actor_values_serialized") is False,
+            evidence=f"raw_actor_values_serialized={bool(actor_citation_manifest.get('raw_actor_values_serialized'))}",
+            blocker_id="mobile-actor-raw-value-serialization-blocked",
+            operator_action="Regenerate actor citations with hash-only actor values.",
+        ),
+        slot(
+            "mobile-actor-source-viewer-locators",
+            ready=locators_present and bool(actor_entries),
+            evidence=f"actor_entry_count={len(actor_entries)} locators_present={locators_present}",
+            blocker_id="mobile-actor-source-viewer-locator-required",
+            operator_action="Attach source viewer locators for every actor selected for review.",
+        ),
+        slot(
+            "mobile-actor-review-queue-cap-disclosed",
+            ready=int(actor_review_profile.get("review_queue_count") or 0) >= 0,
+            evidence=(
+                f"review_queue_count={int(actor_review_profile.get('review_queue_count') or 0)} "
+                f"review_queue_truncated={bool(actor_review_profile.get('review_queue_truncated'))}"
+            ),
+            blocker_id="mobile-actor-review-queue-cap-disclosure-required",
+            operator_action="Record review queue caps and truncation before large-case actor review.",
+        ),
+        slot(
+            "mobile-actor-device-wide-identity-resolution",
+            ready=False,
+            evidence="device_wide_identity_resolution_ready=false",
+            blocker_id="mobile-actor-device-wide-identity-resolution-required",
+            operator_action="Merge actor pivots with device accounts, address books, SIM/account metadata, and app-native IDs.",
+        ),
+        slot(
+            "mobile-actor-merge-split-review-history",
+            ready=False,
+            evidence="merge_split_review_history_persisted=false",
+            blocker_id="mobile-actor-merge-split-review-history-required",
+            operator_action="Persist analyst merge/split decisions with reviewer identity, rationale, and source citations.",
+        ),
+        slot(
+            "mobile-actor-cross-app-dedupe",
+            ready=False,
+            evidence="cross_app_dedupe_validated=false",
+            blocker_id="mobile-actor-cross-app-dedupe-required",
+            operator_action="Validate cross-app entity deduplication before identity-complete claims.",
+        ),
+        slot(
+            "mobile-actor-vendor-identity-diff",
+            ready=trusted_diff.get("status") == "pass",
+            evidence=f"trusted_diff_status={trusted_diff.get('status', 'missing')}",
+            blocker_id=MOBILE_CORRELATION_TRUSTED_DIFF_BLOCKERS[44],
+            operator_action="Attach a passing vendor/native actor identity diff.",
+        ),
+        slot(
+            "mobile-actor-known-answer-corpus",
+            ready=False,
+            evidence="known_answer_actor_corpus_attached=false",
+            blocker_id="mobile-actor-known-answer-corpus-required",
+            operator_action="Validate shared devices, aliases, recycled numbers, group chats, and app IDs against known-answer data.",
+        ),
+        slot(
+            "mobile-actor-independent-review",
+            ready=False,
+            evidence="independent_review_signoff_present=false",
+            blocker_id="mobile-actor-independent-review-required",
+            operator_action="Attach independent reviewer signoff before identity-complete actor wording.",
+        ),
+    ]
+    blockers = sorted(
+        {
+            str(item.get("blocker_id"))
+            for item in validation_slots
+            if item.get("status") != "complete" and item.get("blocker_id")
+        }
+    )
+    plan: dict[str, object] = {
+        "profile_version": MOBILE_ACTOR_REPORT_GRADE_VALIDATION_PLAN_VERSION,
+        "item_number": 44,
+        "gap_id": "#44",
+        "batch_id": "commercial-uplift-041-045",
+        "selected_track": "bounded-contact-call-sms-actor-report-validation",
+        "actor_count": len(actor_rows),
+        "message_count": len(message_rows),
+        "contact_count": len(contact_rows),
+        "call_count": len(call_rows),
+        "actor_review_profile_sha256": actor_review_profile_hash,
+        "actor_citation_manifest_sha256": actor_manifest_hash,
+        "actor_entry_count": int(actor_citation_manifest.get("actor_entry_count") or 0),
+        "review_queue_count": int(actor_review_profile.get("review_queue_count") or 0),
+        "review_queue_truncated": bool(actor_review_profile.get("review_queue_truncated")),
+        "multi_identifier_actor_count": int(actor_review_profile.get("multi_identifier_actor_count") or 0),
+        "raw_actor_values_serialized": bool(actor_citation_manifest.get("raw_actor_values_serialized")),
+        "device_wide_identity_resolution_ready": False,
+        "merge_split_review_required": bool(actor_review_profile.get("merge_split_review_required")),
+        "known_answer_actor_diff_required": True,
+        "trusted_diff_status": str(trusted_diff.get("status") or "missing"),
+        "ready_slot_count": sum(1 for item in validation_slots if item.get("status") == "complete"),
+        "blocking_slot_count": sum(1 for item in validation_slots if item.get("status") != "complete"),
+        "validation_status": "report-validation-blocked" if blockers else "ready-for-report-review",
+        "commercial_grade": False,
+        "commercial_grade_ready": False,
+        "validation_slots": validation_slots,
+        "blockers": blockers,
+        "commercial_grade_blockers": list(MOBILE_ACTOR_REPORT_GRADE_BLOCKERS),
+        "validation_commands": [
+            "rapidtriage artifacts <mobile-export-root> --kind mobile-export --output rapidtriage-mobile-export.json",
+            "rapidtriage cross-tool-validate --rapid-output rapidtriage-mobile-export.json --reference-output <trusted-mobile-actor-report> --backlog-item 44 --json",
+            "rapidtriage commercial-readiness --validation-package docs/validation/rapidtriage-core-forensics-041-050-known-answer.json --limit 45 --json",
+        ],
+        "report_guidance": {
+            "allowed_use": "mobile-contact-call-sms-actor-review-pivot",
+            "forbidden_claims": [
+                "device-wide identity resolution complete",
+                "all accounts for this person are merged",
+                "actor deduplication is court-ready",
+                "shared-device or recycled-number ambiguity has been eliminated",
+            ],
+            "required_disclaimer": (
+                "Mobile actor views are source-export review pivots. Treat identity grouping as candidate-only until "
+                "merge/split review history, cross-app dedupe validation, trusted diffs, known-answer fixtures, and "
+                "independent review are attached."
+            ),
+        },
+    }
+    plan["validation_plan_sha256"] = stable_mobile_sha256(
+        {key: value for key, value in plan.items() if key != "validation_plan_sha256"}
+    )
+    return plan
+
+
 def build_schema_version_registry(rows: list[Mapping[str, object]], *, limit: int = 200) -> list[dict[str, object]]:
     registry: dict[tuple[str, str, str], dict[str, object]] = {}
     for row in rows:
@@ -6658,6 +6871,7 @@ def mobile_correlation_commercial_uplift_evidence(
     timeline_validation_plan: Mapping[str, object] | None = None,
     actor_review_profile: Mapping[str, object] | None = None,
     actor_citation_manifest: Mapping[str, object] | None = None,
+    actor_validation_plan: Mapping[str, object] | None = None,
     schema_compatibility_profile: Mapping[str, object] | None = None,
     schema_version_manifest: Mapping[str, object] | None = None,
     trusted_diff: Mapping[str, object] | None = None,
@@ -6668,6 +6882,7 @@ def mobile_correlation_commercial_uplift_evidence(
     timeline_validation_plan = timeline_validation_plan or {}
     actor_review_profile = actor_review_profile or {}
     actor_citation_manifest = actor_citation_manifest or {}
+    actor_validation_plan = actor_validation_plan or {}
     schema_compatibility_profile = schema_compatibility_profile or {}
     schema_version_manifest = schema_version_manifest or {}
     trusted_diff = trusted_diff or {}
@@ -6687,6 +6902,10 @@ def mobile_correlation_commercial_uplift_evidence(
         passed_validation_check_ids.append("mobile_timeline_report_grade_validation_plan_present")
         if int(timeline_validation_plan.get("ready_slot_count") or 0) >= 6:
             passed_validation_check_ids.append("mobile_timeline_report_grade_ready_slots")
+    if actor_validation_plan:
+        passed_validation_check_ids.append("mobile_actor_report_grade_validation_plan_present")
+        if int(actor_validation_plan.get("ready_slot_count") or 0) >= 6:
+            passed_validation_check_ids.append("mobile_actor_report_grade_ready_slots")
     return {
         "batch_id": "commercial-uplift-041-045",
         "item_numbers": [43, 44, 45],
@@ -6701,6 +6920,7 @@ def mobile_correlation_commercial_uplift_evidence(
             schema_version_count=schema_version_count,
             trusted_diff=trusted_diff,
             timeline_validation_plan=timeline_validation_plan,
+            actor_validation_plan=actor_validation_plan,
         ),
         "source_refs": [
             f"service:{service}" for service in services[:20]
@@ -6711,6 +6931,8 @@ def mobile_correlation_commercial_uplift_evidence(
             f"{timeline_validation_plan.get('validation_plan_sha256', '')}"
         ] + [
             f"mobile_actor_citation_manifest_sha256:{actor_citation_manifest.get('manifest_sha256', '')}"
+        ] + [
+            f"mobile_actor_report_grade_validation_plan_sha256:{actor_validation_plan.get('validation_plan_sha256', '')}"
         ] + [
             f"mobile_schema_version_manifest_sha256:{schema_version_manifest.get('manifest_sha256', '')}"
         ],
@@ -6757,6 +6979,10 @@ def mobile_correlation_commercial_uplift_evidence(
             "actor_review_profile_present": bool(actor_review_profile),
             "actor_citation_manifest_present": bool(actor_citation_manifest),
             "actor_citation_manifest_hash": str(actor_citation_manifest.get("manifest_sha256") or ""),
+            "actor_report_grade_validation_plan_present": bool(actor_validation_plan),
+            "actor_report_grade_validation_plan_hash": str(actor_validation_plan.get("validation_plan_sha256") or ""),
+            "actor_report_grade_ready_slot_count": int(actor_validation_plan.get("ready_slot_count") or 0),
+            "actor_report_grade_blocking_slot_count": int(actor_validation_plan.get("blocking_slot_count") or 0),
             "actor_citation_entry_count": int(actor_citation_manifest.get("actor_entry_count") or 0),
             "raw_actor_values_serialized": bool(actor_citation_manifest.get("raw_actor_values_serialized")),
             "actor_review_queue_count": int(actor_review_profile.get("review_queue_count") or 0),
@@ -6788,6 +7014,7 @@ def mobile_correlation_reportability_decision(
     schema_version_count: int,
     trusted_diff: Mapping[str, object] | None = None,
     timeline_validation_plan: Mapping[str, object] | None = None,
+    actor_validation_plan: Mapping[str, object] | None = None,
 ) -> dict[str, object]:
     blockers = {str(item) for item in report_grade["blockers"] if str(item)}
     blockers.update(f"check:{item}" for item in failed_validation_check_ids)
@@ -6797,6 +7024,7 @@ def mobile_correlation_reportability_decision(
         blockers.add("schema-version-registry-known-answer-not-attached")
     trusted_diff = trusted_diff or {}
     timeline_validation_plan = timeline_validation_plan or {}
+    actor_validation_plan = actor_validation_plan or {}
     if trusted_diff.get("status") != "pass":
         blockers.update(MOBILE_CORRELATION_TRUSTED_DIFF_BLOCKERS.values())
     return {
@@ -6816,6 +7044,10 @@ def mobile_correlation_reportability_decision(
         ),
         "timeline_report_grade_ready_slot_count": int(timeline_validation_plan.get("ready_slot_count") or 0),
         "timeline_report_grade_blocking_slot_count": int(timeline_validation_plan.get("blocking_slot_count") or 0),
+        "actor_report_grade_validation_plan_present": bool(actor_validation_plan),
+        "actor_report_grade_validation_plan_hash": str(actor_validation_plan.get("validation_plan_sha256") or ""),
+        "actor_report_grade_ready_slot_count": int(actor_validation_plan.get("ready_slot_count") or 0),
+        "actor_report_grade_blocking_slot_count": int(actor_validation_plan.get("blocking_slot_count") or 0),
         "ready_for_court_report": False,
         "required_before_report": [
             "validate device-wide timeline joins, timezone assumptions, and attachment recovery",
@@ -9152,6 +9384,19 @@ def mobile_correlation_core_accuracy_gates(
             item44.append("actor source viewer locators")
         if actor_citation_manifest.get("raw_actor_values_serialized") is False:
             item44.append("actor values hashed in manifest")
+    actor_validation_plan = (
+        details.get("mobile_actor_report_grade_validation_plan")
+        if isinstance(details.get("mobile_actor_report_grade_validation_plan"), Mapping)
+        else {}
+    )
+    if actor_validation_plan:
+        item44.append("actor report-grade validation plan")
+        evidence_refs.append(
+            "mobile_actor_report_grade_validation_plan_sha256:"
+            f"{actor_validation_plan.get('validation_plan_sha256', '')}"
+        )
+        if int(actor_validation_plan.get("ready_slot_count") or 0) >= 6:
+            item44.append("actor report-grade ready slots")
     if actor_review_profile.get("merge_split_review_required"):
         item44.append("merge/split review requirement")
     item44.append("dedupe/entity limitation warning")

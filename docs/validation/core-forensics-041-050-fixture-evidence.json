@@ -45,7 +45,7 @@
       "title": "Contact/call/SMS unified mobile view",
       "test_files": ["tests/test_rapidtriage_mobile_export.py"],
       "assertions": [
-        "Mobile correlation summary builds unified contact/call/SMS actor pivots with source links, participants, export-scope warnings, #44 core_accuracy_gates, and blocks identity-complete actor reportability without analyst merge/split and cross-app validation.",
+        "Mobile correlation summary builds unified contact/call/SMS actor pivots with source links, participants, hash-only actor citations, mobile_actor_report_grade_validation_plan ready/blocking slots, export-scope warnings, #44 core_accuracy_gates, and blocks identity-complete actor reportability without analyst merge/split and cross-app validation.",
         "build_mobile_correlation_trusted_diff compares actor rows against vendor/native known-answer rows before satisfying the #44 trusted diff gate."
       ],
       "remaining_external_validation": [

@@ -76,7 +76,7 @@
       ],
       "expected": {
         "required_assertions": [
-          "Mobile correlation summary preserves contact/call/SMS actor merge, source row links, participant attribution, hash-only mobile_actor_citation_manifest source viewer locators, dedupe/export-scope warnings, and #44 core_accuracy_gates.",
+          "Mobile correlation summary preserves contact/call/SMS actor merge, source row links, participant attribution, hash-only mobile_actor_citation_manifest source viewer locators, mobile_actor_report_grade_validation_plan ready/blocking slots, dedupe/export-scope warnings, and #44 core_accuracy_gates.",
           "Mobile actor trusted diff helper requires vendor/native actor row equality before satisfying the #44 trusted mobile actor diff pass gate.",
           "Mobile unified view reportability decisions block identity-complete actor claims until analyst merge/split and cross-app actor validation exists."
         ]
