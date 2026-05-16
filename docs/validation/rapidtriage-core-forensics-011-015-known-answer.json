@@ -106,7 +106,7 @@
       ],
       "expected": {
         "required_assertions": [
-          "Native ShellBags key-tree candidates preserve BagMRU/Bags relationship, bag/node IDs, timestamp source, and user-hive scope",
+          "Native ShellBags key-tree candidates preserve BagMRU/Bags relationship, bag/node IDs, relationship lineage profile hashes, timestamp source, and user-hive scope",
           "#15 core_accuracy_gates are present on native ShellBags rows",
           "trusted ShellBags parser diff helpers pass exact matching rows and block mismatches",
           "ShellBags reportability decisions block final folder-access claims until shell-item, transaction-log, and deleted/slack validation is attached"

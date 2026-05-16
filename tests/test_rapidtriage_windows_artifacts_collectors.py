@@ -4099,8 +4099,18 @@ class RapidTriageWindowsArtifactsCollectorTests(unittest.TestCase):
                 key_tree.details["shellbag_evidence"]["relationship_evidence"]["bag_node_relationship_status"],
                 "candidate-from-key-path-and-values",
             )
+            relationship_profile = key_tree.details["shellbag_relationship_profile"]
+            self.assertEqual(relationship_profile["profile_version"], "shellbag-relationship-profile-v1")
+            self.assertEqual(relationship_profile["shellbag_section"], "bagmru")
+            self.assertIn("0", relationship_profile["numeric_node_segments"])
+            self.assertIn("42", relationship_profile["bag_id_candidates"])
+            self.assertEqual(len(relationship_profile["relationship_hash"]), 64)
             self.assertIn("42", key_tree.details["shellbag_evidence"]["relationship_evidence"]["bag_id_candidates"])
             self.assertIn("0", key_tree.details["shellbag_evidence"]["relationship_evidence"]["node_id_candidates"])
+            self.assertEqual(
+                key_tree.details["shellbag_evidence"]["relationship_evidence"]["relationship_profile_hash"],
+                relationship_profile["relationship_hash"],
+            )
             self.assertEqual(
                 key_tree.details["shellbag_evidence"]["activity_evidence"]["primary_timestamp"],
                 "2024-04-02T03:04:05+00:00",
@@ -4131,6 +4141,7 @@ class RapidTriageWindowsArtifactsCollectorTests(unittest.TestCase):
             self.assertIn("UsrClass/NTUSER correlation", shellbag_gate["satisfied_checks"])
             self.assertIn("transaction log context recorded", shellbag_gate["satisfied_checks"])
             self.assertIn("deleted/slack validation warning", shellbag_gate["satisfied_checks"])
+            self.assertIn("relationship lineage profile", shellbag_gate["satisfied_checks"])
             self.assertIn("shell item binary decoding", shellbag_gate["missing_required_checks"])
             shellbag_uplift = key_tree.details["commercial_uplift_evidence"]
             self.assertEqual(shellbag_uplift["batch_id"], "commercial-uplift-011-015")
@@ -4157,6 +4168,11 @@ class RapidTriageWindowsArtifactsCollectorTests(unittest.TestCase):
             self.assertEqual(shellbag_manifest["source"]["user_hive_scope"], "usrclass")
             self.assertEqual(shellbag_manifest["row_identity"]["shellbag_section"], "bagmru")
             self.assertIn("42", shellbag_manifest["bag_relationship"]["bag_id_candidates"])
+            self.assertEqual(
+                shellbag_manifest["bag_relationship"]["relationship_profile_hash"],
+                relationship_profile["relationship_hash"],
+            )
+            self.assertIn("0", shellbag_manifest["bag_relationship"]["numeric_node_segments"])
             self.assertFalse(shellbag_manifest["bag_relationship"]["bag_node_relationship_validated"])
             self.assertEqual(
                 shellbag_manifest["activity_timestamps"]["primary_timestamp"],

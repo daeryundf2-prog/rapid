@@ -25,7 +25,7 @@ from .registry import (
     registry_transaction_replay_profile,
 )
 
-PARSER_VERSION = "windows-shellbags-native-v3"
+PARSER_VERSION = "windows-shellbags-native-v4"
 SHELLBAG_USER_HIVES = {"NTUSER.DAT", "USRCLASS.DAT"}
 SHELLBAG_BLOCKERS = [
     "binary shell item payload decoding is not report-grade yet",
@@ -186,6 +186,17 @@ def build_native_shellbag_record(
     node_ids = shellbag_node_id_candidates(source_key_path, value_names, section)
     path_candidates = shellbag_path_candidates(source_key_path, value_previews.values())
     timestamp_candidates = shellbag_timestamp_candidates(key_last_written_at, metadata)
+    relationship_profile = shellbag_relationship_profile(
+        source_key_path=source_key_path,
+        section=section,
+        bag_ids=bag_ids,
+        node_ids=node_ids,
+        value_names=value_names,
+        value_previews=value_previews,
+        cell_offset=cell_offset,
+        hbin_offset=hbin_offset,
+        allocation_status=allocation_status,
+    )
     checks = shellbag_validation_checks(
         metadata,
         candidate_source=candidate_source,
@@ -223,6 +234,7 @@ def build_native_shellbag_record(
         "value_names": sorted(value_names),
         "value_previews": dict(sorted(value_previews.items())),
         "timestamp_candidates": timestamp_candidates,
+        "shellbag_relationship_profile": relationship_profile,
         "registry_transaction_log_evidence": dict(transaction_log_evidence),
         "registry_transaction_replay_profile": registry_transaction_replay_profile(
             transaction_log_evidence,
@@ -241,6 +253,7 @@ def build_native_shellbag_record(
             transaction_log_evidence=transaction_log_evidence,
             cell_offset=cell_offset,
             hbin_offset=hbin_offset,
+            relationship_profile=relationship_profile,
         ),
         "key_last_written_at": key_last_written_at,
         "key_path_confidence": key_path_confidence,
@@ -271,6 +284,7 @@ def build_native_shellbag_record(
                 "node_id_candidates": node_ids,
                 "path_candidates": path_candidates,
                 "timestamp_candidates": timestamp_candidates,
+                "shellbag_relationship_profile": relationship_profile,
                 "allocation_status": allocation_status,
                 "cell_offset": cell_offset,
                 "hbin_offset": hbin_offset,
@@ -345,6 +359,7 @@ def shellbag_evidence(
     transaction_log_evidence: Mapping[str, object],
     cell_offset: int,
     hbin_offset: int,
+    relationship_profile: Mapping[str, object],
 ) -> dict[str, object]:
     return {
         "key_evidence": {
@@ -362,6 +377,8 @@ def shellbag_evidence(
             "node_id_candidates": list(node_ids),
             "bag_node_relationship_status": "candidate-from-key-path-and-values",
             "value_names": sorted(value_names),
+            "relationship_profile": dict(relationship_profile),
+            "relationship_profile_hash": str(relationship_profile.get("relationship_hash") or ""),
         },
         "activity_evidence": {
             "path_candidates": list(path_candidates),
@@ -377,6 +394,69 @@ def shellbag_evidence(
     }
 
 
+def shellbag_relationship_profile(
+    *,
+    source_key_path: str,
+    section: str,
+    bag_ids: Sequence[str],
+    node_ids: Sequence[str],
+    value_names: Sequence[str],
+    value_previews: Mapping[str, str],
+    cell_offset: int,
+    hbin_offset: int,
+    allocation_status: str,
+) -> dict[str, object]:
+    parts = shellbag_key_parts(source_key_path)
+    lowered = [part.lower() for part in parts]
+    root_index = next((index for index, part in enumerate(lowered) if part in {"bagmru", "bags"}), -1)
+    key_segments = parts[root_index + 1 :] if root_index >= 0 else []
+    numeric_key_segments = [part for part in key_segments if part.isdigit()]
+    numeric_value_names = [str(value) for value in value_names if str(value).isdigit()]
+    numeric_value_previews = [
+        str(value)
+        for value in value_previews.values()
+        if str(value).isdigit()
+    ]
+    numeric_node_segments = sorted(
+        {str(value) for value in [*numeric_key_segments, *numeric_value_names, *node_ids] if str(value)}
+    )
+    value_numeric_candidates = sorted(
+        {str(value) for value in [*numeric_value_names, *numeric_value_previews] if str(value)}
+    )
+    parent_node_path = "\\".join(key_segments[:-1]) if len(key_segments) > 1 else ""
+    profile_payload: dict[str, object] = {
+        "profile_version": "shellbag-relationship-profile-v1",
+        "source_key_path": source_key_path,
+        "shellbag_section": section,
+        "normalized_key_parts": parts,
+        "shellbag_root_index": root_index,
+        "node_path_segments": key_segments,
+        "numeric_node_segments": numeric_node_segments,
+        "node_depth": len(key_segments),
+        "parent_node_path": parent_node_path,
+        "bag_id_candidates": list(bag_ids),
+        "node_id_candidates": list(node_ids),
+        "value_numeric_candidates": value_numeric_candidates,
+        "value_names": sorted(str(value) for value in value_names),
+        "cell_offset": cell_offset,
+        "hbin_offset": hbin_offset,
+        "allocation_status": allocation_status,
+        "relationship_status": "candidate-key-lineage-not-shellitem-decoded",
+        "relationship_validated": False,
+        "commercial_blockers": [
+            "binary-shell-item-decoding-required",
+            "dedicated-shellbags-parser-diff-required",
+            "transaction-log-replay-required",
+        ],
+    }
+    profile_payload["relationship_hash"] = shellbag_stable_sha256(profile_payload)
+    return profile_payload
+
+
+def shellbag_key_parts(source_key_path: str) -> list[str]:
+    return [part.strip() for part in source_key_path.replace("/", "\\").split("\\") if part.strip()]
+
+
 def shellbag_stable_sha256(value: object) -> str:
     return hashlib.sha256(
         json.dumps(value, ensure_ascii=False, sort_keys=True, default=str, separators=(",", ":")).encode("utf-8")
@@ -390,6 +470,11 @@ def shellbag_depth_manifest(details: Mapping[str, object]) -> dict[str, object]:
     relationship = (
         evidence.get("relationship_evidence")
         if isinstance(evidence.get("relationship_evidence"), Mapping)
+        else {}
+    )
+    relationship_profile = (
+        details.get("shellbag_relationship_profile")
+        if isinstance(details.get("shellbag_relationship_profile"), Mapping)
         else {}
     )
     activity = evidence.get("activity_evidence") if isinstance(evidence.get("activity_evidence"), Mapping) else {}
@@ -468,6 +553,16 @@ def shellbag_depth_manifest(details: Mapping[str, object]) -> dict[str, object]:
             "bag_id_candidates": list(relationship.get("bag_id_candidates") or details.get("bag_id_candidates") or []),
             "node_id_candidates": list(relationship.get("node_id_candidates") or details.get("node_id_candidates") or []),
             "relationship_status": str(relationship.get("bag_node_relationship_status") or ""),
+            "relationship_profile_version": str(relationship_profile.get("profile_version") or ""),
+            "relationship_profile_hash": str(
+                relationship_profile.get("relationship_hash")
+                or relationship.get("relationship_profile_hash")
+                or ""
+            ),
+            "node_path_segments": list(relationship_profile.get("node_path_segments") or [])[:50],
+            "numeric_node_segments": list(relationship_profile.get("numeric_node_segments") or [])[:50],
+            "node_depth": int(relationship_profile.get("node_depth") or 0),
+            "parent_node_path": str(relationship_profile.get("parent_node_path") or ""),
             "bag_node_relationship_validated": bool(SHELLBAG_CAPABILITIES["bag_node_relationship_validation"]),
         },
         "activity_timestamps": {
@@ -509,6 +604,7 @@ def shellbag_depth_manifest(details: Mapping[str, object]) -> dict[str, object]:
                 "kind": "shellbag-bag-node-candidates",
                 "bag_id_candidates": list(details.get("bag_id_candidates") or []),
                 "node_id_candidates": list(details.get("node_id_candidates") or []),
+                "relationship_profile_hash": str(relationship_profile.get("relationship_hash") or ""),
             },
             {
                 "kind": "shellbag-timestamp-candidates",
@@ -744,6 +840,13 @@ def shellbag_core_accuracy_gates(details: Mapping[str, object]) -> list[dict[str
     satisfied: list[str] = []
     if details.get("bag_id_candidates") or details.get("node_id_candidates") or details.get("shellbag_section") in {"bagmru", "bags"}:
         satisfied.append("BagMRU/Bags relationship")
+    relationship_profile = (
+        details.get("shellbag_relationship_profile")
+        if isinstance(details.get("shellbag_relationship_profile"), Mapping)
+        else {}
+    )
+    if relationship_profile.get("relationship_hash"):
+        satisfied.append("relationship lineage profile")
     if checks.get("binary_shell_item_decoding_available"):
         satisfied.append("shell item binary decoding")
     if details.get("timestamp_candidates"):

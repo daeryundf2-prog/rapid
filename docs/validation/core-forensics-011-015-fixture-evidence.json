@@ -80,7 +80,7 @@
       "number": 15,
       "title": "ShellBags native hive parser",
       "assertions": [
-        "shellbag-native-candidate rows preserve BagMRU/Bags relationship candidates, bag/node IDs, timestamp source labeling, NTUSER/UsrClass scope, deleted/slack warning, source hashes, #15 core_accuracy_gates, and shellbag_analyst_review_profile.",
+        "shellbag-native-candidate rows preserve BagMRU/Bags relationship candidates, bag/node IDs, relationship lineage profiles with stable hashes, timestamp source labeling, NTUSER/UsrClass scope, deleted/slack warning, source hashes, #15 core_accuracy_gates, and shellbag_analyst_review_profile.",
         "ShellBags native rows keep binary shell-item decode and transaction-log replay blockers explicit.",
         "trusted ShellBags parser diff helpers compare source key/folder path, bag ID, node ID, timestamp, and hive fields against ShellBagsExplorer/SBECmd-style rows.",
         "ShellBags reportability decisions block final folder-access wording until shell-item, transaction-log, and deleted/slack validation is attached."
