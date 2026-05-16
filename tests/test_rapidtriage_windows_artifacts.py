@@ -3983,6 +3983,13 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
             entry_manifest = entries[0]["details"]["windows_edb_report_citation_manifest"]
             self.assertEqual(entry_manifest["manifest_version"], "windows-edb-report-citation-manifest-v1")
             self.assertEqual(entry_manifest["row_identity"]["artifact_scope"], "source-tool-export")
+            self.assertEqual(
+                entries[0]["details"]["windows_edb_report_citation_manifest_hash"],
+                entry_manifest["manifest_sha256"],
+            )
+            self.assertIn("source-tool export fields", entries[0]["details"]["edb_semantics_warning"].lower())
+            self.assertIn("source_format", entry_manifest["trusted_diff_contract"]["required_fields"])
+            self.assertIn("edb_semantics_warning", entry_manifest["trusted_diff_contract"]["required_fields"])
             self.assertEqual(entry_manifest["reportability"]["allowed_use"], "search-index-triage-pivot")
             self.assertFalse(entry_manifest["reportability"]["standalone_decoded_row_fact"])
             self.assertIn("windows-edb-path-url-content", {row["kind"] for row in entry_manifest["citation_refs"]})
@@ -4006,6 +4013,8 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
             self.assertIn("catalog/table/page mapping", edb_gate["satisfied_checks"])
             self.assertIn("path/URL/content correlation", edb_gate["satisfied_checks"])
             self.assertIn("page-level source citation", edb_gate["satisfied_checks"])
+            self.assertIn("stable Windows.edb citation manifest", edb_gate["satisfied_checks"])
+            self.assertIn("Windows.edb semantics warning", edb_gate["satisfied_checks"])
             self.assertFalse(edb_files[0]["details"]["search_index_native_capabilities"]["native_row_level_decode"])
             self.assertTrue(edb_files[0]["details"]["search_index_native_capabilities"]["native_page_map_triage"])
             self.assertEqual(
@@ -4020,8 +4029,17 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
             self.assertGreaterEqual(edb_files[0]["details"]["native_candidate_metadata"]["row_candidate_count"], 1)
             edb_manifest = edb_files[0]["details"]["windows_edb_report_citation_manifest"]
             self.assertEqual(edb_manifest["row_identity"]["artifact_scope"], "database")
+            self.assertEqual(
+                edb_files[0]["details"]["windows_edb_report_citation_manifest_hash"],
+                edb_manifest["manifest_sha256"],
+            )
+            self.assertIn("not decoded", edb_files[0]["details"]["edb_semantics_warning"].lower())
             self.assertEqual(edb_manifest["qc_prep_item_number"], 26)
             self.assertIn("native Windows.edb ESE header and page-map triage", edb_manifest["qc_prep_contract"]["implemented"])
+            self.assertEqual(
+                edb_manifest["trusted_diff_contract"]["blocker_when_missing"],
+                "windows-edb-trusted-parser-diff-required",
+            )
             self.assertFalse(edb_manifest["validation_summary"]["native_row_level_decode_available"])
             self.assertFalse(edb_manifest["validation_summary"]["native_deleted_state_decode_available"])
             self.assertIn(
@@ -4038,6 +4056,11 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
             )
             self.assertEqual(edb_uplift["reportability_decision"]["allowed_use"], "search-index-triage-pivot")
             self.assertIn("ese-signature-valid", edb_uplift["passed_validation_matrix_ids"])
+            self.assertIn("windows_edb_report_citation_manifest_sha256", " ".join(edb_uplift["source_refs"]))
+            self.assertEqual(
+                edb_uplift["windows_edb_trusted_diff_contract"]["contract_version"],
+                "windows-edb-trusted-diff-contract-v1",
+            )
             self.assertTrue(edb_uplift["large_data_controls"]["row_level_native_decode_required_for_commercial_claims"])
             edb_review_profile = edb_files[0]["details"]["windows_search_analyst_review_profile"]
             self.assertEqual(edb_review_profile["artifact_type"], "windows-search-edb-file")
@@ -4066,6 +4089,11 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
             self.assertFalse(page_candidate["details"]["commercial_grade_ready"])
             page_manifest = page_candidate["details"]["windows_edb_report_citation_manifest"]
             self.assertEqual(page_manifest["row_identity"]["artifact_scope"], "page-candidate")
+            self.assertEqual(
+                page_candidate["details"]["windows_edb_report_citation_manifest_hash"],
+                page_manifest["manifest_sha256"],
+            )
+            self.assertIn("page offset/hash", page_candidate["details"]["edb_semantics_warning"])
             self.assertIn("windows-edb-page-locator", {row["kind"] for row in page_manifest["citation_refs"]})
             self.assertFalse(page_manifest["reportability"]["standalone_decoded_row_fact"])
             self.assertTrue(any(item["details"]["table_family"] == "property-store" for item in edb_table_candidates))
@@ -4080,6 +4108,7 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
                 table_candidate["details"]["windows_edb_report_citation_manifest"]["row_identity"]["deleted_state"],
                 "candidate-marker-present",
             )
+            self.assertIn("decoded ESE catalog", table_candidate["details"]["edb_semantics_warning"])
             self.assertTrue(any(item["details"]["file_name"] == "Incident Notes.docx" for item in edb_row_candidates))
             row_candidate = next(item for item in edb_row_candidates if item["details"]["file_name"] == "Incident Notes.docx")
             self.assertEqual(row_candidate["details"]["item_path"], r"C:\Users\alice\Documents\Incident Notes.docx")
@@ -4105,9 +4134,17 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
             self.assertIn("deleted/index-state validation", row_gate["satisfied_checks"])
             self.assertIn("field presence profile", row_gate["satisfied_checks"])
             self.assertIn("page-local table marker correlation", row_gate["satisfied_checks"])
+            self.assertIn("stable Windows.edb citation manifest", row_gate["satisfied_checks"])
+            self.assertIn("Windows.edb semantics warning", row_gate["satisfied_checks"])
             row_manifest = row_candidate["details"]["windows_edb_report_citation_manifest"]
             self.assertEqual(row_manifest["row_identity"]["artifact_scope"], "row-candidate")
             self.assertEqual(row_manifest["row_identity"]["deleted_state"], "candidate-marker-present")
+            self.assertEqual(
+                row_candidate["details"]["windows_edb_report_citation_manifest_hash"],
+                row_manifest["manifest_sha256"],
+            )
+            self.assertTrue(row_manifest["row_identity"]["field_presence_profile"]["item_path"])
+            self.assertIn("Row candidate correlates", row_manifest["reportability"]["semantics_warning"])
             self.assertIn("windows-edb-row-cluster", {row["kind"] for row in row_manifest["citation_refs"]})
             self.assertEqual(len(row_manifest["manifest_sha256"]), 64)
             self.assertFalse(row_manifest["reportability"]["standalone_decoded_row_fact"])

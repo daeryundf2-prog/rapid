@@ -1465,6 +1465,11 @@ class RapidTriageWindowsArtifactsCollectorTests(unittest.TestCase):
         self.assertEqual(edb_diff["status"], "diffs-present")
         self.assertFalse(edb_diff["commercial_grade_evidence"])
         self.assertEqual(edb_diff["mismatch_count"], 1)
+        self.assertEqual(
+            edb_diff["trusted_diff_contract"]["contract_version"],
+            "windows-edb-trusted-diff-contract-v1",
+        )
+        self.assertIn("path_or_url_or_content", edb_diff["rapid_required_field_coverage"]["present_fields"])
 
         mft_diff = build_mft_trusted_diff(
             [{"record_number": "42", "file_path": r"C:\a.txt"}],
@@ -1489,6 +1494,9 @@ class RapidTriageWindowsArtifactsCollectorTests(unittest.TestCase):
                     "page_offset": 28672,
                     "page_sha256": "a" * 64,
                     "source_format": "ese-edb",
+                    "timestamp_semantics": "not-decoded-native-edb",
+                    "deleted_state_semantics": "candidate-marker-not-row-decoded",
+                    "edb_semantics_warning": "Row candidate correlates path/URL/content strings on a page.",
                 },
             }
         ]
@@ -1503,6 +1511,8 @@ class RapidTriageWindowsArtifactsCollectorTests(unittest.TestCase):
                 "PageOffset": "0x7000",
                 "PageSHA256": "a" * 64,
                 "SourceFormat": "ese-edb",
+                "TimestampSemantics": "not-decoded-native-edb",
+                "DeletedStateSemantics": "candidate-marker-not-row-decoded",
             }
         ]
 
@@ -1511,6 +1521,27 @@ class RapidTriageWindowsArtifactsCollectorTests(unittest.TestCase):
         self.assertEqual(diff["status"], "pass")
         self.assertTrue(diff["commercial_grade_evidence"])
         self.assertEqual(diff["matched_count"], 1)
+        self.assertEqual(
+            diff["trusted_diff_contract"]["compare_fields"],
+            [
+                "artifact_type",
+                "path",
+                "url",
+                "content",
+                "deleted_state",
+                "deleted_state_semantics",
+                "table",
+                "table_family_candidates",
+                "timestamp",
+                "timestamp_semantics",
+                "page_index",
+                "page_offset",
+                "page_sha256",
+                "source_format",
+                "edb_semantics_warning",
+            ],
+        )
+        self.assertIn("edb_semantics_warning", diff["rapid_required_field_coverage"]["present_fields"])
 
     def test_windows_edb_trusted_diff_reports_page_and_deleted_state_mismatches(self) -> None:
         rapid_rows = [

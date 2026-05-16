@@ -13,7 +13,7 @@ from ...core.models import ArtifactRecord
 from .common import build_forensic_review
 from .ese import build_ese_page_map, build_ese_string_pivots, probe_ese_database
 
-PARSER_VERSION = "windows-search-index-import-v7"
+PARSER_VERSION = "windows-search-index-import-v8"
 SEARCH_EDB_PATH = ("ProgramData", "Microsoft", "Search", "Data", "Applications", "Windows", "Windows.edb")
 SUPPORTED_EXPORT_SUFFIXES = {".csv", ".json", ".jsonl", ".ndjson"}
 EXPORT_HINTS = ("windows.edb", "windows-search", "searchindex", "search-index", "edbexport", "winsearch")
@@ -50,6 +50,30 @@ WINDOWS_SEARCH_CAPABILITIES = {
     "native_space_tree_decode": False,
     "native_long_value_tree_decode": False,
 }
+WINDOWS_EDB_TRUSTED_DIFF_COMPARE_FIELDS = [
+    "artifact_type",
+    "path",
+    "url",
+    "content",
+    "deleted_state",
+    "deleted_state_semantics",
+    "table",
+    "table_family_candidates",
+    "timestamp",
+    "timestamp_semantics",
+    "page_index",
+    "page_offset",
+    "page_sha256",
+    "source_format",
+    "edb_semantics_warning",
+]
+WINDOWS_EDB_TRUSTED_DIFF_REQUIRED_FIELDS = [
+    "source_format",
+    "path_or_url_or_content",
+    "deleted_state_semantics",
+    "timestamp_semantics",
+    "edb_semantics_warning",
+]
 WINDOWS_SEARCH_ANALYST_REVIEW_CATALOG = {
     "windows-search-index-entry": {
         "severity": "medium",
@@ -195,7 +219,9 @@ def build_edb_inventory_record(path: Path) -> ArtifactRecord:
         artifact_type="windows-search-edb-file",
         path=str(path.resolve()),
         supported=False,
-        details={
+        details=finalize_windows_search_details(
+            "windows-search-edb-file",
+            {
             "parser": "windows-search-edb-inventory",
             "parser_version": PARSER_VERSION,
             "coverage_status": coverage_status,
@@ -347,7 +373,8 @@ def build_edb_inventory_record(path: Path) -> ArtifactRecord:
             "commercial_grade_blockers": report_grade["blockers"],
             "recommended_parsers": ["WinSearchDBAnalyzer", "ESEDatabaseView", "libesedb/esedbexport"],
             "note": "Windows.edb is inventoried directly with bounded ESE header/string/page-map/table candidate pivots; page candidates preserve offset/hash context for review, but export CSV/JSON rows with a trusted ESE/Search parser for full table, timestamp, and deleted-state decoding.",
-        },
+            },
+        ),
     )
 
 
@@ -398,7 +425,9 @@ def build_edb_pivot_records(path: Path, inventory_details: Mapping[str, object])
                 artifact_type="windows-search-edb-pivot",
                 path=str(path.resolve()),
                 supported=True,
-                details={
+                details=finalize_windows_search_details(
+                    "windows-search-edb-pivot",
+                    {
                     "parser": "windows-search-edb-string-pivot",
                     "parser_version": PARSER_VERSION,
                     "coverage_status": "native-ese-string-pivot",
@@ -495,7 +524,8 @@ def build_edb_pivot_records(path: Path, inventory_details: Mapping[str, object])
                     "risk_flags": sorted(set(risk_flags)),
                     "risk_score": min(100, len(set(risk_flags)) * 20),
                     "raw_preview": candidate_value[:2000],
-                },
+                    },
+                ),
             )
         )
     return records
@@ -547,7 +577,9 @@ def build_edb_page_candidate_records(path: Path, inventory_details: Mapping[str,
                 artifact_type="windows-search-edb-page-candidate",
                 path=str(path.resolve()),
                 supported=True,
-                details={
+                details=finalize_windows_search_details(
+                    "windows-search-edb-page-candidate",
+                    {
                     "parser": "windows-search-edb-page-map",
                     "parser_version": PARSER_VERSION,
                     "coverage_status": "native-ese-page-map-candidate",
@@ -671,7 +703,8 @@ def build_edb_page_candidate_records(path: Path, inventory_details: Mapping[str,
                     "risk_flags": sorted(set(risk_flags)),
                     "risk_score": min(100, len(set(risk_flags)) * 15),
                     "raw_preview": json.dumps(sample, ensure_ascii=False, sort_keys=True)[:2000],
-                },
+                    },
+                ),
             )
         )
     return records
@@ -709,7 +742,9 @@ def build_edb_table_candidate_records(path: Path, inventory_details: Mapping[str
                 artifact_type="windows-search-edb-table-candidate",
                 path=str(path.resolve()),
                 supported=True,
-                details={
+                details=finalize_windows_search_details(
+                    "windows-search-edb-table-candidate",
+                    {
                     "parser": "windows-search-edb-table-candidate",
                     "parser_version": PARSER_VERSION,
                     "coverage_status": "native-ese-table-string-candidate",
@@ -795,7 +830,8 @@ def build_edb_table_candidate_records(path: Path, inventory_details: Mapping[str
                     "risk_flags": [f"windows-search-table:{table_family}"],
                     "risk_score": 20,
                     "raw_preview": " ".join(strings[:20])[:2000],
-                },
+                    },
+                ),
             )
         )
     return records
@@ -842,7 +878,9 @@ def build_edb_row_candidate_records(path: Path, inventory_details: Mapping[str, 
                 artifact_type="windows-search-edb-row-candidate",
                 path=str(path.resolve()),
                 supported=True,
-                details={
+                details=finalize_windows_search_details(
+                    "windows-search-edb-row-candidate",
+                    {
                     "parser": "windows-search-edb-row-candidate",
                     "parser_version": PARSER_VERSION,
                     "coverage_status": "native-ese-correlated-string-row-candidate",
@@ -973,7 +1011,8 @@ def build_edb_row_candidate_records(path: Path, inventory_details: Mapping[str, 
                     "risk_flags": sorted(set(risk_flags)),
                     "risk_score": min(100, len(set(risk_flags)) * 20),
                     "raw_preview": json.dumps(candidate, ensure_ascii=False, sort_keys=True)[:2000],
-                },
+                    },
+                ),
             )
         )
     return records
@@ -1098,6 +1137,7 @@ def build_search_index_entry(
         "raw": dict(row),
         "raw_preview": json.dumps(row, ensure_ascii=False, sort_keys=True)[:2000],
     }
+    details = finalize_windows_search_details("windows-search-index-entry", details)
     return ArtifactRecord(
         provider=WindowsSearchIndexProvider.name,
         artifact_type="windows-search-index-entry",
@@ -1200,6 +1240,65 @@ def build_search_index_summary(root: Path, records: Sequence[ArtifactRecord]) ->
     )
 
 
+def finalize_windows_search_details(artifact_type: str, details: Mapping[str, object]) -> dict[str, object]:
+    finalized = dict(details)
+    finalized.setdefault("artifact_type", artifact_type)
+    manifest = (
+        finalized.get("windows_edb_report_citation_manifest")
+        if isinstance(finalized.get("windows_edb_report_citation_manifest"), Mapping)
+        else {}
+    )
+    if manifest:
+        manifest_hash = str(manifest.get("manifest_sha256") or "")
+        if manifest_hash:
+            finalized["windows_edb_report_citation_manifest_hash"] = manifest_hash
+        row_identity = manifest.get("row_identity") if isinstance(manifest.get("row_identity"), Mapping) else {}
+        reportability = manifest.get("reportability") if isinstance(manifest.get("reportability"), Mapping) else {}
+        trusted_contract = (
+            manifest.get("trusted_diff_contract") if isinstance(manifest.get("trusted_diff_contract"), Mapping) else {}
+        )
+        warning = str(row_identity.get("edb_semantics_warning") or reportability.get("semantics_warning") or "")
+        if warning:
+            finalized["edb_semantics_warning"] = warning
+        if trusted_contract:
+            finalized["windows_edb_trusted_diff_contract"] = dict(trusted_contract)
+    if "core_accuracy_gates" in finalized:
+        finalized["core_accuracy_gates"] = windows_search_core_accuracy_gates(artifact_type, finalized)
+    if "commercial_uplift_evidence" in finalized:
+        finalized["commercial_uplift_evidence"] = windows_search_commercial_uplift_evidence(finalized)
+    return finalized
+
+
+def windows_edb_semantics_warning(artifact_scope: str) -> str:
+    if artifact_scope == "source-tool-export":
+        return "Source-tool export fields are accepted as imported rows; validate the exporter version and original Windows.edb hash before report-grade use."
+    if artifact_scope == "database":
+        return "Native Windows.edb inventory proves source database/header/page-string context, not decoded Search row values."
+    if artifact_scope == "string-pivot":
+        return "String pivot is a bounded ESE string hit and must not be treated as a decoded Windows Search row."
+    if artifact_scope == "page-candidate":
+        return "Page candidate groups strings by ESE page offset/hash; row ownership, timestamp, and deleted state remain unverified."
+    if artifact_scope == "table-candidate":
+        return "Table candidate is inferred from marker strings, not from decoded ESE catalog metadata."
+    if artifact_scope == "row-candidate":
+        return "Row candidate correlates path/URL/content strings on a page; native ESE row ownership, timestamp, and deleted state are not decoded."
+    return "Windows.edb evidence is validation-gated until native ESE row decoding or trusted parser diff evidence is attached."
+
+
+def windows_edb_trusted_diff_contract(artifact_scope: str) -> dict[str, object]:
+    return {
+        "contract_version": "windows-edb-trusted-diff-contract-v1",
+        "artifact_family": "windows-edb",
+        "artifact_scope": artifact_scope,
+        "required_fields": WINDOWS_EDB_TRUSTED_DIFF_REQUIRED_FIELDS,
+        "compare_fields": WINDOWS_EDB_TRUSTED_DIFF_COMPARE_FIELDS,
+        "recognized_reference_tools": sorted(WINDOWS_SEARCH_TRUSTED_TOOLS),
+        "native_row_semantics_must_be_verified": artifact_scope != "source-tool-export",
+        "report_grade_requires_status": "pass",
+        "blocker_when_missing": "windows-edb-trusted-parser-diff-required",
+    }
+
+
 def windows_edb_report_citation_manifest(
     *,
     source_path: str,
@@ -1219,6 +1318,13 @@ def windows_edb_report_citation_manifest(
     report_grade: Mapping[str, object],
 ) -> dict[str, object]:
     normalized_path = normalize_windows_search_path(item_path)
+    field_presence_profile = dict(row_cluster_evidence.get("field_presence_profile") or {})
+    page_table_marker_hits = dict(
+        row_cluster_evidence.get("page_table_marker_hits")
+        or row_cluster_evidence.get("table_marker_hits")
+        or {}
+    )
+    semantics_warning = windows_edb_semantics_warning(artifact_scope)
     row_identity = {
         "artifact_scope": artifact_scope,
         "source_format": source_format,
@@ -1236,6 +1342,9 @@ def windows_edb_report_citation_manifest(
         if deleted_state == "candidate-marker-present"
         else "not-decoded-or-not-provided",
         "page_locator": dict(page_locator),
+        "field_presence_profile": field_presence_profile,
+        "page_table_marker_hits": page_table_marker_hits,
+        "edb_semantics_warning": semantics_warning,
     }
     citation_refs: list[dict[str, object]] = [
         {
@@ -1355,6 +1464,7 @@ def windows_edb_report_citation_manifest(
         "row_identity_hash": stable_search_json_sha256(row_identity),
         "citation_refs": citation_refs,
         "citation_ref_count": len(citation_refs),
+        "trusted_diff_contract": windows_edb_trusted_diff_contract(artifact_scope),
         "validation_summary": {
             "report_grade_status": str(report_grade.get("status") or ""),
             "commercial_gap_ids": list(report_grade.get("commercial_gap_ids") or ["#11"]),
@@ -1368,6 +1478,7 @@ def windows_edb_report_citation_manifest(
             "standalone_decoded_row_fact": False,
             "ready_for_court_report": bool(report_grade.get("report_grade_ready")),
             "validation_required": not bool(report_grade.get("report_grade_ready")),
+            "semantics_warning": semantics_warning,
             "blockers": sorted(
                 set(str(item) for item in report_grade.get("blockers") or [])
                 | {"windows-edb-native-row-decoder-validation-required", "windows-edb-deleted-state-trusted-tool-diff-required"}
@@ -1747,18 +1858,22 @@ def windows_search_commercial_uplift_evidence(details: Mapping[str, object]) -> 
         else {"status": "not-attached"}
     )
     reportability_decision = windows_search_reportability_decision(report_grade, details)
+    source_refs = [
+        f"source_path:{details.get('source_path', '')}",
+        f"source_index:{details.get('source_index', '')}",
+        f"source_sha256:{hashes.get('sha256', '')}",
+        f"artifact_type:{details.get('artifact_type', '')}",
+    ]
+    manifest_hash = str(details.get("windows_edb_report_citation_manifest_hash") or "")
+    if manifest_hash:
+        source_refs.append(f"windows_edb_report_citation_manifest_sha256:{manifest_hash}")
     return {
         "batch_id": "commercial-uplift-011-015",
         "item_numbers": [11],
         "qc_prep_item_numbers": [QC_PREP_WINDOWS_EDB_ITEM],
         "implementation_track": "native-parser-depth",
         "objective": "Expose Windows.edb ESE/Search validation evidence, row limits, and commercial blockers on #11 / QC-prep #26 native candidates.",
-        "source_refs": [
-            f"source_path:{details.get('source_path', '')}",
-            f"source_index:{details.get('source_index', '')}",
-            f"source_sha256:{hashes.get('sha256', '')}",
-            f"artifact_type:{details.get('artifact_type', '')}",
-        ],
+        "source_refs": source_refs,
         "passed_validation_matrix_ids": [
             str(item.get("id")) for item in matrix if isinstance(item, Mapping) and item.get("passed")
         ],
@@ -1769,6 +1884,8 @@ def windows_search_commercial_uplift_evidence(details: Mapping[str, object]) -> 
         "reportability_decision": reportability_decision,
         "commercial_blockers": list(report_grade.get("blockers") or []),
         "windows_edb_trusted_diff": trusted_diff,
+        "windows_edb_trusted_diff_contract": dict(details.get("windows_edb_trusted_diff_contract") or {}),
+        "edb_semantics_warning": str(details.get("edb_semantics_warning") or ""),
         "large_data_controls": {
             "bounded_page_map": True,
             "page_count_scanned": int(metadata.get("page_count_scanned") or 0),
@@ -1825,6 +1942,11 @@ def windows_search_core_accuracy_gates(artifact_type: str, details: Mapping[str,
         evidence_refs.append(f"page_sha256:{details.get('page_sha256')}")
     if hashes.get("sha256"):
         evidence_refs.append(f"source_sha256:{hashes['sha256']}")
+    manifest_hash = str(details.get("windows_edb_report_citation_manifest_hash") or "")
+    if not manifest_hash and isinstance(details.get("windows_edb_report_citation_manifest"), Mapping):
+        manifest_hash = str(dict(details.get("windows_edb_report_citation_manifest") or {}).get("manifest_sha256") or "")
+    if manifest_hash:
+        evidence_refs.append(f"windows_edb_report_citation_manifest_sha256:{manifest_hash}")
 
     satisfied: list[str] = []
     if details.get("ese_page_map") or details.get("table_family") or details.get("table_families") or details.get("table_family_candidates") or checks.get("ese_page_map_built"):
@@ -1841,6 +1963,10 @@ def windows_search_core_accuracy_gates(artifact_type: str, details: Mapping[str,
         satisfied.append("deleted/index-state validation")
     if details.get("page_offset") not in (None, "") or details.get("page_sha256") or checks.get("ese_page_map_built") or checks.get("has_page_source_citation") or hashes.get("sha256"):
         satisfied.append("page-level source citation")
+    if manifest_hash:
+        satisfied.append("stable Windows.edb citation manifest")
+    if details.get("edb_semantics_warning"):
+        satisfied.append("Windows.edb semantics warning")
     if trusted_diff.get("status") == "pass":
         satisfied.append("trusted Windows.edb parser diff pass")
     return [build_accuracy_gate(11, satisfied_checks=satisfied, evidence_refs=evidence_refs)]
@@ -1854,7 +1980,7 @@ def build_windows_edb_trusted_diff(
 ) -> dict[str, object]:
     rapid_index = index_search_rows(rapid_rows)
     trusted_index = index_search_rows(trusted_rows)
-    return build_simple_trusted_row_diff(
+    diff = build_simple_trusted_row_diff(
         rapid_index,
         trusted_index,
         trusted_tool=trusted_tool,
@@ -1863,6 +1989,10 @@ def build_windows_edb_trusted_diff(
         blocker="windows-edb-trusted-parser-diff-required",
         key_label="search_key",
     )
+    diff["trusted_diff_contract"] = windows_edb_trusted_diff_contract("row-candidate")
+    diff["rapid_required_field_coverage"] = windows_edb_required_field_coverage(rapid_index.values())
+    diff["trusted_required_field_coverage"] = windows_edb_required_field_coverage(trusted_index.values())
+    return diff
 
 
 def index_search_rows(rows: Sequence[Mapping[str, object]]) -> dict[str, dict[str, str]]:
@@ -1875,14 +2005,20 @@ def index_search_rows(rows: Sequence[Mapping[str, object]]) -> dict[str, dict[st
             "url": normalized_diff_value(first_alias(payload, "url", "item_url", "itemurl", "system.itemurl")),
             "content": normalized_diff_value(first_alias(payload, "content", "content_snippet", "system.search.contents", "text")),
             "deleted_state": normalized_deleted_state(first_alias(payload, "deleted_state", "isdeleted", "deleted", "index_state")),
+            "deleted_state_semantics": normalized_diff_value(
+                first_alias(payload, "deleted_state_semantics", "DeletedStateSemantics")
+            ),
             "table": normalized_diff_value(first_alias(payload, "table", "table_family", "table_name")),
             "table_family_candidates": normalized_diff_list(
                 first_alias(payload, "table_family_candidates", "table_families", "TableFamilies")
             ),
+            "timestamp": normalized_diff_value(first_alias(payload, "timestamp", "modified_at", "System.DateModified")),
+            "timestamp_semantics": normalized_diff_value(first_alias(payload, "timestamp_semantics", "TimestampSemantics")),
             "page_offset": normalized_int_text(first_alias(payload, "page_offset", "PageOffset", "offset")),
             "page_sha256": normalized_diff_value(first_alias(payload, "page_sha256", "PageSHA256", "page_hash")),
             "page_index": normalized_int_text(first_alias(payload, "page_index", "PageIndex")),
             "source_format": normalized_diff_value(first_alias(payload, "source_format", "SourceFormat")),
+            "edb_semantics_warning": normalized_diff_value(first_alias(payload, "edb_semantics_warning", "Warning")),
         }
         key = search_diff_key(normalized)
         if key:
@@ -1895,11 +2031,57 @@ def search_diff_row_payload(row: Mapping[str, object]) -> Mapping[str, object]:
     if not details:
         return row
     payload = dict(details)
+    manifest = (
+        payload.get("windows_edb_report_citation_manifest")
+        if isinstance(payload.get("windows_edb_report_citation_manifest"), Mapping)
+        else {}
+    )
+    if manifest:
+        row_identity = manifest.get("row_identity") if isinstance(manifest.get("row_identity"), Mapping) else {}
+        for key, value in row_identity.items():
+            if key == "page_locator" and isinstance(value, Mapping):
+                for locator_key, locator_value in value.items():
+                    payload.setdefault(str(locator_key), locator_value)
+                continue
+            payload.setdefault(str(key), value)
+        reportability = manifest.get("reportability") if isinstance(manifest.get("reportability"), Mapping) else {}
+        if reportability.get("semantics_warning"):
+            payload.setdefault("edb_semantics_warning", reportability.get("semantics_warning"))
     for key, value in row.items():
         if key == "details":
             continue
         payload.setdefault(key, value)
     return payload
+
+
+def windows_edb_required_field_coverage(rows: Iterable[Mapping[str, str]]) -> dict[str, object]:
+    rows_list = [dict(row) for row in rows]
+    if not rows_list:
+        return {
+            "row_count": 0,
+            "required_fields": WINDOWS_EDB_TRUSTED_DIFF_REQUIRED_FIELDS,
+            "present_fields": [],
+            "missing_fields": WINDOWS_EDB_TRUSTED_DIFF_REQUIRED_FIELDS,
+        }
+    present: set[str] = set()
+    for row in rows_list:
+        if row.get("source_format"):
+            present.add("source_format")
+        if row.get("path") or row.get("url") or row.get("content"):
+            present.add("path_or_url_or_content")
+        if row.get("deleted_state_semantics") or row.get("deleted_state"):
+            present.add("deleted_state_semantics")
+        if row.get("timestamp_semantics") or row.get("timestamp"):
+            present.add("timestamp_semantics")
+        if row.get("edb_semantics_warning"):
+            present.add("edb_semantics_warning")
+    missing = [field for field in WINDOWS_EDB_TRUSTED_DIFF_REQUIRED_FIELDS if field not in present]
+    return {
+        "row_count": len(rows_list),
+        "required_fields": WINDOWS_EDB_TRUSTED_DIFF_REQUIRED_FIELDS,
+        "present_fields": [field for field in WINDOWS_EDB_TRUSTED_DIFF_REQUIRED_FIELDS if field in present],
+        "missing_fields": missing,
+    }
 
 
 def search_diff_key(normalized: Mapping[str, str]) -> str:

@@ -19,10 +19,10 @@
       "number": 11,
       "title": "Windows.edb full ESE parser",
       "assertions": [
-        "windows-search-edb-file rows preserve ESE header/page-map/table-family metadata, source hashes, path/URL/content pivots, #11 core_accuracy_gates, and windows_search_analyst_review_profile.",
-        "windows-search-edb-page-candidate rows preserve page index, page offset, page hash, table marker hits, page-local path/content candidates, and page-level source citation.",
-        "windows-search-edb-row-candidate rows correlate path/content/deleted-state markers, emit windows_search_analyst_review_profile with not-proof-of warnings, and retain validation-required blockers.",
-        "trusted Windows.edb parser diff helpers compare path/URL/content/deleted-state/table fields and keep report-grade blocked when mismatches, missing rows, extra rows, or unrecognized tools are present.",
+        "windows-search-edb-file rows preserve ESE header/page-map/table-family metadata, source hashes, path/URL/content pivots, stable windows_edb_report_citation_manifest_hash, #11 core_accuracy_gates, and windows_search_analyst_review_profile.",
+        "windows-search-edb-page-candidate rows preserve page index, page offset, page hash, table marker hits, page-local path/content candidates, page-level source citation, and explicit Windows.edb semantics warnings.",
+        "windows-search-edb-row-candidate rows correlate path/content/deleted-state markers, emit windows_search_analyst_review_profile with not-proof-of warnings, retain validation-required blockers, and expose field-presence/page-marker evidence inside the citation manifest.",
+        "trusted Windows.edb parser diff helpers compare path/URL/content/deleted-state/table/timestamp/page/source-format fields, publish the trusted-diff contract, and keep report-grade blocked when mismatches, missing rows, extra rows, or unrecognized tools are present.",
         "Windows.edb reportability decisions keep native rows as search-index triage pivots until ESE row validation is attached."
       ],
       "blockers_kept": [
