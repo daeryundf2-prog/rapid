@@ -6564,6 +6564,101 @@ body.analysis-active .workbench-side-stack .core-workflow-step {
   font-size: 0.7rem;
 }
 
+.human-action-guide {
+  display: grid;
+  grid-template-columns: minmax(230px, 1fr) minmax(280px, 1.1fr) auto;
+  gap: 8px;
+  align-items: center;
+  border: 1px solid rgba(138, 190, 213, 0.26);
+  border-radius: 15px;
+  background:
+    radial-gradient(circle at 0% 50%, rgba(72, 203, 238, 0.18), transparent 36%),
+    linear-gradient(135deg, rgba(240, 247, 250, 0.08), rgba(255, 255, 255, 0.02));
+  padding: 8px;
+}
+
+.human-action-main {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.human-action-main .eyebrow {
+  margin: 0;
+}
+
+.human-action-main strong {
+  overflow: hidden;
+  color: #f6fbfd;
+  font-size: 0.92rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.human-action-main span {
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  color: #bdd0dc;
+  font-size: 0.74rem;
+  line-height: 1.45;
+}
+
+.human-action-steps {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 5px;
+}
+
+.human-step-chip {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 5px;
+  border: 1px solid rgba(188, 207, 218, 0.18);
+  border-radius: 999px;
+  background: rgba(17, 27, 39, 0.6);
+  color: #aebfcb;
+  font-size: 0.68rem;
+  font-weight: 850;
+  padding: 5px 7px 5px 5px;
+  white-space: nowrap;
+}
+
+.human-step-chip b {
+  display: inline-grid;
+  width: 18px;
+  height: 18px;
+  place-items: center;
+  flex: 0 0 auto;
+  border-radius: 999px;
+  background: rgba(220, 234, 241, 0.14);
+  color: #eaf4f8;
+  font-size: 0.68rem;
+}
+
+.human-step-chip.active {
+  border-color: rgba(95, 213, 244, 0.58);
+  background: rgba(42, 93, 112, 0.72);
+  color: #f4fbfd;
+}
+
+.human-step-chip.active b {
+  background: #dff8ff;
+  color: #12303b;
+}
+
+.human-action-buttons {
+  display: flex;
+  gap: 6px;
+  justify-content: flex-end;
+}
+
+.human-action-buttons button {
+  white-space: nowrap;
+}
+
 .shortcut-help {
   margin: 0 0 7px;
   border-color: #35495c;
@@ -6701,6 +6796,14 @@ body.analysis-active .workbench-side-stack .core-workflow-step {
     grid-template-columns: repeat(3, minmax(0, 1fr));
   }
 
+  .human-action-guide {
+    grid-template-columns: 1fr;
+  }
+
+  .human-action-buttons {
+    justify-content: flex-start;
+  }
+
   body.analysis-active .completed-core-workflow,
   .mission-strip {
     grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -6728,6 +6831,7 @@ body.analysis-active .workbench-side-stack .core-workflow-step {
   .workbench-side-stack .completed-core-workflow,
   body.analysis-active .workbench-side-stack .completed-core-workflow,
   .workbench-switchboard .forensic-view-mode-bar,
+  .human-action-steps,
   .table-control-bar {
     grid-template-columns: 1fr;
   }

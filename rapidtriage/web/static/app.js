@@ -281,6 +281,7 @@ function renderDetailShell(run, tab) {
       ${renderCaseCommandBar(run)}
       ${renderForensicViewModeBar(run, tab)}
       <p class="view-helper compact-view-helper">${escapeHtml(group.summary)}</p>
+      ${renderHumanActionGuide(run, tab)}
     </section>
     ${renderShortcutHelp()}
     ${renderCommandPalette(run, tab)}
@@ -301,6 +302,124 @@ function renderDetailShell(run, tab) {
       ${renderWorkbenchSmokePanel(run)}
     </details>
   `;
+}
+
+function renderHumanActionGuide(run, tab) {
+  const guide = humanActionGuideForTab(run, tab);
+  return `
+    <section class="human-action-guide" aria-label="Recommended next action" data-testid="human-action-guide">
+      <div class="human-action-main">
+        <p class="eyebrow">지금 할 일</p>
+        <strong>${escapeHtml(guide.title)}</strong>
+        <span>${escapeHtml(guide.body)}</span>
+      </div>
+      <div class="human-action-steps" aria-label="Suggested workflow">
+        ${guide.steps.map((step, index) => `
+          <span class="human-step-chip ${index === guide.activeStep ? "active" : ""}">
+            <b>${index + 1}</b>${escapeHtml(step)}
+          </span>
+        `).join("")}
+      </div>
+      <div class="human-action-buttons">
+        <button type="button" data-open-tab="${escapeHtml(guide.primaryTab)}">${escapeHtml(guide.primaryLabel)}</button>
+        <button class="secondary-button" type="button" data-open-tab="${escapeHtml(guide.secondaryTab)}">${escapeHtml(guide.secondaryLabel)}</button>
+      </div>
+    </section>
+  `;
+}
+
+function humanActionGuideForTab(run, tab) {
+  const summary = run.summary?.summary || {};
+  const docs = Number(summary.document_match_count || 0);
+  const files = Number(summary.file_candidate_count || 0);
+  const timeline = Number(summary.timeline_event_count || 0);
+  const reportCandidates = Number(summary.report_item_count || 0);
+  const artifactSignals = artifactGroupCount(run, ["evtx", "registry", "browser", "ai", "kakao", "mail", "message", "mft", "usn"]);
+  const baseSteps = ["전체 검색", "원본 확인", "리뷰 표시", "보고서 정리"];
+  const guides = {
+    summary: {
+      title: "먼저 전체 검색으로 사건 단서를 좁히세요",
+      body: `${formatNumber(docs + files + timeline + artifactSignals)}개 후보를 바로 훑기보다 키워드로 좁히는 게 빠릅니다.`,
+      primaryTab: "search",
+      primaryLabel: "전체 검색 시작",
+      secondaryTab: "artifacts",
+      secondaryLabel: "아티팩트 보기",
+      activeStep: 0,
+    },
+    search: {
+      title: "검색어를 넣고, 결과 행을 열어 원본을 확인하세요",
+      body: "결과는 증거가 아니라 후보입니다. 오른쪽 원본 뷰어에서 path, hash, locator를 확인한 뒤 리뷰로 넘기세요.",
+      primaryTab: "review",
+      primaryLabel: "리뷰 보드로 이동",
+      secondaryTab: "artifacts",
+      secondaryLabel: "관련 아티팩트 보기",
+      activeStep: 1,
+    },
+    artifacts: {
+      title: "중요 아티팩트부터 열고 검색 필터로 좁히세요",
+      body: `${formatNumber(artifactSignals)}개 아티팩트 신호가 있습니다. EVTX, Registry, Browser, AI, Messenger를 먼저 확인하세요.`,
+      primaryTab: "search",
+      primaryLabel: "이 케이스 검색",
+      secondaryTab: "timeline",
+      secondaryLabel: "시간순으로 보기",
+      activeStep: 1,
+    },
+    files: {
+      title: "파일 후보는 필터 후 필요한 것만 열어보세요",
+      body: `${formatNumber(files)}개 파일 후보가 있습니다. 대용량 케이스에서는 visible filter와 source filter를 먼저 쓰는 게 안전합니다.`,
+      primaryTab: "search",
+      primaryLabel: "파일 내용 검색",
+      secondaryTab: "review",
+      secondaryLabel: "선택 항목 리뷰",
+      activeStep: 1,
+    },
+    docs: {
+      title: "문서 히트는 문맥과 원본 위치를 같이 보세요",
+      body: `${formatNumber(docs)}개 문서/텍스트 히트가 있습니다. 스니펫만 믿지 말고 source viewer에서 앞뒤 문맥을 확인하세요.`,
+      primaryTab: "search",
+      primaryLabel: "문서 재검색",
+      secondaryTab: "review",
+      secondaryLabel: "리뷰로 넘기기",
+      activeStep: 1,
+    },
+    timeline: {
+      title: "시간 흐름을 만든 뒤 의심 구간으로 피벗하세요",
+      body: `${formatNumber(timeline)}개 타임라인 이벤트가 있습니다. 날짜 필터로 좁히고 관련 파일/로그/브라우저 흔적을 같이 여세요.`,
+      primaryTab: "search",
+      primaryLabel: "시간대 키워드 검색",
+      secondaryTab: "artifacts",
+      secondaryLabel: "아티팩트 대조",
+      activeStep: 1,
+    },
+    indicators: {
+      title: "IOC는 단독 결론보다 피벗 출발점으로 쓰세요",
+      body: "IP, URL, 도메인, 해시는 관련 파일과 웹 기록, 실행 흔적까지 이어서 봐야 의미가 생깁니다.",
+      primaryTab: "search",
+      primaryLabel: "IOC로 검색",
+      secondaryTab: "timeline",
+      secondaryLabel: "시간대 확인",
+      activeStep: 1,
+    },
+    review: {
+      title: "증거 후보를 relevant / needs-review / excluded로 나누세요",
+      body: `${formatNumber(reportCandidates)}개 보고서 후보가 있습니다. 확실한 항목만 include-in-report로 올리는 게 안전합니다.`,
+      primaryTab: "report",
+      primaryLabel: "보고서 정리",
+      secondaryTab: "search",
+      secondaryLabel: "더 찾기",
+      activeStep: 2,
+    },
+    report: {
+      title: "제출 전 hash, locator, limitation을 마지막으로 확인하세요",
+      body: "보고서는 결론보다 출처가 중요합니다. source hash, parser version, offset/index, review state가 붙은 항목만 사용하세요.",
+      primaryTab: "review",
+      primaryLabel: "리뷰 상태 확인",
+      secondaryTab: "summary",
+      secondaryLabel: "검증 상태 보기",
+      activeStep: 3,
+    },
+  };
+  return { steps: baseSteps, ...(guides[tab] || guides.summary) };
 }
 
 function renderForensicFeatureCatalog(run, tab) {
@@ -517,27 +636,27 @@ function renderTableControlBar(tab) {
   return `
     <section class="table-control-bar" aria-label="Large result table controls" data-testid="table-control-bar" data-control-contract="${escapeHtml(TABLE_CONTROL_CONTRACT.profile_version)}">
       <label>
-        Visible filter
-        <input id="tableFilter" placeholder="Filter visible rows" />
+        현재 표 필터
+        <input id="tableFilter" placeholder="보이는 행에서 바로 찾기" />
       </label>
       <label>
-        Column preset
+        컬럼 보기
         <select id="columnPresetInput" aria-label="Column display preset">
-          <option value="analyst">Analyst default</option>
-          <option value="compact">Compact</option>
-          <option value="source">Source/citation focus</option>
+          <option value="analyst">분석 기본</option>
+          <option value="compact">촘촘히 보기</option>
+          <option value="source">출처/인용 중심</option>
         </select>
       </label>
       <label>
-        Source filter
-        <input id="sourceFilterInput" placeholder="path, provider, hive, DB..." />
+        출처 필터
+        <input id="sourceFilterInput" placeholder="경로, provider, hive, DB..." />
       </label>
       <label>
-        Time filter
-        <input id="timeFilterInput" placeholder="YYYY-MM-DD or time text" />
+        시간 필터
+        <input id="timeFilterInput" placeholder="YYYY-MM-DD 또는 시간 단서" />
       </label>
-      <button id="clearFilter" type="button">Clear</button>
-      <span class="table-control-hint">${escapeHtml(tabLabel(tab))} · ${kbd("[")} ${kbd("]")} page/window · DOM window ${VIRTUAL_TABLE_ROW_LIMIT} · filter text bounded to ${ROW_FILTER_TEXT_LIMIT} chars/row</span>
+      <button id="clearFilter" type="button">초기화</button>
+      <span class="table-control-hint" title="filter text bounded to ${ROW_FILTER_TEXT_LIMIT} chars/row">${escapeHtml(tabLabel(tab))} · ${kbd("[")} ${kbd("]")} 페이지 이동 · 화면 행 ${VIRTUAL_TABLE_ROW_LIMIT}개 제한 · 행당 ${ROW_FILTER_TEXT_LIMIT}자까지만 필터</span>
     </section>
   `;
 }
@@ -951,9 +1070,9 @@ function renderCaseHero(run) {
         <h2>${escapeHtml(headline)}</h2>
         <p>${escapeHtml(run.request.root || payload.output_dir || "Evidence source")}에서 생성된 산출물을 검색, 비교, 검토, 보고서 후보로 바로 연결합니다.</p>
         <div class="case-hero-actions">
-          <button type="button" data-open-tab="search" data-testid="hero-search-button">Search all evidence</button>
-          <button class="secondary-button" type="button" data-open-tab="artifacts" data-testid="hero-artifacts-button">Open artifacts</button>
-          <button class="secondary-button" type="button" data-open-tab="review" data-testid="hero-review-button">Review board</button>
+          <button type="button" data-open-tab="search" data-testid="hero-search-button">전체 증거 검색</button>
+          <button class="secondary-button" type="button" data-open-tab="artifacts" data-testid="hero-artifacts-button">아티팩트 보기</button>
+          <button class="secondary-button" type="button" data-open-tab="review" data-testid="hero-review-button">리뷰 보드</button>
         </div>
       </div>
       <div class="case-hero-metrics">
@@ -1187,14 +1306,14 @@ function renderCaseCommandBar(run) {
       </div>
       <form id="globalCaseSearchForm" class="case-command-search" aria-label="Global case search" data-testid="global-case-search">
         <label>
-          <span>Global search</span>
-          <input name="keyword" placeholder="Search web, AI, logs, docs, OCR..." autocomplete="off" />
+          <span>전체 검색</span>
+          <input name="keyword" placeholder="웹, AI, 로그, 문서, OCR에서 찾기..." autocomplete="off" />
         </label>
-        <button type="submit">Search</button>
+        <button type="submit">검색</button>
       </form>
       <div class="case-command-actions">
-        <button class="secondary-button" type="button" data-open-tab="review">Review ${formatNumber(reviewCount)}</button>
-        <button class="secondary-button" type="button" data-open-tab="report">Report</button>
+        <button class="secondary-button" type="button" data-open-tab="review">리뷰 ${formatNumber(reviewCount)}</button>
+        <button class="secondary-button" type="button" data-open-tab="report">보고서</button>
       </div>
     </section>
   `;
