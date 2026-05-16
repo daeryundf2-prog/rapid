@@ -1488,7 +1488,7 @@ class CaseDatabase:
                     details = artifact_details(row)
                     title = artifact_title(row)
                     summary = artifact_summary(row)
-                    cursor = connection.execute(
+                    connection.execute(
                         """
                         INSERT INTO artifact (
                             citation_id, case_id, evidence_source_id, artifact_type, parser_name,
@@ -1509,10 +1509,6 @@ class CaseDatabase:
                             None,
                             now_iso(),
                         ),
-                    )
-                    connection.execute(
-                        "INSERT INTO artifact_fts(rowid, title, summary, metadata) VALUES (?, ?, ?, ?)",
-                        (int(cursor.lastrowid), title, summary, artifact_index_text(row)),
                     )
                     count += 1
         return count
@@ -1570,7 +1566,7 @@ class CaseDatabase:
                 details = artifact_details(artifact)
                 title = artifact_title(artifact)
                 summary = artifact_summary(artifact)
-                cursor = connection.execute(
+                connection.execute(
                     """
                     INSERT INTO artifact (
                         citation_id, case_id, evidence_source_id, artifact_type, parser_name,
@@ -1592,10 +1588,6 @@ class CaseDatabase:
                         now_iso(),
                     ),
                 )
-                connection.execute(
-                    "INSERT INTO artifact_fts(rowid, title, summary, metadata) VALUES (?, ?, ?, ?)",
-                    (int(cursor.lastrowid), title, summary, artifact_index_text(artifact)),
-                )
                 count += 1
             for index, row in enumerate(scanner_rows if isinstance(scanner_rows, list) else []):
                 if not isinstance(row, Mapping):
@@ -1604,7 +1596,7 @@ class CaseDatabase:
                 details = artifact_details(artifact)
                 title = artifact_title(artifact)
                 summary = artifact_summary(artifact)
-                cursor = connection.execute(
+                connection.execute(
                     """
                     INSERT INTO artifact (
                         citation_id, case_id, evidence_source_id, artifact_type, parser_name,
@@ -1625,10 +1617,6 @@ class CaseDatabase:
                         None,
                         now_iso(),
                     ),
-                )
-                connection.execute(
-                    "INSERT INTO artifact_fts(rowid, title, summary, metadata) VALUES (?, ?, ?, ?)",
-                    (int(cursor.lastrowid), title, summary, artifact_index_text(artifact)),
                 )
                 count += 1
         return count
@@ -1654,7 +1642,7 @@ class CaseDatabase:
                     details = artifact_details(artifact)
                     title = artifact_title(artifact)
                     summary = artifact_summary(artifact)
-                    cursor = connection.execute(
+                    connection.execute(
                         """
                         INSERT INTO artifact (
                             citation_id, case_id, evidence_source_id, artifact_type, parser_name,
@@ -1675,10 +1663,6 @@ class CaseDatabase:
                             None,
                             now_iso(),
                         ),
-                    )
-                    connection.execute(
-                        "INSERT INTO artifact_fts(rowid, title, summary, metadata) VALUES (?, ?, ?, ?)",
-                        (int(cursor.lastrowid), title, summary, artifact_index_text(artifact)),
                     )
                     count += 1
         return count
@@ -1720,10 +1704,6 @@ class CaseDatabase:
                 )
                 artifact_id = int(cursor.lastrowid)
                 index_body = worker_record_index_text(artifact)
-                connection.execute(
-                    "INSERT INTO artifact_fts(rowid, title, summary, metadata) VALUES (?, ?, ?, ?)",
-                    (artifact_id, title, summary, index_body),
-                )
                 doc_cursor = connection.execute(
                     """
                     INSERT INTO indexed_document (
@@ -1892,6 +1872,24 @@ def apply_schema(connection: sqlite3.Connection) -> None:
         WHERE id NOT IN (SELECT rowid FROM file_record_fts)
         """
     )
+    try:
+        connection.execute(
+            """
+            INSERT INTO artifact_fts(rowid, title, summary, metadata)
+            SELECT
+                id,
+                title,
+                summary,
+                data_json
+            FROM artifact
+            WHERE id NOT IN (SELECT rowid FROM artifact_fts)
+            """
+        )
+    except sqlite3.OperationalError:
+        # Older databases may have an external-content artifact_fts table whose
+        # virtual columns do not map cleanly to artifact.data_json. Keep search
+        # usable via the bounded fallback instead of blocking case access.
+        pass
     connection.execute(
         """
         INSERT OR REPLACE INTO event_fts(rowid, event_type, timestamp, target, description, source)
@@ -2479,18 +2477,6 @@ def artifact_search_metadata(row: Mapping[str, object]) -> dict[str, object]:
     if nested:
         metadata["preview_value"] = nested
     return metadata
-
-
-def artifact_index_text(row: Mapping[str, object]) -> str:
-    details = artifact_details(row)
-    searchable = {
-        "artifact_type": row.get("artifact_type"),
-        "provider": row.get("provider"),
-        "path": row.get("path"),
-        "details": details,
-        "metadata": artifact_search_metadata(row),
-    }
-    return json.dumps(searchable, ensure_ascii=False, sort_keys=True)
 
 
 def artifact_nested_preview(details: Mapping[str, object]) -> str:
@@ -10079,10 +10065,33 @@ CREATE TABLE IF NOT EXISTS artifact (
 CREATE VIRTUAL TABLE IF NOT EXISTS artifact_fts USING fts5(
     title,
     summary,
-    metadata,
-    content='artifact',
-    content_rowid='id'
+    metadata
 );
+
+CREATE TRIGGER IF NOT EXISTS artifact_fts_ai AFTER INSERT ON artifact BEGIN
+    INSERT INTO artifact_fts(rowid, title, summary, metadata)
+    VALUES (
+        new.id,
+        new.title,
+        new.summary,
+        new.data_json
+    );
+END;
+
+CREATE TRIGGER IF NOT EXISTS artifact_fts_ad AFTER DELETE ON artifact BEGIN
+    DELETE FROM artifact_fts WHERE rowid = old.id;
+END;
+
+CREATE TRIGGER IF NOT EXISTS artifact_fts_au AFTER UPDATE ON artifact BEGIN
+    DELETE FROM artifact_fts WHERE rowid = old.id;
+    INSERT INTO artifact_fts(rowid, title, summary, metadata)
+    VALUES (
+        new.id,
+        new.title,
+        new.summary,
+        new.data_json
+    );
+END;
 
 CREATE TABLE IF NOT EXISTS event (
     id INTEGER PRIMARY KEY AUTOINCREMENT,

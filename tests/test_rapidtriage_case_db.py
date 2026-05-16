@@ -549,6 +549,13 @@ class RapidTriageCaseDatabaseTests(unittest.TestCase):
                         self.assertEqual(source_plan["partial_coverage_warning"], False)
                         self.assertEqual(payload["matches"][0]["path"], "/evidence/needle-after-cap.txt")
                         self.assertEqual(payload["matches"][0]["metadata"]["search_backend"], "sqlite-fts5")
+                    elif source == "artifacts":
+                        self.assertEqual(payload["summary"]["match_count"], 1)
+                        self.assertEqual(source_plan["backend"], "sqlite-fts5")
+                        self.assertEqual(source_plan["fts_table"], "artifact_fts")
+                        self.assertEqual(source_plan["scan_candidate_limit"], None)
+                        self.assertEqual(source_plan["partial_coverage_warning"], False)
+                        self.assertEqual(payload["matches"][0]["source"], "artifacts")
                     elif source == "timeline":
                         self.assertEqual(payload["summary"]["match_count"], 1)
                         self.assertEqual(source_plan["backend"], "sqlite-fts5")
@@ -557,11 +564,6 @@ class RapidTriageCaseDatabaseTests(unittest.TestCase):
                         self.assertEqual(source_plan["partial_coverage_warning"], False)
                         self.assertEqual(payload["matches"][0]["path"], "/evidence/needle-after-cap.txt")
                         self.assertEqual(payload["matches"][0]["metadata"]["search_backend"], "sqlite-fts5")
-                    else:
-                        self.assertEqual(payload["summary"]["match_count"], 0)
-                        self.assertEqual(source_plan["backend"], "bounded-scan")
-                        self.assertEqual(source_plan["scan_candidate_limit"], 10_000)
-                        self.assertEqual(source_plan["partial_coverage_warning"], True)
                     self.assertIn("#74", payload["large_case_search_plan"]["commercial_gap_ids"])
 
     def test_case_search_source_filter_skips_unrequested_large_backends(self) -> None:
