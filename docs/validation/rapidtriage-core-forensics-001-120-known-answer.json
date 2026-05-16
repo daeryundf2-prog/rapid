@@ -2057,10 +2057,10 @@
       ],
       "expected": {
         "required_assertions": [
-          "Case DB report export preserves audit events, previous/event hash chain, actor/action/target/time fields, head hash, audit-hash-chain-manifest-v1 manifest hash, notarization warning, and #88 core_accuracy_gates."
+          "Case DB report export preserves audit events, previous/event hash chain, actor/action/target/time fields, head hash, audit-hash-chain-manifest-v1 manifest hash, immutable-audit-report-grade-validation-plan-v1, plan hash/counts, notarization warning, and #88 core_accuracy_gates."
         ]
       },
-      "notes": "Internal fixture pass; DB-level append-only enforcement and external notarization remain blockers.",
+      "notes": "Internal fixture pass; database-level audit append-only enforcement, trusted audit chain manifests, external notarization/signing, signed audit export bundle, multi-user identity binding, and retention policy remain blockers.",
       "source_manifest": "docs/validation/rapidtriage-core-forensics-081-090-known-answer.json"
     },
     {

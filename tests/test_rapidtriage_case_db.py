@@ -2300,6 +2300,34 @@ class RapidTriageCaseDatabaseTests(unittest.TestCase):
                 export["audit_integrity"]["functional_priority_profile"]["implemented_controls"]["audit_replay_manifest_hash"],
                 export["audit_integrity"]["audit_replay_manifest"]["manifest_hash"],
             )
+            audit_plan = export["audit_integrity"]["immutable_audit_report_grade_validation_plan"]
+            self.assertEqual(audit_plan["profile_version"], "immutable-audit-report-grade-validation-plan-v1")
+            self.assertEqual(audit_plan["item_number"], 88)
+            self.assertEqual(audit_plan["plan_context"], "case-db-report-export")
+            self.assertEqual(
+                audit_plan["audit_hash_chain_manifest_hash"],
+                export["audit_integrity"]["audit_hash_chain_manifest"]["manifest_hash"],
+            )
+            self.assertEqual(
+                audit_plan["audit_replay_manifest_hash"],
+                export["audit_integrity"]["audit_replay_manifest"]["manifest_hash"],
+            )
+            self.assertEqual(
+                export["audit_integrity"]["immutable_audit_report_grade_validation_plan_hash"],
+                audit_plan["validation_plan_sha256"],
+            )
+            self.assertEqual(audit_plan["ready_slot_count"], 6)
+            self.assertGreaterEqual(audit_plan["blocking_slot_count"], 6)
+            self.assertEqual(export["audit_integrity"]["report_grade_ready_slot_count"], 6)
+            self.assertEqual(export["audit_integrity"]["report_grade_blocking_slot_count"], audit_plan["blocking_slot_count"])
+            audit_ready_slots = {slot["slot_id"] for slot in audit_plan["ready_slots"]}
+            audit_blocking_slots = {slot["slot_id"] for slot in audit_plan["blocking_slots"]}
+            self.assertIn("audit-replay-manifest", audit_ready_slots)
+            self.assertIn("audit-trusted-hash-chain-manifest-diff", audit_blocking_slots)
+            self.assertIn(
+                "immutable_audit_report_grade_validation_plan_hash",
+                export["audit_integrity"]["functional_priority_profile"]["implemented_controls"],
+            )
             self.assertIn(
                 "trusted-audit-hash-chain-manifest-diff-missing",
                 export["audit_integrity"]["functional_priority_profile"]["failed_validation_check_ids"],
@@ -2307,6 +2335,10 @@ class RapidTriageCaseDatabaseTests(unittest.TestCase):
             self.assertEqual(export["audit_integrity"]["core_accuracy_gates"][0]["gap_id"], "#88")
             self.assertIn(
                 "audit hash-chain manifest hash emitted",
+                export["audit_integrity"]["core_accuracy_gates"][0]["satisfied_checks"],
+            )
+            self.assertIn(
+                "immutable audit report-grade validation plan",
                 export["audit_integrity"]["core_accuracy_gates"][0]["satisfied_checks"],
             )
             self.assertGreaterEqual(export["audit_integrity"]["summary"]["event_count"], 1)
@@ -2321,6 +2353,7 @@ class RapidTriageCaseDatabaseTests(unittest.TestCase):
             )
             self.assertEqual(export["audit_integrity"]["trusted_audit_integrity_diff"]["status"], "missing")
             self.assertIn("trusted-audit-hash-chain-manifest-diff-missing", export["audit_integrity"]["blockers"])
+            self.assertIn("external-audit-chain-notarization-required", export["audit_integrity"]["blockers"])
             audit_diff = build_immutable_audit_trusted_diff(export["audit_integrity"], export["audit_integrity"])
             audit_gates = immutable_audit_core_accuracy_gates(
                 events=export["audit_integrity"]["events"],
@@ -2328,6 +2361,7 @@ class RapidTriageCaseDatabaseTests(unittest.TestCase):
                 audit_hash_chain_manifest=export["audit_integrity"]["audit_hash_chain_manifest"],
                 audit_replay_manifest=export["audit_integrity"]["audit_replay_manifest"],
                 trusted_diff=audit_diff,
+                report_grade_validation_plan=audit_plan,
             )
             self.assertEqual(audit_diff["status"], "pass")
             self.assertIn("manifest_hash", audit_diff["compared_fields"])
@@ -2338,6 +2372,7 @@ class RapidTriageCaseDatabaseTests(unittest.TestCase):
             self.assertIn("audit replay manifest hash emitted", audit_gates[0]["satisfied_checks"])
             self.assertIn("audit replay matrix hash emitted", audit_gates[0]["satisfied_checks"])
             self.assertIn("audit replay chain validation pass", audit_gates[0]["satisfied_checks"])
+            self.assertIn("immutable audit report-grade validation plan", audit_gates[0]["satisfied_checks"])
             self.assertIn("trusted audit hash-chain manifest diff pass", audit_gates[0]["satisfied_checks"])
             self.assertIn("reproducibility", export)
             self.assertIn("#89", export["reproducibility"]["commercial_gap_ids"])

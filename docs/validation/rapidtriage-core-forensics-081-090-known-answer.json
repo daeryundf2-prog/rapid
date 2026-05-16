@@ -88,8 +88,8 @@
       "status": "pass",
       "backlog_items": [88],
       "evidence_paths": ["docs/validation/core-forensics-081-090-fixture-evidence.json", "tests/test_rapidtriage_case_db.py"],
-      "expected": {"required_assertions": ["Case DB report export preserves audit events, previous/event hash chain, actor/action/target/time fields, head hash, audit-hash-chain-manifest-v1 manifest hash, notarization warning, trusted audit hash-chain manifest diff helpers/gates, and #88 core_accuracy_gates."]},
-      "notes": "Internal fixture pass; DB-level append-only enforcement, trusted audit chain manifests, and external notarization remain blockers."
+      "expected": {"required_assertions": ["Case DB report export preserves audit events, previous/event hash chain, actor/action/target/time fields, head hash, audit-hash-chain-manifest-v1 manifest hash, immutable-audit-report-grade-validation-plan-v1, plan hash/counts, notarization warning, trusted audit hash-chain manifest diff helpers/gates, and #88 core_accuracy_gates."]},
+      "notes": "Internal fixture pass; database-level audit append-only enforcement, trusted audit chain manifests, external notarization/signing, signed audit export bundle, multi-user identity binding, and retention policy remain blockers."
     },
     {
       "id": "core-forensics-089-reproducibility",

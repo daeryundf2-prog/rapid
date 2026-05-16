@@ -217,6 +217,7 @@ class RapidTriageCoreForensicsAccuracyTests(unittest.TestCase):
         self.assertIn("acquisition hash report-grade validation plan", acquisition_hash["required_checks"])
         self.assertIn("trusted acquisition hash manifest diff pass", acquisition_hash["required_checks"])
         self.assertIn("previous/event hash chain generated", immutable_audit["required_checks"])
+        self.assertIn("immutable audit report-grade validation plan", immutable_audit["required_checks"])
         self.assertIn("trusted audit hash-chain manifest diff pass", immutable_audit["required_checks"])
         self.assertIn("stable payload hash generated", reproducibility["required_checks"])
         self.assertIn("trusted report replay manifest diff pass", reproducibility["required_checks"])

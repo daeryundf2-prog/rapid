@@ -3023,6 +3023,7 @@ def forensic_integrity_evidence_chain() -> list[dict[str, object]]:
             "primary_outputs": [
                 "case-db-report-export.audit_integrity",
                 "audit_integrity.audit_hash_chain_manifest.manifest_hash",
+                "audit_integrity.immutable_audit_report_grade_validation_plan_hash",
                 "audit_integrity.events[].previous_event_hash",
                 "audit_integrity.events[].event_hash",
                 "audit_integrity.summary.head_hash",

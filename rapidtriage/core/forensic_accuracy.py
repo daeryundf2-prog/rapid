@@ -1424,6 +1424,8 @@ CORE_FORENSIC_ACCURACY_ITEMS: tuple[dict[str, object], ...] = (
             "actor/action/target/time fields preserved",
             "head hash recorded",
             "audit hash-chain manifest hash emitted",
+            "immutable audit report-grade validation plan",
+            "immutable audit report-grade ready slots",
             "external notarization limitation warning",
             "trusted audit hash-chain manifest diff pass",
         ),

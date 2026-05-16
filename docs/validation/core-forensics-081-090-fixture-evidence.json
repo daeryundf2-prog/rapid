@@ -72,9 +72,9 @@
       "title": "Analyst action immutable audit log",
       "test_files": ["tests/test_rapidtriage_case_db.py"],
       "assertions": [
-        "Case DB report exports preserve audit events, previous/event hash chain, actor/action/target/time fields, head hash, audit-hash-chain-manifest-v1 manifest hash, notarization warning, trusted audit hash-chain manifest diff helpers/gates, and #88 core_accuracy_gates."
+        "Case DB report exports preserve audit events, previous/event hash chain, actor/action/target/time fields, head hash, audit-hash-chain-manifest-v1 manifest hash, immutable-audit-report-grade-validation-plan-v1, plan hash/counts, notarization warning, trusted audit hash-chain manifest diff helpers/gates, and #88 core_accuracy_gates."
       ],
-      "remaining_external_validation": ["Database-level append-only enforcement, trusted audit chain manifests, and external notarization/signing."]
+      "remaining_external_validation": ["Database-level audit append-only enforcement, trusted audit chain manifests, external notarization/signing, signed audit export bundle, multi-user identity binding, and retention policy."]
     },
     {
       "item": 89,

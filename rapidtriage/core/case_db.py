@@ -56,6 +56,15 @@ ACQUISITION_HASH_REPORT_GRADE_BLOCKERS = [
     "hash-tool-version-capture-required",
 ]
 IMMUTABLE_AUDIT_GAP_ID = "#88"
+IMMUTABLE_AUDIT_REPORT_GRADE_VALIDATION_PLAN_VERSION = "immutable-audit-report-grade-validation-plan-v1"
+IMMUTABLE_AUDIT_REPORT_GRADE_BLOCKERS = [
+    "trusted-audit-hash-chain-manifest-diff-missing",
+    "database-level-audit-append-only-required",
+    "external-audit-chain-notarization-required",
+    "signed-audit-export-bundle-required",
+    "multi-user-identity-binding-required",
+    "audit-retention-policy-required",
+]
 REPORT_REPRODUCIBILITY_GAP_ID = "#89"
 SOURCE_PROVENANCE_GAP_ID = "#90"
 CUSTODY_TRUSTED_DIFF_BLOCKER_86 = "trusted-custody-event-manifest-diff-missing"
@@ -7167,6 +7176,176 @@ def build_audit_replay_manifest(events: Sequence[Mapping[str, object]], *, expec
     return {**manifest_core, "manifest_hash": stable_payload_sha256(manifest_core)}
 
 
+def build_immutable_audit_report_grade_validation_plan(
+    *,
+    events: Sequence[Mapping[str, object]],
+    head_hash: str,
+    audit_hash_chain_manifest: Mapping[str, object],
+    audit_replay_manifest: Mapping[str, object],
+    trusted_diff: Mapping[str, object] | None,
+) -> dict[str, object]:
+    trusted_status = str(trusted_diff.get("status") or "missing") if trusted_diff else "missing"
+    events_with_hash = sum(1 for item in events if item.get("event_hash"))
+    events_with_previous = sum(1 for item in events if "previous_event_hash" in item)
+    events_with_actor_action_time = sum(
+        1
+        for item in events
+        if item.get("actor") and item.get("action") and item.get("target_type") and item.get("timestamp")
+    )
+    ready_slots = [
+        {
+            "slot_id": "audit-event-inventory",
+            "status": "complete",
+            "evidence": {
+                "event_count": len(events),
+                "events_with_actor_action_time": events_with_actor_action_time,
+            },
+        },
+        {
+            "slot_id": "audit-event-hash-chain",
+            "status": "complete",
+            "evidence": {
+                "events_with_event_hash": events_with_hash,
+                "events_with_previous_hash": events_with_previous,
+                "head_hash": head_hash,
+            },
+        },
+        {
+            "slot_id": "audit-hash-chain-manifest",
+            "status": "complete",
+            "evidence": {
+                "manifest_hash": audit_hash_chain_manifest.get("manifest_hash"),
+                "actor_action_matrix_hash": audit_hash_chain_manifest.get("actor_action_matrix_hash"),
+            },
+        },
+        {
+            "slot_id": "audit-replay-manifest",
+            "status": "complete",
+            "evidence": {
+                "manifest_hash": audit_replay_manifest.get("manifest_hash"),
+                "replay_matrix_hash": audit_replay_manifest.get("replay_matrix_hash"),
+                "chain_valid": bool(audit_replay_manifest.get("chain_valid")),
+            },
+        },
+        {
+            "slot_id": "audit-replay-head-validation",
+            "status": "complete",
+            "evidence": {
+                "expected_head_hash": audit_replay_manifest.get("expected_head_hash"),
+                "recomputed_head_hash": audit_replay_manifest.get("recomputed_head_hash"),
+                "head_hash_matches": bool(audit_replay_manifest.get("head_hash_matches")),
+            },
+        },
+        {
+            "slot_id": "audit-trusted-diff-disclosure",
+            "status": "complete",
+            "evidence": {
+                "trusted_diff_status": trusted_status,
+                "trusted_tool": str((trusted_diff or {}).get("trusted_tool") or ""),
+            },
+        },
+    ]
+    blocking_slots: list[dict[str, object]] = []
+    if not events:
+        blocking_slots.append(
+            {
+                "slot_id": "audit-events-present",
+                "status": "blocked",
+                "blocker": "audit-event-chain-required",
+                "required_evidence": "append-only audit events for review, export, report, and settings changes",
+            }
+        )
+    if events_with_hash != len(events) or events_with_previous != len(events) or not head_hash:
+        blocking_slots.append(
+            {
+                "slot_id": "audit-hash-chain-completeness",
+                "status": "blocked",
+                "blocker": "audit-hash-chain-completeness-required",
+                "required_evidence": "event_hash, previous_event_hash, and head hash for every audit chain export",
+            }
+        )
+    if events_with_actor_action_time != len(events):
+        blocking_slots.append(
+            {
+                "slot_id": "audit-actor-action-time-completeness",
+                "status": "blocked",
+                "blocker": "audit-actor-action-time-completeness-required",
+                "required_evidence": "actor, action, target, and timestamp on every audit event",
+            }
+        )
+    if not bool(audit_replay_manifest.get("chain_valid")):
+        blocking_slots.append(
+            {
+                "slot_id": "audit-replay-chain-valid",
+                "status": "blocked",
+                "blocker": "audit-replay-chain-validation-required",
+                "required_evidence": "replayed event hash chain must match stored head hash",
+            }
+        )
+    if trusted_status != "pass":
+        blocking_slots.append(
+            {
+                "slot_id": "audit-trusted-hash-chain-manifest-diff",
+                "status": "external-required",
+                "blocker": IMMUTABLE_AUDIT_TRUSTED_DIFF_BLOCKER_88,
+                "required_evidence": "trusted audit hash-chain manifest diff covering chain manifest, replay manifest, actor/action matrix, and replay matrix",
+            }
+        )
+    blocking_slots.extend(
+        [
+            {
+                "slot_id": "database-level-audit-append-only",
+                "status": "external-required",
+                "blocker": "database-level-audit-append-only-required",
+                "required_evidence": "database constraints/triggers or storage policy preventing audit_event update/delete after creation",
+            },
+            {
+                "slot_id": "external-audit-chain-notarization",
+                "status": "external-required",
+                "blocker": "external-audit-chain-notarization-required",
+                "required_evidence": "external timestamp, signing, or notarization proof for the exported audit chain head",
+            },
+            {
+                "slot_id": "signed-audit-export-bundle",
+                "status": "external-required",
+                "blocker": "signed-audit-export-bundle-required",
+                "required_evidence": "signed bundle containing audit export, manifests, hashes, and replay proof",
+            },
+            {
+                "slot_id": "multi-user-identity-binding",
+                "status": "external-required",
+                "blocker": "multi-user-identity-binding-required",
+                "required_evidence": "authenticated user identity mapping and role source for every audit actor",
+            },
+            {
+                "slot_id": "audit-retention-policy",
+                "status": "external-required",
+                "blocker": "audit-retention-policy-required",
+                "required_evidence": "case/lab retention policy for audit logs, export bundles, and notarization proofs",
+            },
+        ]
+    )
+    plan_core: dict[str, object] = {
+        "profile_version": IMMUTABLE_AUDIT_REPORT_GRADE_VALIDATION_PLAN_VERSION,
+        "item_number": 88,
+        "commercial_gap_ids": [IMMUTABLE_AUDIT_GAP_ID],
+        "plan_context": "case-db-report-export",
+        "audit_hash_chain_manifest_hash": audit_hash_chain_manifest.get("manifest_hash"),
+        "audit_replay_manifest_hash": audit_replay_manifest.get("manifest_hash"),
+        "actor_action_matrix_hash": audit_hash_chain_manifest.get("actor_action_matrix_hash"),
+        "replay_matrix_hash": audit_replay_manifest.get("replay_matrix_hash"),
+        "trusted_diff_status": trusted_status,
+        "ready_slots": ready_slots,
+        "blocking_slots": blocking_slots,
+        "ready_slot_count": len(ready_slots),
+        "blocking_slot_count": len(blocking_slots),
+        "blockers": sorted({str(slot.get("blocker") or "") for slot in blocking_slots if slot.get("blocker")}),
+        "commercial_claim_allowed": False,
+        "reporting_boundary": "This plan makes export-time audit chains reproducible and reviewable, but immutable/court claims require database append-only controls, external notarization/signing, identity binding, retention policy, and trusted-chain evidence.",
+    }
+    return {**plan_core, "validation_plan_sha256": stable_payload_sha256(plan_core)}
+
+
 def build_report_replay_manifest(
     *,
     stable_payload_sha256_value: str,
@@ -7759,9 +7938,17 @@ def build_audit_integrity_chain(
         events.append(event)
     audit_chain_manifest = build_audit_hash_chain_manifest(events, head_hash=previous_hash)
     audit_replay_manifest = build_audit_replay_manifest(events, expected_head_hash=previous_hash)
+    audit_report_grade_validation_plan = build_immutable_audit_report_grade_validation_plan(
+        events=events,
+        head_hash=previous_hash,
+        audit_hash_chain_manifest=audit_chain_manifest,
+        audit_replay_manifest=audit_replay_manifest,
+        trusted_diff=trusted_diff,
+    )
     blockers = []
     if not trusted_diff or trusted_diff.get("status") != "pass":
         blockers.append(IMMUTABLE_AUDIT_TRUSTED_DIFF_BLOCKER_88)
+    blockers = sorted({*blockers, *audit_report_grade_validation_plan["blockers"]})
     return {
         "status": "tamper-evident-export-chain",
         "commercial_gap_ids": [IMMUTABLE_AUDIT_GAP_ID],
@@ -7771,6 +7958,7 @@ def build_audit_integrity_chain(
             audit_hash_chain_manifest=audit_chain_manifest,
             audit_replay_manifest=audit_replay_manifest,
             trusted_diff=trusted_diff,
+            report_grade_validation_plan=audit_report_grade_validation_plan,
         ),
         "summary": {
             "event_count": len(events),
@@ -7783,6 +7971,10 @@ def build_audit_integrity_chain(
         "audit_hash_chain_manifest": audit_chain_manifest,
         "audit_replay_manifest": audit_replay_manifest,
         "audit_replay_manifest_hash": audit_replay_manifest["manifest_hash"],
+        "immutable_audit_report_grade_validation_plan": audit_report_grade_validation_plan,
+        "immutable_audit_report_grade_validation_plan_hash": audit_report_grade_validation_plan["validation_plan_sha256"],
+        "report_grade_ready_slot_count": audit_report_grade_validation_plan["ready_slot_count"],
+        "report_grade_blocking_slot_count": audit_report_grade_validation_plan["blocking_slot_count"],
         "trusted_audit_integrity_diff": dict(trusted_diff) if trusted_diff else missing_integrity_trusted_diff(
             IMMUTABLE_AUDIT_GAP_ID,
             IMMUTABLE_AUDIT_TRUSTED_DIFF_BLOCKER_88,
@@ -7794,6 +7986,7 @@ def build_audit_integrity_chain(
             audit_hash_chain_manifest=audit_chain_manifest,
             audit_replay_manifest=audit_replay_manifest,
             trusted_diff=trusted_diff,
+            report_grade_validation_plan=audit_report_grade_validation_plan,
         ),
         "blockers": blockers,
         "limitations": [
@@ -9286,6 +9479,7 @@ def audit_integrity_functional_profile(
     audit_hash_chain_manifest: Mapping[str, object],
     audit_replay_manifest: Mapping[str, object],
     trusted_diff: Mapping[str, object] | None,
+    report_grade_validation_plan: Mapping[str, object] | None = None,
 ) -> dict[str, object]:
     events_with_hash = sum(1 for item in events if item.get("event_hash"))
     events_with_previous = sum(1 for item in events if "previous_event_hash" in item)
@@ -9306,6 +9500,11 @@ def audit_integrity_functional_profile(
         failed_checks.append("audit-replay-chain-invalid")
     if not trusted_diff or trusted_diff.get("status") != "pass":
         failed_checks.append(IMMUTABLE_AUDIT_TRUSTED_DIFF_BLOCKER_88)
+    if not report_grade_validation_plan or not report_grade_validation_plan.get("validation_plan_sha256"):
+        failed_checks.append("immutable-audit-report-grade-validation-plan-missing")
+    else:
+        failed_checks.extend(str(blocker) for blocker in report_grade_validation_plan.get("blockers") or [])
+    failed_checks = sorted(dict.fromkeys(failed_checks))
     return {
         "item_number": 44,
         "batch_id": FUNCTIONAL_DEFENSIBILITY_BATCH_ID,
@@ -9320,6 +9519,11 @@ def audit_integrity_functional_profile(
             "audit_replay_chain_valid": bool(audit_replay_manifest.get("chain_valid")),
             "external_notarization_required": True,
             "trusted_diff_status": str(trusted_diff.get("status")) if trusted_diff else "missing",
+            "immutable_audit_report_grade_validation_plan_hash": str(
+                (report_grade_validation_plan or {}).get("validation_plan_sha256") or ""
+            ),
+            "report_grade_ready_slot_count": int((report_grade_validation_plan or {}).get("ready_slot_count") or 0),
+            "report_grade_blocking_slot_count": int((report_grade_validation_plan or {}).get("blocking_slot_count") or 0),
         },
         "passed_validation_check_ids": [
             "audit-events-exported",
@@ -9328,6 +9532,7 @@ def audit_integrity_functional_profile(
             "audit-chain-manifest-hash-recorded",
             "audit-replay-manifest-hash-recorded",
             "external-notarization-limitation-disclosed",
+            "immutable-audit-report-grade-validation-plan-exported",
         ],
         "failed_validation_check_ids": failed_checks,
         "reportability_decision": {
@@ -9608,6 +9813,7 @@ def immutable_audit_core_accuracy_gates(
     audit_hash_chain_manifest: Mapping[str, object] | None = None,
     audit_replay_manifest: Mapping[str, object] | None = None,
     trusted_diff: Mapping[str, object] | None = None,
+    report_grade_validation_plan: Mapping[str, object] | None = None,
 ) -> list[dict[str, object]]:
     satisfied = ["external notarization limitation warning"]
     if events:
@@ -9628,6 +9834,10 @@ def immutable_audit_core_accuracy_gates(
         satisfied.append("audit replay matrix hash emitted")
     if audit_replay_manifest and audit_replay_manifest.get("chain_valid"):
         satisfied.append("audit replay chain validation pass")
+    if report_grade_validation_plan and report_grade_validation_plan.get("validation_plan_sha256"):
+        satisfied.append("immutable audit report-grade validation plan")
+    if report_grade_validation_plan and int(report_grade_validation_plan.get("ready_slot_count") or 0) >= 6:
+        satisfied.append("immutable audit report-grade ready slots")
     if trusted_diff and trusted_diff.get("status") == "pass":
         satisfied.append("trusted audit hash-chain manifest diff pass")
     return [
@@ -9641,6 +9851,7 @@ def immutable_audit_core_accuracy_gates(
                 f"audit_replay_manifest_hash:{(audit_replay_manifest or {}).get('manifest_hash', '')}",
                 f"actor_action_matrix_hash:{(audit_hash_chain_manifest or {}).get('actor_action_matrix_hash', '')}",
                 f"replay_matrix_hash:{(audit_replay_manifest or {}).get('replay_matrix_hash', '')}",
+                f"immutable_audit_report_grade_validation_plan_hash:{(report_grade_validation_plan or {}).get('validation_plan_sha256', '')}",
             ],
         )
     ]
