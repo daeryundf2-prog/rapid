@@ -3147,8 +3147,15 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
             self.assertEqual(srum_import_manifest["manifest_version"], "srum-report-citation-manifest-v1")
             self.assertEqual(srum_import_manifest["row_identity"]["artifact_scope"], "source-tool-export")
             self.assertEqual(srum_import_manifest["row_identity"]["table_family"], "network-usage")
+            self.assertEqual(srum_import_manifest["row_identity"]["network_profile"], "CorpWiFi")
+            self.assertEqual(
+                srum_rows[0]["details"]["srum_report_citation_manifest_hash"],
+                srum_import_manifest["manifest_sha256"],
+            )
+            self.assertIn("semantics_warning", srum_import_manifest["trusted_diff_contract"]["required_fields"])
             self.assertEqual(srum_import_manifest["reportability"]["allowed_use"], "srum-usage-triage-pivot")
             self.assertFalse(srum_import_manifest["reportability"]["standalone_execution_proof"])
+            self.assertIn("triage pivots", srum_import_manifest["reportability"]["semantics_warning"])
             self.assertIn("srum-counter-semantics", {row["kind"] for row in srum_import_manifest["citation_refs"]})
             srum_import_review_profile = srum_rows[0]["details"]["execution_analyst_review_profile"]
             self.assertEqual(srum_import_review_profile["artifact_type"], "srum-network-usage")
@@ -3177,6 +3184,10 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
             )
             srum_database_manifest = srum_database_rows[0]["details"]["srum_report_citation_manifest"]
             self.assertEqual(srum_database_manifest["row_identity"]["artifact_scope"], "database")
+            self.assertEqual(
+                srum_database_rows[0]["details"]["srum_report_citation_manifest_hash"],
+                srum_database_manifest["manifest_sha256"],
+            )
             self.assertFalse(srum_database_manifest["validation_summary"]["native_srum_page_row_decode_available"])
             self.assertIn("trusted-srum-parser-diff-required", srum_database_manifest["reportability"]["blockers"])
             self.assertTrue(srum_database_rows[0]["details"]["validation_checks"]["ese_signature_valid"])
@@ -3193,9 +3204,10 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
             self.assertFalse(srum_database_rows[0]["details"]["execution_native_capabilities"]["native_srum_page_row_decode"])
             srum_db_gate = srum_database_rows[0]["details"]["core_accuracy_gates"][0]
             self.assertEqual(srum_db_gate["gap_id"], "#10")
-            self.assertIn("ESE page checksum validation", srum_db_gate["satisfied_checks"])
+            self.assertIn("ESE header/page-size validation", srum_db_gate["satisfied_checks"])
             self.assertIn("catalog/table mapping", srum_db_gate["satisfied_checks"])
             self.assertIn("native-row confidence scoring", srum_db_gate["satisfied_checks"])
+            self.assertIn("stable SRUM citation manifest", srum_db_gate["satisfied_checks"])
             srum_uplift = srum_database_rows[0]["details"]["commercial_uplift_evidence"]
             self.assertEqual(srum_uplift["batch_id"], "commercial-uplift-006-010")
             self.assertEqual(srum_uplift["item_numbers"], [10])
@@ -3228,8 +3240,14 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
             srum_row_manifest = srum_row_candidate["details"]["srum_report_citation_manifest"]
             self.assertEqual(srum_row_manifest["row_identity"]["artifact_scope"], "row-candidate")
             self.assertIn("bytes_received", srum_row_manifest["row_identity"]["counter_names"])
+            self.assertEqual(srum_row_manifest["row_identity"]["network_profile"], "CorpWiFi")
+            self.assertEqual(
+                srum_row_candidate["details"]["srum_report_citation_manifest_hash"],
+                srum_row_manifest["manifest_sha256"],
+            )
             self.assertIn("srum-row-cluster", {row["kind"] for row in srum_row_manifest["citation_refs"]})
             self.assertFalse(srum_row_manifest["reportability"]["standalone_execution_proof"])
+            self.assertIn("trusted-srum-parser-diff-required", srum_row_manifest["reportability"]["blockers"])
             srum_row_review_profile = srum_row_candidate["details"]["execution_analyst_review_profile"]
             self.assertEqual(srum_row_review_profile["artifact_type"], "srum-row-candidate")
             self.assertEqual(srum_row_review_profile["source_field_values"]["app_id"], "powershell.exe")

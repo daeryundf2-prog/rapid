@@ -16,7 +16,7 @@ from .ese import ESE_SCAN_READ_SIZE, build_ese_string_pivots, probe_ese_database
 from .os_account import decode_reg_export
 from .srum_ese import analyze_srudb_native
 
-PARSER_VERSION = "windows-execution-v13"
+PARSER_VERSION = "windows-execution-v14"
 REGISTRY_EXPORT_EXT = ".reg"
 SRUM_IMPORT_SUFFIXES = {".csv", ".json", ".jsonl", ".ndjson"}
 AMCACHE_HIVE_NAME = "AMCACHE.HVE"
@@ -108,7 +108,7 @@ EXECUTION_DIFF_REQUIRED_FIELDS_BY_FAMILY = {
     "amcache": ("executable_path", "sha1", "semantics_warning"),
     "shimcache-appcompatcache": ("executable_path", "cache_order", "semantics_warning"),
     "bam-dam": ("executable_path", "user_sid", "timestamp", "source_key", "source_offset", "semantics_warning"),
-    "srum": ("executable_path", "timestamp", "table_family"),
+    "srum": ("executable_path", "timestamp", "table_family", "source_format", "semantics_warning"),
 }
 QC_PREP_EXECUTION_ITEM_NUMBERS = {
     "amcache-entry": 22,
@@ -1518,6 +1518,40 @@ def build_srum_database_inventory_record(path: Path) -> ArtifactRecord:
             "validation_checks": validation_checks,
         },
     )
+    srum_manifest = srum_report_citation_manifest(
+        source_path=str(path.resolve()),
+        source_hashes=file_hashes(path),
+        artifact_type="srum-database-file",
+        artifact_scope="database",
+        source_format="ese-srum",
+        source_index=0,
+        table_family="srudb",
+        app_id="",
+        timestamp="",
+        counters={
+            "table_candidate_count": len(table_candidates),
+            "row_candidate_count": len(row_candidates),
+            "page_size": ese_header.get("page_size", 0),
+        },
+        source_offset=0,
+        row_cluster_evidence={},
+        report_grade=report_grade,
+    )
+    core_accuracy_gates = execution_core_accuracy_gates(
+        "srum-database-file",
+        {
+            "source_path": str(path.resolve()),
+            "source_hashes": file_hashes(path),
+            "source_format": "ese-srum",
+            "ese_header": ese_header,
+            "native_srudb_validation": native_validation,
+            "table_candidate_count": len(table_candidates),
+            "row_candidate_count": len(row_candidates),
+            "validation_checks": validation_checks,
+            "srum_report_citation_manifest_hash": srum_manifest["manifest_sha256"],
+            "execution_caveat": srum_execution_caveat("database"),
+        },
+    )
     return ArtifactRecord(
         provider=WindowsExecutionProvider.name,
         artifact_type="srum-database-file",
@@ -1557,25 +1591,9 @@ def build_srum_database_inventory_record(path: Path) -> ArtifactRecord:
                     "page_size": ese_header.get("page_size", 0),
                 },
             ),
-            "srum_report_citation_manifest": srum_report_citation_manifest(
-                source_path=str(path.resolve()),
-                source_hashes=file_hashes(path),
-                artifact_type="srum-database-file",
-                artifact_scope="database",
-                source_format="ese-srum",
-                source_index=0,
-                table_family="srudb",
-                app_id="",
-                timestamp="",
-                counters={
-                    "table_candidate_count": len(table_candidates),
-                    "row_candidate_count": len(row_candidates),
-                    "page_size": ese_header.get("page_size", 0),
-                },
-                source_offset=0,
-                row_cluster_evidence={},
-                report_grade=report_grade,
-            ),
+            "srum_report_citation_manifest": srum_manifest,
+            "srum_report_citation_manifest_hash": srum_manifest["manifest_sha256"],
+            "execution_caveat": srum_execution_caveat("database"),
             "parser_confidence": 0.65 if ese_header.get("signature_valid") else 0.35,
             "evidence_strength": "application-resource-usage-database-presence",
             "validation_required": True,
@@ -1678,6 +1696,37 @@ def build_srum_database_pivot_records(path: Path, inventory_details: Mapping[str
                 "validation_checks": validation_checks,
             },
         )
+        srum_manifest = srum_report_citation_manifest(
+            source_path=str(path.resolve()),
+            source_hashes=source_hashes,
+            artifact_type="srum-database-pivot",
+            artifact_scope="string-pivot",
+            source_format="ese-srum",
+            source_index=index,
+            table_family="unknown",
+            app_id=display_name_for_execution_key(executable_path) if executable_path else "",
+            timestamp="",
+            counters={},
+            source_offset=0,
+            row_cluster_evidence={"candidate_kind": candidate_kind, "candidate_value": candidate_value, "url": url},
+            report_grade=report_grade,
+            url=url,
+        )
+        core_accuracy_gates = execution_core_accuracy_gates(
+            "srum-database-pivot",
+            {
+                "source_path": str(path.resolve()),
+                "source_hashes": source_hashes,
+                "source_index": index,
+                "candidate_kind": candidate_kind,
+                "app_id": display_name_for_execution_key(executable_path) if executable_path else "",
+                "executable_path": executable_path,
+                "url": url,
+                "validation_checks": validation_checks,
+                "srum_report_citation_manifest_hash": srum_manifest["manifest_sha256"],
+                "execution_caveat": srum_execution_caveat("string-pivot"),
+            },
+        )
         yield ArtifactRecord(
             provider=WindowsExecutionProvider.name,
             artifact_type="srum-database-pivot",
@@ -1708,21 +1757,9 @@ def build_srum_database_pivot_records(path: Path, inventory_details: Mapping[str
                         "url": url,
                     },
                 ),
-                "srum_report_citation_manifest": srum_report_citation_manifest(
-                    source_path=str(path.resolve()),
-                    source_hashes=source_hashes,
-                    artifact_type="srum-database-pivot",
-                    artifact_scope="string-pivot",
-                    source_format="ese-srum",
-                    source_index=index,
-                    table_family="unknown",
-                    app_id=display_name_for_execution_key(executable_path) if executable_path else "",
-                    timestamp="",
-                    counters={},
-                    source_offset=0,
-                    row_cluster_evidence={"candidate_kind": candidate_kind, "candidate_value": candidate_value, "url": url},
-                    report_grade=report_grade,
-                ),
+                "srum_report_citation_manifest": srum_manifest,
+                "srum_report_citation_manifest_hash": srum_manifest["manifest_sha256"],
+                "execution_caveat": srum_execution_caveat("string-pivot"),
                 "timestamp": "",
                 "timestamp_source": "not_available_native_string_pivot",
                 "parser_confidence": 0.4,
@@ -1808,6 +1845,38 @@ def build_srum_database_table_candidate_records(path: Path, inventory_details: M
                 "validation_checks": validation_checks,
             },
         )
+        srum_manifest = srum_report_citation_manifest(
+            source_path=str(path.resolve()),
+            source_hashes=source_hashes,
+            artifact_type="srum-table-candidate",
+            artifact_scope="table-candidate",
+            source_format="ese-srum",
+            source_index=index,
+            table_family=table_family,
+            app_id="",
+            timestamp="",
+            counters={"matched_marker_count": len(matched)},
+            source_offset=int((candidate.get("source_offsets") or [0])[0] or 0),
+            row_cluster_evidence={
+                "matched_markers": matched,
+                "source_offsets": [int(value) for value in candidate.get("source_offsets") or []],
+            },
+            report_grade=report_grade,
+        )
+        core_accuracy_gates = execution_core_accuracy_gates(
+            "srum-table-candidate",
+            {
+                "source_path": str(path.resolve()),
+                "source_hashes": source_hashes,
+                "source_index": index,
+                "table_family": table_family,
+                "matched_marker_count": len(matched),
+                "source_offsets": [int(value) for value in candidate.get("source_offsets") or []],
+                "validation_checks": validation_checks,
+                "srum_report_citation_manifest_hash": srum_manifest["manifest_sha256"],
+                "execution_caveat": srum_execution_caveat("table-candidate"),
+            },
+        )
         yield ArtifactRecord(
             provider=WindowsExecutionProvider.name,
             artifact_type="srum-table-candidate",
@@ -1838,24 +1907,9 @@ def build_srum_database_table_candidate_records(path: Path, inventory_details: M
                         "source_offset_count": len(candidate.get("source_offsets") or []),
                     },
                 ),
-                "srum_report_citation_manifest": srum_report_citation_manifest(
-                    source_path=str(path.resolve()),
-                    source_hashes=source_hashes,
-                    artifact_type="srum-table-candidate",
-                    artifact_scope="table-candidate",
-                    source_format="ese-srum",
-                    source_index=index,
-                    table_family=table_family,
-                    app_id="",
-                    timestamp="",
-                    counters={"matched_marker_count": len(matched)},
-                    source_offset=int((candidate.get("source_offsets") or [0])[0] or 0),
-                    row_cluster_evidence={
-                        "matched_markers": matched,
-                        "source_offsets": [int(value) for value in candidate.get("source_offsets") or []],
-                    },
-                    report_grade=report_grade,
-                ),
+                "srum_report_citation_manifest": srum_manifest,
+                "srum_report_citation_manifest_hash": srum_manifest["manifest_sha256"],
+                "execution_caveat": srum_execution_caveat("table-candidate"),
                 "parser_confidence": float(candidate.get("candidate_confidence") or (0.38 + min(0.24, len(matched) * 0.06))),
                 "evidence_strength": "srum-table-presence-candidate",
                 "validation_required": True,
@@ -1949,6 +2003,43 @@ def build_srum_database_row_candidate_records(path: Path, inventory_details: Map
                 "validation_checks": validation_checks,
             },
         )
+        srum_manifest = srum_report_citation_manifest(
+            source_path=str(path.resolve()),
+            source_hashes=source_hashes,
+            artifact_type="srum-row-candidate",
+            artifact_scope="row-candidate",
+            source_format="ese-srum",
+            source_index=index,
+            table_family=str(candidate.get("table_family") or "unknown"),
+            app_id=app_id,
+            timestamp=str(candidate.get("timestamp") or ""),
+            counters=dict(candidate.get("counter_candidates") or {}),
+            source_offset=int(candidate.get("source_offset") or 0),
+            row_cluster_evidence=srum_row_evidence(candidate),
+            report_grade=report_grade,
+            user=str(candidate.get("user") or candidate.get("user_sid") or ""),
+            url=url,
+            interface_luid=str(candidate.get("interface_luid") or ""),
+            network_profile=str(candidate.get("network_profile") or ""),
+        )
+        core_accuracy_gates = execution_core_accuracy_gates(
+            "srum-row-candidate",
+            {
+                "source_path": str(path.resolve()),
+                "source_hashes": source_hashes,
+                "source_index": index,
+                "table_family": str(candidate.get("table_family") or "unknown"),
+                "app_id": app_id,
+                "executable_path": executable_path,
+                "user": str(candidate.get("user") or ""),
+                "user_sid": str(candidate.get("user_sid") or ""),
+                "timestamp": str(candidate.get("timestamp") or ""),
+                "counter_candidates": dict(candidate.get("counter_candidates") or {}),
+                "validation_checks": validation_checks,
+                "srum_report_citation_manifest_hash": srum_manifest["manifest_sha256"],
+                "execution_caveat": srum_execution_caveat("row-candidate"),
+            },
+        )
         yield ArtifactRecord(
             provider=WindowsExecutionProvider.name,
             artifact_type="srum-row-candidate",
@@ -1998,21 +2089,9 @@ def build_srum_database_row_candidate_records(path: Path, inventory_details: Map
                         "counter_candidate_count": len(dict(candidate.get("counter_candidates") or {})),
                     },
                 ),
-                "srum_report_citation_manifest": srum_report_citation_manifest(
-                    source_path=str(path.resolve()),
-                    source_hashes=source_hashes,
-                    artifact_type="srum-row-candidate",
-                    artifact_scope="row-candidate",
-                    source_format="ese-srum",
-                    source_index=index,
-                    table_family=str(candidate.get("table_family") or "unknown"),
-                    app_id=app_id,
-                    timestamp=str(candidate.get("timestamp") or ""),
-                    counters=dict(candidate.get("counter_candidates") or {}),
-                    source_offset=int(candidate.get("source_offset") or 0),
-                    row_cluster_evidence=srum_row_evidence(candidate),
-                    report_grade=report_grade,
-                ),
+                "srum_report_citation_manifest": srum_manifest,
+                "srum_report_citation_manifest_hash": srum_manifest["manifest_sha256"],
+                "execution_caveat": srum_execution_caveat("row-candidate"),
                 "parser_confidence": float(candidate.get("candidate_confidence") or 0.42),
                 "evidence_strength": "srum-native-row-string-candidate",
                 "validation_required": True,
@@ -2106,6 +2185,50 @@ def build_srum_record(path: Path, row: Mapping[str, object], index: int) -> Arti
             "validation_checks": validation_checks,
         },
     )
+    srum_manifest = srum_report_citation_manifest(
+        source_path=str(path.resolve()),
+        source_hashes=file_hashes(path),
+        artifact_type=artifact_type,
+        artifact_scope="source-tool-export",
+        source_format=path.suffix.lower().lstrip("."),
+        source_index=index,
+        table_family="network-usage" if artifact_type == "srum-network-usage" else "app-resource",
+        app_id=app_id,
+        timestamp=timestamp,
+        counters={
+            "bytes_sent": bytes_sent,
+            "bytes_received": bytes_received,
+            "bytes_total": bytes_total,
+            "cpu_time": cpu_time,
+            "energy_usage": energy,
+        },
+        source_offset=0,
+        row_cluster_evidence={},
+        report_grade=report_grade,
+        user=user,
+        interface_luid=interface_luid,
+        network_profile=network_profile,
+    )
+    core_accuracy_gates = execution_core_accuracy_gates(
+        artifact_type,
+        {
+            "source_path": str(path.resolve()),
+            "source_hashes": file_hashes(path),
+            "source_index": index,
+            "source_format": path.suffix.lower().lstrip("."),
+            "app_id": app_id,
+            "executable_path": app_id if looks_like_executable_path(app_id) else "",
+            "user": user,
+            "timestamp": timestamp,
+            "bytes_sent": bytes_sent,
+            "bytes_received": bytes_received,
+            "energy_usage": energy,
+            "cpu_time": cpu_time,
+            "validation_checks": validation_checks,
+            "srum_report_citation_manifest_hash": srum_manifest["manifest_sha256"],
+            "execution_caveat": srum_execution_caveat("source-tool-export"),
+        },
+    )
     details = {
         "parser": "windows-srum-import",
         "parser_version": PARSER_VERSION,
@@ -2140,27 +2263,9 @@ def build_srum_record(path: Path, row: Mapping[str, object], index: int) -> Arti
             interface_luid=interface_luid,
             network_profile=network_profile,
         ),
-        "srum_report_citation_manifest": srum_report_citation_manifest(
-            source_path=str(path.resolve()),
-            source_hashes=file_hashes(path),
-            artifact_type=artifact_type,
-            artifact_scope="source-tool-export",
-            source_format=path.suffix.lower().lstrip("."),
-            source_index=index,
-            table_family="network-usage" if artifact_type == "srum-network-usage" else "app-resource",
-            app_id=app_id,
-            timestamp=timestamp,
-            counters={
-                "bytes_sent": bytes_sent,
-                "bytes_received": bytes_received,
-                "bytes_total": bytes_total,
-                "cpu_time": cpu_time,
-                "energy_usage": energy,
-            },
-            source_offset=0,
-            row_cluster_evidence={},
-            report_grade=report_grade,
-        ),
+        "srum_report_citation_manifest": srum_manifest,
+        "srum_report_citation_manifest_hash": srum_manifest["manifest_sha256"],
+        "execution_caveat": srum_execution_caveat("source-tool-export"),
         "parser_confidence": 0.82,
         "evidence_strength": "application-resource-usage-indicator",
         "validation_required": False,
@@ -2294,6 +2399,7 @@ def srum_usage_evidence(
         "app_id": app_id,
         "user": user,
         "timestamp": timestamp,
+        "timestamp_source": "srum-export-row",
         "counter_fields_present": sorted(
             name
             for name, value in {
@@ -2306,10 +2412,47 @@ def srum_usage_evidence(
             }.items()
             if value
         ),
+        "counter_values": {
+            "bytes_sent": bytes_sent,
+            "bytes_received": bytes_received,
+            "cpu_time": cpu_time,
+            "energy_usage": energy,
+            "interface_luid": interface_luid,
+            "network_profile": network_profile,
+        },
         "counter_normalization_status": "normalized-from-source-tool-export",
         "source_tool_export_validation_required": True,
         "report_grade_ready": False,
     }
+
+
+def srum_execution_caveat(artifact_scope: str) -> str:
+    if artifact_scope == "source-tool-export":
+        return (
+            "SRUM source-tool rows are triage pivots; preserve the export provenance and validate "
+            "timestamp/counter semantics before testimony."
+        )
+    if artifact_scope == "database":
+        return (
+            "SRUDB.dat inventory proves database/header/string evidence only; native ESE catalog/page/row "
+            "decoding is required before reporting decoded SRUM facts."
+        )
+    if artifact_scope == "string-pivot":
+        return (
+            "SRUM string pivots prove a bounded string was observed in SRUDB.dat, not a decoded usage row; "
+            "validate row membership, counters, and timestamps with a trusted SRUM parser."
+        )
+    if artifact_scope == "table-candidate":
+        return (
+            "SRUM table candidates are inferred from bounded native strings, not decoded from the ESE "
+            "catalog; validate table GUID/schema mapping with a trusted parser."
+        )
+    if artifact_scope == "row-candidate":
+        return (
+            "SRUM native row candidates are clustered from nearby strings, not decoded ESE row columns; "
+            "validate table, counters, and timestamps with a dedicated SRUM parser."
+        )
+    return "SRUM evidence is a validation-required triage pivot until trusted parser evidence is attached."
 
 
 def srum_report_citation_manifest(
@@ -2327,20 +2470,32 @@ def srum_report_citation_manifest(
     source_offset: int,
     row_cluster_evidence: Mapping[str, object],
     report_grade: Mapping[str, object],
+    user: str = "",
+    url: str = "",
+    interface_luid: str = "",
+    network_profile: str = "",
+    source_key: str = "",
 ) -> dict[str, object]:
     normalized_app = normalize_execution_path(app_id) if looks_like_executable_path(app_id) else app_id.lower()
     counter_map = {str(key): value for key, value in counters.items() if value not in ("", None, 0)}
+    trusted_diff_required_fields = execution_diff_required_fields("srum")
     row_identity = {
         "artifact_scope": artifact_scope,
         "source_format": source_format,
+        "source_key": source_key,
         "source_index": source_index,
         "source_offset": source_offset,
         "table_family": table_family,
         "app_id": app_id,
         "normalized_app": normalized_app,
+        "user": user,
         "timestamp": timestamp,
         "timestamp_semantics": "source-tool-export-timestamp" if artifact_scope == "source-tool-export" else "native-string-candidate-not-row-decoded",
+        "url": url,
+        "interface_luid": interface_luid,
+        "network_profile": network_profile,
         "counter_names": sorted(counter_map),
+        "counter_values": counter_map,
     }
     citation_refs: list[dict[str, object]] = [
         {
@@ -2417,11 +2572,42 @@ def srum_report_citation_manifest(
             "native_srum_page_row_decode_available": bool(EXECUTION_NATIVE_CAPABILITIES["native_srum_page_row_decode"]),
             "trusted_srum_parser_diff_required": artifact_scope != "source-tool-export",
         },
+        "trusted_diff_contract": {
+            "artifact_family": "srum",
+            "required_fields": trusted_diff_required_fields,
+            "compare_fields": [
+                field
+                for field in EXECUTION_DIFF_COMPARE_FIELDS
+                if field
+                in {
+                    "executable_path",
+                    "timestamp",
+                    "timestamp_source",
+                    "user",
+                    "user_sid",
+                    "table_family",
+                    "url",
+                    "network_profile",
+                    "interface_luid",
+                    "bytes_sent",
+                    "bytes_received",
+                    "energy_usage",
+                    "cpu_time",
+                    "source_format",
+                    "source_offset",
+                    "counter_sha256",
+                    "semantics_warning",
+                }
+            ],
+            "reference_tools": ["SrumECmd", "libesedb/esedbexport", "ESEDatabaseView"],
+            "counter_semantics_must_be_verified": True,
+        },
         "reportability": {
             "allowed_use": "srum-usage-triage-pivot",
             "standalone_execution_proof": False,
             "ready_for_court_report": bool(report_grade.get("report_grade_ready")),
             "validation_required": not bool(report_grade.get("report_grade_ready")),
+            "semantics_warning": srum_execution_caveat(artifact_scope),
             "blockers": sorted(
                 set(str(item) for item in report_grade.get("blockers") or [])
                 | {"native-ese-page-row-decoding-required", "trusted-srum-parser-diff-required"}
@@ -4249,6 +4435,9 @@ def execution_core_accuracy_gates(artifact_type: str, details: Mapping[str, obje
     bam_dam_manifest_hash = str(details.get("bam_dam_row_manifest_hash") or "")
     if bam_dam_manifest_hash:
         evidence_refs.append(f"bam_dam_row_manifest_sha256:{bam_dam_manifest_hash}")
+    srum_manifest_hash = str(details.get("srum_report_citation_manifest_hash") or "")
+    if srum_manifest_hash:
+        evidence_refs.append(f"srum_report_citation_manifest_sha256:{srum_manifest_hash}")
 
     if artifact_type == "amcache-hive":
         artifact_type = "amcache-entry"
@@ -4325,7 +4514,7 @@ def execution_core_accuracy_gates(artifact_type: str, details: Mapping[str, obje
             else {}
         )
         if native_validation.get("page_size_plausible") or checks.get("ese_signature_valid"):
-            satisfied.append("ESE page checksum validation")
+            satisfied.append("ESE header/page-size validation")
         if details.get("table_family") or details.get("table_candidate_count") or checks.get("has_native_srum_table_candidates"):
             satisfied.append("catalog/table mapping")
         if details.get("counter_candidates") or details.get("bytes_sent") or details.get("bytes_received") or checks.get("has_counter_candidates"):
@@ -4338,6 +4527,10 @@ def execution_core_accuracy_gates(artifact_type: str, details: Mapping[str, obje
             satisfied.append("bounded SRUM row-cluster context")
         if details.get("field_presence_profile") or checks.get("has_srum_field_presence_profile"):
             satisfied.append("SRUM field presence profile")
+        if srum_manifest_hash:
+            satisfied.append("stable SRUM citation manifest")
+        if details.get("execution_caveat"):
+            satisfied.append("SRUM semantics warning")
         if trusted_diff.get("status") == "pass":
             satisfied.append("trusted SRUM parser row diff pass")
         return [build_accuracy_gate(10, satisfied_checks=satisfied, evidence_refs=evidence_refs)]
@@ -4396,6 +4589,9 @@ def execution_commercial_uplift_evidence(artifact_type: str, details: Mapping[st
     bam_dam_manifest_hash = str(details.get("bam_dam_row_manifest_hash") or "")
     if bam_dam_manifest_hash:
         source_refs.append(f"bam_dam_row_manifest_sha256:{bam_dam_manifest_hash}")
+    srum_manifest_hash = str(details.get("srum_report_citation_manifest_hash") or "")
+    if srum_manifest_hash:
+        source_refs.append(f"srum_report_citation_manifest_sha256:{srum_manifest_hash}")
     return {
         "batch_id": "commercial-uplift-006-010",
         "item_numbers": item_numbers,
@@ -4870,6 +5066,27 @@ def execution_diff_row_payload(row: Mapping[str, object]) -> Mapping[str, object
             payload.setdefault("bytes_received", counters.get("bytes_received", ""))
             payload.setdefault("energy_usage", counters.get("energy_usage", ""))
             payload.setdefault("cpu_time", counters.get("cpu_time", ""))
+    manifest = payload.get("srum_report_citation_manifest")
+    if isinstance(manifest, Mapping):
+        identity = manifest.get("row_identity") if isinstance(manifest.get("row_identity"), Mapping) else {}
+        reportability = manifest.get("reportability") if isinstance(manifest.get("reportability"), Mapping) else {}
+        payload.setdefault("source_format", identity.get("source_format", ""))
+        payload.setdefault("source_key", identity.get("source_key", ""))
+        payload.setdefault("source_offset", identity.get("source_offset", ""))
+        payload.setdefault("table_family", identity.get("table_family", ""))
+        payload.setdefault("app_id", identity.get("app_id", ""))
+        payload.setdefault("user", identity.get("user", ""))
+        payload.setdefault("timestamp", identity.get("timestamp", ""))
+        payload.setdefault("url", identity.get("url", ""))
+        payload.setdefault("network_profile", identity.get("network_profile", ""))
+        payload.setdefault("interface_luid", identity.get("interface_luid", ""))
+        counter_values = identity.get("counter_values") if isinstance(identity.get("counter_values"), Mapping) else {}
+        payload.setdefault("bytes_sent", counter_values.get("bytes_sent", ""))
+        payload.setdefault("bytes_received", counter_values.get("bytes_received", ""))
+        payload.setdefault("energy_usage", counter_values.get("energy_usage", ""))
+        payload.setdefault("cpu_time", counter_values.get("cpu_time", ""))
+        if reportability:
+            payload.setdefault("execution_caveat", reportability.get("semantics_warning", srum_execution_caveat("")))
     return payload
 
 

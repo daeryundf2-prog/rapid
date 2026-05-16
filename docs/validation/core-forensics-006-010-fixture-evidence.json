@@ -83,7 +83,9 @@
         "srum-network-usage rows preserve source-tool app/user/timestamp/counter normalization.",
         "srum-database-file, srum-table-candidate, and srum-row-candidate rows preserve ESE header validation, table markers, row string candidates, counter/timestamp candidates, source hashes, #10 core_accuracy_gates, and native-row-not-decoded reportability decisions.",
         "SRUM import/database/pivot/table/row candidate rows emit execution_analyst_review_profile with app/counter/source-offset pivots, DNS/process/network correlation targets, and native ESE row-decoding blockers.",
-        "build_execution_artifact_trusted_diff can compare SRUM rows with SrumECmd/libesedb-style output by app/path, timestamp, user SID, and counter hash."
+        "SRUM import/database/pivot/table/row candidate rows emit stable srum_report_citation_manifest_hash values with source format, source key/offset, timestamp source, individual counter values, network profile/interface pivots, and semantics-warning caveats.",
+        "SRUM #10 core_accuracy_gates record ESE header/page-size validation, stable SRUM citation manifest presence, and SRUM semantics warning evidence without claiming decoded native ESE row facts.",
+        "build_execution_artifact_trusted_diff can compare SRUM rows with SrumECmd/libesedb-style output by app/path, timestamp, user SID, source format, semantics warning, and counter hash."
       ],
       "blockers_kept": [
         "full native ESE catalog decoding",

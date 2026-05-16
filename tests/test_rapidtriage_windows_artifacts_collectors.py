@@ -3371,6 +3371,7 @@ class RapidTriageWindowsArtifactsCollectorTests(unittest.TestCase):
                     "bytes_received": 2048,
                     "interface_luid": "12",
                     "network_profile": "CorpWiFi",
+                    "execution_caveat": "SRUM source-tool rows are triage pivots.",
                     "srum_usage_evidence": {
                         "table_family": "network-usage",
                         "app_id": "powershell.exe",
@@ -3398,6 +3399,7 @@ class RapidTriageWindowsArtifactsCollectorTests(unittest.TestCase):
                 "BytesReceived": "2048",
                 "InterfaceLuid": "12",
                 "NetworkProfile": "CorpWiFi",
+                "Warning": "SRUM source-tool rows are triage pivots.",
             }
         ]
 
@@ -3419,19 +3421,23 @@ class RapidTriageWindowsArtifactsCollectorTests(unittest.TestCase):
                 "artifact_type": "srum-row-candidate",
                 "details": {
                     "app_id": "powershell.exe",
+                    "source_format": "ese-srum",
                     "timestamp": "2024-04-01T05:06:07+00:00",
                     "table_family": "network-usage",
                     "bytes_received": 2048,
                     "counter_candidates": {"bytes_received": 2048},
+                    "execution_caveat": "SRUM native row candidates are clustered from nearby strings.",
                 },
             }
         ]
         trusted_rows = [
             {
                 "AppId": "powershell.exe",
+                "SourceFormat": "ese-srum",
                 "Timestamp": "2024-04-01T05:06:07+00:00",
                 "TableFamily": "network-usage",
                 "BytesReceived": 1024,
+                "Warning": "SRUM native row candidates are clustered from nearby strings.",
             }
         ]
 

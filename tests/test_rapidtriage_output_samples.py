@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
 import tempfile
 import unittest
@@ -387,6 +388,8 @@ def mask_dynamic_manifest_hashes(value: Any) -> Any:
         return masked
     if isinstance(value, list):
         return [mask_dynamic_manifest_hashes(item) for item in value]
+    if isinstance(value, str) and "_manifest_sha256:" in value:
+        return re.sub(r":[0-9a-f]{64}\b", ":<DYNAMIC_MANIFEST_HASH>", value)
     return value
 
 
