@@ -15,6 +15,7 @@
 - Run `python scripts/build-release.py --output-dir release` and attach `SHA256SUMS` plus `dependency-inventory.txt`.
 - Run `python scripts/build-release.py --output-dir release --verify`.
 - Run `python scripts/check-dependencies.py --output logs/dependency-monitoring.json` and attach the dependency monitoring/SBOM evidence.
+- Run `python scripts/internal-release-evidence-bundle.py --output-dir logs/internal-release-evidence --overwrite` before external sign-off. This creates internal #116-#120 evidence for the analyst quickstart lab, admin deployment smoke, security-hardening review, synthetic hostile corpus, parser sandbox smoke, dependency monitoring, release checksum linkage, and an explicit `commercial_claim_allowed=false` blocker manifest.
 - Run `python scripts/external-release-evidence-template.py --output logs/external-commercial-evidence.json`, then fill it with real CI/SBOM/signing/notarization/platform-smoke/package-smoke evidence before the final verifier run.
 - Run `python scripts/hostile-evidence-containment-template.py --output logs/hostile-evidence-containment.json`, then fill it with real sandbox design, OS-level sandbox, hostile probe, malicious corpus, and fuzz/quarantine evidence before the final verifier run.
 - Run `python scripts/independent-operations-evidence-template.py --output logs/independent-operations-evidence.json`, then fill it with real independent review, support SLA, hotfix drill, and final commercial release gate evidence before the final verifier run.
@@ -42,6 +43,7 @@ Expected artifacts:
 - macOS/Linux quick-start docs, E01 workflow docs, and fresh-machine smoke test docs.
 - Release validation JSON/Markdown package.
 - SHA256SUMS, signing/notarization evidence, and dependency inventory/SBOM.
+- Optional internal evidence bundle under `logs/internal-release-evidence/` containing `internal-release-evidence-bundle.json`, `quickstart-lab-run.json`, `admin-deployment-smoke.json`, `synthetic-hostile-corpus-manifest.json`, `parser-sandbox-smoke.json`, `security-hardening-review.json`, `dependency-monitoring.json`, `dependency-release-linkage.json`, and bundle `SHA256SUMS`.
 - `release-evidence-report.json` and `release-evidence-report.md` showing PASS/FAIL for release, validation, benchmark, optional columnar benchmark, platform smoke, crash-export/redaction, parser-isolation smoke, dependency-monitoring, and security-hardening self-review evidence.
 - Support contact/SLA document and emergency parser-fix policy.
 
