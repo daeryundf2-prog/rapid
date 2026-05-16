@@ -321,6 +321,8 @@ class RapidTriageCoreForensicsAccuracyTests(unittest.TestCase):
         self.assertIn("security hardening report-grade ready slots", security_hardening["required_checks"])
         self.assertIn("trusted independent AppSec review diff pass", security_hardening["required_checks"])
         self.assertIn("OS sandbox blocker disclosed", malicious_sandbox["required_checks"])
+        self.assertIn("malicious sandbox report-grade validation plan", malicious_sandbox["required_checks"])
+        self.assertIn("malicious sandbox report-grade ready slots", malicious_sandbox["required_checks"])
         self.assertIn("trusted malicious evidence sandbox corpus diff pass", malicious_sandbox["required_checks"])
         self.assertIn("release blocking policy recorded", dependency_monitoring["required_checks"])
         self.assertIn("trusted dependency advisory/SBOM diff pass", dependency_monitoring["required_checks"])

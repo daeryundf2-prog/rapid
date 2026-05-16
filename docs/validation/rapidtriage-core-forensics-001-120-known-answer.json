@@ -2738,10 +2738,10 @@
       ],
       "expected": {
         "required_assertions": [
-          "Enterprise policy preserves preview sandboxing, active-content blocking, parser crash isolation, hostile evidence guidance, parser subprocess isolation smoke, malicious-evidence-sandbox-evidence-manifest-v1 manifest hash/evidence slots, OS sandbox blocker, trusted malicious-corpus diff helpers/gates, and #119 core_accuracy_gates."
+          "Enterprise policy preserves preview sandboxing, active-content blocking, parser crash isolation, hostile evidence guidance, parser subprocess isolation smoke, malicious-evidence-sandbox-evidence-manifest-v1 manifest hash/evidence slots, malicious-evidence-sandbox-report-grade-validation-plan-v1 hash/ready/blocking slots, OS sandbox blocker, trusted malicious-corpus diff helpers/gates, and #119 core_accuracy_gates."
         ]
       },
-      "notes": "Internal fixture pass; OS-level parser sandbox and trusted malicious corpus/fuzz validation remain external.",
+      "notes": "Internal fixture pass; OS-level parser sandbox, trusted malicious corpus/fuzz validation, active-content renderer escape tests, quarantine workflow proof, release-host malicious-sandbox smoke, and trusted sandbox review remain external.",
       "source_manifest": "docs/validation/rapidtriage-core-forensics-101-120-known-answer.json"
     },
     {

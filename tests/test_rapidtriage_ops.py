@@ -582,12 +582,32 @@ class RapidTriageOpsTests(unittest.TestCase):
             "enterprise-control-evidence-matrix-v1",
         )
         self.assertIn("malicious_corpus_validation", payload["security_hardening"]["malicious_sandbox_evidence_slots"])
+        sandbox_plan = payload["security_hardening"]["malicious_sandbox_report_grade_validation_plan"]
+        self.assertEqual(sandbox_plan["profile_version"], "malicious-evidence-sandbox-report-grade-validation-plan-v1")
+        self.assertEqual(sandbox_plan["item_number"], 119)
+        self.assertFalse(sandbox_plan["commercial_claim_allowed"])
+        self.assertEqual(
+            payload["security_hardening"]["malicious_sandbox_report_grade_validation_plan_hash"],
+            sandbox_plan["validation_plan_hash"],
+        )
+        self.assertGreaterEqual(payload["security_hardening"]["malicious_sandbox_report_grade_ready_slot_count"], 8)
+        self.assertGreaterEqual(payload["security_hardening"]["malicious_sandbox_report_grade_blocking_slot_count"], 9)
+        self.assertIn("malicious-corpus-validation-required", payload["security_hardening"]["blockers"])
+        self.assertIn("os-level-parser-sandbox-required", sandbox_plan["blockers"])
         self.assertIn(
             "malicious sandbox evidence manifest hash emitted",
             payload["security_hardening"]["core_accuracy_gates"][1]["satisfied_checks"],
         )
         self.assertIn(
             "malicious sandbox control evidence matrix hash emitted",
+            payload["security_hardening"]["core_accuracy_gates"][1]["satisfied_checks"],
+        )
+        self.assertIn(
+            "malicious sandbox report-grade validation plan",
+            payload["security_hardening"]["core_accuracy_gates"][1]["satisfied_checks"],
+        )
+        self.assertIn(
+            "malicious sandbox report-grade ready slots",
             payload["security_hardening"]["core_accuracy_gates"][1]["satisfied_checks"],
         )
         self.assertEqual(payload["security_hardening"]["functional_priority_profile"]["item_number"], 63)
@@ -636,15 +656,20 @@ class RapidTriageOpsTests(unittest.TestCase):
             trusted_diff=hardening_diff,
             report_grade_validation_plan=hardening_plan,
         )
-        sandbox_gate = malicious_evidence_sandbox_core_accuracy_gates(trusted_diff=sandbox_diff)
+        sandbox_gate = malicious_evidence_sandbox_core_accuracy_gates(
+            trusted_diff=sandbox_diff,
+            report_grade_validation_plan=sandbox_plan,
+        )
         self.assertEqual(hardening_diff["status"], "pass")
         self.assertEqual(sandbox_diff["status"], "pass")
         self.assertIn("control_evidence_matrix_hash", hardening_diff["compared_fields"])
         self.assertIn("security_hardening_report_grade_validation_plan_hash", hardening_diff["compared_fields"])
         self.assertIn("control_evidence_matrix_hash", sandbox_diff["compared_fields"])
+        self.assertIn("malicious_sandbox_report_grade_validation_plan_hash", sandbox_diff["compared_fields"])
         self.assertIn("trusted independent AppSec review diff pass", hardening_gate[0]["satisfied_checks"])
         self.assertIn("security hardening report-grade validation plan", hardening_gate[0]["satisfied_checks"])
         self.assertIn("trusted malicious evidence sandbox corpus diff pass", sandbox_gate[0]["satisfied_checks"])
+        self.assertIn("malicious sandbox report-grade validation plan", sandbox_gate[0]["satisfied_checks"])
 
     def test_benchmark_command_writes_json_and_markdown(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -2093,6 +2118,10 @@ class RapidTriageOpsTests(unittest.TestCase):
             self.assertIn(
                 "enterprise-policy.security_hardening.security_hardening_report_grade_validation_plan_hash",
                 final_by_number[118]["primary_outputs"],
+            )
+            self.assertIn(
+                "enterprise-policy.security_hardening.malicious_sandbox_report_grade_validation_plan_hash",
+                final_by_number[119]["primary_outputs"],
             )
             self.assertIn(
                 "operations_documents.document_evidence_manifests.120.manifest_hash",

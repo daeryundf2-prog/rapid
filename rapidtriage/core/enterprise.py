@@ -91,6 +91,18 @@ SECURITY_HARDENING_REPORT_GRADE_BLOCKERS = [
     "parser-safety-review-required",
     "release-host-hardening-smoke-required",
 ]
+MALICIOUS_SANDBOX_REPORT_GRADE_VALIDATION_PLAN_VERSION = "malicious-evidence-sandbox-report-grade-validation-plan-v1"
+MALICIOUS_SANDBOX_REPORT_GRADE_BLOCKERS = [
+    MALICIOUS_SANDBOX_TRUSTED_DIFF_BLOCKER_119,
+    "os-level-parser-sandbox-required",
+    "malicious-corpus-validation-required",
+    "active-content-renderer-test-required",
+    "parser-crash-isolation-test-required",
+    "preview-sandbox-escape-test-required",
+    "quarantine-workflow-test-required",
+    "release-host-malicious-sandbox-smoke-required",
+    "independent-malicious-evidence-review-required",
+]
 SECURITY_OPERATIONS_TRUSTED_TOOLS = {
     "independent-appsec-review",
     "malicious-evidence-sandbox-corpus",
@@ -537,6 +549,28 @@ def build_enterprise_policy() -> dict[str, object]:
             "os_sandbox_proof": "OS-level parser and preview sandbox proof",
         },
     )
+    policy["security_hardening"]["malicious_sandbox_report_grade_validation_plan"] = (
+        build_malicious_evidence_sandbox_report_grade_validation_plan(
+            security_hardening=policy["security_hardening"],
+            evidence_manifest=policy["security_hardening"]["malicious_sandbox_evidence_manifest"],
+            trusted_diff=policy["security_hardening"]["trusted_malicious_sandbox_diff"],
+        )
+    )
+    policy["security_hardening"]["malicious_sandbox_report_grade_validation_plan_hash"] = policy["security_hardening"][
+        "malicious_sandbox_report_grade_validation_plan"
+    ]["validation_plan_hash"]
+    policy["security_hardening"]["malicious_sandbox_report_grade_ready_slot_count"] = policy["security_hardening"][
+        "malicious_sandbox_report_grade_validation_plan"
+    ]["ready_slot_count"]
+    policy["security_hardening"]["malicious_sandbox_report_grade_blocking_slot_count"] = policy["security_hardening"][
+        "malicious_sandbox_report_grade_validation_plan"
+    ]["blocking_slot_count"]
+    malicious_sandbox_report_blockers = policy["security_hardening"][
+        "malicious_sandbox_report_grade_validation_plan"
+    ]["blockers"]
+    policy["security_hardening"]["blockers"] = sorted(
+        {*policy["security_hardening"].get("blockers", []), *malicious_sandbox_report_blockers}
+    )
     policy["security_hardening"]["core_accuracy_gates"] = [
         *security_hardening_core_accuracy_gates(
             trusted_diff=policy["security_hardening"]["trusted_security_hardening_diff"],
@@ -549,6 +583,9 @@ def build_enterprise_policy() -> dict[str, object]:
         *malicious_evidence_sandbox_core_accuracy_gates(
             trusted_diff=policy["security_hardening"]["trusted_malicious_sandbox_diff"],
             evidence_manifest=policy["security_hardening"]["malicious_sandbox_evidence_manifest"],
+            report_grade_validation_plan=policy["security_hardening"][
+                "malicious_sandbox_report_grade_validation_plan"
+            ],
         ),
     ]
     return policy
@@ -1769,6 +1806,154 @@ def security_hardening_functional_profile(
     }
 
 
+def build_malicious_evidence_sandbox_report_grade_validation_plan(
+    *,
+    security_hardening: Mapping[str, object],
+    evidence_manifest: Mapping[str, object],
+    trusted_diff: Mapping[str, object],
+) -> dict[str, object]:
+    sandbox_slots = (
+        evidence_manifest.get("malicious_sandbox_evidence_slots")
+        if isinstance(evidence_manifest.get("malicious_sandbox_evidence_slots"), Mapping)
+        else {}
+    )
+    ready_slots = [
+        {
+            "slot_id": "enterprise-policy-malicious-sandbox-json",
+            "status": "ready",
+            "evidence_ref": "rapidtriage enterprise-policy --json.security_hardening",
+            "evidence_hash": stable_enterprise_sha256(
+                "enterprise-policy command emits malicious evidence sandbox policy JSON"
+            ),
+        },
+        {
+            "slot_id": "malicious-sandbox-evidence-manifest",
+            "status": "ready",
+            "evidence_ref": "enterprise-policy.security_hardening.malicious_sandbox_evidence_manifest_hash",
+            "evidence_hash": str(evidence_manifest.get("manifest_hash") or ""),
+        },
+        {
+            "slot_id": "malicious-sandbox-control-evidence-matrix",
+            "status": "ready",
+            "evidence_ref": "enterprise-policy.security_hardening.control_evidence_matrix_hash",
+            "evidence_hash": str(evidence_manifest.get("control_evidence_matrix_hash") or ""),
+        },
+        {
+            "slot_id": "preview-sandbox-boundary",
+            "status": "ready-with-blocker",
+            "evidence_ref": "enterprise-policy.security_hardening.preview_sandboxing",
+            "evidence_hash": stable_enterprise_sha256(security_hardening.get("preview_sandboxing", "")),
+        },
+        {
+            "slot_id": "parser-sandbox-boundary",
+            "status": "ready-with-blocker",
+            "evidence_ref": "enterprise-policy.security_hardening.parser_sandboxing",
+            "evidence_hash": stable_enterprise_sha256(security_hardening.get("parser_sandboxing", "")),
+        },
+        {
+            "slot_id": "malicious-corpus-validation-boundary",
+            "status": "ready-with-blocker",
+            "evidence_ref": "enterprise-policy.security_hardening.malicious_sandbox_evidence_slots.malicious_corpus_validation",
+            "evidence_hash": stable_enterprise_sha256(sandbox_slots.get("malicious_corpus_validation", {})),
+        },
+        {
+            "slot_id": "os-sandbox-proof-boundary",
+            "status": "ready-with-blocker",
+            "evidence_ref": "enterprise-policy.security_hardening.malicious_sandbox_evidence_slots.os_sandbox_proof",
+            "evidence_hash": stable_enterprise_sha256(sandbox_slots.get("os_sandbox_proof", {})),
+        },
+        {
+            "slot_id": "trusted-malicious-sandbox-diff-boundary",
+            "status": "ready" if trusted_diff.get("status") == "pass" else "ready-with-blocker",
+            "evidence_ref": "enterprise-policy.security_hardening.trusted_malicious_sandbox_diff",
+            "evidence_hash": stable_enterprise_sha256(trusted_diff),
+        },
+    ]
+    blocking_slots = []
+    if trusted_diff.get("status") != "pass":
+        blocking_slots.append(
+            {
+                "slot_id": "trusted-malicious-evidence-sandbox-diff",
+                "status": "blocking",
+                "blocker": MALICIOUS_SANDBOX_TRUSTED_DIFF_BLOCKER_119,
+                "required_evidence": "trusted malicious-evidence sandbox corpus diff proving sandbox policy fields and evidence hashes are unchanged",
+            }
+        )
+    for slot_id, blocker, required_evidence in (
+        (
+            "os-level-parser-sandbox",
+            "os-level-parser-sandbox-required",
+            "OS-level parser/preview sandbox proof for the release package and supported platforms",
+        ),
+        (
+            "malicious-corpus-validation",
+            "malicious-corpus-validation-required",
+            "hostile evidence corpus/fuzz validation proving previews and parsers fail closed",
+        ),
+        (
+            "active-content-renderer-test",
+            "active-content-renderer-test-required",
+            "renderer test proving active content is blocked in previews, reports, and exports",
+        ),
+        (
+            "parser-crash-isolation-test",
+            "parser-crash-isolation-test-required",
+            "parser crash isolation test proving one hostile artifact cannot terminate the case job",
+        ),
+        (
+            "preview-sandbox-escape-test",
+            "preview-sandbox-escape-test-required",
+            "sandbox escape regression suite covering archive, media, HTML, PDF, and document preview paths",
+        ),
+        (
+            "quarantine-workflow-test",
+            "quarantine-workflow-test-required",
+            "quarantine workflow proof for artifacts that trigger parser crashes or active-content warnings",
+        ),
+        (
+            "release-host-malicious-sandbox-smoke",
+            "release-host-malicious-sandbox-smoke-required",
+            "release-host smoke proving malicious-sandbox policy, manifests, and blockers are packaged and visible",
+        ),
+        (
+            "independent-malicious-evidence-review",
+            "independent-malicious-evidence-review-required",
+            "independent reviewer/lab signoff for hostile evidence handling and OS sandbox limits",
+        ),
+    ):
+        blocking_slots.append(
+            {
+                "slot_id": slot_id,
+                "status": "blocking",
+                "current_attachment_status": "not-attached",
+                "blocker": blocker,
+                "required_evidence": required_evidence,
+            }
+        )
+    blockers = sorted({str(slot["blocker"]) for slot in blocking_slots if slot.get("blocker")})
+    plan: dict[str, object] = {
+        "profile_version": MALICIOUS_SANDBOX_REPORT_GRADE_VALIDATION_PLAN_VERSION,
+        "item_number": 119,
+        "commercial_gap_ids": [MALICIOUS_EVIDENCE_SANDBOXING_GAP_ID],
+        "commercial_claim_allowed": False,
+        "preview_sandboxing": security_hardening.get("preview_sandboxing", ""),
+        "parser_sandboxing": security_hardening.get("parser_sandboxing", ""),
+        "malicious_sandbox_evidence_manifest_hash": str(evidence_manifest.get("manifest_hash") or ""),
+        "control_evidence_matrix_hash": str(evidence_manifest.get("control_evidence_matrix_hash") or ""),
+        "trusted_diff_status": str(trusted_diff.get("status") or ""),
+        "trusted_diff_blocker": trusted_diff.get("blocker"),
+        "ready_slots": ready_slots,
+        "blocking_slots": blocking_slots,
+        "ready_slot_count": len(ready_slots),
+        "blocking_slot_count": len(blocking_slots),
+        "external_blocker_catalog": list(MALICIOUS_SANDBOX_REPORT_GRADE_BLOCKERS),
+        "blockers": blockers,
+        "reporting_boundary": "Preview and parser sandbox policy is internally visible; commercial hostile-evidence claims require OS sandbox proof, malicious corpus/fuzz validation, renderer escape tests, quarantine workflow proof, and independent review.",
+    }
+    plan["validation_plan_hash"] = stable_enterprise_sha256(plan)
+    return plan
+
+
 def missing_enterprise_trusted_diff(number: int) -> dict[str, object]:
     gap_ids = {
         106: LOCAL_ONLY_ENTERPRISE_GAP_ID,
@@ -2194,7 +2379,12 @@ def build_security_operations_trusted_diff(
             "security_hardening_report_grade_validation_plan_hash",
             "control_evidence_matrix_hash",
         ],
-        119: ["malicious_sandbox_evidence_manifest_hash", "malicious_sandbox_evidence_slots", "control_evidence_matrix_hash"],
+        119: [
+            "malicious_sandbox_evidence_manifest_hash",
+            "malicious_sandbox_evidence_slots",
+            "malicious_sandbox_report_grade_validation_plan_hash",
+            "control_evidence_matrix_hash",
+        ],
     }[number]
     compared_fields = list(compared_fields)
     for field in optional_fields:
@@ -2275,6 +2465,7 @@ def security_hardening_core_accuracy_gates(
 def malicious_evidence_sandbox_core_accuracy_gates(
     trusted_diff: Mapping[str, object] | None = None,
     evidence_manifest: Mapping[str, object] | None = None,
+    report_grade_validation_plan: Mapping[str, object] | None = None,
 ) -> list[dict[str, object]]:
     satisfied = [
         "preview sandboxing documented",
@@ -2290,12 +2481,29 @@ def malicious_evidence_sandbox_core_accuracy_gates(
             satisfied.append("malicious sandbox evidence slots emitted")
         if evidence_manifest.get("control_evidence_matrix_hash"):
             satisfied.append("malicious sandbox control evidence matrix hash emitted")
+    if report_grade_validation_plan:
+        if report_grade_validation_plan.get("validation_plan_hash"):
+            satisfied.append("malicious sandbox report-grade validation plan")
+        if int(report_grade_validation_plan.get("ready_slot_count") or 0) > 0:
+            satisfied.append("malicious sandbox report-grade ready slots")
     if trusted_diff and trusted_diff.get("status") == "pass":
         satisfied.append("trusted malicious evidence sandbox corpus diff pass")
+    evidence_refs = ["enterprise_policy.security_hardening", "docs/rapidtriage-admin-deployment-guide.md"]
+    if report_grade_validation_plan and report_grade_validation_plan.get("validation_plan_hash"):
+        evidence_refs.append(
+            "malicious_sandbox_report_grade_validation_plan_sha256:"
+            f"{report_grade_validation_plan['validation_plan_hash']}"
+        )
+        evidence_refs.append(
+            f"malicious_sandbox_report_grade_ready_slots:{report_grade_validation_plan.get('ready_slot_count')}"
+        )
+        evidence_refs.append(
+            f"malicious_sandbox_report_grade_blocking_slots:{report_grade_validation_plan.get('blocking_slot_count')}"
+        )
     return [
         build_accuracy_gate(
             119,
             satisfied_checks=satisfied,
-            evidence_refs=["enterprise_policy.security_hardening", "docs/rapidtriage-admin-deployment-guide.md"],
+            evidence_refs=evidence_refs,
         )
     ]

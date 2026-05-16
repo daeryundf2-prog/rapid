@@ -2014,6 +2014,8 @@ CORE_FORENSIC_ACCURACY_ITEMS: tuple[dict[str, object], ...] = (
             "OS sandbox blocker disclosed",
             "malicious sandbox evidence manifest hash emitted",
             "malicious sandbox evidence slots emitted",
+            "malicious sandbox report-grade validation plan",
+            "malicious sandbox report-grade ready slots",
             "trusted malicious evidence sandbox corpus diff pass",
         ),
     },

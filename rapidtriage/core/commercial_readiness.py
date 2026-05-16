@@ -3872,6 +3872,7 @@ def final_delivery_evidence_chain() -> list[dict[str, object]]:
             "produces": "enterprise-policy.security_hardening.trusted_malicious_sandbox_diff",
             "primary_outputs": [
                 "enterprise-policy.security_hardening.trusted_malicious_sandbox_diff",
+                "enterprise-policy.security_hardening.malicious_sandbox_report_grade_validation_plan_hash",
                 "operations_documents.document_evidence_manifests.119.manifest_hash",
                 "operations_documents.document_evidence_slots.119.malicious_corpus_validation",
             ],
