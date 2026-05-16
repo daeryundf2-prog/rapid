@@ -50,6 +50,9 @@ def main(argv: list[str] | None = None) -> int:
         "redacted_report_in_bundle": f"{report_payload.get('crash_id')}.json" in members,
         "sensitive_tokens_absent": all(token not in report_text for token in ("release-secret-token", "secret-value")),
         "redaction_matrix_has_hash": bool(report_payload.get("crash_redaction_matrix_hash")),
+        "report_grade_plan_has_hash": bool(report_payload.get("crash_report_grade_validation_plan_hash")),
+        "manifest_preserves_report_grade_hash": manifest.get("crash_report_grade_validation_plan_hash")
+        == report_payload.get("crash_report_grade_validation_plan_hash"),
         "redacted_key_count_recorded": int(redaction_matrix.get("redacted_key_count") or 0) >= 1,
         "trusted_diff_passes": trusted_diff.get("status") == "pass",
     }
@@ -63,6 +66,9 @@ def main(argv: list[str] | None = None) -> int:
         "export_bundle_path": str(bundle_path),
         "export_bundle_sha256": hashlib.sha256(bundle_path.read_bytes()).hexdigest(),
         "crash_id": report_payload.get("crash_id"),
+        "crash_report_grade_validation_plan_hash": report_payload.get("crash_report_grade_validation_plan_hash", ""),
+        "crash_report_grade_ready_slot_count": report_payload.get("crash_report_grade_ready_slot_count", 0),
+        "crash_report_grade_blocking_slot_count": report_payload.get("crash_report_grade_blocking_slot_count", 0),
         "review_tool": "local-crash-export-log",
         "trusted_crash_report_diff": trusted_diff,
         "checks": checks,

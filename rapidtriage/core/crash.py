@@ -19,6 +19,17 @@ DEFAULT_CRASH_DIR = Path.home() / ".rapidtriage" / "crash-reports"
 CRASH_REPORTING_GAP_ID = "#105"
 CRASH_REPORT_TRUSTED_DIFF_BLOCKER_105 = "trusted-crash-redaction-export-diff-missing"
 CRASH_REPORT_TRUSTED_TOOLS = {"crash-redaction-checklist", "local-crash-export-log", "enterprise-no-upload-review"}
+CRASH_REPORT_GRADE_VALIDATION_PLAN_VERSION = "crash-reporting-report-grade-validation-plan-v1"
+CRASH_REPORT_GRADE_BLOCKERS = [
+    CRASH_REPORT_TRUSTED_DIFF_BLOCKER_105,
+    "operator-crash-export-ui-smoke-required",
+    "trusted-crash-redaction-checklist-required",
+    "enterprise-no-upload-review-required",
+    "release-host-crash-export-smoke-required",
+    "independent-redaction-review-required",
+    "signed-release-build-evidence-required",
+    "crash-dashboard-release-smoke-required",
+]
 FUNCTIONAL_OPS_BATCH_ID = "commercial-uplift-061-065"
 
 
@@ -89,8 +100,11 @@ def export_crash_report_bundle(
         ],
         "redaction_matrix_hash": payload.get("crash_redaction_matrix_hash", ""),
         "no_upload_manifest_hash": payload.get("crash_no_upload_manifest_hash", ""),
+        "crash_report_grade_validation_plan_hash": payload.get("crash_report_grade_validation_plan_hash", ""),
+        "crash_report_grade_ready_slot_count": payload.get("crash_report_grade_ready_slot_count", 0),
+        "crash_report_grade_blocking_slot_count": payload.get("crash_report_grade_blocking_slot_count", 0),
         "operator_review_required": True,
-        "blockers": [CRASH_REPORT_TRUSTED_DIFF_BLOCKER_105],
+        "blockers": sorted({CRASH_REPORT_TRUSTED_DIFF_BLOCKER_105, *CRASH_REPORT_GRADE_BLOCKERS}),
     }
     manifest["manifest_hash"] = stable_crash_sha256(manifest)
     with zipfile.ZipFile(bundle_path, "w", compression=zipfile.ZIP_DEFLATED) as archive:
@@ -128,6 +142,9 @@ def summarize_crash_report(path: Path, payload: Mapping[str, object]) -> dict[st
         "crash_export_evidence_manifest_hash": payload.get("crash_export_evidence_manifest_hash", ""),
         "crash_no_upload_manifest_hash": payload.get("crash_no_upload_manifest_hash", ""),
         "crash_redaction_matrix_hash": payload.get("crash_redaction_matrix_hash", ""),
+        "crash_report_grade_validation_plan_hash": payload.get("crash_report_grade_validation_plan_hash", ""),
+        "crash_report_grade_ready_slot_count": int(payload.get("crash_report_grade_ready_slot_count") or 0),
+        "crash_report_grade_blocking_slot_count": int(payload.get("crash_report_grade_blocking_slot_count") or 0),
         "size_bytes": path.stat().st_size,
     }
 
@@ -222,6 +239,18 @@ def write_crash_report(
     payload["crash_redaction_matrix"] = crash_export_evidence_manifest["redaction_matrix"]
     payload["crash_redaction_matrix_hash"] = crash_export_evidence_manifest["redaction_matrix_hash"]
     payload["export_evidence_slots"] = crash_export_evidence_manifest["export_evidence_slots"]
+    validation_plan = build_crash_report_grade_validation_plan(
+        payload,
+        report_path=report_path,
+        evidence_manifest=crash_export_evidence_manifest,
+        no_upload_manifest=no_upload_manifest,
+        trusted_diff=trusted_diff,
+    )
+    payload["crash_report_grade_validation_plan"] = validation_plan
+    payload["crash_report_grade_validation_plan_hash"] = validation_plan["validation_plan_hash"]
+    payload["crash_report_grade_ready_slot_count"] = validation_plan["ready_slot_count"]
+    payload["crash_report_grade_blocking_slot_count"] = validation_plan["blocking_slot_count"]
+    payload["blockers"] = sorted({*blockers, *validation_plan["blockers"]})
     payload["functional_priority_profile"] = crash_reporting_functional_profile(
         crash_id=crash_id,
         report_path=report_path,
@@ -235,6 +264,7 @@ def write_crash_report(
         trusted_diff=trusted_diff,
         evidence_manifest=crash_export_evidence_manifest,
         no_upload_manifest=no_upload_manifest,
+        report_grade_validation_plan=validation_plan,
     )
     report_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     return {"crash_id": crash_id, "path": str(report_path), "payload": payload}
@@ -316,6 +346,7 @@ def build_crash_report_trusted_diff(
         "crash_export_evidence_manifest_hash",
         "crash_no_upload_manifest_hash",
         "crash_redaction_matrix_hash",
+        "crash_report_grade_validation_plan_hash",
         "export_evidence_slots",
     ]
     mismatches = []
@@ -342,6 +373,7 @@ def crash_report_core_accuracy_gates(
     trusted_diff: Mapping[str, object] | None = None,
     evidence_manifest: Mapping[str, object] | None = None,
     no_upload_manifest: Mapping[str, object] | None = None,
+    report_grade_validation_plan: Mapping[str, object] | None = None,
 ) -> list[dict[str, object]]:
     satisfied = [
         "local crash report written",
@@ -364,6 +396,11 @@ def crash_report_core_accuracy_gates(
             satisfied.append("crash no-upload manifest hash emitted")
         if no_upload_manifest.get("automatic_upload_enabled") is False:
             satisfied.append("automatic crash upload disabled in manifest")
+    if report_grade_validation_plan:
+        if report_grade_validation_plan.get("validation_plan_hash"):
+            satisfied.append("crash report-grade validation plan")
+        if int(report_grade_validation_plan.get("ready_slot_count") or 0) > 0:
+            satisfied.append("crash report-grade ready slots")
     if trusted_diff and trusted_diff.get("status") == "pass":
         satisfied.append("trusted crash redaction/export diff pass")
     evidence_refs = [f"crash_id:{crash_id}", f"path:{report_path}"]
@@ -371,6 +408,14 @@ def crash_report_core_accuracy_gates(
         evidence_refs.append(f"crash_no_upload_manifest_sha256:{no_upload_manifest['manifest_hash']}")
     if evidence_manifest and evidence_manifest.get("redaction_matrix_hash"):
         evidence_refs.append(f"crash_redaction_matrix_sha256:{evidence_manifest['redaction_matrix_hash']}")
+    if report_grade_validation_plan and report_grade_validation_plan.get("validation_plan_hash"):
+        evidence_refs.append(
+            f"crash_report_grade_validation_plan_sha256:{report_grade_validation_plan['validation_plan_hash']}"
+        )
+        evidence_refs.append(f"crash_report_grade_ready_slots:{report_grade_validation_plan.get('ready_slot_count')}")
+        evidence_refs.append(
+            f"crash_report_grade_blocking_slots:{report_grade_validation_plan.get('blocking_slot_count')}"
+        )
     return [
         build_accuracy_gate(
             105,
@@ -504,6 +549,153 @@ def build_crash_no_upload_manifest(
     }
     manifest["manifest_hash"] = stable_crash_sha256(manifest)
     return manifest
+
+
+def build_crash_report_grade_validation_plan(
+    payload: Mapping[str, object],
+    *,
+    report_path: Path,
+    evidence_manifest: Mapping[str, object],
+    no_upload_manifest: Mapping[str, object],
+    trusted_diff: Mapping[str, object],
+) -> dict[str, object]:
+    export_slots = (
+        evidence_manifest.get("export_evidence_slots")
+        if isinstance(evidence_manifest.get("export_evidence_slots"), Mapping)
+        else {}
+    )
+    ready_slots = [
+        {
+            "slot_id": "local-crash-report-json",
+            "status": "ready",
+            "evidence_ref": "crash_report_path",
+            "evidence_hash": stable_crash_sha256(str(report_path)),
+        },
+        {
+            "slot_id": "redaction-matrix",
+            "status": "ready",
+            "evidence_ref": "crash_redaction_matrix_hash",
+            "evidence_hash": str(evidence_manifest.get("redaction_matrix_hash") or ""),
+        },
+        {
+            "slot_id": "export-evidence-manifest",
+            "status": "ready",
+            "evidence_ref": "crash_export_evidence_manifest_hash",
+            "evidence_hash": str(evidence_manifest.get("manifest_hash") or ""),
+        },
+        {
+            "slot_id": "no-upload-manifest",
+            "status": "ready",
+            "evidence_ref": "crash_no_upload_manifest_hash",
+            "evidence_hash": str(no_upload_manifest.get("manifest_hash") or ""),
+        },
+        {
+            "slot_id": "local-dashboard-and-api",
+            "status": "ready",
+            "evidence_ref": "/api/crash-reports + /api/crash-reports/{crash_id}/export",
+            "evidence_hash": stable_crash_sha256("local crash dashboard/list/detail/export API"),
+        },
+        {
+            "slot_id": "release-smoke-tooling",
+            "status": "ready",
+            "evidence_ref": "scripts/crash-export-smoke.py",
+            "evidence_hash": stable_crash_sha256("crash-export-release-smoke-v1"),
+        },
+        {
+            "slot_id": "redaction-review-tooling",
+            "status": "ready",
+            "evidence_ref": "scripts/crash-redaction-review.py",
+            "evidence_hash": stable_crash_sha256("crash-redaction-export-review-v1"),
+        },
+        {
+            "slot_id": "trusted-diff-boundary",
+            "status": "ready" if trusted_diff.get("status") == "pass" else "ready-with-blocker",
+            "evidence_ref": "trusted_crash_report_diff",
+            "evidence_hash": stable_crash_sha256(trusted_diff),
+        },
+    ]
+    blocking_slots = []
+    if trusted_diff.get("status") != "pass":
+        blocking_slots.append(
+            {
+                "slot_id": "trusted-crash-redaction-export-diff",
+                "status": "blocking",
+                "blocker": CRASH_REPORT_TRUSTED_DIFF_BLOCKER_105,
+                "required_evidence": "trusted redaction/export diff from an approved checklist or release smoke log",
+            }
+        )
+    for slot_id, blocker, required_evidence in (
+        (
+            "operator-crash-export-ui-smoke",
+            "operator-crash-export-ui-smoke-required",
+            "operator transcript and bundle hash proving the release UI can export a local crash report",
+        ),
+        (
+            "trusted-crash-redaction-checklist",
+            "trusted-crash-redaction-checklist-required",
+            "reviewer checklist proving sensitive values are redacted in report JSON and export ZIP",
+        ),
+        (
+            "enterprise-no-upload-review",
+            "enterprise-no-upload-review-required",
+            "enterprise policy/no-network review proving crash reports are not uploaded automatically",
+        ),
+        (
+            "release-host-crash-export-smoke",
+            "release-host-crash-export-smoke-required",
+            "crash-export-release-smoke-v1 JSON generated on the actual signed release host",
+        ),
+        (
+            "independent-redaction-review",
+            "independent-redaction-review-required",
+            "independent reviewer or lab rerun of the crash redaction/export review",
+        ),
+        (
+            "signed-release-build-evidence",
+            "signed-release-build-evidence-required",
+            "signed release artifact set and hashes used for the crash smoke/review run",
+        ),
+        (
+            "crash-dashboard-release-smoke",
+            "crash-dashboard-release-smoke-required",
+            "release-host dashboard/list/detail/export smoke transcript for crash reports",
+        ),
+    ):
+        slot = export_slots.get(slot_id.replace("operator-crash-export-ui-smoke", "operator_export_ui_smoke"))
+        status = str((slot or {}).get("status") or "not-attached") if isinstance(slot, Mapping) else "not-attached"
+        blocking_slots.append(
+            {
+                "slot_id": slot_id,
+                "status": "blocking",
+                "current_attachment_status": status,
+                "blocker": blocker,
+                "required_evidence": required_evidence,
+            }
+        )
+    blockers = sorted({str(slot["blocker"]) for slot in blocking_slots if slot.get("blocker")})
+    plan: dict[str, object] = {
+        "profile_version": CRASH_REPORT_GRADE_VALIDATION_PLAN_VERSION,
+        "item_number": 105,
+        "commercial_gap_ids": [CRASH_REPORTING_GAP_ID],
+        "commercial_claim_allowed": False,
+        "crash_id": payload.get("crash_id"),
+        "report_path": str(report_path),
+        "reporting_boundary": "local-only crash reports are usable; commercial crash-reporting claims require attached release-host smoke and independent redaction/no-upload proof",
+        "crash_export_evidence_manifest_hash": str(evidence_manifest.get("manifest_hash") or ""),
+        "crash_redaction_matrix_hash": str(evidence_manifest.get("redaction_matrix_hash") or ""),
+        "crash_no_upload_manifest_hash": str(no_upload_manifest.get("manifest_hash") or ""),
+        "trusted_diff_status": str(trusted_diff.get("status") or ""),
+        "trusted_diff_blocker": trusted_diff.get("blocker"),
+        "ready_slots": ready_slots,
+        "blocking_slots": blocking_slots,
+        "ready_slot_count": len(ready_slots),
+        "blocking_slot_count": len(blocking_slots),
+        "external_blocker_catalog": list(CRASH_REPORT_GRADE_BLOCKERS),
+        "blockers": blockers,
+        "report_use_warning": "Use as local crash-reporting evidence only; do not claim commercial crash reporting until blocking slots are satisfied.",
+    }
+    plan["validation_plan_hash"] = stable_crash_sha256(plan)
+    return plan
 
 
 def sanitize_context(context: Mapping[str, object]) -> dict[str, object]:

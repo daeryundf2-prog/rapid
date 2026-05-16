@@ -2427,10 +2427,10 @@
       ],
       "expected": {
         "required_assertions": [
-          "Crash reports and enterprise policy preserve local-only report generation, sensitive context redaction, runtime metadata, no-upload policy, crash-export-evidence-manifest-v1 manifest hash/redacted-key inventory/export evidence slots, operator export limitation, local dashboard/list/detail/export API, release crash-export smoke script, release redaction review script, trusted crash redaction/export diff helpers/gates, and #105 core_accuracy_gates."
+          "Crash reports and enterprise policy preserve local-only report generation, sensitive context redaction, runtime metadata, no-upload policy, crash-export-evidence-manifest-v1 manifest hash/redacted-key inventory/export evidence slots, crash-reporting-report-grade-validation-plan-v1 ready/blocking slots, operator export limitation, local dashboard/list/detail/export API, release crash-export smoke script, release redaction review script, trusted crash redaction/export diff helpers/gates, and #105 core_accuracy_gates."
         ]
       },
-      "notes": "Internal fixture pass; actual signed/release-build host smoke/review JSON and independent reviewer/lab signoff remain external.",
+      "notes": "Internal fixture pass; actual signed/release-build host smoke/review JSON, operator export/dashboard smoke evidence, and independent reviewer/lab signoff remain external.",
       "source_manifest": "docs/validation/rapidtriage-core-forensics-101-120-known-answer.json"
     },
     {

@@ -55,6 +55,11 @@ def main(argv: list[str] | None = None) -> int:
         "secret_redacted": "release-secret-token" not in report_text,
         "bundle_hash_verified": hashlib.sha256(bundle_path.read_bytes()).hexdigest() == export["bundle_sha256"],
         "manifest_hash_preserved": manifest_payload.get("manifest_hash") == export["manifest_hash"],
+        "report_grade_plan_present": bool(report["payload"].get("crash_report_grade_validation_plan_hash")),
+        "export_manifest_preserves_report_grade_hash": manifest_payload.get(
+            "crash_report_grade_validation_plan_hash"
+        )
+        == report["payload"].get("crash_report_grade_validation_plan_hash"),
         "no_automatic_upload": export["automatic_upload_enabled"] is False,
     }
     payload: dict[str, object] = {
@@ -70,6 +75,11 @@ def main(argv: list[str] | None = None) -> int:
         "export_bundle_path": str(bundle_path),
         "export_bundle_sha256": export["bundle_sha256"],
         "export_manifest_hash": export["manifest_hash"],
+        "crash_report_grade_validation_plan_hash": report["payload"].get(
+            "crash_report_grade_validation_plan_hash", ""
+        ),
+        "crash_report_grade_ready_slot_count": report["payload"].get("crash_report_grade_ready_slot_count", 0),
+        "crash_report_grade_blocking_slot_count": report["payload"].get("crash_report_grade_blocking_slot_count", 0),
         "bundle_members": bundle_members,
         "checks": checks,
         "passed_check_count": sum(1 for passed in checks.values() if passed),

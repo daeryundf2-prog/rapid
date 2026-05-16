@@ -551,6 +551,21 @@ def check_crash_export_smoke(path: Path | None) -> list[dict[str, Any]]:
             path=path,
         )
     )
+    checks.append(
+        make_check(
+            "crash-export-smoke-report-grade-plan",
+            isinstance(payload.get("crash_report_grade_validation_plan_hash"), str)
+            and len(str(payload.get("crash_report_grade_validation_plan_hash"))) == 64
+            and payload.get("checks", {}).get("report_grade_plan_present") is True
+            and payload.get("checks", {}).get("export_manifest_preserves_report_grade_hash") is True,
+            (
+                f"plan_hash={payload.get('crash_report_grade_validation_plan_hash')}, "
+                f"ready={payload.get('crash_report_grade_ready_slot_count')}, "
+                f"blocking={payload.get('crash_report_grade_blocking_slot_count')}"
+            ),
+            path=path,
+        )
+    )
     return checks
 
 
@@ -615,6 +630,21 @@ def check_crash_redaction_review(path: Path | None) -> list[dict[str, Any]]:
             "crash-redaction-review-hash",
             isinstance(payload.get("review_hash"), str) and len(str(payload.get("review_hash"))) == 64,
             f"review_hash={payload.get('review_hash')}",
+            path=path,
+        )
+    )
+    checks.append(
+        make_check(
+            "crash-redaction-review-report-grade-plan",
+            isinstance(payload.get("crash_report_grade_validation_plan_hash"), str)
+            and len(str(payload.get("crash_report_grade_validation_plan_hash"))) == 64
+            and payload.get("checks", {}).get("report_grade_plan_has_hash") is True
+            and payload.get("checks", {}).get("manifest_preserves_report_grade_hash") is True,
+            (
+                f"plan_hash={payload.get('crash_report_grade_validation_plan_hash')}, "
+                f"ready={payload.get('crash_report_grade_ready_slot_count')}, "
+                f"blocking={payload.get('crash_report_grade_blocking_slot_count')}"
+            ),
             path=path,
         )
     )

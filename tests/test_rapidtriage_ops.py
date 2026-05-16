@@ -1798,6 +1798,10 @@ class RapidTriageOpsTests(unittest.TestCase):
                 "crash-report.crash_export_evidence_manifest.manifest_hash",
                 release_by_number[105]["primary_outputs"],
             )
+            self.assertIn(
+                "crash-report.crash_report_grade_validation_plan_hash",
+                release_by_number[105]["primary_outputs"],
+            )
             self.assertEqual(release_by_number[105]["trusted_diff_required"], "trusted-crash-redaction-export-diff")
             enterprise_governance = payload["enterprise_governance_progress"]
             self.assertEqual(enterprise_governance["version"], "enterprise-governance-progress-v1")
@@ -6044,6 +6048,18 @@ class RapidTriageOpsTests(unittest.TestCase):
             self.assertEqual(payload["crash_no_upload_manifest_hash"], payload["crash_no_upload_manifest"]["manifest_hash"])
             self.assertFalse(payload["crash_no_upload_manifest"]["automatic_upload_enabled"])
             self.assertEqual(payload["crash_no_upload_manifest"]["known_upload_endpoint_count"], 0)
+            self.assertEqual(
+                payload["crash_report_grade_validation_plan"]["profile_version"],
+                "crash-reporting-report-grade-validation-plan-v1",
+            )
+            self.assertEqual(len(payload["crash_report_grade_validation_plan_hash"]), 64)
+            self.assertEqual(
+                payload["crash_report_grade_validation_plan_hash"],
+                payload["crash_report_grade_validation_plan"]["validation_plan_hash"],
+            )
+            self.assertGreaterEqual(payload["crash_report_grade_ready_slot_count"], 8)
+            self.assertGreaterEqual(payload["crash_report_grade_blocking_slot_count"], 8)
+            self.assertIn("release-host-crash-export-smoke-required", payload["blockers"])
             self.assertTrue(
                 payload["functional_priority_profile"]["implemented_controls"]["crash_no_upload_manifest_emitted"]
             )
@@ -6065,6 +6081,14 @@ class RapidTriageOpsTests(unittest.TestCase):
                 "crash redaction matrix hash emitted",
                 payload["core_accuracy_gates"][0]["satisfied_checks"],
             )
+            self.assertIn(
+                "crash report-grade validation plan",
+                payload["core_accuracy_gates"][0]["satisfied_checks"],
+            )
+            self.assertIn(
+                "crash report-grade ready slots",
+                payload["core_accuracy_gates"][0]["satisfied_checks"],
+            )
             self.assertTrue(payload["local_only"])
             self.assertEqual(payload["context"]["auth_token"], "<redacted>")
             self.assertEqual(payload["exception"]["type"], "RuntimeError")
@@ -6078,6 +6102,7 @@ class RapidTriageOpsTests(unittest.TestCase):
             )
             self.assertEqual(crash_diff["status"], "pass")
             self.assertIn("crash_redaction_matrix_hash", crash_diff["compared_fields"])
+            self.assertIn("crash_report_grade_validation_plan_hash", crash_diff["compared_fields"])
             self.assertIn("trusted crash redaction/export diff pass", crash_gates[0]["satisfied_checks"])
 
     def test_crash_export_smoke_script_writes_release_evidence(self) -> None:
@@ -6106,6 +6131,9 @@ class RapidTriageOpsTests(unittest.TestCase):
             self.assertTrue(payload["checks"]["dashboard_lists_report"])
             self.assertTrue(payload["checks"]["export_bundle_written"])
             self.assertTrue(payload["checks"]["bundle_hash_verified"])
+            self.assertTrue(payload["checks"]["report_grade_plan_present"])
+            self.assertTrue(payload["checks"]["export_manifest_preserves_report_grade_hash"])
+            self.assertEqual(len(payload["crash_report_grade_validation_plan_hash"]), 64)
             self.assertEqual(len(payload["smoke_hash"]), 64)
             self.assertTrue(Path(payload["export_bundle_path"]).is_file())
             self.assertTrue((output_dir / "crash-export-smoke.json").is_file())
@@ -6154,7 +6182,10 @@ class RapidTriageOpsTests(unittest.TestCase):
             self.assertEqual(review["review_tool"], "local-crash-export-log")
             self.assertTrue(review["checks"]["sensitive_tokens_absent"])
             self.assertTrue(review["checks"]["manifest_no_automatic_upload"])
+            self.assertTrue(review["checks"]["report_grade_plan_has_hash"])
+            self.assertTrue(review["checks"]["manifest_preserves_report_grade_hash"])
             self.assertTrue(review["checks"]["trusted_diff_passes"])
+            self.assertEqual(len(review["crash_report_grade_validation_plan_hash"]), 64)
             self.assertEqual(len(review["review_hash"]), 64)
             self.assertTrue((output_dir / "crash-redaction-review.json").is_file())
 
@@ -7007,7 +7038,9 @@ class RapidTriageOpsTests(unittest.TestCase):
             self.assertIn("columnar-benchmark-jsonl-metrics", check_ids)
             self.assertIn("columnar-benchmark-commercial-disclosure", check_ids)
             self.assertIn("crash-export-smoke-bundle-hash", check_ids)
+            self.assertIn("crash-export-smoke-report-grade-plan", check_ids)
             self.assertIn("crash-redaction-review-checks", check_ids)
+            self.assertIn("crash-redaction-review-report-grade-plan", check_ids)
             self.assertIn("parser-sandbox-smoke-limitation-preserved", check_ids)
             self.assertIn("dependency-monitoring-ci-workflow", check_ids)
             self.assertIn("dependency-monitoring-limitation-preserved", check_ids)

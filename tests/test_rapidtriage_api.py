@@ -1117,6 +1117,7 @@ class RapidTriageApiTests(unittest.TestCase):
                 self.assertTrue(listing["crash_trend_dashboard"]["export_ui_available"])
                 self.assertEqual(listing["reports"][0]["crash_id"], report["crash_id"])
                 self.assertGreaterEqual(listing["reports"][0]["redacted_key_count"], 1)
+                self.assertEqual(len(listing["reports"][0]["crash_report_grade_validation_plan_hash"]), 64)
                 self.assertGreaterEqual(listing["crash_trend_dashboard"]["redacted_key_total"], 1)
 
                 detail_response = client.get(f"/api/crash-reports/{report['crash_id']}")
@@ -1132,6 +1133,10 @@ class RapidTriageApiTests(unittest.TestCase):
                 self.assertEqual(exported["profile_version"], "crash-export-ui-bundle-manifest-v1")
                 self.assertTrue(exported["local_only"])
                 self.assertFalse(exported["automatic_upload_enabled"])
+                self.assertEqual(
+                    exported["crash_report_grade_validation_plan_hash"],
+                    detail["payload"]["crash_report_grade_validation_plan_hash"],
+                )
                 bundle_path = Path(exported["bundle_path"])
                 self.assertTrue(bundle_path.exists())
                 self.assertEqual(hash_file(bundle_path, "sha256"), exported["bundle_sha256"])

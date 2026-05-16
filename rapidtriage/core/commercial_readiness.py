@@ -3483,6 +3483,7 @@ def release_operations_evidence_chain() -> list[dict[str, object]]:
             "primary_outputs": [
                 "crash-report.json",
                 "crash-report.crash_export_evidence_manifest.manifest_hash",
+                "crash-report.crash_report_grade_validation_plan_hash",
                 "crash-report.export_evidence_slots.operator_export_ui_smoke",
                 "crash-report.export_evidence_slots.redaction_checklist",
                 "crash-report.export_evidence_slots.enterprise_no_upload_review",

@@ -1760,6 +1760,8 @@ CORE_FORENSIC_ACCURACY_ITEMS: tuple[dict[str, object], ...] = (
             "crash export evidence manifest hash emitted",
             "crash export evidence slots emitted",
             "redacted context key manifest emitted",
+            "crash report-grade validation plan",
+            "crash report-grade ready slots",
             "trusted crash redaction/export diff pass",
         ),
     },
