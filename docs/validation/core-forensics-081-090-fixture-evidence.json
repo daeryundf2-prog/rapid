@@ -18,9 +18,9 @@
       "title": "Parser-specific fixture corpus",
       "test_files": ["tests/test_rapidtriage_ops.py"],
       "assertions": [
-        "Validation output inventories parser areas, fixture/test counts, fixture/test file SHA256 values, area manifest hashes, fixture_corpus_digest, expected edge cases, coverage status, release gate, trusted fixture corpus manifest diff helpers/gates, and #82 core_accuracy_gates."
+        "Validation output inventories parser areas, fixture/test counts, fixture/test file SHA256 values, area manifest hashes, fixture_corpus_digest, fixture-corpus-report-grade-validation-plan-v1 ready/blocking slots, expected edge cases, coverage status, release gate, trusted fixture corpus manifest diff helpers/gates, and #82 core_accuracy_gates."
       ],
-      "remaining_external_validation": ["Broader malformed, deleted, native, and versioned corpus coverage plus trusted fixture corpus manifests."]
+      "remaining_external_validation": ["Broader malformed, deleted, native, and versioned corpus coverage, parser-version compatibility matrix, release-blocking fixture policy, coverage threshold signoff, broad platform fixture corpus, and trusted fixture corpus manifests."]
     },
     {
       "item": 83,

@@ -2873,6 +2873,7 @@ def validation_spine_evidence_chain() -> list[dict[str, object]]:
             "primary_outputs": [
                 "parser_fixture_corpus.areas",
                 "parser_fixture_corpus.fixture_corpus_digest",
+                "parser_fixture_corpus.fixture_corpus_report_grade_validation_plan_hash",
                 "areas[].area_manifest_hash",
                 "areas[].fixture_file_manifest[].sha256",
                 "areas[].test_file_manifest[].sha256",

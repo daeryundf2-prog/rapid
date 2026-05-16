@@ -864,6 +864,16 @@ class RapidTriageOpsTests(unittest.TestCase):
             self.assertIn("trusted-known-answer-manifest-diff-missing", payload["known_answer_validation"]["blockers"])
             self.assertIn("#82", payload["parser_fixture_corpus"]["commercial_gap_ids"])
             self.assertEqual(payload["parser_fixture_corpus"]["core_accuracy_gates"][0]["gap_id"], "#82")
+            self.assertEqual(
+                payload["parser_fixture_corpus"]["fixture_corpus_report_grade_validation_plan"]["profile_version"],
+                "fixture-corpus-report-grade-validation-plan-v1",
+            )
+            self.assertEqual(
+                payload["parser_fixture_corpus"]["fixture_corpus_report_grade_validation_plan_hash"],
+                payload["parser_fixture_corpus"]["fixture_corpus_report_grade_validation_plan"]["validation_plan_hash"],
+            )
+            self.assertEqual(payload["parser_fixture_corpus"]["report_grade_ready_slot_count"], 6)
+            self.assertEqual(payload["parser_fixture_corpus"]["report_grade_blocking_slot_count"], 6)
             self.assertEqual(payload["parser_fixture_corpus"]["trusted_fixture_corpus_diff"]["status"], "missing")
             self.assertIn("trusted-fixture-corpus-manifest-diff-missing", payload["parser_fixture_corpus"]["blockers"])
             self.assertIn("#83", payload["parser_false_positive_false_negative_notes"][0]["commercial_gap_ids"])
@@ -1256,8 +1266,26 @@ class RapidTriageOpsTests(unittest.TestCase):
             self.assertIn("area_manifest_hash", fixture_diff["compared_fields"])
             self.assertEqual(len(promoted_fixture["fixture_corpus_digest"]), 64)
             self.assertTrue(all(len(area["area_manifest_hash"]) == 64 for area in promoted_fixture["areas"]))
+            self.assertEqual(
+                promoted_fixture["fixture_corpus_report_grade_validation_plan"]["profile_version"],
+                "fixture-corpus-report-grade-validation-plan-v1",
+            )
+            self.assertEqual(
+                promoted_fixture["fixture_corpus_report_grade_validation_plan"]["fixture_corpus_digest"],
+                promoted_fixture["fixture_corpus_digest"],
+            )
+            self.assertEqual(
+                promoted_fixture["fixture_corpus_report_grade_validation_plan_hash"],
+                promoted_fixture["fixture_corpus_report_grade_validation_plan"]["validation_plan_hash"],
+            )
             self.assertIn("trusted fixture corpus manifest diff pass", promoted_fixture["core_accuracy_gates"][0]["satisfied_checks"])
             self.assertIn("fixture/test file hashes recorded", promoted_fixture["core_accuracy_gates"][0]["satisfied_checks"])
+            self.assertIn(
+                "fixture corpus report-grade validation plan emitted",
+                promoted_fixture["core_accuracy_gates"][0]["satisfied_checks"],
+            )
+            self.assertNotIn("trusted-fixture-corpus-manifest-diff-missing", promoted_fixture["blockers"])
+            self.assertIn("trusted-fixture-diff-present-but-commercial-retest-required", promoted_fixture["blockers"])
 
             fp_fn_notes = build_parser_false_positive_false_negative_notes()
             fp_fn_diff = build_fp_fn_trusted_diff(fp_fn_notes, fp_fn_notes)
@@ -1472,6 +1500,10 @@ class RapidTriageOpsTests(unittest.TestCase):
             )
             self.assertIn("datasets[].evidence_files[].sha256", spine_by_number[81]["primary_outputs"])
             self.assertIn("parser_fixture_corpus.fixture_corpus_digest", spine_by_number[82]["primary_outputs"])
+            self.assertIn(
+                "parser_fixture_corpus.fixture_corpus_report_grade_validation_plan_hash",
+                spine_by_number[82]["primary_outputs"],
+            )
             self.assertIn("areas[].area_manifest_hash", spine_by_number[82]["primary_outputs"])
             self.assertIn("parser_false_positive_false_negative_notes[].risk_note_hash", spine_by_number[83]["primary_outputs"])
             self.assertIn("parser_fp_fn_risk_register_profile.register_digest", spine_by_number[83]["primary_outputs"])

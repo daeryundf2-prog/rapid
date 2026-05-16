@@ -1930,10 +1930,10 @@
       ],
       "expected": {
         "required_assertions": [
-          "Parser fixture corpus output preserves parser areas, fixture/test counts, fixture/test file SHA256 values, area manifest hashes, fixture_corpus_digest, expected edge cases, coverage status, release gate, and #82 core_accuracy_gates."
+          "Parser fixture corpus output preserves parser areas, fixture/test counts, fixture/test file SHA256 values, area manifest hashes, fixture_corpus_digest, fixture-corpus-report-grade-validation-plan-v1 ready/blocking slots, expected edge cases, coverage status, release gate, trusted fixture corpus manifest diff helpers/gates, and #82 core_accuracy_gates."
         ]
       },
-      "notes": "Internal fixture pass; broader malformed/deleted/versioned corpus and trusted fixture corpus manifests remain blockers.",
+      "notes": "Internal fixture pass; broader malformed/deleted/native/versioned corpus, parser-version compatibility matrix, release-blocking fixture policy, coverage threshold signoff, broad platform fixture corpus, and trusted fixture corpus manifests remain blockers.",
       "source_manifest": "docs/validation/rapidtriage-core-forensics-081-090-known-answer.json"
     },
     {

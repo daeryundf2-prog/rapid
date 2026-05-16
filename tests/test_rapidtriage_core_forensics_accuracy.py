@@ -193,6 +193,7 @@ class RapidTriageCoreForensicsAccuracyTests(unittest.TestCase):
         self.assertIn("trusted known-answer manifest diff pass", known_answer["required_checks"])
         self.assertTrue(known_answer["accuracy_controls"]["legal_or_authority_gate_required"])
         self.assertIn("parser areas inventoried", fixture_corpus["required_checks"])
+        self.assertIn("fixture corpus report-grade validation plan emitted", fixture_corpus["required_checks"])
         self.assertIn("trusted fixture corpus manifest diff pass", fixture_corpus["required_checks"])
         self.assertIn("false positive risks documented", fp_fn["required_checks"])
         self.assertIn("trusted FP/FN risk register diff pass", fp_fn["required_checks"])

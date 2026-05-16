@@ -49,6 +49,7 @@ KNOWN_ANSWER_REPORT_GRADE_BLOCKERS = [
     "release-signoff-required",
 ]
 FIXTURE_CORPUS_TRUSTED_DIFF_BLOCKER_82 = "trusted-fixture-corpus-manifest-diff-missing"
+FIXTURE_CORPUS_REPORT_GRADE_VALIDATION_PLAN_VERSION = "fixture-corpus-report-grade-validation-plan-v1"
 FP_FN_TRUSTED_DIFF_BLOCKER_83 = "trusted-fp-fn-risk-register-diff-missing"
 INDEPENDENT_VALIDATION_TRUSTED_DIFF_BLOCKER_84 = "trusted-independent-validation-signoff-diff-missing"
 VALIDATION_PACKAGE_TRUSTED_DIFF_BLOCKER_85 = "trusted-validation-package-manifest-diff-missing"
@@ -1013,6 +1014,15 @@ def build_parser_fixture_corpus(
     ]
     if trusted_diff and trusted_diff.get("status") == "pass":
         satisfied.append("trusted fixture corpus manifest diff pass")
+    report_grade_validation_plan = build_fixture_corpus_report_grade_validation_plan(
+        fixture_root=fixture_root,
+        areas=rows,
+        fixture_digest=fixture_digest,
+        release_gate_matrix=release_gate_matrix,
+        trusted_diff=trusted_diff,
+    )
+    satisfied.append("fixture corpus report-grade validation plan emitted")
+    satisfied.append("fixture corpus report-grade ready slots emitted")
     return {
         "fixture_root": str(fixture_root),
         "parser_area_count": len(rows),
@@ -1021,6 +1031,10 @@ def build_parser_fixture_corpus(
         "fixture_corpus_digest": fixture_digest,
         "fixture_release_gate_matrix": release_gate_matrix,
         "fixture_release_gate_matrix_hash": release_gate_matrix["matrix_hash"],
+        "fixture_corpus_report_grade_validation_plan": report_grade_validation_plan,
+        "fixture_corpus_report_grade_validation_plan_hash": report_grade_validation_plan["validation_plan_hash"],
+        "report_grade_ready_slot_count": report_grade_validation_plan["ready_slot_count"],
+        "report_grade_blocking_slot_count": report_grade_validation_plan["blocking_slot_count"],
         "commercial_gap_ids": [PARSER_FIXTURE_CORPUS_GAP_ID],
         "ready_for_court_report": covered == len(rows),
         "trusted_fixture_corpus_diff": dict(trusted_diff) if trusted_diff else missing_validation_trusted_diff(
@@ -1028,7 +1042,7 @@ def build_parser_fixture_corpus(
             FIXTURE_CORPUS_TRUSTED_DIFF_BLOCKER_82,
             trusted_tool="fixture-corpus-manifest",
         ),
-        "blockers": [FIXTURE_CORPUS_TRUSTED_DIFF_BLOCKER_82] if not trusted_diff or trusted_diff.get("status") != "pass" else [],
+        "blockers": list(report_grade_validation_plan["blockers"]),
         "core_accuracy_gates": [
             build_accuracy_gate(
                 82,
@@ -1039,11 +1053,171 @@ def build_parser_fixture_corpus(
                     f"fixture_root:{fixture_root}",
                     f"fixture_corpus_digest:{fixture_digest}",
                     f"fixture_release_gate_matrix_hash:{release_gate_matrix['matrix_hash']}",
+                    f"fixture_corpus_report_grade_validation_plan_hash:{report_grade_validation_plan['validation_plan_hash']}",
+                    f"report_grade_ready_slot_count:{report_grade_validation_plan['ready_slot_count']}",
+                    f"report_grade_blocking_slot_count:{report_grade_validation_plan['blocking_slot_count']}",
                 ],
             )
         ],
         "areas": rows,
     }
+
+
+def build_fixture_corpus_report_grade_validation_plan(
+    *,
+    fixture_root: Path,
+    areas: Sequence[Mapping[str, object]],
+    fixture_digest: str,
+    release_gate_matrix: Mapping[str, object],
+    trusted_diff: Mapping[str, object] | None,
+) -> dict[str, object]:
+    fixture_file_hash_count = sum(int(row.get("fixture_hash_count") or 0) for row in areas)
+    test_file_hash_count = sum(int(row.get("test_file_hash_count") or 0) for row in areas)
+    expected_edge_case_count = sum(len(row.get("expected_edge_cases") or []) for row in areas)
+    fixture_backed_count = sum(1 for row in areas if row.get("fixture_backed"))
+    area_manifest_hashes = [str(row.get("area_manifest_hash") or "") for row in areas if row.get("area_manifest_hash")]
+    file_hash_rows = []
+    for row in areas:
+        for key in ("fixture_file_manifest", "test_file_manifest"):
+            for file_row in row.get(key) or []:
+                if not isinstance(file_row, Mapping):
+                    continue
+                file_hash_rows.append(
+                    {
+                        "area_id": str(row.get("id") or ""),
+                        "kind": "fixture" if key == "fixture_file_manifest" else "test",
+                        "path": str(file_row.get("path") or ""),
+                        "exists": bool(file_row.get("exists")),
+                        "sha256": str(file_row.get("sha256") or ""),
+                        "size_bytes": file_row.get("size_bytes"),
+                    }
+                )
+    ready_slots: list[dict[str, object]] = [
+        {
+            "slot_id": "fixture-corpus-digest",
+            "status": "ready",
+            "evidence_ref": "parser_fixture_corpus.fixture_corpus_digest",
+            "evidence_hash": fixture_digest,
+            "description": "Fixture corpus digest binds parser areas, fixture/test counts, and area manifest hashes.",
+        },
+        {
+            "slot_id": "fixture-release-gate-matrix",
+            "status": "ready",
+            "evidence_ref": "parser_fixture_corpus.fixture_release_gate_matrix_hash",
+            "evidence_hash": str(release_gate_matrix.get("matrix_hash") or ""),
+            "description": "Release gate matrix records whether parser changes have fixture/test coverage.",
+        },
+        {
+            "slot_id": "area-manifest-hashes",
+            "status": "ready",
+            "evidence_ref": "parser_fixture_corpus.areas[].area_manifest_hash",
+            "evidence_hash": hashlib_json({"area_manifest_hashes": area_manifest_hashes}),
+            "description": "Per-area hashes make fixture and test coverage rows individually citable.",
+        },
+        {
+            "slot_id": "fixture-and-test-file-hashes",
+            "status": "ready",
+            "evidence_ref": "parser_fixture_corpus.areas[].fixture_file_manifest/test_file_manifest",
+            "evidence_hash": hashlib_json({"file_hash_rows": file_hash_rows}),
+            "description": "Fixture and regression-test files are represented by path, existence, size, and SHA256 rows.",
+        },
+        {
+            "slot_id": "expected-edge-case-matrix",
+            "status": "ready",
+            "evidence_ref": "parser_fixture_corpus.areas[].expected_edge_cases",
+            "evidence_hash": hashlib_json(
+                {
+                    "edge_cases": [
+                        {
+                            "area_id": str(row.get("id") or ""),
+                            "expected_edge_cases": [str(value) for value in row.get("expected_edge_cases") or []],
+                        }
+                        for row in areas
+                    ]
+                }
+            ),
+            "description": "Expected edge cases describe what each parser fixture family must protect.",
+        },
+        {
+            "slot_id": "coverage-status",
+            "status": "ready",
+            "evidence_ref": "parser_fixture_corpus.coverage_status",
+            "evidence_hash": hashlib_json(
+                {
+                    "parser_area_count": len(areas),
+                    "fixture_backed_count": fixture_backed_count,
+                    "fixture_file_hash_count": fixture_file_hash_count,
+                    "test_file_hash_count": test_file_hash_count,
+                }
+            ),
+            "description": "Coverage status summarizes fixture-backed parser areas and file-hash coverage.",
+        },
+    ]
+    blocking_slots: list[dict[str, object]] = [
+        {
+            "slot_id": "trusted-fixture-corpus-manifest-diff",
+            "status": "blocked",
+            "blocker": FIXTURE_CORPUS_TRUSTED_DIFF_BLOCKER_82
+            if not trusted_diff or trusted_diff.get("status") != "pass"
+            else "trusted-fixture-diff-present-but-commercial-retest-required",
+            "required_evidence": "trusted fixture corpus manifest diff covering area hashes, release-gate rows, and fixture/test file hashes",
+        },
+        {
+            "slot_id": "malformed-deleted-native-versioned-fixtures",
+            "status": "blocked",
+            "blocker": "malformed-deleted-native-versioned-fixture-corpus-required",
+            "required_evidence": "malformed, deleted, native binary, and versioned fixture corpus for each report-grade parser family",
+        },
+        {
+            "slot_id": "parser-version-compatibility-matrix",
+            "status": "blocked",
+            "blocker": "parser-version-fixture-matrix-required",
+            "required_evidence": "parser-version and app/OS-version matrix showing which fixture set validates each supported format",
+        },
+        {
+            "slot_id": "release-blocking-fixture-policy",
+            "status": "blocked",
+            "blocker": "release-blocking-fixture-policy-required",
+            "required_evidence": "CI/release policy proving parser semantic changes fail without matching fixture/test updates",
+        },
+        {
+            "slot_id": "coverage-threshold-signoff",
+            "status": "blocked",
+            "blocker": "fixture-coverage-threshold-signoff-required",
+            "required_evidence": "forensic lead signoff for minimum fixture coverage and accepted unsupported structures",
+        },
+        {
+            "slot_id": "broad-platform-fixture-corpus",
+            "status": "blocked",
+            "blocker": "broad-platform-fixture-corpus-required",
+            "required_evidence": "Windows, macOS, Linux, mobile, cloud, email, media, memory, and OCR corpus coverage for report-grade claims",
+        },
+    ]
+    plan_core = {
+        "profile_version": FIXTURE_CORPUS_REPORT_GRADE_VALIDATION_PLAN_VERSION,
+        "item_number": 82,
+        "gap_id": PARSER_FIXTURE_CORPUS_GAP_ID,
+        "commercial_gap_ids": [PARSER_FIXTURE_CORPUS_GAP_ID],
+        "fixture_root": str(fixture_root),
+        "fixture_root_hash": hashlib.sha256(str(fixture_root).encode("utf-8", errors="replace")).hexdigest(),
+        "parser_area_count": len(areas),
+        "fixture_backed_count": fixture_backed_count,
+        "fixture_file_hash_count": fixture_file_hash_count,
+        "test_file_hash_count": test_file_hash_count,
+        "expected_edge_case_count": expected_edge_case_count,
+        "fixture_corpus_digest": fixture_digest,
+        "fixture_release_gate_matrix_hash": str(release_gate_matrix.get("matrix_hash") or ""),
+        "trusted_diff_status": str((trusted_diff or {}).get("status") or "missing"),
+        "ready_slots": ready_slots,
+        "blocking_slots": blocking_slots,
+        "ready_slot_count": len(ready_slots),
+        "blocking_slot_count": len(blocking_slots),
+        "blockers": [str(slot.get("blocker") or "") for slot in blocking_slots if slot.get("blocker")],
+        "commercial_claim_allowed": False,
+        "ready_for_court_report": False,
+        "report_use_warning": "Use as internal #82 fixture-corpus control evidence only; do not claim report-grade parser validation until blocking slots are satisfied.",
+    }
+    return {**plan_core, "validation_plan_hash": hashlib_json(plan_core)}
 
 
 def fixture_corpus_file_manifest(root: Path, relative_paths: Sequence[str]) -> list[dict[str, object]]:

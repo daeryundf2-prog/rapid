@@ -22,8 +22,8 @@
       "status": "pass",
       "backlog_items": [82],
       "evidence_paths": ["docs/validation/core-forensics-081-090-fixture-evidence.json", "tests/test_rapidtriage_ops.py"],
-      "expected": {"required_assertions": ["Parser fixture corpus output preserves parser areas, fixture/test counts, fixture/test file SHA256 values, area manifest hashes, fixture_corpus_digest, expected edge cases, coverage status, release gate, trusted fixture corpus manifest diff helpers/gates, and #82 core_accuracy_gates."]},
-      "notes": "Internal fixture pass; broader malformed/deleted/versioned corpus and trusted fixture corpus manifests remain blockers."
+      "expected": {"required_assertions": ["Parser fixture corpus output preserves parser areas, fixture/test counts, fixture/test file SHA256 values, area manifest hashes, fixture_corpus_digest, fixture-corpus-report-grade-validation-plan-v1 ready/blocking slots, expected edge cases, coverage status, release gate, trusted fixture corpus manifest diff helpers/gates, and #82 core_accuracy_gates."]},
+      "notes": "Internal fixture pass; broader malformed/deleted/native/versioned corpus, parser-version compatibility matrix, release-blocking fixture policy, coverage threshold signoff, broad platform fixture corpus, and trusted fixture corpus manifests remain blockers."
     },
     {
       "id": "core-forensics-083-fp-fn-notes",

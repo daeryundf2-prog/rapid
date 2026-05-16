@@ -1310,6 +1310,8 @@ CORE_FORENSIC_ACCURACY_ITEMS: tuple[dict[str, object], ...] = (
             "coverage status summarized",
             "release gate for parser changes recorded",
             "trusted fixture corpus manifest diff pass",
+            "fixture corpus report-grade validation plan emitted",
+            "fixture corpus report-grade ready slots emitted",
         ),
     },
     {
