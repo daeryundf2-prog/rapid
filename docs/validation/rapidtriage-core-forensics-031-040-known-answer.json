@@ -84,6 +84,7 @@
         "required_assertions": [
           "Signal rows preserve service/profile, thread/message inventory, SQLCipher authority gates, attachment/deleted warnings, and #34 core_accuracy_gates",
           "Signal rows emit signal_parser_manifest with export/SQLCipher track, row citation, source viewer locator, thread/recipient/attachment review state, and key/deleted/disappearing blocker evidence",
+          "Signal rows emit signal-report-grade-validation-plan-v1 with source export/SQLCipher integrity, source row citation, thread/recipient/message/attachment normalization, Signal database/SQLCipher inventory boundary, SQLCipher strategy classification, hash-only text policy, source viewer locator, trusted Signal export/native DB diff, SQLCipher key authority workflow, recipient/thread schema corpus, attachment locality validation, deleted/disappearing message semantics, delivery/read-state semantics, and independent review evidence slots",
           "Signal trusted diff helper requires authorized export or validated SQLCipher row equality before satisfying the #34 trusted Signal export/native DB diff pass gate",
           "Signal reportability decisions block SQLCipher-complete claims until key handling, encrypted backup, attachment, and deleted-row validation exists"
         ]

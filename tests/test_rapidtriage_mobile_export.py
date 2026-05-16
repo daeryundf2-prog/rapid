@@ -945,6 +945,8 @@ class RapidTriageMobileExportTests(unittest.TestCase):
             self.assertIn("Signal parser manifest", signal_gate["satisfied_checks"])
             self.assertIn("Signal source row citation", signal_gate["satisfied_checks"])
             self.assertIn("Signal review viewer controls", signal_gate["satisfied_checks"])
+            self.assertIn("Signal report-grade validation plan", signal_gate["satisfied_checks"])
+            self.assertIn("Signal validation ready slots", signal_gate["satisfied_checks"])
             self.assertIn("SQLCipher/key authority gate", signal_gate["satisfied_checks"])
             self.assertEqual(
                 signal["details"]["chat_app_strategy_profile"]["selected_track"],
@@ -976,6 +978,73 @@ class RapidTriageMobileExportTests(unittest.TestCase):
                 signal["details"]["signal_parser_manifest_hash"],
                 signal_parser_manifest["manifest_sha256"],
             )
+            signal_validation_plan = signal["details"]["signal_report_grade_validation_plan"]
+            self.assertEqual(
+                signal_validation_plan["profile_version"],
+                "signal-report-grade-validation-plan-v1",
+            )
+            self.assertEqual(signal_validation_plan["item_number"], 34)
+            self.assertEqual(signal_validation_plan["gap_id"], "#34")
+            self.assertEqual(signal_validation_plan["status"], "report-validation-blocked")
+            self.assertFalse(signal_validation_plan["commercial_grade"])
+            self.assertEqual(len(signal_validation_plan["manifest_sha256"]), 64)
+            self.assertEqual(
+                signal["details"]["signal_report_grade_validation_plan_hash"],
+                signal_validation_plan["manifest_sha256"],
+            )
+            self.assertEqual(
+                {command["id"] for command in signal_validation_plan["validation_commands"]},
+                {
+                    "source-signal-export-sqlcipher-manifest",
+                    "signal-export-import",
+                    "trusted-signal-diff",
+                    "signal-sqlcipher-authority-review",
+                    "signal-known-answer-run",
+                },
+            )
+            signal_validation_slots = {slot["id"]: slot for slot in signal_validation_plan["evidence_slots"]}
+            self.assertEqual(
+                signal_validation_slots["source-export-sqlcipher-row-integrity"]["status"],
+                "complete",
+            )
+            self.assertEqual(
+                signal_validation_slots["service-profile-row-citation"]["status"],
+                "complete",
+            )
+            self.assertEqual(
+                signal_validation_slots["thread-recipient-message-attachment-normalization"]["status"],
+                "complete",
+            )
+            self.assertEqual(
+                signal_validation_slots["signal-database-sqlcipher-inventory-boundary"]["status"],
+                "not-applicable",
+            )
+            self.assertEqual(
+                signal_validation_slots["sqlcipher-strategy-classification"]["status"],
+                "complete",
+            )
+            self.assertEqual(
+                signal_validation_slots["hash-only-text-policy"]["status"],
+                "complete",
+            )
+            self.assertEqual(
+                signal_validation_slots["source-viewer-locator"]["status"],
+                "complete",
+            )
+            self.assertEqual(
+                signal_validation_slots["trusted-signal-export-native-db-diff"]["status"],
+                "pending-cross-tool-validate",
+            )
+            self.assertTrue(signal_validation_slots["sqlcipher-key-authority-workflow"]["blocking"])
+            self.assertTrue(
+                signal_validation_slots["deleted-disappearing-message-semantics"]["blocking"]
+            )
+            self.assertEqual(signal_validation_plan["ready_slot_count"], 6)
+            self.assertEqual(signal_validation_plan["blocking_slot_count"], 7)
+            self.assertIn(
+                "sqlcipher-key-authority-workflow-required",
+                signal_validation_plan["commercial_grade_blockers"],
+            )
             self.assertEqual(signal["details"]["chat_app_commercial_uplift_evidence"]["item_numbers"], [34])
             self.assertEqual(
                 signal["details"]["chat_app_commercial_uplift_evidence"]["qc_prep_item_numbers"],
@@ -986,6 +1055,24 @@ class RapidTriageMobileExportTests(unittest.TestCase):
                     "signal_parser_manifest_hash"
                 ],
                 signal_parser_manifest["manifest_sha256"],
+            )
+            self.assertEqual(
+                signal["details"]["chat_app_commercial_uplift_evidence"]["large_data_controls"][
+                    "signal_report_grade_validation_plan_hash"
+                ],
+                signal_validation_plan["manifest_sha256"],
+            )
+            self.assertEqual(
+                signal["details"]["chat_app_commercial_uplift_evidence"]["large_data_controls"][
+                    "signal_report_grade_validation_ready_slot_count"
+                ],
+                6,
+            )
+            self.assertEqual(
+                signal["details"]["chat_app_commercial_uplift_evidence"]["large_data_controls"][
+                    "signal_report_grade_validation_blocking_slot_count"
+                ],
+                7,
             )
             self.assertTrue(
                 signal["details"]["chat_app_commercial_uplift_evidence"]["large_data_controls"][
@@ -1003,8 +1090,20 @@ class RapidTriageMobileExportTests(unittest.TestCase):
                 ]["signal_parser_manifest_hash"],
                 signal_parser_manifest["manifest_sha256"],
             )
+            self.assertEqual(
+                signal["details"]["chat_app_commercial_uplift_evidence"]["functional_priority_profile"][
+                    "implemented_controls"
+                ]["signal_report_grade_validation_plan_hash"],
+                signal_validation_plan["manifest_sha256"],
+            )
             self.assertIn(
                 "signal-parser-manifest-emitted",
+                signal["details"]["chat_app_commercial_uplift_evidence"]["functional_priority_profile"][
+                    "passed_validation_check_ids"
+                ],
+            )
+            self.assertIn(
+                "signal-report-grade-validation-plan-emitted",
                 signal["details"]["chat_app_commercial_uplift_evidence"]["functional_priority_profile"][
                     "passed_validation_check_ids"
                 ],

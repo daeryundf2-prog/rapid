@@ -537,6 +537,16 @@ TELEGRAM_REPORT_GRADE_BLOCKERS = [
     "cache-media-locality-validation-required",
     "independent-telegram-review-required",
 ]
+SIGNAL_REPORT_GRADE_VALIDATION_PLAN_VERSION = "signal-report-grade-validation-plan-v1"
+SIGNAL_REPORT_GRADE_BLOCKERS = [
+    "trusted-signal-export-native-db-diff-required",
+    "sqlcipher-key-authority-workflow-required",
+    "recipient-thread-schema-known-answer-required",
+    "attachment-locality-validation-required",
+    "deleted-disappearing-message-semantics-validation-required",
+    "delivery-read-state-semantics-validation-required",
+    "independent-signal-review-required",
+]
 QC_PREP_CHAT_APP_ITEMS = {
     "KakaoTalk": 37,
     "WhatsApp": 38,
@@ -1520,6 +1530,22 @@ def build_record(
             detail_payload.setdefault(
                 "signal_parser_manifest_hash",
                 detail_payload["signal_parser_manifest"]["manifest_sha256"],
+            )
+            detail_payload.setdefault(
+                "signal_report_grade_validation_plan",
+                build_signal_report_grade_validation_plan(
+                    artifact_type=artifact_type,
+                    source_tool=source_tool,
+                    source_format=source_format,
+                    source_index=source_index,
+                    source_hashes=source_hashes,
+                    source_path=path,
+                    details=detail_payload,
+                ),
+            )
+            detail_payload.setdefault(
+                "signal_report_grade_validation_plan_hash",
+                detail_payload["signal_report_grade_validation_plan"]["manifest_sha256"],
             )
         if chat_app_gap_ids(service) == ["#35"]:
             detail_payload.setdefault(
@@ -4193,6 +4219,255 @@ def build_signal_parser_manifest(
         {key: value for key, value in manifest.items() if key != "manifest_sha256"}
     )
     return manifest
+
+
+def build_signal_report_grade_validation_plan(
+    *,
+    artifact_type: str,
+    source_tool: str,
+    source_format: str,
+    source_index: int,
+    source_hashes: Mapping[str, str],
+    source_path: Path,
+    details: Mapping[str, object],
+) -> dict[str, object]:
+    parser_manifest = (
+        details.get("signal_parser_manifest")
+        if isinstance(details.get("signal_parser_manifest"), Mapping)
+        else {}
+    )
+    messenger_manifest = (
+        details.get("messenger_export_framework_manifest")
+        if isinstance(details.get("messenger_export_framework_manifest"), Mapping)
+        else {}
+    )
+    message_profile = (
+        details.get("signal_message_review_profile")
+        if isinstance(details.get("signal_message_review_profile"), Mapping)
+        else {}
+    )
+    database_profile = (
+        details.get("signal_database_review_profile")
+        if isinstance(details.get("signal_database_review_profile"), Mapping)
+        else {}
+    )
+    row_citation = (
+        parser_manifest.get("row_citation")
+        if isinstance(parser_manifest.get("row_citation"), Mapping)
+        else {}
+    )
+    source_locator = (
+        row_citation.get("source_viewer_locator")
+        if isinstance(row_citation.get("source_viewer_locator"), Mapping)
+        else {}
+    )
+    table_summaries = details.get("table_summaries") if isinstance(details.get("table_summaries"), list) else []
+    source_sha256 = optional_text(source_hashes.get("sha256"))
+    message_hash_present = bool(optional_text(details.get("message_text_sha256")))
+    thread_recipient_or_attachment_present = bool(
+        message_profile.get("thread_or_recipient_attribution_present")
+        or message_profile.get("thread_id_present")
+        or message_profile.get("recipient_id_present")
+        or message_profile.get("attachment_metadata_present")
+        or optional_text(details.get("conversation_id"))
+        or optional_text(details.get("sender"))
+        or optional_text(details.get("media_reference_sha256"))
+    )
+    database_inventory_present = bool(database_profile) or bool(table_summaries)
+    parser_track_present = bool(parser_manifest.get("parser_tracks"))
+    evidence_slots = [
+        {
+            "id": "source-export-sqlcipher-row-integrity",
+            "label": "Source Signal export or SQLCipher inventory row has hashable provenance",
+            "status": "complete" if source_sha256 else "missing-source-hash",
+            "blocking": not bool(source_sha256),
+            "evidence_refs": [
+                f"source_tool:{source_tool}",
+                f"source_format:{source_format}",
+                f"source_index:{source_index}",
+                f"source_sha256:{source_sha256}",
+            ],
+        },
+        {
+            "id": "service-profile-row-citation",
+            "label": "Signal service profile and source row citation are fixed",
+            "status": "complete" if row_citation.get("row_hash") else "missing-row-citation",
+            "blocking": not bool(row_citation.get("row_hash")),
+            "evidence_refs": [
+                f"signal_parser_manifest:{parser_manifest.get('manifest_sha256', '')}",
+                f"row_hash:{row_citation.get('row_hash', '')}",
+            ],
+        },
+        {
+            "id": "thread-recipient-message-attachment-normalization",
+            "label": "Thread, recipient, message, and attachment pivots are normalized without SQLCipher completeness claims",
+            "status": "complete"
+            if artifact_type == "mobile-message" and (message_hash_present or thread_recipient_or_attachment_present)
+            else "not-applicable",
+            "blocking": artifact_type == "mobile-message"
+            and not (message_hash_present or thread_recipient_or_attachment_present),
+            "evidence_refs": [
+                f"artifact_type:{artifact_type}",
+                f"message_text_sha256_present:{message_hash_present}",
+                f"thread_recipient_or_attachment_present:{thread_recipient_or_attachment_present}",
+            ],
+        },
+        {
+            "id": "signal-database-sqlcipher-inventory-boundary",
+            "label": "Signal SQLite/SQLCipher candidates are inventory-only until key authority evidence is attached",
+            "status": "complete" if artifact_type == "mobile-chat-database" and database_inventory_present else "not-applicable",
+            "blocking": False,
+            "evidence_refs": [
+                f"database_inventory_present:{database_inventory_present}",
+                f"table_summary_count:{len(table_summaries)}",
+            ],
+        },
+        {
+            "id": "sqlcipher-strategy-classification",
+            "label": "Export, SQLCipher inventory, key authority, attachment, and deleted/disappearing validation tracks are recorded",
+            "status": "complete" if parser_track_present else "missing-parser-track",
+            "blocking": not parser_track_present,
+            "evidence_refs": [
+                f"parser_track_count:{len(parser_manifest.get('parser_tracks') or [])}",
+                f"sqlcipher_key_authority_status:{message_profile.get('sqlcipher_key_authority_status') or database_profile.get('sqlcipher_key_authority_status') or 'not-attached'}",
+                f"sqlcipher_decode_status:{message_profile.get('sqlcipher_decode_status') or database_profile.get('sqlcipher_decode_status') or 'not-performed'}",
+            ],
+        },
+        {
+            "id": "hash-only-text-policy",
+            "label": "Message text is represented with hash/citation controls before report selection",
+            "status": "complete"
+            if parser_manifest.get("large_data_controls", {}).get("raw_text_hash_only_by_default")
+            else "missing-hash-only-policy",
+            "blocking": not bool(parser_manifest.get("large_data_controls", {}).get("raw_text_hash_only_by_default")),
+            "evidence_refs": [
+                f"raw_text_hash_only_by_default:{parser_manifest.get('large_data_controls', {}).get('raw_text_hash_only_by_default', False)}",
+                f"message_text_sha256_present:{message_hash_present}",
+            ],
+        },
+        {
+            "id": "source-viewer-locator",
+            "label": "GUI/report can pivot back to the Signal source row or SQLCipher inventory",
+            "status": "complete" if source_locator else "missing-source-viewer-locator",
+            "blocking": not bool(source_locator),
+            "evidence_refs": [
+                f"viewer:{source_locator.get('viewer', '') if isinstance(source_locator, Mapping) else ''}",
+                f"messenger_manifest:{messenger_manifest.get('manifest_sha256', '')}",
+            ],
+        },
+        {
+            "id": "trusted-signal-export-native-db-diff",
+            "label": "RapidTriage Signal rows are diffed against authorized export/native SQLCipher output",
+            "status": "pending-cross-tool-validate",
+            "blocking": True,
+            "evidence_refs": ["command:rapidtriage cross-tool-validate --backlog-item 34"],
+        },
+        {
+            "id": "sqlcipher-key-authority-workflow",
+            "label": "Signal SQLCipher key handling is authority-gated, audited, and secret-safe",
+            "status": "authority-workflow-required",
+            "blocking": True,
+            "evidence_refs": ["required:lawful SQLCipher key authority, no raw key exposure, controlled reveal audit"],
+        },
+        {
+            "id": "recipient-thread-schema-known-answer",
+            "label": "Recipient, thread, group, message, and attachment schema semantics are known-answer validated",
+            "status": "external-corpus-required",
+            "blocking": True,
+            "evidence_refs": ["required:Signal recipient/thread/schema-version corpus"],
+        },
+        {
+            "id": "attachment-locality-validation",
+            "label": "Attachment metadata is linked to recovered local bytes and hashes before media claims",
+            "status": "external-media-validation-required",
+            "blocking": True,
+            "evidence_refs": ["required:Signal attachment byte and locality validation"],
+        },
+        {
+            "id": "deleted-disappearing-message-semantics",
+            "label": "Deleted rows, disappearing timers, quote links, and ephemeral semantics are validated",
+            "status": "external-corpus-required",
+            "blocking": True,
+            "evidence_refs": ["required:deleted/disappearing/quote known-answer corpus"],
+        },
+        {
+            "id": "delivery-read-state-semantics",
+            "label": "Delivery, read, receipt, and device-sync status semantics are validated",
+            "status": "external-corpus-required",
+            "blocking": True,
+            "evidence_refs": ["required:Signal delivery/read receipt known-answer corpus"],
+        },
+        {
+            "id": "independent-signal-review",
+            "label": "Independent reviewer signs off on Signal scope, SQLCipher/key limits, schema version, and report wording",
+            "status": "external-review-required",
+            "blocking": True,
+            "evidence_refs": ["required:independent Signal validation review"],
+        },
+    ]
+    ready_slot_ids = [
+        str(slot.get("id"))
+        for slot in evidence_slots
+        if str(slot.get("status", "")).startswith("complete")
+    ]
+    blocking_slot_ids = [str(slot.get("id")) for slot in evidence_slots if slot.get("blocking")]
+    plan: dict[str, object] = {
+        "profile_version": SIGNAL_REPORT_GRADE_VALIDATION_PLAN_VERSION,
+        "item_number": 34,
+        "gap_id": "#34",
+        "status": "report-validation-blocked",
+        "commercial_grade": False,
+        "artifact_goal": "Signal authorized export/SQLCipher message, recipient, thread, attachment, key authority, and deleted-state validation",
+        "artifact_type": artifact_type,
+        "service": "Signal",
+        "source_tool": source_tool,
+        "source_format": source_format,
+        "source_index": source_index,
+        "source_path": str(source_path.resolve()),
+        "source_sha256": source_sha256,
+        "source_record_id": source_record_id(details, source_index),
+        "app_version": optional_text(details.get("app_version")),
+        "schema_version": optional_text(details.get("schema_version")),
+        "database_name": optional_text(details.get("database_name")),
+        "validation_commands": [
+            {
+                "id": "source-signal-export-sqlcipher-manifest",
+                "purpose": "Freeze source export/SQLCipher inventory hashes and acquisition metadata",
+                "command": "rapidtriage manifest <signal-export-or-store-folder> --output <case>/signal-source-manifest.json",
+            },
+            {
+                "id": "signal-export-import",
+                "purpose": "Recreate RapidTriage Signal normalized rows and SQLCipher inventory",
+                "command": "rapidtriage artifacts <mobile-export> --kind mobile-export --output <case>/signal-mobile-export.json",
+            },
+            {
+                "id": "trusted-signal-diff",
+                "purpose": "Compare Signal message/inventory rows with authorized export or validated SQLCipher parser output",
+                "command": "rapidtriage cross-tool-validate --rapid-output <case>/signal-mobile-export.json --reference-output signal=<trusted-signal-output.json> --backlog-item 34 --json",
+            },
+            {
+                "id": "signal-sqlcipher-authority-review",
+                "purpose": "Attach lawful key provenance and controlled-reveal audit evidence before SQLCipher content claims",
+                "command": "rapidtriage forensic-validation-pack --case <case> --artifact signal-sqlcipher-authority --json",
+            },
+            {
+                "id": "signal-known-answer-run",
+                "purpose": "Attach schema, recipient/thread, attachment, delivery/read, deleted/disappearing known-answer evidence",
+                "command": "rapidtriage commercial-readiness --validation-package <signal-known-answer.json> --limit 34 --json",
+            },
+        ],
+        "evidence_slots": evidence_slots,
+        "ready_slot_ids": ready_slot_ids,
+        "blocking_slot_ids": blocking_slot_ids,
+        "ready_slot_count": len(ready_slot_ids),
+        "blocking_slot_count": len(blocking_slot_ids),
+        "commercial_grade_blockers": list(SIGNAL_REPORT_GRADE_BLOCKERS),
+        "report_guidance": "Use Signal rows as authorized export/SQLCipher-inventory triage until trusted diff, lawful key authority, schema/recipient corpus, attachment byte proof, deleted/disappearing validation, delivery/read semantics, and independent review are attached.",
+    }
+    plan["manifest_sha256"] = stable_mobile_sha256(
+        {key: value for key, value in plan.items() if key != "manifest_sha256"}
+    )
+    return plan
 
 
 def classify_signal_attachment(media_reference: str, attachment_name: str) -> str:
@@ -8449,6 +8724,11 @@ def chat_app_core_accuracy_gates(
         manifest_hash = optional_text(signal_manifest.get("manifest_sha256"))
         if manifest_hash:
             evidence_refs.append(f"signal_parser_manifest_sha256:{manifest_hash}")
+    signal_validation_plan = details.get("signal_report_grade_validation_plan")
+    if isinstance(signal_validation_plan, Mapping):
+        validation_plan_hash = optional_text(signal_validation_plan.get("manifest_sha256"))
+        if validation_plan_hash:
+            evidence_refs.append(f"signal_report_grade_validation_plan_sha256:{validation_plan_hash}")
     extended_messenger_manifest = details.get("extended_messenger_parser_manifest")
     if isinstance(extended_messenger_manifest, Mapping):
         manifest_hash = optional_text(extended_messenger_manifest.get("manifest_sha256"))
@@ -8588,6 +8868,10 @@ def chat_app_core_accuracy_gates(
                     satisfied.append("Signal source row citation")
                 if details.get("signal_parser_manifest", {}).get("large_data_controls", {}).get("viewer_default"):
                     satisfied.append("Signal review viewer controls")
+            if isinstance(signal_validation_plan, Mapping):
+                satisfied.append("Signal report-grade validation plan")
+                if int(signal_validation_plan.get("ready_slot_count") or 0) >= 6:
+                    satisfied.append("Signal validation ready slots")
             if details.get("commercial_grade_blockers") or not validation.get("decryption_attempted", True):
                 satisfied.append("SQLCipher/key authority gate")
             if details.get("commercial_grade_blockers"):
@@ -9400,6 +9684,11 @@ def chat_app_commercial_uplift_evidence(
         if isinstance(details.get("signal_parser_manifest"), Mapping)
         else {}
     )
+    signal_validation_plan = (
+        details.get("signal_report_grade_validation_plan")
+        if isinstance(details.get("signal_report_grade_validation_plan"), Mapping)
+        else {}
+    )
     extended_messenger_manifest = (
         details.get("extended_messenger_parser_manifest")
         if isinstance(details.get("extended_messenger_parser_manifest"), Mapping)
@@ -9413,6 +9702,7 @@ def chat_app_commercial_uplift_evidence(
     telegram_manifest_hash = optional_text(telegram_manifest.get("manifest_sha256"))
     telegram_validation_plan_hash = optional_text(telegram_validation_plan.get("manifest_sha256"))
     signal_manifest_hash = optional_text(signal_manifest.get("manifest_sha256"))
+    signal_validation_plan_hash = optional_text(signal_validation_plan.get("manifest_sha256"))
     extended_messenger_manifest_hash = optional_text(extended_messenger_manifest.get("manifest_sha256"))
     if manifest_hash:
         source_refs.append(f"messenger_manifest_sha256:{manifest_hash}")
@@ -9430,6 +9720,8 @@ def chat_app_commercial_uplift_evidence(
         source_refs.append(f"telegram_report_grade_validation_plan_sha256:{telegram_validation_plan_hash}")
     if signal_manifest_hash:
         source_refs.append(f"signal_parser_manifest_sha256:{signal_manifest_hash}")
+    if signal_validation_plan_hash:
+        source_refs.append(f"signal_report_grade_validation_plan_sha256:{signal_validation_plan_hash}")
     if extended_messenger_manifest_hash:
         source_refs.append(f"extended_messenger_parser_manifest_sha256:{extended_messenger_manifest_hash}")
     return {
@@ -9525,6 +9817,13 @@ def chat_app_commercial_uplift_evidence(
                 and telegram_manifest.get("large_data_controls", {}).get("viewer_default")
             ),
             "signal_parser_manifest_hash": signal_manifest_hash,
+            "signal_report_grade_validation_plan_hash": signal_validation_plan_hash,
+            "signal_report_grade_validation_ready_slot_count": int(
+                signal_validation_plan.get("ready_slot_count") or 0
+            ),
+            "signal_report_grade_validation_blocking_slot_count": int(
+                signal_validation_plan.get("blocking_slot_count") or 0
+            ),
             "signal_source_row_citation_present": bool(
                 isinstance(signal_manifest.get("row_citation"), Mapping)
                 and signal_manifest.get("row_citation", {}).get("row_hash")
@@ -9616,6 +9915,11 @@ def messenger_export_functional_profile(
         if isinstance(details.get("signal_parser_manifest"), Mapping)
         else {}
     )
+    signal_validation_plan = (
+        details.get("signal_report_grade_validation_plan")
+        if isinstance(details.get("signal_report_grade_validation_plan"), Mapping)
+        else {}
+    )
     extended_messenger_manifest = (
         details.get("extended_messenger_parser_manifest")
         if isinstance(details.get("extended_messenger_parser_manifest"), Mapping)
@@ -9646,6 +9950,8 @@ def messenger_export_functional_profile(
         failed_checks.append("telegram-report-grade-validation-plan-not-emitted")
     if service == "Signal" and not signal_manifest:
         failed_checks.append("signal-parser-manifest-not-emitted")
+    if service == "Signal" and not signal_validation_plan:
+        failed_checks.append("signal-report-grade-validation-plan-not-emitted")
     if chat_app_gap_ids(service) == ["#35"] and not extended_messenger_manifest:
         failed_checks.append("extended-messenger-parser-manifest-not-emitted")
     row_citation = messenger_manifest.get("row_citation") if isinstance(messenger_manifest, Mapping) else {}
@@ -9687,6 +9993,7 @@ def messenger_export_functional_profile(
     telegram_manifest_hash = optional_text(telegram_manifest.get("manifest_sha256"))
     telegram_validation_plan_hash = optional_text(telegram_validation_plan.get("manifest_sha256"))
     signal_manifest_hash = optional_text(signal_manifest.get("manifest_sha256"))
+    signal_validation_plan_hash = optional_text(signal_validation_plan.get("manifest_sha256"))
     extended_messenger_manifest_hash = optional_text(extended_messenger_manifest.get("manifest_sha256"))
     table_citation_count = int(messenger_manifest.get("table_citation_count") or 0)
     passed_validation_check_ids = [
@@ -9722,6 +10029,8 @@ def messenger_export_functional_profile(
         passed_validation_check_ids.append("telegram-source-locator-emitted")
     if signal_manifest:
         passed_validation_check_ids.append("signal-parser-manifest-emitted")
+    if signal_validation_plan:
+        passed_validation_check_ids.append("signal-report-grade-validation-plan-emitted")
     if isinstance(signal_row_citation, Mapping) and signal_row_citation.get("source_viewer_locator"):
         passed_validation_check_ids.append("signal-source-locator-emitted")
     if extended_messenger_manifest:
@@ -9769,6 +10078,7 @@ def messenger_export_functional_profile(
                 isinstance(telegram_row_citation, Mapping) and telegram_row_citation.get("row_hash")
             ),
             "signal_parser_manifest_hash": signal_manifest_hash,
+            "signal_report_grade_validation_plan_hash": signal_validation_plan_hash,
             "signal_row_citation_present": bool(
                 isinstance(signal_row_citation, Mapping) and signal_row_citation.get("row_hash")
             ),

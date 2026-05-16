@@ -904,7 +904,8 @@
       ],
       "expected": {
         "required_assertions": [
-          "Signal rows preserve service/profile, thread/message inventory, SQLCipher authority gates, attachment/deleted warnings, and #34 core_accuracy_gates"
+          "Signal rows preserve service/profile, thread/message inventory, SQLCipher authority gates, attachment/deleted warnings, and #34 core_accuracy_gates",
+          "Signal rows emit signal-report-grade-validation-plan-v1 with source export/SQLCipher integrity, source row citation, thread/recipient/message/attachment normalization, Signal database/SQLCipher inventory boundary, SQLCipher strategy classification, hash-only text policy, source viewer locator, trusted Signal export/native DB diff, SQLCipher key authority workflow, recipient/thread schema corpus, attachment locality validation, deleted/disappearing message semantics, delivery/read-state semantics, and independent review evidence slots"
         ]
       },
       "notes": "Internal fixture pass; SQLCipher/key handling remains a separate validated module.",
