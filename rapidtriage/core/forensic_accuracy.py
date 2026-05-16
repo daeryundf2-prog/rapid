@@ -1942,6 +1942,8 @@ CORE_FORENSIC_ACCURACY_ITEMS: tuple[dict[str, object], ...] = (
             "admin curriculum documented",
             "validation exercise documented",
             "training delivery blocker disclosed",
+            "training delivery report-grade validation plan",
+            "training delivery report-grade ready slots",
             "trusted training delivery diff pass",
         ),
     },

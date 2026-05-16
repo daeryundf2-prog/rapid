@@ -2647,10 +2647,10 @@
       ],
       "expected": {
         "required_assertions": [
-          "Release package preserves training curriculum, analyst/admin curriculum, validation exercise, delivery blocker, and #115 core_accuracy_gates."
+          "Release package preserves training curriculum, analyst/admin curriculum, validation exercise, training-delivery-evidence-manifest-v1 manifest hash/evidence slots, training-delivery-report-grade-validation-plan-v1 hash/ready/blocking slots, delivery blocker, trusted training-delivery diff helpers/gates, and #115 core_accuracy_gates."
         ]
       },
-      "notes": "Internal fixture pass; real training delivery remains external.",
+      "notes": "Internal fixture pass; real training delivery, scoring rubric execution, instructor signoff, trainee completion records, lab environment proof, and trusted instructor signoff remain external.",
       "source_manifest": "docs/validation/rapidtriage-core-forensics-101-120-known-answer.json"
     },
     {

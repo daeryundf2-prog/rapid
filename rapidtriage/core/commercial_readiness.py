@@ -3755,6 +3755,7 @@ def operations_continuity_evidence_chain() -> list[dict[str, object]]:
             "primary_outputs": [
                 "docs/rapidtriage-training-curriculum.md",
                 "operations_documents.document_evidence_manifests.115.manifest_hash",
+                "operations_documents.document_report_grade_validation_plan_hashes.115",
                 "operations_documents.document_evidence_slots.115.training_delivery_log",
             ],
             "trusted_diff": "trusted-training-delivery-diff",

@@ -81,6 +81,7 @@ TRAINING_CURRICULUM_GAP_ID = "#115"
 RELEASE_NOTES_REPORT_GRADE_VALIDATION_PLAN_VERSION = "release-notes-report-grade-validation-plan-v1"
 LTS_HOTFIX_REPORT_GRADE_VALIDATION_PLAN_VERSION = "lts-hotfix-report-grade-validation-plan-v1"
 SUPPORT_SLA_REPORT_GRADE_VALIDATION_PLAN_VERSION = "support-sla-report-grade-validation-plan-v1"
+TRAINING_DELIVERY_REPORT_GRADE_VALIDATION_PLAN_VERSION = "training-delivery-report-grade-validation-plan-v1"
 OPERATIONS_DOCUMENT_TRUSTED_DIFF_BLOCKERS = {
     112: "trusted-release-notes-ci-gate-diff-missing",
     113: "trusted-lts-hotfix-policy-diff-missing",
@@ -127,6 +128,17 @@ SUPPORT_SLA_REPORT_GRADE_BLOCKERS = [
     "support-ticket-sample-required",
     "release-host-support-flow-smoke-required",
     "independent-support-sla-review-required",
+]
+TRAINING_DELIVERY_REPORT_GRADE_BLOCKERS = [
+    OPERATIONS_DOCUMENT_TRUSTED_DIFF_BLOCKERS[115],
+    "training-delivery-log-required",
+    "scoring-rubric-results-required",
+    "instructor-signoff-required",
+    "trainee-completion-records-required",
+    "lab-environment-proof-required",
+    "admin-training-delivery-required",
+    "validation-exercise-run-required",
+    "independent-training-review-required",
 ]
 ANALYST_QUICKSTART_LAB_GAP_ID = "#116"
 ADMIN_DEPLOYMENT_GUIDE_GAP_ID = "#117"
@@ -2049,6 +2061,140 @@ def build_support_sla_report_grade_validation_plan(
     return plan
 
 
+def build_training_delivery_report_grade_validation_plan(
+    *,
+    evidence_manifest: dict[str, object],
+    trusted_diff: dict[str, object],
+) -> dict[str, object]:
+    document_hashes = evidence_manifest.get("document_hashes") if isinstance(evidence_manifest.get("document_hashes"), list) else []
+    evidence_slots = evidence_manifest.get("evidence_slots") if isinstance(evidence_manifest.get("evidence_slots"), dict) else {}
+    ready_slots = [
+        {
+            "slot_id": "training-curriculum-document",
+            "status": "ready",
+            "evidence_ref": "docs/rapidtriage-training-curriculum.md",
+            "evidence_hash": stable_release_sha256(document_hashes),
+        },
+        {
+            "slot_id": "training-delivery-evidence-manifest",
+            "status": "ready",
+            "evidence_ref": "release-manifest.package_readiness.operations_documents.document_evidence_manifest_hashes.115",
+            "evidence_hash": str(evidence_manifest.get("manifest_hash") or ""),
+        },
+        {
+            "slot_id": "training-document-evidence-matrix",
+            "status": "ready",
+            "evidence_ref": "release-manifest.package_readiness.operations_documents.document_evidence_matrix_hashes.115",
+            "evidence_hash": str(evidence_manifest.get("document_evidence_matrix_hash") or ""),
+        },
+        {
+            "slot_id": "training-delivery-log-boundary",
+            "status": "ready-with-blocker",
+            "evidence_ref": "release-manifest.package_readiness.operations_documents.document_evidence_slots.115.training_delivery_log",
+            "evidence_hash": stable_release_sha256(evidence_slots.get("training_delivery_log", {})),
+        },
+        {
+            "slot_id": "scoring-rubric-results-boundary",
+            "status": "ready-with-blocker",
+            "evidence_ref": "release-manifest.package_readiness.operations_documents.document_evidence_slots.115.scoring_rubric_results",
+            "evidence_hash": stable_release_sha256(evidence_slots.get("scoring_rubric_results", {})),
+        },
+        {
+            "slot_id": "trusted-training-delivery-diff-boundary",
+            "status": "ready" if trusted_diff.get("status") == "pass" else "ready-with-blocker",
+            "evidence_ref": "release-manifest.package_readiness.operations_documents.trusted_operations_document_diffs.115",
+            "evidence_hash": stable_release_sha256(trusted_diff),
+        },
+    ]
+    blocking_slots = []
+    if trusted_diff.get("status") != "pass":
+        blocking_slots.append(
+            {
+                "slot_id": "trusted-training-delivery-diff",
+                "status": "blocking",
+                "blocker": OPERATIONS_DOCUMENT_TRUSTED_DIFF_BLOCKERS[115],
+                "required_evidence": "trusted training delivery log comparing curriculum, lab execution, rubric results, instructor signoff, and trainee completion records",
+            }
+        )
+    for slot_id, blocker, required_evidence in (
+        (
+            "training-delivery-log",
+            "training-delivery-log-required",
+            "real analyst/admin training delivery log with date, instructor, attendees, curriculum version, and lab version",
+        ),
+        (
+            "scoring-rubric-results",
+            "scoring-rubric-results-required",
+            "completed scoring rubric results for analyst/admin exercises with pass/fail criteria and remediation notes",
+        ),
+        (
+            "instructor-signoff",
+            "instructor-signoff-required",
+            "instructor signoff confirming curriculum coverage, lab completion, limitations explained, and evidence handling warnings",
+        ),
+        (
+            "trainee-completion-records",
+            "trainee-completion-records-required",
+            "trainee completion records or redacted roster tied to the delivered curriculum and lab evidence",
+        ),
+        (
+            "lab-environment-proof",
+            "lab-environment-proof-required",
+            "lab environment proof with sample data hashes, tool version, platform, and reproducible setup notes",
+        ),
+        (
+            "admin-training-delivery",
+            "admin-training-delivery-required",
+            "admin training delivery evidence covering install, updates, backup, logging, policy, and security deployment",
+        ),
+        (
+            "validation-exercise-run",
+            "validation-exercise-run-required",
+            "validation exercise run proving ingest, search, review, report, and export workflow against expected outputs",
+        ),
+        (
+            "independent-training-review",
+            "independent-training-review-required",
+            "independent reviewer confirmation that training claims match delivered labs and validation evidence",
+        ),
+    ):
+        blocking_slots.append(
+            {
+                "slot_id": slot_id,
+                "status": "blocking",
+                "current_attachment_status": "not-attached",
+                "blocker": blocker,
+                "required_evidence": required_evidence,
+            }
+        )
+    blockers = sorted({str(slot["blocker"]) for slot in blocking_slots if slot.get("blocker")})
+    plan: dict[str, object] = {
+        "profile_version": TRAINING_DELIVERY_REPORT_GRADE_VALIDATION_PLAN_VERSION,
+        "item_number": 115,
+        "commercial_gap_ids": [TRAINING_CURRICULUM_GAP_ID],
+        "commercial_claim_allowed": False,
+        "document_count": len(document_hashes),
+        "evidence_slot_count": len(evidence_slots),
+        "training_delivery_evidence_manifest_hash": str(evidence_manifest.get("manifest_hash") or ""),
+        "operations_document_evidence_matrix_hash": str(evidence_manifest.get("document_evidence_matrix_hash") or ""),
+        "trusted_diff_status": str(trusted_diff.get("status") or ""),
+        "trusted_diff_blocker": trusted_diff.get("blocker"),
+        "ready_slots": ready_slots,
+        "blocking_slots": blocking_slots,
+        "ready_slot_count": len(ready_slots),
+        "blocking_slot_count": len(blocking_slots),
+        "external_blocker_catalog": list(TRAINING_DELIVERY_REPORT_GRADE_BLOCKERS),
+        "blockers": blockers,
+        "reporting_boundary": (
+            "The training curriculum is packaged; report-grade training claims require delivered training logs, "
+            "scoring rubric results, instructor signoff, trainee completion records, lab environment proof, "
+            "admin training delivery, validation exercise runs, and independent review."
+        ),
+    }
+    plan["validation_plan_hash"] = stable_release_sha256(plan)
+    return plan
+
+
 def build_operations_document_evidence_matrix(
     *,
     number: int,
@@ -2528,15 +2674,21 @@ def write_release_manifest(output_dir: Path, repo: Path, commercial_readiness: d
         support_process_readiness_manifest=support_process_readiness_manifest,
         trusted_diff=trusted_operations_document_diffs["114"],
     )
+    training_delivery_report_grade_validation_plan = build_training_delivery_report_grade_validation_plan(
+        evidence_manifest=operations_document_evidence_manifests["115"],
+        trusted_diff=trusted_operations_document_diffs["115"],
+    )
     operations_document_report_grade_validation_plans = {
         "112": release_notes_report_grade_validation_plan,
         "113": lts_hotfix_report_grade_validation_plan,
         "114": support_sla_report_grade_validation_plan,
+        "115": training_delivery_report_grade_validation_plan,
     }
     operations_document_report_grade_validation_plan_hashes = {
         "112": release_notes_report_grade_validation_plan["validation_plan_hash"],
         "113": lts_hotfix_report_grade_validation_plan["validation_plan_hash"],
         "114": support_sla_report_grade_validation_plan["validation_plan_hash"],
+        "115": training_delivery_report_grade_validation_plan["validation_plan_hash"],
     }
     operations_documents_blockers = sorted(
         {
@@ -2544,6 +2696,7 @@ def write_release_manifest(output_dir: Path, repo: Path, commercial_readiness: d
             *[str(blocker) for blocker in release_notes_report_grade_validation_plan.get("blockers", [])],
             *[str(blocker) for blocker in lts_hotfix_report_grade_validation_plan.get("blockers", [])],
             *[str(blocker) for blocker in support_sla_report_grade_validation_plan.get("blockers", [])],
+            *[str(blocker) for blocker in training_delivery_report_grade_validation_plan.get("blockers", [])],
         }
     )
     update_manifest_payload: dict[str, object] = {}
@@ -2740,11 +2893,13 @@ def write_release_manifest(output_dir: Path, repo: Path, commercial_readiness: d
                     "112": release_notes_report_grade_validation_plan["ready_slot_count"],
                     "113": lts_hotfix_report_grade_validation_plan["ready_slot_count"],
                     "114": support_sla_report_grade_validation_plan["ready_slot_count"],
+                    "115": training_delivery_report_grade_validation_plan["ready_slot_count"],
                 },
                 "document_report_grade_blocking_slot_counts": {
                     "112": release_notes_report_grade_validation_plan["blocking_slot_count"],
                     "113": lts_hotfix_report_grade_validation_plan["blocking_slot_count"],
                     "114": support_sla_report_grade_validation_plan["blocking_slot_count"],
+                    "115": training_delivery_report_grade_validation_plan["blocking_slot_count"],
                 },
                 "admin_guide_coverage_manifest": admin_guide_coverage_manifest,
                 "admin_guide_coverage_manifest_hash": admin_guide_coverage_manifest["manifest_hash"],
@@ -3396,6 +3551,10 @@ def operations_documents_core_accuracy_gates(
         114: (
             "support SLA report-grade validation plan",
             "support SLA report-grade ready slots",
+        ),
+        115: (
+            "training delivery report-grade validation plan",
+            "training delivery report-grade ready slots",
         ),
     }
     gates = []
