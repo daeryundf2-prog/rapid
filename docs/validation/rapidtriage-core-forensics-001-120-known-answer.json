@@ -1267,7 +1267,7 @@
       ],
       "expected": {
         "required_assertions": [
-          "Review marks preserve status, verification, assignment, priority, report inclusion, history/audit warnings, and #51 core_accuracy_gates."
+          "Review marks preserve status, verification, assignment, priority, report inclusion, history/audit warnings, review_workflow_report_grade_validation_plan ready/blocking slots, and #51 core_accuracy_gates."
         ]
       },
       "notes": "Internal fixture pass; role-based multi-user review remains commercial blocker.",

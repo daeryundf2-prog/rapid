@@ -11,7 +11,7 @@
       "status": "pass",
       "backlog_items": [51],
       "evidence_paths": ["docs/validation/core-forensics-051-060-fixture-evidence.json", "tests/test_rapidtriage_case_db.py", "tests/test_rapidtriage_api.py"],
-      "expected": {"required_assertions": ["Review marks preserve status, verification, assignment, priority, report inclusion, history/audit warnings, source-viewer locators, queue row hashes, assignment manifest hashes, trusted reviewer workflow audit diff gates, and #51 core_accuracy_gates.", "Reviewer workflow reportability decisions block role-based case-management claims until multi-user RBAC, conflict handling, notifications, signed reviewer SOP, and trusted audit diff evidence exists."]},
+      "expected": {"required_assertions": ["Review marks preserve status, verification, assignment, priority, report inclusion, history/audit warnings, source-viewer locators, queue row hashes, assignment manifest hashes, review_workflow_report_grade_validation_plan ready/blocking slots, trusted reviewer workflow audit diff gates, and #51 core_accuracy_gates.", "Reviewer workflow reportability decisions block role-based case-management claims until multi-user RBAC, conflict handling, notifications, signed reviewer SOP, and trusted audit diff evidence exists."]},
       "notes": "Internal fixture pass; role-based multi-user review remains commercial blocker."
     },
     {

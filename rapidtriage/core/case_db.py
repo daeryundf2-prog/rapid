@@ -72,6 +72,15 @@ ACQUISITION_QUALITY_TRUSTED_TOOLS = {
     "contamination-checklist",
 }
 REVIEW_WORKFLOW_TRUSTED_DIFF_BLOCKER = "review-workflow-trusted-audit-diff-required"
+REVIEW_WORKFLOW_REPORT_GRADE_VALIDATION_PLAN_VERSION = "case-review-workflow-report-grade-validation-plan-v1"
+REVIEW_WORKFLOW_REPORT_GRADE_BLOCKERS = [
+    "role-based-assignment-queue-required",
+    "notification-workflow-required",
+    "multi-user-conflict-resolution-required",
+    "sla-dashboard-required",
+    "reviewer-sop-signoff-required",
+    REVIEW_WORKFLOW_TRUSTED_DIFF_BLOCKER,
+]
 CASE_DB_SEARCH_SCAN_ROW_LIMIT = 100_000
 CASE_DB_SEARCH_SCAN_OVERSAMPLE = 100
 CASE_DB_SEARCH_MIN_SCAN_ROWS = 10_000
@@ -10114,6 +10123,20 @@ def review_workflow_assessment(
     trusted_diff = trusted_diff if isinstance(trusted_diff, Mapping) else {}
     if trusted_diff.get("status") == "pass":
         satisfied.append("trusted reviewer workflow audit diff pass")
+    validation_plan = build_review_workflow_report_grade_validation_plan(
+        context="review-mark",
+        assignment_present=bool(assignee),
+        priority=priority,
+        due_at=due_at,
+        review_queue_count=1,
+        source_viewer_locator_count=1,
+        audit_history_linked=True,
+        review_assignment_manifest_hash="",
+        trusted_diff=trusted_diff,
+    )
+    satisfied.append("review workflow report-grade validation plan")
+    if int(validation_plan.get("ready_slot_count") or 0) >= 6:
+        satisfied.append("review workflow report-grade ready slots")
     blockers = [
         "local-single-database-review-workflow-until-role-based-server-is-enabled",
         "review-status-does-not-replace-source-verification-and-parser-validation",
@@ -10130,6 +10153,7 @@ def review_workflow_assessment(
                 "case_db:review_mark",
                 "case_db:review_mark_history",
                 f"trusted_diff_status:{trusted_diff.get('status', 'missing')}",
+                f"review_workflow_report_grade_validation_plan_sha256:{validation_plan['validation_plan_sha256']}",
             ],
         )
     ]
@@ -10146,6 +10170,8 @@ def review_workflow_assessment(
             "blocker_id": REVIEW_WORKFLOW_TRUSTED_DIFF_BLOCKER,
             "required_tools": sorted(REVIEW_WORKFLOW_TRUSTED_TOOLS),
         },
+        "review_workflow_report_grade_validation_plan": validation_plan,
+        "review_workflow_report_grade_validation_plan_hash": validation_plan["validation_plan_sha256"],
         "commercial_uplift_evidence": {
             "batch_id": "commercial-uplift-051-055",
             "item_numbers": [51],
@@ -10156,6 +10182,7 @@ def review_workflow_assessment(
                 f"due_at:{due_at}",
                 "case_db:review_mark",
                 "case_db:review_mark_history",
+                f"review_workflow_report_grade_validation_plan_sha256:{validation_plan['validation_plan_sha256']}",
             ],
             "reportability_decision": {
                 "profile_version": "case-review-workflow-reportability-decision-v1",
@@ -10170,6 +10197,12 @@ def review_workflow_assessment(
                     *([] if trusted_diff.get("status") == "pass" else [REVIEW_WORKFLOW_TRUSTED_DIFF_BLOCKER]),
                 ],
                 "ready_for_court_report": False,
+                "review_workflow_report_grade_validation_plan_present": True,
+                "review_workflow_report_grade_validation_plan_hash": validation_plan["validation_plan_sha256"],
+                "review_workflow_report_grade_ready_slot_count": int(validation_plan.get("ready_slot_count") or 0),
+                "review_workflow_report_grade_blocking_slot_count": int(
+                    validation_plan.get("blocking_slot_count") or 0
+                ),
                 "required_before_report": [
                     "enable role-based multi-user queues, conflict handling, notifications, and signed reviewer SOPs",
                     "verify source hashes, parser limitations, and immutable history before report inclusion",
@@ -10190,6 +10223,12 @@ def review_workflow_assessment(
                 "priority_normalized": bool(priority),
                 "due_date_recorded": bool(due_at),
                 "audit_history_linked": True,
+                "review_workflow_report_grade_validation_plan_present": True,
+                "review_workflow_report_grade_validation_plan_hash": validation_plan["validation_plan_sha256"],
+                "review_workflow_report_grade_ready_slot_count": int(validation_plan.get("ready_slot_count") or 0),
+                "review_workflow_report_grade_blocking_slot_count": int(
+                    validation_plan.get("blocking_slot_count") or 0
+                ),
                 "role_based_case_server": False,
             },
             "reporting_status": "implemented-baseline-validation-required",
@@ -10208,6 +10247,172 @@ def review_workflow_assessment(
             "history",
         ],
     }
+
+
+def build_review_workflow_report_grade_validation_plan(
+    *,
+    context: str,
+    assignment_present: bool,
+    priority: str,
+    due_at: str,
+    review_queue_count: int,
+    source_viewer_locator_count: int,
+    audit_history_linked: bool,
+    review_assignment_manifest_hash: str,
+    trusted_diff: Mapping[str, object] | None = None,
+) -> dict[str, object]:
+    trusted_diff = trusted_diff if isinstance(trusted_diff, Mapping) else {}
+
+    def slot(
+        slot_id: str,
+        *,
+        ready: bool,
+        evidence: str,
+        blocker_id: str | None = None,
+        operator_action: str = "",
+    ) -> dict[str, object]:
+        row: dict[str, object] = {
+            "slot_id": slot_id,
+            "status": "complete" if ready else "external-required",
+            "evidence": evidence,
+        }
+        if blocker_id and not ready:
+            row["blocker_id"] = blocker_id
+        if operator_action:
+            row["operator_action"] = operator_action
+        return row
+
+    validation_slots = [
+        slot(
+            "case-review-status-fields-persisted",
+            ready=True,
+            evidence=f"context={context}",
+            blocker_id="case-review-status-fields-required",
+            operator_action="Persist review status, verification status, and report inclusion state.",
+        ),
+        slot(
+            "case-review-assignment-priority-metadata",
+            ready=assignment_present or bool(priority),
+            evidence=f"assignment_present={assignment_present} priority={priority}",
+            blocker_id="case-review-assignment-priority-required",
+            operator_action="Capture assignee/priority metadata before using rows as a review queue.",
+        ),
+        slot(
+            "case-review-due-date-or-followup-state",
+            ready=True,
+            evidence=f"due_at={due_at}",
+            blocker_id="case-review-followup-state-required",
+            operator_action="Record due date or explicit empty follow-up state.",
+        ),
+        slot(
+            "case-review-source-viewer-locators",
+            ready=source_viewer_locator_count > 0,
+            evidence=f"source_viewer_locator_count={source_viewer_locator_count}",
+            blocker_id="case-review-source-viewer-locators-required",
+            operator_action="Attach source-viewer locators so reviewers can verify evidence before report inclusion.",
+        ),
+        slot(
+            "case-review-audit-history-linked",
+            ready=audit_history_linked,
+            evidence=f"audit_history_linked={audit_history_linked}",
+            blocker_id="case-review-audit-history-required",
+            operator_action="Link review state changes to review mark history before report use.",
+        ),
+        slot(
+            "case-review-bounded-queue-or-mark-emitted",
+            ready=review_queue_count > 0,
+            evidence=f"review_queue_count={review_queue_count} assignment_manifest_hash={review_assignment_manifest_hash}",
+            blocker_id="case-review-queue-or-mark-required",
+            operator_action="Emit at least one review queue row or review mark workflow record.",
+        ),
+        slot(
+            "case-review-role-based-assignment-queue",
+            ready=False,
+            evidence="role_based_assignment_queue=false",
+            blocker_id="role-based-assignment-queue-required",
+            operator_action="Add role-based queues and per-action permission enforcement.",
+        ),
+        slot(
+            "case-review-notification-workflow",
+            ready=False,
+            evidence="notification_workflow=false",
+            blocker_id="notification-workflow-required",
+            operator_action="Add notifications for assignment, due dates, and review handoffs.",
+        ),
+        slot(
+            "case-review-multi-user-conflict-resolution",
+            ready=False,
+            evidence="multi_user_conflict_resolution=false",
+            blocker_id="multi-user-conflict-resolution-required",
+            operator_action="Add locking/conflict records for concurrent reviewers.",
+        ),
+        slot(
+            "case-review-sla-dashboard",
+            ready=False,
+            evidence="sla_dashboard=false",
+            blocker_id="sla-dashboard-required",
+            operator_action="Add SLA/aging dashboards for review queues.",
+        ),
+        slot(
+            "case-review-reviewer-sop-signoff",
+            ready=False,
+            evidence="reviewer_sop_signoff=false",
+            blocker_id="reviewer-sop-signoff-required",
+            operator_action="Attach signed reviewer SOP/training signoff for commercial workflow claims.",
+        ),
+        slot(
+            "case-review-trusted-audit-diff",
+            ready=trusted_diff.get("status") == "pass",
+            evidence=f"trusted_diff_status={trusted_diff.get('status', 'missing')}",
+            blocker_id=REVIEW_WORKFLOW_TRUSTED_DIFF_BLOCKER,
+            operator_action="Attach a passing trusted reviewer workflow audit diff before report-grade claims.",
+        ),
+    ]
+    blockers = sorted(
+        str(slot_row.get("blocker_id"))
+        for slot_row in validation_slots
+        if slot_row.get("status") != "complete" and slot_row.get("blocker_id")
+    )
+    ready_slot_count = sum(1 for slot_row in validation_slots if slot_row.get("status") == "complete")
+    plan_core: dict[str, object] = {
+        "profile_version": REVIEW_WORKFLOW_REPORT_GRADE_VALIDATION_PLAN_VERSION,
+        "item_number": 51,
+        "gap_id": "#51",
+        "batch_id": "commercial-uplift-051-055",
+        "selected_track": "single-case-review-workflow-report-validation",
+        "context": context,
+        "assignment_present": assignment_present,
+        "priority": priority,
+        "due_at": due_at,
+        "review_queue_count": review_queue_count,
+        "source_viewer_locator_count": source_viewer_locator_count,
+        "audit_history_linked": audit_history_linked,
+        "review_assignment_manifest_hash": review_assignment_manifest_hash,
+        "trusted_diff_status": str(trusted_diff.get("status") or "missing"),
+        "ready_slot_count": ready_slot_count,
+        "blocking_slot_count": len(blockers),
+        "validation_status": "report-validation-blocked",
+        "commercial_grade": False,
+        "commercial_grade_ready": False,
+        "validation_slots": validation_slots,
+        "blockers": blockers,
+        "commercial_grade_blockers": list(REVIEW_WORKFLOW_REPORT_GRADE_BLOCKERS),
+        "validation_commands": [
+            "rapidtriage case-review --case-id <case> --target-type <type> --target-id <id> --json",
+            "rapidtriage case-search --case-id <case> --query <keyword> --json",
+            "rapidtriage commercial-readiness --validation-package docs/validation/rapidtriage-core-forensics-051-060-known-answer.json --limit 51 --json",
+        ],
+        "report_guidance": {
+            "allowed_use": "single-user-review-status-triage-pivot",
+            "forbidden_claim": "role-based multi-user case-management workflow",
+            "required_disclaimer": (
+                "Review workflow rows are local Case DB triage state and require role-based queues, "
+                "notifications, multi-user conflict handling, SLA dashboards, reviewer SOP signoff, and "
+                "trusted audit diffs before commercial case-management claims."
+            ),
+        },
+    }
+    return {**plan_core, "validation_plan_sha256": stable_payload_sha256(plan_core)}
 
 
 def build_case_search_review_workflow_summary(
@@ -10268,6 +10473,17 @@ def build_case_search_review_workflow_summary(
         review_status_filter=review_status_filter,
         verification_status_filter=verification_status_filter,
     )
+    validation_plan = build_review_workflow_report_grade_validation_plan(
+        context="case-search-review-summary",
+        assignment_present=assigned_count > 0,
+        priority=",".join(sorted(priority_counts)) or "normal",
+        due_at="",
+        review_queue_count=len(review_queue),
+        source_viewer_locator_count=review_assignment_manifest["source_viewer_locator_count"],
+        audit_history_linked=True,
+        review_assignment_manifest_hash=review_assignment_manifest["manifest_hash"],
+        trusted_diff=None,
+    )
     satisfied = [
         "search result review state attached",
         "review status summary emitted",
@@ -10283,6 +10499,9 @@ def build_case_search_review_workflow_summary(
         satisfied.append("review status filter applied")
     if verification_status_filter:
         satisfied.append("verification status filter applied")
+    satisfied.append("review workflow report-grade validation plan")
+    if int(validation_plan.get("ready_slot_count") or 0) >= 6:
+        satisfied.append("review workflow report-grade ready slots")
     core_accuracy_gates = [
         build_accuracy_gate(
             51,
@@ -10294,6 +10513,7 @@ def build_case_search_review_workflow_summary(
                 f"review_status_filter:{review_status_filter or ''}",
                 f"verification_status_filter:{verification_status_filter or ''}",
                 f"review_assignment_manifest_hash:{review_assignment_manifest['manifest_hash']}",
+                f"review_workflow_report_grade_validation_plan_sha256:{validation_plan['validation_plan_sha256']}",
                 "case_db:review_mark",
                 "case_db:review_mark_history",
             ],
@@ -10316,6 +10536,8 @@ def build_case_search_review_workflow_summary(
         "review_queue_truncated": len(review_queue) > 100,
         "review_assignment_manifest": review_assignment_manifest,
         "review_assignment_manifest_hash": review_assignment_manifest["manifest_hash"],
+        "review_workflow_report_grade_validation_plan": validation_plan,
+        "review_workflow_report_grade_validation_plan_hash": validation_plan["validation_plan_sha256"],
         "source_viewer_locator_count": review_assignment_manifest["source_viewer_locator_count"],
         "filters": {
             "review_status": review_status_filter or "",
@@ -10332,6 +10554,7 @@ def build_case_search_review_workflow_summary(
                 f"report_candidates:{report_candidate_count}",
                 "case_db:review_mark",
                 "case_db:review_mark_history",
+                f"review_workflow_report_grade_validation_plan_sha256:{validation_plan['validation_plan_sha256']}",
             ],
             "passed_validation_check_ids": sorted(set(satisfied)),
             "failed_validation_check_ids": [
@@ -10347,6 +10570,12 @@ def build_case_search_review_workflow_summary(
                 "report_candidate_count": report_candidate_count,
                 "review_assignment_manifest_present": True,
                 "review_assignment_manifest_hash": review_assignment_manifest["manifest_hash"],
+                "review_workflow_report_grade_validation_plan_present": True,
+                "review_workflow_report_grade_validation_plan_hash": validation_plan["validation_plan_sha256"],
+                "review_workflow_report_grade_ready_slot_count": int(validation_plan.get("ready_slot_count") or 0),
+                "review_workflow_report_grade_blocking_slot_count": int(
+                    validation_plan.get("blocking_slot_count") or 0
+                ),
                 "source_viewer_locator_count": review_assignment_manifest["source_viewer_locator_count"],
                 "role_based_case_server": False,
                 "notification_sla_enabled": False,
@@ -10363,6 +10592,12 @@ def build_case_search_review_workflow_summary(
                     REVIEW_WORKFLOW_TRUSTED_DIFF_BLOCKER,
                 ],
                 "ready_for_court_report": False,
+                "review_workflow_report_grade_validation_plan_present": True,
+                "review_workflow_report_grade_validation_plan_hash": validation_plan["validation_plan_sha256"],
+                "review_workflow_report_grade_ready_slot_count": int(validation_plan.get("ready_slot_count") or 0),
+                "review_workflow_report_grade_blocking_slot_count": int(
+                    validation_plan.get("blocking_slot_count") or 0
+                ),
             },
         },
         "ready_for_court_report": False,

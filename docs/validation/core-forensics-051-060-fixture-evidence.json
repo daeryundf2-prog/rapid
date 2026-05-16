@@ -9,7 +9,7 @@
       "title": "Reviewer assignment/status workflow",
       "test_files": ["tests/test_rapidtriage_case_db.py", "tests/test_rapidtriage_api.py"],
       "assertions": [
-        "Case DB review marks preserve status, verification status, reviewer, assignee, priority, due date, report inclusion, history, trusted reviewer workflow audit diff gates, #51 core_accuracy_gates, and reportability blockers for missing role-based queue, conflict handling, notifications, reviewer SOP, and trusted audit evidence.",
+        "Case DB review marks preserve status, verification status, reviewer, assignee, priority, due date, report inclusion, history, review_workflow_report_grade_validation_plan ready/blocking slots, trusted reviewer workflow audit diff gates, #51 core_accuracy_gates, and reportability blockers for missing role-based queue, conflict handling, notifications, reviewer SOP, and trusted audit evidence.",
         "Source previews expose a Stage 10 #51~#60 analyst workbench capability matrix with a stable matrix hash, review/compare/viewer/OCR/dedup entries, per-item blockers, and GUI-safe routing hints."
       ],
       "remaining_external_validation": ["Role-based multi-user server, conflict handling, notifications, signed reviewer SOP, and trusted analyst review log diff."]

@@ -1369,6 +1369,20 @@ class RapidTriageCaseDatabaseTests(unittest.TestCase):
                 unfiltered["review_workflow_summary"]["review_assignment_manifest_hash"],
                 unfiltered["review_workflow_summary"]["review_assignment_manifest"]["manifest_hash"],
             )
+            review_plan = unfiltered["review_workflow_summary"]["review_workflow_report_grade_validation_plan"]
+            self.assertEqual(
+                review_plan["profile_version"],
+                "case-review-workflow-report-grade-validation-plan-v1",
+            )
+            self.assertEqual(review_plan["item_number"], 51)
+            self.assertEqual(review_plan["gap_id"], "#51")
+            self.assertEqual(
+                unfiltered["review_workflow_summary"]["review_workflow_report_grade_validation_plan_hash"],
+                review_plan["validation_plan_sha256"],
+            )
+            self.assertEqual(review_plan["ready_slot_count"], 6)
+            self.assertEqual(review_plan["blocking_slot_count"], 6)
+            self.assertIn("role-based-assignment-queue-required", review_plan["blockers"])
             self.assertGreaterEqual(unfiltered["review_workflow_summary"]["source_viewer_locator_count"], 1)
             self.assertEqual(
                 unfiltered["review_workflow_summary"]["review_queue"][0]["source_viewer_locator"]["viewer"],
@@ -1381,6 +1395,10 @@ class RapidTriageCaseDatabaseTests(unittest.TestCase):
             )
             self.assertIn(
                 "review source viewer locators emitted",
+                unfiltered["review_workflow_summary"]["core_accuracy_gates"][0]["satisfied_checks"],
+            )
+            self.assertIn(
+                "review workflow report-grade validation plan",
                 unfiltered["review_workflow_summary"]["core_accuracy_gates"][0]["satisfied_checks"],
             )
             document_match = unfiltered["matches"][0]
@@ -1416,6 +1434,7 @@ class RapidTriageCaseDatabaseTests(unittest.TestCase):
             self.assertEqual(review_uplift["batch_id"], "commercial-uplift-051-055")
             self.assertEqual(review_uplift["item_numbers"], [51])
             self.assertIn("review status fields persisted", review_uplift["passed_validation_check_ids"])
+            self.assertIn("review workflow report-grade validation plan", review_uplift["passed_validation_check_ids"])
             self.assertEqual(
                 review_uplift["reportability_decision"]["decision"],
                 "do-not-report-review-workflow-as-role-based-case-management",
@@ -1425,6 +1444,9 @@ class RapidTriageCaseDatabaseTests(unittest.TestCase):
                 "single-user-review-status-triage-pivot",
             )
             self.assertFalse(review_uplift["large_data_controls"]["role_based_case_server"])
+            self.assertTrue(review_uplift["large_data_controls"]["review_workflow_report_grade_validation_plan_present"])
+            self.assertEqual(review_uplift["large_data_controls"]["review_workflow_report_grade_ready_slot_count"], 6)
+            self.assertEqual(review_uplift["large_data_controls"]["review_workflow_report_grade_blocking_slot_count"], 6)
             self.assertFalse(review["review_workflow"]["ready_for_court_report"])
 
             filtered = database.search_case(
