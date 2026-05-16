@@ -343,6 +343,8 @@ class RapidTriageMobileExportTests(unittest.TestCase):
             self.assertIn("KakaoTalk parser manifest", kakao_gate["satisfied_checks"])
             self.assertIn("KakaoTalk source row citation", kakao_gate["satisfied_checks"])
             self.assertIn("KakaoTalk review viewer controls", kakao_gate["satisfied_checks"])
+            self.assertIn("KakaoTalk report-grade validation plan", kakao_gate["satisfied_checks"])
+            self.assertIn("KakaoTalk validation ready slots", kakao_gate["satisfied_checks"])
             self.assertIn("encrypted/deleted limitation warning", kakao_gate["satisfied_checks"])
             self.assertIn("source hash and legal provenance", kakao_gate["satisfied_checks"])
             self.assertEqual(
@@ -377,6 +379,49 @@ class RapidTriageMobileExportTests(unittest.TestCase):
             self.assertEqual(
                 kakao["details"]["kakaotalk_parser_manifest_hash"],
                 kakao_parser_manifest["manifest_sha256"],
+            )
+            kakao_validation_plan = kakao["details"]["kakaotalk_report_grade_validation_plan"]
+            self.assertEqual(
+                kakao_validation_plan["profile_version"],
+                "kakaotalk-report-grade-validation-plan-v1",
+            )
+            self.assertEqual(kakao_validation_plan["item_number"], 31)
+            self.assertEqual(kakao_validation_plan["gap_id"], "#31")
+            self.assertEqual(kakao_validation_plan["status"], "report-validation-blocked")
+            self.assertFalse(kakao_validation_plan["commercial_grade"])
+            self.assertEqual(len(kakao_validation_plan["manifest_sha256"]), 64)
+            self.assertEqual(
+                kakao["details"]["kakaotalk_report_grade_validation_plan_hash"],
+                kakao_validation_plan["manifest_sha256"],
+            )
+            self.assertEqual(
+                {command["id"] for command in kakao_validation_plan["validation_commands"]},
+                {
+                    "source-kakaotalk-export-manifest",
+                    "kakaotalk-export-import",
+                    "trusted-kakaotalk-diff",
+                    "kakaotalk-version-known-answer-run",
+                },
+            )
+            kakao_validation_slots = {slot["id"]: slot for slot in kakao_validation_plan["evidence_slots"]}
+            self.assertEqual(kakao_validation_slots["source-export-row-integrity"]["status"], "complete")
+            self.assertEqual(kakao_validation_slots["service-profile-row-citation"]["status"], "complete")
+            self.assertEqual(kakao_validation_slots["message-pivot-normalization"]["status"], "complete")
+            self.assertEqual(kakao_validation_slots["database-inventory-boundary"]["status"], "not-applicable")
+            self.assertEqual(kakao_validation_slots["bigbang-compatibility-classification"]["status"], "complete")
+            self.assertEqual(kakao_validation_slots["hash-only-text-policy"]["status"], "complete")
+            self.assertEqual(kakao_validation_slots["source-viewer-locator"]["status"], "complete")
+            self.assertEqual(
+                kakao_validation_slots["trusted-kakaotalk-export-native-db-diff"]["status"],
+                "pending-cross-tool-validate",
+            )
+            self.assertTrue(kakao_validation_slots["post-bigbang-known-answer-corpus"]["blocking"])
+            self.assertTrue(kakao_validation_slots["encrypted-store-key-authority-boundary"]["blocking"])
+            self.assertEqual(kakao_validation_plan["ready_slot_count"], 6)
+            self.assertEqual(kakao_validation_plan["blocking_slot_count"], 7)
+            self.assertIn(
+                "post-bigbang-known-answer-corpus-required",
+                kakao_validation_plan["commercial_grade_blockers"],
             )
             kakao_manifest = kakao["details"]["messenger_export_framework_manifest"]
             self.assertEqual(kakao_manifest["manifest_version"], "messenger-export-framework-manifest-v1")
@@ -425,12 +470,22 @@ class RapidTriageMobileExportTests(unittest.TestCase):
                 ],
                 kakao_parser_manifest["manifest_sha256"],
             )
+            self.assertEqual(
+                kakao_uplift["functional_priority_profile"]["implemented_controls"][
+                    "kakaotalk_report_grade_validation_plan_hash"
+                ],
+                kakao_validation_plan["manifest_sha256"],
+            )
             self.assertIn(
                 "messenger-export-framework-manifest-emitted",
                 kakao_uplift["functional_priority_profile"]["passed_validation_check_ids"],
             )
             self.assertIn(
                 "kakaotalk-parser-manifest-emitted",
+                kakao_uplift["functional_priority_profile"]["passed_validation_check_ids"],
+            )
+            self.assertIn(
+                "kakaotalk-report-grade-validation-plan-emitted",
                 kakao_uplift["functional_priority_profile"]["passed_validation_check_ids"],
             )
             self.assertIn(
@@ -448,6 +503,15 @@ class RapidTriageMobileExportTests(unittest.TestCase):
             self.assertEqual(
                 kakao_uplift["large_data_controls"]["kakaotalk_parser_manifest_hash"],
                 kakao_parser_manifest["manifest_sha256"],
+            )
+            self.assertEqual(
+                kakao_uplift["large_data_controls"]["kakaotalk_report_grade_validation_plan_hash"],
+                kakao_validation_plan["manifest_sha256"],
+            )
+            self.assertEqual(kakao_uplift["large_data_controls"]["kakaotalk_report_grade_validation_ready_slot_count"], 6)
+            self.assertEqual(
+                kakao_uplift["large_data_controls"]["kakaotalk_report_grade_validation_blocking_slot_count"],
+                7,
             )
             self.assertTrue(kakao_uplift["large_data_controls"]["messenger_row_citation_present"])
             self.assertTrue(kakao_uplift["large_data_controls"]["kakaotalk_source_row_citation_present"])

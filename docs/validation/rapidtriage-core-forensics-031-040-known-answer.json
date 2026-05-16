@@ -18,6 +18,7 @@
         "required_assertions": [
           "KakaoTalk rows preserve service/profile, message/media pivots, BigBang compatibility, limitation warnings, source hashes, and #31 core_accuracy_gates",
           "KakaoTalk rows emit kakaotalk_parser_manifest with parser track, row citation, source viewer locator, hash-only text policy, and review blocker evidence",
+          "KakaoTalk rows emit kakaotalk-report-grade-validation-plan-v1 with source export/native DB integrity, source row citation, message pivot normalization, DB inventory boundary, BigBang compatibility classification, hash-only text policy, source viewer locator, trusted KakaoTalk export/native DB diff, post-BigBang known-answer corpus, schema-version parser map, encrypted-store authority boundary, deleted/read-state known-answer corpus, attachment byte validation, and independent review evidence slots",
           "KakaoTalk trusted diff helper requires authorized export or validated native DB equality before satisfying the #31 trusted KakaoTalk export/native DB diff pass gate",
           "KakaoTalk reportability decisions block decrypted-complete message claims until post-BigBang/schema/encrypted/deleted validation exists"
         ]

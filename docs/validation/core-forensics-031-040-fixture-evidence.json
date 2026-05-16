@@ -21,6 +21,7 @@
       "title": "KakaoTalk parser",
       "assertions": [
         "KakaoTalk export rows preserve service/profile detection, chat/message participant/media normalization, app/schema and BigBang compatibility metadata, encrypted/deleted warnings, source hashes, legal provenance, #31 core_accuracy_gates, and decrypted-complete reportability blockers.",
+        "KakaoTalk rows emit kakaotalk-report-grade-validation-plan-v1 with source export/native DB integrity, source row citation, message pivot normalization, DB inventory boundary, BigBang compatibility classification, hash-only text policy, source viewer locator, trusted KakaoTalk export/native DB diff, post-BigBang known-answer corpus, schema-version parser map, encrypted-store authority boundary, deleted/read-state known-answer corpus, attachment byte validation, and independent review evidence slots.",
         "build_chat_app_trusted_diff compares KakaoTalk rows against authorized export or validated native DB output before satisfying the #31 trusted diff gate."
       ],
       "blockers_kept": [

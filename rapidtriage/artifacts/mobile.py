@@ -506,6 +506,16 @@ CHAT_APP_TRUSTED_DIFF_CHECKS = {
     34: ("trusted Signal export/native DB diff pass", "signal-trusted-export-or-native-db-diff-required"),
     35: ("trusted extended messenger export/native DB diff pass", "extended-messenger-trusted-export-or-native-db-diff-required"),
 }
+KAKAOTALK_REPORT_GRADE_VALIDATION_PLAN_VERSION = "kakaotalk-report-grade-validation-plan-v1"
+KAKAOTALK_REPORT_GRADE_BLOCKERS = [
+    "trusted-kakaotalk-export-native-db-diff-required",
+    "post-bigbang-known-answer-corpus-required",
+    "schema-version-parser-map-required",
+    "encrypted-store-key-authority-boundary-required",
+    "deleted-read-state-known-answer-required",
+    "attachment-byte-media-validation-required",
+    "independent-kakaotalk-review-required",
+]
 QC_PREP_CHAT_APP_ITEMS = {
     "KakaoTalk": 37,
     "WhatsApp": 38,
@@ -1493,6 +1503,23 @@ def build_record(
             "messenger_export_framework_manifest_hash",
             detail_payload["messenger_export_framework_manifest"]["manifest_sha256"],
         )
+        if service == "KakaoTalk":
+            detail_payload.setdefault(
+                "kakaotalk_report_grade_validation_plan",
+                build_kakaotalk_report_grade_validation_plan(
+                    artifact_type=artifact_type,
+                    source_tool=source_tool,
+                    source_format=source_format,
+                    source_index=source_index,
+                    source_hashes=source_hashes,
+                    source_path=path,
+                    details=detail_payload,
+                ),
+            )
+            detail_payload.setdefault(
+                "kakaotalk_report_grade_validation_plan_hash",
+                detail_payload["kakaotalk_report_grade_validation_plan"]["manifest_sha256"],
+            )
     gap_ids = mobile_commercial_gap_ids(artifact_type, source_tool)
     if "#26" in gap_ids:
         detail_payload.setdefault(
@@ -2498,6 +2525,254 @@ def build_kakaotalk_parser_manifest(
         {key: value for key, value in manifest.items() if key != "manifest_sha256"}
     )
     return manifest
+
+
+def build_kakaotalk_report_grade_validation_plan(
+    *,
+    artifact_type: str,
+    source_tool: str,
+    source_format: str,
+    source_index: int,
+    source_hashes: Mapping[str, str],
+    source_path: Path,
+    details: Mapping[str, object],
+) -> dict[str, object]:
+    parser_manifest = (
+        details.get("kakaotalk_parser_manifest")
+        if isinstance(details.get("kakaotalk_parser_manifest"), Mapping)
+        else {}
+    )
+    messenger_manifest = (
+        details.get("messenger_export_framework_manifest")
+        if isinstance(details.get("messenger_export_framework_manifest"), Mapping)
+        else {}
+    )
+    message_profile = (
+        details.get("kakaotalk_message_review_profile")
+        if isinstance(details.get("kakaotalk_message_review_profile"), Mapping)
+        else {}
+    )
+    database_profile = (
+        details.get("kakaotalk_database_review_profile")
+        if isinstance(details.get("kakaotalk_database_review_profile"), Mapping)
+        else {}
+    )
+    compatibility = (
+        details.get("kakaotalk_compatibility_assessment")
+        if isinstance(details.get("kakaotalk_compatibility_assessment"), Mapping)
+        else kakaotalk_compatibility_assessment(optional_text(details.get("app_version")))
+    )
+    row_citation = (
+        parser_manifest.get("row_citation")
+        if isinstance(parser_manifest.get("row_citation"), Mapping)
+        else {}
+    )
+    source_locator = (
+        row_citation.get("source_viewer_locator")
+        if isinstance(row_citation.get("source_viewer_locator"), Mapping)
+        else {}
+    )
+    issue_ids = {
+        str(item.get("id"))
+        for item in details.get("chat_app_issue_matrix", [])
+        if isinstance(item, Mapping)
+    }
+    table_summaries = details.get("table_summaries") if isinstance(details.get("table_summaries"), list) else []
+    source_sha256 = optional_text(source_hashes.get("sha256"))
+    message_hash_present = bool(optional_text(details.get("message_text_sha256")))
+    message_pivots_present = any(
+        optional_text(details.get(key))
+        for key in ("conversation_id", "conversation_title", "message_id", "sender", "recipient")
+    )
+    database_inventory_present = bool(database_profile) or bool(table_summaries)
+    evidence_slots = [
+        {
+            "id": "source-export-row-integrity",
+            "label": "Source export/native DB row has hashable source provenance",
+            "status": "complete" if source_sha256 else "missing-source-hash",
+            "blocking": not bool(source_sha256),
+            "evidence_refs": [
+                f"source_tool:{source_tool}",
+                f"source_format:{source_format}",
+                f"source_index:{source_index}",
+                f"source_sha256:{source_sha256}",
+            ],
+        },
+        {
+            "id": "service-profile-row-citation",
+            "label": "KakaoTalk service profile and source row citation are fixed",
+            "status": "complete" if row_citation.get("row_hash") else "missing-row-citation",
+            "blocking": not bool(row_citation.get("row_hash")),
+            "evidence_refs": [
+                f"kakaotalk_parser_manifest:{parser_manifest.get('manifest_sha256', '')}",
+                f"row_hash:{row_citation.get('row_hash', '')}",
+            ],
+        },
+        {
+            "id": "message-pivot-normalization",
+            "label": "Conversation/message/participant/media pivots are normalized without claiming native decrypt completeness",
+            "status": "complete" if artifact_type == "mobile-message" and (message_hash_present or message_pivots_present) else "not-applicable",
+            "blocking": artifact_type == "mobile-message" and not (message_hash_present or message_pivots_present),
+            "evidence_refs": [
+                f"artifact_type:{artifact_type}",
+                f"message_text_sha256_present:{message_hash_present}",
+                f"message_pivots_present:{message_pivots_present}",
+            ],
+        },
+        {
+            "id": "database-inventory-boundary",
+            "label": "KakaoTalk DB candidates are inventory-only until validated native decode evidence is attached",
+            "status": "complete" if artifact_type == "mobile-chat-database" and database_inventory_present else "not-applicable",
+            "blocking": False,
+            "evidence_refs": [
+                f"database_inventory_present:{database_inventory_present}",
+                f"table_summary_count:{len(table_summaries)}",
+            ],
+        },
+        {
+            "id": "bigbang-compatibility-classification",
+            "label": "Legacy/post-BigBang compatibility and selected parser track are recorded",
+            "status": "complete" if isinstance(compatibility.get("strategy_profile"), Mapping) else "missing-compatibility-profile",
+            "blocking": not isinstance(compatibility.get("strategy_profile"), Mapping),
+            "evidence_refs": [
+                f"status:{compatibility.get('status', '')}",
+                f"selected_track:{compatibility.get('strategy_profile', {}).get('selected_track', '') if isinstance(compatibility.get('strategy_profile'), Mapping) else ''}",
+                f"post_bigbang_issue:{'kakaotalk-post-2025-08-bigbang' in issue_ids}",
+            ],
+        },
+        {
+            "id": "hash-only-text-policy",
+            "label": "Message text is represented with hash/citation controls before report selection",
+            "status": "complete" if parser_manifest.get("large_data_controls", {}).get("raw_text_hash_only_by_default") else "missing-hash-only-policy",
+            "blocking": not bool(parser_manifest.get("large_data_controls", {}).get("raw_text_hash_only_by_default")),
+            "evidence_refs": [
+                f"raw_text_hash_only_by_default:{parser_manifest.get('large_data_controls', {}).get('raw_text_hash_only_by_default', False)}",
+                f"message_text_sha256_present:{message_hash_present}",
+            ],
+        },
+        {
+            "id": "source-viewer-locator",
+            "label": "GUI/report can pivot back to the KakaoTalk source row or DB inventory",
+            "status": "complete" if source_locator else "missing-source-viewer-locator",
+            "blocking": not bool(source_locator),
+            "evidence_refs": [
+                f"viewer:{source_locator.get('viewer', '') if isinstance(source_locator, Mapping) else ''}",
+                f"messenger_manifest:{messenger_manifest.get('manifest_sha256', '')}",
+            ],
+        },
+        {
+            "id": "trusted-kakaotalk-export-native-db-diff",
+            "label": "RapidTriage KakaoTalk rows are diffed against an authorized export or validated native DB parser",
+            "status": "pending-cross-tool-validate",
+            "blocking": True,
+            "evidence_refs": ["command:rapidtriage cross-tool-validate --backlog-item 31"],
+        },
+        {
+            "id": "post-bigbang-known-answer-corpus",
+            "label": "KakaoTalk 25.7.2 / 2025-08-13+ behavior is validated with known-answer data",
+            "status": "external-corpus-required",
+            "blocking": True,
+            "evidence_refs": ["required:post-BigBang KakaoTalk known-answer corpus"],
+        },
+        {
+            "id": "schema-version-parser-map",
+            "label": "Version-specific KakaoTalk export/native schema mapping is validated",
+            "status": "external-corpus-required",
+            "blocking": True,
+            "evidence_refs": ["required:KakaoTalk schema/version matrix"],
+        },
+        {
+            "id": "encrypted-store-key-authority-boundary",
+            "label": "Encrypted store or key material handling is authority-gated and never embedded as static secrets",
+            "status": "authority-workflow-required",
+            "blocking": True,
+            "evidence_refs": ["required:case authority, key provenance, no hardcoded proprietary key"],
+        },
+        {
+            "id": "deleted-read-state-known-answer",
+            "label": "Deleted/read/message-type semantics are validated before report claims",
+            "status": "external-corpus-required",
+            "blocking": True,
+            "evidence_refs": ["required:deleted/read-state known-answer corpus"],
+        },
+        {
+            "id": "attachment-byte-media-validation",
+            "label": "Attachment metadata is linked to recovered local bytes and hashes before media claims",
+            "status": "external-media-validation-required",
+            "blocking": True,
+            "evidence_refs": ["required:attachment byte/hash validation"],
+        },
+        {
+            "id": "independent-kakaotalk-review",
+            "label": "Independent reviewer signs off on KakaoTalk scope, version, decrypt limits, and report wording",
+            "status": "external-review-required",
+            "blocking": True,
+            "evidence_refs": ["required:independent KakaoTalk validation review"],
+        },
+    ]
+    ready_slot_ids = [
+        str(slot.get("id"))
+        for slot in evidence_slots
+        if str(slot.get("status", "")).startswith("complete")
+    ]
+    blocking_slot_ids = [str(slot.get("id")) for slot in evidence_slots if slot.get("blocking")]
+    plan: dict[str, object] = {
+        "profile_version": KAKAOTALK_REPORT_GRADE_VALIDATION_PLAN_VERSION,
+        "item_number": 31,
+        "gap_id": "#31",
+        "status": "report-validation-blocked",
+        "commercial_grade": False,
+        "artifact_goal": "KakaoTalk authorized export/native DB message, media, version, and decrypt-boundary validation",
+        "artifact_type": artifact_type,
+        "service": "KakaoTalk",
+        "source_tool": source_tool,
+        "source_format": source_format,
+        "source_index": source_index,
+        "source_path": str(source_path.resolve()),
+        "source_sha256": source_sha256,
+        "source_record_id": source_record_id(details, source_index),
+        "app_version": optional_text(details.get("app_version")),
+        "schema_version": optional_text(details.get("schema_version")),
+        "compatibility_status": optional_text(compatibility.get("status")),
+        "selected_track": optional_text(
+            compatibility.get("strategy_profile", {}).get("selected_track")
+            if isinstance(compatibility.get("strategy_profile"), Mapping)
+            else ""
+        ),
+        "validation_commands": [
+            {
+                "id": "source-kakaotalk-export-manifest",
+                "purpose": "Freeze source export/native DB hashes and acquisition metadata",
+                "command": "rapidtriage manifest <kakaotalk-export-or-db-folder> --output <case>/kakaotalk-source-manifest.json",
+            },
+            {
+                "id": "kakaotalk-export-import",
+                "purpose": "Recreate RapidTriage KakaoTalk normalized rows and DB inventory",
+                "command": "rapidtriage artifacts <mobile-export> --kind mobile-export --output <case>/kakaotalk-mobile-export.json",
+            },
+            {
+                "id": "trusted-kakaotalk-diff",
+                "purpose": "Compare KakaoTalk message/DB rows with an authorized export or validated native parser output",
+                "command": "rapidtriage cross-tool-validate --rapid-output <case>/kakaotalk-mobile-export.json --reference-output kakaotalk=<trusted-kakaotalk-output.json> --backlog-item 31 --json",
+            },
+            {
+                "id": "kakaotalk-version-known-answer-run",
+                "purpose": "Attach version-specific legacy/post-BigBang schema and deleted/read-state known-answer evidence",
+                "command": "rapidtriage commercial-readiness --validation-package <kakaotalk-known-answer.json> --limit 31 --json",
+            },
+        ],
+        "evidence_slots": evidence_slots,
+        "ready_slot_ids": ready_slot_ids,
+        "blocking_slot_ids": blocking_slot_ids,
+        "ready_slot_count": len(ready_slot_ids),
+        "blocking_slot_count": len(blocking_slot_ids),
+        "commercial_grade_blockers": list(KAKAOTALK_REPORT_GRADE_BLOCKERS),
+        "report_guidance": "Use KakaoTalk rows as authorized export/native inventory triage until trusted diff, version corpus, encrypted-store authority, deleted/read-state validation, media byte proof, and independent review are attached.",
+    }
+    plan["manifest_sha256"] = stable_mobile_sha256(
+        {key: value for key, value in plan.items() if key != "manifest_sha256"}
+    )
+    return plan
 
 
 def classify_kakaotalk_export_attachment(media_reference: str, attachment_name: str, message_type: str) -> str:
@@ -7592,6 +7867,11 @@ def chat_app_core_accuracy_gates(
         manifest_hash = optional_text(kakaotalk_manifest.get("manifest_sha256"))
         if manifest_hash:
             evidence_refs.append(f"kakaotalk_parser_manifest_sha256:{manifest_hash}")
+    kakaotalk_validation_plan = details.get("kakaotalk_report_grade_validation_plan")
+    if isinstance(kakaotalk_validation_plan, Mapping):
+        validation_plan_hash = optional_text(kakaotalk_validation_plan.get("manifest_sha256"))
+        if validation_plan_hash:
+            evidence_refs.append(f"kakaotalk_report_grade_validation_plan_sha256:{validation_plan_hash}")
     whatsapp_manifest = details.get("whatsapp_parser_manifest")
     if isinstance(whatsapp_manifest, Mapping):
         manifest_hash = optional_text(whatsapp_manifest.get("manifest_sha256"))
@@ -7662,6 +7942,10 @@ def chat_app_core_accuracy_gates(
                     satisfied.append("KakaoTalk source row citation")
                 if details.get("kakaotalk_parser_manifest", {}).get("large_data_controls", {}).get("viewer_default"):
                     satisfied.append("KakaoTalk review viewer controls")
+            if isinstance(kakaotalk_validation_plan, Mapping):
+                satisfied.append("KakaoTalk report-grade validation plan")
+                if int(kakaotalk_validation_plan.get("ready_slot_count") or 0) >= 6:
+                    satisfied.append("KakaoTalk validation ready slots")
             if "kakaotalk-post-2025-08-bigbang" in issue_ids or details.get("commercial_grade_blockers"):
                 satisfied.append("encrypted/deleted limitation warning")
             if source_hashes.get("sha256") and source_tool:
@@ -8516,6 +8800,11 @@ def chat_app_commercial_uplift_evidence(
         if isinstance(details.get("kakaotalk_parser_manifest"), Mapping)
         else {}
     )
+    kakaotalk_validation_plan = (
+        details.get("kakaotalk_report_grade_validation_plan")
+        if isinstance(details.get("kakaotalk_report_grade_validation_plan"), Mapping)
+        else {}
+    )
     whatsapp_manifest = (
         details.get("whatsapp_parser_manifest")
         if isinstance(details.get("whatsapp_parser_manifest"), Mapping)
@@ -8538,6 +8827,7 @@ def chat_app_commercial_uplift_evidence(
     )
     manifest_hash = optional_text(messenger_manifest.get("manifest_sha256"))
     kakaotalk_manifest_hash = optional_text(kakaotalk_manifest.get("manifest_sha256"))
+    kakaotalk_validation_plan_hash = optional_text(kakaotalk_validation_plan.get("manifest_sha256"))
     whatsapp_manifest_hash = optional_text(whatsapp_manifest.get("manifest_sha256"))
     telegram_manifest_hash = optional_text(telegram_manifest.get("manifest_sha256"))
     signal_manifest_hash = optional_text(signal_manifest.get("manifest_sha256"))
@@ -8546,6 +8836,8 @@ def chat_app_commercial_uplift_evidence(
         source_refs.append(f"messenger_manifest_sha256:{manifest_hash}")
     if kakaotalk_manifest_hash:
         source_refs.append(f"kakaotalk_parser_manifest_sha256:{kakaotalk_manifest_hash}")
+    if kakaotalk_validation_plan_hash:
+        source_refs.append(f"kakaotalk_report_grade_validation_plan_sha256:{kakaotalk_validation_plan_hash}")
     if whatsapp_manifest_hash:
         source_refs.append(f"whatsapp_parser_manifest_sha256:{whatsapp_manifest_hash}")
     if telegram_manifest_hash:
@@ -8599,6 +8891,13 @@ def chat_app_commercial_uplift_evidence(
             ),
             "messenger_table_citation_count": int(messenger_manifest.get("table_citation_count") or 0),
             "kakaotalk_parser_manifest_hash": kakaotalk_manifest_hash,
+            "kakaotalk_report_grade_validation_plan_hash": kakaotalk_validation_plan_hash,
+            "kakaotalk_report_grade_validation_ready_slot_count": int(
+                kakaotalk_validation_plan.get("ready_slot_count") or 0
+            ),
+            "kakaotalk_report_grade_validation_blocking_slot_count": int(
+                kakaotalk_validation_plan.get("blocking_slot_count") or 0
+            ),
             "kakaotalk_source_row_citation_present": bool(
                 isinstance(kakaotalk_manifest.get("row_citation"), Mapping)
                 and kakaotalk_manifest.get("row_citation", {}).get("row_hash")
@@ -8687,6 +8986,11 @@ def messenger_export_functional_profile(
         if isinstance(details.get("kakaotalk_parser_manifest"), Mapping)
         else {}
     )
+    kakaotalk_validation_plan = (
+        details.get("kakaotalk_report_grade_validation_plan")
+        if isinstance(details.get("kakaotalk_report_grade_validation_plan"), Mapping)
+        else {}
+    )
     whatsapp_manifest = (
         details.get("whatsapp_parser_manifest")
         if isinstance(details.get("whatsapp_parser_manifest"), Mapping)
@@ -8720,6 +9024,8 @@ def messenger_export_functional_profile(
         failed_checks.append("messenger-export-framework-manifest-not-emitted")
     if "KakaoTalk" == service and not kakaotalk_manifest:
         failed_checks.append("kakaotalk-parser-manifest-not-emitted")
+    if "KakaoTalk" == service and not kakaotalk_validation_plan:
+        failed_checks.append("kakaotalk-report-grade-validation-plan-not-emitted")
     if service == "WhatsApp" and not whatsapp_manifest:
         failed_checks.append("whatsapp-parser-manifest-not-emitted")
     if service == "Telegram" and not telegram_manifest:
@@ -8761,6 +9067,7 @@ def messenger_export_functional_profile(
     supported_services = [str(profile["service"]) for profile in CHAT_APP_PROFILES]
     manifest_hash = optional_text(messenger_manifest.get("manifest_sha256"))
     kakaotalk_manifest_hash = optional_text(kakaotalk_manifest.get("manifest_sha256"))
+    kakaotalk_validation_plan_hash = optional_text(kakaotalk_validation_plan.get("manifest_sha256"))
     whatsapp_manifest_hash = optional_text(whatsapp_manifest.get("manifest_sha256"))
     telegram_manifest_hash = optional_text(telegram_manifest.get("manifest_sha256"))
     signal_manifest_hash = optional_text(signal_manifest.get("manifest_sha256"))
@@ -8781,6 +9088,8 @@ def messenger_export_functional_profile(
         passed_validation_check_ids.append("messenger-table-citation-inventory-emitted")
     if kakaotalk_manifest:
         passed_validation_check_ids.append("kakaotalk-parser-manifest-emitted")
+    if kakaotalk_validation_plan:
+        passed_validation_check_ids.append("kakaotalk-report-grade-validation-plan-emitted")
     if isinstance(kakaotalk_row_citation, Mapping) and kakaotalk_row_citation.get("source_viewer_locator"):
         passed_validation_check_ids.append("kakaotalk-source-locator-emitted")
     if whatsapp_manifest:
@@ -8825,6 +9134,7 @@ def messenger_export_functional_profile(
             "messenger_row_citation_present": bool(isinstance(row_citation, Mapping) and row_citation.get("row_hash")),
             "messenger_table_citation_count": table_citation_count,
             "kakaotalk_parser_manifest_hash": kakaotalk_manifest_hash,
+            "kakaotalk_report_grade_validation_plan_hash": kakaotalk_validation_plan_hash,
             "kakaotalk_row_citation_present": bool(
                 isinstance(kakaotalk_row_citation, Mapping) and kakaotalk_row_citation.get("row_hash")
             ),
