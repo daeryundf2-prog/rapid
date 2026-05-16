@@ -794,6 +794,52 @@ class RapidTriageRunTests(unittest.TestCase):
             )
             self.assertGreater(len(decision_manifest["decision_rows"]), 0)
             self.assertRegex(decision_manifest["decision_row_head_hash"], r"^[0-9a-f]{64}$")
+            checkpoint_validation_plan = checkpoints["checkpoint_resume_report_grade_validation_plan"]
+            self.assertEqual(
+                checkpoint_validation_plan["profile_version"],
+                "checkpoint-resume-report-grade-validation-plan-v1",
+            )
+            self.assertEqual(checkpoint_validation_plan["item_number"], 70)
+            self.assertEqual(checkpoint_validation_plan["gap_id"], "#70")
+            self.assertEqual(len(checkpoint_validation_plan["validation_plan_hash"]), 64)
+            self.assertEqual(checkpoint_validation_plan["ready_slot_count"], 6)
+            self.assertEqual(checkpoint_validation_plan["blocking_slot_count"], 6)
+            self.assertTrue(checkpoint_validation_plan["complete_json_stage_reuse_only"])
+            self.assertFalse(checkpoint_validation_plan["mid_parser_resume"])
+            self.assertFalse(checkpoint_validation_plan["failed_stage_partial_resume"])
+            self.assertEqual(
+                checkpoint_validation_plan["checkpoint_resume_decision_manifest_hash"],
+                decision_manifest["manifest_hash"],
+            )
+            self.assertEqual(
+                checkpoint_validation_plan["checkpoint_integrity_head_hash"],
+                checkpoints["checkpoint_integrity_profile"]["head_hash"],
+            )
+            self.assertIn(
+                "checkpoint-decision-rows",
+                {slot["slot_id"] for slot in checkpoint_validation_plan["ready_slots"]},
+            )
+            self.assertIn(
+                "checkpoint-mid-parser-state",
+                {slot["slot_id"] for slot in checkpoint_validation_plan["blocking_slots"]},
+            )
+            self.assertIn("mid-parser-checkpointing-required", checkpoint_validation_plan["blockers"])
+            self.assertEqual(
+                checkpoints["checkpoint_resume_report_grade_validation_plan_hash"],
+                checkpoint_validation_plan["validation_plan_hash"],
+            )
+            self.assertEqual(checkpoints["summary"]["report_grade_ready_slot_count"], 6)
+            self.assertEqual(checkpoints["summary"]["report_grade_blocking_slot_count"], 6)
+            self.assertEqual(
+                checkpoints["summary"]["checkpoint_resume_report_grade_validation_plan_hash"],
+                checkpoint_validation_plan["validation_plan_hash"],
+            )
+            self.assertEqual(
+                checkpoints["checkpoint_resume_assessment"]["checkpoint_resume_report_grade_validation_plan_hash"],
+                checkpoint_validation_plan["validation_plan_hash"],
+            )
+            self.assertEqual(checkpoints["checkpoint_resume_assessment"]["report_grade_ready_slot_count"], 6)
+            self.assertEqual(checkpoints["checkpoint_resume_assessment"]["report_grade_blocking_slot_count"], 6)
             self.assertEqual(checkpoints["core_accuracy_gates"][0]["gap_id"], "#70")
             self.assertIn("stage checkpoints emitted", checkpoints["core_accuracy_gates"][0]["satisfied_checks"])
             self.assertIn("checkpoint row hash emitted", checkpoints["core_accuracy_gates"][0]["satisfied_checks"])
@@ -801,11 +847,27 @@ class RapidTriageRunTests(unittest.TestCase):
                 "checkpoint resume decision manifest emitted",
                 checkpoints["core_accuracy_gates"][0]["satisfied_checks"],
             )
+            self.assertIn(
+                "checkpoint resume report-grade validation plan emitted",
+                checkpoints["core_accuracy_gates"][0]["satisfied_checks"],
+            )
+            self.assertIn(
+                "checkpoint resume report-grade ready slots emitted",
+                checkpoints["core_accuracy_gates"][0]["satisfied_checks"],
+            )
             self.assertEqual(checkpoints["commercial_uplift_evidence"]["batch_id"], "commercial-uplift-066-070")
             self.assertEqual(checkpoints["commercial_uplift_evidence"]["item_numbers"], [70])
             self.assertIn(
                 "checkpoint resume decision manifest emitted",
                 checkpoints["commercial_uplift_evidence"]["passed_validation_check_ids"],
+            )
+            self.assertIn(
+                "checkpoint resume report-grade validation plan emitted",
+                checkpoints["commercial_uplift_evidence"]["passed_validation_check_ids"],
+            )
+            self.assertIn(
+                "report-grade validation plan",
+                " ".join(checkpoints["commercial_uplift_evidence"]["large_data_controls"]),
             )
             self.assertIn("#70", checkpoints["checkpoints"][0]["commercial_gap_ids"])
             self.assertRegex(checkpoints["checkpoints"][0]["row_hash"], r"^[0-9a-f]{64}$")
@@ -932,10 +994,15 @@ class RapidTriageRunTests(unittest.TestCase):
                 resume_requested=checkpoints["resume"]["requested"],
                 resume_effective=checkpoints["resume"]["effective"],
                 decision_manifest_hash=checkpoints["checkpoint_resume_decision_manifest_hash"],
+                validation_plan=checkpoint_validation_plan,
                 trusted_diff=checkpoint_diff,
             )
             self.assertEqual(checkpoint_diff["status"], "pass")
             self.assertIn("trusted checkpoint/resume manifest diff pass", checkpoint_gates[0]["satisfied_checks"])
+            self.assertIn(
+                "checkpoint resume report-grade validation plan emitted",
+                checkpoint_gates[0]["satisfied_checks"],
+            )
 
             step_statuses = {step["name"]: step["status"] for step in summary_payload["steps"]}
             self.assertEqual(step_statuses["docs"], "reused")

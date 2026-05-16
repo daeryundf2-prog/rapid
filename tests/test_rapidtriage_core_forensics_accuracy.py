@@ -155,6 +155,7 @@ class RapidTriageCoreForensicsAccuracyTests(unittest.TestCase):
         self.assertIn("step progress recorded", job_queue["required_checks"])
         self.assertIn("trusted job transition-log diff pass", job_queue["required_checks"])
         self.assertIn("stage checkpoints emitted", checkpoint["required_checks"])
+        self.assertIn("checkpoint resume report-grade validation plan emitted", checkpoint["required_checks"])
         self.assertIn("trusted checkpoint/resume manifest diff pass", checkpoint["required_checks"])
         self.assertIn("per-parser exception capture", parser_crash["required_checks"])
         self.assertIn("trusted parser crash-corpus diff pass", parser_crash["required_checks"])

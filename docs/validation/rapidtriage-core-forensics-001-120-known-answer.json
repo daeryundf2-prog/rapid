@@ -1674,10 +1674,10 @@
       ],
       "expected": {
         "required_assertions": [
-          "Run checkpoint output preserves stage checkpoints, output path/size, reused flags, row hashes, checkpoint integrity head hash, checkpoint resume decision row hashes, resume summary, partial-stage warning, #70 core_accuracy_gates, and #70 commercial_uplift_evidence."
+          "Run checkpoint output preserves stage checkpoints, output path/size, reused flags, row hashes, checkpoint integrity head hash, checkpoint resume decision row hashes, checkpoint_resume_report_grade_validation_plan hashes/ready slots/blocking slots, resume summary, partial-stage warning, #70 core_accuracy_gates, and #70 commercial_uplift_evidence."
         ]
       },
-      "notes": "Internal fixture pass; mid-parser checkpointing and failed-stage resume remain blockers.",
+      "notes": "Internal fixture pass; mid-parser checkpointing, trusted checkpoint manifests, failed-stage partial resume, long-running replay, partial-output cleanup, and Case DB dedup remain blockers.",
       "source_manifest": "docs/validation/rapidtriage-core-forensics-061-070-known-answer.json"
     },
     {

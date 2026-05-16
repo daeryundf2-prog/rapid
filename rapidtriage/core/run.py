@@ -112,6 +112,15 @@ INCREMENTAL_INDEXING_REPORT_GRADE_BLOCKERS = [
     "cross-platform-fingerprint-semantics-required",
 ]
 CHECKPOINT_TRUSTED_DIFF_BLOCKER_70 = "trusted-checkpoint-resume-manifest-diff-missing"
+CHECKPOINT_RESUME_REPORT_GRADE_VALIDATION_PLAN_VERSION = "checkpoint-resume-report-grade-validation-plan-v1"
+CHECKPOINT_RESUME_REPORT_GRADE_BLOCKERS = [
+    "mid-parser-checkpointing-required",
+    "failed-stage-partial-resume-validation-required",
+    "trusted-checkpoint-resume-manifest-required",
+    "long-running-case-replay-validation-required",
+    "partial-output-cleanup-validation-required",
+    "case-db-resume-dedup-validation-required",
+]
 PARSER_CRASH_TRUSTED_DIFF_BLOCKER_71 = "trusted-parser-crash-corpus-diff-missing"
 MEMORY_CAP_TRUSTED_DIFF_BLOCKER_72 = "trusted-memory-cap-rss-diff-missing"
 PREVIEW_SANDBOX_TRUSTED_DIFF_BLOCKER_73 = "trusted-preview-no-exec-diff-missing"
@@ -2534,6 +2543,15 @@ def write_run_checkpoints(
         resume_disabled_reason=resume_disabled_reason,
         integrity_profile=integrity_profile,
     )
+    validation_plan = checkpoint_resume_report_grade_validation_plan(
+        checkpoints,
+        input_fingerprint=input_fingerprint,
+        resume_requested=resume_requested,
+        resume_effective=resume_effective,
+        resume_disabled_reason=resume_disabled_reason,
+        integrity_profile=integrity_profile,
+        decision_manifest=decision_manifest,
+    )
     payload = {
         "command": "run-checkpoints",
         "generated_at": dt.datetime.now().isoformat(),
@@ -2549,6 +2567,9 @@ def write_run_checkpoints(
             "status_counts": dict(status_counts),
             "reused_count": sum(1 for item in checkpoints if item.get("reused")),
             "checkpoint_resume_decision_manifest_hash": decision_manifest["manifest_hash"],
+            "checkpoint_resume_report_grade_validation_plan_hash": validation_plan["validation_plan_hash"],
+            "report_grade_ready_slot_count": validation_plan["ready_slot_count"],
+            "report_grade_blocking_slot_count": validation_plan["blocking_slot_count"],
             "commercial_gap_ids": [CHECKPOINT_RESUME_GAP_ID],
             "commercial_grade_ready": False,
         },
@@ -2557,15 +2578,21 @@ def write_run_checkpoints(
             resume_effective=resume_effective,
             checkpoints=checkpoints,
             decision_manifest=decision_manifest,
+            validation_plan=validation_plan,
         ),
         "checkpoint_integrity_profile": integrity_profile,
         "checkpoint_resume_decision_manifest": decision_manifest,
         "checkpoint_resume_decision_manifest_hash": decision_manifest["manifest_hash"],
+        "checkpoint_resume_report_grade_validation_plan": validation_plan,
+        "checkpoint_resume_report_grade_validation_plan_hash": validation_plan["validation_plan_hash"],
+        "report_grade_ready_slot_count": validation_plan["ready_slot_count"],
+        "report_grade_blocking_slot_count": validation_plan["blocking_slot_count"],
         "core_accuracy_gates": checkpoint_resume_core_accuracy_gates(
             checkpoints=checkpoints,
             resume_requested=resume_requested,
             resume_effective=resume_effective,
             decision_manifest_hash=decision_manifest["manifest_hash"],
+            validation_plan=validation_plan,
         ),
         "commercial_uplift_evidence": performance_commercial_uplift_evidence(
             item_number=70,
@@ -2577,6 +2604,8 @@ def write_run_checkpoints(
                 "checkpoint row hash emitted",
                 "checkpoint integrity head hash emitted",
                 "checkpoint resume decision manifest emitted",
+                "checkpoint resume report-grade validation plan emitted",
+                "checkpoint resume report-grade ready slots emitted",
             ],
             large_data_controls=[
                 "every completed stage is listed with output path, size, status, and reuse flag",
@@ -2585,11 +2614,14 @@ def write_run_checkpoints(
                 "resume requested/effective/disabled reason is persisted",
                 "input fingerprint is embedded next to checkpoints for reproducibility",
                 "checkpoint summary counts reused and completed stage outputs",
+                "checkpoint resume report-grade validation plan separates complete-stage reuse evidence from mid-parser blockers",
             ],
             external_validation=[
                 "mid-parser checkpointing",
                 "failed-stage resume replay on long-running cases",
+                "trusted checkpoint/resume manifest diff",
                 "cancellation/retry cleanup validation under load",
+                "Case DB resume dedup validation",
                 CHECKPOINT_TRUSTED_DIFF_BLOCKER_70,
             ],
         ),
@@ -2705,6 +2737,153 @@ def checkpoint_resume_decision_manifest(
     }
 
 
+def checkpoint_resume_report_grade_validation_plan(
+    checkpoints: Sequence[Mapping[str, object]],
+    *,
+    input_fingerprint: Mapping[str, object],
+    resume_requested: bool,
+    resume_effective: bool,
+    resume_disabled_reason: str,
+    integrity_profile: Mapping[str, object],
+    decision_manifest: Mapping[str, object],
+) -> dict[str, object]:
+    resume_state = {
+        "resume_requested": resume_requested,
+        "resume_effective": resume_effective,
+        "resume_disabled_reason": resume_disabled_reason,
+        "reused_count": int(decision_manifest.get("reused_count") or 0),
+        "missing_output_count": int(decision_manifest.get("missing_output_count") or 0),
+    }
+    resume_state_hash = hashlib.sha256(json.dumps(resume_state, sort_keys=True).encode("utf-8")).hexdigest()
+    checkpoint_size_rows = [
+        {
+            "stage": str(item.get("stage") or ""),
+            "exists": bool(item.get("exists")),
+            "size_bytes": int(item.get("size_bytes") or 0),
+            "reused": bool(item.get("reused")),
+        }
+        for item in checkpoints
+        if isinstance(item, Mapping)
+    ]
+    checkpoint_size_head_hash = hashlib.sha256(
+        json.dumps(checkpoint_size_rows, sort_keys=True).encode("utf-8")
+    ).hexdigest()
+    input_fingerprint_hash = hashlib.sha256(
+        str(input_fingerprint.get("fingerprint") or "").encode("utf-8", errors="replace")
+    ).hexdigest()
+    ready_slots: list[dict[str, object]] = [
+        {
+            "slot_id": "checkpoint-stage-rows",
+            "status": "ready",
+            "evidence_ref": "checkpoint_integrity_profile.head_hash",
+            "evidence_hash": str(integrity_profile.get("head_hash") or ""),
+            "description": "Stage checkpoint rows preserve output path, existence, byte size, and reuse status.",
+        },
+        {
+            "slot_id": "checkpoint-decision-rows",
+            "status": "ready",
+            "evidence_ref": "checkpoint_resume_decision_manifest.decision_row_head_hash",
+            "evidence_hash": str(decision_manifest.get("decision_row_head_hash") or ""),
+            "description": "Resume decision rows hash every stage reuse or completion decision.",
+        },
+        {
+            "slot_id": "checkpoint-decision-manifest",
+            "status": "ready",
+            "evidence_ref": "checkpoint_resume_decision_manifest.manifest_hash",
+            "evidence_hash": str(decision_manifest.get("manifest_hash") or ""),
+            "description": "Decision manifest ties checkpoint rows to resume policy and input fingerprint.",
+        },
+        {
+            "slot_id": "checkpoint-resume-state",
+            "status": "ready",
+            "evidence_ref": "resume_state_hash",
+            "evidence_hash": resume_state_hash,
+            "description": "Resume requested/effective/disabled state is preserved for analyst review.",
+        },
+        {
+            "slot_id": "checkpoint-input-fingerprint",
+            "status": "ready",
+            "evidence_ref": "input_fingerprint_hash",
+            "evidence_hash": input_fingerprint_hash,
+            "description": "Input fingerprint links checkpoint reuse to the source evidence state.",
+        },
+        {
+            "slot_id": "checkpoint-output-size-review",
+            "status": "ready",
+            "evidence_ref": "checkpoint_size_head_hash",
+            "evidence_hash": checkpoint_size_head_hash,
+            "description": "Output existence, size, and reuse rows support repeatable checkpoint review.",
+        },
+    ]
+    blocking_slots: list[dict[str, object]] = [
+        {
+            "slot_id": "checkpoint-mid-parser-state",
+            "status": "blocked",
+            "blocker": "mid-parser-checkpointing-required",
+            "required_evidence": "parser-native offsets or cursors that resume inside long-running parser stages",
+        },
+        {
+            "slot_id": "checkpoint-failed-stage-partial-resume",
+            "status": "blocked",
+            "blocker": "failed-stage-partial-resume-validation-required",
+            "required_evidence": "failed-stage replay corpus proving safe partial-output handling and rebuild decisions",
+        },
+        {
+            "slot_id": "checkpoint-trusted-manifest-diff",
+            "status": "blocked",
+            "blocker": "trusted-checkpoint-resume-manifest-required",
+            "required_evidence": "trusted checkpoint/resume manifest diff with matching stage, size, reuse, and decision hashes",
+        },
+        {
+            "slot_id": "checkpoint-long-running-replay",
+            "status": "blocked",
+            "blocker": "long-running-case-replay-validation-required",
+            "required_evidence": "long-running case replay logs proving resume stability across large evidence corpora",
+        },
+        {
+            "slot_id": "checkpoint-partial-output-cleanup",
+            "status": "blocked",
+            "blocker": "partial-output-cleanup-validation-required",
+            "required_evidence": "partial-output cleanup/review validation for canceled or failed stages",
+        },
+        {
+            "slot_id": "checkpoint-case-db-dedup",
+            "status": "blocked",
+            "blocker": "case-db-resume-dedup-validation-required",
+            "required_evidence": "Case DB replay proving resumed imports do not duplicate indexed artifacts",
+        },
+    ]
+    plan_core = {
+        "profile_version": CHECKPOINT_RESUME_REPORT_GRADE_VALIDATION_PLAN_VERSION,
+        "item_number": 70,
+        "gap_id": CHECKPOINT_RESUME_GAP_ID,
+        "commercial_gap_ids": [CHECKPOINT_RESUME_GAP_ID],
+        "checkpoint_count": len(checkpoints),
+        "reused_count": int(decision_manifest.get("reused_count") or 0),
+        "missing_output_count": int(decision_manifest.get("missing_output_count") or 0),
+        "resume_requested": resume_requested,
+        "resume_effective": resume_effective,
+        "resume_disabled_reason": resume_disabled_reason,
+        "checkpoint_integrity_head_hash": str(integrity_profile.get("head_hash") or ""),
+        "checkpoint_resume_decision_manifest_hash": str(decision_manifest.get("manifest_hash") or ""),
+        "decision_row_head_hash": str(decision_manifest.get("decision_row_head_hash") or ""),
+        "input_fingerprint": str(input_fingerprint.get("fingerprint") or ""),
+        "complete_json_stage_reuse_only": True,
+        "mid_parser_resume": False,
+        "failed_stage_partial_resume": False,
+        "ready_slots": ready_slots,
+        "blocking_slots": blocking_slots,
+        "ready_slot_count": len(ready_slots),
+        "blocking_slot_count": len(blocking_slots),
+        "blockers": list(CHECKPOINT_RESUME_REPORT_GRADE_BLOCKERS),
+        "commercial_claim_allowed": False,
+        "ready_for_court_report": False,
+        "report_use_warning": "Use as complete-stage checkpoint/reuse triage evidence only; do not claim mid-parser or failed-stage resume until blockers are satisfied.",
+    }
+    validation_plan_hash = hashlib.sha256(json.dumps(plan_core, sort_keys=True).encode("utf-8")).hexdigest()
+    return {**plan_core, "validation_plan_hash": validation_plan_hash}
+
+
 def incremental_indexing_assessment(
     *,
     scanned_files: int,
@@ -2791,7 +2970,9 @@ def checkpoint_resume_assessment(
     resume_effective: bool,
     checkpoints: Sequence[Mapping[str, object]],
     decision_manifest: Mapping[str, object] | None = None,
+    validation_plan: Mapping[str, object] | None = None,
 ) -> dict[str, object]:
+    plan = validation_plan or {}
     return {
         "component": "stage-checkpoint-resume",
         "status": "resume-effective" if resume_effective else ("resume-requested-disabled-or-not-reused" if resume_requested else "fresh-run"),
@@ -2799,12 +2980,17 @@ def checkpoint_resume_assessment(
         "checkpoint_count": len(checkpoints),
         "reused_count": sum(1 for item in checkpoints if item.get("reused")),
         "checkpoint_resume_decision_manifest_hash": str((decision_manifest or {}).get("manifest_hash") or ""),
+        "checkpoint_resume_report_grade_validation_plan": dict(plan) if plan else {},
+        "checkpoint_resume_report_grade_validation_plan_hash": str(plan.get("validation_plan_hash") or ""),
+        "report_grade_ready_slot_count": int(plan.get("ready_slot_count") or 0),
+        "report_grade_blocking_slot_count": int(plan.get("blocking_slot_count") or 0),
         "ready_for_court_report": False,
         "blockers": [
             "checkpointing-reuses-complete-json-stage-outputs-not-mid-parser-state",
             "failed-or-partial-stage-resume-requires-rebuild-and-review-of-warning-output",
             "long-running-parser-cooperative-cancellation-remains-limited",
             CHECKPOINT_TRUSTED_DIFF_BLOCKER_70,
+            *CHECKPOINT_RESUME_REPORT_GRADE_BLOCKERS,
         ],
         "recommended_validation": [
             "Review each checkpoint status, output path, size, and reused flag before relying on resumed results.",
@@ -2828,6 +3014,7 @@ def checkpoint_resume_assessment(
             resume_requested=resume_requested,
             resume_effective=resume_effective,
             decision_manifest_hash=str((decision_manifest or {}).get("manifest_hash") or ""),
+            validation_plan=plan,
         ),
     }
 
@@ -3038,6 +3225,7 @@ def checkpoint_resume_core_accuracy_gates(
     resume_requested: bool,
     resume_effective: bool,
     decision_manifest_hash: str = "",
+    validation_plan: Mapping[str, object] | None = None,
     trusted_diff: Mapping[str, object] | None = None,
 ) -> list[dict[str, object]]:
     satisfied = ["partial-stage limitation warning"]
@@ -3053,12 +3241,24 @@ def checkpoint_resume_core_accuracy_gates(
         satisfied.append("resume status summarized")
     if decision_manifest_hash:
         satisfied.append("checkpoint resume decision manifest emitted")
+    plan = validation_plan or {}
+    validation_plan_hash = str(plan.get("validation_plan_hash") or "")
+    ready_slot_count = int(plan.get("ready_slot_count") or 0)
+    blocking_slot_count = int(plan.get("blocking_slot_count") or 0)
+    if validation_plan_hash:
+        satisfied.append("checkpoint resume report-grade validation plan emitted")
+    if ready_slot_count:
+        satisfied.append("checkpoint resume report-grade ready slots emitted")
     evidence_refs = [
         f"checkpoint_count:{len(checkpoints)}",
         f"resume_requested:{resume_requested}",
         f"resume_effective:{resume_effective}",
         f"checkpoint_resume_decision_manifest_hash:{decision_manifest_hash}",
     ]
+    if validation_plan_hash:
+        evidence_refs.append(f"checkpoint_resume_report_grade_validation_plan_hash:{validation_plan_hash}")
+        evidence_refs.append(f"checkpoint_resume_report_grade_ready_slots:{ready_slot_count}")
+        evidence_refs.append(f"checkpoint_resume_report_grade_blocking_slots:{blocking_slot_count}")
     if trusted_diff and trusted_diff.get("status") == "pass":
         satisfied.append("trusted checkpoint/resume manifest diff pass")
         evidence_refs.append(f"trusted_tool:{trusted_diff.get('trusted_tool', '')}")

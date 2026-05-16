@@ -1086,6 +1086,8 @@ CORE_FORENSIC_ACCURACY_ITEMS: tuple[dict[str, object], ...] = (
             "reused flag captured",
             "resume status summarized",
             "checkpoint resume decision manifest emitted",
+            "checkpoint resume report-grade validation plan emitted",
+            "checkpoint resume report-grade ready slots emitted",
             "partial-stage limitation warning",
             "trusted checkpoint/resume manifest diff pass",
         ),

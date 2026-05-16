@@ -110,8 +110,8 @@
       "status": "pass",
       "backlog_items": [70],
       "evidence_paths": ["docs/validation/core-forensics-061-070-fixture-evidence.json", "tests/test_rapidtriage_run.py"],
-      "expected": {"required_assertions": ["Run checkpoint output preserves stage checkpoints, output path/size, reused flags, row hashes, checkpoint integrity head hash, checkpoint resume decision row hashes, resume summary, partial-stage warning, trusted checkpoint diff status, #70 core_accuracy_gates, and #70 commercial_uplift_evidence.", "Checkpoint reportability decisions block mid-parser-complete resume claims until failed-stage and mid-parser resume are validated against trusted manifests across long-running corpora."]},
-      "notes": "Internal fixture pass; mid-parser checkpointing, trusted checkpoint manifests, and failed-stage resume remain blockers."
+      "expected": {"required_assertions": ["Run checkpoint output preserves stage checkpoints, output path/size, reused flags, row hashes, checkpoint integrity head hash, checkpoint resume decision row hashes, checkpoint_resume_report_grade_validation_plan hashes/ready slots/blocking slots, resume summary, partial-stage warning, trusted checkpoint diff status, #70 core_accuracy_gates, and #70 commercial_uplift_evidence.", "Checkpoint reportability decisions block mid-parser-complete resume claims until failed-stage partial resume, mid-parser resume, trusted manifests, long-running replay, partial-output cleanup, and Case DB dedup validation are attached."]},
+      "notes": "Internal fixture pass; mid-parser checkpointing, trusted checkpoint manifests, failed-stage partial resume, long-running replay, partial-output cleanup, and Case DB dedup remain blockers."
     }
   ]
 }
