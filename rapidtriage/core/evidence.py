@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import shlex
 import shutil
 import sys
 from dataclasses import asdict, dataclass, replace
@@ -90,6 +91,7 @@ class EvidenceAdapterResult:
     container_export_profile: dict[str, object] | None = None
     verified_export_manifest_profile: dict[str, object] | None = None
     forensic_container_workflow_manifest: dict[str, object] | None = None
+    forensic_container_validation_plan: dict[str, object] | None = None
     ingest_workflow: dict[str, object] | None = None
     image_analyst_review_profile: dict[str, object] | None = None
     e01_intake_profile: dict[str, object] | None = None
@@ -1011,6 +1013,18 @@ class VirtualDiskAdapter:
         )
 
 
+FORENSIC_CONTAINER_REPORT_GRADE_VALIDATION_PLAN_VERSION = "forensic-container-report-grade-validation-plan-v1"
+
+FORENSIC_CONTAINER_REPORT_GRADE_BLOCKERS = (
+    "proprietary-container-direct-parser-not-implemented",
+    "embedded-metadata-compression-deleted-entry-validation-required",
+    "vendor-export-log-required",
+    "forensic-container-verified-export-manifest-required",
+    "encrypted-compressed-proprietary-container-corpus-required",
+    "native-parser-version-matrix-required",
+)
+
+
 def build_forensic_container_export_profile(source: Path) -> dict[str, object]:
     suffix = source.suffix.lower().lstrip(".") or "forensic-container"
     required_export_artifacts = [
@@ -1162,6 +1176,290 @@ def build_forensic_container_workflow_manifest(
     return payload
 
 
+def build_forensic_container_report_grade_validation_plan(
+    source: Path,
+    *,
+    detected_format: str | None = None,
+    output_dir: Path | str | None = None,
+    expected_export_entries: list[str] | None = None,
+    source_integrity: dict[str, object] | None = None,
+    container_export_profile: dict[str, object] | None = None,
+    verified_export_manifest_profile: dict[str, object] | None = None,
+) -> dict[str, object]:
+    """Create the #25 report-grade validation handoff for export-first containers."""
+
+    source_path = source.expanduser().resolve()
+    output_root = (
+        Path(output_dir).expanduser().resolve() if output_dir else Path("rapidforensic-container-validation")
+    )
+    container_type = detected_format or source.suffix.lower().lstrip(".") or "forensic-container"
+    source_row = dict(source_integrity or {})
+    if not source_row and source.is_file():
+        source_row = describe_source_integrity(source)
+    export_profile = dict(container_export_profile or build_forensic_container_export_profile(source_path))
+    manifest_profile = dict(
+        verified_export_manifest_profile
+        or build_verified_export_manifest_profile(
+            source_path,
+            discover_forensic_container_export_manifest(source_path),
+            source_integrity=source_row,
+        )
+    )
+    manifest_present = bool(manifest_profile.get("manifest_present"))
+    manifest_linked = manifest_profile.get("validation_status") == "manifest-linked"
+    vendor_logged = bool(manifest_profile.get("vendor_tool") and manifest_profile.get("vendor_tool_version"))
+    export_root_hashed = bool(manifest_profile.get("export_root_sha256"))
+    hashed_file_count = int(manifest_profile.get("hashed_file_count") or 0)
+    expected_rows = [
+        {
+            "id": f"expected-export-entry-{index + 1:03d}",
+            "description": str(item),
+            "status": "pending-trusted-comparison",
+        }
+        for index, item in enumerate(expected_export_entries or [])
+        if str(item).strip()
+    ]
+    validation_commands = [
+        _forensic_container_validation_command(
+            "source-container-hash",
+            ["rapidtriage", "e01-hash", str(source_path), "--output-dir", str(output_root / "source-hash"), "--json"],
+            purpose="Compute and preserve the original proprietary container hash.",
+            expected_output=str(output_root / "source-hash" / "e01-streaming-hash.json"),
+        ),
+        _forensic_container_validation_command(
+            "evidence-preflight",
+            [
+                "rapidtriage",
+                "evidence",
+                str(source_path),
+                "--output",
+                str(output_root / "rapidtriage-evidence-preflight.json"),
+                "--json",
+            ],
+            purpose="Record adapter detection, source integrity, export-first blockers, and sidecar manifest status.",
+            expected_output=str(output_root / "rapidtriage-evidence-preflight.json"),
+        ),
+        _forensic_container_validation_command(
+            "vendor-export",
+            [
+                "<trusted-vendor-tool>",
+                "export-or-mount-read-only",
+                str(source_path),
+                str(output_root / "vendor-export"),
+            ],
+            purpose="Export or mount the proprietary container read-only with the acquisition/vendor tool and preserve the transcript.",
+            expected_output=str(output_root / "vendor-export"),
+            trusted_tool=True,
+            status="operator-action-required",
+        ),
+        _forensic_container_validation_command(
+            "export-manifest-author",
+            [
+                "<analyst>",
+                "create-export-manifest-json",
+                str(source_path.with_suffix(source_path.suffix + ".export-manifest.json")),
+            ],
+            purpose="Create the vendor export manifest sidecar with source hash, vendor version, export root hash, and exported-file hashes.",
+            expected_output=str(source_path.with_suffix(source_path.suffix + ".export-manifest.json")),
+            trusted_tool=True,
+            status="complete" if manifest_linked else "operator-action-required",
+        ),
+        _forensic_container_validation_command(
+            "scan-derived-export",
+            [
+                "rapidtriage",
+                "run",
+                str(output_root / "vendor-export"),
+                "--mode",
+                "hacking",
+                "--output-dir",
+                str(output_root / "derived-run"),
+                "--read-only",
+            ],
+            purpose="Scan the vendor export as derived evidence while retaining the original container and export logs.",
+            expected_output=str(output_root / "derived-run" / "rapidtriage-run.json"),
+            status="ready-after-verified-export" if manifest_linked else "pending-verified-export-manifest",
+        ),
+        _forensic_container_validation_command(
+            "trusted-workflow-diff",
+            [
+                "rapidtriage",
+                "image-workflow-validate",
+                "--item-number",
+                "25",
+                "--rapid-output",
+                str(output_root / "rapidtriage-evidence-preflight.json"),
+                "--trusted-output",
+                str(output_root / "trusted-container-export.csv"),
+                "--trusted-tool",
+                "vendor-export-manifest",
+                "--output",
+                str(output_root / "container-trusted-diff.json"),
+                "--json",
+            ],
+            purpose="Compare source hash, container type, manifest hash, and exported-file rows against trusted vendor/export references.",
+            expected_output=str(output_root / "container-trusted-diff.json"),
+            trusted_tool=True,
+        ),
+    ]
+    source_hash_complete = bool(source_row.get("sha256"))
+    evidence_slots = [
+        {
+            "id": "source-container-integrity",
+            "label": "Original proprietary container hash",
+            "status": "complete" if source_hash_complete else "pending-source-hash",
+            "required_before_report": True,
+            "sha256": source_row.get("sha256"),
+        },
+        {
+            "id": "container-type-and-export-policy",
+            "label": "Container type plus export-first policy disclosure",
+            "status": "complete" if container_type and export_profile else "pending-detection",
+            "required_before_report": True,
+            "container_type": container_type,
+            "workflow": export_profile.get("workflow"),
+            "direct_parser_available": export_profile.get("direct_parser_available"),
+        },
+        {
+            "id": "vendor-tool-version-log",
+            "label": "Vendor tool name, version, and export transcript",
+            "status": "complete" if vendor_logged and manifest_linked else "pending-vendor-export-log",
+            "required_before_report": True,
+            "vendor_tool": manifest_profile.get("vendor_tool"),
+            "vendor_tool_version": manifest_profile.get("vendor_tool_version"),
+        },
+        {
+            "id": "verified-export-manifest",
+            "label": "Verified vendor export manifest sidecar",
+            "status": "complete" if manifest_linked else ("review-required" if manifest_present else "missing"),
+            "required_before_report": True,
+            "manifest_sha256": manifest_profile.get("manifest_sha256"),
+            "validation_status": manifest_profile.get("validation_status"),
+            "source_hash_matches_manifest": manifest_profile.get("source_hash_matches_manifest"),
+        },
+        {
+            "id": "derived-export-root-integrity",
+            "label": "Derived export root hash",
+            "status": "complete" if manifest_linked and export_root_hashed else "pending-export-root-hash",
+            "required_before_report": True,
+            "export_root": manifest_profile.get("export_root"),
+            "export_root_sha256": manifest_profile.get("export_root_sha256"),
+        },
+        {
+            "id": "exported-file-hash-inventory",
+            "label": "Exported file hash inventory",
+            "status": "complete" if manifest_linked and hashed_file_count > 0 else "pending-file-hash-inventory",
+            "required_before_report": True,
+            "file_count": manifest_profile.get("file_count", 0),
+            "hashed_file_count": hashed_file_count,
+            "sample_count": len(manifest_profile.get("sample_files") or []),
+        },
+        {
+            "id": "trusted-vendor-export-diff",
+            "label": "Trusted vendor export manifest diff",
+            "status": "pending-image-workflow-validate",
+            "required_before_report": True,
+            "required_fields": [
+                "source_sha256",
+                "container_format",
+                "vendor_tool",
+                "vendor_tool_version",
+                "export_manifest_sha256",
+                "exported_file_sha256",
+            ],
+        },
+        {
+            "id": "metadata-deleted-entry-validation",
+            "label": "Embedded metadata and deleted-entry validation corpus",
+            "status": "external-corpus-required",
+            "required_before_commercial_grade": True,
+            "minimum_cases": ["live-files", "deleted-files", "compressed-items", "embedded-metadata", "vendor-log"],
+        },
+        {
+            "id": "encrypted-compressed-container-corpus",
+            "label": "Encrypted/compressed proprietary container corpus",
+            "status": "external-corpus-required",
+            "required_before_commercial_grade": True,
+            "minimum_cases": ["plain-ad1", "encrypted-ad1", "l01-lx01", "aff-aff4", "corrupt-or-partial"],
+        },
+        {
+            "id": "native-parser-research-track",
+            "label": "Native parser/library research and version matrix",
+            "status": "native-parser-required-for-commercial-grade",
+            "required_before_commercial_grade": True,
+            "formats": ["AD1", "L01", "Lx01", "AFF", "AFF4", "XVA"],
+        },
+    ]
+    ready_slots = [slot["id"] for slot in evidence_slots if str(slot.get("status", "")).startswith("complete")]
+    blocker_slots = [
+        slot["id"]
+        for slot in evidence_slots
+        if slot.get("required_before_report") and not str(slot.get("status", "")).startswith("complete")
+    ]
+    payload: dict[str, object] = {
+        "profile_version": FORENSIC_CONTAINER_REPORT_GRADE_VALIDATION_PLAN_VERSION,
+        "item_number": 25,
+        "gap_id": "#25",
+        "source_path": str(source_path),
+        "detected_format": container_type,
+        "output_root": str(output_root),
+        "status": "report-validation-blocked" if blocker_slots else "ready-for-report-review",
+        "commercial_grade_ready": False,
+        "expected_export_entries": expected_rows,
+        "source_integrity": source_row,
+        "container_export_profile": export_profile,
+        "verified_export_manifest_profile": manifest_profile,
+        "validation_commands": validation_commands,
+        "evidence_slots": evidence_slots,
+        "ready_slot_ids": ready_slots,
+        "blocking_slot_ids": blocker_slots,
+        "export_manifest_policy": {
+            "sidecar_names": [
+                source_path.with_suffix(source_path.suffix + ".export-manifest.json").name,
+                source_path.with_suffix(source_path.suffix + ".manifest.json").name,
+            ],
+            "required_fields": ["vendor_tool", "vendor_tool_version", "source_sha256", "export_root_sha256", "files"],
+            "sample_bound": 25,
+            "treat_export_as_derived_evidence": True,
+        },
+        "report_claim_boundary": (
+            "This plan can make one proprietary-container export workflow reviewable when all report-required slots pass; "
+            "commercial-grade native AD1/L01/Lx01/AFF/AFF4/XVA claims still require native parser validation, "
+            "deleted-entry/metadata corpora, encrypted/compressed corpus, and independent signoff."
+        ),
+        "commercial_grade_blockers": list(FORENSIC_CONTAINER_REPORT_GRADE_BLOCKERS),
+        "operator_next_steps": [
+            "Hash the original proprietary container and run evidence-preflight.",
+            "Export or mount the container read-only with the trusted vendor/acquisition tool and preserve logs.",
+            "Attach a JSON export manifest sidecar with source/export hashes, vendor version, and bounded file samples.",
+            "Scan the derived export folder, then run trusted-workflow-diff before citing exported paths or hashes.",
+        ],
+    }
+    payload["manifest_sha256"] = stable_manifest_sha256(payload)
+    return payload
+
+
+def _forensic_container_validation_command(
+    command_id: str,
+    argv: list[str],
+    *,
+    purpose: str,
+    expected_output: str,
+    trusted_tool: bool = False,
+    status: str = "pending-run",
+) -> dict[str, object]:
+    clean_argv = [str(item) for item in argv if str(item) != ""]
+    return {
+        "id": command_id,
+        "argv": clean_argv,
+        "command": " ".join(shlex.quote(item) for item in clean_argv),
+        "purpose": purpose,
+        "expected_output": expected_output,
+        "status": status,
+        "trusted_tool_required": trusted_tool,
+    }
+
+
 def discover_forensic_container_export_manifest(source: Path) -> Path | None:
     candidates = [
         source.with_suffix(source.suffix + ".export-manifest.json"),
@@ -1288,6 +1586,17 @@ class ForensicContainerAdapter:
             if source.is_file() and supported
             else None
         )
+        forensic_container_validation_plan = (
+            build_forensic_container_report_grade_validation_plan(
+                source,
+                detected_format=suffix or "forensic-container",
+                source_integrity=source_integrity,
+                container_export_profile=container_export_profile,
+                verified_export_manifest_profile=verified_export_manifest_profile,
+            )
+            if source.is_file() and supported
+            else None
+        )
         return EvidenceAdapterResult(
             adapter=self.name,
             source_path=str(source),
@@ -1380,6 +1689,9 @@ class ForensicContainerAdapter:
                     "image_report_grade_assessment": report_grade,
                     "detected_format": suffix or "forensic-container",
                     "export_manifest_sha256": (verified_export_manifest_profile or {}).get("manifest_sha256", ""),
+                    "report_grade_validation_plan_sha256": (forensic_container_validation_plan or {}).get(
+                        "manifest_sha256", ""
+                    ),
                     "native_vs_export_workflow": container_export_profile or {},
                     "verified_export_manifest_profile": verified_export_manifest_profile or {},
                 },
@@ -1387,6 +1699,7 @@ class ForensicContainerAdapter:
             container_export_profile=container_export_profile,
             verified_export_manifest_profile=verified_export_manifest_profile,
             forensic_container_workflow_manifest=forensic_container_workflow_manifest,
+            forensic_container_validation_plan=forensic_container_validation_plan,
             image_analyst_review_profile=image_workflow_analyst_review_profile(
                 25,
                 {

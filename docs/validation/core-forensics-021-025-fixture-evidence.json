@@ -77,7 +77,8 @@
       "number": 25,
       "title": "AD1/L01/Lx01/AFF/AFF4/XVA support",
       "assertions": [
-        "Forensic container adapter preserves container type detection, source integrity, native-vs-export workflow disclosure, metadata/deleted-entry validation blockers, encrypted/compressed limitation warnings, #25 core_accuracy_gates, image_analyst_review_profile, #25 commercial_uplift_evidence implemented/usable/validated flags, and native-parser reportability blockers.",
+        "Forensic container adapter preserves container type detection, source integrity, native-vs-export workflow disclosure, metadata/deleted-entry validation blockers, encrypted/compressed limitation warnings, #25 core_accuracy_gates, image_analyst_review_profile, #25 commercial_uplift_evidence implemented/usable/validated flags, forensic-container-report-grade-validation-plan-v1, and native-parser reportability blockers.",
+        "Forensic container validation plans preserve source-container hash, evidence preflight, vendor export, export-manifest authoring, derived-export scan, trusted-workflow-diff commands, source/vendor/export/file hash evidence slots, and native/deleted/encrypted-container blockers.",
         "build_image_workflow_trusted_diff compares container type, source hash, vendor export manifest hash, and exported file rows before satisfying the #25 trusted manifest diff gate."
       ],
       "blockers_kept": [

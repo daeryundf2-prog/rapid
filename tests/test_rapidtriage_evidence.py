@@ -440,6 +440,31 @@ class RapidTriageEvidenceAdapterTests(unittest.TestCase):
                 self.assertEqual(workflow_statuses["verified-export-manifest"], "blocked")
                 self.assertEqual(workflow_statuses["scan-derived-export"], "blocked")
                 self.assertFalse(workflow_manifest["commercial_grade_ready"])
+                validation_plan = result["forensic_container_validation_plan"]
+                self.assertEqual(
+                    validation_plan["profile_version"],
+                    "forensic-container-report-grade-validation-plan-v1",
+                )
+                self.assertEqual(validation_plan["item_number"], 25)
+                self.assertEqual(validation_plan["gap_id"], "#25")
+                self.assertEqual(validation_plan["detected_format"], detected_format)
+                self.assertEqual(len(validation_plan["manifest_sha256"]), 64)
+                validation_command_ids = {row["id"] for row in validation_plan["validation_commands"]}
+                self.assertIn("source-container-hash", validation_command_ids)
+                self.assertIn("evidence-preflight", validation_command_ids)
+                self.assertIn("vendor-export", validation_command_ids)
+                self.assertIn("export-manifest-author", validation_command_ids)
+                self.assertIn("scan-derived-export", validation_command_ids)
+                self.assertIn("trusted-workflow-diff", validation_command_ids)
+                validation_slot_statuses = {slot["id"]: slot["status"] for slot in validation_plan["evidence_slots"]}
+                self.assertEqual(validation_slot_statuses["source-container-integrity"], "complete")
+                self.assertEqual(validation_slot_statuses["container-type-and-export-policy"], "complete")
+                self.assertEqual(validation_slot_statuses["verified-export-manifest"], "missing")
+                self.assertEqual(validation_slot_statuses["trusted-vendor-export-diff"], "pending-image-workflow-validate")
+                self.assertIn("source-container-integrity", validation_plan["ready_slot_ids"])
+                self.assertIn("verified-export-manifest", validation_plan["blocking_slot_ids"])
+                self.assertIn("trusted-vendor-export-diff", validation_plan["blocking_slot_ids"])
+                self.assertFalse(validation_plan["commercial_grade_ready"])
 
     def test_forensic_container_reads_verified_export_manifest_sidecar(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -488,6 +513,19 @@ class RapidTriageEvidenceAdapterTests(unittest.TestCase):
                 result["commercial_uplift_evidence"]["large_data_controls"]["export_manifest_sha256"],
                 profile["manifest_sha256"],
             )
+            validation_plan = result["forensic_container_validation_plan"]
+            validation_slot_statuses = {slot["id"]: slot["status"] for slot in validation_plan["evidence_slots"]}
+            self.assertEqual(validation_slot_statuses["verified-export-manifest"], "complete")
+            self.assertEqual(validation_slot_statuses["vendor-tool-version-log"], "complete")
+            self.assertEqual(validation_slot_statuses["derived-export-root-integrity"], "complete")
+            self.assertEqual(validation_slot_statuses["exported-file-hash-inventory"], "complete")
+            self.assertEqual(
+                validation_plan["verified_export_manifest_profile"]["manifest_sha256"],
+                profile["manifest_sha256"],
+            )
+            self.assertIn("verified-export-manifest", validation_plan["ready_slot_ids"])
+            self.assertIn("trusted-vendor-export-diff", validation_plan["blocking_slot_ids"])
+            self.assertEqual(validation_plan["export_manifest_policy"]["sample_bound"], 25)
 
     def test_unknown_format_is_not_supported(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:

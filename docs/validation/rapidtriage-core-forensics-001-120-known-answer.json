@@ -703,7 +703,8 @@
       ],
       "expected": {
         "required_assertions": [
-          "Forensic container detection preserves type, source integrity, export-first disclosure, metadata/deleted blockers, encrypted/compressed warnings, #25 core_accuracy_gates, and #25 commercial_uplift_evidence implemented/usable/validated flags"
+          "Forensic container detection preserves type, source integrity, export-first disclosure, metadata/deleted blockers, encrypted/compressed warnings, #25 core_accuracy_gates, forensic-container-report-grade-validation-plan-v1, and #25 commercial_uplift_evidence implemented/usable/validated flags",
+          "Forensic container validation plans enumerate source-container hash, evidence preflight, vendor export, export-manifest authoring, derived-export scan, trusted-workflow-diff commands, export-root/file-hash evidence slots, and native/deleted/encrypted-container blockers"
         ]
       },
       "notes": "Internal fixture pass; native proprietary container parsing and vendor export known-answer validation remain required.",
