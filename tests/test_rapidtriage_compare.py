@@ -79,11 +79,14 @@ class RapidTriageCompareTests(unittest.TestCase):
             self.assertIn("bounded compare notes captured", compare_gate["satisfied_checks"])
             self.assertIn("compare citation manifest hash", compare_gate["satisfied_checks"])
             self.assertIn("compare source viewer locators", compare_gate["satisfied_checks"])
+            self.assertIn("compare report-grade validation plan", compare_gate["satisfied_checks"])
+            self.assertIn("compare report-grade ready slots", compare_gate["satisfied_checks"])
             self.assertIn("specialized diff limitation warning", compare_gate["satisfied_checks"])
             uplift = payload["commercial_uplift_evidence"]
             self.assertEqual(uplift["batch_id"], "commercial-uplift-051-055")
             self.assertEqual(uplift["item_numbers"], [52])
             self.assertIn("bounded text diff", uplift["passed_validation_check_ids"])
+            self.assertIn("compare report-grade validation plan", uplift["passed_validation_check_ids"])
             self.assertIn("binary-structure-aware-diff", uplift["failed_validation_check_ids"])
             self.assertEqual(
                 uplift["reportability_decision"]["allowed_use"],
@@ -96,6 +99,13 @@ class RapidTriageCompareTests(unittest.TestCase):
                 uplift["large_data_controls"]["compare_citation_manifest_hash"],
                 payload["compare_citation_manifest"]["manifest_hash"],
             )
+            self.assertTrue(uplift["large_data_controls"]["compare_report_grade_validation_plan_present"])
+            self.assertEqual(
+                uplift["large_data_controls"]["compare_report_grade_validation_plan_hash"],
+                payload["compare_report_grade_validation_plan"]["validation_plan_sha256"],
+            )
+            self.assertEqual(uplift["large_data_controls"]["compare_report_grade_ready_slot_count"], 6)
+            self.assertEqual(uplift["large_data_controls"]["compare_report_grade_blocking_slot_count"], 6)
             self.assertEqual(uplift["large_data_controls"]["source_viewer_locator_count"], 2)
             self.assertEqual(uplift["large_data_controls"]["diff_locator_count"], 1)
             self.assertTrue(uplift["large_data_controls"]["compare_review_profile_present"])
@@ -111,6 +121,18 @@ class RapidTriageCompareTests(unittest.TestCase):
             self.assertFalse(review_profile["persistent_compare_notes"])
             self.assertTrue(review_profile["commercial_release_blocked"])
             self.assertEqual(review_profile["review_queue"][0]["report_decision"], "pending")
+            validation_plan = payload["compare_report_grade_validation_plan"]
+            self.assertEqual(
+                validation_plan["profile_version"],
+                "multi-evidence-compare-report-grade-validation-plan-v1",
+            )
+            self.assertEqual(validation_plan["item_number"], 52)
+            self.assertEqual(validation_plan["gap_id"], "#52")
+            self.assertEqual(payload["summary"]["compare_report_grade_validation_plan_hash"], validation_plan["validation_plan_sha256"])
+            self.assertEqual(validation_plan["ready_slot_count"], 6)
+            self.assertEqual(validation_plan["blocking_slot_count"], 6)
+            self.assertIn("web-three-pane-compare-ui-required", validation_plan["blockers"])
+            self.assertIn("compare-trusted-expected-diff-required", validation_plan["blockers"])
             citation_manifest = payload["compare_citation_manifest"]
             self.assertEqual(citation_manifest["manifest_version"], "multi-evidence-compare-citation-manifest-v1")
             self.assertEqual(citation_manifest["comparison_count"], 1)
@@ -212,12 +234,24 @@ class RapidTriageCompareTests(unittest.TestCase):
             self.assertEqual(payload["core_accuracy_gates"][0]["gap_id"], "#52")
             self.assertIn("compare review profile", payload["core_accuracy_gates"][0]["satisfied_checks"])
             self.assertIn("selection rationale captured", payload["core_accuracy_gates"][0]["satisfied_checks"])
+            self.assertIn("compare report-grade validation plan", payload["core_accuracy_gates"][0]["satisfied_checks"])
             self.assertTrue(payload["commercial_uplift_evidence"]["large_data_controls"]["a_b_c_baseline_compare"])
             self.assertTrue(payload["commercial_uplift_evidence"]["large_data_controls"]["compare_citation_manifest_present"])
+            self.assertTrue(
+                payload["commercial_uplift_evidence"]["large_data_controls"][
+                    "compare_report_grade_validation_plan_present"
+                ]
+            )
             self.assertEqual(payload["commercial_uplift_evidence"]["large_data_controls"]["review_queue_count"], 2)
             self.assertEqual(payload["compare_citation_manifest"]["comparison_count"], 2)
             self.assertEqual(payload["compare_citation_manifest"]["source_viewer_locator_count"], 4)
             self.assertEqual(payload["summary"]["compare_citation_manifest_hash"], payload["compare_citation_manifest"]["manifest_hash"])
+            self.assertEqual(
+                payload["summary"]["compare_report_grade_validation_plan_hash"],
+                payload["compare_report_grade_validation_plan"]["validation_plan_sha256"],
+            )
+            self.assertEqual(payload["compare_report_grade_validation_plan"]["ready_slot_count"], 6)
+            self.assertEqual(payload["compare_report_grade_validation_plan"]["blocking_slot_count"], 6)
             self.assertEqual(payload["summary"]["review_queue_count"], 2)
             self.assertTrue(payload["summary"]["selection_rationale_present"])
             self.assertEqual(payload["compare_review_profile"]["review_note_count"], 2)

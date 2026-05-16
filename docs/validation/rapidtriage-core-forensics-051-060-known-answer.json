@@ -22,8 +22,8 @@
       "status": "pass",
       "backlog_items": [52],
       "evidence_paths": ["docs/validation/core-forensics-051-060-fixture-evidence.json", "tests/test_rapidtriage_compare.py", "tests/test_rapidtriage_api.py"],
-      "expected": {"required_assertions": ["Compare preserves A/B/C baseline review, hashes, bounded text diff, status counts, source-viewer locators, diff locators, comparison entry hashes, citation manifest hashes, specialized-diff warning, trusted expected-diff gates, and #52 core_accuracy_gates.", "Compare reportability decisions block semantic-diff-complete claims until binary/image/SQLite/mailbox diff viewers, persistent Case DB compare notes, selection rationale, reviewed citations, and trusted expected diff evidence exist."]},
-      "notes": "Internal fixture pass; semantic binary/image/table diff viewers remain future work."
+      "expected": {"required_assertions": ["Compare preserves A/B/C baseline review, hashes, bounded text diff, status counts, source-viewer locators, diff locators, comparison entry hashes, citation manifest hashes, compare_report_grade_validation_plan ready/blocking slots, specialized-diff warning, trusted expected-diff gates, and #52 core_accuracy_gates.", "Compare reportability decisions block semantic-diff-complete claims until web three-pane review, binary/image/SQLite/mailbox diff viewers, persistent Case DB compare notes, selection rationale, reviewed citations, and trusted expected diff evidence exist."]},
+      "notes": "Internal fixture pass; web three-pane review plus semantic binary/image/table/mailbox diff viewers remain future work."
     },
     {
       "id": "core-forensics-053-hex-viewer-fixture",

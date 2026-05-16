@@ -121,7 +121,7 @@ For A/B/C evidence review, pass three or more files to `compare`; the first path
 rapidtriage compare ./baseline.txt ./host-a.txt ./host-b.txt --label baseline --label host-a --label host-b --selection-rationale "Compare the same config across hosts" --review-note "Host A matches baseline" --review-note "Host B differs" --output compare.json
 ```
 
-The compare JSON includes `compare_review_profile` with input inventory, comparison review queue, selection rationale, bounded review notes, and #52 blockers for persistent notes plus binary/image/SQLite/timeline-aware semantic diff.
+The compare JSON includes `compare_review_profile` with input inventory, comparison review queue, selection rationale, bounded review notes, and #52 blockers for persistent notes plus binary/image/SQLite/timeline-aware semantic diff. It also includes `compare_report_grade_validation_plan`, which gives a hashable ready/blocking checklist for hashes, source/diff locators, analyst rationale, notes, missing web three-pane review, semantic viewers, persistent notes, citation signoff, and trusted expected-diff evidence.
 
 ## Processing Transparency
 

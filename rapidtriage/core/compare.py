@@ -39,6 +39,7 @@ TEXT_EXTENSIONS = {
     ".yml",
 }
 COMPARE_GAP_ID = "#52"
+COMPARE_REPORT_GRADE_VALIDATION_PLAN_VERSION = "multi-evidence-compare-report-grade-validation-plan-v1"
 COMPARE_NATIVE_CAPABILITIES = {
     "a_b_file_compare": True,
     "a_b_c_baseline_compare": True,
@@ -53,8 +54,11 @@ COMPARE_NATIVE_CAPABILITIES = {
     "persistent_compare_notes": False,
 }
 COMPARE_REPORT_GRADE_BLOCKERS = [
+    "web-three-pane-compare-ui-required",
     "binary-structure-aware-diff-not-implemented",
     "visual-and-table-aware-diff-not-implemented",
+    "timeline-aware-compare-not-implemented",
+    "persistent-case-db-compare-notes-required",
     "comparison-context-and-analyst-selection-require-review-history",
     "compare-trusted-expected-diff-required",
 ]
@@ -119,12 +123,20 @@ def compare_paths(
         input_records=[left_record, right_record],
         review_profile=review_profile,
     )
-    report_grade = compare_report_grade_assessment(mode="pair")
+    validation_plan = build_compare_report_grade_validation_plan(
+        results=[result],
+        mode="pair",
+        review_profile=review_profile,
+        citation_manifest=citation_manifest,
+        trusted_diff=None,
+    )
+    report_grade = compare_report_grade_assessment(mode="pair", validation_plan=validation_plan)
     core_accuracy_gates = compare_core_accuracy_gates(
         results=[result],
         mode="pair",
         review_profile=review_profile,
         citation_manifest=citation_manifest,
+        validation_plan=validation_plan,
     )
     return {
         "command": "compare",
@@ -152,6 +164,7 @@ def compare_paths(
             "selection_rationale_present": bool(review_profile.get("selection_rationale")),
             "review_note_count": int(review_profile.get("review_note_count") or 0),
             "compare_citation_manifest_hash": citation_manifest["manifest_hash"],
+            "compare_report_grade_validation_plan_hash": validation_plan["validation_plan_sha256"],
             "source_viewer_locator_count": citation_manifest["source_viewer_locator_count"],
             "commercial_gap_ids": [COMPARE_GAP_ID],
             "commercial_grade_ready": False,
@@ -159,6 +172,7 @@ def compare_paths(
         "compare_native_capabilities": dict(COMPARE_NATIVE_CAPABILITIES),
         "compare_review_profile": review_profile,
         "compare_citation_manifest": citation_manifest,
+        "compare_report_grade_validation_plan": validation_plan,
         "compare_report_grade_assessment": report_grade,
         "core_accuracy_gates": core_accuracy_gates,
         "commercial_uplift_evidence": compare_commercial_uplift_evidence(
@@ -170,6 +184,7 @@ def compare_paths(
             diff_context=diff_context,
             review_profile=review_profile,
             citation_manifest=citation_manifest,
+            validation_plan=validation_plan,
         ),
         "results": [result],
     }
@@ -237,12 +252,20 @@ def compare_many_paths(
         input_records=input_records,
         review_profile=review_profile,
     )
-    report_grade = compare_report_grade_assessment(mode="multi")
+    validation_plan = build_compare_report_grade_validation_plan(
+        results=comparisons,
+        mode="multi",
+        review_profile=review_profile,
+        citation_manifest=citation_manifest,
+        trusted_diff=None,
+    )
+    report_grade = compare_report_grade_assessment(mode="multi", validation_plan=validation_plan)
     core_accuracy_gates = compare_core_accuracy_gates(
         results=comparisons,
         mode="multi",
         review_profile=review_profile,
         citation_manifest=citation_manifest,
+        validation_plan=validation_plan,
     )
     return {
         "command": "compare",
@@ -273,6 +296,7 @@ def compare_many_paths(
             "selection_rationale_present": bool(review_profile.get("selection_rationale")),
             "review_note_count": int(review_profile.get("review_note_count") or 0),
             "compare_citation_manifest_hash": citation_manifest["manifest_hash"],
+            "compare_report_grade_validation_plan_hash": validation_plan["validation_plan_sha256"],
             "source_viewer_locator_count": citation_manifest["source_viewer_locator_count"],
             "commercial_gap_ids": [COMPARE_GAP_ID],
             "commercial_grade_ready": False,
@@ -280,6 +304,7 @@ def compare_many_paths(
         "compare_native_capabilities": dict(COMPARE_NATIVE_CAPABILITIES),
         "compare_review_profile": review_profile,
         "compare_citation_manifest": citation_manifest,
+        "compare_report_grade_validation_plan": validation_plan,
         "compare_report_grade_assessment": report_grade,
         "core_accuracy_gates": core_accuracy_gates,
         "commercial_uplift_evidence": compare_commercial_uplift_evidence(
@@ -291,6 +316,7 @@ def compare_many_paths(
             diff_context=diff_context,
             review_profile=review_profile,
             citation_manifest=citation_manifest,
+            validation_plan=validation_plan,
         ),
         "results": comparisons,
     }
@@ -303,6 +329,7 @@ def compare_core_accuracy_gates(
     trusted_diff: Mapping[str, object] | None = None,
     review_profile: Mapping[str, object] | None = None,
     citation_manifest: Mapping[str, object] | None = None,
+    validation_plan: Mapping[str, object] | None = None,
 ) -> list[dict[str, object]]:
     satisfied = []
     if mode == "multi" or len(results) >= 1:
@@ -327,6 +354,11 @@ def compare_core_accuracy_gates(
         satisfied.append("compare citation manifest hash")
     if int(citation_manifest.get("source_viewer_locator_count") or 0) > 0:
         satisfied.append("compare source viewer locators")
+    validation_plan = validation_plan if isinstance(validation_plan, Mapping) else {}
+    if validation_plan.get("validation_plan_sha256"):
+        satisfied.append("compare report-grade validation plan")
+    if int(validation_plan.get("ready_slot_count") or 0) >= 6:
+        satisfied.append("compare report-grade ready slots")
     if not COMPARE_NATIVE_CAPABILITIES["binary_structure_aware_diff"]:
         satisfied.append("specialized diff limitation warning")
     trusted_diff = trusted_diff if isinstance(trusted_diff, Mapping) else {}
@@ -338,6 +370,9 @@ def compare_core_accuracy_gates(
         f"review_queue_count:{review_profile.get('review_queue_count', 0)}",
         f"review_note_count:{review_profile.get('review_note_count', 0)}",
         f"compare_citation_manifest_hash:{citation_manifest.get('manifest_hash', '')}",
+        f"compare_report_grade_validation_plan_sha256:{validation_plan.get('validation_plan_sha256', '')}",
+        f"compare_report_grade_ready_slot_count:{validation_plan.get('ready_slot_count', 0)}",
+        f"compare_report_grade_blocking_slot_count:{validation_plan.get('blocking_slot_count', 0)}",
         f"trusted_diff_status:{trusted_diff.get('status', 'missing')}",
     ]
     for result in results[:3]:
@@ -503,6 +538,179 @@ def build_compare_citation_manifest(
     return {**manifest_core, "manifest_hash": stable_payload_sha256(manifest_core)}
 
 
+def build_compare_report_grade_validation_plan(
+    *,
+    results: Sequence[Mapping[str, object]],
+    mode: str,
+    review_profile: Mapping[str, object],
+    citation_manifest: Mapping[str, object],
+    trusted_diff: Mapping[str, object] | None = None,
+) -> dict[str, object]:
+    trusted_diff = trusted_diff if isinstance(trusted_diff, Mapping) else {}
+    status_counts = review_profile.get("status_counts") if isinstance(review_profile.get("status_counts"), Mapping) else {}
+
+    def slot(
+        slot_id: str,
+        *,
+        ready: bool,
+        evidence: str,
+        blocker_id: str | None = None,
+        operator_action: str = "",
+    ) -> dict[str, object]:
+        row: dict[str, object] = {
+            "slot_id": slot_id,
+            "status": "complete" if ready else "external-required",
+            "evidence": evidence,
+        }
+        if blocker_id and not ready:
+            row["blocker_id"] = blocker_id
+        if operator_action:
+            row["operator_action"] = operator_action
+        return row
+
+    hash_complete = all(result.get("left", {}).get("hashes") and result.get("right", {}).get("hashes") for result in results)
+    validation_slots = [
+        slot(
+            "compare-baseline-pair-or-abc-results",
+            ready=bool(results),
+            evidence=f"mode={mode} result_count={len(results)}",
+            blocker_id="compare-results-required",
+            operator_action="Emit at least one baseline comparison row before review.",
+        ),
+        slot(
+            "compare-file-hash-inventory",
+            ready=hash_complete,
+            evidence=f"hash_complete={hash_complete}",
+            blocker_id="compare-file-hash-inventory-required",
+            operator_action="Compute MD5/SHA1/SHA256 for every compared side.",
+        ),
+        slot(
+            "compare-bounded-diff-or-status-counts",
+            ready=bool(status_counts),
+            evidence=f"status_counts={dict(status_counts)}",
+            blocker_id="compare-status-counts-required",
+            operator_action="Emit status counts and bounded text diff metadata.",
+        ),
+        slot(
+            "compare-review-profile-and-queue",
+            ready=int(review_profile.get("review_queue_count") or 0) == len(results) and bool(results),
+            evidence=f"review_queue_count={review_profile.get('review_queue_count', 0)}",
+            blocker_id="compare-review-profile-required",
+            operator_action="Create a review queue row for each comparison.",
+        ),
+        slot(
+            "compare-citation-source-and-diff-locators",
+            ready=bool(citation_manifest.get("manifest_hash"))
+            and int(citation_manifest.get("source_viewer_locator_count") or 0) >= len(results) * 2,
+            evidence=(
+                f"manifest_hash={citation_manifest.get('manifest_hash', '')} "
+                f"source_viewer_locator_count={citation_manifest.get('source_viewer_locator_count', 0)} "
+                f"diff_locator_count={citation_manifest.get('diff_locator_count', 0)}"
+            ),
+            blocker_id="compare-citation-locators-required",
+            operator_action="Attach source-viewer and diff-viewer locators for every comparison.",
+        ),
+        slot(
+            "compare-selection-rationale-and-notes",
+            ready=bool(review_profile.get("selection_rationale")) and int(review_profile.get("review_note_count") or 0) > 0,
+            evidence=(
+                f"selection_rationale_present={bool(review_profile.get('selection_rationale'))} "
+                f"review_note_count={review_profile.get('review_note_count', 0)}"
+            ),
+            blocker_id="compare-selection-rationale-and-notes-required",
+            operator_action="Record analyst selection rationale and bounded notes before report inclusion.",
+        ),
+        slot(
+            "compare-web-three-pane-ui",
+            ready=False,
+            evidence="web_three_pane_compare_ui=false",
+            blocker_id="web-three-pane-compare-ui-required",
+            operator_action="Add web-side A/B/C panes with synchronized source, diff, and notes panels.",
+        ),
+        slot(
+            "compare-semantic-binary-image-sqlite-mailbox-diff",
+            ready=False,
+            evidence="semantic_specialized_diff=false",
+            blocker_id="semantic-binary-image-sqlite-mailbox-diff-required",
+            operator_action="Add artifact-specific binary/hex, image, SQLite, mailbox, and timeline-aware diff viewers.",
+        ),
+        slot(
+            "compare-persistent-case-db-notes",
+            ready=False,
+            evidence="persistent_case_db_compare_notes=false",
+            blocker_id="persistent-case-db-compare-notes-required",
+            operator_action="Persist comparison notes, review status, and report decisions in Case DB.",
+        ),
+        slot(
+            "compare-timeline-aware-comparison",
+            ready=False,
+            evidence="timeline_aware_compare=false",
+            blocker_id="timeline-aware-compare-not-implemented",
+            operator_action="Add timeline-aware compare for ordered artifact sequences.",
+        ),
+        slot(
+            "compare-reviewed-citation-signoff",
+            ready=False,
+            evidence="reviewed_citation_signoff=false",
+            blocker_id="reviewed-comparison-citation-signoff-required",
+            operator_action="Attach reviewer signoff to selected citations before court exhibit export.",
+        ),
+        slot(
+            "compare-trusted-expected-diff",
+            ready=trusted_diff.get("status") == "pass",
+            evidence=f"trusted_diff_status={trusted_diff.get('status', 'missing')}",
+            blocker_id=COMPARE_TRUSTED_DIFF_BLOCKER,
+            operator_action="Attach a passing trusted expected-diff manifest.",
+        ),
+    ]
+    blockers = sorted(
+        str(slot_row.get("blocker_id"))
+        for slot_row in validation_slots
+        if slot_row.get("status") != "complete" and slot_row.get("blocker_id")
+    )
+    ready_slot_count = sum(1 for slot_row in validation_slots if slot_row.get("status") == "complete")
+    plan_core: dict[str, object] = {
+        "profile_version": COMPARE_REPORT_GRADE_VALIDATION_PLAN_VERSION,
+        "item_number": 52,
+        "gap_id": COMPARE_GAP_ID,
+        "batch_id": "commercial-uplift-051-055",
+        "selected_track": "multi-evidence-compare-report-validation",
+        "mode": mode,
+        "result_count": len(results),
+        "input_count": int(review_profile.get("input_count") or 0),
+        "status_counts": dict(status_counts),
+        "review_queue_count": int(review_profile.get("review_queue_count") or 0),
+        "selection_rationale_present": bool(review_profile.get("selection_rationale")),
+        "review_note_count": int(review_profile.get("review_note_count") or 0),
+        "compare_citation_manifest_hash": str(citation_manifest.get("manifest_hash") or ""),
+        "source_viewer_locator_count": int(citation_manifest.get("source_viewer_locator_count") or 0),
+        "diff_locator_count": int(citation_manifest.get("diff_locator_count") or 0),
+        "trusted_diff_status": str(trusted_diff.get("status") or "missing"),
+        "ready_slot_count": ready_slot_count,
+        "blocking_slot_count": len(blockers),
+        "validation_status": "report-validation-blocked",
+        "commercial_grade": False,
+        "commercial_grade_ready": False,
+        "validation_slots": validation_slots,
+        "blockers": blockers,
+        "commercial_grade_blockers": list(COMPARE_REPORT_GRADE_BLOCKERS),
+        "validation_commands": [
+            "rapidtriage compare <baseline> <item-a> <item-b> --selection-rationale <why> --review-note <note> --json",
+            "rapidtriage commercial-readiness --validation-package docs/validation/rapidtriage-core-forensics-051-060-known-answer.json --limit 52 --json",
+        ],
+        "report_guidance": {
+            "allowed_use": "bounded-file-compare-triage-pivot",
+            "forbidden_claim": "semantic artifact-specific comparison complete",
+            "required_disclaimer": (
+                "A/B/C compare output is a bounded file-level triage pivot until web-side multi-pane review, "
+                "semantic specialized diff viewers, persistent Case DB notes, citation signoff, and trusted "
+                "expected-diff manifests are attached."
+            ),
+        },
+    }
+    return {**plan_core, "validation_plan_sha256": stable_payload_sha256(plan_core)}
+
+
 def compare_source_locator(record: Mapping[str, object], *, side: str) -> dict[str, object]:
     hashes = record.get("hashes") if isinstance(record.get("hashes"), Mapping) else {}
     return {
@@ -587,13 +795,17 @@ def _compare_diff_values(row: Mapping[str, object]) -> dict[str, object]:
     }
 
 
-def compare_report_grade_assessment(*, mode: str) -> dict[str, object]:
+def compare_report_grade_assessment(*, mode: str, validation_plan: Mapping[str, object] | None = None) -> dict[str, object]:
+    validation_plan = validation_plan if isinstance(validation_plan, Mapping) else {}
     return {
         "status": "implemented-baseline-validation-required",
         "mode": mode,
         "commercial_gap_ids": [COMPARE_GAP_ID],
         "ready_for_court_report": False,
         "blockers": list(COMPARE_REPORT_GRADE_BLOCKERS),
+        "compare_report_grade_validation_plan_hash": str(validation_plan.get("validation_plan_sha256") or ""),
+        "compare_report_grade_ready_slot_count": int(validation_plan.get("ready_slot_count") or 0),
+        "compare_report_grade_blocking_slot_count": int(validation_plan.get("blocking_slot_count") or 0),
         "recommended_validation": [
             "Confirm why the compared files were selected and record reviewer status before report inclusion.",
             "Use artifact-specific viewers/parsers for binary, image, SQLite, and mailbox semantic differences.",
@@ -611,6 +823,7 @@ def compare_commercial_uplift_evidence(
     diff_context: int,
     review_profile: Mapping[str, object] | None = None,
     citation_manifest: Mapping[str, object] | None = None,
+    validation_plan: Mapping[str, object] | None = None,
 ) -> dict[str, object]:
     passed = []
     for gate in core_accuracy_gates:
@@ -625,6 +838,7 @@ def compare_commercial_uplift_evidence(
     ]
     review_profile = review_profile if isinstance(review_profile, Mapping) else {}
     citation_manifest = citation_manifest if isinstance(citation_manifest, Mapping) else {}
+    validation_plan = validation_plan if isinstance(validation_plan, Mapping) else {}
     return {
         "batch_id": "commercial-uplift-051-055",
         "item_numbers": [52],
@@ -632,6 +846,7 @@ def compare_commercial_uplift_evidence(
         "source_refs": [
             f"mode:{mode}",
             f"result_count:{len(results)}",
+            f"compare_report_grade_validation_plan_sha256:{validation_plan.get('validation_plan_sha256', '')}",
             *[f"comparison_id:{result.get('comparison_id', '')}" for result in results[:5]],
         ],
         "reportability_decision": compare_reportability_decision(
@@ -639,6 +854,7 @@ def compare_commercial_uplift_evidence(
             results=results,
             failed_validation_check_ids=failed,
             commercial_blockers=list(report_grade.get("blockers") or []),
+            validation_plan=validation_plan,
         ),
         "passed_validation_check_ids": sorted(set(passed)),
         "failed_validation_check_ids": failed,
@@ -651,6 +867,10 @@ def compare_commercial_uplift_evidence(
             "bounded_text_diff": True,
             "compare_citation_manifest_present": bool(citation_manifest.get("manifest_hash")),
             "compare_citation_manifest_hash": str(citation_manifest.get("manifest_hash") or ""),
+            "compare_report_grade_validation_plan_present": bool(validation_plan.get("validation_plan_sha256")),
+            "compare_report_grade_validation_plan_hash": str(validation_plan.get("validation_plan_sha256") or ""),
+            "compare_report_grade_ready_slot_count": int(validation_plan.get("ready_slot_count") or 0),
+            "compare_report_grade_blocking_slot_count": int(validation_plan.get("blocking_slot_count") or 0),
             "source_viewer_locator_count": int(citation_manifest.get("source_viewer_locator_count") or 0),
             "diff_locator_count": int(citation_manifest.get("diff_locator_count") or 0),
             "compare_review_profile_present": bool(review_profile),
@@ -671,7 +891,9 @@ def compare_reportability_decision(
     results: Sequence[Mapping[str, object]],
     failed_validation_check_ids: Sequence[str],
     commercial_blockers: Sequence[str],
+    validation_plan: Mapping[str, object] | None = None,
 ) -> dict[str, object]:
+    validation_plan = validation_plan if isinstance(validation_plan, Mapping) else {}
     blockers = {str(item) for item in commercial_blockers if str(item)}
     blockers.update(f"check:{item}" for item in failed_validation_check_ids)
     return {
@@ -683,6 +905,10 @@ def compare_reportability_decision(
         "mode": mode,
         "result_count": len(results),
         "ready_for_court_report": False,
+        "compare_report_grade_validation_plan_present": bool(validation_plan.get("validation_plan_sha256")),
+        "compare_report_grade_validation_plan_hash": str(validation_plan.get("validation_plan_sha256") or ""),
+        "compare_report_grade_ready_slot_count": int(validation_plan.get("ready_slot_count") or 0),
+        "compare_report_grade_blocking_slot_count": int(validation_plan.get("blocking_slot_count") or 0),
         "required_before_report": [
             "record analyst-selected comparison rationale and persistent compare notes",
             "run semantic binary, image, SQLite, mailbox, or timeline-aware viewers for specialized evidence",

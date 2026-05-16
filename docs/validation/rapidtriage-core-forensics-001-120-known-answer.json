@@ -1289,10 +1289,10 @@
       ],
       "expected": {
         "required_assertions": [
-          "Compare preserves A/B/C baseline review, hashes, bounded text diff, status counts, specialized-diff warning, and #52 core_accuracy_gates."
+          "Compare preserves A/B/C baseline review, hashes, bounded text diff, status counts, compare_report_grade_validation_plan ready/blocking slots, specialized-diff warning, and #52 core_accuracy_gates."
         ]
       },
-      "notes": "Internal fixture pass; semantic binary/image/table diff viewers remain future work.",
+      "notes": "Internal fixture pass; web three-pane review plus semantic binary/image/table/mailbox diff viewers remain future work.",
       "source_manifest": "docs/validation/rapidtriage-core-forensics-051-060-known-answer.json"
     },
     {

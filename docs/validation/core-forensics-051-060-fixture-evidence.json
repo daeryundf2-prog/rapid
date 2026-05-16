@@ -19,9 +19,9 @@
       "title": "A/B/C multi-evidence compare",
       "test_files": ["tests/test_rapidtriage_compare.py", "tests/test_rapidtriage_api.py"],
       "assertions": [
-        "Compare output preserves A/B and A/B/C baseline comparison, file hashes, bounded text diff, status counts, report pivots, trusted expected-diff gates, #52 core_accuracy_gates, and reportability blockers for missing semantic binary/image/SQLite/mailbox diff plus compare notes."
+        "Compare output preserves A/B and A/B/C baseline comparison, file hashes, bounded text diff, status counts, report pivots, trusted expected-diff gates, compare_report_grade_validation_plan ready/blocking slots, #52 core_accuracy_gates, and reportability blockers for missing semantic binary/image/SQLite/mailbox diff plus compare notes."
       ],
-      "remaining_external_validation": ["Binary/image/SQLite semantic diff viewers, reviewer-selected comparison known-answer corpus, and trusted expected-diff manifest."]
+      "remaining_external_validation": ["Web three-pane compare UI, binary/image/SQLite/mailbox semantic diff viewers, persistent Case DB compare notes, reviewed citation signoff, reviewer-selected comparison known-answer corpus, and trusted expected-diff manifest."]
     },
     {
       "item": 53,

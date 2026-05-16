@@ -88,6 +88,10 @@
       "type": "object",
       "additionalProperties": true
     },
+    "compare_report_grade_validation_plan": {
+      "type": "object",
+      "additionalProperties": true
+    },
     "compare_report_grade_assessment": {
       "type": "object",
       "additionalProperties": true
