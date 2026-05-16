@@ -516,6 +516,17 @@ KAKAOTALK_REPORT_GRADE_BLOCKERS = [
     "attachment-byte-media-validation-required",
     "independent-kakaotalk-review-required",
 ]
+WHATSAPP_REPORT_GRADE_VALIDATION_PLAN_VERSION = "whatsapp-report-grade-validation-plan-v1"
+WHATSAPP_REPORT_GRADE_BLOCKERS = [
+    "trusted-whatsapp-export-native-db-diff-required",
+    "crypt-backup-key-authority-workflow-required",
+    "msgstore-wa-db-schema-version-known-answer-required",
+    "deleted-row-known-answer-required",
+    "contact-call-media-recovery-validation-required",
+    "timezone-ack-read-state-semantics-validation-required",
+    "attachment-byte-media-validation-required",
+    "independent-whatsapp-review-required",
+]
 QC_PREP_CHAT_APP_ITEMS = {
     "KakaoTalk": 37,
     "WhatsApp": 38,
@@ -1433,6 +1444,22 @@ def build_record(
             detail_payload.setdefault(
                 "whatsapp_parser_manifest_hash",
                 detail_payload["whatsapp_parser_manifest"]["manifest_sha256"],
+            )
+            detail_payload.setdefault(
+                "whatsapp_report_grade_validation_plan",
+                build_whatsapp_report_grade_validation_plan(
+                    artifact_type=artifact_type,
+                    source_tool=source_tool,
+                    source_format=source_format,
+                    source_index=source_index,
+                    source_hashes=source_hashes,
+                    source_path=path,
+                    details=detail_payload,
+                ),
+            )
+            detail_payload.setdefault(
+                "whatsapp_report_grade_validation_plan_hash",
+                detail_payload["whatsapp_report_grade_validation_plan"]["manifest_sha256"],
             )
         if service == "Telegram":
             detail_payload.setdefault(
@@ -3049,6 +3076,258 @@ def build_whatsapp_parser_manifest(
         {key: value for key, value in manifest.items() if key != "manifest_sha256"}
     )
     return manifest
+
+
+def build_whatsapp_report_grade_validation_plan(
+    *,
+    artifact_type: str,
+    source_tool: str,
+    source_format: str,
+    source_index: int,
+    source_hashes: Mapping[str, str],
+    source_path: Path,
+    details: Mapping[str, object],
+) -> dict[str, object]:
+    parser_manifest = (
+        details.get("whatsapp_parser_manifest")
+        if isinstance(details.get("whatsapp_parser_manifest"), Mapping)
+        else {}
+    )
+    messenger_manifest = (
+        details.get("messenger_export_framework_manifest")
+        if isinstance(details.get("messenger_export_framework_manifest"), Mapping)
+        else {}
+    )
+    message_profile = (
+        details.get("whatsapp_message_review_profile")
+        if isinstance(details.get("whatsapp_message_review_profile"), Mapping)
+        else {}
+    )
+    database_profile = (
+        details.get("whatsapp_database_review_profile")
+        if isinstance(details.get("whatsapp_database_review_profile"), Mapping)
+        else {}
+    )
+    row_citation = (
+        parser_manifest.get("row_citation")
+        if isinstance(parser_manifest.get("row_citation"), Mapping)
+        else {}
+    )
+    source_locator = (
+        row_citation.get("source_viewer_locator")
+        if isinstance(row_citation.get("source_viewer_locator"), Mapping)
+        else {}
+    )
+    table_summaries = details.get("table_summaries") if isinstance(details.get("table_summaries"), list) else []
+    source_sha256 = optional_text(source_hashes.get("sha256"))
+    message_hash_present = bool(optional_text(details.get("message_text_sha256")))
+    jid_or_media_present = bool(
+        message_profile.get("jid_attribution_present")
+        or message_profile.get("media_metadata_present")
+        or optional_text(details.get("sender"))
+        or optional_text(details.get("recipient"))
+        or optional_text(details.get("media_reference_sha256"))
+    )
+    database_inventory_present = bool(database_profile) or bool(table_summaries)
+    parser_track_present = bool(parser_manifest.get("parser_tracks"))
+    evidence_slots = [
+        {
+            "id": "source-export-row-integrity",
+            "label": "Source export/msgstore row has hashable source provenance",
+            "status": "complete" if source_sha256 else "missing-source-hash",
+            "blocking": not bool(source_sha256),
+            "evidence_refs": [
+                f"source_tool:{source_tool}",
+                f"source_format:{source_format}",
+                f"source_index:{source_index}",
+                f"source_sha256:{source_sha256}",
+            ],
+        },
+        {
+            "id": "service-profile-row-citation",
+            "label": "WhatsApp service profile and source row citation are fixed",
+            "status": "complete" if row_citation.get("row_hash") else "missing-row-citation",
+            "blocking": not bool(row_citation.get("row_hash")),
+            "evidence_refs": [
+                f"whatsapp_parser_manifest:{parser_manifest.get('manifest_sha256', '')}",
+                f"row_hash:{row_citation.get('row_hash', '')}",
+            ],
+        },
+        {
+            "id": "message-jid-media-normalization",
+            "label": "Message/JID/media pivots are normalized without claiming crypt or deleted completeness",
+            "status": "complete"
+            if artifact_type == "mobile-message" and (message_hash_present or jid_or_media_present)
+            else "not-applicable",
+            "blocking": artifact_type == "mobile-message" and not (message_hash_present or jid_or_media_present),
+            "evidence_refs": [
+                f"artifact_type:{artifact_type}",
+                f"message_text_sha256_present:{message_hash_present}",
+                f"jid_or_media_present:{jid_or_media_present}",
+            ],
+        },
+        {
+            "id": "msgstore-database-inventory-boundary",
+            "label": "msgstore/wa.db candidates are inventory-only until validated native decode evidence is attached",
+            "status": "complete" if artifact_type == "mobile-chat-database" and database_inventory_present else "not-applicable",
+            "blocking": False,
+            "evidence_refs": [
+                f"database_inventory_present:{database_inventory_present}",
+                f"table_summary_count:{len(table_summaries)}",
+            ],
+        },
+        {
+            "id": "crypt-export-strategy-classification",
+            "label": "Export, msgstore inventory, crypt-key, and deleted/media validation tracks are recorded",
+            "status": "complete" if parser_track_present else "missing-parser-track",
+            "blocking": not parser_track_present,
+            "evidence_refs": [
+                f"parser_track_count:{len(parser_manifest.get('parser_tracks') or [])}",
+                f"crypt_key_authority_status:{message_profile.get('crypt_key_authority_status') or database_profile.get('crypt_key_authority_status') or 'not-attached'}",
+            ],
+        },
+        {
+            "id": "hash-only-text-policy",
+            "label": "Message text is represented with hash/citation controls before report selection",
+            "status": "complete"
+            if parser_manifest.get("large_data_controls", {}).get("raw_text_hash_only_by_default")
+            else "missing-hash-only-policy",
+            "blocking": not bool(parser_manifest.get("large_data_controls", {}).get("raw_text_hash_only_by_default")),
+            "evidence_refs": [
+                f"raw_text_hash_only_by_default:{parser_manifest.get('large_data_controls', {}).get('raw_text_hash_only_by_default', False)}",
+                f"message_text_sha256_present:{message_hash_present}",
+            ],
+        },
+        {
+            "id": "source-viewer-locator",
+            "label": "GUI/report can pivot back to the WhatsApp source row or msgstore inventory",
+            "status": "complete" if source_locator else "missing-source-viewer-locator",
+            "blocking": not bool(source_locator),
+            "evidence_refs": [
+                f"viewer:{source_locator.get('viewer', '') if isinstance(source_locator, Mapping) else ''}",
+                f"messenger_manifest:{messenger_manifest.get('manifest_sha256', '')}",
+            ],
+        },
+        {
+            "id": "trusted-whatsapp-export-native-db-diff",
+            "label": "RapidTriage WhatsApp rows are diffed against authorized export/msgstore output",
+            "status": "pending-cross-tool-validate",
+            "blocking": True,
+            "evidence_refs": ["command:rapidtriage cross-tool-validate --backlog-item 32"],
+        },
+        {
+            "id": "crypt-backup-key-authority-workflow",
+            "label": "crypt* backup or SQLCipher key handling is authority-gated and audited",
+            "status": "authority-workflow-required",
+            "blocking": True,
+            "evidence_refs": ["required:lawful key provenance, no raw key exposure, controlled reveal audit"],
+        },
+        {
+            "id": "msgstore-wa-db-schema-version-known-answer",
+            "label": "msgstore.db and wa.db schema versions are validated with known-answer data",
+            "status": "external-corpus-required",
+            "blocking": True,
+            "evidence_refs": ["required:WhatsApp schema/version matrix"],
+        },
+        {
+            "id": "deleted-row-known-answer",
+            "label": "Deleted row, quoted message, and recovery semantics are validated",
+            "status": "external-corpus-required",
+            "blocking": True,
+            "evidence_refs": ["required:deleted-row known-answer corpus"],
+        },
+        {
+            "id": "contact-call-media-recovery-validation",
+            "label": "Contacts, calls, media rows, and export/msgstore joins are validated",
+            "status": "external-corpus-required",
+            "blocking": True,
+            "evidence_refs": ["required:contact/call/media known-answer corpus"],
+        },
+        {
+            "id": "timezone-ack-read-state-semantics",
+            "label": "Timestamp, timezone, ack, delivery, and read-state semantics are validated",
+            "status": "external-corpus-required",
+            "blocking": True,
+            "evidence_refs": ["required:timestamp/ack/read-state fixture matrix"],
+        },
+        {
+            "id": "attachment-byte-media-validation",
+            "label": "Media metadata is linked to recovered local bytes and hashes before media claims",
+            "status": "external-media-validation-required",
+            "blocking": True,
+            "evidence_refs": ["required:attachment byte/hash validation"],
+        },
+        {
+            "id": "independent-whatsapp-review",
+            "label": "Independent reviewer signs off on WhatsApp scope, crypt limits, schema version, and report wording",
+            "status": "external-review-required",
+            "blocking": True,
+            "evidence_refs": ["required:independent WhatsApp validation review"],
+        },
+    ]
+    ready_slot_ids = [
+        str(slot.get("id"))
+        for slot in evidence_slots
+        if str(slot.get("status", "")).startswith("complete")
+    ]
+    blocking_slot_ids = [str(slot.get("id")) for slot in evidence_slots if slot.get("blocking")]
+    plan: dict[str, object] = {
+        "profile_version": WHATSAPP_REPORT_GRADE_VALIDATION_PLAN_VERSION,
+        "item_number": 32,
+        "gap_id": "#32",
+        "status": "report-validation-blocked",
+        "commercial_grade": False,
+        "artifact_goal": "WhatsApp authorized export/msgstore message, contact, call, media, crypt, and deleted-row validation",
+        "artifact_type": artifact_type,
+        "service": "WhatsApp",
+        "source_tool": source_tool,
+        "source_format": source_format,
+        "source_index": source_index,
+        "source_path": str(source_path.resolve()),
+        "source_sha256": source_sha256,
+        "source_record_id": source_record_id(details, source_index),
+        "app_version": optional_text(details.get("app_version")),
+        "schema_version": optional_text(details.get("schema_version")),
+        "database_name": optional_text(details.get("database_name")),
+        "validation_commands": [
+            {
+                "id": "source-whatsapp-export-manifest",
+                "purpose": "Freeze source export/msgstore hashes and acquisition metadata",
+                "command": "rapidtriage manifest <whatsapp-export-or-db-folder> --output <case>/whatsapp-source-manifest.json",
+            },
+            {
+                "id": "whatsapp-export-import",
+                "purpose": "Recreate RapidTriage WhatsApp normalized rows and msgstore inventory",
+                "command": "rapidtriage artifacts <mobile-export> --kind mobile-export --output <case>/whatsapp-mobile-export.json",
+            },
+            {
+                "id": "trusted-whatsapp-diff",
+                "purpose": "Compare WhatsApp message/DB rows with authorized export or validated native parser output",
+                "command": "rapidtriage cross-tool-validate --rapid-output <case>/whatsapp-mobile-export.json --reference-output whatsapp=<trusted-whatsapp-output.json> --backlog-item 32 --json",
+            },
+            {
+                "id": "whatsapp-crypt-authority-review",
+                "purpose": "Attach lawful key provenance and controlled-reveal audit evidence before crypt backup claims",
+                "command": "rapidtriage forensic-validation-pack --case <case> --artifact whatsapp-crypt-authority --json",
+            },
+            {
+                "id": "whatsapp-version-known-answer-run",
+                "purpose": "Attach schema, deleted-row, ack/read, and media-byte known-answer evidence",
+                "command": "rapidtriage commercial-readiness --validation-package <whatsapp-known-answer.json> --limit 32 --json",
+            },
+        ],
+        "evidence_slots": evidence_slots,
+        "ready_slot_ids": ready_slot_ids,
+        "blocking_slot_ids": blocking_slot_ids,
+        "ready_slot_count": len(ready_slot_ids),
+        "blocking_slot_count": len(blocking_slot_ids),
+        "commercial_grade_blockers": list(WHATSAPP_REPORT_GRADE_BLOCKERS),
+        "report_guidance": "Use WhatsApp rows as authorized export/msgstore triage until trusted diff, lawful crypt authority, schema corpus, deleted/read-state validation, media byte proof, and independent review are attached.",
+    }
+    plan["manifest_sha256"] = stable_mobile_sha256(
+        {key: value for key, value in plan.items() if key != "manifest_sha256"}
+    )
+    return plan
 
 
 def is_whatsapp_jid(value: str) -> bool:
@@ -7877,6 +8156,11 @@ def chat_app_core_accuracy_gates(
         manifest_hash = optional_text(whatsapp_manifest.get("manifest_sha256"))
         if manifest_hash:
             evidence_refs.append(f"whatsapp_parser_manifest_sha256:{manifest_hash}")
+    whatsapp_validation_plan = details.get("whatsapp_report_grade_validation_plan")
+    if isinstance(whatsapp_validation_plan, Mapping):
+        validation_plan_hash = optional_text(whatsapp_validation_plan.get("manifest_sha256"))
+        if validation_plan_hash:
+            evidence_refs.append(f"whatsapp_report_grade_validation_plan_sha256:{validation_plan_hash}")
     telegram_manifest = details.get("telegram_parser_manifest")
     if isinstance(telegram_manifest, Mapping):
         manifest_hash = optional_text(telegram_manifest.get("manifest_sha256"))
@@ -7969,6 +8253,10 @@ def chat_app_core_accuracy_gates(
                     satisfied.append("WhatsApp source row citation")
                 if details.get("whatsapp_parser_manifest", {}).get("large_data_controls", {}).get("viewer_default"):
                     satisfied.append("WhatsApp review viewer controls")
+            if isinstance(whatsapp_validation_plan, Mapping):
+                satisfied.append("WhatsApp report-grade validation plan")
+                if int(whatsapp_validation_plan.get("ready_slot_count") or 0) >= 6:
+                    satisfied.append("WhatsApp validation ready slots")
             if details.get("commercial_grade_blockers") or not validation.get("decryption_attempted", True):
                 satisfied.append("crypt backup authority workflow warning")
             if details.get("commercial_grade_blockers"):
@@ -8810,6 +9098,11 @@ def chat_app_commercial_uplift_evidence(
         if isinstance(details.get("whatsapp_parser_manifest"), Mapping)
         else {}
     )
+    whatsapp_validation_plan = (
+        details.get("whatsapp_report_grade_validation_plan")
+        if isinstance(details.get("whatsapp_report_grade_validation_plan"), Mapping)
+        else {}
+    )
     telegram_manifest = (
         details.get("telegram_parser_manifest")
         if isinstance(details.get("telegram_parser_manifest"), Mapping)
@@ -8829,6 +9122,7 @@ def chat_app_commercial_uplift_evidence(
     kakaotalk_manifest_hash = optional_text(kakaotalk_manifest.get("manifest_sha256"))
     kakaotalk_validation_plan_hash = optional_text(kakaotalk_validation_plan.get("manifest_sha256"))
     whatsapp_manifest_hash = optional_text(whatsapp_manifest.get("manifest_sha256"))
+    whatsapp_validation_plan_hash = optional_text(whatsapp_validation_plan.get("manifest_sha256"))
     telegram_manifest_hash = optional_text(telegram_manifest.get("manifest_sha256"))
     signal_manifest_hash = optional_text(signal_manifest.get("manifest_sha256"))
     extended_messenger_manifest_hash = optional_text(extended_messenger_manifest.get("manifest_sha256"))
@@ -8840,6 +9134,8 @@ def chat_app_commercial_uplift_evidence(
         source_refs.append(f"kakaotalk_report_grade_validation_plan_sha256:{kakaotalk_validation_plan_hash}")
     if whatsapp_manifest_hash:
         source_refs.append(f"whatsapp_parser_manifest_sha256:{whatsapp_manifest_hash}")
+    if whatsapp_validation_plan_hash:
+        source_refs.append(f"whatsapp_report_grade_validation_plan_sha256:{whatsapp_validation_plan_hash}")
     if telegram_manifest_hash:
         source_refs.append(f"telegram_parser_manifest_sha256:{telegram_manifest_hash}")
     if signal_manifest_hash:
@@ -8907,6 +9203,13 @@ def chat_app_commercial_uplift_evidence(
                 and kakaotalk_manifest.get("large_data_controls", {}).get("viewer_default")
             ),
             "whatsapp_parser_manifest_hash": whatsapp_manifest_hash,
+            "whatsapp_report_grade_validation_plan_hash": whatsapp_validation_plan_hash,
+            "whatsapp_report_grade_validation_ready_slot_count": int(
+                whatsapp_validation_plan.get("ready_slot_count") or 0
+            ),
+            "whatsapp_report_grade_validation_blocking_slot_count": int(
+                whatsapp_validation_plan.get("blocking_slot_count") or 0
+            ),
             "whatsapp_source_row_citation_present": bool(
                 isinstance(whatsapp_manifest.get("row_citation"), Mapping)
                 and whatsapp_manifest.get("row_citation", {}).get("row_hash")
@@ -8996,6 +9299,11 @@ def messenger_export_functional_profile(
         if isinstance(details.get("whatsapp_parser_manifest"), Mapping)
         else {}
     )
+    whatsapp_validation_plan = (
+        details.get("whatsapp_report_grade_validation_plan")
+        if isinstance(details.get("whatsapp_report_grade_validation_plan"), Mapping)
+        else {}
+    )
     telegram_manifest = (
         details.get("telegram_parser_manifest")
         if isinstance(details.get("telegram_parser_manifest"), Mapping)
@@ -9028,6 +9336,8 @@ def messenger_export_functional_profile(
         failed_checks.append("kakaotalk-report-grade-validation-plan-not-emitted")
     if service == "WhatsApp" and not whatsapp_manifest:
         failed_checks.append("whatsapp-parser-manifest-not-emitted")
+    if service == "WhatsApp" and not whatsapp_validation_plan:
+        failed_checks.append("whatsapp-report-grade-validation-plan-not-emitted")
     if service == "Telegram" and not telegram_manifest:
         failed_checks.append("telegram-parser-manifest-not-emitted")
     if service == "Signal" and not signal_manifest:
@@ -9069,6 +9379,7 @@ def messenger_export_functional_profile(
     kakaotalk_manifest_hash = optional_text(kakaotalk_manifest.get("manifest_sha256"))
     kakaotalk_validation_plan_hash = optional_text(kakaotalk_validation_plan.get("manifest_sha256"))
     whatsapp_manifest_hash = optional_text(whatsapp_manifest.get("manifest_sha256"))
+    whatsapp_validation_plan_hash = optional_text(whatsapp_validation_plan.get("manifest_sha256"))
     telegram_manifest_hash = optional_text(telegram_manifest.get("manifest_sha256"))
     signal_manifest_hash = optional_text(signal_manifest.get("manifest_sha256"))
     extended_messenger_manifest_hash = optional_text(extended_messenger_manifest.get("manifest_sha256"))
@@ -9094,6 +9405,8 @@ def messenger_export_functional_profile(
         passed_validation_check_ids.append("kakaotalk-source-locator-emitted")
     if whatsapp_manifest:
         passed_validation_check_ids.append("whatsapp-parser-manifest-emitted")
+    if whatsapp_validation_plan:
+        passed_validation_check_ids.append("whatsapp-report-grade-validation-plan-emitted")
     if isinstance(whatsapp_row_citation, Mapping) and whatsapp_row_citation.get("source_viewer_locator"):
         passed_validation_check_ids.append("whatsapp-source-locator-emitted")
     if telegram_manifest:
@@ -9139,6 +9452,7 @@ def messenger_export_functional_profile(
                 isinstance(kakaotalk_row_citation, Mapping) and kakaotalk_row_citation.get("row_hash")
             ),
             "whatsapp_parser_manifest_hash": whatsapp_manifest_hash,
+            "whatsapp_report_grade_validation_plan_hash": whatsapp_validation_plan_hash,
             "whatsapp_row_citation_present": bool(
                 isinstance(whatsapp_row_citation, Mapping) and whatsapp_row_citation.get("row_hash")
             ),

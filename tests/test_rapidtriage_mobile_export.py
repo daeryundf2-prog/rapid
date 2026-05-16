@@ -564,6 +564,8 @@ class RapidTriageMobileExportTests(unittest.TestCase):
             self.assertIn("WhatsApp parser manifest", whatsapp_gate["satisfied_checks"])
             self.assertIn("WhatsApp source row citation", whatsapp_gate["satisfied_checks"])
             self.assertIn("WhatsApp review viewer controls", whatsapp_gate["satisfied_checks"])
+            self.assertIn("WhatsApp report-grade validation plan", whatsapp_gate["satisfied_checks"])
+            self.assertIn("WhatsApp validation ready slots", whatsapp_gate["satisfied_checks"])
             self.assertIn("crypt backup authority workflow warning", whatsapp_gate["satisfied_checks"])
             self.assertEqual(
                 whatsapp["details"]["chat_app_strategy_profile"]["selected_track"],
@@ -600,6 +602,53 @@ class RapidTriageMobileExportTests(unittest.TestCase):
                 whatsapp["details"]["whatsapp_parser_manifest_hash"],
                 whatsapp_parser_manifest["manifest_sha256"],
             )
+            whatsapp_validation_plan = whatsapp["details"]["whatsapp_report_grade_validation_plan"]
+            self.assertEqual(
+                whatsapp_validation_plan["profile_version"],
+                "whatsapp-report-grade-validation-plan-v1",
+            )
+            self.assertEqual(whatsapp_validation_plan["item_number"], 32)
+            self.assertEqual(whatsapp_validation_plan["gap_id"], "#32")
+            self.assertEqual(whatsapp_validation_plan["status"], "report-validation-blocked")
+            self.assertFalse(whatsapp_validation_plan["commercial_grade"])
+            self.assertEqual(len(whatsapp_validation_plan["manifest_sha256"]), 64)
+            self.assertEqual(
+                whatsapp["details"]["whatsapp_report_grade_validation_plan_hash"],
+                whatsapp_validation_plan["manifest_sha256"],
+            )
+            self.assertEqual(
+                {command["id"] for command in whatsapp_validation_plan["validation_commands"]},
+                {
+                    "source-whatsapp-export-manifest",
+                    "whatsapp-export-import",
+                    "trusted-whatsapp-diff",
+                    "whatsapp-crypt-authority-review",
+                    "whatsapp-version-known-answer-run",
+                },
+            )
+            whatsapp_validation_slots = {slot["id"]: slot for slot in whatsapp_validation_plan["evidence_slots"]}
+            self.assertEqual(whatsapp_validation_slots["source-export-row-integrity"]["status"], "complete")
+            self.assertEqual(whatsapp_validation_slots["service-profile-row-citation"]["status"], "complete")
+            self.assertEqual(whatsapp_validation_slots["message-jid-media-normalization"]["status"], "complete")
+            self.assertEqual(
+                whatsapp_validation_slots["msgstore-database-inventory-boundary"]["status"],
+                "not-applicable",
+            )
+            self.assertEqual(whatsapp_validation_slots["crypt-export-strategy-classification"]["status"], "complete")
+            self.assertEqual(whatsapp_validation_slots["hash-only-text-policy"]["status"], "complete")
+            self.assertEqual(whatsapp_validation_slots["source-viewer-locator"]["status"], "complete")
+            self.assertEqual(
+                whatsapp_validation_slots["trusted-whatsapp-export-native-db-diff"]["status"],
+                "pending-cross-tool-validate",
+            )
+            self.assertTrue(whatsapp_validation_slots["crypt-backup-key-authority-workflow"]["blocking"])
+            self.assertTrue(whatsapp_validation_slots["deleted-row-known-answer"]["blocking"])
+            self.assertEqual(whatsapp_validation_plan["ready_slot_count"], 6)
+            self.assertEqual(whatsapp_validation_plan["blocking_slot_count"], 8)
+            self.assertIn(
+                "crypt-backup-key-authority-workflow-required",
+                whatsapp_validation_plan["commercial_grade_blockers"],
+            )
             whatsapp_uplift = whatsapp["details"]["chat_app_commercial_uplift_evidence"]
             self.assertEqual(whatsapp_uplift["item_numbers"], [32])
             self.assertEqual(whatsapp_uplift["qc_prep_item_numbers"], [38])
@@ -609,6 +658,18 @@ class RapidTriageMobileExportTests(unittest.TestCase):
                 whatsapp_uplift["large_data_controls"]["whatsapp_parser_manifest_hash"],
                 whatsapp_parser_manifest["manifest_sha256"],
             )
+            self.assertEqual(
+                whatsapp_uplift["large_data_controls"]["whatsapp_report_grade_validation_plan_hash"],
+                whatsapp_validation_plan["manifest_sha256"],
+            )
+            self.assertEqual(
+                whatsapp_uplift["large_data_controls"]["whatsapp_report_grade_validation_ready_slot_count"],
+                6,
+            )
+            self.assertEqual(
+                whatsapp_uplift["large_data_controls"]["whatsapp_report_grade_validation_blocking_slot_count"],
+                8,
+            )
             self.assertTrue(whatsapp_uplift["large_data_controls"]["whatsapp_source_row_citation_present"])
             self.assertTrue(whatsapp_uplift["large_data_controls"]["whatsapp_review_viewer_controls_present"])
             self.assertEqual(
@@ -617,8 +678,18 @@ class RapidTriageMobileExportTests(unittest.TestCase):
                 ],
                 whatsapp_parser_manifest["manifest_sha256"],
             )
+            self.assertEqual(
+                whatsapp_uplift["functional_priority_profile"]["implemented_controls"][
+                    "whatsapp_report_grade_validation_plan_hash"
+                ],
+                whatsapp_validation_plan["manifest_sha256"],
+            )
             self.assertIn(
                 "whatsapp-parser-manifest-emitted",
+                whatsapp_uplift["functional_priority_profile"]["passed_validation_check_ids"],
+            )
+            self.assertIn(
+                "whatsapp-report-grade-validation-plan-emitted",
                 whatsapp_uplift["functional_priority_profile"]["passed_validation_check_ids"],
             )
             self.assertIn(

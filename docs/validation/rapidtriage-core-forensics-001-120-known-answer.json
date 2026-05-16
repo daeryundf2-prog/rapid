@@ -860,7 +860,8 @@
       ],
       "expected": {
         "required_assertions": [
-          "WhatsApp rows preserve service/profile, chat/contact/media pivots, crypt/deleted warnings, source provenance, and #32 core_accuracy_gates"
+          "WhatsApp rows preserve service/profile, chat/contact/media pivots, crypt/deleted warnings, source provenance, and #32 core_accuracy_gates",
+          "WhatsApp rows emit whatsapp-report-grade-validation-plan-v1 with source export/msgstore integrity, source row citation, message/JID/media normalization, msgstore DB inventory boundary, crypt/export strategy classification, hash-only text policy, source viewer locator, trusted WhatsApp export/native DB diff, crypt key authority workflow, msgstore/wa.db schema corpus, deleted-row known-answer corpus, contact/call/media recovery validation, timezone/ack/read-state semantics, attachment byte validation, and independent review evidence slots"
         ]
       },
       "notes": "Internal fixture pass; crypt backups and deleted rows require external corpus.",

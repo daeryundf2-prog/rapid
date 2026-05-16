@@ -35,6 +35,7 @@
       "title": "WhatsApp parser",
       "assertions": [
         "WhatsApp export/database rows preserve service/profile detection, chat/contact/media normalization, crypt authority warnings, deleted-row warnings, source hash/app-version provenance, #32 core_accuracy_gates, and crypt/deleted-complete reportability blockers.",
+        "WhatsApp rows emit whatsapp-report-grade-validation-plan-v1 with source export/msgstore integrity, source row citation, message/JID/media normalization, msgstore DB inventory boundary, crypt/export strategy classification, hash-only text policy, source viewer locator, trusted WhatsApp export/native DB diff, crypt key authority workflow, msgstore/wa.db schema corpus, deleted-row known-answer corpus, contact/call/media recovery validation, timezone/ack/read-state semantics, attachment byte validation, and independent review evidence slots.",
         "build_chat_app_trusted_diff compares WhatsApp export/msgstore rows before satisfying the #32 trusted diff gate."
       ],
       "blockers_kept": [

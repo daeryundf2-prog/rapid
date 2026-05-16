@@ -40,6 +40,7 @@
         "required_assertions": [
           "WhatsApp rows preserve service/profile, chat/contact/media pivots, crypt/deleted warnings, source provenance, and #32 core_accuracy_gates",
           "WhatsApp rows emit whatsapp_parser_manifest with export/msgstore track, row citation, source viewer locator, JID/media review state, and crypt/deleted blocker evidence",
+          "WhatsApp rows emit whatsapp-report-grade-validation-plan-v1 with source export/msgstore integrity, source row citation, message/JID/media normalization, msgstore DB inventory boundary, crypt/export strategy classification, hash-only text policy, source viewer locator, trusted WhatsApp export/native DB diff, crypt key authority workflow, msgstore/wa.db schema corpus, deleted-row known-answer corpus, contact/call/media recovery validation, timezone/ack/read-state semantics, attachment byte validation, and independent review evidence slots",
           "WhatsApp trusted diff helper requires export/msgstore row equality before satisfying the #32 trusted WhatsApp export/native DB diff pass gate",
           "WhatsApp reportability decisions block crypt/deleted-complete claims until backup key, database, and deleted-row validation exists"
         ]
