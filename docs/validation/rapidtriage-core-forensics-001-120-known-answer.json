@@ -1310,10 +1310,10 @@
       ],
       "expected": {
         "required_assertions": [
-          "Source preview preserves bounded hex rows, byte offsets, preview hash, byte-search citation support, source validation warning, bounded range citation package metadata, and #53 core_accuracy_gates."
+          "Source preview preserves bounded hex rows, byte offsets, preview hash, byte-search citation support, source validation warning, bounded range citation package metadata, hex_viewer_report_grade_validation_plan ready/blocking slots, and #53 core_accuracy_gates."
         ]
       },
-      "notes": "Internal fixture pass; full range export and source-byte citation package remain validation-gated.",
+      "notes": "Internal fixture pass; full interactive byte navigation and source-byte citation package remain validation-gated.",
       "source_manifest": "docs/validation/rapidtriage-core-forensics-051-060-known-answer.json"
     },
     {

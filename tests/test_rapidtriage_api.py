@@ -2237,7 +2237,11 @@ class RapidTriageApiTests(unittest.TestCase):
             hex_uplift = binary_preview["hex"]["commercial_uplift_evidence"]
             self.assertEqual(hex_uplift["item_numbers"], [53])
             self.assertIn("bounded hex rows", hex_uplift["passed_validation_check_ids"])
+            self.assertIn("hex viewer report-grade validation plan", hex_uplift["passed_validation_check_ids"])
             self.assertTrue(hex_uplift["large_data_controls"]["export_range_citation"])
+            self.assertTrue(hex_uplift["large_data_controls"]["hex_viewer_report_grade_validation_plan_present"])
+            self.assertEqual(hex_uplift["large_data_controls"]["hex_viewer_report_grade_ready_slot_count"], 6)
+            self.assertEqual(hex_uplift["large_data_controls"]["hex_viewer_report_grade_blocking_slot_count"], 6)
             self.assertEqual(
                 hex_uplift["reportability_decision"]["allowed_use"],
                 "bounded-hex-preview-triage-pivot",
@@ -2253,6 +2257,17 @@ class RapidTriageApiTests(unittest.TestCase):
             )
             self.assertTrue(binary_preview["hex"]["offset_navigation"]["supports_keyword_byte_hits"])
             self.assertTrue(binary_preview["hex"]["offset_navigation"]["supports_range_citation_export"])
+            hex_plan = binary_preview["hex"]["hex_viewer_report_grade_validation_plan"]
+            self.assertEqual(hex_plan["profile_version"], "hex-viewer-report-grade-validation-plan-v1")
+            self.assertEqual(hex_plan["item_number"], 53)
+            self.assertEqual(hex_plan["gap_id"], "#53")
+            self.assertEqual(
+                binary_preview["hex"]["hex_viewer_report_grade_validation_plan_hash"],
+                hex_plan["validation_plan_sha256"],
+            )
+            self.assertEqual(hex_plan["ready_slot_count"], 6)
+            self.assertEqual(hex_plan["blocking_slot_count"], 6)
+            self.assertIn("interactive-jump-to-offset-ui-not-implemented", hex_plan["blockers"])
             self.assertEqual(binary_preview["hex"]["range_citation_profile"]["profile_version"], "hex-range-citation-v1")
             self.assertEqual(binary_preview["hex"]["range_citation_profile"]["qc_prep_item"], 12)
             self.assertTrue(binary_preview["hex"]["range_citation_profile"]["supports_report_candidate_payload"])
@@ -2268,6 +2283,10 @@ class RapidTriageApiTests(unittest.TestCase):
             self.assertGreaterEqual(binary_preview["hex"]["hex_preview_manifest"]["row_hash_count"], 1)
             self.assertIn(
                 "hex preview source locator manifest",
+                binary_preview["hex"]["core_accuracy_gates"][0]["satisfied_checks"],
+            )
+            self.assertIn(
+                "hex viewer report-grade validation plan",
                 binary_preview["hex"]["core_accuracy_gates"][0]["satisfied_checks"],
             )
             hex_range_response = client.get(
@@ -2293,12 +2312,19 @@ class RapidTriageApiTests(unittest.TestCase):
             self.assertEqual(hex_range["hex_range_proof_manifest"]["manifest_version"], "hex-range-proof-manifest-v1")
             self.assertEqual(hex_range["hex_range_proof_manifest"]["source_viewer_locator"]["viewer"], "source-hex-range")
             self.assertEqual(hex_range["hex_range_proof_manifest_hash"], hex_range["hex_range_proof_manifest"]["manifest_hash"])
+            self.assertEqual(
+                hex_range["hex_viewer_report_grade_validation_plan_hash"],
+                hex_range["hex_viewer_report_grade_validation_plan"]["validation_plan_sha256"],
+            )
+            self.assertEqual(hex_range["hex_viewer_report_grade_validation_plan"]["ready_slot_count"], 6)
+            self.assertEqual(hex_range["hex_viewer_report_grade_validation_plan"]["blocking_slot_count"], 6)
             self.assertGreaterEqual(hex_range["hex_range_proof_manifest"]["row_hash_count"], 1)
             self.assertIn("RapidTriage", hex_range["rows"][0]["ascii"])
             self.assertIn("range_sha256", hex_range["copy_safe_citation"]["text"])
             self.assertEqual(hex_range["core_accuracy_gates"][0]["gap_id"], "#53")
             self.assertIn("bounded hex rows", hex_range["core_accuracy_gates"][0]["satisfied_checks"])
             self.assertIn("hex range proof manifest", hex_range["core_accuracy_gates"][0]["satisfied_checks"])
+            self.assertIn("hex viewer report-grade validation plan", hex_range["core_accuracy_gates"][0]["satisfied_checks"])
             binary_search_response = client.get(
                 f"/api/runs/{run_id}/source-search",
                 params={"path": str(binary_path), "keyword": "RapidTriage"},

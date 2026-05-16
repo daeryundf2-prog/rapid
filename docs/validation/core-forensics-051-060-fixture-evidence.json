@@ -28,9 +28,9 @@
       "title": "Raw/source hex viewer",
       "test_files": ["tests/test_rapidtriage_api.py"],
       "assertions": [
-        "Source preview emits bounded hex rows with offsets, ASCII, preview hash, byte-search citation support, bounded range citation package metadata, trusted offset manifest gates, #53 core_accuracy_gates, and reportability blockers for missing interactive jump-to-offset, byte selection hashing, and trusted offset validation."
+        "Source preview emits bounded hex rows with offsets, ASCII, preview hash, byte-search citation support, bounded range citation package metadata, hex_viewer_report_grade_validation_plan ready/blocking slots, trusted offset manifest gates, #53 core_accuracy_gates, and reportability blockers for missing interactive jump-to-offset, byte selection hashing, source hash display, sector navigation, external citation validation, and trusted offset validation."
       ],
-      "remaining_external_validation": ["Interactive full-file jump UI, trusted offset manifest diff, and external byte-level citation package validation."]
+      "remaining_external_validation": ["Interactive full-file jump UI, byte selection hashing, trusted offset manifest diff, full-source hash display for large sources, sector/partition-aware navigation, and external byte-level citation package validation."]
     },
     {
       "item": 54,

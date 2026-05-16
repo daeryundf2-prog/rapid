@@ -219,6 +219,15 @@ def stable_payload_sha256(payload: Mapping[str, object] | Sequence[Mapping[str, 
 
 HEX_VIEWER_TRUSTED_DIFF_BLOCKER = "hex-viewer-trusted-offset-manifest-required"
 HEX_VIEWER_TRUSTED_TOOLS = {"known-byte-offset-manifest", "hex-editor-ground-truth", "source-byte-citation-package"}
+HEX_VIEWER_REPORT_GRADE_VALIDATION_PLAN_VERSION = "hex-viewer-report-grade-validation-plan-v1"
+HEX_VIEWER_REPORT_GRADE_BLOCKERS = [
+    "interactive-jump-to-offset-ui-not-implemented",
+    "copy-safe-byte-selection-ui-not-implemented",
+    "hex-viewer-trusted-offset-manifest-required",
+    "full-file-inline-hash-for-large-source-required",
+    "sector-partition-aware-navigation-not-implemented",
+    "external-byte-citation-package-validation-required",
+]
 SQLITE_VIEWER_TRUSTED_DIFF_BLOCKER = "sqlite-viewer-trusted-query-schema-diff-required"
 SQLITE_VIEWER_TRUSTED_TOOLS = {"sqlite3-cli-oracle", "db-browser-export", "known-answer-sqlite-manifest"}
 EMAIL_VIEWER_TRUSTED_DIFF_BLOCKER = "email-viewer-trusted-thread-export-required"
@@ -5310,6 +5319,24 @@ def build_hex_preview(source_path: Path, *, run_id: str | None = None) -> Dict[s
         truncated=len(data) > HEX_PREVIEW_MAX_BYTES,
         range_profile=range_profile,
     )
+    validation_plan = build_hex_viewer_report_grade_validation_plan(
+        context="hex-preview",
+        source_path=source_path,
+        rows=rows,
+        preview_hashes=preview_hashes,
+        truncated=len(data) > HEX_PREVIEW_MAX_BYTES,
+        source_hash_status="available-on-demand-via-source-metadata",
+        preview_manifest=preview_manifest,
+        range_export_ready=True,
+    )
+    core_accuracy_gates = hex_viewer_core_accuracy_gates(
+        source_path=source_path,
+        rows=rows,
+        preview_hashes=preview_hashes,
+        truncated=len(data) > HEX_PREVIEW_MAX_BYTES,
+        preview_manifest=preview_manifest,
+        validation_plan=validation_plan,
+    )
     return {
         "preview_type": "hex",
         "message": "Bounded hex preview is available.",
@@ -5345,6 +5372,8 @@ def build_hex_preview(source_path: Path, *, run_id: str | None = None) -> Dict[s
             },
             "range_citation_profile": range_profile,
             "hex_preview_manifest": preview_manifest,
+            "hex_viewer_report_grade_validation_plan": validation_plan,
+            "hex_viewer_report_grade_validation_plan_hash": validation_plan["validation_plan_sha256"],
             "rows": rows,
             "truncated": len(data) > HEX_PREVIEW_MAX_BYTES,
             "safety": "read-only bounded preview; use source hashes before reporting byte offsets",
@@ -5357,13 +5386,7 @@ def build_hex_preview(source_path: Path, *, run_id: str | None = None) -> Dict[s
                     "file-format-structure-decoding-requires-specialized-parser",
                 ],
             ),
-            "core_accuracy_gates": hex_viewer_core_accuracy_gates(
-                source_path=source_path,
-                rows=rows,
-                preview_hashes=preview_hashes,
-                truncated=len(data) > HEX_PREVIEW_MAX_BYTES,
-                preview_manifest=preview_manifest,
-            ),
+            "core_accuracy_gates": core_accuracy_gates,
             "trusted_hex_viewer_diff": {
                 "status": "missing",
                 "blocker_id": HEX_VIEWER_TRUSTED_DIFF_BLOCKER,
@@ -5372,13 +5395,7 @@ def build_hex_preview(source_path: Path, *, run_id: str | None = None) -> Dict[s
             "commercial_uplift_evidence": viewer_workflow_commercial_uplift_evidence(
                 item_number=53,
                 component="raw-source-hex-viewer",
-                core_accuracy_gates=hex_viewer_core_accuracy_gates(
-                    source_path=source_path,
-                    rows=rows,
-                    preview_hashes=preview_hashes,
-                    truncated=len(data) > HEX_PREVIEW_MAX_BYTES,
-                    preview_manifest=preview_manifest,
-                ),
+                core_accuracy_gates=core_accuracy_gates,
                 blockers=[
                     "interactive-jump-to-offset-ui-not-implemented",
                     "copy-safe-byte-selection-ui-not-implemented",
@@ -5386,12 +5403,20 @@ def build_hex_preview(source_path: Path, *, run_id: str | None = None) -> Dict[s
                     "sector-partition-aware-navigation-not-implemented",
                     HEX_VIEWER_TRUSTED_DIFF_BLOCKER,
                 ],
-                source_refs=[f"source_path:{source_path}", f"preview_sha256:{preview_hashes['sha256']}"],
+                source_refs=[
+                    f"source_path:{source_path}",
+                    f"preview_sha256:{preview_hashes['sha256']}",
+                    f"hex_viewer_report_grade_validation_plan_sha256:{validation_plan['validation_plan_sha256']}",
+                ],
                 controls={
                     "max_hex_preview_bytes": HEX_PREVIEW_MAX_BYTES,
                     "row_width": HEX_PREVIEW_ROW_WIDTH,
                     "row_count": len(rows),
                     "hex_preview_manifest_hash": preview_manifest["manifest_hash"],
+                    "hex_viewer_report_grade_validation_plan_present": True,
+                    "hex_viewer_report_grade_validation_plan_hash": validation_plan["validation_plan_sha256"],
+                    "hex_viewer_report_grade_ready_slot_count": validation_plan["ready_slot_count"],
+                    "hex_viewer_report_grade_blocking_slot_count": validation_plan["blocking_slot_count"],
                     "hex_preview_row_hash_count": preview_manifest["row_hash_count"],
                     "supports_keyword_byte_hits": True,
                     "full_file_inline_hash": False,
@@ -5589,6 +5614,25 @@ def build_hex_range_citation_package(
         include_source_hashes=include_source_hashes,
         citation_id=citation_id,
     )
+    validation_plan = build_hex_viewer_report_grade_validation_plan(
+        context="hex-range-citation",
+        source_path=source_path,
+        rows=rows,
+        preview_hashes=range_hashes,
+        truncated=length > len(data),
+        source_hash_status="computed" if include_source_hashes else "available-on-demand",
+        range_manifest=proof_manifest,
+        range_export_ready=True,
+        include_source_hashes=include_source_hashes,
+    )
+    core_accuracy_gates = hex_viewer_core_accuracy_gates(
+        source_path=source_path,
+        rows=rows,
+        preview_hashes=range_hashes,
+        truncated=length > len(data),
+        range_manifest=proof_manifest,
+        validation_plan=validation_plan,
+    )
     package = {
         "command": "source-hex-range",
         "profile_version": "hex-range-citation-package-v1",
@@ -5611,6 +5655,8 @@ def build_hex_range_citation_package(
         "source_hash_status": "computed" if include_source_hashes else "available-on-demand",
         "hex_range_proof_manifest": proof_manifest,
         "hex_range_proof_manifest_hash": proof_manifest["manifest_hash"],
+        "hex_viewer_report_grade_validation_plan": validation_plan,
+        "hex_viewer_report_grade_validation_plan_hash": validation_plan["validation_plan_sha256"],
         "rows": rows,
         "citation": (
             f"{source_path.name} bytes {offset}-{max(end_exclusive - 1, offset)} "
@@ -5641,13 +5687,7 @@ def build_hex_range_citation_package(
                 "copy_safe_citation": True,
             },
         ),
-        "core_accuracy_gates": hex_viewer_core_accuracy_gates(
-            source_path=source_path,
-            rows=rows,
-            preview_hashes=range_hashes,
-            truncated=length > len(data),
-            range_manifest=proof_manifest,
-        ),
+        "core_accuracy_gates": core_accuracy_gates,
     }
     review_link_profile = hex_range_review_link_profile(package)
     return {
@@ -6451,6 +6491,182 @@ def image_viewer_commercial_uplift_evidence(
     )
 
 
+def build_hex_viewer_report_grade_validation_plan(
+    *,
+    context: str,
+    source_path: Path,
+    rows: Sequence[Mapping[str, object]],
+    preview_hashes: Mapping[str, str],
+    truncated: bool,
+    source_hash_status: str,
+    preview_manifest: Mapping[str, object] | None = None,
+    range_manifest: Mapping[str, object] | None = None,
+    range_export_ready: bool = False,
+    include_source_hashes: bool = False,
+    trusted_diff: Mapping[str, object] | None = None,
+) -> dict[str, object]:
+    preview_manifest = preview_manifest if isinstance(preview_manifest, Mapping) else {}
+    range_manifest = range_manifest if isinstance(range_manifest, Mapping) else {}
+    trusted_diff = trusted_diff if isinstance(trusted_diff, Mapping) else {}
+
+    def slot(
+        slot_id: str,
+        *,
+        ready: bool,
+        evidence: str,
+        blocker_id: str | None = None,
+        operator_action: str = "",
+    ) -> dict[str, object]:
+        row: dict[str, object] = {
+            "slot_id": slot_id,
+            "status": "complete" if ready else "external-required",
+            "evidence": evidence,
+        }
+        if blocker_id and not ready:
+            row["blocker_id"] = blocker_id
+        if operator_action:
+            row["operator_action"] = operator_action
+        return row
+
+    row_hash_count = int(preview_manifest.get("row_hash_count") or range_manifest.get("row_hash_count") or 0)
+    manifest_hash = str(preview_manifest.get("manifest_hash") or range_manifest.get("manifest_hash") or "")
+    validation_slots = [
+        slot(
+            "hex-bounded-row-window",
+            ready=bool(rows),
+            evidence=f"context={context} row_count={len(rows)} truncated={truncated}",
+            blocker_id="hex-bounded-row-window-required",
+            operator_action="Emit bounded rows before byte-level review.",
+        ),
+        slot(
+            "hex-byte-and-hex-offsets",
+            ready=bool(rows) and all(row.get("offset") is not None and row.get("offset_hex") for row in rows),
+            evidence=f"row_count={len(rows)}",
+            blocker_id="hex-byte-offsets-required",
+            operator_action="Preserve byte offsets and hex offsets for each row.",
+        ),
+        slot(
+            "hex-preview-or-range-hash",
+            ready=bool(preview_hashes.get("sha256")),
+            evidence=f"sha256={preview_hashes.get('sha256', '')}",
+            blocker_id="hex-preview-or-range-hash-required",
+            operator_action="Hash the preview or exported range.",
+        ),
+        slot(
+            "hex-source-or-range-locator-manifest",
+            ready=bool(manifest_hash) and row_hash_count > 0,
+            evidence=f"manifest_hash={manifest_hash} row_hash_count={row_hash_count}",
+            blocker_id="hex-source-or-range-locator-manifest-required",
+            operator_action="Attach source/range locator manifest and row hashes.",
+        ),
+        slot(
+            "hex-range-citation-export",
+            ready=range_export_ready,
+            evidence=f"range_export_ready={range_export_ready} max_export_bytes={HEX_RANGE_EXPORT_MAX_BYTES}",
+            blocker_id="hex-range-citation-export-required",
+            operator_action="Expose bounded range citation export for selected bytes.",
+        ),
+        slot(
+            "hex-source-hash-workflow",
+            ready=bool(source_hash_status),
+            evidence=f"source_hash_status={source_hash_status} include_source_hashes={include_source_hashes}",
+            blocker_id="hex-source-hash-workflow-required",
+            operator_action="Compute or disclose an on-demand source hash workflow.",
+        ),
+        slot(
+            "hex-interactive-jump-to-offset-ui",
+            ready=False,
+            evidence="interactive_jump_to_offset_ui=false",
+            blocker_id="interactive-jump-to-offset-ui-not-implemented",
+            operator_action="Add full-file jump-to-offset UI with bounded server reads.",
+        ),
+        slot(
+            "hex-copy-safe-byte-selection-ui",
+            ready=False,
+            evidence="copy_safe_byte_selection_ui=false",
+            blocker_id="copy-safe-byte-selection-ui-not-implemented",
+            operator_action="Add byte selection hashing and copy-safe report snippets.",
+        ),
+        slot(
+            "hex-full-file-inline-hash-for-large-source",
+            ready=False,
+            evidence="full_file_inline_hash_for_large_source=false",
+            blocker_id="full-file-inline-hash-for-large-source-required",
+            operator_action="Display full-source hashes inline without forcing large previews into memory.",
+        ),
+        slot(
+            "hex-sector-partition-aware-navigation",
+            ready=False,
+            evidence="sector_partition_aware_navigation=false",
+            blocker_id="sector-partition-aware-navigation-not-implemented",
+            operator_action="Attach disk/partition/sector context for image-backed byte offsets.",
+        ),
+        slot(
+            "hex-external-byte-citation-package-validation",
+            ready=False,
+            evidence="external_byte_citation_package_validation=false",
+            blocker_id="external-byte-citation-package-validation-required",
+            operator_action="Validate citation packages against an external byte-offset corpus.",
+        ),
+        slot(
+            "hex-trusted-offset-manifest",
+            ready=trusted_diff.get("status") == "pass",
+            evidence=f"trusted_diff_status={trusted_diff.get('status', 'missing')}",
+            blocker_id=HEX_VIEWER_TRUSTED_DIFF_BLOCKER,
+            operator_action="Attach a passing trusted offset manifest diff.",
+        ),
+    ]
+    blockers = sorted(
+        str(slot_row.get("blocker_id"))
+        for slot_row in validation_slots
+        if slot_row.get("status") != "complete" and slot_row.get("blocker_id")
+    )
+    ready_slot_count = sum(1 for slot_row in validation_slots if slot_row.get("status") == "complete")
+    plan_core: dict[str, object] = {
+        "profile_version": HEX_VIEWER_REPORT_GRADE_VALIDATION_PLAN_VERSION,
+        "item_number": 53,
+        "gap_id": VIEWER_WORKFLOW_GAP_IDS["hex"],
+        "batch_id": "commercial-uplift-051-055",
+        "selected_track": "raw-source-hex-viewer-report-validation",
+        "context": context,
+        "path": str(source_path),
+        "row_count": len(rows),
+        "row_width": HEX_PREVIEW_ROW_WIDTH,
+        "truncated": truncated,
+        "preview_or_range_sha256": str(preview_hashes.get("sha256") or ""),
+        "manifest_hash": manifest_hash,
+        "row_hash_count": row_hash_count,
+        "source_hash_status": source_hash_status,
+        "include_source_hashes": include_source_hashes,
+        "range_export_ready": range_export_ready,
+        "range_export_max_bytes": HEX_RANGE_EXPORT_MAX_BYTES,
+        "trusted_diff_status": str(trusted_diff.get("status") or "missing"),
+        "ready_slot_count": ready_slot_count,
+        "blocking_slot_count": len(blockers),
+        "validation_status": "report-validation-blocked",
+        "commercial_grade": False,
+        "commercial_grade_ready": False,
+        "validation_slots": validation_slots,
+        "blockers": blockers,
+        "commercial_grade_blockers": list(HEX_VIEWER_REPORT_GRADE_BLOCKERS),
+        "validation_commands": [
+            "rapidtriage web -> source-preview for a binary file",
+            "GET /api/runs/<run_id>/source-hex-range?path=<path>&offset=<n>&length=<n>&include_hashes=true",
+            "rapidtriage commercial-readiness --validation-package docs/validation/rapidtriage-core-forensics-051-060-known-answer.json --limit 53 --json",
+        ],
+        "report_guidance": {
+            "allowed_use": "bounded-hex-preview-triage-pivot",
+            "forbidden_claim": "full-source byte-citation or disk-sector navigation complete",
+            "required_disclaimer": (
+                "Hex viewer output is bounded preview/range-citation evidence until jump-to-offset UI, "
+                "byte selection hashing, full-source hash display, sector/partition context, external citation "
+                "validation, and trusted offset manifests are attached."
+            ),
+        },
+    }
+    return {**plan_core, "validation_plan_sha256": stable_payload_sha256(plan_core)}
+
+
 def hex_viewer_core_accuracy_gates(
     *,
     source_path: Path,
@@ -6460,6 +6676,7 @@ def hex_viewer_core_accuracy_gates(
     trusted_diff: Mapping[str, object] | None = None,
     preview_manifest: Mapping[str, object] | None = None,
     range_manifest: Mapping[str, object] | None = None,
+    validation_plan: Mapping[str, object] | None = None,
 ) -> list[dict[str, object]]:
     satisfied = []
     if rows:
@@ -6480,6 +6697,11 @@ def hex_viewer_core_accuracy_gates(
         satisfied.append("hex range proof manifest")
     if int(preview_manifest.get("row_hash_count") or range_manifest.get("row_hash_count") or 0) > 0:
         satisfied.append("hex row hashes")
+    validation_plan = validation_plan if isinstance(validation_plan, Mapping) else {}
+    if validation_plan.get("validation_plan_sha256"):
+        satisfied.append("hex viewer report-grade validation plan")
+    if int(validation_plan.get("ready_slot_count") or 0) >= 6:
+        satisfied.append("hex viewer report-grade ready slots")
     trusted_diff = trusted_diff if isinstance(trusted_diff, Mapping) else {}
     if trusted_diff.get("status") == "pass":
         satisfied.append("trusted hex offset manifest diff pass")
@@ -6493,6 +6715,9 @@ def hex_viewer_core_accuracy_gates(
                 f"preview_sha256:{preview_hashes.get('sha256', '')}",
                 f"hex_preview_manifest_hash:{preview_manifest.get('manifest_hash', '')}",
                 f"hex_range_manifest_hash:{range_manifest.get('manifest_hash', '')}",
+                f"hex_viewer_report_grade_validation_plan_sha256:{validation_plan.get('validation_plan_sha256', '')}",
+                f"hex_viewer_report_grade_ready_slot_count:{validation_plan.get('ready_slot_count', 0)}",
+                f"hex_viewer_report_grade_blocking_slot_count:{validation_plan.get('blocking_slot_count', 0)}",
                 f"trusted_diff_status:{trusted_diff.get('status', 'missing')}",
             ],
         )
