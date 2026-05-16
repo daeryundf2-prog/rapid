@@ -1229,6 +1229,10 @@ def _write_prefetch_fixture(path: Path) -> None:
     header[0x88:0x90] = datetime_to_filetime(datetime(2024, 3, 30, 8, 9, 10, tzinfo=timezone.utc)).to_bytes(8, "little")
     header[0xD0:0xD4] = (3).to_bytes(4, "little")
     referenced_path = r"\DEVICE\HARDDISKVOLUME3\WINDOWS\SYSTEM32\WINDOWSPOWERSHELL\V1.0\POWERSHELL.EXE".encode("utf-16le")
+    header[0x54:0x58] = (0x100).to_bytes(4, "little")
+    header[0x58:0x5C] = (1).to_bytes(4, "little")
+    header[0x64:0x68] = (0x120).to_bytes(4, "little")
+    header[0x68:0x6C] = (len(referenced_path)).to_bytes(4, "little")
     header[0x120 : 0x120 + len(referenced_path)] = referenced_path
     path.write_bytes(bytes(header))
 

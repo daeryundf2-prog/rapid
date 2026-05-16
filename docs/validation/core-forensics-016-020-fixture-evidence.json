@@ -18,8 +18,8 @@
       "number": 16,
       "title": "Prefetch full version parser",
       "assertions": [
-        "prefetch-file and prefetch-reference rows preserve SCCA/header validation, version-specific offsets, run count, last-run timestamps, volume/file reference candidates, source hashes, #16 core_accuracy_gates, prefetch_analyst_review_profile, and execution-pivot reportability decisions.",
-        "trusted Prefetch parser diff helpers compare executable, hash, run count, last-run, and referenced path fields against PECmd/WinPrefetchView-style rows."
+        "prefetch-file and prefetch-reference rows preserve SCCA/header validation, version-specific offsets, section-boundary profile hashes, run count, last-run timestamps, volume/file reference candidates, source hashes, #16 core_accuracy_gates, prefetch_analyst_review_profile, and execution-pivot reportability decisions.",
+        "trusted Prefetch parser diff helpers compare executable, hash, run count, last-run, referenced path, and section-boundary status/hash fields against PECmd/WinPrefetchView-style rows."
       ],
       "blockers_kept": [
         "compressed PF handling",

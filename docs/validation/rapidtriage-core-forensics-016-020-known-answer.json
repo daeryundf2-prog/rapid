@@ -17,8 +17,8 @@
       ],
       "expected": {
         "required_assertions": [
-          "Prefetch SCCA header, common version offsets, run count, last-run timestamps, volume/file candidates, #16 core_accuracy_gates, and execution-pivot reportability decisions are emitted",
-          "trusted Prefetch parser diff helpers pass exact matching rows and block mismatches"
+          "Prefetch SCCA header, common version offsets, section-boundary profile hashes, run count, last-run timestamps, volume/file candidates, #16 core_accuracy_gates, and execution-pivot reportability decisions are emitted",
+          "trusted Prefetch parser diff helpers pass exact matching rows and block mismatches, including section-boundary status/hash fields when present"
         ]
       },
       "notes": "Internal fixture pass; PECmd cross-tool corpus, compressed PF, and file metrics validation remain commercial-grade evidence."

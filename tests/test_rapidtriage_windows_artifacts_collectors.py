@@ -1446,8 +1446,13 @@ class RapidTriageWindowsArtifactsCollectorTests(unittest.TestCase):
             self.assertFalse(hints["binary_format_detected"])
             self.assertEqual(hints["prefetch_compression"]["format"], "windows-prefetch-mam")
             self.assertEqual(hints["prefetch_compression"]["declared_uncompressed_size"], 4096)
+            self.assertEqual(
+                hints["prefetch_section_bounds_profile"]["bounds_status"],
+                "compressed-not-decompressed",
+            )
             self.assertTrue(hints["prefetch_validation_checks"]["compressed_prefetch_detected"])
             self.assertTrue(hints["prefetch_validation_checks"]["compressed_prefetch_status_recorded"])
+            self.assertTrue(hints["prefetch_validation_checks"]["section_bounds_profile_emitted"])
             gate = prefetch_core_accuracy_gates(
                 {
                     "source_path": str(pf),
@@ -1456,6 +1461,7 @@ class RapidTriageWindowsArtifactsCollectorTests(unittest.TestCase):
                 }
             )[0]
             self.assertIn("compressed PF handling", gate["satisfied_checks"])
+            self.assertIn("section bounds profile", gate["satisfied_checks"])
 
     def test_core_filesystem_and_activity_trusted_diffs_gate_commercial_claims(self) -> None:
         edb_diff = build_windows_edb_trusted_diff(
@@ -2044,6 +2050,10 @@ class RapidTriageWindowsArtifactsCollectorTests(unittest.TestCase):
                         "format": "plain-or-unknown",
                         "decompression_status": "not-needed",
                     },
+                    "prefetch_section_bounds_profile": {
+                        "bounds_status": "declared-sections-bounded",
+                        "section_profile_hash": "a" * 64,
+                    },
                 },
             }
         ]
@@ -2062,6 +2072,8 @@ class RapidTriageWindowsArtifactsCollectorTests(unittest.TestCase):
                 "FileReference": "42-7",
                 "CompressionFormat": "plain-or-unknown",
                 "DecompressionStatus": "not-needed",
+                "SectionBoundsStatus": "declared-sections-bounded",
+                "SectionProfileHash": "a" * 64,
             }
         ]
 

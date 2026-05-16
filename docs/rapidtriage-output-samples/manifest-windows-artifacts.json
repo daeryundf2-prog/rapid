@@ -22689,7 +22689,10 @@
                 "full_file_metrics_decode_required_for_commercial_claims": true,
                 "max_referenced_paths": 200,
                 "prefetch_version": 30,
-                "scan_limit_bytes": 1048576
+                "scan_limit_bytes": 1048576,
+                "section_bounds_status": "section-locators-recorded",
+                "section_count_declared": 0,
+                "section_profile_hash": "25541309a2d9031e9ce9869a0e7263954619120d9c1eec7f4029c0f8ffd32ebe"
               },
               "next_internal_step": "Finish file metrics, MFT reference, authoritative volume, compressed PF, and cross-version corpus validation.",
               "objective": "Expose Prefetch version/layout validation, referenced-path evidence, and commercial blockers.",
@@ -22697,6 +22700,7 @@
                 "scca-signature",
                 "supported-common-layout",
                 "compressed-prefetch-status-recorded",
+                "section-bounds-profile",
                 "declared-size-match",
                 "execution-counters-present"
               ],
@@ -22715,6 +22719,7 @@
                   "implemented_outputs": [
                     "version-specific common-header profile for versions 17, 23, 26, 30, and observed 31",
                     "compressed MAM/PF detection with explicit decompression limitation",
+                    "version-aware section bounds profile for file metrics, trace chains, filename strings, and volume locators",
                     "bounded referenced-path, volume-device, and file-reference candidate pivots",
                     "execution-depth manifest with source hash, offsets, validation checks, and report blockers"
                   ],
@@ -22751,6 +22756,7 @@
                   "implemented_outputs": [
                     "version-specific common-header profile for versions 17, 23, 26, 30, and observed 31",
                     "compressed MAM/PF detection with explicit decompression limitation",
+                    "version-aware section bounds profile for file metrics, trace chains, filename strings, and volume locators",
                     "bounded referenced-path, volume-device, and file-reference candidate pivots",
                     "execution-depth manifest with source hash, offsets, validation checks, and report blockers"
                   ],
@@ -22760,6 +22766,7 @@
                 "qc_prep_item_number": 31,
                 "required_before_report": [
                   "compressed Prefetch handling validated where applicable",
+                  "declared section offsets and bounds diffed against a trusted Prefetch parser for critical claims",
                   "file metrics and volume tables decoded",
                   "run counts and timestamps diffed against PECmd or known-answer corpus",
                   "execution claim correlated with Amcache, BAM, SRUM, EventLog, MFT, or USN"
@@ -22769,7 +22776,8 @@
                 "source_path:<ROOT>/Windows/Prefetch/POWERSHELL.EXE-12345678.pf",
                 "source_index:",
                 "source_sha256:4ed0441ececfe85a462ba5770a37ae31ada11a969d8a3f75ab7fa567ed6c0d5a",
-                "artifact_type:prefetch-file"
+                "artifact_type:prefetch-file",
+                "section_profile_hash:25541309a2d9031e9ce9869a0e7263954619120d9c1eec7f4029c0f8ffd32ebe"
               ]
             },
             "core_accuracy_gates": [
@@ -22818,7 +22826,8 @@
                   "version-specific section offsets",
                   "run count and last-run timestamps",
                   "volume/file metrics",
-                  "compressed PF handling"
+                  "compressed PF handling",
+                  "section bounds profile"
                 ],
                 "status": "validation-required",
                 "title": "Prefetch full version parser"
@@ -22880,7 +22889,7 @@
             "note": "Prefetch triage parser uses version-specific common-header offsets plus bounded native candidates; validate critical findings with a dedicated parser such as PECmd.",
             "parser": "windows-prefetch-inventory",
             "parser_confidence": "medium",
-            "parser_version": "prefetch-inventory-v8",
+            "parser_version": "prefetch-inventory-v9",
             "prefetch_analyst_review_profile": {
               "analyst_questions": [
                 "Does PECmd or another trusted parser confirm the executable, hash, run count, and last-run timestamp?",
@@ -22909,6 +22918,7 @@
               "failed_validation_checks": [
                 "compressed_prefetch_decompressed",
                 "compressed_prefetch_detected",
+                "declared_sections_within_file",
                 "full_file_metrics_decoded",
                 "full_volume_table_decoded"
               ],
@@ -22923,6 +22933,8 @@
                 "executable_hint",
                 "prefetch_hash",
                 "prefetch_version",
+                "section_bounds_status",
+                "section_profile_hash",
                 "run_count",
                 "last_run_at",
                 "referenced_path",
@@ -22945,7 +22957,10 @@
                 "prefetch_hash": "12345678",
                 "prefetch_version": 30,
                 "referenced_path_count": 1,
-                "run_count": 3
+                "run_count": 3,
+                "section_bounds_status": "section-locators-recorded",
+                "section_count_declared": 0,
+                "section_profile_hash": "25541309a2d9031e9ce9869a0e7263954619120d9c1eec7f4029c0f8ffd32ebe"
               },
               "summary": "Prefetch execution pivot with run count, last-run time, version layout, and referenced-file context.",
               "validation_required": true
@@ -22982,6 +22997,11 @@
                   "volume_candidate_count": 1
                 },
                 {
+                  "bounds_status": "section-locators-recorded",
+                  "kind": "prefetch-section-bounds",
+                  "section_profile_hash": "25541309a2d9031e9ce9869a0e7263954619120d9c1eec7f4029c0f8ffd32ebe"
+                },
+                {
                   "decompression_status": "not-needed",
                   "format": "plain-or-unknown",
                   "kind": "prefetch-compression-state"
@@ -23011,10 +23031,14 @@
                 "actual_file_size": 512,
                 "binary_format_detected": true,
                 "declared_file_size": 512,
+                "declared_sections_within_file": false,
                 "file_size_matches_declared": true,
                 "layout_name": "windows-10",
                 "prefetch_version": 30,
                 "scca_signature": true,
+                "section_bounds_profile_hash": "25541309a2d9031e9ce9869a0e7263954619120d9c1eec7f4029c0f8ffd32ebe",
+                "section_bounds_status": "section-locators-recorded",
+                "section_count_declared": 0,
                 "supported_common_layout": true,
                 "windows_family": "Windows 10"
               },
@@ -23022,7 +23046,7 @@
               "item_number": 16,
               "manifest_sha256": "<DYNAMIC_MANIFEST_HASH>",
               "manifest_version": "prefetch-execution-depth-manifest-v1",
-              "parser_version": "prefetch-inventory-v8",
+              "parser_version": "prefetch-inventory-v9",
               "qc_prep_contract": {
                 "commercial_blockers": [
                   "native file metrics array decoding",
@@ -23034,6 +23058,7 @@
                 "implemented_outputs": [
                   "version-specific common-header profile for versions 17, 23, 26, 30, and observed 31",
                   "compressed MAM/PF detection with explicit decompression limitation",
+                  "version-aware section bounds profile for file metrics, trace chains, filename strings, and volume locators",
                   "bounded referenced-path, volume-device, and file-reference candidate pivots",
                   "execution-depth manifest with source hash, offsets, validation checks, and report blockers"
                 ],
@@ -23043,6 +23068,7 @@
               "qc_prep_item_number": 31,
               "referenced_file_metrics": {
                 "authoritative_volume_table_decoded": false,
+                "file_metrics_section_status": "not-declared",
                 "file_reference_candidate_count": 1,
                 "file_reference_candidates": [
                   {
@@ -23055,6 +23081,7 @@
                     "volume_device_path": "\\DEVICE\\HARDDISKVOLUME3"
                   }
                 ],
+                "filename_strings_section_status": "not-declared",
                 "full_file_metrics_decoded": false,
                 "mft_file_reference_decode_available": false,
                 "referenced_path_count": 1,
@@ -23072,7 +23099,8 @@
                     "source": "referenced_path_prefix",
                     "volume_device_path": "\\DEVICE\\HARDDISKVOLUME3"
                   }
-                ]
+                ],
+                "volume_information_section_status": "not-declared"
               },
               "reportability": {
                 "allowed_use": "prefetch-execution-triage-pivot",
@@ -23107,6 +23135,68 @@
                 "source_index": ""
               },
               "row_identity_hash": "0c6f7e6b223d0bd47495caa55df5d734e2e835b6b7fcd1dce6ee83cd7148ca13",
+              "section_bounds": {
+                "bounds_status": "section-locators-recorded",
+                "declared_sections_within_file": false,
+                "decode_boundary": "section-locator-only; file metrics, trace chains, and volume records are not decoded as report-grade rows",
+                "profile_version": "prefetch-section-bounds-profile-v1",
+                "section_count_declared": 0,
+                "section_profile_hash": "25541309a2d9031e9ce9869a0e7263954619120d9c1eec7f4029c0f8ffd32ebe",
+                "sections": [
+                  {
+                    "bounds_status": "not-declared",
+                    "count": 0,
+                    "declared_size": 0,
+                    "decode_status": "locator-only-not-decoded",
+                    "derived_size": 0,
+                    "end_offset": 0,
+                    "entry_size_assumption": 32,
+                    "offset": 0,
+                    "offset_hex": "",
+                    "section": "file_metrics_array",
+                    "within_file": false
+                  },
+                  {
+                    "bounds_status": "not-declared",
+                    "count": 0,
+                    "declared_size": 0,
+                    "decode_status": "locator-only-not-decoded",
+                    "derived_size": 0,
+                    "end_offset": 0,
+                    "entry_size_assumption": 8,
+                    "offset": 0,
+                    "offset_hex": "",
+                    "section": "trace_chains",
+                    "within_file": false
+                  },
+                  {
+                    "bounds_status": "not-declared",
+                    "count": 0,
+                    "declared_size": 0,
+                    "decode_status": "locator-only-not-decoded",
+                    "derived_size": 0,
+                    "end_offset": 0,
+                    "entry_size_assumption": 0,
+                    "offset": 0,
+                    "offset_hex": "",
+                    "section": "filename_strings",
+                    "within_file": false
+                  },
+                  {
+                    "bounds_status": "not-declared",
+                    "count": 0,
+                    "declared_size": 0,
+                    "decode_status": "locator-only-not-decoded",
+                    "derived_size": 0,
+                    "end_offset": 0,
+                    "entry_size_assumption": 0,
+                    "offset": 0,
+                    "offset_hex": "",
+                    "section": "volume_information",
+                    "within_file": false
+                  }
+                ]
+              },
               "source": {
                 "size": 512,
                 "source_format": "pf",
@@ -23128,6 +23218,7 @@
               "mft_file_reference_decode": false,
               "run_count_and_last_run_times": true,
               "scca_signature_validation": true,
+              "section_locator_bounds_profile": true,
               "trace_chain_decode": false,
               "volume_candidate_pivots": true
             },
@@ -23154,6 +23245,74 @@
               ],
               "status": "validation-required"
             },
+            "prefetch_section_bounds_profile": {
+              "actual_file_size": 512,
+              "bounds_status": "section-locators-recorded",
+              "compressed_prefetch_detected": false,
+              "declared_file_size": 512,
+              "declared_sections_within_file": false,
+              "decode_boundary": "section-locator-only; file metrics, trace chains, and volume records are not decoded as report-grade rows",
+              "layout_name": "windows-10",
+              "parser_version": "prefetch-inventory-v9",
+              "prefetch_version": 30,
+              "profile_version": "prefetch-section-bounds-profile-v1",
+              "section_count_declared": 0,
+              "section_profile_hash": "25541309a2d9031e9ce9869a0e7263954619120d9c1eec7f4029c0f8ffd32ebe",
+              "sections": [
+                {
+                  "bounds_status": "not-declared",
+                  "count": 0,
+                  "declared_size": 0,
+                  "decode_status": "locator-only-not-decoded",
+                  "derived_size": 0,
+                  "end_offset": 0,
+                  "entry_size_assumption": 32,
+                  "offset": 0,
+                  "offset_hex": "",
+                  "section": "file_metrics_array",
+                  "within_file": false
+                },
+                {
+                  "bounds_status": "not-declared",
+                  "count": 0,
+                  "declared_size": 0,
+                  "decode_status": "locator-only-not-decoded",
+                  "derived_size": 0,
+                  "end_offset": 0,
+                  "entry_size_assumption": 8,
+                  "offset": 0,
+                  "offset_hex": "",
+                  "section": "trace_chains",
+                  "within_file": false
+                },
+                {
+                  "bounds_status": "not-declared",
+                  "count": 0,
+                  "declared_size": 0,
+                  "decode_status": "locator-only-not-decoded",
+                  "derived_size": 0,
+                  "end_offset": 0,
+                  "entry_size_assumption": 0,
+                  "offset": 0,
+                  "offset_hex": "",
+                  "section": "filename_strings",
+                  "within_file": false
+                },
+                {
+                  "bounds_status": "not-declared",
+                  "count": 0,
+                  "declared_size": 0,
+                  "decode_status": "locator-only-not-decoded",
+                  "derived_size": 0,
+                  "end_offset": 0,
+                  "entry_size_assumption": 0,
+                  "offset": 0,
+                  "offset_hex": "",
+                  "section": "volume_information",
+                  "within_file": false
+                }
+              ]
+            },
             "prefetch_validation_checks": {
               "actual_file_size": 512,
               "commercial_validation_required": true,
@@ -23161,6 +23320,7 @@
               "compressed_prefetch_detected": false,
               "compressed_prefetch_status_recorded": true,
               "declared_file_size": 512,
+              "declared_sections_within_file": false,
               "file_size_matches_declared": true,
               "full_file_metrics_decoded": false,
               "full_volume_table_decoded": false,
@@ -23174,6 +23334,8 @@
               "referenced_path_count": 1,
               "run_count_plausible": true,
               "run_count_present": true,
+              "section_bounds_profile_emitted": true,
+              "section_count_declared": 0,
               "supported_common_layout": true,
               "volume_candidate_count": 1
             },
@@ -23195,6 +23357,12 @@
                 "label": "Compressed Prefetch status is detected and disclosed",
                 "passed": true,
                 "severity": "medium"
+              },
+              {
+                "id": "section-bounds-profile",
+                "label": "Declared section offsets are profiled and bounded when present",
+                "passed": true,
+                "severity": "high"
               },
               {
                 "id": "declared-size-match",
@@ -23223,6 +23391,25 @@
               "layout_name": "windows-10",
               "run_count_offset": 208,
               "run_count_offset_hex": "0xd0",
+              "section_field_offsets": {
+                "file_metrics_array": {
+                  "count": 88,
+                  "offset": 84
+                },
+                "filename_strings": {
+                  "offset": 100,
+                  "size": 104
+                },
+                "trace_chains": {
+                  "count": 96,
+                  "offset": 92
+                },
+                "volume_information": {
+                  "count": 112,
+                  "offset": 108,
+                  "size": 116
+                }
+              },
               "signature": "SCCA",
               "supported_common_layout": true,
               "version": 30,
@@ -23302,7 +23489,10 @@
                 "full_file_metrics_decode_required_for_commercial_claims": true,
                 "max_referenced_paths": 200,
                 "prefetch_version": 30,
-                "scan_limit_bytes": 1048576
+                "scan_limit_bytes": 1048576,
+                "section_bounds_status": "section-locators-recorded",
+                "section_count_declared": 0,
+                "section_profile_hash": "25541309a2d9031e9ce9869a0e7263954619120d9c1eec7f4029c0f8ffd32ebe"
               },
               "next_internal_step": "Finish file metrics, MFT reference, authoritative volume, compressed PF, and cross-version corpus validation.",
               "objective": "Expose Prefetch version/layout validation, referenced-path evidence, and commercial blockers.",
@@ -23310,6 +23500,7 @@
                 "scca-signature",
                 "supported-common-layout",
                 "compressed-prefetch-status-recorded",
+                "section-bounds-profile",
                 "declared-size-match",
                 "execution-counters-present"
               ],
@@ -23328,6 +23519,7 @@
                   "implemented_outputs": [
                     "version-specific common-header profile for versions 17, 23, 26, 30, and observed 31",
                     "compressed MAM/PF detection with explicit decompression limitation",
+                    "version-aware section bounds profile for file metrics, trace chains, filename strings, and volume locators",
                     "bounded referenced-path, volume-device, and file-reference candidate pivots",
                     "execution-depth manifest with source hash, offsets, validation checks, and report blockers"
                   ],
@@ -23364,6 +23556,7 @@
                   "implemented_outputs": [
                     "version-specific common-header profile for versions 17, 23, 26, 30, and observed 31",
                     "compressed MAM/PF detection with explicit decompression limitation",
+                    "version-aware section bounds profile for file metrics, trace chains, filename strings, and volume locators",
                     "bounded referenced-path, volume-device, and file-reference candidate pivots",
                     "execution-depth manifest with source hash, offsets, validation checks, and report blockers"
                   ],
@@ -23373,6 +23566,7 @@
                 "qc_prep_item_number": 31,
                 "required_before_report": [
                   "compressed Prefetch handling validated where applicable",
+                  "declared section offsets and bounds diffed against a trusted Prefetch parser for critical claims",
                   "file metrics and volume tables decoded",
                   "run counts and timestamps diffed against PECmd or known-answer corpus",
                   "execution claim correlated with Amcache, BAM, SRUM, EventLog, MFT, or USN"
@@ -23382,7 +23576,8 @@
                 "source_path:<ROOT>/Windows/Prefetch/POWERSHELL.EXE-12345678.pf",
                 "source_index:0",
                 "source_sha256:4ed0441ececfe85a462ba5770a37ae31ada11a969d8a3f75ab7fa567ed6c0d5a",
-                "artifact_type:prefetch-reference"
+                "artifact_type:prefetch-reference",
+                "section_profile_hash:25541309a2d9031e9ce9869a0e7263954619120d9c1eec7f4029c0f8ffd32ebe"
               ]
             },
             "core_accuracy_gates": [
@@ -23431,7 +23626,8 @@
                   "version-specific section offsets",
                   "run count and last-run timestamps",
                   "volume/file metrics",
-                  "compressed PF handling"
+                  "compressed PF handling",
+                  "section bounds profile"
                 ],
                 "status": "validation-required",
                 "title": "Prefetch full version parser"
@@ -23467,7 +23663,7 @@
             "last_run_at": "2024-04-01T09:10:11+00:00",
             "parser": "windows-prefetch-reference",
             "parser_confidence": "low",
-            "parser_version": "prefetch-inventory-v8",
+            "parser_version": "prefetch-inventory-v9",
             "prefetch_analyst_review_profile": {
               "analyst_questions": [
                 "Does PECmd or another trusted parser confirm the executable, hash, run count, and last-run timestamp?",
@@ -23505,6 +23701,8 @@
                 "executable_hint",
                 "prefetch_hash",
                 "prefetch_version",
+                "section_bounds_status",
+                "section_profile_hash",
                 "run_count",
                 "last_run_at",
                 "referenced_path",
@@ -23528,7 +23726,8 @@
                 "prefetch_version": 0,
                 "referenced_path": "\\DEVICE\\HARDDISKVOLUME3\\WINDOWS\\SYSTEM32\\WINDOWSPOWERSHELL\\V1.0\\POWERSHELL.EXE",
                 "referenced_path_count": 0,
-                "run_count": 3
+                "run_count": 3,
+                "section_count_declared": 0
               },
               "summary": "Prefetch execution pivot with run count, last-run time, version layout, and referenced-file context.",
               "validation_required": true
@@ -23558,6 +23757,11 @@
                   "volume_candidate_count": 0
                 },
                 {
+                  "bounds_status": "",
+                  "kind": "prefetch-section-bounds",
+                  "section_profile_hash": ""
+                },
+                {
                   "decompression_status": "",
                   "format": "",
                   "kind": "prefetch-compression-state"
@@ -23584,10 +23788,14 @@
                 "actual_file_size": 0,
                 "binary_format_detected": false,
                 "declared_file_size": 0,
+                "declared_sections_within_file": false,
                 "file_size_matches_declared": null,
                 "layout_name": "",
                 "prefetch_version": 0,
                 "scca_signature": false,
+                "section_bounds_profile_hash": "",
+                "section_bounds_status": "",
+                "section_count_declared": 0,
                 "supported_common_layout": false,
                 "windows_family": ""
               },
@@ -23595,7 +23803,7 @@
               "item_number": 16,
               "manifest_sha256": "<DYNAMIC_MANIFEST_HASH>",
               "manifest_version": "prefetch-execution-depth-manifest-v1",
-              "parser_version": "prefetch-inventory-v8",
+              "parser_version": "prefetch-inventory-v9",
               "qc_prep_contract": {
                 "commercial_blockers": [
                   "native file metrics array decoding",
@@ -23607,6 +23815,7 @@
                 "implemented_outputs": [
                   "version-specific common-header profile for versions 17, 23, 26, 30, and observed 31",
                   "compressed MAM/PF detection with explicit decompression limitation",
+                  "version-aware section bounds profile for file metrics, trace chains, filename strings, and volume locators",
                   "bounded referenced-path, volume-device, and file-reference candidate pivots",
                   "execution-depth manifest with source hash, offsets, validation checks, and report blockers"
                 ],
@@ -23616,8 +23825,10 @@
               "qc_prep_item_number": 31,
               "referenced_file_metrics": {
                 "authoritative_volume_table_decoded": false,
+                "file_metrics_section_status": "",
                 "file_reference_candidate_count": 0,
                 "file_reference_candidates": [],
+                "filename_strings_section_status": "",
                 "full_file_metrics_decoded": false,
                 "mft_file_reference_decode_available": false,
                 "referenced_path_count": 1,
@@ -23625,7 +23836,8 @@
                   "\\DEVICE\\HARDDISKVOLUME3\\WINDOWS\\SYSTEM32\\WINDOWSPOWERSHELL\\V1.0\\POWERSHELL.EXE"
                 ],
                 "volume_candidate_count": 0,
-                "volume_candidates": []
+                "volume_candidates": [],
+                "volume_information_section_status": ""
               },
               "reportability": {
                 "allowed_use": "prefetch-execution-triage-pivot",
@@ -23660,6 +23872,15 @@
                 "source_index": 0
               },
               "row_identity_hash": "04ce238d9cbeadba4108e07ca912397b64b6ff47e40bf80a127bd6846e379d48",
+              "section_bounds": {
+                "bounds_status": "",
+                "declared_sections_within_file": false,
+                "decode_boundary": "",
+                "profile_version": "",
+                "section_count_declared": 0,
+                "section_profile_hash": "",
+                "sections": []
+              },
               "source": {
                 "size": "",
                 "source_format": "pf",
@@ -23681,6 +23902,7 @@
               "mft_file_reference_decode": false,
               "run_count_and_last_run_times": true,
               "scca_signature_validation": true,
+              "section_locator_bounds_profile": true,
               "trace_chain_decode": false,
               "volume_candidate_pivots": true
             },
@@ -23724,6 +23946,12 @@
                 "label": "Compressed Prefetch status is detected and disclosed",
                 "passed": true,
                 "severity": "medium"
+              },
+              {
+                "id": "section-bounds-profile",
+                "label": "Declared section offsets are profiled and bounded when present",
+                "passed": true,
+                "severity": "high"
               },
               {
                 "id": "declared-size-match",

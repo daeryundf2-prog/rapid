@@ -12,7 +12,7 @@ from ...core.models import ArtifactRecord
 from .common import build_forensic_review, isoformat_from_timestamp
 
 PREFETCH_ROOT = ("Windows", "Prefetch")
-PARSER_VERSION = "prefetch-inventory-v8"
+PARSER_VERSION = "prefetch-inventory-v9"
 QC_PREP_PREFETCH_ITEM = 31
 QC_PREP_PREFETCH_GOAL = (
     "Deepen Prefetch version 17/23/26/30/31 support, compressed PF handling, "
@@ -24,6 +24,7 @@ QC_PREP_PREFETCH_CONTRACT = {
     "implemented_outputs": [
         "version-specific common-header profile for versions 17, 23, 26, 30, and observed 31",
         "compressed MAM/PF detection with explicit decompression limitation",
+        "version-aware section bounds profile for file metrics, trace chains, filename strings, and volume locators",
         "bounded referenced-path, volume-device, and file-reference candidate pivots",
         "execution-depth manifest with source hash, offsets, validation checks, and report blockers",
     ],
@@ -75,6 +76,16 @@ PREFETCH_VERSION_LAYOUTS = {
         "last_run_time_slots": 8,
     },
 }
+PREFETCH_SECTION_FIELD_OFFSETS = {
+    "file_metrics_array": {"offset": 0x54, "count": 0x58},
+    "trace_chains": {"offset": 0x5C, "count": 0x60},
+    "filename_strings": {"offset": 0x64, "size": 0x68},
+    "volume_information": {"offset": 0x6C, "count": 0x70, "size": 0x74},
+}
+PREFETCH_SECTION_ENTRY_SIZE_HINTS = {
+    "file_metrics_array": {17: 20, 23: 32, 26: 32, 30: 32, 31: 32},
+    "trace_chains": {17: 8, 23: 8, 26: 8, 30: 8, 31: 8},
+}
 PREFETCH_COMMERCIAL_BLOCKERS = [
     "Full file metrics array decoding and MFT file-reference extraction are not implemented.",
     "Volume information is surfaced as bounded string/path candidates, not decoded from the authoritative volume table.",
@@ -86,6 +97,7 @@ PREFETCH_NATIVE_CAPABILITIES = {
     "compressed_prefetch_detection": True,
     "compressed_prefetch_decompression": False,
     "common_header_version_offsets": True,
+    "section_locator_bounds_profile": True,
     "run_count_and_last_run_times": True,
     "bounded_referenced_path_pivots": True,
     "volume_candidate_pivots": True,
@@ -181,6 +193,7 @@ class WindowsPrefetchProvider:
                             "size": stat_result.st_size,
                             "referenced_path_count": header.get("referenced_path_count", 0),
                             "prefetch_version": header.get("prefetch_version", 0),
+                            "prefetch_section_bounds_profile": header.get("prefetch_section_bounds_profile", {}),
                         }
                     ),
                     "forensic_review": build_forensic_review(
@@ -232,6 +245,7 @@ def prefetch_header_hints(path: Path) -> dict[str, object]:
     is_scca = len(header) >= 8 and header[4:8] == b"SCCA"
     prefetch_version = int.from_bytes(header[:4], "little") if is_scca else 0
     version_metadata = prefetch_version_metadata(prefetch_version)
+    section_bounds_profile = prefetch_section_bounds_profile(blob, version_metadata, compression_probe)
     hints: dict[str, object] = {
         "binary_format_detected": is_scca,
         "prefetch_parse_status": "parsed-common-header" if version_metadata["supported_common_layout"] else "inventory-only",
@@ -249,6 +263,7 @@ def prefetch_header_hints(path: Path) -> dict[str, object]:
         "file_reference_candidates": [],
         "file_reference_candidate_count": 0,
         "prefetch_compression": compression_probe,
+        "prefetch_section_bounds_profile": section_bounds_profile,
         "prefetch_validation_checks": prefetch_validation_checks(
             is_scca=is_scca,
             prefetch_version=prefetch_version,
@@ -259,6 +274,7 @@ def prefetch_header_hints(path: Path) -> dict[str, object]:
             referenced_paths=[],
             volume_candidates=[],
             compression_probe=compression_probe,
+            section_bounds_profile=section_bounds_profile,
         ),
         "parser_confidence": "medium" if is_scca else "low",
     }
@@ -300,6 +316,7 @@ def prefetch_header_hints(path: Path) -> dict[str, object]:
         referenced_paths=referenced_paths,
         volume_candidates=volume_candidates,
         compression_probe=compression_probe,
+        section_bounds_profile=section_bounds_profile,
     )
     hints["parser_confidence"] = "medium" if version_metadata["supported_common_layout"] else "low"
     return hints
@@ -333,6 +350,7 @@ def prefetch_version_metadata(prefetch_version: int) -> dict[str, object]:
             "last_run_time_offset_hex": "",
             "last_run_time_slots": 0,
             "signature": "SCCA",
+            "section_field_offsets": {},
         }
     run_count_offset = int(layout["run_count_offset"])
     last_run_time_offset = int(layout["last_run_time_offset"])
@@ -347,7 +365,86 @@ def prefetch_version_metadata(prefetch_version: int) -> dict[str, object]:
         "last_run_time_offset_hex": hex(last_run_time_offset),
         "last_run_time_slots": layout["last_run_time_slots"],
         "signature": "SCCA",
+        "section_field_offsets": dict(PREFETCH_SECTION_FIELD_OFFSETS),
     }
+
+
+def prefetch_section_bounds_profile(
+    blob: bytes,
+    version_metadata: Mapping[str, object],
+    compression_probe: Mapping[str, object],
+) -> dict[str, object]:
+    version = int(version_metadata.get("version") or 0)
+    supported = bool(version_metadata.get("supported_common_layout"))
+    declared_file_size = read_u32(blob, 0x0C) if len(blob) >= 0x10 else 0
+    profile: dict[str, object] = {
+        "profile_version": "prefetch-section-bounds-profile-v1",
+        "parser_version": PARSER_VERSION,
+        "prefetch_version": version,
+        "layout_name": str(version_metadata.get("layout_name") or ""),
+        "actual_file_size": len(blob),
+        "declared_file_size": declared_file_size,
+        "compressed_prefetch_detected": bool(compression_probe.get("detected")),
+        "bounds_status": "unsupported-layout",
+        "section_count_declared": 0,
+        "declared_sections_within_file": False,
+        "sections": [],
+        "decode_boundary": (
+            "section-locator-only; file metrics, trace chains, and volume records are not decoded as report-grade rows"
+        ),
+    }
+    if compression_probe.get("detected"):
+        profile["bounds_status"] = "compressed-not-decompressed"
+        profile["section_profile_hash"] = prefetch_stable_sha256(profile)
+        return profile
+    if not supported:
+        profile["section_profile_hash"] = prefetch_stable_sha256(profile)
+        return profile
+
+    sections: list[dict[str, object]] = []
+    for section_name, offset_fields in PREFETCH_SECTION_FIELD_OFFSETS.items():
+        offset_value = read_u32(blob, int(offset_fields["offset"]))
+        count_value = read_u32(blob, int(offset_fields["count"])) if "count" in offset_fields else 0
+        size_value = read_u32(blob, int(offset_fields["size"])) if "size" in offset_fields else 0
+        entry_size = int(PREFETCH_SECTION_ENTRY_SIZE_HINTS.get(section_name, {}).get(version, 0))
+        derived_size = size_value or (count_value * entry_size if count_value and entry_size else 0)
+        end_offset = offset_value + derived_size if offset_value and derived_size else 0
+        declared = bool(offset_value or count_value or size_value)
+        within_file = bool(declared and offset_value > 0 and end_offset > offset_value and end_offset <= len(blob))
+        if within_file:
+            bounds_status = "bounded-locator"
+        elif declared:
+            bounds_status = "declared-out-of-bounds-or-size-missing"
+        else:
+            bounds_status = "not-declared"
+        sections.append(
+            {
+                "section": section_name,
+                "offset": offset_value,
+                "offset_hex": hex(offset_value) if offset_value else "",
+                "count": count_value,
+                "declared_size": size_value,
+                "entry_size_assumption": entry_size,
+                "derived_size": derived_size,
+                "end_offset": end_offset,
+                "within_file": within_file,
+                "bounds_status": bounds_status,
+                "decode_status": "locator-only-not-decoded",
+            }
+        )
+    declared_sections = [section for section in sections if section["bounds_status"] != "not-declared"]
+    profile["sections"] = sections
+    profile["section_count_declared"] = len(declared_sections)
+    profile["declared_sections_within_file"] = bool(declared_sections) and all(
+        bool(section["within_file"]) for section in declared_sections
+    )
+    profile["bounds_status"] = (
+        "declared-sections-bounded"
+        if profile["declared_sections_within_file"]
+        else "section-locators-recorded"
+    )
+    profile["section_profile_hash"] = prefetch_stable_sha256(profile)
+    return profile
 
 
 def build_prefetch_reference_record(
@@ -416,6 +513,7 @@ def build_prefetch_reference_record(
                     "prefetch_report_grade_assessment": report_grade,
                     "referenced_path": referenced_path,
                     "prefetch_version": header.get("prefetch_version", 0),
+                    "prefetch_section_bounds_profile": header.get("prefetch_section_bounds_profile", {}),
                 }
             ),
             "forensic_review": build_forensic_review(
@@ -526,8 +624,10 @@ def prefetch_validation_checks(
     referenced_paths: list[str],
     volume_candidates: list[dict[str, object]],
     compression_probe: Mapping[str, object] | None = None,
+    section_bounds_profile: Mapping[str, object] | None = None,
 ) -> dict[str, object]:
     compression = compression_probe or {}
+    section_profile = section_bounds_profile or {}
     now = datetime.now(tz=timezone.utc)
     parsed_run_times = [parse_iso_datetime(item) for item in run_times]
     valid_run_times = [item for item in parsed_run_times if item is not None]
@@ -553,6 +653,9 @@ def prefetch_validation_checks(
         "referenced_path_count": len(referenced_paths),
         "has_volume_candidates": bool(volume_candidates),
         "volume_candidate_count": len(volume_candidates),
+        "section_bounds_profile_emitted": bool(section_profile.get("section_profile_hash")),
+        "section_count_declared": int(section_profile.get("section_count_declared") or 0),
+        "declared_sections_within_file": bool(section_profile.get("declared_sections_within_file")),
         "full_file_metrics_decoded": False,
         "full_volume_table_decoded": False,
         "commercial_validation_required": True,
@@ -580,6 +683,17 @@ def prefetch_validation_matrix(checks: object) -> list[dict[str, object]]:
             "passed": (not bool(check_map.get("compressed_prefetch_detected")))
             or bool(check_map.get("compressed_prefetch_status_recorded")),
             "severity": "medium",
+        },
+        {
+            "id": "section-bounds-profile",
+            "label": "Declared section offsets are profiled and bounded when present",
+            "passed": bool(check_map.get("section_bounds_profile_emitted"))
+            and (
+                bool(check_map.get("declared_sections_within_file"))
+                or int(check_map.get("section_count_declared") or 0) == 0
+                or bool(check_map.get("compressed_prefetch_detected"))
+            ),
+            "severity": "high",
         },
         {
             "id": "declared-size-match",
@@ -633,6 +747,11 @@ def prefetch_commercial_uplift_evidence(details: Mapping[str, object]) -> dict[s
         if isinstance(details.get("prefetch_trusted_diff"), Mapping)
         else {"status": "not-attached"}
     )
+    section_profile = (
+        details.get("prefetch_section_bounds_profile")
+        if isinstance(details.get("prefetch_section_bounds_profile"), Mapping)
+        else {}
+    )
     reportability_decision = prefetch_reportability_decision(report_grade, details)
     return {
         "batch_id": "commercial-uplift-016-020",
@@ -646,6 +765,7 @@ def prefetch_commercial_uplift_evidence(details: Mapping[str, object]) -> dict[s
             f"source_index:{details.get('source_index', '')}",
             f"source_sha256:{hashes.get('sha256', '')}",
             f"artifact_type:{details.get('artifact_type', '')}",
+            f"section_profile_hash:{section_profile.get('section_profile_hash', '')}",
         ],
         "passed_validation_matrix_ids": [
             str(item.get("id")) for item in matrix if isinstance(item, Mapping) and item.get("passed")
@@ -662,6 +782,9 @@ def prefetch_commercial_uplift_evidence(details: Mapping[str, object]) -> dict[s
             "scan_limit_bytes": MAX_PREFETCH_SCAN_BYTES,
             "max_referenced_paths": MAX_REFERENCED_PATHS,
             "prefetch_version": int(details.get("prefetch_version") or 0),
+            "section_bounds_status": str(section_profile.get("bounds_status") or ""),
+            "section_count_declared": int(section_profile.get("section_count_declared") or 0),
+            "section_profile_hash": str(section_profile.get("section_profile_hash") or ""),
             "full_file_metrics_decode_required_for_commercial_claims": True,
         },
         "next_internal_step": "Finish file metrics, MFT reference, authoritative volume, compressed PF, and cross-version corpus validation.",
@@ -688,6 +811,7 @@ def prefetch_reportability_decision(
         "blockers": sorted(blockers),
         "required_before_report": [
             "compressed Prefetch handling validated where applicable",
+            "declared section offsets and bounds diffed against a trusted Prefetch parser for critical claims",
             "file metrics and volume tables decoded",
             "run counts and timestamps diffed against PECmd or known-answer corpus",
             "execution claim correlated with Amcache, BAM, SRUM, EventLog, MFT, or USN",
@@ -709,11 +833,19 @@ def prefetch_analyst_review_profile(details: Mapping[str, object]) -> dict[str, 
         else {}
     )
     checks = details.get("prefetch_validation_checks") if isinstance(details.get("prefetch_validation_checks"), Mapping) else {}
+    section_profile = (
+        details.get("prefetch_section_bounds_profile")
+        if isinstance(details.get("prefetch_section_bounds_profile"), Mapping)
+        else {}
+    )
     source_values = {
         "entry_name": str(details.get("entry_name") or details.get("prefetch_entry_name") or ""),
         "executable_hint": str(details.get("executable_hint") or ""),
         "prefetch_hash": str(details.get("prefetch_hash") or ""),
         "prefetch_version": int(details.get("prefetch_version") or 0),
+        "section_bounds_status": str(section_profile.get("bounds_status") or ""),
+        "section_count_declared": int(section_profile.get("section_count_declared") or 0),
+        "section_profile_hash": str(section_profile.get("section_profile_hash") or ""),
         "run_count": int(details.get("run_count") or 0),
         "last_run_at": str(details.get("last_run_at") or ""),
         "referenced_path": str(details.get("referenced_path") or ""),
@@ -740,6 +872,8 @@ def prefetch_analyst_review_profile(details: Mapping[str, object]) -> dict[str, 
             "executable_hint",
             "prefetch_hash",
             "prefetch_version",
+            "section_bounds_status",
+            "section_profile_hash",
             "run_count",
             "last_run_at",
             "referenced_path",
@@ -776,6 +910,11 @@ def prefetch_execution_depth_manifest(details: Mapping[str, object]) -> dict[str
     compression = (
         details.get("prefetch_compression")
         if isinstance(details.get("prefetch_compression"), Mapping)
+        else {}
+    )
+    section_profile = (
+        details.get("prefetch_section_bounds_profile")
+        if isinstance(details.get("prefetch_section_bounds_profile"), Mapping)
         else {}
     )
     report_grade = (
@@ -823,6 +962,10 @@ def prefetch_execution_depth_manifest(details: Mapping[str, object]) -> dict[str
             "declared_file_size": int(details.get("declared_file_size") or checks.get("declared_file_size") or 0),
             "actual_file_size": int(checks.get("actual_file_size") or details.get("size") or 0),
             "file_size_matches_declared": checks.get("file_size_matches_declared"),
+            "section_bounds_profile_hash": str(section_profile.get("section_profile_hash") or ""),
+            "section_bounds_status": str(section_profile.get("bounds_status") or ""),
+            "section_count_declared": int(section_profile.get("section_count_declared") or 0),
+            "declared_sections_within_file": bool(section_profile.get("declared_sections_within_file")),
         },
         "execution_counters": {
             "run_count": int(details.get("run_count") or 0),
@@ -842,9 +985,21 @@ def prefetch_execution_depth_manifest(details: Mapping[str, object]) -> dict[str
             "file_reference_candidates": [
                 dict(item) for item in details.get("file_reference_candidates") or [] if isinstance(item, Mapping)
             ][:25],
+            "file_metrics_section_status": prefetch_section_status(section_profile, "file_metrics_array"),
+            "filename_strings_section_status": prefetch_section_status(section_profile, "filename_strings"),
+            "volume_information_section_status": prefetch_section_status(section_profile, "volume_information"),
             "full_file_metrics_decoded": bool(checks.get("full_file_metrics_decoded")),
             "mft_file_reference_decode_available": bool(PREFETCH_NATIVE_CAPABILITIES["mft_file_reference_decode"]),
             "authoritative_volume_table_decoded": bool(checks.get("full_volume_table_decoded")),
+        },
+        "section_bounds": {
+            "profile_version": str(section_profile.get("profile_version") or ""),
+            "bounds_status": str(section_profile.get("bounds_status") or ""),
+            "section_count_declared": int(section_profile.get("section_count_declared") or 0),
+            "declared_sections_within_file": bool(section_profile.get("declared_sections_within_file")),
+            "section_profile_hash": str(section_profile.get("section_profile_hash") or ""),
+            "sections": [dict(item) for item in section_profile.get("sections") or [] if isinstance(item, Mapping)],
+            "decode_boundary": str(section_profile.get("decode_boundary") or ""),
         },
         "compression": {
             "detected": bool(compression.get("detected")),
@@ -875,6 +1030,11 @@ def prefetch_execution_depth_manifest(details: Mapping[str, object]) -> dict[str
                 "volume_candidate_count": int(details.get("volume_candidate_count") or 0),
             },
             {
+                "kind": "prefetch-section-bounds",
+                "bounds_status": str(section_profile.get("bounds_status") or ""),
+                "section_profile_hash": str(section_profile.get("section_profile_hash") or ""),
+            },
+            {
                 "kind": "prefetch-compression-state",
                 "format": str(compression.get("format") or ""),
                 "decompression_status": str(compression.get("decompression_status") or ""),
@@ -901,6 +1061,13 @@ def prefetch_execution_depth_manifest(details: Mapping[str, object]) -> dict[str
     return manifest_payload
 
 
+def prefetch_section_status(section_profile: Mapping[str, object], section_name: str) -> str:
+    for section in section_profile.get("sections") or []:
+        if isinstance(section, Mapping) and section.get("section") == section_name:
+            return str(section.get("bounds_status") or "")
+    return ""
+
+
 def prefetch_core_accuracy_gates(details: Mapping[str, object]) -> list[dict[str, object]]:
     checks = details.get("validation_checks") if isinstance(details.get("validation_checks"), Mapping) else {}
     version_metadata = (
@@ -912,6 +1079,11 @@ def prefetch_core_accuracy_gates(details: Mapping[str, object]) -> list[dict[str
     trusted_diff = (
         details.get("prefetch_trusted_diff")
         if isinstance(details.get("prefetch_trusted_diff"), Mapping)
+        else {}
+    )
+    section_profile = (
+        details.get("prefetch_section_bounds_profile")
+        if isinstance(details.get("prefetch_section_bounds_profile"), Mapping)
         else {}
     )
     evidence_refs = [
@@ -932,6 +1104,8 @@ def prefetch_core_accuracy_gates(details: Mapping[str, object]) -> list[dict[str
         satisfied.append("volume/file metrics")
     if checks.get("compressed_prefetch_status_recorded") or details.get("prefetch_compression"):
         satisfied.append("compressed PF handling")
+    if section_profile.get("section_profile_hash") or checks.get("section_bounds_profile_emitted"):
+        satisfied.append("section bounds profile")
     if trusted_diff.get("status") == "pass":
         satisfied.append("trusted Prefetch parser diff pass")
     return [build_accuracy_gate(16, satisfied_checks=satisfied, evidence_refs=evidence_refs)]
@@ -962,6 +1136,11 @@ def index_prefetch_rows(rows: Sequence[Mapping[str, object]]) -> dict[str, dict[
         compression = (
             payload.get("prefetch_compression")
             if isinstance(payload.get("prefetch_compression"), Mapping)
+            else {}
+        )
+        section_profile = (
+            payload.get("prefetch_section_bounds_profile")
+            if isinstance(payload.get("prefetch_section_bounds_profile"), Mapping)
             else {}
         )
         executable = normalized_diff_value(
@@ -1004,6 +1183,18 @@ def index_prefetch_rows(rows: Sequence[Mapping[str, object]]) -> dict[str, dict[
                 first_present(
                     first_alias(payload, "decompression_status", "compression_status"),
                     first_alias(compression, "decompression_status", "compression_status"),
+                )
+            ),
+            "section_bounds_status": normalized_diff_value(
+                first_present(
+                    first_alias(payload, "section_bounds_status", "prefetch_section_bounds_status"),
+                    first_alias(section_profile, "bounds_status", "section_bounds_status"),
+                )
+            ),
+            "section_profile_hash": normalized_diff_value(
+                first_present(
+                    first_alias(payload, "section_profile_hash", "prefetch_section_profile_hash"),
+                    first_alias(section_profile, "section_profile_hash"),
                 )
             ),
         }

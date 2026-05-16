@@ -3350,7 +3350,7 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
             details = prefetch_file["details"]
 
             self.assertEqual(details["prefetch_parse_status"], "parsed-common-header")
-            self.assertEqual(details["parser_version"], "prefetch-inventory-v8")
+            self.assertEqual(details["parser_version"], "prefetch-inventory-v9")
             self.assertFalse(details["commercial_grade_ready"])
             self.assertIn("Full file metrics array decoding", details["commercial_readiness_blockers"][0])
             self.assertIn("#16", details["prefetch_report_grade_assessment"]["commercial_gap_ids"])
@@ -3365,7 +3365,25 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
             self.assertEqual(details["prefetch_validation_checks"]["file_size_matches_declared"], True)
             self.assertTrue(details["prefetch_validation_checks"]["run_count_plausible"])
             self.assertTrue(details["prefetch_validation_checks"]["last_run_times_not_future"])
+            self.assertTrue(details["prefetch_validation_checks"]["section_bounds_profile_emitted"])
+            self.assertTrue(details["prefetch_validation_checks"]["declared_sections_within_file"])
             self.assertFalse(details["prefetch_validation_checks"]["full_file_metrics_decoded"])
+            section_profile = details["prefetch_section_bounds_profile"]
+            self.assertEqual(section_profile["profile_version"], "prefetch-section-bounds-profile-v1")
+            self.assertEqual(section_profile["bounds_status"], "declared-sections-bounded")
+            self.assertEqual(len(section_profile["section_profile_hash"]), 64)
+            self.assertEqual(section_profile["section_count_declared"], 2)
+            file_metrics_section = next(
+                item for item in section_profile["sections"] if item["section"] == "file_metrics_array"
+            )
+            self.assertEqual(file_metrics_section["offset"], 0x100)
+            self.assertEqual(file_metrics_section["count"], 1)
+            self.assertTrue(file_metrics_section["within_file"])
+            filename_section = next(
+                item for item in section_profile["sections"] if item["section"] == "filename_strings"
+            )
+            self.assertEqual(filename_section["offset"], 0x120)
+            self.assertTrue(filename_section["within_file"])
             prefetch_gate = details["core_accuracy_gates"][0]
             self.assertEqual(prefetch_gate["gap_id"], "#16")
             self.assertIn("SCCA/header validation", prefetch_gate["satisfied_checks"])
@@ -3373,6 +3391,7 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
             self.assertIn("run count and last-run timestamps", prefetch_gate["satisfied_checks"])
             self.assertIn("volume/file metrics", prefetch_gate["satisfied_checks"])
             self.assertIn("compressed PF handling", prefetch_gate["satisfied_checks"])
+            self.assertIn("section bounds profile", prefetch_gate["satisfied_checks"])
             prefetch_uplift = details["commercial_uplift_evidence"]
             self.assertEqual(prefetch_uplift["batch_id"], "commercial-uplift-016-020")
             self.assertEqual(prefetch_uplift["item_numbers"], [16])
@@ -3382,6 +3401,11 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
                 "prefetch-execution-triage-pivot",
             )
             self.assertIn("scca-signature", prefetch_uplift["passed_validation_matrix_ids"])
+            self.assertIn("section-bounds-profile", prefetch_uplift["passed_validation_matrix_ids"])
+            self.assertEqual(
+                prefetch_uplift["large_data_controls"]["section_profile_hash"],
+                section_profile["section_profile_hash"],
+            )
             self.assertTrue(
                 prefetch_uplift["large_data_controls"]["full_file_metrics_decode_required_for_commercial_claims"]
             )
@@ -3390,6 +3414,10 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
             self.assertEqual(prefetch_review_profile["qc_prep_item_number"], 31)
             self.assertEqual(prefetch_review_profile["source_field_values"]["executable_hint"], "POWERSHELL.EXE")
             self.assertEqual(prefetch_review_profile["source_field_values"]["run_count"], 3)
+            self.assertEqual(
+                prefetch_review_profile["source_field_values"]["section_bounds_status"],
+                "declared-sections-bounded",
+            )
             self.assertIn("Amcache", prefetch_review_profile["correlation_targets"])
             self.assertIn("standalone execution attribution", prefetch_review_profile["not_proof_of"])
             prefetch_manifest = details["prefetch_execution_depth_manifest"]
@@ -3398,11 +3426,18 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
             self.assertEqual(prefetch_manifest["qc_prep_item_number"], 31)
             self.assertEqual(prefetch_manifest["format_validation"]["layout_name"], "windows-10")
             self.assertTrue(prefetch_manifest["format_validation"]["supported_common_layout"])
+            self.assertEqual(
+                prefetch_manifest["format_validation"]["section_bounds_profile_hash"],
+                section_profile["section_profile_hash"],
+            )
+            self.assertEqual(prefetch_manifest["section_bounds"]["bounds_status"], "declared-sections-bounded")
+            self.assertTrue(prefetch_manifest["section_bounds"]["declared_sections_within_file"])
             self.assertEqual(prefetch_manifest["execution_counters"]["run_count"], 3)
             self.assertEqual(
                 prefetch_manifest["execution_counters"]["last_run_at"],
                 "2024-04-01T09:10:11+00:00",
             )
+            self.assertEqual(prefetch_manifest["referenced_file_metrics"]["file_metrics_section_status"], "bounded-locator")
             self.assertFalse(prefetch_manifest["referenced_file_metrics"]["full_file_metrics_decoded"])
             self.assertFalse(prefetch_manifest["referenced_file_metrics"]["mft_file_reference_decode_available"])
             self.assertEqual(
