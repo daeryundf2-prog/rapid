@@ -79,6 +79,18 @@ SECURITY_HARDENING_REVIEW_GAP_ID = "#118"
 MALICIOUS_EVIDENCE_SANDBOXING_GAP_ID = "#119"
 SECURITY_HARDENING_TRUSTED_DIFF_BLOCKER_118 = "trusted-security-hardening-review-diff-missing"
 MALICIOUS_SANDBOX_TRUSTED_DIFF_BLOCKER_119 = "trusted-malicious-evidence-sandbox-diff-missing"
+SECURITY_HARDENING_REPORT_GRADE_VALIDATION_PLAN_VERSION = "security-hardening-report-grade-validation-plan-v1"
+SECURITY_HARDENING_REPORT_GRADE_BLOCKERS = [
+    SECURITY_HARDENING_TRUSTED_DIFF_BLOCKER_118,
+    "independent-appsec-review-required",
+    "threat-model-review-required",
+    "path-traversal-test-required",
+    "auth-network-hardening-review-required",
+    "export-rendering-safety-test-required",
+    "crash-redaction-review-required",
+    "parser-safety-review-required",
+    "release-host-hardening-smoke-required",
+]
 SECURITY_OPERATIONS_TRUSTED_TOOLS = {
     "independent-appsec-review",
     "malicious-evidence-sandbox-corpus",
@@ -485,8 +497,32 @@ def build_enterprise_policy() -> dict[str, object]:
     policy["security_hardening"]["security_hardening_baseline_manifest_hash"] = policy["security_hardening"][
         "security_hardening_baseline_manifest"
     ]["manifest_hash"]
+    policy["security_hardening"]["security_hardening_report_grade_validation_plan"] = (
+        build_security_hardening_report_grade_validation_plan(
+            security_hardening=policy["security_hardening"],
+            evidence_manifest=policy["security_hardening"]["security_hardening_evidence_manifest"],
+            baseline_manifest=policy["security_hardening"]["security_hardening_baseline_manifest"],
+            trusted_diff=policy["security_hardening"]["trusted_security_hardening_diff"],
+        )
+    )
+    policy["security_hardening"]["security_hardening_report_grade_validation_plan_hash"] = policy[
+        "security_hardening"
+    ]["security_hardening_report_grade_validation_plan"]["validation_plan_hash"]
+    policy["security_hardening"]["security_hardening_report_grade_ready_slot_count"] = policy["security_hardening"][
+        "security_hardening_report_grade_validation_plan"
+    ]["ready_slot_count"]
+    policy["security_hardening"]["security_hardening_report_grade_blocking_slot_count"] = policy["security_hardening"][
+        "security_hardening_report_grade_validation_plan"
+    ]["blocking_slot_count"]
+    security_hardening_report_blockers = policy["security_hardening"][
+        "security_hardening_report_grade_validation_plan"
+    ]["blockers"]
+    policy["security_hardening"]["blockers"] = sorted(
+        {*policy["security_hardening"].get("blockers", []), *security_hardening_report_blockers}
+    )
     policy["security_hardening"]["functional_priority_profile"] = security_hardening_functional_profile(
         baseline_manifest=policy["security_hardening"]["security_hardening_baseline_manifest"],
+        report_grade_validation_plan=policy["security_hardening"]["security_hardening_report_grade_validation_plan"],
     )
     attach_enterprise_control_manifest(
         policy["security_hardening"],
@@ -506,6 +542,9 @@ def build_enterprise_policy() -> dict[str, object]:
             trusted_diff=policy["security_hardening"]["trusted_security_hardening_diff"],
             evidence_manifest=policy["security_hardening"]["security_hardening_evidence_manifest"],
             baseline_manifest=policy["security_hardening"]["security_hardening_baseline_manifest"],
+            report_grade_validation_plan=policy["security_hardening"][
+                "security_hardening_report_grade_validation_plan"
+            ],
         ),
         *malicious_evidence_sandbox_core_accuracy_gates(
             trusted_diff=policy["security_hardening"]["trusted_malicious_sandbox_diff"],
@@ -1526,10 +1565,168 @@ def build_security_hardening_baseline_manifest(section: Mapping[str, object]) ->
     return manifest
 
 
+def build_security_hardening_report_grade_validation_plan(
+    *,
+    security_hardening: Mapping[str, object],
+    evidence_manifest: Mapping[str, object],
+    baseline_manifest: Mapping[str, object],
+    trusted_diff: Mapping[str, object],
+) -> dict[str, object]:
+    controls = baseline_manifest.get("controls") if isinstance(baseline_manifest.get("controls"), list) else []
+    ready_slots = [
+        {
+            "slot_id": "enterprise-policy-security-hardening-json",
+            "status": "ready",
+            "evidence_ref": "rapidtriage enterprise-policy --json.security_hardening",
+            "evidence_hash": stable_enterprise_sha256("enterprise-policy command emits security hardening JSON"),
+        },
+        {
+            "slot_id": "security-hardening-evidence-manifest",
+            "status": "ready",
+            "evidence_ref": "enterprise-policy.security_hardening.security_hardening_evidence_manifest_hash",
+            "evidence_hash": str(evidence_manifest.get("manifest_hash") or ""),
+        },
+        {
+            "slot_id": "security-hardening-control-evidence-matrix",
+            "status": "ready",
+            "evidence_ref": "enterprise-policy.security_hardening.control_evidence_matrix_hash",
+            "evidence_hash": str(evidence_manifest.get("control_evidence_matrix_hash") or ""),
+        },
+        {
+            "slot_id": "security-hardening-baseline-manifest",
+            "status": "ready",
+            "evidence_ref": "enterprise-policy.security_hardening.security_hardening_baseline_manifest_hash",
+            "evidence_hash": str(baseline_manifest.get("manifest_hash") or ""),
+        },
+        {
+            "slot_id": "security-hardening-control-inventory",
+            "status": "ready",
+            "evidence_ref": "enterprise-policy.security_hardening.security_hardening_baseline_manifest.controls",
+            "evidence_hash": stable_enterprise_sha256(controls),
+        },
+        {
+            "slot_id": "independent-appsec-review-boundary",
+            "status": "ready-with-blocker",
+            "evidence_ref": "enterprise-policy.security_hardening.security_hardening_evidence_slots.independent_appsec_review",
+            "evidence_hash": stable_enterprise_sha256(
+                evidence_manifest.get("security_hardening_evidence_slots", {}).get("independent_appsec_review", {})
+                if isinstance(evidence_manifest.get("security_hardening_evidence_slots"), Mapping)
+                else {}
+            ),
+        },
+        {
+            "slot_id": "threat-model-review-boundary",
+            "status": "ready-with-blocker",
+            "evidence_ref": "enterprise-policy.security_hardening.security_hardening_evidence_slots.threat_model_review",
+            "evidence_hash": stable_enterprise_sha256(
+                evidence_manifest.get("security_hardening_evidence_slots", {}).get("threat_model_review", {})
+                if isinstance(evidence_manifest.get("security_hardening_evidence_slots"), Mapping)
+                else {}
+            ),
+        },
+        {
+            "slot_id": "trusted-security-hardening-diff-boundary",
+            "status": "ready" if trusted_diff.get("status") == "pass" else "ready-with-blocker",
+            "evidence_ref": "enterprise-policy.security_hardening.trusted_security_hardening_diff",
+            "evidence_hash": stable_enterprise_sha256(trusted_diff),
+        },
+    ]
+    blocking_slots = []
+    if trusted_diff.get("status") != "pass":
+        blocking_slots.append(
+            {
+                "slot_id": "trusted-security-hardening-review-diff",
+                "status": "blocking",
+                "blocker": SECURITY_HARDENING_TRUSTED_DIFF_BLOCKER_118,
+                "required_evidence": "trusted independent AppSec review diff proving hardening policy fields and evidence hashes are unchanged",
+            }
+        )
+    for slot_id, blocker, required_evidence in (
+        (
+            "independent-appsec-review",
+            "independent-appsec-review-required",
+            "independent AppSec review covering auth, path handling, export rendering, crash redaction, and parser safety",
+        ),
+        (
+            "threat-model-review",
+            "threat-model-review-required",
+            "threat model and abuse-path review for local/remote deployment and hostile evidence handling",
+        ),
+        (
+            "path-traversal-test",
+            "path-traversal-test-required",
+            "path/archive traversal fixture suite for preview, export, and archive handling paths",
+        ),
+        (
+            "auth-network-hardening-review",
+            "auth-network-hardening-review-required",
+            "remote bind/auth-token review or smoke log proving unsafe network exposure remains blocked",
+        ),
+        (
+            "export-rendering-safety-test",
+            "export-rendering-safety-test-required",
+            "HTML/script injection regression suite for report and viewer rendering",
+        ),
+        (
+            "crash-redaction-review",
+            "crash-redaction-review-required",
+            "crash export/redaction review proving sensitive context is removed before operator sharing",
+        ),
+        (
+            "parser-safety-review",
+            "parser-safety-review-required",
+            "parser crash isolation and hostile-evidence review, including OS sandbox limitation signoff",
+        ),
+        (
+            "release-host-hardening-smoke",
+            "release-host-hardening-smoke-required",
+            "release-host smoke proving security-hardening policy, manifests, and blockers are packaged and visible",
+        ),
+    ):
+        blocking_slots.append(
+            {
+                "slot_id": slot_id,
+                "status": "blocking",
+                "current_attachment_status": "not-attached",
+                "blocker": blocker,
+                "required_evidence": required_evidence,
+            }
+        )
+    blockers = sorted({str(slot["blocker"]) for slot in blocking_slots if slot.get("blocker")})
+    plan: dict[str, object] = {
+        "profile_version": SECURITY_HARDENING_REPORT_GRADE_VALIDATION_PLAN_VERSION,
+        "item_number": 118,
+        "commercial_gap_ids": [SECURITY_HARDENING_REVIEW_GAP_ID],
+        "commercial_claim_allowed": False,
+        "status": security_hardening.get("status", ""),
+        "preview_sandboxing": security_hardening.get("preview_sandboxing", ""),
+        "parser_sandboxing": security_hardening.get("parser_sandboxing", ""),
+        "independent_review_required": bool(security_hardening.get("independent_review_required")),
+        "security_hardening_evidence_manifest_hash": str(evidence_manifest.get("manifest_hash") or ""),
+        "control_evidence_matrix_hash": str(evidence_manifest.get("control_evidence_matrix_hash") or ""),
+        "security_hardening_baseline_manifest_hash": str(baseline_manifest.get("manifest_hash") or ""),
+        "baseline_control_count": len(controls),
+        "security_control_inventory_hash": stable_enterprise_sha256(controls),
+        "trusted_diff_status": str(trusted_diff.get("status") or ""),
+        "trusted_diff_blocker": trusted_diff.get("blocker"),
+        "ready_slots": ready_slots,
+        "blocking_slots": blocking_slots,
+        "ready_slot_count": len(ready_slots),
+        "blocking_slot_count": len(blocking_slots),
+        "external_blocker_catalog": list(SECURITY_HARDENING_REPORT_GRADE_BLOCKERS),
+        "blockers": blockers,
+        "reporting_boundary": "Security hardening baseline is implemented and reportable as an internal readiness boundary; commercial hardening claims require independent AppSec, threat-model, path/auth/export/crash/parser, and release-host evidence.",
+    }
+    plan["validation_plan_hash"] = stable_enterprise_sha256(plan)
+    return plan
+
+
 def security_hardening_functional_profile(
     baseline_manifest: Mapping[str, object] | None = None,
+    report_grade_validation_plan: Mapping[str, object] | None = None,
 ) -> dict[str, object]:
     baseline_manifest = baseline_manifest or {}
+    report_grade_validation_plan = report_grade_validation_plan or {}
     return {
         "batch_id": FUNCTIONAL_OPS_BATCH_ID,
         "item_number": 63,
@@ -1545,6 +1742,9 @@ def security_hardening_functional_profile(
             "parser_crash_isolation_documented": True,
             "security_hardening_baseline_manifest_emitted": bool(baseline_manifest.get("manifest_hash")),
             "security_hardening_baseline_manifest_hash": str(baseline_manifest.get("manifest_hash") or ""),
+            "security_hardening_report_grade_validation_plan_hash": str(
+                report_grade_validation_plan.get("validation_plan_hash") or ""
+            ),
             "os_level_parser_sandbox": False,
         },
         "passed_validation_check_ids": [
@@ -1553,6 +1753,9 @@ def security_hardening_functional_profile(
                 "security-hardening-baseline-manifest-emitted": bool(baseline_manifest.get("manifest_hash")),
                 "security-control-inventory-emitted": bool(baseline_manifest.get("controls")),
                 "independent-review-required-recorded": bool(baseline_manifest.get("independent_review_required")),
+                "security-hardening-report-grade-validation-plan-emitted": bool(
+                    report_grade_validation_plan.get("validation_plan_hash")
+                ),
             }.items()
             if passed
         ],
@@ -1988,6 +2191,7 @@ def build_security_operations_trusted_diff(
             "security_hardening_evidence_manifest_hash",
             "security_hardening_evidence_slots",
             "security_hardening_baseline_manifest_hash",
+            "security_hardening_report_grade_validation_plan_hash",
             "control_evidence_matrix_hash",
         ],
         119: ["malicious_sandbox_evidence_manifest_hash", "malicious_sandbox_evidence_slots", "control_evidence_matrix_hash"],
@@ -2017,6 +2221,7 @@ def security_hardening_core_accuracy_gates(
     trusted_diff: Mapping[str, object] | None = None,
     evidence_manifest: Mapping[str, object] | None = None,
     baseline_manifest: Mapping[str, object] | None = None,
+    report_grade_validation_plan: Mapping[str, object] | None = None,
 ) -> list[dict[str, object]]:
     satisfied = [
         "security baseline emitted",
@@ -2037,11 +2242,27 @@ def security_hardening_core_accuracy_gates(
             satisfied.append("security hardening baseline manifest hash emitted")
         if baseline_manifest.get("controls"):
             satisfied.append("security hardening control inventory emitted")
+    if report_grade_validation_plan:
+        if report_grade_validation_plan.get("validation_plan_hash"):
+            satisfied.append("security hardening report-grade validation plan")
+        if int(report_grade_validation_plan.get("ready_slot_count") or 0) > 0:
+            satisfied.append("security hardening report-grade ready slots")
     if trusted_diff and trusted_diff.get("status") == "pass":
         satisfied.append("trusted independent AppSec review diff pass")
     evidence_refs = ["enterprise_policy.security_hardening", "docs/rapidtriage-security-policy.md"]
     if baseline_manifest and baseline_manifest.get("manifest_hash"):
         evidence_refs.append(f"security_hardening_baseline_manifest_sha256:{baseline_manifest['manifest_hash']}")
+    if report_grade_validation_plan and report_grade_validation_plan.get("validation_plan_hash"):
+        evidence_refs.append(
+            "security_hardening_report_grade_validation_plan_sha256:"
+            f"{report_grade_validation_plan['validation_plan_hash']}"
+        )
+        evidence_refs.append(
+            f"security_hardening_report_grade_ready_slots:{report_grade_validation_plan.get('ready_slot_count')}"
+        )
+        evidence_refs.append(
+            f"security_hardening_report_grade_blocking_slots:{report_grade_validation_plan.get('blocking_slot_count')}"
+        )
     return [
         build_accuracy_gate(
             118,

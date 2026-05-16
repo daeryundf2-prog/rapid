@@ -3860,6 +3860,7 @@ def final_delivery_evidence_chain() -> list[dict[str, object]]:
             "produces": "enterprise-policy.security_hardening",
             "primary_outputs": [
                 "enterprise-policy.security_hardening",
+                "enterprise-policy.security_hardening.security_hardening_report_grade_validation_plan_hash",
                 "operations_documents.document_evidence_manifests.118.manifest_hash",
                 "operations_documents.document_evidence_slots.118.independent_appsec_review",
             ],

@@ -1995,6 +1995,8 @@ CORE_FORENSIC_ACCURACY_ITEMS: tuple[dict[str, object], ...] = (
             "independent AppSec blocker disclosed",
             "security hardening evidence manifest hash emitted",
             "security hardening evidence slots emitted",
+            "security hardening report-grade validation plan",
+            "security hardening report-grade ready slots",
             "trusted independent AppSec review diff pass",
         ),
     },

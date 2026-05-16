@@ -317,6 +317,8 @@ class RapidTriageCoreForensicsAccuracyTests(unittest.TestCase):
         self.assertIn("admin deployment report-grade ready slots", admin_guide["required_checks"])
         self.assertIn("trusted admin deployment proof diff pass", admin_guide["required_checks"])
         self.assertIn("independent AppSec blocker disclosed", security_hardening["required_checks"])
+        self.assertIn("security hardening report-grade validation plan", security_hardening["required_checks"])
+        self.assertIn("security hardening report-grade ready slots", security_hardening["required_checks"])
         self.assertIn("trusted independent AppSec review diff pass", security_hardening["required_checks"])
         self.assertIn("OS sandbox blocker disclosed", malicious_sandbox["required_checks"])
         self.assertIn("trusted malicious evidence sandbox corpus diff pass", malicious_sandbox["required_checks"])

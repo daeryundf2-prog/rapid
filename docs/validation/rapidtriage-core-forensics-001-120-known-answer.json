@@ -2714,10 +2714,10 @@
       ],
       "expected": {
         "required_assertions": [
-          "Enterprise policy preserves hardening baseline, auth/network hardening, export rendering safety, crash redaction, AppSec blocker, and #118 core_accuracy_gates."
+          "Enterprise policy preserves hardening baseline, auth/network hardening, export rendering safety, crash redaction, security-hardening-evidence-manifest-v1 manifest hash/evidence slots, security-hardening-report-grade-validation-plan-v1 hash/ready/blocking slots, AppSec blocker, trusted independent AppSec diff helpers/gates, and #118 core_accuracy_gates."
         ]
       },
-      "notes": "Internal fixture pass; independent AppSec review remains external.",
+      "notes": "Internal fixture pass; independent AppSec review, trusted hardening manifests, threat-model review, path/auth/export/crash/parser hardening evidence, and release-host hardening smoke remain external.",
       "source_manifest": "docs/validation/rapidtriage-core-forensics-101-120-known-answer.json"
     },
     {

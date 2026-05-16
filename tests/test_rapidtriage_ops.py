@@ -538,6 +538,18 @@ class RapidTriageOpsTests(unittest.TestCase):
         self.assertGreaterEqual(baseline_manifest["control_count"], 7)
         self.assertIn("path_traversal_guardrails", {control["control"] for control in baseline_manifest["controls"]})
         self.assertIn("independent_appsec_review", payload["security_hardening"]["security_hardening_evidence_slots"])
+        hardening_plan = payload["security_hardening"]["security_hardening_report_grade_validation_plan"]
+        self.assertEqual(hardening_plan["profile_version"], "security-hardening-report-grade-validation-plan-v1")
+        self.assertEqual(hardening_plan["item_number"], 118)
+        self.assertFalse(hardening_plan["commercial_claim_allowed"])
+        self.assertEqual(
+            payload["security_hardening"]["security_hardening_report_grade_validation_plan_hash"],
+            hardening_plan["validation_plan_hash"],
+        )
+        self.assertGreaterEqual(payload["security_hardening"]["security_hardening_report_grade_ready_slot_count"], 8)
+        self.assertGreaterEqual(payload["security_hardening"]["security_hardening_report_grade_blocking_slot_count"], 9)
+        self.assertIn("independent-appsec-review-required", payload["security_hardening"]["blockers"])
+        self.assertIn("path-traversal-test-required", hardening_plan["blockers"])
         self.assertIn(
             "security hardening evidence manifest hash emitted",
             payload["security_hardening"]["core_accuracy_gates"][0]["satisfied_checks"],
@@ -548,6 +560,14 @@ class RapidTriageOpsTests(unittest.TestCase):
         )
         self.assertIn(
             "security hardening control evidence matrix hash emitted",
+            payload["security_hardening"]["core_accuracy_gates"][0]["satisfied_checks"],
+        )
+        self.assertIn(
+            "security hardening report-grade validation plan",
+            payload["security_hardening"]["core_accuracy_gates"][0]["satisfied_checks"],
+        )
+        self.assertIn(
+            "security hardening report-grade ready slots",
             payload["security_hardening"]["core_accuracy_gates"][0]["satisfied_checks"],
         )
         self.assertEqual(
@@ -576,8 +596,17 @@ class RapidTriageOpsTests(unittest.TestCase):
                 "security_hardening_baseline_manifest_emitted"
             ]
         )
+        self.assertTrue(
+            payload["security_hardening"]["functional_priority_profile"]["implemented_controls"][
+                "security_hardening_report_grade_validation_plan_hash"
+            ]
+        )
         self.assertIn(
             "security-hardening-baseline-manifest-emitted",
+            payload["security_hardening"]["functional_priority_profile"]["passed_validation_check_ids"],
+        )
+        self.assertIn(
+            "security-hardening-report-grade-validation-plan-emitted",
             payload["security_hardening"]["functional_priority_profile"]["passed_validation_check_ids"],
         )
         self.assertFalse(
@@ -603,13 +632,18 @@ class RapidTriageOpsTests(unittest.TestCase):
             payload["security_hardening"],
             trusted_tool="malicious-evidence-sandbox-corpus",
         )
-        hardening_gate = security_hardening_core_accuracy_gates(trusted_diff=hardening_diff)
+        hardening_gate = security_hardening_core_accuracy_gates(
+            trusted_diff=hardening_diff,
+            report_grade_validation_plan=hardening_plan,
+        )
         sandbox_gate = malicious_evidence_sandbox_core_accuracy_gates(trusted_diff=sandbox_diff)
         self.assertEqual(hardening_diff["status"], "pass")
         self.assertEqual(sandbox_diff["status"], "pass")
         self.assertIn("control_evidence_matrix_hash", hardening_diff["compared_fields"])
+        self.assertIn("security_hardening_report_grade_validation_plan_hash", hardening_diff["compared_fields"])
         self.assertIn("control_evidence_matrix_hash", sandbox_diff["compared_fields"])
         self.assertIn("trusted independent AppSec review diff pass", hardening_gate[0]["satisfied_checks"])
+        self.assertIn("security hardening report-grade validation plan", hardening_gate[0]["satisfied_checks"])
         self.assertIn("trusted malicious evidence sandbox corpus diff pass", sandbox_gate[0]["satisfied_checks"])
 
     def test_benchmark_command_writes_json_and_markdown(self) -> None:
@@ -2055,6 +2089,10 @@ class RapidTriageOpsTests(unittest.TestCase):
             self.assertIn(
                 "operations_documents.document_report_grade_validation_plan_hashes.117",
                 final_by_number[117]["primary_outputs"],
+            )
+            self.assertIn(
+                "enterprise-policy.security_hardening.security_hardening_report_grade_validation_plan_hash",
+                final_by_number[118]["primary_outputs"],
             )
             self.assertIn(
                 "operations_documents.document_evidence_manifests.120.manifest_hash",
