@@ -4552,6 +4552,8 @@ class RapidTriageWindowsArtifactsCollectorTests(unittest.TestCase):
         self.assertTrue(diff["commercial_grade_evidence"])
         self.assertEqual(diff["matched_count"], 3)
         self.assertEqual(diff["mismatch_count"], 0)
+        self.assertEqual(diff["field_coverage"]["missing_required_fields"], {})
+        self.assertIn("assigned_sids", diff["required_fields_by_row_type"]["privilege"])
         self.assertEqual(diff["reportability_decision"]["decision"], "os-account-diff-passed")
 
     def test_os_account_trusted_diff_blocks_group_membership_mismatch(self) -> None:
@@ -4581,6 +4583,25 @@ class RapidTriageWindowsArtifactsCollectorTests(unittest.TestCase):
         self.assertFalse(diff["commercial_grade_evidence"])
         self.assertEqual(diff["mismatch_count"], 1)
         self.assertIn("sam-security-system-trusted-diff-required", diff["reportability_decision"]["blockers"])
+
+    def test_os_account_trusted_diff_blocks_missing_required_field_coverage(self) -> None:
+        rapid_rows = [
+            {
+                "artifact_type": "windows-privilege-assignment",
+                "details": {
+                    "privilege": "SeDebugPrivilege",
+                    "assigned_sids": ["S-1-5-32-544"],
+                },
+            }
+        ]
+        trusted_rows = [{"right": "SeDebugPrivilege"}]
+
+        diff = build_os_account_trusted_diff(rapid_rows, trusted_rows, trusted_tool="RECmd")
+
+        self.assertEqual(diff["status"], "diffs-present")
+        self.assertFalse(diff["commercial_grade_evidence"])
+        self.assertIn("assigned_sids", diff["field_coverage"]["missing_required_fields"]["trusted:privilege:sedebugprivilege"])
+        self.assertIn("os-account-trusted-field-coverage-required", diff["reportability_decision"]["blockers"])
 
     def test_manifest_collects_browser_and_recent_file_artifacts_from_fixture(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:

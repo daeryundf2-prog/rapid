@@ -19,6 +19,7 @@
         "windows-account-lifecycle rows preserve user name, RID, UAC flags, SAM F/V candidate fields, group membership hints, inherited privilege context, source hashes, and #6 core_accuracy_gates.",
         "windows-lsa-policy-location rows preserve secret metadata without decrypting or exposing protected values.",
         "windows-privilege-assignment rows attribute high-risk privileges to assigned SID/principal hints.",
+        "account, group, privilege, LSA, and native SAM candidate rows preserve sam_security_system_row_manifest hashes and required trusted-diff field coverage.",
         "build_os_account_trusted_diff compares account/group/privilege rows with trusted SAM/SECURITY/SYSTEM parser output by user/RID/SID, UAC flags, group names, privileges, and secret redaction state.",
         "account reportability decisions keep rows as triage pivots until SAM F/V, alias-member, SECURITY, domain, and transaction-log validation is attached."
       ],

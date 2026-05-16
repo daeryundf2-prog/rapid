@@ -5206,7 +5206,7 @@
           "supported": true,
           "details": {
             "parser": "windows-user-profile-inventory",
-            "parser_version": "windows-os-account-v9",
+            "parser_version": "windows-os-account-v10",
             "coverage_status": "parsed",
             "reportability": "triage",
             "source_path": "<ROOT>/Users/alice",
