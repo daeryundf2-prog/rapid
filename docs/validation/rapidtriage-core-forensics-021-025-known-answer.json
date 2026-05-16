@@ -17,7 +17,8 @@
       ],
       "expected": {
         "required_assertions": [
-          "AI browser storage transcript candidates preserve Q/A pairing, orphan counts, source hashes, storage provenance, and #21 core_accuracy_gates",
+          "AI browser storage and service export transcript candidates preserve Q/A pairing, orphan counts, source hashes, storage provenance, JSON Pointer source locators, row/text hashes, service export schema profiles, and #21 core_accuracy_gates",
+          "macos-system parses ChatGPT export ZIP entries and Takeout.zip-style Gemini export entries into service-labeled Q/A rows with archive context and JSON Pointer citations",
           "AI transcript trusted export diff helper requires service/export row equality before satisfying the #21 trusted AI transcript export diff pass gate",
           "AI transcript reportability decisions block complete-transcript claims until service-side export/schema/deleted-fragment validation exists"
         ]

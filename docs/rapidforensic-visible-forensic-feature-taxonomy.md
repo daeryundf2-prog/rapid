@@ -314,8 +314,8 @@ GUI에서는 다음 14개 상위 그룹으로 보여주는 것이 적절하다.
 | browser storage scan | Local Storage, Session Storage, IndexedDB, Cache | partial+ | deleted fragment recovery |
 | Q/A fragment 추출 | role/content, prompt/question/answer/response/completion | partial+ | provider schema별 parser |
 | Q/A pairing | transcript pair confidence/orphan count | partial+ | official export diff |
-| 공식 export JSON parser | `ai-service-export-conversation`, `ai_service_export_parser_manifest` | partial | provider schema/version fixture, trusted export diff |
-| source offset/hash | candidate manifest | partial+ | browser source viewer E2E |
+| 공식 export JSON parser | `ai-service-export-conversation`, `ai_service_export_parser_manifest` | partial+ | provider schema/version fixture, trusted export diff |
+| source offset/hash/JSON Pointer | candidate manifest, row citation hash, text hash | partial++ | browser source viewer E2E |
 | AI 대화 후보 보기 | `browser-ai-conversation`, `macos-browser-ai-conversation` | partial+ | chat-like viewer polish |
 | mobile AI usage | `mobile-browser`, `mobile-app`, risk flags | partial | app-specific local DB parser |
 

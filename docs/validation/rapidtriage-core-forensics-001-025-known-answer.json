@@ -511,7 +511,7 @@
       ],
       "expected": {
         "required_assertions": [
-          "AI browser storage transcript candidates preserve Q/A pairing, orphan counts, source hashes, storage provenance, and #21 core_accuracy_gates"
+          "AI browser storage and service export transcript candidates preserve Q/A pairing, orphan counts, source hashes, storage provenance, JSON Pointer source locators, row/text hashes, service export schema profiles, and #21 core_accuracy_gates"
         ]
       },
       "notes": "Internal fixture pass; service-side export validation and schema-version corpus remain commercial-grade evidence.",

@@ -176,6 +176,7 @@ AI_EXPORT_PATH_TERMS = (
     "bard",
     "perplexity",
     "copilot",
+    "takeout",
     "conversations",
     "conversation",
     "export",
@@ -792,6 +793,7 @@ def extract_ai_export_rows(
         "conversation_id": "",
         "conversation_title": "",
         "timestamp": None,
+        "export_schema_profile": infer_ai_export_schema_profile(payload, service_hint=service_hint),
     }
     rows: List[Dict[str, object]] = []
     walk_ai_export_payload(
@@ -805,6 +807,7 @@ def extract_ai_export_rows(
         context=context,
         rows=rows,
         depth=0,
+        json_pointer="",
     )
     return rows
 
@@ -821,11 +824,12 @@ def walk_ai_export_payload(
     context: Mapping[str, object],
     rows: List[Dict[str, object]],
     depth: int,
+    json_pointer: str,
 ) -> None:
     if len(rows) >= MAX_AI_CONVERSATION_ROWS or depth > 14:
         return
     if isinstance(value, list):
-        for item in value:
+        for index, item in enumerate(value):
             if len(rows) >= MAX_AI_CONVERSATION_ROWS:
                 break
             walk_ai_export_payload(
@@ -839,6 +843,7 @@ def walk_ai_export_payload(
                 context=context,
                 rows=rows,
                 depth=depth + 1,
+                json_pointer=join_json_pointer(json_pointer, str(index)),
             )
         return
     if not isinstance(value, Mapping):
@@ -854,6 +859,7 @@ def walk_ai_export_payload(
         source_size=source_size,
         source_modified_at=source_modified_at,
         context=next_context,
+        source_json_pointer=json_pointer,
     )
     rows.extend(pair_rows[: max(0, MAX_AI_CONVERSATION_ROWS - len(rows))])
     if len(rows) >= MAX_AI_CONVERSATION_ROWS:
@@ -870,6 +876,7 @@ def walk_ai_export_payload(
             source_size=source_size,
             source_modified_at=source_modified_at,
             context=ai_export_context_for(message, next_context),
+            source_json_pointer=join_json_pointer(json_pointer, "message"),
         )
         if maybe_row:
             rows.append(maybe_row)
@@ -883,6 +890,7 @@ def walk_ai_export_payload(
         source_size=source_size,
         source_modified_at=source_modified_at,
         context=next_context,
+        source_json_pointer=json_pointer,
     )
     if maybe_row and len(rows) < MAX_AI_CONVERSATION_ROWS:
         rows.append(maybe_row)
@@ -891,14 +899,16 @@ def walk_ai_export_payload(
     for key in selected_child_keys:
         child = value.get(key)
         if isinstance(child, Mapping):
-            iterable: Iterable[Any] = child.values()
+            iterable: Iterable[tuple[str, Any]] = ((str(child_key), child_value) for child_key, child_value in child.items())
         elif isinstance(child, list):
-            iterable = child
+            iterable = ((str(child_index), child_value) for child_index, child_value in enumerate(child))
         else:
             continue
-        for item in iterable:
+        for child_token, item in iterable:
             if len(rows) >= MAX_AI_CONVERSATION_ROWS:
                 return
+            child_pointer = join_json_pointer(json_pointer, key)
+            child_pointer = join_json_pointer(child_pointer, child_token)
             walk_ai_export_payload(
                 item,
                 source=source,
@@ -910,6 +920,7 @@ def walk_ai_export_payload(
                 context=next_context,
                 rows=rows,
                 depth=depth + 1,
+                json_pointer=child_pointer,
             )
     for key, child in value.items():
         if key in selected_child_keys or not isinstance(child, (Mapping, list)):
@@ -927,16 +938,17 @@ def walk_ai_export_payload(
             context=next_context,
             rows=rows,
             depth=depth + 1,
+            json_pointer=join_json_pointer(json_pointer, key),
         )
 
 
 def ai_export_context_for(value: Mapping[str, object], context: Mapping[str, object]) -> Dict[str, object]:
     updated = dict(context)
-    for key in ("id", "conversation_id", "thread_id", "uuid"):
+    for key in ("id", "conversation_id", "conversationId", "thread_id", "threadId", "uuid", "chat_id", "chatId"):
         if value.get(key):
             updated["conversation_id"] = str(value[key])
             break
-    for key in ("title", "name", "conversation_title", "thread_title"):
+    for key in ("title", "name", "conversation_title", "conversationTitle", "thread_title", "threadTitle"):
         if value.get(key):
             text = normalize_ai_export_text(value[key])
             if text:
@@ -951,6 +963,47 @@ def ai_export_context_for(value: Mapping[str, object], context: Mapping[str, obj
     return updated
 
 
+def join_json_pointer(base: str, token: str) -> str:
+    escaped = token.replace("~", "~0").replace("/", "~1")
+    return f"{base}/{escaped}" if base else f"/{escaped}"
+
+
+def infer_ai_export_schema_profile(payload: Any, *, service_hint: str = "") -> Dict[str, object]:
+    service = service_hint or infer_ai_service_from_payload(payload) or "AI service"
+    shape = "unknown-json"
+    recognized = False
+    if isinstance(payload, list):
+        shape = "top-level-list"
+        recognized = True
+    elif isinstance(payload, Mapping):
+        keys = {str(key) for key in payload.keys()}
+        lowered_keys = {key.lower() for key in keys}
+        if "mapping" in lowered_keys:
+            shape = "chatgpt-mapping-tree"
+            service = service or "ChatGPT"
+            recognized = True
+        elif {"chat_messages", "messages", "turns", "items"} & lowered_keys:
+            shape = "message-list-conversation"
+            recognized = True
+        elif {"conversations", "conversation", "threads"} & lowered_keys:
+            shape = "conversation-container"
+            recognized = True
+        elif {"prompt", "question", "query", "input"} & lowered_keys and {"answer", "response", "completion", "output"} & lowered_keys:
+            shape = "prompt-answer-row"
+            recognized = True
+    schema_id = f"{normalize_key(service) or 'ai'}:{shape}"
+    return {
+        "profile_version": "ai-service-export-schema-profile-v1",
+        "schema_id": schema_id,
+        "service": service or "AI service",
+        "shape": shape,
+        "recognized_shape": recognized,
+        "schema_version_known": False,
+        "schema_version_source": "",
+        "validation_status": "recognized-shape-validation-required" if recognized else "generic-json-validation-required",
+    }
+
+
 def ai_export_prompt_answer_rows(
     value: Mapping[str, object],
     *,
@@ -961,11 +1014,15 @@ def ai_export_prompt_answer_rows(
     source_size: int,
     source_modified_at: str | None,
     context: Mapping[str, object],
+    source_json_pointer: str,
 ) -> List[Dict[str, object]]:
-    question = first_ai_export_text(value, ("prompt", "question", "query", "user_prompt", "input"))
-    answer = first_ai_export_text(value, ("answer", "response", "completion", "assistant_response", "output"))
+    question, question_key = first_ai_export_text_with_key(value, ("prompt", "question", "query", "user_prompt", "input"))
+    answer, answer_key = first_ai_export_text_with_key(value, ("answer", "response", "completion", "assistant_response", "output"))
     rows: List[Dict[str, object]] = []
-    for role, direction, text in (("user", "question", question), ("assistant", "answer", answer)):
+    for role, direction, text, text_key in (
+        ("user", "question", question, question_key),
+        ("assistant", "answer", answer, answer_key),
+    ):
         if not useful_conversation_text(text):
             continue
         rows.append(
@@ -981,6 +1038,7 @@ def ai_export_prompt_answer_rows(
                 direction=direction,
                 text=text,
                 confidence=0.9,
+                source_json_pointer=join_json_pointer(source_json_pointer, text_key) if text_key else source_json_pointer,
             )
         )
     return rows
@@ -996,11 +1054,12 @@ def ai_export_message_row(
     source_size: int,
     source_modified_at: str | None,
     context: Mapping[str, object],
+    source_json_pointer: str,
 ) -> Dict[str, object] | None:
     role = normalize_ai_export_role(value)
     if not role:
         return None
-    text = first_ai_export_text(value, ("content", "text", "message", "body", "parts"))
+    text, text_key = first_ai_export_text_with_key(value, ("content", "text", "message", "body", "parts"))
     if not useful_conversation_text(text):
         return None
     return build_ai_export_row(
@@ -1015,6 +1074,7 @@ def ai_export_message_row(
         direction=role_to_direction(role),
         text=text,
         confidence=0.92 if role in {"user", "assistant"} else 0.7,
+        source_json_pointer=join_json_pointer(source_json_pointer, text_key) if text_key else source_json_pointer,
     )
 
 
@@ -1031,17 +1091,32 @@ def build_ai_export_row(
     direction: str,
     text: str,
     confidence: float,
+    source_json_pointer: str,
 ) -> Dict[str, object]:
     try:
         source_relative_path = str(source.resolve().relative_to(root.resolve()))
     except ValueError:
         source_relative_path = source.name
     offset = source_text.find(text[:120]) if text else -1
+    export_schema_profile = context.get("export_schema_profile")
+    if not isinstance(export_schema_profile, Mapping):
+        export_schema_profile = infer_ai_export_schema_profile({}, service_hint=str(context.get("service_hint") or ""))
+    text_sha256 = hashlib.sha256(text.encode("utf-8")).hexdigest() if text else ""
+    row_citation_material = {
+        "ai_service": str(context.get("service_hint") or "AI service"),
+        "direction": direction,
+        "source_sha256": source_sha256,
+        "source_json_pointer": source_json_pointer,
+        "source_offset": offset if offset >= 0 else None,
+        "text_sha256": text_sha256,
+        "conversation_id": str(context.get("conversation_id") or ""),
+    }
     return {
         "ai_service": str(context.get("service_hint") or "AI service"),
         "direction": direction,
         "role": role,
         "text": text[:1500],
+        "text_sha256": text_sha256,
         "confidence": confidence,
         "storage_area": "service-export",
         "source_storage_kind": "service-export-json",
@@ -1049,13 +1124,21 @@ def build_ai_export_row(
         "source_size": source_size,
         "source_modified_at": source_modified_at,
         "source_offset": offset if offset >= 0 else None,
+        "source_json_pointer": source_json_pointer,
+        "source_locator_type": "json-pointer+text-offset" if source_json_pointer and offset >= 0 else "json-pointer" if source_json_pointer else "text-offset",
         "service_detection_source": "service-export-json",
         "source_path": str(source.resolve()),
         "source_sha256": source_sha256,
         "conversation_id": str(context.get("conversation_id") or ""),
+        "conversation_id_hash": hashlib.sha256(str(context.get("conversation_id") or "").encode("utf-8")).hexdigest()
+        if context.get("conversation_id")
+        else "",
         "conversation_title": str(context.get("conversation_title") or ""),
         "timestamp": context.get("timestamp"),
         "export_schema": "service-export-json",
+        "export_schema_profile": dict(export_schema_profile),
+        "export_schema_id": str(export_schema_profile.get("schema_id") or ""),
+        "row_citation_hash": stable_browser_sha256(row_citation_material),
         "evidence_note": "Recovered from a service export JSON/JSONL file; verify provider schema/version and account scope before reporting completeness.",
     }
 
@@ -1111,6 +1194,10 @@ def build_ai_service_export_record(
         "has_question_answer_pair": bool(transcript["complete_pair_count"]),
         "has_source_hashes": all(bool(row.get("source_sha256")) for row in conversation_rows),
         "has_source_storage_area": all(bool(row.get("storage_area")) for row in conversation_rows),
+        "has_source_json_pointers": all(bool(row.get("source_json_pointer")) for row in conversation_rows),
+        "has_row_citation_hashes": all(bool(row.get("row_citation_hash")) for row in conversation_rows),
+        "has_text_hashes": all(bool(row.get("text_sha256")) for row in conversation_rows),
+        "has_export_schema_profiles": all(bool(row.get("export_schema_id")) for row in conversation_rows),
         "service_side_export_parsed": True,
         "service_side_export_validated": True,
         "trusted_export_diff_attached": False,
@@ -1248,6 +1335,8 @@ def build_ai_service_export_parser_manifest(
         "detected_service": service,
         "service_side_export_parsed": True,
         "schema_version_known": False,
+        "json_pointer_locator_count": int(source_summary.get("json_pointer_count") or 0),
+        "export_schema_id_counts": source_summary.get("export_schema_id_counts") or [],
         "candidate_row_count": int(transcript.get("question_count") or 0) + int(transcript.get("answer_count") or 0),
         "detected_service_counts": source_summary.get("service_counts") or [],
         "pair_count": int(transcript.get("pair_count") or 0),
@@ -1279,7 +1368,7 @@ def build_ai_service_export_parser_manifest(
 
 
 def normalize_ai_export_role(value: Mapping[str, object]) -> str:
-    role_value: object = value.get("role") or value.get("sender") or value.get("from")
+    role_value: object = value.get("role") or value.get("sender") or value.get("from") or value.get("actor")
     author = value.get("author")
     if isinstance(author, Mapping):
         role_value = author.get("role") or author.get("name") or role_value
@@ -1296,13 +1385,18 @@ def normalize_ai_export_role(value: Mapping[str, object]) -> str:
 
 
 def first_ai_export_text(value: Mapping[str, object], keys: Sequence[str]) -> str:
+    text, _key = first_ai_export_text_with_key(value, keys)
+    return text
+
+
+def first_ai_export_text_with_key(value: Mapping[str, object], keys: Sequence[str]) -> tuple[str, str]:
     for key in keys:
         if key not in value:
             continue
         text = normalize_ai_export_text(value[key])
         if useful_conversation_text(text):
-            return text
-    return ""
+            return text, key
+    return "", ""
 
 
 def normalize_ai_export_text(value: object) -> str:
@@ -1327,7 +1421,19 @@ def normalize_ai_export_text(value: object) -> str:
 
 
 def ai_export_timestamp(value: Mapping[str, object]) -> str | None:
-    for key in ("create_time", "update_time", "created_at", "updated_at", "timestamp", "time", "created"):
+    for key in (
+        "create_time",
+        "update_time",
+        "created_at",
+        "updated_at",
+        "createTime",
+        "updateTime",
+        "createdAt",
+        "updatedAt",
+        "timestamp",
+        "time",
+        "created",
+    ):
         raw = value.get(key)
         if raw in (None, ""):
             continue
@@ -3596,6 +3702,8 @@ def ai_transcript_analyst_review_profile(details: Mapping[str, object]) -> Dict[
         "service_schema_validation_status": str(schema_manifest.get("service_schema_validation_status") or ""),
         "source_file_count": int(source_summary.get("source_file_count") or 0),
         "service_counts": dict(service_counts),
+        "json_pointer_locator_count": int(source_summary.get("json_pointer_count") or 0),
+        "export_schema_id_counts": source_summary.get("export_schema_id_counts") or [],
     }
     has_pairs = int(source_field_values["complete_pair_count"] or 0) > 0
     has_manifest = bool(candidate_manifest.get("manifest_sha256"))
@@ -3799,6 +3907,10 @@ def ai_transcript_functional_profile(
         passed_checks.append("ai-transcript-schema-validation-manifest-emitted")
     if int(candidate_manifest.get("candidate_citation_count") or 0) >= len(conversation_rows):
         passed_checks.append("ai-candidate-source-locators-emitted")
+    if int(source_summary.get("json_pointer_count") or 0) >= len(conversation_rows):
+        passed_checks.append("ai-json-pointer-source-locators-emitted")
+    if source_summary.get("export_schema_id_counts"):
+        passed_checks.append("ai-service-export-schema-profile-emitted")
     if len(candidate_manifest.get("pair_citations") or []) >= int(transcript.get("pair_count") or 0):
         passed_checks.append("ai-pair-source-locators-emitted")
     return {
@@ -3820,6 +3932,8 @@ def ai_transcript_functional_profile(
             "service_schema_validation_status": str(schema_manifest.get("service_schema_validation_status") or ""),
             "candidate_citation_count": int(candidate_manifest.get("candidate_citation_count") or 0),
             "pair_citation_count": len(candidate_manifest.get("pair_citations") or []),
+            "json_pointer_locator_count": int(source_summary.get("json_pointer_count") or 0),
+            "export_schema_id_counts": source_summary.get("export_schema_id_counts") or [],
             "browser": str(details.get("browser") or ""),
             "profile": str(details.get("profile") or ""),
         },
@@ -4481,6 +4595,12 @@ def ai_transcript_core_accuracy_gates(details: Mapping[str, object]) -> list[dic
         satisfied.append("AI transcript candidate manifest")
     if int(candidate_manifest.get("candidate_citation_count") or 0) >= len(rows):
         satisfied.append("candidate source viewer locators")
+    if rows and all(row.get("source_json_pointer") for row in rows):
+        satisfied.append("JSON pointer source locators")
+    if rows and all(row.get("row_citation_hash") and row.get("text_sha256") for row in rows):
+        satisfied.append("row/text hashes for transcript candidates")
+    if count_field(rows, "export_schema_id"):
+        satisfied.append("service export schema profile")
     if len(candidate_manifest.get("pair_citations") or []) >= int(transcript.get("pair_count") or 0):
         satisfied.append("pair source viewer locators")
     if "orphan_question_count" in transcript and "orphan_answer_count" in transcript:
@@ -4927,6 +5047,8 @@ def build_ai_transcript_pair(question: Mapping[str, object], answer: Mapping[str
             "answer_source_path": str(answer.get("source_path") or ""),
             "question_source_offset": question.get("source_offset"),
             "answer_source_offset": answer.get("source_offset"),
+            "question_source_json_pointer": str(question.get("source_json_pointer") or ""),
+            "answer_source_json_pointer": str(answer.get("source_json_pointer") or ""),
             "same_source_hash": same_source,
             "source_ordering": "question-before-answer",
             "storage_area": str(question.get("storage_area") or answer.get("storage_area") or ""),
@@ -4991,6 +5113,8 @@ def build_ai_transcript_candidate_manifest(
         "orphan_answer_count": int(transcript.get("orphan_answer_count") or 0),
         "completeness_score": transcript.get("completeness_score"),
         "pairing_confidence_summary": transcript.get("pairing_confidence_summary") or {},
+        "json_pointer_locator_count": int(source_summary.get("json_pointer_count") or 0),
+        "export_schema_id_counts": source_summary.get("export_schema_id_counts") or [],
         "candidate_citations": candidate_citations,
         "pair_citations": pair_citations,
         "large_data_controls": {
@@ -5065,6 +5189,8 @@ def build_ai_transcript_schema_validation_manifest(
             "source_file_count": int(source_summary.get("source_file_count") or 0),
             "source_sha256s": list(source_summary.get("source_sha256s") or [])[:25],
             "storage_area_counts": source_summary.get("storage_area_counts") or [],
+            "json_pointer_count": int(source_summary.get("json_pointer_count") or 0),
+            "export_schema_id_counts": source_summary.get("export_schema_id_counts") or [],
         },
         "pairing_quality": {
             "candidate_row_count": len(conversation_rows),
@@ -5082,6 +5208,9 @@ def build_ai_transcript_schema_validation_manifest(
             "candidate_citation_count": int(candidate_manifest.get("candidate_citation_count") or 0),
             "pair_citation_count": len(candidate_manifest.get("pair_citations") or []),
         },
+        "json_pointer_locator_status": (
+            "present" if int(source_summary.get("json_pointer_count") or 0) >= len(conversation_rows) else "partial"
+        ),
         "service_schema_validation_status": "service-export-and-schema-validation-required",
         "reportability": {
             "allowed_use": "ai-transcript-candidate-review-pivot",
@@ -5134,6 +5263,9 @@ def ai_conversation_candidate_citation(
         "source_path": source_path,
         "source_sha256": str(row.get("source_sha256") or ""),
         "source_offset": source_offset,
+        "source_json_pointer": str(row.get("source_json_pointer") or ""),
+        "source_locator_type": str(row.get("source_locator_type") or ""),
+        "row_citation_hash": str(row.get("row_citation_hash") or ""),
         "text_sha256": hashlib.sha256(text.encode("utf-8")).hexdigest() if text else "",
         "text_preview": text[:160],
     }
@@ -5141,11 +5273,12 @@ def ai_conversation_candidate_citation(
         **citation_payload,
         "row_hash": stable_browser_sha256(citation_payload),
         "source_viewer_locator": {
-            "viewer": "text-offset",
+            "viewer": "json-pointer" if row.get("source_json_pointer") else "text-offset",
             "profile_dir": str(profile_dir.resolve()),
             "source_path": source_path,
             "source_relative_path": str(row.get("source_relative_path") or ""),
             "source_offset": source_offset,
+            "source_json_pointer": str(row.get("source_json_pointer") or ""),
             "open_requires_source_validation": True,
         },
         "validation_status": "ai-candidate-source-citation",
@@ -5170,6 +5303,8 @@ def ai_transcript_pair_citation(pair: Mapping[str, object], *, source_index: int
         "answer_source_path": str(evidence.get("answer_source_path") or pair.get("answer_source_path") or ""),
         "question_source_offset": evidence.get("question_source_offset"),
         "answer_source_offset": evidence.get("answer_source_offset"),
+        "question_source_json_pointer": str(evidence.get("question_source_json_pointer") or ""),
+        "answer_source_json_pointer": str(evidence.get("answer_source_json_pointer") or ""),
         "source_sha256s": list(pair.get("source_sha256s") or []),
         "same_source_hash": bool(evidence.get("same_source_hash")),
     }
@@ -5179,15 +5314,17 @@ def ai_transcript_pair_citation(pair: Mapping[str, object], *, source_index: int
         "source_viewer_locators": [
             {
                 "role": "question",
-                "viewer": "text-offset",
+                "viewer": "json-pointer" if citation_payload["question_source_json_pointer"] else "text-offset",
                 "source_path": citation_payload["question_source_path"],
                 "source_offset": citation_payload["question_source_offset"],
+                "source_json_pointer": citation_payload["question_source_json_pointer"],
             },
             {
                 "role": "answer",
-                "viewer": "text-offset",
+                "viewer": "json-pointer" if citation_payload["answer_source_json_pointer"] else "text-offset",
                 "source_path": citation_payload["answer_source_path"],
                 "source_offset": citation_payload["answer_source_offset"],
+                "source_json_pointer": citation_payload["answer_source_json_pointer"],
             },
         ],
         "validation_status": "paired-candidate-source-citation",
@@ -5224,12 +5361,15 @@ def summarize_pairing_confidence(pairs: Sequence[Mapping[str, object]]) -> Dict[
 def summarize_ai_conversation_sources(conversation_rows: Sequence[Mapping[str, object]]) -> Dict[str, object]:
     source_paths = sorted({str(row.get("source_path") or "") for row in conversation_rows if row.get("source_path")})
     source_hashes = sorted({str(row.get("source_sha256") or "") for row in conversation_rows if row.get("source_sha256")})
+    json_pointer_count = sum(1 for row in conversation_rows if row.get("source_json_pointer"))
     return {
         "source_file_count": len(source_paths),
         "source_paths": source_paths[:25],
         "source_sha256s": source_hashes[:25],
         "storage_area_counts": count_field(conversation_rows, "storage_area"),
         "service_counts": count_field(conversation_rows, "ai_service"),
+        "json_pointer_count": json_pointer_count,
+        "export_schema_id_counts": count_field(conversation_rows, "export_schema_id"),
     }
 
 

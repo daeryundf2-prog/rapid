@@ -220,15 +220,85 @@ class RapidTriageMacOsArtifactsTests(unittest.TestCase):
             self.assertEqual(details["complete_pair_count"], 1)
             self.assertEqual(details["conversation_candidates"][0]["source_storage_kind"], "service-export-zip-json")
             self.assertIn("::conversations.json", details["conversation_candidates"][0]["source_path"])
+            self.assertTrue(details["conversation_candidates"][0]["source_json_pointer"])
+            self.assertTrue(details["conversation_candidates"][0]["row_citation_hash"])
+            self.assertTrue(details["conversation_candidates"][0]["text_sha256"])
             self.assertEqual(
                 details["ai_service_export_parser_manifest"]["source_format"],
                 "zip-json-entry",
             )
+            self.assertEqual(details["ai_service_export_parser_manifest"]["json_pointer_locator_count"], 2)
             self.assertEqual(
                 details["ai_service_export_parser_manifest"]["archive_context"]["archive_entry_name"],
                 "conversations.json",
             )
             self.assertIn("archive completeness", details["validation_guidance"])
+
+    def test_macos_system_collector_parses_takeout_ai_export_with_json_pointer_locators(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            evidence_root = root / "mac-case"
+            output = root / "macos-system-ai-takeout.json"
+            user_docs = evidence_root / "Users" / "alice" / "Documents"
+            user_docs.mkdir(parents=True)
+            (evidence_root / "System" / "Library").mkdir(parents=True)
+            archive_path = user_docs / "Takeout.zip"
+            with zipfile.ZipFile(archive_path, "w") as archive:
+                archive.writestr(
+                    "Gemini Apps/conversations.json",
+                    json.dumps(
+                        {
+                            "conversations": [
+                                {
+                                    "id": "gem-1",
+                                    "title": "Gemini export",
+                                    "turns": [
+                                        {
+                                            "role": "user",
+                                            "createTime": "2024-04-01T09:10:11Z",
+                                            "parts": [{"text": "Find suspicious macOS downloads."}],
+                                        },
+                                        {
+                                            "role": "model",
+                                            "createTime": "2024-04-01T09:10:22Z",
+                                            "parts": [{"text": "Review QuarantineEventsV2 Safari rows."}],
+                                        },
+                                    ],
+                                }
+                            ]
+                        }
+                    ),
+                )
+
+            self.assertEqual(main(["artifacts", str(evidence_root), "--kind", "macos-system", "--output", str(output)]), 0)
+
+            payload = json.loads(output.read_text(encoding="utf-8"))
+            ai_export = next(
+                item
+                for item in payload["artifacts"]
+                if item["artifact_type"] == "ai-service-export-conversation"
+                and item["details"]["profile"] == "Gemini"
+            )
+            details = ai_export["details"]
+            self.assertEqual(details["complete_pair_count"], 1)
+            self.assertEqual(details["conversation_candidates"][0]["export_schema_id"], "gemini:conversation-container")
+            self.assertTrue(all(row["source_json_pointer"] for row in details["conversation_candidates"]))
+            self.assertTrue(all(row["text_sha256"] for row in details["conversation_candidates"]))
+            self.assertTrue(all(row["row_citation_hash"] for row in details["conversation_candidates"]))
+            self.assertEqual(details["source_storage_summary"]["json_pointer_count"], 2)
+            self.assertEqual(details["ai_transcript_candidate_manifest"]["json_pointer_locator_count"], 2)
+            self.assertEqual(details["ai_service_export_parser_manifest"]["json_pointer_locator_count"], 2)
+            self.assertEqual(
+                details["ai_transcript_candidate_manifest"]["export_schema_id_counts"][0]["value"],
+                "gemini:conversation-container",
+            )
+            pair_citation = details["ai_transcript_candidate_manifest"]["pair_citations"][0]
+            self.assertEqual(pair_citation["source_viewer_locators"][0]["viewer"], "json-pointer")
+            self.assertTrue(pair_citation["question_source_json_pointer"])
+            gates = {gate["gap_id"]: gate for gate in details["core_accuracy_gates"]}
+            self.assertIn("JSON pointer source locators", gates["#21"]["satisfied_checks"])
+            self.assertIn("row/text hashes for transcript candidates", gates["#21"]["satisfied_checks"])
+            self.assertIn("service export schema profile", gates["#21"]["satisfied_checks"])
 
     def test_kakaotalk_macos_collector_reports_db_openability_and_message_tables(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:

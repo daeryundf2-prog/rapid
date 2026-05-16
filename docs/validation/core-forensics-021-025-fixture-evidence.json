@@ -5,12 +5,14 @@
   "claim_boundary": "Internal fixture-backed validation for implemented+usable+validated maturity only; commercial-grade still requires external corpora, independent review, and trusted-tool diffs.",
   "fixture_sources": [
     "tests/windows_artifact_fixtures.py",
+    "tests/test_rapidtriage_macos_artifacts.py",
     "tests/test_rapidtriage_windows_artifacts.py",
     "tests/test_rapidtriage_evidence.py",
     "tests/test_rapidtriage_e01.py"
   ],
   "collector_commands": [
     "rapidtriage artifacts <fixture-root> --kind browser --output browser.json",
+    "rapidtriage artifacts <mac-fixture-root> --kind macos-system --output macos-system.json",
     "rapidtriage evidence case.E01 --json",
     "rapidtriage evidence case.001 --json",
     "rapidtriage evidence vm.vmdk --json",
@@ -21,7 +23,8 @@
       "number": 21,
       "title": "AI service transcript parser for ChatGPT/Claude/Gemini/Perplexity",
       "assertions": [
-        "browser-ai-conversation rows preserve service labels, Q/A pairing confidence, orphan counts, storage/source provenance, privacy/completeness warnings, #21 core_accuracy_gates, ai_transcript_analyst_review_profile, and complete-transcript reportability blockers.",
+        "browser-ai-conversation and ai-service-export-conversation rows preserve service labels, Q/A pairing confidence, orphan counts, storage/source provenance, source JSON Pointer locators, row/text hashes, privacy/completeness warnings, #21 core_accuracy_gates, ai_transcript_analyst_review_profile, and complete-transcript reportability blockers.",
+        "macos-system parses ChatGPT export ZIP entries and Takeout.zip-style Gemini export entries into service-labeled Q/A rows with archive context, JSON Pointer source locators, row citation hashes, text hashes, and service export schema profiles.",
         "build_ai_transcript_trusted_diff compares RapidTriage Q/A candidates against service/export rows and only clears the #21 trusted diff gate on recognized-tool row equality."
       ],
       "blockers_kept": [
