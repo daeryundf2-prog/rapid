@@ -459,6 +459,15 @@ class RapidTriageCaseDatabaseTests(unittest.TestCase):
             self.assertEqual(file_plan["search_index_status"], "needs-rebuild")
             self.assertEqual(file_plan["missing_index_rows"], 1)
             self.assertEqual(file_plan["partial_coverage_warning"], True)
+            self.assertEqual(
+                warning_payload["reportability_decision"]["profile_version"],
+                "case-search-reportability-decision-v1",
+            )
+            self.assertFalse(warning_payload["reportability_decision"]["ready_for_absence_claim"])
+            self.assertIn(
+                "case-search-index-rebuild-required-before-absence-claims",
+                warning_payload["reportability_decision"]["blockers"],
+            )
 
             rebuilt = database.rebuild_search_indexes("CASE-INDEX-REBUILD")
             self.assertEqual(rebuilt["status"], "rebuilt")
@@ -738,6 +747,12 @@ class RapidTriageCaseDatabaseTests(unittest.TestCase):
                         self.assertEqual(payload["matches"][0]["path"], "/evidence/needle-after-cap.txt")
                         self.assertEqual(payload["matches"][0]["metadata"]["search_backend"], "sqlite-fts5")
                     self.assertIn("#74", payload["large_case_search_plan"]["commercial_gap_ids"])
+                    self.assertEqual(
+                        payload["reportability_decision"]["profile_version"],
+                        "case-search-reportability-decision-v1",
+                    )
+                    self.assertTrue(payload["reportability_decision"]["ready_for_absence_claim"])
+                    self.assertEqual(payload["reportability_decision"]["search_index_health_status"], "healthy")
 
     def test_case_search_source_filter_skips_unrequested_large_backends(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:

@@ -630,6 +630,11 @@ class CaseDatabase:
             large_case_search_plan=large_case_search_plan,
             review_workflow_summary=review_workflow_summary,
         )
+        reportability_decision = case_search_reportability_decision(
+            result_window_manifest=result_window_manifest,
+            large_case_search_plan=large_case_search_plan,
+            returned_matches=matches,
+        )
         return {
             "command": "case-search",
             "generated_at": now_iso(),
@@ -697,6 +702,7 @@ class CaseDatabase:
             "large_case_search_plan": large_case_search_plan,
             "review_workflow_summary": review_workflow_summary,
             "case_search_result_window_manifest": result_window_manifest,
+            "reportability_decision": reportability_decision,
             "matches": matches,
         }
 
@@ -3856,6 +3862,69 @@ def build_case_search_result_window_manifest(
         ),
     }
     return {**manifest_core, "manifest_hash": stable_payload_sha256(manifest_core)}
+
+
+def case_search_reportability_decision(
+    *,
+    result_window_manifest: Mapping[str, object],
+    large_case_search_plan: Mapping[str, object],
+    returned_matches: Sequence[Mapping[str, object]],
+) -> dict[str, object]:
+    search_index_health = (
+        large_case_search_plan.get("search_index_health")
+        if isinstance(large_case_search_plan.get("search_index_health"), Mapping)
+        else {}
+    )
+    health_summary = search_index_health.get("summary") if isinstance(search_index_health.get("summary"), Mapping) else {}
+    large_case_controls = (
+        result_window_manifest.get("large_case_controls")
+        if isinstance(result_window_manifest.get("large_case_controls"), Mapping)
+        else {}
+    )
+    filters = result_window_manifest.get("filters") if isinstance(result_window_manifest.get("filters"), Mapping) else {}
+    partial_sources = [str(item) for item in large_case_controls.get("partial_sources", [])]
+    blockers: list[str] = [
+        "open-source-viewer-and-record-review-mark-before-report",
+        "trusted-parser-or-known-answer-validation-required-before-court-use",
+    ]
+    if partial_sources:
+        blockers.append("bounded-or-stale-search-source-partial-coverage")
+    if search_index_health.get("status") not in ("healthy", None, ""):
+        blockers.append("case-search-index-rebuild-required-before-absence-claims")
+    if filters.get("post_retrieval_filtering"):
+        blockers.append("post-retrieval-filtering-blocks-absence-claims")
+    ready_for_absence_claim = bool(result_window_manifest.get("ready_for_court_absence_claim")) and not any(
+        blocker
+        in {
+            "bounded-or-stale-search-source-partial-coverage",
+            "case-search-index-rebuild-required-before-absence-claims",
+            "post-retrieval-filtering-blocks-absence-claims",
+        }
+        for blocker in blockers
+    )
+    core: dict[str, object] = {
+        "profile_version": "case-search-reportability-decision-v1",
+        "decision": "case-search-results-are-review-leads-not-standalone-proof",
+        "allowed_use": "triage-search-pivot-and-review-queue",
+        "match_count": len(returned_matches),
+        "ready_for_review_queue": True,
+        "ready_for_absence_claim": ready_for_absence_claim,
+        "ready_for_court_report": False,
+        "source_plan_status": str(large_case_search_plan.get("status") or ""),
+        "result_window_manifest_hash": str(result_window_manifest.get("manifest_hash") or ""),
+        "search_index_health_status": str(search_index_health.get("status") or "unknown"),
+        "search_index_missing_rows": int(health_summary.get("missing_index_rows") or 0),
+        "partial_sources": partial_sources,
+        "blockers": blockers,
+        "required_before_report": [
+            "open the source viewer for selected hits",
+            "record review status and analyst note",
+            "carry citation/source locator into report item",
+            "attach trusted validation evidence before court/report-grade claims",
+        ],
+        "commercial_gap_ids": ["#52", "#61", "#64", "#65", "#74", "#78", "#79"],
+    }
+    return {**core, "decision_hash": stable_payload_sha256(core)}
 
 
 def case_search_scan_candidate_limit(limit: int) -> int:
