@@ -37,9 +37,9 @@
       "title": "SQLite/table specialized viewer",
       "test_files": ["tests/test_rapidtriage_api.py"],
       "assertions": [
-        "SQLite source preview opens read-only, records table/schema/column/index metadata, bounded row previews, search hooks, API-backed table pagination, restricted contains filters, trusted query/schema diff gates, #54 core_accuracy_gates, and reportability blockers for missing browser E2E pagination validation, WAL/journal replay, deleted-row validation, and large database corpus."
+        "SQLite source preview opens read-only, records table/schema/column/index metadata, bounded row previews, search hooks, API-backed table pagination, restricted contains filters, sqlite-preview and table-page manifests, sqlite_viewer_report_grade_validation_plan ready/blocking slots, trusted query/schema diff gates, #54 core_accuracy_gates, and reportability blockers for missing browser E2E pagination validation, WAL/journal replay, deleted-row validation, selected-row export, FTS/virtual-table review, and large database corpus."
       ],
-      "remaining_external_validation": ["Browser E2E pagination validation, deleted-row/WAL validation, trusted sqlite3 query/schema diff, and large database fixture corpus."]
+      "remaining_external_validation": ["Browser E2E pagination validation, deleted-row/WAL validation, trusted sqlite3 query/schema diff, selected-row export workflow, FTS/virtual-table review, and large database fixture corpus."]
     },
     {
       "item": 55,

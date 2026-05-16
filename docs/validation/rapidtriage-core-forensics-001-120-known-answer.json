@@ -1331,7 +1331,7 @@
       ],
       "expected": {
         "required_assertions": [
-          "SQLite preview preserves read-only open, table/schema inventory, column/index metadata, bounded row preview, API-backed table pagination, restricted contains filters, deleted/WAL warning, and #54 core_accuracy_gates."
+          "SQLite preview preserves read-only open, table/schema inventory, column/index metadata, bounded row preview, API-backed table pagination, restricted contains filters, sqlite_viewer_report_grade_validation_plan ready/blocking slots, deleted/WAL warning, and #54 core_accuracy_gates."
         ]
       },
       "notes": "Internal fixture pass; deleted-row/WAL and large database corpus validation remain blockers.",

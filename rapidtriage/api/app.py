@@ -230,6 +230,15 @@ HEX_VIEWER_REPORT_GRADE_BLOCKERS = [
 ]
 SQLITE_VIEWER_TRUSTED_DIFF_BLOCKER = "sqlite-viewer-trusted-query-schema-diff-required"
 SQLITE_VIEWER_TRUSTED_TOOLS = {"sqlite3-cli-oracle", "db-browser-export", "known-answer-sqlite-manifest"}
+SQLITE_VIEWER_REPORT_GRADE_VALIDATION_PLAN_VERSION = "sqlite-viewer-report-grade-validation-plan-v1"
+SQLITE_VIEWER_REPORT_GRADE_BLOCKERS = [
+    "sqlite-pagination-browser-e2e-required",
+    "sqlite-deleted-row-and-wal-recovery-required",
+    "sqlite-viewer-trusted-query-schema-diff-required",
+    "sqlite-export-selected-rows-workflow-required",
+    "sqlite-fts-ranking-and-virtual-table-review-required",
+    "sqlite-large-database-corpus-required",
+]
 EMAIL_VIEWER_TRUSTED_DIFF_BLOCKER = "email-viewer-trusted-thread-export-required"
 EMAIL_VIEWER_TRUSTED_TOOLS = {"mail-client-thread-export", "eml-ground-truth", "mbox-ground-truth", "vendor-mailbox-export"}
 MEDIA_TRANSCRIPT_TRUSTED_DIFF_BLOCKER = "media-transcript-trusted-cue-diff-required"
@@ -4873,6 +4882,22 @@ def build_sqlite_preview(source_path: Path, *, run_id: str | None = None) -> Dic
                 tables=previews,
                 table_page_profile=table_page_profile,
             )
+            validation_plan = build_sqlite_viewer_report_grade_validation_plan(
+                context="sqlite-preview",
+                source_path=source_path,
+                database_metadata=database_metadata,
+                tables=previews,
+                preview_manifest=sqlite_manifest,
+                pagination_api=True,
+                restricted_where_contains=True,
+            )
+            core_accuracy_gates = sqlite_viewer_core_accuracy_gates(
+                source_path=source_path,
+                database_metadata=database_metadata,
+                tables=previews,
+                preview_manifest=sqlite_manifest,
+                validation_plan=validation_plan,
+            )
     except sqlite3.DatabaseError as exc:
         return {
             "preview_type": "binary",
@@ -4901,6 +4926,8 @@ def build_sqlite_preview(source_path: Path, *, run_id: str | None = None) -> Dic
             "table_page_profile": table_page_profile,
             "sqlite_preview_manifest": sqlite_manifest,
             "sqlite_preview_manifest_hash": sqlite_manifest["manifest_hash"],
+            "sqlite_viewer_report_grade_validation_plan": validation_plan,
+            "sqlite_viewer_report_grade_validation_plan_hash": validation_plan["validation_plan_sha256"],
             "large_sqlite_fts_optimization": sqlite_fts_optimization_metadata(database_metadata, previews),
             "table_limit": SQLITE_PREVIEW_TABLE_LIMIT,
             "row_limit": SQLITE_PREVIEW_ROW_LIMIT,
@@ -4915,12 +4942,7 @@ def build_sqlite_preview(source_path: Path, *, run_id: str | None = None) -> Dic
                     "wal/journal-replay-and-deleted-row-recovery-not-implemented-in-viewer",
                 ],
             ),
-            "core_accuracy_gates": sqlite_viewer_core_accuracy_gates(
-                source_path=source_path,
-                database_metadata=database_metadata,
-                tables=previews,
-                preview_manifest=sqlite_manifest,
-            ),
+            "core_accuracy_gates": core_accuracy_gates,
             "trusted_sqlite_viewer_diff": {
                 "status": "missing",
                 "blocker_id": SQLITE_VIEWER_TRUSTED_DIFF_BLOCKER,
@@ -4929,12 +4951,7 @@ def build_sqlite_preview(source_path: Path, *, run_id: str | None = None) -> Dic
             "commercial_uplift_evidence": viewer_workflow_commercial_uplift_evidence(
                 item_number=54,
                 component="sqlite-table-specialized-viewer",
-                core_accuracy_gates=sqlite_viewer_core_accuracy_gates(
-                    source_path=source_path,
-                    database_metadata=database_metadata,
-                    tables=previews,
-                    preview_manifest=sqlite_manifest,
-                ),
+                core_accuracy_gates=core_accuracy_gates,
                 blockers=[
                     "interactive-table-pagination-ui-needs-browser-e2e-validation",
                     "where-builder-is-restricted-contains-filter-not-arbitrary-sql",
@@ -4942,7 +4959,11 @@ def build_sqlite_preview(source_path: Path, *, run_id: str | None = None) -> Dic
                     "export-selected-rows-workflow-not-implemented",
                     SQLITE_VIEWER_TRUSTED_DIFF_BLOCKER,
                 ],
-                source_refs=[f"source_path:{source_path}", f"table_count:{len(tables)}"],
+                source_refs=[
+                    f"source_path:{source_path}",
+                    f"table_count:{len(tables)}",
+                    f"sqlite_viewer_report_grade_validation_plan_sha256:{validation_plan['validation_plan_sha256']}",
+                ],
                 controls={
                     "table_limit": SQLITE_PREVIEW_TABLE_LIMIT,
                     "row_limit": SQLITE_PREVIEW_ROW_LIMIT,
@@ -4954,6 +4975,10 @@ def build_sqlite_preview(source_path: Path, *, run_id: str | None = None) -> Dic
                     "where_builder_ui": False,
                     "max_table_page_rows": SQLITE_TABLE_PAGE_MAX_ROWS,
                     "sqlite_preview_manifest_hash": sqlite_manifest["manifest_hash"],
+                    "sqlite_viewer_report_grade_validation_plan_present": True,
+                    "sqlite_viewer_report_grade_validation_plan_hash": validation_plan["validation_plan_sha256"],
+                    "sqlite_viewer_report_grade_ready_slot_count": validation_plan["ready_slot_count"],
+                    "sqlite_viewer_report_grade_blocking_slot_count": validation_plan["blocking_slot_count"],
                     "sqlite_preview_table_hash_count": sqlite_manifest["table_hash_count"],
                     "sqlite_preview_row_hash_count": sqlite_manifest["row_hash_count"],
                     "sqlite_sidecar_state_profile": database_metadata.get("sidecar_state_profile", {}),
@@ -6724,6 +6749,184 @@ def hex_viewer_core_accuracy_gates(
     ]
 
 
+def build_sqlite_viewer_report_grade_validation_plan(
+    *,
+    context: str,
+    source_path: Path,
+    database_metadata: Mapping[str, object],
+    tables: Sequence[Mapping[str, object]],
+    preview_manifest: Mapping[str, object] | None = None,
+    page_manifest: Mapping[str, object] | None = None,
+    pagination_api: bool = False,
+    restricted_where_contains: bool = False,
+    trusted_diff: Mapping[str, object] | None = None,
+) -> dict[str, object]:
+    preview_manifest = preview_manifest if isinstance(preview_manifest, Mapping) else {}
+    page_manifest = page_manifest if isinstance(page_manifest, Mapping) else {}
+    trusted_diff = trusted_diff if isinstance(trusted_diff, Mapping) else {}
+
+    def slot(
+        slot_id: str,
+        *,
+        ready: bool,
+        evidence: str,
+        blocker_id: str | None = None,
+        operator_action: str = "",
+    ) -> dict[str, object]:
+        row: dict[str, object] = {
+            "slot_id": slot_id,
+            "status": "complete" if ready else "external-required",
+            "evidence": evidence,
+        }
+        if blocker_id and not ready:
+            row["blocker_id"] = blocker_id
+        if operator_action:
+            row["operator_action"] = operator_action
+        return row
+
+    table_count = len(tables)
+    bounded_row_table_count = sum(1 for table in tables if table.get("rows") is not None)
+    has_column_metadata = any(table.get("column_details") or table.get("indexes") or table.get("columns") for table in tables)
+    table_hash_count = int(preview_manifest.get("table_hash_count") or 0)
+    row_hash_count = int(preview_manifest.get("row_hash_count") or page_manifest.get("row_hash_count") or 0)
+    manifest_hash = str(preview_manifest.get("manifest_hash") or page_manifest.get("manifest_hash") or "")
+    validation_slots = [
+        slot(
+            "sqlite-read-only-open",
+            ready=True,
+            evidence=f"context={context} sqlite_uri_mode=ro path={source_path.name}",
+            blocker_id="sqlite-read-only-open-required",
+            operator_action="Open SQLite evidence through read-only URI mode.",
+        ),
+        slot(
+            "sqlite-table-schema-inventory",
+            ready=bool(tables),
+            evidence=f"table_count={table_count}",
+            blocker_id="sqlite-table-schema-inventory-required",
+            operator_action="Emit table/schema inventory before row review.",
+        ),
+        slot(
+            "sqlite-column-index-metadata",
+            ready=has_column_metadata,
+            evidence=f"column_or_index_metadata={has_column_metadata}",
+            blocker_id="sqlite-column-index-metadata-required",
+            operator_action="Preserve column, type, primary-key, and index hints.",
+        ),
+        slot(
+            "sqlite-bounded-row-preview-or-page",
+            ready=bounded_row_table_count > 0,
+            evidence=f"bounded_row_table_count={bounded_row_table_count}",
+            blocker_id="sqlite-bounded-row-preview-or-page-required",
+            operator_action="Return bounded rows with source-viewer locators.",
+        ),
+        slot(
+            "sqlite-preview-or-page-manifest-hashes",
+            ready=bool(manifest_hash) and row_hash_count > 0,
+            evidence=f"manifest_hash={manifest_hash} table_hash_count={table_hash_count} row_hash_count={row_hash_count}",
+            blocker_id="sqlite-preview-or-page-manifest-hashes-required",
+            operator_action="Attach preview/page manifest hashes and row hashes.",
+        ),
+        slot(
+            "sqlite-pagination-and-restricted-filter-controls",
+            ready=pagination_api or restricted_where_contains,
+            evidence=f"pagination_api={pagination_api} restricted_where_contains={restricted_where_contains}",
+            blocker_id="sqlite-pagination-and-restricted-filter-controls-required",
+            operator_action="Expose bounded pagination and schema-validated filters instead of arbitrary SQL.",
+        ),
+        slot(
+            "sqlite-pagination-browser-e2e",
+            ready=False,
+            evidence="browser_e2e_pagination=false",
+            blocker_id="sqlite-pagination-browser-e2e-required",
+            operator_action="Run browser E2E proving table navigation, filter state, and row selection UX.",
+        ),
+        slot(
+            "sqlite-deleted-row-and-wal-recovery",
+            ready=False,
+            evidence="deleted_row_wal_recovery=false",
+            blocker_id="sqlite-deleted-row-and-wal-recovery-required",
+            operator_action="Validate WAL/journal replay and deleted-row recovery against known-answer corpora.",
+        ),
+        slot(
+            "sqlite-trusted-query-schema-diff",
+            ready=trusted_diff.get("status") == "pass",
+            evidence=f"trusted_diff_status={trusted_diff.get('status', 'missing')}",
+            blocker_id=SQLITE_VIEWER_TRUSTED_DIFF_BLOCKER,
+            operator_action="Attach a passing sqlite3/DB-browser/known-answer schema and query diff.",
+        ),
+        slot(
+            "sqlite-export-selected-rows-workflow",
+            ready=False,
+            evidence="export_selected_rows_workflow=false",
+            blocker_id="sqlite-export-selected-rows-workflow-required",
+            operator_action="Add reviewed selected-row export with manifest, hashes, and report citations.",
+        ),
+        slot(
+            "sqlite-fts-ranking-and-virtual-table-review",
+            ready=False,
+            evidence="fts_ranking_virtual_table_review=false",
+            blocker_id="sqlite-fts-ranking-and-virtual-table-review-required",
+            operator_action="Validate FTS ranking, virtual tables, triggers, views, and shadow-table handling.",
+        ),
+        slot(
+            "sqlite-large-database-corpus",
+            ready=False,
+            evidence="large_database_corpus=false",
+            blocker_id="sqlite-large-database-corpus-required",
+            operator_action="Run large SQLite corpus validation with latency, memory, and page-window evidence.",
+        ),
+    ]
+    blockers = sorted(
+        str(slot_row.get("blocker_id"))
+        for slot_row in validation_slots
+        if slot_row.get("status") != "complete" and slot_row.get("blocker_id")
+    )
+    ready_slot_count = sum(1 for slot_row in validation_slots if slot_row.get("status") == "complete")
+    plan_core: dict[str, object] = {
+        "profile_version": SQLITE_VIEWER_REPORT_GRADE_VALIDATION_PLAN_VERSION,
+        "item_number": 54,
+        "gap_id": VIEWER_WORKFLOW_GAP_IDS["sqlite"],
+        "batch_id": "commercial-uplift-051-055",
+        "selected_track": "sqlite-table-specialized-viewer-report-validation",
+        "context": context,
+        "path": str(source_path),
+        "table_count": table_count,
+        "bounded_row_table_count": bounded_row_table_count,
+        "page_size": database_metadata.get("page_size", ""),
+        "page_count": database_metadata.get("page_count", ""),
+        "freelist_count": database_metadata.get("freelist_count", ""),
+        "manifest_hash": manifest_hash,
+        "table_hash_count": table_hash_count,
+        "row_hash_count": row_hash_count,
+        "pagination_api": pagination_api,
+        "restricted_where_contains": restricted_where_contains,
+        "trusted_diff_status": str(trusted_diff.get("status") or "missing"),
+        "ready_slot_count": ready_slot_count,
+        "blocking_slot_count": len(blockers),
+        "validation_status": "report-validation-blocked",
+        "commercial_grade": False,
+        "commercial_grade_ready": False,
+        "validation_slots": validation_slots,
+        "blockers": blockers,
+        "commercial_grade_blockers": list(SQLITE_VIEWER_REPORT_GRADE_BLOCKERS),
+        "validation_commands": [
+            "rapidtriage web -> source-preview for a SQLite database",
+            "GET /api/runs/<run_id>/source-sqlite-table?path=<path>&table=<table>&offset=0&limit=<n>",
+            "rapidtriage commercial-readiness --validation-package docs/validation/rapidtriage-core-forensics-051-060-known-answer.json --limit 54 --json",
+        ],
+        "report_guidance": {
+            "allowed_use": "read-only-sqlite-preview-triage-pivot",
+            "forbidden_claim": "deleted-row/WAL-complete SQLite analysis or full database forensic recovery",
+            "required_disclaimer": (
+                "SQLite viewer output is bounded read-only table/page evidence until browser pagination E2E, "
+                "WAL/journal replay, deleted-row validation, selected-row export, FTS/virtual-table review, "
+                "large database corpus testing, and trusted sqlite query/schema diffs are attached."
+            ),
+        },
+    }
+    return {**plan_core, "validation_plan_sha256": stable_payload_sha256(plan_core)}
+
+
 def sqlite_viewer_core_accuracy_gates(
     *,
     source_path: Path,
@@ -6732,11 +6935,12 @@ def sqlite_viewer_core_accuracy_gates(
     trusted_diff: Mapping[str, object] | None = None,
     preview_manifest: Mapping[str, object] | None = None,
     page_manifest: Mapping[str, object] | None = None,
+    validation_plan: Mapping[str, object] | None = None,
 ) -> list[dict[str, object]]:
     satisfied = ["read-only SQLite open"]
     if tables:
         satisfied.append("table and schema inventory")
-    if any(table.get("column_details") or table.get("indexes") for table in tables):
+    if any(table.get("column_details") or table.get("indexes") or table.get("columns") for table in tables):
         satisfied.append("column/index metadata")
     if any(table.get("rows") is not None for table in tables):
         satisfied.append("bounded row preview")
@@ -6748,6 +6952,11 @@ def sqlite_viewer_core_accuracy_gates(
         satisfied.append("SQLite table page proof manifest")
     if int(preview_manifest.get("row_hash_count") or page_manifest.get("row_hash_count") or 0) > 0:
         satisfied.append("SQLite row hashes")
+    validation_plan = validation_plan if isinstance(validation_plan, Mapping) else {}
+    if validation_plan.get("validation_plan_sha256"):
+        satisfied.append("SQLite viewer report-grade validation plan")
+    if int(validation_plan.get("ready_slot_count") or 0) >= 6:
+        satisfied.append("SQLite viewer report-grade ready slots")
     satisfied.append("deleted/WAL limitation warning")
     trusted_diff = trusted_diff if isinstance(trusted_diff, Mapping) else {}
     if trusted_diff.get("status") == "pass":
@@ -6763,6 +6972,9 @@ def sqlite_viewer_core_accuracy_gates(
                 f"page_count:{database_metadata.get('page_count', '')}",
                 f"sqlite_preview_manifest_hash:{preview_manifest.get('manifest_hash', '')}",
                 f"sqlite_table_page_manifest_hash:{page_manifest.get('manifest_hash', '')}",
+                f"sqlite_viewer_report_grade_validation_plan_sha256:{validation_plan.get('validation_plan_sha256', '')}",
+                f"sqlite_viewer_report_grade_ready_slot_count:{validation_plan.get('ready_slot_count', 0)}",
+                f"sqlite_viewer_report_grade_blocking_slot_count:{validation_plan.get('blocking_slot_count', 0)}",
                 f"trusted_diff_status:{trusted_diff.get('status', 'missing')}",
             ],
         )
@@ -8709,6 +8921,22 @@ def build_sqlite_table_page(
         order_by=order_by,
         descending=descending,
     )
+    validation_plan = build_sqlite_viewer_report_grade_validation_plan(
+        context="sqlite-table-page",
+        source_path=source_path,
+        database_metadata={"page_size": "", "page_count": "", "freelist_count": ""},
+        tables=[{"name": table, "columns": selected_columns, "rows": rows, "column_count": len(all_columns)}],
+        page_manifest=page_manifest,
+        pagination_api=True,
+        restricted_where_contains=bool(where_column and where_contains is not None),
+    )
+    core_accuracy_gates = sqlite_viewer_core_accuracy_gates(
+        source_path=source_path,
+        database_metadata={"page_size": "", "page_count": ""},
+        tables=[{"name": table, "columns": selected_columns, "rows": rows, "column_count": len(all_columns)}],
+        page_manifest=page_manifest,
+        validation_plan=validation_plan,
+    )
     return {
         "command": "source-sqlite-table",
         "profile_version": "sqlite-table-page-v1",
@@ -8737,6 +8965,8 @@ def build_sqlite_table_page(
         },
         "sqlite_table_page_manifest": page_manifest,
         "sqlite_table_page_manifest_hash": page_manifest["manifest_hash"],
+        "sqlite_viewer_report_grade_validation_plan": validation_plan,
+        "sqlite_viewer_report_grade_validation_plan_hash": validation_plan["validation_plan_sha256"],
         "order_by": {
             "column": order_by or "",
             "direction": "desc" if order_by and descending else ("asc" if order_by else ""),
@@ -8765,14 +8995,12 @@ def build_sqlite_table_page(
                 "max_page_rows": SQLITE_TABLE_PAGE_MAX_ROWS,
                 "sqlite_table_page_manifest_hash": page_manifest["manifest_hash"],
                 "row_hash_count": page_manifest["row_hash_count"],
+                "sqlite_viewer_report_grade_validation_plan_hash": validation_plan["validation_plan_sha256"],
+                "sqlite_viewer_report_grade_ready_slot_count": validation_plan["ready_slot_count"],
+                "sqlite_viewer_report_grade_blocking_slot_count": validation_plan["blocking_slot_count"],
             },
         ),
-        "core_accuracy_gates": sqlite_viewer_core_accuracy_gates(
-            source_path=source_path,
-            database_metadata={"page_size": "", "page_count": ""},
-            tables=[{"name": table, "columns": selected_columns, "rows": rows, "column_count": len(all_columns)}],
-            page_manifest=page_manifest,
-        ),
+        "core_accuracy_gates": core_accuracy_gates,
     }
 
 

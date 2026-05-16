@@ -44,7 +44,7 @@
       "status": "pass",
       "backlog_items": [54],
       "evidence_paths": ["docs/validation/core-forensics-051-060-fixture-evidence.json", "tests/test_rapidtriage_api.py"],
-      "expected": {"required_assertions": ["SQLite preview preserves read-only open, table/schema inventory, column/index metadata, bounded row preview, preview source manifest hashes, API-backed table pagination, table page proof manifest hashes, restricted contains filters, deleted/WAL warning, trusted query/schema diff gates, and #54 core_accuracy_gates.", "SQLite viewer reportability decisions block deleted-row/WAL-complete claims until browser E2E pagination validation, WAL/journal replay, deleted-row validation, trusted sqlite3 query/schema diff, and large database corpus evidence exists."]},
+      "expected": {"required_assertions": ["SQLite preview preserves read-only open, table/schema inventory, column/index metadata, bounded row preview, preview source manifest hashes, API-backed table pagination, table page proof manifest hashes, restricted contains filters, sqlite_viewer_report_grade_validation_plan ready/blocking slots, deleted/WAL warning, trusted query/schema diff gates, and #54 core_accuracy_gates.", "SQLite viewer reportability decisions block deleted-row/WAL-complete claims until browser E2E pagination validation, WAL/journal replay, deleted-row validation, trusted sqlite3 query/schema diff, selected-row export workflow, FTS/virtual-table review, and large database corpus evidence exists."]},
       "notes": "Internal fixture pass; deleted-row/WAL and large database corpus validation remain blockers."
     },
     {

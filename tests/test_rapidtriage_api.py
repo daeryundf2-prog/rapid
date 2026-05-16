@@ -1932,9 +1932,13 @@ class RapidTriageApiTests(unittest.TestCase):
             sqlite_uplift = sqlite_preview["sqlite"]["commercial_uplift_evidence"]
             self.assertEqual(sqlite_uplift["item_numbers"], [54])
             self.assertIn("read-only SQLite open", sqlite_uplift["passed_validation_check_ids"])
+            self.assertIn("SQLite viewer report-grade validation plan", sqlite_uplift["passed_validation_check_ids"])
             self.assertFalse(sqlite_uplift["large_data_controls"]["deleted_row_recovery"])
             self.assertTrue(sqlite_uplift["large_data_controls"]["table_pagination_api"])
             self.assertTrue(sqlite_uplift["large_data_controls"]["where_builder_api"])
+            self.assertTrue(sqlite_uplift["large_data_controls"]["sqlite_viewer_report_grade_validation_plan_present"])
+            self.assertEqual(sqlite_uplift["large_data_controls"]["sqlite_viewer_report_grade_ready_slot_count"], 6)
+            self.assertEqual(sqlite_uplift["large_data_controls"]["sqlite_viewer_report_grade_blocking_slot_count"], 6)
             self.assertEqual(sqlite_preview["sqlite"]["table_page_profile"]["profile_version"], "sqlite-table-page-profile-v1")
             self.assertTrue(sqlite_preview["sqlite"]["table_page_profile"]["supports_offset_pagination"])
             self.assertFalse(sqlite_preview["sqlite"]["table_page_profile"]["executes_arbitrary_sql"])
@@ -1947,6 +1951,14 @@ class RapidTriageApiTests(unittest.TestCase):
             self.assertEqual(sqlite_preview["sqlite"]["sqlite_preview_manifest"]["source_viewer_locator"]["viewer"], "source-sqlite")
             self.assertGreaterEqual(sqlite_preview["sqlite"]["sqlite_preview_manifest"]["table_hash_count"], 1)
             self.assertGreaterEqual(sqlite_preview["sqlite"]["sqlite_preview_manifest"]["row_hash_count"], 1)
+            sqlite_plan = sqlite_preview["sqlite"]["sqlite_viewer_report_grade_validation_plan"]
+            self.assertEqual(sqlite_plan["profile_version"], "sqlite-viewer-report-grade-validation-plan-v1")
+            self.assertEqual(sqlite_plan["item_number"], 54)
+            self.assertEqual(sqlite_plan["gap_id"], "#54")
+            self.assertEqual(sqlite_preview["sqlite"]["sqlite_viewer_report_grade_validation_plan_hash"], sqlite_plan["validation_plan_sha256"])
+            self.assertEqual(sqlite_plan["ready_slot_count"], 6)
+            self.assertEqual(sqlite_plan["blocking_slot_count"], 6)
+            self.assertIn("sqlite-deleted-row-and-wal-recovery-required", sqlite_plan["blockers"])
             manifest_row = sqlite_preview["sqlite"]["sqlite_preview_manifest"]["tables"][0]["row_hashes"][0]
             self.assertEqual(manifest_row["source_viewer_locator"]["profile_version"], "sqlite-row-source-viewer-locator-v1")
             self.assertEqual(manifest_row["review_note_citation"]["qc_prep_item"], 11)
@@ -1955,6 +1967,10 @@ class RapidTriageApiTests(unittest.TestCase):
                 sqlite_preview["sqlite"]["core_accuracy_gates"][0]["satisfied_checks"],
             )
             self.assertIn("SQLite row hashes", sqlite_preview["sqlite"]["core_accuracy_gates"][0]["satisfied_checks"])
+            self.assertIn(
+                "SQLite viewer report-grade validation plan",
+                sqlite_preview["sqlite"]["core_accuracy_gates"][0]["satisfied_checks"],
+            )
             self.assertEqual(
                 sqlite_uplift["reportability_decision"]["allowed_use"],
                 "read-only-sqlite-preview-triage-pivot",
@@ -2113,6 +2129,12 @@ class RapidTriageApiTests(unittest.TestCase):
             self.assertEqual(sqlite_page["sqlite_table_page_manifest_hash"], sqlite_page["sqlite_table_page_manifest"]["manifest_hash"])
             self.assertEqual(sqlite_page["sqlite_table_page_manifest"]["source_viewer_locator"]["viewer"], "source-sqlite-table")
             self.assertGreaterEqual(sqlite_page["sqlite_table_page_manifest"]["row_hash_count"], 1)
+            self.assertEqual(
+                sqlite_page["sqlite_viewer_report_grade_validation_plan_hash"],
+                sqlite_page["sqlite_viewer_report_grade_validation_plan"]["validation_plan_sha256"],
+            )
+            self.assertEqual(sqlite_page["sqlite_viewer_report_grade_validation_plan"]["ready_slot_count"], 6)
+            self.assertEqual(sqlite_page["sqlite_viewer_report_grade_validation_plan"]["blocking_slot_count"], 6)
             self.assertEqual(sqlite_page["rows"][0]["source_viewer_locator"]["profile_version"], "sqlite-row-source-viewer-locator-v1")
             self.assertEqual(sqlite_page["rows"][0]["source_viewer_locator"]["query_hash"], sqlite_page["sqlite_table_page_manifest"]["query_hash"])
             self.assertEqual(sqlite_page["rows"][0]["review_note_citation"]["qc_prep_item"], 11)
@@ -2121,6 +2143,7 @@ class RapidTriageApiTests(unittest.TestCase):
                 sqlite_page["rows"][0]["source_viewer_locator"]["locator_sha256"],
             )
             self.assertIn("SQLite table page proof manifest", sqlite_page["core_accuracy_gates"][0]["satisfied_checks"])
+            self.assertIn("SQLite viewer report-grade validation plan", sqlite_page["core_accuracy_gates"][0]["satisfied_checks"])
             self.assertIn("password", sqlite_page["rows"][0]["values"]["body"])
             self.assertIn("sqlite_table=notes", sqlite_page["copy_safe_citation"]["text"])
             json_preview_response = client.get(f"/api/runs/{run_id}/source-preview", params={"path": str(json_path)})
