@@ -1779,6 +1779,8 @@ CORE_FORENSIC_ACCURACY_ITEMS: tuple[dict[str, object], ...] = (
             "local-only limitation disclosed",
             "local-only evidence manifest hash emitted",
             "local-only evidence slots emitted",
+            "local-only report-grade validation plan",
+            "local-only report-grade ready slots",
             "trusted local-only deployment policy diff pass",
         ),
     },

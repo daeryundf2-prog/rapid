@@ -269,6 +269,8 @@ class RapidTriageCoreForensicsAccuracyTests(unittest.TestCase):
         self.assertIn("crash report-grade ready slots", crash_reporting["required_checks"])
         self.assertIn("trusted crash redaction/export diff pass", crash_reporting["required_checks"])
         self.assertIn("telemetry disabled recorded", local_only["required_checks"])
+        self.assertIn("local-only report-grade validation plan", local_only["required_checks"])
+        self.assertIn("local-only report-grade ready slots", local_only["required_checks"])
         self.assertIn("trusted local-only deployment policy diff pass", local_only["required_checks"])
         self.assertIn("network activation disabled recorded", license_activation["required_checks"])
         self.assertIn("trusted license authority diff pass", license_activation["required_checks"])

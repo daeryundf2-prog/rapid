@@ -15,6 +15,15 @@ RBAC_GAP_ID = "#108"
 MULTI_USER_CASE_SERVER_GAP_ID = "#109"
 COLLABORATION_AUDIT_TRAIL_GAP_ID = "#110"
 LOCAL_ONLY_TRUSTED_DIFF_BLOCKER_106 = "trusted-local-only-deployment-policy-diff-missing"
+LOCAL_ONLY_REPORT_GRADE_VALIDATION_PLAN_VERSION = "local-only-enterprise-report-grade-validation-plan-v1"
+LOCAL_ONLY_REPORT_GRADE_BLOCKERS = [
+    LOCAL_ONLY_TRUSTED_DIFF_BLOCKER_106,
+    "network-egress-smoke-required",
+    "remote-bind-auth-smoke-required",
+    "deployment-policy-signoff-required",
+    "release-host-local-only-smoke-required",
+    "independent-network-egress-review-required",
+]
 LICENSE_TRUSTED_DIFF_BLOCKER_107 = "trusted-license-authority-diff-missing"
 RBAC_TRUSTED_DIFF_BLOCKER_108 = "trusted-rbac-enforcement-diff-missing"
 MULTI_USER_TRUSTED_DIFF_BLOCKER_109 = "trusted-multi-user-server-review-diff-missing"
@@ -209,14 +218,34 @@ def build_enterprise_policy() -> dict[str, object]:
     policy["telemetry"]["local_only_deployment_manifest_hash"] = policy["telemetry"][
         "local_only_deployment_manifest"
     ]["manifest_hash"]
+    policy["telemetry"]["local_only_report_grade_validation_plan"] = build_local_only_report_grade_validation_plan(
+        telemetry=policy["telemetry"],
+        network=policy["network"],
+        deployment_manifest=policy["telemetry"]["local_only_deployment_manifest"],
+        evidence_manifest=policy["telemetry"]["local_only_evidence_manifest"],
+        trusted_diff=policy["telemetry"]["trusted_local_only_diff"],
+    )
+    policy["telemetry"]["local_only_report_grade_validation_plan_hash"] = policy["telemetry"][
+        "local_only_report_grade_validation_plan"
+    ]["validation_plan_hash"]
+    policy["telemetry"]["local_only_report_grade_ready_slot_count"] = policy["telemetry"][
+        "local_only_report_grade_validation_plan"
+    ]["ready_slot_count"]
+    policy["telemetry"]["local_only_report_grade_blocking_slot_count"] = policy["telemetry"][
+        "local_only_report_grade_validation_plan"
+    ]["blocking_slot_count"]
+    local_only_report_blockers = policy["telemetry"]["local_only_report_grade_validation_plan"]["blockers"]
+    policy["telemetry"]["blockers"] = sorted({*policy["telemetry"].get("blockers", []), *local_only_report_blockers})
     policy["telemetry"]["functional_priority_profile"] = local_only_enterprise_functional_profile(
         auth_required=auth_required,
         deployment_manifest=policy["telemetry"]["local_only_deployment_manifest"],
+        report_grade_validation_plan=policy["telemetry"]["local_only_report_grade_validation_plan"],
     )
     policy["telemetry"]["core_accuracy_gates"] = telemetry_core_accuracy_gates(
         trusted_diff=policy["telemetry"]["trusted_local_only_diff"],
         evidence_manifest=policy["telemetry"]["local_only_evidence_manifest"],
         deployment_manifest=policy["telemetry"]["local_only_deployment_manifest"],
+        report_grade_validation_plan=policy["telemetry"]["local_only_report_grade_validation_plan"],
     )
     attach_enterprise_control_manifest(
         policy["license_activation"],
@@ -548,12 +577,147 @@ def build_local_only_deployment_manifest(policy: Mapping[str, object]) -> dict[s
     return manifest
 
 
+def build_local_only_report_grade_validation_plan(
+    *,
+    telemetry: Mapping[str, object],
+    network: Mapping[str, object],
+    deployment_manifest: Mapping[str, object],
+    evidence_manifest: Mapping[str, object],
+    trusted_diff: Mapping[str, object],
+) -> dict[str, object]:
+    ready_slots = [
+        {
+            "slot_id": "enterprise-policy-json",
+            "status": "ready",
+            "evidence_ref": "rapidtriage enterprise-policy --json",
+            "evidence_hash": stable_enterprise_sha256("enterprise-policy command emits local-only policy JSON"),
+        },
+        {
+            "slot_id": "local-only-evidence-manifest",
+            "status": "ready",
+            "evidence_ref": "enterprise-policy.telemetry.local_only_evidence_manifest_hash",
+            "evidence_hash": str(evidence_manifest.get("manifest_hash") or ""),
+        },
+        {
+            "slot_id": "local-only-deployment-manifest",
+            "status": "ready",
+            "evidence_ref": "enterprise-policy.telemetry.local_only_deployment_manifest_hash",
+            "evidence_hash": str(deployment_manifest.get("manifest_hash") or ""),
+        },
+        {
+            "slot_id": "upload-surface-inventory",
+            "status": "ready",
+            "evidence_ref": "enterprise-policy.telemetry.local_only_deployment_manifest.upload_surfaces",
+            "evidence_hash": stable_enterprise_sha256(deployment_manifest.get("upload_surfaces") or []),
+        },
+        {
+            "slot_id": "network-boundary",
+            "status": "ready",
+            "evidence_ref": "enterprise-policy.network",
+            "evidence_hash": stable_enterprise_sha256(
+                {
+                    "default_bind": network.get("default_bind", ""),
+                    "remote_requires_auth_token": network.get("remote_requires_auth_token", False),
+                    "known_outbound_endpoint_count": deployment_manifest.get("known_outbound_endpoint_count", 0),
+                }
+            ),
+        },
+        {
+            "slot_id": "control-evidence-matrix",
+            "status": "ready",
+            "evidence_ref": "enterprise-policy.telemetry.control_evidence_matrix_hash",
+            "evidence_hash": str(evidence_manifest.get("control_evidence_matrix_hash") or ""),
+        },
+        {
+            "slot_id": "trusted-diff-boundary",
+            "status": "ready" if trusted_diff.get("status") == "pass" else "ready-with-blocker",
+            "evidence_ref": "enterprise-policy.telemetry.trusted_local_only_diff",
+            "evidence_hash": stable_enterprise_sha256(trusted_diff),
+        },
+    ]
+    blocking_slots = []
+    if trusted_diff.get("status") != "pass":
+        blocking_slots.append(
+            {
+                "slot_id": "trusted-local-only-deployment-policy-diff",
+                "status": "blocking",
+                "blocker": LOCAL_ONLY_TRUSTED_DIFF_BLOCKER_106,
+                "required_evidence": "trusted local-only policy diff proving policy fields and manifest hashes are unchanged",
+            }
+        )
+    for slot_id, blocker, required_evidence in (
+        (
+            "network-egress-smoke",
+            "network-egress-smoke-required",
+            "packet/log capture proving no telemetry, evidence, or crash upload endpoints are contacted",
+        ),
+        (
+            "remote-bind-auth-smoke",
+            "remote-bind-auth-smoke-required",
+            "release-host remote bind smoke proving non-local API exposure requires RAPIDTRIAGE_AUTH_TOKEN",
+        ),
+        (
+            "deployment-policy-signoff",
+            "deployment-policy-signoff-required",
+            "operator enterprise deployment policy signoff for local-only operation",
+        ),
+        (
+            "release-host-local-only-smoke",
+            "release-host-local-only-smoke-required",
+            "enterprise-policy JSON and no-egress smoke produced from the actual release host/package",
+        ),
+        (
+            "independent-network-egress-review",
+            "independent-network-egress-review-required",
+            "independent reviewer/lab network-egress review for the release artifact set",
+        ),
+    ):
+        blocking_slots.append(
+            {
+                "slot_id": slot_id,
+                "status": "blocking",
+                "current_attachment_status": "not-attached",
+                "blocker": blocker,
+                "required_evidence": required_evidence,
+            }
+        )
+    blockers = sorted({str(slot["blocker"]) for slot in blocking_slots if slot.get("blocker")})
+    plan: dict[str, object] = {
+        "profile_version": LOCAL_ONLY_REPORT_GRADE_VALIDATION_PLAN_VERSION,
+        "item_number": 106,
+        "commercial_gap_ids": [LOCAL_ONLY_ENTERPRISE_GAP_ID],
+        "commercial_claim_allowed": False,
+        "policy_default": telemetry.get("default", ""),
+        "telemetry_enabled": bool(telemetry.get("enabled")),
+        "evidence_uploads_enabled": bool(telemetry.get("evidence_uploads")),
+        "crash_uploads_enabled": bool(telemetry.get("crash_uploads")),
+        "default_bind": network.get("default_bind", ""),
+        "known_outbound_endpoint_count": deployment_manifest.get("known_outbound_endpoint_count", 0),
+        "local_only_evidence_manifest_hash": str(evidence_manifest.get("manifest_hash") or ""),
+        "local_only_deployment_manifest_hash": str(deployment_manifest.get("manifest_hash") or ""),
+        "control_evidence_matrix_hash": str(evidence_manifest.get("control_evidence_matrix_hash") or ""),
+        "trusted_diff_status": str(trusted_diff.get("status") or ""),
+        "trusted_diff_blocker": trusted_diff.get("blocker"),
+        "ready_slots": ready_slots,
+        "blocking_slots": blocking_slots,
+        "ready_slot_count": len(ready_slots),
+        "blocking_slot_count": len(blocking_slots),
+        "external_blocker_catalog": list(LOCAL_ONLY_REPORT_GRADE_BLOCKERS),
+        "blockers": blockers,
+        "reporting_boundary": "Local-only policy is implemented and usable; commercial local-only enterprise claims require release-host no-egress, remote-auth, and independent deployment evidence.",
+    }
+    plan["validation_plan_hash"] = stable_enterprise_sha256(plan)
+    return plan
+
+
 def local_only_enterprise_functional_profile(
     *,
     auth_required: bool,
     deployment_manifest: Mapping[str, object] | None = None,
+    report_grade_validation_plan: Mapping[str, object] | None = None,
 ) -> dict[str, object]:
     deployment_manifest = deployment_manifest or {}
+    report_grade_validation_plan = report_grade_validation_plan or {}
     return {
         "batch_id": FUNCTIONAL_OPS_BATCH_ID,
         "item_number": 61,
@@ -568,6 +732,9 @@ def local_only_enterprise_functional_profile(
             "auth_token_configured": auth_required,
             "upload_surface_inventory_emitted": bool(deployment_manifest.get("upload_surfaces")),
             "local_only_deployment_manifest_hash": str(deployment_manifest.get("manifest_hash") or ""),
+            "local_only_report_grade_validation_plan_hash": str(
+                report_grade_validation_plan.get("validation_plan_hash") or ""
+            ),
             "hidden_upload_paths_known": False,
         },
         "passed_validation_check_ids": [
@@ -580,6 +747,9 @@ def local_only_enterprise_functional_profile(
                     deployment_manifest.get("network_boundary", {}).get("remote_requires_auth_token")
                     if isinstance(deployment_manifest.get("network_boundary"), Mapping)
                     else False
+                ),
+                "local-only-report-grade-validation-plan-emitted": bool(
+                    report_grade_validation_plan.get("validation_plan_hash")
                 ),
             }.items()
             if passed
@@ -764,6 +934,7 @@ def build_enterprise_trusted_diff(
             "local_only_evidence_manifest_hash",
             "local_only_evidence_slots",
             "local_only_deployment_manifest_hash",
+            "local_only_report_grade_validation_plan_hash",
             "control_evidence_matrix_hash",
         ],
         107: ["license_evidence_manifest_hash", "license_evidence_slots", "control_evidence_matrix_hash"],
@@ -824,6 +995,7 @@ def telemetry_core_accuracy_gates(
     trusted_diff: Mapping[str, object] | None = None,
     evidence_manifest: Mapping[str, object] | None = None,
     deployment_manifest: Mapping[str, object] | None = None,
+    report_grade_validation_plan: Mapping[str, object] | None = None,
 ) -> list[dict[str, object]]:
     satisfied = [
         "telemetry disabled recorded",
@@ -846,11 +1018,26 @@ def telemetry_core_accuracy_gates(
             satisfied.append("local-only upload surface inventory emitted")
         if deployment_manifest.get("known_outbound_endpoint_count") == 0:
             satisfied.append("known outbound endpoint inventory empty")
+    if report_grade_validation_plan:
+        if report_grade_validation_plan.get("validation_plan_hash"):
+            satisfied.append("local-only report-grade validation plan")
+        if int(report_grade_validation_plan.get("ready_slot_count") or 0) > 0:
+            satisfied.append("local-only report-grade ready slots")
     if trusted_diff and trusted_diff.get("status") == "pass":
         satisfied.append("trusted local-only deployment policy diff pass")
     evidence_refs = ["enterprise_policy.telemetry", "enterprise_policy.network"]
     if deployment_manifest and deployment_manifest.get("manifest_hash"):
         evidence_refs.append(f"local_only_deployment_manifest_sha256:{deployment_manifest['manifest_hash']}")
+    if report_grade_validation_plan and report_grade_validation_plan.get("validation_plan_hash"):
+        evidence_refs.append(
+            f"local_only_report_grade_validation_plan_sha256:{report_grade_validation_plan['validation_plan_hash']}"
+        )
+        evidence_refs.append(
+            f"local_only_report_grade_ready_slots:{report_grade_validation_plan.get('ready_slot_count')}"
+        )
+        evidence_refs.append(
+            f"local_only_report_grade_blocking_slots:{report_grade_validation_plan.get('blocking_slot_count')}"
+        )
     return [
         build_accuracy_gate(
             106,

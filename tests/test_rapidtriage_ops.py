@@ -201,6 +201,14 @@ class RapidTriageOpsTests(unittest.TestCase):
             "local-only upload surface inventory emitted",
             payload["telemetry"]["core_accuracy_gates"][0]["satisfied_checks"],
         )
+        self.assertIn(
+            "local-only report-grade validation plan",
+            payload["telemetry"]["core_accuracy_gates"][0]["satisfied_checks"],
+        )
+        self.assertIn(
+            "local-only report-grade ready slots",
+            payload["telemetry"]["core_accuracy_gates"][0]["satisfied_checks"],
+        )
         self.assertEqual(payload["telemetry"]["functional_priority_profile"]["item_number"], 61)
         self.assertEqual(payload["telemetry"]["functional_priority_profile"]["batch_id"], "commercial-uplift-061-065")
         self.assertTrue(payload["telemetry"]["functional_priority_profile"]["implemented_controls"]["telemetry_disabled"])
@@ -219,6 +227,23 @@ class RapidTriageOpsTests(unittest.TestCase):
             "local-only-deployment-manifest-emitted",
             payload["telemetry"]["functional_priority_profile"]["passed_validation_check_ids"],
         )
+        local_only_plan = payload["telemetry"]["local_only_report_grade_validation_plan"]
+        self.assertEqual(
+            local_only_plan["profile_version"],
+            "local-only-enterprise-report-grade-validation-plan-v1",
+        )
+        self.assertEqual(len(payload["telemetry"]["local_only_report_grade_validation_plan_hash"]), 64)
+        self.assertEqual(
+            payload["telemetry"]["local_only_report_grade_validation_plan_hash"],
+            local_only_plan["validation_plan_hash"],
+        )
+        self.assertGreaterEqual(payload["telemetry"]["local_only_report_grade_ready_slot_count"], 7)
+        self.assertGreaterEqual(payload["telemetry"]["local_only_report_grade_blocking_slot_count"], 6)
+        self.assertIn("network-egress-smoke-required", payload["telemetry"]["blockers"])
+        self.assertIn(
+            "local-only-report-grade-validation-plan-emitted",
+            payload["telemetry"]["functional_priority_profile"]["passed_validation_check_ids"],
+        )
         self.assertIn(
             "network-egress-test-not-attached",
             payload["telemetry"]["functional_priority_profile"]["failed_validation_check_ids"],
@@ -235,6 +260,7 @@ class RapidTriageOpsTests(unittest.TestCase):
         local_gates = telemetry_core_accuracy_gates(trusted_diff=local_diff)
         self.assertEqual(local_diff["status"], "pass")
         self.assertIn("control_evidence_matrix_hash", local_diff["compared_fields"])
+        self.assertIn("local_only_report_grade_validation_plan_hash", local_diff["compared_fields"])
         self.assertIn("trusted local-only deployment policy diff pass", local_gates[0]["satisfied_checks"])
         self.assertIn("#107", payload["license_activation"]["commercial_gap_ids"])
         self.assertEqual(payload["license_activation"]["core_accuracy_gates"][0]["gap_id"], "#107")
@@ -1817,6 +1843,10 @@ class RapidTriageOpsTests(unittest.TestCase):
             self.assertEqual(enterprise_by_number[106]["produces"], "enterprise-policy.telemetry")
             self.assertIn(
                 "enterprise-policy.telemetry.local_only_evidence_manifest.manifest_hash",
+                enterprise_by_number[106]["primary_outputs"],
+            )
+            self.assertIn(
+                "enterprise-policy.telemetry.local_only_report_grade_validation_plan_hash",
                 enterprise_by_number[106]["primary_outputs"],
             )
             self.assertIn(

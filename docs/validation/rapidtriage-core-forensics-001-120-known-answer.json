@@ -2449,10 +2449,10 @@
       ],
       "expected": {
         "required_assertions": [
-          "Enterprise policy preserves telemetry-disabled state, evidence/crash upload denial, localhost default, auth-token requirement, local-only-enterprise-evidence-manifest-v1 manifest hash/evidence slots, local-only caveat, trusted local-only deployment diff helpers/gates, and #106 core_accuracy_gates."
+          "Enterprise policy preserves telemetry-disabled state, evidence/crash upload denial, localhost default, auth-token requirement, local-only-enterprise-evidence-manifest-v1 manifest hash/evidence slots, local-only-enterprise-report-grade-validation-plan-v1 ready/blocking slots, upload-surface inventory, local-only caveat, trusted local-only deployment diff helpers/gates, and #106 core_accuracy_gates."
         ]
       },
-      "notes": "Internal fixture pass; enterprise deployment proof and trusted deployment policy manifests remain external.",
+      "notes": "Internal fixture pass; enterprise deployment proof, trusted deployment policy manifests, release-host no-egress/remote-auth smoke, and network hardening review remain external.",
       "source_manifest": "docs/validation/rapidtriage-core-forensics-101-120-known-answer.json"
     },
     {

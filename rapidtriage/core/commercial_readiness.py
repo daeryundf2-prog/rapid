@@ -3568,6 +3568,7 @@ def enterprise_governance_evidence_chain() -> list[dict[str, object]]:
             "primary_outputs": [
                 "enterprise-policy.telemetry",
                 "enterprise-policy.telemetry.local_only_evidence_manifest.manifest_hash",
+                "enterprise-policy.telemetry.local_only_report_grade_validation_plan_hash",
                 "enterprise-policy.telemetry.local_only_evidence_slots.network_egress_smoke",
                 "enterprise-policy.telemetry.local_only_evidence_slots.remote_bind_auth_smoke",
                 "enterprise-policy.network",
