@@ -19,7 +19,7 @@ from ...core.forensic_accuracy import build_accuracy_gate
 from ...core.models import ArtifactRecord
 
 EVENT_LOG_ROOT = ("Windows", "System32", "winevt", "Logs")
-PARSER_VERSION = "eventlog-normalized-v19"
+PARSER_VERSION = "eventlog-normalized-v20"
 BUILTIN_RULEPACK_VERSION = "eventlog-builtin-rules-v2"
 EVENT_EXPORT_SUFFIXES = {".xml", ".json", ".jsonl", ".ndjson", ".csv"}
 ETL_SUFFIXES = {".etl"}
@@ -1635,6 +1635,13 @@ def collect_native_evtx_events(
                 details["evtx_record_provenance"] = native_evtx_record_provenance(details)
                 details["evtx_native_parse_profile"] = native_evtx_native_parse_profile(details)
                 details["evtx_message_rendering_profile"] = native_evtx_message_rendering_profile(details)
+                if native_evtx_should_emit_recovery_manifest(details):
+                    details["evtx_recovery_report_citation_manifest"] = native_evtx_recovery_report_citation_manifest(
+                        details
+                    )
+                    details["evtx_recovery_report_citation_manifest_hash"] = details[
+                        "evtx_recovery_report_citation_manifest"
+                    ]["manifest_sha256"]
                 details["evtx_commercial_readiness_profile"] = native_evtx_commercial_readiness_profile(details)
                 details["core_accuracy_gates"] = native_evtx_core_accuracy_gates(details)
                 details["commercial_uplift_evidence"] = native_evtx_commercial_uplift_evidence(details)
@@ -2426,6 +2433,7 @@ def native_evtx_commercial_readiness_profile(details: Mapping[str, object]) -> d
             ),
             "confidence": float(recovery_profile.get("confidence") or 0),
             "evidence_reasons": list(recovery_profile.get("evidence_reasons") or []),
+            "citation_manifest_hash": str(details.get("evtx_recovery_report_citation_manifest_hash") or ""),
         },
         "trusted_evidence": {
             "record_diff_status": str(trusted_diff.get("status") or "not-attached"),
@@ -2804,6 +2812,11 @@ def native_evtx_recovery_report_citation_manifest(details: Mapping[str, object])
         for item in validation_matrix
         if isinstance(item, Mapping) and item.get("id") and not item.get("passed")
     ]
+    artifact_type = (
+        "eventlog-record-candidate"
+        if str(details.get("parser") or "") == "windows-eventlog-evtx-native-candidate"
+        else "eventlog-event"
+    )
     citation_refs = [
         {
             "kind": "evtx-recovery-candidate-record",
@@ -2847,7 +2860,7 @@ def native_evtx_recovery_report_citation_manifest(details: Mapping[str, object])
     ]
     manifest: dict[str, object] = {
         "manifest_version": "evtx-recovery-report-citation-manifest-v1",
-        "artifact_type": "eventlog-record-candidate",
+        "artifact_type": artifact_type,
         "parser": PARSER_VERSION,
         "source": {
             "path": details.get("source_path", ""),
@@ -2861,6 +2874,8 @@ def native_evtx_recovery_report_citation_manifest(details: Mapping[str, object])
             "candidate_reason": recovery_evidence.get("candidate_reason", ""),
             "recovery_status": recovery_context.get("status", ""),
             "allocation_status": recovery_context.get("allocation_status", ""),
+            "candidate_class": validation_profile.get("candidate_class", ""),
+            "confidence_band": recovery_context.get("confidence_band", ""),
         },
         "citation_refs": citation_refs,
         "citation_ref_count": len(citation_refs),
@@ -2877,6 +2892,9 @@ def native_evtx_recovery_report_citation_manifest(details: Mapping[str, object])
             else [],
             "caution_labels": list(recovery_context.get("caution_labels") or [])
             if isinstance(recovery_context.get("caution_labels"), list)
+            else [],
+            "required_independent_checks": list(validation_profile.get("required_independent_checks") or [])
+            if isinstance(validation_profile.get("required_independent_checks"), list)
             else [],
         },
         "reportability": {
@@ -2897,6 +2915,17 @@ def native_evtx_recovery_report_citation_manifest(details: Mapping[str, object])
         {key: value for key, value in manifest.items() if key != "manifest_sha256"}
     )
     return manifest
+
+
+def native_evtx_should_emit_recovery_manifest(details: Mapping[str, object]) -> bool:
+    recovery_status = str(details.get("evtx_recovery_status") or "")
+    allocation_status = str(details.get("evtx_allocation_status") or "")
+    return recovery_status in {"slack-or-deleted-record-candidate", "corrupt-record-candidate"} or allocation_status in {
+        "slack-or-deleted-candidate",
+        "after-last-record-candidate",
+        "record-outside-chunk-bounds",
+        "record-crosses-free-space-boundary",
+    }
 
 
 def stable_eventlog_json_sha256(value: Mapping[str, object] | Sequence[object] | str) -> str:
@@ -3122,7 +3151,14 @@ def build_evtx_recovery_corpus_diff(
         rapid = rapid_by_key[key]
         oracle_row = oracle_by_key[key]
         field_diffs = []
-        for field in ("record_sha256", "declared_size", "allocation_status", "recovery_status"):
+        for field in (
+            "record_sha256",
+            "declared_size",
+            "allocation_status",
+            "recovery_status",
+            "candidate_reason",
+            "chunk_boundary_status",
+        ):
             left = rapid.get(field, "")
             right = oracle_row.get(field, "")
             if left or right:
@@ -3144,7 +3180,15 @@ def build_evtx_recovery_corpus_diff(
         "profile_version": "evtx-recovery-corpus-diff-v1",
         "oracle": oracle_name,
         "oracle_recognized": recognized_oracle,
-        "compare_fields": ["record_offset", "record_sha256", "declared_size", "allocation_status", "recovery_status"],
+        "compare_fields": [
+            "record_offset",
+            "record_sha256",
+            "declared_size",
+            "allocation_status",
+            "recovery_status",
+            "candidate_reason",
+            "chunk_boundary_status",
+        ],
         "rapid_candidate_count": len(rapid_by_key),
         "oracle_candidate_count": len(oracle_by_key),
         "matched_count": matched_count,
@@ -3228,18 +3272,82 @@ def _normalize_evtx_message_record(record: Mapping[str, object]) -> tuple[str, d
 
 def _normalize_evtx_recovery_candidate(candidate: Mapping[str, object]) -> tuple[str, dict[str, str]]:
     candidate = _evtx_row_payload(candidate)
+    evidence = candidate.get("evtx_recovery_evidence") if isinstance(candidate.get("evtx_recovery_evidence"), Mapping) else {}
+    context = candidate.get("evtx_recovery_context") if isinstance(candidate.get("evtx_recovery_context"), Mapping) else {}
+    integrity = candidate.get("evtx_record_integrity") if isinstance(candidate.get("evtx_record_integrity"), Mapping) else {}
+    chunk = candidate.get("evtx_chunk_context") if isinstance(candidate.get("evtx_chunk_context"), Mapping) else {}
+    manifest = (
+        candidate.get("evtx_recovery_report_citation_manifest")
+        if isinstance(candidate.get("evtx_recovery_report_citation_manifest"), Mapping)
+        else {}
+    )
+    manifest_identity = manifest.get("row_identity") if isinstance(manifest.get("row_identity"), Mapping) else {}
+    manifest_refs = manifest.get("citation_refs") if isinstance(manifest.get("citation_refs"), list) else []
+    manifest_record_ref = next(
+        (
+            item
+            for item in manifest_refs
+            if isinstance(item, Mapping) and item.get("ref_id") == "evtx-recovery-record-offset"
+        ),
+        {},
+    )
+    manifest_chunk_ref = next(
+        (
+            item
+            for item in manifest_refs
+            if isinstance(item, Mapping) and item.get("ref_id") == "evtx-recovery-chunk-boundary"
+        ),
+        {},
+    )
     offset = _first_present_string(candidate, ("evtx_record_offset", "record_offset", "offset", "byte_offset"))
+    if not offset:
+        offset = _first_value_string(
+            evidence.get("record_offset"),
+            manifest_identity.get("record_offset"),
+            manifest_record_ref.get("record_offset") if isinstance(manifest_record_ref, Mapping) else "",
+        )
     if not offset:
         return "", {}
     key = _normalize_numeric_string(offset)
     return key, {
         "record_offset": key,
-        "record_sha256": _first_present_string(candidate, ("evtx_record_sha256", "record_sha256", "sha256")),
-        "declared_size": _normalize_numeric_string(
-            _first_present_string(candidate, ("evtx_declared_size", "declared_size", "record_size"))
+        "record_sha256": _first_value_string(
+            _first_present_string(candidate, ("evtx_record_sha256", "record_sha256", "sha256")),
+            manifest_identity.get("record_sha256"),
+            manifest_record_ref.get("record_sha256") if isinstance(manifest_record_ref, Mapping) else "",
         ),
-        "allocation_status": _first_present_string(candidate, ("evtx_allocation_status", "allocation_status")),
-        "recovery_status": _first_present_string(candidate, ("evtx_recovery_status", "recovery_status", "status")),
+        "declared_size": _normalize_numeric_string(
+            _first_value_string(
+                _first_present_string(candidate, ("evtx_declared_size", "declared_size", "record_size")),
+                evidence.get("declared_size"),
+                integrity.get("declared_size"),
+                manifest_record_ref.get("declared_size") if isinstance(manifest_record_ref, Mapping) else "",
+            )
+        ),
+        "allocation_status": _first_value_string(
+            _first_present_string(candidate, ("evtx_allocation_status", "allocation_status")),
+            evidence.get("allocation_status"),
+            context.get("allocation_status"),
+            manifest_identity.get("allocation_status"),
+        ),
+        "recovery_status": _first_value_string(
+            _first_present_string(candidate, ("evtx_recovery_status", "recovery_status", "status")),
+            evidence.get("recovery_status"),
+            context.get("status"),
+            manifest_identity.get("recovery_status"),
+        ),
+        "candidate_reason": _first_value_string(
+            _first_present_string(candidate, ("candidate_reason", "evtx_candidate_reason")),
+            evidence.get("candidate_reason"),
+            context.get("candidate_reason"),
+            manifest_identity.get("candidate_reason"),
+        ),
+        "chunk_boundary_status": _first_value_string(
+            _first_present_string(candidate, ("chunk_boundary_status", "evtx_chunk_boundary_status")),
+            evidence.get("chunk_boundary_status"),
+            chunk.get("chunk_boundary_status"),
+            manifest_chunk_ref.get("chunk_boundary_status") if isinstance(manifest_chunk_ref, Mapping) else "",
+        ),
     }
 
 
@@ -3274,6 +3382,13 @@ def normalize_evtx_rendered_message(message: str) -> str:
 def _first_present_string(record: Mapping[str, object], keys: Sequence[str]) -> str:
     for key in keys:
         value = record.get(key)
+        if value is not None and str(value) != "":
+            return str(value)
+    return ""
+
+
+def _first_value_string(*values: object) -> str:
+    for value in values:
         if value is not None and str(value) != "":
             return str(value)
     return ""

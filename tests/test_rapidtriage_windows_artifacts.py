@@ -2322,6 +2322,28 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
                 native_evtx["details"]["evtx_record_provenance"]["chunk_boundary_status"],
                 "slack-or-deleted-region",
             )
+            recovery_manifest = native_evtx["details"]["evtx_recovery_report_citation_manifest"]
+            self.assertEqual(recovery_manifest["artifact_type"], "eventlog-event")
+            self.assertEqual(recovery_manifest["row_identity"]["record_offset"], native_evtx["details"]["evtx_record_offset"])
+            self.assertEqual(recovery_manifest["row_identity"]["candidate_class"], "slack-or-deleted-record")
+            self.assertIn(
+                "known-answer-deleted-record-fixture-match",
+                recovery_manifest["validation_summary"]["required_independent_checks"],
+            )
+            self.assertEqual(
+                native_evtx["details"]["evtx_recovery_report_citation_manifest_hash"],
+                recovery_manifest["manifest_sha256"],
+            )
+            self.assertEqual(
+                native_evtx["details"]["evtx_commercial_readiness_profile"]["recovery_validation"][
+                    "citation_manifest_hash"
+                ],
+                recovery_manifest["manifest_sha256"],
+            )
+            self.assertEqual(
+                recovery_manifest["citation_refs"][0]["source_viewer_locator"]["mode"],
+                "evtx-recovery-record-candidate",
+            )
             self.assertIn(
                 "rendered-message-trusted-diff-required",
                 native_evtx["details"]["evtx_message_rendering_profile"]["blockers"],
