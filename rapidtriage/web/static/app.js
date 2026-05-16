@@ -260,26 +260,28 @@ function renderDetailShell(run, tab) {
   const tabs = tabsForGroup(activeViewGroup);
   const group = viewGroupById(activeViewGroup);
   return `
-    <div class="detail-topline">
-      <div>
-        <p class="eyebrow">${escapeHtml(run.request.mode)}</p>
-        <h3>${escapeHtml(run.run_id)}</h3>
-      </div>
-      <div class="detail-actions">
-        <a class="link-button" href="/api/runs/${encodeURIComponent(run.run_id)}/outputs/report/file">Report</a>
-        <button id="removeRunButton" class="secondary-button danger" type="button">Remove</button>
-        <span class="status-pill ok">completed</span>
-      </div>
-    </div>
-    ${renderCaseHero(run)}
-    ${renderCoreEvidenceWorkflow(run)}
-    ${renderLazywebCommandCenter(run, tab)}
-    ${renderForensicFeatureCatalog(run, tab)}
-    ${renderWorkbenchSmokePanel(run)}
-    ${renderCaseCommandBar(run)}
-    ${renderForensicRibbon(run)}
-    ${renderForensicViewModeBar(run, tab)}
-    <p class="view-helper compact-view-helper">${escapeHtml(group.summary)}</p>
+    <section class="workbench-command-deck" aria-label="Case command deck">
+      ${renderCaseHero(run)}
+      <aside class="workbench-side-stack" aria-label="Case progress and delivery">
+        <div class="detail-topline">
+          <div>
+            <p class="eyebrow">${escapeHtml(run.request.mode)}</p>
+            <h3>${escapeHtml(run.run_id)}</h3>
+          </div>
+          <div class="detail-actions">
+            <a class="link-button" href="/api/runs/${encodeURIComponent(run.run_id)}/outputs/report/file">Report</a>
+            <button id="removeRunButton" class="secondary-button danger" type="button">Remove</button>
+            <span class="status-pill ok">completed</span>
+          </div>
+        </div>
+        ${renderCoreEvidenceWorkflow(run)}
+      </aside>
+    </section>
+    <section class="workbench-switchboard" aria-label="Analyst workbench switchboard">
+      ${renderCaseCommandBar(run)}
+      ${renderForensicViewModeBar(run, tab)}
+      <p class="view-helper compact-view-helper">${escapeHtml(group.summary)}</p>
+    </section>
     ${renderShortcutHelp()}
     ${renderCommandPalette(run, tab)}
     ${renderCompareTray()}
@@ -288,6 +290,16 @@ function renderDetailShell(run, tab) {
     </div>
     ${renderTableControlBar(tab)}
     ${renderWorkbenchLayoutFrame(run, tab)}
+    <details class="workbench-intel-drawer">
+      <summary>
+        <span>검증/기능/성능 패널</span>
+        <strong>고급 정보 열기</strong>
+      </summary>
+      ${renderLazywebCommandCenter(run, tab)}
+      ${renderForensicFeatureCatalog(run, tab)}
+      ${renderForensicRibbon(run)}
+      ${renderWorkbenchSmokePanel(run)}
+    </details>
   `;
 }
 

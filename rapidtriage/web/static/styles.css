@@ -6401,6 +6401,255 @@ body.analysis-active .core-workflow-step b {
   display: none;
 }
 
+/* Workbench 2.0: command deck first, data workspace second, diagnostics on demand. */
+.workbench-command-deck {
+  display: grid;
+  grid-template-columns: minmax(0, 1.45fr) minmax(320px, 0.8fr);
+  gap: 10px;
+  align-items: stretch;
+  margin-bottom: 10px;
+}
+
+.workbench-side-stack {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  gap: 8px;
+  min-width: 0;
+}
+
+.workbench-side-stack .detail-topline {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 8px;
+  border: 1px solid #3d5264;
+  border-radius: 16px;
+  background:
+    radial-gradient(circle at 100% 0%, rgba(143, 183, 204, 0.14), transparent 34%),
+    #202d3a;
+  padding: 10px;
+}
+
+.workbench-side-stack .detail-topline h3 {
+  overflow: hidden;
+  margin: 1px 0 0;
+  color: #f5f9fc;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.workbench-side-stack .detail-actions {
+  justify-content: flex-start;
+}
+
+.workbench-side-stack .completed-core-workflow,
+body.analysis-active .workbench-side-stack .completed-core-workflow {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-content: start;
+  height: 100%;
+  margin: 0;
+  border: 1px solid #34485a;
+  border-radius: 16px;
+  background:
+    linear-gradient(180deg, rgba(28, 41, 54, 0.92), rgba(23, 34, 47, 0.98)),
+    #182331;
+  padding: 8px;
+}
+
+.workbench-side-stack .core-workflow-step,
+body.analysis-active .workbench-side-stack .core-workflow-step {
+  min-height: 86px;
+  border-radius: 12px;
+  background:
+    linear-gradient(145deg, rgba(52, 71, 90, 0.92), rgba(31, 45, 59, 0.98));
+  padding: 9px;
+}
+
+.workbench-side-stack .core-workflow-step strong {
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.workbench-switchboard {
+  position: sticky;
+  top: 58px;
+  z-index: 7;
+  display: grid;
+  gap: 7px;
+  margin: 0 0 8px;
+  border: 1px solid #385066;
+  border-radius: 18px;
+  background:
+    radial-gradient(circle at 0% 0%, rgba(64, 213, 255, 0.11), transparent 34%),
+    linear-gradient(135deg, rgba(25, 36, 49, 0.96), rgba(31, 43, 57, 0.96));
+  box-shadow: 0 16px 46px rgba(0, 0, 0, 0.24);
+  padding: 7px;
+  backdrop-filter: blur(16px);
+}
+
+.workbench-switchboard .case-command-bar {
+  display: grid;
+  grid-template-columns: minmax(210px, 0.9fr) minmax(260px, 1.2fr) auto;
+  gap: 8px;
+  align-items: center;
+  margin: 0;
+  border: 0;
+  border-radius: 13px;
+  background: #202d3a;
+  padding: 7px;
+}
+
+.workbench-switchboard .case-command-main {
+  min-width: 0;
+}
+
+.workbench-switchboard .case-command-main strong,
+.workbench-switchboard .case-command-main span:last-child {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.workbench-switchboard .case-command-search {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 6px;
+  align-items: end;
+}
+
+.workbench-switchboard .case-command-search label {
+  min-width: 0;
+}
+
+.workbench-switchboard .case-command-actions {
+  display: flex;
+  gap: 5px;
+  justify-content: flex-end;
+}
+
+.workbench-switchboard .forensic-view-mode-bar {
+  display: grid;
+  grid-template-columns: repeat(9, minmax(82px, 1fr));
+  gap: 5px;
+  margin: 0;
+  border: 0;
+  background: transparent;
+  padding: 0;
+}
+
+.workbench-switchboard .forensic-view-mode {
+  min-height: 40px;
+  border-radius: 12px;
+  background:
+    linear-gradient(145deg, rgba(51, 69, 86, 0.92), rgba(35, 49, 64, 0.98));
+  padding: 6px 7px;
+}
+
+.workbench-switchboard .forensic-view-mode.active {
+  background:
+    linear-gradient(135deg, rgba(134, 180, 207, 0.96), rgba(87, 126, 151, 0.96));
+  color: #101820;
+}
+
+.workbench-switchboard .forensic-view-mode.active span,
+.workbench-switchboard .forensic-view-mode.active strong,
+.workbench-switchboard .forensic-view-mode.active em {
+  color: #101820;
+}
+
+.workbench-switchboard .compact-view-helper {
+  margin: -1px 4px 1px;
+  font-size: 0.7rem;
+}
+
+.shortcut-help {
+  margin: 0 0 7px;
+  border-color: #35495c;
+  border-radius: 13px;
+  background: #202d3a;
+  padding: 7px 9px;
+}
+
+.shortcut-help summary {
+  color: #bdd2df;
+}
+
+.table-control-bar {
+  position: sticky;
+  top: 204px;
+  z-index: 6;
+  grid-template-columns: minmax(180px, 1fr) minmax(130px, 0.5fr) minmax(150px, 0.7fr) minmax(130px, 0.6fr) auto minmax(160px, auto);
+  margin: 0 0 8px;
+  border-radius: 15px;
+  background:
+    linear-gradient(135deg, rgba(32, 45, 58, 0.96), rgba(24, 35, 48, 0.96)),
+    #202d3a;
+  padding: 7px;
+}
+
+.case-workbench-layout {
+  margin-top: 0;
+}
+
+.workbench-intel-drawer {
+  margin-top: 10px;
+  border: 1px solid #34485a;
+  border-radius: 18px;
+  background:
+    radial-gradient(circle at 100% 0%, rgba(240, 184, 75, 0.08), transparent 32%),
+    #172331;
+  color: var(--ink);
+  padding: 7px;
+}
+
+.workbench-intel-drawer > summary {
+  display: flex;
+  cursor: pointer;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  border-radius: 13px;
+  background: #223142;
+  padding: 9px 11px;
+  list-style: none;
+}
+
+.workbench-intel-drawer > summary::-webkit-details-marker {
+  display: none;
+}
+
+.workbench-intel-drawer > summary span {
+  color: #a9becd;
+  font-size: 0.72rem;
+  font-weight: 900;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.workbench-intel-drawer > summary strong {
+  color: #f4f8fb;
+}
+
+.workbench-intel-drawer[open] > summary {
+  margin-bottom: 7px;
+}
+
+.workbench-intel-drawer .lazyweb-command-center,
+.workbench-intel-drawer .forensic-feature-catalog,
+.workbench-intel-drawer .forensic-ribbon,
+.workbench-intel-drawer .workbench-smoke-panel {
+  margin-bottom: 7px;
+}
+
+.workbench-intel-drawer .workbench-smoke-panel {
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: #202d3a;
+  padding: 8px;
+}
+
 @media (max-width: 1180px) {
   body.has-runs .shell,
   body.analysis-active .shell {
@@ -6434,6 +6683,24 @@ body.analysis-active .core-workflow-step b {
     grid-template-columns: 1fr;
   }
 
+  .workbench-command-deck,
+  .workbench-switchboard .case-command-bar {
+    grid-template-columns: 1fr;
+  }
+
+  .workbench-switchboard {
+    position: static;
+  }
+
+  .table-control-bar {
+    position: static;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .workbench-switchboard .forensic-view-mode-bar {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
   body.analysis-active .completed-core-workflow,
   .mission-strip {
     grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -6456,6 +6723,13 @@ body.analysis-active .core-workflow-step b {
 
   .forensic-view-mode-bar {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .workbench-side-stack .completed-core-workflow,
+  body.analysis-active .workbench-side-stack .completed-core-workflow,
+  .workbench-switchboard .forensic-view-mode-bar,
+  .table-control-bar {
+    grid-template-columns: 1fr;
   }
 
   .lazyweb-command-grid,
