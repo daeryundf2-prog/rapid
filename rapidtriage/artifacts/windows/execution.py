@@ -16,7 +16,7 @@ from .ese import ESE_SCAN_READ_SIZE, build_ese_string_pivots, probe_ese_database
 from .os_account import decode_reg_export
 from .srum_ese import analyze_srudb_native
 
-PARSER_VERSION = "windows-execution-v11"
+PARSER_VERSION = "windows-execution-v12"
 REGISTRY_EXPORT_EXT = ".reg"
 SRUM_IMPORT_SUFFIXES = {".csv", ".json", ".jsonl", ".ndjson"}
 AMCACHE_HIVE_NAME = "AMCACHE.HVE"
@@ -350,6 +350,8 @@ def build_execution_registry_record(path: Path, key: str, values: Mapping[str, s
     source_hashes = file_hashes(path)
     amcache_schema_version = {}
     amcache_manifest = {}
+    shimcache_layout = {}
+    shimcache_manifest = {}
     if artifact_type == "amcache-entry":
         amcache_schema_version = amcache_schema_version_profile(
             source_format="reg",
@@ -375,6 +377,33 @@ def build_execution_registry_record(path: Path, key: str, values: Mapping[str, s
             schema_version_profile=amcache_schema_version,
             report_grade=report_grade,
         )
+    if artifact_type == "shimcache-entry":
+        shimcache_layout = shimcache_layout_profile(
+            source_format="reg",
+            source_key=key,
+            executable_path=executable_path,
+            timestamp=timestamp,
+            timestamp_source=timestamp_source,
+            source_offset=0,
+            cache_order=None,
+            nearby_metadata_candidates=[],
+            decoded_values=decoded_values,
+        )
+        shimcache_manifest = shimcache_row_manifest(
+            source_path=str(path.resolve()),
+            source_hashes=source_hashes,
+            source_format="reg",
+            source_key=key,
+            source_index=0,
+            executable_path=executable_path,
+            timestamp=timestamp,
+            timestamp_source=timestamp_source,
+            source_offset=0,
+            cache_order=None,
+            row_cluster_evidence={},
+            layout_profile=shimcache_layout,
+            report_grade=report_grade,
+        )
     core_accuracy_gates = execution_core_accuracy_gates(
         artifact_type,
         {
@@ -392,6 +421,7 @@ def build_execution_registry_record(path: Path, key: str, values: Mapping[str, s
             "publisher": execution_fields.get("publisher", ""),
             "sha1": execution_fields.get("sha1", ""),
             "amcache_row_manifest_hash": amcache_manifest.get("manifest_sha256", ""),
+            "shimcache_row_manifest_hash": shimcache_manifest.get("manifest_sha256", ""),
             "validation_checks": validation_checks,
             "decoded_values": decoded_values,
         },
@@ -462,6 +492,9 @@ def build_execution_registry_record(path: Path, key: str, values: Mapping[str, s
                 timestamp_source=timestamp_source,
                 decoded_values=decoded_values,
             ) if artifact_type == "shimcache-entry" else {},
+            "shimcache_layout_profile": shimcache_layout,
+            "shimcache_row_manifest": shimcache_manifest,
+            "shimcache_row_manifest_hash": shimcache_manifest.get("manifest_sha256", ""),
             "shimcache_execution_caveat_profile": shimcache_execution_caveat_profile(
                 validation_checks=validation_checks,
                 report_grade=report_grade,
@@ -529,6 +562,7 @@ def build_execution_registry_record(path: Path, key: str, values: Mapping[str, s
                     "source_index": 0,
                     "source_format": "reg",
                     "amcache_row_manifest_hash": amcache_manifest.get("manifest_sha256", ""),
+                    "shimcache_row_manifest_hash": shimcache_manifest.get("manifest_sha256", ""),
                     "execution_validation_matrix": execution_validation_matrix(validation_checks),
                     "execution_report_grade_assessment": report_grade,
                 },
@@ -658,6 +692,35 @@ def build_native_shimcache_records(path: Path) -> Iterable[ArtifactRecord]:
             gap_ids=["#8"],
             extra_blockers=["native-appcompatcache-layout-decoding-required", "os-build-layout-validation-required"],
         )
+        row_cluster_evidence = shimcache_row_cluster_evidence(cluster)
+        shimcache_layout = shimcache_layout_profile(
+            source_format="system-hive-native-shimcache-scan",
+            source_key="SYSTEM\\ControlSet*\\Control\\Session Manager\\AppCompatCache",
+            executable_path=executable_path,
+            timestamp=timestamp,
+            timestamp_source="native-shimcache-nearby-string-timestamp-candidate" if timestamp else "not_available_native_string_pivot",
+            source_offset=int(cluster.get("source_offset") or 0),
+            cache_order=int(cluster.get("cache_order") or index),
+            nearby_metadata_candidates=[
+                str(value) for value in cluster.get("nearby_metadata_candidates", [])
+            ] if isinstance(cluster.get("nearby_metadata_candidates"), list) else [],
+            decoded_values={},
+        )
+        shimcache_manifest = shimcache_row_manifest(
+            source_path=str(path.resolve()),
+            source_hashes=source_hashes,
+            source_format="system-hive-native-shimcache-scan",
+            source_key="SYSTEM\\ControlSet*\\Control\\Session Manager\\AppCompatCache",
+            source_index=index,
+            executable_path=executable_path,
+            timestamp=timestamp,
+            timestamp_source="native-shimcache-nearby-string-timestamp-candidate" if timestamp else "not_available_native_string_pivot",
+            source_offset=int(cluster.get("source_offset") or 0),
+            cache_order=int(cluster.get("cache_order") or index),
+            row_cluster_evidence=row_cluster_evidence,
+            layout_profile=shimcache_layout,
+            report_grade=row_report_grade,
+        )
         core_accuracy_gates = execution_core_accuracy_gates(
             "shimcache-entry",
             {
@@ -669,10 +732,10 @@ def build_native_shimcache_records(path: Path) -> Iterable[ArtifactRecord]:
                 "timestamp": timestamp,
                 "source_offset": cluster.get("source_offset"),
                 "cache_order": cluster.get("cache_order"),
+                "shimcache_row_manifest_hash": shimcache_manifest.get("manifest_sha256", ""),
                 "validation_checks": row_checks,
             },
         )
-        row_cluster_evidence = shimcache_row_cluster_evidence(cluster)
         citation_manifest = shimcache_report_citation_manifest(
             source_path=str(path.resolve()),
             source_hashes=source_hashes,
@@ -722,6 +785,9 @@ def build_native_shimcache_records(path: Path) -> Iterable[ArtifactRecord]:
                         str(value) for value in cluster.get("nearby_metadata_candidates", [])
                     ] if isinstance(cluster.get("nearby_metadata_candidates"), list) else [],
                 ),
+                "shimcache_layout_profile": shimcache_layout,
+                "shimcache_row_manifest": shimcache_manifest,
+                "shimcache_row_manifest_hash": shimcache_manifest.get("manifest_sha256", ""),
                 "shimcache_execution_caveat_profile": shimcache_execution_caveat_profile(
                     validation_checks=row_checks,
                     report_grade=row_report_grade,
@@ -745,6 +811,7 @@ def build_native_shimcache_records(path: Path) -> Iterable[ArtifactRecord]:
                         "source_hashes": source_hashes,
                         "source_index": index,
                         "source_format": "system-hive-native-shimcache-scan",
+                        "shimcache_row_manifest_hash": shimcache_manifest.get("manifest_sha256", ""),
                         "execution_validation_matrix": execution_validation_matrix(row_checks),
                         "execution_report_grade_assessment": row_report_grade,
                     },
@@ -3013,6 +3080,196 @@ def shimcache_row_cluster_evidence(cluster: Mapping[str, object]) -> dict[str, o
     }
 
 
+def shimcache_layout_profile(
+    *,
+    source_format: str,
+    source_key: str,
+    executable_path: str,
+    timestamp: str,
+    timestamp_source: str,
+    source_offset: int | None,
+    cache_order: int | None,
+    nearby_metadata_candidates: Sequence[str],
+    decoded_values: Mapping[str, str],
+) -> dict[str, object]:
+    os_build = str(
+        execution_first_value(
+            decoded_values,
+            "OSBuild",
+            "WindowsBuild",
+            "BuildLab",
+            "CurrentBuild",
+            "CurrentBuildNumber",
+        )
+        or ""
+    ).strip()
+    normalized_source = str(source_format or "").lower()
+    layout_family = "registry-export-appcompatcache"
+    if normalized_source != "reg":
+        layout_family = "native-system-hive-appcompatcache-string-pivot"
+    if os_build:
+        layout_family = f"windows-{os_build}-appcompatcache-candidate"
+    source_markers = [
+        str(value)
+        for value in nearby_metadata_candidates
+        if any(marker in str(value).lower() for marker in ("appcompatcache", "appcompatflags", "controlset", "session manager"))
+    ][:20]
+    required_layout_features = {
+        "os_build": bool(os_build),
+        "source_key": bool(source_key),
+        "executable_path": bool(executable_path),
+        "cache_order": cache_order is not None,
+        "source_offset": source_offset is not None,
+        "timestamp_candidate": bool(timestamp),
+        "not_execution_proof_caveat": True,
+    }
+    missing_features = [name for name, present in required_layout_features.items() if not present]
+    return {
+        "profile_version": "shimcache-layout-profile-v1",
+        "commercial_gap_id": "#8",
+        "artifact_family": "shimcache-appcompatcache",
+        "source_format": source_format,
+        "source_key": source_key,
+        "layout_family": layout_family,
+        "os_build": os_build,
+        "os_build_status": "declared" if os_build else "unknown-layout-validation-required",
+        "native_binary_layout_decode_available": bool(EXECUTION_NATIVE_CAPABILITIES["native_shimcache_binary_decode"]),
+        "decoded_layout_status": (
+            "trusted-export-row"
+            if normalized_source == "reg"
+            else "bounded-native-string-pivot-layout-not-decoded"
+        ),
+        "required_layout_features": required_layout_features,
+        "missing_layout_features": missing_features,
+        "source_markers": source_markers,
+        "cache_order": cache_order,
+        "source_offset": source_offset,
+        "timestamp": timestamp,
+        "timestamp_source": timestamp_source,
+        "timestamp_semantics": "os-version-dependent-and-not-proof-of-execution" if timestamp else "not-available",
+        "standalone_execution_proof": False,
+        "validation_required": True,
+        "commercial_blockers": sorted(
+            {
+                "native-appcompatcache-layout-decoding-required",
+                "os-build-layout-validation-required",
+                "trusted-shimcache-parser-diff-required",
+                "cross-artifact-execution-correlation-required",
+            }
+        ),
+        "profile_hash": stable_execution_json_sha256(
+            {
+                "source_format": source_format,
+                "source_key": source_key,
+                "layout_family": layout_family,
+                "os_build": os_build,
+                "cache_order": cache_order,
+                "source_offset": source_offset,
+                "timestamp": timestamp,
+                "timestamp_source": timestamp_source,
+                "source_markers": source_markers,
+                "missing_layout_features": missing_features,
+            }
+        ),
+    }
+
+
+def shimcache_row_manifest(
+    *,
+    source_path: str,
+    source_hashes: Mapping[str, str],
+    source_format: str,
+    source_key: str,
+    source_index: int,
+    executable_path: str,
+    timestamp: str,
+    timestamp_source: str,
+    source_offset: int,
+    cache_order: int | None,
+    row_cluster_evidence: Mapping[str, object],
+    layout_profile: Mapping[str, object],
+    report_grade: Mapping[str, object],
+) -> dict[str, object]:
+    normalized_path = normalize_execution_path(executable_path)
+    row_identity = {
+        "source_format": source_format,
+        "source_key": source_key,
+        "source_index": source_index,
+        "source_offset": source_offset,
+        "cache_order": cache_order,
+        "executable_path": executable_path,
+        "normalized_path": normalized_path,
+        "file_name": execution_file_name(executable_path),
+        "timestamp": timestamp,
+        "timestamp_source": timestamp_source,
+        "timestamp_semantics": "os-version-dependent-and-not-proof-of-execution" if timestamp else "not-available",
+        "os_build": layout_profile.get("os_build", ""),
+        "layout_family": layout_profile.get("layout_family", ""),
+        "standalone_execution_proof": False,
+    }
+    required_fields = execution_diff_required_fields("shimcache-appcompatcache")
+    row_manifest: dict[str, object] = {
+        "manifest_version": "shimcache-row-manifest-v1",
+        "parser_version": PARSER_VERSION,
+        "commercial_gap_id": "#8",
+        "artifact_type": "shimcache-entry",
+        "source": {
+            "path": source_path,
+            "sha256": source_hashes.get("sha256", ""),
+            "format": source_format,
+        },
+        "row_identity": row_identity,
+        "row_identity_hash": stable_execution_json_sha256(row_identity),
+        "layout_profile": dict(layout_profile),
+        "source_viewer_locator": {
+            "viewer": "registry-export" if source_format == "reg" else "source-hex",
+            "source_key": source_key,
+            "source_offset": source_offset,
+            "length": row_cluster_evidence.get("cluster_window_bytes", SHIMCACHE_ROW_CLUSTER_WINDOW_BYTES)
+            if row_cluster_evidence
+            else 0,
+        },
+        "trusted_diff_contract": {
+            "profile_version": "execution-artifact-trusted-diff-v1",
+            "artifact_family": "shimcache-appcompatcache",
+            "compare_fields": list(EXECUTION_DIFF_COMPARE_FIELDS),
+            "required_fields": required_fields,
+        },
+        "validation_summary": {
+            "report_grade_status": str(report_grade.get("status") or ""),
+            "commercial_gap_ids": list(report_grade.get("commercial_gap_ids") or ["#8"]),
+            "native_binary_layout_decode_available": bool(EXECUTION_NATIVE_CAPABILITIES["native_shimcache_binary_decode"]),
+            "trusted_parser_diff_required": True,
+            "os_build_layout_validation_required": True,
+            "cross_artifact_execution_correlation_required": True,
+            "row_cluster_status": str(row_cluster_evidence.get("cluster_status") or "not-available"),
+        },
+        "reportability": {
+            "allowed_use": "program-presence-cache-order-pivot",
+            "standalone_execution_proof": False,
+            "ready_for_court_report": bool(report_grade.get("report_grade_ready")),
+            "validation_required": not bool(report_grade.get("report_grade_ready")),
+            "blockers": sorted(
+                set(str(item) for item in report_grade.get("blockers") or [])
+                | {
+                    "shimcache-not-proof-of-execution",
+                    "os-build-layout-validation-required",
+                    "trusted-shimcache-parser-diff-required",
+                }
+            ),
+        },
+        "large_data_controls": {
+            "bounded_native_string_scan_bytes": MAX_NATIVE_SHIMCACHE_SCAN_BYTES,
+            "row_cluster_window_bytes": SHIMCACHE_ROW_CLUSTER_WINDOW_BYTES,
+            "native_binary_layout_required_for_commercial_claims": True,
+        },
+    }
+    row_manifest["manifest_sha256"] = stable_execution_json_sha256(
+        {key: value for key, value in row_manifest.items() if key != "manifest_sha256"}
+    )
+    return row_manifest
+
+
 def shimcache_report_citation_manifest(
     *,
     source_path: str,
@@ -3819,6 +4076,9 @@ def execution_core_accuracy_gates(artifact_type: str, details: Mapping[str, obje
     amcache_manifest_hash = str(details.get("amcache_row_manifest_hash") or "")
     if amcache_manifest_hash:
         evidence_refs.append(f"amcache_row_manifest_sha256:{amcache_manifest_hash}")
+    shimcache_manifest_hash = str(details.get("shimcache_row_manifest_hash") or "")
+    if shimcache_manifest_hash:
+        evidence_refs.append(f"shimcache_row_manifest_sha256:{shimcache_manifest_hash}")
 
     if artifact_type == "amcache-hive":
         artifact_type = "amcache-entry"
@@ -3859,6 +4119,8 @@ def execution_core_accuracy_gates(artifact_type: str, details: Mapping[str, obje
             satisfied.append("cache order preservation")
         if details.get("source_key") or details.get("source_index", "") != "":
             satisfied.append("entry order preservation")
+        if shimcache_manifest_hash:
+            satisfied.append("stable ShimCache row manifest")
         satisfied.append("not-proof-of-execution warning")
         if not EXECUTION_NATIVE_CAPABILITIES["native_shimcache_binary_decode"]:
             satisfied.append("malformed binary bounds checks")
@@ -3963,6 +4225,7 @@ def execution_commercial_uplift_evidence(artifact_type: str, details: Mapping[st
             f"source_sha256:{hashes.get('sha256', '')}",
             f"source_format:{details.get('source_format', '')}",
             f"amcache_row_manifest_sha256:{details.get('amcache_row_manifest_hash', '')}",
+            f"shimcache_row_manifest_sha256:{details.get('shimcache_row_manifest_hash', '')}",
         ],
         "passed_validation_matrix_ids": [
             str(item.get("id")) for item in matrix if isinstance(item, Mapping) and item.get("passed")
@@ -4364,6 +4627,23 @@ def execution_diff_row_payload(row: Mapping[str, object]) -> Mapping[str, object
         payload.setdefault("cache_order", evidence.get("cache_order", ""))
         payload.setdefault("execution_caveat", evidence.get("execution_caveat", ""))
         payload.setdefault("timestamp_source", evidence.get("timestamp_source", ""))
+    manifest = payload.get("shimcache_row_manifest")
+    if isinstance(manifest, Mapping):
+        identity = manifest.get("row_identity") if isinstance(manifest.get("row_identity"), Mapping) else {}
+        reportability = manifest.get("reportability") if isinstance(manifest.get("reportability"), Mapping) else {}
+        payload.setdefault("source_format", identity.get("source_format", ""))
+        payload.setdefault("source_key", identity.get("source_key", ""))
+        payload.setdefault("source_offset", identity.get("source_offset", ""))
+        payload.setdefault("cache_order", identity.get("cache_order", ""))
+        payload.setdefault("executable_path", identity.get("executable_path", ""))
+        payload.setdefault("timestamp", identity.get("timestamp", ""))
+        payload.setdefault("timestamp_source", identity.get("timestamp_source", ""))
+        payload.setdefault("os_build", identity.get("os_build", ""))
+        if reportability:
+            payload.setdefault(
+                "execution_caveat",
+                "ShimCache/AppCompatCache can show program presence/order, but it is not standalone proof of execution.",
+            )
     evidence = payload.get("bam_dam_evidence")
     if isinstance(evidence, Mapping):
         payload.setdefault("source_key", evidence.get("source_key", ""))

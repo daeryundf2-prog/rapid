@@ -52,8 +52,10 @@
       "title": "ShimCache/AppCompatCache parser",
       "assertions": [
         "shimcache-entry rows preserve path/timestamp candidates, source order, OS-layout warning, not-proof-of-execution wording, #8 core_accuracy_gates, and program-presence-only reportability decisions.",
-        "shimcache-entry rows emit execution_analyst_review_profile with explicit program-execution denial, not-execution-proof risk tags, Prefetch correlation targets, and native layout blockers."
-        ,"build_execution_artifact_trusted_diff can compare ShimCache rows with AppCompatCacheParser/ShimCacheParser-style output while preserving the not-proof-of-execution warning."
+        "shimcache-entry rows emit execution_analyst_review_profile with explicit program-execution denial, not-execution-proof risk tags, Prefetch correlation targets, and native layout blockers.",
+        "shimcache-entry rows emit shimcache_layout_profile, shimcache_row_manifest, shimcache_row_manifest_hash, source-viewer locators, and stable row identity hashes.",
+        "build_execution_artifact_trusted_diff can compare ShimCache rows with AppCompatCacheParser/ShimCacheParser-style output while preserving the not-proof-of-execution warning.",
+        "build_execution_artifact_trusted_diff blocks ShimCache commercial evidence when required path, cache-order/source-offset, or caveat coverage is missing."
       ],
       "blockers_kept": [
         "native AppCompatCache binary layout decoding across Windows versions"

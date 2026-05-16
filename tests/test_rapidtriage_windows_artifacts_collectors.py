@@ -31,6 +31,8 @@ from rapidtriage.artifacts.windows.execution import (
     collect_bam_dam_candidate_clusters,
     collect_shimcache_candidate_clusters,
     iter_registry_like_string_occurrences,
+    shimcache_layout_profile,
+    shimcache_row_manifest,
 )
 from rapidtriage.artifacts.windows.registry import (
     build_registry_deleted_cell_diff,
@@ -3002,6 +3004,47 @@ class RapidTriageWindowsArtifactsCollectorTests(unittest.TestCase):
         self.assertIn("AppCompatCache", " ".join(clusters[0]["nearby_metadata_candidates"]))
         self.assertTrue(clusters[1]["executable_path"].endswith("cleanmgr.exe"))
 
+    def test_shimcache_layout_profile_and_row_manifest_preserve_not_execution_contract(self) -> None:
+        layout = shimcache_layout_profile(
+            source_format="system-hive-native-shimcache-scan",
+            source_key=r"SYSTEM\ControlSet001\Control\Session Manager\AppCompatCache",
+            executable_path=r"C:\Users\alice\AppData\Roaming\legacy.exe",
+            timestamp="2024-04-01T03:04:05+00:00",
+            timestamp_source="native-shimcache-nearby-string-timestamp-candidate",
+            source_offset=8192,
+            cache_order=0,
+            nearby_metadata_candidates=[r"ControlSet001\Control\Session Manager\AppCompatCache"],
+            decoded_values={"CurrentBuildNumber": "22631"},
+        )
+        manifest = shimcache_row_manifest(
+            source_path="/evidence/SYSTEM",
+            source_hashes={"sha256": "c" * 64},
+            source_format="system-hive-native-shimcache-scan",
+            source_key=r"SYSTEM\ControlSet001\Control\Session Manager\AppCompatCache",
+            source_index=0,
+            executable_path=r"C:\Users\alice\AppData\Roaming\legacy.exe",
+            timestamp="2024-04-01T03:04:05+00:00",
+            timestamp_source="native-shimcache-nearby-string-timestamp-candidate",
+            source_offset=8192,
+            cache_order=0,
+            row_cluster_evidence={
+                "cluster_status": "bounded-native-string-cluster",
+                "cluster_window_bytes": 4096,
+            },
+            layout_profile=layout,
+            report_grade={"status": "validation-required", "report_grade_ready": False, "blockers": []},
+        )
+
+        self.assertEqual(layout["profile_version"], "shimcache-layout-profile-v1")
+        self.assertEqual(layout["os_build"], "22631")
+        self.assertFalse(layout["standalone_execution_proof"])
+        self.assertEqual(manifest["manifest_version"], "shimcache-row-manifest-v1")
+        self.assertEqual(manifest["layout_profile"]["layout_family"], "windows-22631-appcompatcache-candidate")
+        self.assertFalse(manifest["row_identity"]["standalone_execution_proof"])
+        self.assertIn("shimcache-not-proof-of-execution", manifest["reportability"]["blockers"])
+        self.assertEqual(len(manifest["manifest_sha256"]), 64)
+        self.assertIn("semantics_warning", manifest["trusted_diff_contract"]["required_fields"])
+
     def test_shimcache_trusted_diff_accepts_nested_artifact_rows_with_order_and_offset(self) -> None:
         rapid_rows = [
             {
@@ -3046,6 +3089,8 @@ class RapidTriageWindowsArtifactsCollectorTests(unittest.TestCase):
         self.assertTrue(diff["commercial_grade_evidence"])
         self.assertEqual(diff["matched_count"], 1)
         self.assertIn("cache_order", diff["compare_fields"])
+        self.assertEqual(next(iter(diff["field_coverage"].values()))["rapid_missing_required_fields"], [])
+        self.assertIn("semantics_warning", diff["required_fields"])
 
     def test_shimcache_trusted_diff_blocks_order_mismatch(self) -> None:
         rapid_rows = [
@@ -3079,6 +3124,46 @@ class RapidTriageWindowsArtifactsCollectorTests(unittest.TestCase):
         self.assertFalse(diff["commercial_grade_evidence"])
         self.assertEqual(diff["mismatch_count"], 1)
         self.assertEqual(diff["mismatches"][0]["field_diffs"][0]["field"], "cache_order")
+
+    def test_shimcache_trusted_diff_blocks_missing_not_execution_warning(self) -> None:
+        rapid_rows = [
+            {
+                "artifact_type": "shimcache-entry",
+                "details": {
+                    "source_offset": 8192,
+                    "cache_order": 0,
+                    "executable_path": r"C:\Users\alice\AppData\Roaming\legacy.exe",
+                    "timestamp": "2024-04-01T03:04:05+00:00",
+                },
+            }
+        ]
+        trusted_rows = [
+            {
+                "SourceOffset": 8192,
+                "CacheOrder": 0,
+                "Path": r"C:\Users\alice\AppData\Roaming\legacy.exe",
+                "LastModified": "2024-04-01T03:04:05+00:00",
+            }
+        ]
+
+        diff = build_execution_artifact_trusted_diff(
+            rapid_rows,
+            trusted_rows,
+            trusted_tool="AppCompatCacheParser",
+            artifact_family="shimcache-appcompatcache",
+        )
+
+        self.assertEqual(diff["status"], "pass")
+        self.assertFalse(diff["commercial_grade_evidence"])
+        coverage = next(iter(diff["field_coverage"].values()))
+        self.assertIn(
+            "semantics_warning",
+            coverage["rapid_missing_required_fields"],
+        )
+        self.assertIn(
+            "execution-artifact-trusted-field-coverage-required",
+            diff["reportability_decision"]["blockers"],
+        )
 
     def test_native_bam_dam_clusters_preserve_sid_path_timestamp_and_source(self) -> None:
         payload = (
