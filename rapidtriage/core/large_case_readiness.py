@@ -9,7 +9,7 @@ from typing import Mapping, Sequence
 
 from .benchmark import scale_label
 from .benchmark_fts import SQLITE_FTS_BENCHMARK_VERSION
-from .case_db import case_db_fts_optimization_assessment, case_db_search_index_health
+from .case_db import build_fts_query, case_db_fts_optimization_assessment, case_db_search_index_health
 from .docs import write_result
 from .search_backend import build_search_backend_contract, stable_backend_sha256
 
@@ -100,6 +100,28 @@ def build_large_case_readiness_report(
             "case_db_search_index_missing_rows": int(
                 ((case_db_profile.get("search_index_health") or {}).get("summary") or {}).get("missing_index_rows")
                 or 0
+            ),
+            "case_db_cursor_diagnostics_ready": bool(
+                (
+                    ((case_db_profile.get("search_diagnostics") or {}).get("cursor_diagnostics") or {}).get("ready")
+                )
+            ),
+            "case_db_cursor_pagination_proven_tables": int(
+                (
+                    (
+                        ((case_db_profile.get("search_diagnostics") or {}).get("cursor_diagnostics") or {}).get(
+                            "summary"
+                        )
+                        or {}
+                    ).get("pagination_proven_table_count")
+                )
+                or 0
+            ),
+            "case_db_cursor_diagnostics_hash": str(
+                ((case_db_profile.get("search_diagnostics") or {}).get("cursor_diagnostics") or {}).get(
+                    "profile_hash"
+                )
+                or ""
             ),
             "commercial_blocker_count": len(large_case_commercial_blockers(record_counts)),
         },
@@ -284,17 +306,28 @@ def case_db_search_diagnostics(
         case_db_fts_table_search_profile(connection, table_name=table_name, keyword=normalized_keyword)
         for table_name in fts_tables
     ]
-    ready = bool(table_profiles) and all(bool(item.get("query_plan_available")) for item in table_profiles)
+    cursor_diagnostics = case_db_cursor_diagnostics(
+        connection,
+        keyword=normalized_keyword,
+        fts_tables=fts_tables,
+    )
+    ready = (
+        bool(table_profiles)
+        and all(bool(item.get("query_plan_available")) for item in table_profiles)
+        and bool(cursor_diagnostics.get("ready"))
+    )
     core: dict[str, object] = {
         "profile_version": "case-db-search-diagnostics-v1",
         "keyword": normalized_keyword,
         "ready": ready,
         "fts_table_count": len(table_profiles),
         "fts_tables": table_profiles,
+        "cursor_diagnostics": cursor_diagnostics,
         "diagnostic_scope": [
             "fts-row-count",
             "keyword-match-count",
             "explain-query-plan",
+            "cursor-page-window-hashes",
             "stable-table-profile-hash",
         ],
         "commercial_gap_ids": ["#66", "#74", "#78", "#79"],
@@ -306,6 +339,136 @@ def case_db_search_diagnostics(
         ],
     }
     return {**core, "profile_hash": stable_backend_sha256(core)}
+
+
+def case_db_cursor_diagnostics(
+    connection: sqlite3.Connection,
+    *,
+    keyword: str,
+    fts_tables: Sequence[str],
+    page_size: int = 1,
+) -> dict[str, object]:
+    normalized_keyword = keyword.strip() or "needle"
+    normalized_page_size = max(1, min(100, int(page_size)))
+    table_profiles = [
+        case_db_fts_table_cursor_profile(
+            connection,
+            table_name=table_name,
+            keyword=normalized_keyword,
+            page_size=normalized_page_size,
+        )
+        for table_name in fts_tables
+    ]
+    pagination_proven_count = sum(bool(item.get("pagination_proven")) for item in table_profiles)
+    errored_count = sum(1 for item in table_profiles if item.get("errors"))
+    ready = bool(table_profiles) and all(bool(item.get("cursor_contract_ready")) for item in table_profiles)
+    core: dict[str, object] = {
+        "profile_version": "case-db-cursor-diagnostics-v1",
+        "keyword": normalized_keyword,
+        "page_size": normalized_page_size,
+        "ready": ready,
+        "summary": {
+            "fts_table_count": len(table_profiles),
+            "cursor_contract_ready_table_count": sum(
+                bool(item.get("cursor_contract_ready")) for item in table_profiles
+            ),
+            "pagination_proven_table_count": pagination_proven_count,
+            "errored_table_count": errored_count,
+        },
+        "tables": table_profiles,
+        "diagnostic_scope": [
+            "deterministic-rowid-order",
+            "page-one-row-hash",
+            "page-two-row-hash-when-available",
+            "next-offset-hash",
+            "non-overlap-proof",
+        ],
+        "commercial_gap_ids": ["#78", "#79"],
+        "commercial_claim_allowed": False,
+        "blockers": []
+        if pagination_proven_count
+        else [
+            "seed-at-least-two-matching-case-db-rows-to-prove-next-cursor-pagination",
+            "attach-browser-row-window-evidence-before-ui-virtualization-claims",
+        ],
+    }
+    return {**core, "profile_hash": stable_backend_sha256(core)}
+
+
+def case_db_fts_table_cursor_profile(
+    connection: sqlite3.Connection,
+    *,
+    table_name: str,
+    keyword: str,
+    page_size: int,
+) -> dict[str, object]:
+    quoted = quote_sqlite_identifier(table_name)
+    query = build_fts_query([keyword])
+    errors: list[str] = []
+    page_one_rowids: list[int] = []
+    page_two_rowids: list[int] = []
+    has_more = False
+    next_offset = 0
+
+    def read_page(offset: int) -> list[int]:
+        rows = connection.execute(
+            f"""
+            SELECT rowid
+            FROM {quoted}
+            WHERE {quoted} MATCH ?
+            ORDER BY rowid ASC
+            LIMIT ?
+            OFFSET ?
+            """,
+            (query, page_size + 1, offset),
+        ).fetchall()
+        return [int(row["rowid"] if isinstance(row, sqlite3.Row) else row[0]) for row in rows]
+
+    try:
+        first_window = read_page(0)
+        page_one_rowids = first_window[:page_size]
+        has_more = len(first_window) > page_size
+        if has_more:
+            next_offset = page_size
+            second_window = read_page(next_offset)
+            page_two_rowids = second_window[:page_size]
+    except sqlite3.DatabaseError as exc:
+        errors.append(f"cursor-page-error:{exc}")
+
+    scope = {
+        "table": table_name,
+        "keyword": keyword,
+        "page_size": page_size,
+        "ordering": "rowid-ascending",
+    }
+    page_one_hash = stable_backend_sha256(
+        {"scope": scope, "offset": 0, "rowids": page_one_rowids}
+    )
+    page_two_hash = (
+        stable_backend_sha256({"scope": scope, "offset": next_offset, "rowids": page_two_rowids})
+        if has_more
+        else ""
+    )
+    non_overlapping_pages = not (set(page_one_rowids) & set(page_two_rowids))
+    core: dict[str, object] = {
+        "table": table_name,
+        "keyword": keyword,
+        "page_size": page_size,
+        "ordering": "rowid-ascending",
+        "cursor_contract_ready": not errors,
+        "pagination_proven": bool(has_more and page_two_rowids and non_overlapping_pages),
+        "has_more": has_more,
+        "next_offset": next_offset if has_more else None,
+        "next_offset_hash": stable_backend_sha256({"scope": scope, "offset": next_offset}) if has_more else "",
+        "page_one_rowids": page_one_rowids,
+        "page_two_rowids": page_two_rowids,
+        "page_one_hash": page_one_hash,
+        "page_two_hash": page_two_hash,
+        "non_overlapping_pages": non_overlapping_pages,
+        "rowid_sample_count": len(page_one_rowids) + len(page_two_rowids),
+        "errors": errors,
+    }
+    return {**core, "cursor_profile_hash": stable_backend_sha256(core)}
 
 
 def case_db_fts_table_search_profile(
@@ -418,6 +581,21 @@ def build_large_case_checks(
             "Case DB search diagnostics include FTS row counts, MATCH counts, and query plans.",
             evidence=[
                 str(((case_db_profile.get("search_diagnostics") or {}).get("profile_hash")) or ""),
+            ],
+        ),
+        readiness_check(
+            "case-db-cursor-diagnostics-ready",
+            bool(
+                (((case_db_profile.get("search_diagnostics") or {}).get("cursor_diagnostics") or {}).get("ready"))
+            ),
+            "Case DB cursor diagnostics emit stable page-window hashes and next-offset evidence.",
+            evidence=[
+                str(
+                    ((case_db_profile.get("search_diagnostics") or {}).get("cursor_diagnostics") or {}).get(
+                        "profile_hash"
+                    )
+                    or ""
+                ),
             ],
         ),
         readiness_check(

@@ -222,6 +222,9 @@ class CommercialReadinessValidationBundleTests(unittest.TestCase):
                             "largest_benchmark_record_count": 100000,
                             "case_db_attached": True,
                             "case_db_search_diagnostics_ready": True,
+                            "case_db_cursor_diagnostics_ready": True,
+                            "case_db_cursor_pagination_proven_tables": 1,
+                            "case_db_cursor_diagnostics_hash": "c" * 64,
                             "case_db_search_index_healthy": False,
                             "case_db_search_index_missing_rows": 2,
                         },
@@ -232,6 +235,12 @@ class CommercialReadinessValidationBundleTests(unittest.TestCase):
                                 "ready": True,
                                 "fts_table_count": 2,
                                 "profile_hash": "d" * 64,
+                                "cursor_diagnostics": {
+                                    "profile_version": "case-db-cursor-diagnostics-v1",
+                                    "ready": True,
+                                    "profile_hash": "c" * 64,
+                                    "summary": {"pagination_proven_table_count": 1},
+                                },
                             },
                             "search_index_health": {
                                 "profile_version": "case-db-search-index-health-summary-v1",
@@ -254,6 +263,8 @@ class CommercialReadinessValidationBundleTests(unittest.TestCase):
         mac_first = report["mac_first_evidence_summary"]
         self.assertTrue(mac_first["attached"])
         self.assertEqual(mac_first["large_case_search_diagnostics_ready_count"], 1)
+        self.assertEqual(mac_first["large_case_cursor_diagnostics_ready_count"], 1)
+        self.assertEqual(mac_first["large_case_cursor_pagination_proven_table_count"], 1)
         self.assertIn(74, mac_first["supports_backlog_items"])
         row = mac_first["rows"][0]
         self.assertEqual(row["command"], "large-case-readiness")
@@ -262,6 +273,9 @@ class CommercialReadinessValidationBundleTests(unittest.TestCase):
         self.assertTrue(row["large_case_search_diagnostics_ready"])
         self.assertEqual(row["large_case_search_diagnostics_hash"], "d" * 64)
         self.assertEqual(row["large_case_search_diagnostics_fts_table_count"], 2)
+        self.assertTrue(row["large_case_cursor_diagnostics_ready"])
+        self.assertEqual(row["large_case_cursor_diagnostics_hash"], "c" * 64)
+        self.assertEqual(row["large_case_cursor_pagination_proven_tables"], 1)
         self.assertFalse(row["large_case_search_index_healthy"])
         self.assertEqual(row["large_case_search_index_health_status"], "needs-rebuild")
         self.assertEqual(row["large_case_search_index_health_hash"], "e" * 64)

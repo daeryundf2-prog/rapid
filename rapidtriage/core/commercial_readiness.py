@@ -823,6 +823,14 @@ def load_mac_first_evidence(path: Path) -> dict[str, object]:
     search_diagnostics = (
         case_db_profile.get("search_diagnostics") if isinstance(case_db_profile.get("search_diagnostics"), Mapping) else {}
     )
+    cursor_diagnostics = (
+        search_diagnostics.get("cursor_diagnostics")
+        if isinstance(search_diagnostics.get("cursor_diagnostics"), Mapping)
+        else {}
+    )
+    cursor_diagnostics_summary = (
+        cursor_diagnostics.get("summary") if isinstance(cursor_diagnostics.get("summary"), Mapping) else {}
+    )
     search_index_health = (
         case_db_profile.get("search_index_health") if isinstance(case_db_profile.get("search_index_health"), Mapping) else {}
     )
@@ -854,6 +862,17 @@ def load_mac_first_evidence(path: Path) -> dict[str, object]:
         "large_case_search_diagnostics_ready": large_case_summary.get("case_db_search_diagnostics_ready"),
         "large_case_search_diagnostics_hash": str(search_diagnostics.get("profile_hash") or ""),
         "large_case_search_diagnostics_fts_table_count": search_diagnostics.get("fts_table_count"),
+        "large_case_cursor_diagnostics_ready": large_case_summary.get("case_db_cursor_diagnostics_ready"),
+        "large_case_cursor_diagnostics_hash": str(
+            large_case_summary.get("case_db_cursor_diagnostics_hash")
+            or cursor_diagnostics.get("profile_hash")
+            or ""
+        ),
+        "large_case_cursor_pagination_proven_tables": (
+            large_case_summary.get("case_db_cursor_pagination_proven_tables")
+            if large_case_summary.get("case_db_cursor_pagination_proven_tables") is not None
+            else cursor_diagnostics_summary.get("pagination_proven_table_count")
+        ),
         "large_case_search_index_healthy": large_case_summary.get("case_db_search_index_healthy"),
         "large_case_search_index_health_status": str(search_index_health.get("status") or ""),
         "large_case_search_index_health_hash": str(search_index_health.get("profile_hash") or ""),
@@ -946,6 +965,12 @@ def build_mac_first_evidence_summary(
         "failed_check_counts": dict(sorted(failed_check_counts.items())),
         "large_case_search_diagnostics_ready_count": sum(
             1 for row in rows if row.get("large_case_search_diagnostics_ready") is True
+        ),
+        "large_case_cursor_diagnostics_ready_count": sum(
+            1 for row in rows if row.get("large_case_cursor_diagnostics_ready") is True
+        ),
+        "large_case_cursor_pagination_proven_table_count": sum(
+            int(row.get("large_case_cursor_pagination_proven_tables") or 0) for row in rows
         ),
         "source_review_handoff_ready_count": sum(
             1 for row in rows if row.get("source_ready_for_review_note") is True
