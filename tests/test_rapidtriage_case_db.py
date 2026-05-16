@@ -2554,12 +2554,56 @@ class RapidTriageCaseDatabaseTests(unittest.TestCase):
             self.assertTrue(all(item["validation_assessment"]["parser_confidence_calibration_manifest"]["profile_version"] == "parser-confidence-calibration-manifest-v1" for item in export["items"]))
             self.assertTrue(all(len(item["validation_assessment"]["parser_confidence_manifest_hash"]) == 64 for item in export["items"]))
             self.assertTrue(all(len(item["validation_assessment"]["calibration_field_presence_hash"]) == 64 for item in export["items"]))
+            self.assertTrue(
+                all(
+                    item["validation_assessment"]["parser_confidence_report_grade_validation_plan"]["profile_version"]
+                    == "parser-confidence-report-grade-validation-plan-v1"
+                    for item in export["items"]
+                )
+            )
+            self.assertTrue(
+                all(
+                    item["validation_assessment"]["parser_confidence_report_grade_validation_plan_hash"]
+                    == item["validation_assessment"]["parser_confidence_report_grade_validation_plan"][
+                        "validation_plan_sha256"
+                    ]
+                    for item in export["items"]
+                )
+            )
+            self.assertTrue(
+                all(
+                    item["validation_assessment"]["parser_confidence_report_grade_ready_slot_count"] >= 6
+                    for item in export["items"]
+                )
+            )
+            self.assertTrue(
+                all(
+                    item["validation_assessment"]["parser_confidence_report_grade_blocking_slot_count"] >= 6
+                    for item in export["items"]
+                )
+            )
+            first_confidence_plan = export["items"][0]["validation_assessment"][
+                "parser_confidence_report_grade_validation_plan"
+            ]
+            self.assertIn(
+                "parser-confidence-band-and-score",
+                {slot["slot_id"] for slot in first_confidence_plan["ready_slots"]},
+            )
+            self.assertIn(
+                "parser-specific-calibration-table",
+                {slot["slot_id"] for slot in first_confidence_plan["blocking_slots"]},
+            )
+            self.assertIn(
+                "parser-specific-calibration-table-required",
+                export["items"][0]["validation_assessment"]["blockers"],
+            )
             self.assertTrue(all(item["validation_assessment"]["confidence_band"] for item in export["items"]))
             self.assertTrue(all(isinstance(item["validation_assessment"]["reportability_score"], int) for item in export["items"]))
             self.assertTrue(all("confidence band assigned" in item["validation_assessment"]["core_accuracy_gates"][0]["satisfied_checks"] for item in export["items"]))
             self.assertTrue(all("reportability score emitted" in item["validation_assessment"]["core_accuracy_gates"][0]["satisfied_checks"] for item in export["items"]))
             self.assertTrue(all("parser confidence calibration manifest hash emitted" in item["validation_assessment"]["core_accuracy_gates"][0]["satisfied_checks"] for item in export["items"]))
             self.assertTrue(all("parser confidence field-presence hash emitted" in item["validation_assessment"]["core_accuracy_gates"][0]["satisfied_checks"] for item in export["items"]))
+            self.assertTrue(all("parser confidence report-grade validation plan" in item["validation_assessment"]["core_accuracy_gates"][0]["satisfied_checks"] for item in export["items"]))
             self.assertTrue(all(item["validation_assessment"]["trusted_parser_confidence_diff"]["status"] == "missing" for item in export["items"]))
             self.assertTrue(all(item["validation_assessment"]["trusted_validation_warning_diff"]["status"] == "missing" for item in export["items"]))
             self.assertTrue(all(item["validation_assessment"]["validation_warning_checklist_manifest"]["profile_version"] == "validation-warning-checklist-manifest-v1" for item in export["items"]))
@@ -2585,6 +2629,7 @@ class RapidTriageCaseDatabaseTests(unittest.TestCase):
                 evidence_strength=export["items"][0]["provenance"]["evidence_strength"],
                 confidence_manifest=validation_assessment["parser_confidence_calibration_manifest"],
                 trusted_diff=confidence_diff,
+                report_grade_validation_plan=first_confidence_plan,
             )
             warning_gate = validation_warning_ux_core_accuracy_gates(
                 warnings=validation_assessment["warnings"],
@@ -2595,6 +2640,7 @@ class RapidTriageCaseDatabaseTests(unittest.TestCase):
             self.assertIn("parser_confidence_manifest_hash", confidence_diff["compared_fields"])
             self.assertIn("calibration_field_presence_hash", confidence_diff["compared_fields"])
             self.assertIn("trusted parser confidence calibration diff pass", confidence_gate[0]["satisfied_checks"])
+            self.assertIn("parser confidence report-grade validation plan", confidence_gate[0]["satisfied_checks"])
             self.assertEqual(warning_diff["status"], "pass")
             self.assertIn("validation_warning_manifest_hash", warning_diff["compared_fields"])
             self.assertIn("warning_action_matrix_hash", warning_diff["compared_fields"])

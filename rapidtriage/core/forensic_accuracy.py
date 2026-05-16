@@ -1483,6 +1483,8 @@ CORE_FORENSIC_ACCURACY_ITEMS: tuple[dict[str, object], ...] = (
             "confidence band assigned",
             "reportability score emitted",
             "parser confidence calibration manifest hash emitted",
+            "parser confidence report-grade validation plan",
+            "parser confidence report-grade ready slots",
             "trusted parser confidence calibration diff pass",
         ),
     },

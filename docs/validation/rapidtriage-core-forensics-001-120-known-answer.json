@@ -2122,10 +2122,10 @@
       ],
       "expected": {
         "required_assertions": [
-          "Case DB report items preserve parser confidence, confidence band, reportability score, reportability, coverage status, warning derivation, evidence strength, parser-confidence-calibration-manifest-v1 manifest hash, and #91 core_accuracy_gates."
+          "Case DB report items preserve parser confidence, confidence band, reportability score, reportability, coverage status, warning derivation, evidence strength, parser-confidence-calibration-manifest-v1 manifest hash, parser-confidence-report-grade-validation-plan-v1, plan hash/counts, and #91 core_accuracy_gates."
         ]
       },
-      "notes": "Internal fixture pass; parser-specific confidence calibration remains blocker.",
+      "notes": "Internal fixture pass; parser-specific confidence calibration, trusted calibration manifests, cross-tool confidence validation, low-confidence FP/FN corpus, reportability threshold review, and release parser-confidence policy locks remain blockers.",
       "source_manifest": "docs/validation/rapidtriage-core-forensics-091-100-known-answer.json"
     },
     {

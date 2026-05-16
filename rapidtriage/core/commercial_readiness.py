@@ -3139,6 +3139,7 @@ def report_quality_evidence_chain() -> list[dict[str, object]]:
                 "items[].validation_assessment.confidence_band",
                 "items[].validation_assessment.reportability_score",
                 "items[].validation_assessment.parser_confidence_calibration_manifest.manifest_hash",
+                "items[].validation_assessment.parser_confidence_report_grade_validation_plan_hash",
             ],
             "trusted_diff": "trusted-parser-confidence-calibration-diff",
         },

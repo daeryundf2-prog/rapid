@@ -8,8 +8,8 @@
       "item": 91,
       "title": "Parser confidence scoring",
       "test_files": ["tests/test_rapidtriage_case_db.py", "tests/test_rapidtriage_core_forensics_accuracy.py"],
-      "assertions": ["Case DB report items preserve parser confidence, confidence band, reportability score, reportability, coverage status, validation warning derivation, evidence strength, parser-confidence-calibration-manifest-v1 manifest hash, trusted parser confidence calibration diff helpers/gates, and #91 core_accuracy_gates."],
-      "remaining_external_validation": ["Parser-specific confidence calibration tables, trusted calibration manifests, and cross-tool confidence validation."]
+      "assertions": ["Case DB report items preserve parser confidence, confidence band, reportability score, reportability, coverage status, validation warning derivation, evidence strength, parser-confidence-calibration-manifest-v1 manifest hash, parser-confidence-report-grade-validation-plan-v1, plan hash/counts, trusted parser confidence calibration diff helpers/gates, and #91 core_accuracy_gates."],
+      "remaining_external_validation": ["Parser-specific confidence calibration tables, trusted calibration manifests, cross-tool confidence validation, low-confidence FP/FN corpus, reportability threshold review, and release parser-confidence policy locks."]
     },
     {
       "item": 92,

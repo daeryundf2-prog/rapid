@@ -101,6 +101,15 @@ PARSER_CONFIDENCE_GAP_ID = "#91"
 VALIDATION_WARNING_UX_GAP_ID = "#92"
 LEGAL_LIMITATION_GAP_ID = "#93"
 COURT_EXHIBIT_EXPORT_GAP_ID = "#94"
+PARSER_CONFIDENCE_REPORT_GRADE_VALIDATION_PLAN_VERSION = "parser-confidence-report-grade-validation-plan-v1"
+PARSER_CONFIDENCE_REPORT_GRADE_BLOCKERS = [
+    "trusted-parser-confidence-calibration-diff-missing",
+    "parser-specific-calibration-table-required",
+    "cross-tool-confidence-validation-required",
+    "low-confidence-fp-fn-corpus-required",
+    "reportability-threshold-review-required",
+    "release-parser-confidence-policy-lock-required",
+]
 PARSER_CONFIDENCE_TRUSTED_DIFF_BLOCKER_91 = "trusted-parser-confidence-calibration-diff-missing"
 VALIDATION_WARNING_TRUSTED_DIFF_BLOCKER_92 = "trusted-validation-warning-checklist-diff-missing"
 LEGAL_LIMITATION_TRUSTED_DIFF_BLOCKER_93 = "trusted-legal-limitation-wording-diff-missing"
@@ -7777,6 +7786,203 @@ def build_parser_confidence_calibration_manifest(
     return {**manifest_core, "manifest_hash": manifest_hash}
 
 
+def build_parser_confidence_report_grade_validation_plan(
+    *,
+    parser_confidence: object,
+    reportability: str,
+    coverage_status: str,
+    warnings: Sequence[str],
+    evidence_strength: str,
+    confidence_manifest: Mapping[str, object],
+    trusted_diff: Mapping[str, object] | None,
+) -> dict[str, object]:
+    trusted_status = str(trusted_diff.get("status") or "missing") if trusted_diff else "missing"
+    confidence_score = optional_float(parser_confidence)
+    calibration_field_presence = (
+        confidence_manifest.get("calibration_field_presence")
+        if isinstance(confidence_manifest.get("calibration_field_presence"), Mapping)
+        else {}
+    )
+    ready_slots = [
+        {
+            "slot_id": "parser-confidence-band-and-score",
+            "status": "complete",
+            "evidence": {
+                "parser_confidence": confidence_score,
+                "confidence_band": str(confidence_manifest.get("confidence_band") or ""),
+            },
+        },
+        {
+            "slot_id": "reportability-and-score",
+            "status": "complete",
+            "evidence": {
+                "reportability": reportability,
+                "reportability_score": confidence_manifest.get("reportability_score"),
+            },
+        },
+        {
+            "slot_id": "coverage-warning-evidence-strength",
+            "status": "complete",
+            "evidence": {
+                "coverage_status": coverage_status,
+                "warning_count": len(warnings),
+                "evidence_strength": evidence_strength,
+            },
+        },
+        {
+            "slot_id": "calibration-manifest",
+            "status": "complete",
+            "evidence": {
+                "manifest_hash": str(confidence_manifest.get("manifest_hash") or ""),
+                "calibration_field_presence_hash": str(
+                    confidence_manifest.get("calibration_field_presence_hash") or ""
+                ),
+            },
+        },
+        {
+            "slot_id": "calibration-basis",
+            "status": "complete",
+            "evidence": {
+                "basis": list(confidence_manifest.get("calibration_basis") or []),
+                "field_presence": dict(calibration_field_presence),
+            },
+        },
+        {
+            "slot_id": "trusted-calibration-diff-disclosure",
+            "status": "complete",
+            "evidence": {
+                "trusted_diff_status": trusted_status,
+                "trusted_tool": str((trusted_diff or {}).get("trusted_tool") or ""),
+            },
+        },
+    ]
+    blocking_slots: list[dict[str, object]] = []
+    if confidence_score is None:
+        blocking_slots.append(
+            {
+                "slot_id": "parser-confidence-present",
+                "status": "blocked",
+                "blocker": "parser-confidence-required",
+                "required_evidence": "parser confidence value for every report item",
+            }
+        )
+    if not reportability:
+        blocking_slots.append(
+            {
+                "slot_id": "reportability-state",
+                "status": "blocked",
+                "blocker": "reportability-state-required",
+                "required_evidence": "reportability decision for every report item",
+            }
+        )
+    if not coverage_status:
+        blocking_slots.append(
+            {
+                "slot_id": "coverage-status",
+                "status": "blocked",
+                "blocker": "coverage-status-required",
+                "required_evidence": "parser coverage status for every report item",
+            }
+        )
+    if not evidence_strength:
+        blocking_slots.append(
+            {
+                "slot_id": "evidence-strength",
+                "status": "blocked",
+                "blocker": "evidence-strength-required",
+                "required_evidence": "evidence-strength classification for every report item",
+            }
+        )
+    if not confidence_manifest.get("manifest_hash") or not confidence_manifest.get("calibration_field_presence_hash"):
+        blocking_slots.append(
+            {
+                "slot_id": "confidence-calibration-manifest-complete",
+                "status": "blocked",
+                "blocker": "parser-confidence-calibration-manifest-required",
+                "required_evidence": "calibration manifest hash and field-presence hash",
+            }
+        )
+    missing_fields = [key for key, present in calibration_field_presence.items() if not present]
+    if missing_fields:
+        blocking_slots.append(
+            {
+                "slot_id": "calibration-field-completeness",
+                "status": "blocked",
+                "blocker": "parser-confidence-calibration-field-completeness-required",
+                "required_evidence": "all calibration field-presence entries satisfied",
+                "missing_fields": missing_fields,
+            }
+        )
+    if trusted_status != "pass":
+        blocking_slots.append(
+            {
+                "slot_id": "trusted-parser-confidence-calibration-diff",
+                "status": "external-required",
+                "blocker": PARSER_CONFIDENCE_TRUSTED_DIFF_BLOCKER_91,
+                "required_evidence": "trusted calibration manifest diff over confidence, band, score, reportability, coverage, warnings, and evidence strength",
+            }
+        )
+    blocking_slots.extend(
+        [
+            {
+                "slot_id": "parser-specific-calibration-table",
+                "status": "external-required",
+                "blocker": "parser-specific-calibration-table-required",
+                "required_evidence": "per-parser confidence calibration table and threshold rationale",
+            },
+            {
+                "slot_id": "cross-tool-confidence-validation",
+                "status": "external-required",
+                "blocker": "cross-tool-confidence-validation-required",
+                "required_evidence": "cross-tool confidence comparison for representative parser families",
+            },
+            {
+                "slot_id": "low-confidence-fp-fn-corpus",
+                "status": "external-required",
+                "blocker": "low-confidence-fp-fn-corpus-required",
+                "required_evidence": "false-positive/false-negative corpus covering low and medium confidence bands",
+            },
+            {
+                "slot_id": "reportability-threshold-review",
+                "status": "external-required",
+                "blocker": "reportability-threshold-review-required",
+                "required_evidence": "reviewed thresholds mapping confidence bands to reportability wording",
+            },
+            {
+                "slot_id": "release-parser-confidence-policy-lock",
+                "status": "external-required",
+                "blocker": "release-parser-confidence-policy-lock-required",
+                "required_evidence": "release-build parser confidence policy/version lock",
+            },
+        ]
+    )
+    plan_core: dict[str, object] = {
+        "profile_version": PARSER_CONFIDENCE_REPORT_GRADE_VALIDATION_PLAN_VERSION,
+        "item_number": 91,
+        "commercial_gap_ids": [PARSER_CONFIDENCE_GAP_ID],
+        "plan_context": "case-db-report-item-validation-assessment",
+        "parser_confidence": confidence_score,
+        "confidence_band": str(confidence_manifest.get("confidence_band") or ""),
+        "reportability": reportability,
+        "coverage_status": coverage_status,
+        "warning_count": len(warnings),
+        "evidence_strength": evidence_strength,
+        "reportability_score": confidence_manifest.get("reportability_score"),
+        "calibration_manifest_hash": str(confidence_manifest.get("manifest_hash") or ""),
+        "calibration_field_presence_hash": str(confidence_manifest.get("calibration_field_presence_hash") or ""),
+        "trusted_diff_status": trusted_status,
+        "ready_slots": ready_slots,
+        "blocking_slots": blocking_slots,
+        "ready_slot_count": len(ready_slots),
+        "blocking_slot_count": len(blocking_slots),
+        "external_blocker_catalog": list(PARSER_CONFIDENCE_REPORT_GRADE_BLOCKERS),
+        "blockers": sorted({str(slot.get("blocker") or "") for slot in blocking_slots if slot.get("blocker")}),
+        "commercial_claim_allowed": False,
+        "reporting_boundary": "This plan makes one report item confidence-scored and reviewable, but commercial parser-confidence claims require parser-specific calibration tables, cross-tool validation, low-confidence FP/FN corpus, reportability threshold review, release policy locks, and trusted calibration manifests.",
+    }
+    return {**plan_core, "validation_plan_sha256": stable_payload_sha256(plan_core)}
+
+
 def validation_warning_detail(warning: str) -> dict[str, object]:
     severity = "medium"
     category = "general-validation"
@@ -8481,6 +8687,24 @@ def build_report_item_validation_assessment(
         evidence_strength=evidence_strength,
     )
     warning_manifest = build_validation_warning_checklist_manifest(warnings)
+    parser_confidence_report_grade_validation_plan = build_parser_confidence_report_grade_validation_plan(
+        parser_confidence=parser_confidence,
+        reportability=reportability,
+        coverage_status=coverage_status,
+        warnings=warnings,
+        evidence_strength=evidence_strength,
+        confidence_manifest=confidence_manifest,
+        trusted_diff=parser_confidence_trusted_diff,
+    )
+    blockers = [
+        blocker
+        for blocker, diff in (
+            (PARSER_CONFIDENCE_TRUSTED_DIFF_BLOCKER_91, parser_confidence_trusted_diff),
+            (VALIDATION_WARNING_TRUSTED_DIFF_BLOCKER_92, validation_warning_trusted_diff),
+        )
+        if not diff or diff.get("status") != "pass"
+    ]
+    blockers = sorted({*blockers, *parser_confidence_report_grade_validation_plan["blockers"]})
     return {
         "commercial_gap_ids": [PARSER_CONFIDENCE_GAP_ID, VALIDATION_WARNING_UX_GAP_ID],
         "parser_confidence": parser_confidence,
@@ -8492,6 +8716,16 @@ def build_report_item_validation_assessment(
         "parser_confidence_calibration_manifest": confidence_manifest,
         "parser_confidence_manifest_hash": confidence_manifest["manifest_hash"],
         "calibration_field_presence_hash": confidence_manifest["calibration_field_presence_hash"],
+        "parser_confidence_report_grade_validation_plan": parser_confidence_report_grade_validation_plan,
+        "parser_confidence_report_grade_validation_plan_hash": parser_confidence_report_grade_validation_plan[
+            "validation_plan_sha256"
+        ],
+        "parser_confidence_report_grade_ready_slot_count": parser_confidence_report_grade_validation_plan[
+            "ready_slot_count"
+        ],
+        "parser_confidence_report_grade_blocking_slot_count": parser_confidence_report_grade_validation_plan[
+            "blocking_slot_count"
+        ],
         "validation_required": bool(warnings),
         "warnings": warnings,
         "warning_details": warning_manifest["warnings"],
@@ -8515,14 +8749,7 @@ def build_report_item_validation_assessment(
             VALIDATION_WARNING_TRUSTED_DIFF_BLOCKER_92,
             trusted_tool="validation-warning-checklist",
         ),
-        "blockers": [
-            blocker
-            for blocker, diff in (
-                (PARSER_CONFIDENCE_TRUSTED_DIFF_BLOCKER_91, parser_confidence_trusted_diff),
-                (VALIDATION_WARNING_TRUSTED_DIFF_BLOCKER_92, validation_warning_trusted_diff),
-            )
-            if not diff or diff.get("status") != "pass"
-        ],
+        "blockers": blockers,
         "core_accuracy_gates": [
             *parser_confidence_core_accuracy_gates(
                 parser_confidence=parser_confidence,
@@ -8532,6 +8759,7 @@ def build_report_item_validation_assessment(
                 evidence_strength=evidence_strength,
                 confidence_manifest=confidence_manifest,
                 trusted_diff=parser_confidence_trusted_diff,
+                report_grade_validation_plan=parser_confidence_report_grade_validation_plan,
             ),
             *validation_warning_ux_core_accuracy_gates(
                 warnings=warnings,
@@ -11065,6 +11293,7 @@ def parser_confidence_core_accuracy_gates(
     evidence_strength: str,
     confidence_manifest: Mapping[str, object] | None = None,
     trusted_diff: Mapping[str, object] | None = None,
+    report_grade_validation_plan: Mapping[str, object] | None = None,
 ) -> list[dict[str, object]]:
     satisfied = []
     if parser_confidence not in (None, ""):
@@ -11085,6 +11314,10 @@ def parser_confidence_core_accuracy_gates(
         satisfied.append("parser confidence calibration manifest hash emitted")
     if confidence_manifest and confidence_manifest.get("calibration_field_presence_hash"):
         satisfied.append("parser confidence field-presence hash emitted")
+    if report_grade_validation_plan and report_grade_validation_plan.get("validation_plan_sha256"):
+        satisfied.append("parser confidence report-grade validation plan")
+    if report_grade_validation_plan and int(report_grade_validation_plan.get("ready_slot_count") or 0) >= 6:
+        satisfied.append("parser confidence report-grade ready slots")
     if trusted_diff and trusted_diff.get("status") == "pass":
         satisfied.append("trusted parser confidence calibration diff pass")
     return [
@@ -11101,6 +11334,7 @@ def parser_confidence_core_accuracy_gates(
                 f"reportability_score:{(confidence_manifest or {}).get('reportability_score', '')}",
                 f"parser_confidence_manifest_hash:{(confidence_manifest or {}).get('manifest_hash', '')}",
                 f"calibration_field_presence_hash:{(confidence_manifest or {}).get('calibration_field_presence_hash', '')}",
+                f"parser_confidence_report_grade_validation_plan_hash:{(report_grade_validation_plan or {}).get('validation_plan_sha256', '')}",
             ],
         )
     ]
