@@ -244,6 +244,7 @@ class RapidTriageCoreForensicsAccuracyTests(unittest.TestCase):
         self.assertIn("acquisition metadata report-grade validation plan", acquisition_metadata["required_checks"])
         self.assertIn("trusted acquisition handoff diff pass", acquisition_metadata["required_checks"])
         self.assertIn("UTC assumption disclosed", timezone_validation["required_checks"])
+        self.assertIn("timezone report-grade validation plan", timezone_validation["required_checks"])
         self.assertIn("trusted timezone normalization matrix diff pass", timezone_validation["required_checks"])
         self.assertIn("baseline requirement disclosed", clock_skew["required_checks"])
         self.assertIn("trusted clock-skew baseline diff pass", clock_skew["required_checks"])

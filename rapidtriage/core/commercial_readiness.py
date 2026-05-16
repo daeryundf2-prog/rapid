@@ -3294,6 +3294,7 @@ def acquisition_quality_evidence_chain() -> list[dict[str, object]]:
                 "timezone_validation.samples[].timezone_sample_row_hash",
                 "timezone_validation.timezone_normalization_manifest.manifest_hash",
                 "timezone_validation.validation_assessment.normalized_utc_assumption",
+                "timezone_validation.timezone_report_grade_validation_plan_hash",
                 "timezone_validation.trusted_timezone_validation_diff",
             ],
             "trusted_diff": "trusted-timezone-normalization-matrix-diff",

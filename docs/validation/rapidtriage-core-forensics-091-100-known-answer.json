@@ -77,8 +77,8 @@
       "status": "pass",
       "backlog_items": [97],
       "evidence_paths": ["docs/validation/core-forensics-091-100-fixture-evidence.json", "tests/test_rapidtriage_case_db.py"],
-      "expected": {"required_assertions": ["Report exports preserve timezone inventory, missing timezone counts, timestamp samples, timezone sample row hashes, timezone-normalization-manifest-v1 manifest hashes, UTC assumption, review-required flag, trusted timezone-matrix diff helpers/gates, and #97 core_accuracy_gates."]},
-      "notes": "Internal fixture pass; parser-specific timezone matrix and trusted normalization manifests remain blocker."
+      "expected": {"required_assertions": ["Report exports preserve timezone inventory, missing timezone counts, timestamp samples, timezone sample row hashes, timezone-normalization-manifest-v1 manifest hashes, time-semantics-manifest-v1 manifest hashes, timezone-normalization-report-grade-validation-plan-v1, plan hash/counts, UTC assumption, review-required flag, trusted timezone-matrix diff helpers/gates, and #97 core_accuracy_gates."]},
+      "notes": "Internal fixture pass; source-timezone completeness, parser-specific timezone matrix, trusted normalization manifests, multi-source reconciliation, timezone known-answer/DST corpus, and source clock baseline remain blockers."
     },
     {
       "id": "core-forensics-098-clock-skew",

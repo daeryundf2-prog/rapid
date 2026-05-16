@@ -1601,6 +1601,8 @@ CORE_FORENSIC_ACCURACY_ITEMS: tuple[dict[str, object], ...] = (
             "timestamp samples preserved",
             "timezone sample row hashes emitted",
             "timezone normalization manifest hash emitted",
+            "timezone report-grade validation plan",
+            "timezone report-grade ready slots",
             "UTC assumption disclosed",
             "review-required flag emitted",
             "trusted timezone normalization matrix diff pass",

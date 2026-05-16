@@ -50,8 +50,8 @@
       "item": 97,
       "title": "Timezone normalization validation",
       "test_files": ["tests/test_rapidtriage_case_db.py"],
-      "assertions": ["Report exports preserve timezone inventory, missing timezone counts, timestamp samples, timezone sample row hashes, timezone-normalization-manifest-v1 manifest hashes, UTC assumption, review-required flag, trusted timezone-matrix diff helpers/gates, and #97 core_accuracy_gates."],
-      "remaining_external_validation": ["Parser-specific timezone assumption matrix, trusted normalization manifests, and multi-source reconciliation."]
+      "assertions": ["Report exports preserve timezone inventory, missing timezone counts, timestamp samples, timezone sample row hashes, timezone-normalization-manifest-v1 manifest hashes, time-semantics-manifest-v1 manifest hashes, timezone-normalization-report-grade-validation-plan-v1, plan hash/counts, UTC assumption, review-required flag, trusted timezone-matrix diff helpers/gates, and #97 core_accuracy_gates."],
+      "remaining_external_validation": ["Source-timezone completeness, parser-specific timezone assumption matrix, trusted normalization manifests, multi-source reconciliation, timezone known-answer/DST corpus, and source clock baseline."]
     },
     {
       "item": 98,

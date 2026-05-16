@@ -2913,6 +2913,20 @@ class RapidTriageCaseDatabaseTests(unittest.TestCase):
                 export["timezone_validation"]["functional_priority_profile"]["implemented_controls"]["time_semantics_manifest_hash"],
                 export["timezone_validation"]["time_semantics_manifest"]["manifest_hash"],
             )
+            self.assertEqual(
+                export["timezone_validation"]["timezone_report_grade_validation_plan"]["profile_version"],
+                "timezone-normalization-report-grade-validation-plan-v1",
+            )
+            self.assertEqual(
+                export["timezone_validation"]["timezone_report_grade_validation_plan_hash"],
+                export["timezone_validation"]["timezone_report_grade_validation_plan"]["validation_plan_hash"],
+            )
+            self.assertGreaterEqual(export["timezone_validation"]["timezone_report_grade_ready_slot_count"], 7)
+            self.assertGreaterEqual(export["timezone_validation"]["timezone_report_grade_blocking_slot_count"], 6)
+            self.assertIn(
+                "source-timezone-completeness",
+                {slot["slot_id"] for slot in export["timezone_validation"]["timezone_report_grade_validation_plan"]["blocking_slots"]},
+            )
             self.assertTrue(
                 all("normalized_utc" in sample for sample in export["timezone_validation"]["samples"])
             )
@@ -2927,6 +2941,7 @@ class RapidTriageCaseDatabaseTests(unittest.TestCase):
                 samples=export["timezone_validation"]["samples"],
                 timezone_manifest=export["timezone_validation"]["timezone_normalization_manifest"],
                 time_semantics_manifest=export["timezone_validation"]["time_semantics_manifest"],
+                report_grade_validation_plan=export["timezone_validation"]["timezone_report_grade_validation_plan"],
                 trusted_diff=timezone_diff,
             )
             self.assertEqual(timezone_diff["status"], "pass")
@@ -2936,6 +2951,7 @@ class RapidTriageCaseDatabaseTests(unittest.TestCase):
             self.assertIn("time_semantics_manifest_hash", timezone_diff["compared_fields"])
             self.assertIn("timezone normalization manifest hash emitted", timezone_gates[0]["satisfied_checks"])
             self.assertIn("time semantics manifest hash emitted", timezone_gates[0]["satisfied_checks"])
+            self.assertIn("timezone report-grade validation plan", timezone_gates[0]["satisfied_checks"])
             self.assertIn("trusted timezone normalization matrix diff pass", timezone_gates[0]["satisfied_checks"])
             self.assertIn("clock_skew_analysis", export)
             self.assertIn("#98", export["summary"]["clock_skew_gap_ids"])

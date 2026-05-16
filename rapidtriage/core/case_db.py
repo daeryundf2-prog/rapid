@@ -153,6 +153,16 @@ ACQUISITION_METADATA_REPORT_GRADE_BLOCKERS = [
     "source-read-only-policy-signoff-required",
 ]
 TIMEZONE_VALIDATION_TRUSTED_DIFF_BLOCKER_97 = "trusted-timezone-normalization-matrix-diff-missing"
+TIMEZONE_REPORT_GRADE_VALIDATION_PLAN_VERSION = "timezone-normalization-report-grade-validation-plan-v1"
+TIMEZONE_REPORT_GRADE_BLOCKERS = [
+    "trusted-timezone-normalization-matrix-diff-missing",
+    "source-timezone-completeness-required",
+    "parser-timezone-assumption-matrix-required",
+    "multi-source-timezone-reconciliation-required",
+    "timezone-known-answer-corpus-required",
+    "daylight-saving-edge-case-corpus-required",
+    "source-clock-baseline-required",
+]
 CLOCK_SKEW_TRUSTED_DIFF_BLOCKER_98 = "trusted-clock-skew-baseline-diff-missing"
 CONTAMINATION_WARNING_TRUSTED_DIFF_BLOCKER_99 = "trusted-contamination-checklist-diff-missing"
 ACQUISITION_QUALITY_TRUSTED_TOOLS = {
@@ -10001,6 +10011,194 @@ def build_time_semantics_manifest(
     return {**manifest_core, "manifest_hash": stable_payload_sha256(manifest_core)}
 
 
+def build_timezone_report_grade_validation_plan(
+    *,
+    event_count: int,
+    missing_timezone_count: int,
+    samples: Sequence[Mapping[str, object]],
+    timezone_manifest: Mapping[str, object],
+    time_semantics_manifest: Mapping[str, object],
+    trusted_diff: Mapping[str, object],
+) -> dict[str, object]:
+    trusted_status = str(trusted_diff.get("status") or "missing")
+    sample_row_hashes = [str(sample.get("timezone_sample_row_hash") or "") for sample in samples]
+    parser_assumption_matrix = (
+        timezone_manifest.get("parser_assumption_matrix")
+        if isinstance(timezone_manifest.get("parser_assumption_matrix"), Mapping)
+        else {}
+    )
+    ready_slots = [
+        {
+            "slot_id": "event-timezone-inventory",
+            "status": "complete",
+            "evidence": {
+                "event_count": event_count,
+                "missing_timezone_count": missing_timezone_count,
+                "timezone_counts": dict(timezone_manifest.get("timezone_counts") or {}),
+            },
+        },
+        {
+            "slot_id": "timestamp-sample-row-hashes",
+            "status": "complete",
+            "evidence": {
+                "sample_count": len(samples),
+                "sample_row_hash_count": sum(1 for value in sample_row_hashes if value),
+            },
+        },
+        {
+            "slot_id": "timezone-normalization-manifest",
+            "status": "complete",
+            "evidence": {"manifest_hash": str(timezone_manifest.get("manifest_hash") or "")},
+        },
+        {
+            "slot_id": "parser-assumption-matrix",
+            "status": "complete",
+            "evidence": {
+                "matrix_hash": str(timezone_manifest.get("parser_assumption_matrix_hash") or ""),
+                "assumption_count": int(parser_assumption_matrix.get("assumption_count") or 0),
+            },
+        },
+        {
+            "slot_id": "time-semantics-manifest",
+            "status": "complete",
+            "evidence": {
+                "manifest_hash": str(time_semantics_manifest.get("manifest_hash") or ""),
+                "normalized_utc_sample_count": int(
+                    time_semantics_manifest.get("normalized_utc_sample_count") or 0
+                ),
+            },
+        },
+        {
+            "slot_id": "utc-assumption-and-review-warning",
+            "status": "complete",
+            "evidence": {
+                "utc_assumption": str(timezone_manifest.get("utc_assumption") or ""),
+                "review_required": missing_timezone_count > 0,
+            },
+        },
+        {
+            "slot_id": "trusted-timezone-diff-disclosure",
+            "status": "complete",
+            "evidence": {
+                "trusted_diff_status": trusted_status,
+                "trusted_tool": str(trusted_diff.get("trusted_tool") or ""),
+            },
+        },
+    ]
+    blocking_slots: list[dict[str, object]] = []
+    if event_count == 0:
+        blocking_slots.append(
+            {
+                "slot_id": "case-events-present",
+                "status": "blocked",
+                "blocker": "no-case-events-for-time-validation",
+                "required_evidence": "at least one case event with an original timestamp",
+            }
+        )
+    if len([value for value in sample_row_hashes if value]) != len(samples):
+        blocking_slots.append(
+            {
+                "slot_id": "timezone-sample-row-hash-completeness",
+                "status": "blocked",
+                "blocker": "timezone-sample-row-hash-completeness-required",
+                "required_evidence": "row hash for every timezone validation sample",
+            }
+        )
+    if missing_timezone_count:
+        blocking_slots.append(
+            {
+                "slot_id": "source-timezone-completeness",
+                "status": "blocked",
+                "blocker": "source-timezone-completeness-required",
+                "required_evidence": "source timezone or parser-specific timezone assumption for every reportable timestamp",
+                "missing_timezone_count": missing_timezone_count,
+            }
+        )
+    if not timezone_manifest.get("manifest_hash") or not timezone_manifest.get("parser_assumption_matrix_hash"):
+        blocking_slots.append(
+            {
+                "slot_id": "timezone-normalization-manifest-complete",
+                "status": "blocked",
+                "blocker": "timezone-normalization-manifest-required",
+                "required_evidence": "timezone normalization manifest hash and parser assumption matrix hash",
+            }
+        )
+    if not time_semantics_manifest.get("manifest_hash"):
+        blocking_slots.append(
+            {
+                "slot_id": "time-semantics-manifest-complete",
+                "status": "blocked",
+                "blocker": "time-semantics-manifest-required",
+                "required_evidence": "time semantics manifest with original/normalized timestamp citation fields",
+            }
+        )
+    if trusted_status != "pass":
+        blocking_slots.append(
+            {
+                "slot_id": "trusted-timezone-normalization-matrix-diff",
+                "status": "external-required",
+                "blocker": TIMEZONE_VALIDATION_TRUSTED_DIFF_BLOCKER_97,
+                "required_evidence": "trusted timezone matrix diff covering summary, samples, parser assumptions, and time semantics manifest",
+            }
+        )
+    blocking_slots.extend(
+        [
+            {
+                "slot_id": "parser-timezone-assumption-matrix",
+                "status": "external-required",
+                "blocker": "parser-timezone-assumption-matrix-required",
+                "required_evidence": "parser-family/version timezone assumption matrix reviewed for all timestamp sources",
+            },
+            {
+                "slot_id": "multi-source-timezone-reconciliation",
+                "status": "external-required",
+                "blocker": "multi-source-timezone-reconciliation-required",
+                "required_evidence": "case-level reconciliation across OS, filesystem, browser, app, cloud, and acquisition timestamps",
+            },
+            {
+                "slot_id": "timezone-known-answer-corpus",
+                "status": "external-required",
+                "blocker": "timezone-known-answer-corpus-required",
+                "required_evidence": "known-answer fixture corpus for UTC, local, offset, missing, and parser-assumed timestamps",
+            },
+            {
+                "slot_id": "daylight-saving-edge-case-corpus",
+                "status": "external-required",
+                "blocker": "daylight-saving-edge-case-corpus-required",
+                "required_evidence": "DST and ambiguous local-time edge-case corpus for supported regions",
+            },
+            {
+                "slot_id": "source-clock-baseline",
+                "status": "external-required",
+                "blocker": "source-clock-baseline-required",
+                "required_evidence": "source clock/acquisition baseline tied to #98 clock-skew analysis",
+            },
+        ]
+    )
+    plan_core: dict[str, object] = {
+        "profile_version": TIMEZONE_REPORT_GRADE_VALIDATION_PLAN_VERSION,
+        "item_number": 97,
+        "commercial_gap_ids": [TIMEZONE_NORMALIZATION_GAP_ID],
+        "plan_context": "case-db-timezone-normalization-validation",
+        "event_count": event_count,
+        "missing_timezone_count": missing_timezone_count,
+        "sample_count": len(samples),
+        "timezone_normalization_manifest_hash": str(timezone_manifest.get("manifest_hash") or ""),
+        "parser_assumption_matrix_hash": str(timezone_manifest.get("parser_assumption_matrix_hash") or ""),
+        "time_semantics_manifest_hash": str(time_semantics_manifest.get("manifest_hash") or ""),
+        "trusted_diff_status": trusted_status,
+        "ready_slots": ready_slots,
+        "blocking_slots": blocking_slots,
+        "ready_slot_count": len(ready_slots),
+        "blocking_slot_count": len(blocking_slots),
+        "external_blocker_catalog": list(TIMEZONE_REPORT_GRADE_BLOCKERS),
+        "blockers": sorted({str(slot.get("blocker") or "") for slot in blocking_slots if slot.get("blocker")}),
+        "commercial_claim_allowed": False,
+        "reporting_boundary": "This plan makes timezone normalization auditable, but commercial claims require source timezone completeness or validated parser assumptions, trusted timezone matrices, multi-source reconciliation, known-answer/DST corpus, and source clock baselines.",
+    }
+    return {**plan_core, "validation_plan_hash": stable_payload_sha256(plan_core)}
+
+
 def build_timezone_validation(
     connection: sqlite3.Connection,
     case_id: str,
@@ -10063,6 +10261,15 @@ def build_timezone_validation(
         timezone_manifest=timezone_manifest,
         trusted_diff=trusted_diff,
     )
+    report_grade_validation_plan = build_timezone_report_grade_validation_plan(
+        event_count=len(rows),
+        missing_timezone_count=missing,
+        samples=samples,
+        timezone_manifest=timezone_manifest,
+        time_semantics_manifest=time_semantics_manifest,
+        trusted_diff=trusted_diff,
+    )
+    blockers = sorted({*blockers, *report_grade_validation_plan["blockers"]})
     return {
         "status": "timezone-review-required" if missing else "timezone-fields-present",
         "commercial_gap_ids": [TIMEZONE_NORMALIZATION_GAP_ID],
@@ -10081,6 +10288,7 @@ def build_timezone_validation(
             "timezone_counts": timezone_counts,
             "timezone_normalization_manifest_hash": timezone_manifest["manifest_hash"],
             "time_semantics_manifest_hash": time_semantics_manifest["manifest_hash"],
+            "timezone_report_grade_validation_plan_hash": report_grade_validation_plan["validation_plan_hash"],
             "commercial_gap_ids": [TIMEZONE_NORMALIZATION_GAP_ID],
         },
         "samples": samples,
@@ -10089,6 +10297,10 @@ def build_timezone_validation(
         "parser_assumption_matrix_hash": timezone_manifest["parser_assumption_matrix_hash"],
         "time_semantics_manifest": time_semantics_manifest,
         "time_semantics_manifest_hash": time_semantics_manifest["manifest_hash"],
+        "timezone_report_grade_validation_plan": report_grade_validation_plan,
+        "timezone_report_grade_validation_plan_hash": report_grade_validation_plan["validation_plan_hash"],
+        "timezone_report_grade_ready_slot_count": report_grade_validation_plan["ready_slot_count"],
+        "timezone_report_grade_blocking_slot_count": report_grade_validation_plan["blocking_slot_count"],
         "trusted_timezone_validation_diff": trusted_diff,
         "blockers": blockers,
         "validation_assessment": {
@@ -10099,12 +10311,16 @@ def build_timezone_validation(
             "timezone_normalization_manifest_hash": timezone_manifest["manifest_hash"],
             "parser_assumption_matrix_hash": timezone_manifest["parser_assumption_matrix_hash"],
             "time_semantics_manifest_hash": time_semantics_manifest["manifest_hash"],
+            "timezone_report_grade_validation_plan_hash": report_grade_validation_plan["validation_plan_hash"],
+            "timezone_report_grade_ready_slot_count": report_grade_validation_plan["ready_slot_count"],
+            "timezone_report_grade_blocking_slot_count": report_grade_validation_plan["blocking_slot_count"],
             "core_accuracy_gates": timezone_validation_core_accuracy_gates(
                 event_count=len(rows),
                 missing_timezone_count=missing,
                 samples=samples,
                 timezone_manifest=timezone_manifest,
                 time_semantics_manifest=time_semantics_manifest,
+                report_grade_validation_plan=report_grade_validation_plan,
                 trusted_diff=trusted_diff,
             ),
             "trusted_timezone_validation_diff": trusted_diff,
@@ -12144,6 +12360,7 @@ def timezone_validation_core_accuracy_gates(
     samples: Sequence[Mapping[str, object]],
     timezone_manifest: Mapping[str, object] | None = None,
     time_semantics_manifest: Mapping[str, object] | None = None,
+    report_grade_validation_plan: Mapping[str, object] | None = None,
     trusted_diff: Mapping[str, object] | None = None,
 ) -> list[dict[str, object]]:
     satisfied = [
@@ -12161,6 +12378,10 @@ def timezone_validation_core_accuracy_gates(
         satisfied.append("parser assumption matrix hash emitted")
     if time_semantics_manifest and time_semantics_manifest.get("manifest_hash"):
         satisfied.append("time semantics manifest hash emitted")
+    if report_grade_validation_plan and report_grade_validation_plan.get("validation_plan_hash"):
+        satisfied.append("timezone report-grade validation plan")
+    if report_grade_validation_plan and report_grade_validation_plan.get("ready_slot_count"):
+        satisfied.append("timezone report-grade ready slots")
     if trusted_diff and trusted_diff.get("status") == "pass":
         satisfied.append("trusted timezone normalization matrix diff pass")
     return [
@@ -12174,6 +12395,7 @@ def timezone_validation_core_accuracy_gates(
                 f"timezone_normalization_manifest_hash:{(timezone_manifest or {}).get('manifest_hash', '')}",
                 f"parser_assumption_matrix_hash:{(timezone_manifest or {}).get('parser_assumption_matrix_hash', '')}",
                 f"time_semantics_manifest_hash:{(time_semantics_manifest or {}).get('manifest_hash', '')}",
+                f"timezone_report_grade_validation_plan_hash:{(report_grade_validation_plan or {}).get('validation_plan_hash', '')}",
             ],
         )
     ]
