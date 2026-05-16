@@ -3010,6 +3010,7 @@ def forensic_integrity_evidence_chain() -> list[dict[str, object]]:
             "primary_outputs": [
                 "case-db-report-export.acquisition_hash_workflow",
                 "acquisition_hash_workflow.acquisition_hash_manifest.manifest_hash",
+                "acquisition_hash_workflow.acquisition_hash_report_grade_validation_plan_hash",
                 "acquisition_hash_workflow.hashes[].acquisition_hash_row_hash",
                 "acquisition_hash_workflow.acquisition_hash_manifest.algorithm_coverage",
             ],

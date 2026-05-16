@@ -77,8 +77,8 @@
       "status": "pass",
       "backlog_items": [87],
       "evidence_paths": ["docs/validation/core-forensics-081-090-fixture-evidence.json", "tests/test_rapidtriage_case_db.py"],
-      "expected": {"required_assertions": ["Case DB report export preserves evidence-source hashes, hash records, algorithms, calculation timestamps, per-row acquisition hash digests, acquisition-hash-manifest-v1 manifest hash, algorithm coverage, missing-hash warning, trusted acquisition hash manifest diff helpers/gates, and #87 core_accuracy_gates."]},
-      "notes": "Internal fixture pass; whole-device acquisition hash metadata and trusted acquisition hash manifests remain blockers."
+      "expected": {"required_assertions": ["Case DB report export preserves evidence-source hashes, hash records, algorithms, calculation timestamps, per-row acquisition hash digests, acquisition-hash-manifest-v1 manifest hash, acquisition-hash-report-grade-validation-plan-v1, plan hash/counts, algorithm coverage, missing-hash warning, trusted acquisition hash manifest diff helpers/gates, and #87 core_accuracy_gates."]},
+      "notes": "Internal fixture pass; whole-device acquisition hash metadata, source SHA-256 completeness, write-blocker/operator metadata, hash tool-version logs, and trusted acquisition hash manifests remain blockers."
     },
     {
       "id": "core-forensics-088-immutable-audit",

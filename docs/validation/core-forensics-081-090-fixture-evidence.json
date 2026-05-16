@@ -63,9 +63,9 @@
       "title": "Evidence acquisition hash workflow",
       "test_files": ["tests/test_rapidtriage_case_db.py"],
       "assertions": [
-        "Case DB report exports preserve evidence-source hashes, hash records, algorithms, calculation timestamps, per-row acquisition hash digests, acquisition-hash-manifest-v1 manifest hash, algorithm coverage, missing-hash warnings, trusted acquisition hash manifest diff helpers/gates, and #87 core_accuracy_gates."
+        "Case DB report exports preserve evidence-source hashes, hash records, algorithms, calculation timestamps, per-row acquisition hash digests, acquisition-hash-manifest-v1 manifest hash, acquisition-hash-report-grade-validation-plan-v1, plan hash/counts, algorithm coverage, missing-hash warnings, trusted acquisition hash manifest diff helpers/gates, and #87 core_accuracy_gates."
       ],
-      "remaining_external_validation": ["Whole-device acquisition hash workflow, operator metadata, and trusted acquisition hash manifests."]
+      "remaining_external_validation": ["Whole-device acquisition hash workflow, source SHA-256 completeness, write-blocker/operator metadata, hash tool-version logs, and trusted acquisition hash manifests."]
     },
     {
       "item": 88,

@@ -1406,6 +1406,8 @@ CORE_FORENSIC_ACCURACY_ITEMS: tuple[dict[str, object], ...] = (
             "calculation timestamps preserved",
             "acquisition hash row hashes emitted",
             "acquisition hash manifest hash emitted",
+            "acquisition hash report-grade validation plan",
+            "acquisition hash report-grade ready slots",
             "missing hash limitation warning",
             "trusted acquisition hash manifest diff pass",
         ),

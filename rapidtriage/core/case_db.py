@@ -46,6 +46,15 @@ CUSTODY_REPORT_GRADE_BLOCKERS = [
     "lab-custody-policy-required",
 ]
 ACQUISITION_HASH_GAP_ID = "#87"
+ACQUISITION_HASH_REPORT_GRADE_VALIDATION_PLAN_VERSION = "acquisition-hash-report-grade-validation-plan-v1"
+ACQUISITION_HASH_REPORT_GRADE_BLOCKERS = [
+    "trusted-acquisition-hash-manifest-diff-missing",
+    "whole-device-acquisition-hash-required",
+    "source-hash-completeness-required",
+    "write-blocker-metadata-required",
+    "operator-acquisition-log-required",
+    "hash-tool-version-capture-required",
+]
 IMMUTABLE_AUDIT_GAP_ID = "#88"
 REPORT_REPRODUCIBILITY_GAP_ID = "#89"
 SOURCE_PROVENANCE_GAP_ID = "#90"
@@ -6885,6 +6894,178 @@ def build_acquisition_hash_inventory_matrix(
     return {**matrix_core, "matrix_hash": stable_payload_sha256(matrix_core)}
 
 
+def build_acquisition_hash_report_grade_validation_plan(
+    *,
+    hashes: Sequence[Mapping[str, object]],
+    acquisition_hash_manifest: Mapping[str, object],
+    trusted_diff: Mapping[str, object] | None,
+) -> dict[str, object]:
+    matrix = acquisition_hash_manifest.get("hash_inventory_matrix")
+    inventory_matrix = matrix if isinstance(matrix, Mapping) else {}
+    algorithm_coverage = acquisition_hash_manifest.get("algorithm_coverage")
+    algorithm_coverage = algorithm_coverage if isinstance(algorithm_coverage, Mapping) else {}
+    trusted_status = str(trusted_diff.get("status") or "missing") if trusted_diff else "missing"
+    evidence_source_hashes = sum(1 for item in hashes if item.get("target_type") == "evidence_source")
+    rows_with_hash_values = sum(1 for item in hashes if isinstance(item.get("hashes"), Mapping) and item.get("hashes"))
+    rows_with_sha256 = sum(
+        1
+        for item in hashes
+        if isinstance(item.get("hashes"), Mapping)
+        and any(str(algorithm).lower() == "sha256" for algorithm in item.get("hashes", {}))
+    )
+    rows_with_timestamp = sum(1 for item in hashes if item.get("calculated_at"))
+    rows_with_row_hash = sum(1 for item in hashes if item.get("acquisition_hash_row_hash"))
+    ready_slots = [
+        {
+            "slot_id": "acquisition-hash-record-inventory",
+            "status": "complete",
+            "evidence": {
+                "hash_record_count": len(hashes),
+                "evidence_source_hash_count": evidence_source_hashes,
+                "rows_with_hash_values": rows_with_hash_values,
+            },
+        },
+        {
+            "slot_id": "acquisition-hash-algorithm-coverage",
+            "status": "complete",
+            "evidence": dict(algorithm_coverage),
+        },
+        {
+            "slot_id": "acquisition-hash-row-hashes",
+            "status": "complete",
+            "evidence": {
+                "row_hash_count": rows_with_row_hash,
+                "hash_row_hash_count": len(acquisition_hash_manifest.get("hash_row_hashes") or []),
+            },
+        },
+        {
+            "slot_id": "acquisition-hash-manifest",
+            "status": "complete",
+            "evidence": {
+                "manifest_hash": acquisition_hash_manifest.get("manifest_hash"),
+                "missing_hash_warning_count": acquisition_hash_manifest.get("missing_hash_warning_count", 0),
+            },
+        },
+        {
+            "slot_id": "acquisition-hash-inventory-matrix",
+            "status": "complete",
+            "evidence": {
+                "matrix_hash": acquisition_hash_manifest.get("hash_inventory_matrix_hash"),
+                "all_rows_have_hash_material": bool(inventory_matrix.get("all_rows_have_hash_material")),
+                "all_evidence_sources_have_sha256": bool(inventory_matrix.get("all_evidence_sources_have_sha256")),
+            },
+        },
+        {
+            "slot_id": "acquisition-hash-trusted-diff-disclosure",
+            "status": "complete",
+            "evidence": {
+                "trusted_diff_status": trusted_status,
+                "trusted_tool": str((trusted_diff or {}).get("trusted_tool") or ""),
+            },
+        },
+    ]
+    blocking_slots: list[dict[str, object]] = []
+    if not hashes:
+        blocking_slots.append(
+            {
+                "slot_id": "acquisition-hash-records-present",
+                "status": "blocked",
+                "blocker": "acquisition-hash-record-inventory-required",
+                "required_evidence": "at least one evidence source or generated-output hash row",
+            }
+        )
+    if rows_with_hash_values != len(hashes):
+        blocking_slots.append(
+            {
+                "slot_id": "acquisition-hash-values-complete",
+                "status": "blocked",
+                "blocker": "source-hash-completeness-required",
+                "required_evidence": "hash values for every acquisition hash row",
+            }
+        )
+    if rows_with_sha256 != len(hashes):
+        blocking_slots.append(
+            {
+                "slot_id": "acquisition-sha256-coverage",
+                "status": "blocked",
+                "blocker": "source-sha256-completeness-required",
+                "required_evidence": "SHA-256 coverage for every acquisition hash row",
+            }
+        )
+    if rows_with_timestamp != len(hashes):
+        blocking_slots.append(
+            {
+                "slot_id": "acquisition-hash-timestamps",
+                "status": "blocked",
+                "blocker": "hash-calculation-timestamp-required",
+                "required_evidence": "calculated_at timestamp for every hash row",
+            }
+        )
+    if rows_with_row_hash != len(hashes):
+        blocking_slots.append(
+            {
+                "slot_id": "acquisition-hash-row-digests",
+                "status": "blocked",
+                "blocker": "acquisition-hash-row-digest-required",
+                "required_evidence": "stable row digest for every hash row",
+            }
+        )
+    if trusted_status != "pass":
+        blocking_slots.append(
+            {
+                "slot_id": "acquisition-trusted-hash-manifest-diff",
+                "status": "external-required",
+                "blocker": ACQUISITION_HASH_TRUSTED_DIFF_BLOCKER_87,
+                "required_evidence": "trusted acquisition hash manifest diff covering rows, manifest hash, and inventory matrix hash",
+            }
+        )
+    blocking_slots.extend(
+        [
+            {
+                "slot_id": "whole-device-acquisition-hash",
+                "status": "external-required",
+                "blocker": "whole-device-acquisition-hash-required",
+                "required_evidence": "source image/device hash captured at acquisition, not only imported file/output hashes",
+            },
+            {
+                "slot_id": "write-blocker-metadata",
+                "status": "external-required",
+                "blocker": "write-blocker-metadata-required",
+                "required_evidence": "write-blocker/source-protection device serial, firmware/version, validation result, and operator",
+            },
+            {
+                "slot_id": "operator-acquisition-log",
+                "status": "external-required",
+                "blocker": "operator-acquisition-log-required",
+                "required_evidence": "operator acquisition log tying source media, time, tool, hash command, and case identifier together",
+            },
+            {
+                "slot_id": "hash-tool-version-capture",
+                "status": "external-required",
+                "blocker": "hash-tool-version-capture-required",
+                "required_evidence": "hashing/imaging tool path, version, command line, and output log for each acquisition hash",
+            },
+        ]
+    )
+    plan_core: dict[str, object] = {
+        "profile_version": ACQUISITION_HASH_REPORT_GRADE_VALIDATION_PLAN_VERSION,
+        "item_number": 87,
+        "commercial_gap_ids": [ACQUISITION_HASH_GAP_ID],
+        "plan_context": "case-db-report-export",
+        "acquisition_hash_manifest_hash": acquisition_hash_manifest.get("manifest_hash"),
+        "hash_inventory_matrix_hash": acquisition_hash_manifest.get("hash_inventory_matrix_hash"),
+        "trusted_diff_status": trusted_status,
+        "ready_slots": ready_slots,
+        "blocking_slots": blocking_slots,
+        "ready_slot_count": len(ready_slots),
+        "blocking_slot_count": len(blocking_slots),
+        "blockers": sorted({str(slot.get("blocker") or "") for slot in blocking_slots if slot.get("blocker")}),
+        "commercial_claim_allowed": False,
+        "reporting_boundary": "This plan makes Case DB acquisition-hash exports auditable, but court/commercial hash claims require original source/device hashes, write-blocker metadata, operator logs, tool-version capture, and trusted-manifest evidence.",
+    }
+    return {**plan_core, "validation_plan_sha256": stable_payload_sha256(plan_core)}
+
+
 def build_audit_hash_chain_manifest(events: Sequence[Mapping[str, object]], *, head_hash: str) -> dict[str, object]:
     actor_action_matrix = build_audit_actor_action_matrix(events)
     manifest_core = {
@@ -7361,6 +7542,7 @@ def acquisition_hash_workflow_functional_profile(
     hashes: Sequence[Mapping[str, object]],
     acquisition_hash_manifest: Mapping[str, object],
     trusted_diff: Mapping[str, object] | None,
+    report_grade_validation_plan: Mapping[str, object] | None = None,
 ) -> dict[str, object]:
     evidence_source_hashes = sum(1 for item in hashes if item.get("target_type") == "evidence_source")
     rows_with_hash_values = sum(1 for item in hashes if isinstance(item.get("hashes"), Mapping) and item.get("hashes"))
@@ -7387,6 +7569,11 @@ def acquisition_hash_workflow_functional_profile(
         failed_checks.append("acquisition-sha256-coverage-incomplete")
     if not trusted_diff or trusted_diff.get("status") != "pass":
         failed_checks.append(ACQUISITION_HASH_TRUSTED_DIFF_BLOCKER_87)
+    if not report_grade_validation_plan or not report_grade_validation_plan.get("validation_plan_sha256"):
+        failed_checks.append("acquisition-hash-report-grade-validation-plan-missing")
+    else:
+        failed_checks.extend(str(blocker) for blocker in report_grade_validation_plan.get("blockers") or [])
+    failed_checks = sorted(dict.fromkeys(failed_checks))
     return {
         "item_number": 87,
         "batch_id": FORENSIC_INTEGRITY_BATCH_ID,
@@ -7401,6 +7588,11 @@ def acquisition_hash_workflow_functional_profile(
             "acquisition_hash_manifest_hash": str(acquisition_hash_manifest.get("manifest_hash") or ""),
             "missing_hash_warning_count": acquisition_hash_manifest.get("missing_hash_warning_count", 0),
             "trusted_diff_status": str(trusted_diff.get("status")) if trusted_diff else "missing",
+            "acquisition_hash_report_grade_validation_plan_hash": str(
+                (report_grade_validation_plan or {}).get("validation_plan_sha256") or ""
+            ),
+            "report_grade_ready_slot_count": int((report_grade_validation_plan or {}).get("ready_slot_count") or 0),
+            "report_grade_blocking_slot_count": int((report_grade_validation_plan or {}).get("blocking_slot_count") or 0),
         },
         "passed_validation_check_ids": [
             "case-db-acquisition-hash-records-exported",
@@ -7408,6 +7600,7 @@ def acquisition_hash_workflow_functional_profile(
             "case-db-acquisition-hash-row-hashes-exported",
             "case-db-acquisition-hash-manifest-hash-exported",
             "case-db-acquisition-hash-limitations-disclosed",
+            "case-db-acquisition-hash-report-grade-validation-plan-exported",
         ],
         "failed_validation_check_ids": failed_checks,
         "reportability_decision": {
@@ -7477,9 +7670,15 @@ def build_acquisition_hash_workflow(
         )
     hashes = [attach_acquisition_hash_row_hash(item) for item in hashes]
     acquisition_manifest = build_acquisition_hash_manifest(hashes)
+    acquisition_report_grade_validation_plan = build_acquisition_hash_report_grade_validation_plan(
+        hashes=hashes,
+        acquisition_hash_manifest=acquisition_manifest,
+        trusted_diff=trusted_diff,
+    )
     blockers = []
     if not trusted_diff or trusted_diff.get("status") != "pass":
         blockers.append(ACQUISITION_HASH_TRUSTED_DIFF_BLOCKER_87)
+    blockers = sorted({*blockers, *acquisition_report_grade_validation_plan["blockers"]})
     return {
         "status": "case-db-hash-export",
         "commercial_gap_ids": [ACQUISITION_HASH_GAP_ID],
@@ -7492,10 +7691,15 @@ def build_acquisition_hash_workflow(
         },
         "hashes": hashes,
         "acquisition_hash_manifest": acquisition_manifest,
+        "acquisition_hash_report_grade_validation_plan": acquisition_report_grade_validation_plan,
+        "acquisition_hash_report_grade_validation_plan_hash": acquisition_report_grade_validation_plan["validation_plan_sha256"],
+        "report_grade_ready_slot_count": acquisition_report_grade_validation_plan["ready_slot_count"],
+        "report_grade_blocking_slot_count": acquisition_report_grade_validation_plan["blocking_slot_count"],
         "functional_priority_profile": acquisition_hash_workflow_functional_profile(
             hashes=hashes,
             acquisition_hash_manifest=acquisition_manifest,
             trusted_diff=trusted_diff,
+            report_grade_validation_plan=acquisition_report_grade_validation_plan,
         ),
         "trusted_acquisition_hash_diff": dict(trusted_diff) if trusted_diff else missing_integrity_trusted_diff(
             ACQUISITION_HASH_GAP_ID,
@@ -7506,6 +7710,7 @@ def build_acquisition_hash_workflow(
             hashes=hashes,
             acquisition_hash_manifest=acquisition_manifest,
             trusted_diff=trusted_diff,
+            report_grade_validation_plan=acquisition_report_grade_validation_plan,
         ),
         "blockers": blockers,
         "limitations": [
@@ -9359,6 +9564,7 @@ def acquisition_hash_core_accuracy_gates(
     hashes: Sequence[Mapping[str, object]],
     acquisition_hash_manifest: Mapping[str, object] | None = None,
     trusted_diff: Mapping[str, object] | None = None,
+    report_grade_validation_plan: Mapping[str, object] | None = None,
 ) -> list[dict[str, object]]:
     satisfied = ["missing hash limitation warning"]
     if any(item.get("target_type") == "evidence_source" for item in hashes):
@@ -9375,6 +9581,10 @@ def acquisition_hash_core_accuracy_gates(
         satisfied.append("acquisition hash manifest hash emitted")
     if acquisition_hash_manifest and acquisition_hash_manifest.get("hash_inventory_matrix_hash"):
         satisfied.append("acquisition hash inventory matrix emitted")
+    if report_grade_validation_plan and report_grade_validation_plan.get("validation_plan_sha256"):
+        satisfied.append("acquisition hash report-grade validation plan")
+    if report_grade_validation_plan and int(report_grade_validation_plan.get("ready_slot_count") or 0) >= 6:
+        satisfied.append("acquisition hash report-grade ready slots")
     if trusted_diff and trusted_diff.get("status") == "pass":
         satisfied.append("trusted acquisition hash manifest diff pass")
     return [
@@ -9385,6 +9595,7 @@ def acquisition_hash_core_accuracy_gates(
                 f"hash_count:{len(hashes)}",
                 f"acquisition_hash_manifest_hash:{(acquisition_hash_manifest or {}).get('manifest_hash', '')}",
                 f"hash_inventory_matrix_hash:{(acquisition_hash_manifest or {}).get('hash_inventory_matrix_hash', '')}",
+                f"acquisition_hash_report_grade_validation_plan_hash:{(report_grade_validation_plan or {}).get('validation_plan_sha256', '')}",
             ],
         )
     ]

@@ -2193,7 +2193,38 @@ class RapidTriageCaseDatabaseTests(unittest.TestCase):
             self.assertTrue(
                 all(len(item["acquisition_hash_row_hash"]) == 64 for item in export["acquisition_hash_workflow"]["hashes"])
             )
+            acquisition_plan = export["acquisition_hash_workflow"]["acquisition_hash_report_grade_validation_plan"]
+            self.assertEqual(acquisition_plan["profile_version"], "acquisition-hash-report-grade-validation-plan-v1")
+            self.assertEqual(acquisition_plan["item_number"], 87)
+            self.assertEqual(acquisition_plan["plan_context"], "case-db-report-export")
+            self.assertEqual(
+                acquisition_plan["acquisition_hash_manifest_hash"],
+                export["acquisition_hash_workflow"]["acquisition_hash_manifest"]["manifest_hash"],
+            )
+            self.assertEqual(
+                acquisition_plan["hash_inventory_matrix_hash"],
+                export["acquisition_hash_workflow"]["acquisition_hash_manifest"]["hash_inventory_matrix_hash"],
+            )
+            self.assertEqual(
+                export["acquisition_hash_workflow"]["acquisition_hash_report_grade_validation_plan_hash"],
+                acquisition_plan["validation_plan_sha256"],
+            )
+            self.assertEqual(acquisition_plan["ready_slot_count"], 6)
+            self.assertGreaterEqual(acquisition_plan["blocking_slot_count"], 5)
+            self.assertEqual(export["acquisition_hash_workflow"]["report_grade_ready_slot_count"], 6)
+            self.assertEqual(
+                export["acquisition_hash_workflow"]["report_grade_blocking_slot_count"],
+                acquisition_plan["blocking_slot_count"],
+            )
+            acquisition_ready_slots = {slot["slot_id"] for slot in acquisition_plan["ready_slots"]}
+            acquisition_blocking_slots = {slot["slot_id"] for slot in acquisition_plan["blocking_slots"]}
+            self.assertIn("acquisition-hash-manifest", acquisition_ready_slots)
+            self.assertIn("acquisition-trusted-hash-manifest-diff", acquisition_blocking_slots)
             self.assertEqual(export["acquisition_hash_workflow"]["functional_priority_profile"]["item_number"], 87)
+            self.assertIn(
+                "acquisition_hash_report_grade_validation_plan_hash",
+                export["acquisition_hash_workflow"]["functional_priority_profile"]["implemented_controls"],
+            )
             self.assertIn(
                 "trusted-acquisition-hash-manifest-diff-missing",
                 export["acquisition_hash_workflow"]["functional_priority_profile"]["failed_validation_check_ids"],
@@ -2207,8 +2238,13 @@ class RapidTriageCaseDatabaseTests(unittest.TestCase):
                 "acquisition hash manifest hash emitted",
                 export["acquisition_hash_workflow"]["core_accuracy_gates"][0]["satisfied_checks"],
             )
+            self.assertIn(
+                "acquisition hash report-grade validation plan",
+                export["acquisition_hash_workflow"]["core_accuracy_gates"][0]["satisfied_checks"],
+            )
             self.assertEqual(export["acquisition_hash_workflow"]["trusted_acquisition_hash_diff"]["status"], "missing")
             self.assertIn("trusted-acquisition-hash-manifest-diff-missing", export["acquisition_hash_workflow"]["blockers"])
+            self.assertIn("whole-device-acquisition-hash-required", export["acquisition_hash_workflow"]["blockers"])
             hash_diff = build_acquisition_hash_trusted_diff(
                 export["acquisition_hash_workflow"],
                 export["acquisition_hash_workflow"],
@@ -2217,11 +2253,13 @@ class RapidTriageCaseDatabaseTests(unittest.TestCase):
                 hashes=export["acquisition_hash_workflow"]["hashes"],
                 acquisition_hash_manifest=export["acquisition_hash_workflow"]["acquisition_hash_manifest"],
                 trusted_diff=hash_diff,
+                report_grade_validation_plan=acquisition_plan,
             )
             self.assertEqual(hash_diff["status"], "pass")
             self.assertIn("manifest_hash", hash_diff["compared_fields"])
             self.assertIn("hash_inventory_matrix_hash", hash_diff["compared_fields"])
             self.assertIn("trusted acquisition hash manifest diff pass", hash_gates[0]["satisfied_checks"])
+            self.assertIn("acquisition hash report-grade validation plan", hash_gates[0]["satisfied_checks"])
             self.assertEqual(
                 export["acquisition_hash_workflow"]["acquisition_hash_manifest"]["hash_inventory_matrix"]["profile_version"],
                 "acquisition-hash-inventory-matrix-v1",

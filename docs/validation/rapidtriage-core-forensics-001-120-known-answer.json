@@ -2036,10 +2036,10 @@
       ],
       "expected": {
         "required_assertions": [
-          "Case DB report export preserves evidence-source hashes, hash records, algorithms, calculation timestamps, per-row acquisition hash digests, acquisition-hash-manifest-v1 manifest hash, algorithm coverage, missing-hash warning, and #87 core_accuracy_gates."
+          "Case DB report export preserves evidence-source hashes, hash records, algorithms, calculation timestamps, per-row acquisition hash digests, acquisition-hash-manifest-v1 manifest hash, acquisition-hash-report-grade-validation-plan-v1, plan hash/counts, algorithm coverage, missing-hash warning, and #87 core_accuracy_gates."
         ]
       },
-      "notes": "Internal fixture pass; whole-device acquisition hash metadata remains blocker.",
+      "notes": "Internal fixture pass; whole-device acquisition hash metadata, source SHA-256 completeness, write-blocker/operator metadata, hash tool-version logs, and trusted acquisition hash manifests remain blockers.",
       "source_manifest": "docs/validation/rapidtriage-core-forensics-081-090-known-answer.json"
     },
     {
