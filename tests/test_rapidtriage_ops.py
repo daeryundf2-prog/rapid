@@ -3623,6 +3623,82 @@ class RapidTriageOpsTests(unittest.TestCase):
             self.assertEqual(timeline_comparison["mismatch_count"], 0)
             self.assertIn("url", timeline_comparison["compared_canonical_fields"])
 
+    def test_cross_tool_validate_compares_ai_transcript_pairs(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            rapid = root / "rapid-ai.json"
+            service_export = root / "chatgpt-export.csv"
+            rapid.write_text(
+                json.dumps(
+                    {
+                        "artifacts": [
+                            {
+                                "artifact_type": "ai-service-export-conversation",
+                                "details": {
+                                    "ai_service": "ChatGPT",
+                                    "conversation_id": "conv-1",
+                                    "conversation_title": "Incident response checklist",
+                                    "transcript_pairs": [
+                                        {
+                                            "pair_id": "pair-1",
+                                            "question": "What happened before the suspicious download?",
+                                            "answer": "The interactive logon happened first.",
+                                            "timestamp": "2024-04-01T09:10:11+00:00",
+                                            "source_sha256s": ["a" * 64],
+                                            "question_source_path": "Local Storage/leveldb/000003.log",
+                                            "answer_source_path": "Local Storage/leveldb/000003.log",
+                                            "question_source_offset": 128,
+                                            "answer_source_offset": 256,
+                                            "storage_area": "Local Storage",
+                                            "pairing_confidence": "high-candidate",
+                                        }
+                                    ],
+                                },
+                            }
+                        ]
+                    }
+                ),
+                encoding="utf-8",
+            )
+            service_export.write_text(
+                "Service,ConversationId,ConversationTitle,PairId,Question,Answer,Timestamp,SourceSha256s,"
+                "QuestionSourcePath,AnswerSourcePath,QuestionSourceOffset,AnswerSourceOffset,StorageArea,PairingConfidence\n"
+                f"chatgpt,conv-1,Incident response checklist,pair-1,"
+                "What happened before the suspicious download?,The interactive logon happened first.,"
+                f"2024-04-01T09:10:11+00:00,{('a' * 64)},"
+                "Local Storage/leveldb/000003.log,Local Storage/leveldb/000003.log,128,256,Local Storage,high-candidate\n",
+                encoding="utf-8",
+            )
+
+            stdout = io.StringIO()
+            with contextlib.redirect_stdout(stdout):
+                exit_code = main(
+                    [
+                        "cross-tool-validate",
+                        "--rapid-output",
+                        str(rapid),
+                        "--reference-output",
+                        f"serviceexport={service_export}",
+                        "--backlog-item",
+                        "21",
+                        "--min-overlap",
+                        "1.0",
+                        "--json",
+                    ]
+                )
+
+            self.assertEqual(exit_code, 0)
+            payload = json.loads(stdout.getvalue())
+            field_comparison = payload["comparisons"][0]["ai_transcript_field_comparison"]
+            self.assertEqual(payload["status"], "pass")
+            self.assertGreaterEqual(field_comparison["common_record_count"], 1)
+            self.assertEqual(field_comparison["mismatch_count"], 0)
+            self.assertEqual(field_comparison["missing_common_field_count"], 0)
+            self.assertIn("question", field_comparison["compared_canonical_fields"])
+            self.assertIn("answer", field_comparison["compared_canonical_fields"])
+            manifest = payload["cross_tool_validation_assessment"]["trusted_tool_diff_manifest"]
+            self.assertIn("ai_transcript_field_comparison", manifest["comparison_summaries"][0]["field_diffs"])
+
     def test_cross_tool_validate_compares_mobile_vendor_export_rows(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             root = Path(tmp_dir)

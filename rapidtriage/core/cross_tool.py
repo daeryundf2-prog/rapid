@@ -296,6 +296,45 @@ BROWSER_TIMELINE_FIELD_ALIASES = {
     "source_table": ("source_table", "SourceTable", "table", "Table"),
     "source_index": ("source_index", "SourceIndex", "row_index", "RowIndex", "index", "Index"),
 }
+AI_TRANSCRIPT_FIELD_ALIASES = {
+    "ai_service": ("ai_service", "AIService", "service", "Service", "provider", "Provider"),
+    "conversation_id": ("conversation_id", "ConversationId", "chat_id", "ChatId", "thread_id", "ThreadId"),
+    "conversation_title": ("conversation_title", "ConversationTitle", "title", "Title", "chat_title", "ChatTitle"),
+    "pair_id": ("pair_id", "PairId", "message_id", "MessageId", "id", "Id"),
+    "question": ("question", "Question", "prompt", "Prompt", "user_text", "UserText", "user_message", "UserMessage"),
+    "answer": (
+        "answer",
+        "Answer",
+        "response",
+        "Response",
+        "assistant_text",
+        "AssistantText",
+        "assistant_message",
+        "AssistantMessage",
+    ),
+    "timestamp": ("timestamp", "Timestamp", "created_at", "CreatedAt", "Created", "created", "message_time", "MessageTime"),
+    "source_path": ("source_path", "SourcePath", "source", "Source", "export_path", "ExportPath"),
+    "source_sha256s": ("source_sha256s", "SourceSha256s", "source_sha256", "SourceSha256", "source_hashes", "SourceHashes"),
+    "question_source_path": ("question_source_path", "QuestionSourcePath", "prompt_source_path", "PromptSourcePath"),
+    "answer_source_path": ("answer_source_path", "AnswerSourcePath", "response_source_path", "ResponseSourcePath"),
+    "question_source_offset": ("question_source_offset", "QuestionSourceOffset", "prompt_offset", "PromptOffset"),
+    "answer_source_offset": ("answer_source_offset", "AnswerSourceOffset", "response_offset", "ResponseOffset"),
+    "storage_area": ("storage_area", "StorageArea", "source_storage_area", "SourceStorageArea"),
+    "pairing_confidence": ("pairing_confidence", "PairingConfidence", "confidence_label", "ConfidenceLabel"),
+    "confidence": ("confidence", "Confidence", "score", "Score"),
+    "transcript_validation_status": (
+        "transcript_validation_status",
+        "TranscriptValidationStatus",
+        "validation_status",
+        "ValidationStatus",
+    ),
+    "completeness_score": (
+        "completeness_score",
+        "CompletenessScore",
+        "transcript_completeness_score",
+        "TranscriptCompletenessScore",
+    ),
+}
 MOBILE_EXPORT_FIELD_ALIASES = {
     "artifact_family": ("artifact_family", "ArtifactFamily", "artifact_type", "ArtifactType", "type", "Type"),
     "source_tool": ("source_tool", "SourceTool", "tool", "Tool", "vendor_tool", "VendorTool"),
@@ -776,6 +815,7 @@ def load_tool_dataset(name: str, path: Path) -> dict[str, object]:
         "system_artifact_field_index": system_artifact_field_index(rows),
         "browser_storage_field_index": browser_storage_field_index(rows),
         "browser_timeline_field_index": browser_timeline_field_index(rows),
+        "ai_transcript_field_index": ai_transcript_field_index(rows),
         "mobile_export_field_index": mobile_export_field_index(rows),
         "mobile_app_field_index": mobile_app_field_index(rows),
         "chat_app_field_index": chat_app_field_index(rows),
@@ -873,6 +913,7 @@ def rows_from_mapping(item: Mapping[str, object]) -> Iterable[dict[str, object]]
     yield flattened
     yield from nested_usn_state_replay_rows(item, flattened)
     yield from nested_browser_rows(item, flattened)
+    yield from nested_ai_transcript_rows(item, flattened)
 
 
 def nested_browser_rows(
@@ -897,6 +938,109 @@ def nested_browser_rows(
         row.setdefault("browser", browser)
         row.setdefault("profile", profile)
         yield row
+
+
+def nested_ai_transcript_rows(
+    item: Mapping[str, object],
+    flattened_parent: Mapping[str, object],
+) -> Iterable[dict[str, object]]:
+    parent_values = {
+        "ai_service": first_value(flattened_parent, ("ai_service", "details.ai_service", "service", "details.service")),
+        "conversation_id": first_value(
+            flattened_parent,
+            ("conversation_id", "details.conversation_id", "id", "details.id", "chat_id", "details.chat_id"),
+        ),
+        "conversation_title": first_value(
+            flattened_parent,
+            ("conversation_title", "details.conversation_title", "title", "details.title"),
+        ),
+        "timestamp": first_value(flattened_parent, ("timestamp", "details.timestamp", "created_at", "details.created_at")),
+        "source_path": first_value(flattened_parent, ("source_path", "details.source_path", "path", "details.path")),
+    }
+    pair_paths = (
+        ("details", "transcript_pairs"),
+        ("transcript_pairs",),
+        ("details", "transcript", "pairs"),
+        ("transcript", "pairs"),
+    )
+    for pair in first_nested_list(item, pair_paths):
+        if not isinstance(pair, Mapping):
+            continue
+        row = flatten_mapping(pair)
+        row.setdefault("artifact_type", "ai-transcript-pair")
+        for key, value in parent_values.items():
+            if value not in (None, ""):
+                row.setdefault(key, value)
+        yield row
+
+    conversation_paths = (
+        ("details", "conversation_rows"),
+        ("conversation_rows",),
+        ("details", "conversation_candidates"),
+        ("conversation_candidates",),
+    )
+    rows = [row for row in first_nested_list(item, conversation_paths) if isinstance(row, Mapping)]
+    for pair in pair_ai_conversation_rows(rows):
+        row = flatten_mapping(pair)
+        row.setdefault("artifact_type", "ai-transcript-pair")
+        for key, value in parent_values.items():
+            if value not in (None, ""):
+                row.setdefault(key, value)
+        yield row
+
+
+def pair_ai_conversation_rows(rows: Sequence[Mapping[str, object]]) -> list[dict[str, object]]:
+    pairs: list[dict[str, object]] = []
+    pending_question: Mapping[str, object] | None = None
+    for row in rows:
+        direction = normalize_field_value(
+            first_value(row, ("direction", "Direction", "role", "Role", "author_role", "AuthorRole")) or ""
+        )
+        text = first_value(row, ("text", "Text", "message_text", "MessageText", "content", "Content"))
+        if direction in {"question", "prompt", "user"}:
+            pending_question = row
+            continue
+        if direction not in {"answer", "response", "assistant"} or pending_question is None:
+            continue
+        pair_id = first_value(row, ("pair_id", "PairId", "message_id", "MessageId", "id", "Id"))
+        question_id = first_value(pending_question, ("message_id", "MessageId", "id", "Id"))
+        pairs.append(
+            {
+                "ai_service": first_value(row, AI_TRANSCRIPT_FIELD_ALIASES["ai_service"])
+                or first_value(pending_question, AI_TRANSCRIPT_FIELD_ALIASES["ai_service"]),
+                "pair_id": pair_id or question_id,
+                "question": first_value(pending_question, ("question", "Question", "prompt", "Prompt")) or first_value(
+                    pending_question, ("text", "Text", "message_text", "MessageText", "content", "Content")
+                ),
+                "answer": first_value(row, ("answer", "Answer", "response", "Response")) or text,
+                "timestamp": first_value(row, AI_TRANSCRIPT_FIELD_ALIASES["timestamp"])
+                or first_value(pending_question, AI_TRANSCRIPT_FIELD_ALIASES["timestamp"]),
+                "source_path": first_value(row, AI_TRANSCRIPT_FIELD_ALIASES["source_path"])
+                or first_value(pending_question, AI_TRANSCRIPT_FIELD_ALIASES["source_path"]),
+                "source_sha256s": [
+                    value
+                    for value in (
+                        first_value(pending_question, AI_TRANSCRIPT_FIELD_ALIASES["source_sha256s"]),
+                        first_value(row, AI_TRANSCRIPT_FIELD_ALIASES["source_sha256s"]),
+                    )
+                    if value
+                ],
+                "question_source_path": first_value(pending_question, AI_TRANSCRIPT_FIELD_ALIASES["source_path"]),
+                "answer_source_path": first_value(row, AI_TRANSCRIPT_FIELD_ALIASES["source_path"]),
+                "question_source_offset": first_value(
+                    pending_question,
+                    ("source_offset", "SourceOffset", "question_source_offset", "QuestionSourceOffset"),
+                ),
+                "answer_source_offset": first_value(
+                    row,
+                    ("source_offset", "SourceOffset", "answer_source_offset", "AnswerSourceOffset"),
+                ),
+                "storage_area": first_value(row, AI_TRANSCRIPT_FIELD_ALIASES["storage_area"])
+                or first_value(pending_question, AI_TRANSCRIPT_FIELD_ALIASES["storage_area"]),
+            }
+        )
+        pending_question = None
+    return pairs
 
 
 def nested_usn_state_replay_rows(
@@ -999,6 +1143,8 @@ def composite_candidate_keys(row: Mapping[str, object]) -> list[str]:
     composites.extend(system_artifact_key_variants(row))
     composites.extend(browser_storage_key_variants(row))
     composites.extend(browser_timeline_key_variants(row))
+    if has_ai_transcript_signal(row):
+        composites.extend(ai_transcript_key_variants(row))
     if has_mobile_export_signal(row):
         composites.extend(mobile_export_key_variants(row))
     if has_mobile_app_signal(row):
@@ -1086,6 +1232,7 @@ def compare_datasets(
     system_artifact_field_comparison = compare_system_artifact_fields(rapid_dataset, reference_dataset)
     browser_storage_field_comparison = compare_browser_storage_fields(rapid_dataset, reference_dataset)
     browser_timeline_field_comparison = compare_browser_timeline_fields(rapid_dataset, reference_dataset)
+    ai_transcript_field_comparison = compare_ai_transcript_fields(rapid_dataset, reference_dataset)
     mobile_export_field_comparison = compare_mobile_export_fields(rapid_dataset, reference_dataset)
     mobile_app_field_comparison = compare_mobile_app_fields(rapid_dataset, reference_dataset)
     chat_app_field_comparison = compare_chat_app_fields(rapid_dataset, reference_dataset)
@@ -1115,6 +1262,11 @@ def compare_datasets(
     if browser_storage_field_comparison["mismatch_count"]:
         status = "failed"
     if browser_timeline_field_comparison["mismatch_count"]:
+        status = "failed"
+    if (
+        ai_transcript_field_comparison["mismatch_count"]
+        or ai_transcript_field_comparison["missing_common_field_count"]
+    ):
         status = "failed"
     if (
         mobile_export_field_comparison["mismatch_count"]
@@ -1174,6 +1326,7 @@ def compare_datasets(
         "system_artifact_field_comparison": system_artifact_field_comparison,
         "browser_storage_field_comparison": browser_storage_field_comparison,
         "browser_timeline_field_comparison": browser_timeline_field_comparison,
+        "ai_transcript_field_comparison": ai_transcript_field_comparison,
         "mobile_export_field_comparison": mobile_export_field_comparison,
         "mobile_app_field_comparison": mobile_app_field_comparison,
         "chat_app_field_comparison": chat_app_field_comparison,
@@ -2297,6 +2450,15 @@ def cloud_api_field_index(rows: Sequence[Mapping[str, object]]) -> dict[str, dic
     )
 
 
+def ai_transcript_field_index(rows: Sequence[Mapping[str, object]]) -> dict[str, dict[str, str]]:
+    return messaging_field_index(
+        rows,
+        signal=has_ai_transcript_signal,
+        key_builder=ai_transcript_key_variants,
+        field_builder=ai_transcript_normalized_fields,
+    )
+
+
 def messaging_field_index(
     rows: Sequence[Mapping[str, object]],
     *,
@@ -2374,6 +2536,19 @@ def has_cloud_api_signal(row: Mapping[str, object]) -> bool:
     return bool(request_id or (endpoint and response_hash))
 
 
+def has_ai_transcript_signal(row: Mapping[str, object]) -> bool:
+    artifact_hint = normalize_mobile_identifier(
+        first_value(row, ("artifact_type", "ArtifactType", "artifact_family", "ArtifactFamily", "source_type", "SourceType"))
+    )
+    if re.search(r"\b(ai-service|ai-transcript|ai-conversation|chatgpt|claude|gemini|perplexity|copilot)\b", artifact_hint):
+        return True
+    service = first_value(row, AI_TRANSCRIPT_FIELD_ALIASES["ai_service"])
+    question = first_value(row, AI_TRANSCRIPT_FIELD_ALIASES["question"])
+    answer = first_value(row, AI_TRANSCRIPT_FIELD_ALIASES["answer"])
+    pair_id = first_value(row, AI_TRANSCRIPT_FIELD_ALIASES["pair_id"])
+    return bool(service and (pair_id or (question and answer)))
+
+
 def chat_app_key_variants(row: Mapping[str, object]) -> list[str]:
     service = normalize_mobile_identifier(first_value(row, CHAT_APP_FIELD_ALIASES["service"]))
     conversation_id = normalize_mobile_identifier(first_value(row, CHAT_APP_FIELD_ALIASES["conversation_id"]))
@@ -2441,6 +2616,26 @@ def cloud_api_key_variants(row: Mapping[str, object]) -> list[str]:
     return list(dict.fromkeys(keys))
 
 
+def ai_transcript_key_variants(row: Mapping[str, object]) -> list[str]:
+    service = normalize_mobile_identifier(first_value(row, AI_TRANSCRIPT_FIELD_ALIASES["ai_service"]))
+    conversation_id = normalize_mobile_identifier(first_value(row, AI_TRANSCRIPT_FIELD_ALIASES["conversation_id"]))
+    pair_id = normalize_mobile_identifier(first_value(row, AI_TRANSCRIPT_FIELD_ALIASES["pair_id"]))
+    timestamp = normalize_field_value(first_value(row, AI_TRANSCRIPT_FIELD_ALIASES["timestamp"]) or "")
+    question = normalize_field_value(first_value(row, AI_TRANSCRIPT_FIELD_ALIASES["question"]) or "")
+    answer = normalize_field_value(first_value(row, AI_TRANSCRIPT_FIELD_ALIASES["answer"]) or "")
+    source_hashes = normalize_ntfs_list(first_value(row, AI_TRANSCRIPT_FIELD_ALIASES["source_sha256s"]))
+    keys: list[str] = []
+    if service and conversation_id and pair_id:
+        keys.append(normalize_key(f"ai-transcript-pair:{service}:{conversation_id}:{pair_id}"))
+    if service and pair_id:
+        keys.append(normalize_key(f"ai-transcript-pair:{service}:{pair_id}"))
+    if service and timestamp and question and answer:
+        keys.append(normalize_key(f"ai-transcript-text:{service}:{timestamp}:{question[:160]}:{answer[:160]}"))
+    if service and source_hashes and question and answer:
+        keys.append(normalize_key(f"ai-transcript-source:{service}:{source_hashes}:{question[:160]}:{answer[:160]}"))
+    return list(dict.fromkeys(keys))
+
+
 def chat_app_normalized_fields(row: Mapping[str, object]) -> dict[str, str]:
     return normalized_fields_by_alias(
         row,
@@ -2480,6 +2675,19 @@ def cloud_api_normalized_fields(row: Mapping[str, object]) -> dict[str, str]:
         hash_fields={"response_hash"},
         int_fields={"status_code", "item_count"},
     )
+
+
+def ai_transcript_normalized_fields(row: Mapping[str, object]) -> dict[str, str]:
+    fields = normalized_fields_by_alias(
+        row,
+        AI_TRANSCRIPT_FIELD_ALIASES,
+        path_fields={"source_path", "question_source_path", "answer_source_path"},
+        int_fields={"question_source_offset", "answer_source_offset"},
+    )
+    source_hashes = normalize_ntfs_list(first_value(row, AI_TRANSCRIPT_FIELD_ALIASES["source_sha256s"]))
+    if source_hashes:
+        fields["source_sha256s"] = source_hashes
+    return fields
 
 
 def normalized_fields_by_alias(
@@ -2569,6 +2777,20 @@ def compare_cloud_api_fields(
         index_key="cloud_api_field_index",
         mode="cloud-api-response-field-diff",
         key_name="cloud_api_key",
+        row_limit=MAX_MESSAGING_FIELD_DIFF_ROWS,
+    )
+
+
+def compare_ai_transcript_fields(
+    rapid_dataset: Mapping[str, object],
+    reference_dataset: Mapping[str, object],
+) -> dict[str, object]:
+    return compare_ntfs_field_indexes(
+        rapid_dataset,
+        reference_dataset,
+        index_key="ai_transcript_field_index",
+        mode="ai-service-transcript-qa-field-diff",
+        key_name="ai_transcript_key",
         row_limit=MAX_MESSAGING_FIELD_DIFF_ROWS,
     )
 
@@ -3303,6 +3525,7 @@ def build_trusted_tool_diff_manifest(
             "system_artifact_field_comparison",
             "browser_storage_field_comparison",
             "browser_timeline_field_comparison",
+            "ai_transcript_field_comparison",
             "mobile_export_field_comparison",
             "mobile_app_field_comparison",
             "chat_app_field_comparison",
