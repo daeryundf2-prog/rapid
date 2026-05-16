@@ -2603,10 +2603,10 @@
       ],
       "expected": {
         "required_assertions": [
-          "Release package preserves LTS policy, hotfix criteria, backport validation, emergency patch gate, maintenance blocker, and #113 core_accuracy_gates."
+          "Release package preserves LTS policy, hotfix criteria, backport validation, emergency patch gate, lts-hotfix-policy-evidence-manifest-v1 manifest hash/evidence slots, lts-hotfix-report-grade-validation-plan-v1 ready/blocking slots, maintenance blocker, trusted LTS/hotfix diff helpers/gates, and #113 core_accuracy_gates."
         ]
       },
-      "notes": "Internal fixture pass; operator-maintained LTS process remains external.",
+      "notes": "Internal fixture pass; operator-maintained LTS branch discipline, hotfix backport validation, emergency patch drill, release-host hotfix smoke, independent LTS policy review, and trusted hotfix policy review remain external.",
       "source_manifest": "docs/validation/rapidtriage-core-forensics-101-120-known-answer.json"
     },
     {

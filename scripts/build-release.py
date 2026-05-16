@@ -79,6 +79,7 @@ LTS_HOTFIX_POLICY_GAP_ID = "#113"
 SUPPORT_SLA_GAP_ID = "#114"
 TRAINING_CURRICULUM_GAP_ID = "#115"
 RELEASE_NOTES_REPORT_GRADE_VALIDATION_PLAN_VERSION = "release-notes-report-grade-validation-plan-v1"
+LTS_HOTFIX_REPORT_GRADE_VALIDATION_PLAN_VERSION = "lts-hotfix-report-grade-validation-plan-v1"
 OPERATIONS_DOCUMENT_TRUSTED_DIFF_BLOCKERS = {
     112: "trusted-release-notes-ci-gate-diff-missing",
     113: "trusted-lts-hotfix-policy-diff-missing",
@@ -104,6 +105,16 @@ RELEASE_NOTES_REPORT_GRADE_BLOCKERS = [
     "checksum-publication-review-required",
     "release-host-smoke-log-required",
     "independent-release-notes-review-required",
+]
+LTS_HOTFIX_REPORT_GRADE_BLOCKERS = [
+    OPERATIONS_DOCUMENT_TRUSTED_DIFF_BLOCKERS[113],
+    "maintained-branch-proof-required",
+    "hotfix-backport-validation-required",
+    "emergency-patch-drill-required",
+    "release-owner-hotfix-signoff-required",
+    "lts-branch-policy-review-required",
+    "release-host-hotfix-smoke-required",
+    "independent-lts-policy-review-required",
 ]
 ANALYST_QUICKSTART_LAB_GAP_ID = "#116"
 ADMIN_DEPLOYMENT_GUIDE_GAP_ID = "#117"
@@ -1727,6 +1738,135 @@ def build_release_notes_report_grade_validation_plan(
     return plan
 
 
+def build_lts_hotfix_report_grade_validation_plan(
+    *,
+    evidence_manifest: dict[str, object],
+    trusted_diff: dict[str, object],
+) -> dict[str, object]:
+    document_hashes = evidence_manifest.get("document_hashes") if isinstance(evidence_manifest.get("document_hashes"), list) else []
+    evidence_slots = evidence_manifest.get("evidence_slots") if isinstance(evidence_manifest.get("evidence_slots"), dict) else {}
+    ready_slots = [
+        {
+            "slot_id": "lts-hotfix-policy-document",
+            "status": "ready",
+            "evidence_ref": "docs/rapidtriage-lts-hotfix-policy.md",
+            "evidence_hash": stable_release_sha256(document_hashes),
+        },
+        {
+            "slot_id": "lts-hotfix-evidence-manifest",
+            "status": "ready",
+            "evidence_ref": "release-manifest.package_readiness.operations_documents.document_evidence_manifest_hashes.113",
+            "evidence_hash": str(evidence_manifest.get("manifest_hash") or ""),
+        },
+        {
+            "slot_id": "lts-hotfix-document-evidence-matrix",
+            "status": "ready",
+            "evidence_ref": "release-manifest.package_readiness.operations_documents.document_evidence_matrix_hashes.113",
+            "evidence_hash": str(evidence_manifest.get("document_evidence_matrix_hash") or ""),
+        },
+        {
+            "slot_id": "maintained-branch-proof-boundary",
+            "status": "ready-with-blocker",
+            "evidence_ref": "release-manifest.package_readiness.operations_documents.document_evidence_slots.113.maintained_branch_proof",
+            "evidence_hash": stable_release_sha256(evidence_slots.get("maintained_branch_proof", {})),
+        },
+        {
+            "slot_id": "hotfix-backport-validation-boundary",
+            "status": "ready-with-blocker",
+            "evidence_ref": "release-manifest.package_readiness.operations_documents.document_evidence_slots.113.hotfix_backport_validation",
+            "evidence_hash": stable_release_sha256(evidence_slots.get("hotfix_backport_validation", {})),
+        },
+        {
+            "slot_id": "trusted-lts-hotfix-diff-boundary",
+            "status": "ready" if trusted_diff.get("status") == "pass" else "ready-with-blocker",
+            "evidence_ref": "release-manifest.package_readiness.operations_documents.trusted_operations_document_diffs.113",
+            "evidence_hash": stable_release_sha256(trusted_diff),
+        },
+    ]
+    blocking_slots = []
+    if trusted_diff.get("status") != "pass":
+        blocking_slots.append(
+            {
+                "slot_id": "trusted-lts-hotfix-policy-diff",
+                "status": "blocking",
+                "blocker": OPERATIONS_DOCUMENT_TRUSTED_DIFF_BLOCKERS[113],
+                "required_evidence": "trusted LTS/hotfix policy review comparing branch policy, backport validation, and release gating",
+            }
+        )
+    for slot_id, blocker, required_evidence in (
+        (
+            "maintained-branch-proof",
+            "maintained-branch-proof-required",
+            "operator-maintained LTS branch proof with branch name, protection status, and supported version window",
+        ),
+        (
+            "hotfix-backport-validation",
+            "hotfix-backport-validation-required",
+            "hotfix backport validation transcript tying patch, tests, and release notes to affected branches",
+        ),
+        (
+            "emergency-patch-drill",
+            "emergency-patch-drill-required",
+            "emergency patch drill proving triage, fix, validation, and release timing can meet policy",
+        ),
+        (
+            "release-owner-hotfix-signoff",
+            "release-owner-hotfix-signoff-required",
+            "release owner signoff for hotfix scope, risk, rollback, and customer notice wording",
+        ),
+        (
+            "lts-branch-policy-review",
+            "lts-branch-policy-review-required",
+            "review confirming branch rules, support windows, and backport criteria are current for this release",
+        ),
+        (
+            "release-host-hotfix-smoke",
+            "release-host-hotfix-smoke-required",
+            "release-host smoke log for the hotfix/LTS package path before support claims are made",
+        ),
+        (
+            "independent-lts-policy-review",
+            "independent-lts-policy-review-required",
+            "independent reviewer confirmation of LTS/hotfix policy operation and evidence completeness",
+        ),
+    ):
+        blocking_slots.append(
+            {
+                "slot_id": slot_id,
+                "status": "blocking",
+                "current_attachment_status": "not-attached",
+                "blocker": blocker,
+                "required_evidence": required_evidence,
+            }
+        )
+    blockers = sorted({str(slot["blocker"]) for slot in blocking_slots if slot.get("blocker")})
+    plan: dict[str, object] = {
+        "profile_version": LTS_HOTFIX_REPORT_GRADE_VALIDATION_PLAN_VERSION,
+        "item_number": 113,
+        "commercial_gap_ids": [LTS_HOTFIX_POLICY_GAP_ID],
+        "commercial_claim_allowed": False,
+        "document_count": len(document_hashes),
+        "evidence_slot_count": len(evidence_slots),
+        "lts_hotfix_evidence_manifest_hash": str(evidence_manifest.get("manifest_hash") or ""),
+        "operations_document_evidence_matrix_hash": str(evidence_manifest.get("document_evidence_matrix_hash") or ""),
+        "trusted_diff_status": str(trusted_diff.get("status") or ""),
+        "trusted_diff_blocker": trusted_diff.get("blocker"),
+        "ready_slots": ready_slots,
+        "blocking_slots": blocking_slots,
+        "ready_slot_count": len(ready_slots),
+        "blocking_slot_count": len(blocking_slots),
+        "external_blocker_catalog": list(LTS_HOTFIX_REPORT_GRADE_BLOCKERS),
+        "blockers": blockers,
+        "reporting_boundary": (
+            "The LTS/hotfix policy document is packaged; commercial support claims require maintained branch "
+            "proof, backport validation, emergency patch drills, release-owner signoff, release-host smoke, "
+            "and independent review evidence."
+        ),
+    }
+    plan["validation_plan_hash"] = stable_release_sha256(plan)
+    return plan
+
+
 def build_operations_document_evidence_matrix(
     *,
     number: int,
@@ -2197,16 +2337,23 @@ def write_release_manifest(output_dir: Path, repo: Path, commercial_readiness: d
         release_discipline_manifest=release_discipline_manifest,
         trusted_diff=trusted_operations_document_diffs["112"],
     )
+    lts_hotfix_report_grade_validation_plan = build_lts_hotfix_report_grade_validation_plan(
+        evidence_manifest=operations_document_evidence_manifests["113"],
+        trusted_diff=trusted_operations_document_diffs["113"],
+    )
     operations_document_report_grade_validation_plans = {
         "112": release_notes_report_grade_validation_plan,
+        "113": lts_hotfix_report_grade_validation_plan,
     }
     operations_document_report_grade_validation_plan_hashes = {
         "112": release_notes_report_grade_validation_plan["validation_plan_hash"],
+        "113": lts_hotfix_report_grade_validation_plan["validation_plan_hash"],
     }
     operations_documents_blockers = sorted(
         {
             *[OPERATIONS_DOCUMENT_TRUSTED_DIFF_BLOCKERS[number] for number in range(112, 118)],
             *[str(blocker) for blocker in release_notes_report_grade_validation_plan.get("blockers", [])],
+            *[str(blocker) for blocker in lts_hotfix_report_grade_validation_plan.get("blockers", [])],
         }
     )
     update_manifest_payload: dict[str, object] = {}
@@ -2401,9 +2548,11 @@ def write_release_manifest(output_dir: Path, repo: Path, commercial_readiness: d
                 "document_report_grade_validation_plan_hashes": operations_document_report_grade_validation_plan_hashes,
                 "document_report_grade_ready_slot_counts": {
                     "112": release_notes_report_grade_validation_plan["ready_slot_count"],
+                    "113": lts_hotfix_report_grade_validation_plan["ready_slot_count"],
                 },
                 "document_report_grade_blocking_slot_counts": {
                     "112": release_notes_report_grade_validation_plan["blocking_slot_count"],
+                    "113": lts_hotfix_report_grade_validation_plan["blocking_slot_count"],
                 },
                 "admin_guide_coverage_manifest": admin_guide_coverage_manifest,
                 "admin_guide_coverage_manifest_hash": admin_guide_coverage_manifest["manifest_hash"],
@@ -3047,6 +3196,10 @@ def operations_documents_core_accuracy_gates(
         112: (
             "release notes report-grade validation plan",
             "release notes report-grade ready slots",
+        ),
+        113: (
+            "LTS/hotfix report-grade validation plan",
+            "LTS/hotfix report-grade ready slots",
         ),
     }
     gates = []

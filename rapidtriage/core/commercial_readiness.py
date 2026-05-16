@@ -3731,6 +3731,7 @@ def operations_continuity_evidence_chain() -> list[dict[str, object]]:
             "primary_outputs": [
                 "docs/rapidtriage-lts-hotfix-policy.md",
                 "operations_documents.document_evidence_manifests.113.manifest_hash",
+                "operations_documents.document_report_grade_validation_plan_hashes.113",
                 "operations_documents.document_evidence_slots.113.maintained_branch_proof",
             ],
             "trusted_diff": "trusted-lts-hotfix-policy-diff",

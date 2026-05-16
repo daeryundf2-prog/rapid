@@ -297,6 +297,8 @@ class RapidTriageCoreForensicsAccuracyTests(unittest.TestCase):
         self.assertIn("release notes report-grade ready slots", release_notes["required_checks"])
         self.assertIn("trusted release notes CI gate diff pass", release_notes["required_checks"])
         self.assertIn("hotfix criteria documented", lts_policy["required_checks"])
+        self.assertIn("LTS/hotfix report-grade validation plan", lts_policy["required_checks"])
+        self.assertIn("LTS/hotfix report-grade ready slots", lts_policy["required_checks"])
         self.assertIn("trusted LTS/hotfix policy diff pass", lts_policy["required_checks"])
         self.assertIn("staffed support blocker disclosed", support_sla["required_checks"])
         self.assertIn("trusted support desk SLA diff pass", support_sla["required_checks"])

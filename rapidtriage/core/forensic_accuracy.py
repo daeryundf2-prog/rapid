@@ -1908,6 +1908,8 @@ CORE_FORENSIC_ACCURACY_ITEMS: tuple[dict[str, object], ...] = (
             "backport validation documented",
             "emergency patch gate documented",
             "operator maintenance blocker disclosed",
+            "LTS/hotfix report-grade validation plan",
+            "LTS/hotfix report-grade ready slots",
             "trusted LTS/hotfix policy diff pass",
         ),
     },
