@@ -2818,6 +2818,10 @@ def artifact_search_metadata(row: Mapping[str, object]) -> dict[str, object]:
         "count",
         "source_hashes",
         "record_hashes",
+        "source_viewer_locator",
+        "source_locator",
+        "row_citation_hash",
+        "parser_manifest_hashes",
         "source_path",
         "source_format",
         "source_index",
@@ -2829,10 +2833,86 @@ def artifact_search_metadata(row: Mapping[str, object]) -> dict[str, object]:
         "matched_rules",
     )
     metadata = {key: details[key] for key in keys if details.get(key) not in (None, "", [])}
+    source_viewer_locator = artifact_source_viewer_locator(details)
+    if source_viewer_locator:
+        metadata["source_viewer_locator"] = source_viewer_locator
+        metadata.setdefault("source_locator", source_viewer_locator)
+        metadata["source_locator_hash"] = stable_payload_sha256(source_viewer_locator)
+    row_citation = artifact_row_citation(details)
+    if row_citation:
+        metadata["row_citation"] = row_citation
+        if row_citation.get("row_hash"):
+            metadata["row_citation_hash"] = str(row_citation["row_hash"])
+    parser_manifest_hashes = artifact_parser_manifest_hashes(details)
+    if parser_manifest_hashes:
+        metadata["parser_manifest_hashes"] = parser_manifest_hashes
     nested = artifact_nested_preview(details)
     if nested:
         metadata["preview_value"] = nested
     return metadata
+
+
+def artifact_parser_manifest_hashes(details: Mapping[str, object]) -> dict[str, str]:
+    manifest_fields = {
+        "cloud_export_import_manifest_hash": "cloud_export_import",
+        "cloud_archive_manifest_hash": "cloud_archive",
+        "google_takeout_parser_manifest_hash": "google_takeout",
+        "icloud_export_parser_manifest_hash": "icloud_export",
+        "m365_export_parser_manifest_hash": "m365_export",
+        "email_mailbox_parser_manifest_hash": "email_mailbox",
+        "email_expansion_citation_manifest_hash": "email_expansion",
+        "ai_transcript_parser_manifest_hash": "ai_transcript",
+    }
+    hashes: dict[str, str] = {}
+    for field, label in manifest_fields.items():
+        value = str(details.get(field) or "").strip()
+        if value:
+            hashes[label] = value
+    return hashes
+
+
+def artifact_row_citation(details: Mapping[str, object]) -> dict[str, object]:
+    for manifest_key in artifact_source_manifest_keys():
+        manifest = details.get(manifest_key)
+        if not isinstance(manifest, Mapping):
+            continue
+        row_citation = manifest.get("row_citation")
+        if isinstance(row_citation, Mapping):
+            return dict(row_citation)
+    return {}
+
+
+def artifact_source_viewer_locator(details: Mapping[str, object]) -> dict[str, object]:
+    direct = details.get("source_viewer_locator")
+    if isinstance(direct, Mapping):
+        return dict(direct)
+    for manifest_key in artifact_source_manifest_keys():
+        manifest = details.get(manifest_key)
+        if not isinstance(manifest, Mapping):
+            continue
+        row_citation = manifest.get("row_citation")
+        if isinstance(row_citation, Mapping) and isinstance(row_citation.get("source_viewer_locator"), Mapping):
+            return dict(row_citation["source_viewer_locator"])
+    import_manifest = details.get("cloud_export_import_manifest")
+    if isinstance(import_manifest, Mapping) and isinstance(import_manifest.get("source_viewer_locator"), Mapping):
+        return dict(import_manifest["source_viewer_locator"])
+    attachments = details.get("attachments")
+    if isinstance(attachments, list):
+        for attachment in attachments:
+            if isinstance(attachment, Mapping) and isinstance(attachment.get("source_viewer_locator"), Mapping):
+                return dict(attachment["source_viewer_locator"])
+    return {}
+
+
+def artifact_source_manifest_keys() -> tuple[str, ...]:
+    return (
+        "google_takeout_parser_manifest",
+        "icloud_export_parser_manifest",
+        "m365_export_parser_manifest",
+        "email_mailbox_parser_manifest",
+        "email_expansion_citation_manifest",
+        "ai_transcript_parser_manifest",
+    )
 
 
 def artifact_nested_preview(details: Mapping[str, object]) -> str:
@@ -3220,6 +3300,13 @@ def build_source_reference(match: Mapping[str, object]) -> dict[str, object]:
     metadata = match.get("metadata") if isinstance(match.get("metadata"), Mapping) else {}
     source_hashes = metadata.get("source_hashes") if isinstance(metadata.get("source_hashes"), Mapping) else {}
     record_hashes = metadata.get("record_hashes") if isinstance(metadata.get("record_hashes"), Mapping) else {}
+    source_viewer_locator = (
+        dict(metadata.get("source_viewer_locator")) if isinstance(metadata.get("source_viewer_locator"), Mapping) else {}
+    )
+    source_locator = dict(metadata.get("source_locator")) if isinstance(metadata.get("source_locator"), Mapping) else {}
+    parser_manifest_hashes = (
+        dict(metadata.get("parser_manifest_hashes")) if isinstance(metadata.get("parser_manifest_hashes"), Mapping) else {}
+    )
     reference = {
         "citation_id": str(match.get("citation_id") or ""),
         "target_type": str(match.get("target_type") or ""),
@@ -3233,6 +3320,11 @@ def build_source_reference(match: Mapping[str, object]) -> dict[str, object]:
         "record_offset": metadata.get("record_offset") or metadata.get("file_offset"),
         "source_hashes": dict(source_hashes),
         "record_hashes": dict(record_hashes),
+        "source_viewer_locator": source_viewer_locator,
+        "source_locator": source_locator or source_viewer_locator,
+        "source_locator_hash": str(metadata.get("source_locator_hash") or ""),
+        "row_citation_hash": str(metadata.get("row_citation_hash") or ""),
+        "parser_manifest_hashes": parser_manifest_hashes,
         "evidence_strength": str(metadata.get("evidence_strength") or ""),
         "reportability": str(metadata.get("reportability") or ""),
         "coverage_status": str(metadata.get("coverage_status") or ""),
@@ -5223,6 +5315,11 @@ def attach_citation_row_hash(citation: Mapping[str, object]) -> dict[str, object
 
 def report_citation_source_viewer_locator(*, citation_id: str, role: str, item: Mapping[str, object]) -> dict[str, object]:
     source_reference = item.get("source_reference") if isinstance(item.get("source_reference"), Mapping) else {}
+    upstream_locator = (
+        dict(source_reference.get("source_viewer_locator"))
+        if isinstance(source_reference.get("source_viewer_locator"), Mapping)
+        else {}
+    )
     return {
         "viewer": "report-citation-source",
         "open_action": "open-report-citation",
@@ -5233,6 +5330,10 @@ def report_citation_source_viewer_locator(*, citation_id: str, role: str, item: 
         "path": str(source_reference.get("path") or item.get("path") or ""),
         "parser": str(source_reference.get("parser") or ""),
         "parser_version": str(source_reference.get("parser_version") or ""),
+        "upstream_source_viewer_locator": upstream_locator,
+        "parser_manifest_hashes": dict(source_reference.get("parser_manifest_hashes"))
+        if isinstance(source_reference.get("parser_manifest_hashes"), Mapping)
+        else {},
     }
 
 
@@ -8393,6 +8494,14 @@ def build_report_item_provenance(
         "source_locator": dict(source_reference.get("source_locator"))
         if isinstance(source_reference.get("source_locator"), Mapping)
         else {},
+        "source_viewer_locator": dict(source_reference.get("source_viewer_locator"))
+        if isinstance(source_reference.get("source_viewer_locator"), Mapping)
+        else {},
+        "source_locator_hash": str(source_reference.get("source_locator_hash") or ""),
+        "row_citation_hash": str(source_reference.get("row_citation_hash") or ""),
+        "parser_manifest_hashes": dict(source_reference.get("parser_manifest_hashes"))
+        if isinstance(source_reference.get("parser_manifest_hashes"), Mapping)
+        else {},
         "hashes": dict(hashes),
         "record_hashes": dict(record_hashes),
         "parser": str(source_reference.get("parser") or metadata.get("parser") or ""),
@@ -10268,6 +10377,9 @@ def build_case_search_review_workflow_summary(
 
 def build_review_queue_source_viewer_locator(match: Mapping[str, object], review: Mapping[str, object]) -> dict[str, object]:
     metadata = match.get("metadata") if isinstance(match.get("metadata"), Mapping) else {}
+    upstream_locator = (
+        dict(metadata.get("source_viewer_locator")) if isinstance(metadata.get("source_viewer_locator"), Mapping) else {}
+    )
     return {
         "viewer": "case-review-source",
         "source": str(match.get("source") or "unknown"),
@@ -10285,6 +10397,10 @@ def build_review_queue_source_viewer_locator(match: Mapping[str, object], review
             "record_offset": metadata.get("record_offset") if metadata.get("record_offset") is not None else "",
             "source_index": metadata.get("source_index") if metadata.get("source_index") is not None else "",
         },
+        "upstream_source_viewer_locator": upstream_locator,
+        "parser_manifest_hashes": dict(metadata.get("parser_manifest_hashes"))
+        if isinstance(metadata.get("parser_manifest_hashes"), Mapping)
+        else {},
         "open_action": "open-source-and-verify-before-report",
     }
 

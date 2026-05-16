@@ -6,6 +6,7 @@ import unittest
 import contextlib
 import io
 import json
+import zipfile
 from pathlib import Path
 from unittest import mock
 
@@ -948,6 +949,89 @@ class RapidTriageCaseDatabaseTests(unittest.TestCase):
             self.assertEqual(payload["imported_run"]["case_id"], "CASE-CLI-IMPORT")
             self.assertGreaterEqual(payload["imported_run"]["summary"]["file_record_count"], 1)
             self.assertGreaterEqual(payload["imported_run"]["summary"]["indexed_document_count"], 1)
+
+    def test_case_db_cloud_artifact_search_preserves_source_viewer_locator(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            archive_path = root / "takeout-archive.zip"
+            with zipfile.ZipFile(archive_path, "w") as archive:
+                archive.writestr(
+                    "Takeout/Mail/All mail Including Spam and Trash.mbox",
+                    "\n".join(
+                        [
+                            "From alice@example.com Fri May 01 00:00:00 2026",
+                            "Message-ID: <gmail-mbox-1@example.com>",
+                            "Date: Fri, 01 May 2026 00:30:00 +0000",
+                            "From: Alice <alice@example.com>",
+                            "To: Bob <bob@example.com>",
+                            "Subject: Invoice password from MBOX",
+                            "",
+                            "Please review the invoice password from archived mail.",
+                            "",
+                        ]
+                    ),
+                )
+            artifacts_output = root / "cloud-artifacts.json"
+            self.assertEqual(
+                main(["artifacts", str(root), "--kind", "cloud-export", "--output", str(artifacts_output)]),
+                0,
+            )
+
+            database = open_case_database(root / "case.db")
+            imported = database.import_run_output(
+                {
+                    "root": str(root),
+                    "source": {"type": "folder", "source_path": str(root), "analysis_root": str(root)},
+                    "outputs": {"artifacts_cloud_export": str(artifacts_output)},
+                },
+                case_id="CASE-CLOUD-SRC",
+            )
+            self.assertGreaterEqual(imported["summary"]["artifact_count"], 1)
+
+            search = database.search_case(
+                case_id="CASE-CLOUD-SRC",
+                keywords=["invoice", "password"],
+                sources=["artifacts"],
+            )
+            match = next(item for item in search["matches"] if item["kind"] == "cloud-mail")
+            source_reference = match["source_reference"]
+
+            self.assertEqual(
+                match["metadata"]["source_viewer_locator"]["viewer"],
+                "google-takeout-product-row",
+            )
+            self.assertEqual(source_reference["source_viewer_locator"]["viewer"], "google-takeout-product-row")
+            self.assertEqual(source_reference["source_locator"]["viewer"], "google-takeout-product-row")
+            self.assertEqual(source_reference["row_citation_hash"], match["metadata"]["row_citation_hash"])
+            self.assertIn("sha256", source_reference["source_hashes"])
+            self.assertIn("google_takeout", source_reference["parser_manifest_hashes"])
+            self.assertEqual(
+                search["review_workflow_summary"]["review_queue"][0]["source_viewer_locator"][
+                    "upstream_source_viewer_locator"
+                ]["viewer"],
+                "google-takeout-product-row",
+            )
+
+            database.mark_review(
+                case_id="CASE-CLOUD-SRC",
+                target_type=str(match["target_type"]),
+                target_id=str(match["target_id"]),
+                status="relevant",
+                verification_status="source_opened",
+                tags=["cloud", "mail"],
+                note="Confirmed cloud export row locator.",
+                include_in_report=True,
+                reviewer="unit-test",
+            )
+            export = database.export_reviewed_items(case_id="CASE-CLOUD-SRC")
+            item = export["items"][0]
+            self.assertEqual(item["source_reference"]["source_viewer_locator"]["viewer"], "google-takeout-product-row")
+            self.assertEqual(item["provenance"]["source_viewer_locator"]["viewer"], "google-takeout-product-row")
+            source_citation = next(row for row in export["citation_index"] if row["role"] == "source-record")
+            self.assertEqual(
+                source_citation["source_viewer_locator"]["upstream_source_viewer_locator"]["viewer"],
+                "google-takeout-product-row",
+            )
 
     def test_cli_case_db_imports_vsc_compare_as_searchable_artifacts(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
