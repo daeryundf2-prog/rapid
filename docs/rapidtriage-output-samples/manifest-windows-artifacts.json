@@ -3732,7 +3732,7 @@
               "item_number": 14,
               "manifest_sha256": "<DYNAMIC_MANIFEST_HASH>",
               "manifest_version": "jumplist-destlist-depth-manifest-v1",
-              "parser_version": "windows-recent-files-v7",
+              "parser_version": "windows-recent-files-v8",
               "qc_prep_contract": {
                 "implemented": [
                   "CFB/OLE stream inventory with bounded stream limits",
@@ -3847,7 +3847,7 @@
             "ole_streams": [],
             "parser": "windows-recent-files",
             "parser_confidence": 0.65,
-            "parser_version": "windows-recent-files-v7",
+            "parser_version": "windows-recent-files-v8",
             "recent_native_capabilities": {
               "appid_hash_mapping": false,
               "destlist_account_metadata_decode": false,
@@ -4355,7 +4355,7 @@
               "item_number": 14,
               "manifest_sha256": "<DYNAMIC_MANIFEST_HASH>",
               "manifest_version": "jumplist-destlist-depth-manifest-v1",
-              "parser_version": "windows-recent-files-v7",
+              "parser_version": "windows-recent-files-v8",
               "qc_prep_contract": {
                 "implemented": [
                   "CFB/OLE stream inventory with bounded stream limits",
@@ -4470,7 +4470,7 @@
             "ole_streams": [],
             "parser": "windows-recent-files",
             "parser_confidence": 0.65,
-            "parser_version": "windows-recent-files-v7",
+            "parser_version": "windows-recent-files-v8",
             "recent_native_capabilities": {
               "appid_hash_mapping": false,
               "destlist_account_metadata_decode": false,
@@ -4618,6 +4618,12 @@
                 "full-property-store-decode-available"
               ],
               "implementation_track": "native-parser-depth",
+              "implemented_controls": {
+                "extra_data_bound_count": 1,
+                "field_source_count": 14,
+                "target_context_citation_profile_hash": "971a8f5d126306fdb74dfddf62938e0e1b6888296631b80e691027be88693347",
+                "target_context_citation_profile_present": true
+              },
               "item_numbers": [
                 17
               ],
@@ -4625,7 +4631,9 @@
                 "bounded_extra_data_blocks": true,
                 "max_extra_data_blocks": 64,
                 "max_shell_items": 128,
-                "property_store_decode_required_for_commercial_claims": true
+                "property_store_decode_required_for_commercial_claims": true,
+                "target_context_citation_profile_hash": "971a8f5d126306fdb74dfddf62938e0e1b6888296631b80e691027be88693347",
+                "target_context_citation_profile_present": true
               },
               "lnk_trusted_diff": {
                 "status": "not-attached"
@@ -4651,6 +4659,7 @@
                     "ShellLinkHeader flags, attributes, timestamps, size, show command, and hotkey fields",
                     "LinkInfo local/common path candidates and StringData target context",
                     "ExtraData block inventory with TrackerDataBlock and property-store candidate preservation",
+                    "target context citation profile with source field offsets, block bounds, and stable identity hash",
                     "depth manifest with source hash, target identity hash, citation refs, and report blockers"
                   ],
                   "item_number": 32
@@ -4689,6 +4698,7 @@
                     "ShellLinkHeader flags, attributes, timestamps, size, show command, and hotkey fields",
                     "LinkInfo local/common path candidates and StringData target context",
                     "ExtraData block inventory with TrackerDataBlock and property-store candidate preservation",
+                    "target context citation profile with source field offsets, block bounds, and stable identity hash",
                     "depth manifest with source hash, target identity hash, citation refs, and report blockers"
                   ],
                   "item_number": 32
@@ -4706,7 +4716,8 @@
                 "source_path:<ROOT>/Users/alice/AppData/Roaming/Microsoft/Windows/Recent/Case Notes.lnk",
                 "source_sha256:9acc17da47c5d23d5d4c6307982fe7726fa5714d1fb26f5ae429d06b0a463f8d",
                 "target_path:C:\\Users\\alice\\Documents\\Case Notes.docx",
-                "artifact_type:recent-shortcut"
+                "artifact_type:recent-shortcut",
+                "target_context_profile_sha256:971a8f5d126306fdb74dfddf62938e0e1b6888296631b80e691027be88693347"
               ]
             },
             "core_accuracy_gates": [
@@ -4754,7 +4765,8 @@
                   "header flag consistency",
                   "target/working-dir/arguments extraction",
                   "tracker GUID validation",
-                  "timestamp/source field provenance"
+                  "timestamp/source field provenance",
+                  "target context citation profile"
                 ],
                 "status": "validation-required",
                 "title": "LNK full metadata parser"
@@ -4892,6 +4904,7 @@
                 "working_dir": "C:\\Users\\alice\\Documents"
               },
               "summary": "Shell Link shortcut pivot with target path, LinkInfo/StringData, timestamps, and tracker context.",
+              "target_context_citation_profile_hash": "971a8f5d126306fdb74dfddf62938e0e1b6888296631b80e691027be88693347",
               "validation_required": true
             },
             "lnk_header_size": 76,
@@ -4929,6 +4942,11 @@
                   "kind": "lnk-tracker",
                   "machine_id": "ALICE-PC",
                   "validation_status": "candidate-requires-known-answer-corpus"
+                },
+                {
+                  "kind": "lnk-target-context-profile",
+                  "profile_sha256": "971a8f5d126306fdb74dfddf62938e0e1b6888296631b80e691027be88693347",
+                  "target_identity_hash": "77fc2b6f245a33fef9db6f91bb2056cb01e033595ad499cb4a1c8b49b099932d"
                 }
               ],
               "commercial_batch_id": "commercial-uplift-016-020",
@@ -4972,7 +4990,7 @@
               },
               "manifest_sha256": "<DYNAMIC_MANIFEST_HASH>",
               "manifest_version": "lnk-metadata-depth-manifest-v1",
-              "parser_version": "windows-recent-files-v7",
+              "parser_version": "windows-recent-files-v8",
               "qc_prep_contract": {
                 "commercial_blockers": [
                   "complete shell item semantic decoding",
@@ -4985,6 +5003,7 @@
                   "ShellLinkHeader flags, attributes, timestamps, size, show command, and hotkey fields",
                   "LinkInfo local/common path candidates and StringData target context",
                   "ExtraData block inventory with TrackerDataBlock and property-store candidate preservation",
+                  "target context citation profile with source field offsets, block bounds, and stable identity hash",
                   "depth manifest with source hash, target identity hash, citation refs, and report blockers"
                 ],
                 "item_number": 32
@@ -5047,13 +5066,245 @@
                 "target_modified_at": "2024-03-05T06:07:08+00:00",
                 "target_path": "C:\\Users\\alice\\Documents\\Case Notes.docx",
                 "working_dir": "C:\\Users\\alice\\Documents"
+              },
+              "target_context_citation_profile": {
+                "extra_data_bound_count": 1,
+                "field_source_count": 14,
+                "profile_sha256": "971a8f5d126306fdb74dfddf62938e0e1b6888296631b80e691027be88693347",
+                "profile_version": "lnk-target-context-citation-profile-v1",
+                "viewer": "lnk-shell-link"
               }
             },
             "lnk_metadata_depth_manifest_hash": "<DYNAMIC_MANIFEST_HASH>",
             "lnk_parse_status": "parsed",
+            "lnk_target_context_citation_profile": {
+              "commercial_batch_id": "commercial-uplift-016-020",
+              "extra_data_bounds": [
+                {
+                  "index": 0,
+                  "offset": 210,
+                  "parse_status": "parsed-known",
+                  "signature": "0xA0000003",
+                  "size": 96,
+                  "type": "TrackerDataBlock"
+                }
+              ],
+              "field_sources": [
+                {
+                  "field": "header_size",
+                  "offset": 0,
+                  "size": 4,
+                  "structure": "ShellLinkHeader",
+                  "value": 76
+                },
+                {
+                  "field": "link_clsid",
+                  "offset": 4,
+                  "size": 16,
+                  "structure": "ShellLinkHeader",
+                  "value": "validated"
+                },
+                {
+                  "field": "link_flags",
+                  "offset": 20,
+                  "size": 4,
+                  "structure": "ShellLinkHeader",
+                  "value": 184
+                },
+                {
+                  "field": "file_attributes",
+                  "offset": 24,
+                  "size": 4,
+                  "structure": "ShellLinkHeader",
+                  "value": 32
+                },
+                {
+                  "field": "target_created_at",
+                  "offset": 28,
+                  "size": 8,
+                  "structure": "ShellLinkHeader",
+                  "value": "2024-03-05T06:07:08+00:00"
+                },
+                {
+                  "field": "target_accessed_at",
+                  "offset": 36,
+                  "size": 8,
+                  "structure": "ShellLinkHeader",
+                  "value": "2024-03-05T06:07:08+00:00"
+                },
+                {
+                  "field": "target_modified_at",
+                  "offset": 44,
+                  "size": 8,
+                  "structure": "ShellLinkHeader",
+                  "value": "2024-03-05T06:07:08+00:00"
+                },
+                {
+                  "field": "target_file_size",
+                  "offset": 52,
+                  "size": 4,
+                  "structure": "ShellLinkHeader",
+                  "value": 4096
+                },
+                {
+                  "field": "show_command",
+                  "offset": 60,
+                  "size": 4,
+                  "structure": "ShellLinkHeader",
+                  "value": 1
+                },
+                {
+                  "field": "hot_key",
+                  "offset": 64,
+                  "size": 2,
+                  "structure": "ShellLinkHeader",
+                  "value": 0
+                },
+                {
+                  "field": "target_path",
+                  "structure": "LinkInfo/StringData/embedded path",
+                  "value": "C:\\Users\\alice\\Documents\\Case Notes.docx"
+                },
+                {
+                  "field": "working_dir",
+                  "structure": "StringData",
+                  "value": "C:\\Users\\alice\\Documents"
+                },
+                {
+                  "field": "relative_path",
+                  "structure": "StringData",
+                  "value": "C:\\Users\\alice\\Documents\\Case Notes.docx"
+                },
+                {
+                  "block_offset": 210,
+                  "field": "tracker_machine_id",
+                  "structure": "TrackerDataBlock",
+                  "value": "ALICE-PC"
+                }
+              ],
+              "gap_id": "#17",
+              "item_number": 17,
+              "link_info_bounds": {
+                "common_path_suffix_offset": 0,
+                "header_size": 0,
+                "local_base_path_offset": 0,
+                "offset": 0,
+                "parse_status": "not-present",
+                "size": 0
+              },
+              "parser_version": "windows-recent-files-v8",
+              "profile_sha256": "971a8f5d126306fdb74dfddf62938e0e1b6888296631b80e691027be88693347",
+              "profile_version": "lnk-target-context-citation-profile-v1",
+              "property_store_review": {
+                "block_count": 0,
+                "candidate_profile_hash": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+                "embedded_path_count": 0,
+                "guid_candidate_count": 0,
+                "reportability": "review-only",
+                "string_candidate_count": 0
+              },
+              "qc_prep_item_goal": "Deepen LNK ShellLinkHeader, LinkInfo, StringData, ExtraData, TrackerDataBlock, and target/source citation.",
+              "qc_prep_item_number": 32,
+              "reportability_decision": {
+                "allowed_use": "shortcut-target-and-metadata-triage-pivot",
+                "blockers": [
+                  "full-shell-item-property-store-decoding-required",
+                  "lnk-shell-item-property-store-validation-required",
+                  "lnk-tracker-and-linkinfo-cross-tool-diff-required",
+                  "lnk-trusted-parser-diff-required",
+                  "recent-files-validation-required",
+                  "tracker-data-known-answer-corpus-validation-required",
+                  "validation-check-failed:full-property-store-decode-available",
+                  "validation-check-failed:has-link-info",
+                  "validation-check-failed:has-property-store-data-block",
+                  "validation-check-failed:has-shell-item-idlist"
+                ],
+                "commercial_gap_id": "#17",
+                "decision": "do-not-report-target-context-as-complete",
+                "profile_version": "lnk-reportability-decision-v1",
+                "qc_prep_contract": {
+                  "commercial_blockers": [
+                    "complete shell item semantic decoding",
+                    "full property-store schema validation",
+                    "LinkInfo/network-provider OS-version validation",
+                    "LECmd/known-answer trusted diff evidence for critical shortcuts"
+                  ],
+                  "goal": "Deepen LNK ShellLinkHeader, LinkInfo, StringData, ExtraData, TrackerDataBlock, and target/source citation.",
+                  "implemented_outputs": [
+                    "ShellLinkHeader flags, attributes, timestamps, size, show command, and hotkey fields",
+                    "LinkInfo local/common path candidates and StringData target context",
+                    "ExtraData block inventory with TrackerDataBlock and property-store candidate preservation",
+                    "target context citation profile with source field offsets, block bounds, and stable identity hash",
+                    "depth manifest with source hash, target identity hash, citation refs, and report blockers"
+                  ],
+                  "item_number": 32
+                },
+                "qc_prep_item_goal": "Deepen LNK ShellLinkHeader, LinkInfo, StringData, ExtraData, TrackerDataBlock, and target/source citation.",
+                "qc_prep_item_number": 32,
+                "required_before_report": [
+                  "Shell Item and property-store semantics validated",
+                  "LinkInfo drive/network provider fields decoded and diffed",
+                  "Tracker GUID and machine ID semantics verified",
+                  "LECmd or known-answer corpus attached for critical shortcuts"
+                ]
+              },
+              "source": {
+                "entry_name": "",
+                "source_format": "lnk-shell-link",
+                "source_path": "<ROOT>/Users/alice/AppData/Roaming/Microsoft/Windows/Recent/Case Notes.lnk",
+                "source_sha256": "9acc17da47c5d23d5d4c6307982fe7726fa5714d1fb26f5ae429d06b0a463f8d"
+              },
+              "source_viewer_locator": {
+                "extra_data_block_count": 1,
+                "header_offset": 0,
+                "header_size": 76,
+                "source_path": "<ROOT>/Users/alice/AppData/Roaming/Microsoft/Windows/Recent/Case Notes.lnk",
+                "source_sha256": "9acc17da47c5d23d5d4c6307982fe7726fa5714d1fb26f5ae429d06b0a463f8d",
+                "string_data_end_offset": 210,
+                "viewer": "lnk-shell-link"
+              },
+              "target_context": {
+                "command_line_arguments": "",
+                "icon_location": "",
+                "relative_path": "C:\\Users\\alice\\Documents\\Case Notes.docx",
+                "target_accessed_at": "2024-03-05T06:07:08+00:00",
+                "target_created_at": "2024-03-05T06:07:08+00:00",
+                "target_file_size": 4096,
+                "target_identity_hash": "77fc2b6f245a33fef9db6f91bb2056cb01e033595ad499cb4a1c8b49b099932d",
+                "target_modified_at": "2024-03-05T06:07:08+00:00",
+                "target_path": "C:\\Users\\alice\\Documents\\Case Notes.docx",
+                "tracker_machine_id": "ALICE-PC",
+                "working_dir": "C:\\Users\\alice\\Documents"
+              },
+              "tracker_context": {
+                "birth_droid_file_identifier": "0df0ad0b-1234-5678-aabb-ccddeeff0011",
+                "droid_file_identifier": "87654321-09ba-dcfe-1032-547698badcfe",
+                "machine_id": "ALICE-PC",
+                "parse_status": "parsed-candidate",
+                "present": true,
+                "validation_status": "candidate-requires-known-answer-corpus"
+              },
+              "validation_summary": {
+                "failed_check_ids": [
+                  "full-property-store-decode-available",
+                  "has-link-info",
+                  "has-property-store-data-block",
+                  "has-shell-item-idlist"
+                ],
+                "passed_check_ids": [
+                  "extra-data-block-count",
+                  "has-target-path",
+                  "has-timestamps",
+                  "has-tracker-data",
+                  "has-valid-header"
+                ],
+                "report_grade_ready": false
+              }
+            },
+            "lnk_target_context_citation_profile_hash": "971a8f5d126306fdb74dfddf62938e0e1b6888296631b80e691027be88693347",
             "modified_at": "2024-03-05T06:07:08+00:00",
             "parser": "windows-recent-files",
-            "parser_version": "windows-recent-files-v7",
+            "parser_version": "windows-recent-files-v8",
             "property_store_blocks": [],
             "recent_native_capabilities": {
               "appid_hash_mapping": false,

@@ -1366,6 +1366,7 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
             self.assertIn("target/working-dir/arguments extraction", lnk_gate["satisfied_checks"])
             self.assertIn("tracker GUID validation", lnk_gate["satisfied_checks"])
             self.assertIn("timestamp/source field provenance", lnk_gate["satisfied_checks"])
+            self.assertIn("target context citation profile", lnk_gate["satisfied_checks"])
             lnk_uplift = details["commercial_uplift_evidence"]
             self.assertEqual(lnk_uplift["batch_id"], "commercial-uplift-016-020")
             self.assertEqual(lnk_uplift["item_numbers"], [17])
@@ -1376,9 +1377,30 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
             )
             self.assertIn("has-valid-header", lnk_uplift["passed_validation_matrix_ids"])
             self.assertTrue(lnk_uplift["large_data_controls"]["property_store_decode_required_for_commercial_claims"])
+            self.assertTrue(lnk_uplift["implemented_controls"]["target_context_citation_profile_present"])
+            self.assertEqual(len(lnk_uplift["implemented_controls"]["target_context_citation_profile_hash"]), 64)
+            self.assertGreaterEqual(lnk_uplift["implemented_controls"]["field_source_count"], 6)
+            lnk_context_profile = details["lnk_target_context_citation_profile"]
+            self.assertEqual(lnk_context_profile["profile_version"], "lnk-target-context-citation-profile-v1")
+            self.assertEqual(lnk_context_profile["gap_id"], "#17")
+            self.assertEqual(lnk_context_profile["source_viewer_locator"]["viewer"], "lnk-shell-link")
+            self.assertEqual(lnk_context_profile["source_viewer_locator"]["header_offset"], 0)
+            self.assertEqual(lnk_context_profile["target_context"]["target_path"], r"C:\Users\alice\Documents\Incident Notes.docx")
+            self.assertEqual(lnk_context_profile["target_context"]["tracker_machine_id"], "ALICE-PC")
+            self.assertEqual(len(lnk_context_profile["target_context"]["target_identity_hash"]), 64)
+            self.assertEqual(details["lnk_target_context_citation_profile_hash"], lnk_context_profile["profile_sha256"])
+            field_offsets = {item["field"]: item for item in lnk_context_profile["field_sources"]}
+            self.assertEqual(field_offsets["link_flags"]["offset"], 0x14)
+            self.assertEqual(field_offsets["target_modified_at"]["structure"], "ShellLinkHeader")
+            self.assertEqual(field_offsets["tracker_machine_id"]["structure"], "TrackerDataBlock")
+            self.assertEqual(lnk_context_profile["extra_data_bounds"][0]["type"], "TrackerDataBlock")
             lnk_review_profile = details["lnk_analyst_review_profile"]
             self.assertEqual(lnk_review_profile["profile_version"], "lnk-analyst-review-profile-v1")
             self.assertEqual(lnk_review_profile["qc_prep_item_number"], 32)
+            self.assertEqual(
+                lnk_review_profile["target_context_citation_profile_hash"],
+                lnk_context_profile["profile_sha256"],
+            )
             self.assertEqual(
                 lnk_review_profile["source_field_values"]["target_path"],
                 r"C:\Users\alice\Documents\Incident Notes.docx",
@@ -1397,6 +1419,14 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
             self.assertIn("IsUnicode", lnk_manifest["header_validation"]["link_flag_names"])
             self.assertEqual(lnk_manifest["extra_data"]["extra_data_block_types"], ["TrackerDataBlock"])
             self.assertFalse(lnk_manifest["extra_data"]["full_property_store_decode_available"])
+            self.assertEqual(
+                lnk_manifest["target_context_citation_profile"]["profile_sha256"],
+                lnk_context_profile["profile_sha256"],
+            )
+            self.assertIn(
+                "lnk-target-context-profile",
+                {item["kind"] for item in lnk_manifest["citation_refs"]},
+            )
             self.assertEqual(
                 lnk_manifest["reportability"]["allowed_use"],
                 "shortcut-target-and-metadata-triage-pivot",

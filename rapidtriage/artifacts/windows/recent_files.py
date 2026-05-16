@@ -14,7 +14,7 @@ from ...core.models import ArtifactRecord
 from .common import build_forensic_review, isoformat_from_timestamp, iter_windows_user_homes
 
 RECENT_ROOT = ("AppData", "Roaming", "Microsoft", "Windows", "Recent")
-PARSER_VERSION = "windows-recent-files-v7"
+PARSER_VERSION = "windows-recent-files-v8"
 MAX_JUMPLIST_EMBEDDED_LNKS = 50
 MAX_OLE_STREAMS = 128
 MAX_OLE_STREAM_BYTES = 8 * 1024 * 1024
@@ -52,6 +52,7 @@ QC_PREP_LNK_CONTRACT = {
         "ShellLinkHeader flags, attributes, timestamps, size, show command, and hotkey fields",
         "LinkInfo local/common path candidates and StringData target context",
         "ExtraData block inventory with TrackerDataBlock and property-store candidate preservation",
+        "target context citation profile with source field offsets, block bounds, and stable identity hash",
         "depth manifest with source hash, target identity hash, citation refs, and report blockers",
     ],
     "commercial_blockers": [
@@ -201,6 +202,10 @@ def parse_lnk_metadata(path: Path) -> dict[str, object]:
             "artifact_type": "recent-shortcut",
         }
     )
+    if metadata.get("lnk_parse_status") == "parsed":
+        citation_profile = lnk_target_context_citation_profile(metadata)
+        metadata["lnk_target_context_citation_profile"] = citation_profile
+        metadata["lnk_target_context_citation_profile_hash"] = citation_profile["profile_sha256"]
     metadata["core_accuracy_gates"] = lnk_core_accuracy_gates(
         {
             **metadata,
@@ -410,6 +415,8 @@ def lnk_core_accuracy_gates(details: dict[str, object]) -> list[dict[str, object
         satisfied.append("property-store block provenance")
     if details.get("target_created_at") or details.get("target_accessed_at") or details.get("target_modified_at"):
         satisfied.append("timestamp/source field provenance")
+    if details.get("lnk_target_context_citation_profile"):
+        satisfied.append("target context citation profile")
     if trusted_diff.get("status") == "pass":
         satisfied.append("trusted LNK parser diff pass")
     return [build_accuracy_gate(17, satisfied_checks=satisfied, evidence_refs=evidence_refs)]
@@ -544,19 +551,26 @@ def parse_lnk_link_info(data: bytes, link_flags: int) -> dict[str, str]:
         offset += 2 + read_u16(data, offset)
     size = read_u32(data, offset)
     if size < 0x1C or offset + size > len(data):
-        return {"parse_status": "invalid-link-info"}
+        return {"parse_status": "invalid-link-info", "offset": offset, "size": size}
     block = data[offset : offset + size]
     header_size = read_u32(block, 4)
     local_base_path_offset = read_u32(block, 16)
     common_path_suffix_offset = read_u32(block, 24)
-    result = {
+    result: dict[str, str] = {
         "parse_status": "parsed",
+        "offset": str(offset),
+        "size": str(size),
+        "header_size": str(header_size),
+        "local_base_path_offset": str(local_base_path_offset),
+        "common_path_suffix_offset": str(common_path_suffix_offset),
         "local_base_path": read_c_string(block, local_base_path_offset, "cp1252"),
         "common_path_suffix": read_c_string(block, common_path_suffix_offset, "cp1252"),
     }
     if header_size >= 0x24:
-        result["local_base_path_unicode"] = read_c_string(block, read_u32(block, 28), "utf-16le")
-        result["common_path_suffix_unicode"] = read_c_string(block, read_u32(block, 36), "utf-16le")
+        result["local_base_path_unicode_offset"] = str(read_u32(block, 28))
+        result["common_path_suffix_unicode_offset"] = str(read_u32(block, 36))
+        result["local_base_path_unicode"] = read_c_string(block, int(result["local_base_path_unicode_offset"]), "utf-16le")
+        result["common_path_suffix_unicode"] = read_c_string(block, int(result["common_path_suffix_unicode_offset"]), "utf-16le")
         if result["local_base_path_unicode"]:
             result["local_base_path"] = result["local_base_path_unicode"]
         if result["common_path_suffix_unicode"]:
@@ -744,6 +758,155 @@ def recent_stable_sha256(value: object) -> str:
     ).hexdigest()
 
 
+def lnk_target_context_citation_profile(details: Mapping[str, object]) -> dict[str, object]:
+    hashes = details.get("source_hashes") if isinstance(details.get("source_hashes"), Mapping) else {}
+    link_info = details.get("link_info") if isinstance(details.get("link_info"), Mapping) else {}
+    tracker = details.get("tracker_data") if isinstance(details.get("tracker_data"), Mapping) else {}
+    validation_checks = (
+        details.get("validation_checks") if isinstance(details.get("validation_checks"), Mapping) else {}
+    )
+    report_grade = (
+        details.get("recent_report_grade_assessment")
+        if isinstance(details.get("recent_report_grade_assessment"), Mapping)
+        else {}
+    )
+    extra_blocks = [item for item in details.get("extra_data_blocks") or [] if isinstance(item, Mapping)]
+    property_blocks = [item for item in details.get("property_store_blocks") or [] if isinstance(item, Mapping)]
+    target_context = {
+        "target_path": str(details.get("target_path") or ""),
+        "working_dir": str(details.get("working_dir") or ""),
+        "relative_path": str(details.get("relative_path") or ""),
+        "command_line_arguments": str(details.get("command_line_arguments") or ""),
+        "icon_location": str(details.get("icon_location") or ""),
+        "target_created_at": str(details.get("target_created_at") or ""),
+        "target_accessed_at": str(details.get("target_accessed_at") or ""),
+        "target_modified_at": str(details.get("target_modified_at") or ""),
+        "target_file_size": int(details.get("target_file_size") or 0),
+        "tracker_machine_id": str(tracker.get("machine_id") or ""),
+    }
+    header_fields = [
+        {"field": "header_size", "structure": "ShellLinkHeader", "offset": 0x00, "size": 4, "value": int(details.get("lnk_header_size") or 0)},
+        {"field": "link_clsid", "structure": "ShellLinkHeader", "offset": 0x04, "size": 16, "value": "validated"},
+        {"field": "link_flags", "structure": "ShellLinkHeader", "offset": 0x14, "size": 4, "value": int(details.get("link_flags") or 0)},
+        {"field": "file_attributes", "structure": "ShellLinkHeader", "offset": 0x18, "size": 4, "value": int(details.get("file_attributes") or 0)},
+        {"field": "target_created_at", "structure": "ShellLinkHeader", "offset": 0x1C, "size": 8, "value": target_context["target_created_at"]},
+        {"field": "target_accessed_at", "structure": "ShellLinkHeader", "offset": 0x24, "size": 8, "value": target_context["target_accessed_at"]},
+        {"field": "target_modified_at", "structure": "ShellLinkHeader", "offset": 0x2C, "size": 8, "value": target_context["target_modified_at"]},
+        {"field": "target_file_size", "structure": "ShellLinkHeader", "offset": 0x34, "size": 4, "value": target_context["target_file_size"]},
+        {"field": "show_command", "structure": "ShellLinkHeader", "offset": 0x3C, "size": 4, "value": int(details.get("show_command") or 0)},
+        {"field": "hot_key", "structure": "ShellLinkHeader", "offset": 0x40, "size": 2, "value": int(details.get("hot_key") or 0)},
+    ]
+    string_fields = [
+        {"field": "target_path", "structure": "LinkInfo/StringData/embedded path", "value": target_context["target_path"]},
+        {"field": "working_dir", "structure": "StringData", "value": target_context["working_dir"]},
+        {"field": "relative_path", "structure": "StringData", "value": target_context["relative_path"]},
+        {"field": "command_line_arguments", "structure": "StringData", "value": target_context["command_line_arguments"]},
+        {"field": "icon_location", "structure": "StringData", "value": target_context["icon_location"]},
+    ]
+    field_sources = header_fields + [item for item in string_fields if item["value"] not in ("", None)]
+    if tracker:
+        field_sources.append(
+            {
+                "field": "tracker_machine_id",
+                "structure": "TrackerDataBlock",
+                "block_offset": next(
+                    (int(block.get("offset") or 0) for block in extra_blocks if block.get("type") == "TrackerDataBlock"),
+                    0,
+                ),
+                "value": target_context["tracker_machine_id"],
+            }
+        )
+    profile_payload = {
+        "profile_version": "lnk-target-context-citation-profile-v1",
+        "parser_version": PARSER_VERSION,
+        "commercial_batch_id": "commercial-uplift-016-020",
+        "item_number": 17,
+        "gap_id": "#17",
+        "qc_prep_item_number": QC_PREP_LNK_ITEM,
+        "qc_prep_item_goal": QC_PREP_LNK_GOAL,
+        "source": {
+            "source_path": str(details.get("source_path") or ""),
+            "source_sha256": str(hashes.get("sha256") or ""),
+            "entry_name": str(details.get("entry_name") or ""),
+            "source_format": "lnk-shell-link",
+        },
+        "source_viewer_locator": {
+            "viewer": "lnk-shell-link",
+            "source_path": str(details.get("source_path") or ""),
+            "source_sha256": str(hashes.get("sha256") or ""),
+            "header_offset": 0,
+            "header_size": LNK_HEADER_SIZE,
+            "string_data_end_offset": int(details.get("string_data_offset") or 0),
+            "extra_data_block_count": len(extra_blocks),
+        },
+        "target_context": {
+            **target_context,
+            "target_identity_hash": recent_stable_sha256(target_context),
+        },
+        "field_sources": field_sources,
+        "link_info_bounds": {
+            "parse_status": str(link_info.get("parse_status") or "not-present"),
+            "offset": int(str(link_info.get("offset") or "0")),
+            "size": int(str(link_info.get("size") or "0")),
+            "header_size": int(str(link_info.get("header_size") or "0")),
+            "local_base_path_offset": int(str(link_info.get("local_base_path_offset") or "0")),
+            "common_path_suffix_offset": int(str(link_info.get("common_path_suffix_offset") or "0")),
+        },
+        "extra_data_bounds": [
+            {
+                "index": int(block.get("index") or 0),
+                "offset": int(block.get("offset") or 0),
+                "size": int(block.get("size") or 0),
+                "signature": str(block.get("signature") or ""),
+                "type": str(block.get("type") or ""),
+                "parse_status": str(block.get("parse_status") or ""),
+            }
+            for block in extra_blocks
+        ],
+        "tracker_context": {
+            "present": bool(tracker),
+            "parse_status": str(tracker.get("parse_status") or ""),
+            "machine_id": str(tracker.get("machine_id") or ""),
+            "droid_file_identifier": str(tracker.get("droid_file_identifier") or ""),
+            "birth_droid_file_identifier": str(tracker.get("birth_droid_file_identifier") or ""),
+            "validation_status": str(tracker.get("validation_status") or ""),
+        },
+        "property_store_review": {
+            "block_count": len(property_blocks),
+            "embedded_path_count": sum(len(block.get("embedded_paths") or []) for block in property_blocks),
+            "string_candidate_count": sum(len(block.get("string_candidates") or []) for block in property_blocks),
+            "guid_candidate_count": sum(len(block.get("guid_candidates") or []) for block in property_blocks),
+            "candidate_profile_hash": recent_stable_sha256(
+                [
+                    {
+                        "embedded_paths": list(block.get("embedded_paths") or []),
+                        "strings": list(block.get("string_candidates") or []),
+                        "guids": list(block.get("guid_candidates") or []),
+                    }
+                    for block in property_blocks
+                ]
+            ),
+            "reportability": "review-only",
+        },
+        "validation_summary": {
+            "passed_check_ids": sorted(str(key).replace("_", "-") for key, value in validation_checks.items() if bool(value)),
+            "failed_check_ids": sorted(str(key).replace("_", "-") for key, value in validation_checks.items() if not bool(value)),
+            "report_grade_ready": bool(report_grade.get("report_grade_ready")),
+        },
+        "reportability_decision": lnk_reportability_decision(report_grade, details),
+    }
+    # Keep the displayed locator path, but do not let a temp mount/root path make
+    # the stable citation hash change for identical shortcut bytes.
+    hash_payload = dict(profile_payload)
+    hash_payload["source"] = {**profile_payload["source"], "source_path": ""}
+    hash_payload["source_viewer_locator"] = {
+        **profile_payload["source_viewer_locator"],
+        "source_path": "",
+    }
+    profile_payload["profile_sha256"] = recent_stable_sha256(hash_payload)
+    return profile_payload
+
+
 def lnk_metadata_depth_manifest(details: Mapping[str, object]) -> dict[str, object]:
     hashes = details.get("source_hashes") if isinstance(details.get("source_hashes"), Mapping) else {}
     report_grade = (
@@ -757,6 +920,11 @@ def lnk_metadata_depth_manifest(details: Mapping[str, object]) -> dict[str, obje
     tracker = details.get("tracker_data") if isinstance(details.get("tracker_data"), Mapping) else {}
     validation_checks = (
         details.get("validation_checks") if isinstance(details.get("validation_checks"), Mapping) else {}
+    )
+    target_context_profile = (
+        details.get("lnk_target_context_citation_profile")
+        if isinstance(details.get("lnk_target_context_citation_profile"), Mapping)
+        else {}
     )
     extra_blocks = [item for item in details.get("extra_data_blocks") or [] if isinstance(item, Mapping)]
     property_blocks = [item for item in details.get("property_store_blocks") or [] if isinstance(item, Mapping)]
@@ -835,6 +1003,17 @@ def lnk_metadata_depth_manifest(details: Mapping[str, object]) -> dict[str, obje
                 validation_checks.get("full_property_store_decode_available")
             ),
         },
+        "target_context_citation_profile": {
+            "profile_version": str(target_context_profile.get("profile_version") or ""),
+            "profile_sha256": str(target_context_profile.get("profile_sha256") or ""),
+            "field_source_count": len(target_context_profile.get("field_sources") or []),
+            "extra_data_bound_count": len(target_context_profile.get("extra_data_bounds") or []),
+            "viewer": (
+                target_context_profile.get("source_viewer_locator", {}).get("viewer")
+                if isinstance(target_context_profile.get("source_viewer_locator"), Mapping)
+                else ""
+            ),
+        },
         "citation_refs": [
             {
                 "kind": "lnk-source-file",
@@ -866,6 +1045,15 @@ def lnk_metadata_depth_manifest(details: Mapping[str, object]) -> dict[str, obje
                 "machine_id": str(tracker.get("machine_id") or ""),
                 "validation_status": str(tracker.get("validation_status") or ""),
             },
+            {
+                "kind": "lnk-target-context-profile",
+                "profile_sha256": str(target_context_profile.get("profile_sha256") or ""),
+                "target_identity_hash": (
+                    target_context_profile.get("target_context", {}).get("target_identity_hash")
+                    if isinstance(target_context_profile.get("target_context"), Mapping)
+                    else ""
+                ),
+            },
         ],
         "reportability": {
             "allowed_use": reportability["allowed_use"],
@@ -894,6 +1082,11 @@ def lnk_analyst_review_profile(details: Mapping[str, object]) -> dict[str, objec
     )
     checks = details.get("validation_checks") if isinstance(details.get("validation_checks"), Mapping) else {}
     tracker = details.get("tracker_data") if isinstance(details.get("tracker_data"), Mapping) else {}
+    target_context_profile = (
+        details.get("lnk_target_context_citation_profile")
+        if isinstance(details.get("lnk_target_context_citation_profile"), Mapping)
+        else {}
+    )
     source_values = {
         "target_path": str(details.get("target_path") or ""),
         "working_dir": str(details.get("working_dir") or ""),
@@ -928,6 +1121,7 @@ def lnk_analyst_review_profile(details: Mapping[str, object]) -> dict[str, objec
             "target_modified_at",
             "target_accessed_at",
         ],
+        "target_context_citation_profile_hash": str(target_context_profile.get("profile_sha256") or ""),
         "source_field_values": {key: value for key, value in source_values.items() if value not in ("", None, [], {})},
         "correlation_targets": ["MFT", "USN", "JumpList", "ShellBags", "Windows Search", "LECmd"],
         "risk_tags": ["shortcut-context", "lnk-validation-required"],
@@ -1666,6 +1860,11 @@ def lnk_commercial_uplift_evidence(details: Mapping[str, object]) -> dict[str, o
         if isinstance(details.get("lnk_trusted_diff"), Mapping)
         else {"status": "not-attached"}
     )
+    target_context_profile = (
+        details.get("lnk_target_context_citation_profile")
+        if isinstance(details.get("lnk_target_context_citation_profile"), Mapping)
+        else {}
+    )
     reportability_decision = lnk_reportability_decision(report_grade, details)
     return {
         "batch_id": "commercial-uplift-016-020",
@@ -1679,7 +1878,14 @@ def lnk_commercial_uplift_evidence(details: Mapping[str, object]) -> dict[str, o
             f"source_sha256:{hashes.get('sha256', '')}",
             f"target_path:{details.get('target_path', '')}",
             f"artifact_type:{details.get('artifact_type', '')}",
+            f"target_context_profile_sha256:{target_context_profile.get('profile_sha256', '')}",
         ],
+        "implemented_controls": {
+            "target_context_citation_profile_present": bool(target_context_profile),
+            "target_context_citation_profile_hash": str(target_context_profile.get("profile_sha256") or ""),
+            "field_source_count": len(target_context_profile.get("field_sources") or []),
+            "extra_data_bound_count": len(target_context_profile.get("extra_data_bounds") or []),
+        },
         "passed_validation_matrix_ids": [
             str(item.get("id")) for item in matrix if isinstance(item, Mapping) and item.get("passed")
         ],
@@ -1694,6 +1900,8 @@ def lnk_commercial_uplift_evidence(details: Mapping[str, object]) -> dict[str, o
             "bounded_extra_data_blocks": True,
             "max_extra_data_blocks": MAX_LNK_EXTRA_DATA_BLOCKS,
             "max_shell_items": MAX_LNK_SHELL_ITEMS,
+            "target_context_citation_profile_present": bool(target_context_profile),
+            "target_context_citation_profile_hash": str(target_context_profile.get("profile_sha256") or ""),
             "property_store_decode_required_for_commercial_claims": True,
         },
         "next_internal_step": "Finish Shell Item property store semantics and tracker/LinkInfo known-answer corpus validation.",

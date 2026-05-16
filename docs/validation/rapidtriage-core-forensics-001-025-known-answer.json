@@ -420,7 +420,7 @@
       ],
       "expected": {
         "required_assertions": [
-          "Shell Link header, target path, working directory, tracker candidate, timestamp fields, and #17 core_accuracy_gates are emitted"
+          "Shell Link header, target path, working directory, tracker candidate, timestamp fields, #17 core_accuracy_gates, and lnk_target_context_citation_profile are emitted"
         ]
       },
       "notes": "Internal fixture pass; LECmd cross-tool corpus and full shell-item property store validation remain required.",

@@ -37,7 +37,7 @@
       ],
       "expected": {
         "required_assertions": [
-          "Shell Link header, target path, working directory, tracker candidate, timestamp fields, #17 core_accuracy_gates, and shortcut-context reportability decisions are emitted",
+          "Shell Link header, target path, working directory, tracker candidate, timestamp fields, #17 core_accuracy_gates, lnk_target_context_citation_profile, and shortcut-context reportability decisions are emitted",
           "trusted LNK parser diff helpers pass exact matching rows and block mismatches"
         ]
       },

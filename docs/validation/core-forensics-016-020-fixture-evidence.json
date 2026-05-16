@@ -31,7 +31,7 @@
       "number": 17,
       "title": "LNK full metadata parser",
       "assertions": [
-        "recent-shortcut rows preserve Shell Link header flags, target path, working directory, StringData, LinkInfo, tracker candidate GUIDs, timestamps, source hashes, #17 core_accuracy_gates, lnk_analyst_review_profile, and shortcut-context reportability decisions.",
+        "recent-shortcut rows preserve Shell Link header flags, target path, working directory, StringData, LinkInfo, tracker candidate GUIDs, timestamps, source hashes, #17 core_accuracy_gates, lnk_target_context_citation_profile, lnk_analyst_review_profile, and shortcut-context reportability decisions.",
         "trusted LNK parser diff helpers compare target, working directory, arguments, timestamps, and tracker machine fields against LECmd-style rows."
       ],
       "blockers_kept": [
