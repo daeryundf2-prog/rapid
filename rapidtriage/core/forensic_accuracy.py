@@ -1032,6 +1032,8 @@ CORE_FORENSIC_ACCURACY_ITEMS: tuple[dict[str, object], ...] = (
             "run-log template emitted",
             "hardware-scale evidence manifest hash emitted",
             "stress execution proof manifest emitted",
+            "stress report-grade validation plan emitted",
+            "stress report-grade ready slots emitted",
             "real-hardware validation warning",
             "trusted stress run-log diff pass",
         ),

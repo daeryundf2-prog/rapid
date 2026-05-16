@@ -41,6 +41,15 @@ BENCHMARK_REPORT_GRADE_BLOCKERS = [
     "release-approved-threshold-comparison-required",
     "independent-reproduction-log-required",
 ]
+STRESS_REPORT_GRADE_VALIDATION_PLAN_VERSION = "stress-test-report-grade-validation-plan-v1"
+STRESS_REPORT_GRADE_BLOCKERS = [
+    "actual-1tb-hardware-run-required",
+    "actual-5tb-hardware-run-required",
+    "actual-10tb-hardware-run-required",
+    "trusted-run-log-manifest-required",
+    "bottleneck-trace-required",
+    "independent-reproduction-log-required",
+]
 BENCHMARK_NATIVE_CAPABILITIES = {
     "synthetic_case_generation": True,
     "existing_root_benchmark": True,
@@ -309,6 +318,13 @@ def build_stress_test_plan(
         stress_json_path=json_path,
         stress_markdown_path=markdown_path,
     )
+    stress_validation_plan = build_stress_test_validation_plan(
+        scenarios=scenarios,
+        failure_thresholds=failure_thresholds,
+        evidence_capture_profile=evidence_capture_profile,
+        hardware_scale_manifest=hardware_scale_manifest,
+        stress_execution_manifest=stress_execution_manifest,
+    )
     payload: dict[str, object] = {
         "command": "stress-plan",
         "generated_at": now_iso(),
@@ -329,12 +345,17 @@ def build_stress_test_plan(
         "hardware_scale_evidence_manifest_hash": hardware_scale_manifest["manifest_hash"],
         "stress_execution_proof_manifest": stress_execution_manifest,
         "stress_execution_proof_manifest_hash": stress_execution_manifest["manifest_hash"],
+        "stress_report_grade_validation_plan": stress_validation_plan,
+        "stress_report_grade_validation_plan_hash": stress_validation_plan["validation_plan_hash"],
+        "report_grade_ready_slot_count": stress_validation_plan["ready_slot_count"],
+        "report_grade_blocking_slot_count": stress_validation_plan["blocking_slot_count"],
         "functional_priority_profile": stress_functional_profile(
             scenarios=scenarios,
             hardware_scale_manifest=hardware_scale_manifest,
             stress_execution_manifest=stress_execution_manifest,
+            validation_plan=stress_validation_plan,
         ),
-        "stress_test_assessment": stress_test_assessment(scenarios=scenarios),
+        "stress_test_assessment": stress_test_assessment(scenarios=scenarios, validation_plan=stress_validation_plan),
         "evidence_capture_profile": evidence_capture_profile,
         "commercial_uplift_evidence": performance_commercial_uplift_evidence(
             item_number=67,
@@ -343,6 +364,7 @@ def build_stress_test_plan(
                 "resource caps specified",
                 "required evidence bundle listed",
                 "failure thresholds specified",
+                "stress report-grade validation plan emitted",
             ],
             large_data_controls=[
                 "1TB/5TB/10TB runbook scenarios include wall-clock and output reserve estimates",
@@ -350,10 +372,12 @@ def build_stress_test_plan(
                 "stop thresholds require parser crash, disk free, memory, and stall tracking",
                 "required evidence bundle lists hashes, checkpoints, warnings, and known-answer samples",
                 "stress execution proof manifest records required run-log artifacts and unattached execution status",
+                "stress report-grade validation plan records ready evidence slots and external blocking slots",
             ],
             external_validation=[
                 "actual 1TB-10TB hardware stress runs",
                 "bottleneck traces and independent reproduction logs",
+                "trusted run-log manifest for each TB scenario",
                 STRESS_TRUSTED_DIFF_BLOCKER_67,
             ],
         ),
@@ -361,6 +385,7 @@ def build_stress_test_plan(
             scenarios=scenarios,
             hardware_scale_manifest=hardware_scale_manifest,
             stress_execution_manifest=stress_execution_manifest,
+            validation_plan=stress_validation_plan,
         ),
         "scenarios": scenarios,
         "runbook": [
@@ -616,6 +641,129 @@ def build_stress_execution_proof_manifest(
     return {
         **manifest_core,
         "manifest_hash": hashlib.sha256(json.dumps(manifest_core, sort_keys=True).encode("utf-8")).hexdigest(),
+    }
+
+
+def build_stress_test_validation_plan(
+    *,
+    scenarios: Sequence[Mapping[str, object]],
+    failure_thresholds: Mapping[str, object],
+    evidence_capture_profile: Mapping[str, object],
+    hardware_scale_manifest: Mapping[str, object],
+    stress_execution_manifest: Mapping[str, object],
+) -> dict[str, object]:
+    scenario_sizes = [int(scenario.get("size_tb") or 0) for scenario in scenarios]
+    ready_slots = [
+        {
+            "id": "stress-tb-scale-scenarios",
+            "status": "ready",
+            "evidence": "1TB/5TB/10TB-style scenarios include size, expected wall clock, output reserve, and checkpoint interval.",
+            "evidence_hash": hashlib.sha256(
+                json.dumps(
+                    [
+                        {
+                            "size_tb": scenario.get("size_tb"),
+                            "size_bytes": scenario.get("size_bytes"),
+                            "checkpoint_interval_minutes": scenario.get("checkpoint_interval_minutes"),
+                            "expected_wall_clock_hours": scenario.get("expected_wall_clock_hours"),
+                        }
+                        for scenario in scenarios
+                    ],
+                    sort_keys=True,
+                ).encode("utf-8")
+            ).hexdigest(),
+        },
+        {
+            "id": "stress-resource-caps-and-thresholds",
+            "status": "ready",
+            "evidence": "Memory, disk, parser crash, stall, and output reserve thresholds are declared.",
+            "evidence_hash": hashlib.sha256(json.dumps(dict(failure_thresholds), sort_keys=True).encode("utf-8")).hexdigest(),
+        },
+        {
+            "id": "stress-required-evidence-bundle",
+            "status": "ready",
+            "evidence": "Required run artifacts and telemetry fields are enumerated for each hardware run.",
+            "evidence_hash": hashlib.sha256(
+                json.dumps(dict(evidence_capture_profile), sort_keys=True).encode("utf-8")
+            ).hexdigest(),
+        },
+        {
+            "id": "stress-hardware-scale-manifest",
+            "status": "ready",
+            "evidence": "Hardware-scale evidence manifest binds scenario rows and capture profile.",
+            "evidence_hash": str(hardware_scale_manifest.get("manifest_hash") or ""),
+        },
+        {
+            "id": "stress-execution-proof-manifest",
+            "status": "ready",
+            "evidence": "Execution proof manifest preserves run-log templates and explicitly marks real runs unattached.",
+            "evidence_hash": str(stress_execution_manifest.get("manifest_hash") or ""),
+        },
+        {
+            "id": "stress-run-log-templates",
+            "status": "ready",
+            "evidence": "Per-scenario run-log templates require wall clock, memory, output size, crash/retry/cancel, checkpoint, and known-answer status.",
+            "evidence_hash": str(stress_execution_manifest.get("run_log_rows_hash") or ""),
+        },
+    ]
+    blocking_slots = [
+        {
+            "id": "stress-1tb-hardware-run",
+            "status": "external-evidence-required",
+            "blocker": "actual-1tb-hardware-run-required",
+            "required_artifacts": ["completed run log", "source hash manifest", "resource telemetry", "known-answer sample"],
+        },
+        {
+            "id": "stress-5tb-hardware-run",
+            "status": "external-evidence-required",
+            "blocker": "actual-5tb-hardware-run-required",
+            "required_artifacts": ["completed run log", "source hash manifest", "resource telemetry", "known-answer sample"],
+        },
+        {
+            "id": "stress-10tb-hardware-run",
+            "status": "external-evidence-required",
+            "blocker": "actual-10tb-hardware-run-required",
+            "required_artifacts": ["completed run log", "source hash manifest", "resource telemetry", "known-answer sample"],
+        },
+        {
+            "id": "stress-trusted-run-log-manifest",
+            "status": "external-evidence-required",
+            "blocker": "trusted-run-log-manifest-required",
+            "required_artifacts": ["signed run-log manifest", "threshold pass/fail summary"],
+        },
+        {
+            "id": "stress-bottleneck-trace",
+            "status": "external-evidence-required",
+            "blocker": "bottleneck-trace-required",
+            "required_artifacts": ["CPU/IO/memory telemetry", "parser-stage duration profile"],
+        },
+        {
+            "id": "stress-independent-reproduction-log",
+            "status": "external-evidence-required",
+            "blocker": "independent-reproduction-log-required",
+            "required_artifacts": ["second-lab run log", "result hash comparison", "reviewer signoff"],
+        },
+    ]
+    plan_core: dict[str, object] = {
+        "profile_version": STRESS_REPORT_GRADE_VALIDATION_PLAN_VERSION,
+        "item_number": 67,
+        "commercial_gap_ids": [STRESS_TEST_GAP_ID],
+        "scenario_sizes_tb": scenario_sizes,
+        "scenario_count": len(scenarios),
+        "largest_size_tb": max(scenario_sizes, default=0),
+        "ready_slots": ready_slots,
+        "blocking_slots": blocking_slots,
+        "ready_slot_count": len(ready_slots),
+        "blocking_slot_count": len(blocking_slots),
+        "blockers": list(STRESS_REPORT_GRADE_BLOCKERS),
+        "hardware_scale_manifest_hash": str(hardware_scale_manifest.get("manifest_hash") or ""),
+        "stress_execution_proof_manifest_hash": str(stress_execution_manifest.get("manifest_hash") or ""),
+        "commercial_claim_allowed": False,
+        "report_use_warning": "This plan proves the stress run contract and required evidence only; it is not proof that terabyte-scale evidence was processed.",
+    }
+    return {
+        **plan_core,
+        "validation_plan_hash": hashlib.sha256(json.dumps(plan_core, sort_keys=True).encode("utf-8")).hexdigest(),
     }
 
 
@@ -1038,6 +1186,7 @@ def stress_functional_profile(
     scenarios: Sequence[Mapping[str, object]],
     hardware_scale_manifest: Mapping[str, object],
     stress_execution_manifest: Mapping[str, object],
+    validation_plan: Mapping[str, object],
 ) -> dict[str, object]:
     return {
         "batch_id": FUNCTIONAL_SCALE_BATCH_ID,
@@ -1058,7 +1207,10 @@ def stress_functional_profile(
             "hardware_scale_manifest_hash": str(hardware_scale_manifest.get("manifest_hash") or ""),
             "evidence_capture_profile_hash": str(hardware_scale_manifest.get("evidence_capture_profile_hash") or ""),
             "stress_execution_proof_manifest_hash": str(stress_execution_manifest.get("manifest_hash") or ""),
+            "stress_report_grade_validation_plan_hash": str(validation_plan.get("validation_plan_hash") or ""),
             "stress_run_log_row_count": int(stress_execution_manifest.get("scenario_count") or 0),
+            "report_grade_ready_slot_count": int(validation_plan.get("ready_slot_count") or 0),
+            "report_grade_blocking_slot_count": int(validation_plan.get("blocking_slot_count") or 0),
             "actual_hardware_run_attached": False,
         },
         "blockers": [
@@ -1074,12 +1226,19 @@ def stress_functional_profile(
     }
 
 
-def stress_test_assessment(*, scenarios: list[dict[str, object]]) -> dict[str, object]:
+def stress_test_assessment(
+    *,
+    scenarios: list[dict[str, object]],
+    validation_plan: Mapping[str, object] | None = None,
+) -> dict[str, object]:
     return {
         "component": "1tb-10tb-evidence-stress-test",
         "status": "stress-runbook-generated-real-validation-required",
         "commercial_gap_ids": [STRESS_TEST_GAP_ID],
         "scenario_sizes_tb": [scenario.get("size_tb") for scenario in scenarios],
+        "stress_report_grade_validation_plan_hash": str((validation_plan or {}).get("validation_plan_hash") or ""),
+        "report_grade_ready_slot_count": int((validation_plan or {}).get("ready_slot_count") or 0),
+        "report_grade_blocking_slot_count": int((validation_plan or {}).get("blocking_slot_count") or 0),
         "ready_for_court_report": False,
         "blockers": [
             "stress-plan-does-not-generate-or-process-terabytes-of-evidence",
@@ -1100,7 +1259,7 @@ def stress_test_assessment(*, scenarios: list[dict[str, object]]) -> dict[str, o
             ],
             external_validation=["actual 1TB-10TB run logs remain required"],
         ),
-        "core_accuracy_gates": stress_core_accuracy_gates(scenarios=scenarios),
+        "core_accuracy_gates": stress_core_accuracy_gates(scenarios=scenarios, validation_plan=validation_plan),
     }
 
 
@@ -1287,6 +1446,7 @@ def stress_core_accuracy_gates(
     scenarios: Sequence[Mapping[str, object]],
     hardware_scale_manifest: Mapping[str, object] | None = None,
     stress_execution_manifest: Mapping[str, object] | None = None,
+    validation_plan: Mapping[str, object] | None = None,
     trusted_diff: Mapping[str, object] | None = None,
 ) -> list[dict[str, object]]:
     satisfied = ["real-hardware validation warning"]
@@ -1302,12 +1462,18 @@ def stress_core_accuracy_gates(
         satisfied.append("hardware-scale evidence manifest hash emitted")
     if stress_execution_manifest:
         satisfied.append("stress execution proof manifest emitted")
+    if validation_plan:
+        satisfied.append("stress report-grade validation plan emitted")
+        if int(validation_plan.get("ready_slot_count") or 0) > 0:
+            satisfied.append("stress report-grade ready slots emitted")
     satisfied.append("failure thresholds specified")
     evidence_refs = [f"scenario_count:{len(scenarios)}"]
     if hardware_scale_manifest:
         evidence_refs.append(f"hardware_scale_manifest_hash:{hardware_scale_manifest.get('manifest_hash', '')}")
     if stress_execution_manifest:
         evidence_refs.append(f"stress_execution_proof_manifest_hash:{stress_execution_manifest.get('manifest_hash', '')}")
+    if validation_plan and validation_plan.get("validation_plan_hash"):
+        evidence_refs.append(f"stress_report_grade_validation_plan_hash:{validation_plan.get('validation_plan_hash')}")
     if trusted_diff and trusted_diff.get("status") == "pass":
         satisfied.append("trusted stress run-log diff pass")
         evidence_refs.append(f"trusted_tool:{trusted_diff.get('trusted_tool', '')}")

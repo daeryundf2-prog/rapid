@@ -699,6 +699,24 @@ class RapidTriageOpsTests(unittest.TestCase):
             )
             self.assertFalse(payload["stress_execution_proof_manifest"]["actual_hardware_run_attached"])
             self.assertEqual(payload["stress_execution_proof_manifest"]["run_log_rows"][0]["execution_status"], "real-run-not-attached")
+            stress_plan = payload["stress_report_grade_validation_plan"]
+            self.assertEqual(stress_plan["profile_version"], "stress-test-report-grade-validation-plan-v1")
+            self.assertEqual(stress_plan["item_number"], 67)
+            self.assertEqual(stress_plan["stress_execution_proof_manifest_hash"], payload["stress_execution_proof_manifest_hash"])
+            self.assertEqual(payload["stress_report_grade_validation_plan_hash"], stress_plan["validation_plan_hash"])
+            self.assertEqual(payload["report_grade_ready_slot_count"], 6)
+            self.assertEqual(payload["report_grade_blocking_slot_count"], 6)
+            self.assertIn("stress-tb-scale-scenarios", {slot["id"] for slot in stress_plan["ready_slots"]})
+            self.assertIn("stress-10tb-hardware-run", {slot["id"] for slot in stress_plan["blocking_slots"]})
+            self.assertIn("actual-10tb-hardware-run-required", stress_plan["blockers"])
+            self.assertIn(
+                "stress report-grade validation plan emitted",
+                payload["core_accuracy_gates"][0]["satisfied_checks"],
+            )
+            self.assertIn(
+                "stress report-grade ready slots emitted",
+                payload["core_accuracy_gates"][0]["satisfied_checks"],
+            )
             self.assertEqual(payload["functional_priority_profile"]["item_number"], 35)
             self.assertEqual(payload["functional_priority_profile"]["batch_id"], "commercial-uplift-031-035")
             self.assertEqual(payload["functional_priority_profile"]["controls"]["largest_size_tb"], 10)
@@ -710,8 +728,18 @@ class RapidTriageOpsTests(unittest.TestCase):
                 payload["functional_priority_profile"]["controls"]["stress_execution_proof_manifest_hash"],
                 payload["stress_execution_proof_manifest"]["manifest_hash"],
             )
+            self.assertEqual(
+                payload["functional_priority_profile"]["controls"]["stress_report_grade_validation_plan_hash"],
+                stress_plan["validation_plan_hash"],
+            )
             self.assertEqual(payload["functional_priority_profile"]["controls"]["stress_run_log_row_count"], 2)
+            self.assertEqual(payload["functional_priority_profile"]["controls"]["report_grade_ready_slot_count"], 6)
+            self.assertEqual(payload["functional_priority_profile"]["controls"]["report_grade_blocking_slot_count"], 6)
             self.assertFalse(payload["functional_priority_profile"]["controls"]["actual_hardware_run_attached"])
+            self.assertEqual(
+                payload["stress_test_assessment"]["stress_report_grade_validation_plan_hash"],
+                stress_plan["validation_plan_hash"],
+            )
             self.assertEqual(
                 payload["evidence_capture_profile"]["profile_version"],
                 "stress-evidence-capture-profile-v1",
@@ -733,7 +761,9 @@ class RapidTriageOpsTests(unittest.TestCase):
             self.assertEqual(uplift["batch_id"], "commercial-uplift-066-070")
             self.assertEqual(uplift["item_numbers"], [67])
             self.assertIn("1TB/5TB/10TB runbook scenarios", " ".join(uplift["large_data_controls"]))
+            self.assertIn("report-grade validation plan", " ".join(uplift["large_data_controls"]))
             self.assertIn("actual 1TB-10TB hardware stress runs", uplift["remaining_external_validation"])
+            self.assertIn("trusted run-log manifest for each TB scenario", uplift["remaining_external_validation"])
             self.assertIn("trusted-stress-run-log-diff-missing", uplift["remaining_external_validation"])
             self.assertEqual(
                 uplift["reportability_decision"]["allowed_use"],
@@ -742,8 +772,13 @@ class RapidTriageOpsTests(unittest.TestCase):
             scenario_uplift = payload["scenarios"][0]["commercial_uplift_evidence"]
             self.assertEqual(scenario_uplift["item_numbers"], [67])
             stress_diff = build_stress_run_trusted_diff(payload["scenarios"], payload["scenarios"])
-            stress_gates = stress_core_accuracy_gates(scenarios=payload["scenarios"], trusted_diff=stress_diff)
+            stress_gates = stress_core_accuracy_gates(
+                scenarios=payload["scenarios"],
+                validation_plan=stress_plan,
+                trusted_diff=stress_diff,
+            )
             self.assertEqual(stress_diff["status"], "pass")
+            self.assertIn("stress report-grade validation plan emitted", stress_gates[0]["satisfied_checks"])
             self.assertIn("trusted stress run-log diff pass", stress_gates[0]["satisfied_checks"])
             self.assertIn("run-log template emitted", stress_gates[0]["satisfied_checks"])
 
