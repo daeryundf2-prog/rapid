@@ -334,7 +334,7 @@ def load_image_workflow_rows(path: Path, *, max_rows: int = 50000) -> list[dict[
     return rows[:max_rows]
 
 
-def load_source_read_review_note(path: Path) -> str:
+def load_source_read_review_package(path: Path) -> dict[str, object]:
     try:
         payload = json.loads(path.read_text(encoding="utf-8"))
     except OSError as exc:
@@ -344,6 +344,10 @@ def load_source_read_review_note(path: Path) -> str:
     package = payload.get("source_citation_package") if isinstance(payload, dict) else None
     if not isinstance(package, dict):
         raise ValueError("source-read JSON is missing source_citation_package")
+    return dict(package)
+
+
+def build_source_read_review_note(package: Mapping[str, object]) -> str:
     review_note = str(package.get("review_note_template") or "").strip()
     citation_text = str(package.get("citation_text") or "").strip()
     package_hash = str(package.get("package_hash") or "").strip()
@@ -2878,8 +2882,10 @@ def main(argv=None) -> int:
         try:
             database = open_case_database(Path(args.database).expanduser().resolve())
             review_note_parts = [args.note.strip()] if args.note else []
+            source_citation_package = None
             if args.source_read_json:
-                review_note_parts.append(load_source_read_review_note(Path(args.source_read_json).expanduser().resolve()))
+                source_citation_package = load_source_read_review_package(Path(args.source_read_json).expanduser().resolve())
+                review_note_parts.append(build_source_read_review_note(source_citation_package))
             payload = database.mark_review(
                 case_id=args.case_id,
                 target_type=args.target_type,
@@ -2893,6 +2899,7 @@ def main(argv=None) -> int:
                 priority=args.priority,
                 due_at=args.due_at,
                 include_in_report=args.include_in_report,
+                source_citation_package=source_citation_package,
             )
         except (CaseDatabaseError, ValueError) as exc:
             parser.error(str(exc))

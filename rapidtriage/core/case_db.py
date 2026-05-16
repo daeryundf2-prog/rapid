@@ -833,6 +833,7 @@ class CaseDatabase:
         assignee: str | None = None,
         priority: str | None = None,
         due_at: str | None = None,
+        source_citation_package: Mapping[str, object] | None = None,
     ) -> dict[str, object]:
         normalized_case_id = normalize_identifier(case_id, fallback="case")
         timestamp = now_iso()
@@ -870,7 +871,17 @@ class CaseDatabase:
                 str(priority if priority is not None else previous_review.get("priority", "normal"))
             )
             effective_due_at = str(due_at if due_at is not None else previous_review.get("due_at", ""))
+            effective_source_citation_package = normalize_source_citation_package(
+                source_citation_package
+                if source_citation_package is not None
+                else previous_review.get("source_citation_package", {})
+            )
             tags_json = json.dumps(effective_tags, ensure_ascii=False)
+            source_citation_package_json = json.dumps(
+                effective_source_citation_package,
+                ensure_ascii=False,
+                sort_keys=True,
+            )
             if existing is None:
                 citation_id = next_citation_id_for_connection(connection, normalized_case_id, "review")
                 connection.execute(
@@ -878,9 +889,10 @@ class CaseDatabase:
                     INSERT INTO review_mark (
                         citation_id, case_id, target_type, target_id, status,
                         verification_status, tags_json, note, include_in_report,
-                        reviewer, assignee, priority, due_at, created_at, updated_at
+                        reviewer, assignee, priority, due_at, source_citation_package_json,
+                        created_at, updated_at
                     )
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         citation_id,
@@ -896,6 +908,7 @@ class CaseDatabase:
                         effective_assignee,
                         effective_priority,
                         effective_due_at,
+                        source_citation_package_json,
                         timestamp,
                         timestamp,
                     ),
@@ -906,7 +919,8 @@ class CaseDatabase:
                     """
                     UPDATE review_mark
                     SET status = ?, verification_status = ?, tags_json = ?, note = ?,
-                        include_in_report = ?, reviewer = ?, assignee = ?, priority = ?, due_at = ?, updated_at = ?
+                        include_in_report = ?, reviewer = ?, assignee = ?, priority = ?,
+                        due_at = ?, source_citation_package_json = ?, updated_at = ?
                     WHERE id = ?
                     """,
                     (
@@ -919,6 +933,7 @@ class CaseDatabase:
                         effective_assignee,
                         effective_priority,
                         effective_due_at,
+                        source_citation_package_json,
                         timestamp,
                         existing["id"],
                     ),
@@ -937,6 +952,8 @@ class CaseDatabase:
                 "assignee": effective_assignee,
                 "priority": effective_priority,
                 "due_at": effective_due_at,
+                "source_citation_package": effective_source_citation_package,
+                "source_citation_package_hash": source_citation_package_hash(effective_source_citation_package),
                 "updated_at": timestamp,
             }
             insert_review_history(
@@ -977,6 +994,8 @@ class CaseDatabase:
                             "assignee": effective_assignee,
                             "priority": effective_priority,
                             "due_at": effective_due_at,
+                            "source_citation_package_hash": source_citation_package_hash(effective_source_citation_package),
+                            "source_citation_package_attached": bool(effective_source_citation_package),
                         },
                         ensure_ascii=False,
                         sort_keys=True,
@@ -1891,6 +1910,7 @@ def review_changed_fields(previous_review: Mapping[str, object], current_review:
         "assignee",
         "priority",
         "due_at",
+        "source_citation_package",
     )
     return [
         field
@@ -1925,6 +1945,7 @@ def apply_schema(connection: sqlite3.Connection) -> None:
     ensure_column(connection, "review_mark", "assignee", "TEXT NOT NULL DEFAULT ''")
     ensure_column(connection, "review_mark", "priority", "TEXT NOT NULL DEFAULT 'normal'")
     ensure_column(connection, "review_mark", "due_at", "TEXT NOT NULL DEFAULT ''")
+    ensure_column(connection, "review_mark", "source_citation_package_json", "TEXT NOT NULL DEFAULT '{}'")
     current_version = get_schema_version(connection)
     if current_version not in (0, SCHEMA_VERSION):
         raise CaseDatabaseError(f"unsupported case DB schema version: {current_version}")
@@ -3223,6 +3244,59 @@ def build_source_reference(match: Mapping[str, object]) -> dict[str, object]:
     }
 
 
+def merge_source_citation_package_into_reference(
+    source_reference: Mapping[str, object],
+    package: Mapping[str, object],
+) -> dict[str, object]:
+    merged = dict(source_reference)
+    if not package:
+        return merged
+    locator = package.get("source_locator") if isinstance(package.get("source_locator"), Mapping) else {}
+    source_hashes = dict(merged.get("source_hashes")) if isinstance(merged.get("source_hashes"), Mapping) else {}
+    source_sha256 = str(package.get("source_sha256") or "").strip()
+    if source_sha256:
+        source_hashes.setdefault("sha256", source_sha256)
+    record_hashes = dict(merged.get("record_hashes")) if isinstance(merged.get("record_hashes"), Mapping) else {}
+    snippet_sha256 = str(package.get("snippet_sha256") or "").strip()
+    if snippet_sha256:
+        record_hashes.setdefault("snippet_sha256", snippet_sha256)
+    merged.update(
+        {
+            "source_citation_package_hash": source_citation_package_hash(package),
+            "source_read_citation_id": str(package.get("citation_id") or ""),
+            "source_read_citation_text": str(package.get("citation_text") or ""),
+            "source_path_hash": str(package.get("source_path_hash") or ""),
+            "source_locator": dict(locator),
+            "parser": str(merged.get("parser") or "rapidtriage.source-read"),
+            "parser_version": str(merged.get("parser_version") or package.get("profile_version") or "source-read-citation-package-v1"),
+            "reportability": str(merged.get("reportability") or "review-lead-source-citation-package"),
+        }
+    )
+    if source_hashes:
+        merged["source_hashes"] = source_hashes
+    if record_hashes:
+        merged["record_hashes"] = record_hashes
+    locator_field_map = {
+        "record_offset": ("record_offset", "byte_offset", "offset"),
+        "source_index": ("source_index", "archive_entry_index"),
+        "line": ("line", "line_number"),
+        "row_id": ("row_id", "rowid"),
+        "table": ("table",),
+    }
+    for output_field, locator_fields in locator_field_map.items():
+        if merged.get(output_field) not in (None, ""):
+            continue
+        for locator_field in locator_fields:
+            if locator.get(locator_field) not in (None, ""):
+                merged[output_field] = locator.get(locator_field)
+                break
+    return {
+        key: value
+        for key, value in merged.items()
+        if value not in (None, "", {}, [])
+    }
+
+
 def build_review_priority(match: Mapping[str, object], keywords: list[str]) -> dict[str, object]:
     metadata = match.get("metadata") if isinstance(match.get("metadata"), Mapping) else {}
     source = str(match.get("source") or "")
@@ -4154,6 +4228,17 @@ def build_review_export_item(
             "metadata": {},
         }
     enriched = enrich_case_search_matches([match], [])[0]
+    source_citation_package = (
+        normalize_source_citation_package(review.get("source_citation_package"))
+        if isinstance(review.get("source_citation_package"), Mapping)
+        else {}
+    )
+    source_reference = merge_source_citation_package_into_reference(
+        enriched.get("source_reference") if isinstance(enriched.get("source_reference"), Mapping) else {},
+        source_citation_package,
+    )
+    enriched_for_report = dict(enriched)
+    enriched_for_report["source_reference"] = source_reference
     return {
         "review_citation_id": str(review.get("citation_id") or ""),
         "target_citation_id": str(enriched.get("citation_id") or ""),
@@ -4166,15 +4251,18 @@ def build_review_export_item(
         "preview": str(enriched.get("preview") or ""),
         "review": dict(review),
         "review_history": load_review_history(connection, case_id, target_type=target_type, target_id=target_id),
-                "source_reference": enriched.get("source_reference") or {},
-                "functional_priority_gap_ids": ["#21", "#22", "#23", "#24"],
-                "commercial_gap_ids": ["#64", "#65", PARSER_CONFIDENCE_GAP_ID, VALIDATION_WARNING_UX_GAP_ID, LEGAL_LIMITATION_GAP_ID],
+        "source_citation_package": source_citation_package,
+        "source_citation_package_hash": source_citation_package_hash(source_citation_package),
+        "source_review_handoff": build_source_review_handoff(source_citation_package),
+        "source_reference": source_reference,
+        "functional_priority_gap_ids": ["#21", "#22", "#23", "#24"],
+        "commercial_gap_ids": ["#64", "#65", PARSER_CONFIDENCE_GAP_ID, VALIDATION_WARNING_UX_GAP_ID, LEGAL_LIMITATION_GAP_ID],
         "report_citation_status": "citation-linked-validation-required",
         "evidence_selection_status": "versioned-review-selection",
-        "provenance": build_report_item_provenance(enriched, review),
-        "validation_assessment": build_report_item_validation_assessment(enriched),
-        "legal_limitations": build_report_item_legal_limitations(enriched),
-        "legal_limitations_assessment": build_legal_limitations_assessment(enriched),
+        "provenance": build_report_item_provenance(enriched_for_report, review),
+        "validation_assessment": build_report_item_validation_assessment(enriched_for_report),
+        "legal_limitations": build_report_item_legal_limitations(enriched_for_report),
+        "legal_limitations_assessment": build_legal_limitations_assessment(enriched_for_report),
         "review_priority": enriched.get("review_priority") or {},
         "metadata": enriched.get("metadata") or {},
     }
@@ -4989,6 +5077,7 @@ def build_report_citation_index(items: Sequence[Mapping[str, object]]) -> list[d
             }
         if target_id:
             source_reference = item.get("source_reference") if isinstance(item.get("source_reference"), Mapping) else {}
+            source_package = item.get("source_citation_package") if isinstance(item.get("source_citation_package"), Mapping) else {}
             citations[target_id] = {
                 "citation_id": target_id,
                 "role": "source-record",
@@ -4997,6 +5086,8 @@ def build_report_citation_index(items: Sequence[Mapping[str, object]]) -> list[d
                 "title": str(item.get("title") or ""),
                 "path": str(item.get("path") or ""),
                 "source_reference": source_reference,
+                "source_citation_package_hash": source_citation_package_hash(source_package),
+                "source_review_handoff": build_source_review_handoff(source_package),
                 "source_hash_status": "present" if citation_source_reference_has_hash(source_reference) else "missing",
                 "parser_version_status": "present" if source_reference.get("parser_version") else "missing",
                 "copy_safe_citation": copy_safe_report_citation(
@@ -8296,6 +8387,12 @@ def build_report_item_provenance(
         "target_citation_id": str(enriched.get("citation_id") or ""),
         "review_citation_id": str(review.get("citation_id") or ""),
         "source_path": str(source_reference.get("path") or enriched.get("path") or ""),
+        "source_citation_package_hash": str(source_reference.get("source_citation_package_hash") or ""),
+        "source_read_citation_id": str(source_reference.get("source_read_citation_id") or ""),
+        "source_read_citation_text": str(source_reference.get("source_read_citation_text") or ""),
+        "source_locator": dict(source_reference.get("source_locator"))
+        if isinstance(source_reference.get("source_locator"), Mapping)
+        else {},
         "hashes": dict(hashes),
         "record_hashes": dict(record_hashes),
         "parser": str(source_reference.get("parser") or metadata.get("parser") or ""),
@@ -9798,6 +9895,54 @@ def normalize_review_priority(value: str) -> str:
     return normalized
 
 
+def normalize_source_citation_package(package: object) -> dict[str, object]:
+    if not isinstance(package, Mapping):
+        return {}
+    normalized = dict(package)
+    package_hash = str(normalized.get("package_hash") or "").strip()
+    if not package_hash:
+        normalized["package_hash"] = stable_payload_sha256(normalized)
+    return normalized
+
+
+def source_citation_package_hash(package: Mapping[str, object]) -> str:
+    if not package:
+        return ""
+    package_hash = str(package.get("package_hash") or "").strip()
+    return package_hash or stable_payload_sha256(dict(package))
+
+
+def build_source_review_handoff(package: Mapping[str, object]) -> dict[str, object]:
+    if not package:
+        return {
+            "profile_version": "source-review-handoff-v1",
+            "present": False,
+            "ready_for_report_candidate": False,
+            "blockers": ["source-read-citation-package-not-attached"],
+        }
+    blockers = []
+    if not package.get("source_locator"):
+        blockers.append("source-read-locator-missing")
+    if not package.get("source_sha256"):
+        blockers.append("source-read-source-hash-not-computed")
+    if not package.get("snippet_sha256"):
+        blockers.append("source-read-snippet-hash-missing")
+    if not package.get("package_hash"):
+        blockers.append("source-read-package-hash-missing")
+    return {
+        "profile_version": "source-review-handoff-v1",
+        "present": True,
+        "citation_text": str(package.get("citation_text") or ""),
+        "package_hash": source_citation_package_hash(package),
+        "source_locator_present": bool(package.get("source_locator")),
+        "source_sha256_present": bool(package.get("source_sha256")),
+        "snippet_sha256_present": bool(package.get("snippet_sha256")),
+        "ready_for_report_candidate": not blockers,
+        "ready_for_court_report": False,
+        "blockers": blockers + ["trusted-source-viewer-locator-diff-required-before-court-use"],
+    }
+
+
 def review_mark_to_dict(row: sqlite3.Row) -> dict[str, object]:
     try:
         tags = json.loads(str(row["tags_json"] or "[]"))
@@ -9806,6 +9951,11 @@ def review_mark_to_dict(row: sqlite3.Row) -> dict[str, object]:
     assignee = str(row["assignee"] or "") if "assignee" in row.keys() else ""
     priority = str(row["priority"] or "normal") if "priority" in row.keys() else "normal"
     due_at = str(row["due_at"] or "") if "due_at" in row.keys() else ""
+    source_citation_package = (
+        normalize_source_citation_package(parse_json_object(row["source_citation_package_json"]))
+        if "source_citation_package_json" in row.keys()
+        else {}
+    )
     review_mark = {
         "citation_id": str(row["citation_id"]),
         "case_id": str(row["case_id"]),
@@ -9820,6 +9970,9 @@ def review_mark_to_dict(row: sqlite3.Row) -> dict[str, object]:
         "assignee": assignee,
         "priority": priority,
         "due_at": due_at,
+        "source_citation_package": source_citation_package,
+        "source_citation_package_hash": source_citation_package_hash(source_citation_package),
+        "source_review_handoff": build_source_review_handoff(source_citation_package),
         "review_workflow": review_workflow_assessment(assignee=assignee, priority=priority, due_at=due_at),
         "evidence_selection_versioning": {
             "commercial_gap_ids": ["#65"],
@@ -10614,6 +10767,7 @@ CREATE TABLE IF NOT EXISTS review_mark (
     assignee TEXT NOT NULL DEFAULT '',
     priority TEXT NOT NULL DEFAULT 'normal',
     due_at TEXT NOT NULL DEFAULT '',
+    source_citation_package_json TEXT NOT NULL DEFAULT '{}',
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL,
     FOREIGN KEY (case_id) REFERENCES case_record(case_id) ON DELETE CASCADE

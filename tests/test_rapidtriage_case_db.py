@@ -825,6 +825,102 @@ class RapidTriageCaseDatabaseTests(unittest.TestCase):
             self.assertIn("Source citation:", payload["note"])
             self.assertIn("Source citation package hash:", payload["note"])
 
+    def test_source_read_citation_package_is_structured_in_report_export(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            db_path = root / "case.db"
+            database = open_case_database(db_path)
+            database.create_case(case_id="CASE-SOURCE-STRUCT")
+            with database.connect() as connection:
+                cursor = connection.execute(
+                    """
+                    INSERT INTO indexed_document (
+                        citation_id, case_id, source_type, field_name, title, body, indexed_at
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        "CASE-SOURCE-STRUCT-IDX-000001",
+                        "CASE-SOURCE-STRUCT",
+                        "source-read-fixture",
+                        "body",
+                        "Users/alice/Databases/chat.sqlite",
+                        "wire transfer password appears here",
+                        "2026-05-16T00:00:00+00:00",
+                    ),
+                )
+                target_id = str(cursor.lastrowid)
+
+            source_read_path = root / "source-read.json"
+            source_read_path.write_text(
+                json.dumps(
+                    {
+                        "source_citation_package": {
+                            "profile_version": "source-read-citation-package-v1",
+                            "citation_id": "SRCREAD-0001",
+                            "citation_text": "Users/alice/Databases/chat.sqlite [SQLite row 2] sha256:aaaaaaaa",
+                            "relative_path": "Users/alice/Databases/chat.sqlite",
+                            "source_sha256": "a" * 64,
+                            "snippet": "wire transfer password appears here",
+                            "snippet_sha256": "b" * 64,
+                            "source_locator": {
+                                "locator_type": "sqlite-table-row",
+                                "table": "messages",
+                                "rowid": 2,
+                            },
+                            "review_note_template": "Current-file hit: Users/alice/Databases/chat.sqlite [SQLite row 2]\nSnippet: password",
+                            "package_hash": "f" * 64,
+                        }
+                    },
+                    ensure_ascii=False,
+                ),
+                encoding="utf-8",
+            )
+
+            stdout = io.StringIO()
+            with contextlib.redirect_stdout(stdout):
+                exit_code = main(
+                    [
+                        "case-review",
+                        str(db_path),
+                        "--case-id",
+                        "CASE-SOURCE-STRUCT",
+                        "--target-type",
+                        "indexed_document",
+                        "--target-id",
+                        target_id,
+                        "--status",
+                        "relevant",
+                        "--verification-status",
+                        "source_opened",
+                        "--source-read-json",
+                        str(source_read_path),
+                        "--include-in-report",
+                        "--json",
+                    ]
+                )
+
+            self.assertEqual(exit_code, 0)
+            review_payload = json.loads(stdout.getvalue())
+            self.assertEqual(review_payload["source_citation_package_hash"], "f" * 64)
+            self.assertTrue(review_payload["source_review_handoff"]["source_locator_present"])
+            self.assertTrue(review_payload["source_review_handoff"]["source_sha256_present"])
+
+            export = database.export_reviewed_items(case_id="CASE-SOURCE-STRUCT")
+            item = export["items"][0]
+            self.assertEqual(item["source_citation_package_hash"], "f" * 64)
+            self.assertEqual(item["source_citation_package"]["citation_id"], "SRCREAD-0001")
+            self.assertEqual(item["source_reference"]["source_hashes"]["sha256"], "a" * 64)
+            self.assertEqual(item["source_reference"]["record_hashes"]["snippet_sha256"], "b" * 64)
+            self.assertEqual(item["source_reference"]["source_locator"]["table"], "messages")
+            self.assertEqual(item["source_reference"]["row_id"], 2)
+            self.assertEqual(item["provenance"]["source_citation_package_hash"], "f" * 64)
+            self.assertEqual(item["provenance"]["source_locator"]["locator_type"], "sqlite-table-row")
+            self.assertEqual(item["report_citation_profile"]["source_hash_status"], "present")
+            source_citation = next(row for row in export["citation_index"] if row["role"] == "source-record")
+            self.assertEqual(source_citation["source_citation_package_hash"], "f" * 64)
+            self.assertTrue(source_citation["source_review_handoff"]["source_locator_present"])
+
     def test_cli_case_db_import_run_outputs_counts(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             root = Path(tmp_dir)
