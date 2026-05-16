@@ -991,7 +991,7 @@
       ],
       "expected": {
         "required_assertions": [
-          "Apple/iCloud rows preserve profile detection, account/file/photo normalization, ADP/shared-album limitations, retention/schema warnings, and #38 core_accuracy_gates"
+          "Apple/iCloud rows preserve profile detection, account/file/photo normalization, ADP/shared-album limitations, retention/schema warnings, #38 core_accuracy_gates, and icloud_export_report_grade_validation_plan ready/blocking slots"
         ]
       },
       "notes": "Internal fixture pass; ADP, shared album, and third-party container semantics need provider corpus.",

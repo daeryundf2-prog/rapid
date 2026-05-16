@@ -94,6 +94,18 @@ GOOGLE_TAKEOUT_REPORT_GRADE_VALIDATION_BLOCKERS = [
     "google-provider-schema-version-tracking-required",
     "independent-google-export-review-required",
 ]
+ICLOUD_EXPORT_REPORT_GRADE_VALIDATION_PLAN_VERSION = "icloud-export-report-grade-validation-plan-v1"
+ICLOUD_EXPORT_REPORT_GRADE_VALIDATION_BLOCKERS = [
+    "apple-export-scope-and-account-proof-required",
+    "original-apple-export-hash-required",
+    "adp-shared-album-third-party-container-validation-required",
+    "icloud-photo-sidecar-exif-merge-required",
+    "icloud-album-share-comments-likes-validation-required",
+    "icloud-device-inventory-association-required",
+    "icloud-provider-native-diff-required",
+    "apple-provider-schema-version-tracking-required",
+    "independent-icloud-export-review-required",
+]
 CLOUD_QC_PREP_ITEMS = {
     "google": 43,
     "apple-icloud": 44,
@@ -793,6 +805,29 @@ def build_record(
         detail_payload["icloud_export_parser_manifest_hash"] = detail_payload["icloud_export_parser_manifest"][
             "manifest_sha256"
         ]
+        detail_payload["icloud_export_report_grade_validation_plan"] = (
+            build_icloud_export_report_grade_validation_plan(
+                artifact_type=artifact_type,
+                service=service,
+                source_index=source_index,
+                source_hashes=source_hashes,
+                source_path=str(path.resolve()),
+                details=detail_payload,
+            )
+        )
+        detail_payload["icloud_export_report_grade_validation_plan_hash"] = detail_payload[
+            "icloud_export_report_grade_validation_plan"
+        ]["manifest_sha256"]
+        checks = dict(detail_payload.get("validation_checks") or {})
+        checks.update(
+            {
+                "icloud_export_report_grade_validation_plan_emitted": True,
+                "icloud_export_report_grade_ready_slots": detail_payload[
+                    "icloud_export_report_grade_validation_plan"
+                ].get("ready_slot_count", 0),
+            }
+        )
+        detail_payload["validation_checks"] = checks
     if family == "microsoft-365":
         detail_payload["m365_export_parser_manifest"] = build_m365_export_parser_manifest(
             artifact_type=artifact_type,
@@ -2192,6 +2227,11 @@ def cloud_export_import_functional_profile(
         if isinstance(details.get("icloud_export_parser_manifest"), Mapping)
         else {}
     )
+    icloud_report_plan = (
+        details.get("icloud_export_report_grade_validation_plan")
+        if isinstance(details.get("icloud_export_report_grade_validation_plan"), Mapping)
+        else {}
+    )
     m365_manifest = (
         details.get("m365_export_parser_manifest")
         if isinstance(details.get("m365_export_parser_manifest"), Mapping)
@@ -2213,6 +2253,8 @@ def cloud_export_import_functional_profile(
             "google-takeout-report-grade-validation-plan-not-emitted": family == "google"
             and not google_report_plan,
             "icloud-export-parser-manifest-not-emitted": family == "apple-icloud" and not icloud_manifest,
+            "icloud-export-report-grade-validation-plan-not-emitted": family == "apple-icloud"
+            and not icloud_report_plan,
             "m365-export-parser-manifest-not-emitted": family == "microsoft-365" and not m365_manifest,
             "trusted-provider-export-diff-required": trusted_diff.get("status") != "pass",
         }.items()
@@ -2260,6 +2302,13 @@ def cloud_export_import_functional_profile(
                 and google_manifest.get("row_citation", {}).get("row_hash")
             ),
             "icloud_export_parser_manifest_hash": optional_text(icloud_manifest.get("manifest_sha256")),
+            "icloud_export_report_grade_validation_plan_hash": optional_text(
+                icloud_report_plan.get("manifest_sha256")
+            ),
+            "icloud_export_report_grade_ready_slot_count": int(icloud_report_plan.get("ready_slot_count") or 0),
+            "icloud_export_report_grade_blocking_slot_count": int(
+                icloud_report_plan.get("blocking_slot_count") or 0
+            ),
             "icloud_export_source_row_citation_present": bool(
                 isinstance(icloud_manifest.get("row_citation"), Mapping)
                 and icloud_manifest.get("row_citation", {}).get("row_hash")
@@ -2290,6 +2339,8 @@ def cloud_export_import_functional_profile(
                 and isinstance(google_manifest.get("row_citation"), Mapping)
                 and isinstance(google_manifest.get("row_citation", {}).get("source_viewer_locator"), Mapping),
                 "icloud-export-parser-manifest-emitted": family == "apple-icloud" and bool(icloud_manifest),
+                "icloud-export-report-grade-validation-plan-emitted": family == "apple-icloud"
+                and bool(icloud_report_plan),
                 "icloud-export-source-locator-emitted": family == "apple-icloud"
                 and isinstance(icloud_manifest.get("row_citation"), Mapping)
                 and isinstance(icloud_manifest.get("row_citation", {}).get("source_viewer_locator"), Mapping),
@@ -2372,6 +2423,15 @@ def cloud_commercial_uplift_evidence(
     )
     if icloud_manifest.get("manifest_sha256"):
         source_refs.append(f"icloud_export_parser_manifest_sha256:{icloud_manifest['manifest_sha256']}")
+    icloud_report_plan = (
+        details.get("icloud_export_report_grade_validation_plan")
+        if isinstance(details.get("icloud_export_report_grade_validation_plan"), Mapping)
+        else {}
+    )
+    if icloud_report_plan.get("manifest_sha256"):
+        source_refs.append(
+            f"icloud_export_report_grade_validation_plan_sha256:{icloud_report_plan['manifest_sha256']}"
+        )
     m365_manifest = (
         details.get("m365_export_parser_manifest")
         if isinstance(details.get("m365_export_parser_manifest"), Mapping)
@@ -2473,6 +2533,13 @@ def cloud_commercial_uplift_evidence(
                 and google_manifest.get("large_data_controls", {}).get("viewer_default")
             ),
             "icloud_export_parser_manifest_hash": optional_text(icloud_manifest.get("manifest_sha256")),
+            "icloud_export_report_grade_validation_plan_hash": optional_text(
+                icloud_report_plan.get("manifest_sha256")
+            ),
+            "icloud_export_report_grade_ready_slot_count": int(icloud_report_plan.get("ready_slot_count") or 0),
+            "icloud_export_report_grade_blocking_slot_count": int(
+                icloud_report_plan.get("blocking_slot_count") or 0
+            ),
             "icloud_export_source_row_citation_present": bool(
                 isinstance(icloud_manifest.get("row_citation"), Mapping)
                 and icloud_manifest.get("row_citation", {}).get("row_hash")
@@ -3187,6 +3254,281 @@ def build_icloud_export_parser_manifest(
     return manifest
 
 
+def build_icloud_export_report_grade_validation_plan(
+    *,
+    artifact_type: str,
+    service: str,
+    source_index: int,
+    source_hashes: Mapping[str, str],
+    source_path: str,
+    details: Mapping[str, object],
+) -> dict[str, object]:
+    """#38 report-grade evidence slots for Apple/iCloud export rows."""
+
+    review_profile = (
+        details.get("icloud_export_review_profile")
+        if isinstance(details.get("icloud_export_review_profile"), Mapping)
+        else {}
+    )
+    parser_manifest = (
+        details.get("icloud_export_parser_manifest")
+        if isinstance(details.get("icloud_export_parser_manifest"), Mapping)
+        else {}
+    )
+    import_manifest = (
+        details.get("cloud_export_import_manifest")
+        if isinstance(details.get("cloud_export_import_manifest"), Mapping)
+        else {}
+    )
+    validation_checks = (
+        details.get("validation_checks")
+        if isinstance(details.get("validation_checks"), Mapping)
+        else {}
+    )
+    product_family = optional_text(review_profile.get("product_family")) or icloud_product_family(
+        service=service,
+        artifact_type=artifact_type,
+        source_path=source_path,
+    )
+    row_citation = (
+        parser_manifest.get("row_citation")
+        if isinstance(parser_manifest.get("row_citation"), Mapping)
+        else {}
+    )
+    row_pivots = row_citation.get("row_pivots") if isinstance(row_citation.get("row_pivots"), Mapping) else {}
+    has_source_hash = bool(source_hashes.get("sha256"))
+    has_row_citation = bool(row_citation.get("row_hash"))
+    has_source_viewer = isinstance(row_citation.get("source_viewer_locator"), Mapping)
+    has_product_pivot = bool(review_profile.get("primary_pivot_present") or row_pivots)
+    is_account = product_family == "account"
+    is_drive_or_photo = product_family in {"icloud-drive", "icloud-photos"}
+    is_photo = product_family == "icloud-photos"
+    is_mail = product_family == "icloud-mail"
+    is_device = product_family == "device-association"
+    has_account_identity = bool(details.get("account_email") or details.get("account_name"))
+    has_file_reference = bool(details.get("file_id") or details.get("file_name") or details.get("url_sha256"))
+    has_mail_reference = bool(
+        details.get("message_id") or details.get("subject") or details.get("body_sha256") or details.get("body_preview")
+    )
+
+    def slot(
+        slot_id: str,
+        status: str,
+        *,
+        blocking: bool,
+        evidence: Mapping[str, object] | None = None,
+        required_before_report: Sequence[str] | None = None,
+    ) -> dict[str, object]:
+        return {
+            "id": slot_id,
+            "status": status,
+            "blocking": blocking,
+            "evidence": dict(evidence or {}),
+            "required_before_report": list(required_before_report or []),
+        }
+
+    slots = [
+        slot(
+            "source-apple-export-hash-integrity",
+            "complete" if has_source_hash else "missing",
+            blocking=not has_source_hash,
+            evidence={"source_sha256": source_hashes.get("sha256", "")},
+            required_before_report=["preserve the original Apple/iCloud export or copied source hash"],
+        ),
+        slot(
+            "icloud-row-citation",
+            "complete" if has_row_citation else "missing",
+            blocking=not has_row_citation,
+            evidence={
+                "row_hash": optional_text(row_citation.get("row_hash")),
+                "source_index": source_index,
+                "artifact_type": artifact_type,
+            },
+            required_before_report=["cite row hash, source index, product family, and source path"],
+        ),
+        slot(
+            "icloud-product-pivot-inventory",
+            "complete" if has_product_pivot else "missing",
+            blocking=not has_product_pivot,
+            evidence={
+                "product_family": product_family,
+                "present_primary_pivots": list(review_profile.get("present_primary_pivots") or []),
+                "row_pivot_keys": sorted(str(key) for key in row_pivots.keys()),
+            },
+            required_before_report=["verify that iCloud product-specific pivot fields identify the row"],
+        ),
+        slot(
+            "icloud-source-viewer-locator",
+            "complete" if has_source_viewer else "missing",
+            blocking=not has_source_viewer,
+            evidence={"viewer": "icloud-export-product-row" if has_source_viewer else ""},
+            required_before_report=["open the iCloud product-row viewer before report selection"],
+        ),
+        slot(
+            "apple-account-identity-pivot",
+            "complete" if is_account and has_account_identity else ("not-applicable" if not is_account else "missing"),
+            blocking=is_account and not has_account_identity,
+            evidence={
+                "account_email_present": bool(details.get("account_email")),
+                "account_name_present": bool(details.get("account_name")),
+            },
+            required_before_report=["tie Apple ID/account rows to the legal acquisition scope and owner proof"],
+        ),
+        slot(
+            "icloud-drive-photo-file-reference",
+            "complete" if is_drive_or_photo and has_file_reference else (
+                "not-applicable" if not is_drive_or_photo else "missing"
+            ),
+            blocking=is_drive_or_photo and not has_file_reference,
+            evidence={
+                "file_id": optional_text(details.get("file_id")),
+                "file_name": optional_text(details.get("file_name")),
+                "url_hash_present": bool(details.get("url_sha256")),
+            },
+            required_before_report=["verify iCloud Drive/Photos file identity and source locator before report use"],
+        ),
+        slot(
+            "icloud-mail-message-policy",
+            "complete" if is_mail and has_mail_reference else ("not-applicable" if not is_mail else "missing"),
+            blocking=is_mail and not has_mail_reference,
+            evidence={
+                "message_id": optional_text(details.get("message_id")),
+                "subject_present": bool(details.get("subject")),
+                "body_sha256": optional_text(details.get("body_sha256")),
+                "body_preview_present": bool(details.get("body_preview")),
+            },
+            required_before_report=["use mail hashes/previews as review aids until Apple Mail/native diff passes"],
+        ),
+        slot(
+            "icloud-photo-sidecar-exif-album-share",
+            "pending-provider-sidecar-validate" if is_photo else "not-applicable",
+            blocking=is_photo,
+            evidence={
+                "product_family": product_family,
+                "photo_sidecar_exif_merge_status": optional_text(
+                    review_profile.get("photo_sidecar_exif_merge_status")
+                ),
+                "shared_album_semantics_status": optional_text(
+                    review_profile.get("shared_album_semantics_status")
+                ),
+            },
+            required_before_report=["merge Photos sidecars, EXIF, album/share metadata, comments, and likes"],
+        ),
+        slot(
+            "apple-export-scope-account-proof",
+            "external-scope-manifest-required",
+            blocking=True,
+            evidence={
+                "provider_scope_verified": bool(validation_checks.get("provider_scope_verified")),
+                "apple_export_path_hint": bool(
+                    isinstance(review_profile.get("source_path_hints"), Mapping)
+                    and review_profile.get("source_path_hints", {}).get("apple_export_path")
+                ),
+            },
+            required_before_report=["attach Apple privacy/iCloud export scope, account owner, and export timestamp"],
+        ),
+        slot(
+            "original-apple-export-completeness",
+            "external-archive-proof-required",
+            blocking=True,
+            evidence={
+                "archive_entry_name": optional_text(details.get("archive_entry_name")),
+                "archive_embedded_row": bool(validation_checks.get("archive_embedded_row")),
+                "original_export_hash_verified": bool(review_profile.get("original_export_hash_verified")),
+            },
+            required_before_report=["prove original Apple export/copy completeness and SHA256 for split archives/folders"],
+        ),
+        slot(
+            "adp-shared-album-third-party-container-scope",
+            "external-acquisition-context-required",
+            blocking=True,
+            evidence={
+                "advanced_data_protection_status": optional_text(
+                    review_profile.get("advanced_data_protection_status")
+                ),
+                "shared_album_semantics_status": optional_text(
+                    review_profile.get("shared_album_semantics_status")
+                ),
+                "third_party_container_visibility_status": optional_text(
+                    review_profile.get("third_party_container_visibility_status")
+                ),
+            },
+            required_before_report=[
+                "document ADP state, shared album fidelity, and third-party iCloud container visibility"
+            ],
+        ),
+        slot(
+            "icloud-provider-native-row-diff",
+            "pending-cross-tool-validate",
+            blocking=True,
+            evidence={"provider_native_diff_status": optional_text(review_profile.get("provider_native_diff_status"))},
+            required_before_report=["diff selected rows against Apple privacy export, iCloud web export, or known-answer evidence"],
+        ),
+        slot(
+            "icloud-device-inventory-association",
+            "external-device-corpus-required" if is_account or is_device else "not-applicable",
+            blocking=is_account or is_device,
+            evidence={"product_family": product_family},
+            required_before_report=["validate device inventory/account association on known-answer Apple exports"],
+        ),
+        slot(
+            "apple-provider-schema-version-tracking",
+            "external-schema-matrix-required",
+            blocking=True,
+            evidence={"parser_version": PARSER_VERSION, "source_format": optional_text(details.get("source_format"))},
+            required_before_report=["track Apple/iCloud export schema versions and parser compatibility by export date"],
+        ),
+        slot(
+            "independent-icloud-export-review",
+            "independent-review-required",
+            blocking=True,
+            evidence={"gap_id": "#38"},
+            required_before_report=["attach independent reviewer signoff before commercial/report-grade wording"],
+        ),
+    ]
+    ready_slot_count = sum(1 for item in slots if item["status"] == "complete")
+    blocking_slot_count = sum(1 for item in slots if item["blocking"])
+    plan: dict[str, object] = {
+        "profile_version": ICLOUD_EXPORT_REPORT_GRADE_VALIDATION_PLAN_VERSION,
+        "item_number": 38,
+        "gap_id": "#38",
+        "batch_id": "commercial-uplift-036-040",
+        "qc_prep_item_number": 44,
+        "artifact_type": artifact_type,
+        "service": service or "unknown",
+        "product_family": product_family,
+        "source_format": optional_text(details.get("source_format")),
+        "source_path": source_path,
+        "source_index": source_index,
+        "source_sha256": source_hashes.get("sha256", ""),
+        "cloud_export_import_manifest_sha256": optional_text(import_manifest.get("manifest_sha256")),
+        "icloud_export_parser_manifest_sha256": optional_text(parser_manifest.get("manifest_sha256")),
+        "validation_status": "report-validation-blocked",
+        "commercial_grade": False,
+        "validation_commands": [
+            "source-apple-export-scope-manifest",
+            "apple-icloud-provider-native-export-or-web-diff",
+            "icloud-known-answer-run",
+            "icloud-photos-sidecar-exif-album-share-validation",
+            "independent-icloud-export-review",
+        ],
+        "evidence_slots": slots,
+        "ready_slot_count": ready_slot_count,
+        "blocking_slot_count": blocking_slot_count,
+        "blockers": list(ICLOUD_EXPORT_REPORT_GRADE_VALIDATION_BLOCKERS),
+        "required_before_report": [
+            "attach Apple privacy/iCloud export scope, account owner proof, export timestamp, and original source hash/completeness proof",
+            "diff high-value account, iCloud Drive, Photos, Mail, and device rows against Apple/iCloud native/provider evidence",
+            "validate ADP, shared album, EXIF/sidecar, album/share/comment/like, third-party container, and schema-version semantics",
+            "attach independent review before commercial-grade or testimony-grade claims",
+        ],
+    }
+    plan["manifest_sha256"] = stable_cloud_json_sha256(
+        {key: value for key, value in plan.items() if key != "manifest_sha256"}
+    )
+    return plan
+
+
 def build_m365_export_parser_manifest(
     *,
     artifact_type: str,
@@ -3480,6 +3822,15 @@ def cloud_core_accuracy_gates(
     )
     if icloud_manifest.get("manifest_sha256"):
         evidence_refs.append(f"icloud_export_parser_manifest_sha256:{icloud_manifest['manifest_sha256']}")
+    icloud_report_plan = (
+        details.get("icloud_export_report_grade_validation_plan")
+        if isinstance(details.get("icloud_export_report_grade_validation_plan"), Mapping)
+        else {}
+    )
+    if icloud_report_plan.get("manifest_sha256"):
+        evidence_refs.append(
+            f"icloud_export_report_grade_validation_plan_sha256:{icloud_report_plan['manifest_sha256']}"
+        )
     m365_manifest = (
         details.get("m365_export_parser_manifest")
         if isinstance(details.get("m365_export_parser_manifest"), Mapping)
@@ -3564,6 +3915,10 @@ def cloud_core_accuracy_gates(
                     satisfied.append("iCloud export source row citation")
                 if isinstance(icloud_manifest.get("large_data_controls"), Mapping) and icloud_manifest.get("large_data_controls", {}).get("viewer_default"):
                     satisfied.append("iCloud export review viewer controls")
+            if icloud_report_plan:
+                satisfied.append("iCloud export report-grade validation plan")
+                if int(icloud_report_plan.get("ready_slot_count") or 0) >= 4:
+                    satisfied.append("iCloud export report-grade ready slots")
             if trusted_diff.get("status") == "pass" and int(trusted_diff.get("gap_number") or 0) == 38:
                 satisfied.append("trusted iCloud/provider export diff pass")
         elif number == 39:

@@ -118,12 +118,15 @@
       "title": "Apple iCloud export parser",
       "assertions": [
         "Apple/iCloud rows preserve provider profile detection, account/file/photo metadata normalization, source hashes, export-scope warnings, ADP/shared-album warnings, retention/schema warnings, cloud_analyst_review_profile, #38 core_accuracy_gates, and account/photo-complete reportability blockers.",
+        "Apple/iCloud rows emit icloud_export_report_grade_validation_plan with source hash, row citation, product pivot, source-viewer locator, account/file/photo/mail slots, export scope, ADP/container, provider diff, device association, schema, and independent-review ready/blocking counts.",
         "build_cloud_export_trusted_diff compares Apple/iCloud rows against Apple privacy export, iCloud web export, or native export rows before satisfying the #38 trusted diff gate."
       ],
       "blockers_kept": [
         "Advanced Data Protection limitations",
         "shared album fidelity",
-        "third-party iCloud container validation"
+        "third-party iCloud container validation",
+        "provider-native Apple/iCloud row diff",
+        "device inventory and schema corpus validation"
       ]
     },
     {

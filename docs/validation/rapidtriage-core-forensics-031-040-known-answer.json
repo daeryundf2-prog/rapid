@@ -187,8 +187,9 @@
         "required_assertions": [
           "Apple/iCloud rows preserve profile detection, account/file/photo normalization, ADP/shared-album limitations, retention/schema warnings, and #38 core_accuracy_gates",
           "Apple/iCloud rows emit icloud_export_parser_manifest with stable manifest hash, product family, row citation, source viewer locator, account/file/photo pivots, ADP/shared-album/third-party-container state, sidecar/EXIF status, and viewer controls",
+          "Apple/iCloud rows emit icloud_export_report_grade_validation_plan with stable hash, source hash, row citation, product pivot, source-viewer locator, account/file/photo/mail report slots, ADP/container scope, provider diff, device association, schema, independent-review slots, and ready/blocking counts",
           "iCloud trusted diff helper requires Apple privacy export/iCloud web/native export row equality before satisfying the #38 trusted iCloud/provider export diff pass gate",
-          "iCloud reportability decisions block account/photo-complete claims until ADP/shared-album, retention, and schema validation exists"
+          "iCloud reportability decisions block account/photo-complete claims until export scope, original source completeness, ADP/shared-album/container, provider diff, device association, retention, and schema validation exists"
         ]
       },
       "notes": "Internal fixture pass; ADP, shared album, and third-party container semantics need provider corpus."

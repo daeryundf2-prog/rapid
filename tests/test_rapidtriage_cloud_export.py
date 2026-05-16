@@ -610,6 +610,8 @@ class RapidTriageCloudExportTests(unittest.TestCase):
             self.assertIn("iCloud export parser manifest", apple_gate["satisfied_checks"])
             self.assertIn("iCloud export source row citation", apple_gate["satisfied_checks"])
             self.assertIn("iCloud export review viewer controls", apple_gate["satisfied_checks"])
+            self.assertIn("iCloud export report-grade validation plan", apple_gate["satisfied_checks"])
+            self.assertIn("iCloud export report-grade ready slots", apple_gate["satisfied_checks"])
             icloud_account_profile = account["details"]["icloud_export_review_profile"]
             self.assertEqual(icloud_account_profile["profile_version"], "icloud-export-review-v1")
             self.assertEqual(icloud_account_profile["product_family"], "account")
@@ -617,6 +619,8 @@ class RapidTriageCloudExportTests(unittest.TestCase):
             self.assertEqual(icloud_account_profile["advanced_data_protection_status"], "not-validated")
             self.assertTrue(account["details"]["validation_checks"]["icloud_export_review_profile_emitted"])
             self.assertTrue(account["details"]["validation_checks"]["icloud_row_pivot_present"])
+            self.assertTrue(account["details"]["validation_checks"]["icloud_export_report_grade_validation_plan_emitted"])
+            self.assertEqual(account["details"]["validation_checks"]["icloud_export_report_grade_ready_slots"], 5)
             account_uplift = account["details"]["commercial_uplift_evidence"]
             self.assertEqual(account_uplift["item_numbers"], [38])
             self.assertEqual(account_uplift["qc_prep_item_numbers"], [44])
@@ -648,6 +652,39 @@ class RapidTriageCloudExportTests(unittest.TestCase):
                 account["details"]["icloud_export_parser_manifest_hash"],
                 icloud_manifest["manifest_sha256"],
             )
+            icloud_plan = account["details"]["icloud_export_report_grade_validation_plan"]
+            self.assertEqual(
+                icloud_plan["profile_version"],
+                "icloud-export-report-grade-validation-plan-v1",
+            )
+            self.assertEqual(icloud_plan["item_number"], 38)
+            self.assertEqual(icloud_plan["gap_id"], "#38")
+            self.assertEqual(icloud_plan["qc_prep_item_number"], 44)
+            self.assertEqual(icloud_plan["product_family"], "account")
+            self.assertEqual(icloud_plan["ready_slot_count"], 5)
+            self.assertEqual(icloud_plan["blocking_slot_count"], 7)
+            self.assertEqual(
+                account["details"]["icloud_export_report_grade_validation_plan_hash"],
+                icloud_plan["manifest_sha256"],
+            )
+            icloud_slots = {item["id"]: item for item in icloud_plan["evidence_slots"]}
+            self.assertEqual(icloud_slots["source-apple-export-hash-integrity"]["status"], "complete")
+            self.assertEqual(icloud_slots["icloud-row-citation"]["status"], "complete")
+            self.assertEqual(icloud_slots["icloud-product-pivot-inventory"]["status"], "complete")
+            self.assertEqual(icloud_slots["icloud-source-viewer-locator"]["status"], "complete")
+            self.assertEqual(icloud_slots["apple-account-identity-pivot"]["status"], "complete")
+            self.assertEqual(
+                icloud_slots["icloud-provider-native-row-diff"]["status"],
+                "pending-cross-tool-validate",
+            )
+            self.assertEqual(
+                icloud_slots["icloud-device-inventory-association"]["status"],
+                "external-device-corpus-required",
+            )
+            self.assertIn(
+                f"icloud_export_report_grade_validation_plan_sha256:{icloud_plan['manifest_sha256']}",
+                apple_gate["evidence_refs"],
+            )
             self.assertEqual(
                 account["details"]["cloud_provider_strategy_profile"]["selected_track"],
                 "icloud-export-account-photo-file-scope-validation",
@@ -657,18 +694,44 @@ class RapidTriageCloudExportTests(unittest.TestCase):
             account_profile = account_uplift["functional_priority_profile"]
             self.assertEqual(account_profile["qc_prep_item_numbers"], [44])
             self.assertIn("icloud-export-parser-manifest-emitted", account_profile["passed_validation_check_ids"])
+            self.assertIn(
+                "icloud-export-report-grade-validation-plan-emitted",
+                account_profile["passed_validation_check_ids"],
+            )
             self.assertIn("icloud-export-source-locator-emitted", account_profile["passed_validation_check_ids"])
             self.assertEqual(
                 account_profile["implemented_controls"]["icloud_export_parser_manifest_hash"],
                 icloud_manifest["manifest_sha256"],
+            )
+            self.assertEqual(
+                account_profile["implemented_controls"]["icloud_export_report_grade_validation_plan_hash"],
+                icloud_plan["manifest_sha256"],
+            )
+            self.assertEqual(
+                account_profile["implemented_controls"]["icloud_export_report_grade_ready_slot_count"],
+                5,
+            )
+            self.assertEqual(
+                account_profile["implemented_controls"]["icloud_export_report_grade_blocking_slot_count"],
+                7,
             )
             self.assertTrue(account_profile["implemented_controls"]["icloud_export_source_row_citation_present"])
             self.assertEqual(
                 account_uplift["large_data_controls"]["icloud_export_parser_manifest_hash"],
                 icloud_manifest["manifest_sha256"],
             )
+            self.assertEqual(
+                account_uplift["large_data_controls"]["icloud_export_report_grade_validation_plan_hash"],
+                icloud_plan["manifest_sha256"],
+            )
+            self.assertEqual(account_uplift["large_data_controls"]["icloud_export_report_grade_ready_slot_count"], 5)
+            self.assertEqual(account_uplift["large_data_controls"]["icloud_export_report_grade_blocking_slot_count"], 7)
             self.assertTrue(account_uplift["large_data_controls"]["icloud_export_source_row_citation_present"])
             self.assertTrue(account_uplift["large_data_controls"]["icloud_export_viewer_controls_present"])
+            self.assertIn(
+                f"icloud_export_report_grade_validation_plan_sha256:{icloud_plan['manifest_sha256']}",
+                account_uplift["source_refs"],
+            )
             self.assertEqual(
                 account_uplift["reportability_decision"]["allowed_use"],
                 "icloud-export-triage-pivot",
@@ -687,6 +750,20 @@ class RapidTriageCloudExportTests(unittest.TestCase):
             self.assertEqual(photo_manifest["product_family"], "icloud-photos")
             self.assertIn("file_name", photo_manifest["row_citation"]["row_pivots"])
             self.assertEqual(photo_manifest["manifest_sha256"], icloud_photo["details"]["icloud_export_parser_manifest_hash"])
+            photo_plan = icloud_photo["details"]["icloud_export_report_grade_validation_plan"]
+            self.assertEqual(photo_plan["product_family"], "icloud-photos")
+            self.assertEqual(photo_plan["ready_slot_count"], 5)
+            self.assertEqual(photo_plan["blocking_slot_count"], 7)
+            self.assertEqual(
+                photo_plan["manifest_sha256"],
+                icloud_photo["details"]["icloud_export_report_grade_validation_plan_hash"],
+            )
+            photo_slots = {item["id"]: item for item in photo_plan["evidence_slots"]}
+            self.assertEqual(photo_slots["icloud-drive-photo-file-reference"]["status"], "complete")
+            self.assertEqual(
+                photo_slots["icloud-photo-sidecar-exif-album-share"]["status"],
+                "pending-provider-sidecar-validate",
+            )
             self.assertIn("#38", icloud_photo["details"]["commercial_gap_ids"])
 
             cloud_file = next(
