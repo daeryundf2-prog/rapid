@@ -1700,6 +1700,8 @@ CORE_FORENSIC_ACCURACY_ITEMS: tuple[dict[str, object], ...] = (
             "release artifact hashes captured",
             "macos notarization evidence manifest hash emitted",
             "macos notarization evidence slots emitted",
+            "macos notarization report-grade validation plan",
+            "macos notarization report-grade ready slots",
             "trusted macOS notarization evidence diff pass",
         ),
     },

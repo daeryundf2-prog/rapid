@@ -2355,10 +2355,10 @@
       ],
       "expected": {
         "required_assertions": [
-          "Release manifest and packaging plan preserve macOS package targets, codesign/notarization/Gatekeeper requirements, release artifact hashes, macos-notarization-evidence-manifest-v1 manifest hash/notarization slots, external notarization blocker, trusted macOS notarization diff helpers/gates, and #102 core_accuracy_gates."
+          "Release manifest preserves macOS package targets, codesign/notarization/Gatekeeper requirements, release artifact hashes, macos-notarization-evidence-manifest-v1 manifest hash/notarization slots, macos-notarization-report-grade-validation-plan-v1 ready/blocking slots, external notarization blocker, trusted macOS notarization diff helpers/gates, and #102 core_accuracy_gates; packaging plan preserves the macOS target package boundary."
         ]
       },
-      "notes": "Internal fixture pass; actual Apple signing/notarization and trusted notarization manifests remain external.",
+      "notes": "Internal fixture pass; actual Apple signing/notarization, notarytool proof, stapled ticket proof, Gatekeeper smoke, fresh macOS smoke logs, package wrapper logs, and trusted notarization attestations remain external.",
       "source_manifest": "docs/validation/rapidtriage-core-forensics-101-120-known-answer.json"
     },
     {

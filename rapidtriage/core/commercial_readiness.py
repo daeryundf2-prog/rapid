@@ -3435,6 +3435,7 @@ def release_operations_evidence_chain() -> list[dict[str, object]]:
             "primary_outputs": [
                 "release-manifest.package_readiness.macos_notarized_package",
                 "macos_notarized_package.macos_notarization_evidence_manifest.manifest_hash",
+                "macos_notarized_package.macos_notarization_report_grade_validation_plan_hash",
                 "macos_notarized_package.notarization_slots.codesign_verification",
                 "macos_notarized_package.notarization_slots.notarytool_submission",
                 "macos_notarized_package.notarization_slots.gatekeeper_assessment",

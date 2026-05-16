@@ -1775,6 +1775,10 @@ class RapidTriageOpsTests(unittest.TestCase):
                 release_by_number[102]["primary_outputs"],
             )
             self.assertIn(
+                "macos_notarized_package.macos_notarization_report_grade_validation_plan_hash",
+                release_by_number[102]["primary_outputs"],
+            )
+            self.assertIn(
                 "linux_package.linux_package_evidence_manifest.manifest_hash",
                 release_by_number[103]["primary_outputs"],
             )
@@ -5480,6 +5484,32 @@ class RapidTriageOpsTests(unittest.TestCase):
             self.assertIn("rapidtriage.dmg", macos_workflow_manifest["target_outputs"])
             self.assertIn("pkg_dmg_build_log", macos_workflow_manifest["evidence_slots"])
             self.assertIn("notarization-ticket-not-attached", macos_workflow_manifest["blockers"])
+            macos_report_grade_plan = manifest["package_readiness"]["macos_notarized_package"][
+                "macos_notarization_report_grade_validation_plan"
+            ]
+            self.assertEqual(
+                macos_report_grade_plan["profile_version"],
+                "macos-notarization-report-grade-validation-plan-v1",
+            )
+            self.assertEqual(
+                manifest["package_readiness"]["macos_notarized_package"][
+                    "macos_notarization_report_grade_validation_plan_hash"
+                ],
+                macos_report_grade_plan["validation_plan_sha256"],
+            )
+            self.assertGreaterEqual(
+                manifest["package_readiness"]["macos_notarized_package"][
+                    "macos_notarization_report_grade_ready_slot_count"
+                ],
+                7,
+            )
+            self.assertGreaterEqual(
+                manifest["package_readiness"]["macos_notarized_package"][
+                    "macos_notarization_report_grade_blocking_slot_count"
+                ],
+                7,
+            )
+            self.assertIn("notarytool-submission-proof-required", macos_report_grade_plan["blockers"])
             self.assertEqual(
                 manifest["package_readiness"]["macos_notarized_package"]["macos_notarization_evidence_manifest_hash"],
                 macos_notarization_manifest["manifest_hash"],
@@ -5488,6 +5518,12 @@ class RapidTriageOpsTests(unittest.TestCase):
             self.assertIn(
                 "macos notarization evidence manifest hash emitted",
                 manifest["package_readiness"]["macos_notarized_package"]["core_accuracy_gates"][0]["satisfied_checks"],
+            )
+            self.assertIn(
+                "macos notarization report-grade validation plan",
+                manifest["package_readiness"]["macos_notarized_package"]["core_accuracy_gates"][0][
+                    "satisfied_checks"
+                ],
             )
             self.assertIn(
                 "macos evidence slot matrix hash emitted",
@@ -5505,6 +5541,10 @@ class RapidTriageOpsTests(unittest.TestCase):
             self.assertEqual(manifest["package_readiness"]["macos_notarized_package"]["trusted_macos_notarization_diff"]["status"], "missing")
             self.assertIn(
                 "trusted-macos-notarization-evidence-diff-missing",
+                manifest["package_readiness"]["macos_notarized_package"]["blockers"],
+            )
+            self.assertIn(
+                "notarytool-submission-proof-required",
                 manifest["package_readiness"]["macos_notarized_package"]["blockers"],
             )
             self.assertIn("#103", manifest["package_readiness"]["linux_package"]["commercial_gap_ids"])
@@ -5819,6 +5859,22 @@ class RapidTriageOpsTests(unittest.TestCase):
             self.assertIn("windows_signing_report_grade_validation_plan_hash", windows_diff["compared_fields"])
             self.assertIn("trusted Windows Authenticode evidence diff pass", windows_gates[0]["satisfied_checks"])
             self.assertIn("windows signing report-grade ready slots", windows_gates[0]["satisfied_checks"])
+            macos_diff = build_release.build_release_packaging_trusted_diff(
+                102,
+                manifest["package_readiness"]["macos_notarized_package"],
+                manifest["package_readiness"]["macos_notarized_package"],
+                trusted_tool="macos-notarization-log",
+            )
+            macos_gates = build_release.release_packaging_core_accuracy_gate(
+                102,
+                trusted_diff=macos_diff,
+                evidence_manifest=macos_notarization_manifest,
+                report_grade_validation_plan=macos_report_grade_plan,
+            )
+            self.assertEqual(macos_diff["status"], "pass")
+            self.assertIn("macos_notarization_report_grade_validation_plan_hash", macos_diff["compared_fields"])
+            self.assertIn("trusted macOS notarization evidence diff pass", macos_gates[0]["satisfied_checks"])
+            self.assertIn("macos notarization report-grade ready slots", macos_gates[0]["satisfied_checks"])
             release_notes_diff = build_release.build_operations_document_trusted_diff(
                 112,
                 manifest["package_readiness"]["operations_documents"],

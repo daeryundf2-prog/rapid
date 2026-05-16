@@ -34,6 +34,17 @@ WINDOWS_SIGNING_REPORT_GRADE_BLOCKERS = [
     "windows-defender-smartscreen-review-required",
 ]
 MACOS_NOTARIZATION_TRUSTED_DIFF_BLOCKER_102 = "trusted-macos-notarization-evidence-diff-missing"
+MACOS_NOTARIZATION_REPORT_GRADE_VALIDATION_PLAN_VERSION = "macos-notarization-report-grade-validation-plan-v1"
+MACOS_NOTARIZATION_REPORT_GRADE_BLOCKERS = [
+    MACOS_NOTARIZATION_TRUSTED_DIFF_BLOCKER_102,
+    "codesign-verification-required",
+    "notarytool-submission-proof-required",
+    "notarization-ticket-staple-required",
+    "gatekeeper-assessment-required",
+    "fresh-macos-smoke-required",
+    "pkg-dmg-wrapper-build-log-required",
+    "apple-developer-id-certificate-required",
+]
 LINUX_PACKAGE_TRUSTED_DIFF_BLOCKER_103 = "trusted-linux-package-smoke-diff-missing"
 AUTO_UPDATE_TRUSTED_DIFF_BLOCKER_104 = "trusted-auto-update-channel-diff-missing"
 RELEASE_PACKAGING_TRUSTED_TOOLS = {
@@ -773,6 +784,188 @@ def build_macos_package_workflow_manifest(
     return manifest
 
 
+def build_macos_notarization_report_grade_validation_plan(
+    *,
+    notarization_manifest: dict[str, object],
+    workflow_manifest: dict[str, object],
+    artifacts: list[dict[str, object]],
+    trusted_diff: dict[str, object],
+) -> dict[str, object]:
+    artifact_names = {str(artifact.get("name") or "") for artifact in artifacts if artifact.get("name")}
+    release_artifact_hashes = notarization_manifest.get("release_artifact_hashes")
+    notarization_slots = (
+        notarization_manifest.get("notarization_slots")
+        if isinstance(notarization_manifest.get("notarization_slots"), Mapping)
+        else {}
+    )
+    evidence_slot_matrix = (
+        notarization_manifest.get("evidence_slot_matrix")
+        if isinstance(notarization_manifest.get("evidence_slot_matrix"), Mapping)
+        else {}
+    )
+    ready_slots: list[dict[str, object]] = []
+    blocking_slots: list[dict[str, object]] = []
+
+    def add_ready(slot_id: str, evidence: str, source: str) -> None:
+        ready_slots.append(
+            {
+                "slot_id": slot_id,
+                "status": "ready",
+                "evidence": evidence,
+                "source": source,
+                "commercial_claim_material": False,
+            }
+        )
+
+    def add_blocking(slot_id: str, blocker: str, required_evidence: str, owner: str = "release engineer") -> None:
+        blocking_slots.append(
+            {
+                "slot_id": slot_id,
+                "status": "external-evidence-required",
+                "blocker": blocker,
+                "required_evidence": required_evidence,
+                "owner": owner,
+                "commercial_claim_material": True,
+            }
+        )
+
+    if "rapidtriage-portable.zip" in artifact_names:
+        add_ready("portable-payload-present", "rapidtriage-portable.zip included in release artifacts", "artifacts")
+    else:
+        add_blocking("portable-payload-present", "portable-payload-missing", "rapidtriage-portable.zip release artifact")
+    if release_artifact_hashes:
+        add_ready(
+            "release-artifact-hashes",
+            "release artifact SHA256 inventory captured",
+            "macos-notarization-evidence-manifest",
+        )
+    else:
+        add_blocking("release-artifact-hashes", "release-artifact-hashes-missing", "Release artifact hash inventory")
+    if notarization_manifest.get("manifest_hash"):
+        add_ready(
+            "macos-notarization-evidence-manifest",
+            "macOS notarization evidence manifest hash emitted",
+            "release-manifest",
+        )
+    else:
+        add_blocking(
+            "macos-notarization-evidence-manifest",
+            "macos-notarization-evidence-manifest-hash-missing",
+            "macos-notarization-evidence-manifest-v1 hash",
+        )
+    if notarization_manifest.get("evidence_slot_matrix_hash") and evidence_slot_matrix.get("rows"):
+        add_ready("macos-notarization-evidence-slot-matrix", "Evidence slot matrix rows and hash emitted", "release-manifest")
+    else:
+        add_blocking(
+            "macos-notarization-evidence-slot-matrix",
+            "macos-notarization-evidence-slot-matrix-missing",
+            "release-evidence-slot-matrix-v1 rows and hash",
+        )
+    if workflow_manifest.get("manifest_hash"):
+        add_ready("macos-package-workflow-manifest", "macOS package workflow manifest hash emitted", "release-manifest")
+    else:
+        add_blocking(
+            "macos-package-workflow-manifest",
+            "macos-package-workflow-manifest-missing",
+            "macos-package-workflow-manifest-v1 hash",
+        )
+    if workflow_manifest.get("launcher_entries"):
+        add_ready("macos-launcher-and-smoke-scripts", "macOS launcher and smoke script entries declared", "workflow-manifest")
+    else:
+        add_blocking(
+            "macos-launcher-and-smoke-scripts",
+            "macos-launcher-smoke-scripts-missing",
+            "Packaged macOS launcher and smoke scripts",
+        )
+    if workflow_manifest.get("verification_commands"):
+        add_ready("macos-verification-commands", "macOS release verification commands declared", "workflow-manifest")
+    else:
+        add_blocking(
+            "macos-verification-commands",
+            "macos-verification-commands-missing",
+            "codesign, notarytool, Gatekeeper, and smoke verification commands",
+        )
+    if trusted_diff.get("status"):
+        add_ready("trusted-diff-boundary", "Trusted macOS notarization diff status recorded", "trusted_macos_notarization_diff")
+    if notarization_slots:
+        add_ready("notarization-slot-disclosure", "codesign, notarytool, Gatekeeper, and smoke slots disclosed", "notarization_slots")
+
+    if trusted_diff.get("status") != "pass":
+        add_blocking(
+            "trusted-macos-notarization-diff",
+            MACOS_NOTARIZATION_TRUSTED_DIFF_BLOCKER_102,
+            "Trusted macOS notarization evidence diff manifest",
+        )
+    required_external_slots = {
+        "codesign_verification": (
+            "codesign-verification-required",
+            "codesign --verify --deep --strict transcript for macOS artifacts",
+        ),
+        "notarytool_submission": (
+            "notarytool-submission-proof-required",
+            "Apple notarytool submission ID, status, and log transcript",
+        ),
+        "gatekeeper_assessment": (
+            "gatekeeper-assessment-required",
+            "spctl Gatekeeper assessment transcript on a clean macOS host",
+        ),
+        "fresh_macos_smoke": (
+            "fresh-macos-smoke-required",
+            "Fresh macOS install/run smoke summary and logs",
+        ),
+    }
+    for slot_name, (blocker, required_evidence) in required_external_slots.items():
+        slot = notarization_slots.get(slot_name) if isinstance(notarization_slots, Mapping) else {}
+        if not isinstance(slot, Mapping) or slot.get("status") != "attached":
+            add_blocking(slot_name, blocker, required_evidence)
+    workflow_slots = workflow_manifest.get("evidence_slots") if isinstance(workflow_manifest.get("evidence_slots"), Mapping) else {}
+    wrapper_slot = workflow_slots.get("pkg_dmg_build_log") if isinstance(workflow_slots, Mapping) else {}
+    if not isinstance(wrapper_slot, Mapping) or wrapper_slot.get("status") != "attached":
+        add_blocking(
+            "pkg-dmg-wrapper-log",
+            "pkg-dmg-wrapper-build-log-required",
+            "pkg/dmg wrapper build transcript, output hashes, and package metadata",
+        )
+    add_blocking(
+        "notarization-ticket-staple",
+        "notarization-ticket-staple-required",
+        "Stapled notarization ticket proof or accepted equivalent release policy",
+    )
+    add_blocking(
+        "apple-developer-id-certificate",
+        "apple-developer-id-certificate-required",
+        "Apple Developer ID certificate identity and chain verification transcript",
+    )
+
+    blockers = sorted({str(slot.get("blocker")) for slot in blocking_slots if slot.get("blocker")})
+    plan_core: dict[str, object] = {
+        "profile_version": MACOS_NOTARIZATION_REPORT_GRADE_VALIDATION_PLAN_VERSION,
+        "item_number": 102,
+        "commercial_gap_ids": [MACOS_NOTARIZED_PACKAGE_GAP_ID],
+        "commercial_claim_allowed": False,
+        "reporting_boundary": (
+            "Internal release artifacts prove payload inventory, evidence-slot disclosure, and workflow readiness only; "
+            "a notarized macOS package claim requires the blocking external Apple signing/notarization evidence."
+        ),
+        "target_outputs": notarization_manifest.get("target_outputs", []),
+        "release_artifact_hashes": release_artifact_hashes or [],
+        "notarization_evidence_manifest_hash": notarization_manifest.get("manifest_hash"),
+        "package_workflow_manifest_hash": workflow_manifest.get("manifest_hash"),
+        "evidence_slot_matrix_hash": notarization_manifest.get("evidence_slot_matrix_hash"),
+        "trusted_diff_status": trusted_diff.get("status"),
+        "trusted_diff_blocker": trusted_diff.get("blocker"),
+        "ready_slots": ready_slots,
+        "blocking_slots": blocking_slots,
+        "ready_slot_count": len(ready_slots),
+        "blocking_slot_count": len(blocking_slots),
+        "external_blocker_catalog": MACOS_NOTARIZATION_REPORT_GRADE_BLOCKERS,
+        "blockers": blockers,
+    }
+    plan = dict(plan_core)
+    plan["validation_plan_sha256"] = stable_release_sha256(plan_core)
+    return plan
+
+
 def build_linux_package_evidence_manifest(
     artifacts: list[dict[str, object]],
     trusted_diff: dict[str, object],
@@ -1463,6 +1656,18 @@ def write_release_manifest(output_dir: Path, repo: Path, commercial_readiness: d
         artifacts,
         macos_notarization_evidence_manifest,
     )
+    macos_notarization_report_grade_validation_plan = build_macos_notarization_report_grade_validation_plan(
+        notarization_manifest=macos_notarization_evidence_manifest,
+        workflow_manifest=macos_package_workflow_manifest,
+        artifacts=artifacts,
+        trusted_diff=macos_trusted_diff,
+    )
+    macos_notarization_blockers = sorted(
+        {
+            MACOS_NOTARIZATION_TRUSTED_DIFF_BLOCKER_102,
+            *[str(blocker) for blocker in macos_notarization_report_grade_validation_plan.get("blockers", [])],
+        }
+    )
     linux_trusted_diff = missing_release_packaging_trusted_diff(103)
     linux_package_evidence_manifest = build_linux_package_evidence_manifest(artifacts, linux_trusted_diff)
     linux_package_workflow_manifest = build_linux_package_workflow_manifest(
@@ -1547,6 +1752,7 @@ def write_release_manifest(output_dir: Path, repo: Path, commercial_readiness: d
                 "core_accuracy_gates": release_packaging_core_accuracy_gate(
                     102,
                     evidence_manifest=macos_notarization_evidence_manifest,
+                    report_grade_validation_plan=macos_notarization_report_grade_validation_plan,
                 ),
                 "functional_priority_profile": release_packaging_functional_priority_profile("macos"),
                 "required_evidence": ["codesign verification", "notarization ticket", "Gatekeeper assessment"],
@@ -1555,9 +1761,19 @@ def write_release_manifest(output_dir: Path, repo: Path, commercial_readiness: d
                 "evidence_slot_matrix_hash": macos_notarization_evidence_manifest["evidence_slot_matrix_hash"],
                 "macos_package_workflow_manifest": macos_package_workflow_manifest,
                 "macos_package_workflow_manifest_hash": macos_package_workflow_manifest["manifest_hash"],
+                "macos_notarization_report_grade_validation_plan": macos_notarization_report_grade_validation_plan,
+                "macos_notarization_report_grade_validation_plan_hash": macos_notarization_report_grade_validation_plan[
+                    "validation_plan_sha256"
+                ],
+                "macos_notarization_report_grade_ready_slot_count": macos_notarization_report_grade_validation_plan[
+                    "ready_slot_count"
+                ],
+                "macos_notarization_report_grade_blocking_slot_count": macos_notarization_report_grade_validation_plan[
+                    "blocking_slot_count"
+                ],
                 "notarization_slots": macos_notarization_evidence_manifest["notarization_slots"],
                 "trusted_macos_notarization_diff": macos_trusted_diff,
-                "blockers": [MACOS_NOTARIZATION_TRUSTED_DIFF_BLOCKER_102],
+                "blockers": macos_notarization_blockers,
             },
             "linux_package": {
                 "status": "packaging-plan-ready",
@@ -1893,7 +2109,14 @@ def build_release_packaging_trusted_diff(
             ]
         )
     if number == 102:
-        compared_fields.extend(["macos_notarization_evidence_manifest_hash", "notarization_slots", "evidence_slot_matrix_hash"])
+        compared_fields.extend(
+            [
+                "macos_notarization_evidence_manifest_hash",
+                "notarization_slots",
+                "evidence_slot_matrix_hash",
+                "macos_notarization_report_grade_validation_plan_hash",
+            ]
+        )
     if number == 103:
         compared_fields.extend(["linux_package_evidence_manifest_hash", "package_evidence_slots", "evidence_slot_matrix_hash"])
     if number == 104:
@@ -2072,6 +2295,11 @@ def release_packaging_core_accuracy_gate(
             satisfied_checks.append("macos notarization evidence slots emitted")
         if evidence_manifest.get("evidence_slot_matrix_hash"):
             satisfied_checks.append("macos evidence slot matrix hash emitted")
+    if number == 102 and report_grade_validation_plan:
+        if report_grade_validation_plan.get("validation_plan_sha256"):
+            satisfied_checks.append("macos notarization report-grade validation plan")
+        if int(report_grade_validation_plan.get("ready_slot_count") or 0) > 0:
+            satisfied_checks.append("macos notarization report-grade ready slots")
     if number == 103 and evidence_manifest:
         if evidence_manifest.get("release_artifact_hashes"):
             satisfied_checks.append("release artifact hashes captured")
