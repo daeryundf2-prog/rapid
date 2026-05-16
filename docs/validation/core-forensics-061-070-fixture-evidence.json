@@ -18,9 +18,9 @@
       "title": "Saved keyword pack library",
       "test_files": ["tests/test_rapidtriage_api.py", "tests/test_rapidtriage_search_analysis.py"],
       "assertions": [
-        "Keyword-pack API and resolver preserve built-in inventory, deduplicated expansion, pack provenance, custom JSON support, per-pack keyword-pack-manifest, library keyword-pack-library-manifest, selection keyword-pack-selection-manifest, keyword row hashes, expansion head hashes, manifest hashes, API search keyword_pack_selection_profile, web built-in pack selection controls, trusted expansion diff helper/gate, #62 core_accuracy_gates, and reportability blockers for missing signed/versioned packs, case edits, and language/domain corpus validation."
+        "Keyword-pack API and resolver preserve built-in inventory, deduplicated expansion, pack provenance, custom JSON support, per-pack keyword-pack-manifest, library keyword-pack-library-manifest, selection keyword-pack-selection-manifest, keyword rows, row hashes, expansion head hashes, manifest hashes, keyword_pack_report_grade_validation_plan hashes/ready slots/blocking slots, API search keyword_pack_selection_profile, web built-in pack selection controls, trusted expansion diff helper/gate, #62 core_accuracy_gates, and reportability blockers for missing signed/versioned packs, release review, case edits, language/domain corpus validation, trusted expansion diff, and large-case pack performance."
       ],
-      "remaining_external_validation": ["Signed pack library, trusted expansion manifest, per-case editing UI, language/domain pack corpus, and release-reviewed pack versions."]
+      "remaining_external_validation": ["Signed/versioned pack library, release-review records, trusted expansion manifest, per-case editing UI/audit, language/domain pack corpus, large-case pack performance validation, and release-reviewed pack versions."]
     },
     {
       "item": 63,

@@ -1505,10 +1505,10 @@
       ],
       "expected": {
         "required_assertions": [
-          "Keyword-pack outputs preserve built-in inventory, custom JSON support, deduplicated expansion, pack provenance, per-pack keyword-pack-manifest, library keyword-pack-library-manifest, selection keyword-pack-selection-manifest, keyword row hashes, expansion head hashes, manifest hashes, API search keyword_pack_selection_profile, web built-in pack selection controls, case-specific warnings, and #62 core_accuracy_gates."
+          "Keyword-pack outputs preserve built-in inventory, custom JSON support, deduplicated expansion, pack provenance, per-pack keyword-pack-manifest, library keyword-pack-library-manifest, selection keyword-pack-selection-manifest, keyword row hashes, expansion head hashes, manifest hashes, keyword_pack_report_grade_validation_plan hashes/ready slots/blocking slots, API search keyword_pack_selection_profile, web built-in pack selection controls, case-specific warnings, and #62 core_accuracy_gates."
         ]
       },
-      "notes": "Internal fixture pass; signed pack library, trusted pack manifest diff, per-case editing UI, and language/domain corpus validation remain blockers.",
+      "notes": "Internal fixture pass with #62 report-grade validation-plan hashes; signed/versioned pack library, release-review records, trusted pack manifest diff, per-case editing UI/audit, language/domain corpus validation, and large-case pack performance remain blockers.",
       "source_manifest": "docs/validation/rapidtriage-core-forensics-061-070-known-answer.json"
     },
     {

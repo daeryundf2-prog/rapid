@@ -596,36 +596,68 @@ class RapidTriageApiTests(unittest.TestCase):
         self.assertEqual(client.get("/api/health").json(), {"status": "ok"})
         self.assertFalse(client.get("/api/enterprise/policy").json()["telemetry"]["enabled"])
         keyword_packs = client.get("/api/keyword-packs").json()
-        self.assertIn("#62", keyword_packs["keyword_pack_library_assessment"]["commercial_gap_ids"])
-        self.assertEqual(keyword_packs["keyword_pack_library_assessment"]["core_accuracy_gates"][0]["gap_id"], "#62")
-        library_manifest = keyword_packs["keyword_pack_library_assessment"]["keyword_pack_library_manifest"]
+        library_assessment = keyword_packs["keyword_pack_library_assessment"]
+        self.assertIn("#62", library_assessment["commercial_gap_ids"])
+        self.assertEqual(library_assessment["core_accuracy_gates"][0]["gap_id"], "#62")
+        library_manifest = library_assessment["keyword_pack_library_manifest"]
         self.assertEqual(library_manifest["manifest_version"], "keyword-pack-library-manifest-v1")
 
         self.assertEqual(
-            keyword_packs["keyword_pack_library_assessment"]["keyword_pack_library_manifest_hash"],
+            library_assessment["keyword_pack_library_manifest_hash"],
             library_manifest["manifest_hash"],
         )
         self.assertGreaterEqual(library_manifest["keyword_row_hash_count"], 1)
+        library_plan = library_assessment["keyword_pack_report_grade_validation_plan"]
+        self.assertEqual(library_plan["profile_version"], "keyword-pack-report-grade-validation-plan-v1")
+        self.assertEqual(library_plan["item_number"], 62)
+        self.assertEqual(library_plan["gap_id"], "#62")
+        self.assertEqual(library_plan["keyword_pack_manifest_sha256"], library_manifest["manifest_hash"])
+        self.assertEqual(library_plan["validation_plan_sha256"], library_assessment["keyword_pack_report_grade_validation_plan_hash"])
+        self.assertEqual(library_assessment["report_grade_ready_slot_count"], 6)
+        self.assertEqual(library_assessment["report_grade_blocking_slot_count"], 6)
+        self.assertEqual(library_plan["ready_slot_count"], 6)
+        self.assertEqual(library_plan["blocking_slot_count"], 6)
+        self.assertEqual(library_plan["validation_status"], "report-validation-blocked")
+        self.assertIn("signed-versioned-keyword-pack-library-required", library_plan["blockers"])
+        self.assertIn("trusted-keyword-pack-expansion-diff-required", library_plan["blockers"])
         self.assertIn(
             "keyword-pack manifest hash",
-            keyword_packs["keyword_pack_library_assessment"]["core_accuracy_gates"][0]["satisfied_checks"],
+            library_assessment["core_accuracy_gates"][0]["satisfied_checks"],
         )
         self.assertIn(
             "keyword row hashes",
-            keyword_packs["keyword_pack_library_assessment"]["core_accuracy_gates"][0]["satisfied_checks"],
+            library_assessment["core_accuracy_gates"][0]["satisfied_checks"],
         )
-        self.assertEqual(keyword_packs["keyword_pack_library_assessment"]["commercial_uplift_evidence"]["item_numbers"], [62])
+        self.assertIn(
+            "keyword-pack report-grade validation plan",
+            library_assessment["core_accuracy_gates"][0]["satisfied_checks"],
+        )
+        self.assertIn(
+            "keyword-pack report-grade ready slots",
+            library_assessment["core_accuracy_gates"][0]["satisfied_checks"],
+        )
+        self.assertEqual(library_assessment["commercial_uplift_evidence"]["item_numbers"], [62])
         self.assertEqual(
-            keyword_packs["keyword_pack_library_assessment"]["commercial_uplift_evidence"]["large_data_controls"]["keyword_pack_manifest_hash"],
+            library_assessment["commercial_uplift_evidence"]["large_data_controls"]["keyword_pack_manifest_hash"],
             library_manifest["manifest_hash"],
         )
         self.assertEqual(
-            keyword_packs["keyword_pack_library_assessment"]["commercial_uplift_evidence"]["reportability_decision"]["allowed_use"],
+            library_assessment["commercial_uplift_evidence"]["large_data_controls"]["keyword_pack_report_grade_validation_plan_hash"],
+            library_plan["validation_plan_sha256"],
+        )
+        self.assertEqual(library_assessment["commercial_uplift_evidence"]["large_data_controls"]["keyword_pack_report_grade_ready_slot_count"], 6)
+        self.assertEqual(library_assessment["commercial_uplift_evidence"]["large_data_controls"]["keyword_pack_report_grade_blocking_slot_count"], 6)
+        self.assertEqual(
+            library_assessment["commercial_uplift_evidence"]["reportability_decision"]["allowed_use"],
             "keyword-pack-expansion-triage-pivot",
+        )
+        self.assertEqual(
+            library_assessment["commercial_uplift_evidence"]["reportability_decision"]["keyword_pack_report_grade_validation_plan_hash"],
+            library_plan["validation_plan_sha256"],
         )
         self.assertIn(
             "trusted-keyword-pack-expansion-diff-missing",
-            keyword_packs["keyword_pack_library_assessment"]["commercial_uplift_evidence"]["failed_validation_check_ids"],
+            library_assessment["commercial_uplift_evidence"]["failed_validation_check_ids"],
         )
         self.assertIn("#62", keyword_packs["packs"][0]["commercial_gap_ids"])
         self.assertEqual(keyword_packs["packs"][0]["core_accuracy_gates"][0]["gap_id"], "#62")
@@ -638,6 +670,10 @@ class RapidTriageApiTests(unittest.TestCase):
             keyword_packs["packs"][0]["keyword_pack_manifest"]["manifest_hash"],
         )
         self.assertGreaterEqual(keyword_packs["packs"][0]["keyword_pack_manifest"]["keyword_row_hash_count"], 1)
+        self.assertEqual(
+            keyword_packs["packs"][0]["keyword_pack_report_grade_validation_plan"]["validation_plan_sha256"],
+            keyword_packs["packs"][0]["keyword_pack_report_grade_validation_plan_hash"],
+        )
         self.assertEqual(keyword_packs["packs"][0]["commercial_uplift_evidence"]["batch_id"], "commercial-uplift-061-065")
         trusted_pack = build_keyword_pack_trusted_diff(["Password", "token"], ["password", "TOKEN"])
         pack_gates = keyword_pack_core_accuracy_gates(
@@ -1648,10 +1684,26 @@ class RapidTriageApiTests(unittest.TestCase):
                 search_response.json()["keyword_pack_selection_profile"]["keyword_pack_selection_manifest_hash"],
                 selection_manifest["manifest_hash"],
             )
+            selection_plan = search_response.json()["keyword_pack_selection_profile"]["keyword_pack_report_grade_validation_plan"]
+            self.assertEqual(selection_plan["profile_version"], "keyword-pack-report-grade-validation-plan-v1")
+            self.assertEqual(selection_plan["plan_context"], "selection")
+            self.assertEqual(selection_plan["keyword_pack_manifest_sha256"], selection_manifest["manifest_hash"])
+            self.assertEqual(
+                search_response.json()["keyword_pack_selection_profile"]["keyword_pack_report_grade_validation_plan_hash"],
+                selection_plan["validation_plan_sha256"],
+            )
+            self.assertEqual(search_response.json()["keyword_pack_selection_profile"]["report_grade_ready_slot_count"], 6)
+            self.assertEqual(search_response.json()["keyword_pack_selection_profile"]["report_grade_blocking_slot_count"], 6)
+            self.assertIn("per-case-pack-editor-audit-required", selection_plan["blockers"])
+            self.assertIn("language-domain-pack-corpus-required", selection_plan["blockers"])
             self.assertGreaterEqual(selection_manifest["keyword_row_hash_count"], 1)
             self.assertGreaterEqual(len(selection_manifest["keyword_rows"]), 1)
             self.assertIn(
                 "keyword row hashes",
+                search_response.json()["keyword_pack_selection_profile"]["core_accuracy_gates"][0]["satisfied_checks"],
+            )
+            self.assertIn(
+                "keyword-pack report-grade validation plan",
                 search_response.json()["keyword_pack_selection_profile"]["core_accuracy_gates"][0]["satisfied_checks"],
             )
             self.assertEqual(
@@ -1661,6 +1713,10 @@ class RapidTriageApiTests(unittest.TestCase):
             self.assertEqual(
                 search_response.json()["keyword_pack_selection_profile"]["commercial_uplift_evidence"]["large_data_controls"]["keyword_pack_manifest_hash"],
                 selection_manifest["manifest_hash"],
+            )
+            self.assertEqual(
+                search_response.json()["keyword_pack_selection_profile"]["commercial_uplift_evidence"]["large_data_controls"]["keyword_pack_report_grade_validation_plan_hash"],
+                selection_plan["validation_plan_sha256"],
             )
             self.assertEqual(search_response.json()["workbench_search_profile"]["item_number"], 16)
             self.assertIn("documents", search_response.json()["workbench_search_profile"]["target_sources"])

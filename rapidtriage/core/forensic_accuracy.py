@@ -935,6 +935,8 @@ CORE_FORENSIC_ACCURACY_ITEMS: tuple[dict[str, object], ...] = (
             "deduplicated keyword expansion",
             "pack provenance recorded",
             "case-specific validation warning",
+            "keyword-pack report-grade validation plan",
+            "keyword-pack report-grade ready slots",
             "trusted keyword-pack expansion diff pass",
         ),
     },
