@@ -45,6 +45,7 @@
       "title": "iOS keychain/artifact parser",
       "assertions": [
         "iOS keychain inventory rows preserve read-only table counts, default redaction, protected-data labels, reveal authority/audit gate metadata, mobile_analyst_review_profile, #28 core_accuracy_gates, and secret/access-semantics reportability blockers.",
+        "iOS keychain inventory rows emit ios-keychain-report-grade-validation-plan-v1 with keychain DB hash, read-only table inventory, redaction proof, table-class/sensitive-column map, source viewer locator, controlled-reveal audit boundary, trusted keychain diff, protected-data/keybag corpus, access-group semantics corpus, and independent signoff evidence slots.",
         "build_mobile_trusted_diff compares redacted keychain table/count inventory against authorized keychain inventory output before satisfying the #28 trusted diff gate."
       ],
       "blockers_kept": [

@@ -88,6 +88,14 @@ IOS_BACKUP_REPORT_GRADE_BLOCKERS = [
     "deleted-record-semantics-known-answer-required",
     "independent-ios-backup-review-required",
 ]
+IOS_KEYCHAIN_REPORT_GRADE_VALIDATION_PLAN_VERSION = "ios-keychain-report-grade-validation-plan-v1"
+IOS_KEYCHAIN_REPORT_GRADE_BLOCKERS = [
+    "trusted-ios-keychain-inventory-diff-required",
+    "lawful-authority-and-controlled-reveal-audit-required",
+    "keybag-protected-data-class-validation-required",
+    "access-group-semantics-known-answer-required",
+    "independent-ios-keychain-review-required",
+]
 IOS_QC_PREP_ITEM_NUMBER = 46
 IOS_QC_PREP_GOAL = (
     "Deepen iOS backup parser for Manifest.db, domains, app DB mapping, SMS, media, and encrypted-backup lawful key workflow."
@@ -5358,6 +5366,15 @@ def collect_ios_keychain_inventory(path: Path) -> ArtifactRecord:
         scope_profile=keychain_scope_profile,
         authority_gate=keychain_authority_gate,
     )
+    keychain_report_grade_validation_plan = build_ios_keychain_report_grade_validation_plan(
+        source_path=path,
+        source_hashes=source_hashes,
+        table_summaries=table_summaries,
+        validation=validation,
+        scope_profile=keychain_scope_profile,
+        authority_gate=keychain_authority_gate,
+        deep_inventory_manifest=keychain_deep_manifest,
+    )
     return build_record(
         path,
         artifact_type="ios-keychain-inventory",
@@ -5373,6 +5390,10 @@ def collect_ios_keychain_inventory(path: Path) -> ArtifactRecord:
             "ios_keychain_authority_gate": keychain_authority_gate,
             "ios_keychain_deep_inventory_manifest": keychain_deep_manifest,
             "ios_keychain_deep_inventory_manifest_hash": keychain_deep_manifest["manifest_sha256"],
+            "ios_keychain_report_grade_validation_plan": keychain_report_grade_validation_plan,
+            "ios_keychain_report_grade_validation_plan_hash": keychain_report_grade_validation_plan[
+                "manifest_sha256"
+            ],
             "protected_data_class_handling": {
                 "status": "redacted-inventory-only",
                 "default_label": "protected-data-redacted",
@@ -6163,6 +6184,219 @@ def build_ios_keychain_deep_inventory_manifest(
     return manifest
 
 
+def build_ios_keychain_report_grade_validation_plan(
+    *,
+    source_path: Path,
+    source_hashes: Mapping[str, str],
+    table_summaries: Sequence[Mapping[str, object]],
+    validation: Mapping[str, object],
+    scope_profile: Mapping[str, object],
+    authority_gate: Mapping[str, object],
+    deep_inventory_manifest: Mapping[str, object],
+) -> dict[str, object]:
+    backup_root = source_path.parent
+    output_root = backup_root / "ios-keychain-rapidtriage-validation"
+    table_count = int(scope_profile.get("table_count") or len(table_summaries))
+    protected_value_column_count = int(scope_profile.get("protected_value_column_count") or 0)
+    secret_reveal_performed = bool(validation.get("secrets_extracted"))
+    validation_commands = [
+        _mobile_vendor_export_validation_command(
+            "source-keychain-manifest",
+            ["rapidtriage", "manifest", str(backup_root), "--output", str(output_root / "source-keychain-manifest.json")],
+            purpose="Hash the authorized backup root and keychain database source without reading protected values.",
+            expected_output=str(output_root / "source-keychain-manifest.json"),
+            status="ready",
+        ),
+        _mobile_vendor_export_validation_command(
+            "ios-keychain-inventory-import",
+            [
+                "rapidtriage",
+                "artifacts",
+                str(backup_root),
+                "--kind",
+                "mobile-export",
+                "--output",
+                str(output_root / "rapidtriage-ios-keychain.json"),
+            ],
+            purpose="Regenerate RapidTriage redacted keychain table/column inventory rows.",
+            expected_output=str(output_root / "rapidtriage-ios-keychain.json"),
+            status="ready",
+        ),
+        _mobile_vendor_export_validation_command(
+            "controlled-reveal-authority-review",
+            [
+                "<analyst>",
+                "attach-keychain-authority-keybag-and-audit-log",
+                str(source_path),
+            ],
+            purpose="Attach lawful authority, keybag/protected-data validation, and immutable audit only if any secret reveal is performed.",
+            expected_output=str(output_root / "controlled-reveal-authority-review.json"),
+            trusted_tool=True,
+            status="authority-required" if secret_reveal_performed else "complete-no-secret-reveal",
+        ),
+        _mobile_vendor_export_validation_command(
+            "trusted-ios-keychain-inventory-diff",
+            [
+                "rapidtriage",
+                "cross-tool-validate",
+                "--rapid-output",
+                str(output_root / "rapidtriage-ios-keychain.json"),
+                "--reference-output",
+                "keychain-dumper=<authorized-keychain-inventory.csv-or-json>",
+                "--reference-output",
+                "cellebrite=<Cellebrite-keychain-inventory.csv-or-json>",
+                "--backlog-item",
+                "28",
+                "--source-evidence",
+                str(source_path),
+                "--tool-version",
+                "keychain-dumper=<version>",
+                "--tool-command",
+                "keychain-dumper=<command>",
+                "--corpus-scope",
+                "<ios-keychain-version-redaction-authority-known-answer-scope>",
+                "--output",
+                str(output_root / "ios-keychain-trusted-diff.json"),
+                "--json",
+            ],
+            purpose="Compare redacted table, row-count, table-class, and sensitive-column inventory against trusted keychain tooling.",
+            expected_output=str(output_root / "ios-keychain-trusted-diff.json"),
+            trusted_tool=True,
+            status="pending-cross-tool-validate",
+        ),
+    ]
+    evidence_slots = [
+        {
+            "id": "keychain-db-source-integrity",
+            "label": "keychain DB SHA-256 and source identity",
+            "status": "complete" if source_hashes.get("sha256") else "pending-source-hash",
+            "required_before_report": True,
+            "sha256": source_hashes.get("sha256", ""),
+        },
+        {
+            "id": "read-only-table-inventory",
+            "label": "keychain tables opened read-only with bounded schema/row counts",
+            "status": "complete" if validation.get("opened_readonly") else "review-required",
+            "required_before_report": True,
+            "table_count": table_count,
+            "max_sqlite_tables": MAX_SQLITE_TABLES,
+        },
+        {
+            "id": "redaction-policy-enforced",
+            "label": "secret values not read, exported, or revealed",
+            "status": "complete"
+            if validation.get("values_redacted", True) and not validation.get("secrets_extracted")
+            else "redaction-failed-review-required",
+            "required_before_report": True,
+            "values_redacted": bool(validation.get("values_redacted", True)),
+            "secrets_extracted": bool(validation.get("secrets_extracted")),
+            "row_values_read": False,
+        },
+        {
+            "id": "table-class-sensitive-column-map",
+            "label": "table class and sensitive/protected column inventory",
+            "status": "complete" if table_count >= 0 and isinstance(scope_profile.get("table_class_counts"), Mapping) else "review-required",
+            "required_before_report": True,
+            "table_class_counts": dict(scope_profile.get("table_class_counts") or {}),
+            "protected_value_column_count": protected_value_column_count,
+            "sensitive_column_names": list(scope_profile.get("sensitive_column_names") or [])[:50],
+        },
+        {
+            "id": "source-viewer-locator",
+            "label": "source viewer locator for redacted keychain inventory",
+            "status": "complete"
+            if isinstance(deep_inventory_manifest.get("source_viewer_locator"), Mapping)
+            else "locator-required",
+            "required_before_report": True,
+            "source_viewer_locator": dict(deep_inventory_manifest.get("source_viewer_locator") or {}),
+        },
+        {
+            "id": "controlled-reveal-audit-boundary",
+            "label": "lawful authority and immutable audit boundary for any secret reveal",
+            "status": "authority-required" if secret_reveal_performed else "complete-no-secret-reveal",
+            "required_before_report": secret_reveal_performed,
+            "required_before_secret_reveal": True,
+            "secret_reveal_allowed": bool(authority_gate.get("secret_reveal_allowed")),
+            "audit_required_before_reveal": bool(authority_gate.get("audit_required_before_reveal", True)),
+        },
+        {
+            "id": "trusted-keychain-inventory-diff",
+            "label": "Trusted keychain parser table/count/class inventory diff",
+            "status": "pending-cross-tool-validate",
+            "required_before_report": True,
+            "required_fields": [
+                "table",
+                "row_count",
+                "table_class",
+                "sensitive_columns",
+                "protected_value_column_count",
+                "redaction_policy",
+            ],
+        },
+        {
+            "id": "keybag-protected-data-known-answer",
+            "label": "Keybag/protected-data class known-answer validation",
+            "status": "external-corpus-required",
+            "required_before_commercial_grade": True,
+            "minimum_cases": ["locked class", "unlocked class", "certificate", "generic password", "internet password"],
+        },
+        {
+            "id": "access-group-semantics-known-answer",
+            "label": "Access group/account/service semantic known-answer validation",
+            "status": "external-corpus-required",
+            "required_before_commercial_grade": True,
+            "minimum_fields": ["agrp", "acct", "svce", "cdat", "mdat", "pdmn"],
+        },
+        {
+            "id": "independent-ios-keychain-review",
+            "label": "Independent review of keychain authority, redaction, and trusted diff procedure",
+            "status": "external-review-required",
+            "required_before_commercial_grade": True,
+            "required_materials": ["keychain DB hash", "redacted inventory output", "trusted diff", "authority/audit log if revealed"],
+        },
+    ]
+    ready_slots = [slot["id"] for slot in evidence_slots if str(slot.get("status", "")).startswith("complete")]
+    blocker_slots = [
+        slot["id"]
+        for slot in evidence_slots
+        if slot.get("required_before_report") and not str(slot.get("status", "")).startswith("complete")
+    ]
+    payload: dict[str, object] = {
+        "profile_version": IOS_KEYCHAIN_REPORT_GRADE_VALIDATION_PLAN_VERSION,
+        "item_number": 28,
+        "gap_id": "#28",
+        "source_path": str(source_path.resolve()),
+        "backup_root": str(backup_root.resolve()),
+        "source_hashes": dict(source_hashes),
+        "status": "report-validation-blocked" if blocker_slots else "ready-for-report-review",
+        "commercial_grade_ready": False,
+        "scope_profile": dict(scope_profile),
+        "authority_gate": dict(authority_gate),
+        "ios_keychain_deep_inventory_manifest_hash": optional_text(deep_inventory_manifest.get("manifest_sha256")),
+        "validation_commands": validation_commands,
+        "evidence_slots": evidence_slots,
+        "ready_slot_ids": ready_slots,
+        "blocking_slot_ids": blocker_slots,
+        "report_claim_boundary": (
+            "This plan can make redacted keychain inventory reviewable when report-required slots pass; "
+            "it is not proof of passwords, tokens, certificates, private keys, access-group semantics, "
+            "or protected-data class decoding without authority, keybag validation, trusted diffs, and known-answer evidence."
+        ),
+        "commercial_grade_blockers": list(IOS_KEYCHAIN_REPORT_GRADE_BLOCKERS),
+        "operator_next_steps": [
+            "Preserve and hash the original keychain database before import.",
+            "Regenerate RapidTriage redacted keychain inventory rows from the authorized backup root.",
+            "Run a trusted keychain inventory diff against authorized keychain tooling.",
+            "Attach lawful authority, keybag/protected-data validation, and immutable audit only if any secret is revealed.",
+            "Attach access-group/protected-data known-answer fixtures before commercial-grade wording.",
+        ],
+    }
+    payload["manifest_sha256"] = stable_mobile_sha256(
+        {key: value for key, value in payload.items() if key != "manifest_sha256"}
+    )
+    return payload
+
+
 def sanitize_ios_plist(payload: Mapping[str, object]) -> dict[str, object]:
     allowed = {
         "Build Version": "build_version",
@@ -6524,6 +6758,11 @@ def mobile_functional_expansion_profiles(
         if isinstance(details.get("ios_keychain_deep_inventory_manifest"), Mapping)
         else {}
     )
+    ios_keychain_validation_plan = (
+        details.get("ios_keychain_report_grade_validation_plan")
+        if isinstance(details.get("ios_keychain_report_grade_validation_plan"), Mapping)
+        else {}
+    )
     vendor_manifest_hash = optional_text(vendor_import_manifest.get("manifest_sha256"))
     vendor_schema_mapper_hash = optional_text(vendor_schema_mapper_manifest.get("manifest_sha256"))
     profiles: list[dict[str, object]] = [
@@ -6594,6 +6833,11 @@ def mobile_functional_expansion_profiles(
             if isinstance(details.get("ios_keychain_deep_inventory_manifest"), Mapping)
             else {}
         )
+        ios_keychain_validation_plan = (
+            details.get("ios_keychain_report_grade_validation_plan")
+            if isinstance(details.get("ios_keychain_report_grade_validation_plan"), Mapping)
+            else {}
+        )
         profiles.append(
             {
                 "batch_id": FUNCTIONAL_EXPANSION_BATCH_ID,
@@ -6623,6 +6867,10 @@ def mobile_functional_expansion_profiles(
                         ios_keychain_deep_manifest.get("manifest_sha256")
                     ),
                     "ios_keychain_deep_inventory_manifest_emitted": bool(ios_keychain_deep_manifest),
+                    "ios_keychain_report_grade_validation_plan_hash": optional_text(
+                        ios_keychain_validation_plan.get("manifest_sha256")
+                    ),
+                    "ios_keychain_report_grade_validation_plan_emitted": bool(ios_keychain_validation_plan),
                     "source_viewer_locator_emitted": isinstance(
                         ios_parser_manifest.get("source_viewer_locator"), Mapping
                     ),
@@ -6639,6 +6887,8 @@ def mobile_functional_expansion_profiles(
                         and not ios_validation_plan,
                         "ios-keychain-deep-inventory-manifest-not-emitted": artifact_type == "ios-keychain-inventory"
                         and not ios_keychain_deep_manifest,
+                        "ios-keychain-report-grade-validation-plan-not-emitted": artifact_type == "ios-keychain-inventory"
+                        and not ios_keychain_validation_plan,
                         "keychain-secret-reveal-authority-not-attached": artifact_type == "ios-keychain-inventory"
                         and not validation_checks.get("controlled_reveal_authorized"),
                     }.items()
@@ -6654,6 +6904,7 @@ def mobile_functional_expansion_profiles(
                         "ios-backup-deep-parser-manifest-emitted": bool(ios_deep_parser_manifest),
                         "ios-backup-report-grade-validation-plan-emitted": bool(ios_validation_plan),
                         "ios-keychain-deep-inventory-manifest-emitted": bool(ios_keychain_deep_manifest),
+                        "ios-keychain-report-grade-validation-plan-emitted": bool(ios_keychain_validation_plan),
                         "ios-protected-values-redacted": not validation_checks.get("secrets_extracted"),
                     }.items()
                     if passed
@@ -6787,6 +7038,11 @@ def mobile_commercial_uplift_evidence(
         if isinstance(details.get("ios_keychain_deep_inventory_manifest"), Mapping)
         else {}
     )
+    ios_keychain_validation_plan = (
+        details.get("ios_keychain_report_grade_validation_plan")
+        if isinstance(details.get("ios_keychain_report_grade_validation_plan"), Mapping)
+        else {}
+    )
     functional_priority_profiles = mobile_functional_expansion_profiles(
         artifact_type=artifact_type,
         source_tool=source_tool,
@@ -6885,6 +7141,19 @@ def mobile_commercial_uplift_evidence(
             "ios_keychain_deep_inventory_source_locator_present": isinstance(
                 ios_keychain_deep_manifest.get("source_viewer_locator"), Mapping
             ),
+            "ios_keychain_report_grade_validation_plan_hash": optional_text(
+                ios_keychain_validation_plan.get("manifest_sha256")
+            ),
+            "ios_keychain_report_grade_validation_ready_slot_count": len(
+                ios_keychain_validation_plan.get("ready_slot_ids") or []
+            )
+            if isinstance(ios_keychain_validation_plan.get("ready_slot_ids"), list)
+            else 0,
+            "ios_keychain_report_grade_validation_blocking_slot_count": len(
+                ios_keychain_validation_plan.get("blocking_slot_ids") or []
+            )
+            if isinstance(ios_keychain_validation_plan.get("blocking_slot_ids"), list)
+            else 0,
             "vendor_export_manifest_present": bool(source_profile.get("vendor_export_manifest_present")),
             "vendor_tool_version": source_profile.get("vendor_tool_version"),
             "vendor_parser_version": source_profile.get("vendor_parser_version"),
@@ -7032,6 +7301,11 @@ def mobile_core_accuracy_gates(
         manifest_hash = optional_text(ios_keychain_manifest.get("manifest_sha256"))
         if manifest_hash:
             evidence_refs.append(f"ios_keychain_deep_inventory_manifest_sha256:{manifest_hash}")
+    ios_keychain_validation_plan = details.get("ios_keychain_report_grade_validation_plan")
+    if isinstance(ios_keychain_validation_plan, Mapping):
+        manifest_hash = optional_text(ios_keychain_validation_plan.get("manifest_sha256"))
+        if manifest_hash:
+            evidence_refs.append(f"ios_keychain_report_grade_validation_plan_sha256:{manifest_hash}")
 
     validation = details.get("validation_checks") if isinstance(details.get("validation_checks"), Mapping) else {}
     trusted_diff = details.get("chat_app_trusted_diff") if isinstance(details.get("chat_app_trusted_diff"), Mapping) else {}
@@ -7125,6 +7399,10 @@ def mobile_core_accuracy_gates(
             satisfied.append("iOS keychain deep inventory manifest")
             if isinstance(ios_keychain_manifest.get("source_viewer_locator"), Mapping):
                 satisfied.append("iOS keychain deep inventory source locator")
+        if isinstance(ios_keychain_validation_plan, Mapping):
+            satisfied.append("iOS keychain report-grade validation plan")
+            if ios_keychain_validation_plan.get("ready_slot_ids"):
+                satisfied.append("iOS keychain validation ready slots")
         if details.get("controlled_reveal_audit"):
             satisfied.append("audit log for any controlled reveal")
         if trusted_diff.get("status") == "pass":

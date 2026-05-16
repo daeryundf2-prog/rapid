@@ -769,7 +769,8 @@
       ],
       "expected": {
         "required_assertions": [
-          "iOS keychain inventory preserves redaction, protected-data labeling, reveal authority/audit gates, table counts, and #28 core_accuracy_gates"
+          "iOS keychain inventory preserves redaction, protected-data labeling, reveal authority/audit gates, table counts, and #28 core_accuracy_gates",
+          "iOS keychain inventory rows emit ios-keychain-report-grade-validation-plan-v1 with keychain DB hash, read-only table inventory, redaction proof, table-class/sensitive-column map, source viewer locator, controlled-reveal audit boundary, trusted keychain diff, protected-data/keybag corpus, access-group semantics corpus, and independent signoff evidence slots"
         ]
       },
       "notes": "Internal fixture pass; protected-data decryption and legal reveal package remain operator-owned blockers.",

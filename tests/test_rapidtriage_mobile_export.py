@@ -1116,6 +1116,8 @@ class RapidTriageMobileExportTests(unittest.TestCase):
             self.assertIn("iOS keychain source locator", keychain_gate["satisfied_checks"])
             self.assertIn("iOS keychain deep inventory manifest", keychain_gate["satisfied_checks"])
             self.assertIn("iOS keychain deep inventory source locator", keychain_gate["satisfied_checks"])
+            self.assertIn("iOS keychain report-grade validation plan", keychain_gate["satisfied_checks"])
+            self.assertIn("iOS keychain validation ready slots", keychain_gate["satisfied_checks"])
             self.assertIn("audit log for any controlled reveal", keychain_gate["satisfied_checks"])
             keychain_uplift = keychain["details"]["commercial_uplift_evidence"]
             self.assertEqual(keychain_uplift["item_numbers"], [28])
@@ -1147,6 +1149,42 @@ class RapidTriageMobileExportTests(unittest.TestCase):
             self.assertFalse(keychain_deep_manifest["capability_statement"]["secret_value_decryption"])
             self.assertFalse(keychain_deep_manifest["validation"]["commercial_grade"])
             self.assertIn("trusted-keychain-inventory-diff-required", keychain_deep_manifest["commercial_blockers"])
+            keychain_validation_plan = keychain["details"]["ios_keychain_report_grade_validation_plan"]
+            self.assertEqual(
+                keychain_validation_plan["profile_version"],
+                "ios-keychain-report-grade-validation-plan-v1",
+            )
+            self.assertEqual(keychain_validation_plan["item_number"], 28)
+            self.assertEqual(keychain_validation_plan["gap_id"], "#28")
+            self.assertEqual(keychain_validation_plan["status"], "report-validation-blocked")
+            self.assertFalse(keychain_validation_plan["commercial_grade_ready"])
+            self.assertEqual(len(keychain_validation_plan["manifest_sha256"]), 64)
+            self.assertEqual(
+                keychain["details"]["ios_keychain_report_grade_validation_plan_hash"],
+                keychain_validation_plan["manifest_sha256"],
+            )
+            self.assertEqual(
+                [command["id"] for command in keychain_validation_plan["validation_commands"]],
+                [
+                    "source-keychain-manifest",
+                    "ios-keychain-inventory-import",
+                    "controlled-reveal-authority-review",
+                    "trusted-ios-keychain-inventory-diff",
+                ],
+            )
+            keychain_slots = {slot["id"]: slot for slot in keychain_validation_plan["evidence_slots"]}
+            self.assertEqual(keychain_slots["keychain-db-source-integrity"]["status"], "complete")
+            self.assertEqual(keychain_slots["read-only-table-inventory"]["status"], "complete")
+            self.assertEqual(keychain_slots["redaction-policy-enforced"]["status"], "complete")
+            self.assertEqual(keychain_slots["table-class-sensitive-column-map"]["status"], "complete")
+            self.assertEqual(keychain_slots["source-viewer-locator"]["status"], "complete")
+            self.assertEqual(keychain_slots["controlled-reveal-audit-boundary"]["status"], "complete-no-secret-reveal")
+            self.assertEqual(keychain_slots["trusted-keychain-inventory-diff"]["status"], "pending-cross-tool-validate")
+            self.assertIn("trusted-keychain-inventory-diff", keychain_validation_plan["blocking_slot_ids"])
+            self.assertIn(
+                "trusted-ios-keychain-inventory-diff-required",
+                keychain_validation_plan["commercial_grade_blockers"],
+            )
             keychain_scope = keychain["details"]["ios_keychain_scope_profile"]
             self.assertEqual(keychain_scope["sensitive_table_names"], ["genp"])
             self.assertEqual(keychain_scope["table_class_counts"]["generic-password"], 1)
@@ -1173,6 +1211,14 @@ class RapidTriageMobileExportTests(unittest.TestCase):
                 "ios-keychain-deep-inventory-manifest-emitted",
                 keychain_profiles[53]["passed_validation_check_ids"],
             )
+            self.assertEqual(
+                keychain_profiles[53]["implemented_controls"]["ios_keychain_report_grade_validation_plan_hash"],
+                keychain_validation_plan["manifest_sha256"],
+            )
+            self.assertIn(
+                "ios-keychain-report-grade-validation-plan-emitted",
+                keychain_profiles[53]["passed_validation_check_ids"],
+            )
             self.assertTrue(keychain_uplift["large_data_controls"]["protected_values_redacted_by_default"])
             self.assertEqual(
                 keychain_uplift["large_data_controls"]["ios_keychain_deep_inventory_manifest_hash"],
@@ -1180,6 +1226,18 @@ class RapidTriageMobileExportTests(unittest.TestCase):
             )
             self.assertTrue(
                 keychain_uplift["large_data_controls"]["ios_keychain_deep_inventory_source_locator_present"]
+            )
+            self.assertEqual(
+                keychain_uplift["large_data_controls"]["ios_keychain_report_grade_validation_plan_hash"],
+                keychain_validation_plan["manifest_sha256"],
+            )
+            self.assertEqual(
+                keychain_uplift["large_data_controls"]["ios_keychain_report_grade_validation_ready_slot_count"],
+                6,
+            )
+            self.assertEqual(
+                keychain_uplift["large_data_controls"]["ios_keychain_report_grade_validation_blocking_slot_count"],
+                1,
             )
             self.assertIn("protected-data-boundary", keychain_uplift["passed_validation_matrix_ids"])
             self.assertEqual(
