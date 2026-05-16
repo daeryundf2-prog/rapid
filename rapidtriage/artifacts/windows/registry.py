@@ -11,7 +11,7 @@ from typing import Iterable, Mapping, Sequence
 from ...core.forensic_accuracy import build_accuracy_gate
 from ...core.models import ArtifactRecord
 
-PARSER_VERSION = "registry-normalized-v10"
+PARSER_VERSION = "registry-normalized-v11"
 REGISTRY_EXPORT_PATTERN = re.compile(r"^\[(?P<key>.+)]$")
 REGISTRY_VALUE_PATTERN = re.compile(r'^(?P<name>@|"[^"]+")=(?P<value>.*)$')
 REGISTRY_HIVE_SIGNATURE = b"regf"
@@ -775,6 +775,37 @@ def build_registry_key_tree_records(
             extra_blockers=["native-key-tree-broad-corpus-validation-required"],
             gap_ids=["#4"],
         )
+        report_citation_manifest = registry_report_citation_manifest(
+            artifact_type="registry-key-tree-node",
+            source_path=str(path.resolve()),
+            source_hashes=dict(source_hashes),
+            row_identity={
+                "hive_name": path.name,
+                "hive_hint": hive_hint_from_path(path),
+                "key_path": f"{hive_hint_from_path(path)}\\{key_path}" if key_path else hive_hint_from_path(path),
+                "name": key_node.get("name", ""),
+                "cell_offset": key_node.get("cell_offset", 0),
+                "cell_relative_offset": key_node.get("cell_relative_offset", 0),
+                "hbin_offset": key_node.get("hbin_offset", 0),
+                "allocation_status": allocation_status,
+                "last_written_at": key_node.get("last_written_at", ""),
+                "parent_cell_offset": key_node.get("parent_cell_offset", 0),
+                "value_count": key_node.get("value_count", 0),
+                "subkey_count": key_node.get("subkey_count", 0),
+                "linked_subkey_count": len(subkey_names),
+                "linked_value_count": len(value_cells),
+                "subkey_names": sorted(subkey_names),
+                "value_names": sorted(str(value.get("name") or "") for value in value_cells if value.get("name")),
+                "root_reachable": relationship_profile["root_reachable"],
+                "parent_link_consistency": relationship_profile["parent_link_consistency"],
+            },
+            validation_matrix=validation_matrix,
+            report_grade_assessment=report_grade_assessment,
+            transaction_log_evidence=metadata.get("transaction_log_evidence")
+            if isinstance(metadata.get("transaction_log_evidence"), Mapping)
+            else {},
+            citation_scope="key-tree",
+        )
         core_accuracy_gates = registry_core_accuracy_gates(
             gap_ids=["#4"],
             validation_matrix=validation_matrix,
@@ -868,31 +899,8 @@ def build_registry_key_tree_records(
                 "validation_flags": validation_flags,
                 "registry_validation_matrix": validation_matrix,
                 "registry_report_grade_assessment": report_grade_assessment,
-                "registry_report_citation_manifest": registry_report_citation_manifest(
-                    artifact_type="registry-key-tree-node",
-                    source_path=str(path.resolve()),
-                    source_hashes=dict(source_hashes),
-                    row_identity={
-                        "hive_name": path.name,
-                        "hive_hint": hive_hint_from_path(path),
-                        "key_path": f"{hive_hint_from_path(path)}\\{key_path}" if key_path else hive_hint_from_path(path),
-                        "name": key_node.get("name", ""),
-                        "cell_offset": key_node.get("cell_offset", 0),
-                        "cell_relative_offset": key_node.get("cell_relative_offset", 0),
-                        "hbin_offset": key_node.get("hbin_offset", 0),
-                        "allocation_status": allocation_status,
-                        "last_written_at": key_node.get("last_written_at", ""),
-                        "parent_cell_offset": key_node.get("parent_cell_offset", 0),
-                        "value_count": key_node.get("value_count", 0),
-                        "subkey_count": key_node.get("subkey_count", 0),
-                    },
-                    validation_matrix=validation_matrix,
-                    report_grade_assessment=report_grade_assessment,
-                    transaction_log_evidence=metadata.get("transaction_log_evidence")
-                    if isinstance(metadata.get("transaction_log_evidence"), Mapping)
-                    else {},
-                    citation_scope="key-tree",
-                ),
+                "registry_report_citation_manifest": report_citation_manifest,
+                "registry_report_citation_manifest_hash": report_citation_manifest["manifest_sha256"],
                 "registry_native_depth_readiness_profile": registry_native_depth_readiness_profile(
                     family="key-tree",
                     artifact_scope="key-tree-node",
@@ -1012,6 +1020,29 @@ def build_registry_key_recovery_records(
             validation_checks=validation_matrix,
             transaction_log_evidence=transaction_log_evidence,
         )
+        report_citation_manifest = registry_report_citation_manifest(
+            artifact_type="registry-key-recovery-candidate",
+            source_path=str(path.resolve()),
+            source_hashes=dict(source_hashes),
+            row_identity={
+                "hive_name": path.name,
+                "hive_hint": hive_hint_from_path(path),
+                "key_path_candidate": f"{hive_hint_from_path(path)}\\{key_path}" if key_path else hive_hint_from_path(path),
+                "name": candidate.get("name", ""),
+                "cell_offset": candidate.get("cell_offset", 0),
+                "cell_relative_offset": candidate.get("cell_relative_offset", 0),
+                "hbin_offset": candidate.get("hbin_offset", 0),
+                "allocation_status": candidate.get("allocation_status", ""),
+                "candidate_kind": "deleted-or-free-key-cell",
+                "last_written_at": candidate.get("last_written_at", ""),
+                "parent_cell_offset": candidate.get("parent_cell_offset", 0),
+            },
+            validation_matrix=validation_matrix,
+            report_grade_assessment=report_grade_assessment,
+            transaction_log_evidence=transaction_log_evidence,
+            recovery_profile=recovery_profile,
+            citation_scope="deleted-key-recovery",
+        )
         core_accuracy_gates = registry_core_accuracy_gates(
             gap_ids=["#5"],
             validation_matrix=validation_matrix,
@@ -1069,29 +1100,8 @@ def build_registry_key_recovery_records(
                 "validation_required": True,
                 "registry_validation_matrix": validation_matrix,
                 "registry_report_grade_assessment": report_grade_assessment,
-                "registry_report_citation_manifest": registry_report_citation_manifest(
-                    artifact_type="registry-key-recovery-candidate",
-                    source_path=str(path.resolve()),
-                    source_hashes=dict(source_hashes),
-                    row_identity={
-                        "hive_name": path.name,
-                        "hive_hint": hive_hint_from_path(path),
-                        "key_path_candidate": f"{hive_hint_from_path(path)}\\{key_path}" if key_path else hive_hint_from_path(path),
-                        "name": candidate.get("name", ""),
-                        "cell_offset": candidate.get("cell_offset", 0),
-                        "cell_relative_offset": candidate.get("cell_relative_offset", 0),
-                        "hbin_offset": candidate.get("hbin_offset", 0),
-                        "allocation_status": candidate.get("allocation_status", ""),
-                        "candidate_kind": "deleted-or-free-key-cell",
-                        "last_written_at": candidate.get("last_written_at", ""),
-                        "parent_cell_offset": candidate.get("parent_cell_offset", 0),
-                    },
-                    validation_matrix=validation_matrix,
-                    report_grade_assessment=report_grade_assessment,
-                    transaction_log_evidence=transaction_log_evidence,
-                    recovery_profile=recovery_profile,
-                    citation_scope="deleted-key-recovery",
-                ),
+                "registry_report_citation_manifest": report_citation_manifest,
+                "registry_report_citation_manifest_hash": report_citation_manifest["manifest_sha256"],
                 "registry_native_depth_readiness_profile": registry_native_depth_readiness_profile(
                     family="deleted-cell",
                     artifact_scope="key-recovery-candidate",
@@ -1229,6 +1239,34 @@ def build_registry_value_recovery_records(
             validation_checks=validation_matrix,
             transaction_log_evidence=transaction_log_evidence,
         )
+        report_citation_manifest = registry_report_citation_manifest(
+            artifact_type="registry-value-recovery-candidate",
+            source_path=str(path.resolve()),
+            source_hashes=dict(source_hashes),
+            row_identity={
+                "hive_name": path.name,
+                "hive_hint": hive_hint_from_path(path),
+                "name": candidate.get("name", ""),
+                "value_type": candidate.get("value_type", ""),
+                "value_data_size": candidate.get("value_data_size", 0),
+                "value_data_offset": candidate.get("value_data_offset", 0),
+                "value_data_inline": candidate.get("value_data_inline", False),
+                "decoded_data_preview_sha256": sha256_text(decoded_data),
+                "parent_key_path_candidate": parent_path,
+                "parent_key_confidence": parent_confidence,
+                "parent_key_cell_offset": parent.get("cell_offset", 0) if parent is not None else 0,
+                "cell_offset": candidate.get("cell_offset", 0),
+                "cell_relative_offset": candidate.get("cell_relative_offset", 0),
+                "hbin_offset": candidate.get("hbin_offset", 0),
+                "allocation_status": candidate.get("allocation_status", ""),
+                "candidate_kind": "deleted-or-free-value-cell",
+            },
+            validation_matrix=validation_matrix,
+            report_grade_assessment=report_grade_assessment,
+            transaction_log_evidence=transaction_log_evidence,
+            recovery_profile=recovery_profile,
+            citation_scope="deleted-value-recovery",
+        )
         core_accuracy_gates = registry_core_accuracy_gates(
             gap_ids=["#5"],
             validation_matrix=validation_matrix,
@@ -1289,34 +1327,8 @@ def build_registry_value_recovery_records(
                 "validation_required": True,
                 "registry_validation_matrix": validation_matrix,
                 "registry_report_grade_assessment": report_grade_assessment,
-                "registry_report_citation_manifest": registry_report_citation_manifest(
-                    artifact_type="registry-value-recovery-candidate",
-                    source_path=str(path.resolve()),
-                    source_hashes=dict(source_hashes),
-                    row_identity={
-                        "hive_name": path.name,
-                        "hive_hint": hive_hint_from_path(path),
-                        "name": candidate.get("name", ""),
-                        "value_type": candidate.get("value_type", ""),
-                        "value_data_size": candidate.get("value_data_size", 0),
-                        "value_data_offset": candidate.get("value_data_offset", 0),
-                        "value_data_inline": candidate.get("value_data_inline", False),
-                        "decoded_data_preview_sha256": sha256_text(decoded_data),
-                        "parent_key_path_candidate": parent_path,
-                        "parent_key_confidence": parent_confidence,
-                        "parent_key_cell_offset": parent.get("cell_offset", 0) if parent is not None else 0,
-                        "cell_offset": candidate.get("cell_offset", 0),
-                        "cell_relative_offset": candidate.get("cell_relative_offset", 0),
-                        "hbin_offset": candidate.get("hbin_offset", 0),
-                        "allocation_status": candidate.get("allocation_status", ""),
-                        "candidate_kind": "deleted-or-free-value-cell",
-                    },
-                    validation_matrix=validation_matrix,
-                    report_grade_assessment=report_grade_assessment,
-                    transaction_log_evidence=transaction_log_evidence,
-                    recovery_profile=recovery_profile,
-                    citation_scope="deleted-value-recovery",
-                ),
+                "registry_report_citation_manifest": report_citation_manifest,
+                "registry_report_citation_manifest_hash": report_citation_manifest["manifest_sha256"],
                 "registry_native_depth_readiness_profile": registry_native_depth_readiness_profile(
                     family="deleted-cell",
                     artifact_scope="value-recovery-candidate",
@@ -2049,7 +2061,17 @@ def build_registry_key_tree_diff(
         rapid = rapid_by_path[key]
         trusted = trusted_by_path[key]
         field_diffs = []
-        for field in ("value_names", "last_written_at", "root_reachable"):
+        for field in (
+            "cell_offset",
+            "parent_cell_offset",
+            "subkey_names",
+            "value_names",
+            "linked_subkey_count",
+            "linked_value_count",
+            "last_written_at",
+            "root_reachable",
+            "parent_link_consistency",
+        ):
             left = rapid.get(field, "")
             right = trusted.get(field, "")
             if left or right:
@@ -2071,7 +2093,18 @@ def build_registry_key_tree_diff(
         "profile_version": "registry-key-tree-diff-v1",
         "trusted_tool": tool_name,
         "trusted_tool_recognized": trusted_tool_recognized,
-        "compare_fields": ["key_path", "value_names", "last_written_at", "root_reachable"],
+        "compare_fields": [
+            "key_path",
+            "cell_offset",
+            "parent_cell_offset",
+            "subkey_names",
+            "value_names",
+            "linked_subkey_count",
+            "linked_value_count",
+            "last_written_at",
+            "root_reachable",
+            "parent_link_consistency",
+        ],
         "rapid_node_count": len(rapid_by_path),
         "trusted_node_count": len(trusted_by_path),
         "matched_count": matched_count,
@@ -2171,22 +2204,94 @@ def build_registry_deleted_cell_diff(
 
 def _normalize_registry_key_tree_node(node: Mapping[str, object]) -> tuple[str, dict[str, str]]:
     node = _registry_row_payload(node)
+    citation_manifest = node.get("registry_report_citation_manifest")
+    row_identity = (
+        citation_manifest.get("row_identity")
+        if isinstance(citation_manifest, Mapping) and isinstance(citation_manifest.get("row_identity"), Mapping)
+        else {}
+    )
+    relationships = (
+        node.get("registry_key_tree_relationships")
+        if isinstance(node.get("registry_key_tree_relationships"), Mapping)
+        else {}
+    )
+    reconstruction = (
+        node.get("registry_key_tree_reconstruction_profile")
+        if isinstance(node.get("registry_key_tree_reconstruction_profile"), Mapping)
+        else {}
+    )
     key_path = str(node.get("key_path") or node.get("path") or node.get("key") or "").strip()
+    if not key_path and row_identity:
+        key_path = str(row_identity.get("key_path") or row_identity.get("key") or "").strip()
     if not key_path:
         return "", {}
-    value_names = node.get("value_names")
-    if isinstance(value_names, str):
-        values = [part.strip() for part in re.split(r"[,;]", value_names) if part.strip()]
-    elif isinstance(value_names, Sequence):
-        values = [str(item) for item in value_names if str(item)]
-    else:
-        values = []
+    values = _normalize_registry_name_list(node.get("value_names") or row_identity.get("value_names"))
+    subkeys = _normalize_registry_name_list(node.get("subkey_names") or row_identity.get("subkey_names"))
+    cell_offset = (
+        node.get("cell_offset")
+        or row_identity.get("cell_offset")
+        or node.get("offset")
+        or row_identity.get("offset")
+        or ""
+    )
+    parent_cell_offset = (
+        node.get("parent_cell_offset")
+        or row_identity.get("parent_cell_offset")
+        or relationships.get("parent_cell_offset")
+        or node.get("parent_offset")
+        or ""
+    )
+    linked_subkey_count = (
+        node.get("linked_subkey_count")
+        or row_identity.get("linked_subkey_count")
+        or reconstruction.get("decoded_subkey_count")
+        or ""
+    )
+    linked_value_count = (
+        node.get("linked_value_count")
+        or row_identity.get("linked_value_count")
+        or reconstruction.get("decoded_value_count")
+        or ""
+    )
+    root_reachable = node.get("root_reachable", row_identity.get("root_reachable", relationships.get("root_reachable", True)))
+    parent_link_consistency = node.get(
+        "parent_link_consistency",
+        row_identity.get("parent_link_consistency", relationships.get("parent_link_consistency", "")),
+    )
     return normalize_registry_key_path(key_path), {
         "key_path": normalize_registry_key_path(key_path),
+        "cell_offset": _normalize_registry_numeric_string(str(cell_offset)) if str(cell_offset) else "",
+        "parent_cell_offset": _normalize_registry_numeric_string(str(parent_cell_offset)) if str(parent_cell_offset) else "",
+        "subkey_names": "|".join(sorted(subkeys, key=str.lower)),
         "value_names": "|".join(sorted(values, key=str.lower)),
+        "linked_subkey_count": str(linked_subkey_count) if str(linked_subkey_count) else "",
+        "linked_value_count": str(linked_value_count) if str(linked_value_count) else "",
         "last_written_at": str(node.get("last_written_at") or node.get("last_write_time") or ""),
-        "root_reachable": str(bool(node.get("root_reachable", True))).lower(),
+        "root_reachable": _normalize_registry_bool_string(root_reachable, default=True),
+        "parent_link_consistency": _normalize_registry_bool_string(parent_link_consistency, default=None),
     }
+
+
+def _normalize_registry_name_list(value: object) -> list[str]:
+    if isinstance(value, str):
+        return [part.strip() for part in re.split(r"[,;|]", value) if part.strip()]
+    if isinstance(value, Sequence) and not isinstance(value, (bytes, bytearray)):
+        return [str(item) for item in value if str(item)]
+    return []
+
+
+def _normalize_registry_bool_string(value: object, *, default: bool | None) -> str:
+    if value is None or value == "":
+        if default is None:
+            return ""
+        return str(default).lower()
+    if isinstance(value, str):
+        lowered = value.strip().lower()
+        if lowered in {"true", "1", "yes", "y"}:
+            return "true"
+        if lowered in {"false", "0", "no", "n"}:
+            return "false"
+    return str(bool(value)).lower()
 
 
 def _normalize_registry_deleted_cell_candidate(candidate: Mapping[str, object]) -> tuple[str, dict[str, str]]:

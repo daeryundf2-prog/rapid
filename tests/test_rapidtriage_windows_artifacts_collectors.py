@@ -3946,6 +3946,10 @@ class RapidTriageWindowsArtifactsCollectorTests(unittest.TestCase):
             self.assertEqual(key_manifest["manifest_version"], "registry-report-citation-manifest-v1")
             self.assertEqual(key_manifest["artifact_type"], "registry-key-tree-node")
             self.assertEqual(key_manifest["row_identity"]["key_path"], "HKEY_CURRENT_USER\\Software\\Run")
+            self.assertEqual(key_manifest["row_identity"]["linked_subkey_count"], 0)
+            self.assertEqual(key_manifest["row_identity"]["linked_value_count"], 1)
+            self.assertEqual(key_manifest["row_identity"]["value_names"], ["SecurityUpdater"])
+            self.assertTrue(key_manifest["row_identity"]["parent_link_consistency"])
             self.assertEqual(key_manifest["validation_summary"]["transaction_log_status"], "present-not-replayed")
             self.assertEqual(
                 key_manifest["reportability"]["allowed_use"],
@@ -3953,6 +3957,10 @@ class RapidTriageWindowsArtifactsCollectorTests(unittest.TestCase):
             )
             self.assertFalse(key_manifest["reportability"]["ready_for_court_report"])
             self.assertEqual(len(key_manifest["manifest_sha256"]), 64)
+            self.assertEqual(
+                run_key.details["registry_report_citation_manifest_hash"],
+                key_manifest["manifest_sha256"],
+            )
             key_citation_kinds = {item["kind"] for item in key_manifest["citation_refs"]}
             self.assertIn("registry-hive-source", key_citation_kinds)
             self.assertIn("registry-cell-offset", key_citation_kinds)
@@ -4102,6 +4110,10 @@ class RapidTriageWindowsArtifactsCollectorTests(unittest.TestCase):
             self.assertEqual(value_manifest["citation_scope"], "deleted-value-recovery")
             self.assertEqual(value_manifest["row_identity"]["name"], "SecurityUpdater")
             self.assertEqual(
+                value_recovery.details["registry_report_citation_manifest_hash"],
+                value_manifest["manifest_sha256"],
+            )
+            self.assertEqual(
                 value_manifest["row_identity"]["parent_key_path_candidate"],
                 "HKEY_CURRENT_USER\\Software\\Run",
             )
@@ -4142,6 +4154,10 @@ class RapidTriageWindowsArtifactsCollectorTests(unittest.TestCase):
             self.assertEqual(key_recovery_manifest["artifact_type"], "registry-key-recovery-candidate")
             self.assertEqual(key_recovery_manifest["citation_scope"], "deleted-key-recovery")
             self.assertEqual(key_recovery_manifest["row_identity"]["candidate_kind"], "deleted-or-free-key-cell")
+            self.assertEqual(
+                key_recovery.details["registry_report_citation_manifest_hash"],
+                key_recovery_manifest["manifest_sha256"],
+            )
             self.assertIn(
                 "registry-recovery-validation",
                 {item["kind"] for item in key_recovery_manifest["citation_refs"]},
@@ -4152,16 +4168,28 @@ class RapidTriageWindowsArtifactsCollectorTests(unittest.TestCase):
             {
                 "key_path": r"HKEY_CURRENT_USER\Software\Run",
                 "value_names": ["SecurityUpdater"],
+                "subkey_names": ["Child"],
+                "cell_offset": 8192,
+                "parent_cell_offset": 4096,
+                "linked_subkey_count": 1,
+                "linked_value_count": 1,
                 "last_written_at": "2024-04-01T04:05:06+00:00",
                 "root_reachable": True,
+                "parent_link_consistency": True,
             }
         ]
         trusted = [
             {
                 "key": r"HKCU\Software\Run",
                 "value_names": "SecurityUpdater",
+                "subkey_names": "Child",
+                "cell_offset": "0x2000",
+                "parent_cell_offset": "0x1000",
+                "linked_subkey_count": 1,
+                "linked_value_count": 1,
                 "last_write_time": "2024-04-01T04:05:06+00:00",
                 "root_reachable": True,
+                "parent_link_consistency": True,
             }
         ]
 
@@ -4171,24 +4199,47 @@ class RapidTriageWindowsArtifactsCollectorTests(unittest.TestCase):
         self.assertTrue(diff["trusted_tool_recognized"])
         self.assertTrue(diff["commercial_grade_evidence"])
         self.assertEqual(diff["matched_count"], 1)
+        self.assertIn("parent_cell_offset", diff["compare_fields"])
+        self.assertIn("subkey_names", diff["compare_fields"])
+        self.assertIn("linked_value_count", diff["compare_fields"])
         self.assertEqual(diff["reportability_decision"]["decision"], "key-tree-diff-passed")
 
     def test_registry_diffs_accept_nested_rapidtriage_artifact_rows(self) -> None:
         rapid_key_artifact = {
             "artifact_type": "registry-key-tree-node",
             "details": {
-                "key_path": r"HKEY_CURRENT_USER\Software\Run",
-                "value_names": ["SecurityUpdater"],
+                "registry_report_citation_manifest": {
+                    "row_identity": {
+                        "key_path": r"HKEY_CURRENT_USER\Software\Run",
+                        "value_names": ["SecurityUpdater"],
+                        "subkey_names": ["Child"],
+                        "cell_offset": 8192,
+                        "parent_cell_offset": 4096,
+                        "linked_subkey_count": 1,
+                        "linked_value_count": 1,
+                        "root_reachable": True,
+                        "parent_link_consistency": True,
+                    }
+                },
                 "last_written_at": "2024-04-01T04:05:06+00:00",
-                "root_reachable": True,
+                "registry_key_tree_relationships": {
+                    "root_reachable": True,
+                    "parent_link_consistency": True,
+                },
             },
         }
         trusted_key = [
             {
                 "key": r"HKCU\Software\Run",
                 "value_names": "SecurityUpdater",
+                "subkey_names": "Child",
+                "cell_offset": "0x2000",
+                "parent_cell_offset": "0x1000",
+                "linked_subkey_count": 1,
+                "linked_value_count": 1,
                 "last_write_time": "2024-04-01T04:05:06+00:00",
                 "root_reachable": True,
+                "parent_link_consistency": True,
             }
         ]
         rapid_deleted_artifact = {
@@ -4228,14 +4279,29 @@ class RapidTriageWindowsArtifactsCollectorTests(unittest.TestCase):
         self.assertTrue(deleted_diff["commercial_grade_evidence"])
 
     def test_registry_key_tree_diff_blocks_value_and_path_mismatches(self) -> None:
-        rapid = [{"key_path": r"HKCU\Software\Run", "value_names": ["SecurityUpdater"]}]
-        trusted = [{"key_path": r"HKCU\Software\Run", "value_names": ["OtherValue"]}]
+        rapid = [
+            {
+                "key_path": r"HKCU\Software\Run",
+                "value_names": ["SecurityUpdater"],
+                "parent_cell_offset": 4096,
+            }
+        ]
+        trusted = [
+            {
+                "key_path": r"HKCU\Software\Run",
+                "value_names": ["OtherValue"],
+                "parent_cell_offset": 8192,
+            }
+        ]
 
         diff = build_registry_key_tree_diff(rapid, trusted, trusted_tool="RegRipper")
 
         self.assertEqual(diff["status"], "diffs-present")
         self.assertFalse(diff["commercial_grade_evidence"])
         self.assertEqual(diff["mismatch_count"], 1)
+        mismatch_fields = {item["field"] for item in diff["mismatches"][0]["field_diffs"]}
+        self.assertIn("value_names", mismatch_fields)
+        self.assertIn("parent_cell_offset", mismatch_fields)
         self.assertIn("registry-key-tree-cross-tool-diff-required", diff["reportability_decision"]["blockers"])
 
     def test_registry_deleted_cell_diff_compares_offset_class_and_data(self) -> None:
