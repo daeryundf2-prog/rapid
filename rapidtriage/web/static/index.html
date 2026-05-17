@@ -14,12 +14,12 @@
           <div class="brand-lockup">
             <span class="brand-mark" aria-hidden="true">RF</span>
             <div>
-              <p class="eyebrow">single-case forensic workspace</p>
+              <p class="eyebrow">포렌식 작업대</p>
               <h1>RapidForensic</h1>
-              <p class="brand-subtitle">증거 입력부터 검색, 원본 확인, 리뷰 표시, 보고서 후보 정리까지 한 흐름으로 진행합니다.</p>
+              <p class="brand-subtitle">증거를 넣고, 분석하고, 검색/뷰어/리뷰/보고서까지 한 화면에서 이어갑니다.</p>
             </div>
           </div>
-          <span id="apiStatus" class="status-pill">checking</span>
+          <span id="apiStatus" class="status-pill">확인 중</span>
         </div>
         <div class="operator-badges" aria-label="Console strengths">
           <span>Read-only first</span>
@@ -118,24 +118,24 @@
           </ol>
         </section>
         <section class="quick-actions" aria-label="Convenience actions">
-          <button id="sampleRunButton" class="secondary-button" type="button" data-testid="sample-run-button">Run sample case</button>
-          <button id="doctorButton" class="secondary-button" type="button" data-testid="runtime-check-button">Check runtime</button>
-          <button id="crashReportsButton" class="secondary-button" type="button" data-testid="crash-reports-button">Crash reports</button>
+          <button id="sampleRunButton" class="secondary-button" type="button" data-testid="sample-run-button">샘플 실행</button>
+          <button id="doctorButton" class="secondary-button" type="button" data-testid="runtime-check-button">환경 점검</button>
+          <button id="crashReportsButton" class="secondary-button" type="button" data-testid="crash-reports-button">크래시 로그</button>
         </section>
 
         <form id="runForm" class="run-form">
-          <label>
-            Evidence root or E01 image
-            <input id="rootInput" name="root" required placeholder="/cases/case-001 or /cases/case.E01" data-testid="evidence-root-input" />
+          <label class="root-field">
+            증거 폴더 또는 E01 이미지
+            <input id="rootInput" name="root" required placeholder="/cases/case-001 또는 /cases/case.E01" data-testid="evidence-root-input" />
           </label>
           <div class="evidence-check-row">
-            <button id="evidenceCheckButton" class="secondary-button" type="button" data-testid="evidence-support-button">Check evidence support</button>
-            <span id="evidenceCheckStatus" class="help-text">Folders scan directly; images usually need mounting/extraction first.</span>
+            <button id="evidenceCheckButton" class="secondary-button" type="button" data-testid="evidence-support-button">지원 여부 확인</button>
+            <span id="evidenceCheckStatus" class="help-text">폴더는 바로 스캔하고, 이미지는 보통 마운트/추출 확인이 먼저 필요합니다.</span>
           </div>
 
-          <div class="field-grid">
+          <div class="field-grid primary-field-grid">
             <label>
-              Mode
+              분석 모드
               <select id="modeInput" name="mode">
                 <option value="fraud">Fraud</option>
                 <option value="seizure">Seizure</option>
@@ -144,7 +144,7 @@
               </select>
             </label>
             <label>
-              Input kind
+              입력 유형
               <select id="inputKindInput" name="inputKind">
                 <option value="">Auto</option>
                 <option value="folder">Folder</option>
@@ -155,27 +155,27 @@
             </label>
           </div>
 
-          <label>
-            Output directory
+          <label class="output-field">
+            결과 저장 위치
             <input id="outputInput" name="outputDir" placeholder="auto: ROOT/rapidtriage-run-MODE" />
           </label>
 
-          <label>
-            Processing profile
+          <label class="profile-field">
+            처리 방식
             <select id="processingProfileInput" name="processingProfile">
               <option value="fast">Fast first pass - no extraction, quickest review</option>
               <option value="standard">Standard - bounded extraction</option>
               <option value="deep">Deep - no extraction cap</option>
             </select>
           </label>
-          <section id="runPlanPreview" class="run-plan-preview" aria-live="polite"></section>
+          <section id="runPlanPreview" class="run-plan-preview run-plan-summary" aria-live="polite"></section>
 
-          <section class="run-plan-preview" aria-label="Collection profile preview">
+          <section class="run-plan-preview collection-plan-card" aria-label="Collection profile preview">
             <p class="eyebrow">target collection</p>
-            <h3>Preview KAPE-style artifact targets</h3>
-            <p>Before a heavy run, check which Windows/macOS artifact locations are present and which categories are missing.</p>
+            <h3>수집 대상 미리보기</h3>
+            <p>큰 분석을 돌리기 전에 Windows/macOS 주요 아티팩트 경로가 있는지 먼저 확인합니다.</p>
             <label>
-              Collection profile
+              수집 프로필
               <select id="collectProfileInput" name="collectProfile">
                 <option value="intrusion">Intrusion - accounts, EVTX, execution, persistence, remote access</option>
                 <option value="windows-core">Windows core</option>
@@ -185,25 +185,25 @@
                 <option value="full">Full target plan</option>
               </select>
             </label>
-            <button id="collectPlanButton" class="secondary-button" type="button">Preview collection targets</button>
+            <button id="collectPlanButton" class="secondary-button" type="button">수집 대상 보기</button>
             <div id="collectPlanPreview" class="collect-plan-preview" aria-live="polite">
-              <p class="empty-state">Select a root path, then preview collection targets.</p>
+              <p class="empty-state">먼저 증거 경로를 넣은 뒤 수집 대상을 확인하세요.</p>
             </div>
           </section>
 
-          <div class="field-grid">
+          <div class="field-grid limits-grid">
             <label>
-              Max extract MB
+              최대 추출 MB
               <input id="maxExtractMbInput" name="maxExtractMb" type="number" min="0" value="0" />
             </label>
             <label>
-              Max files
+              최대 파일 수
               <input id="maxFileCountInput" name="maxFileCount" type="number" min="0" value="0" />
             </label>
           </div>
 
-          <label>
-            E01 partition start sector optional
+          <label class="e01-sector-field">
+            E01 파티션 시작 섹터 선택
             <input id="e01PartitionStartSectorInput" name="e01PartitionStartSector" type="number" min="0" placeholder="auto: largest supported filesystem from mmls" />
           </label>
 
@@ -212,52 +212,52 @@
             <h3>Known-good suppression and extension spoofing checks</h3>
             <p class="help-text">Use a TXT/CSV/JSON MD5/SHA1/SHA256 feed to mark normal files. Signature mismatch checks run automatically and appear in the Files tab.</p>
             <label>
-              Known-good hash feed path(s)
+              Known-good 해시 피드 경로
               <textarea id="knownGoodHashFeedInput" name="knownGoodHashFeeds" rows="3" placeholder="/cases/feeds/nsrl-lite.csv&#10;/cases/feeds/company-whitelist.json"></textarea>
             </label>
             <div class="field-grid">
               <label>
-                Known-good max hash MB
+                Known-good 최대 해시 MB
                 <input id="knownGoodMaxHashMbInput" name="knownGoodMaxHashMb" type="number" min="0" value="64" />
               </label>
               <label class="inline-toggle">
                 <input id="hideKnownGoodInput" type="checkbox" />
-                Hide known-good rows
+                Known-good 행 숨기기
               </label>
             </div>
           </section>
 
-          <div class="toggle-row">
-            <label><input id="readOnlyInput" type="checkbox" checked /> Read-only</label>
-            <label><input id="dryRunInput" type="checkbox" /> Dry run</label>
-            <label><input id="overwriteInput" type="checkbox" /> Overwrite extracts</label>
+          <div class="toggle-row safety-toggles">
+            <label><input id="readOnlyInput" type="checkbox" checked /> 읽기 전용</label>
+            <label><input id="dryRunInput" type="checkbox" /> 시험 실행</label>
+            <label><input id="overwriteInput" type="checkbox" /> 추출물 덮어쓰기</label>
           </div>
 
-          <button id="runButton" type="submit" data-testid="run-submit-button">Start run</button>
+          <button id="runButton" type="submit" data-testid="run-submit-button">분석 실행</button>
         </form>
 
         <form id="importForm" class="import-form">
           <div>
             <p class="eyebrow">existing output</p>
-            <h2>Import run</h2>
+            <h2>기존 결과 불러오기</h2>
           </div>
           <label>
-            Run output directory
+            분석 결과 폴더
             <input id="importOutputInput" name="importOutputDir" placeholder="/cases/case-001/rapidtriage-run-fraud" />
           </label>
-          <button id="importButton" type="submit">Import results</button>
+          <button id="importButton" type="submit">결과 불러오기</button>
         </form>
       </section>
 
       <section class="results-panel" aria-label="Run results">
         <div class="results-header">
           <div>
-            <p class="eyebrow">case operations</p>
-            <h2>Case workbench</h2>
+            <p class="eyebrow">케이스 작업</p>
+            <h2>분석 결과 작업대</h2>
           </div>
           <div class="results-actions">
-            <span class="results-mode-pill">single case</span>
-            <button id="refreshButton" type="button">Refresh</button>
+            <span class="results-mode-pill">단일 케이스</span>
+            <button id="refreshButton" type="button">새로고침</button>
           </div>
         </div>
         <div class="mission-strip" aria-label="Review workflow reminder" data-testid="six-step-mission-strip">
@@ -270,7 +270,17 @@
         </div>
         <div id="runList" class="run-list" data-testid="run-list"></div>
         <div id="detailPanel" class="detail-panel" data-testid="detail-panel">
-          <p class="empty-state">Run a case to see summary, outputs, and timeline details here.</p>
+          <section class="empty-state workbench-empty-state">
+            <p class="eyebrow">시작 준비 완료</p>
+            <h2>왼쪽에서 증거를 넣으면 이곳이 결과 작업대로 바뀝니다.</h2>
+            <p>분석 후 요약, 검색, 원본 뷰어, 리뷰 표시, 보고서 후보를 이 화면에서 오가며 확인합니다.</p>
+            <div class="empty-state-steps" aria-label="Main workflow">
+              <span>소스 선택</span>
+              <span>분석 실행</span>
+              <span>검색/뷰어</span>
+              <span>리뷰/보고서</span>
+            </div>
+          </section>
         </div>
       </section>
     </main>

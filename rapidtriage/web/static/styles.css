@@ -8082,3 +8082,361 @@ textarea:focus {
     animation: none;
   }
 }
+
+/* Information architecture pass: intake first, results dominant, explanations secondary. */
+.shell,
+body.has-runs .shell,
+body.analysis-active .shell {
+  grid-template-columns: minmax(360px, 420px) minmax(0, 1fr);
+  gap: 14px;
+  align-items: stretch;
+  min-height: calc(100vh - 24px);
+  padding: 12px;
+}
+
+.run-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  max-height: calc(100vh - 24px);
+  overflow: auto;
+  padding: 14px;
+}
+
+.brand-row {
+  order: 1;
+}
+
+.run-form {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  order: 2;
+  margin-top: 0;
+  border: 1px solid rgba(87, 211, 201, 0.26);
+  border-radius: 20px;
+  background:
+    linear-gradient(180deg, rgba(23, 35, 49, 0.97), rgba(10, 17, 27, 0.99));
+  padding: 16px;
+  box-shadow:
+    0 18px 42px rgba(0, 0, 0, 0.28),
+    inset 0 1px 0 rgba(255, 255, 255, 0.06);
+}
+
+.run-form::before {
+  content: "1. 증거 선택";
+  display: inline-flex;
+  align-items: center;
+  width: fit-content;
+  margin-bottom: 10px;
+  border: 1px solid rgba(87, 211, 201, 0.26);
+  border-radius: 999px;
+  background: rgba(87, 211, 201, 0.1);
+  color: #b8f3ee;
+  padding: 5px 10px;
+  font-size: 0.74rem;
+  font-weight: 780;
+  letter-spacing: 0.01em;
+}
+
+.run-form label {
+  color: #dce8f1;
+  font-size: 0.82rem;
+  font-weight: 740;
+}
+
+.root-field {
+  order: 1;
+}
+
+.evidence-check-row {
+  order: 2;
+}
+
+.primary-field-grid {
+  order: 3;
+}
+
+.output-field {
+  order: 4;
+}
+
+.profile-field {
+  order: 5;
+}
+
+.safety-toggles {
+  order: 6;
+}
+
+#runButton {
+  order: 7;
+}
+
+.run-plan-summary {
+  order: 8;
+}
+
+.collection-plan-card {
+  order: 9;
+}
+
+.limits-grid {
+  order: 10;
+}
+
+.e01-sector-field {
+  order: 11;
+}
+
+.known-good-run-options {
+  order: 12;
+}
+
+.run-form input,
+.run-form select,
+.run-form textarea {
+  margin-top: 6px;
+}
+
+.evidence-check-row {
+  display: grid;
+  grid-template-columns: minmax(120px, auto) minmax(0, 1fr);
+  gap: 10px;
+  align-items: center;
+}
+
+#rootInput {
+  min-height: 46px;
+  border-radius: 14px;
+  font-size: 0.95rem;
+}
+
+#runButton {
+  width: 100%;
+  min-height: 50px;
+  margin-top: 4px;
+  border-radius: 15px;
+  font-size: 0.96rem;
+  font-weight: 820;
+}
+
+.quick-actions {
+  order: 3;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.quick-actions button {
+  min-height: 40px;
+  padding: 8px 6px;
+  white-space: normal;
+}
+
+.operator-badges {
+  order: 4;
+}
+
+.intake-choice-grid {
+  order: 5;
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 8px;
+  margin-top: 0;
+}
+
+.intake-choice-card {
+  min-height: auto;
+  border-radius: 15px;
+  padding: 10px 12px;
+  text-align: left;
+}
+
+.intake-choice-card span {
+  color: #a9b8c6;
+  font-size: 0.78rem;
+}
+
+.import-form {
+  order: 6;
+  margin-top: 0;
+}
+
+.intake-core-workflow,
+.quick-start,
+.mode-help,
+.first-run-checklist {
+  order: 20;
+}
+
+.intake-core-workflow,
+.quick-start,
+.mode-help,
+.first-run-checklist {
+  display: none;
+}
+
+.run-plan-preview,
+.known-good-run-options {
+  border-radius: 16px;
+}
+
+.run-plan-preview h3,
+.known-good-run-options h3 {
+  font-size: 0.98rem;
+  letter-spacing: -0.025em;
+}
+
+.results-panel {
+  display: grid;
+  grid-template-rows: auto auto auto minmax(0, 1fr);
+  min-height: calc(100vh - 24px);
+  padding: 14px;
+}
+
+.results-header {
+  min-height: 64px;
+  border-radius: 20px;
+}
+
+.results-header h2 {
+  font-size: clamp(1.16rem, 1.6vw, 1.7rem);
+}
+
+.mission-strip {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 8px;
+  margin: 12px 0 10px;
+  border-radius: 18px;
+  padding: 10px;
+}
+
+.mission-strip span {
+  justify-content: center;
+  min-width: 0;
+  border-radius: 999px;
+  padding: 8px 10px;
+}
+
+.run-list {
+  display: grid;
+  gap: 8px;
+}
+
+.run-list:empty {
+  display: none;
+}
+
+.detail-panel {
+  min-height: 0;
+  margin-top: 12px;
+  border-radius: 24px;
+}
+
+.workbench-empty-state {
+  display: grid;
+  place-items: center;
+  align-content: center;
+  min-height: min(62vh, 700px);
+  border: 1px dashed rgba(142, 160, 178, 0.24);
+  border-radius: 24px;
+  background:
+    radial-gradient(circle at 50% 0%, rgba(87, 211, 201, 0.1), transparent 34%),
+    linear-gradient(180deg, rgba(18, 27, 39, 0.72), rgba(8, 14, 22, 0.82));
+  padding: clamp(24px, 5vw, 64px);
+  text-align: center;
+}
+
+.workbench-empty-state h2 {
+  max-width: 760px;
+  margin: 0;
+  color: #edf6fb;
+  font-size: clamp(1.55rem, 3vw, 3.1rem);
+  letter-spacing: -0.055em;
+}
+
+.workbench-empty-state p:not(.eyebrow) {
+  max-width: 620px;
+  margin: 12px auto 0;
+  color: #a9b8c6;
+  font-size: 0.98rem;
+}
+
+.empty-state-steps {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 8px;
+  margin-top: 22px;
+}
+
+.empty-state-steps span {
+  border: 1px solid rgba(142, 160, 178, 0.24);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.045);
+  color: #d9e5ee;
+  padding: 8px 12px;
+  font-size: 0.82rem;
+  font-weight: 720;
+}
+
+body.has-runs .run-panel,
+body.analysis-active .run-panel {
+  gap: 10px;
+}
+
+body.has-runs .brand-subtitle,
+body.analysis-active .brand-subtitle {
+  display: none;
+}
+
+body.has-runs .run-form,
+body.analysis-active .run-form {
+  padding: 12px;
+}
+
+body.has-runs .run-form .run-plan-preview,
+body.analysis-active .run-form .run-plan-preview,
+body.has-runs .limits-grid,
+body.analysis-active .limits-grid,
+body.has-runs .e01-sector-field,
+body.analysis-active .e01-sector-field,
+body.has-runs .known-good-run-options,
+body.analysis-active .known-good-run-options {
+  display: none;
+}
+
+@media (max-width: 1180px) {
+  .shell,
+  body.has-runs .shell,
+  body.analysis-active .shell {
+    grid-template-columns: 1fr;
+    min-height: auto;
+  }
+
+  .run-panel,
+  .results-panel {
+    max-height: none;
+    min-height: auto;
+  }
+}
+
+@media (max-width: 760px) {
+  .shell,
+  body.has-runs .shell,
+  body.analysis-active .shell {
+    padding: 8px;
+  }
+
+  .evidence-check-row,
+  .quick-actions,
+  .mission-strip {
+    grid-template-columns: 1fr;
+  }
+
+  .workbench-empty-state {
+    min-height: 360px;
+  }
+}

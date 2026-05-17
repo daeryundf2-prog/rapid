@@ -120,9 +120,9 @@ function authToken() {
 async function checkHealth() {
   try {
     await api("/api/health");
-    setStatus(apiStatus, "online", "ok");
+    setStatus(apiStatus, "연결됨", "ok");
   } catch (error) {
-    setStatus(apiStatus, "offline", "failed");
+    setStatus(apiStatus, "오프라인", "failed");
   }
 }
 
@@ -7446,7 +7446,7 @@ function applyStartChoice(action) {
     if (processingProfileInput) processingProfileInput.value = "fast";
     if (modeInput) modeInput.value = "fraud";
     rootInput?.focus();
-    evidenceCheckStatus.textContent = "마운트/Export 폴더 경로를 넣고 Start run을 누르면 됩니다.";
+    evidenceCheckStatus.textContent = "마운트/Export 폴더 경로를 넣고 분석 실행을 누르면 됩니다.";
   } else if (action === "recent") {
     document.querySelector("#importOutputInput")?.focus();
   } else if (action === "sample") {
@@ -7537,16 +7537,16 @@ function updateRunSubmissionCta(root, profileKey = "fast") {
   if (isLikelyE01Path(root)) {
     runButton.dataset.e01Detected = "true";
     runButton.textContent = profileKey === "fast"
-      ? "Start E01 preflight + fast analysis"
-      : "Start E01 ingest + analysis";
+      ? "E01 사전 점검 + 빠른 분석"
+      : "E01 인입 + 분석 실행";
     return;
   }
   delete runButton.dataset.e01Detected;
-  runButton.textContent = "Start run";
+  runButton.textContent = "분석 실행";
 }
 
 function runStartingLabel(root) {
-  return isLikelyE01Path(root) ? "Starting E01 workflow..." : "Starting...";
+  return isLikelyE01Path(root) ? "E01 분석 준비 중..." : "분석 시작 중...";
 }
 
 function renderRunPlanE01Readiness(root, partitionStartSector, profileKey) {
@@ -7621,12 +7621,12 @@ async function previewCollectPlan() {
   const inputKind = document.querySelector("#inputKindInput")?.value || null;
   if (!target) return;
   if (!root.trim()) {
-    target.innerHTML = '<p class="empty-state">Enter a mounted/exported evidence root first.</p>';
+    target.innerHTML = '<p class="empty-state">먼저 마운트/Export된 증거 경로를 넣어주세요.</p>';
     return;
   }
   collectPlanButton.disabled = true;
-  collectPlanButton.textContent = "Previewing...";
-  target.innerHTML = '<p class="empty-state">Checking high-value target paths...</p>';
+  collectPlanButton.textContent = "확인 중...";
+  target.innerHTML = '<p class="empty-state">중요 아티팩트 경로를 확인하는 중입니다...</p>';
   try {
     const payload = await api("/api/collect/plan", {
       method: "POST",
@@ -7637,7 +7637,7 @@ async function previewCollectPlan() {
     target.innerHTML = `<p class="empty-state">${escapeHtml(error.message)}</p>`;
   } finally {
     collectPlanButton.disabled = false;
-    collectPlanButton.textContent = "Preview collection targets";
+    collectPlanButton.textContent = "수집 대상 보기";
   }
 }
 
@@ -7730,7 +7730,7 @@ importForm.addEventListener("submit", async (event) => {
   const outputDir = document.querySelector("#importOutputInput").value.trim();
   if (!outputDir) return;
   importButton.disabled = true;
-  importButton.textContent = "Importing...";
+  importButton.textContent = "불러오는 중...";
   try {
     const run = await api("/api/runs/import", {
       method: "POST",
@@ -7746,13 +7746,13 @@ importForm.addEventListener("submit", async (event) => {
     detailPanel.innerHTML = `<p class="empty-state">${escapeHtml(error.message)}</p>`;
   } finally {
     importButton.disabled = false;
-    importButton.textContent = "Import results";
+    importButton.textContent = "결과 불러오기";
   }
 });
 
 sampleRunButton?.addEventListener("click", async () => {
   sampleRunButton.disabled = true;
-  sampleRunButton.textContent = "Creating sample...";
+  sampleRunButton.textContent = "샘플 생성 중...";
   detailPanel.innerHTML = `
     <section class="empty-state-card">
       <p class="eyebrow">sample case</p>
@@ -7775,13 +7775,13 @@ sampleRunButton?.addEventListener("click", async () => {
     detailPanel.innerHTML = `<p class="empty-state">${escapeHtml(error.message)}</p>`;
   } finally {
     sampleRunButton.disabled = false;
-    sampleRunButton.textContent = "Run sample case";
+    sampleRunButton.textContent = "샘플 실행";
   }
 });
 
 doctorButton?.addEventListener("click", async () => {
   doctorButton.disabled = true;
-  doctorButton.textContent = "Checking...";
+  doctorButton.textContent = "점검 중...";
   try {
     const payload = await api("/api/doctor");
     detailPanel.innerHTML = renderDoctorPanel(payload);
@@ -7789,13 +7789,13 @@ doctorButton?.addEventListener("click", async () => {
     detailPanel.innerHTML = `<p class="empty-state">${escapeHtml(error.message)}</p>`;
   } finally {
     doctorButton.disabled = false;
-    doctorButton.textContent = "Check runtime";
+    doctorButton.textContent = "환경 점검";
   }
 });
 
 crashReportsButton?.addEventListener("click", async () => {
   crashReportsButton.disabled = true;
-  crashReportsButton.textContent = "Loading crashes...";
+  crashReportsButton.textContent = "크래시 불러오는 중...";
   try {
     const payload = await api("/api/crash-reports?limit=100");
     detailPanel.innerHTML = renderCrashReportsPanel(payload);
@@ -7804,7 +7804,7 @@ crashReportsButton?.addEventListener("click", async () => {
     detailPanel.innerHTML = `<p class="empty-state">${escapeHtml(error.message)}</p>`;
   } finally {
     crashReportsButton.disabled = false;
-    crashReportsButton.textContent = "Crash reports";
+    crashReportsButton.textContent = "크래시 로그";
   }
 });
 
