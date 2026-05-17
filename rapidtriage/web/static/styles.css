@@ -10487,3 +10487,556 @@ body.analysis-active .workbench-command-deck {
     min-height: auto;
   }
 }
+
+/* Colormind forensic palette pass: paper, brass, periwinkle, mauve, command navy. */
+:root {
+  --rf-paper: #e3d8e1;
+  --rf-paper-soft: #f5f0f4;
+  --rf-paper-card: #fffafd;
+  --rf-brass: #af9f5a;
+  --rf-brass-soft: rgba(175, 159, 90, 0.16);
+  --rf-periwinkle: #5d7dc8;
+  --rf-periwinkle-soft: rgba(93, 125, 200, 0.16);
+  --rf-mauve: #8a4c66;
+  --rf-mauve-soft: rgba(138, 76, 102, 0.14);
+  --rf-command-blue: #1a428d;
+  --rf-command-blue-strong: #12306d;
+  --rf-command-blue-soft: rgba(26, 66, 141, 0.12);
+  --rf-graphite: #141821;
+  --rf-graphite-2: #202637;
+  --rf-clean-line: rgba(26, 66, 141, 0.16);
+  --rf-clean-line-strong: rgba(26, 66, 141, 0.32);
+  --rf-focus: rgba(93, 125, 200, 0.32);
+  --rf-action: var(--rf-command-blue);
+  --rf-action-hover: var(--rf-command-blue-strong);
+  --rf-action-soft: var(--rf-command-blue-soft);
+  --rf-action-line: rgba(93, 125, 200, 0.42);
+  --rf-image-accent: var(--rf-command-blue);
+  --rf-image-accent-strong: var(--rf-command-blue-strong);
+  --rf-image-accent-soft: var(--rf-command-blue-soft);
+}
+
+html {
+  background: var(--rf-paper);
+}
+
+body {
+  background:
+    radial-gradient(circle at 9% -8%, rgba(93, 125, 200, 0.18), transparent 34rem),
+    radial-gradient(circle at 100% 2%, rgba(138, 76, 102, 0.12), transparent 30rem),
+    linear-gradient(135deg, #f7f3f6 0%, var(--rf-paper) 48%, #d9deeb 100%);
+  color: var(--rf-graphite);
+}
+
+.run-panel {
+  border-color: rgba(227, 216, 225, 0.14);
+  background:
+    radial-gradient(circle at 0% 0%, rgba(93, 125, 200, 0.28), transparent 26rem),
+    radial-gradient(circle at 100% 12%, rgba(138, 76, 102, 0.18), transparent 22rem),
+    linear-gradient(180deg, #182a58 0%, #101827 100%);
+}
+
+.brand-row,
+.run-form,
+.case-queue-shell,
+.import-form,
+.mode-help,
+.first-run-checklist,
+.quick-start li,
+.intake-choice-card,
+.start-focus-card,
+.workflow-help-details,
+.advanced-run-options {
+  border-color: rgba(227, 216, 225, 0.16);
+  background:
+    linear-gradient(180deg, rgba(35, 54, 103, 0.96), rgba(21, 31, 52, 0.98));
+  box-shadow:
+    0 18px 38px rgba(9, 18, 38, 0.28),
+    inset 0 1px 0 rgba(255, 255, 255, 0.08);
+}
+
+.brand-mark {
+  border-color: rgba(175, 159, 90, 0.46);
+  background:
+    linear-gradient(180deg, rgba(175, 159, 90, 0.3), rgba(26, 66, 141, 0.28)),
+    #16244a;
+}
+
+.run-panel .eyebrow,
+.run-form::before,
+body.analysis-active .run-form::before,
+body.has-runs .run-form::before {
+  border-color: rgba(175, 159, 90, 0.44);
+  background: rgba(175, 159, 90, 0.16);
+  color: #f3e9b6;
+}
+
+.image-evidence-flow strong,
+.user-run-steps strong {
+  background: var(--rf-brass);
+  color: #17150b;
+}
+
+.intake-choice-card.primary {
+  border-color: rgba(175, 159, 90, 0.58);
+  background:
+    radial-gradient(circle at 100% 0%, rgba(175, 159, 90, 0.24), transparent 16rem),
+    linear-gradient(135deg, rgba(93, 125, 200, 0.38), rgba(15, 23, 42, 0.98));
+}
+
+.run-panel input,
+.run-panel select,
+.run-panel textarea {
+  border-color: rgba(227, 216, 225, 0.24);
+  background: #0e1728;
+  color: #fffafd;
+}
+
+.run-panel input:focus,
+.run-panel select:focus,
+.run-panel textarea:focus {
+  border-color: var(--rf-brass);
+  outline-color: rgba(175, 159, 90, 0.24);
+}
+
+.run-panel .secondary-button,
+.run-panel .link-button,
+.run-panel .icon-action,
+.run-panel .mini-inline-button {
+  border-color: rgba(227, 216, 225, 0.22);
+  background: rgba(26, 66, 141, 0.44);
+  color: #fffafd;
+}
+
+.run-panel .secondary-button:hover,
+.run-panel .link-button:hover,
+.run-panel .icon-action:hover,
+.run-panel .mini-inline-button:hover {
+  border-color: rgba(175, 159, 90, 0.58);
+  background: rgba(93, 125, 200, 0.5);
+}
+
+.run-panel button:not(.secondary-button):not(.link-button):not(.icon-action):not(.mini-inline-button):not(.preset-chip):not(.search-facet-chip):not(.tab-button):not(.forensic-view-mode):not(.artifact-tree-row):not(.core-workflow-step) {
+  border-color: #d7c779;
+  background: linear-gradient(180deg, #c8ba71 0%, var(--rf-brass) 100%);
+  color: #14110a;
+  box-shadow: 0 14px 28px rgba(175, 159, 90, 0.24);
+}
+
+.run-item,
+body.has-runs .run-item,
+body.analysis-active .run-item {
+  border-color: rgba(227, 216, 225, 0.14);
+  background:
+    linear-gradient(180deg, rgba(29, 43, 79, 0.96), rgba(15, 24, 43, 0.98));
+}
+
+.run-item.selected,
+body.has-runs .run-item.selected,
+body.analysis-active .run-item.selected {
+  border-color: rgba(93, 125, 200, 0.72);
+  background:
+    linear-gradient(180deg, rgba(29, 63, 133, 0.82), rgba(15, 24, 43, 0.98));
+  box-shadow:
+    inset 4px 0 0 var(--rf-brass),
+    0 18px 38px rgba(9, 18, 38, 0.32);
+}
+
+.run-item.selected .status-pill,
+body.has-runs .run-item.selected .status-pill,
+body.analysis-active .run-item.selected .status-pill {
+  border-color: rgba(227, 216, 225, 0.72);
+  background: #fffafd;
+  color: var(--rf-command-blue);
+}
+
+.results-panel {
+  background:
+    linear-gradient(180deg, rgba(255, 250, 253, 0.92), rgba(245, 240, 244, 0.96));
+  color: var(--rf-graphite);
+}
+
+.results-header,
+.mission-strip,
+.detail-panel,
+.case-hero,
+.workbench-switchboard,
+.workbench-command-deck,
+.workbench-intel-drawer,
+.workspace-card,
+.guidance-card,
+.review-card,
+.viewer-panel,
+.workbench-result-zone,
+.table-control-bar,
+.filter-row,
+.search-hero,
+.review-cockpit,
+.human-action-guide,
+.shortcut-help,
+.artifact-tree-card,
+.case-db-panel,
+.source-metadata-panel,
+.sqlite-schema-panel,
+.search-facet-panel,
+.advanced-search-card,
+.keyword-pack-card,
+.lazyweb-command-center,
+.forensic-feature-catalog {
+  border-color: var(--rf-clean-line);
+  background: var(--rf-paper-card);
+  color: var(--rf-graphite);
+  box-shadow:
+    0 16px 36px rgba(26, 66, 141, 0.08),
+    inset 0 1px 0 rgba(255, 255, 255, 0.78);
+}
+
+.results-header {
+  background:
+    linear-gradient(180deg, #fffafd 0%, #f6f2f6 100%);
+}
+
+.results-panel .eyebrow,
+.workbench-switchboard .case-command-main span:first-child,
+.workflow-lane-board-copy p,
+.case-hero .eyebrow {
+  color: var(--rf-command-blue);
+}
+
+.mission-strip {
+  background: rgba(227, 216, 225, 0.56);
+}
+
+.mission-strip span,
+.case-next-route span {
+  border-color: rgba(93, 125, 200, 0.22);
+  background: #fffafd;
+  color: var(--rf-command-blue) !important;
+}
+
+.mission-strip strong,
+.case-next-route strong {
+  background: var(--rf-command-blue);
+  color: #ffffff;
+}
+
+.case-hero,
+body.has-runs .case-hero,
+body.analysis-active .case-hero {
+  border-color: rgba(93, 125, 200, 0.28);
+  background:
+    radial-gradient(circle at 0% 0%, rgba(93, 125, 200, 0.14), transparent 25rem),
+    radial-gradient(circle at 100% 100%, rgba(175, 159, 90, 0.14), transparent 20rem),
+    linear-gradient(135deg, #fffafd 0%, #f4eef4 100%);
+}
+
+.case-source-line {
+  border-color: rgba(93, 125, 200, 0.24);
+  background: rgba(227, 216, 225, 0.42);
+}
+
+.case-source-line span,
+.viewer-lane-outcome b,
+.source-card em,
+.intel-score-meter b,
+.intel-keyword-cloud b {
+  color: var(--rf-command-blue);
+}
+
+.case-hero-metric,
+body.has-runs .case-hero-metric,
+body.analysis-active .case-hero-metric,
+.metric,
+.lazyweb-metric {
+  border-color: rgba(93, 125, 200, 0.18);
+  background: rgba(255, 250, 253, 0.92);
+}
+
+.workbench-command-deck,
+body.has-runs .workbench-command-deck,
+body.analysis-active .workbench-command-deck,
+.workbench-switchboard,
+.workbench-switchboard .case-command-bar {
+  border-color: var(--rf-clean-line);
+  background:
+    linear-gradient(135deg, rgba(255, 250, 253, 0.96), rgba(243, 236, 243, 0.92));
+}
+
+.workflow-lane-board {
+  border-color: var(--rf-clean-line);
+  background:
+    linear-gradient(135deg, rgba(255, 250, 253, 0.98), rgba(239, 235, 243, 0.9)),
+    radial-gradient(circle at 0% 0%, rgba(93, 125, 200, 0.12), transparent 21rem);
+}
+
+.workflow-lane-card {
+  border-color: rgba(26, 66, 141, 0.16);
+  background: #fffafd;
+  color: var(--rf-graphite);
+}
+
+.workflow-lane-card:hover,
+.workflow-lane-card.active {
+  border-color: rgba(26, 66, 141, 0.48);
+  background:
+    linear-gradient(180deg, #fffafd, #f0eef9);
+  box-shadow: 0 16px 36px rgba(26, 66, 141, 0.14);
+}
+
+.workflow-lane-card.active::before {
+  background: linear-gradient(180deg, var(--rf-command-blue), var(--rf-periwinkle));
+}
+
+.workflow-lane-index,
+.forensic-view-mode em {
+  background: var(--rf-periwinkle-soft);
+  color: var(--rf-command-blue);
+}
+
+.workflow-lane-card b {
+  background: var(--rf-brass-soft);
+  color: #4a401b;
+}
+
+.workbench-switchboard .forensic-view-mode-bar {
+  background: rgba(227, 216, 225, 0.48);
+}
+
+.workbench-switchboard .forensic-view-mode,
+.forensic-view-mode,
+.tab-button {
+  border-color: rgba(26, 66, 141, 0.14);
+  background: rgba(255, 250, 253, 0.72);
+  color: #354257;
+}
+
+.workbench-switchboard .forensic-view-mode.active,
+.forensic-view-mode.active,
+.tab-button.active,
+.tab-button[aria-selected="true"] {
+  border-color: rgba(26, 66, 141, 0.32);
+  background: #fffafd;
+  color: var(--rf-command-blue);
+  box-shadow: 0 10px 22px rgba(26, 66, 141, 0.12);
+}
+
+.tab-row .tab-button.active,
+.results-panel button:not(.secondary-button):not(.link-button):not(.icon-action):not(.mini-inline-button):not(.preset-chip):not(.search-facet-chip):not(.tab-button):not(.forensic-view-mode):not(.artifact-tree-row):not(.core-workflow-step),
+.case-hero-actions button:not(.secondary-button),
+.case-command-search button {
+  border-color: var(--rf-command-blue);
+  background: var(--rf-command-blue);
+  color: #ffffff;
+  box-shadow: 0 12px 24px rgba(26, 66, 141, 0.18);
+}
+
+.results-panel button:not(.secondary-button):not(.link-button):not(.icon-action):not(.mini-inline-button):not(.preset-chip):not(.search-facet-chip):not(.tab-button):not(.forensic-view-mode):not(.artifact-tree-row):not(.core-workflow-step):hover,
+.case-hero-actions button:not(.secondary-button):hover,
+.case-command-search button:hover {
+  border-color: var(--rf-command-blue-strong);
+  background: var(--rf-command-blue-strong);
+}
+
+.results-panel .secondary-button,
+.results-panel .link-button,
+.results-panel .icon-action,
+.results-panel .mini-inline-button,
+.results-panel .preset-chip,
+.results-panel .search-facet-chip,
+.case-hero-actions .secondary-button {
+  border-color: rgba(26, 66, 141, 0.18);
+  background: #fffafd;
+  color: var(--rf-command-blue);
+}
+
+.results-panel .secondary-button:hover,
+.results-panel .link-button:hover,
+.results-panel .icon-action:hover,
+.results-panel .mini-inline-button:hover,
+.results-panel .preset-chip:hover,
+.results-panel .search-facet-chip:hover,
+.case-hero-actions .secondary-button:hover {
+  border-color: rgba(93, 125, 200, 0.42);
+  background: rgba(93, 125, 200, 0.12);
+}
+
+.case-workbench-layout.judgment-workbench > aside,
+.case-workbench-layout.judgment-workbench .workbench-result-zone,
+.case-workbench-layout.judgment-workbench .workbench-preview-rail,
+.case-source-card,
+.source-card,
+.adaptive-viewer-header,
+.intel-score-card,
+.intel-keyword-card,
+.review-state-matrix,
+.intel-action-card,
+.preview-detail-card,
+.evidence-tray-card,
+.report-tray-card,
+.artifact-tree-row {
+  border-color: var(--rf-clean-line);
+  background: rgba(255, 250, 253, 0.92);
+}
+
+.source-card:hover,
+.source-card.active,
+.artifact-tree-row.active,
+.artifact-tree-row:hover {
+  border-color: rgba(26, 66, 141, 0.34);
+  background: rgba(93, 125, 200, 0.1);
+}
+
+.source-card em {
+  background: rgba(93, 125, 200, 0.13);
+}
+
+.adaptive-viewer-header,
+.intel-score-card {
+  background:
+    radial-gradient(circle at 100% 0%, rgba(93, 125, 200, 0.12), transparent 11rem),
+    linear-gradient(135deg, #fffafd, #f3eef5);
+}
+
+.viewer-chip-row span,
+.intel-keyword-cloud button {
+  border-color: rgba(26, 66, 141, 0.16);
+  background: rgba(93, 125, 200, 0.1);
+  color: var(--rf-command-blue);
+}
+
+.intel-score-meter::after {
+  background:
+    linear-gradient(90deg, var(--rf-command-blue) calc(var(--score) * 1%), rgba(227, 216, 225, 0.9) 0);
+}
+
+.review-state-matrix span {
+  background: rgba(227, 216, 225, 0.34);
+}
+
+.review-state-matrix span:nth-of-type(2),
+.intel-keyword-card {
+  background: rgba(93, 125, 200, 0.08);
+}
+
+.review-state-matrix span:nth-of-type(3),
+.status-pill.warning {
+  border-color: rgba(138, 76, 102, 0.24);
+  background: var(--rf-mauve-soft);
+  color: #6d2f49;
+}
+
+.secondary-button.danger,
+.status-pill.failed,
+.status-pill.error,
+.danger {
+  border-color: rgba(138, 76, 102, 0.28);
+  background: var(--rf-mauve-soft);
+  color: var(--rf-mauve);
+}
+
+.status-pill.ok,
+.run-item .status-pill.ok {
+  border-color: rgba(26, 66, 141, 0.18);
+  background: rgba(93, 125, 200, 0.1);
+  color: var(--rf-command-blue);
+}
+
+.results-panel input,
+.results-panel select,
+.results-panel textarea,
+.case-command-search input,
+.table-control-bar input,
+.table-control-bar select {
+  border-color: rgba(26, 66, 141, 0.18);
+  background: #fffafd;
+  color: var(--rf-graphite);
+}
+
+.results-panel input:focus,
+.results-panel select:focus,
+.results-panel textarea:focus {
+  border-color: var(--rf-periwinkle);
+  outline-color: var(--rf-focus);
+}
+
+.data-table th {
+  background: rgba(227, 216, 225, 0.46);
+  color: #2f3a4f;
+}
+
+.data-table tr:hover td {
+  background: rgba(93, 125, 200, 0.08);
+}
+
+code,
+pre,
+.command-list code {
+  border-color: rgba(26, 66, 141, 0.14);
+  background: rgba(227, 216, 225, 0.36);
+}
+
+/* Component-specific fixes: generic button rules must not recolor review cards. */
+.run-panel button.run-item,
+.run-panel button.run-item:not(.secondary-button):not(.link-button):not(.icon-action):not(.mini-inline-button):not(.preset-chip):not(.search-facet-chip):not(.tab-button):not(.forensic-view-mode):not(.artifact-tree-row):not(.core-workflow-step),
+button.run-item,
+body.has-runs button.run-item,
+body.analysis-active button.run-item {
+  border-color: rgba(227, 216, 225, 0.14);
+  background:
+    linear-gradient(180deg, rgba(29, 43, 79, 0.96), rgba(15, 24, 43, 0.98));
+  color: #fffafd;
+  box-shadow:
+    0 12px 28px rgba(9, 18, 38, 0.24),
+    inset 0 1px 0 rgba(255, 255, 255, 0.06);
+}
+
+.run-panel button.run-item.selected,
+.run-panel button.run-item.selected:not(.secondary-button):not(.link-button):not(.icon-action):not(.mini-inline-button):not(.preset-chip):not(.search-facet-chip):not(.tab-button):not(.forensic-view-mode):not(.artifact-tree-row):not(.core-workflow-step),
+button.run-item.selected,
+body.has-runs button.run-item.selected,
+body.analysis-active button.run-item.selected {
+  border-color: rgba(93, 125, 200, 0.72);
+  background:
+    linear-gradient(180deg, rgba(31, 66, 139, 0.94), rgba(17, 30, 61, 0.98));
+  color: #fffafd;
+  box-shadow:
+    inset 4px 0 0 var(--rf-brass),
+    0 18px 38px rgba(9, 18, 38, 0.32);
+}
+
+.run-panel button.run-item:hover,
+button.run-item:hover {
+  border-color: rgba(175, 159, 90, 0.5);
+  background:
+    linear-gradient(180deg, rgba(43, 73, 136, 0.96), rgba(20, 33, 63, 0.98));
+}
+
+.results-panel button.workflow-lane-card,
+.results-panel button.workflow-lane-card:not(.secondary-button):not(.link-button):not(.icon-action):not(.mini-inline-button):not(.preset-chip):not(.search-facet-chip):not(.tab-button):not(.forensic-view-mode):not(.artifact-tree-row):not(.core-workflow-step) {
+  border-color: rgba(26, 66, 141, 0.16);
+  background: #fffafd;
+  color: var(--rf-graphite);
+  box-shadow: 0 8px 20px rgba(26, 66, 141, 0.07);
+}
+
+.results-panel button.workflow-lane-card:hover,
+.results-panel button.workflow-lane-card.active,
+.results-panel button.workflow-lane-card:hover:not(.secondary-button):not(.link-button):not(.icon-action):not(.mini-inline-button):not(.preset-chip):not(.search-facet-chip):not(.tab-button):not(.forensic-view-mode):not(.artifact-tree-row):not(.core-workflow-step),
+.results-panel button.workflow-lane-card.active:not(.secondary-button):not(.link-button):not(.icon-action):not(.mini-inline-button):not(.preset-chip):not(.search-facet-chip):not(.tab-button):not(.forensic-view-mode):not(.artifact-tree-row):not(.core-workflow-step) {
+  border-color: rgba(26, 66, 141, 0.48);
+  background:
+    linear-gradient(180deg, #fffafd, #f0eef9);
+  color: var(--rf-graphite);
+  box-shadow: 0 16px 36px rgba(26, 66, 141, 0.14);
+}
+
+.results-panel button.workflow-lane-card strong,
+.results-panel button.workflow-lane-card em,
+.results-panel button.workflow-lane-card small {
+  color: inherit;
+}
+
+.results-panel button.workflow-lane-card em,
+.results-panel button.workflow-lane-card small {
+  color: #5b6170;
+}
