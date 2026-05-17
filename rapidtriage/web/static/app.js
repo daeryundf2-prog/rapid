@@ -333,6 +333,7 @@ function renderDetailShell(run, tab) {
     </section>
     <section class="workbench-switchboard" aria-label="Analyst workbench switchboard">
       ${renderCaseCommandBar(run)}
+      ${renderWorkflowLaneBoard(run, tab)}
       ${renderForensicViewModeBar(run, tab)}
       <p class="view-helper compact-view-helper">${escapeHtml(group.summary)}</p>
       ${renderHumanActionGuide(run, tab)}
@@ -355,6 +356,51 @@ function renderDetailShell(run, tab) {
       ${renderForensicRibbon(run)}
       ${renderWorkbenchSmokePanel(run)}
     </details>
+  `;
+}
+
+function workflowLanes() {
+  if (typeof FORENSIC_WORKFLOW_LANES !== "undefined" && Array.isArray(FORENSIC_WORKFLOW_LANES)) {
+    return FORENSIC_WORKFLOW_LANES;
+  }
+  return [];
+}
+
+function workflowLaneForTab(tab) {
+  const lanes = workflowLanes();
+  const groupId = groupForTab(tab);
+  return lanes.find((lane) => lane.tab === tab || lane.id === groupId || (lane.id === "documents" && groupId === "documents"))
+    || lanes[0]
+    || { id: "triage", label: tabLabel(tab), tab, terms: [tab], modules: [] };
+}
+
+function renderWorkflowLaneBoard(run, tab) {
+  const lanes = workflowLanes();
+  if (!lanes.length) return "";
+  const activeLane = workflowLaneForTab(tab);
+  return `
+    <section class="workflow-lane-board" aria-label="Forensic judgment workflows" data-testid="forensic-workflow-lanes">
+      <div class="workflow-lane-board-copy">
+        <p class="eyebrow">forensic judgment system</p>
+        <h3>파일 탐색이 아니라, 사건 결론까지 가는 5개 작업대</h3>
+        <span>E01 같은 이미지 증거는 먼저 안전하게 받아들이고, 키워드/아티팩트/문서/시간축으로 나눠 선별합니다.</span>
+      </div>
+      <div class="workflow-lane-grid">
+        ${lanes.map((lane) => {
+          const signalCount = artifactGroupCount(run, lane.terms || [lane.tab]);
+          const isActive = activeLane.id === lane.id || tab === lane.tab;
+          return `
+            <button class="workflow-lane-card ${isActive ? "active" : ""}" type="button" data-tab="${escapeHtml(lane.tab)}" data-workflow-lane="${escapeHtml(lane.id)}" aria-current="${isActive ? "step" : "false"}">
+              <span class="workflow-lane-index">${escapeHtml(lane.shortcut || "")}</span>
+              <strong>${escapeHtml(lane.label)}</strong>
+              <em>${escapeHtml(lane.korean || lane.goal || "")}</em>
+              <small>${escapeHtml(lane.question || "")}</small>
+              <b>${formatNumber(signalCount)} signal(s)</b>
+            </button>
+          `;
+        }).join("")}
+      </div>
+    </section>
   `;
 }
 
@@ -718,15 +764,18 @@ function renderTableControlBar(tab) {
 function renderWorkbenchLayoutFrame(run, tab) {
   const summary = run.summary?.summary || {};
   const reportCandidates = Number(summary.report_item_count || 0);
+  const activeLane = workflowLaneForTab(tab);
   return `
-    <section class="case-workbench-layout" aria-label="Single case analysis workbench" data-testid="case-workbench-layout">
-      <aside class="workbench-artifact-tree" aria-label="Artifact tree" data-testid="workbench-artifact-tree">
+    <section class="case-workbench-layout judgment-workbench" aria-label="Single case analysis workbench" data-testid="case-workbench-layout" data-workflow-lane="${escapeHtml(activeLane.id)}">
+      <aside class="workbench-artifact-tree source-navigator" aria-label="Evidence and source navigator" data-testid="workbench-artifact-tree">
         <div class="workbench-region-header">
-          <p class="eyebrow">artifact tree</p>
-          <strong>Forensic artifacts</strong>
+          <p class="eyebrow">left · evidence / sources</p>
+          <strong>소스와 아티팩트</strong>
+          <span>전체 파일트리는 숨기고, 판단에 필요한 분류를 먼저 보여줍니다.</span>
         </div>
+        ${renderEvidenceSourceNavigator(run, tab)}
         <div class="artifact-tree-lane" data-testid="artifact-tree-lane-find">
-          <span class="artifact-tree-lane-label">Find</span>
+          <span class="artifact-tree-lane-label">Artifact pivots</span>
           ${renderArtifactTreeRows(run, tab, ["Windows", "Browser / AI", "Mail", "Messenger", "Mobile", "Media / OCR", "Timeline", "Search"])}
         </div>
         <div class="artifact-tree-lane" data-testid="artifact-tree-lane-deliver">
@@ -734,17 +783,151 @@ function renderWorkbenchLayoutFrame(run, tab) {
           ${renderArtifactTreeRows(run, tab, ["Reports", "Validation"])}
         </div>
       </aside>
-      <main class="workbench-result-zone" aria-label="Virtualized result table region" data-testid="workbench-result-table">
+      <main class="workbench-result-zone primary-review-pane" aria-label="Adaptive primary evidence review pane" data-testid="workbench-result-table">
         <div class="workbench-region-header">
-          <p class="eyebrow">results</p>
+          <p class="eyebrow">center · primary review pane</p>
           <strong>${escapeHtml(tabLabel(tab))}</strong>
           <span>cursor pages · DOM window ≤ ${VIRTUAL_TABLE_ROW_LIMIT}</span>
         </div>
+        ${renderAdaptiveViewerHeader(run, tab)}
         <div id="tabBody" class="tab-body" data-testid="tab-body"></div>
       </main>
-      ${renderPreviewRail(run, tab, reportCandidates)}
+      ${renderIntelligencePanel(run, tab, reportCandidates)}
     </section>
   `;
+}
+
+function renderEvidenceSourceNavigator(run, tab) {
+  const summary = run.summary?.summary || {};
+  const root = run.request?.root || run.summary?.output_dir || "not recorded";
+  const sourceGroups = [
+    {
+      label: "Evidence image",
+      tab: "summary",
+      count: artifactGroupCount(run, ["e01", "ex01", "raw", "image", "partition", "filesystem"]) || 1,
+      hint: "E01/Ex01, RAW, VM disk, ZIP, folder",
+    },
+    {
+      label: "File system",
+      tab: "files",
+      count: Number(summary.file_candidate_count || 0),
+      hint: "paths, hashes, media, deleted candidates",
+    },
+    {
+      label: "Documents",
+      tab: "docs",
+      count: Number(summary.document_match_count || 0),
+      hint: "PDF/HWP/Office, mail, chat, OCR",
+    },
+    {
+      label: "Windows activity",
+      tab: "artifacts",
+      count: artifactGroupCount(run, ["windows", "evtx", "registry", "usb", "mft", "usn", "shellbag"]),
+      hint: "EVTX, Registry, USB, execution",
+    },
+    {
+      label: "Browser / AI",
+      tab: "artifacts",
+      count: artifactGroupCount(run, ["browser", "history", "download", "ai", "chatgpt", "claude", "gemini", "perplexity"]),
+      hint: "web, downloads, AI prompts, sessions",
+    },
+    {
+      label: "Timeline",
+      tab: "timeline",
+      count: Number(summary.timeline_event_count || 0),
+      hint: "time correlation and event pivots",
+    },
+  ];
+  return `
+    <section class="source-stack" aria-label="Case source stack" data-testid="evidence-source-stack">
+      <div class="case-source-card">
+        <p class="eyebrow">case source</p>
+        <strong>${escapeHtml(run.run_id || "current case")}</strong>
+        <span title="${escapeHtml(root)}">${escapeHtml(root)}</span>
+      </div>
+      ${sourceGroups.map((item) => `
+        <button class="source-card ${tab === item.tab ? "active" : ""}" type="button" data-open-tab="${escapeHtml(item.tab)}">
+          <span>
+            <strong>${escapeHtml(item.label)}</strong>
+            <small>${escapeHtml(item.hint)}</small>
+          </span>
+          <em>${formatNumber(item.count)}</em>
+        </button>
+      `).join("")}
+    </section>
+  `;
+}
+
+function renderAdaptiveViewerHeader(run, tab) {
+  const activeLane = workflowLaneForTab(tab);
+  const profile = adaptiveViewerProfile(tab);
+  return `
+    <section class="adaptive-viewer-header" aria-label="Adaptive evidence viewer" data-testid="adaptive-evidence-viewer">
+      <div>
+        <p class="eyebrow">adaptive viewer</p>
+        <strong>${escapeHtml(profile.title)}</strong>
+        <span>${escapeHtml(profile.body)}</span>
+      </div>
+      <div class="viewer-chip-row" aria-label="Available viewer modes">
+        ${profile.viewers.map((viewer) => `<span>${escapeHtml(viewer)}</span>`).join("")}
+      </div>
+      <div class="viewer-lane-outcome">
+        <b>${escapeHtml(activeLane.korean || activeLane.label)}</b>
+        <span>${escapeHtml(activeLane.outcome || activeLane.goal || "")}</span>
+      </div>
+    </section>
+  `;
+}
+
+function adaptiveViewerProfile(tab) {
+  const profiles = {
+    summary: {
+      title: "Image intake board",
+      body: "증거 이미지/폴더를 해시와 limitation 기준으로 확인하고, mount/export가 필요한지 판단합니다.",
+      viewers: ["E01 preflight", "Hash", "Source path", "Warnings"],
+    },
+    search: {
+      title: "Keyword triage table + instant preview",
+      body: "전체 검색 결과를 가상화된 표로 좁히고, 행 선택 즉시 원본/스니펫/리뷰 상태를 확인합니다.",
+      viewers: ["Table", "Text", "Current-file search", "Quicklook"],
+    },
+    artifacts: {
+      title: "Artifact-specific behavior viewer",
+      body: "EVTX, Registry, Browser, AI, USB, MFT/USN을 같은 표가 아니라 아티팩트 의미별로 해석합니다.",
+      viewers: ["EVTX", "Registry", "SQLite", "Browser", "Chat"],
+    },
+    indicators: {
+      title: "IOC and risk pivot viewer",
+      body: "IP, 도메인, URL, 해시를 단독 결론이 아닌 관련 파일/웹/시간대 피벗으로 사용합니다.",
+      viewers: ["IOC table", "Graph", "Timeline pivot", "Source"],
+    },
+    files: {
+      title: "File, image, and hex quicklook",
+      body: "대량 파일은 기본 목록을 좁히고 이미지/텍스트/hex 미리보기로 필요한 것만 엽니다.",
+      viewers: ["File table", "Image", "Text", "Hex", "Hash"],
+    },
+    docs: {
+      title: "Document Review workspace",
+      body: "Relativity/Everlaw식 검토 흐름으로 문서, 메일, 메신저, OCR 히트를 태깅하고 보고서 후보화합니다.",
+      viewers: ["Document", "Email", "Chat", "OCR", "Similarity"],
+    },
+    timeline: {
+      title: "Timeline reconstruction viewer",
+      body: "로그/파일/웹/앱 활동을 시간대별로 묶고, 의심 구간에서 원본 아티팩트로 되돌아갑니다.",
+      viewers: ["Timeline", "Event table", "Timezone", "Skew", "Pivot"],
+    },
+    review: {
+      title: "Evidence selection board",
+      body: "관련 있음, 재검토, 제외, 보고서 포함 상태를 빠르게 바꾸고 형상관리합니다.",
+      viewers: ["Review grid", "Notes", "Compare", "Citation"],
+    },
+    report: {
+      title: "Report and exhibit builder",
+      body: "선별된 증거만 해시, parser, source locator, limitation과 함께 제출 묶음으로 정리합니다.",
+      viewers: ["Report", "Manifest", "Citation", "Export"],
+    },
+  };
+  return profiles[tab] || profiles.summary;
 }
 
 function renderArtifactTreeRows(run, tab, labels) {
@@ -768,8 +951,51 @@ function renderArtifactTreeRows(run, tab, labels) {
 }
 
 function renderPreviewRail(run, tab, reportCandidates) {
+  return renderIntelligencePanel(run, tab, reportCandidates);
+}
+
+function renderIntelligencePanel(run, tab, reportCandidates) {
+  const activeLane = workflowLaneForTab(tab);
+  const guide = humanActionGuideForTab(run, tab);
+  const summary = run.summary?.summary || {};
+  const processing = run.summary?.processing || {};
+  const warningCount = Number(processing.warning_count || 0);
+  const artifactSignals = artifactGroupCount(run, ["evtx", "registry", "browser", "ai", "usb", "mft", "usn", "mail", "kakao", "ocr"]);
+  const documentHits = Number(summary.document_match_count || 0);
+  const timelineEvents = Number(summary.timeline_event_count || 0);
+  const priorityScore = Math.min(100, Math.round((warningCount * 12) + Math.min(artifactSignals, 40) + Math.min(documentHits / 5, 20) + Math.min(timelineEvents / 20, 18)));
+  const keywordChips = intelligenceKeywordChips(run, tab);
   return `
-    <aside class="workbench-preview-rail" aria-label="Preview, evidence tray, and report tray" data-testid="workbench-preview-detail" data-preview-contract="${escapeHtml(PREVIEW_DETAIL_CONTRACT.profile_version)}">
+    <aside class="workbench-preview-rail intelligence-panel" aria-label="Intelligence, preview, evidence tray, and report tray" data-testid="workbench-preview-detail" data-preview-contract="${escapeHtml(PREVIEW_DETAIL_CONTRACT.profile_version)}">
+      <section class="intel-score-card" data-testid="intelligence-panel">
+        <p class="eyebrow">right · intelligence panel</p>
+        <strong>판단 보조 패널</strong>
+        <span>${escapeHtml(activeLane.question || "현재 화면에서 무엇을 판단할지 확인합니다.")}</span>
+        <div class="intel-score-meter" style="--score:${priorityScore}">
+          <b>${formatNumber(priorityScore)}</b>
+          <em>review priority</em>
+        </div>
+      </section>
+      <section class="intel-keyword-card">
+        <p class="eyebrow">related pivots</p>
+        <div class="intel-keyword-cloud">
+          ${keywordChips.map((item) => `<button type="button" data-open-tab="${escapeHtml(item.tab)}" data-artifact-filter="${escapeHtml(item.term)}">${escapeHtml(item.label)} <b>${formatNumber(item.count)}</b></button>`).join("")}
+        </div>
+      </section>
+      <section class="review-state-matrix" aria-label="Review decision states">
+        <p class="eyebrow">selection states</p>
+        <span><b>Relevant</b><em>보고서 후보</em></span>
+        <span><b>Needs review</b><em>추가 확인</em></span>
+        <span><b>Excluded</b><em>노이즈 제거</em></span>
+        <span><b>Include</b><em>제출 묶음</em></span>
+      </section>
+      <section class="intel-action-card">
+        <p class="eyebrow">next best actions</p>
+        <strong>${escapeHtml(guide.title)}</strong>
+        <ol>
+          ${guide.steps.map((step) => `<li>${escapeHtml(step)}</li>`).join("")}
+        </ol>
+      </section>
       ${tab === "search" ? "" : renderWorkbenchEvidenceViewerSlot()}
       ${renderPreviewDetailCard(run, tab)}
       ${renderSourceLocatorCard(run)}
@@ -794,12 +1020,32 @@ function renderPreviewRail(run, tab, reportCandidates) {
   `;
 }
 
+function intelligenceKeywordChips(run, tab) {
+  const chipDefs = [
+    { label: "USB", term: "usb", tab: "artifacts", terms: ["usb", "shellbag", "mount", "device"] },
+    { label: "EVTX", term: "evtx", tab: "artifacts", terms: ["evtx", "eventlog", "event id"] },
+    { label: "Registry", term: "registry", tab: "artifacts", terms: ["registry", "ntuser", "sam", "system"] },
+    { label: "Browser", term: "browser", tab: "artifacts", terms: ["browser", "history", "download", "cookie"] },
+    { label: "AI", term: "ai", tab: "artifacts", terms: ["ai", "chatgpt", "claude", "gemini", "perplexity"] },
+    { label: "Docs", term: "document", tab: "docs", terms: ["document", "pdf", "hwp", "docx", "xlsx", "ocr"] },
+    { label: "Mail", term: "email", tab: "docs", terms: ["email", "mail", "eml", "mbox", "pst", "ost"] },
+    { label: "Timeline", term: "timeline", tab: "timeline", terms: ["timeline", "created", "modified", "accessed"] },
+  ];
+  const chips = chipDefs.map((item) => ({
+    ...item,
+    count: artifactGroupCount(run, item.terms),
+  }));
+  const sorted = chips.sort((a, b) => b.count - a.count);
+  const active = sorted.filter((item) => item.tab === tab || item.count > 0).slice(0, 7);
+  return active.length ? active : sorted.slice(0, 6);
+}
+
 function renderWorkbenchEvidenceViewerSlot() {
   return `
     <section id="evidenceViewer" class="viewer-panel viewer-dock primary-viewer-dock" data-testid="source-viewer" role="region" aria-label="Evidence preview" aria-live="polite" aria-busy="false">
       <div class="viewer-empty-state">
-        <strong>Preview</strong>
-        <span>중앙 그리드에서 행을 선택하면 내용, 메타데이터, 해시, 리뷰 폼이 여기에 열립니다.</span>
+        <strong>1-click Quicklook</strong>
+        <span>중앙 결과에서 행을 선택하면 내용, 메타데이터, 해시, citation, 리뷰 폼이 즉시 열립니다.</span>
       </div>
     </section>
   `;
@@ -1371,8 +1617,8 @@ function renderCaseCommandBar(run) {
       </div>
       <form id="globalCaseSearchForm" class="case-command-search" aria-label="Global case search" data-testid="global-case-search">
         <label>
-          <span>전체 검색</span>
-          <input name="keyword" placeholder="웹, AI, 로그, 문서, OCR에서 찾기..." autocomplete="off" />
+          <span>사건 질문 검색</span>
+          <input name="keyword" placeholder="USB, 유출, 삭제, 특정 인물/계정, AI 질문, 파일명..." autocomplete="off" />
         </label>
         <button type="submit">검색</button>
       </form>
@@ -1386,21 +1632,21 @@ function renderCaseCommandBar(run) {
 
 function primaryTaskForTab(tab) {
   const copy = {
-    summary: "현재 케이스 상태를 확인하고 다음 작업으로 이동",
-    files: "의심 파일 후보를 훑고 필요한 항목만 표시",
-    docs: "문서/텍스트 히트에서 키워드 맥락 확인",
-    artifacts: "윈도우/브라우저/AI/앱 아티팩트 검토",
-    timeline: "시간순으로 사건 흐름 재구성",
-    indicators: "URL, IP, 도메인, 해시를 피벗으로 검토",
-    search: "전체 케이스에서 키워드를 찾고 원본 뷰어로 확인",
-    review: "검토 표시와 보고서 포함 여부를 정리",
-    report: "검토된 증거만 보고서/제출 묶음으로 정리",
+    summary: "E01/이미지 증거의 분석 가능성과 제한사항을 먼저 고정",
+    files: "파일/이미지/hex 후보를 빠르게 미리보고 필요한 항목만 표시",
+    docs: "문서·메일·메신저·OCR 히트를 리걸 리뷰 방식으로 선별",
+    artifacts: "EVTX·Registry·USB·Browser·AI 사용 흔적을 사건 질문별로 검토",
+    timeline: "로그·파일·웹·앱 활동을 시간순으로 재구성",
+    indicators: "URL, IP, 도메인, 해시를 관련 파일/시간대 피벗으로 검토",
+    search: "전체 케이스에서 키워드를 찾고 원본 뷰어로 즉시 확인",
+    review: "관련 있음/재검토/제외/보고서 포함 상태를 정리",
+    report: "검토된 증거만 해시·출처·제한사항과 함께 산출물로 정리",
   };
   return copy[tab] || "케이스 작업 진행";
 }
 
 function bindTabButtons() {
-  for (const button of detailPanel.querySelectorAll(".tab-button, .forensic-view-mode")) {
+  for (const button of detailPanel.querySelectorAll(".tab-button, .forensic-view-mode, .workflow-lane-card")) {
     button.addEventListener("click", async () => {
       activeTab = button.dataset.tab;
       activeViewGroup = groupForTab(activeTab);
@@ -1410,6 +1656,11 @@ function bindTabButtons() {
       for (const item of detailPanel.querySelectorAll(".forensic-view-mode")) {
         item.classList.toggle("active", item.dataset.tab === activeTab);
         item.setAttribute("aria-current", item.dataset.tab === activeTab ? "page" : "false");
+      }
+      for (const item of detailPanel.querySelectorAll(".workflow-lane-card")) {
+        const isActive = item.dataset.tab === activeTab || workflowLaneForTab(activeTab).id === item.dataset.workflowLane;
+        item.classList.toggle("active", isActive);
+        item.setAttribute("aria-current", isActive ? "step" : "false");
       }
       persistWorkbenchSession();
       await renderActiveTab();
@@ -7230,7 +7481,7 @@ function bindKeyboardShortcuts() {
       if (toggleViewerReportShortcut()) event.preventDefault();
       return;
     }
-    if (!event.metaKey && !event.ctrlKey && !event.altKey && /^[1-4]$/.test(event.key)) {
+    if (!event.metaKey && !event.ctrlKey && !event.altKey && /^[1-5]$/.test(event.key)) {
       event.preventDefault();
       await switchViewGroupByIndex(Number(event.key) - 1);
       return;

@@ -9985,3 +9985,505 @@ body.analysis-active .known-good-run-options {
     grid-template-columns: 1fr;
   }
 }
+
+/* Forensic judgment workbench: VS Code layout + Relativity-style review flow. */
+body {
+  font-family: "Pretendard", "Noto Sans KR", "Atkinson Hyperlegible", "Avenir Next", "Segoe UI", sans-serif;
+}
+
+.detail-panel {
+  color: #16202a;
+}
+
+.workbench-command-deck,
+body.has-runs .workbench-command-deck,
+body.analysis-active .workbench-command-deck {
+  grid-template-columns: minmax(0, 1.15fr) minmax(320px, 0.85fr);
+  gap: 16px;
+  background:
+    linear-gradient(135deg, rgba(255, 255, 255, 0.96), rgba(248, 252, 250, 0.9)),
+    radial-gradient(circle at 12% 10%, rgba(32, 178, 170, 0.14), transparent 24rem);
+  border: 1px solid rgba(127, 143, 155, 0.26);
+  color: #16202a;
+  box-shadow: 0 18px 46px rgba(35, 48, 63, 0.12);
+}
+
+.workbench-switchboard,
+.workbench-switchboard .case-command-bar {
+  background: rgba(255, 255, 255, 0.92);
+  border-color: rgba(127, 143, 155, 0.24);
+  color: #17202a;
+}
+
+.workbench-switchboard .case-command-main strong,
+.workbench-switchboard .case-command-main span:last-child,
+.workflow-lane-board-copy h3 {
+  color: #14212d;
+}
+
+.workflow-lane-board {
+  display: grid;
+  grid-template-columns: minmax(260px, 0.72fr) minmax(0, 1.8fr);
+  gap: 14px;
+  align-items: stretch;
+  padding: 14px;
+  border: 1px solid rgba(24, 63, 74, 0.14);
+  border-radius: 24px;
+  background:
+    linear-gradient(135deg, rgba(255, 255, 255, 0.98), rgba(239, 250, 247, 0.88)),
+    radial-gradient(circle at 0% 0%, rgba(18, 184, 166, 0.14), transparent 20rem);
+}
+
+.workflow-lane-board-copy {
+  display: grid;
+  align-content: center;
+  gap: 5px;
+  padding: 10px 12px;
+}
+
+.workflow-lane-board-copy h3 {
+  margin: 0;
+  font-size: clamp(1.05rem, 1.4vw, 1.45rem);
+  line-height: 1.18;
+}
+
+.workflow-lane-board-copy span {
+  color: #526173;
+  line-height: 1.5;
+}
+
+.workflow-lane-grid {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.workflow-lane-card {
+  position: relative;
+  display: grid;
+  min-height: 152px;
+  gap: 8px;
+  justify-items: start;
+  padding: 15px;
+  border: 1px solid rgba(87, 111, 128, 0.2);
+  border-radius: 22px;
+  background: #ffffff;
+  color: #182433;
+  text-align: left;
+  box-shadow: 0 8px 20px rgba(24, 39, 52, 0.07);
+  cursor: pointer;
+}
+
+.workflow-lane-card:hover,
+.workflow-lane-card.active {
+  transform: translateY(-1px);
+  border-color: rgba(15, 116, 107, 0.5);
+  background:
+    linear-gradient(180deg, #ffffff, #f1fffc);
+  box-shadow: 0 16px 36px rgba(15, 116, 107, 0.14);
+}
+
+.workflow-lane-card.active::before {
+  content: "";
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 5px;
+  border-radius: 22px 0 0 22px;
+  background: #0f766e;
+}
+
+.workflow-lane-index {
+  display: inline-grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 12px;
+  background: #e7f8f5;
+  color: #0f766e;
+  font-weight: 900;
+}
+
+.workflow-lane-card strong {
+  font-size: 1rem;
+  color: #101a24;
+}
+
+.workflow-lane-card em,
+.workflow-lane-card small {
+  font-style: normal;
+  color: #5d6878;
+  line-height: 1.35;
+}
+
+.workflow-lane-card b {
+  align-self: end;
+  padding: 5px 8px;
+  border-radius: 999px;
+  background: #edf2f7;
+  color: #334155;
+  font-size: 0.75rem;
+}
+
+.workbench-switchboard .forensic-view-mode-bar {
+  grid-template-columns: repeat(7, minmax(104px, 1fr));
+  padding: 6px;
+  border-radius: 18px;
+  background: #eef4f4;
+}
+
+.workbench-switchboard .forensic-view-mode {
+  min-height: 52px;
+  border-radius: 15px;
+  background: transparent;
+  color: #455568;
+}
+
+.workbench-switchboard .forensic-view-mode.active {
+  background: #ffffff;
+  color: #0f4f49;
+  box-shadow: 0 8px 18px rgba(36, 55, 71, 0.11);
+}
+
+.case-workbench-layout.judgment-workbench {
+  grid-template-columns: minmax(260px, 0.82fr) minmax(0, 1.7fr) minmax(320px, 0.9fr);
+  gap: 14px;
+  align-items: start;
+}
+
+.case-workbench-layout.judgment-workbench > aside,
+.case-workbench-layout.judgment-workbench .workbench-result-zone,
+.case-workbench-layout.judgment-workbench .workbench-preview-rail {
+  border: 1px solid rgba(93, 111, 128, 0.24);
+  border-radius: 28px;
+  background: rgba(255, 255, 255, 0.94);
+  color: #17202a;
+  box-shadow: 0 12px 32px rgba(28, 44, 60, 0.09);
+}
+
+.case-workbench-layout.judgment-workbench .workbench-region-header {
+  gap: 3px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid rgba(93, 111, 128, 0.14);
+}
+
+.case-workbench-layout.judgment-workbench .workbench-region-header strong {
+  color: #111827;
+  font-size: 1.04rem;
+}
+
+.case-workbench-layout.judgment-workbench .workbench-region-header span {
+  color: #607084;
+  line-height: 1.45;
+}
+
+.source-stack {
+  display: grid;
+  gap: 9px;
+  margin: 12px 0 14px;
+}
+
+.case-source-card,
+.source-card {
+  width: 100%;
+  border: 1px solid rgba(103, 121, 139, 0.18);
+  border-radius: 18px;
+  background: #f8fbfb;
+  color: #17202a;
+}
+
+.case-source-card {
+  display: grid;
+  gap: 5px;
+  padding: 12px;
+}
+
+.case-source-card strong {
+  color: #111827;
+}
+
+.case-source-card span {
+  overflow: hidden;
+  color: #697789;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.source-card {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+  padding: 11px 12px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.source-card strong {
+  display: block;
+  color: #17202a;
+}
+
+.source-card small {
+  display: block;
+  margin-top: 2px;
+  color: #617185;
+  line-height: 1.35;
+}
+
+.source-card em {
+  min-width: 34px;
+  padding: 5px 8px;
+  border-radius: 12px;
+  background: #eaf4f2;
+  color: #0f766e;
+  text-align: center;
+  font-style: normal;
+  font-weight: 900;
+}
+
+.source-card:hover,
+.source-card.active {
+  border-color: rgba(15, 116, 107, 0.42);
+  background: #effdfa;
+}
+
+.adaptive-viewer-header {
+  display: grid;
+  grid-template-columns: minmax(0, 1.2fr) minmax(220px, 0.8fr);
+  gap: 12px;
+  align-items: start;
+  margin: 12px 0;
+  padding: 14px;
+  border: 1px solid rgba(15, 116, 107, 0.18);
+  border-radius: 22px;
+  background:
+    linear-gradient(135deg, #f8fffd, #f5f7fb);
+}
+
+.adaptive-viewer-header strong {
+  display: block;
+  color: #101a24;
+  font-size: 1.08rem;
+}
+
+.adaptive-viewer-header span,
+.viewer-lane-outcome span {
+  color: #5e6b7b;
+  line-height: 1.45;
+}
+
+.viewer-chip-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+}
+
+.viewer-chip-row span {
+  padding: 7px 9px;
+  border: 1px solid rgba(93, 111, 128, 0.18);
+  border-radius: 999px;
+  background: #ffffff;
+  color: #324155;
+  font-weight: 800;
+  font-size: 0.76rem;
+}
+
+.viewer-lane-outcome {
+  grid-column: 1 / -1;
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  padding-top: 8px;
+  border-top: 1px dashed rgba(93, 111, 128, 0.22);
+}
+
+.viewer-lane-outcome b {
+  color: #0f766e;
+}
+
+.intelligence-panel {
+  display: grid;
+  gap: 12px;
+}
+
+.intel-score-card,
+.intel-keyword-card,
+.review-state-matrix,
+.intel-action-card {
+  border: 1px solid rgba(93, 111, 128, 0.18);
+  border-radius: 20px;
+  background: #fbfdfd;
+  padding: 13px;
+}
+
+.intel-score-card {
+  background:
+    radial-gradient(circle at 100% 0%, rgba(15, 118, 110, 0.16), transparent 9rem),
+    linear-gradient(135deg, #ffffff, #f4fbfa);
+}
+
+.intel-score-card strong,
+.intel-action-card strong {
+  display: block;
+  color: #111827;
+  font-size: 1rem;
+}
+
+.intel-score-card span {
+  display: block;
+  margin-top: 5px;
+  color: #5f6d7e;
+  line-height: 1.45;
+}
+
+.intel-score-meter {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 8px 12px;
+  align-items: center;
+  margin-top: 12px;
+}
+
+.intel-score-meter::after {
+  content: "";
+  height: 10px;
+  border-radius: 999px;
+  background:
+    linear-gradient(90deg, #0f766e calc(var(--score) * 1%), #dbe5ea 0);
+}
+
+.intel-score-meter b {
+  color: #0f4f49;
+  font-size: 1.55rem;
+  line-height: 1;
+}
+
+.intel-score-meter em {
+  grid-column: 1 / -1;
+  color: #66768a;
+  font-style: normal;
+  font-weight: 800;
+}
+
+.intel-keyword-cloud {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+}
+
+.intel-keyword-cloud button {
+  padding: 8px 10px;
+  border: 1px solid rgba(15, 116, 107, 0.18);
+  border-radius: 999px;
+  background: #f2fbf8;
+  color: #164e45;
+  font-weight: 850;
+  cursor: pointer;
+}
+
+.intel-keyword-cloud b {
+  margin-left: 4px;
+  color: #0f766e;
+}
+
+.review-state-matrix {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.review-state-matrix .eyebrow {
+  grid-column: 1 / -1;
+}
+
+.review-state-matrix span {
+  display: grid;
+  gap: 2px;
+  padding: 9px;
+  border-radius: 14px;
+  background: #f5f7fa;
+}
+
+.review-state-matrix b {
+  color: #17202a;
+}
+
+.review-state-matrix em {
+  color: #66768a;
+  font-style: normal;
+  font-size: 0.76rem;
+}
+
+.intel-action-card ol {
+  display: grid;
+  gap: 6px;
+  margin: 10px 0 0;
+  padding-left: 18px;
+  color: #536273;
+  line-height: 1.42;
+}
+
+.artifact-tree-row,
+.preview-detail-card,
+.evidence-tray-card,
+.report-tray-card,
+.viewer-panel {
+  color: #17202a;
+}
+
+.artifact-tree-row {
+  background: #fbfdfd;
+}
+
+.artifact-tree-row.active,
+.artifact-tree-row:hover {
+  background: #effdfa;
+}
+
+.tab-row {
+  background: rgba(255, 255, 255, 0.9);
+  border-color: rgba(93, 111, 128, 0.2);
+}
+
+.tab-row .tab-button {
+  color: #47566a;
+}
+
+.tab-row .tab-button.active {
+  background: #0f766e;
+  color: #ffffff;
+}
+
+.case-command-search input,
+.table-control-bar input,
+.table-control-bar select {
+  background: #ffffff;
+  color: #17202a;
+  border-color: rgba(93, 111, 128, 0.28);
+}
+
+@media (max-width: 1380px) {
+  .workflow-lane-board,
+  .case-workbench-layout.judgment-workbench {
+    grid-template-columns: 1fr;
+  }
+
+  .workflow-lane-grid {
+    grid-template-columns: repeat(5, minmax(160px, 1fr));
+    overflow-x: auto;
+    padding-bottom: 4px;
+  }
+}
+
+@media (max-width: 900px) {
+  .workflow-lane-grid,
+  .workbench-switchboard .forensic-view-mode-bar,
+  .adaptive-viewer-header,
+  .review-state-matrix {
+    grid-template-columns: 1fr;
+  }
+
+  .workflow-lane-card {
+    min-height: auto;
+  }
+}
