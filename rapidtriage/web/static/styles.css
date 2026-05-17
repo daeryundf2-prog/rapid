@@ -11040,3 +11040,290 @@ button.run-item:hover {
 .results-panel button.workflow-lane-card small {
   color: #5b6170;
 }
+
+/* Final Paper Dashboard palette selected from Colormind UI rolls:
+   #F1F1ED #A0918B #8A9CAF #897A65 #3F4A61. */
+:root {
+  --rf-paper: #f1f1ed;
+  --rf-paper-soft: #f7f6f2;
+  --rf-paper-card: #fffdf9;
+  --rf-brass: #897a65;
+  --rf-brass-soft: rgba(137, 122, 101, 0.16);
+  --rf-periwinkle: #8a9caf;
+  --rf-periwinkle-soft: rgba(138, 156, 175, 0.18);
+  --rf-mauve: #a0918b;
+  --rf-mauve-soft: rgba(160, 145, 139, 0.16);
+  --rf-command-blue: #3f4a61;
+  --rf-command-blue-strong: #2b3448;
+  --rf-command-blue-soft: rgba(63, 74, 97, 0.12);
+  --rf-graphite: #151922;
+  --rf-graphite-2: #242b3a;
+  --rf-clean-line: rgba(63, 74, 97, 0.16);
+  --rf-clean-line-strong: rgba(63, 74, 97, 0.34);
+  --rf-focus: rgba(138, 156, 175, 0.38);
+  --rf-action: var(--rf-command-blue);
+  --rf-action-hover: var(--rf-command-blue-strong);
+  --rf-action-soft: var(--rf-command-blue-soft);
+  --rf-action-line: rgba(138, 156, 175, 0.48);
+  --rf-image-accent: var(--rf-command-blue);
+  --rf-image-accent-strong: var(--rf-command-blue-strong);
+  --rf-image-accent-soft: var(--rf-command-blue-soft);
+}
+
+html {
+  background: var(--rf-paper);
+}
+
+body {
+  background:
+    radial-gradient(circle at 10% -8%, rgba(138, 156, 175, 0.2), transparent 35rem),
+    radial-gradient(circle at 100% 4%, rgba(160, 145, 139, 0.16), transparent 32rem),
+    linear-gradient(135deg, #faf9f6 0%, var(--rf-paper) 50%, #e3e5e4 100%);
+  color: var(--rf-graphite);
+}
+
+.run-panel {
+  background:
+    radial-gradient(circle at 0% 0%, rgba(138, 156, 175, 0.24), transparent 26rem),
+    radial-gradient(circle at 100% 12%, rgba(137, 122, 101, 0.18), transparent 24rem),
+    linear-gradient(180deg, #3f4a61 0%, #151b29 100%);
+}
+
+.brand-row,
+.run-form,
+.case-queue-shell,
+.import-form,
+.mode-help,
+.first-run-checklist,
+.quick-start li,
+.intake-choice-card,
+.start-focus-card,
+.workflow-help-details,
+.advanced-run-options {
+  background:
+    linear-gradient(180deg, rgba(66, 78, 103, 0.96), rgba(31, 39, 58, 0.98));
+}
+
+.brand-mark {
+  border-color: rgba(137, 122, 101, 0.58);
+  background:
+    linear-gradient(180deg, rgba(137, 122, 101, 0.28), rgba(63, 74, 97, 0.36)),
+    #2d374d;
+}
+
+.run-panel .eyebrow,
+.run-form::before,
+body.analysis-active .run-form::before,
+body.has-runs .run-form::before {
+  border-color: rgba(137, 122, 101, 0.46);
+  background: rgba(137, 122, 101, 0.2);
+  color: #f0e4ce;
+}
+
+.run-panel button:not(.secondary-button):not(.link-button):not(.icon-action):not(.mini-inline-button):not(.preset-chip):not(.search-facet-chip):not(.tab-button):not(.forensic-view-mode):not(.artifact-tree-row):not(.core-workflow-step) {
+  border-color: #a29174;
+  background: linear-gradient(180deg, #a99879 0%, var(--rf-brass) 100%);
+  color: #050403;
+  box-shadow: 0 14px 28px rgba(33, 28, 20, 0.22);
+}
+
+.run-panel .secondary-button,
+.run-panel .link-button,
+.run-panel .icon-action,
+.run-panel .mini-inline-button {
+  background: rgba(63, 74, 97, 0.54);
+}
+
+.run-panel .secondary-button:hover,
+.run-panel .link-button:hover,
+.run-panel .icon-action:hover,
+.run-panel .mini-inline-button:hover {
+  border-color: rgba(137, 122, 101, 0.6);
+  background: rgba(76, 89, 116, 0.62);
+}
+
+.results-panel,
+.results-header,
+.mission-strip,
+.detail-panel,
+.case-hero,
+.workbench-switchboard,
+.workbench-command-deck,
+.workbench-intel-drawer,
+.workspace-card,
+.guidance-card,
+.review-card,
+.viewer-panel,
+.workbench-result-zone,
+.table-control-bar,
+.filter-row,
+.search-hero,
+.review-cockpit,
+.human-action-guide,
+.shortcut-help,
+.artifact-tree-card,
+.case-db-panel,
+.source-metadata-panel,
+.sqlite-schema-panel,
+.search-facet-panel,
+.advanced-search-card,
+.keyword-pack-card,
+.lazyweb-command-center,
+.forensic-feature-catalog {
+  border-color: var(--rf-clean-line);
+}
+
+.results-panel,
+.results-header,
+.detail-panel,
+.workbench-switchboard,
+.workbench-command-deck,
+.case-workbench-layout.judgment-workbench > aside,
+.case-workbench-layout.judgment-workbench .workbench-result-zone,
+.case-workbench-layout.judgment-workbench .workbench-preview-rail {
+  background:
+    linear-gradient(180deg, rgba(255, 253, 249, 0.96), rgba(247, 246, 242, 0.96));
+}
+
+.case-hero,
+body.has-runs .case-hero,
+body.analysis-active .case-hero {
+  border-color: rgba(138, 156, 175, 0.34);
+  background:
+    radial-gradient(circle at 0% 0%, rgba(138, 156, 175, 0.16), transparent 25rem),
+    radial-gradient(circle at 100% 100%, rgba(137, 122, 101, 0.13), transparent 20rem),
+    linear-gradient(135deg, #fffdf9 0%, #f4f2ed 100%);
+}
+
+.workflow-lane-board {
+  background:
+    linear-gradient(135deg, rgba(255, 253, 249, 0.98), rgba(244, 242, 237, 0.94)),
+    radial-gradient(circle at 0% 0%, rgba(138, 156, 175, 0.14), transparent 21rem);
+}
+
+.results-panel button.workflow-lane-card,
+.results-panel button.workflow-lane-card:not(.secondary-button):not(.link-button):not(.icon-action):not(.mini-inline-button):not(.preset-chip):not(.search-facet-chip):not(.tab-button):not(.forensic-view-mode):not(.artifact-tree-row):not(.core-workflow-step),
+.workflow-lane-card {
+  border-color: rgba(63, 74, 97, 0.16);
+  background: #fffdf9;
+  color: var(--rf-graphite);
+}
+
+.results-panel button.workflow-lane-card:hover,
+.results-panel button.workflow-lane-card.active,
+.workflow-lane-card:hover,
+.workflow-lane-card.active {
+  border-color: rgba(63, 74, 97, 0.42);
+  background:
+    linear-gradient(180deg, #fffdf9, #f1f1ed);
+  box-shadow: 0 16px 36px rgba(63, 74, 97, 0.14);
+}
+
+.workflow-lane-card.active::before {
+  background: linear-gradient(180deg, var(--rf-command-blue), var(--rf-periwinkle));
+}
+
+.workflow-lane-index,
+.forensic-view-mode em {
+  background: var(--rf-periwinkle-soft);
+  color: var(--rf-command-blue);
+}
+
+.workflow-lane-card b,
+.review-state-matrix span,
+.viewer-chip-row span,
+.intel-keyword-cloud button {
+  background: var(--rf-brass-soft);
+  color: #463d30;
+}
+
+.workbench-switchboard .forensic-view-mode-bar,
+.mission-strip,
+.tab-row {
+  background: rgba(241, 241, 237, 0.72);
+}
+
+.mission-strip span,
+.case-next-route span,
+.source-card em,
+.status-pill.ok,
+.run-item .status-pill.ok {
+  border-color: rgba(138, 156, 175, 0.28);
+  background: rgba(138, 156, 175, 0.16);
+  color: var(--rf-command-blue) !important;
+}
+
+.mission-strip strong,
+.case-next-route strong,
+.results-panel button:not(.secondary-button):not(.link-button):not(.icon-action):not(.mini-inline-button):not(.preset-chip):not(.search-facet-chip):not(.tab-button):not(.forensic-view-mode):not(.artifact-tree-row):not(.core-workflow-step),
+.case-hero-actions button:not(.secondary-button),
+.case-command-search button,
+.tab-row .tab-button.active {
+  border-color: var(--rf-command-blue);
+  background: var(--rf-command-blue);
+  color: #ffffff;
+}
+
+.workbench-switchboard .forensic-view-mode.active,
+.forensic-view-mode.active,
+.tab-button.active,
+.tab-button[aria-selected="true"] {
+  border-color: rgba(63, 74, 97, 0.34);
+  background: #fffdf9;
+  color: var(--rf-command-blue);
+}
+
+.case-source-line,
+.adaptive-viewer-header,
+.intel-score-card {
+  border-color: rgba(138, 156, 175, 0.3);
+  background:
+    radial-gradient(circle at 100% 0%, rgba(138, 156, 175, 0.13), transparent 11rem),
+    linear-gradient(135deg, #fffdf9, #f3f1ec);
+}
+
+.intel-score-meter::after {
+  background:
+    linear-gradient(90deg, var(--rf-command-blue) calc(var(--score) * 1%), rgba(241, 241, 237, 0.96) 0);
+}
+
+.review-state-matrix span:nth-of-type(3),
+.status-pill.warning,
+.secondary-button.danger,
+.status-pill.failed,
+.status-pill.error,
+.danger {
+  border-color: rgba(160, 145, 139, 0.34);
+  background: var(--rf-mauve-soft);
+  color: #5f4c46;
+}
+
+.run-panel button.run-item,
+.run-panel button.run-item:not(.secondary-button):not(.link-button):not(.icon-action):not(.mini-inline-button):not(.preset-chip):not(.search-facet-chip):not(.tab-button):not(.forensic-view-mode):not(.artifact-tree-row):not(.core-workflow-step),
+button.run-item,
+body.has-runs button.run-item,
+body.analysis-active button.run-item {
+  background:
+    linear-gradient(180deg, rgba(63, 74, 97, 0.98), rgba(27, 35, 53, 0.98));
+}
+
+.run-panel button.run-item.selected,
+.run-panel button.run-item.selected:not(.secondary-button):not(.link-button):not(.icon-action):not(.mini-inline-button):not(.preset-chip):not(.search-facet-chip):not(.tab-button):not(.forensic-view-mode):not(.artifact-tree-row):not(.core-workflow-step),
+button.run-item.selected,
+body.has-runs button.run-item.selected,
+body.analysis-active button.run-item.selected {
+  border-color: rgba(138, 156, 175, 0.72);
+  background:
+    linear-gradient(180deg, rgba(63, 74, 97, 0.98), rgba(28, 36, 58, 0.98));
+  box-shadow:
+    inset 4px 0 0 var(--rf-brass),
+    0 18px 38px rgba(9, 18, 38, 0.32);
+}
+
+.data-table th {
+  background: rgba(241, 241, 237, 0.84);
+}
+
+.data-table tr:hover td {
+  background: rgba(138, 156, 175, 0.1);
+}
