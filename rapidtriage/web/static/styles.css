@@ -8440,3 +8440,270 @@ body.analysis-active .known-good-run-options {
     min-height: 360px;
   }
 }
+
+/* Active-case correction: the review screen must not collapse into a blank left rail. */
+body.has-runs .shell,
+body.analysis-active .shell {
+  grid-template-columns: minmax(330px, 390px) minmax(0, 1fr) !important;
+  gap: 14px;
+}
+
+body.analysis-active .run-panel {
+  overflow: auto !important;
+  padding: 14px !important;
+}
+
+body.analysis-active .run-panel > .brand-row,
+body.analysis-active .run-panel > .quick-actions,
+body.analysis-active .run-panel > .run-form,
+body.analysis-active .run-panel > .import-form {
+  display: flex !important;
+}
+
+body.analysis-active .run-panel > .quick-actions {
+  display: grid !important;
+}
+
+body.analysis-active .run-panel > .operator-badges,
+body.analysis-active .run-panel > .intake-core-workflow,
+body.analysis-active .run-panel > .intake-choice-grid,
+body.analysis-active .run-panel > .quick-start,
+body.analysis-active .run-panel > .mode-help,
+body.analysis-active .run-panel > .first-run-checklist {
+  display: none !important;
+}
+
+body.analysis-active .brand-row,
+body.has-runs .brand-row {
+  align-items: center;
+}
+
+body.analysis-active .brand-row > :not(.brand-mark),
+body.analysis-active .brand-row .brand-lockup,
+body.analysis-active .brand-row #apiStatus {
+  display: flex !important;
+}
+
+body.analysis-active .brand-subtitle,
+body.has-runs .brand-subtitle {
+  display: none !important;
+}
+
+body.analysis-active .run-form,
+body.has-runs .run-form {
+  display: flex !important;
+  margin-top: 0;
+  padding: 14px;
+}
+
+body.analysis-active .run-form::before,
+body.has-runs .run-form::before {
+  content: "새 증거 분석";
+}
+
+body.analysis-active .quick-actions,
+body.has-runs .quick-actions {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  margin: 0;
+}
+
+body.analysis-active .import-form,
+body.has-runs .import-form {
+  border-radius: 18px;
+}
+
+body.analysis-active .run-list,
+body.has-runs .run-list {
+  display: grid;
+  gap: 8px;
+  margin: 10px 0 0;
+}
+
+body.analysis-active .run-item,
+body.has-runs .run-item {
+  display: grid !important;
+  grid-template-columns: minmax(0, 1fr) auto;
+  width: auto !important;
+  min-height: 72px;
+  height: auto !important;
+  align-items: center;
+  justify-content: stretch;
+  gap: 12px;
+  border: 1px solid rgba(142, 160, 178, 0.22);
+  border-radius: 18px;
+  background:
+    linear-gradient(180deg, rgba(24, 35, 49, 0.94), rgba(13, 20, 30, 0.98));
+  padding: 12px 14px;
+  color: #e9eff5;
+}
+
+body.analysis-active .run-item::before,
+body.has-runs .run-item::before {
+  display: none !important;
+  content: none !important;
+}
+
+body.analysis-active .run-item.selected,
+body.has-runs .run-item.selected {
+  border-color: rgba(87, 211, 201, 0.48);
+  background:
+    linear-gradient(180deg, rgba(24, 43, 53, 0.96), rgba(11, 22, 31, 0.99));
+  box-shadow:
+    0 12px 34px rgba(0, 0, 0, 0.24),
+    inset 3px 0 0 rgba(87, 211, 201, 0.82);
+}
+
+body.analysis-active .run-item .run-item-main,
+body.has-runs .run-item .run-item-main {
+  display: grid !important;
+  min-width: 0;
+  gap: 3px;
+}
+
+body.analysis-active .run-item .run-item-kicker,
+body.analysis-active .run-item .run-item-open,
+body.analysis-active .run-item .status-pill,
+body.has-runs .run-item .run-item-kicker,
+body.has-runs .run-item .run-item-open,
+body.has-runs .run-item .status-pill {
+  display: inline-flex !important;
+}
+
+body.analysis-active .run-item strong,
+body.has-runs .run-item strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+body.analysis-active .run-item-path,
+body.has-runs .run-item-path {
+  display: block !important;
+  overflow: hidden;
+  max-width: 100%;
+  color: #9fafbf;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+body.analysis-active .run-item-meta,
+body.has-runs .run-item-meta {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+body.analysis-active .workbench-command-deck,
+body.has-runs .workbench-command-deck {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) !important;
+  gap: 12px;
+}
+
+body.analysis-active .case-hero,
+body.has-runs .case-hero {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) !important;
+  gap: 16px;
+  border-radius: 24px;
+  padding: clamp(18px, 2.2vw, 28px);
+}
+
+body.analysis-active .case-hero-main,
+body.has-runs .case-hero-main {
+  min-width: 0;
+}
+
+body.analysis-active .case-hero h2,
+body.has-runs .case-hero h2 {
+  max-width: 880px;
+  font-size: clamp(1.8rem, 3vw, 3rem);
+  line-height: 1.02;
+}
+
+body.analysis-active .case-hero p,
+body.has-runs .case-hero p {
+  max-width: 920px;
+  overflow-wrap: anywhere;
+  word-break: keep-all;
+}
+
+body.analysis-active .case-hero-metrics,
+body.has-runs .case-hero-metrics {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(100px, 1fr));
+  gap: 10px;
+}
+
+body.analysis-active .case-hero-metric,
+body.has-runs .case-hero-metric {
+  min-height: 86px;
+  border-radius: 16px;
+  padding: 12px;
+}
+
+body.analysis-active .case-hero-metric strong,
+body.has-runs .case-hero-metric strong {
+  font-size: clamp(1.35rem, 2vw, 2.1rem);
+}
+
+body.analysis-active .workbench-side-stack,
+body.has-runs .workbench-side-stack {
+  display: block;
+}
+
+body.analysis-active .workbench-side-stack .detail-topline,
+body.has-runs .workbench-side-stack .detail-topline {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  border-radius: 20px;
+}
+
+body.analysis-active .workbench-side-stack .completed-core-workflow,
+body.has-runs .workbench-side-stack .completed-core-workflow {
+  display: none !important;
+}
+
+body.analysis-active .mission-strip,
+body.has-runs .mission-strip {
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+}
+
+@media (max-width: 1500px) {
+  body.analysis-active .case-hero-metrics,
+  body.has-runs .case-hero-metrics {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 1180px) {
+  body.has-runs .shell,
+  body.analysis-active .shell {
+    grid-template-columns: 1fr !important;
+  }
+}
+
+@media (max-width: 760px) {
+  body.analysis-active .quick-actions,
+  body.has-runs .quick-actions,
+  body.analysis-active .mission-strip,
+  body.has-runs .mission-strip,
+  body.analysis-active .case-hero-metrics,
+  body.has-runs .case-hero-metrics {
+    grid-template-columns: 1fr;
+  }
+
+  body.analysis-active .run-item,
+  body.has-runs .run-item {
+    grid-template-columns: 1fr;
+  }
+
+  body.analysis-active .run-item-meta,
+  body.has-runs .run-item-meta {
+    justify-content: flex-start;
+  }
+}
