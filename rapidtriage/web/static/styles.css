@@ -9679,3 +9679,309 @@ textarea:focus-visible {
   outline: 3px solid var(--rf-focus);
   outline-offset: 2px;
 }
+
+/* User-centered image evidence pass: E01/image intake is the primary path. */
+:root {
+  --rf-image-accent: #0f766e;
+  --rf-image-accent-strong: #0b5f59;
+  --rf-image-accent-soft: rgba(20, 184, 166, 0.14);
+}
+
+.shell,
+body.has-runs .shell,
+body.analysis-active .shell {
+  grid-template-columns: minmax(390px, 460px) minmax(0, 1fr) !important;
+}
+
+.start-focus-card,
+.workflow-help-details,
+.advanced-run-options {
+  border: 1px solid rgba(125, 211, 252, 0.18);
+  border-radius: 22px;
+  background:
+    radial-gradient(circle at 0% 0%, rgba(45, 212, 191, 0.16), transparent 22rem),
+    linear-gradient(180deg, rgba(30, 43, 62, 0.98), rgba(13, 23, 36, 0.98));
+  color: var(--rf-rail-ink);
+  box-shadow:
+    0 16px 34px rgba(0, 0, 0, 0.22),
+    inset 0 1px 0 rgba(255, 255, 255, 0.06);
+}
+
+.start-focus-card {
+  display: grid;
+  gap: 10px;
+  margin-top: 12px;
+  padding: 16px;
+}
+
+.start-focus-card h2 {
+  color: #ffffff;
+  font-size: clamp(1.18rem, 2vw, 1.6rem);
+  line-height: 1.12;
+}
+
+.start-focus-card p:not(.eyebrow) {
+  margin: 0;
+  color: #dbeafe;
+  line-height: 1.55;
+}
+
+.image-evidence-flow,
+.user-run-steps,
+.case-next-route,
+.empty-state-actions {
+  display: grid;
+  gap: 8px;
+}
+
+.image-evidence-flow {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.image-evidence-flow span,
+.user-run-steps span,
+.case-next-route span {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  border: 1px solid rgba(148, 163, 184, 0.22);
+  border-radius: 999px;
+  background: rgba(226, 232, 240, 0.08);
+  color: #e2e8f0;
+  padding: 8px 10px;
+  font-weight: 780;
+}
+
+.image-evidence-flow strong,
+.user-run-steps strong,
+.case-next-route strong {
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  flex: 0 0 auto;
+  border-radius: 999px;
+  background: #5eead4;
+  color: #06211f;
+  font-size: 0.78rem;
+}
+
+.intake-choice-grid {
+  grid-template-columns: 1fr 1fr;
+}
+
+.intake-choice-card {
+  min-height: 104px;
+  border-radius: 20px;
+  padding: 14px;
+}
+
+.intake-choice-card.primary {
+  grid-column: 1 / -1;
+  border-color: rgba(94, 234, 212, 0.5);
+  background:
+    radial-gradient(circle at 100% 0%, rgba(125, 211, 252, 0.22), transparent 16rem),
+    linear-gradient(135deg, rgba(20, 184, 166, 0.32), rgba(15, 23, 42, 0.98));
+}
+
+.intake-choice-card.primary strong {
+  color: #ffffff;
+  font-size: 1.08rem;
+}
+
+.intake-choice-card.primary span {
+  color: #dffdfa;
+}
+
+.run-form,
+body.has-runs .run-form,
+body.analysis-active .run-form {
+  display: grid !important;
+  gap: 14px;
+  order: 2;
+  margin-top: 12px;
+  padding: 16px;
+}
+
+.run-form::before,
+body.analysis-active .run-form::before,
+body.has-runs .run-form::before {
+  content: "이미지 증거 분석";
+}
+
+.form-intro {
+  display: grid;
+  gap: 4px;
+}
+
+.form-intro h2 {
+  color: #ffffff;
+  font-size: 1.2rem;
+}
+
+.form-intro p:not(.eyebrow) {
+  margin: 0;
+  color: #cbd5e1;
+  line-height: 1.5;
+}
+
+.user-run-steps {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.user-run-steps span {
+  border-radius: 14px;
+  flex-direction: column;
+  align-items: flex-start;
+  color: #eafdfb;
+  font-size: 0.82rem;
+}
+
+.user-run-steps strong {
+  width: 28px;
+  height: 28px;
+}
+
+.root-field input {
+  min-height: 48px;
+  font-size: 0.95rem;
+}
+
+.evidence-check-row {
+  display: grid;
+  grid-template-columns: minmax(150px, auto) minmax(0, 1fr);
+  gap: 10px;
+  align-items: center;
+}
+
+.evidence-check-row .help-text {
+  margin: 0;
+  line-height: 1.45;
+}
+
+.advanced-run-options {
+  padding: 0;
+  overflow: hidden;
+}
+
+.advanced-run-options > summary,
+.workflow-help-details > summary {
+  display: grid;
+  gap: 3px;
+  cursor: pointer;
+  padding: 13px 14px;
+  list-style: none;
+}
+
+.advanced-run-options > summary::-webkit-details-marker,
+.workflow-help-details > summary::-webkit-details-marker {
+  display: none;
+}
+
+.advanced-run-options > summary span,
+.workflow-help-details > summary {
+  color: #f8fafc;
+  font-weight: 860;
+}
+
+.advanced-run-options > summary strong {
+  color: #cbd5e1;
+  font-size: 0.82rem;
+}
+
+.advanced-run-options[open] {
+  padding-bottom: 14px;
+}
+
+.advanced-run-options[open] > :not(summary) {
+  margin-inline: 14px;
+}
+
+.quick-actions {
+  order: 3;
+}
+
+.case-queue-shell,
+body.has-runs .case-queue-shell,
+body.analysis-active .case-queue-shell {
+  order: 4;
+}
+
+.workflow-help-details {
+  order: 5;
+  margin-top: 12px;
+}
+
+.workflow-help-details[open] {
+  padding-bottom: 14px;
+}
+
+.workflow-help-details[open] > :not(summary) {
+  margin-inline: 14px;
+}
+
+body.has-runs .start-focus-card,
+body.analysis-active .start-focus-card,
+body.has-runs .intake-choice-grid,
+body.analysis-active .intake-choice-grid,
+body.has-runs .workflow-help-details,
+body.analysis-active .workflow-help-details {
+  display: none !important;
+}
+
+body.has-runs .run-form .run-plan-preview,
+body.analysis-active .run-form .run-plan-preview,
+body.has-runs .limits-grid,
+body.analysis-active .limits-grid,
+body.has-runs .e01-sector-field,
+body.analysis-active .e01-sector-field,
+body.has-runs .known-good-run-options,
+body.analysis-active .known-good-run-options {
+  display: grid;
+}
+
+.empty-state-actions {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  margin: 22px 0 6px;
+}
+
+.empty-state-actions button {
+  min-height: 48px;
+}
+
+.case-next-route {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  margin-top: 12px;
+}
+
+.case-next-route span {
+  border-radius: 14px;
+  background: #f0fdfa;
+  border-color: #b8e7e1;
+  color: #115e59 !important;
+}
+
+.case-next-route strong {
+  background: #0f766e;
+  color: #ffffff;
+}
+
+@media (max-width: 1180px) {
+  .shell,
+  body.has-runs .shell,
+  body.analysis-active .shell {
+    grid-template-columns: 1fr !important;
+  }
+}
+
+@media (max-width: 780px) {
+  .intake-choice-grid,
+  .image-evidence-flow,
+  .user-run-steps,
+  .case-next-route,
+  .empty-state-actions,
+  .evidence-check-row {
+    grid-template-columns: 1fr;
+  }
+}

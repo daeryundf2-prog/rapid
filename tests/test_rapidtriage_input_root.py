@@ -19,6 +19,11 @@ class RapidTriageInputRootTests(unittest.TestCase):
         self.assertEqual(resolve_input_root("/").kind, "live")
         self.assertEqual(resolve_input_root("/Volumes/case-mount").kind, "mounted-image")
         self.assertEqual(resolve_input_root("/Volumes/e01-case-mount").kind, "e01-derived")
+        self.assertEqual(resolve_input_root("/tmp/case.E01").kind, "e01-derived")
+        self.assertEqual(resolve_input_root("/tmp/case.E02").kind, "e01-derived")
+        self.assertEqual(resolve_input_root("/tmp/disk.raw").kind, "disk-image-derived")
+        self.assertEqual(resolve_input_root("/tmp/disk.vhdx").kind, "disk-image-derived")
+        self.assertEqual(resolve_input_root("/tmp/mac.dmg").kind, "archive-image-derived")
         self.assertEqual(resolve_input_root("/tmp/case-root").kind, "folder")
 
     def test_child_input_root_retains_parent_kind(self) -> None:

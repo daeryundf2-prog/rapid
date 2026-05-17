@@ -1,4 +1,6 @@
 .omx/
+.playwright-cli/
+output/
 .venv/
 .rapidtriage-smoke-venv/
 rapidtriage-windows-smoke/

@@ -50,6 +50,38 @@ const RUN_MODE_COLLECTORS = {
   hacking: ["browser", "recent files", "email", "cloud", "mobile/chat", "KakaoTalk", "APK", "media", "memory", "OS/account", "event logs", "registry", "shellbags", "remote access", "execution", "prefetch", "MFT/USN", "Windows system", "macOS"],
   recovery: ["recent files", "email", "cloud", "mobile/chat", "KakaoTalk", "APK", "media", "memory", "OS/account", "event logs", "registry", "shellbags", "remote access", "prefetch", "MFT/USN", "macOS"],
 };
+const IMAGE_EVIDENCE_FORMATS = [
+  {
+    family: "ewf",
+    label: "E01/Ex01",
+    inputKind: "e01-derived",
+    pattern: /(?:^|[\\/])[^\\/]+\.(?:e\d{2}|ex\d{2})(?:$|[\\/])/i,
+  },
+  {
+    family: "raw",
+    label: "RAW/DD/split",
+    inputKind: "disk-image-derived",
+    pattern: /\.(?:dd|raw|img|ima|001|000|0000|0001|00001)(?:$|[\\/])/i,
+  },
+  {
+    family: "virtual-disk",
+    label: "VHD/VMDK/QCOW",
+    inputKind: "disk-image-derived",
+    pattern: /\.(?:vhd|vhdx|vmdk|vdi|xva|qcow|qcow2)(?:$|[\\/])/i,
+  },
+  {
+    family: "archive-image",
+    label: "DMG/ISO/WIM",
+    inputKind: "archive-image-derived",
+    pattern: /\.(?:dmg|iso|wim|swm)(?:$|[\\/])/i,
+  },
+  {
+    family: "forensic-container",
+    label: "AFF/AD/L01",
+    inputKind: "",
+    pattern: /\.(?:aff|aff4|ad1|l01|lx01)(?:$|[\\/])/i,
+  },
+];
 const E01_PRE_RUN_STEPS = [
   { label: "Input", text: "첫 E01/Ex01 세그먼트를 선택하고 segment order/integrity를 확인합니다." },
   { label: "Preflight", text: "ewfmount, mmls, tsk_recover 존재와 버전을 먼저 확인합니다." },
@@ -1085,14 +1117,23 @@ function renderCaseHero(run) {
   const warningCount = Number(processing.warning_count || 0);
   const artifactSignals = FORENSIC_ARTIFACT_TAXONOMY.reduce((sum, item) => sum + artifactGroupCount(payload, item.terms), 0);
   const source = run.request.root || payload.output_dir || "Evidence source";
-  const headline = warningCount ? `검증 경고 ${formatNumber(warningCount)}건을 먼저 확인하세요` : "분석 결과가 리뷰 가능한 상태입니다";
+  const headline = warningCount ? `경고 ${formatNumber(warningCount)}건부터 확인하면 됩니다` : "검색과 리뷰를 바로 시작할 수 있습니다";
+  const nextAction = warningCount
+    ? "경고/제한사항을 확인한 뒤 검색 결과를 원본 뷰어에서 검토하세요."
+    : "전체 검색으로 단서를 찾고, 필요한 항목만 리뷰 보드와 보고서 후보에 올리세요.";
   return `
     <section class="case-hero" aria-label="Case mission control" data-testid="case-hero">
       <div class="case-hero-main">
-        <p class="eyebrow">검토 우선순위</p>
+        <p class="eyebrow">다음 할 일</p>
         <h2>${escapeHtml(headline)}</h2>
         <p class="case-source-line"><span>원본</span><code>${escapeHtml(source)}</code></p>
-        <p>검색, 원본 뷰어, 리뷰 표시, 보고서 후보 정리를 이 작업대에서 바로 이어갑니다.</p>
+        <p>${escapeHtml(nextAction)}</p>
+        <div class="case-next-route" aria-label="Recommended route">
+          <span><strong>1</strong> 전체 검색</span>
+          <span><strong>2</strong> 원본 확인</span>
+          <span><strong>3</strong> 리뷰 표시</span>
+          <span><strong>4</strong> 보고서 후보</span>
+        </div>
         <div class="case-hero-actions">
           <button type="button" data-open-tab="search" data-testid="hero-search-button">전체 증거 검색</button>
           <button class="secondary-button" type="button" data-open-tab="artifacts" data-testid="hero-artifacts-button">아티팩트 보기</button>
@@ -7444,6 +7485,8 @@ function bindRunFormPersistence() {
     document.querySelector(selector)?.addEventListener("change", refreshRunPlanPreview);
   }
   document.querySelector("#processingProfileInput")?.addEventListener("change", applyProcessingProfile);
+  document.querySelector("#rootInput")?.addEventListener("input", applyRootEvidenceHints);
+  document.querySelector("#rootInput")?.addEventListener("change", applyRootEvidenceHints);
   collectPlanButton?.addEventListener("click", previewCollectPlan);
   bindStartChoiceCards();
 }
@@ -7462,21 +7505,54 @@ function applyStartChoice(action) {
   if (action === "e01") {
     if (inputKindInput) inputKindInput.value = "e01-derived";
     if (processingProfileInput) processingProfileInput.value = "fast";
-    if (modeInput) modeInput.value = "hacking";
+    if (modeInput) modeInput.value = "fraud";
     rootInput?.focus();
-    evidenceCheckStatus.textContent = "E01 선택 후 Check evidence support로 intake/preflight를 먼저 확인하세요.";
+    evidenceCheckStatus.textContent = "E01/Ex01 또는 이미지 경로를 넣고 이미지 지원 확인을 누르면 도구, 파티션, 마운트/추출 필요 여부를 먼저 확인합니다.";
   } else if (action === "folder") {
     if (inputKindInput) inputKindInput.value = "folder";
     if (processingProfileInput) processingProfileInput.value = "fast";
     if (modeInput) modeInput.value = "fraud";
     rootInput?.focus();
-    evidenceCheckStatus.textContent = "마운트/Export 폴더 경로를 넣고 분석 실행을 누르면 됩니다.";
+    evidenceCheckStatus.textContent = "이미지를 이미 마운트/추출한 폴더나 벤더 Export 폴더 경로를 넣고 분석 실행을 누르면 됩니다.";
   } else if (action === "recent") {
     document.querySelector("#importOutputInput")?.focus();
   } else if (action === "sample") {
     sampleRunButton?.click();
   } else if (action === "qc") {
     doctorButton?.click();
+  }
+  persistRunForm();
+  refreshRunPlanPreview();
+}
+
+function detectEvidenceImageKind(root) {
+  const value = String(root || "").trim();
+  if (!value) return { isImage: false, family: "", label: "", inputKind: "" };
+  for (const format of IMAGE_EVIDENCE_FORMATS) {
+    if (format.pattern.test(value)) {
+      return {
+        isImage: true,
+        family: format.family,
+        label: format.label,
+        inputKind: format.inputKind,
+      };
+    }
+  }
+  return { isImage: false, family: "", label: "", inputKind: "" };
+}
+
+function applyRootEvidenceHints() {
+  const root = document.querySelector("#rootInput")?.value || "";
+  const inputKindInput = document.querySelector("#inputKindInput");
+  const detected = detectEvidenceImageKind(root);
+  if (detected.isImage && detected.inputKind && inputKindInput && ["", "e01-derived", "disk-image-derived", "archive-image-derived"].includes(inputKindInput.value)) {
+    inputKindInput.value = detected.inputKind;
+  }
+  if (evidenceCheckStatus && evidenceCheckStatus.dataset.checkedRoot !== root) {
+    delete evidenceCheckStatus.dataset.checkedRoot;
+    evidenceCheckStatus.textContent = detected.isImage
+      ? `${detected.label} 이미지로 보입니다. 먼저 이미지 지원 확인으로 필요한 도구, 파티션/마운트/추출 가능 여부를 확인하세요.`
+      : "E01/Ex01/RAW/VHDX/DMG는 먼저 도구와 파티션 처리 가능 여부를 확인합니다.";
   }
   persistRunForm();
   refreshRunPlanPreview();
@@ -7551,30 +7627,72 @@ function refreshRunPlanPreview() {
 }
 
 function isLikelyE01Path(root) {
-  const value = String(root || "").trim().toLowerCase();
-  return /\.(e01|ex01|e\d{2})$/.test(value) || value.includes(".e01/");
+  return detectEvidenceImageKind(root).family === "ewf";
+}
+
+function isLikelyImageEvidencePath(root) {
+  return detectEvidenceImageKind(root).isImage;
 }
 
 function updateRunSubmissionCta(root, profileKey = "fast") {
   if (!runButton) return;
   if (runButton.disabled) return;
+  const detected = detectEvidenceImageKind(root);
   if (isLikelyE01Path(root)) {
     runButton.dataset.e01Detected = "true";
+    delete runButton.dataset.evidenceImageDetected;
     runButton.textContent = profileKey === "fast"
       ? "E01 사전 점검 + 빠른 분석"
       : "E01 인입 + 분석 실행";
     return;
   }
+  if (detected.isImage) {
+    runButton.dataset.evidenceImageDetected = "true";
+    delete runButton.dataset.e01Detected;
+    runButton.textContent = profileKey === "fast"
+      ? "이미지 빠른 분석 실행"
+      : "이미지 인입 + 분석 실행";
+    return;
+  }
   delete runButton.dataset.e01Detected;
+  delete runButton.dataset.evidenceImageDetected;
   runButton.textContent = "분석 실행";
 }
 
 function runStartingLabel(root) {
-  return isLikelyE01Path(root) ? "E01 분석 준비 중..." : "분석 시작 중...";
+  if (isLikelyE01Path(root)) return "E01 분석 준비 중...";
+  if (isLikelyImageEvidencePath(root)) return "이미지 증거 분석 준비 중...";
+  return "분석 시작 중...";
 }
 
 function renderRunPlanE01Readiness(root, partitionStartSector, profileKey) {
-  if (!isLikelyE01Path(root)) return "";
+  const detected = detectEvidenceImageKind(root);
+  if (!detected.isImage) return "";
+  if (!isLikelyE01Path(root)) {
+    const imageWarning = profileKey === "deep"
+      ? "대용량 이미지에서 심층 추출은 오래 걸릴 수 있습니다. 빠른 1차 분석 후 필요한 범위만 깊게 보세요."
+      : "이미지 증거는 먼저 지원 확인으로 도구와 추출 방식을 확인한 뒤 빠른 1차 분석을 권장합니다.";
+    const strategyText = detected.family === "forensic-container"
+      ? "벤더 도구로 Export/마운트 후 폴더 분석"
+      : "지원 확인 후 마운트/추출 또는 직접 분석";
+    return `
+      <section class="run-plan-e01-readiness" aria-label="Image evidence pre-run readiness">
+        <div class="review-group-header">
+          <div>
+            <p class="eyebrow">image evidence pre-run</p>
+            <h4>${escapeHtml(detected.label)} 이미지 증거로 보입니다</h4>
+          </div>
+          <span class="status-pill warning">support check recommended</span>
+        </div>
+        <p>${escapeHtml(imageWarning)}</p>
+        <div class="processing-caps">
+          <span>Recommended input kind: ${escapeHtml(detected.inputKind || "vendor-export-first")}</span>
+          <span>${escapeHtml(strategyText)}</span>
+          <span>해시/출처/도구 버전 보존 필요</span>
+        </div>
+      </section>
+    `;
+  }
   const sectorText = partitionStartSector === null
     ? "auto select largest supported filesystem"
     : `use sector ${formatNumber(partitionStartSector)}`;
@@ -7921,12 +8039,12 @@ evidenceCheckButton?.addEventListener("click", checkEvidenceSupport);
 async function checkEvidenceSupport() {
   const root = document.querySelector("#rootInput")?.value?.trim();
   if (!root) {
-    evidenceCheckStatus.textContent = "Enter a folder or evidence image path first.";
+    evidenceCheckStatus.textContent = "먼저 E01/Ex01/RAW/VHDX/DMG 이미지나 마운트/Export 폴더 경로를 넣어주세요.";
     return;
   }
   evidenceCheckButton.disabled = true;
-  evidenceCheckButton.textContent = "Checking...";
-  evidenceCheckStatus.textContent = "Inspecting evidence adapter support...";
+  evidenceCheckButton.textContent = "확인 중...";
+  evidenceCheckStatus.textContent = "이미지 형식, 필요한 도구, 파티션/마운트 처리 가능 여부를 확인하는 중입니다...";
   try {
     const payload = await api("/api/evidence/identify", {
       method: "POST",
@@ -7935,12 +8053,13 @@ async function checkEvidenceSupport() {
     const result = payload.result || {};
     applyEvidenceCheckRecommendation(result);
     evidenceCheckStatus.innerHTML = renderEvidenceCheckStatus(result);
+    evidenceCheckStatus.dataset.checkedRoot = root;
     bindEvidenceCheckActions();
   } catch (error) {
     evidenceCheckStatus.textContent = error.message;
   } finally {
     evidenceCheckButton.disabled = false;
-    evidenceCheckButton.textContent = "Check evidence support";
+    evidenceCheckButton.textContent = "이미지 지원 확인";
   }
 }
 

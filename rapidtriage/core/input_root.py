@@ -5,6 +5,27 @@ from pathlib import Path
 from typing import Optional, Union
 
 SUPPORTED_INPUT_ROOT_KINDS = ("folder", "mounted-image", "e01-derived", "disk-image-derived", "archive-image-derived", "live")
+EWF_IMAGE_SUFFIXES = (".e01", ".ex01")
+EWF_SEGMENT_SUFFIXES = tuple(f".e{index:02d}" for index in range(1, 100))
+DISK_IMAGE_SUFFIXES = (
+    ".dd",
+    ".raw",
+    ".img",
+    ".001",
+    ".000",
+    ".0000",
+    ".0001",
+    ".00001",
+    ".ima",
+    ".vhd",
+    ".vhdx",
+    ".vmdk",
+    ".vdi",
+    ".xva",
+    ".qcow",
+    ".qcow2",
+)
+ARCHIVE_IMAGE_SUFFIXES = (".iso", ".dmg", ".wim", ".swm")
 PathLike = Union[Path, str]
 
 
@@ -53,12 +74,18 @@ def normalize_input_root_kind(kind: str) -> str:
 
 def detect_input_root_kind(root_path: Path) -> str:
     path_text = str(root_path).lower()
+    name = root_path.name.lower()
+    suffix = root_path.suffix.lower()
     if root_path == Path("/"):
         return "live"
     if "/volumes/" in path_text or "/mnt/" in path_text or "/media/" in path_text:
         if "e01" in path_text or "ewf" in path_text:
             return "e01-derived"
         return "mounted-image"
-    if "e01" in path_text or "ewf" in path_text:
+    if suffix in EWF_IMAGE_SUFFIXES or name.endswith(EWF_SEGMENT_SUFFIXES) or "ewf" in path_text:
         return "e01-derived"
+    if suffix in DISK_IMAGE_SUFFIXES:
+        return "disk-image-derived"
+    if suffix in ARCHIVE_IMAGE_SUFFIXES:
+        return "archive-image-derived"
     return "folder"

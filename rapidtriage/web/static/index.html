@@ -4,6 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>RapidForensic Analyst Console</title>
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='16' fill='%230f766e'/%3E%3Ctext x='32' y='39' text-anchor='middle' font-size='22' font-family='Arial' font-weight='700' fill='white'%3ERF%3C/text%3E%3C/svg%3E" />
     <link rel="stylesheet" href="/assets/styles.css" />
   </head>
   <body>
@@ -22,68 +23,29 @@
           <span id="apiStatus" class="status-pill">확인 중</span>
         </div>
         <div class="operator-badges" aria-label="Console strengths">
-          <span>Read-only first</span>
-          <span>Mass data aware</span>
-          <span>Review-ready</span>
+          <span>원본 보호 우선</span>
+          <span>대용량 대응</span>
+          <span>검토/보고서 연결</span>
         </div>
-        <section class="core-evidence-workflow intake-core-workflow" aria-label="Core evidence workflow" data-testid="core-evidence-workflow">
-          <article class="core-workflow-step">
-            <span class="core-workflow-number">1</span>
-            <div>
-              <p class="eyebrow">입력</p>
-              <strong>이미지/E01 선택과 지원 여부 확인</strong>
-              <small>E01/Ex01, RAW, VHDX, DMG, ZIP, Folder를 넣고 dependency와 mount/export 필요 여부를 확인합니다.</small>
-            </div>
-          </article>
-          <article class="core-workflow-step">
-            <span class="core-workflow-number">2</span>
-            <div>
-              <p class="eyebrow">추출</p>
-              <strong>파일과 아티팩트를 해시와 함께 확보</strong>
-              <small>manifest, file triage, bounded extraction으로 원본 경로, 크기, SHA256, 제한 사유를 보존합니다.</small>
-            </div>
-          </article>
-          <article class="core-workflow-step">
-            <span class="core-workflow-number">3</span>
-            <div>
-              <p class="eyebrow">분석</p>
-              <strong>OS·문서·메신저 아티팩트 파싱</strong>
-              <small>EVTX, Registry, MFT/USN, Browser, AI, Mail, KakaoTalk 등 collector 결과와 warning을 확인합니다.</small>
-            </div>
-          </article>
-          <article class="core-workflow-step">
-            <span class="core-workflow-number">4</span>
-            <div>
-              <p class="eyebrow">검색</p>
-              <strong>전체 검색과 현재 파일 검색</strong>
-              <small>본문, DB, 로그, OCR 후보를 찾고 cursor/resume 상태로 대량 누락을 확인합니다.</small>
-            </div>
-          </article>
-          <article class="core-workflow-step">
-            <span class="core-workflow-number">5</span>
-            <div>
-              <p class="eyebrow">리뷰</p>
-              <strong>원본 뷰어에서 확인하고 표시</strong>
-              <small>source viewer에서 path/hash/parser/offset을 확인하고 relevant, note, tag를 남깁니다.</small>
-            </div>
-          </article>
-          <article class="core-workflow-step">
-            <span class="core-workflow-number">6</span>
-            <div>
-              <p class="eyebrow">보고서</p>
-              <strong>선택 증거를 제출 후보로 묶기</strong>
-              <small>evidence tray, citation, limitation, validation 상태를 report bundle에 연결합니다.</small>
-            </div>
-          </article>
+        <section class="start-focus-card" aria-label="Recommended start">
+          <p class="eyebrow">이미지 증거 우선</p>
+          <h2>E01/Ex01 같은 포렌식 이미지를 먼저 넣는 흐름입니다</h2>
+          <p>이미지를 선택하면 지원 여부, 필요한 마운트/추출 도구, 파티션 선택, 해시/출처 기록을 먼저 확인한 뒤 분석으로 넘어갑니다.</p>
+          <div class="image-evidence-flow" aria-label="Image evidence flow">
+            <span><strong>1</strong> 이미지 선택</span>
+            <span><strong>2</strong> 지원/도구 확인</span>
+            <span><strong>3</strong> 파티션·마운트</span>
+            <span><strong>4</strong> 분석/검색</span>
+          </div>
         </section>
         <section class="intake-choice-grid" aria-label="Start workflow choices" data-testid="start-choice-grid">
           <button type="button" class="intake-choice-card primary" data-intake-action="e01" data-testid="start-choice-e01">
-            <strong>E01 / Ex01</strong>
-            <span>이미지 선택 → 의존성 검사 → 파티션 → 분석</span>
+            <strong>이미지 증거</strong>
+            <span>E01/Ex01, RAW, VHDX, DMG → 지원 확인 → 분석</span>
           </button>
           <button type="button" class="intake-choice-card" data-intake-action="folder" data-testid="start-choice-folder">
             <strong>Folder / Export</strong>
-            <span>마운트/벤더 export 폴더를 바로 스캔</span>
+            <span>이미지에서 추출/마운트한 폴더나 벤더 export를 스캔</span>
           </button>
           <button type="button" class="intake-choice-card" data-intake-action="recent" data-testid="start-choice-recent">
             <strong>Recent case</strong>
@@ -98,25 +60,138 @@
             <span>runtime, evidence support, validation package 확인</span>
           </button>
         </section>
-        <ol class="quick-start" aria-label="Recommended workflow">
-          <li><strong>1. 증거 선택</strong><span>폴더, 마운트 이미지, E01/파생 경로를 넣습니다.</span></li>
-          <li><strong>2. 빠른 분석</strong><span>대용량은 Fast first pass로 먼저 범위를 좁힙니다.</span></li>
-          <li><strong>3. 검색/뷰어</strong><span>전체 검색 후 원본 파일 안에서 다시 확인합니다.</span></li>
-          <li><strong>4. 리뷰/보고서</strong><span>relevant, excluded, report set을 명확히 남깁니다.</span></li>
-        </ol>
-        <section class="mode-help" aria-label="Mode selection help">
-          <p class="eyebrow">if unsure</p>
-          <p><strong>Fraud</strong> is the safest first pass. Use <strong>Hacking</strong> for intrusion/LotL, <strong>Recovery</strong> for deleted-file leads, and <strong>Seizure</strong> for broad inventory.</p>
-        </section>
-        <section class="first-run-checklist" aria-label="First run checklist">
-          <p class="eyebrow">first-run checklist</p>
-          <ol>
-            <li><strong>Check runtime</strong><span>Confirm Python packages, optional OCR, and E01 tools.</span></li>
-            <li><strong>Run sample case</strong><span>Practice the search, viewer, review, and report flow safely.</span></li>
-            <li><strong>Check evidence support</strong><span>Know whether your source scans directly or needs mounting/export.</span></li>
-            <li><strong>Start fast</strong><span>Use Fast first pass before deep extraction on large cases.</span></li>
-          </ol>
-        </section>
+        <form id="runForm" class="run-form">
+          <div class="form-intro">
+            <p class="eyebrow">새 분석</p>
+            <h2>이미지 또는 추출 폴더 선택</h2>
+            <p>대부분은 E01/Ex01 같은 이미지에서 시작합니다. 폴더만 있는 경우도 같은 칸에 넣으면 됩니다.</p>
+          </div>
+          <div class="user-run-steps" aria-label="Run steps">
+            <span><strong>1</strong> 경로 입력</span>
+            <span><strong>2</strong> 이미지 지원 확인</span>
+            <span><strong>3</strong> 실행</span>
+          </div>
+          <label class="root-field">
+            증거 이미지 또는 분석 폴더
+            <input id="rootInput" name="root" required placeholder="/cases/case.E01, /cases/disk001.Ex01, /cases/image.raw, /cases/export-folder" data-testid="evidence-root-input" />
+          </label>
+          <div class="evidence-check-row">
+            <button id="evidenceCheckButton" class="secondary-button" type="button" data-testid="evidence-support-button">이미지 지원 확인</button>
+            <span id="evidenceCheckStatus" class="help-text">E01/Ex01/RAW/VHDX/DMG는 먼저 도구와 파티션 처리 가능 여부를 확인합니다.</span>
+          </div>
+
+          <div class="field-grid primary-field-grid">
+            <label>
+              분석 모드
+              <select id="modeInput" name="mode">
+                <option value="fraud">부정/문서 우선</option>
+                <option value="seizure">전수 수집</option>
+                <option value="hacking">침해사고/윈도우 아티팩트</option>
+                <option value="recovery">삭제/복구 단서</option>
+              </select>
+            </label>
+            <label>
+              입력 유형
+              <select id="inputKindInput" name="inputKind">
+                <option value="">자동 판단</option>
+                <option value="folder">폴더 / Export</option>
+                <option value="mounted-image">마운트된 이미지</option>
+                <option value="e01-derived">E01/Ex01 이미지 / 추출 결과</option>
+                <option value="disk-image-derived">RAW/DD/가상디스크 이미지</option>
+                <option value="archive-image-derived">DMG/ISO/WIM 이미지</option>
+                <option value="live">현재 PC 경로</option>
+              </select>
+            </label>
+          </div>
+
+          <label class="output-field">
+            결과 저장 위치
+            <input id="outputInput" name="outputDir" placeholder="auto: ROOT/rapidtriage-run-MODE" />
+          </label>
+
+          <label class="profile-field">
+            처리 방식
+            <select id="processingProfileInput" name="processingProfile">
+              <option value="fast">빠른 1차 분석 - 대용량 추천</option>
+              <option value="standard">표준 분석 - 제한 추출 포함</option>
+              <option value="deep">심층 분석 - 제한 없이 깊게</option>
+            </select>
+          </label>
+          <details class="advanced-run-options">
+            <summary>
+              <span>고급 옵션</span>
+              <strong>수집 대상, 제한값, E01 섹터, Known-good 설정</strong>
+            </summary>
+
+            <section id="runPlanPreview" class="run-plan-preview run-plan-summary" aria-live="polite"></section>
+
+            <section class="run-plan-preview collection-plan-card" aria-label="Collection profile preview">
+              <p class="eyebrow">target collection</p>
+              <h3>수집 대상 미리보기</h3>
+              <p>큰 분석을 돌리기 전에 Windows/macOS 주요 아티팩트 경로가 있는지 먼저 확인합니다.</p>
+              <label>
+                수집 프로필
+                <select id="collectProfileInput" name="collectProfile">
+                  <option value="intrusion">침해사고 - 계정, EVTX, 실행, 지속성, 원격접속</option>
+                  <option value="windows-core">Windows 핵심</option>
+                  <option value="macos-core">macOS 핵심</option>
+                  <option value="browser-history">브라우저 기록과 클라우드/동기화</option>
+                  <option value="filesystem-timeline">파일시스템 타임라인</option>
+                  <option value="full">전체 수집 계획</option>
+                </select>
+              </label>
+              <button id="collectPlanButton" class="secondary-button" type="button">수집 대상 보기</button>
+              <div id="collectPlanPreview" class="collect-plan-preview" aria-live="polite">
+                <p class="empty-state">먼저 증거 경로를 넣은 뒤 수집 대상을 확인하세요.</p>
+              </div>
+            </section>
+
+            <div class="field-grid limits-grid">
+              <label>
+                최대 추출 MB
+                <input id="maxExtractMbInput" name="maxExtractMb" type="number" min="0" value="0" />
+              </label>
+              <label>
+                최대 파일 수
+                <input id="maxFileCountInput" name="maxFileCount" type="number" min="0" value="0" />
+              </label>
+            </div>
+
+            <label class="e01-sector-field">
+              E01 파티션 시작 섹터 선택
+              <input id="e01PartitionStartSectorInput" name="e01PartitionStartSector" type="number" min="0" placeholder="auto: largest supported filesystem from mmls" />
+            </label>
+
+            <section class="run-plan-preview known-good-run-options" aria-label="Known-good and signature triage options">
+              <p class="eyebrow">file triage controls</p>
+              <h3>Known-good suppression and extension spoofing checks</h3>
+              <p class="help-text">Use a TXT/CSV/JSON MD5/SHA1/SHA256 feed to mark normal files. Signature mismatch checks run automatically and appear in the Files tab.</p>
+              <label>
+                Known-good 해시 피드 경로
+                <textarea id="knownGoodHashFeedInput" name="knownGoodHashFeeds" rows="3" placeholder="/cases/feeds/nsrl-lite.csv&#10;/cases/feeds/company-whitelist.json"></textarea>
+              </label>
+              <div class="field-grid">
+                <label>
+                  Known-good 최대 해시 MB
+                  <input id="knownGoodMaxHashMbInput" name="knownGoodMaxHashMb" type="number" min="0" value="64" />
+                </label>
+                <label class="inline-toggle">
+                  <input id="hideKnownGoodInput" type="checkbox" />
+                  Known-good 행 숨기기
+                </label>
+              </div>
+            </section>
+          </details>
+
+          <div class="toggle-row safety-toggles">
+            <label><input id="readOnlyInput" type="checkbox" checked /> 읽기 전용</label>
+            <label><input id="dryRunInput" type="checkbox" /> 시험 실행</label>
+            <label><input id="overwriteInput" type="checkbox" /> 추출물 덮어쓰기</label>
+          </div>
+
+          <button id="runButton" type="submit" data-testid="run-submit-button">분석 실행</button>
+        </form>
+
         <section class="quick-actions" aria-label="Convenience actions">
           <button id="sampleRunButton" class="secondary-button" type="button" data-testid="sample-run-button">샘플 실행</button>
           <button id="doctorButton" class="secondary-button" type="button" data-testid="runtime-check-button">환경 점검</button>
@@ -131,118 +206,78 @@
           <div id="runList" class="run-list" data-testid="run-list"></div>
         </section>
 
-        <form id="runForm" class="run-form">
-          <label class="root-field">
-            증거 폴더 또는 E01 이미지
-            <input id="rootInput" name="root" required placeholder="/cases/case-001 또는 /cases/case.E01" data-testid="evidence-root-input" />
-          </label>
-          <div class="evidence-check-row">
-            <button id="evidenceCheckButton" class="secondary-button" type="button" data-testid="evidence-support-button">지원 여부 확인</button>
-            <span id="evidenceCheckStatus" class="help-text">폴더는 바로 스캔하고, 이미지는 보통 마운트/추출 확인이 먼저 필요합니다.</span>
-          </div>
-
-          <div class="field-grid primary-field-grid">
-            <label>
-              분석 모드
-              <select id="modeInput" name="mode">
-                <option value="fraud">Fraud</option>
-                <option value="seizure">Seizure</option>
-                <option value="hacking">Hacking</option>
-                <option value="recovery">Recovery</option>
-              </select>
-            </label>
-            <label>
-              입력 유형
-              <select id="inputKindInput" name="inputKind">
-                <option value="">Auto</option>
-                <option value="folder">Folder</option>
-                <option value="mounted-image">Mounted image</option>
-                <option value="e01-derived">E01 image/derived</option>
-                <option value="live">Live root</option>
-              </select>
-            </label>
-          </div>
-
-          <label class="output-field">
-            결과 저장 위치
-            <input id="outputInput" name="outputDir" placeholder="auto: ROOT/rapidtriage-run-MODE" />
-          </label>
-
-          <label class="profile-field">
-            처리 방식
-            <select id="processingProfileInput" name="processingProfile">
-              <option value="fast">Fast first pass - no extraction, quickest review</option>
-              <option value="standard">Standard - bounded extraction</option>
-              <option value="deep">Deep - no extraction cap</option>
-            </select>
-          </label>
-          <section id="runPlanPreview" class="run-plan-preview run-plan-summary" aria-live="polite"></section>
-
-          <section class="run-plan-preview collection-plan-card" aria-label="Collection profile preview">
-            <p class="eyebrow">target collection</p>
-            <h3>수집 대상 미리보기</h3>
-            <p>큰 분석을 돌리기 전에 Windows/macOS 주요 아티팩트 경로가 있는지 먼저 확인합니다.</p>
-            <label>
-              수집 프로필
-              <select id="collectProfileInput" name="collectProfile">
-                <option value="intrusion">Intrusion - accounts, EVTX, execution, persistence, remote access</option>
-                <option value="windows-core">Windows core</option>
-                <option value="macos-core">macOS core</option>
-                <option value="browser-history">Browser history and cloud/sync</option>
-                <option value="filesystem-timeline">Filesystem timeline</option>
-                <option value="full">Full target plan</option>
-              </select>
-            </label>
-            <button id="collectPlanButton" class="secondary-button" type="button">수집 대상 보기</button>
-            <div id="collectPlanPreview" class="collect-plan-preview" aria-live="polite">
-              <p class="empty-state">먼저 증거 경로를 넣은 뒤 수집 대상을 확인하세요.</p>
-            </div>
+        <details class="workflow-help-details">
+          <summary>분석 흐름과 첫 실행 팁 보기</summary>
+          <section class="core-evidence-workflow intake-core-workflow" aria-label="Core evidence workflow" data-testid="core-evidence-workflow">
+            <article class="core-workflow-step">
+              <span class="core-workflow-number">1</span>
+              <div>
+                <p class="eyebrow">입력</p>
+                <strong>이미지/E01 선택과 지원 여부 확인</strong>
+                <small>E01/Ex01, RAW, VHDX, DMG, ZIP, Folder를 넣고 dependency와 mount/export 필요 여부를 확인합니다.</small>
+              </div>
+            </article>
+            <article class="core-workflow-step">
+              <span class="core-workflow-number">2</span>
+              <div>
+                <p class="eyebrow">추출</p>
+                <strong>파일과 아티팩트를 해시와 함께 확보</strong>
+                <small>manifest, file triage, bounded extraction으로 원본 경로, 크기, SHA256, 제한 사유를 보존합니다.</small>
+              </div>
+            </article>
+            <article class="core-workflow-step">
+              <span class="core-workflow-number">3</span>
+              <div>
+                <p class="eyebrow">분석</p>
+                <strong>OS·문서·메신저 아티팩트 파싱</strong>
+                <small>EVTX, Registry, MFT/USN, Browser, AI, Mail, KakaoTalk 등 collector 결과와 warning을 확인합니다.</small>
+              </div>
+            </article>
+            <article class="core-workflow-step">
+              <span class="core-workflow-number">4</span>
+              <div>
+                <p class="eyebrow">검색</p>
+                <strong>전체 검색과 현재 파일 검색</strong>
+                <small>본문, DB, 로그, OCR 후보를 찾고 cursor/resume 상태로 대량 누락을 확인합니다.</small>
+              </div>
+            </article>
+            <article class="core-workflow-step">
+              <span class="core-workflow-number">5</span>
+              <div>
+                <p class="eyebrow">리뷰</p>
+                <strong>원본 뷰어에서 확인하고 표시</strong>
+                <small>source viewer에서 path/hash/parser/offset을 확인하고 relevant, note, tag를 남깁니다.</small>
+              </div>
+            </article>
+            <article class="core-workflow-step">
+              <span class="core-workflow-number">6</span>
+              <div>
+                <p class="eyebrow">보고서</p>
+                <strong>선택 증거를 제출 후보로 묶기</strong>
+                <small>evidence tray, citation, limitation, validation 상태를 report bundle에 연결합니다.</small>
+              </div>
+            </article>
           </section>
-
-          <div class="field-grid limits-grid">
-            <label>
-              최대 추출 MB
-              <input id="maxExtractMbInput" name="maxExtractMb" type="number" min="0" value="0" />
-            </label>
-            <label>
-              최대 파일 수
-              <input id="maxFileCountInput" name="maxFileCount" type="number" min="0" value="0" />
-            </label>
-          </div>
-
-          <label class="e01-sector-field">
-            E01 파티션 시작 섹터 선택
-            <input id="e01PartitionStartSectorInput" name="e01PartitionStartSector" type="number" min="0" placeholder="auto: largest supported filesystem from mmls" />
-          </label>
-
-          <section class="run-plan-preview known-good-run-options" aria-label="Known-good and signature triage options">
-            <p class="eyebrow">file triage controls</p>
-            <h3>Known-good suppression and extension spoofing checks</h3>
-            <p class="help-text">Use a TXT/CSV/JSON MD5/SHA1/SHA256 feed to mark normal files. Signature mismatch checks run automatically and appear in the Files tab.</p>
-            <label>
-              Known-good 해시 피드 경로
-              <textarea id="knownGoodHashFeedInput" name="knownGoodHashFeeds" rows="3" placeholder="/cases/feeds/nsrl-lite.csv&#10;/cases/feeds/company-whitelist.json"></textarea>
-            </label>
-            <div class="field-grid">
-              <label>
-                Known-good 최대 해시 MB
-                <input id="knownGoodMaxHashMbInput" name="knownGoodMaxHashMb" type="number" min="0" value="64" />
-              </label>
-              <label class="inline-toggle">
-                <input id="hideKnownGoodInput" type="checkbox" />
-                Known-good 행 숨기기
-              </label>
-            </div>
+          <ol class="quick-start" aria-label="Recommended workflow">
+            <li><strong>1. 이미지 선택</strong><span>E01/Ex01, RAW, VHDX, DMG 또는 마운트/Export 폴더를 넣습니다.</span></li>
+            <li><strong>2. 지원 확인</strong><span>도구, 파티션, 마운트/export 필요 여부를 먼저 확인합니다.</span></li>
+            <li><strong>3. 빠른 분석</strong><span>대용량은 Fast first pass로 먼저 범위를 좁힙니다.</span></li>
+            <li><strong>4. 검색/보고서</strong><span>전체 검색 후 원본 뷰어에서 확인하고 report set을 남깁니다.</span></li>
+          </ol>
+          <section class="mode-help" aria-label="Mode selection help">
+            <p class="eyebrow">if unsure</p>
+            <p><strong>부정/문서 우선</strong>이 가장 안전한 1차 분석입니다. 침해사고는 EVTX/실행흔적, 복구는 삭제 단서, 전수 수집은 넓은 인벤토리에 사용하세요.</p>
           </section>
-
-          <div class="toggle-row safety-toggles">
-            <label><input id="readOnlyInput" type="checkbox" checked /> 읽기 전용</label>
-            <label><input id="dryRunInput" type="checkbox" /> 시험 실행</label>
-            <label><input id="overwriteInput" type="checkbox" /> 추출물 덮어쓰기</label>
-          </div>
-
-          <button id="runButton" type="submit" data-testid="run-submit-button">분석 실행</button>
-        </form>
+          <section class="first-run-checklist" aria-label="First run checklist">
+            <p class="eyebrow">first-run checklist</p>
+            <ol>
+              <li><strong>환경 점검</strong><span>libewf/tsk/qemu-img 같은 이미지 처리 도구와 Python 패키지를 확인합니다.</span></li>
+              <li><strong>이미지 지원 확인</strong><span>소스가 직접 스캔되는지, 마운트/export가 필요한지 확인합니다.</span></li>
+              <li><strong>샘플 실행</strong><span>검색, 뷰어, 리뷰, 보고서 흐름을 안전하게 연습합니다.</span></li>
+              <li><strong>빠르게 시작</strong><span>대용량 케이스는 먼저 빠른 1차 분석으로 범위를 좁힙니다.</span></li>
+            </ol>
+          </section>
+        </details>
 
         <form id="importForm" class="import-form">
           <div>
@@ -279,13 +314,18 @@
         <div id="detailPanel" class="detail-panel" data-testid="detail-panel">
           <section class="empty-state workbench-empty-state">
             <p class="eyebrow">시작 준비 완료</p>
-            <h2>왼쪽에서 증거를 넣으면 이곳이 결과 작업대로 바뀝니다.</h2>
-            <p>분석 후 요약, 검색, 원본 뷰어, 리뷰 표시, 보고서 후보를 이 화면에서 오가며 확인합니다.</p>
+            <h2>E01/Ex01 이미지 증거부터 넣어도 됩니다.</h2>
+            <p>지원 확인을 누르면 필요한 도구, 파티션 선택, 마운트/추출 필요 여부를 먼저 안내하고 분석 결과는 이 작업대에 열립니다.</p>
+            <div class="empty-state-actions" aria-label="Start actions">
+              <button type="button" data-intake-action="e01">E01/Ex01 이미지 선택</button>
+              <button class="secondary-button" type="button" data-intake-action="folder">마운트/Export 폴더</button>
+              <button class="secondary-button" type="button" data-intake-action="sample">샘플 실행</button>
+            </div>
             <div class="empty-state-steps" aria-label="Main workflow">
-              <span>소스 선택</span>
+              <span>이미지 선택</span>
+              <span>지원 확인</span>
               <span>분석 실행</span>
               <span>검색/뷰어</span>
-              <span>리뷰/보고서</span>
             </div>
           </section>
         </div>
