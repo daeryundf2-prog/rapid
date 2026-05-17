@@ -154,15 +154,15 @@ function renderRunList(runs) {
     button.type = "button";
     button.className = `run-item ${isSelected ? "selected" : ""}`;
     button.title = `${mode} · ${run.run_id} · ${run.status}`;
-    button.setAttribute("aria-label", `Open run ${run.run_id}, mode ${mode}, status ${run.status}`);
+    button.setAttribute("aria-label", `${run.run_id} 케이스 열기, 모드 ${runModeLabel(mode)}, 상태 ${statusLabel(run.status)}`);
     button.innerHTML = `
       <span class="run-item-main">
-        <span class="run-item-kicker">${escapeHtml(mode)} case</span>
+        <span class="run-item-kicker">${escapeHtml(runModeLabel(mode))}</span>
         <strong>${escapeHtml(run.run_id)}</strong>
         <span class="run-item-path">${escapeHtml(run.origin || "web")} · ${escapeHtml(root)}</span>
       </span>
       <span class="run-item-meta">
-        <span class="status-pill ${statusClass(run.status)}">${escapeHtml(run.status)}</span>
+        <span class="status-pill ${statusClass(run.status)}">${escapeHtml(statusLabel(run.status))}</span>
         <span class="run-item-open">${isSelected ? "열림" : "열기"}</span>
       </span>
     `;
@@ -174,17 +174,39 @@ function renderRunList(runs) {
 function renderEmptyRunList() {
   return `
     <section class="empty-state-card">
-      <p class="eyebrow">first run</p>
-      <h3>Start with the sample, then move to real evidence</h3>
-      <p>처음이면 샘플 케이스로 UI 흐름을 익힌 뒤 실제 증거를 넣는 쪽이 가장 안전합니다.</p>
+      <p class="eyebrow">대기 중</p>
+      <h3>아직 열린 케이스가 없습니다</h3>
+      <p>증거 경로를 넣고 분석 실행을 누르거나, 샘플로 먼저 흐름을 확인하세요.</p>
       <div class="command-list">
-        <code>Click “Check runtime” to verify optional tools.</code>
-        <code>Click “Run sample case” to create a safe practice case.</code>
-        <code>Use Import run if you already have rapidtriage output.</code>
+        <code>환경 점검: 선택 도구와 런타임 확인</code>
+        <code>샘플 실행: 안전한 연습 케이스 생성</code>
+        <code>결과 불러오기: 기존 rapidtriage output 연결</code>
       </div>
-      <p class="help-text">Existing run output이 있다면 왼쪽의 Import run으로 바로 불러올 수 있습니다.</p>
     </section>
   `;
+}
+
+function runModeLabel(mode) {
+  const labels = {
+    fraud: "부정/문서",
+    seizure: "전수 수집",
+    hacking: "침해사고",
+    recovery: "복구",
+    case: "케이스",
+  };
+  return labels[String(mode || "").toLowerCase()] || String(mode || "케이스");
+}
+
+function statusLabel(status) {
+  const labels = {
+    completed: "완료",
+    running: "분석 중",
+    queued: "대기",
+    failed: "실패",
+    cancelled: "취소",
+    imported: "불러옴",
+  };
+  return labels[String(status || "").toLowerCase()] || String(status || "상태 없음");
 }
 
 async function loadRunDetail(runId, tab = "summary") {
@@ -1062,13 +1084,15 @@ function renderCaseHero(run) {
   const outputCount = Object.keys(payload.outputs || {}).length;
   const warningCount = Number(processing.warning_count || 0);
   const artifactSignals = FORENSIC_ARTIFACT_TAXONOMY.reduce((sum, item) => sum + artifactGroupCount(payload, item.terms), 0);
-  const headline = warningCount ? "검증 경고를 먼저 확인하세요" : "분석 결과가 리뷰 가능한 상태입니다";
+  const source = run.request.root || payload.output_dir || "Evidence source";
+  const headline = warningCount ? `검증 경고 ${formatNumber(warningCount)}건을 먼저 확인하세요` : "분석 결과가 리뷰 가능한 상태입니다";
   return `
     <section class="case-hero" aria-label="Case mission control" data-testid="case-hero">
       <div class="case-hero-main">
-        <p class="eyebrow">mission control</p>
+        <p class="eyebrow">검토 우선순위</p>
         <h2>${escapeHtml(headline)}</h2>
-        <p>${escapeHtml(run.request.root || payload.output_dir || "Evidence source")}에서 생성된 산출물을 검색, 비교, 검토, 보고서 후보로 바로 연결합니다.</p>
+        <p class="case-source-line"><span>원본</span><code>${escapeHtml(source)}</code></p>
+        <p>검색, 원본 뷰어, 리뷰 표시, 보고서 후보 정리를 이 작업대에서 바로 이어갑니다.</p>
         <div class="case-hero-actions">
           <button type="button" data-open-tab="search" data-testid="hero-search-button">전체 증거 검색</button>
           <button class="secondary-button" type="button" data-open-tab="artifacts" data-testid="hero-artifacts-button">아티팩트 보기</button>
@@ -1076,12 +1100,12 @@ function renderCaseHero(run) {
         </div>
       </div>
       <div class="case-hero-metrics">
-        ${caseHeroMetric("Docs", summary.document_match_count)}
-        ${caseHeroMetric("Files", summary.file_candidate_count)}
-        ${caseHeroMetric("Timeline", summary.timeline_event_count)}
-        ${caseHeroMetric("Artifact map", artifactSignals)}
-        ${caseHeroMetric("Outputs", outputCount)}
-        ${caseHeroMetric("Warnings", warningCount)}
+        ${caseHeroMetric("문서", summary.document_match_count)}
+        ${caseHeroMetric("파일", summary.file_candidate_count)}
+        ${caseHeroMetric("타임라인", summary.timeline_event_count)}
+        ${caseHeroMetric("아티팩트", artifactSignals)}
+        ${caseHeroMetric("산출물", outputCount)}
+        ${caseHeroMetric("경고", warningCount)}
       </div>
     </section>
   `;

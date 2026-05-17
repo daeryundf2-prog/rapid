@@ -123,6 +123,14 @@
           <button id="crashReportsButton" class="secondary-button" type="button" data-testid="crash-reports-button">크래시 로그</button>
         </section>
 
+        <section class="case-queue-shell" aria-label="Case queue">
+          <div class="panel-section-title">
+            <p class="eyebrow">케이스 큐</p>
+            <strong>현재 분석</strong>
+          </div>
+          <div id="runList" class="run-list" data-testid="run-list"></div>
+        </section>
+
         <form id="runForm" class="run-form">
           <label class="root-field">
             증거 폴더 또는 E01 이미지
@@ -268,7 +276,6 @@
           <span><strong>5</strong> 리뷰</span>
           <span><strong>6</strong> 보고서</span>
         </div>
-        <div id="runList" class="run-list" data-testid="run-list"></div>
         <div id="detailPanel" class="detail-panel" data-testid="detail-panel">
           <section class="empty-state workbench-empty-state">
             <p class="eyebrow">시작 준비 완료</p>
