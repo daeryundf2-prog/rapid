@@ -1446,6 +1446,321 @@ def _mobile_vendor_export_validation_command(
     }
 
 
+def _gap_item_numbers(gap_ids: Sequence[str]) -> list[int]:
+    numbers: list[int] = []
+    for gap_id in gap_ids:
+        value = str(gap_id).strip().removeprefix("#")
+        if value.isdigit():
+            number = int(value)
+            if number not in numbers:
+                numbers.append(number)
+    return numbers
+
+
+def _matrix_item_numbers(rows: Sequence[Mapping[str, object]], fallback: Sequence[int]) -> list[int]:
+    numbers = set(fallback)
+    for row in rows:
+        item_number = row.get("item_number")
+        if isinstance(item_number, int):
+            numbers.add(item_number)
+        row_numbers = row.get("item_numbers")
+        if isinstance(row_numbers, Sequence) and not isinstance(row_numbers, (str, bytes)):
+            numbers.update(int(number) for number in row_numbers if isinstance(number, int))
+    return sorted(numbers)
+
+
+def _mobile_matrix_status(complete: bool, observed: bool) -> str:
+    if complete:
+        return "validated"
+    if observed:
+        return "observed-validation-required"
+    return "supported-not-observed"
+
+
+def build_mobile_schema_compatibility_matrix(
+    *,
+    artifact_type: str,
+    source_tool: str,
+    source_format: str,
+    source_index: int,
+    source_hashes: Mapping[str, str],
+    source_path: Path,
+    details: Mapping[str, object],
+    gap_ids: Sequence[str],
+) -> dict[str, object]:
+    service = optional_text(details.get("service"))
+    profile = chat_app_profile(service) if service else None
+    source_profile = (
+        details.get("mobile_export_source_profile")
+        if isinstance(details.get("mobile_export_source_profile"), Mapping)
+        else {}
+    )
+    vendor_manifest = (
+        details.get("vendor_export_manifest_profile")
+        if isinstance(details.get("vendor_export_manifest_profile"), Mapping)
+        else {}
+    )
+    mapper_manifest = (
+        details.get("mobile_vendor_schema_mapper_manifest")
+        if isinstance(details.get("mobile_vendor_schema_mapper_manifest"), Mapping)
+        else {}
+    )
+    validation_plan = (
+        details.get("mobile_vendor_export_validation_plan")
+        if isinstance(details.get("mobile_vendor_export_validation_plan"), Mapping)
+        else {}
+    )
+    validation_checks = details.get("validation_checks") if isinstance(details.get("validation_checks"), Mapping) else {}
+    matrix_rows: list[dict[str, object]] = []
+    base_item_numbers = _gap_item_numbers(gap_ids)
+
+    if "#26" in gap_ids:
+        observed_artifacts = (
+            source_profile.get("detected_artifact_types")
+            if isinstance(source_profile.get("detected_artifact_types"), list)
+            else []
+        )
+        registry_profile = source_profile.get("vendor_schema_registry_profile")
+        schema_versions: list[str] = []
+        if isinstance(registry_profile, Mapping):
+            raw_versions = registry_profile.get("schema_versions")
+            if isinstance(raw_versions, list):
+                schema_versions = [optional_text(value) for value in raw_versions if optional_text(value)]
+        for vendor, registry in sorted(VENDOR_SCHEMA_REGISTRY.items()):
+            observed_vendor = vendor == source_tool
+            metadata_complete = observed_vendor and all(
+                bool(vendor_manifest.get(key))
+                for key in ("vendor_tool_version", "source_hash_matches_manifest", "original_acquisition_hash_present")
+            )
+            matrix_rows.append(
+                {
+                    "row_id": f"vendor-export:{vendor}",
+                    "scope": "vendor-export",
+                    "item_number": 26,
+                    "target": vendor,
+                    "vendor_family": optional_text(registry.get("family") or vendor),
+                    "observed_in_source": observed_vendor,
+                    "source_tool_version": optional_text(
+                        vendor_manifest.get("vendor_tool_version") or source_profile.get("vendor_tool_version")
+                    )
+                    if observed_vendor
+                    else "",
+                    "schema_versions": schema_versions if observed_vendor else [],
+                    "source_format": source_format if observed_vendor else "",
+                    "required_export_metadata": list(registry.get("required_export_metadata", ())),
+                    "metadata_linkage_complete": bool(metadata_complete),
+                    "expected_artifact_families": list(registry.get("expected_artifacts", ())),
+                    "observed_artifact_types": observed_artifacts if observed_vendor else [],
+                    "mapper_manifest_sha256": optional_text(mapper_manifest.get("manifest_sha256")) if observed_vendor else "",
+                    "validation_plan_sha256": optional_text(validation_plan.get("manifest_sha256")) if observed_vendor else "",
+                    "known_answer_validated": False,
+                    "commercial_grade_ready": False,
+                    "status": _mobile_matrix_status(False, observed_vendor),
+                    "blockers": [
+                        "per-vendor-version-schema-fixtures-required",
+                        "trusted-vendor-mobile-export-diff-required",
+                    ],
+                }
+            )
+        artifact_mappers = mapper_manifest.get("artifact_mappers")
+        if isinstance(artifact_mappers, list):
+            for mapper in artifact_mappers:
+                if not isinstance(mapper, Mapping):
+                    continue
+                observed_mapper = bool(mapper.get("observed"))
+                matrix_rows.append(
+                    {
+                        "row_id": f"vendor-mapper:{optional_text(mapper.get('family'))}",
+                        "scope": "vendor-artifact-mapper",
+                        "item_number": 26,
+                        "target": optional_text(mapper.get("family")),
+                        "output_artifact_type": optional_text(mapper.get("output_artifact_type")),
+                        "observed_in_source": observed_mapper,
+                        "normalized_row_count": int(mapper.get("normalized_row_count") or 0),
+                        "semantic_fields": list(mapper.get("semantic_fields", ())),
+                        "known_answer_validated": False,
+                        "commercial_grade_ready": False,
+                        "status": _mobile_matrix_status(False, observed_mapper),
+                        "blockers": [
+                            "mapper-field-semantics-known-answer-required",
+                            "deleted-record-semantics-known-answer-required",
+                        ],
+                    }
+                )
+
+    if artifact_type in {"ios-backup-file", "ios-backup-source", "ios-backup-metadata", "ios-keychain-inventory"}:
+        root_profile = details.get("ios_backup_root_profile") if isinstance(details.get("ios_backup_root_profile"), Mapping) else {}
+        scope_profile = details.get("ios_backup_scope_profile") if isinstance(details.get("ios_backup_scope_profile"), Mapping) else {}
+        is_keychain = artifact_type == "ios-keychain-inventory"
+        matrix_rows.append(
+            {
+                "row_id": "ios-backup:manifest-db",
+                "scope": "ios-backup",
+                "item_number": 27,
+                "target": "Manifest.db / Info.plist / Status.plist",
+                "observed_in_source": artifact_type != "ios-keychain-inventory",
+                "product_version": optional_text(root_profile.get("product_version") or details.get("product_version")),
+                "manifest_row_count": int(scope_profile.get("manifest_row_count") or details.get("manifest_row_count") or 0),
+                "required_files_present": bool(root_profile.get("required_files_present") or validation_checks.get("required_backup_files_present")),
+                "encrypted_backup_unlocked": bool(validation_checks.get("encrypted_backup_unlocked")),
+                "commercial_grade_ready": False,
+                "status": _mobile_matrix_status(False, artifact_type != "ios-keychain-inventory"),
+                "blockers": [
+                    "trusted-ios-backup-parser-diff-required",
+                    "encrypted-backup-authority-review-required",
+                ],
+            }
+        )
+        matrix_rows.append(
+            {
+                "row_id": "ios-keychain:redacted-inventory",
+                "scope": "ios-keychain",
+                "item_number": 28,
+                "target": "keychain inventory",
+                "observed_in_source": is_keychain or bool(root_profile.get("keychain_file")),
+                "values_redacted": bool(validation_checks.get("values_redacted", True)),
+                "secrets_extracted": bool(validation_checks.get("secrets_extracted")),
+                "lawful_authority_gate_required": True,
+                "commercial_grade_ready": False,
+                "status": _mobile_matrix_status(False, is_keychain or bool(root_profile.get("keychain_file"))),
+                "blockers": [
+                    "trusted-ios-keychain-inventory-diff-required",
+                    "lawful-authority-and-controlled-reveal-audit-required",
+                ],
+            }
+        )
+
+    if artifact_type == "mobile-app":
+        package = optional_text(details.get("package") or details.get("bundle_id") or details.get("bundle") or details.get("app_id"))
+        matrix_rows.append(
+            {
+                "row_id": f"android-app-package:{package or 'unknown'}",
+                "scope": "android-app-or-ios-bundle",
+                "item_numbers": [29, 30],
+                "target": package or optional_text(details.get("app_name") or "unknown"),
+                "observed_in_source": True,
+                "app_version": optional_text(details.get("version") or details.get("app_version")),
+                "apk_or_app_data_inventory": True,
+                "native_app_database_decoded": False,
+                "permission_risk_model_present": bool(details.get("risk_flags")),
+                "commercial_grade_ready": False,
+                "status": "inventory-only-validation-required",
+                "blockers": [
+                    "android-backup-artifact-known-answer-required",
+                    "apk-binary-manifest-and-data-schema-validation-required",
+                ],
+            }
+        )
+
+    if service:
+        selected_services = {
+            "KakaoTalk",
+            "WhatsApp",
+            "Telegram",
+            "Signal",
+            "LINE",
+            "Discord",
+            "Instagram",
+            "WeChat",
+        }
+        for chat_profile in CHAT_APP_PROFILES:
+            chat_service = optional_text(chat_profile.get("service"))
+            if chat_service not in selected_services and chat_service != service:
+                continue
+            observed_chat = chat_service == service
+            chat_gap_ids = chat_app_gap_ids(chat_service)
+            blockers = chat_app_blockers(chat_service)
+            if chat_service == "KakaoTalk":
+                blockers = sorted(
+                    {
+                        *blockers,
+                        "post-bigbang-known-answer-corpus-required",
+                        "kakaotalk-version-and-memory-key-boundary-validation-required",
+                    }
+                )
+            matrix_rows.append(
+                {
+                    "row_id": f"messenger-service:{service_family(chat_service)}",
+                    "scope": "messenger-service",
+                    "item_numbers": _gap_item_numbers(chat_gap_ids),
+                    "target": chat_service,
+                    "observed_in_source": observed_chat,
+                    "aliases": list(chat_profile.get("aliases", ())),
+                    "message_tables": list(chat_profile.get("message_tables", ())),
+                    "source_tool": source_tool if observed_chat else "",
+                    "app_version": optional_text(details.get("app_version")) if observed_chat else "",
+                    "schema_version": optional_text(details.get("schema_version")) if observed_chat else "",
+                    "strategy_track": optional_text(
+                        (details.get("chat_app_strategy_profile") or {}).get("selected_track")
+                        if isinstance(details.get("chat_app_strategy_profile"), Mapping)
+                        else ""
+                    )
+                    if observed_chat
+                    else "supported-profile",
+                    "row_citation_present": bool(details.get("source_record_id") or source_index is not None) if observed_chat else False,
+                    "known_answer_validated": False,
+                    "commercial_grade_ready": False,
+                    "status": _mobile_matrix_status(False, observed_chat),
+                    "blockers": blockers,
+                }
+            )
+
+    row_item_numbers = _matrix_item_numbers(matrix_rows, base_item_numbers)
+    row_blockers = sorted(
+        {
+            str(blocker)
+            for row in matrix_rows
+            for blocker in row.get("blockers", [])
+            if isinstance(blocker, str) and blocker
+        }
+    )
+    scope = "mobile-record"
+    if artifact_type == "mobile-export-source":
+        scope = "vendor-export-source"
+    elif service:
+        scope = "messenger-service"
+    elif artifact_type.startswith("ios-"):
+        scope = "ios-backup-or-keychain"
+    elif artifact_type == "mobile-app":
+        scope = "mobile-app-package"
+    matrix: dict[str, object] = {
+        "profile_version": "mobile-schema-compatibility-matrix-v1",
+        "scope": scope,
+        "artifact_type": artifact_type,
+        "source_tool": source_tool,
+        "source_format": source_format,
+        "source_index": source_index,
+        "source_path": str(source_path.resolve()),
+        "source_sha256": optional_text(source_hashes.get("sha256")),
+        "gap_ids": list(gap_ids),
+        "item_numbers": row_item_numbers,
+        "service": service,
+        "known_service_profile": profile is not None if service else False,
+        "matrix_row_count": len(matrix_rows),
+        "matrix_rows": matrix_rows,
+        "coverage": {
+            "vendor_export_rows": sum(1 for row in matrix_rows if row.get("scope") == "vendor-export"),
+            "vendor_mapper_rows": sum(1 for row in matrix_rows if row.get("scope") == "vendor-artifact-mapper"),
+            "messenger_service_rows": sum(1 for row in matrix_rows if row.get("scope") == "messenger-service"),
+            "backup_or_keychain_rows": sum(1 for row in matrix_rows if str(row.get("scope", "")).startswith("ios-")),
+            "android_or_app_rows": sum(1 for row in matrix_rows if row.get("scope") == "android-app-or-ios-bundle"),
+            "observed_row_count": sum(1 for row in matrix_rows if row.get("observed_in_source")),
+            "commercial_grade_row_count": sum(1 for row in matrix_rows if row.get("commercial_grade_ready")),
+        },
+        "reportability_decision": {
+            "decision": "do-not-report-mobile-schema-as-commercial-complete",
+            "allowed_use": "triage-schema-version-and-source-review-pivot",
+            "blockers": row_blockers,
+        },
+        "commercial_grade_ready": False,
+        "ready_for_court_report": False,
+    }
+    matrix["manifest_sha256"] = stable_mobile_sha256(
+        {key: value for key, value in matrix.items() if key != "manifest_sha256"}
+    )
+    return matrix
+
+
 def build_record(
     path: Path,
     *,
@@ -1687,6 +2002,40 @@ def build_record(
         detail_payload.setdefault(
             "ios_backup_parser_manifest_hash",
             detail_payload["ios_backup_parser_manifest"]["manifest_sha256"],
+        )
+    schema_gap_ids = list(dict.fromkeys([*gap_ids, *(chat_app_gap_ids(service) if service else [])]))
+    schema_compatibility_matrix = build_mobile_schema_compatibility_matrix(
+        artifact_type=artifact_type,
+        source_tool=source_tool,
+        source_format=source_format,
+        source_index=source_index,
+        source_hashes=source_hashes,
+        source_path=path,
+        details=detail_payload,
+        gap_ids=schema_gap_ids,
+    )
+    detail_payload.setdefault("mobile_schema_compatibility_matrix", schema_compatibility_matrix)
+    detail_payload.setdefault(
+        "mobile_schema_compatibility_matrix_hash",
+        schema_compatibility_matrix["manifest_sha256"],
+    )
+    if "#26" in schema_gap_ids:
+        detail_payload.setdefault("mobile_vendor_schema_compatibility_matrix", schema_compatibility_matrix)
+        detail_payload.setdefault(
+            "mobile_vendor_schema_compatibility_matrix_hash",
+            schema_compatibility_matrix["manifest_sha256"],
+        )
+    if service:
+        detail_payload.setdefault("messenger_schema_compatibility_matrix", schema_compatibility_matrix)
+        detail_payload.setdefault(
+            "messenger_schema_compatibility_matrix_hash",
+            schema_compatibility_matrix["manifest_sha256"],
+        )
+    if any(gap_id in schema_gap_ids for gap_id in ("#27", "#28")):
+        detail_payload.setdefault("mobile_backup_schema_compatibility_matrix", schema_compatibility_matrix)
+        detail_payload.setdefault(
+            "mobile_backup_schema_compatibility_matrix_hash",
+            schema_compatibility_matrix["manifest_sha256"],
         )
     validation_checks = detail_payload.get("validation_checks")
     if not isinstance(validation_checks, Mapping):
@@ -9366,6 +9715,11 @@ def mobile_core_accuracy_gates(
         plan_hash = optional_text(vendor_validation_plan.get("manifest_sha256"))
         if plan_hash:
             evidence_refs.append(f"mobile_vendor_export_validation_plan_sha256:{plan_hash}")
+    schema_matrix = details.get("mobile_schema_compatibility_matrix")
+    if isinstance(schema_matrix, Mapping):
+        matrix_hash = optional_text(schema_matrix.get("manifest_sha256"))
+        if matrix_hash:
+            evidence_refs.append(f"mobile_schema_compatibility_matrix_sha256:{matrix_hash}")
     record_id = source_record_id(details, source_index)
     if record_id:
         evidence_refs.append(f"source_record_id:{record_id}")
@@ -9425,6 +9779,8 @@ def mobile_core_accuracy_gates(
             satisfied.append("vendor export validation plan")
             if vendor_validation_plan.get("ready_slot_ids"):
                 satisfied.append("vendor export validation ready slots")
+        if isinstance(schema_matrix, Mapping) and schema_matrix.get("matrix_rows"):
+            satisfied.append("mobile schema compatibility matrix")
         if trusted_diff.get("status") == "pass":
             satisfied.append("trusted vendor mobile export diff pass")
         gates.append(build_accuracy_gate(26, satisfied_checks=satisfied, evidence_refs=evidence_refs))
@@ -9449,6 +9805,8 @@ def mobile_core_accuracy_gates(
             satisfied.append("iOS backup report-grade validation plan")
             if ios_validation_plan.get("ready_slot_ids"):
                 satisfied.append("iOS backup validation ready slots")
+        if isinstance(schema_matrix, Mapping) and schema_matrix.get("matrix_rows"):
+            satisfied.append("mobile schema compatibility matrix")
         if artifact_type == "ios-backup-source" and validation.get("manifest_db_present"):
             satisfied.append("Manifest.db domain/fileID mapping")
         if artifact_type == "ios-backup-metadata" and validation.get("plist_parseable"):
@@ -9764,6 +10122,11 @@ def chat_app_core_accuracy_gates(
         validation_plan_hash = optional_text(extended_messenger_validation_plan.get("manifest_sha256"))
         if validation_plan_hash:
             evidence_refs.append(f"extended_messenger_report_grade_validation_plan_sha256:{validation_plan_hash}")
+    messenger_schema_matrix = details.get("messenger_schema_compatibility_matrix")
+    if isinstance(messenger_schema_matrix, Mapping):
+        matrix_hash = optional_text(messenger_schema_matrix.get("manifest_sha256"))
+        if matrix_hash:
+            evidence_refs.append(f"messenger_schema_compatibility_matrix_sha256:{matrix_hash}")
     validation = details.get("validation_checks") if isinstance(details.get("validation_checks"), Mapping) else {}
     trusted_diff = details.get("chat_app_trusted_diff") if isinstance(details.get("chat_app_trusted_diff"), Mapping) else {}
     issue_ids = {
@@ -9783,6 +10146,8 @@ def chat_app_core_accuracy_gates(
                 satisfied.append("messenger source row citation")
             if manifest.get("table_citation_count"):
                 satisfied.append("messenger table citation inventory")
+        if isinstance(messenger_schema_matrix, Mapping) and messenger_schema_matrix.get("matrix_rows"):
+            satisfied.append("messenger schema compatibility matrix")
         if service and details.get("chat_app_scope_profile", {}).get("known_profile"):
             label = {
                 31: "KakaoTalk service/profile detection",

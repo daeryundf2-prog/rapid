@@ -292,6 +292,30 @@ class RapidTriageMobileExportTests(unittest.TestCase):
                 "mobile-vendor-schema-mapper-manifest-emitted",
                 source_functional_profile["passed_validation_check_ids"],
             )
+            vendor_matrix = source_record["details"]["mobile_vendor_schema_compatibility_matrix"]
+            self.assertEqual(vendor_matrix["profile_version"], "mobile-schema-compatibility-matrix-v1")
+            self.assertEqual(vendor_matrix["scope"], "vendor-export-source")
+            self.assertIn(26, vendor_matrix["item_numbers"])
+            self.assertEqual(
+                source_record["details"]["mobile_vendor_schema_compatibility_matrix_hash"],
+                vendor_matrix["manifest_sha256"],
+            )
+            self.assertEqual(
+                source_record["details"]["mobile_schema_compatibility_matrix_hash"],
+                vendor_matrix["manifest_sha256"],
+            )
+            vendor_rows = {row["row_id"]: row for row in vendor_matrix["matrix_rows"]}
+            self.assertTrue(vendor_rows["vendor-export:cellebrite"]["observed_in_source"])
+            self.assertEqual(vendor_rows["vendor-export:cellebrite"]["source_tool_version"], "7.66")
+            self.assertTrue(vendor_rows["vendor-export:cellebrite"]["metadata_linkage_complete"])
+            self.assertIn("messages", vendor_rows["vendor-export:cellebrite"]["expected_artifact_families"])
+            self.assertFalse(vendor_rows["vendor-export:axiom"]["observed_in_source"])
+            self.assertTrue(vendor_rows["vendor-mapper:messages"]["observed_in_source"])
+            self.assertIn(
+                "trusted-vendor-mobile-export-diff-required",
+                vendor_matrix["reportability_decision"]["blockers"],
+            )
+            self.assertIn("mobile schema compatibility matrix", source_gate["satisfied_checks"])
 
             chat_messages = [
                 artifact
@@ -443,6 +467,25 @@ class RapidTriageMobileExportTests(unittest.TestCase):
             self.assertTrue(kakao_manifest["large_data_controls"]["text_values_hash_only_by_default"])
             self.assertIn("messenger export framework manifest", kakao_gate["satisfied_checks"])
             self.assertIn("messenger source row citation", kakao_gate["satisfied_checks"])
+            kakao_matrix = kakao["details"]["messenger_schema_compatibility_matrix"]
+            self.assertEqual(kakao_matrix["profile_version"], "mobile-schema-compatibility-matrix-v1")
+            self.assertEqual(kakao_matrix["scope"], "messenger-service")
+            self.assertIn(31, kakao_matrix["item_numbers"])
+            self.assertEqual(
+                kakao["details"]["messenger_schema_compatibility_matrix_hash"],
+                kakao_matrix["manifest_sha256"],
+            )
+            self.assertEqual(
+                kakao["details"]["mobile_schema_compatibility_matrix_hash"],
+                kakao_matrix["manifest_sha256"],
+            )
+            messenger_rows = {row["target"]: row for row in kakao_matrix["matrix_rows"] if row["scope"] == "messenger-service"}
+            self.assertTrue(messenger_rows["KakaoTalk"]["observed_in_source"])
+            self.assertEqual(messenger_rows["KakaoTalk"]["app_version"], "25.7.2")
+            self.assertIn("post-bigbang-known-answer-corpus-required", messenger_rows["KakaoTalk"]["blockers"])
+            self.assertIn("WhatsApp", messenger_rows)
+            self.assertFalse(kakao_matrix["commercial_grade_ready"])
+            self.assertIn("messenger schema compatibility matrix", kakao_gate["satisfied_checks"])
             kakao_uplift = kakao["details"]["chat_app_commercial_uplift_evidence"]
             self.assertEqual(kakao_uplift["batch_id"], "commercial-uplift-031-035")
             self.assertEqual(kakao_uplift["item_numbers"], [31])
@@ -1313,6 +1356,15 @@ class RapidTriageMobileExportTests(unittest.TestCase):
             self.assertIn("ai-service-app", app["details"]["risk_flags"])
             self.assertFalse(app["details"]["commercial_grade_ready"])
             self.assertIn("validation_checks", app["details"])
+            app_matrix = app["details"]["mobile_schema_compatibility_matrix"]
+            self.assertEqual(app_matrix["scope"], "mobile-app-package")
+            self.assertIn(29, app_matrix["item_numbers"])
+            self.assertIn(30, app_matrix["item_numbers"])
+            self.assertEqual(app_matrix["coverage"]["android_or_app_rows"], 1)
+            app_matrix_rows = {row["scope"]: row for row in app_matrix["matrix_rows"]}
+            self.assertEqual(app_matrix_rows["android-app-or-ios-bundle"]["target"], "ai.openai.chatgpt")
+            self.assertEqual(app_matrix_rows["android-app-or-ios-bundle"]["app_version"], "2.0")
+            self.assertFalse(app_matrix_rows["android-app-or-ios-bundle"]["native_app_database_decoded"])
 
             browser = next(artifact for artifact in payload["artifacts"] if artifact["artifact_type"] == "mobile-browser")
             self.assertEqual(browser["details"]["url"], "https://chatgpt.com/c/example")
@@ -1506,6 +1558,21 @@ class RapidTriageMobileExportTests(unittest.TestCase):
                 "ios-backup-report-grade-validation-plan-emitted",
                 source_ios_profiles[53]["passed_validation_check_ids"],
             )
+            ios_matrix = ios_source["details"]["mobile_backup_schema_compatibility_matrix"]
+            self.assertEqual(ios_matrix["profile_version"], "mobile-schema-compatibility-matrix-v1")
+            self.assertEqual(ios_matrix["scope"], "ios-backup-or-keychain")
+            self.assertIn(27, ios_matrix["item_numbers"])
+            self.assertIn(28, ios_matrix["item_numbers"])
+            self.assertEqual(
+                ios_source["details"]["mobile_backup_schema_compatibility_matrix_hash"],
+                ios_matrix["manifest_sha256"],
+            )
+            ios_rows = {row["row_id"]: row for row in ios_matrix["matrix_rows"]}
+            self.assertTrue(ios_rows["ios-backup:manifest-db"]["observed_in_source"])
+            self.assertEqual(ios_rows["ios-backup:manifest-db"]["product_version"], "18.4")
+            self.assertTrue(ios_rows["ios-backup:manifest-db"]["required_files_present"])
+            self.assertTrue(ios_rows["ios-keychain:redacted-inventory"]["observed_in_source"])
+            self.assertFalse(ios_matrix["commercial_grade_ready"])
 
             keychain = next(artifact for artifact in payload["artifacts"] if artifact["artifact_type"] == "ios-keychain-inventory")
             self.assertFalse(keychain["details"]["validation_checks"]["secrets_extracted"])
