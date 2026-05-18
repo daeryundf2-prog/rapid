@@ -16,8 +16,10 @@ from rapidtriage.artifacts.windows.eventlog import (
     event_semantics_profile,
     load_event_message_catalog,
     NativeEvtxRecordCandidate,
+    native_evtx_binxml_grammar_coverage_profile,
     native_evtx_commercial_uplift_evidence,
     native_evtx_core_accuracy_gates,
+    native_evtx_native_parse_profile,
     native_evtx_promoted_fields,
     native_evtx_record_candidate_record,
     parse_native_evtx_binxml,
@@ -3749,6 +3751,64 @@ class RapidTriageWindowsArtifactsCollectorTests(unittest.TestCase):
             ["alice", "10.0.0.5", "10.0.0.6"],
         )
 
+    def test_native_evtx_binxml_grammar_coverage_profile_tracks_unsupported_surface(self) -> None:
+        profile = native_evtx_binxml_grammar_coverage_profile(
+            {
+                "status": "partial-tokenized",
+                "token_counts": [
+                    {"value": "FragmentHeaderToken", "count": 1},
+                    {"value": "ValueTextToken", "count": 2},
+                    {"value": "UnknownToken0xff", "count": 1},
+                ],
+                "decoded_value_type_counts": [
+                    {"value": "StringType", "count": 2},
+                    {"value": "TemplateInstance", "count": 1},
+                    {"value": "UnknownType0x22", "count": 1},
+                ],
+                "elements": [{"name": "Event"}],
+                "value_fields": [
+                    {"value_type": "StringType", "text": "alice"},
+                    {"value_type": "BinXmlType", "nested_binxml": {"status": "basic-rendered"}},
+                ],
+                "template_value_count": 1,
+                "template_substitution_count": 1,
+                "unsupported_token_count": 1,
+                "warnings": ["unsupported-token:0xff@4"],
+            }
+        )
+
+        self.assertEqual(profile["profile_version"], "evtx-binxml-grammar-coverage-v1")
+        self.assertIn("UnknownToken0xff", profile["unsupported_token_names"])
+        self.assertEqual(profile["unsupported_token_count"], 1)
+        self.assertIn("UnknownType0x22", profile["unknown_value_types"])
+        self.assertEqual(profile["nested_binxml_value_count"], 1)
+        self.assertIn("full-binxml-object-model-not-implemented", profile["commercial_blockers"])
+        self.assertFalse(profile["reportability_decision"]["ready_for_final_report"])
+
+    def test_native_evtx_parse_profile_includes_grammar_coverage_summary(self) -> None:
+        grammar_profile = native_evtx_binxml_grammar_coverage_profile(
+            {
+                "status": "basic-rendered",
+                "token_counts": [{"value": "FragmentHeaderToken", "count": 1}],
+                "decoded_value_type_counts": [{"value": "StringType", "count": 1}],
+                "value_fields": [{"value_type": "StringType", "text": "alice"}],
+            }
+        )
+
+        profile = native_evtx_native_parse_profile(
+            {
+                "evtx_binxml_status": "basic-rendered",
+                "evtx_binxml": {"value_fields": [{"value_type": "StringType", "text": "alice"}]},
+                "evtx_binxml_grammar_coverage_profile": grammar_profile,
+                "evtx_binxml_grammar_coverage_profile_hash": "b" * 64,
+            }
+        )
+
+        self.assertEqual(profile["grammar_coverage"]["profile_hash"], "b" * 64)
+        self.assertEqual(profile["grammar_coverage"]["observed_token_count"], 1)
+        self.assertEqual(profile["grammar_coverage"]["unsupported_token_count"], 0)
+        self.assertEqual(profile["grammar_coverage"]["unknown_value_types"], [])
+
     def test_native_evtx_core_accuracy_gates_track_report_grade_blockers(self) -> None:
         gates = native_evtx_core_accuracy_gates(
             {
@@ -3769,6 +3829,10 @@ class RapidTriageWindowsArtifactsCollectorTests(unittest.TestCase):
                 "evtx_validation_checks": {
                     "declared_size_valid": True,
                     "decoded_value_type_counts": {"StringType": 2},
+                },
+                "evtx_binxml_grammar_coverage_profile": {
+                    "observed_token_count": 4,
+                    "unsupported_token_count": 0,
                 },
                 "evtx_validation_matrix": [
                     {"id": "chunk-context", "passed": True},
@@ -3819,6 +3883,8 @@ class RapidTriageWindowsArtifactsCollectorTests(unittest.TestCase):
         by_gap = {gate["gap_id"]: gate for gate in gates}
         self.assertEqual(set(by_gap), {"#1", "#2", "#3"})
         self.assertIn("duplicate EventData order preservation", by_gap["#1"]["satisfied_checks"])
+        self.assertIn("BinXML grammar coverage profile", by_gap["#1"]["satisfied_checks"])
+        self.assertIn("known BinXML token coverage", by_gap["#1"]["satisfied_checks"])
         self.assertIn("trusted-tool record-level diff pass", by_gap["#1"]["satisfied_checks"])
         self.assertIn("message text normalization", by_gap["#2"]["satisfied_checks"])
         self.assertIn("inserted parameter mapping", by_gap["#2"]["satisfied_checks"])

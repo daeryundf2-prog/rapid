@@ -19,7 +19,7 @@ from ...core.forensic_accuracy import build_accuracy_gate
 from ...core.models import ArtifactRecord
 
 EVENT_LOG_ROOT = ("Windows", "System32", "winevt", "Logs")
-PARSER_VERSION = "eventlog-normalized-v20"
+PARSER_VERSION = "eventlog-normalized-v21"
 BUILTIN_RULEPACK_VERSION = "eventlog-builtin-rules-v2"
 EVENT_EXPORT_SUFFIXES = {".xml", ".json", ".jsonl", ".ndjson", ".csv"}
 ETL_SUFFIXES = {".etl"}
@@ -128,6 +128,18 @@ NATIVE_EVTX_CAPABILITIES = {
         "HexInt32Type",
         "HexInt64Type",
     ],
+}
+NATIVE_EVTX_GRAMMAR_PROFILE_VERSION = "evtx-binxml-grammar-coverage-v1"
+NATIVE_EVTX_VALIDATED_VALUE_TYPES = set(NATIVE_EVTX_CAPABILITIES["validated_value_types"])
+NATIVE_EVTX_TRIAGE_VALUE_TYPES = {
+    "NullType",
+    "BinXmlType",
+    "TemplateInstance",
+    "CDataSection",
+    "CharacterReference",
+    "EntityReference",
+    "ProcessingInstructionTarget",
+    "ProcessingInstructionData",
 }
 
 EVENT_ID_CATEGORIES = {
@@ -1522,6 +1534,7 @@ def collect_native_evtx_events(
                 timestamp = filetime_to_iso(read_u64(record_blob, 16))
                 payload = record_blob[EVTX_RECORD_HEADER_SIZE:]
                 binxml = parse_native_evtx_binxml(payload)
+                grammar_profile = native_evtx_binxml_grammar_coverage_profile(binxml)
                 binxml_promoted = native_evtx_promoted_fields(binxml)
                 extracted_strings = extract_utf16le_strings(payload)
                 binxml_strings = [str(item.get("text") or "") for item in binxml.get("value_fields", []) if item.get("text")]
@@ -1568,6 +1581,8 @@ def collect_native_evtx_events(
                         binxml,
                     ),
                     "evtx_binxml": binxml,
+                    "evtx_binxml_grammar_coverage_profile": grammar_profile,
+                    "evtx_binxml_grammar_coverage_profile_hash": stable_eventlog_json_sha256(grammar_profile),
                     "binxml_system_fields": dict(binxml_promoted.get("system_fields") or {}),
                     "binxml_event_data_fields": dict(binxml_promoted.get("event_data_fields") or {}),
                     "binxml_event_data_sequence": list(binxml_promoted.get("event_data_sequence") or []),
@@ -2270,8 +2285,111 @@ def native_evtx_record_provenance(details: Mapping[str, object]) -> dict[str, ob
     }
 
 
+def native_evtx_binxml_grammar_coverage_profile(binxml: Mapping[str, object]) -> dict[str, object]:
+    token_rows = binxml.get("token_counts") if isinstance(binxml.get("token_counts"), list) else []
+    value_rows = binxml.get("decoded_value_type_counts") if isinstance(binxml.get("decoded_value_type_counts"), list) else []
+    value_fields = binxml.get("value_fields") if isinstance(binxml.get("value_fields"), list) else []
+    warnings = [str(item) for item in binxml.get("warnings", []) if str(item)] if isinstance(binxml.get("warnings"), list) else []
+
+    observed_tokens: Counter[str] = Counter()
+    unsupported_tokens: Counter[str] = Counter()
+    for row in token_rows:
+        if not isinstance(row, Mapping):
+            continue
+        token_name = str(row.get("value") or row.get("token") or row.get("name") or "")
+        if not token_name:
+            continue
+        count = int(row.get("count") or 0)
+        observed_tokens[token_name] += count
+        if token_name.startswith("UnknownToken"):
+            unsupported_tokens[token_name] += count
+
+    for warning in warnings:
+        match = re.search(r"unsupported-(?:misc-)?token:(0x[0-9a-fA-F]+)@", warning)
+        if match:
+            token_name = f"UnknownToken{match.group(1).lower()}"
+            unsupported_tokens[token_name] = max(unsupported_tokens[token_name], 1)
+
+    decoded_value_types: Counter[str] = Counter()
+    for row in value_rows:
+        if not isinstance(row, Mapping):
+            continue
+        value_type = str(row.get("value") or row.get("value_type") or "")
+        if value_type:
+            decoded_value_types[value_type] += int(row.get("count") or 0)
+    if not decoded_value_types:
+        for field in value_fields:
+            if isinstance(field, Mapping) and field.get("value_type"):
+                decoded_value_types[str(field.get("value_type"))] += 1
+
+    supported_value_types = NATIVE_EVTX_VALIDATED_VALUE_TYPES | NATIVE_EVTX_TRIAGE_VALUE_TYPES
+    unknown_value_types = sorted(
+        value_type
+        for value_type in decoded_value_types
+        if value_type.startswith("UnknownType")
+        or value_type.startswith("unsupported-type")
+        or value_type.startswith("truncated")
+        or value_type.startswith("missing-")
+    )
+    unvalidated_value_types = sorted(
+        value_type
+        for value_type in decoded_value_types
+        if value_type not in supported_value_types and value_type not in unknown_value_types
+    )
+    nested_binxml_count = sum(
+        1
+        for field in value_fields
+        if isinstance(field, Mapping) and isinstance(field.get("nested_binxml"), Mapping)
+    )
+    unsupported_token_count = max(int(binxml.get("unsupported_token_count") or 0), sum(unsupported_tokens.values()))
+    blockers = ["trusted-tool-record-diff-required"]
+    if unsupported_token_count or unknown_value_types:
+        blockers.append("full-binxml-object-model-not-implemented")
+    if unvalidated_value_types:
+        blockers.append("binxml-value-type-validation-required")
+    if str(binxml.get("status") or "") not in {"basic-rendered", "template-substituted-partial"}:
+        blockers.append("binxml-field-decode-incomplete")
+
+    return {
+        "profile_version": NATIVE_EVTX_GRAMMAR_PROFILE_VERSION,
+        "parse_scope": NATIVE_EVTX_PARSE_SCOPE,
+        "binxml_status": str(binxml.get("status") or ""),
+        "observed_token_names": sorted(observed_tokens),
+        "observed_token_count": sum(observed_tokens.values()),
+        "unsupported_token_names": sorted(unsupported_tokens),
+        "unsupported_token_count": unsupported_token_count,
+        "decoded_value_type_counts": counter_items(decoded_value_types),
+        "validated_value_types": sorted(NATIVE_EVTX_VALIDATED_VALUE_TYPES),
+        "triage_value_types": sorted(NATIVE_EVTX_TRIAGE_VALUE_TYPES),
+        "unknown_value_types": unknown_value_types,
+        "unvalidated_value_types": unvalidated_value_types,
+        "element_count": len(binxml.get("elements") or []) if isinstance(binxml.get("elements"), list) else 0,
+        "value_field_count": len(value_fields),
+        "template_value_count": int(binxml.get("template_value_count") or 0),
+        "template_substitution_count": int(binxml.get("template_substitution_count") or 0),
+        "nested_binxml_value_count": nested_binxml_count,
+        "warnings": warnings[:25],
+        "commercial_blockers": sorted(set(blockers)),
+        "reportability_decision": {
+            "decision": "binxml-grammar-triage-profile",
+            "allowed_use": "parser-coverage-review-and-row-filtering",
+            "ready_for_final_report": False,
+            "required_before_report": [
+                "unsupported-token count is zero on the target corpus",
+                "all observed value types are covered by known-answer fixtures",
+                "record-level trusted-tool diff passes for the same EVTX rows",
+            ],
+        },
+    }
+
+
 def native_evtx_native_parse_profile(details: Mapping[str, object]) -> dict[str, object]:
     binxml = details.get("evtx_binxml") if isinstance(details.get("evtx_binxml"), Mapping) else {}
+    grammar_profile = (
+        details.get("evtx_binxml_grammar_coverage_profile")
+        if isinstance(details.get("evtx_binxml_grammar_coverage_profile"), Mapping)
+        else native_evtx_binxml_grammar_coverage_profile(binxml)
+    )
     value_fields = binxml.get("value_fields") if isinstance(binxml.get("value_fields"), list) else []
     system_fields = details.get("binxml_system_fields") if isinstance(details.get("binxml_system_fields"), Mapping) else {}
     event_data_fields = (
@@ -2304,6 +2422,15 @@ def native_evtx_native_parse_profile(details: Mapping[str, object]) -> dict[str,
         "user_data_field_count": len(user_data_fields),
         "template_ids": list(binxml.get("template_ids") or []),
         "template_substitution_count": int(binxml.get("template_substitution_count") or 0),
+        "grammar_coverage": {
+            "profile_hash": str(details.get("evtx_binxml_grammar_coverage_profile_hash") or ""),
+            "observed_token_count": int(grammar_profile.get("observed_token_count") or 0),
+            "unsupported_token_count": int(grammar_profile.get("unsupported_token_count") or 0),
+            "unsupported_token_names": list(grammar_profile.get("unsupported_token_names") or []),
+            "unknown_value_types": list(grammar_profile.get("unknown_value_types") or []),
+            "unvalidated_value_types": list(grammar_profile.get("unvalidated_value_types") or []),
+            "nested_binxml_value_count": int(grammar_profile.get("nested_binxml_value_count") or 0),
+        },
         "promoted_field_sections": {
             "system": sorted(system_fields.keys()),
             "event_data": sorted(event_data_fields.keys()),
@@ -2498,6 +2625,11 @@ def native_evtx_core_accuracy_gates(details: Mapping[str, object]) -> list[dict[
         if isinstance(details.get("evtx_trusted_tool_record_diff"), Mapping)
         else {}
     )
+    grammar_profile = (
+        details.get("evtx_binxml_grammar_coverage_profile")
+        if isinstance(details.get("evtx_binxml_grammar_coverage_profile"), Mapping)
+        else {}
+    )
     source_refs = [
         f"source_path:{details.get('source_path', '')}",
         f"record_id:{details.get('record_id', '')}",
@@ -2514,9 +2646,19 @@ def native_evtx_core_accuracy_gates(details: Mapping[str, object]) -> list[dict[
         item1_checks.append("duplicate EventData order preservation")
     if checks.get("decoded_value_type_counts"):
         item1_checks.append("BinXML scalar type decoding diff")
+    if grammar_profile:
+        item1_checks.append("BinXML grammar coverage profile")
+        if not grammar_profile.get("unsupported_token_count"):
+            item1_checks.append("known BinXML token coverage")
+        else:
+            item1_checks.append("unsupported grammar warning coverage")
     if trusted_diff.get("status") == "pass":
         item1_checks.append("trusted-tool record-level diff pass")
-    if binxml_status and binxml_status not in {"basic-rendered", "template-substituted-partial"}:
+    if (
+        binxml_status
+        and binxml_status not in {"basic-rendered", "template-substituted-partial"}
+        and "unsupported grammar warning coverage" not in item1_checks
+    ):
         item1_checks.append("unsupported grammar warning coverage")
 
     item2_checks: list[str] = []
