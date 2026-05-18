@@ -232,11 +232,15 @@ class RapidTriageFinalRoadmapTests(unittest.TestCase):
             self.assertTrue((bundle_dir / "rapidtriage-bundle-manifest.json").is_file())
             self.assertTrue((bundle_dir / "rapidtriage-court-exhibit-index.json").is_file())
             self.assertTrue((bundle_dir / "rapidtriage-tamper-evident-audit-bundle.json").is_file())
+            self.assertTrue((bundle_dir / "rapidtriage-submission-readiness.json").is_file())
             report_html = (bundle_dir / "rapidtriage-case-report.html").read_text(encoding="utf-8")
             reviewer_html = (bundle_dir / "rapidtriage-reviewer.html").read_text(encoding="utf-8")
             export_manifest = json.loads((bundle_dir / "rapidtriage-case-report.exports.json").read_text(encoding="utf-8"))
             court_exhibit = json.loads((bundle_dir / "rapidtriage-court-exhibit-index.json").read_text(encoding="utf-8"))
             tamper_bundle = json.loads((bundle_dir / "rapidtriage-tamper-evident-audit-bundle.json").read_text(encoding="utf-8"))
+            submission_readiness = json.loads(
+                (bundle_dir / "rapidtriage-submission-readiness.json").read_text(encoding="utf-8")
+            )
             self.assertIn("Reviewer Bundle", reviewer_html)
             self.assertIn("rapidtriage-bundle-manifest.json", reviewer_html)
             self.assertIn("Reviewer Checklist", reviewer_html)
@@ -260,6 +264,7 @@ class RapidTriageFinalRoadmapTests(unittest.TestCase):
                 self.assertIn("rapidtriage-case-report.exports.json", bundle_zip.namelist())
                 self.assertIn("rapidtriage-court-exhibit-index.json", bundle_zip.namelist())
                 self.assertIn("rapidtriage-tamper-evident-audit-bundle.json", bundle_zip.namelist())
+                self.assertIn("rapidtriage-submission-readiness.json", bundle_zip.namelist())
                 self.assertIn("rapidtriage-bundle-manifest.json", bundle_zip.namelist())
             self.assertTrue(Path(payload["archive"]).is_file())
             self.assertIn("sha256", payload["archive_hashes"])
@@ -270,6 +275,39 @@ class RapidTriageFinalRoadmapTests(unittest.TestCase):
             self.assertIn("bundle_manifest", payload["outputs"])
             self.assertIn("court_exhibit_index", payload["outputs"])
             self.assertIn("tamper_evident_audit_bundle", payload["outputs"])
+            self.assertIn("submission_readiness", payload["outputs"])
+            self.assertEqual(payload["submission_readiness_matrix_hash"], submission_readiness["matrix_hash"])
+            self.assertEqual(
+                submission_readiness["profile_version"],
+                "submission-package-readiness-matrix-v1",
+            )
+            self.assertEqual(submission_readiness["item_numbers"], [64, 89, 90, 94, 100])
+            self.assertEqual(submission_readiness["row_count"], 5)
+            self.assertEqual(submission_readiness["implemented_count"], 5)
+            self.assertEqual(submission_readiness["usable_count"], 5)
+            self.assertEqual(submission_readiness["commercial_grade_count"], 0)
+            self.assertFalse(submission_readiness["ready_for_court_report"])
+            self.assertEqual(submission_readiness["archive_hashes"]["sha256"], payload["archive_hashes"]["sha256"])
+            self.assertEqual(
+                submission_readiness["detached_signature_slots"]["final_archive_signature"]["status"],
+                "not-attached",
+            )
+            self.assertEqual(
+                submission_readiness["detached_signature_slots"]["final_archive_signature"]["target_sha256"],
+                payload["archive_hashes"]["sha256"],
+            )
+            self.assertIn(
+                "trusted-citation-index-diff-required",
+                submission_readiness["citation_external_verification"]["blockers"],
+            )
+            self.assertIn(
+                "trusted-report-replay-diff-required",
+                submission_readiness["report_reproducibility_profile"]["blockers"],
+            )
+            self.assertEqual(
+                submission_readiness["source_hash_completeness"]["source_hash_present_count"],
+                submission_readiness["source_hash_completeness"]["selected_item_count"],
+            )
             self.assertEqual(court_exhibit["command"], "court-exhibit-index")
             self.assertIn("#94", court_exhibit["commercial_gap_ids"])
             self.assertEqual(court_exhibit["core_accuracy_gates"][0]["gap_id"], "#94")

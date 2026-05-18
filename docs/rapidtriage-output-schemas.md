@@ -507,6 +507,16 @@ The sample JSON uses a few placeholders so the examples stay stable across machi
 - Reviewed indicator bookmarks are rendered as an IOC/Indicator review pivot section even when they are not directly hashable as standalone evidence files.
 - The report draft includes case metadata, analysis scope, run steps, reviewed/report-candidate counts, evidence hashes, skipped hash rows, conclusion/opinion text, and attachment references. HTML supports quick browser review/printing; DOCX supports portable analyst/legal editing; PDF supports quick handoff; the export manifest hashes each generated report file.
 
+### `submission-readiness`
+
+- Output: `rapidtriage-submission-readiness.json`
+- Profile: `submission-package-readiness-matrix-v1`
+- Covers commercial backlog items #64, #89, #90, #94, and #100 for portable reviewer bundles.
+- Top-level keys include `matrix_hash`, `row_count`, `implemented_count`, `usable_count`, `internal_validated_count`, `external_evidence_required_count`, `commercial_grade_count`, `archive_hashes`, `source_hash_completeness`, `report_reproducibility_profile`, `citation_external_verification`, `detached_signature_slots`, `rows`, and `blockers`.
+- The `rows[]` entries are stable-hashed control rows for citation manager external verification, report reproducibility, source provenance completeness, court exhibit ZIP readiness, and tamper-evident audit readiness.
+- The final ZIP SHA256 is recorded in this external readiness file and `rapidtriage-bundle-manifest.json`. It is not embedded as a final value inside the same ZIP because doing so would mutate the ZIP and change the hash.
+- `detached_signature_slots` are explicit placeholders for final archive, court exhibit index, and tamper audit bundle signatures; they remain `not-attached` until a lab or operator provides signing/notarization material.
+
 ## Artifact collector rows
 
 Android APK collector rows:

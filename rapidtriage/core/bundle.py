@@ -17,8 +17,13 @@ from .submission import build_submission_manifest, compute_hashes
 
 COURT_EXHIBIT_EXPORT_GAP_ID = "#94"
 TAMPER_EVIDENT_AUDIT_BUNDLE_GAP_ID = "#100"
+SUBMISSION_READINESS_PROFILE_VERSION = "submission-package-readiness-matrix-v1"
+SUBMISSION_READINESS_ITEM_NUMBERS = (64, 89, 90, 94, 100)
 COURT_EXHIBIT_TRUSTED_DIFF_BLOCKER_94 = "trusted-court-exhibit-manifest-diff-missing"
 TAMPER_EVIDENT_TRUSTED_DIFF_BLOCKER_100 = "trusted-tamper-signature-attestation-diff-missing"
+SUBMISSION_CITATION_TRUSTED_DIFF_BLOCKER_64 = "trusted-citation-index-diff-required"
+SUBMISSION_REPRODUCIBILITY_BLOCKER_89 = "trusted-report-replay-diff-required"
+SUBMISSION_PROVENANCE_EXTERNAL_BLOCKER_90 = "source-provenance-independent-review-required"
 COURT_EXHIBIT_REPORT_GRADE_VALIDATION_PLAN_VERSION = "court-exhibit-report-grade-validation-plan-v1"
 COURT_EXHIBIT_REPORT_GRADE_BLOCKERS = [
     "trusted-court-exhibit-manifest-diff-missing",
@@ -79,6 +84,7 @@ def build_submission_bundle(
     bundle_manifest_path = output_dir / "rapidtriage-bundle-manifest.json"
     court_exhibit_path = output_dir / "rapidtriage-court-exhibit-index.json"
     tamper_audit_path = output_dir / "rapidtriage-tamper-evident-audit-bundle.json"
+    submission_readiness_path = output_dir / "rapidtriage-submission-readiness.json"
     zip_path = output_dir.with_suffix(".zip")
 
     write_result(manifest, manifest_path)
@@ -110,6 +116,7 @@ def build_submission_bundle(
             "reviewer": str(reviewer_path),
             "court_exhibit_index": str(court_exhibit_path),
             "tamper_evident_audit_bundle": str(tamper_audit_path),
+            "submission_readiness": str(submission_readiness_path),
             "bundle_manifest": str(bundle_manifest_path),
         },
     }
@@ -145,6 +152,17 @@ def build_submission_bundle(
         ],
     )
     write_result(tamper_audit_bundle, tamper_audit_path)
+    submission_readiness = build_submission_readiness_matrix(
+        manifest=manifest,
+        selected=selected,
+        report_exports=report_exports,
+        court_exhibit_index=court_exhibit_index,
+        tamper_audit_bundle=tamper_audit_bundle,
+        archive_path=zip_path,
+        archive_hashes={},
+        bundle_manifest_path=bundle_manifest_path,
+    )
+    write_result(submission_readiness, submission_readiness_path)
     preliminary_manifest = {
         "command": "bundle",
         "generated_at": dt.datetime.now(dt.timezone.utc).isoformat(),
@@ -161,6 +179,14 @@ def build_submission_bundle(
             else 0,
         },
         "outputs": audit["outputs"] | {"audit": str(audit_path), "archive": str(zip_path)},
+        "submission_readiness_matrix_hash": submission_readiness["matrix_hash"],
+        "submission_readiness_state": {
+            "profile_version": submission_readiness["profile_version"],
+            "ready_for_court_report": submission_readiness["ready_for_court_report"],
+            "external_evidence_required": submission_readiness["external_evidence_required"],
+            "blockers": submission_readiness["blockers"],
+            "archive_hash_scope": "pre-archive-placeholder-inside-zip; final archive hash is written to the external bundle manifest after ZIP creation",
+        },
         "custody_note": "Reviewer bundle contains review metadata, selected evidence hashes, and report drafts; it does not include the original evidence image.",
         "court_exhibit_package": {
             "index": str(court_exhibit_path),
@@ -181,11 +207,23 @@ def build_submission_bundle(
             reviewer_path,
             court_exhibit_path,
             tamper_audit_path,
+            submission_readiness_path,
             audit_path,
             bundle_manifest_path,
         ):
             archive.write(path, path.name)
     integrity = compute_hashes(zip_path)
+    submission_readiness = build_submission_readiness_matrix(
+        manifest=manifest,
+        selected=selected,
+        report_exports=report_exports,
+        court_exhibit_index=court_exhibit_index,
+        tamper_audit_bundle=tamper_audit_bundle,
+        archive_path=zip_path,
+        archive_hashes=integrity,
+        bundle_manifest_path=bundle_manifest_path,
+    )
+    write_result(submission_readiness, submission_readiness_path)
     bundle_manifest = {
         **preliminary_manifest,
         "command": "bundle",
@@ -205,10 +243,17 @@ def build_submission_bundle(
             "reviewer": str(reviewer_path),
             "court_exhibit_index": str(court_exhibit_path),
             "tamper_evident_audit_bundle": str(tamper_audit_path),
+            "submission_readiness": str(submission_readiness_path),
             "audit": str(audit_path),
             "bundle_manifest": str(bundle_manifest_path),
             "archive": str(zip_path),
         },
+        "submission_readiness_matrix_hash": submission_readiness["matrix_hash"],
+        "submission_readiness_matrix": submission_readiness,
+        "detached_signature_slots": submission_readiness["detached_signature_slots"],
+        "source_hash_completeness": submission_readiness["source_hash_completeness"],
+        "report_reproducibility_profile": submission_readiness["report_reproducibility_profile"],
+        "citation_external_verification": submission_readiness["citation_external_verification"],
     }
     write_result(bundle_manifest, bundle_manifest_path)
     return bundle_manifest
@@ -318,6 +363,337 @@ def build_selected_evidence_list(manifest: Mapping[str, object]) -> dict[str, ob
         "command": "selected-evidence",
         "generated_at": dt.datetime.now(dt.timezone.utc).isoformat(),
         "items": selected,
+    }
+
+
+def build_submission_readiness_matrix(
+    *,
+    manifest: Mapping[str, object],
+    selected: Mapping[str, object],
+    report_exports: Mapping[str, str],
+    court_exhibit_index: Mapping[str, object],
+    tamper_audit_bundle: Mapping[str, object],
+    archive_path: Path,
+    archive_hashes: Mapping[str, object],
+    bundle_manifest_path: Path,
+) -> dict[str, object]:
+    """Tie report/export outputs into one reviewer-facing submission evidence profile."""
+
+    source_hash_completeness = build_submission_source_hash_completeness(selected)
+    report_reproducibility_profile = build_submission_report_reproducibility_profile(
+        manifest=manifest,
+        selected=selected,
+        report_exports=report_exports,
+        bundle_manifest_path=bundle_manifest_path,
+    )
+    citation_external_verification = build_submission_citation_external_verification(selected)
+    detached_signature_slots = build_submission_detached_signature_slots(
+        archive_path=archive_path,
+        archive_hashes=archive_hashes,
+        court_exhibit_index=court_exhibit_index,
+        tamper_audit_bundle=tamper_audit_bundle,
+    )
+    court_blocker_values = court_exhibit_index.get("blockers")
+    tamper_blocker_values = tamper_audit_bundle.get("blockers")
+    court_blockers = [
+        str(blocker)
+        for blocker in (court_blocker_values if isinstance(court_blocker_values, list) else [])
+        if blocker
+    ]
+    tamper_blockers = [
+        str(blocker)
+        for blocker in (tamper_blocker_values if isinstance(tamper_blocker_values, list) else [])
+        if blocker
+    ]
+    rows = [
+        build_submission_readiness_row(
+            item_number=64,
+            control="citation-manager-external-verification",
+            status="external-evidence-required",
+            evidence={
+                "citation_row_count": citation_external_verification["citation_row_count"],
+                "citation_matrix_hash": citation_external_verification["citation_matrix_hash"],
+                "trusted_diff_status": citation_external_verification["trusted_diff_status"],
+            },
+            blockers=citation_external_verification["blockers"],
+        ),
+        build_submission_readiness_row(
+            item_number=89,
+            control="report-reproducibility",
+            status="external-evidence-required",
+            evidence={
+                "output_hash_count": report_reproducibility_profile["output_hash_count"],
+                "report_export_manifest_sha256": report_reproducibility_profile["report_export_manifest_sha256"],
+                "replay_profile_hash": report_reproducibility_profile["replay_profile_hash"],
+            },
+            blockers=report_reproducibility_profile["blockers"],
+        ),
+        build_submission_readiness_row(
+            item_number=90,
+            control="source-provenance-completeness",
+            status=(
+                "complete-external-review-required"
+                if source_hash_completeness["missing_source_hash_count"] == 0
+                else "blocked"
+            ),
+            evidence={
+                "selected_item_count": source_hash_completeness["selected_item_count"],
+                "source_hash_present_count": source_hash_completeness["source_hash_present_count"],
+                "source_locator_present_count": source_hash_completeness["source_locator_present_count"],
+                "source_hash_matrix_hash": source_hash_completeness["matrix_hash"],
+            },
+            blockers=source_hash_completeness["blockers"],
+        ),
+        build_submission_readiness_row(
+            item_number=94,
+            control="court-exhibit-zip",
+            status="external-evidence-required",
+            evidence={
+                "exhibit_item_count": (court_exhibit_index.get("summary") or {}).get("exhibit_item_count")
+                if isinstance(court_exhibit_index.get("summary"), Mapping)
+                else 0,
+                "court_exhibit_manifest_hash": str(court_exhibit_index.get("court_exhibit_manifest_hash") or ""),
+                "archive_sha256": str(archive_hashes.get("sha256") or ""),
+                "signing_slot_status": detached_signature_slots["court_exhibit_index_signature"]["status"],
+            },
+            blockers=court_blockers,
+        ),
+        build_submission_readiness_row(
+            item_number=100,
+            control="tamper-evident-audit-bundle",
+            status="external-evidence-required",
+            evidence={
+                "tamper_head_hash": str((tamper_audit_bundle.get("summary") or {}).get("head_hash") or "")
+                if isinstance(tamper_audit_bundle.get("summary"), Mapping)
+                else "",
+                "tamper_evident_manifest_hash": str(tamper_audit_bundle.get("tamper_evident_manifest_hash") or ""),
+                "verification_matrix_hash": str(tamper_audit_bundle.get("verification_matrix_hash") or ""),
+                "signing_slot_status": detached_signature_slots["tamper_audit_bundle_signature"]["status"],
+            },
+            blockers=tamper_blockers,
+        ),
+    ]
+    external_blockers = sorted(
+        {
+            str(blocker)
+            for row in rows
+            for blocker in (row.get("blockers") if isinstance(row.get("blockers"), list) else [])
+            if blocker
+        }
+    )
+    matrix_core = {
+        "profile_version": SUBMISSION_READINESS_PROFILE_VERSION,
+        "generated_at": dt.datetime.now(dt.timezone.utc).isoformat(),
+        "case_id": str(manifest.get("case_id") or ""),
+        "item_numbers": list(SUBMISSION_READINESS_ITEM_NUMBERS),
+        "commercial_gap_ids": [f"#{item_number}" for item_number in SUBMISSION_READINESS_ITEM_NUMBERS],
+        "row_count": len(rows),
+        "implemented_count": len(rows),
+        "usable_count": len(rows),
+        "internal_validated_count": sum(1 for row in rows if row.get("row_hash")),
+        "external_evidence_required_count": sum(1 for row in rows if row.get("external_evidence_required")),
+        "commercial_grade_count": 0,
+        "ready_for_court_report": False,
+        "external_evidence_required": True,
+        "commercial_claim_allowed": False,
+        "archive": str(archive_path),
+        "archive_hashes": dict(archive_hashes),
+        "archive_hash_scope": "The final ZIP hash is intentionally stored in this external readiness file and bundle manifest; embedding that final hash inside the same ZIP would mutate the archive.",
+        "source_hash_completeness": source_hash_completeness,
+        "report_reproducibility_profile": report_reproducibility_profile,
+        "citation_external_verification": citation_external_verification,
+        "detached_signature_slots": detached_signature_slots,
+        "rows": rows,
+        "blockers": external_blockers,
+        "verification_steps": [
+            "Open rapidtriage-submission-manifest.json and confirm every cited source hash.",
+            "Recompute rapidtriage-case-report.exports.json and compare generated report hashes.",
+            "Compare rapidtriage-court-exhibit-index.json against an independent exhibit checklist.",
+            "Recompute rapidtriage-tamper-evident-audit-bundle.json entry hashes and head hash.",
+            "Attach detached signatures or notarization records for the final ZIP and exhibit/tamper manifests before court submission.",
+        ],
+    }
+    return {**matrix_core, "matrix_hash": stable_payload_sha256(matrix_core)}
+
+
+def build_submission_readiness_row(
+    *,
+    item_number: int,
+    control: str,
+    status: str,
+    evidence: Mapping[str, object],
+    blockers: Sequence[object],
+) -> dict[str, object]:
+    blocker_list = sorted({str(blocker) for blocker in blockers if blocker})
+    row_core = {
+        "item_number": item_number,
+        "gap_id": f"#{item_number}",
+        "control": control,
+        "status": status,
+        "implemented": True,
+        "usable": status != "blocked",
+        "validated": True,
+        "external_evidence_required": bool(blocker_list),
+        "commercial_grade_ready": False,
+        "evidence": dict(evidence),
+        "blockers": blocker_list,
+    }
+    return {**row_core, "row_hash": stable_payload_sha256(row_core)}
+
+
+def build_submission_source_hash_completeness(selected: Mapping[str, object]) -> dict[str, object]:
+    items = selected.get("items") if isinstance(selected.get("items"), list) else []
+    rows = []
+    missing_hashes = []
+    missing_locators = []
+    for index, item in enumerate(items, start=1):
+        if not isinstance(item, Mapping):
+            continue
+        hashes = item.get("hashes") if isinstance(item.get("hashes"), Mapping) else {}
+        path = str(item.get("path") or "")
+        sha256 = str(hashes.get("sha256") or "")
+        row_core = {
+            "index": index,
+            "bookmark_id": str(item.get("bookmark_id") or ""),
+            "summary": str(item.get("summary") or ""),
+            "path": path,
+            "sha256": sha256,
+            "review_status": str((item.get("review") or {}).get("status") if isinstance(item.get("review"), Mapping) else ""),
+            "hash_status": str(item.get("hash_status") or ""),
+        }
+        if not sha256:
+            missing_hashes.append(row_core["bookmark_id"] or f"row-{index}")
+        if not path:
+            missing_locators.append(row_core["bookmark_id"] or f"row-{index}")
+        rows.append({**row_core, "row_hash": stable_payload_sha256(row_core)})
+    blockers = []
+    if missing_hashes:
+        blockers.append("source-sha256-missing")
+    if missing_locators:
+        blockers.append("source-locator-missing")
+    blockers.append(SUBMISSION_PROVENANCE_EXTERNAL_BLOCKER_90)
+    matrix_core = {
+        "profile_version": "submission-source-hash-completeness-v1",
+        "item_number": 90,
+        "selected_item_count": len(rows),
+        "source_hash_present_count": sum(1 for row in rows if row.get("sha256")),
+        "source_locator_present_count": sum(1 for row in rows if row.get("path")),
+        "missing_source_hash_count": len(missing_hashes),
+        "missing_source_locator_count": len(missing_locators),
+        "missing_source_hash_bookmarks": missing_hashes,
+        "missing_source_locator_bookmarks": missing_locators,
+        "rows": rows,
+        "blockers": blockers,
+        "commercial_claim_allowed": False,
+    }
+    return {**matrix_core, "matrix_hash": stable_payload_sha256(matrix_core)}
+
+
+def build_submission_report_reproducibility_profile(
+    *,
+    manifest: Mapping[str, object],
+    selected: Mapping[str, object],
+    report_exports: Mapping[str, str],
+    bundle_manifest_path: Path,
+) -> dict[str, object]:
+    output_hashes = []
+    for label in ("md", "html", "docx", "pdf", "manifest"):
+        value = report_exports.get(label)
+        if not value:
+            continue
+        path = Path(value)
+        if not path.exists() or not path.is_file():
+            continue
+        output_hashes.append(
+            {
+                "label": label,
+                "path": str(path),
+                "hashes": compute_hashes(path),
+                "size_bytes": path.stat().st_size,
+            }
+        )
+    manifest_output = next((row for row in output_hashes if row["label"] == "manifest"), {})
+    manifest_hashes = manifest_output.get("hashes") if isinstance(manifest_output.get("hashes"), Mapping) else {}
+    profile_core = {
+        "profile_version": "submission-report-reproducibility-profile-v1",
+        "item_number": 89,
+        "case_id": str(manifest.get("case_id") or ""),
+        "submission_manifest_hash": stable_payload_sha256(manifest),
+        "selected_evidence_manifest_hash": stable_payload_sha256(selected),
+        "report_export_manifest_sha256": str(manifest_hashes.get("sha256") or ""),
+        "output_hash_count": len(output_hashes),
+        "output_hashes": output_hashes,
+        "bundle_manifest_path": str(bundle_manifest_path),
+        "volatile_fields": ["generated_at", "output_dir", "absolute output paths", "final archive SHA256"],
+        "replay_command": "rapidtriage bundle <case.json> --allowed-root <evidence-root> --output-dir <review-bundle> --json",
+        "trusted_replay_diff_status": "missing",
+        "blockers": [SUBMISSION_REPRODUCIBILITY_BLOCKER_89],
+        "commercial_claim_allowed": False,
+    }
+    return {**profile_core, "replay_profile_hash": stable_payload_sha256(profile_core)}
+
+
+def build_submission_citation_external_verification(selected: Mapping[str, object]) -> dict[str, object]:
+    items = selected.get("items") if isinstance(selected.get("items"), list) else []
+    citation_rows = []
+    for index, item in enumerate(items, start=1):
+        if not isinstance(item, Mapping):
+            continue
+        hashes = item.get("hashes") if isinstance(item.get("hashes"), Mapping) else {}
+        reference = item.get("reference") if isinstance(item.get("reference"), Mapping) else {}
+        row_core = {
+            "citation_id": f"CIT-{index:04d}",
+            "bookmark_id": str(item.get("bookmark_id") or ""),
+            "source_path": str(item.get("path") or ""),
+            "source_sha256": str(hashes.get("sha256") or ""),
+            "reference": dict(reference),
+            "review_status": str((item.get("review") or {}).get("status") if isinstance(item.get("review"), Mapping) else ""),
+        }
+        citation_rows.append({**row_core, "citation_row_hash": stable_payload_sha256(row_core)})
+    citation_core = {
+        "profile_version": "submission-citation-external-verification-v1",
+        "item_number": 64,
+        "citation_row_count": len(citation_rows),
+        "citation_rows": citation_rows,
+        "trusted_diff_status": "missing",
+        "trusted_diff_required_fields": [
+            "citation_id",
+            "bookmark_id",
+            "source_path",
+            "source_sha256",
+            "reference",
+            "review_status",
+        ],
+        "blockers": [SUBMISSION_CITATION_TRUSTED_DIFF_BLOCKER_64],
+        "commercial_claim_allowed": False,
+    }
+    return {**citation_core, "citation_matrix_hash": stable_payload_sha256(citation_core)}
+
+
+def build_submission_detached_signature_slots(
+    *,
+    archive_path: Path,
+    archive_hashes: Mapping[str, object],
+    court_exhibit_index: Mapping[str, object],
+    tamper_audit_bundle: Mapping[str, object],
+) -> dict[str, object]:
+    return {
+        "final_archive_signature": {
+            "status": "not-attached",
+            "target": str(archive_path),
+            "target_sha256": str(archive_hashes.get("sha256") or ""),
+            "expected_material": "detached signature, timestamp receipt, or lab release attestation over the final ZIP hash",
+        },
+        "court_exhibit_index_signature": {
+            "status": "not-attached",
+            "target_manifest_hash": str(court_exhibit_index.get("court_exhibit_manifest_hash") or ""),
+            "expected_material": "detached signature or reviewer signoff for rapidtriage-court-exhibit-index.json",
+        },
+        "tamper_audit_bundle_signature": {
+            "status": "not-attached",
+            "target_manifest_hash": str(tamper_audit_bundle.get("tamper_evident_manifest_hash") or ""),
+            "expected_material": "detached signature or independent recompute attestation for rapidtriage-tamper-evident-audit-bundle.json",
+        },
     }
 
 
