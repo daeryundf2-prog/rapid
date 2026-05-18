@@ -124,7 +124,7 @@ OS_ACCOUNT_DIFF_COMPARE_FIELDS = (
 )
 OS_ACCOUNT_DIFF_REQUIRED_FIELDS = {
     "account": ("row_type", "user_name", "rid"),
-    "group": ("row_type", "group_name"),
+    "group": ("row_type", "group_name", "member_sids"),
     "privilege": ("row_type", "privilege", "assigned_sids"),
     "secret": ("row_type", "secret_name", "secret_values_redacted"),
 }
@@ -333,6 +333,21 @@ def sam_account_candidate_details(
         validation_checks=validation_checks,
         report_grade=report_grade,
     )
+    validation_profile = sam_security_system_validation_profile(
+        artifact_scope="native-sam-account-key-candidate",
+        row_type="account",
+        source_path=str(path.resolve()),
+        source_hashes=dict(source_hashes),
+        validation_checks=validation_checks,
+        report_grade=report_grade,
+        row_manifest_hash=row_manifest["manifest_sha256"],
+        evidence_fields={
+            "user_name_candidate": user_name,
+            "rid_hex": rid_hex,
+            "cell_offset": candidate.get("cell_offset", 0),
+            "allocation_status": str(candidate.get("allocation_status") or ""),
+        },
+    )
     core_accuracy_gates = os_account_core_accuracy_gates(
         {
             "source_path": str(path.resolve()),
@@ -341,6 +356,7 @@ def sam_account_candidate_details(
             "user_name": user_name,
             "rid": rid_hex,
             "sam_security_system_row_manifest_hash": row_manifest["manifest_sha256"],
+            "sam_security_system_validation_profile_hash": validation_profile["profile_sha256"],
             "validation_checks": validation_checks,
             "uac_flags": [],
         }
@@ -375,6 +391,8 @@ def sam_account_candidate_details(
         "core_accuracy_gates": core_accuracy_gates,
         "sam_security_system_row_manifest": row_manifest,
         "sam_security_system_row_manifest_hash": row_manifest["manifest_sha256"],
+        "sam_security_system_validation_profile": validation_profile,
+        "sam_security_system_validation_profile_hash": validation_profile["profile_sha256"],
         "os_account_native_capabilities": OS_ACCOUNT_NATIVE_CAPABILITIES,
         "account_privilege_deep_parse_profile": account_privilege_deep_parse_profile(
             artifact_scope="native-sam-account-key-candidate",
@@ -443,6 +461,21 @@ def sam_group_candidate_details(
         validation_checks=validation_checks,
         report_grade=report_grade,
     )
+    validation_profile = sam_security_system_validation_profile(
+        artifact_scope="native-sam-group-alias-candidate",
+        row_type="group",
+        source_path=str(path.resolve()),
+        source_hashes=dict(source_hashes),
+        validation_checks=validation_checks,
+        report_grade=report_grade,
+        row_manifest_hash=row_manifest["manifest_sha256"],
+        evidence_fields={
+            "group_name_candidate": group_name,
+            "alias_rid_hex": alias_rid_hex,
+            "cell_offset": candidate.get("cell_offset", 0),
+            "allocation_status": str(candidate.get("allocation_status") or ""),
+        },
+    )
     core_accuracy_gates = os_account_core_accuracy_gates(
         {
             "source_path": str(path.resolve()),
@@ -451,6 +484,7 @@ def sam_group_candidate_details(
             "group_name": group_name,
             "rid": alias_rid_hex,
             "sam_security_system_row_manifest_hash": row_manifest["manifest_sha256"],
+            "sam_security_system_validation_profile_hash": validation_profile["profile_sha256"],
             "validation_checks": validation_checks,
             "group_sid_candidates": [SAM_BUILTIN_GROUP_SIDS[group_name]]
             if group_name in SAM_BUILTIN_GROUP_SIDS
@@ -486,6 +520,8 @@ def sam_group_candidate_details(
         "core_accuracy_gates": core_accuracy_gates,
         "sam_security_system_row_manifest": row_manifest,
         "sam_security_system_row_manifest_hash": row_manifest["manifest_sha256"],
+        "sam_security_system_validation_profile": validation_profile,
+        "sam_security_system_validation_profile_hash": validation_profile["profile_sha256"],
         "os_account_native_capabilities": OS_ACCOUNT_NATIVE_CAPABILITIES,
         "account_privilege_deep_parse_profile": account_privilege_deep_parse_profile(
             artifact_scope="native-sam-group-alias-candidate",
@@ -716,6 +752,20 @@ def build_system_security_records(path: Path, hints: dict[str, object], source_h
             validation_checks=validation_checks,
             report_grade=report_grade,
         )
+        validation_profile = sam_security_system_validation_profile(
+            artifact_scope="security-lsa-secret-metadata",
+            row_type="secret",
+            source_path=str(path.resolve()),
+            source_hashes=dict(source_hashes),
+            validation_checks=validation_checks,
+            report_grade=report_grade,
+            row_manifest_hash=row_manifest["manifest_sha256"],
+            evidence_fields={
+                "secret_name": item.get("secret_name", ""),
+                "value_names": sorted((item.get("values") or {}).keys()) if isinstance(item.get("values"), dict) else [],
+                "secret_values_redacted": True,
+            },
+        )
         core_accuracy_gates = os_account_core_accuracy_gates(
             {
                 "source_path": str(path.resolve()),
@@ -723,6 +773,7 @@ def build_system_security_records(path: Path, hints: dict[str, object], source_h
                 "secret_name": item.get("secret_name", ""),
                 "secret_value_metadata": item.get("values", {}),
                 "sam_security_system_row_manifest_hash": row_manifest["manifest_sha256"],
+                "sam_security_system_validation_profile_hash": validation_profile["profile_sha256"],
                 "validation_checks": validation_checks,
             }
         )
@@ -753,6 +804,8 @@ def build_system_security_records(path: Path, hints: dict[str, object], source_h
                 "core_accuracy_gates": core_accuracy_gates,
                 "sam_security_system_row_manifest": row_manifest,
                 "sam_security_system_row_manifest_hash": row_manifest["manifest_sha256"],
+                "sam_security_system_validation_profile": validation_profile,
+                "sam_security_system_validation_profile_hash": validation_profile["profile_sha256"],
                 "commercial_uplift_evidence": os_account_commercial_uplift_evidence(
                     {
                         "source_path": str(path.resolve()),
@@ -760,6 +813,7 @@ def build_system_security_records(path: Path, hints: dict[str, object], source_h
                         "source_index": index,
                         "rid": "",
                         "sam_security_system_row_manifest_hash": row_manifest["manifest_sha256"],
+                        "sam_security_system_validation_profile_hash": validation_profile["profile_sha256"],
                         "os_account_validation_matrix": os_account_validation_matrix(validation_checks),
                         "os_account_report_grade_assessment": report_grade,
                     }
@@ -801,6 +855,20 @@ def build_system_security_records(path: Path, hints: dict[str, object], source_h
             validation_checks=validation_checks,
             report_grade=report_grade,
         )
+        validation_profile = sam_security_system_validation_profile(
+            artifact_scope="security-privilege-assignment",
+            row_type="privilege",
+            source_path=str(path.resolve()),
+            source_hashes=dict(source_hashes),
+            validation_checks=validation_checks,
+            report_grade=report_grade,
+            row_manifest_hash=row_manifest["manifest_sha256"],
+            evidence_fields={
+                "privilege": item.get("privilege", ""),
+                "assigned_sids": list(item.get("assigned_sids") or []),
+                "assigned_principal_hints": privilege_principal_hints(item),
+            },
+        )
         core_accuracy_gates = os_account_core_accuracy_gates(
             {
                 "source_path": str(path.resolve()),
@@ -809,6 +877,7 @@ def build_system_security_records(path: Path, hints: dict[str, object], source_h
                 "assigned_sids": list(item.get("assigned_sids") or []),
                 "assigned_principal_hints": privilege_principal_hints(item),
                 "sam_security_system_row_manifest_hash": row_manifest["manifest_sha256"],
+                "sam_security_system_validation_profile_hash": validation_profile["profile_sha256"],
                 "validation_checks": validation_checks,
             }
         )
@@ -839,6 +908,8 @@ def build_system_security_records(path: Path, hints: dict[str, object], source_h
                 "core_accuracy_gates": core_accuracy_gates,
                 "sam_security_system_row_manifest": row_manifest,
                 "sam_security_system_row_manifest_hash": row_manifest["manifest_sha256"],
+                "sam_security_system_validation_profile": validation_profile,
+                "sam_security_system_validation_profile_hash": validation_profile["profile_sha256"],
                 "os_account_native_capabilities": OS_ACCOUNT_NATIVE_CAPABILITIES,
                 "commercial_grade_ready": False,
                 "commercial_grade_blockers": report_grade["blockers"],
@@ -882,6 +953,21 @@ def build_system_security_records(path: Path, hints: dict[str, object], source_h
             validation_checks=validation_checks,
             report_grade=report_grade,
         )
+        validation_profile = sam_security_system_validation_profile(
+            artifact_scope="sam-group-membership-export-hint",
+            row_type="group",
+            source_path=str(path.resolve()),
+            source_hashes=dict(source_hashes),
+            validation_checks=validation_checks,
+            report_grade=report_grade,
+            row_manifest_hash=row_manifest["manifest_sha256"],
+            evidence_fields={
+                "group_name": group.get("group_name", ""),
+                "member_sids": list(group.get("member_sids") or []),
+                "member_names": list(group.get("member_names") or []),
+                "group_sid_candidates": list(group.get("group_sid_candidates") or []),
+            },
+        )
         core_accuracy_gates = os_account_core_accuracy_gates(
             {
                 "source_path": str(path.resolve()),
@@ -891,6 +977,7 @@ def build_system_security_records(path: Path, hints: dict[str, object], source_h
                 "member_names": list(group.get("member_names") or []),
                 "group_sid_candidates": list(group.get("group_sid_candidates") or []),
                 "sam_security_system_row_manifest_hash": row_manifest["manifest_sha256"],
+                "sam_security_system_validation_profile_hash": validation_profile["profile_sha256"],
                 "validation_checks": validation_checks,
             }
         )
@@ -927,6 +1014,8 @@ def build_system_security_records(path: Path, hints: dict[str, object], source_h
                 "core_accuracy_gates": core_accuracy_gates,
                 "sam_security_system_row_manifest": row_manifest,
                 "sam_security_system_row_manifest_hash": row_manifest["manifest_sha256"],
+                "sam_security_system_validation_profile": validation_profile,
+                "sam_security_system_validation_profile_hash": validation_profile["profile_sha256"],
                 "os_account_native_capabilities": OS_ACCOUNT_NATIVE_CAPABILITIES,
                 "validation_guidance": "Registry exports can identify group membership hints, but validate against native SAM alias member attributes and domain context before final testimony.",
                 "commercial_grade_ready": False,
@@ -1037,6 +1126,24 @@ def build_account_lifecycle_records(path: Path, hints: dict[str, object], source
             validation_checks=validation_checks,
             report_grade=report_grade,
         )
+        validation_profile = sam_security_system_validation_profile(
+            artifact_scope="account-lifecycle-security-context",
+            row_type="account",
+            source_path=str(path.resolve()),
+            source_hashes=dict(source_hashes),
+            validation_checks=validation_checks,
+            report_grade=report_grade,
+            row_manifest_hash=row_manifest["manifest_sha256"],
+            security_context_manifest_hash=security_context_manifest["manifest_sha256"],
+            evidence_fields={
+                "user_name": user_name,
+                "rid": rid,
+                "group_count": len(group_rows),
+                "security_context_row_count": len(security_context_rows),
+                "inherited_privilege_count": security_context.get("inherited_privilege_count", 0),
+                "sam_binary_field_names": sorted((account.get("sam_binary_fields") or {}).keys()),
+            },
+        )
         core_accuracy_gates = os_account_core_accuracy_gates(
             {
                 "source_path": str(path.resolve()),
@@ -1048,6 +1155,7 @@ def build_account_lifecycle_records(path: Path, hints: dict[str, object], source
                 "group_membership_hints": group_rows,
                 "account_security_context": security_context,
                 "sam_security_system_row_manifest_hash": row_manifest["manifest_sha256"],
+                "sam_security_system_validation_profile_hash": validation_profile["profile_sha256"],
                 "validation_checks": validation_checks,
             }
         )
@@ -1085,6 +1193,8 @@ def build_account_lifecycle_records(path: Path, hints: dict[str, object], source
                 "sam_security_context_manifest_hash": security_context_manifest["manifest_sha256"],
                 "sam_security_system_row_manifest": row_manifest,
                 "sam_security_system_row_manifest_hash": row_manifest["manifest_sha256"],
+                "sam_security_system_validation_profile": validation_profile,
+                "sam_security_system_validation_profile_hash": validation_profile["profile_sha256"],
                 "parser_confidence": account_lifecycle_confidence(account, group_rows),
                 "evidence_strength": "account-lifecycle-registry-export",
                 "validation_required": True,
@@ -1102,6 +1212,7 @@ def build_account_lifecycle_records(path: Path, hints: dict[str, object], source
                         "os_account_report_grade_assessment": report_grade,
                         "account_privilege_deep_parse_profile": deep_parse_profile,
                         "sam_security_system_row_manifest_hash": row_manifest["manifest_sha256"],
+                        "sam_security_system_validation_profile_hash": validation_profile["profile_sha256"],
                         "sam_security_context_manifest_hash": security_context_manifest["manifest_sha256"],
                     }
                 ),
@@ -1472,6 +1583,8 @@ def sam_security_system_deep_parser_profile(
         },
         "security_context_manifest_expected": True,
         "security_context_manifest_version": "sam-security-context-manifest-v1",
+        "validation_profile_expected": True,
+        "validation_profile_version": "sam-security-system-validation-profile-v1",
         "reportability_decision": os_account_reportability_decision(
             artifact_scope=artifact_scope,
             report_grade=report_grade,
@@ -1535,6 +1648,97 @@ def os_account_reportability_decision(
     }
 
 
+def sam_security_system_validation_profile(
+    *,
+    artifact_scope: str,
+    row_type: str,
+    source_path: str,
+    source_hashes: Mapping[str, str],
+    validation_checks: Mapping[str, object],
+    report_grade: Mapping[str, object],
+    row_manifest_hash: str,
+    evidence_fields: Mapping[str, object],
+    security_context_manifest_hash: str = "",
+) -> dict[str, object]:
+    """Bind each SAM/SECURITY/SYSTEM row to the gates needed before testimony."""
+
+    normalized_row_type = row_type.strip().lower() or "account"
+    matrix = os_account_validation_matrix(validation_checks)
+    passed_ids = [str(item.get("id")) for item in matrix if item.get("passed")]
+    failed_ids = [str(item.get("id")) for item in matrix if not item.get("passed")]
+    reportability = os_account_reportability_decision(
+        artifact_scope=artifact_scope,
+        report_grade=report_grade,
+        validation_checks=validation_checks,
+    )
+    required_fields = list(OS_ACCOUNT_DIFF_REQUIRED_FIELDS.get(normalized_row_type, ("row_type",)))
+    profile: dict[str, object] = {
+        "profile_version": "sam-security-system-validation-profile-v1",
+        "commercial_gap_id": "#6",
+        "artifact_scope": artifact_scope,
+        "row_type": normalized_row_type,
+        "validation_status": "validation-required",
+        "allowed_use": "account-security-triage-pivot",
+        "source": {
+            "path": source_path,
+            "sha256": source_hashes.get("sha256", ""),
+            "target_hives": ["SAM", "SECURITY", "SYSTEM"],
+        },
+        "row_manifest_hash": row_manifest_hash,
+        "security_context_manifest_hash": security_context_manifest_hash,
+        "trusted_diff_contract": {
+            "required_fields_for_row_type": required_fields,
+            "trusted_tools": ["RECmd", "Registry Explorer", "RegRipper", "Windows API", "dedicated SAM parser"],
+            "diff_required_before_report": True,
+        },
+        "decode_gate_status": {
+            "sam_fv_candidate_decode_present": bool(
+                validation_checks.get("has_sam_f_value")
+                or validation_checks.get("has_sam_v_value")
+                or validation_checks.get("native_sam_fv_candidate_decoding_available")
+                or validation_checks.get("native_sam_fv_decoding_available")
+            ),
+            "sam_fv_report_grade_layout_validated": bool(validation_checks.get("native_sam_fv_report_grade")),
+            "alias_member_binary_decoded": bool(OS_ACCOUNT_NATIVE_CAPABILITIES["native_sam_alias_member_binary_decode"]),
+            "security_secret_decryption_available": bool(OS_ACCOUNT_NATIVE_CAPABILITIES["security_secret_decryption"]),
+            "domain_context_resolved": bool(OS_ACCOUNT_NATIVE_CAPABILITIES["domain_controller_context_resolution"]),
+            "transaction_log_replay_complete": bool(OS_ACCOUNT_NATIVE_CAPABILITIES["transaction_log_replay"]),
+        },
+        "authority_gate": {
+            "secret_values_redacted": True,
+            "secret_decryption_default": "disabled",
+            "decryption_requires": "explicit lawful authority, controlled reveal, and immutable audit entry",
+        },
+        "validation_matrix": matrix,
+        "passed_validation_ids": passed_ids,
+        "failed_validation_ids": failed_ids,
+        "reportability_decision": reportability,
+        "commercial_grade_ready": False,
+        "commercial_grade_blockers": sorted(
+            set(report_grade.get("blockers") or [])
+            | {
+                "sam-security-system-trusted-diff-required",
+                "full-native-sam-fv-layout-validation-required",
+                "native-sam-alias-member-binary-decoding-required",
+                "security-secret-authority-gate-required",
+                "sam-security-system-transaction-log-replay-required",
+            }
+        ),
+        "evidence_fields": dict(evidence_fields),
+        "next_validation_steps": [
+            "attach trusted SAM/SECURITY/SYSTEM diff with required row fields",
+            "validate SAM F/V layout by Windows build and account RID",
+            "decode alias/member binary attributes for group membership",
+            "preserve SECURITY secrets as redacted metadata unless authority-gated decrypt evidence exists",
+            "replay or independently validate SAM/SECURITY/SYSTEM transaction logs",
+        ],
+    }
+    profile["profile_sha256"] = stable_os_account_json_sha256(
+        {key: value for key, value in profile.items() if key != "profile_sha256"}
+    )
+    return profile
+
+
 def os_account_core_accuracy_gates(details: Mapping[str, object]) -> list[dict[str, object]]:
     checks = details.get("validation_checks") if isinstance(details.get("validation_checks"), Mapping) else {}
     hashes = details.get("source_hashes") if isinstance(details.get("source_hashes"), Mapping) else {}
@@ -1546,6 +1750,10 @@ def os_account_core_accuracy_gates(details: Mapping[str, object]) -> list[dict[s
         evidence_refs.append(f"source_sha256:{hashes['sha256']}")
     if details.get("sam_security_system_row_manifest_hash"):
         evidence_refs.append(f"row_manifest_sha256:{details.get('sam_security_system_row_manifest_hash')}")
+    if details.get("sam_security_system_validation_profile_hash"):
+        evidence_refs.append(
+            f"validation_profile_sha256:{details.get('sam_security_system_validation_profile_hash')}"
+        )
 
     satisfied: list[str] = []
     if (
@@ -1576,6 +1784,8 @@ def os_account_core_accuracy_gates(details: Mapping[str, object]) -> list[dict[s
         satisfied.append("trusted SAM/SECURITY/SYSTEM diff pass")
     if details.get("sam_security_system_row_manifest_hash"):
         satisfied.append("stable SAM/SECURITY/SYSTEM row manifest")
+    if details.get("sam_security_system_validation_profile_hash"):
+        satisfied.append("SAM/SECURITY/SYSTEM validation profile")
 
     return [build_accuracy_gate(6, satisfied_checks=satisfied, evidence_refs=evidence_refs)]
 
@@ -1610,9 +1820,13 @@ def os_account_commercial_uplift_evidence(details: Mapping[str, object]) -> dict
             f"source_sha256:{hashes.get('sha256', '')}",
             f"rid:{details.get('rid', '')}",
             f"row_manifest_sha256:{details.get('sam_security_system_row_manifest_hash', '')}",
+            f"validation_profile_sha256:{details.get('sam_security_system_validation_profile_hash', '')}",
             f"security_context_manifest_sha256:{details.get('sam_security_context_manifest_hash', '')}",
         ],
         "sam_security_system_row_manifest_hash": str(details.get("sam_security_system_row_manifest_hash") or ""),
+        "sam_security_system_validation_profile_hash": str(
+            details.get("sam_security_system_validation_profile_hash") or ""
+        ),
         "sam_security_context_manifest_hash": str(details.get("sam_security_context_manifest_hash") or ""),
         "passed_validation_matrix_ids": [
             str(item.get("id")) for item in matrix if isinstance(item, Mapping) and item.get("passed")

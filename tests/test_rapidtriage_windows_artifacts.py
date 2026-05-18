@@ -2652,6 +2652,11 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
                 sam_deep_profile["security_context_manifest_version"],
                 "sam-security-context-manifest-v1",
             )
+            self.assertEqual(
+                sam_deep_profile["validation_profile_version"],
+                "sam-security-system-validation-profile-v1",
+            )
+            self.assertTrue(sam_deep_profile["validation_profile_expected"])
             self.assertTrue(lifecycle["details"]["validation_checks"]["native_sam_fv_candidate_decoding_available"])
             self.assertFalse(lifecycle["details"]["validation_checks"]["native_sam_fv_report_grade"])
             self.assertIn("admin-account-hint", lifecycle["details"]["risk_flags"])
@@ -2699,6 +2704,26 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
             self.assertEqual(len(row_manifest["row_identity_hash"]), 64)
             self.assertIn("user_name", row_manifest["trusted_diff_contract"]["required_fields_for_row_type"])
             self.assertEqual(row_manifest["trusted_diff_contract"]["missing_identity_fields"], [])
+            validation_profile = lifecycle["details"]["sam_security_system_validation_profile"]
+            self.assertEqual(validation_profile["profile_version"], "sam-security-system-validation-profile-v1")
+            self.assertEqual(validation_profile["artifact_scope"], "account-lifecycle-security-context")
+            self.assertEqual(validation_profile["row_type"], "account")
+            self.assertEqual(validation_profile["validation_status"], "validation-required")
+            self.assertEqual(
+                lifecycle["details"]["sam_security_system_validation_profile_hash"],
+                validation_profile["profile_sha256"],
+            )
+            self.assertEqual(validation_profile["row_manifest_hash"], row_manifest["manifest_sha256"])
+            self.assertEqual(
+                validation_profile["security_context_manifest_hash"],
+                context_manifest["manifest_sha256"],
+            )
+            self.assertIn("user_name", validation_profile["trusted_diff_contract"]["required_fields_for_row_type"])
+            self.assertTrue(validation_profile["decode_gate_status"]["sam_fv_candidate_decode_present"])
+            self.assertFalse(validation_profile["decode_gate_status"]["sam_fv_report_grade_layout_validated"])
+            self.assertFalse(validation_profile["decode_gate_status"]["alias_member_binary_decoded"])
+            self.assertTrue(validation_profile["authority_gate"]["secret_values_redacted"])
+            self.assertEqual(len(validation_profile["profile_sha256"]), 64)
             privilege_row = next(row for row in context_rows if row["context_type"] == "inherited-privilege-hint")
             self.assertEqual(privilege_row["privilege"], "SeDebugPrivilege")
             self.assertEqual(privilege_row["via_groups"], ["Administrators"])
@@ -2733,6 +2758,11 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
             self.assertIn("privilege assignment attribution", lifecycle_gate["satisfied_checks"])
             self.assertIn("secret-value redaction and authority gate", lifecycle_gate["satisfied_checks"])
             self.assertIn("stable SAM/SECURITY/SYSTEM row manifest", lifecycle_gate["satisfied_checks"])
+            self.assertIn("SAM/SECURITY/SYSTEM validation profile", lifecycle_gate["satisfied_checks"])
+            self.assertIn(
+                f"validation_profile_sha256:{validation_profile['profile_sha256']}",
+                lifecycle_gate["evidence_refs"],
+            )
             self.assertFalse(lifecycle_gate["commercial_grade_ready"])
             lifecycle_uplift = lifecycle["details"]["commercial_uplift_evidence"]
             self.assertEqual(lifecycle_uplift["batch_id"], "commercial-uplift-006-010")
@@ -2747,6 +2777,10 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
             self.assertEqual(
                 lifecycle_uplift["sam_security_system_row_manifest_hash"],
                 row_manifest["manifest_sha256"],
+            )
+            self.assertEqual(
+                lifecycle_uplift["sam_security_system_validation_profile_hash"],
+                validation_profile["profile_sha256"],
             )
             self.assertEqual(
                 lifecycle_uplift["sam_security_context_manifest_hash"],
@@ -2766,6 +2800,11 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
             self.assertIn("privileged-group-membership-hint", group["details"]["risk_flags"])
             self.assertEqual(group["details"]["sam_security_system_row_manifest"]["row_type"], "group")
             self.assertEqual(group["details"]["sam_security_system_row_manifest"]["identity"]["group_name"], "Administrators")
+            group_profile = group["details"]["sam_security_system_validation_profile"]
+            self.assertEqual(group_profile["row_type"], "group")
+            self.assertEqual(group_profile["artifact_scope"], "sam-group-membership-export-hint")
+            self.assertIn("member_sids", group_profile["trusted_diff_contract"]["required_fields_for_row_type"])
+            self.assertFalse(group_profile["decode_gate_status"]["alias_member_binary_decoded"])
             self.assertTrue(sam_candidates)
             alice_sam = next(item for item in sam_candidates if item["details"]["user_name_candidate"] == "alice")
             self.assertEqual(alice_sam["details"]["candidate_role"], "account-name-key")
@@ -2781,6 +2820,15 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
             self.assertEqual(len(alice_sam["details"]["source_hashes"]["sha256"]), 64)
             self.assertEqual(alice_sam["details"]["sam_security_system_row_manifest"]["row_type"], "account")
             self.assertEqual(alice_sam["details"]["sam_security_system_row_manifest"]["identity"]["user_name"], "alice")
+            self.assertEqual(
+                alice_sam["details"]["sam_security_system_validation_profile"]["artifact_scope"],
+                "native-sam-account-key-candidate",
+            )
+            self.assertFalse(
+                alice_sam["details"]["sam_security_system_validation_profile"]["decode_gate_status"][
+                    "sam_fv_report_grade_layout_validated"
+                ]
+            )
             admin_group = next(item for item in sam_group_candidates if item["details"]["group_name_candidate"] == "Administrators")
             self.assertFalse(admin_group["details"]["commercial_grade_ready"])
             self.assertEqual(admin_group["details"]["alias_rid_hex"], "00000220")
@@ -2788,6 +2836,10 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
             self.assertFalse(admin_group["details"]["validation_checks"]["native_membership_reconstruction_available"])
             self.assertIn("privileged-group-candidate", admin_group["details"]["risk_flags"])
             self.assertEqual(admin_group["details"]["sam_security_system_row_manifest"]["identity"]["group_name"], "Administrators")
+            self.assertEqual(
+                admin_group["details"]["sam_security_system_validation_profile"]["artifact_scope"],
+                "native-sam-group-alias-candidate",
+            )
             service = next(item for item in service_rows if item["details"]["service_name"] == "SecurityUpdater")
             self.assertEqual(service["details"]["start_type_label"], "automatic")
             self.assertIn("suspicious-service-image-path", service["details"]["risk_flags"])
@@ -2810,6 +2862,11 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
             self.assertIn("#6", lsa_secret["details"]["os_account_report_grade_assessment"]["commercial_gap_ids"])
             self.assertEqual(lsa_secret["details"]["sam_security_system_row_manifest"]["row_type"], "secret")
             self.assertTrue(lsa_secret["details"]["sam_security_system_row_manifest"]["identity"]["secret_values_redacted"])
+            secret_profile = lsa_secret["details"]["sam_security_system_validation_profile"]
+            self.assertEqual(secret_profile["row_type"], "secret")
+            self.assertEqual(secret_profile["artifact_scope"], "security-lsa-secret-metadata")
+            self.assertTrue(secret_profile["authority_gate"]["secret_values_redacted"])
+            self.assertFalse(secret_profile["decode_gate_status"]["security_secret_decryption_available"])
             self.assertEqual(lsa_secret["details"]["secret_value_metadata"]["CupdTime"]["registry_value_type"], "REG_QWORD")
             self.assertEqual(
                 lsa_secret["details"]["secret_value_metadata"]["CupdTime"]["timestamp_candidate"],
@@ -2824,6 +2881,9 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
             )
             self.assertEqual(privilege["details"]["sam_security_system_row_manifest"]["row_type"], "privilege")
             self.assertEqual(privilege["details"]["sam_security_system_row_manifest"]["identity"]["privilege"], "SeDebugPrivilege")
+            privilege_profile = privilege["details"]["sam_security_system_validation_profile"]
+            self.assertEqual(privilege_profile["row_type"], "privilege")
+            self.assertIn("privilege", privilege_profile["trusted_diff_contract"]["required_fields_for_row_type"])
             self.assertIn("high-risk-privilege", privilege["details"]["risk_flags"])
 
     def test_os_account_trusted_diff_blocks_unverified_account_state(self) -> None:
