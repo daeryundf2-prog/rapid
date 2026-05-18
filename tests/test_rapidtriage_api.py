@@ -2856,6 +2856,47 @@ class RapidTriageApiTests(unittest.TestCase):
             self.assertEqual(media_cue["media_transcript_report_grade_validation_plan"]["blocking_slot_count"], 6)
             self.assertIn("media transcript report-grade validation plan", media_cue["core_accuracy_gates"][0]["satisfied_checks"])
             self.assertIn("text_sha256", media_cue["copy_safe_citation"]["text"])
+            viewer_validation_response = client.get(f"/api/runs/{run_id}/viewer-workflow-validation")
+            self.assertEqual(viewer_validation_response.status_code, 200, viewer_validation_response.text)
+            viewer_validation = viewer_validation_response.json()
+            self.assertEqual(viewer_validation["command"], "viewer-workflow-validation")
+            self.assertEqual(viewer_validation["profile_version"], "run-viewer-workflow-validation-v1")
+            self.assertEqual(viewer_validation["item_numbers"], list(range(51, 61)))
+            self.assertRegex(viewer_validation["manifest_hash"], r"^[0-9a-f]{64}$")
+            self.assertGreaterEqual(viewer_validation["candidate_summary"]["total_candidate_count"], 6)
+            route_coverage = viewer_validation["route_coverage_by_id"]
+            for route_id in {
+                "source-preview",
+                "source-hex-range",
+                "source-sqlite-table",
+                "source-email-attachment",
+                "source-image-gallery",
+                "source-media-cue",
+                "source-ocr-queue",
+                "source-ocr-translation",
+            }:
+                self.assertIn(route_id, route_coverage)
+                self.assertTrue(route_coverage[route_id]["implemented"])
+                self.assertGreaterEqual(route_coverage[route_id]["candidate_count"], 1)
+            self.assertTrue(route_coverage["source-sqlite-table"]["sample_ready"])
+            self.assertTrue(route_coverage["source-email-attachment"]["sample_ready"])
+            self.assertTrue(route_coverage["source-media-cue"]["sample_ready"])
+            self.assertIn(
+                "browser-e2e-viewer-route-run-required",
+                viewer_validation["commercial_grade_blockers"],
+            )
+            self.assertFalse(viewer_validation["commercial_grade_ready"])
+            self.assertTrue(viewer_validation["large_data_controls"]["source_candidate_collection_bounded"])
+            self.assertFalse(viewer_validation["browser_e2e_contract"]["workbench_smoke_contract_hash"] == "")
+            item_coverage = {row["item_number"]: row for row in viewer_validation["item_coverage"]}
+            for item_number in range(51, 61):
+                self.assertTrue(item_coverage[item_number]["implemented"])
+            self.assertTrue(item_coverage[54]["validated_in_this_run"])
+            self.assertTrue(item_coverage[57]["validated_in_this_run"])
+            self.assertIn(
+                "source locator validation emitted",
+                viewer_validation["core_accuracy_gates"][0]["satisfied_checks"],
+            )
             filtered_search_response = client.get(
                 f"/api/runs/{run_id}/search",
                 params={

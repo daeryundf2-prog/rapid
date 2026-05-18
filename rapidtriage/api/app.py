@@ -210,6 +210,29 @@ STAGE10_CAPABILITY_SPECS: tuple[dict[str, object], ...] = (
         "blockers": ("persistent-suppression-workflow-required", "trusted-duplicate-manifest-required"),
     },
 )
+RUN_VIEWER_WORKFLOW_VALIDATION_VERSION = "run-viewer-workflow-validation-v1"
+RUN_VIEWER_WORKFLOW_CANDIDATE_LIMIT = 80
+RUN_VIEWER_WORKFLOW_SUPPLEMENTAL_SCAN_LIMIT = 300
+RUN_VIEWER_WORKFLOW_REQUIRED_ROUTES = (
+    "source-preview",
+    "source-hex-range",
+    "source-sqlite-table",
+    "source-email-attachment",
+    "source-image-gallery",
+    "source-media-cue",
+    "source-ocr-queue",
+    "source-ocr-translation",
+)
+RUN_VIEWER_WORKFLOW_FAMILY_PRIORITY = {
+    "sqlite-table-preview": 0,
+    "email-thread-preview": 1,
+    "image-gallery-preview": 2,
+    "media-preview": 3,
+    "document-text-preview": 4,
+    "text-or-hex-preview": 5,
+    "json-structured-preview": 6,
+    "xml-structured-preview": 7,
+}
 
 
 def stable_payload_sha256(payload: Mapping[str, object] | Sequence[Mapping[str, object]]) -> str:
@@ -930,6 +953,13 @@ def create_app(job_store: RunJobStore | None = None, auth_token: str | None = No
             artifacts=read_run_artifacts_for_capabilities(store, run_id, job.summary),
         )
 
+    @api.get("/api/runs/{run_id}/viewer-workflow-validation")
+    def get_run_viewer_workflow_validation(run_id: str) -> Dict[str, object]:
+        job = get_job(store, run_id)
+        if job.summary is None:
+            raise HTTPException(status_code=409, detail="run is not completed")
+        return build_run_viewer_workflow_validation(store, run_id, job.summary)
+
     @api.get("/api/runs/{run_id}/outputs/{output_name}")
     def get_run_output(run_id: str, output_name: str) -> Dict[str, object]:
         try:
@@ -1649,6 +1679,555 @@ def read_run_artifacts_for_capabilities(
                 "capability_load_error": True,
             }
     return artifacts
+
+
+def build_run_viewer_workflow_validation(
+    store: RunJobStore,
+    run_id: str,
+    run_summary: Mapping[str, object],
+) -> Dict[str, object]:
+    """Summarize source-viewer route coverage for one completed run."""
+    candidates, candidate_diagnostics = collect_run_viewer_workflow_source_candidates(
+        store,
+        run_id,
+        run_summary,
+    )
+    source_rows = [
+        build_run_viewer_source_validation_row(
+            run_id=run_id,
+            source_path=source_path,
+            allowed_roots=allowed_source_roots(dict(run_summary)),
+        )
+        for source_path in candidates
+    ]
+    route_coverage_by_id = build_run_viewer_route_coverage(source_rows)
+    item_coverage = build_run_viewer_item_coverage(source_rows, route_coverage_by_id=route_coverage_by_id)
+    family_counts: dict[str, int] = {}
+    for row in source_rows:
+        family = str(row.get("viewer_family") or "unknown")
+        family_counts[family] = family_counts.get(family, 0) + 1
+    smoke_contract = build_workbench_smoke_contract()
+    large_result_evidence = build_workbench_large_result_evidence(record_count=100_000)
+    core_accuracy_gates = build_run_viewer_workflow_accuracy_gates(item_coverage)
+    payload: Dict[str, object] = {
+        "command": "viewer-workflow-validation",
+        "profile_version": RUN_VIEWER_WORKFLOW_VALIDATION_VERSION,
+        "commercial_batch_id": "commercial-uplift-051-060",
+        "item_numbers": list(range(51, 61)),
+        "run_id": run_id,
+        "summary_path": str(run_summary.get("outputs", {}).get("summary") or "")
+        if isinstance(run_summary.get("outputs"), Mapping)
+        else "",
+        "candidate_summary": {
+            "total_candidate_count": len(source_rows),
+            "candidate_limit": RUN_VIEWER_WORKFLOW_CANDIDATE_LIMIT,
+            "viewer_family_counts": family_counts,
+            "candidate_collection": candidate_diagnostics,
+        },
+        "source_viewer_rows": source_rows,
+        "route_coverage": list(route_coverage_by_id.values()),
+        "route_coverage_by_id": route_coverage_by_id,
+        "item_coverage": item_coverage,
+        "browser_e2e_contract": {
+            "profile_version": "viewer-workflow-browser-e2e-contract-v1",
+            "workbench_smoke_contract_hash": smoke_contract["manifest_sha256"],
+            "required_routes": list(RUN_VIEWER_WORKFLOW_REQUIRED_ROUTES),
+            "required_actions": [
+                "open result row",
+                "open source preview",
+                "open specialized viewer route when applicable",
+                "save review state",
+                "pin compare candidate",
+                "export citation or report candidate",
+            ],
+            "external_browser_run_required": True,
+        },
+        "large_data_controls": {
+            "source_candidate_collection_bounded": True,
+            "source_candidate_limit": RUN_VIEWER_WORKFLOW_CANDIDATE_LIMIT,
+            "inline_preview_bounded": True,
+            "specialized_routes_are_cursor_or_range_bounded": True,
+            "virtualized_table_row_limit": VIRTUAL_TABLE_ROW_LIMIT,
+            "large_result_evidence_hash": large_result_evidence["evidence_manifest_hash"],
+            "browser_trace_attached": False,
+        },
+        "core_accuracy_gates": core_accuracy_gates,
+        "reportability_decision": {
+            "decision": "viewer-workflow-validation-is-routing-proof-not-commercial-certification",
+            "allowed_use": "single-run-review-route-and-source-locator-qc",
+            "required_before_report": [
+                "open source row and verify locator/hash",
+                "save review state for selected evidence",
+                "attach viewer-specific manifest for cited rows",
+                "run external browser e2e and trusted viewer corpus before commercial-grade claim",
+            ],
+        },
+        "commercial_grade_ready": False,
+        "commercial_grade_blockers": [
+            "browser-e2e-viewer-route-run-required",
+            "trusted-viewer-corpus-diff-required",
+            "persistent-review-server-and-conflict-tests-required",
+            "large-file-real-browser-performance-trace-required",
+        ],
+    }
+    payload["manifest_hash"] = stable_payload_sha256(payload)
+    return payload
+
+
+def collect_run_viewer_workflow_source_candidates(
+    store: RunJobStore,
+    run_id: str,
+    run_summary: Mapping[str, object],
+) -> tuple[list[Path], dict[str, object]]:
+    allowed_roots = allowed_source_roots(dict(run_summary))
+    raw_paths: list[str] = []
+    load_errors: list[str] = []
+    try:
+        files_payload = store.read_output(run_id, "files")
+    except (KeyError, RuntimeError, PermissionError, FileNotFoundError, OSError) as exc:
+        files_payload = {}
+        load_errors.append(f"files:{exc.__class__.__name__}")
+    candidates = files_payload.get("candidates") if isinstance(files_payload, Mapping) else None
+    if isinstance(candidates, Sequence) and not isinstance(candidates, (str, bytes)):
+        for candidate in candidates:
+            if not isinstance(candidate, Mapping):
+                continue
+            raw_path = str(candidate.get("path") or "")
+            if raw_path:
+                raw_paths.append(raw_path)
+    docs_payload: Mapping[str, object] = {}
+    try:
+        docs_payload = store.read_output(run_id, "docs")
+    except (KeyError, RuntimeError, PermissionError, FileNotFoundError, OSError) as exc:
+        load_errors.append(f"docs:{exc.__class__.__name__}")
+    doc_rows = docs_payload.get("results") if isinstance(docs_payload, Mapping) else None
+    if isinstance(doc_rows, Sequence) and not isinstance(doc_rows, (str, bytes)):
+        for row in doc_rows:
+            if not isinstance(row, Mapping):
+                continue
+            raw_path = str(row.get("path") or "")
+            if raw_path:
+                raw_paths.append(raw_path)
+    supplemental_paths, supplemental_scan = collect_bounded_viewer_candidate_path_strings(
+        allowed_roots,
+        existing_raw_paths=raw_paths,
+    )
+    raw_paths.extend(supplemental_paths)
+
+    deduped: list[Path] = []
+    skipped_outside_roots = 0
+    missing_files = 0
+    for raw_path in raw_paths:
+        resolved: Path | None = None
+        for candidate in candidate_source_paths(raw_path, allowed_roots):
+            if not any(is_relative_to(candidate, root) for root in allowed_roots):
+                continue
+            if candidate.is_file():
+                resolved = candidate
+                break
+        if resolved is None:
+            scoped = [
+                candidate
+                for candidate in candidate_source_paths(raw_path, allowed_roots)
+                if any(is_relative_to(candidate, root) for root in allowed_roots)
+            ]
+            if scoped:
+                missing_files += 1
+            else:
+                skipped_outside_roots += 1
+            continue
+        if resolved not in deduped:
+            deduped.append(resolved)
+
+    ranked = sorted(deduped, key=run_viewer_candidate_sort_key)
+    selected: list[Path] = []
+    selected_families: set[str] = set()
+    for source_path in ranked:
+        family = source_viewer_family_for_path(source_path)
+        if family in selected_families:
+            continue
+        selected.append(source_path)
+        selected_families.add(family)
+        if len(selected) >= RUN_VIEWER_WORKFLOW_CANDIDATE_LIMIT:
+            break
+    for source_path in ranked:
+        if len(selected) >= RUN_VIEWER_WORKFLOW_CANDIDATE_LIMIT:
+            break
+        if source_path not in selected:
+            selected.append(source_path)
+
+    diagnostics = {
+        "profile_version": "run-viewer-source-candidate-collection-v1",
+        "raw_path_count": len(raw_paths),
+        "deduped_candidate_count": len(deduped),
+        "selected_candidate_count": len(selected),
+        "candidate_limit": RUN_VIEWER_WORKFLOW_CANDIDATE_LIMIT,
+        "allowed_roots": [str(root) for root in allowed_roots],
+        "skipped_outside_allowed_roots": skipped_outside_roots,
+        "missing_file_count": missing_files,
+        "load_errors": load_errors,
+        "supplemental_root_scan": supplemental_scan,
+        "bounded": True,
+    }
+    diagnostics["collection_hash"] = stable_payload_sha256(diagnostics)
+    return selected, diagnostics
+
+
+def collect_bounded_viewer_candidate_path_strings(
+    allowed_roots: Sequence[Path],
+    *,
+    existing_raw_paths: Sequence[str],
+) -> tuple[list[str], dict[str, object]]:
+    seen = {
+        str(candidate)
+        for raw_path in existing_raw_paths
+        for candidate in candidate_source_paths(raw_path, allowed_roots)
+    }
+    collected: list[str] = []
+    scanned = 0
+    for root in allowed_roots:
+        if len(collected) >= RUN_VIEWER_WORKFLOW_SUPPLEMENTAL_SCAN_LIMIT:
+            break
+        if not root.is_dir():
+            continue
+        for current_root, dir_names, file_names in os.walk(root):
+            dir_names[:] = sorted(name for name in dir_names if not name.startswith("."))[:50]
+            for file_name in sorted(file_names):
+                if len(collected) >= RUN_VIEWER_WORKFLOW_SUPPLEMENTAL_SCAN_LIMIT:
+                    break
+                path = (Path(current_root) / file_name).expanduser().resolve()
+                scanned += 1
+                if str(path) in seen or not path.is_file():
+                    continue
+                if source_viewer_family_for_path(path) in RUN_VIEWER_WORKFLOW_FAMILY_PRIORITY:
+                    collected.append(str(path))
+                    seen.add(str(path))
+            if len(collected) >= RUN_VIEWER_WORKFLOW_SUPPLEMENTAL_SCAN_LIMIT:
+                break
+    diagnostics = {
+        "profile_version": "viewer-workflow-bounded-root-supplement-v1",
+        "enabled": True,
+        "scan_limit": RUN_VIEWER_WORKFLOW_SUPPLEMENTAL_SCAN_LIMIT,
+        "scanned_file_count": scanned,
+        "collected_path_count": len(collected),
+        "purpose": "Find viewer families not present in the primary files/docs outputs without full evidence traversal.",
+    }
+    diagnostics["scan_hash"] = stable_payload_sha256(diagnostics)
+    return collected, diagnostics
+
+
+def run_viewer_candidate_sort_key(source_path: Path) -> tuple[int, int, str]:
+    family = source_viewer_family_for_path(source_path)
+    try:
+        size = source_path.stat().st_size
+    except OSError:
+        size = 0
+    return (
+        int(RUN_VIEWER_WORKFLOW_FAMILY_PRIORITY.get(family, 99)),
+        min(size, 10_000_000),
+        source_path.name.lower(),
+    )
+
+
+def source_viewer_family_for_path(source_path: Path) -> str:
+    suffix = source_path.suffix.lower()
+    mime_type = mimetypes.guess_type(source_path.name)[0] or "application/octet-stream"
+    return source_viewer_family(source_path, suffix=suffix, mime_type=mime_type)
+
+
+def build_run_viewer_source_validation_row(
+    *,
+    run_id: str,
+    source_path: Path,
+    allowed_roots: Sequence[Path],
+) -> Dict[str, object]:
+    suffix = source_path.suffix.lower()
+    mime_type = mimetypes.guess_type(source_path.name)[0] or "application/octet-stream"
+    viewer_family = source_viewer_family(source_path, suffix=suffix, mime_type=mime_type)
+    quoted_path = quote(str(source_path))
+    matrix = source_stage10_capability_matrix(
+        run_id=run_id,
+        source_path=source_path,
+        quoted_path=quoted_path,
+        viewer_family=viewer_family,
+    )
+    stat = source_path.stat()
+    route_rows = build_run_viewer_route_rows(
+        run_id=run_id,
+        source_path=source_path,
+        viewer_family=viewer_family,
+    )
+    source_resolution = source_path_resolution_diagnostics(str(source_path), allowed_roots)
+    return {
+        "source_path": str(source_path),
+        "source_name": source_path.name,
+        "extension": suffix,
+        "mime_type": mime_type,
+        "size": stat.st_size,
+        "viewer_family": viewer_family,
+        "primary_item_number": stage10_viewer_item_number(viewer_family),
+        "source_exists": True,
+        "source_preview_url": f"/api/runs/{run_id}/source-preview?path={quoted_path}",
+        "source_file_url": f"/api/runs/{run_id}/source-file?path={quoted_path}",
+        "source_locator_validation": {
+            "profile_version": "source-locator-run-validation-v1",
+            "status": "resolved-inside-allowed-root"
+            if source_resolution["status"] == "matched"
+            else "source-resolution-needs-review",
+            "path_resolution_status": source_resolution["status"],
+            "inside_allowed_root_count": source_resolution["inside_allowed_root_count"],
+            "existing_file_count": source_resolution["existing_file_count"],
+            "source_locator_hash": stable_payload_sha256(
+                {
+                    "run_id": run_id,
+                    "source_path": str(source_path),
+                    "viewer_family": viewer_family,
+                    "size": stat.st_size,
+                }
+            ),
+        },
+        "stage10_capability_matrix_hash": stable_payload_sha256(matrix),
+        "routes": route_rows,
+    }
+
+
+def build_run_viewer_route_rows(
+    *,
+    run_id: str,
+    source_path: Path,
+    viewer_family: str,
+) -> list[dict[str, object]]:
+    quoted_path = quote(str(source_path))
+    rows: list[dict[str, object]] = [
+        {
+            "route_id": "source-preview",
+            "item_numbers": [51, 52],
+            "url": f"/api/runs/{run_id}/source-preview?path={quoted_path}",
+            "sample_ready": True,
+            "purpose": "Open the adaptive source viewer and review/compare controls.",
+        },
+        {
+            "route_id": "source-hex-range",
+            "item_numbers": [53],
+            "url": f"/api/runs/{run_id}/source-hex-range?path={quoted_path}&offset=0&length=256&include_hashes=true",
+            "sample_ready": True,
+            "purpose": "Export a bounded byte-range citation package.",
+        },
+    ]
+    if viewer_family == "sqlite-table-preview":
+        table_name = first_sqlite_table_name(source_path)
+        rows.append(
+            {
+                "route_id": "source-sqlite-table",
+                "item_numbers": [54],
+                "url": f"/api/runs/{run_id}/source-sqlite-table?path={quoted_path}&table={quote(table_name)}&offset=0&limit=100"
+                if table_name
+                else f"/api/runs/{run_id}/source-sqlite-table?path={quoted_path}&table={{table}}&offset=0&limit=100",
+                "sample_ready": bool(table_name),
+                "purpose": "Open a read-only paged SQLite table view.",
+                "route_parameter_source": "first_table" if table_name else "analyst-selected-table-required",
+            }
+        )
+    if viewer_family == "email-thread-preview":
+        attachment_count = first_email_attachment_count(source_path)
+        rows.append(
+            {
+                "route_id": "source-email-attachment",
+                "item_numbers": [55],
+                "url": f"/api/runs/{run_id}/source-email-attachment?path={quoted_path}&message_index=1&attachment_index=1",
+                "sample_ready": attachment_count > 0,
+                "purpose": "Open a bounded email attachment proof package when an attachment exists.",
+                "attachment_count": attachment_count,
+            }
+        )
+    if viewer_family == "image-gallery-preview":
+        rows.extend(
+            [
+                {
+                    "route_id": "source-image-gallery",
+                    "item_numbers": [56],
+                    "url": f"/api/runs/{run_id}/source-image-gallery?path={quoted_path}&offset=0&limit={IMAGE_GALLERY_DEFAULT_LIMIT}",
+                    "sample_ready": True,
+                    "purpose": "Open nearby-image review and gallery triage.",
+                },
+                {
+                    "route_id": "source-ocr-queue",
+                    "item_numbers": [58],
+                    "url": f"/api/runs/{run_id}/source-ocr-queue?path={quoted_path}&max_items={SOURCE_OCR_QUEUE_DEFAULT_MAX_ITEMS}",
+                    "sample_ready": True,
+                    "purpose": "Open OCR work queue candidates around the selected image.",
+                },
+                {
+                    "route_id": "source-ocr-translation",
+                    "item_numbers": [59],
+                    "url": f"/api/runs/{run_id}/source-ocr-translation?path={quoted_path}&include_text=true",
+                    "sample_ready": True,
+                    "purpose": "Open side-by-side OCR and translation review.",
+                },
+            ]
+        )
+    if viewer_family == "media-preview":
+        sidecar_count = len(collect_media_transcript_sidecars(source_path))
+        rows.append(
+            {
+                "route_id": "source-media-cue",
+                "item_numbers": [57],
+                "url": f"/api/runs/{run_id}/source-media-cue?path={quoted_path}&sidecar_index=1&cue_index=1&include_source_hashes=true",
+                "sample_ready": sidecar_count > 0,
+                "purpose": "Open a selected transcript cue citation package.",
+                "sidecar_count": sidecar_count,
+            }
+        )
+    for row in rows:
+        row["route_hash"] = stable_payload_sha256(
+            {
+                "route_id": row["route_id"],
+                "url": row["url"],
+                "source_path": str(source_path),
+            }
+        )
+    return rows
+
+
+def first_sqlite_table_name(source_path: Path) -> str:
+    if not is_sqlite_candidate(source_path):
+        return ""
+    try:
+        with contextlib.closing(sqlite3.connect(f"{source_path.as_uri()}?mode=ro", uri=True)) as connection:
+            row = connection.execute(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name LIMIT 1"
+            ).fetchone()
+    except (sqlite3.DatabaseError, OSError):
+        return ""
+    return str(row[0]) if row else ""
+
+
+def first_email_attachment_count(source_path: Path) -> int:
+    suffix = source_path.suffix.lower()
+    if suffix not in {".eml", ".mbox"}:
+        return 0
+    try:
+        messages = read_email_messages(source_path, suffix)
+    except (OSError, LookupError, UnicodeDecodeError, ValueError):
+        return 0
+    for index, message in enumerate(messages[:1], start=1):
+        summary = summarize_email_message(message, index)
+        return int(summary.get("attachment_count") or 0)
+    return 0
+
+
+def build_run_viewer_route_coverage(source_rows: Sequence[Mapping[str, object]]) -> Dict[str, object]:
+    coverage = {
+        route_id: {
+            "route_id": route_id,
+            "implemented": True,
+            "candidate_count": 0,
+            "sample_ready_count": 0,
+            "source_paths": [],
+            "sample_urls": [],
+        }
+        for route_id in RUN_VIEWER_WORKFLOW_REQUIRED_ROUTES
+    }
+    for row in source_rows:
+        routes = row.get("routes") if isinstance(row.get("routes"), Sequence) else []
+        for route in routes:
+            if not isinstance(route, Mapping):
+                continue
+            route_id = str(route.get("route_id") or "")
+            if route_id not in coverage:
+                continue
+            entry = coverage[route_id]
+            entry["candidate_count"] = int(entry["candidate_count"]) + 1
+            if route.get("sample_ready"):
+                entry["sample_ready_count"] = int(entry["sample_ready_count"]) + 1
+            if len(entry["source_paths"]) < 5:
+                entry["source_paths"].append(str(row.get("source_path") or ""))
+            if len(entry["sample_urls"]) < 5:
+                entry["sample_urls"].append(str(route.get("url") or ""))
+    for entry in coverage.values():
+        entry["sample_ready"] = int(entry["sample_ready_count"]) > 0
+        entry["coverage_hash"] = stable_payload_sha256(entry)
+    return coverage
+
+
+def build_run_viewer_item_coverage(
+    source_rows: Sequence[Mapping[str, object]],
+    *,
+    route_coverage_by_id: Mapping[str, object],
+) -> list[dict[str, object]]:
+    route_to_items = {
+        "source-preview": [51, 52],
+        "source-hex-range": [53],
+        "source-sqlite-table": [54],
+        "source-email-attachment": [55],
+        "source-image-gallery": [56],
+        "source-media-cue": [57],
+        "source-ocr-queue": [58],
+        "source-ocr-translation": [59],
+    }
+    item_counts = {item: 0 for item in range(51, 61)}
+    item_sample_ready = {item: 0 for item in range(51, 61)}
+    for route_id, items in route_to_items.items():
+        coverage = route_coverage_by_id.get(route_id)
+        if not isinstance(coverage, Mapping):
+            continue
+        for item in items:
+            item_counts[item] += int(coverage.get("candidate_count") or 0)
+            item_sample_ready[item] += int(coverage.get("sample_ready_count") or 0)
+    duplicate_group_count = 0
+    for row in source_rows:
+        if source_viewer_family_for_path(Path(str(row.get("source_path") or ""))) in {
+            "document-text-preview",
+            "text-or-hex-preview",
+            "json-structured-preview",
+            "xml-structured-preview",
+        }:
+            duplicate_group_count += 1
+    item_counts[60] = duplicate_group_count
+    item_sample_ready[60] = duplicate_group_count
+    labels = {int(spec["item_number"]): str(spec["label"]) for spec in STAGE10_CAPABILITY_SPECS}
+    rows: list[dict[str, object]] = []
+    for item in range(51, 61):
+        row = {
+            "item_number": item,
+            "gap_id": f"#{item}",
+            "label": labels[item],
+            "implemented": True,
+            "candidate_count": item_counts[item],
+            "sample_ready_count": item_sample_ready[item],
+            "validated_in_this_run": item_sample_ready[item] > 0,
+            "commercial_grade_ready": False,
+        }
+        row["coverage_hash"] = stable_payload_sha256(row)
+        rows.append(row)
+    return rows
+
+
+def build_run_viewer_workflow_accuracy_gates(
+    item_coverage: Sequence[Mapping[str, object]],
+) -> list[dict[str, object]]:
+    gates = []
+    for row in item_coverage:
+        item_number = int(row["item_number"])
+        satisfied = [
+            "viewer route contract emitted",
+            "source locator validation emitted",
+            "bounded large-data controls emitted",
+        ]
+        if row.get("validated_in_this_run"):
+            satisfied.append("sample source route available in this run")
+        gates.append(
+            build_accuracy_gate(
+                item_number,
+                satisfied_checks=satisfied,
+                evidence_refs=[
+                    "viewer-workflow-validation.route_coverage",
+                    "viewer-workflow-validation.source_viewer_rows",
+                    "viewer-workflow-validation.item_coverage",
+                ],
+            )
+        )
+    return gates
 
 
 def paginate_payload(
