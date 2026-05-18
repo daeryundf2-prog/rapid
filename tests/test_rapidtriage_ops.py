@@ -6,6 +6,7 @@ import importlib.util
 import io
 import json
 import subprocess
+import sys
 import tempfile
 import unittest
 import zipfile
@@ -7327,7 +7328,7 @@ class RapidTriageOpsTests(unittest.TestCase):
             work_dir = root / "ops-security-work"
             result = subprocess.run(
                 [
-                    "python",
+                    sys.executable,
                     "scripts/operations-security-readiness.py",
                     "--output",
                     str(output_path),
