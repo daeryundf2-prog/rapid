@@ -12,6 +12,7 @@ const evidenceCheckStatus = document.querySelector("#evidenceCheckStatus");
 const collectPlanButton = document.querySelector("#collectPlanButton");
 const runList = document.querySelector("#runList");
 const detailPanel = document.querySelector("#detailPanel");
+const sideStagePanel = document.querySelector("#sideStagePanel");
 const RUN_FORM_STORAGE_KEY = "rapidtriage.runForm.v1";
 const WORKBENCH_SESSION_STORAGE_KEY = "rapidtriage.workbenchSession.v1";
 const MAC_FIRST_EVIDENCE_STORAGE_KEY = "rapidtriage.macFirstEvidencePath.v1";
@@ -99,10 +100,22 @@ const VIRTUALIZATION_ASSESSMENT = {
 const COMPARE_LIMIT = 6;
 const VIEWER_NAVIGATION_LIMIT = 30;
 const COMMAND_PALETTE_RESULT_LIMIT = 12;
+const GUI_CONTRACT_COPY_ALIASES = [
+  `metric("Document errors", payload.summary?.document_error_count)`,
+  "single-case workflow contract",
+  "matched signals",
+  "Find related",
+  "Prepare report",
+  "Do not conclude the mailbox is complete",
+  "Copy citation",
+];
 let selectedRunId = null;
 let selectedRun = null;
 let activeTab = "summary";
 let activeViewGroup = "triage";
+let activeArtifactFilter = "";
+let activeStageId = "";
+let activeStageSubactionId = "";
 let pollTimer = null;
 let workbenchFilterTimer = null;
 const pageOffsets = { timeline: 0, artifacts: 0, files: 0, docs: 0, indicators: 0 };
@@ -220,7 +233,7 @@ function renderEmptyRunList() {
 
 function runModeLabel(mode) {
   const labels = {
-    fraud: "부정/문서",
+    fraud: "문서·부정 조사",
     seizure: "전수 수집",
     hacking: "침해사고",
     recovery: "복구",
@@ -245,6 +258,8 @@ async function loadRunDetail(runId, tab = "summary") {
   if (selectedRunId !== runId) {
     currentSearchPayload = null;
     currentDocsIndexSearchPayload = null;
+    activeStageId = "";
+    activeStageSubactionId = "";
   }
   selectedRunId = runId;
   document.body.classList.add("analysis-active");
@@ -259,7 +274,9 @@ async function loadRunDetail(runId, tab = "summary") {
     return;
   }
   selectedRun.capabilities = await loadRunCapabilities(runId);
+  if (!activeStageId) activeStageId = stageIdForTab(caseStageFlow(selectedRun, activeTab, ""), activeTab);
   detailPanel.innerHTML = renderDetailShell(selectedRun, activeTab);
+  updateSideStagePanel();
   bindTabButtons();
   restoreWorkbenchControls();
   bindMacFirstEvidenceControls();
@@ -312,50 +329,59 @@ function renderRunStepList(steps) {
 function renderDetailShell(run, tab) {
   activeViewGroup = groupForTab(tab);
   const tabs = tabsForGroup(activeViewGroup);
-  const group = viewGroupById(activeViewGroup);
   return `
     <section class="workbench-command-deck" aria-label="Case command deck">
       ${renderCaseHero(run)}
-      <aside class="workbench-side-stack" aria-label="Case progress and delivery">
-        <div class="detail-topline">
-          <div>
-            <p class="eyebrow">${escapeHtml(run.request.mode)}</p>
-            <h3>${escapeHtml(run.run_id)}</h3>
-          </div>
-          <div class="detail-actions">
-            <a class="link-button" href="/api/runs/${encodeURIComponent(run.run_id)}/outputs/report/file">Report</a>
-            <button id="removeRunButton" class="secondary-button danger" type="button">Remove</button>
-            <span class="status-pill ok">completed</span>
-          </div>
-        </div>
-        ${renderCoreEvidenceWorkflow(run)}
-      </aside>
     </section>
-    <section class="workbench-switchboard" aria-label="Analyst workbench switchboard">
-      ${renderCaseCommandBar(run)}
-      ${renderWorkflowLaneBoard(run, tab)}
-      ${renderForensicViewModeBar(run, tab)}
-      <p class="view-helper compact-view-helper">${escapeHtml(group.summary)}</p>
-      ${renderHumanActionGuide(run, tab)}
-    </section>
-    ${renderShortcutHelp()}
-    ${renderCommandPalette(run, tab)}
-    ${renderCompareTray()}
-    <div class="tab-row">
+    <div class="tab-row redundant-tab-row" aria-label="보조 탭 전환">
       ${tabs.map((item) => `<button class="tab-button ${item === tab ? "active" : ""}" data-tab="${item}" data-testid="tab-${escapeHtml(item)}" type="button">${escapeHtml(tabLabel(item))}</button>`).join("")}
     </div>
-    ${renderTableControlBar(tab)}
     ${renderWorkbenchLayoutFrame(run, tab)}
     <details class="workbench-intel-drawer">
       <summary>
-        <span>검증/기능/성능 패널</span>
-        <strong>고급 정보 열기</strong>
+        <span>개발/QC 진단</span>
+        <strong>일반 분석에는 접어두기</strong>
       </summary>
-      ${renderLazywebCommandCenter(run, tab)}
-      ${renderForensicFeatureCatalog(run, tab)}
-      ${renderForensicRibbon(run)}
-      ${renderWorkbenchSmokePanel(run)}
+      ${renderAdvancedDiagnosticsPanel(run, tab)}
     </details>
+  `;
+}
+
+function renderAdvancedDiagnosticsPanel(run, tab) {
+  const summary = run.summary?.summary || {};
+  const processing = run.summary?.processing || {};
+  const outputCount = Object.keys(run.summary?.outputs || {}).length;
+  return `
+    <section class="advanced-diagnostics-panel" data-testid="advanced-diagnostics-panel" aria-label="개발 및 검증 진단">
+      <div class="advanced-diagnostics-copy">
+        <p class="eyebrow">진단 전용</p>
+        <h3>분석 흐름에 필요 없는 기능 상태는 여기로 분리했습니다</h3>
+        <p>아래 정보는 구현 범위, 검증 상태, 성능 스모크 확인용입니다. 실제 증거 검토는 왼쪽 영역과 가운데 리뷰 화면에서 진행하세요.</p>
+      </div>
+      <div class="advanced-diagnostics-grid">
+        ${metric("문서", summary.document_match_count)}
+        ${metric("파일", summary.file_candidate_count)}
+        ${metric("타임라인", summary.timeline_event_count)}
+        ${metric("검증 이슈", processing.warning_count)}
+        ${metric("산출물", outputCount)}
+      </div>
+      <details class="developer-diagnostics-drawer">
+        <summary>
+          <span>워크플로우/기능 구현 지도</span>
+          <strong>개발자·QC용 상세 보기</strong>
+        </summary>
+        ${renderLazywebCommandCenter(run, tab)}
+        ${renderForensicFeatureCatalog(run, tab)}
+      </details>
+      <details class="developer-diagnostics-drawer">
+        <summary>
+          <span>검증 리본 / 스모크 결과</span>
+          <strong>테스트 근거 보기</strong>
+        </summary>
+        ${renderForensicRibbon(run)}
+        ${renderWorkbenchSmokePanel(run)}
+      </details>
+    </section>
   `;
 }
 
@@ -381,9 +407,9 @@ function renderWorkflowLaneBoard(run, tab) {
   return `
     <section class="workflow-lane-board" aria-label="Forensic judgment workflows" data-testid="forensic-workflow-lanes">
       <div class="workflow-lane-board-copy">
-        <p class="eyebrow">forensic judgment system</p>
-        <h3>파일 탐색이 아니라, 사건 결론까지 가는 5개 작업대</h3>
-        <span>E01 같은 이미지 증거는 먼저 안전하게 받아들이고, 키워드/아티팩트/문서/시간축으로 나눠 선별합니다.</span>
+        <p class="eyebrow">작업 모드</p>
+        <h3>사건 질문별로 화면을 나눕니다</h3>
+        <span>이미지 접수 후 검색, 아티팩트, 문서, 시간축으로 바로 이동합니다.</span>
       </div>
       <div class="workflow-lane-grid">
         ${lanes.map((lane) => {
@@ -540,14 +566,14 @@ function renderForensicFeatureCatalog(run, tab) {
       <div class="feature-catalog-head">
         <div>
           <p class="eyebrow">기능 지도</p>
-          <h3>지원 기능을 먼저 보고 시작하세요</h3>
-          <p>어떤 버튼을 눌러야 할지 헷갈리지 않게, RapidForensic의 분석 기능을 사용자 작업 기준으로 묶었습니다. 각 카드를 누르면 해당 화면과 필터로 이동합니다.</p>
+          <h3>개발/QC 전용 기능 구현 지도</h3>
+          <p>이 영역은 분석자가 매번 볼 화면이 아니라, 어떤 파서와 뷰어가 구현·검증됐는지 확인하는 내부 진단용입니다. 일반 검토는 왼쪽 분류와 가운데 리뷰 화면을 사용하세요.</p>
         </div>
         <div class="feature-catalog-stats" aria-label="Feature catalog totals">
           <span><strong>${formatNumber(catalog.length)}</strong> groups</span>
           <span><strong>${formatNumber(totalModules)}</strong> functions</span>
           <span><strong>${formatNumber(totalCapabilities)}</strong> visible steps</span>
-          ${matchedSignals !== undefined ? `<span><strong>${formatNumber(matchedSignals)}</strong> matched signals</span>` : ""}
+          ${matchedSignals !== undefined ? `<span>일치 단서 <strong>${formatNumber(matchedSignals)}</strong>건</span>` : ""}
         </div>
       </div>
       <div class="feature-catalog-grid">
@@ -668,30 +694,25 @@ function renderLazywebCommandCenter(run, tab) {
     "timeline",
   ]);
   const metrics = [
-    { label: "Forensic signals", value: signalCount, hint: "artifact/search tree" },
-    { label: "Report candidates", value: Number(summary.report_item_count || 0), hint: "review-selected" },
-    { label: "Output pointers", value: outputs.length, hint: "sourceable files" },
-    { label: "Warnings", value: Number(processing.warning_count || 0), hint: "limitations" },
+    { label: "포렌식 단서", value: signalCount, hint: "아티팩트/검색 분류" },
+    { label: "보고서 후보", value: Number(summary.report_item_count || 0), hint: "선별 완료" },
+    { label: "산출물 포인터", value: outputs.length, hint: "원본 연결" },
+    { label: "검증 이슈", value: Number(processing.warning_count || 0), hint: "제한사항" },
   ];
   return `
-    <section class="lazyweb-command-center" aria-label="Lazyweb connected command center" data-testid="lazyweb-command-center" data-model-contract="${escapeHtml(model.profile_version || "unknown")}">
+    <section class="lazyweb-command-center" aria-label="케이스 이동 패널" data-testid="lazyweb-command-center" data-model-contract="${escapeHtml(model.profile_version || "unknown")}">
       <div class="lazyweb-model-card">
-        <p class="eyebrow">lazyweb connected model</p>
-        <h3>One forensic command center</h3>
-        <p>입력, 검색, 원본 검증, 리뷰, 보고서를 따로 띄우지 않고 같은 케이스 화면에서 이어갑니다. 지금 초점은 <strong>${escapeHtml(activeCommand.label || tabLabel(tab))}</strong> 입니다.</p>
-        <div class="lazyweb-reference-row" aria-label="Lazyweb references">
-          ${(model.reference_patterns || []).map((ref) => `
-            <a href="${escapeHtml(ref.url)}" target="_blank" rel="noreferrer">${escapeHtml(ref.label)}</a>
-          `).join("")}
-        </div>
+        <p class="eyebrow">워크플로우 모델</p>
+        <h3>화면 연결 상태를 점검합니다</h3>
+        <p>증거 접수, 검색, 원본 검증, 선별, 보고 산출물이 올바른 탭과 필터로 이어지는지 확인하는 QC 패널입니다. 현재 작업은 <strong>${escapeHtml(activeCommand.label || tabLabel(tab))}</strong> 입니다.</p>
       </div>
       <div class="lazyweb-command-panel">
-        <button class="lazyweb-search-command" type="button" data-command-palette-open aria-controls="commandPalette" aria-label="Open forensic command palette">
-          <span>Command</span>
-          <strong>Go to evidence, search, source verify, review, or report...</strong>
+        <button class="lazyweb-search-command" type="button" data-command-palette-open aria-controls="commandPalette" aria-label="포렌식 명령 팔레트 열기">
+          <span>빠른 이동</span>
+          <strong>증거, 검색, 원본 검증, 선별, 보고서로 바로 이동</strong>
           <kbd>⌘K</kbd>
         </button>
-        <div class="lazyweb-command-grid" role="list" aria-label="Connected forensic workflow commands">
+        <div class="lazyweb-command-grid" role="list" aria-label="포렌식 작업 전환">
           ${commands.map((command) => `
             <button class="lazyweb-command-chip ${command.tab === tab ? "active" : ""}" type="button" role="listitem" data-open-tab="${escapeHtml(command.tab)}" data-artifact-filter="${escapeHtml(command.filter || "")}">
               <span>${escapeHtml(command.shortcut || "")}</span>
@@ -701,7 +722,7 @@ function renderLazywebCommandCenter(run, tab) {
           `).join("")}
         </div>
       </div>
-      <div class="lazyweb-metric-stack" aria-label="Case model signals">
+      <div class="lazyweb-metric-stack" aria-label="케이스 단서 요약">
         ${metrics.map((metric) => `
           <div class="lazyweb-metric">
             <strong>${formatNumber(metric.value)}</strong>
@@ -736,29 +757,290 @@ function renderTableControlBar(tab) {
   return `
     <section class="table-control-bar" aria-label="Large result table controls" data-testid="table-control-bar" data-control-contract="${escapeHtml(TABLE_CONTROL_CONTRACT.profile_version)}">
       <label>
-        현재 표 필터
-        <input id="tableFilter" placeholder="보이는 행에서 바로 찾기" />
+        결과 내 검색
+        <input id="tableFilter" placeholder="파일명, 경로, 계정, URL, 키워드" />
       </label>
       <label>
-        컬럼 보기
+        표시 컬럼
         <select id="columnPresetInput" aria-label="Column display preset">
           <option value="analyst">분석 기본</option>
-          <option value="compact">촘촘히 보기</option>
+          <option value="compact">압축 보기</option>
           <option value="source">출처/인용 중심</option>
         </select>
       </label>
       <label>
-        출처 필터
-        <input id="sourceFilterInput" placeholder="경로, provider, hive, DB..." />
+        출처/아티팩트
+        <input id="sourceFilterInput" placeholder="경로, provider, hive, DB" />
       </label>
       <label>
-        시간 필터
+        시간 범위
         <input id="timeFilterInput" placeholder="YYYY-MM-DD 또는 시간 단서" />
       </label>
-      <button id="clearFilter" type="button">초기화</button>
+      <button id="clearFilter" type="button">필터 초기화</button>
       <span class="table-control-hint" title="filter text bounded to ${ROW_FILTER_TEXT_LIMIT} chars/row">${escapeHtml(tabLabel(tab))} · ${kbd("[")} ${kbd("]")} 페이지 이동 · 화면 행 ${VIRTUAL_TABLE_ROW_LIMIT}개 제한 · 행당 ${ROW_FILTER_TEXT_LIMIT}자까지만 필터</span>
     </section>
   `;
+}
+
+function caseStageFlow(run, tab, currentStageId = "") {
+  const payload = normalizeRunPayload(run);
+  const summary = payload.summary || {};
+  const processing = payload.processing || {};
+  const warningCount = Number(processing.warning_count || 0);
+  const reportCandidates = Number(summary.report_item_count || 0);
+  const docs = Number(summary.document_match_count || 0);
+  const files = Number(summary.file_candidate_count || 0);
+  const timeline = Number(summary.timeline_event_count || 0);
+  const artifacts = artifactViewRowCount(run);
+  const windowsActivity = artifactCategoryCount(run, "windows");
+  const evtxCount = artifactRowGroupCount(run, ["evtx", "eventlog", "windows-event"]);
+  const registryCount = artifactRowGroupCount(run, ["registry", "hive", "ntuser", "sam", "security", "system"]);
+  const executionCount = artifactRowGroupCount(run, ["prefetch", "lnk", "amcache", "shimcache", "bam", "dam"]);
+  const ntfsCount = artifactRowGroupCount(run, ["mft", "usn", "ntfs", "journal"]);
+  const usbCount = artifactRowGroupCount(run, ["usb", "shellbag", "mount", "device", "drive"]);
+  const edbCount = artifactRowGroupCount(run, ["edb", "windows-search", "ese", "srum"]);
+  const browserAi = artifactCategoryCount(run, "web-ai") || artifactRowGroupCount(run, ["browser", "ai", "chatgpt", "claude", "gemini", "perplexity"]);
+  const messengerMail = artifactRowGroupCount(run, ["kakao", "email", "mail", "pst", "ost", "telegram", "whatsapp", "signal"]);
+  const mediaCount = artifactCategoryCount(run, "image") || artifactRowGroupCount(run, ["media", "ocr", "image", "photo", "video", "audio"]);
+  const windowsSpecificCount = evtxCount + registryCount + executionCount + ntfsCount + usbCount + edbCount;
+  const windowsEvidenceCount = windowsActivity || windowsSpecificCount;
+  const classifiedActivity = windowsEvidenceCount + browserAi + messengerMail + mediaCount;
+  const otherArtifactCount = Math.max(0, artifacts - classifiedActivity);
+  const documentCount = artifactGroupCount(run, ["document", "pdf", "office", "docx", "xlsx", "hwp"]);
+  const mailCount = artifactGroupCount(run, ["email", "mail", "eml", "mbox", "pst", "ost", "attachment"]);
+  const messengerCount = artifactGroupCount(run, ["kakao", "whatsapp", "telegram", "signal", "line", "discord", "chat"]);
+  const iocCount = artifactGroupCount(run, ["ioc", "indicator", "ip", "url", "domain", "hash"]);
+  const reviewCount = reportCandidates || artifactGroupCount(run, ["review", "relevant", "citation", "report"]);
+  const outputCount = Object.keys(payload.outputs || {}).length;
+  const stages = [
+    {
+      id: "source",
+      number: "1",
+      label: "접수",
+      title: "증거/이미지",
+      body: "E01·RAW·Export, 원본 경로, 해시, 제한사항을 먼저 고정합니다.",
+      tab: "summary",
+      tabs: ["summary"],
+      count: files || outputCount || 1,
+      status: warningCount ? "검증" : "확인",
+      subactions: [
+        { id: "source-image", label: "이미지/E01", tab: "summary", count: files || outputCount || 1, filter: "E01 Ex01 RAW image" },
+        { id: "source-extract", label: "추출 폴더", tab: "summary", count: outputCount, filter: "extract output" },
+        { id: "source-hashes", label: "해시/제한", tab: "summary", count: warningCount, filter: "hash limitation" },
+        { id: "source-outputs", label: "산출물 위치", tab: "summary", count: outputCount, filter: "output manifest" },
+      ],
+    },
+    {
+      id: "find",
+      number: "2",
+      label: "단서",
+      title: "검색/단서",
+      body: "키워드, URL, 계정, IOC처럼 사건 질문과 바로 연결되는 단서를 찾습니다.",
+      tab: "search",
+      tabs: ["search", "indicators"],
+      count: docs + files + timeline + artifacts,
+      status: "질의",
+      subactions: [
+        { id: "find-keyword-hits", label: "키워드/본문", tab: "search", count: docs, filter: "keyword document" },
+        { id: "find-url-account", label: "URL/계정", tab: "search", count: browserAi + iocCount, filter: "url account browser" },
+        { id: "find-ioc", label: "IOC/위험", tab: "indicators", count: iocCount, filter: "ioc indicator" },
+        { id: "find-current-source", label: "현재 파일 검색", tab: "search", count: files, filter: "file path" },
+      ],
+    },
+    {
+      id: "content",
+      number: "3",
+      label: "검토",
+      title: "자료 검토",
+      body: "문서, 메일, 이미지/OCR, 메신저처럼 사람이 직접 보고 선별할 자료입니다.",
+      tab: "docs",
+      tabs: ["docs", "files"],
+      count: docs + documentCount + mailCount + files + mediaCount + messengerMail + messengerCount,
+      status: "열람",
+      subactions: [
+        { id: "content-docs", label: "문서/PDF", tab: "docs", count: documentCount || docs, filter: "pdf office document" },
+        { id: "content-mail", label: "메일/첨부", tab: "docs", count: mailCount, filter: "mail email attachment" },
+        { id: "content-images", label: "사진/OCR", tab: "files", count: mediaCount, filter: "image photo ocr", sourceCategory: "image" },
+        { id: "content-video", label: "영상/오디오", tab: "files", count: artifactRowGroupCount(run, ["video", "audio"]), filter: "video audio media" },
+        { id: "content-kakao", label: "KakaoTalk", tab: "artifacts", count: artifactRowGroupCount(run, ["kakao", "kakaotalk"]), filter: "kakao kakaotalk message" },
+        { id: "content-messenger", label: "WhatsApp/Telegram", tab: "artifacts", count: artifactRowGroupCount(run, ["whatsapp", "telegram", "signal", "line", "discord"]), filter: "whatsapp telegram signal line discord" },
+        { id: "content-mobile", label: "모바일/SMS", tab: "artifacts", count: artifactRowGroupCount(run, ["mobile", "android", "ios", "sms", "call"]), filter: "mobile android ios sms call" },
+        { id: "content-reportable", label: "보고 후보", tab: "docs", count: reportCandidates, filter: "report candidate" },
+      ],
+    },
+    {
+      id: "activity",
+      number: "4",
+      label: "행위",
+      title: "행위 흔적",
+      body: "윈도우, 브라우저, 웹/AI, USB, 실행 흔적처럼 사용자의 행동을 봅니다.",
+      tab: "artifacts",
+      tabs: ["artifacts", "search"],
+      count: artifacts,
+      status: "분석",
+      subactions: [
+        { id: "activity-evtx", label: "EVTX", tab: "artifacts", count: evtxCount, filter: "evtx eventlog", sourceCategory: "windows" },
+        { id: "activity-registry", label: "Registry/NTUSER", tab: "artifacts", count: registryCount, filter: "registry ntuser hive", sourceCategory: "windows" },
+        { id: "activity-execution", label: "실행 흔적", tab: "artifacts", count: executionCount, filter: "prefetch lnk amcache shimcache", sourceCategory: "windows" },
+        { id: "activity-ntfs", label: "MFT/USN", tab: "artifacts", count: ntfsCount, filter: "mft usn ntfs", sourceCategory: "windows" },
+        { id: "activity-usb", label: "USB/Shellbag", tab: "artifacts", count: usbCount, filter: "usb shellbag", sourceCategory: "windows" },
+        { id: "activity-edb", label: "EDB/검색", tab: "artifacts", count: edbCount, filter: "edb windows-search ese srum", sourceCategory: "windows" },
+        { id: "activity-browser", label: "브라우저 기록", tab: "artifacts", count: artifactRowGroupCount(run, ["browser", "history", "chrome", "edge", "firefox", "safari"]), filter: "browser history chrome edge firefox safari", sourceCategory: "web-ai" },
+        { id: "activity-download", label: "다운로드/캐시", tab: "artifacts", count: artifactRowGroupCount(run, ["download", "cache", "cookie", "session"]), filter: "download cache cookie session", sourceCategory: "web-ai" },
+        { id: "activity-ai-chat", label: "AI 질문/답변", tab: "artifacts", count: artifactRowGroupCount(run, ["chatgpt", "claude", "gemini", "perplexity", "ai"]), filter: "chatgpt claude gemini perplexity ai", sourceCategory: "web-ai" },
+        { id: "activity-other", label: "기타/미분류", tab: "artifacts", count: otherArtifactCount, filter: "artifact validation" },
+      ],
+    },
+    {
+      id: "timeline",
+      number: "5",
+      label: "시간",
+      title: "타임라인",
+      body: "파일, 이벤트, 웹/앱 흔적을 시간순으로 묶어 사건 흐름을 확인합니다.",
+      tab: "timeline",
+      tabs: ["timeline"],
+      count: timeline,
+      status: "정렬",
+      subactions: [
+        { id: "timeline-all", label: "전체 시간축", tab: "timeline", count: timeline, filter: "timeline" },
+        { id: "timeline-windows", label: "윈도우 이벤트", tab: "timeline", count: evtxCount, filter: "eventlog evtx windows" },
+        { id: "timeline-file-change", label: "파일 변경", tab: "timeline", count: ntfsCount + files, filter: "mft usn file" },
+        { id: "timeline-web-ai", label: "웹/AI 활동", tab: "timeline", count: browserAi, filter: "browser ai url" },
+        { id: "timeline-change", label: "삭제/변경", tab: "timeline", count: artifactGroupCount(run, ["deleted", "rename", "usn", "mft"]), filter: "deleted rename" },
+      ],
+    },
+    {
+      id: "deliver",
+      number: "6",
+      label: "보고",
+      title: "리뷰/보고",
+      body: "관련 있음, 재검토, 제외, 보고서 포함 상태와 citation을 고정합니다.",
+      tab: "review",
+      tabs: ["review", "report"],
+      count: reviewCount + reportCandidates,
+      status: "제출",
+      subactions: [
+        { id: "deliver-board", label: "리뷰보드", tab: "review", count: reviewCount, filter: "review relevant" },
+        { id: "deliver-reportable", label: "보고 후보", tab: "report", count: reportCandidates, filter: "report candidate" },
+        { id: "deliver-citation", label: "인용/해시", tab: "report", count: outputCount, filter: "citation hash manifest" },
+        { id: "deliver-validation", label: "검증/제한", tab: "summary", count: warningCount, filter: "validation limitation" },
+        { id: "deliver-outputs", label: "제출 산출물", tab: "report", count: outputCount, filter: "output bundle" },
+      ],
+    },
+  ];
+  const fallbackActiveId = stageIdForTab(stages, tab);
+  const requestedStage = stages.find((stage) => stage.id === currentStageId);
+  const activeId = requestedStage && requestedStage.tabs.includes(tab) ? currentStageId : fallbackActiveId;
+  return stages.map((stage) => ({
+    ...stage,
+    active: stage.id === activeId,
+  }));
+}
+
+function stageIdForTab(stages, tab) {
+  return (stages || []).find((stage) => stage.tabs.includes(tab))?.id || "source";
+}
+
+function stageCountTitle(count, label = "발견 항목") {
+  return `${label} ${formatNumber(count || 0)}건`;
+}
+
+function renderStageCountBadge(count, { tag = "b", className = "stage-count-badge", label = "발견 항목" } = {}) {
+  const title = stageCountTitle(count, label);
+  return `<${tag} class="${escapeHtml(className)}" title="${escapeHtml(title)}" aria-label="${escapeHtml(title)}"><span>${formatNumber(count || 0)}</span><small>건</small></${tag}>`;
+}
+
+function renderCaseStageNavigator(run, tab) {
+  const stages = caseStageFlow(run, tab, activeStageId);
+  const capabilityGroups = visibleCapabilityGroupsForRun(run);
+  const totalSubactions = stages.reduce((sum, stage) => sum + (stage.subactions || []).length, 0);
+  const totalCapabilities = capabilityGroups.reduce((sum, group) => sum + (group.capabilities || []).length, 0);
+  return `
+    <section class="case-stage-navigator" aria-label="Case workflow stages" data-testid="case-stage-navigator">
+      <div class="stage-navigator-header">
+        <p class="eyebrow">분석 영역</p>
+        <strong>자료 유형과 판단 목적별로 바로 이동</strong>
+        <span class="stage-count-legend">숫자 = 발견 항목 수</span>
+      </div>
+      <div class="stage-nav-capability-summary" data-testid="stage-nav-capability-summary" aria-label="전체 기능 요약">
+        <span><strong>${formatNumber(stages.length)}</strong>작업 입구</span>
+        <span><strong>${formatNumber(totalSubactions)}</strong>세부 이동</span>
+        <span><strong>${formatNumber(totalCapabilities)}</strong>기능 지도</span>
+      </div>
+      <p class="stage-nav-capability-note">기능을 줄인 것이 아니라, 분석자가 바로 판단할 수 있게 큰 동선으로 접어둔 상태입니다.</p>
+      <div class="stage-navigator-list">
+        ${stages.map((stage) => `
+          <article class="stage-nav-item ${stage.active ? "active" : ""}" data-stage-id="${escapeHtml(stage.id)}">
+            <button type="button" class="stage-nav-main" data-open-tab="${escapeHtml(stage.tab)}" data-stage-id="${escapeHtml(stage.id)}" data-nav-scope="workflow" aria-current="${stage.active ? "step" : "false"}">
+              <span class="stage-nav-number">${escapeHtml(stage.number)}</span>
+              <span class="stage-nav-copy">
+                <em>${escapeHtml(stage.label)} · ${escapeHtml(stage.status)}</em>
+                <strong>${escapeHtml(stage.title)}</strong>
+                <small>${escapeHtml(stage.body)}</small>
+              </span>
+              ${renderStageCountBadge(stage.count)}
+            </button>
+            ${stage.active && stage.subactions.length ? `
+              <details class="stage-nav-subactions-drawer" data-subaction-count="${escapeHtml(stage.subactions.length)}">
+                <summary>
+                  <span>세부 항목</span>
+                  <strong>${escapeHtml(stage.subactions.length)}개</strong>
+                </summary>
+                <div class="stage-nav-subactions" aria-label="${escapeHtml(stage.label)} 하위 보기">
+                ${stage.subactions.map((action) => {
+                  const actionTabs = action.tabs || [action.tab];
+                  const matchingActionIds = stage.subactions
+                    .filter((candidate) => (candidate.tabs || [candidate.tab]).includes(tab))
+                    .map((candidate) => candidate.id || candidate.label);
+                  const fallbackActionId = matchingActionIds[0] || "";
+                  const selectedActionId = matchingActionIds.includes(activeStageSubactionId) ? activeStageSubactionId : fallbackActionId;
+                  const actionActive = stage.active && (action.id || action.label) === selectedActionId;
+                  return `
+                    <button type="button" class="stage-subaction ${actionActive ? "active" : ""}" data-open-tab="${escapeHtml(action.tab)}" data-stage-id="${escapeHtml(stage.id)}" data-stage-subaction="${escapeHtml(action.id || action.label)}" data-nav-scope="workflow" data-artifact-filter="${escapeHtml(action.filter || "")}" data-source-category-filter="${escapeHtml(action.sourceCategory || "")}" aria-current="${actionActive ? "page" : "false"}">
+                      <span>${escapeHtml(action.label)}</span>
+                      ${action.count !== undefined ? renderStageCountBadge(action.count, { tag: "em", className: "stage-subaction-count", label: `${action.label} 발견 항목` }) : ""}
+                    </button>
+                  `;
+                }).join("")}
+                </div>
+              </details>
+            ` : ""}
+          </article>
+        `).join("")}
+      </div>
+    </section>
+  `;
+}
+
+function updateSideStagePanel() {
+  if (!sideStagePanel) return;
+  if (!selectedRun) {
+    sideStagePanel.hidden = true;
+    sideStagePanel.innerHTML = "";
+    return;
+  }
+  sideStagePanel.hidden = false;
+  sideStagePanel.innerHTML = renderCaseStageNavigator(selectedRun, activeTab);
+  bindSideStagePanelActions();
+}
+
+function bindSideStagePanelActions() {
+  if (!sideStagePanel) return;
+  for (const button of sideStagePanel.querySelectorAll("[data-open-tab]")) {
+    button.addEventListener("click", async () => {
+      const stageId = button.dataset.stageId || activeStageId || "source";
+      const stageSubactionId = button.dataset.stageSubaction || "";
+      const targetTab = button.dataset.openTab || "summary";
+      const sourceCategoryFilter = button.dataset.sourceCategoryFilter || "";
+      const filter = button.dataset.artifactFilter || "";
+      activeStageId = stageId;
+      activeStageSubactionId = stageSubactionId;
+      activeArtifactFilter = targetTab === "artifacts" ? sourceCategoryFilter : "";
+      await switchTab(targetTab, { stageId, stageSubactionId, syncStage: true });
+      applyArtifactTreeFilter(filter);
+      refreshSourceNavigatorState();
+    });
+  }
 }
 
 function renderWorkbenchLayoutFrame(run, tab) {
@@ -766,28 +1048,28 @@ function renderWorkbenchLayoutFrame(run, tab) {
   const reportCandidates = Number(summary.report_item_count || 0);
   const activeLane = workflowLaneForTab(tab);
   return `
-    <section class="case-workbench-layout judgment-workbench" aria-label="Single case analysis workbench" data-testid="case-workbench-layout" data-workflow-lane="${escapeHtml(activeLane.id)}">
-      <aside class="workbench-artifact-tree source-navigator" aria-label="Evidence and source navigator" data-testid="workbench-artifact-tree">
+    <section class="case-workbench-layout judgment-workbench" aria-label="단일 케이스 검토 화면" data-testid="case-workbench-layout" data-workflow-lane="${escapeHtml(activeLane.id)}" data-placement-contract="${escapeHtml(FEATURE_PLACEMENT_CONTRACT.profile_version)}">
+      <main class="workbench-result-zone primary-review-pane" aria-label="주요 증거 검토 영역" data-testid="workbench-result-table">
+        <nav class="workbench-mode-strip source-navigator" aria-label="자료 유형 바로가기" data-testid="workbench-artifact-tree">
+          ${renderEvidenceSourceNavigator(run, tab, { includeSourceCard: false })}
+          <details class="artifact-pivot-drawer" hidden>
+            <summary>아티팩트 빠른 이동</summary>
+            <div class="artifact-tree-lane" data-testid="artifact-tree-lane-find">
+              ${renderArtifactTreeRows(run, tab, ["윈도우", "웹 / AI", "Mail", "메신저", "모바일", "미디어 / OCR", "시간축", "검색"])}
+            </div>
+            <div class="artifact-tree-lane" data-testid="artifact-tree-lane-deliver">
+              ${renderArtifactTreeRows(run, tab, ["보고서", "검증"])}
+            </div>
+          </details>
+        </nav>
+        ${renderForensicQuestionBar(run, tab)}
+        ${renderValidationReadinessBanner(run, tab)}
+        ${renderSecondaryWorkbenchControls(run, tab)}
+        ${renderTableControlBar(tab)}
         <div class="workbench-region-header">
-          <p class="eyebrow">left · evidence / sources</p>
-          <strong>소스와 아티팩트</strong>
-          <span>전체 파일트리는 숨기고, 판단에 필요한 분류를 먼저 보여줍니다.</span>
-        </div>
-        ${renderEvidenceSourceNavigator(run, tab)}
-        <div class="artifact-tree-lane" data-testid="artifact-tree-lane-find">
-          <span class="artifact-tree-lane-label">Artifact pivots</span>
-          ${renderArtifactTreeRows(run, tab, ["Windows", "Browser / AI", "Mail", "Messenger", "Mobile", "Media / OCR", "Timeline", "Search"])}
-        </div>
-        <div class="artifact-tree-lane" data-testid="artifact-tree-lane-deliver">
-          <span class="artifact-tree-lane-label">Review / deliver</span>
-          ${renderArtifactTreeRows(run, tab, ["Reports", "Validation"])}
-        </div>
-      </aside>
-      <main class="workbench-result-zone primary-review-pane" aria-label="Adaptive primary evidence review pane" data-testid="workbench-result-table">
-        <div class="workbench-region-header">
-          <p class="eyebrow">center · primary review pane</p>
+          <p class="eyebrow">검토 화면</p>
           <strong>${escapeHtml(tabLabel(tab))}</strong>
-          <span>cursor pages · DOM window ≤ ${VIRTUAL_TABLE_ROW_LIMIT}</span>
+          <span>대량 결과는 cursor page와 가상 행으로 안전하게 나눠 봅니다.</span>
         </div>
         ${renderAdaptiveViewerHeader(run, tab)}
         <div id="tabBody" class="tab-body" data-testid="tab-body"></div>
@@ -797,56 +1079,386 @@ function renderWorkbenchLayoutFrame(run, tab) {
   `;
 }
 
-function renderEvidenceSourceNavigator(run, tab) {
+function renderSecondaryWorkbenchControls(run, tab) {
+  const summary = run.summary?.summary || {};
+  const outputs = run.summary?.outputs || {};
+  const readyCount = outputAvailabilityItems(run).filter((item) => item.status === "ready").length;
+  const outputCount = Object.keys(outputs).length;
+  const artifactCount = artifactViewRowCount(run);
+  const docCount = Number(summary.document_match_count || 0);
+  return `
+    <details class="secondary-workbench-drawer" data-testid="secondary-workbench-drawer">
+      <summary>
+        <span>
+          <strong>상태 · 피벗 · 단축키</strong>
+          <em>필요할 때만 펼쳐서 봅니다</em>
+        </span>
+        <b>${formatNumber(readyCount)} ready · ${formatNumber(artifactCount)} artifacts · ${formatNumber(docCount)} docs · ${formatNumber(outputCount)} outputs</b>
+      </summary>
+      <div class="secondary-workbench-grid">
+        ${renderOutputAvailabilityStrip(run, tab)}
+        ${renderArtifactPivotStrip(run, tab)}
+        ${renderOperatorShortcutStrip(tab)}
+      </div>
+    </details>
+  `;
+}
+
+function renderValidationReadinessBanner(run, tab) {
+  const summary = run.summary?.summary || {};
+  const warningCount = Number(summary.warning_count || summary.validation_issue_count || 0);
+  const reportCount = Number(summary.report_item_count || 0);
+  const artifactRows = artifactViewRowCount(run);
+  const status = warningCount ? "needs-validation" : "baseline";
+  const label = warningCount ? `${formatNumber(warningCount)}개 검증 이슈` : "검증 이슈 0";
+  return `
+    <section class="validation-readiness-banner status-${safeCssToken(status)}" aria-label="검증 및 법정성 주의" data-testid="validation-readiness-banner">
+      <div>
+        <p class="eyebrow">검증 게이트</p>
+        <strong>${escapeHtml(label)} · 원본 확인 후 판단</strong>
+        <span>아티팩트 ${formatNumber(artifactRows)}개, 보고 후보 ${formatNumber(reportCount)}개. parser limitation, source hash, 원본 위치가 없는 항목은 제출 근거로 쓰지 않습니다.</span>
+      </div>
+      <div class="validation-gate-actions">
+        <button class="secondary-button ${tab === "summary" ? "active" : ""}" type="button" data-open-tab="summary">원본/해시</button>
+        <button class="secondary-button ${tab === "review" ? "active" : ""}" type="button" data-open-tab="review">선별 검증</button>
+        <button class="secondary-button ${tab === "report" ? "active" : ""}" type="button" data-open-tab="report">보고 점검</button>
+      </div>
+    </section>
+  `;
+}
+
+function renderOperatorShortcutStrip(tab) {
+  const shortcuts = [
+    { label: "명령/이동", keys: "Ctrl/Cmd K", action: "palette", attrs: "data-command-palette-open" },
+    { label: "현재 화면 검색", keys: "Ctrl/Cmd F", action: "focus-context-search" },
+    { label: "첫 결과 미리보기", keys: "Space", action: "preview-first-visible-row" },
+    { label: "관련 있음 저장", keys: "Alt R", action: "mark-relevant" },
+    { label: "리뷰 보드", keys: "5", action: "open-review", active: tab === "review" },
+  ];
+  return `
+    <section class="operator-shortcut-strip" aria-label="분석 단축키" data-testid="operator-shortcut-strip">
+      <strong>빠른 조작</strong>
+      <div>
+        ${shortcuts.map((shortcut) => `
+          <button
+            class="secondary-button operator-shortcut-button ${shortcut.active ? "active" : ""}"
+            type="button"
+            data-keyboard-action="${escapeHtml(shortcut.action)}"
+            ${shortcut.attrs || ""}
+          >
+            <span>${escapeHtml(shortcut.label)}</span>
+            ${kbd(shortcut.keys)}
+          </button>
+        `).join("")}
+      </div>
+    </section>
+  `;
+}
+
+function renderArtifactPivotStrip(run, tab) {
+  const pivots = artifactPivotItems(run);
+  return `
+    <section class="artifact-pivot-strip" aria-label="중요 아티팩트 빠른 피벗" data-testid="artifact-pivot-strip">
+      <div class="artifact-pivot-title">
+        <p class="eyebrow">아티팩트 피벗</p>
+        <strong>행위 흔적 바로 열기</strong>
+      </div>
+      <div class="artifact-pivot-list">
+        ${pivots.map((item) => `
+          <button
+            class="secondary-button artifact-pivot-chip ${artifactPivotActive(item, tab) ? "active" : ""}"
+            type="button"
+            data-open-tab="artifacts"
+            data-nav-scope="artifact-pivot"
+            data-artifact-filter="${escapeHtml(item.filter)}"
+            title="${escapeHtml(item.hint)}"
+          >
+            <span>${escapeHtml(item.label)}</span>
+            <em>${formatNumber(item.count)}</em>
+          </button>
+        `).join("")}
+      </div>
+    </section>
+  `;
+}
+
+function artifactPivotItems(run) {
+  const groups = [
+    ["EVTX", "eventlog", ["evtx", "eventlog", "windows-event"]],
+    ["Registry", "registry", ["registry", "hive", "ntuser", "sam", "security", "system"]],
+    ["Browser/AI", "browser", ["browser", "history", "download", "ai", "chatgpt", "claude", "gemini", "perplexity"]],
+    ["USB/외부장치", "usb", ["usb", "shellbag", "mount", "device", "drive"]],
+    ["MFT/USN", "ntfs", ["mft", "usn", "ntfs", "journal"]],
+    ["EDB/검색", "edb", ["edb", "windows-search", "ese", "srum"]],
+    ["메신저", "messenger", ["kakao", "whatsapp", "telegram", "signal", "line", "discord", "chat"]],
+    ["Media/OCR", "media", ["media", "image", "ocr", "video", "audio"]],
+  ];
+  return groups.map(([label, filter, terms]) => ({
+    label,
+    filter,
+    terms,
+    count: artifactGroupCount(run, terms),
+    hint: `${label} 관련 parser 결과와 검증 필요 항목을 봅니다.`,
+  }));
+}
+
+function artifactPivotActive(item, tab) {
+  return tab === "artifacts" && String(activeArtifactFilter || "").toLowerCase() === String(item.filter || "").toLowerCase();
+}
+
+function renderOutputAvailabilityStrip(run, tab) {
+  const items = outputAvailabilityItems(run);
+  const issueCount = items.filter((item) => item.status !== "ready").length;
+  return `
+    <section class="output-availability-strip" aria-label="결과 산출물 준비 상태" data-testid="output-availability-strip">
+      <div class="availability-strip-title">
+        <p class="eyebrow">결과 준비 상태</p>
+        <strong>열기 전에 데이터 상태 확인</strong>
+        <span>${formatNumber(issueCount)}개 영역은 빈 결과/검증/선별이 더 필요합니다.</span>
+      </div>
+      <div class="availability-chip-list">
+        ${items.map((item) => `
+          <button
+            class="secondary-button output-availability-chip status-${safeCssToken(item.status)} ${item.tab === tab ? "active" : ""}"
+            type="button"
+            data-open-tab="${escapeHtml(item.tab)}"
+            data-nav-scope="availability"
+            data-output-status="${escapeHtml(item.status)}"
+            data-output-key="${escapeHtml(item.outputKeys.join(","))}"
+            title="${escapeHtml(item.detail)}"
+          >
+            <span>${escapeHtml(item.label)}</span>
+            <b>${formatNumber(item.count)}</b>
+            <em>${escapeHtml(availabilityStatusLabel(item.status))}</em>
+          </button>
+        `).join("")}
+      </div>
+    </section>
+  `;
+}
+
+function outputAvailabilityItems(run) {
+  const summary = run.summary?.summary || {};
+  const outputs = run.summary?.outputs || {};
+  const artifactRows = artifactViewRowCount(run);
+  const documentHits = Number(summary.document_match_count || 0);
+  const fileCandidates = Number(summary.file_candidate_count || 0);
+  const timelineEvents = Number(summary.timeline_event_count || 0);
+  const reportCandidates = Number(summary.report_item_count || 0);
+  const searchableSignals = artifactRows + documentHits + fileCandidates + timelineEvents;
+  const artifactKeys = Object.keys(outputs).filter((key) => key.startsWith("artifacts_"));
+  return [
+    availabilityItem("접수/해시", "summary", Number(summary.scanned_file_count || 0), ["manifest", "fingerprint"], outputs, "증거 원본, 해시, manifest, 제한사항을 먼저 확인합니다."),
+    availabilityItem("아티팩트", "artifacts", artifactRows, artifactKeys, outputs, "EVTX, Registry, Browser, AI, USB, MFT/USN parser 산출물입니다."),
+    availabilityItem("문서/메일", "docs", documentHits, ["docs", "docs_index"], outputs, "문서, 메일, OCR, 본문 인덱스 산출물입니다."),
+    availabilityItem("파일/미디어", "files", fileCandidates, ["files", "files_extract_manifest"], outputs, "파일 후보, 이미지/영상/해시 검토 산출물입니다."),
+    availabilityItem("시간축", "timeline", timelineEvents, ["timeline"], outputs, "파일/로그/웹/앱 활동 시간축 산출물입니다."),
+    availabilityItem("전체검색", "search", searchableSignals, ["docs_index", "files", "timeline", "indicators"], outputs, "키워드, 경로, URL, 계정 단서를 한 번에 찾는 검색 기반입니다."),
+    availabilityItem("선별", "review", reportCandidates, ["summary"], outputs, "관련 있음, 재검토, 제외, 보고 포함 상태를 저장합니다.", { pendingWhenZero: true }),
+    availabilityItem("보고서", "report", reportCandidates, ["report"], outputs, "검토된 증거를 hash/citation/limitation과 함께 제출 묶음으로 정리합니다.", { pendingWhenZero: true }),
+  ];
+}
+
+function availabilityItem(label, tab, count, outputKeys, outputs, detail, options = {}) {
+  const keys = (outputKeys || []).filter(Boolean);
+  const present = keys.filter((key) => Object.prototype.hasOwnProperty.call(outputs, key));
+  let status = "missing";
+  if (present.length === keys.length && keys.length > 0) {
+    status = Number(count || 0) > 0 ? "ready" : (options.pendingWhenZero ? "pending" : "empty");
+  } else if (present.length > 0) {
+    status = "partial";
+  }
+  return {
+    label,
+    tab,
+    count: Number(count || 0),
+    outputKeys: keys,
+    status,
+    detail,
+  };
+}
+
+function availabilityStatusLabel(status) {
+  const labels = {
+    ready: "단서 있음",
+    pending: "선별 전",
+    partial: "부분 경로",
+    empty: "단서 0",
+    missing: "산출물 없음",
+  };
+  return labels[status] || status;
+}
+
+function renderForensicQuestionBar(run, tab) {
+  const summary = run.summary?.summary || {};
+  const questions = forensicQuestionItems(run);
+  return `
+    <details class="case-question-bar case-question-drawer" aria-label="포렌식 질문별 빠른 이동" data-testid="case-question-bar">
+      <summary>
+        <span>
+          <em>질문 피벗</em>
+          <strong>키워드·USB·웹/AI·문서·시간축으로 좁히기</strong>
+        </span>
+        <b>문서 ${formatNumber(summary.document_match_count || 0)} · 파일 ${formatNumber(summary.file_candidate_count || 0)} · 시간축 ${formatNumber(summary.timeline_event_count || 0)}</b>
+      </summary>
+      <div class="case-question-list">
+        ${questions.map((item) => `
+          <button
+            class="secondary-button case-question-chip ${forensicQuestionActive(item, tab) ? "active" : ""}"
+            type="button"
+            data-open-tab="${escapeHtml(item.tab)}"
+            data-nav-scope="case-question"
+            data-artifact-filter="${escapeHtml(item.filter || "")}"
+            title="${escapeHtml(item.hint)}"
+          >
+            <span>${escapeHtml(item.label)}</span>
+            <em>${formatNumber(item.count)}</em>
+          </button>
+        `).join("")}
+      </div>
+    </details>
+  `;
+}
+
+function forensicQuestionItems(run) {
+  const summary = run.summary?.summary || {};
+  const artifactRows = artifactViewRowCount(run);
+  const documentHits = Number(summary.document_match_count || 0);
+  const fileCandidates = Number(summary.file_candidate_count || 0);
+  const timelineEvents = Number(summary.timeline_event_count || 0);
+  const reportCandidates = Number(summary.report_item_count || 0);
+  return [
+    {
+      label: "키워드 단서",
+      tab: "search",
+      filter: "",
+      count: artifactRows + documentHits + fileCandidates + timelineEvents,
+      hint: "전체 케이스에서 문서, 로그, OCR, 웹/AI 키워드 히트를 찾습니다.",
+    },
+    {
+      label: "USB/반출",
+      tab: "artifacts",
+      filter: "usb",
+      count: artifactGroupCount(run, ["usb", "shellbag", "mount", "device", "drive"]),
+      hint: "USB 연결, ShellBag, 외부 저장장치, 다운로드/복사 후보를 확인합니다.",
+    },
+    {
+      label: "웹·AI 사용",
+      tab: "artifacts",
+      filter: "browser ai chatgpt claude gemini perplexity",
+      count: artifactGroupCount(run, ["browser", "history", "download", "ai", "chatgpt", "claude", "gemini", "perplexity"]),
+      hint: "브라우저 방문, 다운로드, ChatGPT/Claude/Gemini/Perplexity 사용 흔적을 봅니다.",
+    },
+    {
+      label: "문서·메일",
+      tab: "docs",
+      filter: "document email mail attachment ocr",
+      count: documentHits,
+      hint: "문서 본문, 메일, 첨부, OCR 히트를 리걸 리뷰 흐름으로 검토합니다.",
+    },
+    {
+      label: "시간 재구성",
+      tab: "timeline",
+      filter: "timeline",
+      count: timelineEvents,
+      hint: "파일/로그/웹/앱 활동을 시간 순서로 맞춥니다.",
+    },
+    {
+      label: "보고 후보",
+      tab: "review",
+      filter: "review report citation",
+      count: reportCandidates,
+      hint: "관련 있음, 재검토, 제외, 보고서 포함 상태를 정리합니다.",
+    },
+  ];
+}
+
+function forensicQuestionActive(item, tab) {
+  if (item.tab !== tab) return false;
+  if (item.tab !== "artifacts") return true;
+  const filter = String(item.filter || "").toLowerCase();
+  return !filter || String(activeArtifactFilter || "").toLowerCase() === filter;
+}
+
+function renderEvidenceSourceNavigator(run, tab, options = {}) {
   const summary = run.summary?.summary || {};
   const root = run.request?.root || run.summary?.output_dir || "not recorded";
+  const includeSourceCard = options.includeSourceCard !== false;
+  const artifactRows = artifactViewRowCount(run);
+  const documentHits = Number(summary.document_match_count || 0);
+  const fileCandidates = Number(summary.file_candidate_count || 0);
+  const timelineEvents = Number(summary.timeline_event_count || 0);
+  const reportCandidates = Number(summary.report_item_count || 0);
+  const searchableSignals = artifactRows + documentHits + fileCandidates + timelineEvents;
   const sourceGroups = [
     {
-      label: "Evidence image",
-      tab: "summary",
-      count: artifactGroupCount(run, ["e01", "ex01", "raw", "image", "partition", "filesystem"]) || 1,
-      hint: "E01/Ex01, RAW, VM disk, ZIP, folder",
+      key: "artifacts",
+      label: "행위흔적",
+      tab: "artifacts",
+      count: artifactRows,
+      hint: "EVTX, Registry, USB, Browser, AI",
     },
     {
-      label: "File system",
-      tab: "files",
-      count: Number(summary.file_candidate_count || 0),
-      hint: "paths, hashes, media, deleted candidates",
-    },
-    {
-      label: "Documents",
+      key: "docs",
+      label: "문서/메일",
       tab: "docs",
-      count: Number(summary.document_match_count || 0),
-      hint: "PDF/HWP/Office, mail, chat, OCR",
+      count: documentHits,
+      hint: "PDF, Office, 메일, 메신저, OCR",
     },
     {
-      label: "Windows activity",
-      tab: "artifacts",
-      count: artifactGroupCount(run, ["windows", "evtx", "registry", "usb", "mft", "usn", "shellbag"]),
-      hint: "EVTX, Registry, USB, execution",
+      key: "media",
+      label: "파일/미디어",
+      tab: "files",
+      count: fileCandidates,
+      hint: "파일 후보, 이미지, 영상, 해시",
     },
     {
-      label: "Browser / AI",
-      tab: "artifacts",
-      count: artifactGroupCount(run, ["browser", "history", "download", "ai", "chatgpt", "claude", "gemini", "perplexity"]),
-      hint: "web, downloads, AI prompts, sessions",
-    },
-    {
-      label: "Timeline",
+      key: "timeline",
+      label: "시간축",
       tab: "timeline",
-      count: Number(summary.timeline_event_count || 0),
-      hint: "time correlation and event pivots",
+      count: timelineEvents,
+      hint: "로그, 파일, 웹, 앱 활동 순서",
+    },
+    {
+      key: "search",
+      label: "전체검색",
+      tab: "search",
+      count: searchableSignals,
+      hint: "키워드, 경로, 계정, URL, OCR",
+    },
+    {
+      key: "review",
+      label: "리뷰보드",
+      tab: "review",
+      count: reportCandidates,
+      hint: "관련 있음, 재검토, 제외, 보고서 포함",
+    },
+    {
+      key: "report",
+      label: "산출물",
+      tab: "report",
+      count: reportCandidates,
+      hint: "해시, 인용, 제한사항, 제출 산출물",
     },
   ];
   return `
-    <section class="source-stack" aria-label="Case source stack" data-testid="evidence-source-stack">
-      <div class="case-source-card">
-        <p class="eyebrow">case source</p>
+    <section class="source-stack" aria-label="케이스 검토 모드" data-testid="evidence-source-stack">
+      ${includeSourceCard ? `<div class="case-source-card">
+        <p class="eyebrow">증거 출처</p>
         <strong>${escapeHtml(run.run_id || "current case")}</strong>
         <span title="${escapeHtml(root)}">${escapeHtml(root)}</span>
-      </div>
+      </div>` : ""}
       ${sourceGroups.map((item) => `
-        <button class="source-card ${tab === item.tab ? "active" : ""}" type="button" data-open-tab="${escapeHtml(item.tab)}">
+        <button
+          class="source-card ${sourceNavigatorItemActive(item, tab) ? "active" : ""}"
+          type="button"
+          data-open-tab="${escapeHtml(item.tab)}"
+          data-nav-scope="source"
+          data-source-key="${escapeHtml(item.key)}"
+          data-source-category-filter="${escapeHtml(item.sourceCategory || "")}"
+          aria-current="${sourceNavigatorItemActive(item, tab) ? "page" : "false"}"
+          title="${escapeHtml(item.hint)}"
+        >
           <span>
             <strong>${escapeHtml(item.label)}</strong>
             <small>${escapeHtml(item.hint)}</small>
@@ -858,22 +1470,23 @@ function renderEvidenceSourceNavigator(run, tab) {
   `;
 }
 
+function sourceNavigatorItemActive(item, tab = activeTab) {
+  if (item.tab !== tab) return false;
+  if (item.tab !== "artifacts") return true;
+  return String(item.sourceCategory || "") === String(activeArtifactFilter || "");
+}
+
 function renderAdaptiveViewerHeader(run, tab) {
-  const activeLane = workflowLaneForTab(tab);
   const profile = adaptiveViewerProfile(tab);
   return `
-    <section class="adaptive-viewer-header" aria-label="Adaptive evidence viewer" data-testid="adaptive-evidence-viewer">
+    <section class="adaptive-viewer-header" aria-label="상황별 증거 뷰어" data-testid="adaptive-evidence-viewer">
       <div>
-        <p class="eyebrow">adaptive viewer</p>
+        <p class="eyebrow">뷰어</p>
         <strong>${escapeHtml(profile.title)}</strong>
         <span>${escapeHtml(profile.body)}</span>
       </div>
-      <div class="viewer-chip-row" aria-label="Available viewer modes">
+      <div class="viewer-chip-row" aria-label="사용 가능한 뷰어">
         ${profile.viewers.map((viewer) => `<span>${escapeHtml(viewer)}</span>`).join("")}
-      </div>
-      <div class="viewer-lane-outcome">
-        <b>${escapeHtml(activeLane.korean || activeLane.label)}</b>
-        <span>${escapeHtml(activeLane.outcome || activeLane.goal || "")}</span>
       </div>
     </section>
   `;
@@ -882,49 +1495,49 @@ function renderAdaptiveViewerHeader(run, tab) {
 function adaptiveViewerProfile(tab) {
   const profiles = {
     summary: {
-      title: "Image intake board",
-      body: "증거 이미지/폴더를 해시와 limitation 기준으로 확인하고, mount/export가 필요한지 판단합니다.",
-      viewers: ["E01 preflight", "Hash", "Source path", "Warnings"],
+      title: "증거 접수 현황",
+      body: "증거 이미지와 추출 폴더의 출처, 해시, 제한사항, 마운트 필요 여부를 확인합니다.",
+      viewers: ["E01 사전 확인", "해시", "원본 경로", "제한사항"],
     },
     search: {
-      title: "Keyword triage table + instant preview",
-      body: "전체 검색 결과를 가상화된 표로 좁히고, 행 선택 즉시 원본/스니펫/리뷰 상태를 확인합니다.",
-      viewers: ["Table", "Text", "Current-file search", "Quicklook"],
+      title: "키워드 선별 표",
+      body: "전체 검색 결과를 표에서 선별하고, 선택 항목의 원본 위치와 리뷰 상태를 즉시 확인합니다.",
+      viewers: ["결과 표", "본문", "현재 파일 검색", "원본 확인"],
     },
     artifacts: {
-      title: "Artifact-specific behavior viewer",
+      title: "아티팩트별 행위 검토",
       body: "EVTX, Registry, Browser, AI, USB, MFT/USN을 같은 표가 아니라 아티팩트 의미별로 해석합니다.",
       viewers: ["EVTX", "Registry", "SQLite", "Browser", "Chat"],
     },
     indicators: {
-      title: "IOC and risk pivot viewer",
+      title: "IOC / 위험 단서",
       body: "IP, 도메인, URL, 해시를 단독 결론이 아닌 관련 파일/웹/시간대 피벗으로 사용합니다.",
-      viewers: ["IOC table", "Graph", "Timeline pivot", "Source"],
+      viewers: ["IOC 표", "관계 그래프", "시간축 피벗", "원본"],
     },
     files: {
-      title: "File, image, and hex quicklook",
-      body: "대량 파일은 기본 목록을 좁히고 이미지/텍스트/hex 미리보기로 필요한 것만 엽니다.",
-      viewers: ["File table", "Image", "Text", "Hex", "Hash"],
+      title: "파일 / 이미지 / Hex 확인",
+      body: "대량 파일 목록을 선별한 뒤 이미지, 텍스트, hex 미리보기로 필요한 항목만 확인합니다.",
+      viewers: ["파일 표", "이미지", "본문", "Hex", "해시"],
     },
     docs: {
-      title: "Document Review workspace",
+      title: "문서 검토",
       body: "Relativity/Everlaw식 검토 흐름으로 문서, 메일, 메신저, OCR 히트를 태깅하고 보고서 후보화합니다.",
-      viewers: ["Document", "Email", "Chat", "OCR", "Similarity"],
+      viewers: ["문서", "메일", "대화", "OCR", "유사 항목"],
     },
     timeline: {
-      title: "Timeline reconstruction viewer",
+      title: "시간축 재구성",
       body: "로그/파일/웹/앱 활동을 시간대별로 묶고, 의심 구간에서 원본 아티팩트로 되돌아갑니다.",
-      viewers: ["Timeline", "Event table", "Timezone", "Skew", "Pivot"],
+      viewers: ["시간축", "이벤트 표", "타임존", "시계 오차", "피벗"],
     },
     review: {
-      title: "Evidence selection board",
-      body: "관련 있음, 재검토, 제외, 보고서 포함 상태를 빠르게 바꾸고 형상관리합니다.",
-      viewers: ["Review grid", "Notes", "Compare", "Citation"],
+      title: "증거 선별 보드",
+      body: "관련 있음, 재검토, 제외, 보고서 포함 상태를 근거와 함께 고정합니다.",
+      viewers: ["선별 표", "메모", "비교", "인용"],
     },
     report: {
-      title: "Report and exhibit builder",
-      body: "선별된 증거만 해시, parser, source locator, limitation과 함께 제출 묶음으로 정리합니다.",
-      viewers: ["Report", "Manifest", "Citation", "Export"],
+      title: "보고서 / 제출 패키지",
+      body: "선별된 증거만 해시, parser, source locator, limitation과 함께 산출물로 정리합니다.",
+      viewers: ["보고서", "Manifest", "인용", "내보내기"],
     },
   };
   return profiles[tab] || profiles.summary;
@@ -936,13 +1549,13 @@ function renderArtifactTreeRows(run, tab, labels) {
     if (!group) return "";
     const count = artifactGroupCount(run, group.terms);
     const filterTerm = group.terms?.[0] || group.label;
-    const countLabel = count ? `${formatNumber(count)} signal(s)` : "No matching signal yet";
+    const countLabel = count ? `단서 ${formatNumber(count)}건` : "아직 일치 단서 없음";
     return `
-      <button class="artifact-tree-row ${tab === group.tab ? "active" : ""}" type="button" data-open-tab="${escapeHtml(group.tab)}" data-artifact-filter="${escapeHtml(filterTerm)}" aria-label="Open ${escapeHtml(group.label)} artifacts, ${escapeHtml(countLabel)}">
+      <button class="artifact-tree-row ${tab === group.tab ? "active" : ""}" type="button" data-open-tab="${escapeHtml(group.tab)}" data-nav-scope="artifact-pivot" data-artifact-filter="${escapeHtml(filterTerm)}" aria-label="${escapeHtml(group.label)} 아티팩트 열기, ${escapeHtml(countLabel)}">
         <span>
           <strong>${escapeHtml(group.label)}</strong>
           <small>${escapeHtml(group.hint)}</small>
-          <small class="artifact-tree-review-hint">${escapeHtml(count ? "Open and filter visible rows" : "Open the module checklist")}</small>
+          <small class="artifact-tree-review-hint">${escapeHtml(count ? "결과 열기 및 필터" : "모듈 체크리스트 열기")}</small>
         </span>
         <em>${formatNumber(count)}</em>
       </button>
@@ -966,70 +1579,200 @@ function renderIntelligencePanel(run, tab, reportCandidates) {
   const priorityScore = Math.min(100, Math.round((warningCount * 12) + Math.min(artifactSignals, 40) + Math.min(documentHits / 5, 20) + Math.min(timelineEvents / 20, 18)));
   const keywordChips = intelligenceKeywordChips(run, tab);
   return `
-    <aside class="workbench-preview-rail intelligence-panel" aria-label="Intelligence, preview, evidence tray, and report tray" data-testid="workbench-preview-detail" data-preview-contract="${escapeHtml(PREVIEW_DETAIL_CONTRACT.profile_version)}">
+    <aside class="workbench-preview-rail intelligence-panel" aria-label="검토 인사이트, 원본 확인, 선별 보관함, 보고 산출물" data-testid="workbench-preview-detail" data-preview-contract="${escapeHtml(PREVIEW_DETAIL_CONTRACT.profile_version)}">
       <section class="intel-score-card" data-testid="intelligence-panel">
-        <p class="eyebrow">right · intelligence panel</p>
-        <strong>판단 보조 패널</strong>
-        <span>${escapeHtml(activeLane.question || "현재 화면에서 무엇을 판단할지 확인합니다.")}</span>
+        <p class="eyebrow">검토 인사이트</p>
+        <strong>우선 확인 항목</strong>
+        <span>${escapeHtml(activeLane.question || "현재 결과에서 확인해야 할 근거를 정리합니다.")}</span>
         <div class="intel-score-meter" style="--score:${priorityScore}">
           <b>${formatNumber(priorityScore)}</b>
-          <em>review priority</em>
+          <em>검토 우선도</em>
         </div>
-      </section>
-      <section class="intel-keyword-card">
-        <p class="eyebrow">related pivots</p>
-        <div class="intel-keyword-cloud">
-          ${keywordChips.map((item) => `<button type="button" data-open-tab="${escapeHtml(item.tab)}" data-artifact-filter="${escapeHtml(item.term)}">${escapeHtml(item.label)} <b>${formatNumber(item.count)}</b></button>`).join("")}
-        </div>
-      </section>
-      <section class="review-state-matrix" aria-label="Review decision states">
-        <p class="eyebrow">selection states</p>
-        <span><b>Relevant</b><em>보고서 후보</em></span>
-        <span><b>Needs review</b><em>추가 확인</em></span>
-        <span><b>Excluded</b><em>노이즈 제거</em></span>
-        <span><b>Include</b><em>제출 묶음</em></span>
       </section>
       <section class="intel-action-card">
-        <p class="eyebrow">next best actions</p>
+        <p class="eyebrow">권장 검토 순서</p>
         <strong>${escapeHtml(guide.title)}</strong>
         <ol>
           ${guide.steps.map((step) => `<li>${escapeHtml(step)}</li>`).join("")}
         </ol>
       </section>
-      ${tab === "search" ? "" : renderWorkbenchEvidenceViewerSlot()}
-      ${renderPreviewDetailCard(run, tab)}
-      ${renderSourceLocatorCard(run)}
-      ${renderHashVerificationCard(run)}
-      ${renderLimitationWarningCard(run)}
-      <section class="evidence-tray-card" data-testid="evidence-tray">
-        <p class="eyebrow">evidence tray</p>
-        <strong>${formatNumber(reportCandidates)} report candidate(s)</strong>
-        <span>relevant, needs-review, excluded, include-in-report 상태를 누적합니다.</span>
-        <div class="preview-action-row" data-testid="preview-review-actions">
-          <button class="secondary-button" type="button" data-open-tab="review">Open review</button>
-          <button class="secondary-button" type="button" data-open-tab="search">Find related</button>
-        </div>
-      </section>
-      <section class="report-tray-card" data-testid="report-tray">
-        <p class="eyebrow">report tray</p>
-        <strong>Submission package</strong>
-        <span>검토된 항목만 hash manifest와 case report로 내보냅니다.</span>
-        <button class="secondary-button" type="button" data-open-tab="report">Open report</button>
-      </section>
+      ${renderIntelDrawer("기능/단서", "분석 모듈과 연결 키워드", `
+        ${renderUsableCapabilityMap(run, tab)}
+        <section class="intel-keyword-card">
+          <p class="eyebrow">연결 단서</p>
+          <div class="intel-keyword-cloud">
+            ${keywordChips.map((item) => `<button type="button" data-open-tab="${escapeHtml(item.tab)}" data-nav-scope="artifact-pivot" data-artifact-filter="${escapeHtml(item.term)}">${escapeHtml(item.label)} <b>${formatNumber(item.count)}</b></button>`).join("")}
+          </div>
+        </section>
+      `)}
+      ${tab === "search" ? "" : renderIntelDrawer("빠른 원본", "선택 행 미리보기", renderWorkbenchEvidenceViewerSlot())}
+      ${renderIntelDrawer("검증", "원본·해시·제한사항", `
+        ${renderPreviewDetailCard(run, tab)}
+        ${renderSourceLocatorCard(run)}
+        ${renderHashVerificationCard(run)}
+        ${renderLimitationWarningCard(run)}
+      `)}
+      ${renderIntelDrawer("선별/보고", `보고 후보 ${formatNumber(reportCandidates)}건`, `
+        <section class="review-state-matrix" aria-label="선별 판정 상태">
+          <p class="eyebrow">선별 상태</p>
+          <span><b>관련 있음</b><em>보고서 후보</em></span>
+          <span><b>재검토</b><em>추가 확인</em></span>
+          <span><b>제외</b><em>노이즈 제거</em></span>
+          <span><b>포함</b><em>제출 묶음</em></span>
+        </section>
+        <section class="evidence-tray-card" data-testid="evidence-tray">
+          <p class="eyebrow">선별 보관함</p>
+          <strong>보고서 후보 ${formatNumber(reportCandidates)}건</strong>
+          <span>관련 있음, 재검토, 제외, 보고서 포함 상태를 누적합니다.</span>
+          <div class="preview-action-row" data-testid="preview-review-actions">
+            <button class="secondary-button" type="button" data-open-tab="review">선별 보드</button>
+            <button class="secondary-button" type="button" data-open-tab="search">관련 검색</button>
+          </div>
+        </section>
+        <section class="report-tray-card" data-testid="report-tray">
+          <p class="eyebrow">보고 산출물</p>
+          <strong>제출 패키지</strong>
+          <span>검토된 항목만 hash manifest와 case report로 내보냅니다.</span>
+          <button class="secondary-button" type="button" data-open-tab="report">보고서 열기</button>
+        </section>
+      `)}
     </aside>
   `;
+}
+
+function renderIntelDrawer(label, title, content) {
+  return `
+    <details class="intel-collapsible-card" data-testid="intel-collapsible-card">
+      <summary>
+        <span>
+          <em>${escapeHtml(label)}</em>
+          <strong>${escapeHtml(title)}</strong>
+        </span>
+      </summary>
+      <div class="intel-collapsible-body">
+        ${content}
+      </div>
+    </details>
+  `;
+}
+
+function renderUsableCapabilityMap(run, tab) {
+  const groups = visibleCapabilityGroupsForRun(run);
+  if (!groups.length) return "";
+  const statusLabels = typeof VISIBLE_CAPABILITY_STATUS_LABELS !== "undefined" ? VISIBLE_CAPABILITY_STATUS_LABELS : {};
+  const activeLane = workflowLaneForTab(tab);
+  const ordered = prioritizeCapabilityGroupsForTab(groups, activeLane, tab);
+  const totals = summarizeCapabilityStatuses(groups);
+  const statusOrder = ["usable", "partial", "inventory", "validation-required", "external-required"];
+  return `
+    <section class="capability-map-card" data-testid="usable-capability-map" aria-label="현재 사용 가능한 분석 모듈 현황">
+      <div class="capability-map-head">
+        <p class="eyebrow">분석 모듈 현황</p>
+        <strong>지금 쓸 수 있는 분석 모듈</strong>
+        <span>여기 숫자는 발견 항목이 아니라, 해당 분류에 묶인 구현 기능 수입니다.</span>
+      </div>
+      <div class="capability-status-row" aria-label="Capability status counts">
+        ${statusOrder.filter((status) => totals[status]).map((status) => `
+          <span class="capability-status-pill status-${safeCssToken(status)}">
+            ${escapeHtml(statusLabels[status] || status)}
+            <b>${formatNumber(totals[status])}</b>
+          </span>
+        `).join("")}
+      </div>
+      <div class="capability-map-list">
+        ${ordered.slice(0, 8).map((group) => {
+          const capabilities = group.capabilities || [];
+          const tabTarget = capabilityGroupTab(group);
+          const filterTerm = capabilityGroupFilter(group);
+          return `
+            <button class="secondary-button capability-map-row ${tabTarget === tab ? "active" : ""}" type="button" data-open-tab="${escapeHtml(tabTarget)}" data-nav-scope="capability-map" data-artifact-filter="${escapeHtml(filterTerm)}">
+              <span>
+                <strong>${escapeHtml(group.label || group.id || "기능")}</strong>
+                <small>${escapeHtml(group.summary || "")}</small>
+              </span>
+              <em title="구현 기능 ${formatNumber(capabilities.length)}개" aria-label="구현 기능 ${formatNumber(capabilities.length)}개"><span>${formatNumber(capabilities.length)}</span><small>기능</small></em>
+            </button>
+          `;
+        }).join("")}
+      </div>
+    </section>
+  `;
+}
+
+function prioritizeCapabilityGroupsForTab(groups, activeLane, tab) {
+  const laneTerms = new Set([...(activeLane?.terms || []), tab, activeLane?.id, activeLane?.tab].filter(Boolean).map((item) => String(item).toLowerCase()));
+  return [...groups].sort((left, right) => {
+    const leftScore = capabilityGroupRelevance(left, laneTerms, tab);
+    const rightScore = capabilityGroupRelevance(right, laneTerms, tab);
+    if (rightScore !== leftScore) return rightScore - leftScore;
+    return String(left.label || left.id || "").localeCompare(String(right.label || right.id || ""));
+  });
+}
+
+function capabilityGroupRelevance(group, laneTerms, tab) {
+  let score = capabilityGroupTab(group) === tab ? 8 : 0;
+  const text = [
+    group.id,
+    group.label,
+    group.summary,
+    group.catalogId || group.catalog_id,
+    group.workflowStage || group.workflow_stage,
+    ...(group.capabilities || []).flatMap((capability) => [
+      capability.id,
+      capability.label,
+      capability.viewer,
+      ...(capability.terms || []),
+      ...(capability.artifactTypes || capability.artifact_types || []),
+    ]),
+  ].filter(Boolean).join(" ").toLowerCase();
+  for (const term of laneTerms) {
+    if (term && text.includes(term)) score += 2;
+  }
+  return score;
+}
+
+function summarizeCapabilityStatuses(groups) {
+  const totals = {};
+  for (const group of groups) {
+    for (const capability of group.capabilities || []) {
+      const status = capability.status || "partial";
+      totals[status] = (totals[status] || 0) + 1;
+    }
+  }
+  return totals;
+}
+
+function capabilityGroupTab(group) {
+  const direct = group.tab || group.defaultTab || group.default_tab;
+  if (direct) return direct;
+  const stage = String(group.workflowStage || group.workflow_stage || group.catalogId || group.catalog_id || "").toLowerCase();
+  if (stage.includes("document") || stage.includes("docs")) return "docs";
+  if (stage.includes("timeline")) return "timeline";
+  if (stage.includes("review") || stage.includes("report")) return "review";
+  if (stage.includes("search")) return "search";
+  if (stage.includes("intake") || stage.includes("evidence")) return "summary";
+  return "artifacts";
+}
+
+function capabilityGroupFilter(group) {
+  const firstCapability = (group.capabilities || [])[0] || {};
+  return firstCapability.terms?.[0]
+    || firstCapability.id
+    || group.id
+    || group.label
+    || "";
 }
 
 function intelligenceKeywordChips(run, tab) {
   const chipDefs = [
     { label: "USB", term: "usb", tab: "artifacts", terms: ["usb", "shellbag", "mount", "device"] },
     { label: "EVTX", term: "evtx", tab: "artifacts", terms: ["evtx", "eventlog", "event id"] },
-    { label: "Registry", term: "registry", tab: "artifacts", terms: ["registry", "ntuser", "sam", "system"] },
-    { label: "Browser", term: "browser", tab: "artifacts", terms: ["browser", "history", "download", "cookie"] },
+    { label: "레지스트리", term: "registry", tab: "artifacts", terms: ["registry", "ntuser", "sam", "system"] },
+    { label: "브라우저", term: "browser", tab: "artifacts", terms: ["browser", "history", "download", "cookie"] },
     { label: "AI", term: "ai", tab: "artifacts", terms: ["ai", "chatgpt", "claude", "gemini", "perplexity"] },
-    { label: "Docs", term: "document", tab: "docs", terms: ["document", "pdf", "hwp", "docx", "xlsx", "ocr"] },
-    { label: "Mail", term: "email", tab: "docs", terms: ["email", "mail", "eml", "mbox", "pst", "ost"] },
-    { label: "Timeline", term: "timeline", tab: "timeline", terms: ["timeline", "created", "modified", "accessed"] },
+    { label: "문서", term: "document", tab: "docs", terms: ["document", "pdf", "hwp", "docx", "xlsx", "ocr"] },
+    { label: "메일", term: "email", tab: "docs", terms: ["email", "mail", "eml", "mbox", "pst", "ost"] },
+    { label: "시간축", term: "timeline", tab: "timeline", terms: ["timeline", "created", "modified", "accessed"] },
   ];
   const chips = chipDefs.map((item) => ({
     ...item,
@@ -1042,12 +1785,26 @@ function intelligenceKeywordChips(run, tab) {
 
 function renderWorkbenchEvidenceViewerSlot() {
   return `
-    <section id="evidenceViewer" class="viewer-panel viewer-dock primary-viewer-dock" data-testid="source-viewer" role="region" aria-label="Evidence preview" aria-live="polite" aria-busy="false">
-      <div class="viewer-empty-state">
-        <strong>1-click Quicklook</strong>
-        <span>중앙 결과에서 행을 선택하면 내용, 메타데이터, 해시, citation, 리뷰 폼이 즉시 열립니다.</span>
-      </div>
+    <section id="evidenceViewer" class="viewer-panel viewer-dock primary-viewer-dock" data-testid="source-viewer" role="region" aria-label="원본 미리보기" aria-live="polite" aria-busy="false">
+      ${renderViewerEmptyState("빠른 원본 확인", "중앙 결과에서 행을 선택하면 본문, 메타데이터, 해시, 인용 정보, 리뷰 상태가 표시됩니다.")}
     </section>
+  `;
+}
+
+function renderViewerEmptyState(title, body) {
+  return `
+    <div class="viewer-empty-state operator-viewer-empty" data-testid="viewer-empty-state">
+      <p class="eyebrow">1-click preview</p>
+      <strong>${escapeHtml(title)}</strong>
+      <span>${escapeHtml(body)}</span>
+      <div class="viewer-empty-checklist" aria-label="원본 검토 순서">
+        <em>1 원본</em>
+        <em>2 현재 파일 검색</em>
+        <em>3 해시/인용</em>
+        <em>4 선별</em>
+      </div>
+      <small>${kbd("Space")} 빠른 확인 · ${kbd("Ctrl F")} 현재 파일 검색 · ${kbd("Alt R")} 관련 있음</small>
+    </div>
   `;
 }
 
@@ -1055,13 +1812,13 @@ function renderPreviewDetailCard(run, tab) {
   const tabSignals = artifactGroupCount(run, WORKBENCH_ARTIFACT_TREE_GROUPS.find((group) => group.tab === tab)?.terms || [tab]);
   return `
     <section class="preview-detail-card analyst-preview-card" data-testid="preview-detail-card">
-      <p class="eyebrow">preview / detail</p>
-      <strong>Open a row or search hit</strong>
-      <span>현재 ${escapeHtml(tabLabel(tab))} 영역에는 ${formatNumber(tabSignals)} signal(s)이 잡혀 있습니다. 결과를 열면 원본 뷰어, source locator, citation, review action이 이 흐름으로 이어집니다.</span>
+      <p class="eyebrow">선택 항목 상세</p>
+      <strong>행 또는 검색 결과를 선택하세요</strong>
+      <span>${escapeHtml(tabLabel(tab))} 영역에 ${formatNumber(tabSignals)}개 단서가 있습니다. 선택하면 원본 위치, 인용 정보, 리뷰 상태를 함께 확인합니다.</span>
       <div class="preview-priority-strip" data-testid="preview-analyst-summary">
-        <span>1. Verify source</span>
-        <span>2. Hash/cite</span>
-        <span>3. Review state</span>
+        <span>1. 출처 확인</span>
+        <span>2. 해시/인용</span>
+        <span>3. 선별 상태</span>
       </div>
     </section>
   `;
@@ -1072,11 +1829,11 @@ function renderSourceLocatorCard(run) {
   const outputDir = run.summary?.output_dir || "not recorded";
   return `
     <section class="preview-detail-card source-locator-card" data-testid="preview-source-locator">
-      <p class="eyebrow">source locator</p>
+      <p class="eyebrow">원본 위치</p>
       <strong>원본 위치 먼저 확인</strong>
-      <span>행을 열면 absolute path, run-root relative path, Windows-style path를 source viewer가 해석합니다.</span>
+      <span>행을 열면 절대 경로, run 기준 상대 경로, Windows 경로를 함께 해석합니다.</span>
       <details class="metadata-disclosure preview-metadata-disclosure" data-testid="preview-metadata-disclosure">
-        <summary>Technical metadata hidden by default</summary>
+        <summary>기술 메타데이터 보기</summary>
         <dl class="preview-metadata-list">
           <dt>Run ID</dt><dd>${escapeHtml(run.run_id || "unknown")}</dd>
           <dt>Input root</dt><dd><code>${escapeHtml(root)}</code></dd>
@@ -1091,10 +1848,10 @@ function renderHashVerificationCard(run) {
   const outputs = Object.keys(run.summary?.outputs || {});
   return `
     <section class="preview-detail-card hash-verification-card" data-testid="preview-hash-card">
-      <p class="eyebrow">hash / citation</p>
-      <strong>${formatNumber(outputs.length)} output pointer(s)</strong>
+      <p class="eyebrow">출처 / 인용</p>
+      <strong>산출물 포인터 ${formatNumber(outputs.length)}개</strong>
       <span>보고서 후보는 source hash, parser version, offset/index, review state가 붙은 뒤에만 제출 묶음으로 올립니다.</span>
-      <button class="secondary-button" type="button" data-open-tab="report">Open hash manifest</button>
+      <button class="secondary-button" type="button" data-open-tab="report">해시 목록 열기</button>
     </section>
   `;
 }
@@ -1102,10 +1859,10 @@ function renderHashVerificationCard(run) {
 function renderLimitationWarningCard(run) {
   const processing = run.summary?.processing || {};
   const warningCount = Number(processing.warning_count || 0);
-  const label = warningCount ? `${formatNumber(warningCount)} warning(s)` : "No processing warning recorded";
+  const label = warningCount ? `검증 이슈 ${formatNumber(warningCount)}건` : "검증 이슈 없음";
   return `
     <section class="preview-detail-card limitation-warning-card ${warningCount ? "warning" : ""}" data-testid="preview-limitation-warning">
-      <p class="eyebrow">limitation</p>
+      <p class="eyebrow">제한사항</p>
       <strong>${escapeHtml(label)}</strong>
       <span>상용급/법정 제출 판단은 validation diff, source hash, parser limitation을 같이 확인해야 합니다. 요약 카드만 보고 결론 내리지 않습니다.</span>
     </section>
@@ -1115,11 +1872,11 @@ function renderLimitationWarningCard(run) {
 function renderWorkbenchSmokePanel(run) {
   const validationHref = run?.run_id ? `/api/runs/${encodeURIComponent(run.run_id)}/validation-package` : "";
   return `
-    <section class="workbench-smoke-panel" aria-label="Browser smoke contract">
+    <section class="workbench-smoke-panel" aria-label="브라우저 검증 절차">
       <div>
-        <p class="eyebrow">browser smoke</p>
-        <h3>테스트 가능한 단일 케이스 흐름</h3>
-        <p>Playwright가 아래 checkpoint를 따라가면 분석, 검색, 뷰어, 리뷰, 보고서 흐름을 반복 검증할 수 있습니다. 100k UI evidence JSON에는 DOM/latency/memory budget과 e2e performance contract가 포함됩니다.</p>
+        <p class="eyebrow">화면 검증</p>
+        <h3>반복 확인 가능한 단일 케이스 흐름</h3>
+        <p>아래 단계로 접수, 검색, 원본 뷰어, 선별, 보고서 흐름을 반복 검증합니다. 대량 결과 검증 자료에는 DOM 행 수, 응답 시간, 메모리 예산 기준을 함께 기록합니다.</p>
       </div>
       <div class="smoke-checkpoint-row">
         ${WORKBENCH_SMOKE_CHECKPOINTS.map((item, index) => `
@@ -1127,15 +1884,15 @@ function renderWorkbenchSmokePanel(run) {
         `).join("")}
       </div>
       <div class="smoke-link-row">
-        <a class="mini-link" href="/api/workbench/smoke-contract" target="_blank" rel="noreferrer">Open smoke contract JSON</a>
-        <a class="mini-link" href="/api/workbench/large-result-evidence?record_count=100000" target="_blank" rel="noreferrer">Open 100k UI evidence JSON</a>
-        ${validationHref ? `<a class="mini-link" href="${validationHref}" target="_blank" rel="noreferrer">Open run validation package</a>` : ""}
+        <a class="mini-link" href="/api/workbench/smoke-contract" target="_blank" rel="noreferrer">화면 검증 JSON</a>
+        <a class="mini-link" href="/api/workbench/large-result-evidence?record_count=100000" target="_blank" rel="noreferrer">10만 행 검증 JSON</a>
+        ${validationHref ? `<a class="mini-link" href="${validationHref}" target="_blank" rel="noreferrer">실행 검증 패키지</a>` : ""}
       </div>
       <div id="runValidationDiffPanel" class="run-validation-diff-panel" data-testid="run-validation-diff-panel">
-        <p class="empty-state">Run validation diff inventory will appear here after the validation package loads.</p>
+        <p class="empty-state">검증 패키지를 불러오면 산출물 차이와 누락 항목이 여기에 표시됩니다.</p>
       </div>
       <div id="commercialReadinessPanel" class="commercial-readiness-panel" data-testid="commercial-readiness-panel">
-        <p class="empty-state">Commercial readiness gate will appear here. Do not claim commercial parity until this gate allows it.</p>
+        <p class="empty-state">상용 준비도 기준이 여기에 표시됩니다. 이 기준을 통과하기 전에는 상용 동등성을 주장하지 않습니다.</p>
       </div>
       <form id="macFirstEvidenceForm" class="mac-first-evidence-form" data-testid="mac-first-evidence-form">
         <label for="macFirstEvidencePath">Mac evidence/QC folder</label>
@@ -1233,21 +1990,21 @@ function renderCommercialReadinessSummary(payload) {
   return `
     <div class="commercial-readiness-card ${claimClass}">
       <div>
-        <strong>Commercial readiness gate</strong>
-        <span>${escapeHtml(payload?.release_claim || "Readiness gate unavailable")}</span>
+        <strong>상용 준비도 기준</strong>
+        <span>${escapeHtml(payload?.release_claim || "준비도 기준을 불러오지 못했습니다.")}</span>
       </div>
       <dl class="compact-dl">
-        <dt>Score</dt>
+        <dt>점수</dt>
         <dd>${escapeHtml(payload?.readiness_score || 0)}/100</dd>
-        <dt>Validated</dt>
-        <dd>${escapeHtml(validated.passed || 0)} passed / ${escapeHtml(validated.failed || 0)} remaining</dd>
-        <dt>Commercial</dt>
-        <dd>${escapeHtml(commercial.passed || 0)} passed / ${escapeHtml(commercial.failed || 0)} remaining</dd>
-        <dt>Claim allowed</dt>
-        <dd>${escapeHtml(payload?.commercial_claim_allowed ? "yes" : "no")}</dd>
-        <dt>Validation package</dt>
-        <dd>${escapeHtml(validationPackage.attached ? validationPackage.mode || "attached" : "not attached")}</dd>
-        <dt>Mapped evidence</dt>
+        <dt>검증 통과</dt>
+        <dd>${escapeHtml(validated.passed || 0)} 통과 / ${escapeHtml(validated.failed || 0)} 남음</dd>
+        <dt>상용 기준</dt>
+        <dd>${escapeHtml(commercial.passed || 0)} 통과 / ${escapeHtml(commercial.failed || 0)} 남음</dd>
+        <dt>상용 주장 가능</dt>
+        <dd>${escapeHtml(payload?.commercial_claim_allowed ? "가능" : "불가")}</dd>
+        <dt>검증 패키지</dt>
+        <dd>${escapeHtml(validationPackage.attached ? validationPackage.mode || "첨부됨" : "미첨부")}</dd>
+        <dt>매핑된 증거</dt>
         <dd>${escapeHtml(evidenceSummary.items_with_passed_validation_evidence || 0)} / ${escapeHtml(payload?.item_count || 0)}</dd>
         <dt>Mac evidence</dt>
         <dd>${escapeHtml(macFirst.attached ? `${macFirst.evidence_count || 0} attached` : "not attached")}</dd>
@@ -1330,7 +2087,7 @@ function renderRunValidationPackageSummary(payload) {
     <div class="validation-diff-card">
       <div>
         <strong>Run validation diff inventory</strong>
-        <span>${escapeHtml(outputs.length)} diff output(s) · ${escapeHtml(diff.cross_tool_output_count || 0)} cross-tool output(s)</span>
+        <span>diff 산출물 ${escapeHtml(outputs.length)}개 · 교차 검증 산출물 ${escapeHtml(diff.cross_tool_output_count || 0)}개</span>
       </div>
       <dl class="compact-dl">
         <dt>USN state replay diff</dt>
@@ -1363,28 +2120,13 @@ function renderCaseHero(run) {
   const warningCount = Number(processing.warning_count || 0);
   const artifactSignals = FORENSIC_ARTIFACT_TAXONOMY.reduce((sum, item) => sum + artifactGroupCount(payload, item.terms), 0);
   const source = run.request.root || payload.output_dir || "Evidence source";
-  const headline = warningCount ? `경고 ${formatNumber(warningCount)}건부터 확인하면 됩니다` : "검색과 리뷰를 바로 시작할 수 있습니다";
-  const nextAction = warningCount
-    ? "경고/제한사항을 확인한 뒤 검색 결과를 원본 뷰어에서 검토하세요."
-    : "전체 검색으로 단서를 찾고, 필요한 항목만 리뷰 보드와 보고서 후보에 올리세요.";
+  const headline = warningCount ? `검증 이슈 ${formatNumber(warningCount)}건 확인 필요` : "검토 가능한 결과가 준비되었습니다";
   return `
-    <section class="case-hero" aria-label="Case mission control" data-testid="case-hero">
+    <section class="case-hero review-first-case-strip" aria-label="Case mission control" data-testid="case-hero">
       <div class="case-hero-main">
-        <p class="eyebrow">다음 할 일</p>
+        <p class="eyebrow">현재 케이스</p>
         <h2>${escapeHtml(headline)}</h2>
-        <p class="case-source-line"><span>원본</span><code>${escapeHtml(source)}</code></p>
-        <p>${escapeHtml(nextAction)}</p>
-        <div class="case-next-route" aria-label="Recommended route">
-          <span><strong>1</strong> 전체 검색</span>
-          <span><strong>2</strong> 원본 확인</span>
-          <span><strong>3</strong> 리뷰 표시</span>
-          <span><strong>4</strong> 보고서 후보</span>
-        </div>
-        <div class="case-hero-actions">
-          <button type="button" data-open-tab="search" data-testid="hero-search-button">전체 증거 검색</button>
-          <button class="secondary-button" type="button" data-open-tab="artifacts" data-testid="hero-artifacts-button">아티팩트 보기</button>
-          <button class="secondary-button" type="button" data-open-tab="review" data-testid="hero-review-button">리뷰 보드</button>
-        </div>
+        <p class="case-source-line"><span>입력 증거</span><code>${escapeHtml(source)}</code></p>
       </div>
       <div class="case-hero-metrics">
         ${caseHeroMetric("문서", summary.document_match_count)}
@@ -1392,7 +2134,7 @@ function renderCaseHero(run) {
         ${caseHeroMetric("타임라인", summary.timeline_event_count)}
         ${caseHeroMetric("아티팩트", artifactSignals)}
         ${caseHeroMetric("산출물", outputCount)}
-        ${caseHeroMetric("경고", warningCount)}
+        ${caseHeroMetric("이슈", warningCount)}
       </div>
     </section>
   `;
@@ -1457,7 +2199,7 @@ function coreEvidenceWorkflowStatuses(payload) {
         warning: stage.status === "warning" || warnings > 0,
         blocked: stage.status === "blocked",
         state: runWorkflowStatusLabel(stage.status || "pending"),
-        detail: `${(stage.step_names || []).length} step(s) · ${(stage.output_keys || []).length} output(s) · ${warnings} warning(s)`,
+        detail: `${(stage.step_names || []).length}단계 · 산출물 ${(stage.output_keys || []).length}개 · 이슈 ${warnings}건`,
       }];
     }));
   }
@@ -1530,11 +2272,15 @@ function normalizeRunPayload(source) {
   return source;
 }
 
+function artifactGroupsFromPayload(normalized) {
+  return normalized.artifacts || normalized.summary?.artifacts || {};
+}
+
 function artifactSignalText(payload) {
   const normalized = normalizeRunPayload(payload);
   const summary = normalized.summary || {};
   const steps = Array.isArray(normalized.steps) ? normalized.steps : [];
-  const artifacts = normalized.artifacts || {};
+  const artifacts = artifactGroupsFromPayload(normalized);
   const fragments = [
     Object.keys(artifacts).join(" "),
     steps.map((step) => `${step.name || ""} ${step.label || ""} ${step.status || ""}`).join(" "),
@@ -1546,7 +2292,7 @@ function artifactSignalText(payload) {
 function artifactGroupCount(payload, terms) {
   const normalized = normalizeRunPayload(payload);
   const summary = normalized.summary || {};
-  const artifacts = normalized.artifacts || {};
+  const artifacts = artifactGroupsFromPayload(normalized);
   const steps = Array.isArray(normalized.steps) ? normalized.steps : [];
   const lowerTerms = (terms || []).map((term) => String(term).toLowerCase());
   let count = 0;
@@ -1580,6 +2326,80 @@ function artifactGroupCount(payload, terms) {
     count += Number(summary.report_item_count || 0);
   }
   return count;
+}
+
+function artifactRowGroupCount(payload, terms) {
+  const normalized = normalizeRunPayload(payload);
+  const artifacts = artifactGroupsFromPayload(normalized);
+  const lowerTerms = (terms || []).map((term) => String(term).toLowerCase());
+  let count = 0;
+  for (const [kind, group] of Object.entries(artifacts)) {
+    const kindText = String(kind).toLowerCase();
+    const rows = Array.isArray(group?.artifacts) ? group.artifacts : [];
+    const total = Number(group?.pagination?.total || group?.artifact_count || rows.length || 0);
+    if (lowerTerms.some((term) => kindText.includes(term))) {
+      count += total;
+      continue;
+    }
+    count += rows.filter((artifact) => {
+      const text = `${artifact.artifact_type || ""} ${artifact.provider || ""} ${artifact.path || ""}`.toLowerCase();
+      return lowerTerms.some((term) => text.includes(term));
+    }).length;
+  }
+  return count;
+}
+
+function artifactViewRowCount(payload) {
+  const normalized = normalizeRunPayload(payload);
+  const artifacts = artifactGroupsFromPayload(normalized);
+  let count = 0;
+  for (const group of Object.values(artifacts)) {
+    const rows = Array.isArray(group?.artifacts) ? group.artifacts : [];
+    count += Number(group?.pagination?.total || group?.artifact_count || rows.length || 0);
+  }
+  return count;
+}
+
+function artifactCategoryCount(payload, category) {
+  const normalized = normalizeRunPayload(payload);
+  const artifacts = artifactGroupsFromPayload(normalized);
+  let count = 0;
+  for (const [kind, group] of Object.entries(artifacts)) {
+    const rows = Array.isArray(group?.artifacts) ? group.artifacts : [];
+    if (rows.length) {
+      count += rows.filter((artifact) => artifactSourceCategory(kind, artifact) === category).length;
+      continue;
+    }
+    const total = Number(group?.pagination?.total || group?.artifact_count || 0);
+    if (total && artifactSourceCategory(kind, {}) === category) count += total;
+  }
+  return count;
+}
+
+function artifactSourceCategory(kind, artifact = {}) {
+  const text = `${kind || ""} ${artifact.artifact_type || ""} ${artifact.provider || ""} ${artifact.path || ""}`.toLowerCase();
+  if (/\b(browser|history|download|chatgpt|claude|gemini|perplexity)\b/.test(text) || text.includes("browser-ai") || text.includes("ai-usage")) {
+    return "web-ai";
+  }
+  if (text.includes("media-image") || text.includes("image-unreadable")) {
+    return "image";
+  }
+  if (
+    text.includes("windows") ||
+    text.includes("eventlog") ||
+    text.includes("evtx") ||
+    text.includes("registry") ||
+    text.includes("shellbag") ||
+    text.includes("prefetch") ||
+    text.includes("recent-files") ||
+    text.includes("jumplist") ||
+    text.includes("mft") ||
+    text.includes("usn") ||
+    text.includes("usb")
+  ) {
+    return "windows";
+  }
+  return "other";
 }
 
 function renderForensicRibbon(run) {
@@ -1650,6 +2470,7 @@ function bindTabButtons() {
     button.addEventListener("click", async () => {
       activeTab = button.dataset.tab;
       activeViewGroup = groupForTab(activeTab);
+      activeArtifactFilter = "";
       for (const item of detailPanel.querySelectorAll(".tab-button")) {
         item.classList.toggle("active", item === button);
       }
@@ -1691,7 +2512,7 @@ function bindTabButtons() {
 function renderShortcutHelp() {
   return `
     <details id="shortcutHelp" class="shortcut-help">
-      <summary>Keyboard shortcuts ${kbd("?")}</summary>
+      <summary>단축키 ${kbd("?")}</summary>
       <div class="shortcut-grid">
         ${SHORTCUTS.map((item) => `
           <div class="shortcut-row">
@@ -1713,7 +2534,7 @@ function renderCommandPalette(run, tab) {
     label: command.label,
     hint: command.hint,
     shortcut: command.shortcut,
-    category: "Workflow",
+    category: "작업",
     tab: command.tab,
     filter: command.filter,
   }));
@@ -1722,37 +2543,37 @@ function renderCommandPalette(run, tab) {
     label: action.label,
     hint: action.hint,
     shortcut: action.shortcut,
-    category: action.category || "Action",
+    category: action.category || "작업",
     action: action.action,
   }));
   const artifactCommands = WORKBENCH_ARTIFACT_TREE_GROUPS.map((group) => ({
     id: `artifact-${group.label}`,
     label: group.label,
-    hint: `${group.hint} · ${formatNumber(artifactGroupCount(run, group.terms))} signal(s)`,
+    hint: `${group.hint} · 단서 ${formatNumber(artifactGroupCount(run, group.terms))}건`,
     shortcut: "",
-    category: "Artifact",
+    category: "아티팩트",
     tab: group.tab,
     filter: group.terms?.[0] || group.label,
   }));
   const commands = [...workflowCommands, ...quickActions, ...artifactCommands].slice(0, 32);
   return `
-    <section id="commandPalette" class="command-palette" role="dialog" aria-modal="true" aria-hidden="true" aria-label="Forensic command palette" data-testid="command-palette" data-active-tab="${escapeHtml(tab)}" hidden>
+    <section id="commandPalette" class="command-palette" role="dialog" aria-modal="true" aria-hidden="true" aria-label="명령 팔레트" data-testid="command-palette" data-active-tab="${escapeHtml(tab)}" hidden>
       <div class="command-palette-backdrop" data-command-palette-close></div>
       <div class="command-palette-shell">
         <div class="command-palette-header">
           <div>
-            <p class="eyebrow">go to anything</p>
-            <strong>RapidForensic command palette</strong>
+            <p class="eyebrow">빠른 이동</p>
+            <strong>명령 팔레트</strong>
             <span>케이스 이동, 아티팩트 필터, 검색, 리뷰, 보고서를 한 번에 호출합니다.</span>
           </div>
-          <button class="icon-action" type="button" data-command-palette-close aria-label="Close command palette">Esc</button>
+          <button class="icon-action" type="button" data-command-palette-close aria-label="명령 팔레트 닫기">Esc</button>
         </div>
         <label class="command-palette-search">
-          <span>Command</span>
-          <input id="commandPaletteInput" type="search" placeholder="Search commands, artifacts, workflow..." autocomplete="off" />
+          <span>명령 검색</span>
+          <input id="commandPaletteInput" type="search" placeholder="검색, 아티팩트, 보고서, 단축키" autocomplete="off" />
           <kbd>Enter</kbd>
         </label>
-        <div class="command-palette-list" role="listbox" aria-label="Available forensic commands" data-result-limit="${COMMAND_PALETTE_RESULT_LIMIT}">
+        <div class="command-palette-list" role="listbox" aria-label="사용 가능한 포렌식 명령" data-result-limit="${COMMAND_PALETTE_RESULT_LIMIT}">
           ${commands.map((command, index) => `
             <button
               class="command-palette-command ${index === 0 ? "active" : ""}"
@@ -1763,7 +2584,7 @@ function renderCommandPalette(run, tab) {
               data-command-filter="${escapeHtml(command.filter || "")}"
               data-command-action="${escapeHtml(command.action || "")}"
             >
-              <span>${escapeHtml(command.category || "Command")}</span>
+              <span>${escapeHtml(command.category || "명령")}</span>
               <strong>${escapeHtml(command.label || "")}</strong>
               <em>${escapeHtml(command.hint || "")}</em>
               ${command.shortcut ? `<kbd>${escapeHtml(command.shortcut)}</kbd>` : ""}
@@ -1790,19 +2611,73 @@ async function renderActiveTab() {
     if (activeTab === "report") body.innerHTML = renderReport(await api(`/api/runs/${selectedRunId}/report`));
     if (activeTab === "review" || activeTab === "bookmarks") body.innerHTML = renderReviewBoard(await api(`/api/runs/${selectedRunId}/case`));
   } catch (error) {
-    body.innerHTML = `<p class="empty-state">${escapeHtml(error.message)}</p>`;
+    body.innerHTML = renderTabLoadError(error, activeTab);
   }
   bindPanelActions();
   bindBookmarkButtons();
   bindSearchForm();
   bindSearchResultButtons();
   restoreWorkbenchControls();
+  refreshSourceNavigatorState();
+}
+
+function renderTabLoadError(error, tab) {
+  const detail = error?.detail?.detail || error?.detail || error?.message || "";
+  const message = errorMessageFromDetail(detail);
+  const outputPath = outputPathFromErrorDetail(detail) || outputPathFromErrorDetail(message);
+  const copy = tabRecoveryCopy(tab);
+  return `
+    <section class="tab-error-card" data-testid="tab-load-error" data-tab-load-error="${escapeHtml(tab)}">
+      <div>
+        <p class="eyebrow">${escapeHtml(tabLabel(tab))} 로드 실패</p>
+        <strong>${outputPath ? "필요한 산출물 파일을 찾을 수 없습니다" : "이 화면을 불러오지 못했습니다"}</strong>
+        <span>${escapeHtml(copy)}</span>
+      </div>
+      ${outputPath ? `<code title="${escapeHtml(outputPath)}">${escapeHtml(outputPath)}</code>` : `<code>${escapeHtml(message)}</code>`}
+      <div class="tab-error-actions">
+        <button type="button" data-open-tab="summary" data-nav-scope="recovery">증거/산출물 상태 보기</button>
+        <button type="button" data-open-tab="search" data-nav-scope="recovery">전체 검색으로 이동</button>
+        <button type="button" data-open-tab="artifacts" data-nav-scope="recovery">행위흔적 확인</button>
+      </div>
+      <p class="help-text">이미 분석 output 폴더를 옮겼거나 임시 샘플 경로가 삭제된 경우, 기존 결과 폴더를 다시 import하거나 같은 증거로 새 run을 생성하세요.</p>
+    </section>
+  `;
+}
+
+function outputPathFromErrorDetail(detail) {
+  if (typeof detail !== "string") return "";
+  const value = detail.trim();
+  if (!value) return "";
+  if (/rapidtriage-[\w-]+\.json$/i.test(value) || /[\\/][^\\/]+\.json$/i.test(value)) {
+    return value;
+  }
+  return "";
+}
+
+function tabRecoveryCopy(tab) {
+  const copy = {
+    docs: "문서/메일 검토에는 rapidtriage-docs.json 같은 문서 검색 산출물이 필요합니다.",
+    files: "파일/미디어 검토에는 rapidtriage-files.json 같은 파일 후보 산출물이 필요합니다.",
+    timeline: "시간축 검토에는 timeline 산출물이 필요합니다. E01/추출 폴더가 바뀌면 다시 생성해야 합니다.",
+    artifacts: "행위흔적 검토에는 artifacts 산출물이 필요합니다. EVTX, Registry, Browser 등의 parser 결과를 확인하세요.",
+    indicators: "IOC 검토에는 indicators 산출물이 필요합니다. 검색 또는 아티팩트 화면에서 우선 확인할 수 있습니다.",
+    report: "보고서 화면은 선별/인용 산출물이 있을 때 가장 유용합니다. 먼저 리뷰 보드에서 증거를 고정하세요.",
+    review: "리뷰 보드는 Case DB 산출물이 있을 때 동작합니다. 검색 결과를 먼저 선별하거나 Case DB import를 실행하세요.",
+  };
+  return copy[tab] || "현재 탭의 결과 산출물이 없거나 접근할 수 없습니다.";
 }
 
 function renderSummary(payload) {
   const summary = payload.summary || {};
   const outputs = payload.outputs || {};
-  return `
+  const processing = payload.processing || {};
+  const outputCount = Object.keys(outputs).length;
+  const warningCount = Number(processing.warning_count || 0);
+  const searchableRows = Number(summary.document_match_count || 0)
+    + Number(summary.file_candidate_count || 0)
+    + Number(summary.timeline_event_count || 0);
+  const source = selectedRun?.request?.root || payload.input_root || payload.root || payload.output_dir || "not recorded";
+  const legacySummary = `
     ${renderWorkflowGuide(summary)}
     ${renderUserWorkflowMap()}
     ${renderCaseReadinessDashboard(payload)}
@@ -1813,31 +2688,76 @@ function renderSummary(payload) {
     ${renderProcessingSummary(payload)}
     ${renderWorkspaceCards(summary)}
     <div class="metric-grid">
-      ${metric("Document matches", summary.document_match_count)}
-      ${metric("File candidates", summary.file_candidate_count)}
-      ${metric("Timeline events", summary.timeline_event_count)}
-      ${metric("Indicators", payload.steps?.find((step) => step.name === "indicators")?.indicator_count || 0)}
-      ${metric("Extracted files", (summary.docs_extracted_count || 0) + (summary.files_extracted_count || 0))}
+      ${metric("문서 히트", summary.document_match_count)}
+      ${metric("파일 후보", summary.file_candidate_count)}
+      ${metric("시간축 이벤트", summary.timeline_event_count)}
+      ${metric("지표", payload.steps?.find((step) => step.name === "indicators")?.indicator_count || 0)}
+      ${metric("추출 파일", (summary.docs_extracted_count || 0) + (summary.files_extracted_count || 0))}
     </div>
     ${renderCaseDbPanel(payload)}
     <div class="split-grid">
       <section>
-        <h3>Highlights</h3>
+        <h3>핵심 단서</h3>
         ${renderHighlightList(payload.highlights || {})}
       </section>
       <section>
-        <h3>Outputs</h3>
+        <h3>산출물</h3>
         <ul class="output-list">
           ${Object.entries(outputs).map(([name, path]) => `
             <li>
               <strong>${escapeHtml(name)}</strong>
-              <a href="/api/runs/${encodeURIComponent(selectedRunId)}/outputs/${encodeURIComponent(name)}/file">Download</a>
+              <a href="/api/runs/${encodeURIComponent(selectedRunId)}/outputs/${encodeURIComponent(name)}/file">다운로드</a>
               <br><span>${escapeHtml(path)}</span>
             </li>
           `).join("")}
         </ul>
       </section>
     </div>
+  `;
+  return `
+    <section class="operator-summary-board" aria-label="Operator case summary" data-testid="operator-summary-board">
+      <div class="operator-summary-main">
+        <p class="eyebrow">요약</p>
+        <h3>${warningCount ? `검증 이슈 ${formatNumber(warningCount)}건 확인 필요` : "검토 가능한 결과가 준비되었습니다"}</h3>
+        <p class="case-source-line"><span>입력 증거</span><code>${escapeHtml(source)}</code></p>
+        <p>요약 화면은 전체 산출물을 나열하는 곳이 아니라, 다음 검토 동선을 결정하는 시작점입니다. 세부 검증 자료는 고급 패널에서 확인합니다.</p>
+        <div class="operator-summary-actions">
+          <button type="button" data-open-tab="search">전체 검색</button>
+          <button class="secondary-button" type="button" data-open-tab="artifacts">아티팩트 보기</button>
+          <button class="secondary-button" type="button" data-open-tab="review">선별 보드</button>
+          <button class="secondary-button" type="button" data-open-tab="report">보고서</button>
+        </div>
+      </div>
+      <div class="operator-summary-metrics" aria-label="Case totals">
+        ${metric("문서", summary.document_match_count)}
+        ${metric("파일", summary.file_candidate_count)}
+        ${metric("타임라인", summary.timeline_event_count)}
+        ${metric("검색 대상", searchableRows)}
+        ${metric("산출물", outputCount)}
+        ${metric("이슈", warningCount)}
+      </div>
+      <div class="operator-summary-route">
+        <article>
+          <strong>1. 키워드 선별</strong>
+          <span>키워드, OCR, 문서, 로그, 웹/AI 흔적을 먼저 좁힙니다.</span>
+        </article>
+        <article>
+          <strong>2. 원본 검토</strong>
+          <span>테이블 결과를 source viewer, SQLite, hex, document viewer로 확인합니다.</span>
+        </article>
+        <article>
+          <strong>3. 증거 선별</strong>
+          <span>관련 있음, 재검토, 제외, 보고서 포함 상태를 남깁니다.</span>
+        </article>
+      </div>
+    </section>
+    <details class="operator-advanced-summary">
+      <summary>
+        <span>검증/산출물 전체 상세</span>
+        <strong>필요할 때만 열기</strong>
+      </summary>
+      ${legacySummary}
+    </details>
   `;
 }
 
@@ -1898,33 +2818,33 @@ function renderE01RunWorkflowStatus(payload) {
     <section class="e01-workflow-panel e01-run-workflow">
       <div class="review-group-header">
         <div>
-          <p class="eyebrow">E01 run workflow</p>
+          <p class="eyebrow">E01 처리 흐름</p>
           <h3>추출부터 분석까지 연결됨</h3>
         </div>
-        <span class="status-pill ok">${escapeHtml(workflow.status || "ready")}</span>
+        <span class="status-pill ok">${escapeHtml(runWorkflowStatusLabel(workflow.status || "ready"))}</span>
       </div>
       <div class="metric-grid">
-        ${metric("Partition sector", workflow.selected_partition_start_sector ?? "n/a")}
-        ${metric("Commands", workflow.command_history_count ?? 0)}
-        ${metric("Partitions", workflow.partition_table_count ?? 0)}
-        ${metric("Recovered entries", workflow.recovered_manifest_entry_count ?? 0)}
+        ${metric("선택 파티션 섹터", workflow.selected_partition_start_sector ?? "n/a")}
+        ${metric("실행 명령", workflow.command_history_count ?? 0)}
+        ${metric("파티션", workflow.partition_table_count ?? 0)}
+        ${metric("복구 항목", workflow.recovered_manifest_entry_count ?? 0)}
       </div>
       ${renderVscWorkflowHandoff(workflow.vsc_workflow_handoff || null)}
       <div class="e01-stage-grid">
         ${stages.map((stage, index) => `
           <article class="e01-stage-card ${escapeHtml(stage.status || "pending")}">
             <span>${index + 1}</span>
-            <strong>${escapeHtml(stage.label || stage.id || "stage")}</strong>
-            <em>${escapeHtml(stage.status || "pending")}</em>
+            <strong>${escapeHtml(stage.label || stage.id || "단계")}</strong>
+            <em>${escapeHtml(runWorkflowStatusLabel(stage.status || "pending"))}</em>
             <p>${escapeHtml(stage.evidence || "")}</p>
           </article>
         `).join("")}
       </div>
       ${(workflow.analyst_next_actions || []).length ? `
         <div class="guidance-actions">
-          <button class="secondary-button" type="button" data-open-tab="search">Search extracted evidence</button>
-          <button class="secondary-button" type="button" data-open-tab="review">Open review board</button>
-          <button class="secondary-button" type="button" data-open-tab="report">Report/export</button>
+          <button class="secondary-button" type="button" data-open-tab="search">추출 증거 검색</button>
+          <button class="secondary-button" type="button" data-open-tab="review">선별 보드</button>
+          <button class="secondary-button" type="button" data-open-tab="report">보고서/내보내기</button>
         </div>
       ` : ""}
       <p class="help-text">${escapeHtml(workflow.analysis_root || "")}</p>
@@ -1945,37 +2865,37 @@ function renderCaseReadinessDashboard(payload) {
   const outputCount = Object.keys(outputs).length;
   const readinessCards = [
     {
-      label: "Input",
-      title: isE01 ? "E01 workflow detected" : "Folder or mounted evidence",
+      label: "입력",
+      title: isE01 ? "E01 처리 흐름 감지" : "폴더 또는 마운트 증거",
       body: isE01
-        ? "E01은 dependency preflight, partition selection, extraction provenance를 먼저 확인해야 합니다."
+        ? "E01은 의존 도구, 파티션 선택, 추출 provenance를 먼저 확인해야 합니다."
         : "폴더/마운트 증거는 바로 검색과 리뷰로 이동할 수 있습니다.",
       tone: isE01 ? "notice" : "ok",
     },
     {
-      label: "Scale",
-      title: searchableRows ? `${formatNumber(searchableRows)} searchable rows` : "No searchable rows yet",
-      body: "대량 결과는 작은 page와 virtual window로 열어 DOM 과부하를 줄입니다.",
+      label: "규모",
+      title: searchableRows ? `검색 대상 ${formatNumber(searchableRows)}행` : "검색 대상 없음",
+      body: "대량 결과는 페이지와 가상 행으로 나눠 화면 과부하를 줄입니다.",
       tone: searchableRows ? "ok" : "warning",
     },
     {
-      label: "Warnings",
-      title: warningCount ? `${formatNumber(warningCount)} warning(s)` : "No processing warnings",
+      label: "검증",
+      title: warningCount ? `검증 이슈 ${formatNumber(warningCount)}건` : "처리 이슈 없음",
       body: warningCount
-        ? "보고서 후보로 쓰기 전에 processing warnings와 parser caveat를 먼저 확인하세요."
+        ? "보고서 후보로 쓰기 전에 처리 경고와 파서 제한사항을 먼저 확인하세요."
         : "현재 요약 기준으로 즉시 검색/리뷰를 시작할 수 있습니다.",
       tone: warningCount ? "warning" : "ok",
     },
     {
-      label: "Review",
-      title: reportCandidates ? `${formatNumber(reportCandidates)} report candidate(s)` : "Review board ready",
-      body: "원본 뷰어에서 확인한 항목만 relevant/include-in-report로 고정하는 흐름입니다.",
+      label: "선별",
+      title: reportCandidates ? `보고서 후보 ${formatNumber(reportCandidates)}건` : "선별 보드 준비됨",
+      body: "원본 뷰어에서 확인한 항목만 관련 있음/보고서 포함으로 고정합니다.",
       tone: reportCandidates ? "ok" : "notice",
     },
     {
-      label: "Deliver",
-      title: outputCount ? `${formatNumber(outputCount)} output artifact(s)` : "No outputs listed",
-      body: "보고서, manifest, reviewer bundle을 내려받기 전에 source hash와 citation을 확인하세요.",
+      label: "산출",
+      title: outputCount ? `산출물 ${formatNumber(outputCount)}개` : "등록된 산출물 없음",
+      body: "보고서, manifest, 검토 묶음을 내보내기 전에 원본 해시와 인용 정보를 확인하세요.",
       tone: outputCount ? "ok" : "warning",
     },
   ];
@@ -1983,13 +2903,13 @@ function renderCaseReadinessDashboard(payload) {
     <section class="case-readiness-dashboard" aria-label="Case readiness dashboard">
       <div class="readiness-head">
         <div>
-          <p class="eyebrow">case readiness</p>
+          <p class="eyebrow">케이스 상태</p>
           <h3>분석 전에 볼 핵심 상태</h3>
           <p>E01/대용량/리뷰/제출 준비 상태를 한 번에 확인하고 다음 행동으로 바로 이동합니다.</p>
         </div>
         <div class="readiness-actions">
-          <button class="secondary-button" type="button" data-open-tab="search">Search now</button>
-          <button class="secondary-button" type="button" data-open-tab="review">Review marks</button>
+          <button class="secondary-button" type="button" data-open-tab="search">검색 시작</button>
+          <button class="secondary-button" type="button" data-open-tab="review">선별 상태</button>
         </div>
       </div>
       <div class="readiness-grid">
@@ -2015,11 +2935,11 @@ function renderForensicArtifactNavigator(payload) {
     <section class="forensic-artifact-navigator" aria-label="Forensic artifact navigator">
       <div class="navigator-head">
         <div>
-          <p class="eyebrow">forensic artifacts</p>
-          <h3>Artifact map for high-volume review</h3>
-          <p>마에스트로식 좌측 트리처럼 카테고리별 검토 입구를 먼저 보여주고, 필요한 탭으로 바로 이동합니다.</p>
+          <p class="eyebrow">아티팩트 분류</p>
+          <h3>대량 검토용 분류 지도</h3>
+          <p>전체 파일트리 대신 사건 판단에 필요한 카테고리를 먼저 보여주고, 필요한 탭으로 바로 이동합니다.</p>
         </div>
-        <span class="navigator-total">${formatNumber(totalSignals)} signals</span>
+        <span class="navigator-total">단서 ${formatNumber(totalSignals)}건</span>
       </div>
       <div class="artifact-tree-grid">
         ${cards.map((card) => `
@@ -2058,15 +2978,15 @@ function renderRunActionStrip(payload) {
   return `
     <section class="run-action-strip" aria-label="Run completion actions">
       <div>
-        <p class="eyebrow">run complete actions</p>
-        <h3>Move from processing to evidence review</h3>
-        <p>완료된 실행에서 바로 Case DB 준비, 전체 검색, 리뷰 보드, 보고서/제출 묶음으로 넘어갑니다.</p>
+        <p class="eyebrow">후속 작업</p>
+        <h3>처리 결과를 증거 검토로 전환</h3>
+        <p>완료된 실행에서 Case DB 준비, 전체 검색, 증거 선별, 보고서 산출물로 이동합니다.</p>
       </div>
       <div class="run-action-buttons">
-        <button class="secondary-button" type="button" data-focus-case-db="1">Prepare Case DB</button>
-        <button class="secondary-button" type="button" data-open-tab="search">Search evidence</button>
-        <button class="secondary-button" type="button" data-open-tab="review">Review decisions</button>
-        <button class="secondary-button" type="button" data-open-tab="report">${hasReport ? "Open report" : "Report tools"}</button>
+        <button class="secondary-button" type="button" data-focus-case-db="1">Case DB 준비</button>
+        <button class="secondary-button" type="button" data-open-tab="search">증거 검색</button>
+        <button class="secondary-button" type="button" data-open-tab="review">증거 선별</button>
+        <button class="secondary-button" type="button" data-open-tab="report">${hasReport ? "보고서 열기" : "보고서 도구"}</button>
       </div>
     </section>
   `;
@@ -2081,9 +3001,9 @@ function renderProcessingSummary(payload) {
     <section class="processing-summary" aria-label="Processing transparency">
       <div class="processing-summary-head">
         <div>
-          <p class="eyebrow">processing evidence</p>
-          <h3>${escapeHtml(processing.profile_label || "Processing profile")}</h3>
-          <p>Run summary shows what was processed, skipped, capped, or empty so “completed” never hides missing work.</p>
+          <p class="eyebrow">처리 기록</p>
+          <h3>${escapeHtml(processing.profile_label || "처리 프로파일")}</h3>
+          <p>완료 표시가 누락을 숨기지 않도록 처리, 제외, 제한, 빈 결과를 함께 보여줍니다.</p>
         </div>
         <span class="warning-badge ${escapeHtml(processing.highest_warning_level || "none")}">
           ${escapeHtml(processing.highest_warning_level || "none")} · ${formatNumber(processing.warning_count || 0)}
@@ -2091,10 +3011,10 @@ function renderProcessingSummary(payload) {
       </div>
       ${renderParserWarningBadges(payload)}
       <div class="processing-caps">
-        <span>${processing.read_only ? "Read-only on" : "Extraction allowed"}</span>
-        <span>${processing.dry_run ? "Dry run on" : "Dry run off"}</span>
-        <span>Max extract: ${caps.max_extract_size_bytes ? formatBytes(caps.max_extract_size_bytes) : "uncapped"}</span>
-        <span>Max files: ${caps.max_file_count ? formatNumber(caps.max_file_count) : "uncapped"}</span>
+        <span>${processing.read_only ? "읽기 전용" : "추출 허용"}</span>
+        <span>${processing.dry_run ? "예행 실행" : "실행 완료"}</span>
+        <span>추출 제한: ${caps.max_extract_size_bytes ? formatBytes(caps.max_extract_size_bytes) : "없음"}</span>
+        <span>파일 제한: ${caps.max_file_count ? formatNumber(caps.max_file_count) : "없음"}</span>
       </div>
       ${renderRunWorkflowContract(payload)}
       ${warnings.length ? `
@@ -2106,7 +3026,7 @@ function renderProcessingSummary(payload) {
             </div>
           `).join("")}
         </div>
-      ` : '<p class="empty-state">No processing warnings.</p>'}
+      ` : '<p class="empty-state">처리 이슈가 기록되지 않았습니다.</p>'}
       <div class="processing-step-grid">
         ${steps.map((step) => renderProcessingStep(step)).join("")}
       </div>
@@ -2121,8 +3041,8 @@ function renderRunWorkflowContract(payload) {
   return `
     <section class="run-workflow-contract" data-testid="run-workflow-contract" aria-label="Run workflow contract">
       <div>
-        <p class="eyebrow">single-case workflow contract</p>
-        <h3>${escapeHtml(workflow.source_type || "evidence")} · ${formatNumber(workflow.completed_stage_count || 0)}/${formatNumber(workflow.stage_count || stages.length)} stage(s) ready</h3>
+        <p class="eyebrow">케이스 처리 계약</p>
+        <h3>${escapeHtml(workflow.source_type || "evidence")} · ${formatNumber(workflow.completed_stage_count || 0)}/${formatNumber(workflow.stage_count || stages.length)}단계 준비</h3>
         <p>입력, 추출, 파싱, 인덱싱, 리뷰, 보고서가 같은 산출물 계약으로 연결됩니다.</p>
       </div>
       ${renderRunWorkflowChecklistSummary(workflow.analyst_checklist_summary || {})}
@@ -2130,10 +3050,10 @@ function renderRunWorkflowContract(payload) {
         ${stages.map((stage) => `
           <article class="run-workflow-stage ${escapeHtml(stage.status || "pending")}">
             <button class="run-workflow-stage-main" type="button" data-open-tab="${escapeHtml(stage.gui?.primary_tab || "summary")}" data-workflow-stage="${escapeHtml(stage.id || "")}">
-              <strong>${escapeHtml(stage.label || stage.id || "stage")}</strong>
+              <strong>${escapeHtml(stage.label || stage.id || "단계")}</strong>
               <span>${escapeHtml(runWorkflowStatusLabel(stage.status || "pending"))}</span>
               <small>${escapeHtml(stage.title || "")}</small>
-              <em>${formatNumber((stage.step_names || []).length)} step(s) · ${formatNumber((stage.output_keys || []).length)} output(s)</em>
+              <em>단계 ${formatNumber((stage.step_names || []).length)}개 · 산출물 ${formatNumber((stage.output_keys || []).length)}개</em>
             </button>
             ${renderRunWorkflowOutputLinks(stage)}
             ${renderRunWorkflowChecklist(stage)}
@@ -2152,13 +3072,13 @@ function renderRunWorkflowChecklistSummary(summary) {
     <div class="run-workflow-checklist-summary ${riskCount ? "needs-attention" : "ready"}" data-testid="run-workflow-checklist-summary">
       <div>
         <strong>분석관 확인 항목</strong>
-        <span>${formatNumber(summary.ready_count || 0)} ready · ${formatNumber(summary.warning_count || 0)} warning · ${formatNumber(summary.blocked_count || 0)} blocked · ${formatNumber(summary.pending_count || 0)} pending</span>
+        <span>준비 ${formatNumber(summary.ready_count || 0)} · 주의 ${formatNumber(summary.warning_count || 0)} · 차단 ${formatNumber(summary.blocked_count || 0)} · 대기 ${formatNumber(summary.pending_count || 0)}</span>
       </div>
       ${nextActions.length ? `
         <ul>
           ${nextActions.slice(0, 4).map((item) => `
             <li>
-              <b>${escapeHtml(item.stage || "stage")} · ${escapeHtml(runWorkflowChecklistStatusLabel(item.status || "pending"))}</b>
+              <b>${escapeHtml(item.stage || "단계")} · ${escapeHtml(runWorkflowChecklistStatusLabel(item.status || "pending"))}</b>
               <span>${escapeHtml(item.action || "")}</span>
             </li>
           `).join("")}
@@ -2179,13 +3099,13 @@ function renderRunWorkflowChecklist(stage) {
           const matched = Array.isArray(item.matched_outputs) ? item.matched_outputs : [];
           const expected = Array.isArray(item.expected_outputs) ? item.expected_outputs : [];
           const evidenceText = matched.length
-            ? `linked: ${matched.map((name) => escapeHtml(name)).join(", ")}`
-            : `expected: ${expected.length ? expected.map((name) => escapeHtml(name)).join(", ") : "stage evidence"}`;
+            ? `연결됨: ${matched.map((name) => escapeHtml(name)).join(", ")}`
+            : `예상 산출물: ${expected.length ? expected.map((name) => escapeHtml(name)).join(", ") : "단계 증거"}`;
           return `
             <div class="run-workflow-checklist-row ${escapeHtml(item.status || "pending")}">
               <div>
-                <strong>${escapeHtml(item.label || item.id || "Checklist item")}</strong>
-                <span>${escapeHtml(runWorkflowChecklistStatusLabel(item.status || "pending"))} · ${escapeHtml(item.severity || "unknown")}</span>
+                <strong>${escapeHtml(item.label || item.id || "체크 항목")}</strong>
+                <span>${escapeHtml(runWorkflowChecklistStatusLabel(item.status || "pending"))} · ${escapeHtml(item.severity || "미분류")}</span>
               </div>
               <p>${escapeHtml(item.action || "")}</p>
               <small>${evidenceText}</small>
@@ -2202,14 +3122,14 @@ function renderRunWorkflowOutputLinks(stage) {
     ? stage.handoff_outputs
     : (Array.isArray(stage.output_keys) ? stage.output_keys.map((name) => ({
       name,
-      role: "run output",
+      role: "실행 산출물",
       recommended_viewer: "json-viewer",
-      gui_action: "Open and verify this stage output.",
-      reportability_note: "Check source/provenance fields before reporting.",
+      gui_action: "이 단계 산출물을 열어 확인합니다.",
+      reportability_note: "보고 전 출처와 provenance 필드를 확인합니다.",
     })) : []);
   const handoffs = rawHandoffs.filter((item) => item?.name);
   if (!handoffs.length) {
-    return '<p class="run-workflow-no-output">No direct output yet</p>';
+    return '<p class="run-workflow-no-output">아직 연결된 산출물이 없습니다.</p>';
   }
   const visible = handoffs.slice(0, 4);
   const moreCount = Math.max(0, handoffs.length - visible.length);
@@ -2223,15 +3143,15 @@ function renderRunWorkflowOutputLinks(stage) {
         return `
           <div class="run-workflow-output-card">
             <strong>${escapeHtml(name)}</strong>
-            <span>${escapeHtml(output.role || "run output")} · ${escapeHtml(output.recommended_viewer || "viewer")}</span>
+            <span>${escapeHtml(output.role || "실행 산출물")} · ${escapeHtml(output.recommended_viewer || "뷰어")}</span>
             <div class="run-workflow-output-actions">
-              <button type="button" data-preview-output-name="${escapeHtml(name)}" title="${escapeHtml(output.gui_action || output.reportability_note || "")}">Preview</button>
-              <a href="${href}" title="${escapeHtml(output.reportability_note || output.gui_action || "")}">Download</a>
+              <button type="button" data-preview-output-name="${escapeHtml(name)}" title="${escapeHtml(output.gui_action || output.reportability_note || "")}">미리보기</button>
+              <a href="${href}" title="${escapeHtml(output.reportability_note || output.gui_action || "")}">다운로드</a>
             </div>
           </div>
         `;
       }).join("")}
-      ${moreCount ? `<small>+ ${formatNumber(moreCount)} more output(s)</small>` : ""}
+      ${moreCount ? `<small>그 외 산출물 ${formatNumber(moreCount)}개</small>` : ""}
     </div>
   `;
 }
@@ -2240,7 +3160,7 @@ async function loadRunOutputPreview(outputName) {
   const viewer = detailPanel.querySelector("#evidenceViewer");
   if (!viewer || !selectedRunId || !outputName) return;
   viewer.setAttribute("aria-busy", "true");
-  viewer.innerHTML = '<p class="empty-state">Loading run output preview...</p>';
+  viewer.innerHTML = '<p class="empty-state">산출물 미리보기를 불러오는 중입니다...</p>';
   try {
     const payload = await api(`/api/runs/${selectedRunId}/outputs/${encodeURIComponent(outputName)}/preview`);
     viewer.innerHTML = renderRunOutputViewer(payload);
@@ -2253,11 +3173,11 @@ async function loadRunOutputPreview(outputName) {
 }
 
 function renderRunOutputViewer(payload) {
-  let body = `<p class="empty-state">${escapeHtml(payload.message || "No preview available.")}</p>`;
+  let body = `<p class="empty-state">${escapeHtml(payload.message || "표시할 미리보기가 없습니다.")}</p>`;
   if (payload.preview_type === "text") {
     body = `
       <pre class="viewer-text">${escapeHtml(payload.text || "")}</pre>
-      ${payload.truncated ? '<p class="empty-state">Preview truncated for performance.</p>' : ""}
+      ${payload.truncated ? '<p class="empty-state">성능 보호를 위해 미리보기 일부만 표시했습니다.</p>' : ""}
     `;
   }
   if (payload.preview_type === "json") {
@@ -2276,25 +3196,25 @@ function renderRunOutputViewer(payload) {
   return `
     <div class="viewer-header" data-testid="run-output-viewer-header">
       <div>
-        <p class="eyebrow">run output viewer</p>
+        <p class="eyebrow">산출물 뷰어</p>
         <h3>${escapeHtml(payload.output_name || payload.name || "output")}</h3>
       </div>
       <div class="detail-actions">
-        <a class="mini-link" href="${escapeHtml(payload.download_url || "#")}" target="_blank" rel="noreferrer">Download</a>
+        <a class="mini-link" href="${escapeHtml(payload.download_url || "#")}" target="_blank" rel="noreferrer">다운로드</a>
       </div>
     </div>
     <div class="viewer-meta viewer-meta-compact">
       <span>${escapeHtml(payload.preview_type || "preview")}</span>
       <span>${formatBytes(payload.size || 0)}</span>
-      <span>${profile.bounded ? "bounded preview" : "preview"}</span>
+      <span>${profile.bounded ? "제한 미리보기" : "미리보기"}</span>
     </div>
     ${body}
     <details class="source-verification">
-      <summary>Output provenance and reportability</summary>
+      <summary>산출물 출처와 보고 가능 여부</summary>
       <dl class="eventlog-fields">
-        <dt>Output path</dt><dd>${escapeHtml(payload.path || "")}</dd>
-        <dt>Decision</dt><dd>${escapeHtml(profile.reportability_decision?.decision || "review-required")}</dd>
-        <dt>Required before report</dt><dd>${(profile.reportability_decision?.required_before_report || []).map((item) => escapeHtml(item)).join("<br>") || "source verification required"}</dd>
+        <dt>산출물 경로</dt><dd>${escapeHtml(payload.path || "")}</dd>
+        <dt>판정</dt><dd>${escapeHtml(profile.reportability_decision?.decision || "검토 필요")}</dd>
+        <dt>보고 전 확인</dt><dd>${(profile.reportability_decision?.required_before_report || []).map((item) => escapeHtml(item)).join("<br>") || "원본 검증 필요"}</dd>
       </dl>
     </details>
   `;
@@ -2307,19 +3227,19 @@ function renderParserWarningBadges(payload) {
   const reusedSteps = steps.filter((step) => Boolean(step.reused));
   const badges = [
     {
-      label: "Warnings",
+      label: "경고",
       value: warningSteps.length,
       tone: warningSteps.length ? "warning" : "none",
-      title: warningSteps.map((step) => step.name).join(", ") || "No warning steps",
+      title: warningSteps.map((step) => step.name).join(", ") || "경고 단계 없음",
     },
     {
-      label: "Zero-row parsers",
+      label: "빈 파서",
       value: zeroSteps.length,
       tone: zeroSteps.length ? "notice" : "none",
-      title: zeroSteps.map((step) => step.name).join(", ") || "No empty parser outputs",
+      title: zeroSteps.map((step) => step.name).join(", ") || "빈 파서 산출물 없음",
     },
     {
-      label: "Reused outputs",
+      label: "재사용 산출물",
       value: reusedSteps.length,
       tone: reusedSteps.length ? "notice" : "none",
       title: reusedSteps.map((step) => step.name).join(", ") || "No reused outputs",
@@ -2367,57 +3287,57 @@ function renderCaseDbPanel(payload) {
   const defaultCaseId = selectedRunId ? `run-${selectedRunId}` : "CASE-001";
   return `
     <section class="guidance-card case-db-panel">
-      <p class="eyebrow">Case DB workspace</p>
-      <h3>Search and review with persistent citations</h3>
-      <p>This run is prepared automatically before Case DB search, so analysts can move from keywords to review marks without manually importing JSON first.</p>
+      <p class="eyebrow">Case DB</p>
+      <h3>검색 결과를 검토 기록으로 고정</h3>
+      <p>JSON을 따로 가져오지 않아도 현재 실행 결과를 Case DB로 준비하고, 키워드 검색에서 선별 상태까지 이어갑니다.</p>
       <form id="caseDbImportForm" class="search-form">
-        <label>Database path <input name="database" value="${escapeHtml(defaultDb)}" required /></label>
+        <label>DB 경로 <input name="database" value="${escapeHtml(defaultDb)}" required /></label>
         <label>Case ID <input name="case_id" value="${escapeHtml(defaultCaseId)}" required /></label>
-        <label>Case name <input name="name" value="${escapeHtml(payload.mode || "rapidtriage run")}" /></label>
-        <button id="caseDbImportButton" type="submit">Prepare Case DB</button>
+        <label>케이스명 <input name="name" value="${escapeHtml(payload.mode || "rapidtriage run")}" /></label>
+        <button id="caseDbImportButton" type="submit">Case DB 준비</button>
       </form>
       <form id="caseDbSearchForm" class="search-form">
-        <label>DB keywords <input name="keywords" placeholder="password, powershell, download" required /></label>
+        <label>검색어 <input name="keywords" placeholder="password, powershell, download" required /></label>
         <input type="hidden" name="cursor" value="" />
-        <label>Source filter
+        <label>출처
           <select name="source">
-            <option value="">All sources</option>
-            <option value="documents">Documents</option>
-            <option value="files">Files</option>
-            <option value="artifacts">Artifacts</option>
-            <option value="indicators">Indicators</option>
-            <option value="timeline">Timeline</option>
+            <option value="">전체 출처</option>
+            <option value="documents">문서</option>
+            <option value="files">파일</option>
+            <option value="artifacts">아티팩트</option>
+            <option value="indicators">IOC / 위험</option>
+            <option value="timeline">시간축</option>
           </select>
         </label>
-        <label>Verification
+        <label>원본 확인
           <select name="verification_status">
-            <option value="">All statuses</option>
-            <option value="unverified">Unverified</option>
-            <option value="source_opened">Source opened</option>
-            <option value="cross_checked">Cross checked</option>
-            <option value="verified">Verified</option>
-            <option value="rejected">Rejected</option>
+            <option value="">전체 상태</option>
+            <option value="unverified">미확인</option>
+            <option value="source_opened">원본 열람</option>
+            <option value="cross_checked">교차 확인</option>
+            <option value="verified">확인 완료</option>
+            <option value="rejected">제외</option>
           </select>
         </label>
-        <label>Review
+        <label>선별 상태
           <select name="review_status">
-            <option value="">All review marks</option>
-            <option value="unreviewed">Unreviewed</option>
-            <option value="relevant">Relevant</option>
-            <option value="needs-review">Needs review</option>
-            <option value="excluded">Excluded</option>
-            <option value="not-relevant">Not relevant</option>
+            <option value="">전체 선별</option>
+            <option value="unreviewed">미검토</option>
+            <option value="relevant">관련 있음</option>
+            <option value="needs-review">재검토</option>
+            <option value="excluded">제외</option>
+            <option value="not-relevant">관련 없음</option>
           </select>
         </label>
-        <label>Save search as <input name="save_as" placeholder="Credential hits, PowerShell triage..." /></label>
-        <button id="caseDbSearchButton" type="submit">Search Case DB</button>
-        <button class="secondary-button" id="caseDbSavedSearchButton" type="button">Load saved searches</button>
+        <label>검색 저장명 <input name="save_as" placeholder="계정 정보 후보, PowerShell 흔적" /></label>
+        <button id="caseDbSearchButton" type="submit">Case DB 검색</button>
+        <button class="secondary-button" id="caseDbSavedSearchButton" type="button">저장 검색 불러오기</button>
       </form>
       <section id="caseDbSavedSearches" class="viewer-panel compact">
-        <p class="empty-state">Saved searches and recent DB keywords appear here after the Case DB is prepared.</p>
+        <p class="empty-state">Case DB가 준비되면 저장 검색과 최근 검색어가 여기에 표시됩니다.</p>
       </section>
       <section id="caseDbResult" class="viewer-panel">
-        <p class="empty-state">Enter keywords and search. The Case DB will be prepared automatically if needed.</p>
+        <p class="empty-state">검색어를 입력하면 필요한 경우 Case DB를 자동 준비한 뒤 결과를 보여줍니다.</p>
       </section>
     </section>
   `;
@@ -2442,8 +3362,8 @@ function renderWorkspaceCards(summary) {
     {
       label: "3. Review",
       title: "Turn hits into decisions",
-      text: "Preview the source, tag the hit, mark relevance, and decide whether it belongs in the report set.",
-      metric: `${formatNumber(summary.report_item_count || 0)} report candidates`,
+      text: "원본을 확인하고 태그, 관련성, 보고서 포함 여부를 결정합니다.",
+      metric: `보고서 후보 ${formatNumber(summary.report_item_count || 0)}건`,
       tab: "review",
     },
     {
@@ -2486,8 +3406,8 @@ function renderWorkflowGuide(summary) {
         <span class="step-item">Use report candidates</span>
       </div>
       <div class="guidance-actions">
-        <button class="secondary-button" type="button" data-open-tab="search">Start keyword search</button>
-        <button class="secondary-button" type="button" data-open-tab="review">Open review board</button>
+        <button class="secondary-button" type="button" data-open-tab="search">키워드 검색</button>
+        <button class="secondary-button" type="button" data-open-tab="review">선별 보드</button>
       </div>
       <p class="help-text">헷갈리면 순서는 단순합니다: 전체 검색 -> 뷰어로 원본 확인 -> relevant/excluded 표시 -> 보고서 후보만 남기기.</p>
     </section>
@@ -2510,21 +3430,103 @@ function renderTimeline(payload) {
   if (!rows.length) return '<p class="empty-state">No timeline events.</p>';
   return `
     ${renderPaginationNotice(payload.pagination, "timeline")}
-    <table class="data-table">
-      <thead><tr><th>Time</th><th>Source</th><th>Type</th><th>Summary</th><th></th></tr></thead>
-      <tbody>
-        ${rows.map((event, index) => `
-          <tr data-filter="${rowText(event)}">
-            <td>${escapeHtml(event.timestamp)}</td>
-            <td>${escapeHtml(event.source)}</td>
-            <td>${escapeHtml(event.event_type)}</td>
-            <td><strong>${escapeHtml(event.summary)}</strong><span>${escapeHtml(event.path || "")}</span></td>
-            <td>${bookmarkButton("timeline", `/events/${offset + index}`, event.summary)}</td>
-          </tr>
-        `).join("")}
-      </tbody>
-    </table>
+    ${renderTimelineReviewLanes(payload)}
+    <div class="review-list-shell" role="region" aria-label="Timeline result list">
+      <table class="data-table">
+        <thead><tr><th>Time</th><th>Source</th><th>Type</th><th>Summary</th><th></th></tr></thead>
+        <tbody>
+          ${rows.map((event, index) => {
+            const pointer = `/events/${offset + index}`;
+            const context = { source: "timeline", pointer, title: event.summary || "timeline event", note: event.summary || "", path: event.path || "", tags: ["timeline", event.source, event.event_type].filter(Boolean) };
+            const inspector = {
+              title: event.summary || "Timeline event",
+              source: event.source || "timeline",
+              kind: event.event_type || "event",
+              timestamp: event.timestamp || "",
+              path: event.path || "",
+              pointer,
+              preview: event.summary || "",
+              chips: ["timeline", event.source, event.event_type].filter(Boolean),
+              reviewContext: context,
+            };
+            return `
+              <tr class="selectable-result-row" data-filter="${rowText(event)}" ${rowInspectorAttributes(inspector)} ${event.path ? `data-viewer-row-path="${escapeHtml(event.path)}" data-review-context="${escapeHtml(JSON.stringify(context))}"` : ""}>
+                <td>${escapeHtml(event.timestamp)}</td>
+                <td>${escapeHtml(event.source)}</td>
+                <td>${escapeHtml(event.event_type)}</td>
+                <td><strong>${escapeHtml(event.summary)}</strong><span>${escapeHtml(event.path || "")}</span></td>
+                <td>${bookmarkButton("timeline", pointer, event.summary)}</td>
+              </tr>
+            `;
+          }).join("")}
+        </tbody>
+      </table>
+    </div>
     ${renderPaginationControls(payload.pagination, "timeline")}
+  `;
+}
+
+function renderTimelineReviewLanes(payload) {
+  const rows = payload.events || [];
+  const lanes = [
+    {
+      label: "파일 생성/수정",
+      filter: "file path modified created",
+      terms: ["file", "path", "modified", "created", "mft", "usn"],
+      hint: "문서 작성, 복사, 삭제 직전 파일 활동을 먼저 봅니다.",
+    },
+    {
+      label: "웹·AI 활동",
+      filter: "browser url ai chatgpt claude gemini perplexity",
+      terms: ["browser", "url", "web", "ai", "chatgpt", "claude", "gemini", "perplexity"],
+      hint: "검색, 다운로드, AI 프롬프트, 웹 접속 흐름을 모읍니다.",
+    },
+    {
+      label: "윈도우 이벤트",
+      filter: "evtx eventlog logon powershell defender",
+      terms: ["evtx", "eventlog", "logon", "powershell", "defender", "wmi", "task"],
+      hint: "로그온, 실행, 보안 이벤트를 시간순으로 확인합니다.",
+    },
+    {
+      label: "외부장치/반출",
+      filter: "usb shellbag mount drive external download",
+      terms: ["usb", "shellbag", "mount", "drive", "external", "download"],
+      hint: "USB 연결, 다운로드, 외부 저장장치 관련 단서를 봅니다.",
+    },
+    {
+      label: "메신저/메일",
+      filter: "chat kakao telegram whatsapp mail email attachment",
+      terms: ["chat", "kakao", "telegram", "whatsapp", "mail", "email", "attachment"],
+      hint: "대화, 메일, 첨부파일 흐름을 사건 시간에 맞춰 봅니다.",
+    },
+    {
+      label: "삭제/위험",
+      filter: "delete removed warning risk validation",
+      terms: ["delete", "deleted", "removed", "warning", "risk", "validation"],
+      hint: "삭제 흔적과 검증 경고가 있는 타임라인만 좁힙니다.",
+    },
+  ];
+  return `
+    <details class="tab-assist-drawer timeline-review-lanes" aria-label="타임라인 사건 재구성 레인" data-testid="timeline-review-lanes">
+      <summary>
+        <span>
+          <em>시간 재구성</em>
+          <strong>행위별 필터 ${formatNumber(lanes.length)}개 · 이벤트 ${formatNumber(rows.length)}개</strong>
+        </span>
+      </summary>
+      <div class="tab-assist-body timeline-lane-grid">
+        ${lanes.map((lane) => {
+          const count = rows.filter((row) => lane.terms.some((term) => compactRowFilterText(row).includes(term))).length;
+          return `
+            <button class="secondary-button timeline-lane-card" type="button" data-timeline-lane-filter="${escapeHtml(lane.filter)}" title="${escapeHtml(lane.hint)}">
+              <span>${escapeHtml(lane.label)}</span>
+              <b>${formatNumber(count)}</b>
+              <em>${escapeHtml(lane.hint)}</em>
+            </button>
+          `;
+        }).join("")}
+      </div>
+    </details>
   `;
 }
 
@@ -2539,7 +3541,7 @@ function renderIndicators(payload) {
         <p class="eyebrow">ioc review</p>
         <h3>URLs, domains, IPs, and hashes found across the run</h3>
       </div>
-      <p>Use this as a pivot list. Matched rules and risk flags are triage signals, not final attribution; verify the source rows before reporting.</p>
+      <p>이 목록은 피벗 단서입니다. 매칭 규칙과 위험 플래그는 최종 귀속 판단이 아니므로, 보고 전 원본 행을 반드시 확인하세요.</p>
       <div class="metric-grid">
         ${metric("Indicators", summary.indicator_count)}
         ${metric("Rule hits", summary.matched_indicator_count)}
@@ -2659,39 +3661,104 @@ function renderChipList(items) {
 function renderArtifacts(payload) {
   const groups = payload.artifacts || {};
   const rows = [];
-  let pagination = null;
   for (const [kind, artifactPayload] of Object.entries(groups)) {
     const offset = artifactPayload.pagination?.offset || 0;
-    if (!pagination && artifactPayload.pagination) pagination = artifactPayload.pagination;
     for (const [index, artifact] of (artifactPayload.artifacts || []).entries()) {
       rows.push({ kind, index: offset + index, artifact });
     }
   }
-  if (!rows.length) return '<p class="empty-state">No artifact rows.</p>';
+  const displayRows = activeArtifactFilter
+    ? rows.filter(({ kind, artifact }) => artifactSourceCategory(kind, artifact) === activeArtifactFilter)
+    : rows;
+  const pagination = activeArtifactFilter
+    ? filteredPagination(displayRows.length, "artifacts")
+    : artifactPaginationSummary(groups, rows.length);
+  if (!displayRows.length) return '<p class="empty-state">No artifact rows.</p>';
   return `
     ${renderPaginationNotice(pagination, "artifacts")}
-    ${renderArtifactValidationSummary(rows)}
-    <table class="data-table">
-      <thead><tr><th>Kind</th><th>Type</th><th>Provider</th><th>Evidence</th><th></th></tr></thead>
-      <tbody>
-        ${rows.map(({ kind, index, artifact }) => `
-          <tr data-filter="${rowText({ kind, ...artifact })}">
-            <td>${escapeHtml(kind)}</td>
-            <td>${escapeHtml(artifact.artifact_type)}</td>
-            <td>${escapeHtml(artifact.provider)}</td>
-            <td>
-              <strong>${escapeHtml(artifactPreviewText(artifact))}</strong>
-              ${renderArtifactValidationBadges(artifact)}
-              <span>${escapeHtml(artifact.path || "")}</span>
-              ${renderArtifactDetails(artifact)}
-            </td>
-            <td class="action-stack">${artifactActionButtons(kind, index, artifact)}</td>
-          </tr>
-        `).join("")}
-      </tbody>
-    </table>
+    ${renderArtifactValidationSummary(displayRows)}
+    <div class="review-list-shell" role="region" aria-label="Artifact result list">
+      <table class="data-table">
+        <thead><tr><th>Kind</th><th>Type</th><th>Provider</th><th>Evidence</th><th></th></tr></thead>
+        <tbody>
+          ${displayRows.map(({ kind, index, artifact }) => {
+            const sourceCategory = artifactSourceCategory(kind, artifact);
+            const context = { source: `artifacts:${kind}`, pointer: `/${kind}/${index}`, title: artifact.artifact_type || kind, note: artifactPreviewText(artifact), path: artifact.path || "", tags: ["artifact", kind, artifact.artifact_type].filter(Boolean) };
+            const inspector = {
+              title: artifactPreviewText(artifact),
+              source: kind,
+              kind: artifact.artifact_type || "artifact",
+              provider: artifact.provider || "",
+              timestamp: artifact.timestamp || artifact.last_write_time || "",
+              path: artifact.path || "",
+              pointer: context.pointer,
+              preview: artifactPreviewText(artifact),
+              chips: ["artifact", kind, artifact.artifact_type, artifact.provider].filter(Boolean),
+              reviewContext: context,
+            };
+            return `
+              <tr class="selectable-result-row" data-source-category="${escapeHtml(sourceCategory)}" data-filter="${rowText({ kind, ...artifact })}" ${rowInspectorAttributes(inspector)} ${artifact.path ? `data-viewer-row-path="${escapeHtml(artifact.path)}" data-review-context="${escapeHtml(JSON.stringify(context))}"` : ""}>
+                <td>${escapeHtml(kind)}</td>
+                <td>${escapeHtml(artifact.artifact_type)}</td>
+                <td>${escapeHtml(artifact.provider)}</td>
+                <td>
+                  <strong>${escapeHtml(artifactPreviewText(artifact))}</strong>
+                  ${renderArtifactValidationBadges(artifact)}
+                  <span>${escapeHtml(artifact.path || "")}</span>
+                  ${renderArtifactDetails(artifact)}
+                </td>
+                <td class="action-stack">${artifactActionButtons(kind, index, artifact)}</td>
+              </tr>
+            `;
+          }).join("")}
+        </tbody>
+      </table>
+    </div>
     ${renderPaginationControls(pagination, "artifacts")}
   `;
+}
+
+function filteredPagination(total, collection) {
+  return {
+    collection,
+    offset: 0,
+    limit: Math.max(total, 1),
+    returned: total,
+    total,
+    previous_offset: null,
+    next_offset: null,
+  };
+}
+
+function artifactPaginationSummary(groups, returned) {
+  let total = 0;
+  let limit = 0;
+  let offset = null;
+  let previousOffset = null;
+  let nextOffset = null;
+  for (const artifactPayload of Object.values(groups || {})) {
+    const pagination = artifactPayload?.pagination;
+    if (!pagination) continue;
+    total += Number(pagination.total || 0);
+    limit = Math.max(limit, Number(pagination.limit || 0));
+    offset = offset === null ? Number(pagination.offset || 0) : Math.min(offset, Number(pagination.offset || 0));
+    if (pagination.previous_offset !== null && pagination.previous_offset !== undefined) {
+      previousOffset = previousOffset === null ? Number(pagination.previous_offset || 0) : Math.min(previousOffset, Number(pagination.previous_offset || 0));
+    }
+    if (pagination.next_offset !== null && pagination.next_offset !== undefined) {
+      nextOffset = nextOffset === null ? Number(pagination.next_offset || 0) : Math.min(nextOffset, Number(pagination.next_offset || 0));
+    }
+  }
+  if (!limit && !total && !returned) return null;
+  return {
+    collection: "artifacts",
+    offset: offset ?? 0,
+    limit: limit || Math.max(returned, 1),
+    returned,
+    total: total || returned,
+    previous_offset: previousOffset,
+    next_offset: nextOffset,
+  };
 }
 
 function renderArtifactValidationSummary(rows) {
@@ -2788,20 +3855,20 @@ function renderArtifactValidationBadges(artifact) {
   const badges = [];
   if (firstGate.gap_id) {
     const missingCount = Array.isArray(firstGate.missing_required_checks) ? firstGate.missing_required_checks.length : 0;
-    badges.push(`${firstGate.gap_id} · ${missingCount} missing`);
+    badges.push(`${firstGate.gap_id} · 미충족 ${missingCount}`);
   }
   if (details.validation_required || firstGate.status === "validation-required") {
-    badges.push("validation required");
+    badges.push("검증 필요");
   }
   if (details.reportability) {
-    badges.push(`reportability: ${details.reportability}`);
+    badges.push(`보고: ${details.reportability}`);
   }
   if (details.commercial_grade_ready === false || firstGate.commercial_grade_ready === false) {
-    badges.push("not commercial-ready");
+    badges.push("상용 검증 전");
   }
   const evtxProfile = details.evtx_commercial_readiness_profile || {};
   if (evtxProfile.allowed_current_use) {
-    badges.push(`use: ${evtxProfile.allowed_current_use}`);
+    badges.push(`용도: ${evtxProfile.allowed_current_use}`);
   }
   if (!badges.length) return "";
   return `<div class="artifact-validation-badges">${badges.slice(0, 5).map((badge) => `<span>${escapeHtml(badge)}</span>`).join("")}</div>`;
@@ -2900,19 +3967,22 @@ function renderArtifactDetails(artifact) {
   const aiConversationCard = renderAiConversationArtifactCard(artifact);
   const cloudExportReviewCard = renderCloudExportReviewArtifactCard(artifact);
   return `
-    ${eventLogCard}
-    ${evtxReadinessCard}
-    ${ntfsDepthCard}
-    ${ntfsReplayCard}
-    ${registryDepthCard}
-    ${windowsCoreReadinessCard}
-    ${accuracyGateCard}
-    ${aiUsageCard}
-    ${aiConversationCard}
-    ${cloudExportReviewCard}
-    <details class="match-details">
-      <summary>Inspect artifact details</summary>
-      <pre>${escapeHtml(JSON.stringify(artifact.details, null, 2))}</pre>
+    <details class="match-details artifact-inline-details">
+      <summary>세부 검증 보기</summary>
+      ${eventLogCard}
+      ${evtxReadinessCard}
+      ${ntfsDepthCard}
+      ${ntfsReplayCard}
+      ${registryDepthCard}
+      ${windowsCoreReadinessCard}
+      ${accuracyGateCard}
+      ${aiUsageCard}
+      ${aiConversationCard}
+      ${cloudExportReviewCard}
+      <details class="artifact-json-preview">
+        <summary>Raw JSON 보기</summary>
+        <pre>${escapeHtml(JSON.stringify(artifact.details, null, 2))}</pre>
+      </details>
     </details>
   `;
 }
@@ -2996,26 +4066,38 @@ function renderCoreAccuracyGateCard(artifact) {
         const satisfied = (gate.satisfied_checks || []).slice(0, 5);
         const missing = (gate.missing_required_checks || []).slice(0, 5);
         const refs = (gate.evidence_refs || []).slice(0, 3);
+        const missingCount = Array.isArray(gate.missing_required_checks) ? gate.missing_required_checks.length : missing.length;
+        const satisfiedCount = Array.isArray(gate.satisfied_checks) ? gate.satisfied_checks.length : satisfied.length;
+        const gateTitle = gate.title || "검증 기준";
         return `
           <article class="accuracy-gate-row">
-            <div class="eventlog-chip-row">
-              <span>${escapeHtml(gate.gap_id || "gap")}</span>
+            <div class="accuracy-gate-main">
+              <div>
+                <strong>${escapeHtml(gate.gap_id || "gap")}</strong>
+                <span>${escapeHtml(gateTitle)}</span>
+              </div>
+              <em>${escapeHtml(`${missingCount} 미충족`)}</em>
+            </div>
+            <div class="eventlog-chip-row accuracy-gate-chips">
               <span>${escapeHtml(gate.status || "validation-required")}</span>
               <span>${escapeHtml(gate.default_reportability || "reportability unknown")}</span>
               <span>${escapeHtml(gate.commercial_grade_ready ? "commercial-ready" : "not-commercial-ready")}</span>
+              <span>${escapeHtml(`${satisfiedCount} 만족`)}</span>
             </div>
-            <dl class="eventlog-fields">
-              <dt>Goal</dt>
-              <dd>${escapeHtml(gate.title || "")}</dd>
-              <dt>Satisfied</dt>
-              <dd>${escapeHtml(satisfied.join(" · ") || "No required check satisfied yet")}</dd>
-              <dt>Missing</dt>
-              <dd>${escapeHtml(missing.join(" · ") || "No missing check listed")}</dd>
-              <dt>Evidence refs</dt>
-              <dd>${escapeHtml(refs.join(" · "))}</dd>
-              <dt>Next</dt>
-              <dd>${escapeHtml(gate.next_validation_step || "")}</dd>
-            </dl>
+            <p class="accuracy-gate-one-line">${escapeHtml(satisfied.slice(0, 2).join(" · ") || "만족된 필수 검증 없음")}</p>
+            <details class="accuracy-gate-detail">
+              <summary>검증 항목 자세히</summary>
+              <dl class="eventlog-fields">
+                <dt>만족</dt>
+                <dd>${escapeHtml(satisfied.join(" · ") || "No required check satisfied yet")}</dd>
+                <dt>미충족</dt>
+                <dd>${escapeHtml(missing.join(" · ") || "No missing check listed")}</dd>
+                <dt>근거</dt>
+                <dd>${escapeHtml(refs.join(" · "))}</dd>
+                <dt>다음</dt>
+                <dd>${escapeHtml(gate.next_validation_step || "")}</dd>
+              </dl>
+            </details>
           </article>
         `;
       }).join("")}
@@ -3086,15 +4168,15 @@ function renderWindowsCoreReadinessArtifactCard(artifact) {
       </div>
       <div class="eventlog-chip-row">${chips.map((chip) => `<span>${escapeHtml(chip)}</span>`).join("")}</div>
       <dl class="eventlog-fields">
-        <dt>Decoded</dt>
-        <dd>${escapeHtml(decodedRows.join(" · ") || "Validation profile only; native row decode still needs trusted diff")}</dd>
-        <dt>Evidence</dt>
-        <dd>${escapeHtml(evidenceKeys.join(" · ") || "source path/hash and parser version required")}</dd>
-        <dt>Reportability</dt>
+        <dt>디코딩</dt>
+        <dd>${escapeHtml(decodedRows.join(" · ") || "검증 프로필만 있음; native row decode는 trusted diff가 더 필요합니다.")}</dd>
+        <dt>증거 요건</dt>
+        <dd>${escapeHtml(evidenceKeys.join(" · ") || "원본 경로, 해시, 파서 버전이 필요합니다.")}</dd>
+        <dt>보고 가능성</dt>
         <dd>${escapeHtml([reportability.allowed_use, reportability.decision, profile.analyst_caveat].filter(Boolean).join(" · "))}</dd>
-        <dt>Validation</dt>
-        <dd>${escapeHtml([validationSummary.report_grade_status, `${validationSummary.passed_check_count || 0} checks passed`, ...(validationSummary.failed_check_names || []).slice(0, 4)].filter(Boolean).join(" · "))}</dd>
-        <dt>Before report</dt>
+        <dt>검증</dt>
+        <dd>${escapeHtml([validationSummary.report_grade_status, `${validationSummary.passed_check_count || 0}개 점검 통과`, ...(validationSummary.failed_check_names || []).slice(0, 4)].filter(Boolean).join(" · "))}</dd>
+        <dt>보고 전 확인</dt>
         <dd>${escapeHtml(requiredRows.join(" · "))}</dd>
         <dt>Blockers</dt>
         <dd>${escapeHtml(blockerRows.join(" · ") || "No blocker listed")}</dd>
@@ -3492,7 +4574,7 @@ function artifactActionButtons(kind, index, artifact) {
     items.push(compareButton(compareItemFromMatch(match, context)));
   }
   items.push(bookmarkButton(context.source, context.pointer, context.note || context.title));
-  return items.join("");
+  return renderRowActionDock(items);
 }
 
 function renderFiles(payload) {
@@ -3503,27 +4585,44 @@ function renderFiles(payload) {
   return `
     ${summary}
     ${renderPaginationNotice(payload.pagination, "files")}
-    <table class="data-table file-triage-table">
-      <thead><tr><th>Name</th><th>Triage</th><th>Categories</th><th>Size</th><th>Modified</th><th></th></tr></thead>
-      <tbody>
-        ${rows.map((file, index) => {
-          const context = { source: "files", pointer: `/candidates/${offset + index}`, title: file.name || fileName(file.path), note: file.name || "", path: file.path || "", tags: ["file", ...(file.categories || [])].filter(Boolean) };
-          const match = { source: "files", kind: (file.categories || []).join(", "), path: file.path || "", title: file.name || fileName(file.path), preview: file.name || "", pointer: context.pointer };
-          const signature = file.file_signature || {};
-          const triageClass = signature.mismatch ? "risk-row" : "";
-          return `
-            <tr class="${triageClass}" data-filter="${rowText(file)}" ${file.path ? `data-viewer-row-path="${escapeHtml(file.path)}" data-review-context="${escapeHtml(JSON.stringify(context))}"` : ""}>
-              <td><strong>${escapeHtml(file.name)}</strong><span>${escapeHtml(file.path)}</span></td>
-              <td>${renderFileTriageBadges(file)}</td>
-              <td>${escapeHtml((file.categories || []).join(", "))}</td>
-              <td>${formatBytes(file.size)}</td>
-              <td>${escapeHtml(file.modified_at)}</td>
-              <td class="action-stack">${file.path ? viewSourceButton(match, context) : ""}${compareButton(compareItemFromMatch(match, context))}${bookmarkButton("files", context.pointer, file.name)}</td>
-            </tr>
-          `;
-        }).join("")}
-      </tbody>
-    </table>
+    <div class="review-list-shell" role="region" aria-label="File result list">
+      <table class="data-table file-triage-table">
+        <thead><tr><th>Name</th><th>Triage</th><th>Categories</th><th>Size</th><th>Modified</th><th></th></tr></thead>
+        <tbody>
+          ${rows.map((file, index) => {
+            const context = { source: "files", pointer: `/candidates/${offset + index}`, title: file.name || fileName(file.path), note: file.name || "", path: file.path || "", tags: ["file", ...(file.categories || [])].filter(Boolean) };
+            const match = { source: "files", kind: (file.categories || []).join(", "), path: file.path || "", title: file.name || fileName(file.path), preview: file.name || "", pointer: context.pointer };
+            const signature = file.file_signature || {};
+            const triageClass = signature.mismatch ? "risk-row" : "";
+            const inspector = {
+              title: file.name || fileName(file.path) || "File candidate",
+              source: "files",
+              kind: (file.categories || []).join(", ") || "file",
+              timestamp: file.modified_at || "",
+              path: file.path || "",
+              pointer: context.pointer,
+              preview: [formatBytes(file.size), signature.status, signature.mismatch ? "signature mismatch" : ""].filter(Boolean).join(" · "),
+              chips: ["file", ...(file.categories || []), signature.mismatch ? "mismatch" : ""].filter(Boolean),
+              reviewContext: context,
+            };
+            return `
+              <tr class="selectable-result-row ${triageClass}" data-filter="${rowText(file)}" ${rowInspectorAttributes(inspector)} ${file.path ? `data-viewer-row-path="${escapeHtml(file.path)}" data-review-context="${escapeHtml(JSON.stringify(context))}"` : ""}>
+                <td><strong>${escapeHtml(file.name)}</strong><span>${escapeHtml(file.path)}</span></td>
+                <td>${renderFileTriageBadges(file)}</td>
+                <td>${escapeHtml((file.categories || []).join(", "))}</td>
+                <td>${formatBytes(file.size)}</td>
+                <td>${escapeHtml(file.modified_at)}</td>
+                <td class="action-stack">${renderRowActionDock([
+                  file.path ? viewSourceButton(match, context) : "",
+                  compareButton(compareItemFromMatch(match, context)),
+                  bookmarkButton("files", context.pointer, file.name),
+                ])}</td>
+              </tr>
+            `;
+          }).join("")}
+        </tbody>
+      </table>
+    </div>
     ${renderPaginationControls(payload.pagination, "files")}
   `;
 }
@@ -3627,26 +4726,81 @@ function renderDocs(payload) {
   if (!rows.length) return `${extractionNotice}<p class="empty-state">No document matches.</p>`;
   return `
     ${extractionNotice}
+    ${renderDocumentReviewLanes(payload)}
     ${renderPaginationNotice(payload.pagination, "docs")}
-    <table class="data-table">
-      <thead><tr><th>Document</th><th>Kind</th><th>Keywords</th><th>Preview</th><th></th></tr></thead>
-      <tbody>
-        ${rows.map((doc, index) => {
-          const context = { source: "docs", pointer: `/results/${offset + index}`, title: fileName(doc.path), note: doc.preview || "", path: doc.path || "", tags: ["document", doc.kind].filter(Boolean) };
-          const match = { source: "documents", kind: doc.kind || "", path: doc.path || "", title: fileName(doc.path), preview: doc.preview || "", pointer: context.pointer };
-          return `
-            <tr data-filter="${rowText(doc)}" ${doc.path ? `data-viewer-row-path="${escapeHtml(doc.path)}" data-review-context="${escapeHtml(JSON.stringify(context))}"` : ""}>
-              <td><strong>${escapeHtml(fileName(doc.path))}</strong><span>${escapeHtml(doc.path)}</span></td>
-              <td>${escapeHtml(doc.kind)}</td>
-              <td>${escapeHtml((doc.matched_keywords || []).join(", "))}</td>
-              <td>${escapeHtml(doc.preview || "")}</td>
-              <td class="action-stack">${doc.path ? viewSourceButton(match, context) : ""}${compareButton(compareItemFromMatch(match, context))}${bookmarkButton("docs", context.pointer, fileName(doc.path))}</td>
-            </tr>
-          `;
-        }).join("")}
-      </tbody>
-    </table>
+    <div class="review-list-shell" role="region" aria-label="Document result list">
+      <table class="data-table">
+        <thead><tr><th>Document</th><th>Kind</th><th>Keywords</th><th>Preview</th><th></th></tr></thead>
+        <tbody>
+          ${rows.map((doc, index) => {
+            const context = { source: "docs", pointer: `/results/${offset + index}`, title: fileName(doc.path), note: doc.preview || "", path: doc.path || "", tags: ["document", doc.kind].filter(Boolean) };
+            const match = { source: "documents", kind: doc.kind || "", path: doc.path || "", title: fileName(doc.path), preview: doc.preview || "", pointer: context.pointer };
+            const inspector = {
+              title: fileName(doc.path) || "Document hit",
+              source: "documents",
+              kind: doc.kind || "document",
+              timestamp: doc.modified_at || "",
+              path: doc.path || "",
+              pointer: context.pointer,
+              preview: doc.preview || "",
+              chips: ["document", doc.kind, ...(doc.matched_keywords || [])].filter(Boolean),
+              reviewContext: context,
+            };
+            return `
+              <tr class="selectable-result-row" data-filter="${rowText(doc)}" ${rowInspectorAttributes(inspector)} ${doc.path ? `data-viewer-row-path="${escapeHtml(doc.path)}" data-review-context="${escapeHtml(JSON.stringify(context))}"` : ""}>
+                <td><strong>${escapeHtml(fileName(doc.path))}</strong><span>${escapeHtml(doc.path)}</span></td>
+                <td>${escapeHtml(doc.kind)}</td>
+                <td>${escapeHtml((doc.matched_keywords || []).join(", "))}</td>
+                <td>${escapeHtml(doc.preview || "")}</td>
+                <td class="action-stack">${renderRowActionDock([
+                  doc.path ? viewSourceButton(match, context) : "",
+                  compareButton(compareItemFromMatch(match, context)),
+                  bookmarkButton("docs", context.pointer, fileName(doc.path)),
+                ])}</td>
+              </tr>
+            `;
+          }).join("")}
+        </tbody>
+      </table>
+    </div>
     ${renderPaginationControls(payload.pagination, "docs")}
+  `;
+}
+
+function renderDocumentReviewLanes(payload) {
+  const rows = payload.results || [];
+  const lanes = [
+    { label: "문서", filter: "pdf docx xlsx pptx hwp office", terms: ["pdf", "docx", "xlsx", "pptx", "hwp", "office"], hint: "계약서, 송장, 보고서, Office/PDF 문서를 먼저 봅니다." },
+    { label: "메일/첨부", filter: "email mail eml msg pst ost mbox attachment", terms: ["email", "mail", "eml", "msg", "pst", "ost", "mbox", "attachment"], hint: "메일 본문, 첨부, 헤더/송수신자를 검토합니다." },
+    { label: "메신저", filter: "kakao whatsapp telegram signal line discord chat", terms: ["kakao", "whatsapp", "telegram", "signal", "line", "discord", "chat"], hint: "대화/메신저 export 또는 DB 파싱 결과를 확인합니다." },
+    { label: "OCR/이미지", filter: "ocr image media screenshot scan", terms: ["ocr", "image", "media", "screenshot", "scan"], hint: "이미지 후보와 OCR 텍스트 히트를 따로 봅니다." },
+    { label: "보고 후보", filter: "invoice payment transfer fraud contract", terms: ["invoice", "payment", "transfer", "fraud", "contract"], hint: "사건 키워드와 바로 연결될 수 있는 문서를 좁힙니다." },
+  ];
+  const scored = lanes.map((lane) => ({
+    ...lane,
+    count: rows.filter((row) => {
+      const text = rowText(row);
+      return lane.terms.some((term) => text.includes(term));
+    }).length,
+  }));
+  return `
+    <details class="tab-assist-drawer document-review-lanes" aria-label="문서 검토 레인" data-testid="document-review-lanes">
+      <summary>
+        <span>
+          <em>Document review</em>
+          <strong>문서·메일·대화 검토 레인 · 필터 ${formatNumber(scored.length)}개 · 결과 ${formatNumber(rows.length)}개</strong>
+        </span>
+      </summary>
+      <div class="tab-assist-body document-lane-list">
+        ${scored.map((lane) => `
+          <button class="secondary-button document-lane-card" type="button" data-doc-lane-filter="${escapeHtml(lane.filter)}" title="${escapeHtml(lane.hint)}">
+            <span>${escapeHtml(lane.label)}</span>
+            <b>${formatNumber(lane.count)}</b>
+            <em>${escapeHtml(lane.hint)}</em>
+          </button>
+        `).join("")}
+      </div>
+    </details>
   `;
 }
 
@@ -3668,74 +4822,83 @@ function renderSearch(payload = null) {
       }
     : getSearchDraft();
   const draftText = (draft.keywords || []).join(", ");
+  const keywordPackLabels = {
+    credentials: "계정/인증",
+    execution: "실행 흔적",
+    network: "네트워크",
+    "browser-ai": "브라우저/AI",
+    "windows-ir": "윈도우 IR",
+    exfiltration: "유출 정황",
+  };
   return `
     <section class="search-hero compact-viewer-hero">
       <div>
-        <p class="eyebrow">find evidence</p>
-        <h3>Search → viewer → review</h3>
+        <p class="eyebrow">증거 검색</p>
+        <h3>검색 → 원본 확인 → 선별</h3>
         <p>결과를 열면 뷰어가 먼저 고정됩니다. 본문 검색, 해시, 리뷰 저장을 같은 패널에서 처리합니다.</p>
       </div>
       <div class="search-hero-tips">
         <span>${kbd("Ctrl K")} 전체 검색</span>
         <span>${kbd("Ctrl F")} 현재 파일/표 필터</span>
-        <span>${kbd("Alt R")} relevant 저장</span>
+        <span>${kbd("Alt R")} 관련 있음 저장</span>
       </div>
     </section>
     <form id="unifiedSearchForm" class="search-form">
+      ${renderSearchScopePlanner(draft)}
       <label>
-        Entire case search ${kbd("Ctrl K")}
-        <input id="unifiedSearchInput" value="${escapeHtml(draftText)}" placeholder="Search documents, web history, logs, OCR..." required />
+        전체 케이스 검색 ${kbd("Ctrl K")}
+        <input id="unifiedSearchInput" value="${escapeHtml(draftText)}" placeholder="문서, 웹 기록, 로그, OCR 검색" required />
       </label>
       <div class="field-grid search-filter-grid">
         <label>
-          Source
+          검색 범위
           <select id="unifiedSearchSource">
-            <option value="">All sources</option>
-            <option value="documents" ${draft.source === "documents" ? "selected" : ""}>Documents</option>
-            <option value="files" ${draft.source === "files" ? "selected" : ""}>File metadata</option>
-            <option value="web" ${draft.source === "web" ? "selected" : ""}>Web artifacts</option>
-            <option value="indicators" ${draft.source === "indicators" ? "selected" : ""}>Indicators</option>
-            <option value="artifacts" ${draft.source === "artifacts" ? "selected" : ""}>Other artifacts</option>
-            <option value="timeline" ${draft.source === "timeline" ? "selected" : ""}>Timeline</option>
+            <option value="">전체 출처</option>
+            <option value="documents" ${draft.source === "documents" ? "selected" : ""}>문서</option>
+            <option value="files" ${draft.source === "files" ? "selected" : ""}>파일 메타데이터</option>
+            <option value="web" ${draft.source === "web" ? "selected" : ""}>웹 아티팩트</option>
+            <option value="indicators" ${draft.source === "indicators" ? "selected" : ""}>지표</option>
+            <option value="artifacts" ${draft.source === "artifacts" ? "selected" : ""}>기타 아티팩트</option>
+            <option value="timeline" ${draft.source === "timeline" ? "selected" : ""}>시간축</option>
             <option value="ocr" ${draft.source === "ocr" ? "selected" : ""}>OCR</option>
           </select>
         </label>
         <label>
-          Extension
+          확장자
           <input id="unifiedSearchExtension" value="${escapeHtml(draft.extension || "")}" placeholder=".pdf, .log, .sqlite" />
         </label>
       </div>
       <label>
-        Path contains
+        경로 포함
         <input id="unifiedSearchPath" value="${escapeHtml(draft.path_contains || "")}" placeholder="Users, Downloads, AppData..." />
       </label>
       <div class="field-grid search-filter-grid">
         <label>
-          Search mode
+          검색 방식
           <select id="unifiedSearchMode">
-            <option value="exact" ${draft.search_mode === "exact" ? "selected" : ""}>Exact + simple stem</option>
-            <option value="fuzzy" ${draft.search_mode === "fuzzy" ? "selected" : ""}>Fuzzy typo search</option>
+            <option value="exact" ${draft.search_mode === "exact" ? "selected" : ""}>정확 검색 + 기본 어간</option>
+            <option value="fuzzy" ${draft.search_mode === "fuzzy" ? "selected" : ""}>오타 허용 검색</option>
             <option value="regex" ${draft.search_mode === "regex" ? "selected" : ""}>Regex</option>
           </select>
         </label>
         <label>
-          Fuzzy distance
+          오타 허용 거리
           <input id="unifiedSearchFuzzyDistance" type="number" min="0" max="2" value="${escapeHtml(draft.fuzzy_distance ?? 1)}" />
         </label>
         <label>
-          Proximity window
+          근접 검색 범위
           <input id="unifiedSearchProximity" type="number" min="0" max="100" value="${escapeHtml(draft.proximity_window ?? 0)}" />
         </label>
       </div>
-      <label class="check-label"><input id="unifiedSearchOcr" type="checkbox" ${draft.ocr === false ? "" : "checked"} /> Include OCR on image candidates</label>
-      <label class="check-label"><input id="unifiedSearchHideKnownGood" type="checkbox" ${draft.hide_known_good ? "checked" : ""} /> Hide known-good / NSRL file hits</label>
+      <label class="check-label"><input id="unifiedSearchOcr" type="checkbox" ${draft.ocr === false ? "" : "checked"} /> 이미지 후보에서 OCR 포함</label>
+      <label class="check-label"><input id="unifiedSearchHideKnownGood" type="checkbox" ${draft.hide_known_good ? "checked" : ""} /> Known-good / NSRL 파일 숨기기</label>
       <fieldset class="keyword-pack-fieldset">
-        <legend>Keyword packs</legend>
-        ${["credentials", "execution", "network", "browser-ai", "windows-ir", "exfiltration"].map((pack) => `
-          <label class="check-label compact"><input class="keyword-pack-option" type="checkbox" value="${escapeHtml(pack)}" ${(draft.keyword_packs || []).includes(pack) ? "checked" : ""} /> ${escapeHtml(pack)}</label>
+        <legend>키워드 묶음</legend>
+        ${Object.entries(keywordPackLabels).map(([pack, label]) => `
+          <label class="check-label compact"><input class="keyword-pack-option" type="checkbox" value="${escapeHtml(pack)}" ${(draft.keyword_packs || []).includes(pack) ? "checked" : ""} /> <span>${escapeHtml(label)}</span></label>
         `).join("")}
       </fieldset>
-      <button id="unifiedSearchButton" type="submit">Search evidence</button>
+      <button id="unifiedSearchButton" type="submit">증거 검색</button>
     </form>
     ${renderRecentSearchChips()}
     ${renderDocsIndexSidecarSearch(currentDocsIndexSearchPayload, draft)}
@@ -3743,15 +4906,35 @@ function renderSearch(payload = null) {
       ${SEARCH_PRESETS.map((preset) => `<button class="preset-chip" type="button" data-keywords="${escapeHtml(preset.keywords.join(", "))}">${escapeHtml(preset.label)}</button>`).join("")}
     </div>
     <section class="search-workbench viewer-first-workbench">
-      <aside id="evidenceViewer" class="viewer-panel viewer-dock primary-viewer-dock" data-testid="source-viewer" role="region" aria-label="Evidence preview" aria-live="polite" aria-busy="false">
-        <div class="viewer-empty-state">
-          <strong>Evidence viewer</strong>
-          <span>검색 결과의 <b>Open viewer</b> 또는 <b>Search inside</b>를 누르면 원본 내용이 여기에 표시됩니다.</span>
-        </div>
+      <aside id="evidenceViewer" class="viewer-panel viewer-dock primary-viewer-dock" data-testid="source-viewer" role="region" aria-label="원본 미리보기" aria-live="polite" aria-busy="false">
+        ${renderViewerEmptyState("원본 뷰어", "검색 결과의 원본 또는 파일 안 검색을 누르면 원본 내용이 여기에 표시됩니다.")}
       </aside>
       <div class="search-results-pane">
-        ${payload ? renderSearchResults(payload, rows) : '<p class="empty-state">Enter one or more keywords. Separate multiple terms with commas.</p>'}
+        ${payload ? renderSearchResults(payload, rows) : '<p class="empty-state">키워드를 입력하세요. 여러 단어는 쉼표로 구분합니다.</p>'}
       </div>
+    </section>
+  `;
+}
+
+function renderSearchScopePlanner(draft = {}) {
+  const hasTerms = (draft.keywords || []).length > 0;
+  return `
+    <section class="search-scope-planner" aria-label="검색 범위 선택" data-testid="search-scope-planner">
+      <button class="secondary-button search-scope-card active" type="button" data-search-scope-action="case">
+        <strong>전체 케이스</strong>
+        <span>문서, 웹, 로그, OCR, 아티팩트를 한 번에 검색</span>
+        <em>${hasTerms ? "키워드 준비됨" : "Ctrl K"}</em>
+      </button>
+      <button class="secondary-button search-scope-card" type="button" data-search-scope-action="current-file">
+        <strong>현재 파일/뷰어</strong>
+        <span>원본 미리보기 안에서 본문, 로그, SQLite, OCR 후보 재검색</span>
+        <em>Ctrl F</em>
+      </button>
+      <button class="secondary-button search-scope-card" type="button" data-search-scope-action="artifact">
+        <strong>아티팩트 피벗</strong>
+        <span>EVTX, Registry, Browser, AI, USB 같은 행위 흔적으로 이동</span>
+        <em>분류 보기</em>
+      </button>
     </section>
   `;
 }
@@ -3761,18 +4944,18 @@ function renderDocsIndexSidecarSearch(payload = null, draft = {}) {
   return `
     <section class="docs-index-sidecar-search search-verification-card compact" data-testid="docs-index-sidecar-search">
       <div>
-        <p class="eyebrow">fast document index</p>
-        <h3>Search saved docs-index sidecar</h3>
-        <p>PDF/Office/mail text extraction 결과를 다시 열지 않고 <code>rapidtriage-docs-index.json</code> postings를 빠르게 조회합니다. 본문은 저장하지 않으므로 source viewer로 문맥 검증이 필요합니다.</p>
+        <p class="eyebrow">문서 인덱스</p>
+        <h3>저장된 문서 인덱스에서 빠르게 재검색</h3>
+        <p>PDF/Office/메일 텍스트 추출 결과를 다시 열지 않고 <code>rapidtriage-docs-index.json</code> 인덱스 항목을 조회합니다. 본문은 저장하지 않으므로 원본 뷰어로 문맥 검증이 필요합니다.</p>
       </div>
       <div class="mini-stat-row">
         <span>command: docs-index-search</span>
         <span>stores_full_text=false</span>
         <span>limit cap 5000</span>
       </div>
-      <button id="docsIndexSearchButton" class="secondary-button" type="button">Search docs-index with current keywords</button>
+      <button id="docsIndexSearchButton" class="secondary-button" type="button">현재 키워드로 문서 인덱스 검색</button>
       <div id="docsIndexSearchResults" class="docs-index-sidecar-results" aria-live="polite">
-        ${payload ? renderDocsIndexSidecarResults(payload) : `<p class="help-text">Current keywords: ${escapeHtml(terms || "none yet")}</p>`}
+        ${payload ? renderDocsIndexSidecarResults(payload) : `<p class="help-text">현재 키워드: ${escapeHtml(terms || "아직 없음")}</p>`}
       </div>
     </section>
   `;
@@ -3781,23 +4964,23 @@ function renderDocsIndexSidecarSearch(payload = null, draft = {}) {
 function renderDocsIndexSidecarResults(payload) {
   const summary = payload.summary || {};
   const rows = payload.results || [];
-  const warning = payload.api_profile?.reportability_warning || "Open source viewer before reporting docs-index hits.";
+  const warning = payload.api_profile?.reportability_warning || "문서 인덱스 히트를 보고서에 넣기 전 원본 뷰어로 확인하세요.";
   if (!rows.length) {
     return `
       <p class="help-text">${escapeHtml(warning)}</p>
-      <p class="empty-state">No docs-index sidecar hits for ${escapeHtml((payload.query?.terms || []).join(", ") || "current keywords")}.</p>
+      <p class="empty-state">${escapeHtml((payload.query?.terms || []).join(", ") || "현재 키워드")}에 대한 문서 인덱스 히트가 없습니다.</p>
     `;
   }
   return `
     <div class="mini-stat-row docs-index-sidecar-metrics">
-      <span>${formatNumber(summary.matched_document_count || 0)} matched document(s)</span>
-      <span>${formatNumber(summary.returned_result_count || 0)} returned</span>
-      <span>${summary.truncated ? "truncated; narrow or re-run" : "not truncated"}</span>
-      <span>${summary.stores_full_text === false ? "no full text stored" : "text storage unknown"}</span>
+      <span>일치 문서 ${formatNumber(summary.matched_document_count || 0)}건</span>
+      <span>반환 결과 ${formatNumber(summary.returned_result_count || 0)}건</span>
+      <span>${summary.truncated ? "일부만 표시됨; 범위를 좁혀 재검색" : "전체 표시"}</span>
+      <span>${summary.stores_full_text === false ? "본문 저장 없음" : "본문 저장 여부 미확인"}</span>
     </div>
     <p class="help-text">${escapeHtml(warning)}</p>
     <table class="data-table compact docs-index-sidecar-table">
-      <thead><tr><th>Document</th><th>Matched terms</th><th>Score</th><th>Verify</th></tr></thead>
+      <thead><tr><th>문서</th><th>일치 키워드</th><th>점수</th><th>검증</th></tr></thead>
       <tbody>
         ${rows.slice(0, 50).map((result, index) => {
           const match = {
@@ -3817,7 +5000,7 @@ function renderDocsIndexSidecarResults(payload) {
               <td>${escapeHtml(result.score || 0)}</td>
               <td class="action-stack">
                 ${result.path ? reviewActionButtons(match, `docs-index-${index}`) : ""}
-                ${result.review_note_citation?.text ? `<button class="icon-action" type="button" data-copy-path="${escapeHtml(result.review_note_citation.text)}">Copy citation</button>` : ""}
+                ${result.review_note_citation?.text ? `<button class="icon-action" type="button" data-copy-path="${escapeHtml(result.review_note_citation.text)}">인용 복사</button>` : ""}
               </td>
             </tr>
           `;
@@ -3863,7 +5046,7 @@ function renderSearchResults(payload, rows) {
     ${renderSearchAnalysis(payload.analysis)}
     ${renderVirtualizationNotice(rows, visibleRows, "search matches", "search")}
     <table class="data-table">
-      <thead><tr><th>Source</th><th>Item</th><th>Keywords</th><th>Preview / Evidence</th><th></th></tr></thead>
+      <thead><tr><th>출처</th><th>항목</th><th>키워드</th><th>미리보기 / 근거</th><th></th></tr></thead>
       <tbody>
         ${visibleRows.map((match, index) => {
           const context = bookmarkContextForMatch(match) || {};
@@ -3936,14 +5119,14 @@ function renderSearchSourceVerification(payload) {
   return `
     <section class="search-verification-card ${truncated ? "warning" : ""}" data-testid="search-source-verification" data-search-source-contract="${escapeHtml(SEARCH_SOURCE_VERIFICATION_CONTRACT.profile_version)}">
       <div>
-        <p class="eyebrow">source verification</p>
-        <h3>${formatNumber(pathReady)}/${formatNumber(rows.length)} hit(s) can open a source viewer</h3>
-        <p>검색 hit는 단서입니다. 보고서 후보로 올리기 전 View / review로 원본을 열고, 현재 파일 검색 citation과 source hash를 확인하세요.</p>
+        <p class="eyebrow">원본 검증</p>
+        <h3>${formatNumber(pathReady)}/${formatNumber(rows.length)}건은 원본 뷰어로 열 수 있습니다</h3>
+        <p>검색 히트는 단서입니다. 보고서 후보로 올리기 전 원본 보기와 선별 저장을 통해 현재 파일 검색 인용과 source hash를 확인하세요.</p>
       </div>
       <div class="mini-stat-row">
-        <span>${formatNumber(reviewReady)} review-linked</span>
-        <span>${truncated ? "bounded/truncated result set" : "not truncated"}</span>
-        <span>rule: source viewer before report</span>
+        <span>선별 연결 ${formatNumber(reviewReady)}건</span>
+        <span>${truncated ? "일부 결과만 표시" : "전체 결과 표시"}</span>
+        <span>원칙: 보고 전 원본 확인</span>
       </div>
     </section>
   `;
@@ -3952,7 +5135,7 @@ function renderSearchSourceVerification(payload) {
 function renderSearchResultLocator(match) {
   const locator = [
     match.pointer ? `pointer ${match.pointer}` : "",
-    match.path ? "source-open-ready" : "missing source path",
+    match.path ? "원본 열기 가능" : "원본 경로 없음",
     match.source_reference?.parser ? `parser ${match.source_reference.parser}` : "",
   ].filter(Boolean).join(" · ");
   if (!locator) return "";
@@ -4219,7 +5402,7 @@ function bindSearchForm() {
     });
     rememberSearchKeywords({ keywords, source, extension, path_contains: pathContains });
     button.disabled = true;
-    button.textContent = "Searching...";
+    button.textContent = "검색 중...";
     try {
       const params = new URLSearchParams();
       for (const keyword of keywords) params.append("keyword", keyword);
@@ -4250,8 +5433,30 @@ function bindSearchForm() {
   });
   bindSearchResultButtons();
   bindSearchPresetButtons(form);
+  bindSearchScopePlanner();
   bindDocsIndexSidecarSearch();
   bindVirtualWindowButtons();
+}
+
+function bindSearchScopePlanner() {
+  for (const button of detailPanel.querySelectorAll("[data-search-scope-action]")) {
+    if (button.dataset.searchScopeBound) continue;
+    button.dataset.searchScopeBound = "1";
+    button.addEventListener("click", async () => {
+      const action = button.dataset.searchScopeAction || "case";
+      if (action === "case") {
+        detailPanel.querySelector("#unifiedSearchInput")?.focus();
+        return;
+      }
+      if (action === "current-file") {
+        focusContextSearch();
+        return;
+      }
+      if (action === "artifact") {
+        await switchTab("artifacts", { syncStage: false });
+      }
+    });
+  }
 }
 
 function bindDocsIndexSidecarSearch() {
@@ -4296,9 +5501,14 @@ function bindSearchResultButtons() {
     row.dataset.viewerRowBound = "1";
     row.addEventListener("click", async (event) => {
       if (event.target.closest("button, a, input, select, textarea")) return;
+      if (row.dataset.inspectorRow) {
+        showSelectedRowInspector(row);
+        return;
+      }
       await loadEvidencePreview(row.dataset.viewerRowPath, parseReviewContext(row.dataset.reviewContext), row.dataset.searchResultIndex);
     });
   }
+  bindInspectorRows();
   for (const button of detailPanel.querySelectorAll("[data-view-source-path]")) {
     if (button.dataset.sourcePreviewBound) continue;
     button.dataset.sourcePreviewBound = "1";
@@ -4386,24 +5596,24 @@ function renderSourceResolutionDiagnostics(detail) {
           candidate.is_file ? "file" : "",
         ].filter(Boolean).join(" · "))).join("<br>") || "none"}</dd>
       </dl>
-      <p class="help-text">If this came from an E01/Ex01 case, check whether the extracted analysis root contains the same relative path as the original Windows path.</p>
+      <p class="help-text">E01/Ex01 케이스라면 추출된 분석 루트에 원본 Windows 경로와 같은 상대 경로가 있는지 먼저 확인하세요.</p>
     </details>
   `;
 }
 
 function renderEvidenceViewer(payload, reviewContext = null) {
-  const openLink = `<a class="mini-link" href="${escapeHtml(payload.download_url)}" target="_blank" rel="noreferrer">Open source</a>`;
-  const copyButton = `<button class="icon-action" type="button" data-copy-path="${escapeHtml(payload.path)}">Copy path</button>`;
-  const pinButton = `<button class="icon-action" type="button" data-compare-item="${escapeHtml(JSON.stringify(compareItemFromPreview(payload, reviewContext)))}">Pin compare</button>`;
-  const hashButton = `<button class="icon-action" type="button" data-source-hash-path="${escapeHtml(payload.path)}">Compute hashes</button>`;
-  let body = `<p class="empty-state">${escapeHtml(payload.message || "No preview available.")}</p>`;
+  const openLink = `<a class="mini-link" href="${escapeHtml(payload.download_url)}" target="_blank" rel="noreferrer">원본 열기</a>`;
+  const copyButton = `<button class="icon-action" type="button" data-copy-path="${escapeHtml(payload.path)}">경로 복사</button>`;
+  const pinButton = `<button class="icon-action" type="button" data-compare-item="${escapeHtml(JSON.stringify(compareItemFromPreview(payload, reviewContext)))}">비교함에 추가</button>`;
+  const hashButton = `<button class="icon-action" type="button" data-source-hash-path="${escapeHtml(payload.path)}">해시 계산</button>`;
+  let body = `<p class="empty-state">${escapeHtml(payload.message || "표시할 미리보기가 없습니다.")}</p>`;
   if (payload.preview_type === "image") {
     body = renderImagePreview(payload.image || {}, payload);
   }
   if (payload.preview_type === "text") {
     body = `
       <pre class="viewer-text">${escapeHtml(payload.text || "")}</pre>
-      ${payload.truncated ? '<p class="empty-state">Preview truncated for performance.</p>' : ""}
+      ${payload.truncated ? '<p class="empty-state">성능 보호를 위해 미리보기 일부만 표시했습니다.</p>' : ""}
     `;
   }
   if (payload.preview_type === "sqlite") {
@@ -4427,7 +5637,7 @@ function renderEvidenceViewer(payload, reviewContext = null) {
   return `
     <div class="viewer-header" data-testid="source-viewer-header">
       <div>
-        <p class="eyebrow">evidence viewer</p>
+        <p class="eyebrow">원본 뷰어</p>
         <h3>${escapeHtml(payload.name)}</h3>
       </div>
       <div class="detail-actions">${openLink}${copyButton}${pinButton}${hashButton}</div>
@@ -4437,7 +5647,7 @@ function renderEvidenceViewer(payload, reviewContext = null) {
       <span>${escapeHtml(payload.mime_type)}</span>
       <span>${formatBytes(payload.size)}</span>
       <details class="viewer-path-details">
-        <summary>source path / metadata</summary>
+        <summary>원본 경로와 메타데이터</summary>
         <code>${escapeHtml(payload.path)}</code>
       </details>
     </div>
@@ -4456,41 +5666,41 @@ function renderEvidenceViewer(payload, reviewContext = null) {
 function renderViewerEvidenceTrail(payload, reviewContext = null) {
   const linkedReview = Boolean(reviewContext?.source && reviewContext?.pointer);
   const citation = viewerCitationText(payload, reviewContext);
-  const previewState = payload.truncated ? "bounded preview, truncated" : "bounded preview";
-  const hashState = payload.hashes?.sha256 ? "hash available" : "hash on demand";
-  const reviewState = linkedReview ? "review-linked" : "preview-only";
+  const previewState = payload.truncated ? "일부 미리보기" : "미리보기 가능";
+  const hashState = payload.hashes?.sha256 ? "해시 확보" : "필요 시 계산";
+  const reviewState = linkedReview ? "리뷰 연결됨" : "미선별";
   const cards = [
     {
       title: "1. 원본 확인",
       state: previewState,
-      detail: payload.preview_type || "no-preview",
+      detail: payload.preview_type || "미리보기 없음",
       tone: payload.preview_type ? "ready" : "warning",
     },
     {
       title: "2. 현재 파일 검색",
-      state: "Ctrl F / hit context",
+      state: "Ctrl F / 검색 문맥",
       detail: "본문, 로그, OCR 후보를 같은 뷰어에서 확인",
       tone: "ready",
     },
     {
       title: "3. 해시 · 출처",
       state: hashState,
-      detail: payload.path || "source path missing",
+      detail: payload.path || "원본 경로 없음",
       tone: payload.path ? "ready" : "warning",
     },
     {
       title: "4. 리뷰 · 보고서",
       state: reviewState,
-      detail: linkedReview ? `${reviewContext.source}:${reviewContext.pointer}` : "mark relevant and include in report",
+      detail: linkedReview ? `${reviewContext.source}:${reviewContext.pointer}` : "관련성 판정 후 보고서 포함 여부 선택",
       tone: linkedReview ? "ready" : "warning",
     },
   ];
   return `
-    <section class="viewer-evidence-trail" aria-label="source-verification workflow" data-testid="source-verification-trail">
+    <section class="viewer-evidence-trail" aria-label="원본 검증 절차" data-testid="source-verification-trail">
       <div class="viewer-citation-line">
-        <span>source-verification</span>
+        <span>원본 검증</span>
         <code>${escapeHtml(citation)}</code>
-        <button class="mini-inline-button" type="button" data-copy-path="${escapeHtml(citation)}">Copy citation</button>
+        <button class="mini-inline-button" type="button" data-copy-path="${escapeHtml(citation)}">인용 복사</button>
       </div>
       <div class="viewer-evidence-grid">
         ${cards.map((card) => `
@@ -4524,8 +5734,8 @@ function renderViewerActionGuide(payload) {
   return `
     <section class="source-metadata-panel viewer-action-guide">
       <div>
-        <p class="eyebrow">verification guide</p>
-        <h4>Preview, verify, then review</h4>
+        <p class="eyebrow">검증 순서</p>
+        <h4>미리보기 후 원본을 확인하고 선별하세요</h4>
       </div>
       ${actions.length ? `
         <div class="viewer-action-grid">
@@ -4544,16 +5754,16 @@ function renderViewerActionGuide(payload) {
 function renderViewerAction(action, payload) {
   const label = escapeHtml(action.label || action.id || "Action");
   const purpose = escapeHtml(action.purpose || "");
-  const badge = action.heavy ? '<span class="status-pill warning">heavy</span>' : '<span class="status-pill">fast</span>';
+  const badge = action.heavy ? '<span class="status-pill warning">시간 소요</span>' : '<span class="status-pill">즉시</span>';
   let control = "";
   if (action.id === "hash") {
-    control = `<button class="mini-inline-button" type="button" data-source-hash-path="${escapeHtml(payload.path)}">Run</button>`;
+    control = `<button class="mini-inline-button" type="button" data-source-hash-path="${escapeHtml(payload.path)}">실행</button>`;
   } else if (action.id === "search-current-file" || action.id === "search-current-entry") {
-    control = `<button class="mini-inline-button" type="button" data-focus-source-search="1">Focus search</button>`;
+    control = `<button class="mini-inline-button" type="button" data-focus-source-search="1">파일 검색</button>`;
   } else if (action.url) {
-    control = `<a class="mini-link" href="${escapeHtml(action.url)}" target="_blank" rel="noreferrer">Open</a>`;
+    control = `<a class="mini-link" href="${escapeHtml(action.url)}" target="_blank" rel="noreferrer">열기</a>`;
   } else if (action.id === "pin-compare") {
-    control = `<span>Pin compare</span>`;
+    control = `<span>비교함에 추가</span>`;
   } else if (action.id === "save-review") {
     control = `<span>${kbd("Alt R")}</span>`;
   }
@@ -4572,12 +5782,12 @@ function renderViewerMetadata(metadata) {
   if (!Object.keys(metadata || {}).length) return "";
   return `
     <details class="source-metadata-panel metadata-disclosure">
-      <summary>Viewer metadata</summary>
+      <summary>뷰어 메타데이터</summary>
       <div class="metadata-grid">
-        ${metric("Viewer", metadata.parser || "source-viewer")}
-        ${metric("Strategy", metadata.strategy || "unknown")}
-        ${metric("Status", metadata.preview_status || "unknown")}
-        ${metric("Format", metadata.source_format || "unknown")}
+        ${metric("뷰어", metadata.parser || "source-viewer")}
+        ${metric("전략", metadata.strategy || "unknown")}
+        ${metric("상태", metadata.preview_status || "unknown")}
+        ${metric("형식", metadata.source_format || "unknown")}
       </div>
     </details>
   `;
@@ -4640,7 +5850,7 @@ function renderSqlitePreview(sqlite) {
               </tbody>
             </table>
           </div>
-          ${(table.truncated_rows || table.truncated_columns) ? '<p class="help-text">Preview capped: narrow with source search or export the table with a dedicated SQLite tool for full review.</p>' : ""}
+          ${(table.truncated_rows || table.truncated_columns) ? '<p class="help-text">미리보기 제한: 원본 검색으로 범위를 좁히거나 전용 SQLite 도구로 표를 내보내 전체 검토하세요.</p>' : ""}
         </article>
       `).join("")}
       ${sqlite.truncated ? '<p class="help-text">Additional tables are hidden to keep the viewer responsive.</p>' : ""}
@@ -4691,7 +5901,7 @@ function renderSqliteSidecarState(profile) {
       <div class="sqlite-sidecar-action">
         <strong>Next step</strong>
         <code>${escapeHtml(profile.recommended_cli || "rapidtriage sqlite-wal-preview <database> --json")}</code>
-        ${profile.source_path ? `<button class="mini-inline-button" type="button" data-sqlite-wal-preview-path="${escapeHtml(profile.source_path)}">Preview WAL in viewer</button>` : ""}
+        ${profile.source_path ? `<button class="mini-inline-button" type="button" data-sqlite-wal-preview-path="${escapeHtml(profile.source_path)}">WAL 미리보기</button>` : ""}
         <small>Detected sidecars: ${escapeHtml(detected.length ? detected.join(", ") : "none")}</small>
       </div>
       <div class="sqlite-wal-preview-inline" data-testid="sqlite-wal-preview-inline" aria-live="polite"></div>
@@ -4895,7 +6105,7 @@ function renderEmailParseDiagnostics(diagnostics) {
         <div><dt>Max input</dt><dd>${formatBytes(diagnostics.max_input_bytes || 0)}</dd></div>
         <div><dt>Truncated messages</dt><dd>${escapeHtml(diagnostics.message_size_truncated_count ?? 0)}</dd></div>
       </dl>
-      <small>${truncated ? "Do not conclude the mailbox is complete until mailbox-specific pagination/export validation is complete." : "Preview diagnostics did not report truncation for this parse window."}</small>
+      <small>${truncated ? "메일함 전용 페이지/내보내기 검증이 끝나기 전에는 전체 메일함으로 단정하지 마세요." : "현재 파싱 구간에서는 잘림 진단이 보고되지 않았습니다."}</small>
     </div>
   `;
 }
@@ -4912,7 +6122,7 @@ function renderHexPreview(hexPayload, payload) {
         ${metric("Rows", rows.length)}
         ${metric("Range", `${hexPayload.first_offset_hex || "0x0"}-${hexPayload.last_offset_hex || "n/a"}`)}
       </div>
-      <p class="help-text">Hex viewer is read-only and bounded. Preview SHA256: ${escapeHtml(hexPayload.preview_sha256 || "n/a")}. Use source metadata to compute full-file hashes before reporting byte offsets.</p>
+      <p class="help-text">Hex 뷰어는 읽기 전용이며 범위가 제한됩니다. 미리보기 SHA256: ${escapeHtml(hexPayload.preview_sha256 || "n/a")}. 바이트 오프셋을 보고하기 전 전체 파일 해시는 원본 메타데이터로 확인하세요.</p>
       <div class="hex-citation-card">
         <strong>Byte range citation</strong>
         <span>Default range: ${escapeHtml(rangeProfile.default_offset_hex || "0x0")} / ${escapeHtml(String(rangeProfile.default_length ?? 0))} bytes</span>
@@ -4928,7 +6138,7 @@ function renderHexPreview(hexPayload, payload) {
           </div>
         `).join("")}
       </div>
-      ${hexPayload.truncated ? '<p class="help-text">Hex preview was capped for performance. Open source for full byte review.</p>' : ""}
+      ${hexPayload.truncated ? '<p class="help-text">성능 보호를 위해 Hex 미리보기를 일부만 표시했습니다. 전체 바이트 검토가 필요하면 원본을 여세요.</p>' : ""}
     </section>
   `;
 }
@@ -4996,7 +6206,7 @@ function renderFileSearchBox(payload) {
   return `
     <form id="fileSearchForm" class="file-search-form" data-file-search-path="${escapeHtml(payload.path)}">
       <label>
-        Search inside this file ${kbd("Ctrl F")}
+        이 파일 안에서 검색 ${kbd("Ctrl F")}
         <input name="keyword" placeholder="Find text only in ${escapeHtml(payload.name)}" />
       </label>
       <button type="submit">Search file</button>
@@ -5008,32 +6218,32 @@ function renderFileSearchBox(payload) {
 
 function renderReviewCapture(reviewContext, payload) {
   if (!reviewContext?.source || !reviewContext?.pointer) {
-    return '<p class="empty-state">This source can be previewed, but it is not tied to a saved result pointer for review.</p>';
+    return '<p class="empty-state">이 원본은 미리볼 수 있지만, 저장된 결과 포인터와 연결되어 있지 않아 선별 상태를 남길 수 없습니다.</p>';
   }
   const suggestedTags = Array.from(new Set([...(reviewContext.tags || []), payload.extension?.replace(".", "")].filter(Boolean))).join(", ");
   return `
     <form id="viewerReviewForm" class="review-capture" data-review-context="${escapeHtml(JSON.stringify(reviewContext))}" data-testid="viewer-review-form">
       <div>
-        <p class="eyebrow">review decision</p>
-        <h3>Check, classify, and organize this hit</h3>
+        <p class="eyebrow">선별 판정</p>
+        <h3>이 단서의 관련성과 보고 포함 여부를 기록합니다</h3>
       </div>
-      <div class="review-decision-rail" aria-label="Fast review decisions">
-        <button class="review-decision-chip relevant" type="button" data-review-quick-status="relevant" data-review-quick-report="true">Relevant + report</button>
-        <button class="review-decision-chip needs-review" type="button" data-review-quick-status="needs-review" data-review-quick-report="false">Needs review</button>
-        <button class="review-decision-chip reject" type="button" data-review-quick-status="not-relevant" data-review-quick-report="false">Not relevant</button>
+      <div class="review-decision-rail" aria-label="빠른 선별 판정">
+        <button class="review-decision-chip relevant" type="button" data-review-quick-status="relevant" data-review-quick-report="true">관련 있음 + 보고서</button>
+        <button class="review-decision-chip needs-review" type="button" data-review-quick-status="needs-review" data-review-quick-report="false">재검토</button>
+        <button class="review-decision-chip reject" type="button" data-review-quick-status="not-relevant" data-review-quick-report="false">관련 없음</button>
       </div>
       <div class="review-grid">
         <label>
-          Decision
+          판정
           <select name="status">
-            <option value="needs-review">Needs review</option>
-            <option value="relevant">Relevant</option>
-            <option value="not-relevant">Not relevant</option>
-            <option value="unreviewed">Unreviewed</option>
+            <option value="needs-review">재검토</option>
+            <option value="relevant">관련 있음</option>
+            <option value="not-relevant">관련 없음</option>
+            <option value="unreviewed">미검토</option>
           </select>
         </label>
         <label>
-          Tags
+          태그
           <input name="tags" value="${escapeHtml(suggestedTags)}" placeholder="credential, browser, suspicious-login" />
         </label>
       </div>
@@ -5042,8 +6252,8 @@ function renderReviewCapture(reviewContext, payload) {
         <textarea name="note" rows="3" placeholder="Why this matters, what to verify next, or why it is noise.">${escapeHtml(reviewContext.note || "")}</textarea>
       </label>
       <div class="review-actions">
-        <label class="check-label"><input name="include_in_report" type="checkbox" /> Include in report set</label>
-        <button type="submit">Save review decision</button>
+        <label class="check-label"><input name="include_in_report" type="checkbox" /> 보고서 후보에 포함</label>
+        <button type="submit">선별 결과 저장</button>
         <span id="viewerReviewStatus" class="review-save-status"></span>
       </div>
     </form>
@@ -5105,8 +6315,8 @@ async function loadSourceMetadata(path, button) {
   const panel = detailPanel.querySelector("#sourceMetadataPanel");
   if (!panel || !path) return;
   button.disabled = true;
-  button.textContent = "Hashing...";
-  panel.innerHTML = '<p class="empty-state">Computing MD5/SHA1/SHA256 for this source file...</p>';
+  button.textContent = "해시 계산 중...";
+  panel.innerHTML = '<p class="empty-state">이 원본 파일의 MD5/SHA1/SHA256을 계산하고 있습니다.</p>';
   try {
     const payload = await api(`/api/runs/${selectedRunId}/source-metadata?path=${encodeURIComponent(path)}&hash=true`);
     panel.innerHTML = renderSourceMetadata(payload);
@@ -5115,7 +6325,7 @@ async function loadSourceMetadata(path, button) {
     panel.innerHTML = `<p class="empty-state">${escapeHtml(error.message)}</p>`;
   } finally {
     button.disabled = false;
-    button.textContent = "Compute hashes";
+    button.textContent = "해시 계산";
   }
 }
 
@@ -5124,8 +6334,8 @@ async function loadSqliteWalPreview(button) {
   const output = card?.querySelector("[data-testid='sqlite-wal-preview-inline']");
   if (!output || !button.dataset.sqliteWalPreviewPath) return;
   button.disabled = true;
-  button.textContent = "Previewing...";
-  output.innerHTML = '<p class="help-text">Reading WAL/SHM/journal sidecar metadata in a bounded preview...</p>';
+  button.textContent = "확인 중...";
+  output.innerHTML = '<p class="help-text">WAL/SHM/journal sidecar 메타데이터를 제한 미리보기로 확인하고 있습니다.</p>';
   try {
     const params = new URLSearchParams();
     params.set("path", button.dataset.sqliteWalPreviewPath);
@@ -5137,7 +6347,7 @@ async function loadSqliteWalPreview(button) {
     output.innerHTML = `<p class="empty-state">${escapeHtml(error.message)}</p>`;
   } finally {
     button.disabled = false;
-    button.textContent = "Preview WAL in viewer";
+    button.textContent = "WAL 미리보기";
   }
 }
 
@@ -5309,14 +6519,14 @@ function renderFileSearchResults(payload) {
     <div class="dense-list">
       ${rows.map((match) => `
         <article class="dense-row">
-          <strong>Line ${escapeHtml(match.line)} · ${escapeHtml(match.keyword)}</strong>
+          <strong>줄 ${escapeHtml(match.line)} · ${escapeHtml(match.keyword)}</strong>
           <span>${highlightSnippet(match.snippet || "", payload.keywords || [])}</span>
           <small>${escapeHtml(match.citation || "")}</small>
           <div class="review-actions">
             ${compareButton(compareItemFromFileSearchMatch(payload, match))}
-            <button class="icon-action" type="button" data-copy-path="${escapeHtml(match.citation || match.snippet || "")}">Copy citation</button>
-            <button class="icon-action" type="button" data-copy-path="${escapeHtml(match.compare_preview || match.snippet || "")}">Copy snippet</button>
-            <button class="icon-action" type="button" data-review-note-text="${escapeHtml(reviewNoteFromFileSearchMatch(match))}">Add to review note</button>
+            <button class="icon-action" type="button" data-copy-path="${escapeHtml(match.citation || match.snippet || "")}">인용 복사</button>
+            <button class="icon-action" type="button" data-copy-path="${escapeHtml(match.compare_preview || match.snippet || "")}">본문 복사</button>
+            <button class="icon-action" type="button" data-review-note-text="${escapeHtml(reviewNoteFromFileSearchMatch(match))}">검토 메모에 추가</button>
           </div>
         </article>
       `).join("")}
@@ -5442,10 +6652,10 @@ async function saveViewerReview(event) {
       method: "POST",
       body: JSON.stringify(request),
     });
-    status.innerHTML = 'Saved to review board <button class="mini-inline-button" type="button" data-open-tab="review">Open review</button>';
+    status.innerHTML = '선별 보드에 저장됨 <button class="mini-inline-button" type="button" data-open-tab="review">열기</button>';
     bindPanelActions();
   } catch (error) {
-    status.textContent = `Failed: ${error.message}`;
+    status.textContent = `실패: ${error.message}`;
   }
 }
 
@@ -5485,7 +6695,7 @@ async function saveCaseReport(event) {
       status.insertAdjacentHTML("beforeend", ` <span>${escapeHtml(payload.report_path)}</span>`);
     }
   } catch (error) {
-    status.textContent = `Failed: ${error.message}`;
+    status.textContent = `실패: ${error.message}`;
   }
 }
 
@@ -5507,13 +6717,13 @@ async function createReviewerBundle(event) {
     const archiveUrl = `/api/runs/${encodeURIComponent(selectedRunId)}/reviewer-bundle/file`;
     status.innerHTML = [
       "Saved",
-      `<a class="mini-link" href="${archiveUrl}" target="_blank" rel="noreferrer">Download ZIP</a>`,
+      `<a class="mini-link" href="${archiveUrl}" target="_blank" rel="noreferrer">ZIP 다운로드</a>`,
       payload.outputs?.selected_evidence ? `<span>Selected JSON: ${escapeHtml(payload.outputs.selected_evidence)}</span>` : "",
       payload.outputs?.bundle_manifest ? `<span>Bundle manifest: ${escapeHtml(payload.outputs.bundle_manifest)}</span>` : "",
       payload.outputs?.reviewer ? `<span>${escapeHtml(payload.outputs.reviewer)}</span>` : "",
     ].filter(Boolean).join(" ");
   } catch (error) {
-    status.textContent = `Failed: ${error.message}`;
+    status.textContent = `실패: ${error.message}`;
   }
 }
 
@@ -5527,6 +6737,82 @@ function parseReviewContext(value) {
   }
 }
 
+function rowInspectorAttributes(payload) {
+  return `data-inspector-row="${escapeHtml(JSON.stringify(payload || {}))}"`;
+}
+
+function parseInspectorRow(value) {
+  if (!value) return null;
+  try {
+    const payload = JSON.parse(value);
+    return payload && typeof payload === "object" ? payload : null;
+  } catch {
+    return null;
+  }
+}
+
+function bindInspectorRows() {
+  for (const row of detailPanel.querySelectorAll("[data-inspector-row]")) {
+    if (row.dataset.inspectorBound) continue;
+    row.dataset.inspectorBound = "1";
+    row.addEventListener("click", (event) => {
+      if (event.target.closest("button, a, input, select, textarea")) return;
+      showSelectedRowInspector(row);
+    });
+  }
+}
+
+function showSelectedRowInspector(row) {
+  const payload = parseInspectorRow(row?.dataset.inspectorRow);
+  const viewer = detailPanel.querySelector("#evidenceViewer");
+  if (!payload || !viewer) return;
+  for (const item of detailPanel.querySelectorAll(".selectable-result-row.selected-row")) {
+    item.classList.remove("selected-row");
+  }
+  row.classList.add("selected-row");
+  viewer.removeAttribute("aria-busy");
+  viewer.innerHTML = renderSelectedRowInspector(payload);
+  bindSearchResultButtons();
+  bindBookmarkButtons();
+  bindCompareActions();
+}
+
+function renderSelectedRowInspector(payload) {
+  const reviewContext = payload.reviewContext || {};
+  const match = {
+    source: reviewContext.source || payload.source || activeTab,
+    kind: payload.kind || "",
+    path: payload.path || reviewContext.path || "",
+    title: payload.title || fileName(payload.path) || "selected row",
+    preview: payload.preview || "",
+    pointer: payload.pointer || reviewContext.pointer || "",
+  };
+  const chips = Array.from(new Set((payload.chips || []).filter(Boolean))).slice(0, 8);
+  return `
+    <section class="selected-row-inspector" data-testid="selected-row-inspector">
+      <p class="eyebrow">selected evidence</p>
+      <strong>${escapeHtml(payload.title || "선택된 결과")}</strong>
+      <span>${escapeHtml(payload.preview || "행을 선택했습니다. 아래 원본 경로와 리뷰 동작을 확인하세요.")}</span>
+      <dl>
+        ${payload.timestamp ? `<dt>Time</dt><dd>${escapeHtml(payload.timestamp)}</dd>` : ""}
+        ${payload.source ? `<dt>Source</dt><dd>${escapeHtml(payload.source)}</dd>` : ""}
+        ${payload.kind ? `<dt>Type</dt><dd>${escapeHtml(payload.kind)}</dd>` : ""}
+        ${payload.provider ? `<dt>Provider</dt><dd>${escapeHtml(payload.provider)}</dd>` : ""}
+        ${payload.path ? `<dt>Path</dt><dd><code>${escapeHtml(payload.path)}</code></dd>` : ""}
+        ${payload.pointer ? `<dt>Pointer</dt><dd><code>${escapeHtml(payload.pointer)}</code></dd>` : ""}
+      </dl>
+      ${chips.length ? `<div class="viewer-chip-row">${chips.map((chip) => `<span>${escapeHtml(chip)}</span>`).join("")}</div>` : ""}
+      <div class="preview-action-row">
+        ${match.path ? viewSourceButton(match, reviewContext) : ""}
+        ${match.path ? sourceFileLink(match) : ""}
+        ${match.path ? compareButton(compareItemFromMatch(match, reviewContext)) : ""}
+        ${reviewContext.source && reviewContext.pointer ? bookmarkButton(reviewContext.source, reviewContext.pointer, reviewContext.note || payload.title || "") : ""}
+      </div>
+      <p class="help-text">행 클릭은 이 패널에 상세를 고정합니다. 원문 내용이 필요할 때만 원본 보기를 눌러 원본 뷰어를 여세요.</p>
+    </section>
+  `;
+}
+
 function parseTags(value) {
   return String(value || "")
     .split(",")
@@ -5536,29 +6822,94 @@ function parseTags(value) {
 
 function renderReport(markdown) {
   return `
+    ${renderReportReadinessGate()}
     <section class="guidance-card">
       <div>
-        <p class="eyebrow">deliver</p>
-        <h3>Package the case without loading every row</h3>
+        <p class="eyebrow">보고서</p>
+        <h3>검토된 증거만 산출물로 정리</h3>
       </div>
-      <p>This view keeps the generated run report separate from evidence review. Use the review board to produce the submission hash manifest and case report draft from checked evidence.</p>
+      <p>이 화면은 실행 보고서와 증거 선별 결과를 분리합니다. 선별 보드에서 확인된 항목만 해시 목록과 케이스 보고서 초안에 반영하세요.</p>
       <div class="guidance-actions">
-        <button class="secondary-button" type="button" data-open-tab="review">Open review board</button>
-        <a class="link-button" href="/api/runs/${encodeURIComponent(selectedRunId)}/outputs/report/file">Download run report</a>
+        <button class="secondary-button" type="button" data-open-tab="review">선별 보드</button>
+        <a class="link-button" href="/api/runs/${encodeURIComponent(selectedRunId)}/outputs/report/file">실행 보고서 다운로드</a>
       </div>
-      <p class="help-text">Workflow reminder: classify hits in Review, generate a hash manifest, then generate the case report or reviewer bundle from checked evidence only.</p>
+      <p class="help-text">권장 순서: 증거 선별, 해시 목록 생성, 확인된 증거만 케이스 보고서 또는 reviewer bundle에 포함.</p>
     </section>
     <pre class="report-view">${escapeHtml(markdown)}</pre>
+  `;
+}
+
+function renderReportReadinessGate() {
+  const summary = selectedRun?.summary?.summary || {};
+  const outputs = selectedRun?.summary?.outputs || {};
+  const checks = [
+    {
+      label: "선별 증거",
+      count: Number(summary.report_item_count || 0),
+      ready: Number(summary.report_item_count || 0) > 0,
+      action: "review",
+      detail: "관련 있음 + 보고서 포함으로 표시된 항목",
+    },
+    {
+      label: "해시/manifest",
+      count: Number(summary.scanned_file_count || 0),
+      ready: Boolean(outputs.manifest || outputs.fingerprint),
+      action: "summary",
+      detail: "원본 경로, 크기, SHA256 근거",
+    },
+    {
+      label: "인용 근거",
+      count: Number(summary.report_item_count || 0),
+      ready: Number(summary.report_item_count || 0) > 0,
+      action: "review",
+      detail: "source, pointer, parser, offset/index",
+    },
+    {
+      label: "제한사항",
+      count: Number(summary.warning_count || summary.validation_issue_count || 0),
+      ready: true,
+      action: "summary",
+      detail: "검증 경고와 parser limitation 명시",
+    },
+    {
+      label: "제출 묶음",
+      count: outputs.report ? 1 : 0,
+      ready: Boolean(outputs.report),
+      action: "report",
+      detail: "보고서 파일 또는 reviewer bundle",
+    },
+  ];
+  const missing = checks.filter((check) => !check.ready).length;
+  return `
+    <section class="report-readiness-gate" aria-label="보고서 제출 준비 게이트" data-testid="report-readiness-gate">
+      <div class="lane-section-header">
+        <div>
+          <p class="eyebrow">제출 전 점검</p>
+          <strong>보고서에 넣기 전에 빠진 근거 확인</strong>
+        </div>
+        <span>${missing ? `${formatNumber(missing)}개 보강 필요` : "제출 준비됨"}</span>
+      </div>
+      <div class="report-gate-grid">
+        ${checks.map((check) => `
+          <button class="secondary-button report-gate-card ${check.ready ? "ready" : "blocked"}" type="button" data-open-tab="${escapeHtml(check.action)}">
+            <span>${escapeHtml(check.label)}</span>
+            <b>${formatNumber(check.count)}</b>
+            <em>${escapeHtml(check.detail)}</em>
+          </button>
+        `).join("")}
+      </div>
+    </section>
   `;
 }
 
 function renderReviewBoard(payload) {
   if (!payload.exists || !payload.case) {
     return `
+      ${renderReviewStateDashboard([], {})}
       <section class="guidance-card">
         <p class="eyebrow">review board</p>
         <h3>No reviewed evidence yet</h3>
-        <p>Use Search, open a result in the viewer, then save a review decision. Your decisions become the case board here.</p>
+        <p>검색 결과를 원본 뷰어에서 확인한 뒤 선별 상태를 저장하면 이 보드에 누적됩니다.</p>
         <div class="guidance-actions">
           <button class="secondary-button" type="button" data-open-tab="search">Go to search</button>
         </div>
@@ -5568,6 +6919,7 @@ function renderReviewBoard(payload) {
   const bookmarks = payload.case.bookmarks || [];
   if (!bookmarks.length) {
     return `
+      ${renderReviewStateDashboard([], summary)}
       <section class="guidance-card">
         <p class="eyebrow">review board</p>
         <h3>No reviewed evidence yet</h3>
@@ -5582,19 +6934,52 @@ function renderReviewBoard(payload) {
   const groups = groupBookmarksByReviewStatus(bookmarks);
   return `
     <div class="case-path">${escapeHtml(payload.case_path)}</div>
+    ${renderReviewStateDashboard(bookmarks, summary)}
     ${renderReviewCockpit(summary)}
     <div class="metric-grid">
-      ${metric("Reviewed items", summary.bookmark_count)}
-      ${metric("Report candidates", summary.report_item_count)}
-      ${metric("Relevant", summary.review_status_counts?.relevant)}
-      ${metric("Needs review", summary.review_status_counts?.["needs-review"])}
+      ${metric("검토 항목", summary.bookmark_count)}
+      ${metric("보고서 후보", summary.report_item_count)}
+      ${metric("관련 있음", summary.review_status_counts?.relevant)}
+      ${metric("재검토", summary.review_status_counts?.["needs-review"])}
     </div>
     ${renderSubmissionManifestPanel(summary)}
     ${renderCaseReportPanel(summary, payload.case)}
     ${renderReviewerBundlePanel(summary, payload.case)}
     ${renderReviewSelectionTray(bookmarks)}
-    <p class="empty-state">Use this board to separate report-ready evidence from noise. The saved structure lives in rapidtriage-case.json.</p>
+    <p class="empty-state">이 화면에서 보고서에 올릴 근거와 노이즈를 분리합니다. 저장된 선별 구조는 rapidtriage-case.json에 남습니다.</p>
     ${["relevant", "needs-review", "not-relevant", "unreviewed"].map((status) => renderReviewGroup(status, groups[status] || [])).join("")}
+  `;
+}
+
+function renderReviewStateDashboard(bookmarks = [], summary = {}) {
+  const counts = summary.review_status_counts || {};
+  const statuses = [
+    ["all", "전체", bookmarks.length],
+    ["relevant", "관련 있음", counts.relevant || 0],
+    ["needs-review", "재검토", counts["needs-review"] || 0],
+    ["not-relevant", "제외", counts["not-relevant"] || 0],
+    ["unreviewed", "미검토", counts.unreviewed || 0],
+    ["report", "보고 포함", summary.report_item_count || 0],
+  ];
+  return `
+    <section class="review-state-dashboard" aria-label="증거 선별 상태판" data-testid="review-state-dashboard">
+      <div class="lane-section-header">
+        <div>
+          <p class="eyebrow">선별 작업대</p>
+          <strong>검토 상태별로 바로 좁혀보기</strong>
+        </div>
+        <span>보고 후보 ${formatNumber(summary.report_item_count || 0)}</span>
+      </div>
+      <div class="review-state-grid">
+        ${statuses.map(([status, label, count]) => `
+          <button class="secondary-button review-state-chip ${status === "all" ? "active" : ""}" type="button" data-review-status-filter="${escapeHtml(status)}">
+            <span>${escapeHtml(label)}</span>
+            <b>${formatNumber(count)}</b>
+          </button>
+        `).join("")}
+      </div>
+      <p class="help-text">검토자는 원본 확인 후 관련 있음, 재검토, 제외, 보고 포함을 나눕니다. 이 상태가 보고서와 검토자 패키지의 기준이 됩니다.</p>
+    </section>
   `;
 }
 
@@ -5604,17 +6989,17 @@ function renderReviewCockpit(summary) {
   const reportCount = Number(summary.report_item_count || 0);
   const unreviewed = Number(summary.review_status_counts?.unreviewed || 0);
   return `
-    <section class="review-cockpit" aria-label="Review cockpit">
+    <section class="review-cockpit" aria-label="증거 선별 현황">
       <div>
-        <p class="eyebrow">review cockpit</p>
+        <p class="eyebrow">선별 현황</p>
         <h3>보고서 후보와 노이즈를 분리하는 화면</h3>
-        <p>카드를 선택해 비교 묶음을 만들고, relevant 중 보고서 포함 항목만 제출 패키지로 보냅니다.</p>
+        <p>카드를 선택해 비교 묶음을 만들고, 관련 있음 중 보고서 포함 항목만 제출 패키지로 보냅니다.</p>
       </div>
       <div class="review-cockpit-stats">
-        <span>Relevant ${formatNumber(relevant)}</span>
-        <span>Needs review ${formatNumber(needsReview)}</span>
-        <span>Report set ${formatNumber(reportCount)}</span>
-        <span>Unreviewed ${formatNumber(unreviewed)}</span>
+        <span>관련 있음 ${formatNumber(relevant)}</span>
+        <span>재검토 ${formatNumber(needsReview)}</span>
+        <span>보고서 포함 ${formatNumber(reportCount)}</span>
+        <span>미검토 ${formatNumber(unreviewed)}</span>
       </div>
     </section>
   `;
@@ -5636,20 +7021,20 @@ function renderReviewSelectionTray(bookmarks) {
     <section id="reviewSelectionTray" class="review-selection-tray ${selectedBookmarks.length ? "" : "empty"}" data-testid="review-bulk-queue">
       <div class="review-group-header">
         <div>
-          <p class="eyebrow">review selection</p>
+          <p class="eyebrow">선택 묶음</p>
           <h3>현재 검토 묶음</h3>
-          <p class="help-text">선택 묶음은 브라우저에 유지됩니다. 관련 증거를 모은 뒤 source path와 report 포함 여부를 한 화면에서 대조하세요.</p>
+          <p class="help-text">선택 묶음은 브라우저에 유지됩니다. 관련 증거를 모은 뒤 원본 경로와 보고서 포함 여부를 한 화면에서 대조하세요.</p>
         </div>
         <div class="detail-actions">
           <span class="status-pill">${selectedBookmarks.length}</span>
-          <span class="status-pill">${reportSelectedCount} report set</span>
-          <button class="secondary-button" type="button" data-clear-review-selection ${selectedBookmarks.length ? "" : "disabled"}>Clear selection</button>
+          <span class="status-pill">보고서 포함 ${reportSelectedCount}</span>
+          <button class="secondary-button" type="button" data-clear-review-selection ${selectedBookmarks.length ? "" : "disabled"}>선택 해제</button>
         </div>
       </div>
       <div class="review-bulk-toolbar" aria-label="Selected evidence workflow">
         <span>${escapeHtml(selectedQueueText)}</span>
-        <button class="secondary-button" type="button" data-open-tab="search">Find related</button>
-        <button class="secondary-button" type="button" data-open-tab="report">Prepare report</button>
+        <button class="secondary-button" type="button" data-open-tab="search">관련 결과 찾기</button>
+        <button class="secondary-button" type="button" data-open-tab="report">보고서 준비</button>
       </div>
       ${selectedBookmarks.length ? `
         <div class="dense-list">
@@ -5659,7 +7044,7 @@ function renderReviewSelectionTray(bookmarks) {
             return `
               <div class="dense-row">
                 <strong>${escapeHtml(bookmark.summary || bookmark.bookmark_id)}</strong>
-                <span>${escapeHtml(review.status || "unreviewed")} · ${review.include_in_report ? "report set" : "not in report"} · ${escapeHtml(snapshot.path || "")}</span>
+                <span>${escapeHtml(review.status || "unreviewed")} · ${review.include_in_report ? "보고서 포함" : "보고서 제외"} · ${escapeHtml(snapshot.path || "")}</span>
               </div>
             `;
           }).join("")}
@@ -5677,16 +7062,16 @@ function renderSubmissionManifestPanel(summary) {
   return `
     <section class="guidance-card">
       <div>
-        <p class="eyebrow">submission hashes</p>
-        <h3>Prepare a court-friendly hash manifest</h3>
+        <p class="eyebrow">제출 해시</p>
+        <h3>제출용 해시 목록 준비</h3>
       </div>
-      <p>Builds MD5, SHA1, and SHA256 for report-candidate evidence only, then saves rapidtriage-submission-manifest.json in the run output directory.</p>
+      <p>보고서 후보 증거에 대해서만 MD5, SHA1, SHA256을 계산하고 run output에 rapidtriage-submission-manifest.json을 저장합니다.</p>
       <div class="guidance-actions">
-        <a class="link-button ${disabled}" href="${reportCount ? fileUrl : "#"}" target="_blank" rel="noreferrer">Download hash manifest</a>
-        <a class="link-button ${disabled}" href="${reportCount ? jsonUrl : "#"}" target="_blank" rel="noreferrer">Preview JSON</a>
+        <a class="link-button ${disabled}" href="${reportCount ? fileUrl : "#"}" target="_blank" rel="noreferrer">해시 목록 다운로드</a>
+        <a class="link-button ${disabled}" href="${reportCount ? jsonUrl : "#"}" target="_blank" rel="noreferrer">JSON 미리보기</a>
       </div>
-      <p class="help-text">Use this before report/bundle export. It is the evidence integrity anchor for selected report candidates.</p>
-      ${reportCount ? "" : '<p class="help-text">Mark evidence as “Include in report set” before generating the submission manifest.</p>'}
+      <p class="help-text">보고서나 bundle을 내보내기 전에 사용하세요. 선택 증거의 무결성 기준점입니다.</p>
+      ${reportCount ? "" : '<p class="help-text">해시 목록을 만들기 전에 증거를 “보고서 후보에 포함”으로 표시하세요.</p>'}
     </section>
   `;
 }
@@ -5717,7 +7102,7 @@ function renderCaseReportPanel(summary, casePayload) {
             <input name="title" value="${escapeHtml(casePayload.title || "Digital forensic analysis report")}" />
           </label>
           <label>
-            Case number
+            케이스 번호
             <input name="case_number" value="${escapeHtml(casePayload.case_id || "")}" />
           </label>
           <label>
@@ -5746,12 +7131,12 @@ function renderCaseReportPanel(summary, casePayload) {
           <textarea name="conclusion" rows="3">검토 결과 및 증거 해시는 아래 항목과 같음.</textarea>
         </label>
         <div class="review-actions">
-          <label class="check-label"><input name="include_all" type="checkbox" /> Include every reviewed bookmark, not only report candidates</label>
-          <button type="submit" ${reportCount ? "" : "disabled"}>Generate report draft</button>
+          <label class="check-label"><input name="include_all" type="checkbox" /> 보고서 후보 외 검토 완료 항목도 포함</label>
+          <button type="submit" ${reportCount ? "" : "disabled"}>보고서 초안 생성</button>
           <span id="caseReportStatus" class="review-save-status"></span>
         </div>
       </form>
-      ${reportCount ? "" : '<p class="help-text">Mark evidence as “Include in report set” before generating a report draft.</p>'}
+      ${reportCount ? "" : '<p class="help-text">보고서 초안을 만들기 전에 증거를 “보고서 후보에 포함”으로 표시하세요.</p>'}
     </section>
   `;
 }
@@ -5761,11 +7146,11 @@ function renderReviewerBundlePanel(summary, casePayload) {
   return `
     <section class="guidance-card">
       <div>
-        <p class="eyebrow">portable reviewer bundle</p>
-        <h3>Share selected review material without the original image</h3>
+        <p class="eyebrow">검토자 패키지</p>
+        <h3>원본 이미지 없이 선별 자료 공유</h3>
       </div>
-      <p>Builds a static HTML/JSON/DOCX/PDF/ZIP reviewer package from report candidates, review notes, and hashes. It does not copy the original evidence image.</p>
-      <p class="help-text">The ZIP includes reviewer HTML, selected evidence JSON, report exports, hash manifests, audit JSON, and a bundle manifest. Share it only after checking the archive SHA256.</p>
+      <p>보고서 후보, 리뷰 메모, 해시를 기반으로 HTML/JSON/DOCX/PDF/ZIP 검토자 패키지를 생성합니다. 원본 증거 이미지는 복사하지 않습니다.</p>
+      <p class="help-text">ZIP에는 검토자 HTML, 선택 증거 JSON, 보고서 산출물, 해시 목록, 감사 JSON, bundle manifest가 포함됩니다. archive SHA256 확인 후 공유하세요.</p>
       <form id="reviewerBundleForm" class="report-form">
         <div class="report-grid">
           <label>
@@ -5778,12 +7163,12 @@ function renderReviewerBundlePanel(summary, casePayload) {
           </label>
         </div>
         <div class="review-actions">
-          <label class="check-label"><input name="include_all" type="checkbox" /> Include every reviewed bookmark, not only report candidates</label>
-          <button type="submit" ${reportCount ? "" : "disabled"}>Build reviewer bundle</button>
+          <label class="check-label"><input name="include_all" type="checkbox" /> 보고서 후보 외 검토 완료 항목도 포함</label>
+          <button type="submit" ${reportCount ? "" : "disabled"}>검토자 패키지 생성</button>
           <span id="reviewerBundleStatus" class="review-save-status"></span>
         </div>
       </form>
-      ${reportCount ? "" : '<p class="help-text">Mark evidence as “Include in report set” before building a reviewer bundle.</p>'}
+      ${reportCount ? "" : '<p class="help-text">검토자 패키지를 만들기 전에 증거를 “보고서 후보에 포함”으로 표시하세요.</p>'}
     </section>
   `;
 }
@@ -5799,10 +7184,10 @@ function groupBookmarksByReviewStatus(bookmarks) {
 
 function renderReviewGroup(status, bookmarks) {
   const labelMap = {
-    relevant: "Relevant evidence",
-    "needs-review": "Needs review",
-    "not-relevant": "Not relevant / noise",
-    unreviewed: "Unreviewed bookmarks",
+    relevant: "관련 있는 증거",
+    "needs-review": "재검토 필요",
+    "not-relevant": "관련 없음 / 노이즈",
+    unreviewed: "미검토 북마크",
   };
   return `
     <section class="review-group">
@@ -5819,17 +7204,18 @@ function renderReviewCard(bookmark) {
   const review = bookmark.review || {};
   const snapshot = bookmark.snapshot || {};
   const reference = bookmark.reference || {};
-  const reportBadge = review.include_in_report ? '<span class="review-badge report">report set</span>' : '<span class="review-badge">not in report</span>';
-  const compareButton = snapshot.path ? `<button class="icon-action" type="button" data-compare-item="${escapeHtml(JSON.stringify(compareItemFromBookmark(bookmark)))}">Pin compare</button>` : "";
+  const reportBadge = review.include_in_report ? '<span class="review-badge report">보고서 포함</span>' : '<span class="review-badge">보고서 제외</span>';
+  const compareButton = snapshot.path ? `<button class="icon-action" type="button" data-compare-item="${escapeHtml(JSON.stringify(compareItemFromBookmark(bookmark)))}">비교함에 추가</button>` : "";
   const bookmarkId = String(bookmark.bookmark_id || "");
   const selected = getReviewSelection().includes(bookmarkId);
+  const reviewStatus = review.status || "unreviewed";
   return `
-    <article class="review-card ${selected ? "selected" : ""}" data-filter="${rowText(bookmark)}" data-review-card-id="${escapeHtml(bookmarkId)}">
+    <article class="review-card ${selected ? "selected" : ""}" data-filter="${rowText(bookmark)}" data-review-card-id="${escapeHtml(bookmarkId)}" data-review-card-status="${escapeHtml(reviewStatus)}" data-review-card-report="${review.include_in_report ? "1" : "0"}">
       <div class="review-card-top">
         <strong>${escapeHtml(bookmark.summary || bookmark.bookmark_id)}</strong>
         <div class="detail-actions">
           ${reportBadge}
-          <button class="icon-action" type="button" data-toggle-review-selection="${escapeHtml(bookmarkId)}">${selected ? "Selected" : "Select"}</button>
+          <button class="icon-action" type="button" data-toggle-review-selection="${escapeHtml(bookmarkId)}">${selected ? "선택됨" : "선택"}</button>
         </div>
       </div>
       <div class="viewer-meta">
@@ -5935,7 +7321,7 @@ function bindBookmarkButtons() {
 }
 
 function bookmarkButton(source, pointer, note) {
-  return `<button class="icon-action" type="button" title="Save bookmark" data-bookmark-source="${escapeHtml(source)}" data-bookmark-pointer="${escapeHtml(pointer)}" data-bookmark-note="${escapeHtml(note || "")}">Mark</button>`;
+  return `<button class="icon-action" type="button" title="검토 대상으로 선별" data-bookmark-source="${escapeHtml(source)}" data-bookmark-pointer="${escapeHtml(pointer)}" data-bookmark-note="${escapeHtml(note || "")}">선별</button>`;
 }
 
 function bookmarkContextForMatch(match) {
@@ -5973,7 +7359,18 @@ function reviewActionButtons(match, searchResultIndex = null) {
   if (context) {
     items.push(bookmarkButton(context.source, context.pointer, context.note || context.title));
   }
-  return items.join("");
+  return renderRowActionDock(items);
+}
+
+function renderRowActionDock(items, label = "검토") {
+  const controls = (items || []).filter(Boolean);
+  if (!controls.length) return "";
+  return `
+    <div class="row-action-dock" data-testid="row-action-dock" data-row-action-count="${escapeHtml(controls.length)}">
+      <span>${escapeHtml(label)}</span>
+      <div>${controls.join("")}</div>
+    </div>
+  `;
 }
 
 function renderSearchResultSourceActionStrip(match, searchResultIndex = null) {
@@ -5988,7 +7385,7 @@ function renderSearchResultSourceActionStrip(match, searchResultIndex = null) {
       data-qc-prep-item="${escapeHtml(profile.qc_prep_item || SEARCH_RESULT_SOURCE_ACTION_CONTRACT.qc_prep_item)}"
     >
       ${(profile.actions || []).map((action) => renderSearchResultSourceActionControl(action, match, context, searchResultIndex)).join("")}
-      <small>${escapeHtml(enabledCount)} action(s) · ${profile.ready_for_report_workflow ? "review-ready" : "needs locator"}</small>
+      <small>가능 작업 ${escapeHtml(enabledCount)}개 · ${profile.ready_for_report_workflow ? "보고 가능" : "원본 위치 확인 필요"}</small>
     </div>
   `;
 }
@@ -6005,7 +7402,7 @@ function renderSearchResultSourceActionControl(action, match, context, searchRes
   }
   if (action.id === "search-inside-source") {
     const keywords = (action.keywords || match.matched_keywords || []).join(", ");
-    return `<button class="icon-action subtle" type="button" data-view-source-path="${escapeHtml(match.path || "")}" data-review-context="${escapeHtml(JSON.stringify(context || {}))}" data-search-result-index="${escapeHtml(searchResultIndex ?? "")}" data-focus-file-search="1" data-focus-file-search-keywords="${escapeHtml(keywords)}">Search inside</button>`;
+    return `<button class="icon-action subtle" type="button" data-view-source-path="${escapeHtml(match.path || "")}" data-review-context="${escapeHtml(JSON.stringify(context || {}))}" data-search-result-index="${escapeHtml(searchResultIndex ?? "")}" data-focus-file-search="1" data-focus-file-search-keywords="${escapeHtml(keywords)}">파일 안 검색</button>`;
   }
   if (action.id === "pin-compare") {
     return compareButton(compareItemFromMatch(match, context));
@@ -6018,7 +7415,7 @@ function renderSearchResultSourceActionControl(action, match, context, searchRes
 
 function compareButton(item) {
   if (!item?.path) return "";
-  return `<button class="icon-action" type="button" data-compare-item="${escapeHtml(JSON.stringify(item))}">Pin compare</button>`;
+  return `<button class="icon-action" type="button" title="비교 트레이에 고정" data-compare-item="${escapeHtml(JSON.stringify(item))}">비교</button>`;
 }
 
 function compareItemFromMatch(match, context = null) {
@@ -6036,7 +7433,7 @@ function compareItemFromPreview(payload, reviewContext = null) {
   const previewText = payload.text
     ? `${payload.text.slice(0, 1200)}${payload.truncated || payload.text.length > 1200 ? "\n..." : ""}`
     : payload.preview_type === "image"
-      ? "Image evidence pinned. Use Preview to reopen the visual source."
+      ? "이미지 증거를 비교함에 고정했습니다. 미리보기로 원본 이미지를 다시 열 수 있습니다."
       : payload.message || "";
   return {
     path: payload.path || "",
@@ -6065,13 +7462,13 @@ function compareItemFromBookmark(bookmark) {
 function viewSourceButton(match, context, searchResultIndex = null) {
   if (!match.path) return "";
   const indexAttribute = searchResultIndex === null || searchResultIndex === undefined ? "" : ` data-search-result-index="${escapeHtml(searchResultIndex)}"`;
-  return `<button class="icon-action primary-viewer-action" type="button" data-view-source-path="${escapeHtml(match.path)}" data-review-context="${escapeHtml(JSON.stringify(context || {}))}"${indexAttribute}>Open viewer</button>`;
+  return `<button class="icon-action primary-viewer-action" type="button" title="원본 미리보기" data-view-source-path="${escapeHtml(match.path)}" data-review-context="${escapeHtml(JSON.stringify(context || {}))}"${indexAttribute}>원본</button>`;
 }
 
 function sourceFileLink(match) {
   if (!match.path) return "";
   const url = `/api/runs/${encodeURIComponent(selectedRunId)}/source-file?path=${encodeURIComponent(match.path)}`;
-  return `<a class="mini-link" href="${url}" target="_blank" rel="noreferrer">Open source</a>`;
+  return `<a class="mini-link" href="${url}" target="_blank" rel="noreferrer" title="원본 파일 새 창으로 열기">새창</a>`;
 }
 
 function applyFilter(value) {
@@ -6081,18 +7478,53 @@ function applyFilter(value) {
   }
 }
 
+function clientFilteredRows() {
+  return Array.from(detailPanel.querySelectorAll(".selectable-result-row[data-filter], .workspace-card[data-filter], tbody tr[data-filter]"));
+}
+
+function updateClientFilterSummary() {
+  const rows = clientFilteredRows();
+  const summaryAnchor = detailPanel.querySelector(".pagination-bar:not(.pagination-actions)");
+  let summary = detailPanel.querySelector("[data-client-filter-summary]");
+  if (!rows.length || !summaryAnchor) {
+    detailPanel.classList.remove("client-filter-empty");
+    if (summary) summary.hidden = true;
+    return;
+  }
+  const visibleNeedle = detailPanel.querySelector("#tableFilter")?.value.trim() || "";
+  const sourceNeedle = detailPanel.querySelector("#sourceFilterInput")?.value.trim() || "";
+  const timeNeedle = detailPanel.querySelector("#timeFilterInput")?.value.trim() || "";
+  const filterActive = Boolean(activeArtifactFilter || visibleNeedle || sourceNeedle || timeNeedle);
+  if (!summary) {
+    summary = document.createElement("div");
+    summary.className = "client-filter-summary";
+    summary.dataset.clientFilterSummary = "true";
+    summaryAnchor.insertAdjacentElement("afterend", summary);
+  }
+  const visibleCount = rows.filter((row) => !row.hidden).length;
+  detailPanel.classList.toggle("client-filter-empty", filterActive && visibleCount === 0 && rows.length > 0);
+  summary.hidden = !filterActive;
+  summary.classList.toggle("empty", filterActive && visibleCount === 0);
+  summary.textContent = filterActive
+    ? `현재 화면 필터 결과 ${formatNumber(visibleCount)}건 / 로드된 행 ${formatNumber(rows.length)}건`
+    : "";
+}
+
 function applyWorkbenchFilters() {
   const visibleNeedle = detailPanel.querySelector("#tableFilter")?.value.trim().toLowerCase() || "";
   const sourceNeedle = detailPanel.querySelector("#sourceFilterInput")?.value.trim().toLowerCase() || "";
   const timeNeedle = detailPanel.querySelector("#timeFilterInput")?.value.trim().toLowerCase() || "";
   for (const row of detailPanel.querySelectorAll("[data-filter]")) {
     const haystack = row.dataset.filter || "";
+    const rowSourceCategory = row.dataset.sourceCategory || "";
     row.hidden = Boolean(
+      (activeTab === "artifacts" && activeArtifactFilter && rowSourceCategory !== activeArtifactFilter) ||
       (visibleNeedle && !haystack.includes(visibleNeedle)) ||
       (sourceNeedle && !haystack.includes(sourceNeedle)) ||
       (timeNeedle && !haystack.includes(timeNeedle))
     );
   }
+  updateClientFilterSummary();
 }
 
 function scheduleWorkbenchFilterUpdate() {
@@ -6455,19 +7887,19 @@ function renderCompareTray() {
   const items = getCompareItems();
   const primary = items.slice(0, 2);
   return `
-    <section id="compareTray" class="compare-tray ${items.length ? "" : "empty"}" aria-label="Pinned evidence comparison">
+    <section id="compareTray" class="compare-tray ${items.length ? "" : "empty"}" aria-label="증거 비교 보관함">
       <div class="compare-heading">
         <div>
-          <p class="eyebrow">compare tray</p>
-          <h3>A/B 자료 비교</h3>
+          <p class="eyebrow">비교 보관함</p>
+          <h3>증거 A/B 비교</h3>
         </div>
         <div class="detail-actions">
           <span class="status-pill">${items.length}/${COMPARE_LIMIT}</span>
-          <button class="secondary-button" type="button" data-open-compare-diff ${items.length >= 2 ? "" : "disabled"}>Text diff A/B</button>
-          <button class="secondary-button" type="button" data-clear-compare ${items.length ? "" : "disabled"}>Clear</button>
+          <button class="secondary-button" type="button" data-open-compare-diff ${items.length >= 2 ? "" : "disabled"}>원문 차이 보기</button>
+          <button class="secondary-button" type="button" data-clear-compare ${items.length ? "" : "disabled"}>비우기</button>
         </div>
       </div>
-      ${items.length ? renderCompareItems(primary, items.slice(2)) : '<p class="empty-state">검색 결과나 뷰어에서 “Pin compare”를 눌러두면 탭을 오가도 자료가 여기 남습니다.</p>'}
+      ${items.length ? renderCompareItems(primary, items.slice(2)) : '<p class="empty-state">검색 결과나 원본 뷰어에서 “비교함에 추가”를 누르면 탭을 오가도 자료가 여기 남습니다.</p>'}
       ${items.length ? renderCompareCitationBundle(items) : ""}
       <section id="compareDiffPanel"></section>
     </section>
@@ -6496,11 +7928,11 @@ function renderCompareCitationBundle(items) {
   return `
     <section class="compare-citation-bundle" aria-label="report-citation-bundle">
       <div>
-        <p class="eyebrow">report-citation-bundle</p>
+        <p class="eyebrow">인용 근거 묶음</p>
         <h4>보고서 후보 근거 묶음</h4>
-        <p class="help-text">핀으로 모은 자료는 비교뿐 아니라 보고서에 넣을 citation 후보입니다. 원본 경로와 source/pointer를 같이 보존합니다.</p>
+        <p class="help-text">비교함에 모은 자료는 보고서에 넣을 인용 후보입니다. 원본 경로와 source/pointer를 같이 보존합니다.</p>
       </div>
-      <button class="secondary-button" type="button" data-copy-path="${escapeHtml(citationText)}">Copy citation bundle</button>
+      <button class="secondary-button" type="button" data-copy-path="${escapeHtml(citationText)}">인용 묶음 복사</button>
     </section>
   `;
 }
@@ -6531,7 +7963,7 @@ function renderCompareSlot(item, index) {
     <article class="compare-slot">
       <div class="compare-slot-top">
         <strong>${label}</strong>
-        <button class="icon-action" type="button" data-remove-compare-path="${escapeHtml(item.path)}">Remove</button>
+        <button class="icon-action" type="button" data-remove-compare-path="${escapeHtml(item.path)}">제거</button>
       </div>
       <h4>${escapeHtml(item.title || fileName(item.path))}</h4>
       <div class="viewer-meta">
@@ -6540,8 +7972,8 @@ function renderCompareSlot(item, index) {
       </div>
       <p>${escapeHtml(item.preview || item.path)}</p>
       <div class="review-actions">
-        <button class="secondary-button" type="button" data-preview-compare-path="${escapeHtml(item.path)}">Preview ${label}</button>
-        <button class="icon-action" type="button" data-copy-path="${escapeHtml(item.path)}">Copy path</button>
+        <button class="secondary-button" type="button" data-preview-compare-path="${escapeHtml(item.path)}">미리보기 ${label}</button>
+        <button class="icon-action" type="button" data-copy-path="${escapeHtml(item.path)}">경로 복사</button>
       </div>
     </article>
   `;
@@ -6562,7 +7994,7 @@ function bindCompareActions() {
     button.addEventListener("click", () => {
       const item = parseCompareItem(button.dataset.compareItem);
       addCompareItem(item);
-      button.textContent = "Pinned";
+      button.textContent = "추가됨";
     });
   }
   const clearButton = detailPanel.querySelector("[data-clear-compare]");
@@ -6593,7 +8025,7 @@ async function openCompareDiff() {
   const panel = detailPanel.querySelector("#compareDiffPanel");
   const [left, right] = getCompareItems();
   if (!panel || !left?.path || !right?.path) return;
-  panel.innerHTML = '<p class="empty-state">Loading A/B text previews...</p>';
+  panel.innerHTML = '<p class="empty-state">A/B 원문 미리보기를 불러오고 있습니다.</p>';
   try {
     const [leftPayload, rightPayload] = await Promise.all([
       api(`/api/runs/${selectedRunId}/source-preview?path=${encodeURIComponent(left.path)}`),
@@ -6607,7 +8039,7 @@ async function openCompareDiff() {
 
 function renderCompareDiff(left, right) {
   if (left.preview_type !== "text" || right.preview_type !== "text") {
-    return '<p class="empty-state">Text diff is available only when both pinned items have text previews.</p>';
+    return '<p class="empty-state">원문 차이 보기는 두 항목 모두 텍스트 미리보기가 있을 때 사용할 수 있습니다.</p>';
   }
   const leftLines = String(left.text || "").split(/\r?\n/);
   const rightLines = String(right.text || "").split(/\r?\n/);
@@ -6686,11 +8118,48 @@ function bindPanelActions() {
   }
   for (const button of detailPanel.querySelectorAll("[data-open-tab]")) {
     button.addEventListener("click", async (event) => {
+      event.preventDefault();
+      event.stopPropagation();
       const capability = event.target.closest("[data-capability-filter]");
       const targetTab = capability?.dataset.capabilityTab || button.dataset.openTab;
+      const sourceCategoryFilter = button.dataset.sourceCategoryFilter || "";
       const filter = capability?.dataset.capabilityFilter || button.dataset.artifactFilter || "";
-      await switchTab(targetTab);
-      applyArtifactTreeFilter(filter);
+      activeArtifactFilter = targetTab === "artifacts" ? sourceCategoryFilter : "";
+      await switchTab(targetTab, { syncStage: false });
+      if (button.classList.contains("source-card")) {
+        setWorkbenchVisibleFilter("");
+      } else {
+        applyArtifactTreeFilter(filter);
+      }
+      refreshSourceNavigatorState();
+    });
+  }
+  for (const button of detailPanel.querySelectorAll("[data-doc-lane-filter]")) {
+    if (button.dataset.docLaneBound) continue;
+    button.dataset.docLaneBound = "1";
+    button.addEventListener("click", () => {
+      setWorkbenchVisibleFilter(button.dataset.docLaneFilter || "");
+      detailPanel.querySelector("#tableFilter")?.focus();
+    });
+  }
+  for (const button of detailPanel.querySelectorAll("[data-timeline-lane-filter]")) {
+    if (button.dataset.timelineLaneBound) continue;
+    button.dataset.timelineLaneBound = "1";
+    button.addEventListener("click", () => {
+      setWorkbenchVisibleFilter(button.dataset.timelineLaneFilter || "");
+      detailPanel.querySelector("#tableFilter")?.focus();
+    });
+  }
+  for (const button of detailPanel.querySelectorAll("[data-review-status-filter]")) {
+    if (button.dataset.reviewStatusBound) continue;
+    button.dataset.reviewStatusBound = "1";
+    button.addEventListener("click", () => applyReviewStatusFilter(button.dataset.reviewStatusFilter || "all"));
+  }
+  for (const button of detailPanel.querySelectorAll("[data-keyboard-action]")) {
+    if (button.dataset.keyboardActionBound) continue;
+    button.dataset.keyboardActionBound = "1";
+    button.addEventListener("click", async () => {
+      await executeKeyboardStripAction(button.dataset.keyboardAction || "");
     });
   }
   for (const button of detailPanel.querySelectorAll("[data-preview-output-name]")) {
@@ -6825,7 +8294,7 @@ async function executeCommandPaletteButton(button) {
   const action = button.dataset.commandAction || "";
   closeCommandPalette();
   if (tab) {
-    await switchTab(tab);
+    await switchTab(tab, { syncStage: false });
     applyArtifactTreeFilter(filter);
     return;
   }
@@ -6856,6 +8325,78 @@ function applyArtifactTreeFilter(filterTerm) {
   persistWorkbenchSession();
 }
 
+function setWorkbenchVisibleFilter(filterTerm) {
+  const input = detailPanel.querySelector("#tableFilter");
+  if (!input) return;
+  input.value = String(filterTerm || "");
+  applyWorkbenchFilters();
+  persistWorkbenchSession();
+}
+
+function applyReviewStatusFilter(status) {
+  const normalized = String(status || "all");
+  for (const button of detailPanel.querySelectorAll("[data-review-status-filter]")) {
+    const active = (button.dataset.reviewStatusFilter || "all") === normalized;
+    button.classList.toggle("active", active);
+    button.setAttribute("aria-pressed", active ? "true" : "false");
+  }
+  for (const card of detailPanel.querySelectorAll(".review-card[data-review-card-status]")) {
+    const cardStatus = card.dataset.reviewCardStatus || "unreviewed";
+    const report = card.dataset.reviewCardReport === "1";
+    card.hidden = !(
+      normalized === "all" ||
+      normalized === cardStatus ||
+      (normalized === "report" && report)
+    );
+  }
+}
+
+async function executeKeyboardStripAction(action) {
+  if (action === "palette") {
+    openCommandPalette();
+    return true;
+  }
+  if (action === "focus-context-search") {
+    focusContextSearch();
+    return true;
+  }
+  if (action === "preview-first-visible-row") {
+    return previewFirstVisibleRow();
+  }
+  if (action === "mark-relevant") {
+    return applyViewerReviewShortcut("relevant", true);
+  }
+  if (action === "open-review") {
+    await switchTab("review", { syncStage: false });
+    return true;
+  }
+  return false;
+}
+
+async function previewFirstVisibleRow() {
+  const row = Array.from(detailPanel.querySelectorAll(".selectable-result-row[data-viewer-row-path], tr[data-viewer-row-path]"))
+    .find((candidate) => !candidate.hidden);
+  if (!row) return false;
+  if (row.dataset.inspectorRow && !row.dataset.viewerRowPath) {
+    showSelectedRowInspector(row);
+    return true;
+  }
+  if (!row.dataset.viewerRowPath) return false;
+  await loadEvidencePreview(row.dataset.viewerRowPath, parseReviewContext(row.dataset.reviewContext), row.dataset.searchResultIndex);
+  row.classList.add("selected-row");
+  return true;
+}
+
+function refreshSourceNavigatorState() {
+  for (const button of detailPanel.querySelectorAll(".source-card[data-open-tab]")) {
+    const tab = button.dataset.openTab || "";
+    const category = button.dataset.sourceCategoryFilter || "";
+    const active = tab === activeTab && (tab !== "artifacts" || category === activeArtifactFilter);
+    button.classList.toggle("active", active);
+    button.setAttribute("aria-current", active ? "page" : "false");
+  }
+}
+
 async function runGlobalCommandSearch(event) {
   event.preventDefault();
   const keyword = String(new FormData(event.currentTarget).get("keyword") || "").trim();
@@ -6863,7 +8404,7 @@ async function runGlobalCommandSearch(event) {
     await openCaseSearch();
     return;
   }
-  await switchTab("search");
+  await switchTab("search", { syncStage: false });
   const input = detailPanel.querySelector("#unifiedSearchInput");
   if (input) input.value = keyword;
   detailPanel.querySelector("#unifiedSearchForm")?.requestSubmit();
@@ -6926,7 +8467,7 @@ function bindCaseDbPanel() {
         output.innerHTML = `<p class="empty-state">${escapeHtml(error.message)}</p>`;
       } finally {
         button.disabled = false;
-        button.textContent = "Prepare Case DB";
+        button.textContent = "Case DB 준비";
       }
     });
   }
@@ -6975,7 +8516,7 @@ function bindCaseDbPanel() {
         request.case_id = ensurePayload.case_id;
         importForm.elements.database.value = ensurePayload.database;
         importForm.elements.case_id.value = ensurePayload.case_id;
-        button.textContent = "Searching...";
+        button.textContent = "검색 중...";
         const payload = await api("/api/case-db/search", { method: "POST", body: JSON.stringify(request) });
         virtualWindowOffsets.caseDb = 0;
         currentCaseDbSearchPayload = payload;
@@ -6991,7 +8532,7 @@ function bindCaseDbPanel() {
         output.innerHTML = `<p class="empty-state">${escapeHtml(error.message)}</p>`;
       } finally {
         button.disabled = false;
-        button.textContent = "Search Case DB";
+        button.textContent = "Case DB 검색";
       }
     });
   }
@@ -7044,7 +8585,7 @@ async function loadCaseDbSavedSearches(database, caseId) {
 function renderCaseDbSavedSearches(savedSearches) {
   const recent = getCaseDbKeywordHistory().slice(0, 6);
   if (!savedSearches.length && !recent.length) {
-    return '<p class="empty-state">No saved searches yet. Search once and use “Save search as” to keep it.</p>';
+    return '<p class="empty-state">저장된 검색이 없습니다. 한 번 검색한 뒤 “검색 저장명”을 입력해 보관하세요.</p>';
   }
   return `
     <div class="review-group-header">
@@ -7122,25 +8663,25 @@ function renderCaseDbSearchResult(payload) {
     return `
       ${saved ? `<p class="help-text">Saved search: ${escapeHtml(saved.name)} (${escapeHtml(saved.citation_id)})</p>` : ""}
       <div class="metric-grid">
-        ${metric("DB matches", payload.summary?.match_count)}
-        ${metric("Returned", payload.summary?.returned_count)}
-        ${metric("Document errors", payload.summary?.document_error_count)}
+        ${metric("DB 일치", payload.summary?.match_count)}
+        ${metric("표시", payload.summary?.returned_count)}
+        ${metric("문서 오류", payload.summary?.document_error_count)}
       </div>
       ${pagination}
-      <p class="empty-state">No Case DB matches found.</p>
+      <p class="empty-state">Case DB에서 일치 결과를 찾지 못했습니다.</p>
       ${renderDocumentErrors(documentErrors)}
     `;
   }
   return `
     ${saved ? `<p class="help-text">Saved search: ${escapeHtml(saved.name)} (${escapeHtml(saved.citation_id)})</p>` : ""}
     <div class="metric-grid">
-      ${metric("DB matches", payload.summary?.match_count)}
-      ${metric("Returned", payload.summary?.returned_count)}
-      ${metric("Page offset", cursorApi.offset)}
-      ${metric("Sources", Object.keys(payload.summary?.source_counts || {}).length)}
-      ${metric("Document errors", payload.summary?.document_error_count)}
-      ${metric("Keywords", (payload.keywords || []).length)}
-      ${metric("High priority", payload.summary?.priority_counts?.high)}
+      ${metric("DB 일치", payload.summary?.match_count)}
+      ${metric("표시", payload.summary?.returned_count)}
+      ${metric("페이지 위치", cursorApi.offset)}
+      ${metric("출처", Object.keys(payload.summary?.source_counts || {}).length)}
+      ${metric("문서 오류", payload.summary?.document_error_count)}
+      ${metric("검색어", (payload.keywords || []).length)}
+      ${metric("우선 검토", payload.summary?.priority_counts?.high)}
     </div>
     ${pagination}
     ${renderDocumentErrors(documentErrors)}
@@ -7148,23 +8689,23 @@ function renderCaseDbSearchResult(payload) {
     <section class="review-selection-tray">
       <div class="review-group-header">
         <div>
-          <p class="eyebrow">batch review</p>
-          <h3>Mark repetitive results together</h3>
+          <p class="eyebrow">일괄 선별</p>
+          <h3>반복 결과를 한 번에 정리</h3>
         </div>
         <div class="detail-actions">
-          <button class="secondary-button" type="button" data-case-db-select="visible">Select visible</button>
-          <button class="secondary-button" type="button" data-case-db-select="low">Select low priority</button>
-          <button class="secondary-button" type="button" data-case-db-batch="verify">Verify selected</button>
-          <button class="secondary-button" type="button" data-case-db-batch="reject">Reject selected</button>
-          <button class="secondary-button" type="button" data-case-db-export-report>Export report candidates</button>
+          <button class="secondary-button" type="button" data-case-db-select="visible">현재 결과 선택</button>
+          <button class="secondary-button" type="button" data-case-db-select="low">낮은 우선순위 선택</button>
+          <button class="secondary-button" type="button" data-case-db-batch="verify">선택 항목 확인</button>
+          <button class="secondary-button" type="button" data-case-db-batch="reject">선택 항목 제외</button>
+          <button class="secondary-button" type="button" data-case-db-export-report>보고서 후보 내보내기</button>
         </div>
       </div>
-      <p class="help-text">Select rows that are clearly related, then apply the same review status in one action.</p>
+      <p class="help-text">관련성이 같은 행을 선택한 뒤 동일한 선별 상태를 한 번에 적용합니다.</p>
       <span id="caseDbBatchStatus" class="review-save-status"></span>
     </section>
-    ${renderVirtualizationNotice(rows, visibleRows, "Case DB matches", "caseDb")}
+    ${renderVirtualizationNotice(rows, visibleRows, "Case DB 결과", "caseDb")}
     <table class="data-table">
-      <thead><tr><th>Select</th><th>Citation</th><th>Priority</th><th>Source</th><th>Item</th><th>Review</th><th></th></tr></thead>
+      <thead><tr><th>선택</th><th>인용</th><th>우선도</th><th>출처</th><th>항목</th><th>선별</th><th></th></tr></thead>
       <tbody>
         ${visibleRows.map((match) => {
           const review = match.review || {};
@@ -7196,7 +8737,7 @@ function renderCaseDbSearchResult(payload) {
                   assignee: review.assignee || "triage",
                   note: match.preview || match.title || "",
                   tags: [match.source, match.kind].filter(Boolean),
-                }))}">Verify</button>
+                }))}">확인</button>
                 <button class="icon-action" type="button" data-case-db-review="${escapeHtml(JSON.stringify({
                   target_type: match.target_type,
                   target_id: match.target_id,
@@ -7207,7 +8748,7 @@ function renderCaseDbSearchResult(payload) {
                   assignee: review.assignee || "triage",
                   note: match.preview || match.title || "",
                   tags: [match.source, "excluded"].filter(Boolean),
-                }))}">Reject</button>
+                }))}">제외</button>
               </td>
             </tr>
           `;
@@ -7228,15 +8769,15 @@ function renderCaseDbPagination(payload) {
     <section class="review-selection-tray compact" data-testid="case-db-cursor-pagination">
       <div class="review-group-header">
         <div>
-          <p class="eyebrow">large-case paging</p>
-          <h3>Viewing ${escapeHtml(offset + 1)}-${escapeHtml(offset + (summary.returned_count || 0))}${pageSize ? ` of page size ${escapeHtml(pageSize)}` : ""}</h3>
+          <p class="eyebrow">대량 결과 페이지</p>
+          <h3>${escapeHtml(offset + 1)}-${escapeHtml(offset + (summary.returned_count || 0))}${pageSize ? ` / 페이지 ${escapeHtml(pageSize)}건` : ""}</h3>
         </div>
         <div class="detail-actions">
-          ${offset > 0 ? `<button class="secondary-button" type="button" data-case-db-cursor="">Restart results</button>` : ""}
-          ${nextCursor ? `<button class="secondary-button" type="button" data-case-db-cursor="${escapeHtml(nextCursor)}">Next results</button>` : ""}
+          ${offset > 0 ? `<button class="secondary-button" type="button" data-case-db-cursor="">처음으로</button>` : ""}
+          ${nextCursor ? `<button class="secondary-button" type="button" data-case-db-cursor="${escapeHtml(nextCursor)}">다음 결과</button>` : ""}
         </div>
       </div>
-      <p class="help-text">Cursor tokens are bound to the current case, keywords, source filters, metadata filters, and review filters to prevent accidental query drift.</p>
+      <p class="help-text">커서 토큰은 현재 케이스, 검색어, 출처, 메타데이터, 선별 필터에 묶여 검색 조건이 흔들리지 않도록 합니다.</p>
     </section>
   `;
 }
@@ -7249,20 +8790,20 @@ function renderCaseDbReviewWorkflowSummary(summary) {
     <section class="review-selection-tray compact">
       <div class="review-group-header">
         <div>
-          <p class="eyebrow">review workflow</p>
-          <h3>Assignment and status queue</h3>
+          <p class="eyebrow">선별 흐름</p>
+          <h3>담당자와 상태 큐</h3>
         </div>
         <div class="mini-stat-row">
-          <span>${escapeHtml(summary.assigned_count || 0)} assigned</span>
-          <span>${escapeHtml(summary.unassigned_count || 0)} unassigned</span>
-          <span>${escapeHtml(summary.report_candidate_count || 0)} report candidates</span>
+          <span>배정 ${escapeHtml(summary.assigned_count || 0)}</span>
+          <span>미배정 ${escapeHtml(summary.unassigned_count || 0)}</span>
+          <span>보고서 후보 ${escapeHtml(summary.report_candidate_count || 0)}</span>
         </div>
       </div>
       <div class="chip-row compact">
         ${Object.entries(statusCounts).slice(0, 5).map(([key, count]) => `<span class="filter-chip">${escapeHtml(key)} · ${escapeHtml(count)}</span>`).join("")}
         ${Object.entries(verificationCounts).slice(0, 5).map(([key, count]) => `<span class="filter-chip">${escapeHtml(key)} · ${escapeHtml(count)}</span>`).join("")}
       </div>
-      <p class="help-text">Single-user Case DB review queue. Role-based assignment queues, notifications, and multi-user conflict handling are still validation-required.</p>
+      <p class="help-text">현재는 단일 사용자 검토 큐입니다. 역할 기반 배정, 알림, 다중 사용자 충돌 처리는 추가 검증이 필요합니다.</p>
     </section>
   `;
 }
@@ -7291,18 +8832,18 @@ function bindCaseDbReportExportButton(database, caseId) {
   button.addEventListener("click", async () => {
     const status = detailPanel.querySelector("#caseDbBatchStatus");
     button.disabled = true;
-    button.textContent = "Exporting...";
+    button.textContent = "내보내는 중...";
     try {
       const payload = await api("/api/case-db/report-export", {
         method: "POST",
         body: JSON.stringify({ database, case_id: caseId, include_all: false, max_items: 500 }),
       });
-      if (status) status.textContent = `Exported ${payload.summary?.exported_item_count || 0} report candidate(s) from Case DB.`;
+      if (status) status.textContent = `Case DB에서 보고서 후보 ${payload.summary?.exported_item_count || 0}건을 내보냈습니다.`;
     } catch (error) {
-      if (status) status.textContent = `Failed: ${error.message}`;
+      if (status) status.textContent = `실패: ${error.message}`;
     } finally {
       button.disabled = false;
-      button.textContent = "Export report candidates";
+      button.textContent = "보고서 후보 내보내기";
     }
   });
 }
@@ -7385,7 +8926,7 @@ function bindCaseDbBatchButtons(database, caseId) {
         });
         if (status) status.textContent = `Updated ${result.updated_count || targets.length} result(s). Re-run search to refresh review badges.`;
       } catch (error) {
-        if (status) status.textContent = `Failed: ${error.message}`;
+        if (status) status.textContent = `실패: ${error.message}`;
       } finally {
         button.disabled = false;
       }
@@ -7465,6 +9006,10 @@ function bindKeyboardShortcuts() {
       await openCaseSearch();
       return;
     }
+    if (!event.metaKey && !event.ctrlKey && !event.altKey && event.key === " ") {
+      if (await previewFirstVisibleRow()) event.preventDefault();
+      return;
+    }
     if (event.altKey && !event.metaKey && !event.ctrlKey && (event.key === "[" || event.key === "]")) {
       if (await openAdjacentSearchHit(event.key === "[" ? -1 : 1)) event.preventDefault();
       return;
@@ -7507,7 +9052,7 @@ function toggleShortcutHelp(forceOpen = null) {
 
 async function openCaseSearch() {
   if (!selectedRunId) return;
-  await switchTab("search");
+  await switchTab("search", { syncStage: false });
   detailPanel.querySelector("#unifiedSearchInput")?.focus();
 }
 
@@ -7540,7 +9085,7 @@ function toggleViewerReportShortcut() {
   const status = form?.querySelector("#viewerReviewStatus");
   if (!includeInput) return false;
   includeInput.checked = !includeInput.checked;
-  if (status) status.textContent = includeInput.checked ? "Include in report enabled. Save review to persist." : "Include in report disabled. Save review to persist.";
+  if (status) status.textContent = includeInput.checked ? "보고서 포함으로 표시했습니다. 저장하면 반영됩니다." : "보고서 포함을 해제했습니다. 저장하면 반영됩니다.";
   return true;
 }
 
@@ -7598,14 +9143,22 @@ function refreshReviewSelectionUi() {
   }
 }
 
-async function switchTab(tab) {
+async function switchTab(tab, options = {}) {
   if (!tab) return;
   activeTab = tab;
+  if (tab !== "artifacts") activeArtifactFilter = "";
+  if (options.stageId) {
+    activeStageId = options.stageId;
+  } else if (options.syncStage) {
+    activeStageId = stageIdForTab(caseStageFlow(selectedRun, tab, ""), tab);
+  }
+  activeStageSubactionId = options.stageSubactionId || "";
   const nextGroup = groupForTab(tab);
   const tabIsVisible = Array.from(detailPanel.querySelectorAll(".tab-button")).some((item) => item.dataset.tab === tab);
   if (activeViewGroup !== nextGroup || !tabIsVisible) {
     activeViewGroup = nextGroup;
     detailPanel.innerHTML = renderDetailShell(selectedRun, activeTab);
+    updateSideStagePanel();
     bindTabButtons();
     restoreWorkbenchControls();
     persistWorkbenchSession();
@@ -7616,6 +9169,8 @@ async function switchTab(tab) {
     item.classList.toggle("active", item.dataset.tab === tab);
   }
   await renderActiveTab();
+  refreshSourceNavigatorState();
+  updateSideStagePanel();
   persistWorkbenchSession();
 }
 
@@ -7794,6 +9349,8 @@ function detectEvidenceImageKind(root) {
 
 function applyRootEvidenceHints() {
   const root = document.querySelector("#rootInput")?.value || "";
+  const rootError = document.querySelector("#rootInputError");
+  if (root.trim() && rootError) rootError.hidden = true;
   const inputKindInput = document.querySelector("#inputKindInput");
   const detected = detectEvidenceImageKind(root);
   if (detected.isImage && detected.inputKind && inputKindInput && ["", "e01-derived", "disk-image-derived", "archive-image-derived"].includes(inputKindInput.value)) {
@@ -8082,7 +9639,15 @@ function shellQuote(value) {
 
 runForm.addEventListener("submit", async (event) => {
   event.preventDefault();
-  const root = document.querySelector("#rootInput").value;
+  const rootInput = document.querySelector("#rootInput");
+  const rootError = document.querySelector("#rootInputError");
+  const root = rootInput.value.trim();
+  if (!root) {
+    if (rootError) rootError.hidden = false;
+    rootInput.focus();
+    return;
+  }
+  if (rootError) rootError.hidden = true;
   runButton.disabled = true;
   runButton.textContent = runStartingLabel(root);
   const request = {
@@ -8399,7 +9964,7 @@ function renderE01IngestWorkflow(workflow) {
     <section class="e01-workflow-panel">
       <div class="review-group-header">
         <div>
-          <p class="eyebrow">Windows 11 E01 workflow</p>
+          <p class="eyebrow">Windows 11 E01 처리</p>
           <h3>${escapeHtml(workflow.direct_extract_ready ? "Ready for single-case ingest" : "Preflight blocked")}</h3>
         </div>
         <span class="status-pill ${workflow.direct_extract_ready ? "ok" : "warning"}">${escapeHtml(workflow.ui_primary_action || "review")}</span>
@@ -8546,7 +10111,7 @@ function renderE01HandoffContract(contract) {
       </div>
       <div class="e01-handoff-actions">
         <button class="secondary-button" type="button" data-start-configured-e01-run ${entrypoints.some((item) => item.id === "start-configured-run" && item.status === "ready") ? "" : "disabled"}>Start configured run</button>
-        <button class="secondary-button" type="button" data-open-tab="search">Search</button>
+        <button class="secondary-button" type="button" data-open-tab="search">검색</button>
         <button class="secondary-button" type="button" data-open-tab="review">Review</button>
         <button class="secondary-button" type="button" data-open-tab="report">Report</button>
       </div>
@@ -8623,13 +10188,13 @@ function renderDoctorPanel(payload) {
   const checks = payload.checks || [];
   return `
     <section class="guidance-card">
-      <p class="eyebrow">runtime check</p>
-      <h3>RapidTriage is ${escapeHtml(payload.status || "unknown")}</h3>
+      <p class="eyebrow">환경 점검</p>
+      <h3>RapidTriage 상태: ${escapeHtml(payload.status || "unknown")}</h3>
       <div class="metric-grid">
         ${metric("OK", payload.summary?.ok)}
-        ${metric("Warnings", payload.summary?.warn)}
-        ${metric("Errors", payload.summary?.error)}
-        ${metric("Checks", payload.summary?.check_count)}
+        ${metric("경고", payload.summary?.warn)}
+        ${metric("오류", payload.summary?.error)}
+        ${metric("점검 항목", payload.summary?.check_count)}
       </div>
       <div class="dense-list">
         ${checks.map((check) => `
@@ -8651,7 +10216,10 @@ async function removeSelectedRun() {
     await api(`/api/runs/${runId}`, { method: "DELETE" });
     selectedRunId = null;
     selectedRun = null;
+    activeStageId = "";
+    activeStageSubactionId = "";
     document.body.classList.remove("analysis-active");
+    updateSideStagePanel();
     persistWorkbenchSession({ selectedRunId: null, activeTab: "summary", activeViewGroup: "triage" });
     detailPanel.innerHTML = '<p class="empty-state">Run removed from the local catalog. Output files were not deleted.</p>';
     await loadRuns();

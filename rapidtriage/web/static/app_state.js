@@ -15,6 +15,9 @@ function persistWorkbenchSession(extra = {}) {
     selectedRunId,
     activeTab,
     activeViewGroup,
+    activeArtifactFilter,
+    activeStageId,
+    activeStageSubactionId,
     tableControls: currentWorkbenchControls(),
     virtualWindowOffsets,
     updated_at: new Date().toISOString(),
@@ -29,6 +32,9 @@ function restoreWorkbenchSession() {
   selectedRunId = payload.selectedRunId;
   activeTab = payload.activeTab || "summary";
   activeViewGroup = payload.activeViewGroup || groupForTab(activeTab);
+  activeArtifactFilter = payload.activeArtifactFilter || "";
+  activeStageId = payload.activeStageId || "";
+  activeStageSubactionId = payload.activeStageSubactionId || "";
 }
 
 function restoreWorkbenchControls() {

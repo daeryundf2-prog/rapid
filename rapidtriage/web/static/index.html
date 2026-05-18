@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>RapidForensic Analyst Console</title>
     <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='16' fill='%230f766e'/%3E%3Ctext x='32' y='39' text-anchor='middle' font-size='22' font-family='Arial' font-weight='700' fill='white'%3ERF%3C/text%3E%3C/svg%3E" />
-    <link rel="stylesheet" href="/assets/styles.css" />
+    <link rel="stylesheet" href="/assets/styles.css?v=professional-copy-20260518-overlap-fix-2" />
   </head>
   <body>
     <a class="skip-link" href="#detailPanel">Skip to case workspace</a>
@@ -15,7 +15,7 @@
           <div class="brand-lockup">
             <span class="brand-mark" aria-hidden="true">RF</span>
             <div>
-              <p class="eyebrow">포렌식 작업대</p>
+              <p class="eyebrow">증거 검토 콘솔</p>
               <h1>RapidForensic</h1>
               <p class="brand-subtitle">증거를 넣고, 분석하고, 검색/뷰어/리뷰/보고서까지 한 화면에서 이어갑니다.</p>
             </div>
@@ -27,6 +27,7 @@
           <span>대용량 대응</span>
           <span>검토/보고서 연결</span>
         </div>
+        <section id="sideStagePanel" class="side-stage-panel" aria-label="현재 케이스 단계 선택" hidden></section>
         <section class="start-focus-card" aria-label="Recommended start">
           <p class="eyebrow">이미지 증거 우선</p>
           <h2>E01/Ex01 같은 포렌식 이미지를 먼저 넣는 흐름입니다</h2>
@@ -49,7 +50,7 @@
           </button>
           <button type="button" class="intake-choice-card" data-intake-action="recent" data-testid="start-choice-recent">
             <strong>Recent case</strong>
-            <span>기존 run output을 import해서 이어보기</span>
+            <span>기존 실행 산출물을 가져와 이어보기</span>
           </button>
           <button type="button" class="intake-choice-card" data-intake-action="sample" data-testid="start-choice-sample">
             <strong>Sample case</strong>
@@ -60,7 +61,7 @@
             <span>runtime, evidence support, validation package 확인</span>
           </button>
         </section>
-        <form id="runForm" class="run-form">
+        <form id="runForm" class="run-form" novalidate>
           <div class="form-intro">
             <p class="eyebrow">새 분석</p>
             <h2>이미지 또는 추출 폴더 선택</h2>
@@ -73,8 +74,9 @@
           </div>
           <label class="root-field">
             증거 이미지 또는 분석 폴더
-            <input id="rootInput" name="root" required placeholder="/cases/case.E01, /cases/disk001.Ex01, /cases/image.raw, /cases/export-folder" data-testid="evidence-root-input" />
+            <input id="rootInput" name="root" placeholder="/cases/case.E01, /cases/disk001.Ex01, /cases/image.raw, /cases/export-folder" data-testid="evidence-root-input" />
           </label>
+          <p id="rootInputError" class="form-error" role="alert" hidden>분석할 E01/Ex01, 이미지, ZIP, 또는 폴더 경로를 먼저 입력하세요.</p>
           <div class="evidence-check-row">
             <button id="evidenceCheckButton" class="secondary-button" type="button" data-testid="evidence-support-button">이미지 지원 확인</button>
             <span id="evidenceCheckStatus" class="help-text">E01/Ex01/RAW/VHDX/DMG는 먼저 도구와 파티션 처리 가능 여부를 확인합니다.</span>
@@ -84,7 +86,7 @@
             <label>
               분석 모드
               <select id="modeInput" name="mode">
-                <option value="fraud">부정/문서 우선</option>
+                <option value="fraud">문서·부정 조사</option>
                 <option value="seizure">전수 수집</option>
                 <option value="hacking">침해사고/윈도우 아티팩트</option>
                 <option value="recovery">삭제/복구 단서</option>
@@ -201,7 +203,7 @@
         <section class="case-queue-shell" aria-label="Case queue">
           <div class="panel-section-title">
             <p class="eyebrow">케이스 큐</p>
-            <strong>현재 분석</strong>
+            <strong>현재 케이스</strong>
           </div>
           <div id="runList" class="run-list" data-testid="run-list"></div>
         </section>
@@ -214,7 +216,7 @@
               <div>
                 <p class="eyebrow">입력</p>
                 <strong>이미지/E01 선택과 지원 여부 확인</strong>
-                <small>E01/Ex01, RAW, VHDX, DMG, ZIP, Folder를 넣고 dependency와 mount/export 필요 여부를 확인합니다.</small>
+                <small>E01/Ex01, RAW, VHDX, DMG, ZIP, 폴더를 넣고 필요한 도구와 마운트/export 여부를 확인합니다.</small>
               </div>
             </article>
             <article class="core-workflow-step">
@@ -246,7 +248,7 @@
               <div>
                 <p class="eyebrow">리뷰</p>
                 <strong>원본 뷰어에서 확인하고 표시</strong>
-                <small>source viewer에서 path/hash/parser/offset을 확인하고 relevant, note, tag를 남깁니다.</small>
+                <small>원본 뷰어에서 경로, 해시, 파서, 오프셋을 확인하고 관련성, 메모, 태그를 남깁니다.</small>
               </div>
             </article>
             <article class="core-workflow-step">
@@ -254,7 +256,7 @@
               <div>
                 <p class="eyebrow">보고서</p>
                 <strong>선택 증거를 제출 후보로 묶기</strong>
-                <small>evidence tray, citation, limitation, validation 상태를 report bundle에 연결합니다.</small>
+                <small>선별 보관함, 인용, 제한사항, 검증 상태를 보고 산출물에 연결합니다.</small>
               </div>
             </article>
           </section>
@@ -262,14 +264,14 @@
             <li><strong>1. 이미지 선택</strong><span>E01/Ex01, RAW, VHDX, DMG 또는 마운트/Export 폴더를 넣습니다.</span></li>
             <li><strong>2. 지원 확인</strong><span>도구, 파티션, 마운트/export 필요 여부를 먼저 확인합니다.</span></li>
             <li><strong>3. 빠른 분석</strong><span>대용량은 Fast first pass로 먼저 범위를 좁힙니다.</span></li>
-            <li><strong>4. 검색/보고서</strong><span>전체 검색 후 원본 뷰어에서 확인하고 report set을 남깁니다.</span></li>
+            <li><strong>4. 검색/보고서</strong><span>전체 검색 후 원본을 확인하고 보고서 후보를 남깁니다.</span></li>
           </ol>
           <section class="mode-help" aria-label="Mode selection help">
-            <p class="eyebrow">if unsure</p>
-            <p><strong>부정/문서 우선</strong>이 가장 안전한 1차 분석입니다. 침해사고는 EVTX/실행흔적, 복구는 삭제 단서, 전수 수집은 넓은 인벤토리에 사용하세요.</p>
+            <p class="eyebrow">모드 선택 기준</p>
+            <p><strong>문서·부정 조사</strong>가 가장 안전한 1차 분석입니다. 침해사고는 EVTX/실행 흔적, 복구는 삭제 단서, 전수 수집은 넓은 인벤토리에 사용하세요.</p>
           </section>
           <section class="first-run-checklist" aria-label="First run checklist">
-            <p class="eyebrow">first-run checklist</p>
+            <p class="eyebrow">첫 실행 점검</p>
             <ol>
               <li><strong>환경 점검</strong><span>libewf/tsk/qemu-img 같은 이미지 처리 도구와 Python 패키지를 확인합니다.</span></li>
               <li><strong>이미지 지원 확인</strong><span>소스가 직접 스캔되는지, 마운트/export가 필요한지 확인합니다.</span></li>
@@ -281,7 +283,7 @@
 
         <form id="importForm" class="import-form">
           <div>
-            <p class="eyebrow">existing output</p>
+            <p class="eyebrow">기존 산출물</p>
             <h2>기존 결과 불러오기</h2>
           </div>
           <label>
@@ -296,7 +298,7 @@
         <div class="results-header">
           <div>
             <p class="eyebrow">케이스 작업</p>
-            <h2>분석 결과 작업대</h2>
+            <h2>케이스 검토 콘솔</h2>
           </div>
           <div class="results-actions">
             <span class="results-mode-pill">단일 케이스</span>
@@ -304,35 +306,47 @@
           </div>
         </div>
         <div class="mission-strip" aria-label="Review workflow reminder" data-testid="six-step-mission-strip">
-          <span><strong>1</strong> 입력</span>
-          <span><strong>2</strong> 추출</span>
-          <span><strong>3</strong> 분석</span>
-          <span><strong>4</strong> 검색</span>
-          <span><strong>5</strong> 리뷰</span>
-          <span><strong>6</strong> 보고서</span>
+          <span><strong>1</strong> 접수</span>
+          <span><strong>2</strong> 탐색</span>
+          <span><strong>3</strong> 검토</span>
+          <span><strong>4</strong> 선별</span>
+          <span><strong>5</strong> 보고</span>
         </div>
         <div id="detailPanel" class="detail-panel" data-testid="detail-panel">
-          <section class="empty-state workbench-empty-state">
-            <p class="eyebrow">시작 준비 완료</p>
-            <h2>E01/Ex01 이미지 증거부터 넣어도 됩니다.</h2>
-            <p>지원 확인을 누르면 필요한 도구, 파티션 선택, 마운트/추출 필요 여부를 먼저 안내하고 분석 결과는 이 작업대에 열립니다.</p>
-            <div class="empty-state-actions" aria-label="Start actions">
-              <button type="button" data-intake-action="e01">E01/Ex01 이미지 선택</button>
-              <button class="secondary-button" type="button" data-intake-action="folder">마운트/Export 폴더</button>
-              <button class="secondary-button" type="button" data-intake-action="sample">샘플 실행</button>
+          <section class="empty-state workbench-empty-state operator-empty-state">
+            <div class="empty-workbench-grid">
+              <div class="empty-workbench-hero">
+                <p class="eyebrow">새 케이스 시작</p>
+                <h2>이미지 증거를 넣으면 분석 가능 여부부터 확인합니다.</h2>
+                <p>E01/Ex01, RAW, VHDX, DMG, ZIP, 추출 폴더를 같은 흐름으로 받습니다. 이후 키워드 검색, 원본 검토, 증거 선별, 보고서 후보 정리까지 하나의 콘솔에서 이어집니다.</p>
+                <div class="empty-state-actions" aria-label="Start actions">
+                  <button type="button" data-intake-action="e01">이미지/E01 선택</button>
+                  <button class="secondary-button" type="button" data-intake-action="folder">Export 폴더 연결</button>
+                  <button class="secondary-button" type="button" data-intake-action="sample">샘플로 보기</button>
+                </div>
+              </div>
+              <div class="empty-workbench-panel">
+                <p class="eyebrow">추천 진행</p>
+                <ol class="operator-route-list">
+                  <li><strong>1. 접수</strong><span>원본 경로, 이미지 유형, 해시, dependency 상태 확인</span></li>
+                  <li><strong>2. 빠른 선별</strong><span>키워드, 최근/삭제, 위험도, OCR/문서 후보 좁히기</span></li>
+                  <li><strong>3. 원본 확인</strong><span>테이블 행을 source viewer, hex, SQLite, 문서 뷰어로 검증</span></li>
+                  <li><strong>4. 리뷰/보고서</strong><span>관련 있음, 재검토, 제외, 보고서 포함 상태 고정</span></li>
+                </ol>
+              </div>
             </div>
-            <div class="empty-state-steps" aria-label="Main workflow">
-              <span>이미지 선택</span>
-              <span>지원 확인</span>
-              <span>분석 실행</span>
-              <span>검색/뷰어</span>
+            <div class="empty-action-grid" aria-label="Main review modes">
+              <article class="empty-action-card"><strong>키워드 선별</strong><span>사건 단어로 전체 자료를 3클릭 안에 좁힙니다.</span></article>
+              <article class="empty-action-card"><strong>아티팩트 검토</strong><span>EVTX, Registry, Browser, AI, USB, MFT/USN을 행위별로 봅니다.</span></article>
+              <article class="empty-action-card"><strong>문서 검토</strong><span>PDF/HWP/Office/메일/메신저/OCR 중심으로 선별합니다.</span></article>
+              <article class="empty-action-card"><strong>시간축 분석</strong><span>파일, 로그, 웹, 앱 흔적을 시간 흐름으로 연결합니다.</span></article>
             </div>
           </section>
         </div>
       </section>
     </main>
-    <script src="/assets/app_workbench_config.js"></script>
-    <script src="/assets/app_state.js"></script>
-    <script src="/assets/app.js"></script>
+    <script src="/assets/app_workbench_config.js?v=forensic-priority-12"></script>
+    <script src="/assets/app_state.js?v=forensic-priority-12"></script>
+    <script src="/assets/app.js?v=forensic-priority-12"></script>
   </body>
 </html>
