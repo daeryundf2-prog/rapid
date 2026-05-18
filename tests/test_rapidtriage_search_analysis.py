@@ -223,17 +223,53 @@ class RapidTriageSearchAnalysisTests(unittest.TestCase):
         self.assertEqual(analysis["summary"]["timeline_event_count"], 4)
         self.assertGreaterEqual(analysis["summary"]["workbook_hypothesis_count"], 2)
         self.assertEqual(analysis["summary"]["duplicate_group_count"], 1)
-        self.assertEqual(analysis["summary"]["commercial_gap_ids"], ["#46", "#47", "#48", "#49", "#50", "#60"])
+        self.assertEqual(
+            analysis["summary"]["commercial_gap_ids"],
+            ["#46", "#47", "#48", "#49", "#50", "#51", "#52", "#60"],
+        )
+        self.assertGreaterEqual(analysis["summary"]["review_assignment_queue_count"], 1)
+        self.assertGreaterEqual(analysis["summary"]["compare_candidate_set_count"], 1)
         self.assertFalse(analysis["analysis_native_capabilities"]["full_case_reindex"])
         self.assertTrue(analysis["analysis_native_capabilities"]["search_hit_deduplication"])
+        self.assertTrue(analysis["analysis_native_capabilities"]["bounded_review_assignment_manifest"])
+        self.assertTrue(analysis["analysis_native_capabilities"]["bounded_ab_compare_candidate_sets"])
         self.assertIn("#46", analysis["analysis_report_grade_assessment"]["commercial_gap_ids"])
         analysis_review = analysis["analysis_analyst_review_profile"]
         self.assertEqual(analysis_review["profile_version"], "analysis-analyst-review-profile-v1")
-        self.assertEqual(analysis_review["gap_ids"], ["#46", "#47", "#48", "#49", "#50", "#60"])
+        self.assertEqual(analysis_review["gap_ids"], ["#46", "#47", "#48", "#49", "#50", "#51", "#52", "#60"])
         self.assertEqual(analysis_review["artifact_type"], "search-analysis-workbench")
         self.assertIn("source viewer row verification", analysis_review["correlation_targets"])
         self.assertIn("full-case reindex", analysis_review["not_proof_of"])
         self.assertFalse(analysis_review["report_grade_ready"])
+        self.assertGreaterEqual(analysis_review["source_field_values"]["assignment_queue_count"], 1)
+        self.assertGreaterEqual(analysis_review["source_field_values"]["compare_candidate_set_count"], 1)
+        self.assertEqual(
+            analysis_review["source_field_values"]["analysis_review_workflow_manifest_hash"],
+            analysis["analysis_review_workflow_manifest_hash"],
+        )
+        self.assertIn(
+            {"view": "review-workflow", "json_pointer": "/analysis/analysis_review_workflow_manifest"},
+            analysis_review["review_entrypoints"],
+        )
+        review_manifest = analysis["analysis_review_workflow_manifest"]
+        self.assertEqual(review_manifest["manifest_version"], "search-analysis-review-workflow-manifest-v1")
+        self.assertEqual(analysis["analysis_review_workflow_manifest_hash"], review_manifest["manifest_sha256"])
+        self.assertGreaterEqual(review_manifest["summary"]["assignment_queue_count"], 1)
+        self.assertGreaterEqual(review_manifest["summary"]["compare_candidate_set_count"], 1)
+        self.assertTrue(review_manifest["persistent_state_contract"]["manifest_can_seed_case_db_review_queue"])
+        self.assertFalse(review_manifest["ready_for_court_report"])
+        self.assertIn("bounded-review-assignment-queue-built", review_manifest["passed_validation_check_ids"])
+        self.assertIn("abc-compare-candidate-sets-built", review_manifest["passed_validation_check_ids"])
+        self.assertIn(
+            "persistent-case-db-review-state-required",
+            review_manifest["failed_validation_check_ids"],
+        )
+        self.assertTrue(any(row["lane_id"] == "clusters" for row in review_manifest["assignment_queue"]))
+        self.assertTrue(any(row["source_viewer_locator"] for row in review_manifest["assignment_queue"]))
+        self.assertTrue(any(row["mode"] == "abc" for row in review_manifest["compare_candidate_sets"]))
+        first_compare_set = review_manifest["compare_candidate_sets"][0]
+        self.assertLessEqual(len(first_compare_set["candidates"]), 3)
+        self.assertTrue(all(candidate["source_viewer_locator"] for candidate in first_compare_set["candidates"]))
         analysis_gates = {gate["gap_id"]: gate for gate in analysis["core_accuracy_gates"]}
         self.assertIn("bounded cluster generation", analysis_gates["#46"]["satisfied_checks"])
         self.assertIn("representative match links", analysis_gates["#46"]["satisfied_checks"])
@@ -243,6 +279,7 @@ class RapidTriageSearchAnalysisTests(unittest.TestCase):
         self.assertIn("representative source viewer locators", analysis_gates["#46"]["satisfied_checks"])
         self.assertIn("cluster report-grade validation plan", analysis_gates["#46"]["satisfied_checks"])
         self.assertIn("cluster report-grade ready slots", analysis_gates["#46"]["satisfied_checks"])
+        self.assertIn("analysis review workflow manifest", analysis_gates["#46"]["satisfied_checks"])
         self.assertIn("entity extraction across supported types", analysis_gates["#47"]["satisfied_checks"])
         self.assertIn("match reference links", analysis_gates["#47"]["satisfied_checks"])
         self.assertIn("entity review profile", analysis_gates["#47"]["satisfied_checks"])
@@ -252,6 +289,7 @@ class RapidTriageSearchAnalysisTests(unittest.TestCase):
         self.assertIn("entity report-grade validation plan", analysis_gates["#47"]["satisfied_checks"])
         self.assertIn("entity report-grade ready slots", analysis_gates["#47"]["satisfied_checks"])
         self.assertIn("merge/split review queue", analysis_gates["#47"]["satisfied_checks"])
+        self.assertIn("analysis review workflow manifest", analysis_gates["#47"]["satisfied_checks"])
         self.assertIn("relationship edges built", analysis_gates["#48"]["satisfied_checks"])
         self.assertIn("causal-proof limitation warning", analysis_gates["#48"]["satisfied_checks"])
         self.assertIn("edge source citations", analysis_gates["#48"]["satisfied_checks"])
@@ -262,6 +300,7 @@ class RapidTriageSearchAnalysisTests(unittest.TestCase):
         self.assertIn("graph source locator coverage", analysis_gates["#48"]["satisfied_checks"])
         self.assertIn("graph report-grade validation plan", analysis_gates["#48"]["satisfied_checks"])
         self.assertIn("graph report-grade ready slots", analysis_gates["#48"]["satisfied_checks"])
+        self.assertIn("analysis review workflow manifest", analysis_gates["#48"]["satisfied_checks"])
         self.assertIn("timestamp extraction", analysis_gates["#49"]["satisfied_checks"])
         self.assertIn("UTC normalization", analysis_gates["#49"]["satisfied_checks"])
         self.assertIn("timeline correlation profile", analysis_gates["#49"]["satisfied_checks"])
@@ -272,6 +311,7 @@ class RapidTriageSearchAnalysisTests(unittest.TestCase):
         self.assertIn("clock-skew blocker recorded", analysis_gates["#49"]["satisfied_checks"])
         self.assertIn("timeline report-grade validation plan", analysis_gates["#49"]["satisfied_checks"])
         self.assertIn("timeline report-grade ready slots", analysis_gates["#49"]["satisfied_checks"])
+        self.assertIn("analysis review workflow manifest", analysis_gates["#49"]["satisfied_checks"])
         self.assertIn("draft hypotheses generated", analysis_gates["#50"]["satisfied_checks"])
         self.assertIn("workbook review profile", analysis_gates["#50"]["satisfied_checks"])
         self.assertIn("hypothesis review queue", analysis_gates["#50"]["satisfied_checks"])
@@ -281,6 +321,15 @@ class RapidTriageSearchAnalysisTests(unittest.TestCase):
         self.assertIn("workbook report-grade validation plan", analysis_gates["#50"]["satisfied_checks"])
         self.assertIn("workbook report-grade ready slots", analysis_gates["#50"]["satisfied_checks"])
         self.assertIn("persistence/versioning limitation warning", analysis_gates["#50"]["satisfied_checks"])
+        self.assertIn("analysis review workflow manifest", analysis_gates["#50"]["satisfied_checks"])
+        self.assertIn("review workflow manifest", analysis_gates["#51"]["satisfied_checks"])
+        self.assertIn("bounded assignment queue emitted", analysis_gates["#51"]["satisfied_checks"])
+        self.assertIn("assignment source viewer locators", analysis_gates["#51"]["satisfied_checks"])
+        self.assertIn("case-db review state contract", analysis_gates["#51"]["satisfied_checks"])
+        self.assertIn("A/B/C compare candidate sets", analysis_gates["#52"]["satisfied_checks"])
+        self.assertIn("compare candidate source locators", analysis_gates["#52"]["satisfied_checks"])
+        self.assertIn("three-way compare candidate group", analysis_gates["#52"]["satisfied_checks"])
+        self.assertIn("compare handoff limitations", analysis_gates["#52"]["satisfied_checks"])
         self.assertIn("duplicate fingerprint generation", analysis_gates["#60"]["satisfied_checks"])
         self.assertIn("duplicate group counts", analysis_gates["#60"]["satisfied_checks"])
         self.assertIn("collapse preview profile", analysis_gates["#60"]["satisfied_checks"])
@@ -290,8 +339,12 @@ class RapidTriageSearchAnalysisTests(unittest.TestCase):
         self.assertIn("dedup report-grade validation plan", analysis_gates["#60"]["satisfied_checks"])
         self.assertIn("dedup report-grade ready slots", analysis_gates["#60"]["satisfied_checks"])
         analysis_uplift = analysis["commercial_uplift_evidence"]
-        self.assertEqual(analysis_uplift["batch_id"], "commercial-uplift-046-050")
-        self.assertEqual(analysis_uplift["item_numbers"], [46, 47, 48, 49, 50])
+        self.assertEqual(analysis_uplift["batch_id"], "commercial-uplift-046-052-060")
+        self.assertEqual(analysis_uplift["item_numbers"], [46, 47, 48, 49, 50, 51, 52, 60])
+        self.assertIn(
+            f"analysis_review_workflow_manifest_sha256:{review_manifest['manifest_sha256']}",
+            analysis_uplift["source_refs"],
+        )
         self.assertIn("bounded cluster generation", analysis_uplift["passed_validation_check_ids_by_item"]["#46"])
         self.assertIn("cluster review profile", analysis_uplift["passed_validation_check_ids_by_item"]["#46"])
         self.assertIn("cluster report-grade validation plan", analysis_uplift["passed_validation_check_ids_by_item"]["#46"])
@@ -312,7 +365,13 @@ class RapidTriageSearchAnalysisTests(unittest.TestCase):
         self.assertIn("workbook review profile", analysis_uplift["passed_validation_check_ids_by_item"]["#50"])
         self.assertIn("workbook report-grade validation plan", analysis_uplift["passed_validation_check_ids_by_item"]["#50"])
         self.assertIn("workbook report-grade ready slots", analysis_uplift["passed_validation_check_ids_by_item"]["#50"])
+        self.assertIn("bounded assignment queue emitted", analysis_uplift["passed_validation_check_ids_by_item"]["#51"])
+        self.assertIn("assignment source viewer locators", analysis_uplift["passed_validation_check_ids_by_item"]["#51"])
+        self.assertIn("A/B/C compare candidate sets", analysis_uplift["passed_validation_check_ids_by_item"]["#52"])
+        self.assertIn("compare candidate source locators", analysis_uplift["passed_validation_check_ids_by_item"]["#52"])
         self.assertIn("persistent-cluster-review-state", analysis_uplift["failed_validation_check_ids_by_item"]["#46"])
+        self.assertIn("multi-user-review-conflict-handling", analysis_uplift["failed_validation_check_ids_by_item"]["#51"])
+        self.assertIn("persistent-compare-notes", analysis_uplift["failed_validation_check_ids_by_item"]["#52"])
         self.assertEqual(
             analysis_uplift["reportability_decision"]["decision"],
             "do-not-report-search-analysis-as-reviewed-findings",
@@ -330,6 +389,19 @@ class RapidTriageSearchAnalysisTests(unittest.TestCase):
             analysis_uplift["reportability_decision"]["blockers"],
         )
         self.assertEqual(analysis_uplift["reportability_decision"]["review_output_counts"]["hypotheses"], 4)
+        self.assertEqual(
+            analysis_uplift["reportability_decision"]["review_output_counts"]["assignment_queue"],
+            review_manifest["summary"]["assignment_queue_count"],
+        )
+        self.assertEqual(
+            analysis_uplift["reportability_decision"]["review_output_counts"]["compare_candidate_sets"],
+            review_manifest["summary"]["compare_candidate_set_count"],
+        )
+        self.assertTrue(analysis_uplift["reportability_decision"]["analysis_review_workflow_manifest_present"])
+        self.assertEqual(
+            analysis_uplift["reportability_decision"]["analysis_review_workflow_manifest_hash"],
+            review_manifest["manifest_sha256"],
+        )
         self.assertTrue(analysis_uplift["reportability_decision"]["cluster_report_grade_validation_plan_present"])
         self.assertTrue(analysis_uplift["reportability_decision"]["entity_report_grade_validation_plan_present"])
         self.assertTrue(analysis_uplift["reportability_decision"]["graph_report_grade_validation_plan_present"])
@@ -385,8 +457,31 @@ class RapidTriageSearchAnalysisTests(unittest.TestCase):
         self.assertGreaterEqual(analysis_uplift["large_data_controls"]["workbook_review_queue_count"], 1)
         self.assertGreaterEqual(analysis_uplift["large_data_controls"]["workbook_evidence_attachment_count"], 1)
         self.assertFalse(analysis_uplift["large_data_controls"]["workbook_version_history_supported"])
+        self.assertTrue(analysis_uplift["large_data_controls"]["analysis_review_workflow_manifest_present"])
+        self.assertEqual(
+            analysis_uplift["large_data_controls"]["analysis_review_workflow_manifest_hash"],
+            review_manifest["manifest_sha256"],
+        )
+        self.assertEqual(
+            analysis_uplift["large_data_controls"]["review_assignment_queue_count"],
+            review_manifest["summary"]["assignment_queue_count"],
+        )
+        self.assertEqual(
+            analysis_uplift["large_data_controls"]["compare_candidate_set_count"],
+            review_manifest["summary"]["compare_candidate_set_count"],
+        )
+        self.assertTrue(analysis_uplift["large_data_controls"]["bounded_review_assignment_manifest"])
+        self.assertTrue(analysis_uplift["large_data_controls"]["bounded_ab_compare_candidate_sets"])
         self.assertIn(
             "cluster-review-trusted-diff-required",
+            analysis_uplift["reportability_decision"]["blockers"],
+        )
+        self.assertIn(
+            "multi-user-reviewer-assignment-not-available",
+            analysis_uplift["reportability_decision"]["blockers"],
+        )
+        self.assertIn(
+            "persistent-compare-notes-not-available",
             analysis_uplift["reportability_decision"]["blockers"],
         )
 

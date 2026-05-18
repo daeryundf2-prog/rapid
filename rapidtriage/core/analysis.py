@@ -38,7 +38,10 @@ TIMESTAMP_KEYS = {
 MAX_CLUSTER_REPRESENTATIVES = 8
 MAX_ENTITY_MATCH_REFERENCES = 15
 MAX_GRAPH_MATCH_NODES = 40
-ANALYSIS_GAP_IDS = ["#46", "#47", "#48", "#49", "#50", "#60"]
+MAX_REVIEW_ASSIGNMENT_QUEUE = 60
+MAX_COMPARE_CANDIDATE_SETS = 12
+MAX_COMPARE_CANDIDATES_PER_SET = 3
+ANALYSIS_GAP_IDS = ["#46", "#47", "#48", "#49", "#50", "#51", "#52", "#60"]
 ANALYSIS_NATIVE_CAPABILITIES = {
     "large_result_clustering": True,
     "entity_view_email_phone_ip_domain_hash_url": True,
@@ -47,9 +50,13 @@ ANALYSIS_NATIVE_CAPABILITIES = {
     "search_result_timeline_correlation": True,
     "hypothesis_workbook_drafts": True,
     "search_hit_deduplication": True,
+    "bounded_review_assignment_manifest": True,
+    "bounded_ab_compare_candidate_sets": True,
     "full_case_reindex": False,
     "ml_semantic_clustering": False,
     "analyst_verified_entity_resolution": False,
+    "multi_user_reviewer_assignment": False,
+    "persistent_compare_notes": False,
     "court_ready_graph_layout": False,
 }
 ANALYSIS_REPORT_GRADE_BLOCKERS = [
@@ -175,6 +182,15 @@ def build_search_analysis(
         entities=entities["entities"],
         timeline_events=timeline["events"],
     )
+    review_workflow_manifest = build_analysis_review_workflow_manifest(
+        matches=normalized_matches,
+        clusters=clusters,
+        entities=entities,
+        graph=graph,
+        timeline=timeline,
+        workbook=workbook,
+        deduplication=deduplication,
+    )
     core_accuracy_gates = analysis_core_accuracy_gates(
         matches=normalized_matches,
         clusters=clusters,
@@ -183,6 +199,7 @@ def build_search_analysis(
         timeline=timeline,
         workbook=workbook,
         deduplication=deduplication,
+        review_workflow_manifest=review_workflow_manifest,
         trusted_diffs=trusted_diffs or {},
     )
     report_grade = analysis_report_grade_assessment()
@@ -197,6 +214,8 @@ def build_search_analysis(
             "workbook_hypothesis_count": len(workbook["hypotheses"]),
             "duplicate_group_count": deduplication["summary"]["duplicate_group_count"],
             "duplicate_match_count": deduplication["summary"]["duplicate_match_count"],
+            "review_assignment_queue_count": review_workflow_manifest["summary"]["assignment_queue_count"],
+            "compare_candidate_set_count": review_workflow_manifest["summary"]["compare_candidate_set_count"],
             "commercial_gap_ids": ANALYSIS_GAP_IDS,
             "commercial_grade_ready": False,
         },
@@ -206,6 +225,8 @@ def build_search_analysis(
         "timeline": timeline,
         "deduplication": deduplication,
         "workbook": workbook,
+        "analysis_review_workflow_manifest": review_workflow_manifest,
+        "analysis_review_workflow_manifest_hash": review_workflow_manifest["manifest_sha256"],
         "core_accuracy_gates": core_accuracy_gates,
         "commercial_uplift_evidence": analysis_commercial_uplift_evidence(
             matches=normalized_matches,
@@ -214,6 +235,7 @@ def build_search_analysis(
             graph=graph,
             timeline=timeline,
             workbook=workbook,
+            review_workflow_manifest=review_workflow_manifest,
             core_accuracy_gates=core_accuracy_gates,
             report_grade=report_grade,
             max_clusters=max_clusters,
@@ -232,6 +254,7 @@ def build_search_analysis(
             timeline=timeline,
             workbook=workbook,
             deduplication=deduplication,
+            review_workflow_manifest=review_workflow_manifest,
             report_grade=report_grade,
         ),
         "limitations": [
@@ -250,6 +273,7 @@ def analysis_commercial_uplift_evidence(
     graph: Mapping[str, object],
     timeline: Mapping[str, object],
     workbook: Mapping[str, object],
+    review_workflow_manifest: Mapping[str, object],
     core_accuracy_gates: Sequence[Mapping[str, object]],
     report_grade: Mapping[str, object],
     max_clusters: int,
@@ -261,7 +285,7 @@ def analysis_commercial_uplift_evidence(
     passed_by_item = {
         str(gate.get("gap_id")): list(gate.get("satisfied_checks") or [])
         for gate in core_accuracy_gates
-        if str(gate.get("gap_id")) in {"#46", "#47", "#48", "#49", "#50"}
+        if str(gate.get("gap_id")) in {"#46", "#47", "#48", "#49", "#50", "#51", "#52", "#60"}
     }
     failed_by_item: dict[str, list[str]] = {
         "#46": ["persistent-cluster-review-state", "near-duplicate-text-media-clustering"],
@@ -269,6 +293,8 @@ def analysis_commercial_uplift_evidence(
         "#48": ["interactive-graph-canvas", "server-side-graph-paging", "saved-graph-layouts"],
         "#49": ["full-case-timeline-join", "timezone-skew-validation", "cursor-paged-timeline"],
         "#50": ["editable-persistent-workbook", "evidence-attachment-workflow", "workbook-version-history"],
+        "#51": ["role-based-review-queues", "multi-user-review-conflict-handling", "trusted-review-log-diff"],
+        "#52": ["web-three-pane-compare-ui", "persistent-compare-notes", "trusted-expected-diff-manifest"],
     }
     cluster_summary = clusters.get("summary") if isinstance(clusters.get("summary"), Mapping) else {}
     cluster_review_profile = (
@@ -350,6 +376,11 @@ def analysis_commercial_uplift_evidence(
         if isinstance(workbook.get("workbook_report_grade_validation_plan"), Mapping)
         else {}
     )
+    review_workflow_summary = (
+        review_workflow_manifest.get("summary")
+        if isinstance(review_workflow_manifest.get("summary"), Mapping)
+        else {}
+    )
     trusted_diffs = trusted_diffs or {}
     trusted_diff_blockers = [
         blocker
@@ -376,9 +407,26 @@ def analysis_commercial_uplift_evidence(
         passed_by_item.setdefault("#50", []).append("workbook report-grade validation plan")
         if int(workbook_validation_plan.get("ready_slot_count") or 0) >= 6:
             passed_by_item["#50"].append("workbook report-grade ready slots")
+    if review_workflow_manifest:
+        for item_id in ("#46", "#47", "#48", "#49", "#50"):
+            passed_by_item.setdefault(item_id, []).append("analysis review workflow manifest")
+        passed_by_item.setdefault("#51", []).extend(
+            [
+                "bounded assignment queue emitted",
+                "assignment source viewer locators",
+                "case-db review state contract",
+            ]
+        )
+        passed_by_item.setdefault("#52", []).extend(
+            [
+                "A/B/C compare candidate sets",
+                "compare candidate source locators",
+                "compare handoff limitations",
+            ]
+        )
     return {
-        "batch_id": "commercial-uplift-046-050",
-        "item_numbers": [46, 47, 48, 49, 50],
+        "batch_id": "commercial-uplift-046-052-060",
+        "item_numbers": [46, 47, 48, 49, 50, 51, 52, 60],
         "implementation_track": "search-analysis-ux-gates",
         "source_refs": [
             f"matches:{len(matches)}",
@@ -397,6 +445,7 @@ def analysis_commercial_uplift_evidence(
             f"hypotheses:{workbook_summary.get('hypothesis_count', 0)}",
             f"workbook_citation_manifest_sha256:{workbook_citation_manifest.get('manifest_sha256', '')}",
             f"workbook_report_grade_validation_plan_sha256:{workbook_validation_plan.get('validation_plan_sha256', '')}",
+            f"analysis_review_workflow_manifest_sha256:{review_workflow_manifest.get('manifest_sha256', '')}",
         ],
         "reportability_decision": analysis_reportability_decision(
             report_grade=report_grade,
@@ -406,6 +455,7 @@ def analysis_commercial_uplift_evidence(
             graph_summary=graph_summary,
             timeline_summary=timeline_summary,
             workbook_summary=workbook_summary,
+            review_workflow_manifest=review_workflow_manifest,
             trusted_diffs=trusted_diffs,
             cluster_validation_plan=cluster_validation_plan,
             entity_validation_plan=entity_validation_plan,
@@ -522,6 +572,18 @@ def analysis_commercial_uplift_evidence(
                 workbook_review_profile.get("evidence_attachment_count") or 0
             ),
             "workbook_version_history_supported": bool(workbook_review_profile.get("version_history_supported")),
+            "analysis_review_workflow_manifest_present": bool(review_workflow_manifest),
+            "analysis_review_workflow_manifest_hash": str(review_workflow_manifest.get("manifest_sha256") or ""),
+            "review_assignment_queue_count": int(review_workflow_summary.get("assignment_queue_count") or 0),
+            "review_assignment_queue_cap": int(review_workflow_summary.get("assignment_queue_cap") or 0),
+            "compare_candidate_set_count": int(review_workflow_summary.get("compare_candidate_set_count") or 0),
+            "compare_candidate_set_cap": int(review_workflow_summary.get("compare_candidate_set_cap") or 0),
+            "bounded_review_assignment_manifest": bool(
+                ANALYSIS_NATIVE_CAPABILITIES["bounded_review_assignment_manifest"]
+            ),
+            "bounded_ab_compare_candidate_sets": bool(
+                ANALYSIS_NATIVE_CAPABILITIES["bounded_ab_compare_candidate_sets"]
+            ),
             "persistent_review_state": False,
             "full_case_reindex": False,
         },
@@ -538,6 +600,7 @@ def analysis_reportability_decision(
     graph_summary: Mapping[str, object],
     timeline_summary: Mapping[str, object],
     workbook_summary: Mapping[str, object],
+    review_workflow_manifest: Mapping[str, object] | None = None,
     trusted_diffs: Mapping[int, Mapping[str, object]] | None = None,
     cluster_validation_plan: Mapping[str, object] | None = None,
     entity_validation_plan: Mapping[str, object] | None = None,
@@ -552,7 +615,17 @@ def analysis_reportability_decision(
         blockers.add("full-case-reindex-not-available")
     if not ANALYSIS_NATIVE_CAPABILITIES["analyst_verified_entity_resolution"]:
         blockers.add("analyst-verified-entity-resolution-not-available")
+    if not ANALYSIS_NATIVE_CAPABILITIES["multi_user_reviewer_assignment"]:
+        blockers.add("multi-user-reviewer-assignment-not-available")
+    if not ANALYSIS_NATIVE_CAPABILITIES["persistent_compare_notes"]:
+        blockers.add("persistent-compare-notes-not-available")
     trusted_diffs = trusted_diffs or {}
+    review_workflow_manifest = review_workflow_manifest or {}
+    review_workflow_summary = (
+        review_workflow_manifest.get("summary")
+        if isinstance(review_workflow_manifest.get("summary"), Mapping)
+        else {}
+    )
     cluster_validation_plan = cluster_validation_plan or {}
     entity_validation_plan = entity_validation_plan or {}
     graph_validation_plan = graph_validation_plan or {}
@@ -574,7 +647,11 @@ def analysis_reportability_decision(
             "graph_edges": int(graph_summary.get("edge_count") or 0),
             "timeline_events": int(timeline_summary.get("event_count") or 0),
             "hypotheses": int(workbook_summary.get("hypothesis_count") or 0),
+            "assignment_queue": int(review_workflow_summary.get("assignment_queue_count") or 0),
+            "compare_candidate_sets": int(review_workflow_summary.get("compare_candidate_set_count") or 0),
         },
+        "analysis_review_workflow_manifest_present": bool(review_workflow_manifest),
+        "analysis_review_workflow_manifest_hash": str(review_workflow_manifest.get("manifest_sha256") or ""),
         "cluster_report_grade_validation_plan_present": bool(cluster_validation_plan),
         "cluster_report_grade_validation_plan_hash": str(
             cluster_validation_plan.get("validation_plan_sha256") or ""
@@ -606,6 +683,7 @@ def analysis_reportability_decision(
             "validate graph and timeline joins against full-case indexed source rows with timezone and parser-confidence evidence",
             "attach report citations to verified source rows before promoting any draft hypothesis to a finding",
             "attach passing trusted review diffs for clusters, entities, graph citations, timeline order, and workbook hypotheses",
+            "persist reviewer assignment state and compare notes before treating the review workflow manifest as final review history",
         ],
     }
 
@@ -619,6 +697,7 @@ def analysis_core_accuracy_gates(
     timeline: Mapping[str, object],
     workbook: Mapping[str, object],
     deduplication: Mapping[str, object],
+    review_workflow_manifest: Mapping[str, object],
     trusted_diffs: Mapping[int, Mapping[str, object]] | None = None,
 ) -> list[dict[str, object]]:
     evidence_refs = [
@@ -629,6 +708,7 @@ def analysis_core_accuracy_gates(
         f"timeline_events:{timeline.get('summary', {}).get('event_count', 0) if isinstance(timeline.get('summary'), Mapping) else 0}",
         f"workbook_hypotheses:{workbook.get('summary', {}).get('hypothesis_count', 0) if isinstance(workbook.get('summary'), Mapping) else 0}",
         f"duplicate_groups:{deduplication.get('summary', {}).get('duplicate_group_count', 0) if isinstance(deduplication.get('summary'), Mapping) else 0}",
+        f"analysis_review_workflow_manifest_sha256:{review_workflow_manifest.get('manifest_sha256', '')}",
     ]
     cluster_summary = clusters.get("summary") if isinstance(clusters.get("summary"), Mapping) else {}
     cluster_review_profile = (
@@ -733,6 +813,26 @@ def analysis_core_accuracy_gates(
         if isinstance(deduplication.get("search_dedup_report_grade_validation_plan"), Mapping)
         else {}
     )
+    review_workflow_summary = (
+        review_workflow_manifest.get("summary")
+        if isinstance(review_workflow_manifest.get("summary"), Mapping)
+        else {}
+    )
+    assignment_queue = (
+        review_workflow_manifest.get("assignment_queue")
+        if isinstance(review_workflow_manifest.get("assignment_queue"), list)
+        else []
+    )
+    compare_candidate_sets = (
+        review_workflow_manifest.get("compare_candidate_sets")
+        if isinstance(review_workflow_manifest.get("compare_candidate_sets"), list)
+        else []
+    )
+    review_lanes = (
+        review_workflow_manifest.get("review_lanes")
+        if isinstance(review_workflow_manifest.get("review_lanes"), list)
+        else []
+    )
     trusted_diffs = trusted_diffs or {}
     for number, diff in trusted_diffs.items():
         if isinstance(diff, Mapping):
@@ -768,6 +868,8 @@ def analysis_core_accuracy_gates(
         item46.append("truncation disclosure")
     if not ANALYSIS_NATIVE_CAPABILITIES["ml_semantic_clustering"]:
         item46.append("review-state limitation warning")
+    if any(isinstance(row, Mapping) and row.get("lane_id") == "clusters" for row in review_lanes):
+        item46.append("analysis review workflow manifest")
     if trusted_diffs.get(46, {}).get("status") == "pass":
         item46.append("trusted cluster review diff pass")
 
@@ -802,6 +904,8 @@ def analysis_core_accuracy_gates(
         item47.append("merge/split review queue")
     if not ANALYSIS_NATIVE_CAPABILITIES["analyst_verified_entity_resolution"]:
         item47.append("merge/split limitation warning")
+    if any(isinstance(row, Mapping) and row.get("lane_id") == "entities" for row in review_lanes):
+        item47.append("analysis review workflow manifest")
     if trusted_diffs.get(47, {}).get("status") == "pass":
         item47.append("trusted entity review diff pass")
 
@@ -839,6 +943,8 @@ def analysis_core_accuracy_gates(
         item48.append("graph paging/truncation disclosure")
     if not ANALYSIS_NATIVE_CAPABILITIES["court_ready_graph_layout"]:
         item48.append("causal-proof limitation warning")
+    if any(isinstance(row, Mapping) and row.get("lane_id") == "graph" for row in review_lanes):
+        item48.append("analysis review workflow manifest")
     if trusted_diffs.get(48, {}).get("status") == "pass":
         item48.append("trusted graph source-citation diff pass")
 
@@ -878,6 +984,8 @@ def analysis_core_accuracy_gates(
         if int(timeline_validation_plan.get("ready_slot_count") or 0) >= 6:
             item49.append("timeline report-grade ready slots")
     item49.append("timezone/skew limitation warning")
+    if any(isinstance(row, Mapping) and row.get("lane_id") == "timeline" for row in review_lanes):
+        item49.append("analysis review workflow manifest")
     if trusted_diffs.get(49, {}).get("status") == "pass":
         item49.append("trusted timeline known-answer diff pass")
 
@@ -916,8 +1024,47 @@ def analysis_core_accuracy_gates(
             item50.append("workbook report-grade ready slots")
     if not ANALYSIS_NATIVE_CAPABILITIES["full_case_reindex"]:
         item50.append("persistence/versioning limitation warning")
+    if any(isinstance(row, Mapping) and row.get("lane_id") == "workbook" for row in review_lanes):
+        item50.append("analysis review workflow manifest")
     if trusted_diffs.get(50, {}).get("status") == "pass":
         item50.append("trusted workbook rubric diff pass")
+
+    item51: list[str] = []
+    if review_workflow_manifest.get("manifest_sha256"):
+        item51.append("review workflow manifest")
+    if int(review_workflow_summary.get("assignment_queue_count") or 0) >= 0:
+        item51.append("bounded assignment queue emitted")
+    if any(isinstance(row, Mapping) and row.get("source_viewer_locator") for row in assignment_queue):
+        item51.append("assignment source viewer locators")
+    if any(isinstance(row, Mapping) and row.get("assignment_status") == "unassigned" for row in assignment_queue):
+        item51.append("assignment state fields")
+    if isinstance(review_workflow_manifest.get("persistent_state_contract"), Mapping):
+        item51.append("case-db review state contract")
+    if not ANALYSIS_NATIVE_CAPABILITIES["multi_user_reviewer_assignment"]:
+        item51.append("multi-user assignment limitation warning")
+
+    item52: list[str] = []
+    if compare_candidate_sets:
+        item52.append("A/B/C compare candidate sets")
+    if any(
+        isinstance(row, Mapping)
+        and any(
+            isinstance(candidate, Mapping) and candidate.get("source_viewer_locator")
+            for candidate in list(row.get("candidates") or [])
+        )
+        for row in compare_candidate_sets
+    ):
+        item52.append("compare candidate source locators")
+    if any(
+        isinstance(row, Mapping)
+        and len([candidate for candidate in list(row.get("candidates") or []) if isinstance(candidate, Mapping)]) >= 3
+        for row in compare_candidate_sets
+    ):
+        item52.append("three-way compare candidate group")
+    if review_workflow_manifest.get("reporting_status") == "triage-review-routing-only":
+        item52.append("compare handoff limitations")
+    if not ANALYSIS_NATIVE_CAPABILITIES["persistent_compare_notes"]:
+        item52.append("persistent compare note limitation warning")
 
     item60: list[str] = []
     if dedup_summary.get("unique_fingerprint_count") is not None:
@@ -938,6 +1085,8 @@ def analysis_core_accuracy_gates(
         item60.append("duplicate member row hashes")
     if isinstance(dedup_manifest.get("source_viewer_locator"), Mapping):
         item60.append("dedup source viewer locators")
+    if any(isinstance(row, Mapping) and row.get("lane_id") == "dedup" for row in review_lanes):
+        item60.append("review assignment lane manifest")
     if dedup_validation_plan:
         item60.append("dedup report-grade validation plan")
         evidence_refs.append(
@@ -953,6 +1102,8 @@ def analysis_core_accuracy_gates(
         build_accuracy_gate(48, satisfied_checks=item48, evidence_refs=evidence_refs),
         build_accuracy_gate(49, satisfied_checks=item49, evidence_refs=evidence_refs),
         build_accuracy_gate(50, satisfied_checks=item50, evidence_refs=evidence_refs),
+        build_accuracy_gate(51, satisfied_checks=item51, evidence_refs=evidence_refs),
+        build_accuracy_gate(52, satisfied_checks=item52, evidence_refs=evidence_refs),
         build_accuracy_gate(60, satisfied_checks=item60, evidence_refs=evidence_refs),
     ]
 
@@ -1556,6 +1707,391 @@ def stable_diff_key(*parts: object) -> str:
 def stable_analysis_sha256(value: object) -> str:
     serialized = json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"), default=str)
     return hashlib.sha256(serialized.encode("utf-8", errors="replace")).hexdigest()
+
+
+def build_analysis_review_workflow_manifest(
+    *,
+    matches: Sequence[Mapping[str, object]],
+    clusters: Mapping[str, object],
+    entities: Mapping[str, object],
+    graph: Mapping[str, object],
+    timeline: Mapping[str, object],
+    workbook: Mapping[str, object],
+    deduplication: Mapping[str, object],
+) -> dict[str, object]:
+    """Create a bounded handoff manifest for analyst assignment and compare review."""
+    assignment_queue: list[dict[str, object]] = []
+    lanes: dict[str, dict[str, object]] = {}
+
+    def add_lane(lane_id: str, label: str, *, gap_id: str, json_pointer: str) -> None:
+        lanes.setdefault(
+            lane_id,
+            {
+                "lane_id": lane_id,
+                "label": label,
+                "gap_id": gap_id,
+                "json_pointer": json_pointer,
+                "queue_count": 0,
+                "priority_counts": {},
+            },
+        )
+
+    def add_queue_row(
+        *,
+        lane_id: str,
+        gap_id: str,
+        source_id: str,
+        title: str,
+        priority: str,
+        source_viewer_locator: Mapping[str, object],
+        citation_refs: Sequence[str],
+        recommended_actions: Sequence[str],
+        count: int = 0,
+    ) -> None:
+        if len(assignment_queue) >= MAX_REVIEW_ASSIGNMENT_QUEUE:
+            return
+        priority = priority if priority in {"critical", "high", "normal", "low"} else "normal"
+        row_core = {
+            "lane_id": lane_id,
+            "gap_id": gap_id,
+            "source_id": source_id,
+            "title": title[:180],
+            "priority": priority,
+            "count": count,
+        }
+        row = {
+            "queue_id": stable_id("analysis-assignment", lane_id, gap_id, source_id, len(assignment_queue)),
+            **row_core,
+            "queue_position": len(assignment_queue) + 1,
+            "review_state": "needs-review",
+            "assignment_status": "unassigned",
+            "recommended_assignee_role": "forensic-analyst",
+            "source_viewer_locator": dict(source_viewer_locator),
+            "citation_refs": list(citation_refs)[:8],
+            "recommended_actions": list(recommended_actions)[:6],
+            "report_candidate": False,
+            "row_hash": stable_analysis_sha256(row_core),
+        }
+        assignment_queue.append(row)
+        lane = lanes.setdefault(
+            lane_id,
+            {
+                "lane_id": lane_id,
+                "label": lane_id,
+                "gap_id": gap_id,
+                "json_pointer": "",
+                "queue_count": 0,
+                "priority_counts": {},
+            },
+        )
+        lane["queue_count"] = int(lane.get("queue_count") or 0) + 1
+        priority_counts = lane.setdefault("priority_counts", {})
+        if isinstance(priority_counts, dict):
+            priority_counts[priority] = int(priority_counts.get(priority) or 0) + 1
+
+    add_lane("clusters", "Large result clusters", gap_id="#46", json_pointer="/analysis/clusters/cluster_review_profile")
+    add_lane("entities", "Entity pivots", gap_id="#47", json_pointer="/analysis/entities/entity_review_profile")
+    add_lane("graph", "Relationship graph edges", gap_id="#48", json_pointer="/analysis/graph/graph_citation_manifest")
+    add_lane("timeline", "Timeline anchors", gap_id="#49", json_pointer="/analysis/timeline/timeline_citation_manifest")
+    add_lane("workbook", "Hypothesis workbook", gap_id="#50", json_pointer="/analysis/workbook/workbook_review_profile")
+    add_lane("dedup", "Duplicate search hits", gap_id="#60", json_pointer="/analysis/deduplication/dedup_review_profile")
+
+    cluster_manifest = clusters.get("cluster_citation_manifest") if isinstance(clusters.get("cluster_citation_manifest"), Mapping) else {}
+    for row in list((clusters.get("cluster_review_profile") or {}).get("review_queue") or [])[:12]:
+        if not isinstance(row, Mapping):
+            continue
+        source_id = str(row.get("cluster_id") or "")
+        add_queue_row(
+            lane_id="clusters",
+            gap_id="#46",
+            source_id=source_id,
+            title=str(row.get("label") or row.get("value") or "Cluster review"),
+            priority=str(row.get("review_priority") or "normal"),
+            count=int(row.get("match_count") or 0),
+            source_viewer_locator={
+                "viewer": "search-cluster-review",
+                "cluster_id": source_id,
+                "open_representative_first": True,
+            },
+            citation_refs=[f"cluster_citation_manifest_sha256:{cluster_manifest.get('manifest_sha256', '')}"],
+            recommended_actions=[
+                "Open representative hits.",
+                "Decide whether this cluster is signal, noise, or duplicate context.",
+                "Mark report candidates only after source-row verification.",
+            ],
+        )
+
+    entity_manifest = entities.get("entity_citation_manifest") if isinstance(entities.get("entity_citation_manifest"), Mapping) else {}
+    for row in list((entities.get("entity_review_profile") or {}).get("review_queue") or [])[:12]:
+        if not isinstance(row, Mapping):
+            continue
+        source_id = str(row.get("entity_id") or "")
+        add_queue_row(
+            lane_id="entities",
+            gap_id="#47",
+            source_id=source_id,
+            title=f"{row.get('type') or 'entity'} pivot",
+            priority="high" if row.get("merge_split_candidate") else "normal",
+            count=int(row.get("count") or 0),
+            source_viewer_locator={
+                "viewer": "search-entity-review",
+                "entity_id": source_id,
+                "raw_value_required_from_source": True,
+            },
+            citation_refs=[f"entity_citation_manifest_sha256:{entity_manifest.get('manifest_sha256', '')}"],
+            recommended_actions=[
+                "Review merge/split candidates.",
+                "Open linked source rows.",
+                "Record alias or account ownership only after analyst verification.",
+            ],
+        )
+
+    graph_manifest = graph.get("graph_citation_manifest") if isinstance(graph.get("graph_citation_manifest"), Mapping) else {}
+    for entry in list(graph_manifest.get("edge_entries") or [])[:12]:
+        if not isinstance(entry, Mapping):
+            continue
+        add_queue_row(
+            lane_id="graph",
+            gap_id="#48",
+            source_id=str(entry.get("edge_id") or entry.get("entry_hash") or ""),
+            title=f"{entry.get('edge_type') or 'graph'} relationship",
+            priority="normal",
+            count=int(entry.get("citation_count") or 0),
+            source_viewer_locator=entry.get("source_viewer_locator") if isinstance(entry.get("source_viewer_locator"), Mapping) else {},
+            citation_refs=[f"graph_citation_manifest_sha256:{graph_manifest.get('manifest_sha256', '')}"],
+            recommended_actions=[
+                "Open the source citation for this edge.",
+                "Validate that the edge is a pivot, not causal proof.",
+                "Save reviewed relationships only with source citation.",
+            ],
+        )
+
+    timeline_manifest = timeline.get("timeline_citation_manifest") if isinstance(timeline.get("timeline_citation_manifest"), Mapping) else {}
+    for entry in list(timeline_manifest.get("event_entries") or [])[:12]:
+        if not isinstance(entry, Mapping):
+            continue
+        priority = "high" if entry.get("timezone_label") == "missing" else "normal"
+        add_queue_row(
+            lane_id="timeline",
+            gap_id="#49",
+            source_id=str(entry.get("event_id") or entry.get("entry_hash") or ""),
+            title=f"{entry.get('timestamp') or 'timeline'} event",
+            priority=priority,
+            count=1,
+            source_viewer_locator=entry.get("source_viewer_locator") if isinstance(entry.get("source_viewer_locator"), Mapping) else {},
+            citation_refs=[f"timeline_citation_manifest_sha256:{timeline_manifest.get('manifest_sha256', '')}"],
+            recommended_actions=[
+                "Verify source timestamp semantics.",
+                "Check timezone and clock-skew assumptions.",
+                "Annotate only verified chronology anchors.",
+            ],
+        )
+
+    workbook_manifest = workbook.get("workbook_citation_manifest") if isinstance(workbook.get("workbook_citation_manifest"), Mapping) else {}
+    for row in list((workbook.get("workbook_review_profile") or {}).get("review_queue") or [])[:12]:
+        if not isinstance(row, Mapping):
+            continue
+        add_queue_row(
+            lane_id="workbook",
+            gap_id="#50",
+            source_id=str(row.get("hypothesis_id") or ""),
+            title=str(row.get("title") or "Hypothesis review"),
+            priority="high" if int(row.get("evidence_count") or 0) else "normal",
+            count=int(row.get("evidence_count") or 0),
+            source_viewer_locator={
+                "viewer": "search-workbook-hypothesis-review",
+                "hypothesis_id": str(row.get("hypothesis_id") or ""),
+                "open_requires_source_verification": True,
+            },
+            citation_refs=[f"workbook_citation_manifest_sha256:{workbook_manifest.get('manifest_sha256', '')}"],
+            recommended_actions=[
+                "Attach source-row evidence before promoting the hypothesis.",
+                "Assign owner and review state.",
+                "Keep draft wording out of reports until verified.",
+            ],
+        )
+
+    dedup_manifest = deduplication.get("search_dedup_manifest") if isinstance(deduplication.get("search_dedup_manifest"), Mapping) else {}
+    dedup_profile = deduplication.get("dedup_review_profile") if isinstance(deduplication.get("dedup_review_profile"), Mapping) else {}
+    for row in list(dedup_profile.get("review_queue") or dedup_profile.get("review_groups") or [])[:8]:
+        if not isinstance(row, Mapping):
+            continue
+        add_queue_row(
+            lane_id="dedup",
+            gap_id="#60",
+            source_id=str(row.get("group_id") or ""),
+            title="Duplicate hit review",
+            priority="normal",
+            count=int(row.get("match_count") or 0),
+            source_viewer_locator={
+                "viewer": "search-dedup-review",
+                "group_id": str(row.get("group_id") or ""),
+                "open_representative_first": True,
+            },
+            citation_refs=[f"dedup_manifest_sha256:{dedup_manifest.get('manifest_sha256', '')}"],
+            recommended_actions=[
+                "Open the representative hit.",
+                "Confirm duplicates before suppression.",
+                "Never suppress without persistent review state.",
+            ],
+        )
+
+    compare_sets = build_analysis_compare_candidate_sets(
+        matches=matches,
+        clusters=clusters,
+        deduplication=deduplication,
+    )
+    lane_rows = sorted(lanes.values(), key=lambda item: str(item.get("lane_id") or ""))
+    manifest: dict[str, object] = {
+        "manifest_version": "search-analysis-review-workflow-manifest-v1",
+        "batch_id": "commercial-uplift-046-052-060",
+        "commercial_gap_ids": ANALYSIS_GAP_IDS,
+        "summary": {
+            "match_count": len(matches),
+            "review_lane_count": len(lane_rows),
+            "assignment_queue_count": len(assignment_queue),
+            "assignment_queue_cap": MAX_REVIEW_ASSIGNMENT_QUEUE,
+            "assignment_queue_truncated": len(assignment_queue) >= MAX_REVIEW_ASSIGNMENT_QUEUE,
+            "compare_candidate_set_count": len(compare_sets),
+            "compare_candidate_set_cap": MAX_COMPARE_CANDIDATE_SETS,
+        },
+        "review_lanes": lane_rows,
+        "assignment_queue": assignment_queue,
+        "compare_candidate_sets": compare_sets,
+        "persistent_state_contract": {
+            "current_state": "manifest-only",
+            "manifest_can_seed_case_db_review_queue": True,
+            "case_db_required_for_report_claim": True,
+            "required_state_fields": [
+                "assignee",
+                "review_state",
+                "verification_state",
+                "review_notes",
+                "report_candidate",
+                "decision_history",
+            ],
+        },
+        "large_data_controls": {
+            "assignment_queue_cap": MAX_REVIEW_ASSIGNMENT_QUEUE,
+            "compare_candidate_set_cap": MAX_COMPARE_CANDIDATE_SETS,
+            "compare_candidates_per_set_cap": MAX_COMPARE_CANDIDATES_PER_SET,
+            "rows_use_source_pointers_not_full_payloads": True,
+        },
+        "passed_validation_check_ids": [
+            "analysis-review-workflow-manifest-emitted",
+            "bounded-review-assignment-queue-built",
+            "review-source-viewer-locators-built",
+            "abc-compare-candidate-sets-built",
+            "case-db-state-contract-emitted",
+        ],
+        "failed_validation_check_ids": [
+            "multi-user-review-assignment-server-required",
+            "persistent-case-db-review-state-required",
+            "web-three-pane-compare-ui-required",
+            "persistent-compare-notes-required",
+        ],
+        "reporting_status": "triage-review-routing-only",
+        "ready_for_court_report": False,
+    }
+    manifest["manifest_sha256"] = stable_analysis_sha256(
+        {key: value for key, value in manifest.items() if key != "manifest_sha256"}
+    )
+    return manifest
+
+
+def build_analysis_compare_candidate_sets(
+    *,
+    matches: Sequence[Mapping[str, object]],
+    clusters: Mapping[str, object],
+    deduplication: Mapping[str, object],
+) -> list[dict[str, object]]:
+    sets: list[dict[str, object]] = []
+    seen_keys: set[str] = set()
+
+    def add_set(*, reason: str, source_id: str, indices: Sequence[int], citation_refs: Sequence[str]) -> None:
+        if len(sets) >= MAX_COMPARE_CANDIDATE_SETS:
+            return
+        clean_indices = []
+        for index in indices:
+            if isinstance(index, int) and 0 <= index < len(matches) and index not in clean_indices:
+                clean_indices.append(index)
+            if len(clean_indices) >= MAX_COMPARE_CANDIDATES_PER_SET:
+                break
+        if len(clean_indices) < 2:
+            return
+        dedupe_key = stable_analysis_sha256({"reason": reason, "indices": clean_indices})
+        if dedupe_key in seen_keys:
+            return
+        seen_keys.add(dedupe_key)
+        candidates = [
+            build_compare_candidate(match=matches[index], match_index=index, slot=slot)
+            for slot, index in zip(("A", "B", "C"), clean_indices)
+        ]
+        set_core = {
+            "reason": reason,
+            "source_id": source_id,
+            "candidate_match_indices": clean_indices,
+            "candidate_count": len(candidates),
+        }
+        sets.append(
+            {
+                "compare_set_id": stable_id("analysis-compare-set", reason, source_id, len(sets)),
+                **set_core,
+                "mode": "abc" if len(candidates) >= 3 else "ab",
+                "status": "candidate-not-reviewed",
+                "baseline_slot": "A",
+                "candidates": candidates,
+                "citation_refs": list(citation_refs)[:8],
+                "recommended_action": "Open in multi-evidence compare, verify hashes, then persist notes in Case DB.",
+                "compare_set_hash": stable_analysis_sha256(set_core),
+            }
+        )
+
+    dedup_manifest = deduplication.get("search_dedup_manifest") if isinstance(deduplication.get("search_dedup_manifest"), Mapping) else {}
+    for group in list(deduplication.get("groups") or [])[:MAX_COMPARE_CANDIDATE_SETS]:
+        if not isinstance(group, Mapping):
+            continue
+        add_set(
+            reason="duplicate-search-hit-review",
+            source_id=str(group.get("group_id") or ""),
+            indices=[int(index) for index in list(group.get("match_indices") or []) if isinstance(index, int)],
+            citation_refs=[f"dedup_manifest_sha256:{dedup_manifest.get('manifest_sha256', '')}"],
+        )
+
+    cluster_manifest = clusters.get("cluster_citation_manifest") if isinstance(clusters.get("cluster_citation_manifest"), Mapping) else {}
+    for cluster in list(clusters.get("clusters") or [])[:MAX_COMPARE_CANDIDATE_SETS]:
+        if not isinstance(cluster, Mapping):
+            continue
+        add_set(
+            reason=f"cluster-{cluster.get('family') or 'unknown'}-representative-review",
+            source_id=str(cluster.get("cluster_id") or ""),
+            indices=[int(index) for index in list(cluster.get("match_indices") or []) if isinstance(index, int)],
+            citation_refs=[f"cluster_citation_manifest_sha256:{cluster_manifest.get('manifest_sha256', '')}"],
+        )
+    return sets
+
+
+def build_compare_candidate(*, match: Mapping[str, object], match_index: int, slot: str) -> dict[str, object]:
+    core = {
+        "match_index": match_index,
+        "source": str(match.get("source") or "unknown"),
+        "kind": str(match.get("kind") or ""),
+        "path": str(match.get("path") or ""),
+        "title": str(match.get("title") or match.get("path") or f"match-{match_index}"),
+        "pointer": str(match.get("pointer") or ""),
+    }
+    return {
+        "slot": slot,
+        **core,
+        "candidate_hash": stable_analysis_sha256(core),
+        "source_viewer_locator": {
+            "viewer": "search-result-source",
+            "match_index": match_index,
+            "source": core["source"],
+            "path": core["path"],
+            "pointer": core["pointer"],
+        },
+    }
 
 
 def diff_value(value: object) -> str:
@@ -4140,6 +4676,7 @@ def analysis_analyst_review_profile(
     timeline: Mapping[str, object],
     workbook: Mapping[str, object],
     deduplication: Mapping[str, object],
+    review_workflow_manifest: Mapping[str, object],
     report_grade: Mapping[str, object],
 ) -> dict[str, object]:
     cluster_summary = clusters.get("summary") if isinstance(clusters.get("summary"), Mapping) else {}
@@ -4151,6 +4688,11 @@ def analysis_analyst_review_profile(
     dedup_validation_plan = (
         deduplication.get("search_dedup_report_grade_validation_plan")
         if isinstance(deduplication.get("search_dedup_report_grade_validation_plan"), Mapping)
+        else {}
+    )
+    review_workflow_summary = (
+        review_workflow_manifest.get("summary")
+        if isinstance(review_workflow_manifest.get("summary"), Mapping)
         else {}
     )
     source_counts = Counter(str(match.get("source") or "unknown") for match in matches)
@@ -4197,6 +4739,9 @@ def analysis_analyst_review_profile(
             "timeline_event_count": int(timeline_summary.get("event_count") or 0),
             "workbook_hypothesis_count": int(workbook_summary.get("hypothesis_count") or 0),
             "duplicate_group_count": int(dedup_summary.get("duplicate_group_count") or 0),
+            "assignment_queue_count": int(review_workflow_summary.get("assignment_queue_count") or 0),
+            "compare_candidate_set_count": int(review_workflow_summary.get("compare_candidate_set_count") or 0),
+            "analysis_review_workflow_manifest_hash": str(review_workflow_manifest.get("manifest_sha256") or ""),
             "dedup_report_grade_validation_plan_hash": str(
                 dedup_validation_plan.get("validation_plan_sha256") or ""
             ),
@@ -4211,6 +4756,7 @@ def analysis_analyst_review_profile(
             {"view": "timeline", "json_pointer": "/analysis/timeline/timeline_correlation_profile"},
             {"view": "workbook", "json_pointer": "/analysis/workbook/workbook_review_profile"},
             {"view": "deduplication", "json_pointer": "/analysis/deduplication/dedup_review_profile"},
+            {"view": "review-workflow", "json_pointer": "/analysis/analysis_review_workflow_manifest"},
         ],
         "correlation_targets": [
             "source viewer row verification",
