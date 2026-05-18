@@ -68,6 +68,13 @@ AUTO_UPDATE_REPORT_GRADE_BLOCKERS = [
     "update-client-implementation-required",
     "release-artifact-signature-required",
 ]
+DEPLOYMENT_READINESS_MANIFEST_VERSION = "deployment-readiness-matrix-v1"
+DEPLOYMENT_READINESS_GAP_IDS = [
+    WINDOWS_SIGNED_INSTALLER_GAP_ID,
+    MACOS_NOTARIZED_PACKAGE_GAP_ID,
+    LINUX_PACKAGE_GAP_ID,
+    AUTO_UPDATE_CHANNEL_GAP_ID,
+]
 RELEASE_PACKAGING_TRUSTED_TOOLS = {
     "authenticode-signature-log",
     "macos-notarization-log",
@@ -2878,6 +2885,300 @@ def build_external_blocker_ledger_manifest(
     return manifest
 
 
+def release_file_hash_entry(path: Path) -> dict[str, object]:
+    if not path.is_file():
+        return {"name": path.name, "present": False, "size_bytes": 0, "sha256": ""}
+    return {
+        "name": path.name,
+        "present": True,
+        "size_bytes": path.stat().st_size,
+        "sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
+    }
+
+
+def release_artifact_hash_entry(path: Path) -> dict[str, object]:
+    entry = release_file_hash_entry(path)
+    return {
+        "name": entry["name"],
+        "size_bytes": entry["size_bytes"],
+        "sha256": entry["sha256"],
+    }
+
+
+def sorted_unique_strings(values: list[object]) -> list[str]:
+    return sorted({str(value) for value in values if str(value)})
+
+
+def blocker_list(payload: object) -> list[str]:
+    if not isinstance(payload, Mapping):
+        return []
+    blockers = payload.get("blockers")
+    if isinstance(blockers, list):
+        return sorted_unique_strings(blockers)
+    return []
+
+
+def build_deployment_readiness_row(
+    *,
+    item_number: int,
+    gap_id: str,
+    name: str,
+    package_payload: dict[str, object],
+    internal_evidence_refs: list[str],
+    release_outputs: list[str],
+    required_external_evidence: list[str],
+) -> dict[str, object]:
+    report_plan = {}
+    for key, value in package_payload.items():
+        if key.endswith("_report_grade_validation_plan") and isinstance(value, Mapping):
+            report_plan = dict(value)
+            break
+    ready_slot_count = int(report_plan.get("ready_slot_count") or 0)
+    blocking_slot_count = int(report_plan.get("blocking_slot_count") or 0)
+    row_core: dict[str, object] = {
+        "item_number": item_number,
+        "commercial_gap_id": gap_id,
+        "name": name,
+        "status": "implemented-usable-internal-validated-external-evidence-required",
+        "implemented": True,
+        "usable": True,
+        "internal_validated": True,
+        "commercial_grade": False,
+        "commercial_claim_allowed": False,
+        "ready_slot_count": ready_slot_count,
+        "blocking_slot_count": blocking_slot_count,
+        "release_outputs": release_outputs,
+        "internal_evidence_refs": internal_evidence_refs,
+        "required_external_evidence": required_external_evidence,
+        "external_blockers": blocker_list(package_payload),
+    }
+    row = dict(row_core)
+    row["row_hash"] = stable_release_sha256(row_core)
+    return row
+
+
+def build_clean_machine_smoke_profile(repo: Path) -> dict[str, object]:
+    platform_rows = [
+        {
+            "platform": "windows",
+            "commercial_gap_ids": [WINDOWS_SIGNED_INSTALLER_GAP_ID],
+            "script_paths": [
+                "scripts/windows/smoke-test-rapidtriage.ps1",
+                "scripts/windows/smoke-test-rapidtriage.bat",
+            ],
+            "required_external_evidence": [
+                "fresh Windows 11 smoke output folder",
+                "PowerShell transcript",
+                "clean machine dependency/install notes",
+            ],
+            "blockers": [
+                "fresh-windows-smoke-required",
+                "clean-windows-no-developer-tools-smoke-not-attached",
+            ],
+        },
+        {
+            "platform": "macos",
+            "commercial_gap_ids": [MACOS_NOTARIZED_PACKAGE_GAP_ID],
+            "script_paths": ["scripts/smoke-test-rapidtriage.sh", "scripts/summarize-smoke.py"],
+            "required_external_evidence": [
+                "fresh macOS smoke output folder",
+                "codesign/notarization/Gatekeeper transcript",
+                "clean machine launch log",
+            ],
+            "blockers": ["fresh-macos-smoke-required", "gatekeeper-assessment-required"],
+        },
+        {
+            "platform": "linux",
+            "commercial_gap_ids": [LINUX_PACKAGE_GAP_ID],
+            "script_paths": ["scripts/smoke-test-rapidtriage.sh", "scripts/summarize-smoke.py"],
+            "required_external_evidence": [
+                "fresh distro install/uninstall smoke folder",
+                "deb/rpm/AppImage build logs",
+                "package-manager dependency resolution transcript",
+            ],
+            "blockers": ["install-uninstall-smoke-required", "clean-container-build-log-required"],
+        },
+    ]
+    rows: list[dict[str, object]] = []
+    for row in platform_rows:
+        script_presence = {
+            path: (repo / path).is_file()
+            for path in row["script_paths"]
+        }
+        row_core = {
+            **row,
+            "script_presence": script_presence,
+            "scripts_packaged_by_portable_zip": all(script_presence.values()),
+            "status": "external-evidence-required",
+            "commercial_claim_allowed": False,
+            "owner": "release QA",
+        }
+        rows.append({**row_core, "row_hash": stable_release_sha256(row_core)})
+    profile: dict[str, object] = {
+        "profile_version": "clean-machine-smoke-profile-v1",
+        "platform_count": len(rows),
+        "rows": rows,
+        "scripts_present_count": sum(1 for row in rows if row["scripts_packaged_by_portable_zip"]),
+        "external_evidence_required_count": len(rows),
+        "commercial_claim_allowed": False,
+        "summary": (
+            "Repository scripts and smoke commands are packaged, but fresh Windows/macOS/Linux host "
+            "transcripts must be attached before installer/package commercial claims."
+        ),
+    }
+    profile["profile_hash"] = stable_release_sha256(profile)
+    return profile
+
+
+def build_deployment_readiness_manifest(
+    *,
+    repo: Path,
+    output_dir: Path,
+    artifacts: list[dict[str, object]],
+    package_readiness: dict[str, object],
+    update_manifest_payload: dict[str, object],
+) -> dict[str, object]:
+    rows = [
+        build_deployment_readiness_row(
+            item_number=101,
+            gap_id=WINDOWS_SIGNED_INSTALLER_GAP_ID,
+            name="Windows signed installer",
+            package_payload=dict(package_readiness.get("windows_signed_installer", {})),
+            internal_evidence_refs=[
+                "release-manifest.package_readiness.windows_signed_installer.windows_signing_evidence_manifest_hash",
+                "release-manifest.package_readiness.windows_signed_installer.windows_installer_workflow_manifest_hash",
+                "release-manifest.package_readiness.windows_signed_installer.windows_signing_report_grade_validation_plan_hash",
+                "packaging-plan.json.local_outputs.portable_zip.windows_portable_mode_manifest_hash",
+            ],
+            release_outputs=["rapidtriage-portable.zip", "future rapidtriage-installer.msi", "future rapidtriage-setup.exe"],
+            required_external_evidence=[
+                "MSI/EXE wrapper build log",
+                "Authenticode signature verification",
+                "trusted timestamp proof",
+                "fresh Windows smoke output",
+            ],
+        ),
+        build_deployment_readiness_row(
+            item_number=102,
+            gap_id=MACOS_NOTARIZED_PACKAGE_GAP_ID,
+            name="macOS notarized package",
+            package_payload=dict(package_readiness.get("macos_notarized_package", {})),
+            internal_evidence_refs=[
+                "release-manifest.package_readiness.macos_notarized_package.macos_notarization_evidence_manifest_hash",
+                "release-manifest.package_readiness.macos_notarized_package.macos_package_workflow_manifest_hash",
+                "release-manifest.package_readiness.macos_notarized_package.macos_notarization_report_grade_validation_plan_hash",
+            ],
+            release_outputs=["rapidtriage-portable.zip", "future rapidtriage.pkg", "future rapidtriage.dmg"],
+            required_external_evidence=[
+                "pkg/dmg wrapper build log",
+                "codesign verification",
+                "Apple notarytool submission/ticket proof",
+                "Gatekeeper assessment",
+                "fresh macOS smoke output",
+            ],
+        ),
+        build_deployment_readiness_row(
+            item_number=103,
+            gap_id=LINUX_PACKAGE_GAP_ID,
+            name="Linux deb/rpm/AppImage package",
+            package_payload=dict(package_readiness.get("linux_package", {})),
+            internal_evidence_refs=[
+                "release-manifest.package_readiness.linux_package.linux_package_evidence_manifest_hash",
+                "release-manifest.package_readiness.linux_package.linux_package_workflow_manifest_hash",
+                "release-manifest.package_readiness.linux_package.linux_package_report_grade_validation_plan_hash",
+            ],
+            release_outputs=[
+                "rapidtriage-portable.zip",
+                "future rapidtriage.deb",
+                "future rapidtriage.rpm",
+                "future RapidTriage.AppImage",
+            ],
+            required_external_evidence=[
+                "deb/rpm/AppImage build logs",
+                "clean-container build transcript",
+                "dependency resolution proof",
+                "install/uninstall smoke output",
+            ],
+        ),
+        build_deployment_readiness_row(
+            item_number=104,
+            gap_id=AUTO_UPDATE_CHANNEL_GAP_ID,
+            name="Signed auto-update channel",
+            package_payload=dict(package_readiness.get("auto_update_channel", {})),
+            internal_evidence_refs=[
+                "update-manifest.auto_update_evidence_manifest_hash",
+                "update-manifest.auto_update_report_grade_validation_plan_hash",
+                "release-manifest.package_readiness.auto_update_channel.evidence_slot_matrix_hash",
+            ],
+            release_outputs=["update-manifest.json", "future hosted signed update channel"],
+            required_external_evidence=[
+                "signed update manifest",
+                "hosted TLS update channel proof",
+                "rollback test transcript",
+                "enterprise-disable smoke output",
+                "release artifact signatures",
+            ],
+        ),
+    ]
+    file_hashes = {
+        "packaging_plan_json": release_file_hash_entry(output_dir / "packaging-plan.json"),
+        "packaging_plan_markdown": release_file_hash_entry(output_dir / "packaging-plan.md"),
+        "update_manifest": release_file_hash_entry(output_dir / "update-manifest.json"),
+        "commercial_readiness": release_file_hash_entry(output_dir / "rapidtriage-commercial-readiness.json"),
+    }
+    clean_machine_smoke_profile = build_clean_machine_smoke_profile(repo)
+    external_blockers = sorted_unique_strings(
+        [
+            *[blocker for row in rows for blocker in row["external_blockers"]],
+            *[blocker for platform_row in clean_machine_smoke_profile["rows"] for blocker in platform_row["blockers"]],
+        ]
+    )
+    matrix_core: dict[str, object] = {
+        "profile_version": DEPLOYMENT_READINESS_MANIFEST_VERSION,
+        "item_numbers": [101, 102, 103, 104],
+        "commercial_gap_ids": DEPLOYMENT_READINESS_GAP_IDS,
+        "commercial_claim_allowed": False,
+        "row_count": len(rows),
+        "implemented_count": sum(1 for row in rows if row["implemented"]),
+        "usable_count": sum(1 for row in rows if row["usable"]),
+        "internal_validated_count": sum(1 for row in rows if row["internal_validated"]),
+        "commercial_grade_count": sum(1 for row in rows if row["commercial_grade"]),
+        "external_evidence_required_count": sum(1 for row in rows if row["external_blockers"]),
+        "rows": rows,
+        "release_artifact_hashes": artifacts,
+        "release_artifact_hash_set_hash": stable_release_sha256(artifacts),
+        "file_hashes": file_hashes,
+        "file_hash_set_hash": stable_release_sha256(file_hashes),
+        "clean_machine_smoke_profile": clean_machine_smoke_profile,
+        "clean_machine_smoke_profile_hash": clean_machine_smoke_profile["profile_hash"],
+        "update_manifest_hash": update_manifest_payload.get("auto_update_evidence_manifest_hash"),
+        "external_blocker_count": len(external_blockers),
+        "external_blockers": external_blockers,
+        "verification_commands": [
+            "python scripts/build-release.py --output-dir release --skip-build",
+            "python scripts/build-release.py --output-dir release --verify",
+            "python scripts/verify-release-evidence.py --help",
+            "powershell -ExecutionPolicy Bypass -File scripts/windows/smoke-test-rapidtriage.ps1",
+            "bash scripts/smoke-test-rapidtriage.sh",
+            "python scripts/summarize-smoke.py <smoke-output-dir>",
+        ],
+        "reporting_boundary": (
+            "This matrix proves internal release packaging readiness, hash linkage, and explicit evidence slots. "
+            "It does not claim commercial-grade signed/notarized/native packages until external signing, hosting, "
+            "and clean-machine smoke evidence is attached."
+        ),
+    }
+    manifest: dict[str, object] = {
+        "name": "rapidtriage-deployment-readiness",
+        "profile_version": DEPLOYMENT_READINESS_MANIFEST_VERSION,
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "matrix": matrix_core,
+    }
+    manifest["matrix_hash"] = stable_release_sha256(matrix_core)
+    manifest["manifest_hash"] = stable_release_sha256(manifest)
+    return manifest
+
+
 def write_release_manifest(output_dir: Path, repo: Path, commercial_readiness: dict[str, object] | None = None) -> None:
     admin_guide_coverage_manifest = build_admin_guide_coverage_manifest(repo, output_dir)
     (output_dir / "admin-guide-coverage-manifest.json").write_text(
@@ -3264,6 +3565,48 @@ def write_release_manifest(output_dir: Path, repo: Path, commercial_readiness: d
             "macOS codesign/notarization/Gatekeeper verification when distributing app packages",
         ],
     }
+    deployment_readiness_manifest = build_deployment_readiness_manifest(
+        repo=repo,
+        output_dir=output_dir,
+        artifacts=artifacts,
+        package_readiness=manifest["package_readiness"],
+        update_manifest_payload=update_manifest_payload,
+    )
+    deployment_readiness_path = output_dir / "deployment-readiness-manifest.json"
+    deployment_readiness_path.write_text(
+        json.dumps(deployment_readiness_manifest, indent=2, ensure_ascii=False) + "\n",
+        encoding="utf-8",
+    )
+    deployment_readiness_artifact = release_artifact_hash_entry(deployment_readiness_path)
+    manifest["artifacts"].append(deployment_readiness_artifact)
+    manifest["deployment_readiness_manifest"] = {
+        "path": "deployment-readiness-manifest.json",
+        "profile_version": DEPLOYMENT_READINESS_MANIFEST_VERSION,
+        "manifest_hash": deployment_readiness_manifest["manifest_hash"],
+        "matrix_hash": deployment_readiness_manifest["matrix_hash"],
+        "file_sha256": deployment_readiness_artifact["sha256"],
+    }
+    manifest["deployment_readiness_manifest_hash"] = deployment_readiness_manifest["manifest_hash"]
+    manifest["deployment_readiness_matrix_hash"] = deployment_readiness_manifest["matrix_hash"]
+    manifest["package_readiness"]["deployment_readiness"] = {
+        "status": "implemented-usable-internal-validated-external-evidence-required",
+        "commercial_gap_ids": DEPLOYMENT_READINESS_GAP_IDS,
+        "manifest": "deployment-readiness-manifest.json",
+        "manifest_hash": deployment_readiness_manifest["manifest_hash"],
+        "matrix_hash": deployment_readiness_manifest["matrix_hash"],
+        "row_count": deployment_readiness_manifest["matrix"]["row_count"],
+        "implemented_count": deployment_readiness_manifest["matrix"]["implemented_count"],
+        "usable_count": deployment_readiness_manifest["matrix"]["usable_count"],
+        "internal_validated_count": deployment_readiness_manifest["matrix"]["internal_validated_count"],
+        "commercial_grade_count": deployment_readiness_manifest["matrix"]["commercial_grade_count"],
+        "clean_machine_smoke_profile_hash": deployment_readiness_manifest["matrix"][
+            "clean_machine_smoke_profile_hash"
+        ],
+        "blockers": deployment_readiness_manifest["matrix"]["external_blockers"],
+    }
+    manifest["required_followup_evidence"].append(
+        "deployment-readiness-manifest.json external signing, notarization, hosting, and clean-machine smoke slots"
+    )
     manifest_path = output_dir / "release-manifest.json"
     manifest_path.write_text(json.dumps(manifest, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
 

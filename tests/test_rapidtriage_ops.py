@@ -5577,6 +5577,7 @@ class RapidTriageOpsTests(unittest.TestCase):
             self.assertTrue((output_dir / "update-manifest.json").is_file())
             self.assertTrue((output_dir / "packaging-plan.json").is_file())
             self.assertTrue((output_dir / "packaging-plan.md").is_file())
+            self.assertTrue((output_dir / "deployment-readiness-manifest.json").is_file())
             self.assertTrue((output_dir / "rapidtriage-commercial-readiness.json").is_file())
             self.assertTrue((output_dir / "rapidtriage-commercial-readiness.md").is_file())
             with zipfile.ZipFile(output_dir / "rapidtriage-portable.zip") as archive:
@@ -5610,14 +5611,65 @@ class RapidTriageOpsTests(unittest.TestCase):
             self.assertIn("release-manifest.json", checksums)
             self.assertIn("update-manifest.json", checksums)
             self.assertIn("packaging-plan.json", checksums)
+            self.assertIn("deployment-readiness-manifest.json", checksums)
             self.assertIn("rapidtriage-commercial-readiness.json", checksums)
             manifest = json.loads((output_dir / "release-manifest.json").read_text(encoding="utf-8"))
+            deployment_readiness = json.loads(
+                (output_dir / "deployment-readiness-manifest.json").read_text(encoding="utf-8")
+            )
             artifact_names = {item["name"] for item in manifest["artifacts"]}
             self.assertIn("rapidtriage-portable.zip", artifact_names)
+            self.assertIn("deployment-readiness-manifest.json", artifact_names)
             self.assertEqual(manifest["commercial_readiness"]["status"], "commercial-gaps-present")
             self.assertFalse(manifest["commercial_readiness"]["commercial_claim_allowed"])
             self.assertIn("#101", manifest["commercialization_gap_ids"])
             self.assertIn("#120", manifest["commercialization_gap_ids"])
+            self.assertEqual(
+                deployment_readiness["profile_version"],
+                "deployment-readiness-matrix-v1",
+            )
+            self.assertEqual(deployment_readiness["matrix"]["item_numbers"], [101, 102, 103, 104])
+            self.assertEqual(deployment_readiness["matrix"]["row_count"], 4)
+            self.assertEqual(deployment_readiness["matrix"]["implemented_count"], 4)
+            self.assertEqual(deployment_readiness["matrix"]["usable_count"], 4)
+            self.assertEqual(deployment_readiness["matrix"]["internal_validated_count"], 4)
+            self.assertEqual(deployment_readiness["matrix"]["commercial_grade_count"], 0)
+            self.assertEqual(len(deployment_readiness["manifest_hash"]), 64)
+            self.assertEqual(len(deployment_readiness["matrix_hash"]), 64)
+            self.assertEqual(
+                manifest["deployment_readiness_manifest_hash"],
+                deployment_readiness["manifest_hash"],
+            )
+            self.assertEqual(
+                manifest["deployment_readiness_matrix_hash"],
+                deployment_readiness["matrix_hash"],
+            )
+            self.assertEqual(
+                manifest["deployment_readiness_manifest"]["file_sha256"],
+                hashlib.sha256((output_dir / "deployment-readiness-manifest.json").read_bytes()).hexdigest(),
+            )
+            self.assertEqual(
+                manifest["package_readiness"]["deployment_readiness"]["status"],
+                "implemented-usable-internal-validated-external-evidence-required",
+            )
+            self.assertEqual(
+                manifest["package_readiness"]["deployment_readiness"]["commercial_gap_ids"],
+                ["#101", "#102", "#103", "#104"],
+            )
+            self.assertEqual(
+                manifest["package_readiness"]["deployment_readiness"]["matrix_hash"],
+                deployment_readiness["matrix_hash"],
+            )
+            deployment_blockers = set(deployment_readiness["matrix"]["external_blockers"])
+            self.assertIn("authenticode-signature-required", deployment_blockers)
+            self.assertIn("notarytool-submission-proof-required", deployment_blockers)
+            self.assertIn("deb-build-log-required", deployment_blockers)
+            self.assertIn("signed-update-manifest-required", deployment_blockers)
+            clean_smoke = deployment_readiness["matrix"]["clean_machine_smoke_profile"]
+            self.assertEqual(clean_smoke["profile_version"], "clean-machine-smoke-profile-v1")
+            self.assertEqual(clean_smoke["platform_count"], 3)
+            self.assertEqual(clean_smoke["external_evidence_required_count"], 3)
+            self.assertTrue(all(row["scripts_packaged_by_portable_zip"] for row in clean_smoke["rows"]))
             self.assertIn("#101", manifest["package_readiness"]["windows_signed_installer"]["commercial_gap_ids"])
             self.assertEqual(manifest["package_readiness"]["windows_signed_installer"]["core_accuracy_gates"][0]["gap_id"], "#101")
             windows_signing_manifest = manifest["package_readiness"]["windows_signed_installer"][
