@@ -3703,6 +3703,170 @@ def execution_artifact_validation_profile(
     }
 
 
+def execution_native_depth_family(artifact_type: str) -> str:
+    if artifact_type in {"amcache-entry", "amcache-hive"}:
+        return "amcache"
+    if artifact_type == "shimcache-entry":
+        return "shimcache-appcompatcache"
+    if artifact_type == "bam-entry":
+        return "bam-dam"
+    if artifact_type.startswith("srum-"):
+        return "srum"
+    return "windows-execution"
+
+
+def execution_native_depth_level(artifact_type: str, source_format: str) -> str:
+    if source_format == "reg":
+        return "registry-export-mapping"
+    if artifact_type == "amcache-hive" or source_format == "amcache-hive":
+        return "native-amcache-hive-string-pivot"
+    if "shimcache" in source_format:
+        return "native-system-hive-appcompatcache-string-pivot"
+    if "bam-dam" in source_format:
+        return "native-system-hive-bam-dam-string-pivot"
+    if artifact_type.startswith("srum-"):
+        if "native" in source_format or "srudb" in source_format or "database" in artifact_type:
+            return "native-srudb-ese-header-string-pivot"
+        return "source-tool-export-normalization"
+    return "source-specific-execution-pivot"
+
+
+def execution_native_depth_blockers(artifact_family: str, validation_checks: Mapping[str, object]) -> list[str]:
+    blockers = {"execution-artifact-trusted-diff-required", "known-answer-execution-artifact-validation-required"}
+    if artifact_family == "amcache" and not EXECUTION_NATIVE_CAPABILITIES["native_amcache_schema_decode"]:
+        blockers.add("native-amcache-schema-decoding-required")
+    if artifact_family == "shimcache-appcompatcache" and not EXECUTION_NATIVE_CAPABILITIES["native_shimcache_binary_decode"]:
+        blockers.add("native-appcompatcache-layout-decoding-required")
+    if artifact_family == "bam-dam" and not EXECUTION_NATIVE_CAPABILITIES["native_bam_system_hive_decode"]:
+        blockers.add("native-system-hive-bam-decoding-required")
+    if artifact_family == "srum":
+        if not EXECUTION_NATIVE_CAPABILITIES["native_ese_catalog_decode"]:
+            blockers.add("native-ese-catalog-decoding-required")
+        if not EXECUTION_NATIVE_CAPABILITIES["native_srum_page_row_decode"]:
+            blockers.add("native-ese-page-row-decoding-required")
+    if validation_checks.get("requires_second_parser_validation") or validation_checks.get("requires_srum_parser"):
+        blockers.add("trusted-tool-row-diff-required")
+    if validation_checks.get("requires_correlation"):
+        blockers.add("cross-artifact-correlation-required")
+    return sorted(blockers)
+
+
+def execution_native_depth_requirements(artifact_family: str) -> list[str]:
+    requirements = {
+        "amcache": [
+            "map Windows build-specific Amcache.hve schema families",
+            "decode InventoryApplicationFile/InventoryApplication row fields natively",
+            "validate path, SHA1, publisher, timestamp semantics against AmcacheParser or known-answer fixtures",
+        ],
+        "shimcache-appcompatcache": [
+            "select AppCompatCache binary layout by Windows build",
+            "preserve cache order and not-proof-of-execution warning",
+            "validate decoded entries against AppCompatCacheParser/RECmd output",
+        ],
+        "bam-dam": [
+            "decode SYSTEM hive BAM/DAM binary values by ControlSet and Windows build",
+            "validate SID, device path, FILETIME, and source offsets",
+            "correlate recent-execution claims with Prefetch, SRUM, UserAssist, or Event Logs",
+        ],
+        "srum": [
+            "decode ESE catalog, table pages, and tagged columns",
+            "map SRUM table GUIDs by Windows build",
+            "validate app/user/timestamp/counter semantics against SrumECmd or libesedb fixtures",
+        ],
+    }
+    return requirements.get(artifact_family, ["validate source-specific execution artifact semantics"])
+
+
+def execution_native_depth_profile(
+    *,
+    artifact_type: str,
+    source_format: str,
+    validation_checks: Mapping[str, object],
+    report_grade: Mapping[str, object],
+    evidence_fields: Mapping[str, object],
+) -> dict[str, object]:
+    artifact_family = execution_native_depth_family(artifact_type)
+    normalized_type = "amcache-entry" if artifact_type == "amcache-hive" else artifact_type
+    validation_matrix = execution_validation_matrix(validation_checks)
+    reportability_decision = execution_reportability_decision(
+        artifact_type=normalized_type,
+        artifact_scope=source_format or artifact_type,
+        report_grade=report_grade,
+        validation_checks=validation_checks,
+    )
+    profile: dict[str, object] = {
+        "profile_version": "windows-execution-native-depth-profile-v1",
+        "commercial_batch_id": "commercial-uplift-006-010",
+        "artifact_type": artifact_type,
+        "artifact_family": artifact_family,
+        "source_format": source_format,
+        "current_decode_level": execution_native_depth_level(artifact_type, source_format),
+        "commercial_gap_ids": execution_gap_ids(artifact_type),
+        "qc_prep_item_number": QC_PREP_EXECUTION_ITEM_NUMBERS.get(
+            artifact_type,
+            25 if artifact_type.startswith("srum-") else 0,
+        ),
+        "source_locator": {
+            "source_path": str(evidence_fields.get("source_path") or ""),
+            "source_key": str(evidence_fields.get("source_key") or ""),
+            "source_index": evidence_fields.get("source_index", ""),
+            "source_offset": evidence_fields.get("source_offset", ""),
+            "source_sha256": str(evidence_fields.get("source_sha256") or ""),
+        },
+        "implemented_native_depth": {
+            "registry_export_mapping": source_format == "reg",
+            "bounded_native_string_pivots": source_format != "reg" or artifact_type.startswith("srum-"),
+            "stable_row_or_citation_manifest": bool(
+                evidence_fields.get("amcache_row_manifest_hash")
+                or evidence_fields.get("shimcache_row_manifest_hash")
+                or evidence_fields.get("bam_dam_row_manifest_hash")
+                or evidence_fields.get("srum_report_citation_manifest_hash")
+            ),
+            "timestamp_semantics_labeled": bool(evidence_fields.get("timestamp") or evidence_fields.get("timestamp_source")),
+            "source_offset_preserved": evidence_fields.get("source_offset") not in ("", None),
+            "native_schema_or_layout_decode": (
+                bool(EXECUTION_NATIVE_CAPABILITIES["native_amcache_schema_decode"])
+                if artifact_family == "amcache"
+                else bool(EXECUTION_NATIVE_CAPABILITIES["native_shimcache_binary_decode"])
+                if artifact_family == "shimcache-appcompatcache"
+                else bool(EXECUTION_NATIVE_CAPABILITIES["native_bam_system_hive_decode"])
+                if artifact_family == "bam-dam"
+                else bool(EXECUTION_NATIVE_CAPABILITIES["native_srum_page_row_decode"])
+                if artifact_family == "srum"
+                else False
+            ),
+        },
+        "os_version_native_requirements": execution_native_depth_requirements(artifact_family),
+        "trusted_diff_contract": {
+            "trusted_tools": list(EXECUTION_TRUSTED_TOOL_HINTS),
+            "required_fields": execution_diff_required_fields(artifact_family),
+            "compare_fields": list(EXECUTION_DIFF_COMPARE_FIELDS),
+            "row_level_diff_required": True,
+        },
+        "validation_summary": {
+            "passed_validation_matrix_ids": [
+                str(item.get("id")) for item in validation_matrix if isinstance(item, Mapping) and item.get("passed")
+            ],
+            "failed_validation_matrix_ids": [
+                str(item.get("id")) for item in validation_matrix if isinstance(item, Mapping) and not item.get("passed")
+            ],
+            "report_grade_status": str(report_grade.get("status") or ""),
+        },
+        "blocked_native_decode_gates": execution_native_depth_blockers(artifact_family, validation_checks),
+        "reportability_decision": reportability_decision,
+        "commercial_grade_ready": False,
+        "next_validation_steps": [
+            "attach trusted parser or known-answer row diff output",
+            "retain parser version, source hash, source locator, and timestamp semantics in every report citation",
+            "promote to commercial-grade only after OS-version native decode and broad fixture validation pass",
+        ],
+    }
+    profile["profile_sha256"] = stable_execution_json_sha256(
+        {key: value for key, value in profile.items() if key != "profile_sha256"}
+    )
+    return profile
+
+
 def execution_analyst_review_profile(
     *,
     artifact_type: str,
@@ -3739,6 +3903,13 @@ def execution_analyst_review_profile(
         | {"execution-artifact-trusted-diff-required"}
     )
     failed_checks = sorted(str(key) for key, value in validation_checks.items() if not bool(value))
+    native_depth_profile = execution_native_depth_profile(
+        artifact_type=artifact_type,
+        source_format=source_format,
+        validation_checks=validation_checks,
+        report_grade=report_grade,
+        evidence_fields=evidence_fields,
+    )
     return {
         "profile_version": "execution-analyst-review-profile-v1",
         "artifact_type": artifact_type,
@@ -3756,6 +3927,8 @@ def execution_analyst_review_profile(
         "failed_validation_checks": failed_checks,
         "report_grade_ready": bool(report_grade.get("report_grade_ready")),
         "commercial_blockers": blockers,
+        "native_depth_profile": native_depth_profile,
+        "native_depth_profile_hash": native_depth_profile["profile_sha256"],
         "report_guidance": (
             "Use this row as an execution/resource-usage review pivot. Final reporting requires source hash, "
             "timestamp semantics, parser limitation wording, and trusted parser or known-answer validation."

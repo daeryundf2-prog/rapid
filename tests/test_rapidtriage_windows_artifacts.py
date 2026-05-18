@@ -3062,6 +3062,21 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
             )
             self.assertIn("Prefetch", amcache_review_profile["correlation_targets"])
             self.assertIn("execution-artifact-trusted-diff-required", amcache_review_profile["commercial_blockers"])
+            amcache_native_depth = amcache_review_profile["native_depth_profile"]
+            self.assertEqual(
+                amcache_native_depth["profile_version"],
+                "windows-execution-native-depth-profile-v1",
+            )
+            self.assertEqual(amcache_native_depth["artifact_family"], "amcache")
+            self.assertEqual(amcache_native_depth["current_decode_level"], "registry-export-mapping")
+            self.assertEqual(amcache_native_depth["commercial_gap_ids"], ["#7"])
+            self.assertIn("sha1", amcache_native_depth["trusted_diff_contract"]["required_fields"])
+            self.assertIn(
+                "native-amcache-schema-decoding-required",
+                amcache_native_depth["blocked_native_decode_gates"],
+            )
+            self.assertEqual(amcache_review_profile["native_depth_profile_hash"], amcache_native_depth["profile_sha256"])
+            self.assertEqual(len(amcache_review_profile["native_depth_profile_hash"]), 64)
             amcache_gate = exported_amcache["details"]["core_accuracy_gates"][0]
             self.assertEqual(amcache_gate["gap_id"], "#7")
             self.assertIn("schema-version detection", amcache_gate["satisfied_checks"])
@@ -3179,6 +3194,12 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
             self.assertIn("SRUM", bam_review_profile["correlation_targets"])
             self.assertIn("bam-execution-indicator", bam_review_profile["risk_tags"])
             self.assertIn("native-system-hive-bam-decoding-required", bam_review_profile["commercial_blockers"])
+            bam_native_depth = bam_review_profile["native_depth_profile"]
+            self.assertEqual(bam_native_depth["artifact_family"], "bam-dam")
+            self.assertEqual(bam_native_depth["qc_prep_item_number"], 24)
+            self.assertIn("user_sid", bam_native_depth["trusted_diff_contract"]["required_fields"])
+            self.assertIn("native-system-hive-bam-decoding-required", bam_native_depth["blocked_native_decode_gates"])
+            self.assertFalse(bam_native_depth["implemented_native_depth"]["native_schema_or_layout_decode"])
             bam_uplift = bam["details"]["commercial_uplift_evidence"]
             self.assertEqual(bam_uplift["item_numbers"], [9])
             self.assertEqual(bam_uplift["qc_prep_item_numbers"], [24])
@@ -3273,6 +3294,14 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
                 "native-appcompatcache-layout-decoding-required",
                 shimcache_review_profile["commercial_blockers"],
             )
+            shimcache_native_depth = shimcache_review_profile["native_depth_profile"]
+            self.assertEqual(shimcache_native_depth["artifact_family"], "shimcache-appcompatcache")
+            self.assertEqual(shimcache_native_depth["qc_prep_item_number"], 23)
+            self.assertIn("cache_order", shimcache_native_depth["trusted_diff_contract"]["required_fields"])
+            self.assertIn(
+                "native-appcompatcache-layout-decoding-required",
+                shimcache_native_depth["blocked_native_decode_gates"],
+            )
             shimcache_gate = shimcache["details"]["core_accuracy_gates"][0]
             self.assertEqual(shimcache_gate["gap_id"], "#8")
             self.assertIn("not-proof-of-execution warning", shimcache_gate["satisfied_checks"])
@@ -3350,6 +3379,11 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
             self.assertIn("DNS", srum_import_review_profile["correlation_targets"])
             self.assertTrue(srum_import_review_profile["validation_required"])
             self.assertIn("execution-artifact-trusted-diff-required", srum_import_review_profile["commercial_blockers"])
+            srum_import_native_depth = srum_import_review_profile["native_depth_profile"]
+            self.assertEqual(srum_import_native_depth["artifact_family"], "srum")
+            self.assertEqual(srum_import_native_depth["qc_prep_item_number"], 25)
+            self.assertIn("source_format", srum_import_native_depth["trusted_diff_contract"]["required_fields"])
+            self.assertIn("native-ese-page-row-decoding-required", srum_import_native_depth["blocked_native_decode_gates"])
             self.assertEqual(srum_database_rows[0]["details"]["source_path"], str(fixture.srum_db.resolve()))
             self.assertTrue(srum_database_rows[0]["details"]["ese_header"]["signature_valid"])
             self.assertTrue(srum_database_rows[0]["details"]["srum_database_evidence"]["ese_signature_valid"])
@@ -3440,6 +3474,14 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
             self.assertEqual(srum_row_review_profile["source_field_values"]["app_id"], "powershell.exe")
             self.assertGreaterEqual(srum_row_review_profile["source_field_values"]["source_offset"], 0)
             self.assertIn("native-ese-page-row-decoding-required", srum_row_review_profile["commercial_blockers"])
+            self.assertEqual(
+                srum_row_review_profile["native_depth_profile"]["current_decode_level"],
+                "source-tool-export-normalization",
+            )
+            self.assertIn(
+                "native-ese-catalog-decoding-required",
+                srum_row_review_profile["native_depth_profile"]["blocked_native_decode_gates"],
+            )
             self.assertTrue(srum_row_candidate["details"]["validation_checks"]["requires_srum_parser"])
             self.assertFalse(srum_row_candidate["details"]["commercial_grade_ready"])
             self.assertIn("native-ese-page-row-decoding-required", srum_row_candidate["details"]["commercial_grade_blockers"])
