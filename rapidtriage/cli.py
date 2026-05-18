@@ -1612,6 +1612,12 @@ def build_parser() -> argparse.ArgumentParser:
         default=DEFAULT_LARGE_CASE_P95_THRESHOLD_MS,
         help="Maximum accepted SQLite FTS benchmark query p95 in milliseconds",
     )
+    large_case_readiness.add_argument(
+        "--memory-cap-bytes",
+        type=int,
+        default=0,
+        help="Optional memory cap to record in the #72 large-case readiness matrix",
+    )
     large_case_readiness.add_argument("--output", help="Optional JSON output path")
     large_case_readiness.add_argument("--json", action="store_true", help="Print machine-readable JSON")
 
@@ -3218,6 +3224,7 @@ def main(argv=None) -> int:
                 benchmark_paths=[Path(path).expanduser().resolve() for path in args.benchmark],
                 keyword=args.keyword,
                 max_query_p95_ms=args.max_query_p95_ms,
+                memory_cap_bytes=args.memory_cap_bytes,
                 output=Path(args.output).expanduser().resolve() if args.output else None,
             )
         except (LargeCaseReadinessError, OSError, sqlite3.Error, json.JSONDecodeError) as exc:

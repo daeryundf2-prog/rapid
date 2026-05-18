@@ -11,11 +11,19 @@ from .benchmark import scale_label
 from .benchmark_fts import SQLITE_FTS_BENCHMARK_VERSION
 from .case_db import build_fts_query, case_db_fts_optimization_assessment, case_db_search_index_health
 from .docs import write_result
+from .large_case_controls import (
+    build_duplicate_grouping_contract,
+    build_hash_cache_persistence_contract,
+    build_memory_cap_contract,
+    build_parser_isolation_contract,
+)
 from .search_backend import build_search_backend_contract, stable_backend_sha256
 
 
 LARGE_CASE_READINESS_VERSION = "large-case-readiness-v1"
-LARGE_CASE_READINESS_ITEM_NUMBERS = [66, 67, 74, 78, 79]
+LARGE_SCALE_PERFORMANCE_MATRIX_VERSION = "large-scale-performance-readiness-matrix-v1"
+LARGE_CASE_READINESS_ITEM_NUMBERS = list(range(66, 81))
+LARGE_SCALE_TARGET_RECORD_COUNTS = [100_000, 1_000_000, 10_000_000]
 DEFAULT_LARGE_CASE_P95_THRESHOLD_MS = 1_000.0
 CASE_DB_PROFILE_TABLES = [
     "case_record",
@@ -44,6 +52,7 @@ def build_large_case_readiness_report(
     benchmark_paths: Sequence[Path] | None = None,
     keyword: str = "needle",
     max_query_p95_ms: float = DEFAULT_LARGE_CASE_P95_THRESHOLD_MS,
+    memory_cap_bytes: int = 0,
     output: Path | None = None,
 ) -> dict[str, object]:
     normalized_keyword = keyword.strip() or "needle"
@@ -60,6 +69,13 @@ def build_large_case_readiness_report(
         benchmarks=benchmarks,
         case_db_profile=case_db_profile,
         max_query_p95_ms=max_query_p95_ms,
+    )
+    large_scale_matrix = build_large_scale_performance_matrix(
+        benchmarks=benchmarks,
+        case_db_profile=case_db_profile,
+        checks=checks,
+        max_query_p95_ms=max_query_p95_ms,
+        memory_cap_bytes=memory_cap_bytes,
     )
     failed_checks = [check for check in checks if not check["passed"]]
     record_counts = [int(item["metrics"]["record_count"]) for item in benchmarks]
@@ -83,11 +99,13 @@ def build_large_case_readiness_report(
         "options": {
             "keyword": normalized_keyword,
             "max_query_p95_ms": float(max_query_p95_ms),
+            "memory_cap_bytes": int(memory_cap_bytes or 0),
         },
         "summary": {
             "check_count": len(checks),
             "passed_check_count": len(checks) - len(failed_checks),
             "failed_check_count": len(failed_checks),
+            "supported_backlog_items": list(LARGE_CASE_READINESS_ITEM_NUMBERS),
             "largest_benchmark_record_count": max(record_counts) if record_counts else 0,
             "benchmark_count": len(benchmarks),
             "case_db_attached": bool(case_db_profile.get("attached")),
@@ -124,8 +142,16 @@ def build_large_case_readiness_report(
                 or ""
             ),
             "commercial_blocker_count": len(large_case_commercial_blockers(record_counts)),
+            "large_scale_item_count": large_scale_matrix["summary"]["item_count"],
+            "large_scale_usable_count": large_scale_matrix["summary"]["usable_count"],
+            "large_scale_validated_count": large_scale_matrix["summary"]["validated_count"],
+            "large_scale_external_evidence_required_count": large_scale_matrix["summary"][
+                "external_evidence_required_count"
+            ],
+            "large_scale_matrix_hash": large_scale_matrix["matrix_hash"],
         },
         "checks": checks,
+        "large_scale_performance_matrix": large_scale_matrix,
         "benchmarks": benchmarks,
         "case_db_profile": case_db_profile,
         "search_backend_contract": search_contract,
@@ -607,6 +633,388 @@ def build_large_case_checks(
             ],
         ),
     ]
+
+
+def build_large_scale_performance_matrix(
+    *,
+    benchmarks: Sequence[Mapping[str, object]],
+    case_db_profile: Mapping[str, object],
+    checks: Sequence[Mapping[str, object]],
+    max_query_p95_ms: float,
+    memory_cap_bytes: int = 0,
+) -> dict[str, object]:
+    check_passed = {str(item.get("id")): bool(item.get("passed")) for item in checks}
+    record_counts = [int(item.get("record_count") or 0) for item in benchmarks]
+    covered_targets = [
+        {
+            "label": scale_label(target),
+            "target_record_count": target,
+            "covered": any(count >= target for count in record_counts),
+        }
+        for target in LARGE_SCALE_TARGET_RECORD_COUNTS
+    ]
+    fts_assessment = (
+        case_db_profile.get("case_db_fts_optimization")
+        if isinstance(case_db_profile.get("case_db_fts_optimization"), Mapping)
+        else {}
+    )
+    search_diagnostics = (
+        case_db_profile.get("search_diagnostics")
+        if isinstance(case_db_profile.get("search_diagnostics"), Mapping)
+        else {}
+    )
+    cursor_diagnostics = (
+        search_diagnostics.get("cursor_diagnostics")
+        if isinstance(search_diagnostics.get("cursor_diagnostics"), Mapping)
+        else {}
+    )
+    search_index_health = (
+        case_db_profile.get("search_index_health")
+        if isinstance(case_db_profile.get("search_index_health"), Mapping)
+        else {}
+    )
+    hash_cache_contract = build_hash_cache_persistence_contract()
+    duplicate_contract = build_duplicate_grouping_contract()
+    parser_isolation_contract = build_parser_isolation_contract()
+    memory_cap_contract = build_memory_cap_contract(requested_cap_bytes=memory_cap_bytes)
+
+    benchmark_validated = (
+        check_passed.get("sqlite-fts-benchmark-attached", False)
+        and check_passed.get("benchmark-known-answer-counts-match", False)
+        and check_passed.get("benchmark-query-p95-under-threshold", False)
+    )
+    case_db_search_ready = bool(search_diagnostics.get("ready"))
+    cursor_ready = bool(cursor_diagnostics.get("ready"))
+    search_index_ready = bool(search_index_health.get("ready_for_large_case_search"))
+    fts_ready = bool(fts_assessment.get("ready_for_large_case_search") or case_db_search_ready)
+
+    items = [
+        large_scale_performance_item_row(
+            66,
+            "100k/1M/10M benchmark gate",
+            implemented_controls=[
+                "sqlite-fts-benchmark command",
+                "deterministic known-answer hit count",
+                "query p50/p95 latency samples",
+                "scale target coverage matrix",
+            ],
+            validation_evidence=[
+                f"benchmark_count={len(benchmarks)}",
+                f"largest_benchmark_record_count={max(record_counts) if record_counts else 0}",
+                f"max_query_p95_ms={float(max_query_p95_ms):g}",
+            ],
+            blockers=missing_large_scale_target_blockers(record_counts)
+            + ["representative-release-hardware-benchmark-matrix-required"],
+            usable=bool(benchmarks),
+            validated=benchmark_validated,
+        ),
+        large_scale_performance_item_row(
+            67,
+            "1TB-10TB stress runbook and evidence slots",
+            implemented_controls=[
+                "stress-plan command",
+                "hardware-scale evidence manifest",
+                "resource cap and failure-threshold checklist",
+            ],
+            validation_evidence=["runbook-generation-supported"],
+            blockers=[
+                "attach-actual-1tb-5tb-10tb-run-logs",
+                "attach-memory-p95-latency-and-failure-threshold-telemetry",
+            ],
+            usable=True,
+            validated=False,
+        ),
+        large_scale_performance_item_row(
+            68,
+            "Incremental indexing and stage reuse",
+            implemented_controls=[
+                "case search index health gate",
+                "resume-aware workflow outputs",
+                "hash/fingerprint invalidation contract",
+            ],
+            validation_evidence=[
+                f"search_index_health={search_index_health.get('status') or 'not-attached'}",
+                str(search_index_health.get("profile_hash") or ""),
+            ],
+            blockers=[
+                "large-real-case-stage-reuse-benchmark-required",
+                "content-hash-complete-incremental-indexing-diff-required",
+            ],
+            usable=True,
+            validated=search_index_ready,
+        ),
+        large_scale_performance_item_row(
+            69,
+            "Background job queue",
+            implemented_controls=[
+                "RunJobStore local queue",
+                "persisted job transition log",
+                "job step state model",
+            ],
+            validation_evidence=["/api/runs submit/status route family", "job_queue_assessment emitted per run"],
+            blockers=[
+                "parser-level-progress-percent-under-load-required",
+                "distributed-or-multi-worker-transition-log-diff-required",
+            ],
+            usable=True,
+            validated=False,
+        ),
+        large_scale_performance_item_row(
+            70,
+            "Checkpoint and resume",
+            implemented_controls=[
+                "run --resume option",
+                "stage output reuse policy",
+                "E01/hash checkpoint options",
+            ],
+            validation_evidence=["checkpoint-capable commands are exposed"],
+            blockers=[
+                "mid-parser-resume-fixture-required",
+                "failed-stage-only-resume-replay-log-required",
+            ],
+            usable=True,
+            validated=False,
+        ),
+        large_scale_performance_item_row(
+            71,
+            "Parser crash isolation",
+            implemented_controls=[
+                "local crash report writer",
+                "redacted crash export bundle",
+                "parser isolation contract",
+            ],
+            validation_evidence=[
+                parser_isolation_contract["contract_hash"],
+                "crash reports are local-only and exportable",
+            ],
+            blockers=list(parser_isolation_contract["commercial_blockers"]),
+            usable=True,
+            validated=False,
+        ),
+        large_scale_performance_item_row(
+            72,
+            "Memory cap enforcement",
+            implemented_controls=[
+                "RunRequest.memory_cap_bytes",
+                "memory-cap contract",
+                "stage telemetry expectation",
+            ],
+            validation_evidence=[
+                memory_cap_contract["contract_hash"],
+                f"requested_cap_bytes={int(memory_cap_bytes or 0)}",
+            ],
+            blockers=list(memory_cap_contract["commercial_blockers"]),
+            usable=True,
+            validated=False,
+        ),
+        large_scale_performance_item_row(
+            73,
+            "Preview sandboxing",
+            implemented_controls=[
+                "bounded source preview",
+                "viewer workflow validation",
+                "active-content blocking policy",
+            ],
+            validation_evidence=["source viewer routes require bounded preview/hex/table modes"],
+            blockers=[
+                "malicious-document-preview-corpus-required",
+                "renderer-sandbox-escape-regression-required",
+            ],
+            usable=True,
+            validated=False,
+        ),
+        large_scale_performance_item_row(
+            74,
+            "Large SQLite and FTS optimization",
+            implemented_controls=[
+                "SQLite FTS benchmark",
+                "Case DB FTS table profile",
+                "EXPLAIN QUERY PLAN capture",
+                "search index health gate",
+            ],
+            validation_evidence=[
+                f"fts_ready={fts_ready}",
+                str(search_diagnostics.get("profile_hash") or ""),
+            ],
+            blockers=[
+                "trusted-query-plan-threshold-diff-required",
+                "million-row-real-case-latency-benchmark-required",
+            ],
+            usable=bool(benchmarks) or bool(case_db_profile.get("attached")),
+            validated=benchmark_validated and fts_ready,
+        ),
+        large_scale_performance_item_row(
+            75,
+            "Parallel parser scheduler",
+            implemented_controls=[
+                "bounded local worker pool",
+                "deterministic job transition ordering",
+                "parser stage status model",
+            ],
+            validation_evidence=["ThreadPoolExecutor-backed run queue"],
+            blockers=[
+                "cpu-io-quota-telemetry-required",
+                "deterministic-output-order-under-parallel-parser-load-required",
+            ],
+            usable=True,
+            validated=False,
+        ),
+        large_scale_performance_item_row(
+            76,
+            "File hash cache",
+            implemented_controls=[
+                "hash cache persistence contract",
+                "size/mtime/inode/device invalidation fields",
+                "path-disclosure-minimized snapshot",
+            ],
+            validation_evidence=[hash_cache_contract["contract_hash"]],
+            blockers=list(hash_cache_contract["commercial_blockers"]),
+            usable=True,
+            validated=False,
+        ),
+        large_scale_performance_item_row(
+            77,
+            "Duplicate file/content detection",
+            implemented_controls=[
+                "exact hash baseline",
+                "duplicate grouping contract",
+                "review collapse state requirements",
+            ],
+            validation_evidence=[duplicate_contract["contract_hash"]],
+            blockers=list(duplicate_contract["commercial_blockers"]),
+            usable=True,
+            validated=False,
+        ),
+        large_scale_performance_item_row(
+            78,
+            "Artifact pagination and cursor API",
+            implemented_controls=[
+                "case-db cursor diagnostics",
+                "stable page window hashes",
+                "next-offset evidence",
+            ],
+            validation_evidence=[
+                f"cursor_ready={cursor_ready}",
+                str(cursor_diagnostics.get("profile_hash") or ""),
+            ],
+            blockers=[
+                "cursor-api-regression-suite-for-search-timeline-report-required",
+                "browser-pagination-e2e-trace-required",
+            ],
+            usable=True,
+            validated=cursor_ready,
+        ),
+        large_scale_performance_item_row(
+            79,
+            "UI virtualization for massive result tables",
+            implemented_controls=[
+                "/api/workbench/large-result-evidence",
+                "bounded DOM row window contract",
+                "keyboard window navigation contract",
+            ],
+            validation_evidence=["large-result-ui-evidence-v1 endpoint available"],
+            blockers=[
+                "actual-browser-100k-run-required",
+                "memory-profile-and-p95-latency-required",
+            ],
+            usable=True,
+            validated=False,
+        ),
+        large_scale_performance_item_row(
+            80,
+            "Long-running job cancellation and retry",
+            implemented_controls=[
+                "run cancellation flag",
+                "retry lineage profile",
+                "partial output policy",
+            ],
+            validation_evidence=["cancellation_retry_assessment emitted per run"],
+            blockers=[
+                "cooperative-cancellation-load-validation-required",
+                "idempotent-retry-output-validation-required",
+            ],
+            usable=True,
+            validated=False,
+        ),
+    ]
+
+    commercial_blockers = sorted(
+        {blocker for item in items for blocker in item["commercial_grade_blockers"]}
+    )
+    core: dict[str, object] = {
+        "profile_version": LARGE_SCALE_PERFORMANCE_MATRIX_VERSION,
+        "item_numbers": list(LARGE_CASE_READINESS_ITEM_NUMBERS),
+        "scale_targets": covered_targets,
+        "summary": {
+            "item_count": len(items),
+            "usable_count": sum(bool(item["usable"]) for item in items),
+            "validated_count": sum(bool(item["validated"]) for item in items),
+            "external_evidence_required_count": sum(
+                bool(item["external_evidence_required"]) for item in items
+            ),
+            "commercial_blocker_count": len(commercial_blockers),
+            "covered_scale_target_count": sum(bool(item["covered"]) for item in covered_targets),
+            "case_db_attached": bool(case_db_profile.get("attached")),
+            "case_db_cursor_ready": cursor_ready,
+            "case_db_search_index_ready": search_index_ready,
+        },
+        "items": items,
+        "commercial_grade_blockers": commercial_blockers,
+        "reportability_decision": {
+            "commercial_claim_allowed": False,
+            "decision": "internal-controls-present-but-external-scale-evidence-required",
+            "required_before_claim": [
+                "attach 1M and 10M benchmark JSON generated on target hardware",
+                "attach 1TB/5TB/10TB stress logs with memory and p95 latency telemetry",
+                "attach browser virtualization trace and cursor API regression evidence",
+            ],
+        },
+    }
+    return {**core, "matrix_hash": stable_backend_sha256(core)}
+
+
+def large_scale_performance_item_row(
+    item_number: int,
+    title: str,
+    *,
+    implemented_controls: Sequence[str],
+    validation_evidence: Sequence[str],
+    blockers: Sequence[str],
+    usable: bool,
+    validated: bool,
+) -> dict[str, object]:
+    commercial_blockers = [str(item) for item in blockers if str(item)]
+    external_evidence_required = bool(commercial_blockers)
+    if validated and not external_evidence_required:
+        status = "validated"
+    elif validated:
+        status = "internal-validated-commercial-evidence-required"
+    elif usable:
+        status = "usable-internal-controls-external-evidence-required"
+    else:
+        status = "not-usable-yet"
+    row_core: dict[str, object] = {
+        "item_number": int(item_number),
+        "gap_id": f"#{int(item_number)}",
+        "title": title,
+        "status": status,
+        "usable": bool(usable),
+        "validated": bool(validated),
+        "external_evidence_required": external_evidence_required,
+        "commercial_grade_ready": bool(validated and not external_evidence_required),
+        "implemented_controls": list(implemented_controls),
+        "validation_evidence": [str(item) for item in validation_evidence if str(item)],
+        "commercial_grade_blockers": commercial_blockers,
+    }
+    return {**row_core, "row_hash": stable_backend_sha256(row_core)}
+
+
+def missing_large_scale_target_blockers(record_counts: Sequence[int]) -> list[str]:
+    blockers = []
+    for target in LARGE_SCALE_TARGET_RECORD_COUNTS:
+        if not any(int(count) >= target for count in record_counts):
+            blockers.append(f"attach-{scale_label(target).lower()}-record-sqlite-fts-benchmark-json")
+    return blockers
 
 
 def readiness_check(

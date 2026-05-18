@@ -12,6 +12,7 @@ from rapidtriage.core.benchmark_fts import run_sqlite_fts_benchmark
 from rapidtriage.core.case_db import CaseDatabase
 from rapidtriage.core.large_case_readiness import (
     LARGE_CASE_READINESS_ITEM_NUMBERS,
+    LARGE_SCALE_PERFORMANCE_MATRIX_VERSION,
     build_large_case_readiness_report,
 )
 
@@ -69,8 +70,10 @@ class RapidTriageLargeCaseReadinessTests(unittest.TestCase):
             self.assertTrue((root / "readiness.json").is_file())
             self.assertEqual(payload["profile_version"], "large-case-readiness-v1")
             self.assertEqual(payload["item_numbers"], LARGE_CASE_READINESS_ITEM_NUMBERS)
+            self.assertEqual(payload["item_numbers"], list(range(66, 81)))
             self.assertEqual(payload["summary"]["benchmark_count"], 1)
             self.assertEqual(payload["summary"]["largest_benchmark_record_count"], 100_000)
+            self.assertEqual(payload["summary"]["supported_backlog_items"], list(range(66, 81)))
             self.assertTrue(payload["case_db_profile"]["attached"])
             self.assertIn("artifact_fts", payload["case_db_profile"]["fts_tables"])
             self.assertTrue(payload["summary"]["case_db_search_diagnostics_ready"])
@@ -113,6 +116,27 @@ class RapidTriageLargeCaseReadinessTests(unittest.TestCase):
                 cursor_profiles["indexed_document_fts"]["page_two_rowids"],
             )
             self.assertRegex(payload["manifest_hash"], r"^[0-9a-f]{64}$")
+            matrix = payload["large_scale_performance_matrix"]
+            self.assertEqual(matrix["profile_version"], LARGE_SCALE_PERFORMANCE_MATRIX_VERSION)
+            self.assertEqual(matrix["item_numbers"], list(range(66, 81)))
+            self.assertEqual(matrix["summary"]["item_count"], 15)
+            self.assertEqual(payload["summary"]["large_scale_item_count"], 15)
+            self.assertEqual(payload["summary"]["large_scale_matrix_hash"], matrix["matrix_hash"])
+            self.assertEqual({item["item_number"] for item in matrix["items"]}, set(range(66, 81)))
+            self.assertRegex(matrix["matrix_hash"], r"^[0-9a-f]{64}$")
+            rows = {item["item_number"]: item for item in matrix["items"]}
+            self.assertTrue(rows[66]["validated"])
+            self.assertTrue(rows[68]["validated"])
+            self.assertTrue(rows[74]["validated"])
+            self.assertTrue(rows[78]["validated"])
+            self.assertTrue(rows[80]["usable"])
+            self.assertFalse(rows[80]["validated"])
+            self.assertEqual([item["label"] for item in matrix["scale_targets"]], ["100k", "1M", "10M"])
+            self.assertEqual([item["covered"] for item in matrix["scale_targets"]], [True, False, False])
+            self.assertIn(
+                "attach-10m-record-sqlite-fts-benchmark-json",
+                rows[66]["commercial_grade_blockers"],
+            )
             self.assertTrue(
                 any(check["id"] == "sqlite-fts-100k-or-higher" and check["passed"] for check in payload["checks"])
             )
@@ -130,6 +154,7 @@ class RapidTriageLargeCaseReadinessTests(unittest.TestCase):
         commands = parser._subparsers._group_actions[0].choices
         self.assertIn("large-case-readiness", commands)
         self.assertIn("--benchmark", commands["large-case-readiness"].format_help())
+        self.assertIn("--memory-cap-bytes", commands["large-case-readiness"].format_help())
 
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
@@ -157,6 +182,11 @@ class RapidTriageLargeCaseReadinessTests(unittest.TestCase):
         self.assertEqual(exit_code, 2)
         self.assertEqual(payload["command"], "large-case-readiness")
         self.assertEqual(payload["status"], "needs-large-case-evidence")
+        self.assertEqual(payload["large_scale_performance_matrix"]["summary"]["item_count"], 15)
+        self.assertIn(
+            "representative-release-hardware-benchmark-matrix-required",
+            payload["large_scale_performance_matrix"]["commercial_grade_blockers"],
+        )
         self.assertFalse(payload["summary"]["case_db_attached"])
         self.assertTrue(
             any(check["id"] == "case-db-attached" and not check["passed"] for check in payload["checks"])
