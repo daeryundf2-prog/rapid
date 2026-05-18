@@ -1764,24 +1764,44 @@ def mft_attribute_list_profile(record: Mapping[str, object]) -> dict[str, object
     attribute_types = list(record.get("attribute_types") or [])
     entries = [item for item in record.get("attribute_list_entries") or [] if isinstance(item, Mapping)]
     present = "$ATTRIBUTE_LIST" in attribute_types or bool(entries)
+    bounded_resolution = (
+        record.get("attribute_list_resolution")
+        if isinstance(record.get("attribute_list_resolution"), Mapping)
+        else {}
+    )
+    resolution_status = str(
+        bounded_resolution.get("resolution_status")
+        or ("extension-record-resolution-not-implemented" if present else "not-present-in-record")
+    )
+    resolved = resolution_status == "all-resolved-bounded-scan"
+    blockers = set(str(item) for item in bounded_resolution.get("blockers") or [])
+    if present:
+        blockers.update(
+            {
+                "mft-attribute-list-trusted-diff-required",
+                "mft-full-volume-attribute-list-resolution-required",
+            }
+        )
+    if present and not resolved:
+        blockers.add("mft-attribute-list-extension-record-resolution-required")
     return {
         "profile_version": "mft-attribute-list-v1",
         "present": present,
         "entry_count": len(entries),
         "entries": entries[:25],
-        "resolved": False,
-        "resolution_status": (
-            "extension-record-resolution-not-implemented"
-            if present
-            else "not-present-in-record"
-        ),
+        "resolved": resolved,
+        "resolution_status": resolution_status,
+        "bounded_resolution_profile": dict(bounded_resolution),
+        "resolved_entry_count": int(bounded_resolution.get("resolved_entry_count") or 0),
+        "unresolved_entry_count": int(bounded_resolution.get("unresolved_entry_count") or 0),
+        "trusted_diff_required": bool(present),
         "extension_record_references": [
             dict(item.get("extension_reference_decoded") or {})
             for item in entries
             if item.get("extension_reference_decoded")
         ][:25],
         "commercial_grade_ready": False,
-        "blockers": ["mft-attribute-list-extension-record-resolution-required"] if present else [],
+        "blockers": sorted(blockers),
     }
 
 
@@ -1920,7 +1940,13 @@ def mft_parser_depth_manifest(details: Mapping[str, object]) -> dict[str, object
             "has_attribute_list": bool(attribute_list_profile.get("present")),
             "attribute_list_entry_count": int(attribute_list_profile.get("entry_count") or 0),
             "attribute_list_resolution_available": bool(NTFS_FILESYSTEM_CAPABILITIES["mft_attribute_list_resolution"]),
+            "bounded_attribute_list_resolution_available": bool(attribute_list_profile.get("resolved")),
+            "bounded_attribute_list_resolved_entry_count": int(attribute_list_profile.get("resolved_entry_count") or 0),
+            "bounded_attribute_list_unresolved_entry_count": int(attribute_list_profile.get("unresolved_entry_count") or 0),
             "attribute_list_resolution_status": str(attribute_list_profile.get("resolution_status") or ""),
+            "attribute_list_resolution_profile_hash": ntfs_stable_sha256(
+                attribute_list_profile.get("bounded_resolution_profile") or {}
+            ),
             "attribute_list_blockers": list(attribute_list_profile.get("blockers") or []),
         },
         "data_run_decoding": {
@@ -1965,6 +1991,9 @@ def mft_parser_depth_manifest(details: Mapping[str, object]) -> dict[str, object
                 "kind": "mft-attribute-list",
                 "present": bool(attribute_list_profile.get("present")),
                 "resolution_status": str(attribute_list_profile.get("resolution_status") or ""),
+                "bounded_resolution_available": bool(attribute_list_profile.get("resolved")),
+                "resolved_entry_count": int(attribute_list_profile.get("resolved_entry_count") or 0),
+                "unresolved_entry_count": int(attribute_list_profile.get("unresolved_entry_count") or 0),
             },
             {
                 "kind": "mft-data-run-preview",
@@ -3780,6 +3809,11 @@ def ntfs_native_depth_readiness_profile(
 def mft_depth_components(details: Mapping[str, object], validation_checks: Mapping[str, object]) -> dict[str, bool]:
     data_attributes = [item for item in details.get("data_attributes") or [] if isinstance(item, Mapping)]
     path_profile = details.get("mft_path_reconstruction_profile") if isinstance(details.get("mft_path_reconstruction_profile"), Mapping) else {}
+    attribute_list_profile = (
+        details.get("mft_attribute_list_profile")
+        if isinstance(details.get("mft_attribute_list_profile"), Mapping)
+        else {}
+    )
     usa_fixup_application = (
         details.get("usa_fixup_application")
         if isinstance(details.get("usa_fixup_application"), Mapping)
@@ -3797,6 +3831,7 @@ def mft_depth_components(details: Mapping[str, object], validation_checks: Mappi
         "resident_data_hash": any(item.get("resident_data_hashes") for item in data_attributes),
         "nonresident_runlist_preview": any(item.get("runlist_preview") for item in data_attributes),
         "attribute_list_detect": "$ATTRIBUTE_LIST" in list(details.get("attribute_types") or []),
+        "bounded_attribute_list_resolution": bool(attribute_list_profile.get("resolved")),
         "attribute_list_resolution": bool(NTFS_FILESYSTEM_CAPABILITIES["mft_attribute_list_resolution"]),
         "full_parent_path_reconstruction": bool(NTFS_FILESYSTEM_CAPABILITIES["full_volume_path_reconstruction"]),
     }
@@ -3955,6 +3990,7 @@ def mft_full_parser_profile(artifact_scope: str, details: Mapping[str, object]) 
                 "USA sector trailer restoration before attribute decoding",
                 "STANDARD_INFORMATION and FILE_NAME attribute decoding",
                 "resident data hashing and nonresident runlist preview",
+                "bounded ATTRIBUTE_LIST extension-record resolution when base and extension records are in the same scan window",
                 "bounded parent path cache and source locator/citation",
                 "trusted MFTECmd/analyzeMFT-style record diff helper",
             ],
@@ -3963,6 +3999,7 @@ def mft_full_parser_profile(artifact_scope: str, details: Mapping[str, object]) 
                 "native MFT fixture record decode",
                 "USA sector trailer restoration before attribute decoding",
                 "attribute list detection without false resolution claim",
+                "bounded attribute-list extension record resolution in a synthetic two-record MFT fixture",
                 "nonresident runlist preview decode",
                 "trusted MFT diff pass and mismatch blocking",
             ],
@@ -3992,6 +4029,7 @@ def mft_full_parser_profile(artifact_scope: str, details: Mapping[str, object]) 
                 for item in list(details.get("data_attributes") or [])
             ),
             "attribute_list_detect": bool(attribute_list_profile.get("present")),
+            "bounded_attribute_list_resolution": bool(attribute_list_profile.get("resolved")),
             "attribute_list_resolution": bool(NTFS_FILESYSTEM_CAPABILITIES["mft_attribute_list_resolution"]),
             "full_parent_path_reconstruction": bool(NTFS_FILESYSTEM_CAPABILITIES["full_volume_path_reconstruction"]),
         },
@@ -4842,7 +4880,7 @@ def parse_mft_record_headers(blob: bytes) -> list[dict[str, object]]:
     while True:
         offset = blob.find(b"FILE", offset)
         if offset < 0:
-            return records
+            return enrich_mft_records_with_attribute_list_resolution(records)
         if offset + 48 <= len(blob):
             flags = int_from(blob, offset + 0x16, 2)
             allocated_size = int_from(blob, offset + 0x1C, 4)
@@ -4921,7 +4959,152 @@ def parse_mft_record_headers(blob: bytes) -> list[dict[str, object]]:
             )
         offset += 4
         if len(records) >= 5000:
-            return records
+            return enrich_mft_records_with_attribute_list_resolution(records)
+
+
+def enrich_mft_records_with_attribute_list_resolution(
+    records: Sequence[Mapping[str, object]],
+) -> list[dict[str, object]]:
+    """Resolve ATTRIBUTE_LIST entries when extension records are inside the bounded scan window."""
+
+    mutable_records = [dict(record) for record in records]
+    records_by_number: dict[int, Mapping[str, object]] = {}
+    for record in mutable_records:
+        try:
+            record_number = int(record.get("record_number_candidate") or -1)
+        except (TypeError, ValueError):
+            continue
+        if record_number >= 0:
+            records_by_number[record_number] = record
+
+    for record in mutable_records:
+        entries = [item for item in record.get("attribute_list_entries") or [] if isinstance(item, Mapping)]
+        present = "$ATTRIBUTE_LIST" in list(record.get("attribute_types") or []) or bool(entries)
+        validation_checks = dict(record.get("validation_checks") or {})
+        validation_checks["attribute_list_entries_present"] = bool(entries)
+        validation_checks["attribute_list_bounded_resolution_attempted"] = bool(entries)
+
+        if not entries:
+            record["attribute_list_resolution"] = {
+                "profile_version": "mft-attribute-list-bounded-resolution-v1",
+                "present": present,
+                "entry_count": 0,
+                "resolved_entry_count": 0,
+                "unresolved_entry_count": 0,
+                "resolution_status": "not-present-in-record",
+                "bounded_scan_record_count": len(records_by_number),
+                "resolved_entries": [],
+                "unresolved_entries": [],
+                "commercial_grade_ready": False,
+                "trusted_diff_required": False,
+                "blockers": [],
+            }
+            validation_checks["attribute_list_bounded_resolution_complete"] = False
+            validation_checks["attribute_list_unresolved_extension_records"] = False
+            record["validation_checks"] = validation_checks
+            continue
+
+        resolved_entries: list[dict[str, object]] = []
+        unresolved_entries: list[dict[str, object]] = []
+        for entry in entries:
+            reference = (
+                entry.get("extension_reference_decoded")
+                if isinstance(entry.get("extension_reference_decoded"), Mapping)
+                else {}
+            )
+            try:
+                extension_record_number = int(reference.get("record_number"))
+            except (TypeError, ValueError):
+                extension_record_number = -1
+            try:
+                extension_sequence = int(reference.get("sequence_number"))
+            except (TypeError, ValueError):
+                extension_sequence = -1
+            extension_record = records_by_number.get(extension_record_number)
+            resolution_entry = {
+                "entry_index": entry.get("entry_index", ""),
+                "attribute_type": entry.get("attribute_type", ""),
+                "attribute_type_name": str(entry.get("attribute_type_name") or ""),
+                "attribute_id": entry.get("attribute_id", ""),
+                "lowest_vcn": entry.get("lowest_vcn", 0),
+                "extension_record_number": extension_record_number,
+                "extension_sequence_number": extension_sequence,
+            }
+            if not extension_record:
+                unresolved_entries.append(
+                    {
+                        **resolution_entry,
+                        "resolution_status": "extension-record-outside-bounded-scan",
+                        "blocker": "mft-attribute-list-extension-record-outside-bounded-scan",
+                    }
+                )
+                continue
+
+            actual_sequence = int(extension_record.get("sequence_number") or 0)
+            sequence_matches = extension_sequence < 0 or actual_sequence == extension_sequence
+            matching_attributes = [
+                item
+                for item in extension_record.get("attributes") or []
+                if isinstance(item, Mapping)
+                and int(item.get("attribute_type") or -1) == int(entry.get("attribute_type") or -2)
+            ]
+            if not sequence_matches:
+                unresolved_entries.append(
+                    {
+                        **resolution_entry,
+                        "extension_record_offset": extension_record.get("record_offset", ""),
+                        "actual_sequence_number": actual_sequence,
+                        "resolution_status": "extension-record-sequence-mismatch",
+                        "blocker": "mft-attribute-list-extension-record-sequence-mismatch",
+                    }
+                )
+                continue
+            resolved_entries.append(
+                {
+                    **resolution_entry,
+                    "extension_record_offset": extension_record.get("record_offset", ""),
+                    "actual_sequence_number": actual_sequence,
+                    "sequence_matches": sequence_matches,
+                    "matching_attribute_count": len(matching_attributes),
+                    "matching_attribute_ids": [
+                        item.get("attribute_id", "")
+                        for item in matching_attributes[:10]
+                        if isinstance(item, Mapping)
+                    ],
+                    "extension_attribute_types": list(extension_record.get("attribute_types") or [])[:25],
+                    "resolution_status": "resolved-bounded-scan",
+                }
+            )
+
+        if len(resolved_entries) == len(entries):
+            status = "all-resolved-bounded-scan"
+        elif resolved_entries:
+            status = "partial-bounded-resolution"
+        else:
+            status = "no-extension-records-in-bounded-scan"
+        blockers = {
+            "mft-attribute-list-trusted-diff-required",
+            "mft-full-volume-attribute-list-resolution-required",
+        }
+        blockers.update(str(item.get("blocker")) for item in unresolved_entries if item.get("blocker"))
+        record["attribute_list_resolution"] = {
+            "profile_version": "mft-attribute-list-bounded-resolution-v1",
+            "present": True,
+            "entry_count": len(entries),
+            "resolved_entry_count": len(resolved_entries),
+            "unresolved_entry_count": len(unresolved_entries),
+            "resolution_status": status,
+            "bounded_scan_record_count": len(records_by_number),
+            "resolved_entries": resolved_entries[:25],
+            "unresolved_entries": unresolved_entries[:25],
+            "commercial_grade_ready": False,
+            "trusted_diff_required": True,
+            "blockers": sorted(blockers),
+        }
+        validation_checks["attribute_list_bounded_resolution_complete"] = len(unresolved_entries) == 0
+        validation_checks["attribute_list_unresolved_extension_records"] = bool(unresolved_entries)
+        record["validation_checks"] = validation_checks
+    return mutable_records
 
 
 def validate_mft_update_sequence(record_blob: bytes, *, sector_size: int = 512) -> dict[str, object]:

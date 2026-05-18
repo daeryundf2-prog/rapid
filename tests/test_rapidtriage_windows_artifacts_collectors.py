@@ -378,6 +378,91 @@ class RapidTriageWindowsArtifactsCollectorTests(unittest.TestCase):
         self.assertEqual(parsed["attribute_list"]["entries"][0]["extension_reference_decoded"]["record_number"], 321)
         self.assertEqual(parsed["attribute_list"]["entries"][0]["extension_reference_decoded"]["sequence_number"], 9)
 
+    def test_mft_attribute_list_resolves_extension_record_inside_bounded_scan(self) -> None:
+        def make_record(sequence: int, attributes: list[bytes]) -> bytes:
+            record = bytearray(1024)
+            record[0:4] = b"FILE"
+            record[0x10:0x12] = sequence.to_bytes(2, "little")
+            record[0x12:0x14] = (1).to_bytes(2, "little")
+            record[0x14:0x16] = (0x38).to_bytes(2, "little")
+            record[0x16:0x18] = (0x01).to_bytes(2, "little")
+            record[0x1C:0x20] = (1024).to_bytes(4, "little")
+            offset = 0x38
+            for attribute in attributes:
+                record[offset : offset + len(attribute)] = attribute
+                offset += ((len(attribute) + 7) // 8) * 8
+            record[offset : offset + 4] = (0xFFFFFFFF).to_bytes(4, "little")
+            record[0x18:0x1C] = (offset + 4).to_bytes(4, "little")
+            return bytes(record)
+
+        entry = bytearray(32)
+        entry[0:4] = (0x80).to_bytes(4, "little")
+        entry[4:6] = (32).to_bytes(2, "little")
+        entry[8:16] = (8).to_bytes(8, "little")
+        entry[16:24] = ((9 << 48) | 1).to_bytes(8, "little")
+        entry[24:26] = (7).to_bytes(2, "little")
+        attribute_list = bytearray(0x18 + len(entry))
+        attribute_list[0:4] = (0x20).to_bytes(4, "little")
+        attribute_list[4:8] = len(attribute_list).to_bytes(4, "little")
+        attribute_list[14:16] = (4).to_bytes(2, "little")
+        attribute_list[16:20] = len(entry).to_bytes(4, "little")
+        attribute_list[20:22] = (0x18).to_bytes(2, "little")
+        attribute_list[0x18:] = entry
+
+        runlist = b"\x11\x03\x05\x00"
+        extension_data = bytearray(0x40 + len(runlist))
+        extension_data[0:4] = (0x80).to_bytes(4, "little")
+        extension_data[4:8] = len(extension_data).to_bytes(4, "little")
+        extension_data[8] = 1
+        extension_data[14:16] = (7).to_bytes(2, "little")
+        extension_data[24:32] = (8).to_bytes(8, "little")
+        extension_data[32:34] = (0x40).to_bytes(2, "little")
+        extension_data[40:48] = (4096 * 3).to_bytes(8, "little")
+        extension_data[48:56] = (4096 * 3).to_bytes(8, "little")
+        extension_data[56:64] = (4096 * 3).to_bytes(8, "little")
+        extension_data[0x40:] = runlist
+
+        parsed_records = parse_mft_record_headers(
+            make_record(3, [bytes(attribute_list)]) + make_record(9, [bytes(extension_data)])
+        )
+
+        self.assertEqual(len(parsed_records), 2)
+        base_record = parsed_records[0]
+        bounded = base_record["attribute_list_resolution"]
+        self.assertEqual(bounded["resolution_status"], "all-resolved-bounded-scan")
+        self.assertEqual(bounded["resolved_entry_count"], 1)
+        self.assertEqual(bounded["unresolved_entry_count"], 0)
+        self.assertEqual(bounded["resolved_entries"][0]["extension_record_number"], 1)
+        self.assertEqual(bounded["resolved_entries"][0]["matching_attribute_count"], 1)
+        self.assertTrue(base_record["validation_checks"]["attribute_list_bounded_resolution_complete"])
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            mft_path = Path(tmp_dir) / "$MFT"
+            mft_path.write_bytes(
+                make_record(3, [bytes(attribute_list)]) + make_record(9, [bytes(extension_data)])
+            )
+            artifact = build_native_mft_record(mft_path, base_record, 0)
+
+        profile = artifact.details["mft_attribute_list_profile"]
+        self.assertTrue(profile["resolved"])
+        self.assertEqual(profile["resolution_status"], "all-resolved-bounded-scan")
+        self.assertEqual(profile["resolved_entry_count"], 1)
+        self.assertTrue(
+            artifact.details["mft_parser_depth_manifest"]["attribute_decoding"][
+                "bounded_attribute_list_resolution_available"
+            ]
+        )
+        self.assertTrue(
+            artifact.details["mft_full_parser_profile"]["decoded_components"][
+                "bounded_attribute_list_resolution"
+            ]
+        )
+        self.assertFalse(
+            artifact.details["mft_full_parser_profile"]["decoded_components"]["attribute_list_resolution"]
+        )
+        self.assertFalse(artifact.details["commercial_grade_ready"])
+        self.assertIn("mft-full-volume-attribute-list-resolution-required", profile["blockers"])
+
     def test_mft_usa_fixup_is_applied_before_attribute_decoding(self) -> None:
         record = bytearray(1024)
         record[0:4] = b"FILE"
