@@ -5,6 +5,7 @@ import os
 import tempfile
 import threading
 import unittest
+import urllib.parse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
@@ -165,7 +166,11 @@ class RapidTriageCloudCollectTests(unittest.TestCase):
                 self.assertEqual(plan_slots["cloud-api-provider-scope-profile"]["status"], "complete")
                 self.assertEqual(plan_slots["cloud-api-oauth-consent-legal-authority"]["status"], "complete")
                 self.assertEqual(plan_slots["cloud-api-oauth-device-flow-capture"]["status"], "external-required")
-                self.assertEqual(plan_slots["cloud-api-pagination-delta-execution"]["status"], "declared-not-executed")
+                self.assertEqual(
+                    plan_slots["cloud-api-pagination-delta-execution"]["status"],
+                    "executed-provider-validation-required",
+                )
+                self.assertIn("pagination_pages:2", plan_slots["cloud-api-pagination-delta-execution"]["evidence"])
                 self.assertEqual(
                     plan_slots["cloud-api-retry-throttle-backoff-validation"]["status"],
                     "declared-not-provider-validated",
@@ -217,6 +222,9 @@ class RapidTriageCloudCollectTests(unittest.TestCase):
                 self.assertEqual(payload["cloud_api_collection_strategy_profile"]["services"], ["google"])
                 self.assertTrue(payload["cloud_api_collection_strategy_profile"]["request_retry_policy_declared"])
                 self.assertTrue(payload["cloud_api_collection_strategy_profile"]["pagination_policy_declared"])
+                self.assertTrue(payload["cloud_api_collection_strategy_profile"]["pagination_policy_executed"])
+                self.assertEqual(payload["cloud_api_collection_strategy_profile"]["pagination_page_count"], 2)
+                self.assertEqual(payload["cloud_api_collection_strategy_profile"]["delta_token_hash_count"], 2)
                 self.assertTrue(
                     payload["cloud_api_collection_strategy_profile"]["provider_scope_profile"]["scope_inventory_captured"]
                 )
@@ -237,12 +245,18 @@ class RapidTriageCloudCollectTests(unittest.TestCase):
                 self.assertIn("cloud API report-grade validation plan", api_gate["satisfied_checks"])
                 self.assertIn("cloud API report-grade ready slots", api_gate["satisfied_checks"])
                 self.assertIn("response parser/source viewer manifest", api_gate["satisfied_checks"])
+                self.assertIn("bounded pagination execution profile", api_gate["satisfied_checks"])
                 self.assertIn("pagination/backoff limitation warning", api_gate["satisfied_checks"])
                 self.assertIn("provider OAuth/scope/legal warning", api_gate["satisfied_checks"])
                 self.assertNotIn("trusted cloud API/provider response diff pass", api_gate["satisfied_checks"])
                 self.assertIn("response-parser-manifest", api_uplift["passed_validation_matrix_ids"])
+                self.assertIn("pagination-execution-profile", api_uplift["passed_validation_matrix_ids"])
                 self.assertIn(
                     "response_parser_manifest_sha256:",
+                    "\n".join(api_uplift["source_refs"]),
+                )
+                self.assertIn(
+                    "pagination_profile_sha256:",
                     "\n".join(api_uplift["source_refs"]),
                 )
                 self.assertIn(
@@ -255,6 +269,9 @@ class RapidTriageCloudCollectTests(unittest.TestCase):
                 )
                 self.assertEqual(api_uplift["large_data_controls"]["cloud_api_report_grade_ready_slot_count"], 8)
                 self.assertEqual(api_uplift["large_data_controls"]["cloud_api_report_grade_blocking_slot_count"], 7)
+                self.assertEqual(api_uplift["large_data_controls"]["pagination_executed_count"], 1)
+                self.assertEqual(api_uplift["large_data_controls"]["cloud_api_pagination_page_count"], 2)
+                self.assertEqual(api_uplift["large_data_controls"]["cloud_api_pagination_delta_token_hash_count"], 2)
                 self.assertIn("#41", payload["credential_handling"]["commercial_gap_ids"])
                 self.assertIn("#41", payload["credential_handling"]["credential_security_assessment"]["commercial_gap_ids"])
                 self.assertEqual(payload["credential_handling"]["forensic_review"]["gap_id"], "#41")
@@ -453,8 +470,23 @@ class RapidTriageCloudCollectTests(unittest.TestCase):
                 self.assertEqual(request_profile["profile_version"], "cloud-api-request-acquisition-v1")
                 self.assertEqual(request_profile["retry_max_attempts"], 2)
                 self.assertEqual(request_profile["pagination_mode"], "next_link_field")
-                self.assertEqual(request_profile["pagination_execution_status"], "declared-not-executed")
-                self.assertEqual(payload["requests"][0]["attempt_count"], 1)
+                self.assertEqual(request_profile["pagination_execution_status"], "configured-for-execution")
+                self.assertEqual(request_profile["next_query_param"], "nextPageToken")
+                self.assertEqual(payload["requests"][0]["attempt_count"], 2)
+                pagination_profile = payload["requests"][0]["pagination_execution_profile"]
+                self.assertEqual(pagination_profile["profile_version"], "cloud-api-pagination-execution-v1")
+                self.assertTrue(pagination_profile["executed"])
+                self.assertEqual(pagination_profile["status"], "complete")
+                self.assertEqual(pagination_profile["page_count"], 2)
+                self.assertEqual(pagination_profile["page_sidecar_count"], 2)
+                self.assertEqual(len(pagination_profile["response_sha256s"]), 2)
+                self.assertEqual(len(pagination_profile["response_paths"]), 2)
+                self.assertEqual(len(pagination_profile["next_token_sha256s"]), 1)
+                self.assertEqual(len(pagination_profile["delta_token_sha256s"]), 2)
+                self.assertFalse(pagination_profile["raw_tokens_serialized"])
+                self.assertEqual(len(pagination_profile["profile_sha256"]), 64)
+                self.assertNotIn("page-2", payload_path.read_text(encoding="utf-8"))
+                self.assertNotIn("sync-token", payload_path.read_text(encoding="utf-8"))
                 response_manifest = payload["requests"][0]["cloud_api_response_parser_manifest"]
                 self.assertEqual(
                     response_manifest["manifest_version"],
@@ -466,13 +498,27 @@ class RapidTriageCloudCollectTests(unittest.TestCase):
                 self.assertEqual(response_manifest["row_citation"]["citation_id"], "cloud-api-response-001")
                 self.assertEqual(response_manifest["row_citation"]["source_sha256"], payload["requests"][0]["response_sha256"])
                 self.assertTrue(response_manifest["parser_tracks"]["body_kept_in_sidecar"])
+                self.assertTrue(response_manifest["parser_tracks"]["pagination_executed"])
+                self.assertTrue(response_manifest["parser_tracks"]["delta_collection_executed"])
                 self.assertFalse(response_manifest["parser_tracks"]["provider_native_diff_attached"])
+                self.assertEqual(response_manifest["large_data_controls"]["pagination_page_count"], 2)
+                self.assertEqual(response_manifest["large_data_controls"]["pagination_sidecar_count"], 2)
+                self.assertFalse(response_manifest["large_data_controls"]["pagination_raw_tokens_serialized"])
                 self.assertIn("source-viewer-locator-emitted", response_manifest["passed_validation_check_ids"])
+                self.assertIn("pagination-execution-profile-emitted", response_manifest["passed_validation_check_ids"])
+                self.assertIn("pagination-page-sidecars-hashed", response_manifest["passed_validation_check_ids"])
                 self.assertIn("provider-native-response-diff", response_manifest["failed_validation_check_ids"])
+                self.assertNotIn("pagination-delta-execution", response_manifest["failed_validation_check_ids"])
                 self.assertFalse(response_manifest["large_data_controls"]["raw_body_serialized_in_metadata"])
                 self.assertEqual(
                     acquisition_manifest["request_locators"][0]["response_parser_manifest_sha256"],
                     response_manifest["manifest_sha256"],
+                )
+                self.assertTrue(acquisition_manifest["request_locators"][0]["pagination_executed"])
+                self.assertEqual(acquisition_manifest["request_locators"][0]["pagination_page_count"], 2)
+                self.assertEqual(
+                    acquisition_manifest["request_locators"][0]["pagination_profile_sha256"],
+                    pagination_profile["profile_sha256"],
                 )
                 self.assertEqual(payload["requests"][0]["credential_handling"]["sensitive_header_names"], ["Authorization"])
                 self.assertTrue(payload["requests"][0]["credential_handling"]["sensitive_values_redacted"])
@@ -483,6 +529,8 @@ class RapidTriageCloudCollectTests(unittest.TestCase):
                 self.assertNotIn("secret-token", payload_path.read_text(encoding="utf-8"))
                 response_path = Path(payload["requests"][0]["response_path"])
                 self.assertTrue(response_path.exists())
+                for page_path in pagination_profile["response_paths"]:
+                    self.assertTrue(Path(page_path).exists())
                 self.assertIn("response_sha256", payload["requests"][0])
                 self.assertEqual(server.handler_class.last_authorization, "Bearer secret-token")
 
@@ -492,7 +540,7 @@ class RapidTriageCloudCollectTests(unittest.TestCase):
                     0,
                 )
                 cloud_payload = json.loads(cloud_output.read_text(encoding="utf-8"))
-                self.assertEqual(cloud_payload["summary"]["artifact_type_counts"]["cloud-activity"], 1)
+                self.assertEqual(cloud_payload["summary"]["artifact_type_counts"]["cloud-activity"], 2)
 
     def test_cloud_collect_dry_run_does_not_call_endpoint(self) -> None:
         with cloud_test_server() as server:
@@ -659,13 +707,30 @@ class CloudApiHandler(BaseHTTPRequestHandler):
     def do_GET(self) -> None:
         type(self).request_count += 1
         type(self).last_authorization = self.headers.get("Authorization", "")
-        payload = [
-            {
-                "time": "2026-04-26T01:02:03Z",
-                "title": "Searched for cloud API collection",
-                "products": ["Search"],
+        query = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
+        if query.get("nextPageToken") == ["page-2"]:
+            payload = {
+                "items": [
+                    {
+                        "time": "2026-04-26T01:03:00Z",
+                        "title": "Opened second cloud API page",
+                        "products": ["Search"],
+                    }
+                ],
+                "syncToken": "sync-token-final",
             }
-        ]
+        else:
+            payload = {
+                "items": [
+                    {
+                        "time": "2026-04-26T01:02:03Z",
+                        "title": "Searched for cloud API collection",
+                        "products": ["Search"],
+                    }
+                ],
+                "nextPageToken": "page-2",
+                "syncToken": "sync-token-page-1",
+            }
         body = json.dumps(payload).encode("utf-8")
         self.send_response(200)
         self.send_header("Content-Type", "application/json")

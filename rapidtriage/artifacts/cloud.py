@@ -493,7 +493,7 @@ def collect_cloud_json_payload(
             )
         return
     if detected == "google-activity":
-        rows = extract_list_rows(payload)[:CLOUD_ARCHIVE_JSON_ROW_LIMIT if archive_context else None]
+        rows = extract_list_or_single_rows(payload)[:CLOUD_ARCHIVE_JSON_ROW_LIMIT if archive_context else None]
         for index, row in enumerate(rows):
             details = normalize_activity(row)
             if archive_context:
@@ -1003,6 +1003,12 @@ def detect_export_type(path: Path, payload: object) -> str:
             row_type = detect_row_export_type(lowered, rows[0])
             if row_type:
                 return row_type
+            if "activity" in lowered or any(
+                ("time" in item or "timestamp" in item) and ("title" in item or "products" in item)
+                for item in rows[:5]
+                if isinstance(item, Mapping)
+            ):
+                return "google-activity"
         account_keys = {"account", "apple id", "email", "phone", "full_name", "name", "created"}
         if account_keys.intersection({str(key).lower() for key in payload.keys()}):
             return "cloud-account"

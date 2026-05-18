@@ -29,6 +29,7 @@ CLOUD_API_NATIVE_CAPABILITIES = {
     "redacted_credential_handling": True,
     "response_hashing": True,
     "bounded_response_size": True,
+    "bounded_pagination_execution": True,
     "provider_specific_oauth_flow": False,
     "provider_scope_discovery": False,
     "incremental_delta_collection": False,
@@ -169,6 +170,7 @@ def run_cloud_api_collection(
         "skipped_count": len(skipped),
         "dry_run": dry_run,
     }
+    summary.update(cloud_api_pagination_summary(collected))
     provider_scope_profile = cloud_api_provider_scope_profile(manifest)
     summary["provider_scope_profile_present"] = True
     summary["provider_scope_inventory_captured"] = bool(provider_scope_profile.get("scope_inventory_captured"))
@@ -492,6 +494,7 @@ def prepare_request(
         "bearer_token_env": bearer_env if bearer_token else "",
         "retry": retry_config,
         "pagination": pagination_config,
+        "allow_insecure_http": bool(allow_insecure_http),
     }
 
 
@@ -504,12 +507,6 @@ def execute_request(
     max_response_bytes: int,
 ) -> dict[str, object]:
     request_body = encode_body(prepared.get("body"))
-    request = urllib.request.Request(
-        str(prepared["url"]),
-        data=request_body,
-        headers={str(key): str(value) for key, value in dict(prepared["headers"]).items()},
-        method=str(prepared["method"]),
-    )
     started_at = dt.datetime.now(dt.timezone.utc).isoformat()
     row: dict[str, object] = {
         "index": index,
@@ -528,51 +525,83 @@ def execute_request(
     retry_statuses = {int(status) for status in retry.get("retry_statuses", []) or []}
     backoff_seconds = float(retry.get("backoff_seconds") or 0)
     attempts: list[dict[str, object]] = []
-    for attempt in range(1, max_attempts + 1):
-        try:
-            with urllib.request.urlopen(request, timeout=timeout_seconds) as response:
-                content = response.read(max_response_bytes + 1)
-                truncated = len(content) > max_response_bytes
-                if truncated:
-                    content = content[:max_response_bytes]
-                output_path = response_path_for(responses_dir, index, str(prepared["name"]), response.headers.get("Content-Type", ""))
-                output_path.write_bytes(content)
-                attempts.append({"attempt": attempt, "status": int(response.status), "retryable": False})
-                row.update(
-                    {
-                        "status": int(response.status),
-                        "reason": response.reason,
-                        "content_type": response.headers.get("Content-Type", ""),
-                        "response_path": str(output_path.resolve()),
-                        "response_size": len(content),
-                        "response_sha256": compute_sha256(output_path),
-                        "truncated": truncated,
-                        "completed_at": dt.datetime.now(dt.timezone.utc).isoformat(),
-                    }
-                )
-                break
-        except urllib.error.HTTPError as exc:
-            retryable = exc.code in retry_statuses and attempt < max_attempts
-            attempts.append({"attempt": attempt, "error": "http-error", "status": exc.code, "retryable": retryable})
-            row.update({"error": "http-error", "status": exc.code, "reason": exc.reason})
-            if not retryable:
-                break
-        except urllib.error.URLError as exc:
-            retryable = attempt < max_attempts
-            attempts.append({"attempt": attempt, "error": "url-error", "reason": str(exc.reason), "retryable": retryable})
-            row.update({"error": "url-error", "reason": str(exc.reason)})
-            if not retryable:
-                break
-        except OSError as exc:
-            retryable = attempt < max_attempts
-            attempts.append({"attempt": attempt, "error": "io-error", "reason": str(exc), "retryable": retryable})
-            row.update({"error": "io-error", "reason": str(exc)})
-            if not retryable:
-                break
-        if attempt < max_attempts and backoff_seconds:
-            time.sleep(backoff_seconds)
+    pagination = prepared.get("pagination") if isinstance(prepared.get("pagination"), Mapping) else {}
+    pagination_profile = new_pagination_execution_profile(pagination)
+    current_url = str(prepared["url"])
+    seen_url_hashes = {hashlib.sha256(current_url.encode("utf-8")).hexdigest()}
+    page_limit = int(pagination.get("max_pages") or 1) if pagination.get("mode") not in {"", "none", None} else 1
+    for page_number in range(1, page_limit + 1):
+        page_result = fetch_cloud_api_page(
+            index=index,
+            name=str(prepared["name"]),
+            method=str(prepared["method"]),
+            url=current_url,
+            headers=dict(prepared["headers"]),
+            request_body=request_body,
+            responses_dir=responses_dir,
+            timeout_seconds=timeout_seconds,
+            max_response_bytes=max_response_bytes,
+            max_attempts=max_attempts,
+            retry_statuses=retry_statuses,
+            backoff_seconds=backoff_seconds,
+            page_number=page_number,
+        )
+        attempts.extend(page_result["attempts"])
+        if page_result.get("error"):
+            row.update(
+                {
+                    "error": page_result["error"],
+                    "status": page_result.get("status", row.get("status", 0)),
+                    "reason": page_result.get("reason", ""),
+                    "completed_at": dt.datetime.now(dt.timezone.utc).isoformat(),
+                }
+            )
+            pagination_profile["status"] = "page-error" if page_number > 1 else "initial-request-error"
+            break
+
+        page_metadata = cloud_api_page_metadata(page_result)
+        append_pagination_page(pagination_profile, page_metadata)
+        if page_number == 1:
+            row.update(
+                {
+                    "status": page_result["status"],
+                    "reason": page_result["reason"],
+                    "content_type": page_result["content_type"],
+                    "response_path": page_result["response_path"],
+                    "response_size": page_result["response_size"],
+                    "response_sha256": page_result["response_sha256"],
+                    "truncated": page_result["truncated"],
+                    "completed_at": dt.datetime.now(dt.timezone.utc).isoformat(),
+                }
+            )
+
+        next_profile = resolve_next_page(
+            content=page_result["content"],
+            content_type=str(page_result["content_type"]),
+            pagination=pagination,
+            current_url=current_url,
+            allow_insecure_http=bool(prepared.get("allow_insecure_http")),
+        )
+        record_pagination_cursor(pagination_profile, next_profile)
+        next_url = str(next_profile.get("next_url") or "")
+        if not next_url:
+            pagination_profile["status"] = "complete"
+            break
+        next_url_hash = hashlib.sha256(next_url.encode("utf-8")).hexdigest()
+        if next_url_hash in seen_url_hashes:
+            pagination_profile["repeated_next_url_detected"] = True
+            pagination_profile["status"] = "stopped-repeated-next-url"
+            break
+        if page_number >= page_limit:
+            pagination_profile["max_pages_reached"] = True
+            pagination_profile["status"] = "max-pages-reached"
+            break
+        seen_url_hashes.add(next_url_hash)
+        current_url = next_url
     row["attempts"] = attempts
     row["attempt_count"] = len(attempts)
+    finalize_pagination_execution_profile(pagination_profile)
+    row["pagination_execution_profile"] = pagination_profile
     row["cloud_api_response_parser_manifest"] = cloud_api_response_parser_manifest(
         row,
         output_dir=responses_dir.parent,
@@ -580,6 +609,124 @@ def execute_request(
         timeout_seconds=timeout_seconds,
     )
     return row
+
+
+def fetch_cloud_api_page(
+    *,
+    index: int,
+    name: str,
+    method: str,
+    url: str,
+    headers: Mapping[str, object],
+    request_body: bytes | None,
+    responses_dir: Path,
+    timeout_seconds: int,
+    max_response_bytes: int,
+    max_attempts: int,
+    retry_statuses: set[int],
+    backoff_seconds: float,
+    page_number: int,
+) -> dict[str, object]:
+    attempts: list[dict[str, object]] = []
+    for attempt in range(1, max_attempts + 1):
+        request = urllib.request.Request(
+            url,
+            data=request_body,
+            headers={str(key): str(value) for key, value in dict(headers).items()},
+            method=method,
+        )
+        try:
+            with urllib.request.urlopen(request, timeout=timeout_seconds) as response:
+                content = response.read(max_response_bytes + 1)
+                truncated = len(content) > max_response_bytes
+                if truncated:
+                    content = content[:max_response_bytes]
+                output_path = response_path_for(
+                    responses_dir,
+                    index,
+                    name,
+                    response.headers.get("Content-Type", ""),
+                    page_number=page_number,
+                )
+                output_path.write_bytes(content)
+                attempts.append(
+                    {
+                        "page": page_number,
+                        "attempt": attempt,
+                        "status": int(response.status),
+                        "retryable": False,
+                    }
+                )
+                return {
+                    "page": page_number,
+                    "status": int(response.status),
+                    "reason": response.reason,
+                    "content_type": response.headers.get("Content-Type", ""),
+                    "response_path": str(output_path.resolve()),
+                    "response_size": len(content),
+                    "response_sha256": compute_sha256(output_path),
+                    "truncated": truncated,
+                    "content": content,
+                    "attempts": attempts,
+                }
+        except urllib.error.HTTPError as exc:
+            retryable = exc.code in retry_statuses and attempt < max_attempts
+            attempts.append(
+                {
+                    "page": page_number,
+                    "attempt": attempt,
+                    "error": "http-error",
+                    "status": exc.code,
+                    "retryable": retryable,
+                }
+            )
+            if not retryable:
+                return {
+                    "page": page_number,
+                    "error": "http-error",
+                    "status": exc.code,
+                    "reason": exc.reason,
+                    "attempts": attempts,
+                }
+        except urllib.error.URLError as exc:
+            retryable = attempt < max_attempts
+            attempts.append(
+                {
+                    "page": page_number,
+                    "attempt": attempt,
+                    "error": "url-error",
+                    "reason": str(exc.reason),
+                    "retryable": retryable,
+                }
+            )
+            if not retryable:
+                return {
+                    "page": page_number,
+                    "error": "url-error",
+                    "reason": str(exc.reason),
+                    "attempts": attempts,
+                }
+        except OSError as exc:
+            retryable = attempt < max_attempts
+            attempts.append(
+                {
+                    "page": page_number,
+                    "attempt": attempt,
+                    "error": "io-error",
+                    "reason": str(exc),
+                    "retryable": retryable,
+                }
+            )
+            if not retryable:
+                return {
+                    "page": page_number,
+                    "error": "io-error",
+                    "reason": str(exc),
+                    "attempts": attempts,
+                }
+        if attempt < max_attempts and backoff_seconds:
+            time.sleep(backoff_seconds)
+    return {"page": page_number, "error": "unknown-error", "attempts": attempts}
 
 
 def validate_url(url: str, *, allow_insecure_http: bool) -> None:
@@ -631,6 +778,7 @@ def normalize_pagination_config(value: object) -> dict[str, object]:
             "mode": "none",
             "max_pages": 1,
             "next_link_field": "",
+            "next_query_param": "",
             "delta_token_field": "",
             "implemented": False,
         }
@@ -644,9 +792,189 @@ def normalize_pagination_config(value: object) -> dict[str, object]:
         "mode": mode,
         "max_pages": max_pages,
         "next_link_field": text_value(value.get("next_link_field") or value.get("nextLinkField") or ""),
+        "next_query_param": text_value(
+            value.get("next_query_param")
+            or value.get("nextQueryParam")
+            or value.get("page_token_param")
+            or value.get("pageTokenParam")
+            or value.get("next_link_field")
+            or value.get("nextLinkField")
+            or ""
+        ),
         "delta_token_field": text_value(value.get("delta_token_field") or value.get("deltaTokenField") or ""),
-        "implemented": False,
+        "implemented": mode in {"next_link_field"},
     }
+
+
+def cloud_api_pagination_summary(requests: Iterable[Mapping[str, object]]) -> dict[str, object]:
+    profiles = [
+        row.get("pagination_execution_profile")
+        for row in requests
+        if isinstance(row.get("pagination_execution_profile"), Mapping)
+    ]
+    return {
+        "pagination_profile_count": len(profiles),
+        "pagination_executed_count": sum(1 for profile in profiles if profile.get("executed")),
+        "cloud_api_pagination_page_count": sum(int(profile.get("page_count") or 0) for profile in profiles),
+        "cloud_api_pagination_delta_token_hash_count": sum(
+            len(profile.get("delta_token_sha256s") or []) for profile in profiles
+        ),
+        "cloud_api_pagination_max_pages_reached_count": sum(
+            1 for profile in profiles if profile.get("max_pages_reached")
+        ),
+    }
+
+
+def new_pagination_execution_profile(pagination: Mapping[str, object]) -> dict[str, object]:
+    mode = text_value(pagination.get("mode") or "none")
+    return {
+        "profile_version": "cloud-api-pagination-execution-v1",
+        "mode": mode,
+        "implemented_mode": mode in {"next_link_field"},
+        "configured_max_pages": int(pagination.get("max_pages") or 1),
+        "next_link_field": text_value(pagination.get("next_link_field") or ""),
+        "next_query_param": text_value(pagination.get("next_query_param") or ""),
+        "delta_token_field": text_value(pagination.get("delta_token_field") or ""),
+        "executed": False,
+        "status": "not-configured" if mode in {"", "none"} else "not-started",
+        "page_count": 0,
+        "page_sidecar_count": 0,
+        "response_sha256s": [],
+        "response_paths": [],
+        "response_sizes": [],
+        "status_codes": [],
+        "next_token_sha256s": [],
+        "delta_token_sha256s": [],
+        "max_pages_reached": False,
+        "repeated_next_url_detected": False,
+        "truncation_seen": False,
+        "raw_tokens_serialized": False,
+        "commercial_gap_ids": ["#40"],
+        "validation_status": "internal-execution-validation-required",
+        "blockers": [
+            "provider-native-pagination-known-answer-diff-required",
+            "provider-delta-token-semantics-validation-required",
+            "provider-rate-limit-throttle-validation-required",
+        ],
+    }
+
+
+def cloud_api_page_metadata(page_result: Mapping[str, object]) -> dict[str, object]:
+    return {
+        "page": int(page_result.get("page") or 0),
+        "status": int(page_result.get("status") or 0),
+        "response_path": text_value(page_result.get("response_path") or ""),
+        "response_sha256": text_value(page_result.get("response_sha256") or ""),
+        "response_size": int(page_result.get("response_size") or 0),
+        "truncated": bool(page_result.get("truncated")),
+    }
+
+
+def append_pagination_page(profile: dict[str, object], page_metadata: Mapping[str, object]) -> None:
+    profile["page_count"] = int(profile.get("page_count") or 0) + 1
+    profile["page_sidecar_count"] = int(profile.get("page_sidecar_count") or 0) + 1
+    profile.setdefault("response_sha256s", []).append(text_value(page_metadata.get("response_sha256") or ""))
+    profile.setdefault("response_paths", []).append(text_value(page_metadata.get("response_path") or ""))
+    profile.setdefault("response_sizes", []).append(int(page_metadata.get("response_size") or 0))
+    profile.setdefault("status_codes", []).append(int(page_metadata.get("status") or 0))
+    if page_metadata.get("truncated"):
+        profile["truncation_seen"] = True
+
+
+def resolve_next_page(
+    *,
+    content: object,
+    content_type: str,
+    pagination: Mapping[str, object],
+    current_url: str,
+    allow_insecure_http: bool,
+) -> dict[str, object]:
+    mode = text_value(pagination.get("mode") or "none")
+    payload = decode_json_response(content, content_type=content_type)
+    delta_token = ""
+    if isinstance(payload, Mapping):
+        delta_field = text_value(pagination.get("delta_token_field") or "")
+        if delta_field and payload.get(delta_field) not in (None, ""):
+            delta_token = text_value(payload.get(delta_field))
+    if mode != "next_link_field" or not isinstance(payload, Mapping):
+        return {
+            "next_url": "",
+            "next_token_sha256": "",
+            "delta_token_sha256": hash_token(delta_token),
+        }
+    next_field = text_value(pagination.get("next_link_field") or "")
+    next_value = text_value(payload.get(next_field) if next_field else "")
+    if not next_value:
+        return {
+            "next_url": "",
+            "next_token_sha256": "",
+            "delta_token_sha256": hash_token(delta_token),
+        }
+    next_url = next_page_url_from_value(
+        current_url=current_url,
+        next_value=next_value,
+        query_param=text_value(pagination.get("next_query_param") or next_field),
+    )
+    validate_url(next_url, allow_insecure_http=allow_insecure_http)
+    return {
+        "next_url": next_url,
+        "next_token_sha256": hash_token(next_value),
+        "delta_token_sha256": hash_token(delta_token),
+    }
+
+
+def record_pagination_cursor(profile: dict[str, object], cursor_profile: Mapping[str, object]) -> None:
+    next_hash = text_value(cursor_profile.get("next_token_sha256") or "")
+    delta_hash = text_value(cursor_profile.get("delta_token_sha256") or "")
+    if next_hash:
+        profile.setdefault("next_token_sha256s", []).append(next_hash)
+    if delta_hash:
+        profile.setdefault("delta_token_sha256s", []).append(delta_hash)
+
+
+def finalize_pagination_execution_profile(profile: dict[str, object]) -> None:
+    mode = text_value(profile.get("mode") or "none")
+    page_count = int(profile.get("page_count") or 0)
+    profile["executed"] = mode not in {"", "none"} and bool(profile.get("implemented_mode")) and page_count > 0
+    if mode not in {"", "none"} and not profile.get("implemented_mode"):
+        profile["status"] = "unsupported-pagination-mode"
+    elif mode not in {"", "none"} and profile.get("status") in {"not-started", "not-configured"}:
+        profile["status"] = "complete" if page_count else "not-executed"
+    profile["profile_sha256"] = stable_cloud_api_json_sha256(
+        {key: value for key, value in profile.items() if key != "profile_sha256"}
+    )
+
+
+def decode_json_response(content: object, *, content_type: str) -> object:
+    if "json" not in content_type.lower():
+        return None
+    data = content if isinstance(content, bytes) else b""
+    try:
+        return json.loads(data.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError):
+        return None
+
+
+def next_page_url_from_value(*, current_url: str, next_value: str, query_param: str) -> str:
+    parsed_next = urllib.parse.urlparse(next_value)
+    if parsed_next.scheme and parsed_next.netloc:
+        return next_value
+    if next_value.startswith("/") or parsed_next.path and not parsed_next.query and "/" in next_value:
+        return urllib.parse.urljoin(current_url, next_value)
+    parsed = urllib.parse.urlparse(current_url)
+    query_items = [
+        (key, value)
+        for key, value in urllib.parse.parse_qsl(parsed.query, keep_blank_values=True)
+        if key != query_param
+    ]
+    query_items.append((query_param, next_value))
+    return urllib.parse.urlunparse(parsed._replace(query=urllib.parse.urlencode(query_items)))
+
+
+def hash_token(value: str) -> str:
+    if not value:
+        return ""
+    return hashlib.sha256(value.encode("utf-8", errors="replace")).hexdigest()
 
 
 def redact_headers(headers: Mapping[str, object]) -> dict[str, str]:
@@ -737,6 +1065,14 @@ def cloud_api_collection_strategy_profile(
         and int(row.get("request_acquisition_profile", {}).get("retry_max_attempts") or 1) > 1
         for row in request_rows
     )
+    pagination_profiles = [
+        row.get("pagination_execution_profile")
+        for row in request_rows
+        if isinstance(row.get("pagination_execution_profile"), Mapping)
+    ]
+    pagination_executed = any(profile.get("executed") for profile in pagination_profiles)
+    pagination_page_count = sum(int(profile.get("page_count") or 0) for profile in pagination_profiles)
+    delta_token_hash_count = sum(len(profile.get("delta_token_sha256s") or []) for profile in pagination_profiles)
     return {
         "profile_version": "cloud-api-collection-strategy-v1",
         "selected_track": "manifest-driven-bounded-api-collection",
@@ -750,6 +1086,10 @@ def cloud_api_collection_strategy_profile(
         "timeout_seconds": DEFAULT_CLOUD_API_TIMEOUT_SECONDS,
         "request_retry_policy_declared": retry_declared,
         "pagination_policy_declared": pagination_declared,
+        "pagination_policy_executed": pagination_executed,
+        "pagination_execution_profile_count": len(pagination_profiles),
+        "pagination_page_count": pagination_page_count,
+        "delta_token_hash_count": delta_token_hash_count,
         "response_hashing_enabled": bool(summary.get("dry_run")) or any(row.get("response_sha256") for row in request_rows),
         "credential_strategy_track": (
             credential_handling.get("credential_strategy_profile", {}).get("selected_track")
@@ -758,12 +1098,13 @@ def cloud_api_collection_strategy_profile(
         ),
         "provider_specific_oauth_flow": CLOUD_API_NATIVE_CAPABILITIES["provider_specific_oauth_flow"],
         "provider_scope_discovery": CLOUD_API_NATIVE_CAPABILITIES["provider_scope_discovery"],
-        "pagination_backoff_delta_complete": CLOUD_API_NATIVE_CAPABILITIES["incremental_delta_collection"],
+        "bounded_pagination_execution": CLOUD_API_NATIVE_CAPABILITIES["bounded_pagination_execution"],
+        "pagination_backoff_delta_complete": pagination_executed and delta_token_hash_count > 0,
         "message_or_object_reportable": False,
         "blockers": [
             "provider-specific-oauth-flow-not-implemented",
             "provider-scope-discovery-and-consent-capture-not-implemented",
-            "pagination-backoff-delta-validation-required",
+            "provider-known-answer-pagination-delta-validation-required",
             "provider-api-known-answer-corpus-not-attached",
             CLOUD_API_TRUSTED_DIFF_BLOCKER,
         ],
@@ -825,8 +1166,13 @@ def cloud_api_request_acquisition_profile(prepared: Mapping[str, object]) -> dic
         "pagination_mode": text_value(pagination.get("mode") or "none"),
         "pagination_max_pages": int(pagination.get("max_pages") or 1),
         "next_link_field": text_value(pagination.get("next_link_field") or ""),
+        "next_query_param": text_value(pagination.get("next_query_param") or ""),
         "delta_token_field": text_value(pagination.get("delta_token_field") or ""),
-        "pagination_execution_status": "declared-not-executed" if pagination.get("mode") not in {"", "none", None} else "not-configured",
+        "pagination_execution_status": "configured-for-execution"
+        if pagination.get("implemented")
+        else "declared-not-executed"
+        if pagination.get("mode") not in {"", "none", None}
+        else "not-configured",
         "bounded_response_size": DEFAULT_CLOUD_API_MAX_RESPONSE_BYTES,
         "timeout_seconds": DEFAULT_CLOUD_API_TIMEOUT_SECONDS,
         "provider_specific_oauth_flow": False,
@@ -851,6 +1197,11 @@ def cloud_api_response_parser_manifest(
     acquisition_profile = (
         row.get("request_acquisition_profile")
         if isinstance(row.get("request_acquisition_profile"), Mapping)
+        else {}
+    )
+    pagination_execution = (
+        row.get("pagination_execution_profile")
+        if isinstance(row.get("pagination_execution_profile"), Mapping)
         else {}
     )
     dry_run = bool(row.get("dry_run"))
@@ -897,8 +1248,8 @@ def cloud_api_response_parser_manifest(
             "body_kept_in_sidecar": True,
             "pagination_declared": text_value(acquisition_profile.get("pagination_mode") or "none")
             not in {"", "none"},
-            "pagination_executed": False,
-            "delta_collection_executed": False,
+            "pagination_executed": bool(pagination_execution.get("executed")),
+            "delta_collection_executed": bool(pagination_execution.get("delta_token_sha256s")),
             "provider_specific_oauth_flow": CLOUD_API_NATIVE_CAPABILITIES["provider_specific_oauth_flow"],
             "provider_native_diff_attached": False,
             "legal_hold_record_attached": False,
@@ -906,6 +1257,9 @@ def cloud_api_response_parser_manifest(
         "large_data_controls": {
             "max_response_bytes": max_response_bytes,
             "timeout_seconds": timeout_seconds,
+            "pagination_page_count": int(pagination_execution.get("page_count") or 0),
+            "pagination_sidecar_count": int(pagination_execution.get("page_sidecar_count") or 0),
+            "pagination_raw_tokens_serialized": bool(pagination_execution.get("raw_tokens_serialized")),
             "raw_body_serialized_in_metadata": False,
             "metadata_collapsed_by_default": True,
             "safe_preview_requires_source_viewer": True,
@@ -917,6 +1271,8 @@ def cloud_api_response_parser_manifest(
                 "source-viewer-locator-emitted": True,
                 "response-body-sidecar-boundary": True,
                 "response-hash-present-or-dry-run": bool(response_sha256) or dry_run,
+                "pagination-execution-profile-emitted": bool(pagination_execution),
+                "pagination-page-sidecars-hashed": bool(pagination_execution.get("response_sha256s")),
             }.items()
             if passed
         ],
@@ -924,7 +1280,9 @@ def cloud_api_response_parser_manifest(
             check
             for check, failed in {
                 "provider-native-response-diff": True,
-                "pagination-delta-execution": not CLOUD_API_NATIVE_CAPABILITIES["incremental_delta_collection"],
+                "pagination-delta-execution": text_value(acquisition_profile.get("pagination_mode") or "none")
+                not in {"", "none"}
+                and not bool(pagination_execution.get("executed")),
                 "provider-oauth-consent-record": True,
                 "legal-hold-record": True,
             }.items()
@@ -969,6 +1327,11 @@ def cloud_api_acquisition_manifest(
             if isinstance(row.get("cloud_api_response_parser_manifest"), Mapping)
             else {}
         )
+        pagination_execution = (
+            row.get("pagination_execution_profile")
+            if isinstance(row.get("pagination_execution_profile"), Mapping)
+            else {}
+        )
         if response_manifest.get("manifest_sha256"):
             response_manifest_hashes.append(text_value(response_manifest.get("manifest_sha256") or ""))
         request_locators.append(
@@ -984,6 +1347,9 @@ def cloud_api_acquisition_manifest(
                 "error": text_value(row.get("error") or ""),
                 "attempt_count": int(row.get("attempt_count") or 0),
                 "pagination_mode": text_value(acquisition_profile.get("pagination_mode") or ""),
+                "pagination_executed": bool(pagination_execution.get("executed")),
+                "pagination_page_count": int(pagination_execution.get("page_count") or 0),
+                "pagination_profile_sha256": text_value(pagination_execution.get("profile_sha256") or ""),
                 "retry_max_attempts": int(acquisition_profile.get("retry_max_attempts") or 0),
                 "response_parser_manifest_sha256": text_value(response_manifest.get("manifest_sha256") or ""),
                 "source_viewer": text_value(
@@ -1073,6 +1439,14 @@ def cloud_api_report_grade_validation_plan(
     )
     trusted_diff = summary.get("cloud_api_trusted_diff") if isinstance(summary.get("cloud_api_trusted_diff"), Mapping) else {}
     pagination_declared = bool(collection_strategy_profile.get("pagination_policy_declared"))
+    pagination_profiles = [
+        row.get("pagination_execution_profile")
+        for row in request_rows
+        if isinstance(row.get("pagination_execution_profile"), Mapping)
+    ]
+    pagination_executed = any(profile.get("executed") for profile in pagination_profiles)
+    pagination_page_count = sum(int(profile.get("page_count") or 0) for profile in pagination_profiles)
+    delta_token_hash_count = sum(len(profile.get("delta_token_sha256s") or []) for profile in pagination_profiles)
     retry_declared = bool(collection_strategy_profile.get("request_retry_policy_declared"))
     acquisition_hash = text_value(acquisition_manifest.get("manifest_sha256") or "")
 
@@ -1191,12 +1565,21 @@ def cloud_api_report_grade_validation_plan(
         ),
         slot(
             "cloud-api-pagination-delta-execution",
-            "declared-not-executed" if pagination_declared else "not-declared",
-            [f"pagination_declared:{pagination_declared}"],
+            "executed-provider-validation-required"
+            if pagination_declared and pagination_executed
+            else "declared-not-executed"
+            if pagination_declared
+            else "not-declared",
+            [
+                f"pagination_declared:{pagination_declared}",
+                f"pagination_executed:{pagination_executed}",
+                f"pagination_pages:{pagination_page_count}",
+                f"delta_token_hashes:{delta_token_hash_count}",
+            ],
             blocker="cloud-api-pagination-delta-execution-required",
             blocking=True,
             external=True,
-            required="Exercise next-link/page/delta-token behavior against provider known-answer fixtures.",
+            required="Attach provider known-answer fixtures/native API diff for next-link/page/delta-token semantics.",
         ),
         slot(
             "cloud-api-retry-throttle-backoff-validation",
@@ -1326,6 +1709,12 @@ def cloud_api_validation_matrix(summary: Mapping[str, object], credential_handli
             "id": "response-parser-manifest",
             "label": "Each collected or dry-run response row carries a source-viewer citation manifest",
             "passed": bool(summary.get("response_parser_manifest_count")),
+            "severity": "high",
+        },
+        {
+            "id": "pagination-execution-profile",
+            "label": "Declared next-link pagination is executed with hashed page sidecars and token hashes",
+            "passed": int(summary.get("pagination_executed_count") or 0) > 0,
             "severity": "high",
         },
         {
@@ -1872,6 +2261,12 @@ def cloud_api_commercial_uplift_evidence(
             f"cloud_api_report_grade_validation_plan_sha256:{summary.get('cloud_api_report_grade_validation_plan_hash', '')}",
             *[f"response_sha256:{request.get('response_sha256')}" for request in requests[:5] if request.get("response_sha256")],
             *[
+                f"pagination_profile_sha256:{request.get('pagination_execution_profile', {}).get('profile_sha256')}"
+                for request in requests[:5]
+                if isinstance(request.get("pagination_execution_profile"), Mapping)
+                and request.get("pagination_execution_profile", {}).get("profile_sha256")
+            ],
+            *[
                 f"response_parser_manifest_sha256:{request.get('cloud_api_response_parser_manifest', {}).get('manifest_sha256')}"
                 for request in requests[:5]
                 if isinstance(request.get("cloud_api_response_parser_manifest"), Mapping)
@@ -1911,9 +2306,16 @@ def cloud_api_commercial_uplift_evidence(
                 report_grade_validation_plan.get("blocking_slot_count") or 0
             ),
             "response_parser_manifest_count": int(summary.get("response_parser_manifest_count") or 0),
+            "pagination_profile_count": int(summary.get("pagination_profile_count") or 0),
+            "pagination_executed_count": int(summary.get("pagination_executed_count") or 0),
+            "cloud_api_pagination_page_count": int(summary.get("cloud_api_pagination_page_count") or 0),
+            "cloud_api_pagination_delta_token_hash_count": int(
+                summary.get("cloud_api_pagination_delta_token_hash_count") or 0
+            ),
             "provider_scope_inventory_captured": bool(provider_scope_profile.get("scope_inventory_captured")),
             "provider_scope_profile_present": bool(provider_scope_profile),
             "provider_specific_oauth_flow": False,
+            "bounded_pagination_execution": CLOUD_API_NATIVE_CAPABILITIES["bounded_pagination_execution"],
             "incremental_delta_collection": False,
             "known_answer_cloud_api_corpus_required": True,
         },
@@ -1944,6 +2346,13 @@ def cloud_api_acquisition_functional_profile(
         if isinstance(row.get("credential_handling"), Mapping)
         and row.get("credential_handling", {}).get("sensitive_values_redacted")
     )
+    pagination_profiles = [
+        row.get("pagination_execution_profile")
+        for row in request_rows
+        if isinstance(row.get("pagination_execution_profile"), Mapping)
+    ]
+    pagination_executed_count = sum(1 for profile in pagination_profiles if profile.get("executed"))
+    pagination_page_count = sum(int(profile.get("page_count") or 0) for profile in pagination_profiles)
     failed_checks = [
         check
         for check, failed in {
@@ -1989,6 +2398,9 @@ def cloud_api_acquisition_functional_profile(
             "cloud_api_report_grade_blocking_slot_count": int(
                 report_grade_validation_plan.get("blocking_slot_count") or 0
             ),
+            "pagination_execution_profiles_emitted": bool(pagination_profiles),
+            "pagination_executed_count": pagination_executed_count,
+            "pagination_page_count": pagination_page_count,
             "response_parser_manifests_emitted": response_manifest_count == len(request_rows)
             if request_rows
             else False,
@@ -2001,6 +2413,9 @@ def cloud_api_acquisition_functional_profile(
             "response_hash_count": response_hash_count,
             "response_parser_manifest_count": response_manifest_count,
             "redacted_request_count": redacted_count,
+            "pagination_execution_profile_count": len(pagination_profiles),
+            "pagination_executed_count": pagination_executed_count,
+            "pagination_page_count": pagination_page_count,
             "report_grade_ready_slot_count": int(report_grade_validation_plan.get("ready_slot_count") or 0),
             "report_grade_blocking_slot_count": int(report_grade_validation_plan.get("blocking_slot_count") or 0),
         },
@@ -2014,6 +2429,8 @@ def cloud_api_acquisition_functional_profile(
                 "cloud-api-response-parser-manifests-emitted": response_manifest_count == len(request_rows)
                 if request_rows
                 else False,
+                "cloud-api-pagination-execution-profile-emitted": bool(pagination_profiles),
+                "cloud-api-pagination-pages-hashed": pagination_executed_count > 0 and pagination_page_count > 0,
                 "cloud-api-source-manifest-hashed": bool(compute_sha256(manifest_path)),
                 "cloud-api-credential-redaction-enabled": bool(credential_handling.get("headers_redacted")),
                 "cloud-api-local-output-boundary": True,
@@ -2269,6 +2686,13 @@ def cloud_api_core_accuracy_gates(
         )
         if response_manifest.get("manifest_sha256"):
             evidence_refs.append(f"response_parser_manifest_sha256:{response_manifest['manifest_sha256']}")
+        pagination_profile = (
+            request.get("pagination_execution_profile")
+            if isinstance(request.get("pagination_execution_profile"), Mapping)
+            else {}
+        )
+        if pagination_profile.get("profile_sha256"):
+            evidence_refs.append(f"pagination_profile_sha256:{pagination_profile['profile_sha256']}")
     trusted_diff = summary.get("cloud_api_trusted_diff") if isinstance(summary.get("cloud_api_trusted_diff"), Mapping) else {}
     if trusted_diff:
         evidence_refs.append(f"trusted_diff_status:{trusted_diff.get('status', '')}")
@@ -2296,6 +2720,12 @@ def cloud_api_core_accuracy_gates(
         isinstance(request.get("cloud_api_response_parser_manifest"), Mapping) for request in requests
     ):
         satisfied.append("response parser/source viewer manifest")
+    if int(summary.get("pagination_executed_count") or 0) > 0 or any(
+        isinstance(request.get("pagination_execution_profile"), Mapping)
+        and request.get("pagination_execution_profile", {}).get("executed")
+        for request in requests
+    ):
+        satisfied.append("bounded pagination execution profile")
     if not CLOUD_API_NATIVE_CAPABILITIES["incremental_delta_collection"]:
         satisfied.append("pagination/backoff limitation warning")
     if credential_handling.get("legal_warning") and not CLOUD_API_NATIVE_CAPABILITIES["provider_specific_oauth_flow"]:
@@ -2558,9 +2988,17 @@ def encode_body(value: object) -> bytes | None:
     return json.dumps(value, ensure_ascii=False).encode("utf-8")
 
 
-def response_path_for(responses_dir: Path, index: int, name: str, content_type: str) -> Path:
+def response_path_for(
+    responses_dir: Path,
+    index: int,
+    name: str,
+    content_type: str,
+    *,
+    page_number: int = 1,
+) -> Path:
     suffix = ".json" if "json" in content_type.lower() else ".bin"
-    return responses_dir / f"{index:03d}-{safe_name(name)}{suffix}"
+    page_suffix = "" if page_number <= 1 else f"-page-{page_number:03d}"
+    return responses_dir / f"{index:03d}-{safe_name(name)}{page_suffix}{suffix}"
 
 
 def safe_name(value: str) -> str:
