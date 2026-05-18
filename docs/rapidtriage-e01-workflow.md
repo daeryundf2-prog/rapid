@@ -60,6 +60,13 @@ The saved JSON includes `ingest_workflow.operator_runbook` with:
 - large-case controls for `--resume`, extraction caps, cursor tables, and virtualized review
 - explicit limitations so direct E01 orchestration is not overstated as native commercial EWF parsing
 
+The same evidence JSON also includes two report-limiting readiness objects:
+
+- `e01_validation_plan` records the #22 E01/Ex01 report-grade evidence slots, including segment inventory, dependency preflight, partition selection, corrupt/encrypted corpus requirements, recovered-root hashes, trusted workflow diff requirements, and large-case controls.
+- `image_stress_workflow_profile` records the normalized corrupt/encrypted/large known-answer workflow for image-like inputs. For E01/Ex01 it calls out clean, split, missing-segment, corrupt, encrypted/locked-volume, and large-image cases; for RAW, VM disks, and proprietary forensic containers the same field is reused with their own stress matrix.
+
+These fields are deliberately conservative. They make the UI and reports show what can be triaged now, what requires a lawful unlock or externally decrypted export, and which corpus/trusted-tool evidence is still missing before commercial-grade or court-report claims.
+
 ## Recommended macOS/Linux Workflow
 
 If `libewf` and Sleuth Kit tools are installed:
@@ -106,6 +113,8 @@ This is the stable #22 single-case contract that the GUI, API, and reports can r
 - `report-export`: summary/report output keys, source-hash requirement, and trusted-tool diff requirement.
 
 The manifest carries `profile_version=e01-ex01-integrated-workflow-manifest-v1`, `gap_id=#22`, `item_number=22`, large-data controls, a reportability decision, explicit commercial blockers, and a stable `manifest_sha256`. It should be treated as workflow evidence and UI state, not proof that RapidTriage has a complete native EWF parser.
+
+`image_stress_workflow_profile` carries `profile_version=image-stress-known-answer-workflow-v1` and a stable `manifest_sha256`. Treat it as the compact analyst-facing gate for E01/RAW/VM/container image readiness: it is useful for routing work, warning about large/deferred hashes, and blocking overclaiming, but it does not replace source acquisition hashes, trusted-tool diffs, or external corrupt/encrypted corpus validation.
 
 Failure guidance is normalized so the operator sees the likely class of problem instead of a raw command failure only:
 

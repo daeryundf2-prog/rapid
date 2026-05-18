@@ -10,7 +10,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from rapidtriage.cli import main
-from rapidtriage.core.e01 import build_e01_partition_browser_contract
+from rapidtriage.core.e01 import DIRECT_IMAGE_HASH_LIMIT_BYTES, build_e01_partition_browser_contract
 from rapidtriage.core.evidence import identify_evidence
 
 
@@ -118,6 +118,16 @@ class RapidTriageEvidenceAdapterTests(unittest.TestCase):
                 result["ingest_workflow"]["operator_runbook"]["profile_version"],
                 "windows11-e01-operator-runbook-v1",
             )
+            self.assertEqual(result["e01_validation_plan"]["profile_version"], "e01-ex01-report-grade-validation-plan-v1")
+            self.assertEqual(result["e01_validation_plan"]["gap_id"], "#22")
+            e01_stress = result["image_stress_workflow_profile"]
+            self.assertEqual(e01_stress["profile_version"], "image-stress-known-answer-workflow-v1")
+            self.assertEqual(e01_stress["item_number"], 22)
+            self.assertEqual(e01_stress["detected_format"], "e01")
+            self.assertIn("missing-segment", {row["id"] for row in e01_stress["known_answer_case_matrix"]})
+            self.assertIn("corrupt-e01", {row["id"] for row in e01_stress["known_answer_case_matrix"]})
+            self.assertFalse(e01_stress["commercial_grade_ready"])
+            self.assertEqual(len(e01_stress["manifest_sha256"]), 64)
 
             self.assertTrue(result["limitations"])
             self.assertTrue(result["fallback_guidance"])
@@ -254,6 +264,33 @@ class RapidTriageEvidenceAdapterTests(unittest.TestCase):
                 raw_uplift["reportability_decision"]["allowed_use"],
                 "raw-split-extraction-triage-pivot",
             )
+            raw_stress = result["image_stress_workflow_profile"]
+            self.assertEqual(raw_stress["item_number"], 23)
+            self.assertEqual(raw_stress["detected_format"], "raw")
+            self.assertIn("gapped-or-damaged-split", {row["id"] for row in raw_stress["known_answer_case_matrix"]})
+            self.assertIn("encrypted-volume", {row["id"] for row in raw_stress["known_answer_case_matrix"]})
+            self.assertIn("trusted-recovery-diff", raw_stress["blocker_ids"])
+
+    def test_image_stress_profile_marks_large_encrypted_raw_inputs(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            image_path = Path(tmp_dir) / "disk.raw"
+            with image_path.open("wb") as handle:
+                handle.write(b"-FVE-FS-")
+                handle.truncate(DIRECT_IMAGE_HASH_LIMIT_BYTES + 4096)
+
+            with patch("rapidtriage.core.evidence.missing_raw_image_tools", return_value=[]):
+                result = identify_evidence(image_path).to_dict()
+
+            stress = result["image_stress_workflow_profile"]
+            self.assertEqual(stress["profile_version"], "image-stress-known-answer-workflow-v1")
+            self.assertEqual(stress["status"], "lawful-unlock-or-decrypted-export-required")
+            self.assertEqual(stress["source_size_class"], "large-or-deferred")
+            self.assertIn("large-source-or-deferred-hash", stress["input_risk_flags"])
+            self.assertIn("encryption-indicator-or-unlock-required", stress["input_risk_flags"])
+            encrypted_case = next(row for row in stress["known_answer_case_matrix"] if row["id"] == "encrypted-volume")
+            self.assertEqual(encrypted_case["status"], "external-unlock-required")
+            self.assertTrue(stress["unlock_policy"]["suspected_encryption"])
+            self.assertIn("lawful external unlock", stress["operator_next_steps"][0])
 
     def test_identifies_archive_image_as_direct_extract_when_tool_exists(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -323,6 +360,10 @@ class RapidTriageEvidenceAdapterTests(unittest.TestCase):
                 vm_uplift["reportability_decision"]["allowed_use"],
                 "virtual-disk-extraction-triage-pivot",
             )
+            vm_stress = result["image_stress_workflow_profile"]
+            self.assertEqual(vm_stress["item_number"], 24)
+            self.assertIn("snapshot-chain", {row["id"] for row in vm_stress["known_answer_case_matrix"]})
+            self.assertIn("encrypted-compressed-corrupt-vm", {row["id"] for row in vm_stress["known_answer_case_matrix"]})
 
     def test_identifies_xva_as_export_first_virtual_disk(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -426,6 +467,12 @@ class RapidTriageEvidenceAdapterTests(unittest.TestCase):
                 )
                 self.assertFalse(result["verified_export_manifest_profile"]["manifest_present"])
                 self.assertEqual(result["verified_export_manifest_profile"]["validation_status"], "missing")
+                container_stress = result["image_stress_workflow_profile"]
+                self.assertEqual(container_stress["item_number"], 25)
+                self.assertEqual(container_stress["detected_format"], detected_format)
+                self.assertIn("plain-container-export", {row["id"] for row in container_stress["known_answer_case_matrix"]})
+                self.assertIn("encrypted-container", {row["id"] for row in container_stress["known_answer_case_matrix"]})
+                self.assertIn("verified-export-manifest", container_stress["blocker_ids"])
                 workflow_manifest = result["forensic_container_workflow_manifest"]
                 self.assertEqual(
                     workflow_manifest["profile_version"],

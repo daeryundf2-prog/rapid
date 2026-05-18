@@ -20,6 +20,7 @@ DIRECT_IMAGE_HASH_LIMIT_BYTES = 128 * 1024 * 1024
 E01_STAGE_CHECKPOINT_NAME = "rapidtriage-e01-stage-status.json"
 E01_INTEGRATED_WORKFLOW_MANIFEST_VERSION = "e01-ex01-integrated-workflow-manifest-v1"
 E01_REPORT_GRADE_VALIDATION_PLAN_VERSION = "e01-ex01-report-grade-validation-plan-v1"
+IMAGE_STRESS_KNOWN_ANSWER_PROFILE_VERSION = "image-stress-known-answer-workflow-v1"
 TOOL_PREFLIGHT_PROFILES: dict[str, dict[str, object]] = {
     "ewfmount": {
         "purpose": "Expose E01/Ex01 evidence as a read-only raw image through libewf.",
@@ -2326,6 +2327,283 @@ def stable_manifest_sha256(payload: Mapping[str, object]) -> str:
     redacted = {key: value for key, value in payload.items() if key != "manifest_sha256"}
     encoded = json.dumps(redacted, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
     return hashlib.sha256(encoded).hexdigest()
+
+
+def build_image_stress_known_answer_profile(
+    number: int,
+    *,
+    source_path: Path | str,
+    detected_format: str,
+    source_integrity: Mapping[str, object] | Sequence[Mapping[str, object]] | None = None,
+    tool_preflight: Sequence[Mapping[str, object]] | None = None,
+    workflow_plan: Mapping[str, object] | None = None,
+    report_grade_assessment: Mapping[str, object] | None = None,
+    recovery_unlock_profile: Mapping[str, object] | None = None,
+) -> dict[str, object]:
+    """One compact stress/corpus readiness profile for image-like inputs.
+
+    E01, RAW/split, VM disks, and proprietary forensic containers each expose
+    different validation plans. This profile normalizes the most important
+    analyst question: can this exact input be handled as triage evidence now,
+    and what corrupt/encrypted/large known-answer evidence is still needed
+    before report-grade or commercial-grade claims?
+    """
+
+    source = Path(source_path).expanduser()
+    gap_id = f"#{number}"
+    integrity_rows = _image_source_integrity_rows(source_integrity)
+    hash_statuses = sorted(
+        {
+            str(row.get("hash_status") or "not-recorded")
+            for row in integrity_rows
+            if isinstance(row, Mapping)
+        }
+    )
+    sizes = [
+        _image_optional_int(row.get("size_bytes", row.get("size")))
+        for row in integrity_rows
+        if isinstance(row, Mapping)
+    ]
+    source_size_bytes = sum(size for size in sizes if size is not None)
+    large_input = (
+        any(status in {"deferred-large-source", "skipped-large-file"} for status in hash_statuses)
+        or source_size_bytes > DIRECT_IMAGE_HASH_LIMIT_BYTES
+    )
+    tool_rows = [dict(row) for row in tool_preflight or []]
+    missing_tools = [str(row.get("tool")) for row in tool_rows if not row.get("available")]
+    plan = dict(workflow_plan or {})
+    evidence_slots = [
+        dict(slot)
+        for slot in plan.get("evidence_slots", [])
+        if isinstance(slot, Mapping)
+    ]
+    slot_statuses = {str(slot.get("id")): str(slot.get("status") or "") for slot in evidence_slots}
+    report_grade = dict(report_grade_assessment or {})
+    fde_profile = dict(recovery_unlock_profile or {})
+    fde_workflow = (
+        fde_profile.get("fde_unlock_workflow")
+        if isinstance(fde_profile.get("fde_unlock_workflow"), Mapping)
+        else fde_profile
+    )
+    fde_status = str((fde_workflow or {}).get("status") or "not-inspected")
+    fde_indicators = [
+        dict(item)
+        for item in (fde_workflow or {}).get("indicators", [])
+        if isinstance(item, Mapping)
+    ]
+    suspected_encryption = bool(fde_indicators) or fde_status in {
+        "indicator-found",
+        "unlock-material-required",
+        "external-unlock-required-if-detected",
+    }
+    case_rows = _image_stress_case_rows(
+        number,
+        large_input=large_input,
+        suspected_encryption=suspected_encryption,
+        slot_statuses=slot_statuses,
+    )
+    internal_ready = bool(integrity_rows) and not missing_tools and bool(plan or tool_rows or number == 25)
+    external_cases_required = [
+        row["id"]
+        for row in case_rows
+        if str(row.get("status")) in {"external-corpus-required", "external-unlock-required", "external-run-required"}
+    ]
+    blocker_ids = list(dict.fromkeys(
+        [
+            *[str(item) for item in report_grade.get("blockers") or [] if str(item)],
+            *[str(item) for item in plan.get("blocking_slot_ids") or [] if str(item)],
+            *external_cases_required,
+        ]
+    ))
+    status = "triage-ready-external-corpus-required" if internal_ready else "preflight-blocked"
+    if suspected_encryption:
+        status = "lawful-unlock-or-decrypted-export-required"
+    elif large_input:
+        status = "large-evidence-hash-and-stress-validation-required" if internal_ready else status
+    payload: dict[str, object] = {
+        "profile_version": IMAGE_STRESS_KNOWN_ANSWER_PROFILE_VERSION,
+        "item_number": number,
+        "gap_id": gap_id,
+        "detected_format": detected_format,
+        "source_path": str(source),
+        "status": status,
+        "commercial_grade_ready": False,
+        "external_evidence_required": True,
+        "source_size_bytes": source_size_bytes,
+        "source_size_class": "large-or-deferred" if large_input else ("recorded-small" if source_size_bytes else "not-recorded"),
+        "source_hash_statuses": hash_statuses,
+        "input_risk_flags": [
+            flag
+            for flag, enabled in {
+                "large-source-or-deferred-hash": large_input,
+                "encryption-indicator-or-unlock-required": suspected_encryption,
+                "missing-direct-tooling": bool(missing_tools),
+                "trusted-diff-not-attached": "trusted-workflow-diff" in str(plan),
+                "commercial-parser-incomplete": not bool(report_grade.get("ready_for_court_report")),
+            }.items()
+            if enabled
+        ],
+        "tooling": {
+            "tool_count": len(tool_rows),
+            "missing_tools": missing_tools,
+            "all_required_tools_available": bool(tool_rows) and not missing_tools,
+        },
+        "known_answer_case_matrix": case_rows,
+        "report_required_slots": [
+            {
+                "id": str(slot.get("id") or ""),
+                "status": str(slot.get("status") or ""),
+                "required_before_report": bool(slot.get("required_before_report")),
+            }
+            for slot in evidence_slots
+            if slot.get("required_before_report")
+        ][:25],
+        "workflow_plan_ref": {
+            "profile_version": plan.get("profile_version", ""),
+            "manifest_sha256": plan.get("manifest_sha256", ""),
+            "status": plan.get("status", ""),
+            "blocking_slot_ids": list(plan.get("blocking_slot_ids") or []),
+        },
+        "large_data_policy": {
+            "preflight_hash_limit_bytes": DIRECT_IMAGE_HASH_LIMIT_BYTES,
+            "full_acquisition_hash_required_before_report": True,
+            "checkpoint_or_resume_required_for_large_runs": number in {22, 23, 24},
+            "cursor_or_bounded_review_required": True,
+        },
+        "unlock_policy": {
+            "suspected_encryption": suspected_encryption,
+            "fde_status": fde_status,
+            "indicator_count": len(fde_indicators),
+            "rapidtriage_unlock_engine": "not-implemented",
+            "accepted_workaround": "lawful decrypted export or externally unlocked mounted root with hash/log evidence",
+        },
+        "blocker_ids": blocker_ids,
+        "operator_next_steps": _image_stress_next_steps(number, large_input=large_input, suspected_encryption=suspected_encryption),
+        "report_claim_boundary": (
+            "Use this as an input/workflow readiness profile only. Report-grade conclusions need source hashes, "
+            "trusted-tool diffs, known-answer/corpus evidence, and disclosure of corrupt/encrypted/large limitations."
+        ),
+    }
+    payload["manifest_sha256"] = stable_manifest_sha256(payload)
+    return payload
+
+
+def _image_source_integrity_rows(
+    source_integrity: Mapping[str, object] | Sequence[Mapping[str, object]] | None,
+) -> list[Mapping[str, object]]:
+    if not source_integrity:
+        return []
+    if isinstance(source_integrity, Mapping):
+        parts = source_integrity.get("parts")
+        if isinstance(parts, Sequence) and not isinstance(parts, (str, bytes, bytearray)):
+            return [item for item in parts if isinstance(item, Mapping)]
+        return [source_integrity]
+    if isinstance(source_integrity, Sequence) and not isinstance(source_integrity, (str, bytes, bytearray)):
+        return [item for item in source_integrity if isinstance(item, Mapping)]
+    return []
+
+
+def _image_optional_int(value: object) -> int | None:
+    if value in (None, ""):
+        return None
+    try:
+        return int(value)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return None
+
+
+def _image_stress_case_rows(
+    number: int,
+    *,
+    large_input: bool,
+    suspected_encryption: bool,
+    slot_statuses: Mapping[str, str],
+) -> list[dict[str, object]]:
+    rows_by_number = {
+        22: [
+            ("clean-e01", "Clean single-segment E01/Ex01", "segment-inventory"),
+            ("split-e01", "Contiguous split E01/Ex01 set", "segment-inventory"),
+            ("missing-segment", "Missing segment or non-first segment selection", "corrupt-encrypted-corpus"),
+            ("corrupt-e01", "Malformed/truncated/checksum-failing EWF", "corrupt-encrypted-corpus"),
+            ("encrypted-or-locked-volume", "BitLocker/FileVault/LUKS inside image", "corrupt-encrypted-corpus"),
+            ("large-e01", "Large E01/Ex01 with deferred hash and resume", "platform-tool-matrix"),
+        ],
+        23: [
+            ("single-raw", "Single RAW/DD/IMG image", "split-part-inventory"),
+            ("contiguous-split", "Contiguous split RAW set", "split-part-inventory"),
+            ("gapped-or-damaged-split", "Gapped, out-of-order, or damaged split set", "damaged-gapped-corpus"),
+            ("encrypted-volume", "Encrypted partition requiring external unlock", "encrypted-volume-workflow"),
+            ("large-raw", "Large RAW/split image stress case", "damaged-gapped-corpus"),
+        ],
+        24: [
+            ("single-base-disk", "Single base VHD/VHDX/VMDK/VDI/QCOW", "qemu-info-and-format-profile"),
+            ("snapshot-chain", "Snapshot/differencing/backing-file chain", "snapshot-differencing-chain-corpus"),
+            ("missing-parent", "Missing backing/parent disk", "snapshot-differencing-chain-corpus"),
+            ("encrypted-compressed-corrupt-vm", "Encrypted, compressed, or corrupt VM disk", "encrypted-compressed-corrupt-vm-corpus"),
+            ("large-vm-disk", "Large virtual disk conversion and nested recovery", "encrypted-compressed-corrupt-vm-corpus"),
+        ],
+        25: [
+            ("plain-container-export", "Plain AD1/L01/Lx01/AFF/AFF4 vendor export", "verified-export-manifest"),
+            ("encrypted-container", "Encrypted or password-protected container", "encrypted-compressed-container-corpus"),
+            ("compressed-container", "Compressed or chunked proprietary container", "encrypted-compressed-container-corpus"),
+            ("corrupt-partial-container", "Corrupt/partial proprietary container", "encrypted-compressed-container-corpus"),
+            ("metadata-deleted-entry", "Embedded metadata and deleted-entry validation", "metadata-deleted-entry-validation"),
+        ],
+    }
+    rows: list[dict[str, object]] = []
+    for case_id, label, slot_id in rows_by_number.get(number, []):
+        slot_status = slot_statuses.get(slot_id, "")
+        if case_id.startswith("large") and large_input:
+            status = "case-triggered"
+        elif "encrypted" in case_id and suspected_encryption:
+            status = "external-unlock-required"
+        elif slot_status.startswith("complete"):
+            status = "internally-covered"
+        elif slot_status:
+            status = slot_status
+        else:
+            status = "external-corpus-required"
+        rows.append(
+            {
+                "id": case_id,
+                "label": label,
+                "mapped_evidence_slot": slot_id,
+                "status": status,
+                "required_before_commercial_grade": status not in {"internally-covered"},
+            }
+        )
+    return rows
+
+
+def _image_stress_next_steps(number: int, *, large_input: bool, suspected_encryption: bool) -> list[str]:
+    next_steps = {
+        22: [
+            "Run E01 evidence preflight and source/full hash capture.",
+            "Run e01-smoke and image-workflow-validate against ewfverify/Sleuth Kit or vendor rows.",
+            "Attach malformed, missing-segment, encrypted/locked, and large E01 corpus results before commercial-grade claims.",
+        ],
+        23: [
+            "Inventory split parts and capture per-part hashes before recovery.",
+            "Preserve mmls/fsstat/tsk_recover transcripts and diff recovered paths/hashes against a trusted baseline.",
+            "Attach damaged/gapped split-set, encrypted-volume, and large RAW stress results before commercial-grade claims.",
+        ],
+        24: [
+            "Preserve qemu-img info, conversion command, converted RAW hash, and nested recovery transcript.",
+            "Validate snapshot/backing-chain completeness and converted output against trusted qemu/Sleuth Kit rows.",
+            "Attach encrypted/compressed/corrupt and large VM disk corpus results before commercial-grade claims.",
+        ],
+        25: [
+            "Hash the original proprietary container and require a vendor export manifest sidecar.",
+            "Scan only the verified derived export folder and keep vendor tool/version/export logs.",
+            "Attach encrypted/compressed/corrupt, metadata, deleted-entry, and native-parser version matrix evidence before commercial-grade claims.",
+        ],
+    }
+    steps = list(next_steps.get(number, ["Attach trusted-tool diff and known-answer corpus evidence."]))
+    if large_input:
+        steps.insert(0, "Capture or attach a full acquisition hash because preflight hashing was deferred for size.")
+    if suspected_encryption:
+        steps.insert(0, "Use a lawful external unlock/decrypted export workflow and attach source/decrypted hashes plus unlock logs.")
+    return steps
 
 
 def image_validation_matrix(

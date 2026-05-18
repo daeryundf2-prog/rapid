@@ -24,9 +24,11 @@ from .e01 import (
     E01_SUFFIXES,
     E01_REQUIRED_TOOLS,
     build_e01_intake_profile,
+    build_e01_report_grade_validation_plan,
     collect_tool_preflight,
     build_e01_segment_set_profile,
     build_e01_ingest_workflow_profile,
+    build_image_stress_known_answer_profile,
     describe_source_integrity,
     e01_failure_guidance,
     e01_preflight_summary,
@@ -95,9 +97,11 @@ class EvidenceAdapterResult:
     ingest_workflow: dict[str, object] | None = None
     image_analyst_review_profile: dict[str, object] | None = None
     e01_intake_profile: dict[str, object] | None = None
+    e01_validation_plan: dict[str, object] | None = None
     raw_split_validation_plan: dict[str, object] | None = None
     virtual_disk_validation_plan: dict[str, object] | None = None
     recovery_unlock_profile: dict[str, object] | None = None
+    image_stress_workflow_profile: dict[str, object] | None = None
 
     def to_dict(self) -> dict[str, object]:
         return asdict(self)
@@ -416,6 +420,17 @@ class EwfAdapter:
             source_integrity=source_integrity,
             failure_guidance=failure_guidance,
         )
+        e01_validation_plan = (
+            build_e01_report_grade_validation_plan(
+                source,
+                source_integrity=source_integrity,
+                segment_set_profile=segment_set_profile,
+                tool_preflight=tool_preflight or [],
+                preflight_summary=preflight_summary or {},
+            )
+            if source.is_file() and supported
+            else None
+        )
         return EvidenceAdapterResult(
             adapter=self.name,
             source_path=str(source),
@@ -512,6 +527,7 @@ class EwfAdapter:
             segment_set_profile=segment_set_profile,
             ingest_workflow=ingest_workflow,
             e01_intake_profile=e01_intake_profile,
+            e01_validation_plan=e01_validation_plan,
             image_analyst_review_profile=image_workflow_analyst_review_profile(
                 22,
                 {
@@ -1845,15 +1861,47 @@ def identify_evidence(source: Path) -> EvidenceAdapterResult:
 
 
 def with_recovery_unlock_profile(result: EvidenceAdapterResult) -> EvidenceAdapterResult:
-    if result.recovery_unlock_profile is not None:
-        return result
-    return replace(
+    recovery_profile = result.recovery_unlock_profile or build_recovery_unlock_profile(
+        Path(result.source_path),
+        source_kind=result.detected_format,
+        support_level=result.support_level,
+    )
+    enriched = replace(
         result,
-        recovery_unlock_profile=build_recovery_unlock_profile(
-            Path(result.source_path),
-            source_kind=result.detected_format,
-            support_level=result.support_level,
-        ),
+        recovery_unlock_profile=recovery_profile,
+    )
+    if enriched.image_stress_workflow_profile is not None:
+        return enriched
+    stress_profile = build_evidence_image_stress_profile(enriched)
+    if stress_profile is None:
+        return enriched
+    return replace(enriched, image_stress_workflow_profile=stress_profile)
+
+
+def build_evidence_image_stress_profile(result: EvidenceAdapterResult) -> dict[str, object] | None:
+    gap_id = (result.commercial_gap_ids or [""])[0]
+    number_by_gap = {"#22": 22, "#23": 23, "#24": 24, "#25": 25}
+    number = number_by_gap.get(gap_id)
+    if number is None:
+        return None
+    workflow_plan = (
+        result.e01_validation_plan
+        or result.raw_split_validation_plan
+        or result.virtual_disk_validation_plan
+        or result.forensic_container_validation_plan
+        or result.ingest_workflow
+        or result.forensic_container_workflow_manifest
+        or {}
+    )
+    return build_image_stress_known_answer_profile(
+        number,
+        source_path=Path(result.source_path),
+        detected_format=result.detected_format,
+        source_integrity=result.source_integrity,
+        tool_preflight=result.tool_preflight or [],
+        workflow_plan=workflow_plan,
+        report_grade_assessment=result.report_grade_assessment or {},
+        recovery_unlock_profile=result.recovery_unlock_profile or {},
     )
 
 
