@@ -88,6 +88,15 @@ def load_check_dependencies_module():
     return module
 
 
+def load_operations_security_module():
+    module_path = Path(__file__).resolve().parent.parent / "scripts" / "operations-security-readiness.py"
+    spec = importlib.util.spec_from_file_location("rapidtriage_operations_security_test", module_path)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
 class RapidTriageOpsTests(unittest.TestCase):
     def test_parser_exposes_benchmark_and_case_catalog(self) -> None:
         commands = build_parser()._subparsers._group_actions[0].choices
@@ -7310,6 +7319,97 @@ class RapidTriageOpsTests(unittest.TestCase):
             self.assertIn("dependency_report_grade_validation_plan_hash", dependency_diff["compared_fields"])
             self.assertIn("trusted dependency advisory/SBOM diff pass", dependency_gates[0]["satisfied_checks"])
             self.assertIn("dependency monitoring report-grade validation plan", dependency_gates[0]["satisfied_checks"])
+
+    def test_operations_security_readiness_script_writes_numbered_matrix(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            output_path = root / "operations-security-readiness.json"
+            work_dir = root / "ops-security-work"
+            result = subprocess.run(
+                [
+                    "python",
+                    "scripts/operations-security-readiness.py",
+                    "--output",
+                    str(output_path),
+                    "--work-dir",
+                    str(work_dir),
+                    "--overwrite",
+                    "--json",
+                ],
+                cwd=Path(__file__).resolve().parent.parent,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            payload = json.loads(output_path.read_text(encoding="utf-8"))
+            self.assertEqual(payload["command"], "operations-security-readiness")
+            self.assertEqual(payload["profile_version"], "operations-security-readiness-v1")
+            self.assertEqual(payload["item_numbers"], [108, 109, 110, 111, 118, 119, 120])
+            self.assertFalse(payload["commercial_claim_allowed"])
+            self.assertTrue(payload["all_internal_checks_passed"])
+            self.assertEqual(payload["summary"]["implemented_count"], 7)
+            self.assertEqual(payload["summary"]["usable_count"], 7)
+            self.assertEqual(payload["summary"]["internal_validated_count"], 7)
+            self.assertEqual(payload["summary"]["commercial_grade_count"], 0)
+            self.assertEqual(payload["summary"]["failed_row_numbers"], [])
+
+            rows = {row["number"]: row for row in payload["numbered_readiness"]}
+            self.assertEqual(set(rows), {108, 109, 110, 111, 118, 119, 120})
+            for number, row in rows.items():
+                self.assertTrue(row["implemented"], number)
+                self.assertTrue(row["usable"], number)
+                self.assertTrue(row["internal_validated"], number)
+                self.assertFalse(row["commercial_grade"], number)
+                self.assertFalse(row["commercial_claim_allowed"], number)
+                self.assertEqual(row["failed_check_ids"], [], number)
+                self.assertEqual(len(row["row_hash"]), 64)
+                self.assertTrue(row["source_outputs"], number)
+                self.assertTrue(row["external_blockers"], number)
+
+            self.assertTrue(rows[108]["checks"]["rbac_smoke_viewer_cannot_backup_restore"])
+            self.assertTrue(rows[108]["checks"]["rbac_smoke_admin_can_backup_restore"])
+            self.assertTrue(rows[109]["checks"]["multi_user_disabled_by_default"])
+            self.assertTrue(rows[110]["checks"]["collaboration_tamper_evidence_recorded"])
+            self.assertTrue(rows[111]["checks"]["backup_smoke_restore_hash_verified"])
+            self.assertTrue(rows[118]["checks"]["security_appsec_blocker_preserved"])
+            self.assertTrue(rows[119]["checks"]["sandbox_os_level_claim_blocked"])
+            self.assertTrue(rows[120]["checks"]["dependency_scheduled_workflow_configured"])
+
+            generated = {Path(item["path"]).name: item for item in payload["generated_files"]}
+            self.assertIn("enterprise-policy.json", generated)
+            self.assertIn("rbac-permission-smoke.json", generated)
+            self.assertIn("backup-restore-drill-smoke.json", generated)
+            self.assertIn("security-hardening-review.json", generated)
+            self.assertIn("parser-sandbox-smoke.json", generated)
+            self.assertIn("dependency-monitoring.json", generated)
+            for item in generated.values():
+                self.assertEqual(len(item["sha256"]), 64)
+                self.assertGreater(item["size_bytes"], 0)
+
+            rbac_smoke = json.loads((work_dir / "rbac-permission-smoke.json").read_text(encoding="utf-8"))
+            self.assertEqual(rbac_smoke["profile_version"], "rbac-permission-smoke-v1")
+            self.assertEqual(rbac_smoke["failed_check_ids"], [])
+            backup_smoke = json.loads((work_dir / "backup-restore-drill-smoke.json").read_text(encoding="utf-8"))
+            self.assertTrue(backup_smoke["restore_hash_verified"])
+            self.assertEqual(backup_smoke["failed_check_ids"], [])
+            self.assertEqual(len(payload["manifest_hash"]), 64)
+            checksums = (work_dir / "SHA256SUMS").read_text(encoding="utf-8")
+            self.assertIn("enterprise-policy.json", checksums)
+            self.assertIn("case-backup.json", checksums)
+            self.assertIn("dependency-monitoring.json", checksums)
+
+            ops_security = load_operations_security_module()
+            rebuilt = ops_security.readiness_row(
+                item_number=119,
+                source_outputs=rows[119]["source_outputs"],
+                checks=rows[119]["checks"],
+                evidence_hashes=rows[119]["evidence_hashes"],
+                ready_slot_count=rows[119]["ready_slot_count"],
+                blocking_slot_count=rows[119]["blocking_slot_count"],
+            )
+            self.assertEqual(rebuilt["status"], "implemented-usable-internal-validated")
 
     def test_case_acquisition_command_records_and_lists_metadata(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
