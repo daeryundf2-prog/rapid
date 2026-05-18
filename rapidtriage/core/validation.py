@@ -38,6 +38,7 @@ PARSER_FIXTURE_CORPUS_GAP_ID = "#82"
 PARSER_FP_FN_GAP_ID = "#83"
 INDEPENDENT_VALIDATION_GAP_ID = "#84"
 VALIDATION_PACKAGE_GAP_ID = "#85"
+VALIDATION_LEGAL_DEFENSIBILITY_ITEM_NUMBERS = [81, 82, 83, 84, 85, 86, 87, 88, 89, 90, 97, 98]
 KNOWN_ANSWER_TRUSTED_DIFF_BLOCKER_81 = "trusted-known-answer-manifest-diff-missing"
 KNOWN_ANSWER_REPORT_GRADE_VALIDATION_PLAN_VERSION = "known-answer-report-grade-validation-plan-v1"
 KNOWN_ANSWER_REPORT_GRADE_BLOCKERS = [
@@ -270,6 +271,8 @@ def build_validation_package(
         parser_fp_fn_notes,
         manifest=parser_fp_fn_manifest,
     )
+    core_forensics_accuracy_profiles = build_core_forensics_accuracy_profiles()
+    core_forensics_known_answer_template = build_core_forensics_known_answer_template()
     validation_diff_runner_matrix = build_validation_diff_runner_matrix()
     final_qc_execution_report = build_final_qc_execution_report()
     independent_validation_report = build_independent_validation_report(independent_report)
@@ -291,8 +294,8 @@ def build_validation_package(
         "checks": build_validation_checks(),
         "validation_package_assessment": validation_package_assessment,
         "known_answer_validation": known_answer_validation,
-        "core_forensics_accuracy_profiles": build_core_forensics_accuracy_profiles(),
-        "core_forensics_known_answer_template": build_core_forensics_known_answer_template(),
+        "core_forensics_accuracy_profiles": core_forensics_accuracy_profiles,
+        "core_forensics_known_answer_template": core_forensics_known_answer_template,
         "parser_fixture_corpus": parser_fixture_corpus,
         "parser_false_positive_false_negative_notes": parser_fp_fn_notes,
         "parser_fp_fn_risk_register_profile": parser_fp_fn_profile,
@@ -306,6 +309,8 @@ def build_validation_package(
             parser_fp_fn_profile=parser_fp_fn_profile,
             independent_validation_report=independent_validation_report,
             validation_package_assessment=validation_package_assessment,
+            final_qc_execution_report=final_qc_execution_report,
+            core_forensics_accuracy_profiles=core_forensics_accuracy_profiles,
         ),
         "external_tool_versions": build_external_tool_versions(),
         "external_tool_version_assessment": build_external_tool_version_assessment(),
@@ -347,6 +352,8 @@ def build_validation_package(
         parser_fp_fn_profile=parser_fp_fn_profile,
         independent_validation_report=independent_validation_report,
         validation_package_assessment=validation_package_assessment,
+        final_qc_execution_report=final_qc_execution_report,
+        core_forensics_accuracy_profiles=core_forensics_accuracy_profiles,
     )
     write_result(payload, json_path)
     markdown_path.write_text(render_validation_markdown(payload), encoding="utf-8")
@@ -2574,7 +2581,13 @@ def build_validation_legal_defensibility_matrix(
     parser_fp_fn_profile: Mapping[str, object],
     independent_validation_report: Mapping[str, object],
     validation_package_assessment: Mapping[str, object],
+    final_qc_execution_report: Mapping[str, object] | None = None,
+    core_forensics_accuracy_profiles: Mapping[str, object] | None = None,
 ) -> dict[str, object]:
+    coverage_by_item = known_answer_coverage_by_item(known_answer_validation)
+    accuracy_profiles = accuracy_profiles_by_item(core_forensics_accuracy_profiles or {})
+    final_qc = final_qc_execution_report or {}
+    final_qc_contracts = final_qc_contracts_by_item(final_qc)
     source_rows = [
         {
             "item_number": 81,
@@ -2587,7 +2600,11 @@ def build_validation_legal_defensibility_matrix(
             "implemented": True,
             "usable": True,
             "validated": bool(known_answer_validation.get("dataset_count")),
-            "commercial_grade_ready": bool(known_answer_validation.get("ready_for_court_report")),
+            "external_evidence_required": True,
+            "evidence_scope": "known-answer-manifest",
+            "known_answer_coverage": coverage_by_item.get(81, {}),
+            "commercial_grade_ready": bool(known_answer_validation.get("ready_for_court_report"))
+            and not bool(known_answer_validation.get("blockers")),
         },
         {
             "item_number": 82,
@@ -2600,6 +2617,9 @@ def build_validation_legal_defensibility_matrix(
             "implemented": True,
             "usable": True,
             "validated": bool(parser_fixture_corpus.get("fixture_backed_count")),
+            "external_evidence_required": True,
+            "evidence_scope": "fixture-corpus",
+            "known_answer_coverage": coverage_by_item.get(82, {}),
             "commercial_grade_ready": bool(parser_fixture_corpus.get("ready_for_court_report"))
             and not bool(parser_fixture_corpus.get("blockers")),
         },
@@ -2614,6 +2634,9 @@ def build_validation_legal_defensibility_matrix(
             "implemented": True,
             "usable": True,
             "validated": bool(parser_fp_fn_profile.get("parser_count")),
+            "external_evidence_required": True,
+            "evidence_scope": "fp-fn-risk-register",
+            "known_answer_coverage": coverage_by_item.get(83, {}),
             "commercial_grade_ready": bool(parser_fp_fn_profile.get("commercial_claim_allowed")),
         },
         {
@@ -2631,6 +2654,9 @@ def build_validation_legal_defensibility_matrix(
             "implemented": True,
             "usable": True,
             "validated": bool(independent_validation_report.get("sha256")),
+            "external_evidence_required": True,
+            "evidence_scope": "independent-validation-report",
+            "known_answer_coverage": coverage_by_item.get(84, {}),
             "commercial_grade_ready": bool(independent_validation_report.get("ready_for_court_report")),
         },
         {
@@ -2648,22 +2674,228 @@ def build_validation_legal_defensibility_matrix(
             "implemented": True,
             "usable": True,
             "validated": True,
+            "external_evidence_required": True,
+            "evidence_scope": "validation-package-artifacts",
+            "known_answer_coverage": coverage_by_item.get(85, {}),
             "commercial_grade_ready": bool(validation_package_assessment.get("ready_for_court_report")),
         },
     ]
+    source_rows.extend(
+        build_legal_defensibility_control_row(
+            item_number=number,
+            component=component,
+            contract=final_qc_contracts.get(contract_item_number, {}) if contract_item_number else {},
+            accuracy_profile=accuracy_profiles.get(number, {}),
+            known_answer_coverage=coverage_by_item.get(number, {}),
+            final_qc_execution_report=final_qc,
+            evidence_input_key=evidence_input_key,
+            fallback_blockers=fallback_blockers,
+        )
+        for number, component, evidence_input_key, fallback_blockers, contract_item_number in (
+            (
+                86,
+                "chain-of-custody workflow",
+                "chain_of_custody",
+                ["signed-custody-handoff-required", "trusted-custody-event-manifest-diff-missing"],
+                86,
+            ),
+            (
+                87,
+                "evidence acquisition hash workflow",
+                "chain_of_custody",
+                ["whole-device-acquisition-hash-required", "trusted-acquisition-hash-manifest-diff-missing"],
+                0,
+            ),
+            (
+                88,
+                "immutable analyst audit log",
+                "audit_bundle",
+                ["signed-audit-export-bundle-required", "trusted-audit-hash-chain-diff-missing"],
+                87,
+            ),
+            (
+                89,
+                "report reproducibility",
+                "exhibit_bundle",
+                ["repeat-run-report-replay-evidence-required", "trusted-report-replay-manifest-diff-missing"],
+                0,
+            ),
+            (
+                90,
+                "report source provenance completeness",
+                "exhibit_bundle",
+                ["source-viewer-roundtrip-evidence-required", "trusted-provenance-manifest-diff-missing"],
+                0,
+            ),
+            (
+                97,
+                "timezone normalization validation",
+                "",
+                ["timezone-known-answer-dst-corpus-required", "trusted-timezone-normalization-matrix-diff-missing"],
+                0,
+            ),
+            (
+                98,
+                "clock skew analysis",
+                "",
+                ["clock-baseline-corpus-required", "trusted-clock-skew-baseline-diff-missing"],
+                0,
+            ),
+        )
+    )
     rows = [{**row, "row_hash": hashlib_json(row)} for row in source_rows]
     matrix_core = {
         "profile_version": "validation-legal-defensibility-matrix-v1",
-        "item_numbers": [81, 82, 83, 84, 85],
+        "item_numbers": VALIDATION_LEGAL_DEFENSIBILITY_ITEM_NUMBERS,
         "row_count": len(rows),
         "implemented_count": sum(1 for row in rows if row["implemented"]),
         "usable_count": sum(1 for row in rows if row["usable"]),
         "validated_count": sum(1 for row in rows if row["validated"]),
+        "external_evidence_required_count": sum(1 for row in rows if row["external_evidence_required"]),
         "commercial_grade_count": sum(1 for row in rows if row["commercial_grade_ready"]),
         "rows": rows,
         "commercial_claim_allowed": all(bool(row["commercial_grade_ready"]) for row in rows),
+        "operator_warning": (
+            "Rows marked validated are internally test/fixture backed only. Commercial-grade legal claims still require "
+            "trusted diffs, independent review, signed custody/audit/exhibit records, and jurisdiction-specific signoff."
+        ),
     }
     return {**matrix_core, "matrix_hash": hashlib_json(matrix_core)}
+
+
+def known_answer_coverage_by_item(known_answer_validation: Mapping[str, object]) -> dict[int, dict[str, object]]:
+    pipeline = known_answer_validation.get("known_answer_pipeline_manifest")
+    if not isinstance(pipeline, Mapping):
+        return {}
+    coverage_rows = pipeline.get("coverage_by_item")
+    if not isinstance(coverage_rows, list):
+        return {}
+    coverage: dict[int, dict[str, object]] = {}
+    for row in coverage_rows:
+        if not isinstance(row, Mapping):
+            continue
+        try:
+            item_number = int(row.get("item_number") or 0)
+        except (TypeError, ValueError):
+            continue
+        if item_number:
+            coverage[item_number] = dict(row)
+    return coverage
+
+
+def accuracy_profiles_by_item(core_forensics_accuracy_profiles: Mapping[str, object]) -> dict[int, dict[str, object]]:
+    rows = core_forensics_accuracy_profiles.get("profiles")
+    if not isinstance(rows, list):
+        return {}
+    profiles: dict[int, dict[str, object]] = {}
+    for row in rows:
+        if not isinstance(row, Mapping):
+            continue
+        try:
+            item_number = int(row.get("number") or 0)
+        except (TypeError, ValueError):
+            continue
+        if item_number:
+            profiles[item_number] = dict(row)
+    return profiles
+
+
+def final_qc_contracts_by_item(final_qc_execution_report: Mapping[str, object]) -> dict[int, dict[str, object]]:
+    contract = final_qc_execution_report.get("legal_submission_qc_contract")
+    if not isinstance(contract, Mapping):
+        return {}
+    rows = contract.get("contracts")
+    if not isinstance(rows, list):
+        return {}
+    contracts: dict[int, dict[str, object]] = {}
+    for row in rows:
+        if not isinstance(row, Mapping):
+            continue
+        try:
+            item_number = int(row.get("qc_prep_item_number") or 0)
+        except (TypeError, ValueError):
+            continue
+        if item_number:
+            contracts[item_number] = dict(row)
+    return contracts
+
+
+def build_legal_defensibility_control_row(
+    *,
+    item_number: int,
+    component: str,
+    contract: Mapping[str, object],
+    accuracy_profile: Mapping[str, object],
+    known_answer_coverage: Mapping[str, object],
+    final_qc_execution_report: Mapping[str, object],
+    evidence_input_key: str,
+    fallback_blockers: Sequence[str],
+) -> dict[str, object]:
+    evidence_state = final_qc_evidence_state(final_qc_execution_report, evidence_input_key)
+    coverage_validated = known_answer_coverage_validated(known_answer_coverage)
+    contract_attached = bool(contract.get("attached"))
+    evidence_attached = bool(evidence_state.get("exists"))
+    profile_hash = hashlib_json(
+        {
+            "profile": {
+                "item_number": item_number,
+                "title": str(accuracy_profile.get("title") or component),
+                "required_checks": list(accuracy_profile.get("required_checks") or []),
+                "minimum_evidence": list(accuracy_profile.get("minimum_evidence") or []),
+                "oracle": str(accuracy_profile.get("oracle") or ""),
+            }
+        }
+    )
+    blockers = list(fallback_blockers)
+    if not coverage_validated:
+        blockers.append(f"internal-known-answer-#{item_number}-coverage-required")
+    if evidence_input_key and not evidence_attached:
+        blockers.append(f"{evidence_input_key.replace('_', '-')}-attachment-required")
+    if not contract:
+        blockers.append("final-qc-contract-required")
+    status = "validated-internal-fixture" if coverage_validated else "external-evidence-required"
+    if evidence_attached or contract_attached:
+        status = "attached-evidence-present" if evidence_attached else "contract-ready"
+    return {
+        "item_number": item_number,
+        "gap_id": f"#{item_number}",
+        "component": component,
+        "status": status,
+        "primary_hash": str(evidence_state.get("sha256") or profile_hash),
+        "secondary_hash": str(contract.get("profile_version") or ""),
+        "blockers": blockers,
+        "implemented": bool(accuracy_profile) or bool(contract),
+        "usable": bool(accuracy_profile) or bool(contract),
+        "validated": coverage_validated or evidence_attached or contract_attached,
+        "external_evidence_required": True,
+        "evidence_scope": "case-report-control-and-known-answer-coverage",
+        "known_answer_coverage": dict(known_answer_coverage),
+        "accuracy_profile_hash": profile_hash,
+        "commercial_grade_ready": False,
+    }
+
+
+def known_answer_coverage_validated(known_answer_coverage: Mapping[str, object]) -> bool:
+    if not known_answer_coverage:
+        return False
+    dataset_count = int(known_answer_coverage.get("dataset_count") or 0)
+    pass_count = int(known_answer_coverage.get("pass_count") or 0)
+    expected_assertion_count = int(known_answer_coverage.get("expected_assertion_count") or 0)
+    evidence_hash_count = int(known_answer_coverage.get("evidence_hash_count") or 0)
+    return dataset_count > 0 and pass_count == dataset_count and expected_assertion_count > 0 and evidence_hash_count > 0
+
+
+def final_qc_evidence_state(
+    final_qc_execution_report: Mapping[str, object],
+    evidence_input_key: str,
+) -> dict[str, object]:
+    if not evidence_input_key:
+        return {"path": "", "exists": False, "sha256": "", "bytes": 0}
+    inputs = final_qc_execution_report.get("evidence_inputs")
+    if not isinstance(inputs, Mapping):
+        return {"path": "", "exists": False, "sha256": "", "bytes": 0}
+    state = inputs.get(evidence_input_key)
+    return dict(state) if isinstance(state, Mapping) else {"path": "", "exists": False, "sha256": "", "bytes": 0}
 
 
 def missing_validation_trusted_diff(gap_id: str, blocker: str, *, trusted_tool: str) -> dict[str, object]:
@@ -3991,6 +4223,11 @@ def render_validation_markdown(payload: Mapping[str, object]) -> str:
         if isinstance(payload.get("independent_validation_report"), Mapping)
         else {}
     )
+    legal_matrix = (
+        payload.get("validation_legal_defensibility_matrix")
+        if isinstance(payload.get("validation_legal_defensibility_matrix"), Mapping)
+        else {}
+    )
     external_tools = payload.get("external_tool_versions") if isinstance(payload.get("external_tool_versions"), list) else []
 
     lines = [
@@ -4071,6 +4308,26 @@ def render_validation_markdown(payload: Mapping[str, object]) -> str:
         if independent_report.get("report_path"):
             lines.append(f"- Report: `{independent_report.get('report_path', '')}`")
             lines.append(f"- SHA256: `{independent_report.get('sha256', '')}`")
+
+    lines.extend(["", "## Legal Defensibility Matrix", ""])
+    if legal_matrix:
+        lines.append(f"- Items: `{legal_matrix.get('item_numbers', [])}`")
+        lines.append(
+            f"- Implemented/usable/validated: `{legal_matrix.get('implemented_count', 0)}`/"
+            f"`{legal_matrix.get('usable_count', 0)}`/`{legal_matrix.get('validated_count', 0)}`"
+        )
+        lines.append(f"- External evidence required rows: `{legal_matrix.get('external_evidence_required_count', 0)}`")
+        lines.append(f"- Matrix hash: `{legal_matrix.get('matrix_hash', '')}`")
+        rows = legal_matrix.get("rows")
+        if isinstance(rows, list):
+            for row in rows:
+                if not isinstance(row, Mapping):
+                    continue
+                lines.append(
+                    f"- `#{row.get('item_number', '')}` {row.get('component', '')}: "
+                    f"status `{row.get('status', '')}`, validated `{row.get('validated', False)}`, "
+                    f"scope `{row.get('evidence_scope', '')}`"
+                )
 
     lines.extend(["", "## External Tool Versions", ""])
     for item in external_tools:

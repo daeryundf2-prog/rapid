@@ -360,16 +360,71 @@ class RapidTriageCoreForensicsAccuracyTests(unittest.TestCase):
             self.assertEqual(template["datasets"][0]["id"], "core-forensics-01")
             matrix = payload["validation_legal_defensibility_matrix"]
             self.assertEqual(matrix["profile_version"], "validation-legal-defensibility-matrix-v1")
-            self.assertEqual(matrix["item_numbers"], [81, 82, 83, 84, 85])
-            self.assertEqual(matrix["row_count"], 5)
+            self.assertEqual(matrix["item_numbers"], [81, 82, 83, 84, 85, 86, 87, 88, 89, 90, 97, 98])
+            self.assertEqual(matrix["row_count"], 12)
             self.assertEqual(len(matrix["matrix_hash"]), 64)
-            self.assertEqual(matrix["implemented_count"], 5)
-            self.assertEqual(matrix["usable_count"], 5)
+            self.assertEqual(matrix["implemented_count"], 12)
+            self.assertEqual(matrix["usable_count"], 12)
+            self.assertEqual(matrix["external_evidence_required_count"], 12)
+            self.assertEqual(
+                {row["item_number"] for row in matrix["rows"] if row["component"] == "timezone normalization validation"},
+                {97},
+            )
 
             markdown = (output / "rapidtriage-validation-report.md").read_text(encoding="utf-8")
             self.assertIn("#1-#120 Core Forensics Accuracy Profiles", markdown)
             self.assertIn("Native EVTX BinXML full parsing", markdown)
             self.assertIn("Known-answer template datasets", markdown)
+
+    def test_legal_defensibility_matrix_uses_known_answer_coverage_for_report_controls(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            evidence = root / "legal-fixture.json"
+            evidence.write_text('{"status":"pass"}\n', encoding="utf-8")
+            manifest = root / "manifest.json"
+            manifest.write_text(
+                json.dumps(
+                    {
+                        "datasets": [
+                            {
+                                "id": f"legal-{number}",
+                                "status": "pass",
+                                "backlog_items": [number],
+                                "evidence_paths": [str(evidence)],
+                                "expected": {"required_assertions": [f"#{number} control emits report-grade metadata"]},
+                            }
+                            for number in (86, 87, 88, 89, 90, 97, 98)
+                        ]
+                    }
+                ),
+                encoding="utf-8",
+            )
+            output = root / "validation"
+
+            exit_code = main(
+                [
+                    "validation",
+                    "--output-dir",
+                    str(output),
+                    "--known-answer-manifest",
+                    str(manifest),
+                    "--json",
+                ]
+            )
+
+            self.assertEqual(exit_code, 0)
+            payload = json.loads((output / "rapidtriage-validation-package.json").read_text(encoding="utf-8"))
+            matrix = payload["validation_legal_defensibility_matrix"]
+            rows = {row["item_number"]: row for row in matrix["rows"]}
+            for number in (86, 87, 88, 89, 90, 97, 98):
+                with self.subTest(number=number):
+                    self.assertTrue(rows[number]["validated"])
+                    self.assertEqual(rows[number]["status"], "validated-internal-fixture")
+                    self.assertNotIn(f"internal-known-answer-#{number}-coverage-required", rows[number]["blockers"])
+                    self.assertGreater(rows[number]["known_answer_coverage"]["pass_count"], 0)
+            self.assertIn("timezone-known-answer-dst-corpus-required", rows[97]["blockers"])
+            self.assertIn("clock-baseline-corpus-required", rows[98]["blockers"])
+            self.assertEqual(matrix["external_evidence_required_count"], 12)
 
     def test_core_forensics_6_10_manifest_promotes_validated_maturity_when_attached(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -718,7 +773,7 @@ class RapidTriageCoreForensicsAccuracyTests(unittest.TestCase):
             self.assertEqual(len(validation_manifest["artifact_set_hash"]), 64)
             self.assertEqual(len(validation_manifest["required_output_presence_hash"]), 64)
             legal_matrix = payload["validation_legal_defensibility_matrix"]
-            self.assertEqual(legal_matrix["item_numbers"], [81, 82, 83, 84, 85])
+            self.assertEqual(legal_matrix["item_numbers"], [81, 82, 83, 84, 85, 86, 87, 88, 89, 90, 97, 98])
             self.assertEqual(len(legal_matrix["matrix_hash"]), 64)
 
             readiness = Path(tmp_dir) / "readiness"
