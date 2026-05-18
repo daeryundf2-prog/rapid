@@ -43,6 +43,7 @@ from rapidtriage.artifacts.windows.registry import (
     collect_reg_export,
     collect_registry_hive,
     registry_analyst_review_profile,
+    stable_registry_json_sha256,
 )
 from rapidtriage.artifacts.windows.filesystem import (
     build_mft_bounded_path_cache,
@@ -4413,11 +4414,35 @@ class RapidTriageWindowsArtifactsCollectorTests(unittest.TestCase):
                 run_key.details["registry_transaction_replay_profile"]["transaction_log_status"],
                 "present-not-replayed",
             )
+            self.assertEqual(
+                run_key.details["registry_transaction_replay_profile"]["replay_validation_status"],
+                "recognized-logs-replay-validation-required",
+            )
+            self.assertTrue(
+                run_key.details["registry_transaction_replay_profile"]["ready_for_internal_replay_preflight"]
+            )
+            self.assertEqual(len(run_key.details["registry_transaction_replay_profile"]["replay_validation_profile_hash"]), 64)
             self.assertEqual(run_key.details["registry_transaction_replay_profile"]["recognized_replay_input_count"], 1)
             self.assertFalse(run_key.details["registry_transaction_replay_profile"]["complete_log_pair_present"])
             self.assertEqual(
                 run_key.details["registry_transaction_replay_profile"]["transaction_context_quality"],
                 "recognized-logs-present",
+            )
+            replay_validation = run_key.details["registry_transaction_log_evidence"]["replay_validation_profile"]
+            self.assertEqual(replay_validation["profile_version"], "registry-transaction-replay-validation-v1")
+            self.assertEqual(replay_validation["validation_status"], "recognized-logs-replay-validation-required")
+            self.assertEqual(replay_validation["hive_sequence"]["primary"], 7)
+            self.assertEqual(replay_validation["hive_sequence"]["secondary"], 7)
+            self.assertFalse(replay_validation["hive_sequence"]["dirty"])
+            self.assertIn("matches-hive-sequence", replay_validation["sequence_relations"])
+            self.assertIn("transaction-log-sequence-diff-required", replay_validation["blockers"])
+            self.assertIn(
+                "complete-log-pair-or-explicit-missing-log-proof-required",
+                replay_validation["blockers"],
+            )
+            self.assertEqual(
+                run_key.details["registry_transaction_log_evidence"]["replay_validation_profile_hash"],
+                stable_registry_json_sha256(replay_validation),
             )
             self.assertEqual(
                 run_key.details["registry_transaction_log_evidence"]["present_logs"][0]["name"],
@@ -4470,6 +4495,14 @@ class RapidTriageWindowsArtifactsCollectorTests(unittest.TestCase):
             self.assertFalse(key_depth["decoded_components"]["transaction_log_replay"])
             self.assertEqual(key_depth["validation_summary"]["transaction_log_status"], "present-not-replayed")
             self.assertEqual(
+                key_depth["validation_summary"]["transaction_replay_validation_status"],
+                "recognized-logs-replay-validation-required",
+            )
+            self.assertEqual(
+                key_depth["validation_summary"]["transaction_replay_validation_hash"],
+                run_key.details["registry_transaction_log_evidence"]["replay_validation_profile_hash"],
+            )
+            self.assertEqual(
                 key_depth["registry_key_tree_reconstruction_profile"]["reconstruction_status"],
                 "bounded-node-reconstructed",
             )
@@ -4498,6 +4531,14 @@ class RapidTriageWindowsArtifactsCollectorTests(unittest.TestCase):
             self.assertIn("registry-cell-offset", key_citation_kinds)
             self.assertIn("registry-key-path", key_citation_kinds)
             self.assertIn("registry-transaction-log-context", key_citation_kinds)
+            transaction_citation = next(
+                item for item in key_manifest["citation_refs"] if item["kind"] == "registry-transaction-log-context"
+            )
+            self.assertEqual(
+                transaction_citation["replay_validation_status"],
+                "recognized-logs-replay-validation-required",
+            )
+            self.assertEqual(len(transaction_citation["replay_validation_profile_hash"]), 64)
             key_review = run_key.details["registry_analyst_review_profile"]
             self.assertEqual(key_review["profile_version"], "registry-analyst-review-profile-v1")
             self.assertEqual(key_review["catalog_key"], "persistence")
@@ -4720,6 +4761,58 @@ class RapidTriageWindowsArtifactsCollectorTests(unittest.TestCase):
                 "registry-recovery-validation",
                 {item["kind"] for item in key_recovery_manifest["citation_refs"]},
             )
+
+    def test_registry_transaction_replay_validation_profiles_dirty_hive_pair(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            hive_path = Path(tmp_dir) / "SYSTEM"
+            hive_blob = bytearray(
+                build_minimal_registry_hive(
+                    datetime(2024, 4, 2, 1, 2, 3, tzinfo=timezone.utc),
+                    "SYSTEM",
+                    [r"ControlSet001\Services\SecurityUpdater"],
+                )
+            )
+            hive_blob[4:8] = (10).to_bytes(4, "little")
+            hive_blob[8:12] = (8).to_bytes(4, "little")
+            hive_path.write_bytes(bytes(hive_blob))
+            for suffix, sequence, hive_hint in (("LOG1", 10, 8), ("LOG2", 9, 8)):
+                transaction_log = bytearray(512)
+                transaction_log[0:4] = b"HvLG"
+                transaction_log[4:8] = sequence.to_bytes(4, "little")
+                transaction_log[8:12] = hive_hint.to_bytes(4, "little")
+                transaction_log[12:16] = (2).to_bytes(4, "little")
+                (hive_path.parent / f"SYSTEM.{suffix}").write_bytes(bytes(transaction_log))
+
+            records = list(collect_registry_hive(hive_path))
+
+            hive_inventory = next(record for record in records if record.artifact_type == "registry-hive")
+            replay_profile = hive_inventory.details["registry_transaction_replay_profile"]
+            validation_profile = hive_inventory.details["registry_transaction_log_evidence"][
+                "replay_validation_profile"
+            ]
+
+            self.assertIn("dirty-hive-sequence", hive_inventory.details["risk_flags"])
+            self.assertEqual(replay_profile["transaction_log_status"], "present-not-replayed")
+            self.assertTrue(replay_profile["dirty_hive_sequence"])
+            self.assertTrue(replay_profile["complete_log_pair_present"])
+            self.assertEqual(replay_profile["recognized_replay_input_count"], 2)
+            self.assertEqual(replay_profile["replay_validation_status"], "dirty-hive-replay-required")
+            self.assertIn(
+                "dirty-hive-sequence-requires-transaction-replay",
+                replay_profile["blockers"],
+            )
+            self.assertEqual(validation_profile["validation_status"], "dirty-hive-replay-required")
+            self.assertEqual(validation_profile["hive_sequence"]["primary"], 10)
+            self.assertEqual(validation_profile["hive_sequence"]["secondary"], 8)
+            self.assertTrue(validation_profile["hive_sequence"]["dirty"])
+            self.assertTrue(validation_profile["complete_log_pair_present"])
+            self.assertIn("matches-hive-sequence", validation_profile["sequence_relations"])
+            self.assertEqual(
+                hive_inventory.details["registry_transaction_log_evidence"]["replay_validation_profile_hash"],
+                stable_registry_json_sha256(validation_profile),
+            )
+            self.assertIn("log1_sha256", validation_profile["trusted_diff_required_fields"])
+            self.assertIn("log2_sha256", validation_profile["trusted_diff_required_fields"])
 
     def test_registry_key_tree_diff_compares_trusted_key_paths_and_values(self) -> None:
         rapid = [

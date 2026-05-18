@@ -11,7 +11,7 @@ from typing import Iterable, Mapping, Sequence
 from ...core.forensic_accuracy import build_accuracy_gate
 from ...core.models import ArtifactRecord
 
-PARSER_VERSION = "registry-normalized-v12"
+PARSER_VERSION = "registry-normalized-v13"
 REGISTRY_EXPORT_PATTERN = re.compile(r"^\[(?P<key>.+)]$")
 REGISTRY_VALUE_PATTERN = re.compile(r'^(?P<name>@|"[^"]+")=(?P<value>.*)$')
 REGISTRY_HIVE_SIGNATURE = b"regf"
@@ -342,7 +342,11 @@ def collect_registry_hive(path: Path) -> Iterable[ArtifactRecord]:
 
     source_hashes = file_hashes(path)
     metadata = parse_registry_hive_header(header)
-    metadata["transaction_log_evidence"] = registry_transaction_log_evidence(path)
+    transaction_log_evidence = registry_transaction_log_evidence(path)
+    replay_validation_profile = registry_transaction_replay_validation_profile(metadata, transaction_log_evidence)
+    transaction_log_evidence["replay_validation_profile"] = replay_validation_profile
+    transaction_log_evidence["replay_validation_profile_hash"] = stable_registry_json_sha256(replay_validation_profile)
+    metadata["transaction_log_evidence"] = transaction_log_evidence
     yield build_registry_hive_record(path, stat_result.st_size, metadata, source_hashes)
 
     strings = extract_utf16le_strings(scan_blob)
@@ -1881,6 +1885,11 @@ def registry_commercial_uplift_evidence(
         if isinstance(details.get("transaction_log_evidence"), Mapping)
         else {}
     )
+    replay_validation_profile = (
+        transaction_log_evidence.get("replay_validation_profile")
+        if isinstance(transaction_log_evidence.get("replay_validation_profile"), Mapping)
+        else {}
+    )
     key_tree_diff = (
         details.get("registry_key_tree_diff")
         if isinstance(details.get("registry_key_tree_diff"), Mapping)
@@ -1927,6 +1936,18 @@ def registry_commercial_uplift_evidence(
         ),
         "recovery_reportability_decision": dict(recovery_profile.get("reportability_decision") or {}),
         "transaction_log_status": str(transaction_log_evidence.get("status") or ""),
+        "transaction_replay_validation": {
+            "status": str(replay_validation_profile.get("validation_status") or "not-attached"),
+            "profile_hash": str(transaction_log_evidence.get("replay_validation_profile_hash") or ""),
+            "recognized_replay_input_count": int(
+                replay_validation_profile.get("recognized_replay_input_count") or 0
+            ),
+            "complete_log_pair_present": bool(replay_validation_profile.get("complete_log_pair_present")),
+            "ready_for_internal_replay_preflight": bool(
+                replay_validation_profile.get("ready_for_internal_replay_preflight")
+            ),
+            "blockers": list(replay_validation_profile.get("blockers") or []),
+        },
         "key_tree_diff": {
             "status": str(key_tree_diff.get("status") or "not-attached"),
             "trusted_tool": str(key_tree_diff.get("trusted_tool") or ""),
@@ -1996,6 +2017,11 @@ def registry_native_depth_readiness_profile(
         if isinstance(details.get("registry_recovery_validation_profile"), Mapping)
         else {}
     )
+    replay_validation_profile = (
+        transaction_log_evidence.get("replay_validation_profile")
+        if isinstance(transaction_log_evidence.get("replay_validation_profile"), Mapping)
+        else {}
+    )
     decoded_components = registry_depth_components(family, details, transaction_log_evidence, recovery_profile)
     total_components = len(decoded_components)
     decoded_count = sum(1 for value in decoded_components.values() if value)
@@ -2028,6 +2054,12 @@ def registry_native_depth_readiness_profile(
             ],
             "transaction_log_status": str(transaction_log_evidence.get("status") or "unknown"),
             "transaction_log_replay_applied": bool(transaction_log_evidence.get("transaction_log_replay_applied")),
+            "transaction_replay_validation_status": str(
+                replay_validation_profile.get("validation_status") or ""
+            ),
+            "transaction_replay_validation_hash": str(
+                transaction_log_evidence.get("replay_validation_profile_hash") or ""
+            ),
             "recovery_validation_status": str(recovery_profile.get("independent_validation_status") or ""),
         },
         "source_citation_requirements": [
@@ -4332,6 +4364,120 @@ def registry_transaction_replay_inputs(present_logs: Sequence[Mapping[str, objec
     }
 
 
+def registry_transaction_replay_validation_profile(
+    hive_metadata: Mapping[str, object],
+    transaction_log_evidence: Mapping[str, object],
+) -> dict[str, object]:
+    present_logs = [
+        item for item in transaction_log_evidence.get("present_logs", []) if isinstance(item, Mapping)
+    ]
+    replay_inputs = (
+        transaction_log_evidence.get("replay_inputs")
+        if isinstance(transaction_log_evidence.get("replay_inputs"), Mapping)
+        else registry_transaction_replay_inputs(present_logs)
+    )
+    primary_sequence = int(hive_metadata.get("sequence_primary") or 0)
+    secondary_sequence = int(hive_metadata.get("sequence_secondary") or 0)
+    dirty = bool(hive_metadata.get("dirty"))
+    sequence_targets = {value for value in (primary_sequence, secondary_sequence) if value}
+    log_sequence_rows: list[dict[str, object]] = []
+    for item in present_logs:
+        header = item.get("header") if isinstance(item.get("header"), Mapping) else {}
+        sequence_number = int(header.get("sequence_number") or 0)
+        hive_sequence_hint = int(header.get("hive_sequence_hint") or 0)
+        if sequence_number in sequence_targets or hive_sequence_hint in sequence_targets:
+            relation = "matches-hive-sequence"
+        elif primary_sequence and sequence_number > primary_sequence:
+            relation = "ahead-of-hive-primary"
+        elif primary_sequence and sequence_number < primary_sequence:
+            relation = "behind-hive-primary"
+        else:
+            relation = "unknown"
+        log_sequence_rows.append(
+            {
+                "name": str(item.get("name") or ""),
+                "signature_status": str(item.get("signature_status") or ""),
+                "sequence_number": sequence_number,
+                "hive_sequence_hint": hive_sequence_hint,
+                "flags": int(header.get("flags") or 0),
+                "sequence_relation": relation,
+                "hashes": dict(item.get("hashes") or {}) if isinstance(item.get("hashes"), Mapping) else {},
+                "candidate_for_replay": bool(
+                    isinstance(item.get("replay_readiness"), Mapping)
+                    and item["replay_readiness"].get("candidate_for_future_replay")
+                ),
+            }
+        )
+    recognized_count = int(transaction_log_evidence.get("recognized_log_count") or 0)
+    present_count = int(transaction_log_evidence.get("present_count") or 0)
+    complete_pair = bool(replay_inputs.get("complete_log_pair_present"))
+    if present_count == 0 and not dirty:
+        validation_status = "no-log-clean-hive-disclosed"
+    elif present_count == 0 and dirty:
+        validation_status = "dirty-hive-missing-transaction-logs"
+    elif recognized_count and dirty:
+        validation_status = "dirty-hive-replay-required"
+    elif recognized_count:
+        validation_status = "recognized-logs-replay-validation-required"
+    else:
+        validation_status = "present-unrecognized-log-review-required"
+    blockers: list[str] = []
+    if dirty:
+        blockers.append("dirty-hive-sequence-requires-transaction-replay")
+    if recognized_count:
+        blockers.extend(
+            [
+                "transaction-log-replay-not-implemented",
+                "transaction-log-sequence-diff-required",
+                "recmd-or-registry-explorer-replay-diff-required",
+            ]
+        )
+    elif present_count:
+        blockers.append("transaction-log-header-recognition-required")
+    if recognized_count and not complete_pair:
+        blockers.append("complete-log-pair-or-explicit-missing-log-proof-required")
+    if present_count == 0 and dirty:
+        blockers.append("missing-log-files-for-dirty-hive")
+    return {
+        "profile_version": "registry-transaction-replay-validation-v1",
+        "parser_version": PARSER_VERSION,
+        "validation_status": validation_status,
+        "commercial_grade_ready": False,
+        "report_grade_ready": present_count == 0 and not dirty,
+        "hive_sequence": {
+            "primary": primary_sequence,
+            "secondary": secondary_sequence,
+            "dirty": dirty,
+            "sequence_delta": primary_sequence - secondary_sequence,
+        },
+        "log_sequence_rows": log_sequence_rows,
+        "recognized_replay_input_count": int(replay_inputs.get("recognized_replay_input_count") or 0),
+        "complete_log_pair_present": complete_pair,
+        "ready_for_internal_replay_preflight": bool(
+            replay_inputs.get("ready_for_future_internal_replay")
+        ),
+        "sequence_relations": sorted({str(row["sequence_relation"]) for row in log_sequence_rows}),
+        "blockers": sorted(set(blockers)),
+        "trusted_diff_required_fields": [
+            "hive_path",
+            "hive_sha256",
+            "log1_sha256",
+            "log2_sha256",
+            "sequence_primary",
+            "sequence_secondary",
+            "replayed_key_path",
+            "replayed_value_name",
+            "cell_offset",
+            "last_written_at",
+            "allocation_status",
+        ],
+        "analyst_warning": (
+            "This is a transaction replay preflight, not LOG1/LOG2 replay. Treat affected registry rows as "
+            "triage evidence until replay output or RECmd/Registry Explorer diff evidence is attached."
+        ),
+    }
+
+
 def registry_transaction_context_quality(
     *,
     present_count: int,
@@ -4376,11 +4522,17 @@ def registry_transaction_replay_profile(transaction_log_evidence: Mapping[str, o
         if isinstance(transaction_log_evidence.get("transaction_context_quality"), Mapping)
         else {}
     )
+    replay_validation_profile = (
+        transaction_log_evidence.get("replay_validation_profile")
+        if isinstance(transaction_log_evidence.get("replay_validation_profile"), Mapping)
+        else {}
+    )
     blockers = []
     if required and not replay_applied:
         blockers.append("transaction-log-replay-or-second-parser-diff-required")
     if dirty:
         blockers.append("dirty-hive-sequence-requires-transaction-context")
+    blockers.extend(str(item) for item in replay_validation_profile.get("blockers") or [])
     return {
         "profile_version": "registry-transaction-replay-profile-v1",
         "transaction_log_status": status,
@@ -4391,6 +4543,12 @@ def registry_transaction_replay_profile(transaction_log_evidence: Mapping[str, o
         "recognized_replay_input_count": int(replay_inputs.get("recognized_replay_input_count") or 0),
         "complete_log_pair_present": bool(replay_inputs.get("complete_log_pair_present")),
         "transaction_context_quality": str(quality.get("level") or ""),
+        "replay_validation_status": str(replay_validation_profile.get("validation_status") or ""),
+        "replay_validation_profile_hash": str(transaction_log_evidence.get("replay_validation_profile_hash") or ""),
+        "ready_for_internal_replay_preflight": bool(
+            replay_validation_profile.get("ready_for_internal_replay_preflight")
+        ),
+        "sequence_relations": list(replay_validation_profile.get("sequence_relations") or []),
         "blockers": sorted(set(blockers)),
         "impact_statement": str(transaction_log_evidence.get("impact_statement") or ""),
         "required_before_report": [
@@ -4637,6 +4795,11 @@ def registry_report_citation_manifest(
             }
         )
     if int(transaction_log_evidence.get("present_count") or 0):
+        replay_validation_profile = (
+            transaction_log_evidence.get("replay_validation_profile")
+            if isinstance(transaction_log_evidence.get("replay_validation_profile"), Mapping)
+            else {}
+        )
         citation_refs.append(
             {
                 "kind": "registry-transaction-log-context",
@@ -4645,6 +4808,10 @@ def registry_report_citation_manifest(
                 "present_count": transaction_log_evidence.get("present_count", 0),
                 "recognized_log_count": transaction_log_evidence.get("recognized_log_count", 0),
                 "transaction_log_replay_applied": bool(transaction_log_evidence.get("transaction_log_replay_applied")),
+                "replay_validation_status": replay_validation_profile.get("validation_status", ""),
+                "replay_validation_profile_hash": transaction_log_evidence.get("replay_validation_profile_hash", ""),
+                "complete_log_pair_present": bool(replay_validation_profile.get("complete_log_pair_present")),
+                "sequence_relations": list(replay_validation_profile.get("sequence_relations") or []),
                 "source_viewer_locator": {
                     "viewer": "registry-transaction-log-evidence",
                     "hive_path": source_path,
@@ -4699,6 +4866,15 @@ def registry_report_citation_manifest(
             "report_grade_status": report_grade_assessment.get("status", ""),
             "transaction_log_status": transaction_log_evidence.get("status", "not-evaluated"),
             "transaction_log_replay_applied": bool(transaction_log_evidence.get("transaction_log_replay_applied")),
+            "transaction_replay_validation_status": (
+                transaction_log_evidence.get("replay_validation_profile", {}).get("validation_status", "")
+                if isinstance(transaction_log_evidence.get("replay_validation_profile"), Mapping)
+                else ""
+            ),
+            "transaction_replay_validation_hash": transaction_log_evidence.get(
+                "replay_validation_profile_hash",
+                "",
+            ),
         },
         "reportability": {
             "allowed_use": "registry-native-triage-review-pivot",
