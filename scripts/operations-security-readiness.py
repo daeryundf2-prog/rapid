@@ -462,7 +462,7 @@ def build_operations_security_readiness(
     dependency_checks = {
         "dependency_command_passed": dependency_run["passed"],
         "dependency_profile": dependency_payload.get("command") == "dependency-monitoring",
-        "dependency_inventory_emitted": len(dependency_payload.get("pip_list", {}).get("packages", [])) >= 0,
+        "dependency_inventory_emitted": len(dependency_payload.get("pip_list", {}).get("packages", [])) > 0,
         "dependency_scheduled_workflow_configured": dependency_payload.get("dependency_ci_workflow_evidence", {}).get(
             "configured"
         )
