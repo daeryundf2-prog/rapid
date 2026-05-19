@@ -1,0 +1,50 @@
+{
+  "command": "smoke-summary",
+  "generated_at": "2026-05-19T00:13:11.185161+00:00",
+  "smoke_dir": "/Users/shinyoohag/rapidforensic/repo/qc-runs/2026-05-19-macos-full/smoke",
+  "platform": "macos-linux",
+  "python_platform": "macOS-15.7.4-arm64-arm-64bit",
+  "passed": true,
+  "checks": [
+    {
+      "name": "doctor",
+      "status": "pass",
+      "detail": "doctor status: ok"
+    },
+    {
+      "name": "sample",
+      "status": "pass",
+      "detail": "sample run output: /Users/shinyoohag/rapidforensic/repo/qc-runs/2026-05-19-macos-full/smoke/sample/run-output"
+    },
+    {
+      "name": "search",
+      "status": "pass",
+      "detail": "search matches: 11"
+    },
+    {
+      "name": "benchmark",
+      "status": "pass",
+      "detail": "ingest seconds: 1.240179"
+    },
+    {
+      "name": "validation",
+      "status": "pass",
+      "detail": "validation status: release-validation-package-ready"
+    },
+    {
+      "name": "evidence-guidance",
+      "status": "pass",
+      "detail": "virtual-disk: Virtual disk detected. Install qemu-img/Sleuth Kit where supported or mount/export it first."
+    },
+    {
+      "name": "web",
+      "status": "pass",
+      "detail": "web-index.html present"
+    },
+    {
+      "name": "workbench-smoke-contract",
+      "status": "pass",
+      "detail": "contract profile: single-case-workbench-smoke-v1"
+    }
+  ]
+}

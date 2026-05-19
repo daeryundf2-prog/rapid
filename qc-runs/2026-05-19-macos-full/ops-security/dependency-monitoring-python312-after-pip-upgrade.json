@@ -1,0 +1,1117 @@
+{
+  "command": "dependency-monitoring",
+  "generated_at": "2026-05-19T00:36:52.355948+00:00",
+  "commercial_gap_ids": [
+    "#120"
+  ],
+  "functional_priority_profile": {
+    "batch_id": "commercial-uplift-061-065",
+    "item_number": 64,
+    "implementation_track": "dependency-monitoring",
+    "status": "usable-local-baseline-ci-sbom-required",
+    "implemented_controls": {
+      "dependency_inventory_emitted": true,
+      "pip_audit_attempted": true,
+      "release_blocking_policy_recorded": true,
+      "dependency_monitoring_script_packaged": true,
+      "dependency_sbom_manifest_emitted": true,
+      "dependency_sbom_manifest_hash": "1ef9b3b01b896e17c6f4640812c590f0d92dea2b0efefb2c2864b576e7848cde",
+      "scheduled_ci_scan_configured": true,
+      "scheduled_ci_workflow_hash": "4404331c4de4c1e95c00113d03843e8d5597baeb8f19203751adc720b8fa6515",
+      "sbom_archival_configured": true,
+      "dependency_report_grade_validation_plan_hash": "eb6e21131fd541e901a6dadf79d9e29818809f98c9f24eac65ebaffedb79c51b",
+      "sbom_published": false
+    },
+    "evidence_counts": {
+      "package_count": 58,
+      "pip_audit_return_code": 0,
+      "pip_audit_output_bytes": 3424,
+      "pip_audit_error_bytes": 31,
+      "workflow_check_count": 8
+    },
+    "failed_validation_check_ids": [
+      "sbom-publication-not-attached",
+      "trusted-dependency-advisory-sbom-diff-required"
+    ],
+    "ready_for_commercial_release": false
+  },
+  "core_accuracy_gates": [
+    {
+      "profile_version": "core-forensics-accuracy-v1",
+      "gap_id": "#120",
+      "title": "Dependency vulnerability monitoring",
+      "status": "validation-required",
+      "required_checks": [
+        "dependency inventory emitted",
+        "vulnerability scan attempted",
+        "release blocking policy recorded",
+        "dependency monitoring script packaged",
+        "CI scheduled scan blocker disclosed",
+        "dependency monitoring evidence manifest hash emitted",
+        "dependency monitoring evidence slots emitted",
+        "dependency monitoring report-grade validation plan",
+        "dependency monitoring report-grade ready slots",
+        "trusted dependency advisory/SBOM diff pass"
+      ],
+      "satisfied_checks": [
+        "release blocking policy recorded",
+        "CI scheduled scan blocker disclosed",
+        "dependency inventory emitted",
+        "vulnerability scan attempted",
+        "dependency monitoring script packaged",
+        "CI scheduled advisory scan workflow configured",
+        "CI dependency workflow hash emitted",
+        "dependency monitoring evidence manifest hash emitted",
+        "dependency monitoring evidence slots emitted",
+        "dependency SBOM manifest hash emitted",
+        "dependency evidence matrix hash emitted",
+        "dependency monitoring report-grade validation plan",
+        "dependency monitoring report-grade ready slots"
+      ],
+      "missing_required_checks": [
+        "trusted dependency advisory/SBOM diff pass"
+      ],
+      "minimum_evidence": [
+        "source file or export hash",
+        "tool/parser version and command",
+        "expected-answer manifest",
+        "observed RapidTriage output",
+        "record-level or row-level diff",
+        "reviewer sign-off and limitation note"
+      ],
+      "accuracy_controls": {
+        "source_provenance_required": true,
+        "offset_or_record_id_required": false,
+        "hash_required": true,
+        "timezone_or_timestamp_semantics_required": false,
+        "secret_redaction_required": false,
+        "legal_or_authority_gate_required": true,
+        "cross_tool_diff_required": true,
+        "known_answer_required": true
+      },
+      "evidence_refs": [
+        "package_count:58",
+        "tool:pip-audit",
+        "dependency_report_grade_validation_plan_sha256:eb6e21131fd541e901a6dadf79d9e29818809f98c9f24eac65ebaffedb79c51b",
+        "dependency_report_grade_ready_slots:8",
+        "dependency_report_grade_blocking_slots:9"
+      ],
+      "default_reportability": "validation-required",
+      "commercial_grade_ready": false,
+      "next_validation_step": "Attach known-answer corpus output, cross-tool diff, and reviewer sign-off before report-grade claims."
+    }
+  ],
+  "python": "/Users/shinyoohag/rapidforensic/repo/qc-runs/2026-05-19-macos-full/python312-venv/bin/python",
+  "pip_list": {
+    "return_code": 0,
+    "packages": [
+      {
+        "name": "annotated-doc",
+        "version": "0.0.4"
+      },
+      {
+        "name": "annotated-types",
+        "version": "0.7.0"
+      },
+      {
+        "name": "anyio",
+        "version": "4.13.0"
+      },
+      {
+        "name": "boolean.py",
+        "version": "5.0"
+      },
+      {
+        "name": "build",
+        "version": "1.5.0"
+      },
+      {
+        "name": "CacheControl",
+        "version": "0.14.4"
+      },
+      {
+        "name": "certifi",
+        "version": "2026.4.22"
+      },
+      {
+        "name": "charset-normalizer",
+        "version": "3.4.7"
+      },
+      {
+        "name": "click",
+        "version": "8.4.0"
+      },
+      {
+        "name": "cyclonedx-python-lib",
+        "version": "11.7.0"
+      },
+      {
+        "name": "dashcam-tools",
+        "version": "0.1.0",
+        "editable_project_location": "/Users/shinyoohag/rapidforensic/repo"
+      },
+      {
+        "name": "defusedxml",
+        "version": "0.7.1"
+      },
+      {
+        "name": "et_xmlfile",
+        "version": "2.0.0"
+      },
+      {
+        "name": "fastapi",
+        "version": "0.136.1"
+      },
+      {
+        "name": "filelock",
+        "version": "3.29.0"
+      },
+      {
+        "name": "h11",
+        "version": "0.16.0"
+      },
+      {
+        "name": "httpcore",
+        "version": "1.0.9"
+      },
+      {
+        "name": "httptools",
+        "version": "0.7.1"
+      },
+      {
+        "name": "httpx",
+        "version": "0.28.1"
+      },
+      {
+        "name": "idna",
+        "version": "3.15"
+      },
+      {
+        "name": "license-expression",
+        "version": "30.4.4"
+      },
+      {
+        "name": "markdown-it-py",
+        "version": "4.2.0"
+      },
+      {
+        "name": "mdurl",
+        "version": "0.1.2"
+      },
+      {
+        "name": "msgpack",
+        "version": "1.1.2"
+      },
+      {
+        "name": "numpy",
+        "version": "2.4.6"
+      },
+      {
+        "name": "opencv-python",
+        "version": "4.13.0.92"
+      },
+      {
+        "name": "openpyxl",
+        "version": "3.1.5"
+      },
+      {
+        "name": "packageurl-python",
+        "version": "0.17.6"
+      },
+      {
+        "name": "packaging",
+        "version": "26.2"
+      },
+      {
+        "name": "pillow",
+        "version": "12.2.0"
+      },
+      {
+        "name": "pip",
+        "version": "26.1.1"
+      },
+      {
+        "name": "pip-api",
+        "version": "0.0.34"
+      },
+      {
+        "name": "pip_audit",
+        "version": "2.10.0"
+      },
+      {
+        "name": "pip-requirements-parser",
+        "version": "32.0.1"
+      },
+      {
+        "name": "platformdirs",
+        "version": "4.9.6"
+      },
+      {
+        "name": "py-serializable",
+        "version": "2.1.0"
+      },
+      {
+        "name": "pycryptodome",
+        "version": "3.23.0"
+      },
+      {
+        "name": "pydantic",
+        "version": "2.13.4"
+      },
+      {
+        "name": "pydantic_core",
+        "version": "2.46.4"
+      },
+      {
+        "name": "Pygments",
+        "version": "2.20.0"
+      },
+      {
+        "name": "pyparsing",
+        "version": "3.3.2"
+      },
+      {
+        "name": "pyproject_hooks",
+        "version": "1.2.0"
+      },
+      {
+        "name": "pytesseract",
+        "version": "0.3.13"
+      },
+      {
+        "name": "python-dotenv",
+        "version": "1.2.2"
+      },
+      {
+        "name": "PyYAML",
+        "version": "6.0.3"
+      },
+      {
+        "name": "requests",
+        "version": "2.34.2"
+      },
+      {
+        "name": "rich",
+        "version": "15.0.0"
+      },
+      {
+        "name": "sortedcontainers",
+        "version": "2.4.0"
+      },
+      {
+        "name": "starlette",
+        "version": "1.0.0"
+      },
+      {
+        "name": "tomli",
+        "version": "2.4.1"
+      },
+      {
+        "name": "tomli_w",
+        "version": "1.2.0"
+      },
+      {
+        "name": "typing_extensions",
+        "version": "4.15.0"
+      },
+      {
+        "name": "typing-inspection",
+        "version": "0.4.2"
+      },
+      {
+        "name": "urllib3",
+        "version": "2.7.0"
+      },
+      {
+        "name": "uvicorn",
+        "version": "0.47.0"
+      },
+      {
+        "name": "uvloop",
+        "version": "0.22.1"
+      },
+      {
+        "name": "watchfiles",
+        "version": "1.2.0"
+      },
+      {
+        "name": "websockets",
+        "version": "16.0"
+      }
+    ],
+    "error": ""
+  },
+  "dependency_sbom_manifest": {
+    "profile_version": "dependency-sbom-manifest-v1",
+    "item_number": 64,
+    "commercial_gap_ids": [
+      "#120"
+    ],
+    "sbom_format": "cyclonedx-inspired-internal-json",
+    "component_count": 58,
+    "components": [
+      {
+        "type": "library",
+        "name": "annotated-doc",
+        "version": "0.0.4",
+        "purl": "pkg:pypi/annotated-doc@0.0.4"
+      },
+      {
+        "type": "library",
+        "name": "annotated-types",
+        "version": "0.7.0",
+        "purl": "pkg:pypi/annotated-types@0.7.0"
+      },
+      {
+        "type": "library",
+        "name": "anyio",
+        "version": "4.13.0",
+        "purl": "pkg:pypi/anyio@4.13.0"
+      },
+      {
+        "type": "library",
+        "name": "boolean.py",
+        "version": "5.0",
+        "purl": "pkg:pypi/boolean.py@5.0"
+      },
+      {
+        "type": "library",
+        "name": "build",
+        "version": "1.5.0",
+        "purl": "pkg:pypi/build@1.5.0"
+      },
+      {
+        "type": "library",
+        "name": "CacheControl",
+        "version": "0.14.4",
+        "purl": "pkg:pypi/CacheControl@0.14.4"
+      },
+      {
+        "type": "library",
+        "name": "certifi",
+        "version": "2026.4.22",
+        "purl": "pkg:pypi/certifi@2026.4.22"
+      },
+      {
+        "type": "library",
+        "name": "charset-normalizer",
+        "version": "3.4.7",
+        "purl": "pkg:pypi/charset-normalizer@3.4.7"
+      },
+      {
+        "type": "library",
+        "name": "click",
+        "version": "8.4.0",
+        "purl": "pkg:pypi/click@8.4.0"
+      },
+      {
+        "type": "library",
+        "name": "cyclonedx-python-lib",
+        "version": "11.7.0",
+        "purl": "pkg:pypi/cyclonedx-python-lib@11.7.0"
+      },
+      {
+        "type": "library",
+        "name": "dashcam-tools",
+        "version": "0.1.0",
+        "purl": "pkg:pypi/dashcam-tools@0.1.0"
+      },
+      {
+        "type": "library",
+        "name": "defusedxml",
+        "version": "0.7.1",
+        "purl": "pkg:pypi/defusedxml@0.7.1"
+      },
+      {
+        "type": "library",
+        "name": "et_xmlfile",
+        "version": "2.0.0",
+        "purl": "pkg:pypi/et_xmlfile@2.0.0"
+      },
+      {
+        "type": "library",
+        "name": "fastapi",
+        "version": "0.136.1",
+        "purl": "pkg:pypi/fastapi@0.136.1"
+      },
+      {
+        "type": "library",
+        "name": "filelock",
+        "version": "3.29.0",
+        "purl": "pkg:pypi/filelock@3.29.0"
+      },
+      {
+        "type": "library",
+        "name": "h11",
+        "version": "0.16.0",
+        "purl": "pkg:pypi/h11@0.16.0"
+      },
+      {
+        "type": "library",
+        "name": "httpcore",
+        "version": "1.0.9",
+        "purl": "pkg:pypi/httpcore@1.0.9"
+      },
+      {
+        "type": "library",
+        "name": "httptools",
+        "version": "0.7.1",
+        "purl": "pkg:pypi/httptools@0.7.1"
+      },
+      {
+        "type": "library",
+        "name": "httpx",
+        "version": "0.28.1",
+        "purl": "pkg:pypi/httpx@0.28.1"
+      },
+      {
+        "type": "library",
+        "name": "idna",
+        "version": "3.15",
+        "purl": "pkg:pypi/idna@3.15"
+      },
+      {
+        "type": "library",
+        "name": "license-expression",
+        "version": "30.4.4",
+        "purl": "pkg:pypi/license-expression@30.4.4"
+      },
+      {
+        "type": "library",
+        "name": "markdown-it-py",
+        "version": "4.2.0",
+        "purl": "pkg:pypi/markdown-it-py@4.2.0"
+      },
+      {
+        "type": "library",
+        "name": "mdurl",
+        "version": "0.1.2",
+        "purl": "pkg:pypi/mdurl@0.1.2"
+      },
+      {
+        "type": "library",
+        "name": "msgpack",
+        "version": "1.1.2",
+        "purl": "pkg:pypi/msgpack@1.1.2"
+      },
+      {
+        "type": "library",
+        "name": "numpy",
+        "version": "2.4.6",
+        "purl": "pkg:pypi/numpy@2.4.6"
+      },
+      {
+        "type": "library",
+        "name": "opencv-python",
+        "version": "4.13.0.92",
+        "purl": "pkg:pypi/opencv-python@4.13.0.92"
+      },
+      {
+        "type": "library",
+        "name": "openpyxl",
+        "version": "3.1.5",
+        "purl": "pkg:pypi/openpyxl@3.1.5"
+      },
+      {
+        "type": "library",
+        "name": "packageurl-python",
+        "version": "0.17.6",
+        "purl": "pkg:pypi/packageurl-python@0.17.6"
+      },
+      {
+        "type": "library",
+        "name": "packaging",
+        "version": "26.2",
+        "purl": "pkg:pypi/packaging@26.2"
+      },
+      {
+        "type": "library",
+        "name": "pillow",
+        "version": "12.2.0",
+        "purl": "pkg:pypi/pillow@12.2.0"
+      },
+      {
+        "type": "library",
+        "name": "pip",
+        "version": "26.1.1",
+        "purl": "pkg:pypi/pip@26.1.1"
+      },
+      {
+        "type": "library",
+        "name": "pip-api",
+        "version": "0.0.34",
+        "purl": "pkg:pypi/pip-api@0.0.34"
+      },
+      {
+        "type": "library",
+        "name": "pip-requirements-parser",
+        "version": "32.0.1",
+        "purl": "pkg:pypi/pip-requirements-parser@32.0.1"
+      },
+      {
+        "type": "library",
+        "name": "pip_audit",
+        "version": "2.10.0",
+        "purl": "pkg:pypi/pip_audit@2.10.0"
+      },
+      {
+        "type": "library",
+        "name": "platformdirs",
+        "version": "4.9.6",
+        "purl": "pkg:pypi/platformdirs@4.9.6"
+      },
+      {
+        "type": "library",
+        "name": "py-serializable",
+        "version": "2.1.0",
+        "purl": "pkg:pypi/py-serializable@2.1.0"
+      },
+      {
+        "type": "library",
+        "name": "pycryptodome",
+        "version": "3.23.0",
+        "purl": "pkg:pypi/pycryptodome@3.23.0"
+      },
+      {
+        "type": "library",
+        "name": "pydantic",
+        "version": "2.13.4",
+        "purl": "pkg:pypi/pydantic@2.13.4"
+      },
+      {
+        "type": "library",
+        "name": "pydantic_core",
+        "version": "2.46.4",
+        "purl": "pkg:pypi/pydantic_core@2.46.4"
+      },
+      {
+        "type": "library",
+        "name": "Pygments",
+        "version": "2.20.0",
+        "purl": "pkg:pypi/Pygments@2.20.0"
+      },
+      {
+        "type": "library",
+        "name": "pyparsing",
+        "version": "3.3.2",
+        "purl": "pkg:pypi/pyparsing@3.3.2"
+      },
+      {
+        "type": "library",
+        "name": "pyproject_hooks",
+        "version": "1.2.0",
+        "purl": "pkg:pypi/pyproject_hooks@1.2.0"
+      },
+      {
+        "type": "library",
+        "name": "pytesseract",
+        "version": "0.3.13",
+        "purl": "pkg:pypi/pytesseract@0.3.13"
+      },
+      {
+        "type": "library",
+        "name": "python-dotenv",
+        "version": "1.2.2",
+        "purl": "pkg:pypi/python-dotenv@1.2.2"
+      },
+      {
+        "type": "library",
+        "name": "PyYAML",
+        "version": "6.0.3",
+        "purl": "pkg:pypi/PyYAML@6.0.3"
+      },
+      {
+        "type": "library",
+        "name": "requests",
+        "version": "2.34.2",
+        "purl": "pkg:pypi/requests@2.34.2"
+      },
+      {
+        "type": "library",
+        "name": "rich",
+        "version": "15.0.0",
+        "purl": "pkg:pypi/rich@15.0.0"
+      },
+      {
+        "type": "library",
+        "name": "sortedcontainers",
+        "version": "2.4.0",
+        "purl": "pkg:pypi/sortedcontainers@2.4.0"
+      },
+      {
+        "type": "library",
+        "name": "starlette",
+        "version": "1.0.0",
+        "purl": "pkg:pypi/starlette@1.0.0"
+      },
+      {
+        "type": "library",
+        "name": "tomli",
+        "version": "2.4.1",
+        "purl": "pkg:pypi/tomli@2.4.1"
+      },
+      {
+        "type": "library",
+        "name": "tomli_w",
+        "version": "1.2.0",
+        "purl": "pkg:pypi/tomli_w@1.2.0"
+      },
+      {
+        "type": "library",
+        "name": "typing-inspection",
+        "version": "0.4.2",
+        "purl": "pkg:pypi/typing-inspection@0.4.2"
+      },
+      {
+        "type": "library",
+        "name": "typing_extensions",
+        "version": "4.15.0",
+        "purl": "pkg:pypi/typing_extensions@4.15.0"
+      },
+      {
+        "type": "library",
+        "name": "urllib3",
+        "version": "2.7.0",
+        "purl": "pkg:pypi/urllib3@2.7.0"
+      },
+      {
+        "type": "library",
+        "name": "uvicorn",
+        "version": "0.47.0",
+        "purl": "pkg:pypi/uvicorn@0.47.0"
+      },
+      {
+        "type": "library",
+        "name": "uvloop",
+        "version": "0.22.1",
+        "purl": "pkg:pypi/uvloop@0.22.1"
+      },
+      {
+        "type": "library",
+        "name": "watchfiles",
+        "version": "1.2.0",
+        "purl": "pkg:pypi/watchfiles@1.2.0"
+      },
+      {
+        "type": "library",
+        "name": "websockets",
+        "version": "16.0",
+        "purl": "pkg:pypi/websockets@16.0"
+      }
+    ],
+    "component_inventory_hash": "173c28745118af4805f8e6d109ba9e79cf00274b6d8149f52fbc129ac6229830",
+    "publication_status": "not-published",
+    "commercial_blockers": [
+      "published-sbom-not-attached",
+      "scheduled-ci-advisory-scan-not-attached",
+      "trusted-dependency-advisory-sbom-diff-required"
+    ],
+    "manifest_hash": "1ef9b3b01b896e17c6f4640812c590f0d92dea2b0efefb2c2864b576e7848cde"
+  },
+  "dependency_sbom_manifest_hash": "1ef9b3b01b896e17c6f4640812c590f0d92dea2b0efefb2c2864b576e7848cde",
+  "dependency_ci_workflow_evidence": {
+    "profile_version": "dependency-ci-workflow-evidence-v1",
+    "item_number": 120,
+    "commercial_gap_ids": [
+      "#120"
+    ],
+    "workflow_path": "/Users/shinyoohag/rapidforensic/repo/.github/workflows/dependency-monitoring.yml",
+    "workflow_hash": "4404331c4de4c1e95c00113d03843e8d5597baeb8f19203751adc720b8fa6515",
+    "configured": true,
+    "sbom_archived_in_dependency_artifact": true,
+    "checks": {
+      "workflow_file_exists": true,
+      "scheduled_trigger": true,
+      "manual_trigger": true,
+      "pull_request_dependency_paths": true,
+      "check_dependencies_invoked": true,
+      "artifact_upload_configured": true,
+      "sbom_archived_in_dependency_artifact": true,
+      "read_only_permissions": true
+    },
+    "passed_checks": [
+      "workflow_file_exists",
+      "scheduled_trigger",
+      "manual_trigger",
+      "pull_request_dependency_paths",
+      "check_dependencies_invoked",
+      "artifact_upload_configured",
+      "sbom_archived_in_dependency_artifact",
+      "read_only_permissions"
+    ],
+    "failed_checks": [],
+    "commercial_claim_allowed": false,
+    "remaining_external_validation": [
+      "Attach an actual GitHub Actions run log and artifact URL before claiming commercial scheduled monitoring.",
+      "Attach the generated dependency-monitoring-ci.json artifact or publish the SBOM/dependency baseline with release checksums.",
+      "Attach a trusted exception review for unresolved high/critical findings."
+    ],
+    "evidence_hash": "2ddde81c3cc934ac976aae7667b818eb7e6e8e5ff9442f9caa0c10f97125092a"
+  },
+  "dependency_ci_workflow_evidence_hash": "4404331c4de4c1e95c00113d03843e8d5597baeb8f19203751adc720b8fa6515",
+  "vulnerability_scan": {
+    "commercial_gap_ids": [
+      "#120"
+    ],
+    "core_accuracy_gates": [
+      {
+        "profile_version": "core-forensics-accuracy-v1",
+        "gap_id": "#120",
+        "title": "Dependency vulnerability monitoring",
+        "status": "validation-required",
+        "required_checks": [
+          "dependency inventory emitted",
+          "vulnerability scan attempted",
+          "release blocking policy recorded",
+          "dependency monitoring script packaged",
+          "CI scheduled scan blocker disclosed",
+          "dependency monitoring evidence manifest hash emitted",
+          "dependency monitoring evidence slots emitted",
+          "dependency monitoring report-grade validation plan",
+          "dependency monitoring report-grade ready slots",
+          "trusted dependency advisory/SBOM diff pass"
+        ],
+        "satisfied_checks": [
+          "release blocking policy recorded",
+          "CI scheduled scan blocker disclosed",
+          "dependency inventory emitted",
+          "vulnerability scan attempted",
+          "dependency monitoring script packaged",
+          "CI scheduled advisory scan workflow configured",
+          "CI dependency workflow hash emitted",
+          "dependency monitoring evidence manifest hash emitted",
+          "dependency monitoring evidence slots emitted",
+          "dependency SBOM manifest hash emitted",
+          "dependency evidence matrix hash emitted",
+          "dependency monitoring report-grade validation plan",
+          "dependency monitoring report-grade ready slots"
+        ],
+        "missing_required_checks": [
+          "trusted dependency advisory/SBOM diff pass"
+        ],
+        "minimum_evidence": [
+          "source file or export hash",
+          "tool/parser version and command",
+          "expected-answer manifest",
+          "observed RapidTriage output",
+          "record-level or row-level diff",
+          "reviewer sign-off and limitation note"
+        ],
+        "accuracy_controls": {
+          "source_provenance_required": true,
+          "offset_or_record_id_required": false,
+          "hash_required": true,
+          "timezone_or_timestamp_semantics_required": false,
+          "secret_redaction_required": false,
+          "legal_or_authority_gate_required": true,
+          "cross_tool_diff_required": true,
+          "known_answer_required": true
+        },
+        "evidence_refs": [
+          "package_count:58",
+          "tool:pip-audit",
+          "dependency_report_grade_validation_plan_sha256:eb6e21131fd541e901a6dadf79d9e29818809f98c9f24eac65ebaffedb79c51b",
+          "dependency_report_grade_ready_slots:8",
+          "dependency_report_grade_blocking_slots:9"
+        ],
+        "default_reportability": "validation-required",
+        "commercial_grade_ready": false,
+        "next_validation_step": "Attach known-answer corpus output, cross-tool diff, and reviewer sign-off before report-grade claims."
+      }
+    ],
+    "tool": "pip-audit",
+    "available": true,
+    "return_code": 0,
+    "raw_output": "{\"dependencies\": [{\"name\": \"annotated-doc\", \"version\": \"0.0.4\", \"vulns\": []}, {\"name\": \"annotated-types\", \"version\": \"0.7.0\", \"vulns\": []}, {\"name\": \"anyio\", \"version\": \"4.13.0\", \"vulns\": []}, {\"name\": \"boolean-py\", \"version\": \"5.0\", \"vulns\": []}, {\"name\": \"build\", \"version\": \"1.5.0\", \"vulns\": []}, {\"name\": \"cachecontrol\", \"version\": \"0.14.4\", \"vulns\": []}, {\"name\": \"certifi\", \"version\": \"2026.4.22\", \"vulns\": []}, {\"name\": \"charset-normalizer\", \"version\": \"3.4.7\", \"vulns\": []}, {\"name\": \"click\", \"version\": \"8.4.0\", \"vulns\": []}, {\"name\": \"cyclonedx-python-lib\", \"version\": \"11.7.0\", \"vulns\": []}, {\"name\": \"dashcam-tools\", \"skip_reason\": \"Dependency not found on PyPI and could not be audited: dashcam-tools (0.1.0)\"}, {\"name\": \"defusedxml\", \"version\": \"0.7.1\", \"vulns\": []}, {\"name\": \"et-xmlfile\", \"version\": \"2.0.0\", \"vulns\": []}, {\"name\": \"fastapi\", \"version\": \"0.136.1\", \"vulns\": []}, {\"name\": \"filelock\", \"version\": \"3.29.0\", \"vulns\": []}, {\"name\": \"h11\", \"version\": \"0.16.0\", \"vulns\": []}, {\"name\": \"httpcore\", \"version\": \"1.0.9\", \"vulns\": []}, {\"name\": \"httptools\", \"version\": \"0.7.1\", \"vulns\": []}, {\"name\": \"httpx\", \"version\": \"0.28.1\", \"vulns\": []}, {\"name\": \"idna\", \"version\": \"3.15\", \"vulns\": []}, {\"name\": \"license-expression\", \"version\": \"30.4.4\", \"vulns\": []}, {\"name\": \"markdown-it-py\", \"version\": \"4.2.0\", \"vulns\": []}, {\"name\": \"mdurl\", \"version\": \"0.1.2\", \"vulns\": []}, {\"name\": \"msgpack\", \"version\": \"1.1.2\", \"vulns\": []}, {\"name\": \"numpy\", \"version\": \"2.4.6\", \"vulns\": []}, {\"name\": \"opencv-python\", \"version\": \"4.13.0.92\", \"vulns\": []}, {\"name\": \"openpyxl\", \"version\": \"3.1.5\", \"vulns\": []}, {\"name\": \"packageurl-python\", \"version\": \"0.17.6\", \"vulns\": []}, {\"name\": \"packaging\", \"version\": \"26.2\", \"vulns\": []}, {\"name\": \"pillow\", \"version\": \"12.2.0\", \"vulns\": []}, {\"name\": \"pip\", \"version\": \"26.1.1\", \"vulns\": []}, {\"name\": \"pip-api\", \"version\": \"0.0.34\", \"vulns\": []}, {\"name\": \"pip-audit\", \"version\": \"2.10.0\", \"vulns\": []}, {\"name\": \"pip-requirements-parser\", \"version\": \"32.0.1\", \"vulns\": []}, {\"name\": \"platformdirs\", \"version\": \"4.9.6\", \"vulns\": []}, {\"name\": \"py-serializable\", \"version\": \"2.1.0\", \"vulns\": []}, {\"name\": \"pycryptodome\", \"version\": \"3.23.0\", \"vulns\": []}, {\"name\": \"pydantic\", \"version\": \"2.13.4\", \"vulns\": []}, {\"name\": \"pydantic-core\", \"version\": \"2.46.4\", \"vulns\": []}, {\"name\": \"pygments\", \"version\": \"2.20.0\", \"vulns\": []}, {\"name\": \"pyparsing\", \"version\": \"3.3.2\", \"vulns\": []}, {\"name\": \"pyproject-hooks\", \"version\": \"1.2.0\", \"vulns\": []}, {\"name\": \"pytesseract\", \"version\": \"0.3.13\", \"vulns\": []}, {\"name\": \"python-dotenv\", \"version\": \"1.2.2\", \"vulns\": []}, {\"name\": \"pyyaml\", \"version\": \"6.0.3\", \"vulns\": []}, {\"name\": \"requests\", \"version\": \"2.34.2\", \"vulns\": []}, {\"name\": \"rich\", \"version\": \"15.0.0\", \"vulns\": []}, {\"name\": \"sortedcontainers\", \"version\": \"2.4.0\", \"vulns\": []}, {\"name\": \"starlette\", \"version\": \"1.0.0\", \"vulns\": []}, {\"name\": \"tomli\", \"version\": \"2.4.1\", \"vulns\": []}, {\"name\": \"tomli-w\", \"version\": \"1.2.0\", \"vulns\": []}, {\"name\": \"typing-extensions\", \"version\": \"4.15.0\", \"vulns\": []}, {\"name\": \"typing-inspection\", \"version\": \"0.4.2\", \"vulns\": []}, {\"name\": \"urllib3\", \"version\": \"2.7.0\", \"vulns\": []}, {\"name\": \"uvicorn\", \"version\": \"0.47.0\", \"vulns\": []}, {\"name\": \"uvloop\", \"version\": \"0.22.1\", \"vulns\": []}, {\"name\": \"watchfiles\", \"version\": \"1.2.0\", \"vulns\": []}, {\"name\": \"websockets\", \"version\": \"16.0\", \"vulns\": []}], \"fixes\": []}\n",
+    "error": "No known vulnerabilities found\n",
+    "release_policy": "Block release on known exploitable high/critical dependency issues unless a documented exception is approved."
+  },
+  "trusted_dependency_monitoring_diff": {
+    "status": "missing",
+    "trusted_tool": null,
+    "commercial_gap_ids": [
+      "#120"
+    ],
+    "blocker": "trusted-dependency-advisory-sbom-diff-missing",
+    "required_trusted_tools": [
+      "ci-advisory-scan",
+      "dependency-exception-review",
+      "sbom-publication-log"
+    ]
+  },
+  "blockers": [
+    "artifact-checksum-linkage-required",
+    "ci-advisory-run-log-required",
+    "dependency-exception-review-required",
+    "high-critical-triage-required",
+    "independent-dependency-review-required",
+    "release-host-dependency-smoke-required",
+    "sbom-publication-required",
+    "scanner-version-lock-required",
+    "trusted-dependency-advisory-sbom-diff-missing"
+  ],
+  "dependency_monitoring_evidence_manifest": {
+    "profile_version": "dependency-monitoring-evidence-manifest-v1",
+    "item_number": 120,
+    "commercial_gap_ids": [
+      "#120"
+    ],
+    "commercial_claim_allowed": false,
+    "package_count": 58,
+    "sbom_manifest_hash": "1ef9b3b01b896e17c6f4640812c590f0d92dea2b0efefb2c2864b576e7848cde",
+    "sbom_component_count": 58,
+    "pip_list_hash": "a1d8c2b6fc9f5bbe149b57d3732b1b292762b8b6d33fc3e5609656ecd2e14999",
+    "vulnerability_scan_hash": "a67a0ab5bdc1a85421eba046e0ced54b40f1bae0c87b4a53e920ef03d09431fc",
+    "dependency_evidence_slots": {
+      "scheduled_ci_advisory_scan": {
+        "status": "configured-no-run-attached",
+        "expected_material": "Scheduled CI advisory scan log for the release commit",
+        "required_before_commercial_claim": true,
+        "workflow_hash": "4404331c4de4c1e95c00113d03843e8d5597baeb8f19203751adc720b8fa6515"
+      },
+      "sbom_publication": {
+        "status": "configured-in-ci-artifact-no-run-attached",
+        "expected_material": "Published SBOM, dependency-monitoring-ci.json artifact, and checksum for the release artifact set",
+        "required_before_commercial_claim": true,
+        "workflow_hash": "4404331c4de4c1e95c00113d03843e8d5597baeb8f19203751adc720b8fa6515"
+      },
+      "dependency_exception_review": {
+        "status": "not-attached",
+        "expected_material": "Approved exception review for any unresolved high/critical findings",
+        "required_before_commercial_claim": true
+      }
+    },
+    "dependency_evidence_matrix": {
+      "profile_version": "dependency-evidence-matrix-v1",
+      "item_number": 120,
+      "package_count": 58,
+      "sbom_manifest_hash": "1ef9b3b01b896e17c6f4640812c590f0d92dea2b0efefb2c2864b576e7848cde",
+      "vulnerability_scan_hash": "a67a0ab5bdc1a85421eba046e0ced54b40f1bae0c87b4a53e920ef03d09431fc",
+      "slot_count": 3,
+      "required_slot_count": 3,
+      "attached_slot_count": 2,
+      "missing_required_slot_count": 1,
+      "rows": [
+        {
+          "slot": "dependency_exception_review",
+          "status": "not-attached",
+          "attached": false,
+          "required_before_commercial_claim": true,
+          "expected_material_hash": "5ec91fa1e746523b57e3586aac39ee4606f9a19ce5a25c9cf394f58c044e3b09",
+          "row_hash": "6ab32ef8761fe5ec362c03359550ef32a964f3e141465693a5e33aad7660f6ac"
+        },
+        {
+          "slot": "sbom_publication",
+          "status": "configured-in-ci-artifact-no-run-attached",
+          "attached": true,
+          "required_before_commercial_claim": true,
+          "expected_material_hash": "d29a8260dbb4d0dafbebb15bfb804e9ca42656c7ac30834fad56d685b1bfb2c7",
+          "row_hash": "0482ce83e90a68cef898380ec3f15e7fb8862ce447d2c63e4ba10d1cdf3dd035"
+        },
+        {
+          "slot": "scheduled_ci_advisory_scan",
+          "status": "configured-no-run-attached",
+          "attached": true,
+          "required_before_commercial_claim": true,
+          "expected_material_hash": "1ae78dd89658cdecb09431e339b9cbfca16bb60848814d328ba1d0ae5cff560e",
+          "row_hash": "86fd1463ebfb642b7946b00358396852b5fd466c3732c1c8a7f3066012d45088"
+        }
+      ],
+      "commercial_claim_allowed": false,
+      "matrix_hash": "c2cd36a1534b369aca8ff4745e6de4877482620ceb86bb342befc2b0e93d8d0b"
+    },
+    "dependency_evidence_matrix_hash": "c2cd36a1534b369aca8ff4745e6de4877482620ceb86bb342befc2b0e93d8d0b",
+    "dependency_ci_workflow_evidence_hash": "4404331c4de4c1e95c00113d03843e8d5597baeb8f19203751adc720b8fa6515",
+    "dependency_ci_workflow_configured": true,
+    "trusted_diff_status": "missing",
+    "trusted_diff_blocker": "trusted-dependency-advisory-sbom-diff-missing",
+    "blockers": [
+      "trusted-dependency-advisory-sbom-diff-missing"
+    ],
+    "manifest_hash": "4489aac97fa1166c163ad4d815676d5fc46286cb832a6fe0173a7eb837235e11"
+  },
+  "dependency_monitoring_evidence_manifest_hash": "4489aac97fa1166c163ad4d815676d5fc46286cb832a6fe0173a7eb837235e11",
+  "dependency_evidence_matrix_hash": "c2cd36a1534b369aca8ff4745e6de4877482620ceb86bb342befc2b0e93d8d0b",
+  "dependency_evidence_slots": {
+    "scheduled_ci_advisory_scan": {
+      "status": "configured-no-run-attached",
+      "expected_material": "Scheduled CI advisory scan log for the release commit",
+      "required_before_commercial_claim": true,
+      "workflow_hash": "4404331c4de4c1e95c00113d03843e8d5597baeb8f19203751adc720b8fa6515"
+    },
+    "sbom_publication": {
+      "status": "configured-in-ci-artifact-no-run-attached",
+      "expected_material": "Published SBOM, dependency-monitoring-ci.json artifact, and checksum for the release artifact set",
+      "required_before_commercial_claim": true,
+      "workflow_hash": "4404331c4de4c1e95c00113d03843e8d5597baeb8f19203751adc720b8fa6515"
+    },
+    "dependency_exception_review": {
+      "status": "not-attached",
+      "expected_material": "Approved exception review for any unresolved high/critical findings",
+      "required_before_commercial_claim": true
+    }
+  },
+  "dependency_report_grade_validation_plan": {
+    "profile_version": "dependency-monitoring-report-grade-validation-plan-v1",
+    "item_number": 120,
+    "commercial_gap_ids": [
+      "#120"
+    ],
+    "commercial_claim_allowed": false,
+    "package_count": 58,
+    "pip_list_return_code": 0,
+    "pip_audit_return_code": 0,
+    "pip_audit_available": true,
+    "release_policy": "Block release on known exploitable high/critical dependency issues unless a documented exception is approved.",
+    "dependency_sbom_manifest_hash": "1ef9b3b01b896e17c6f4640812c590f0d92dea2b0efefb2c2864b576e7848cde",
+    "dependency_monitoring_evidence_manifest_hash": "4489aac97fa1166c163ad4d815676d5fc46286cb832a6fe0173a7eb837235e11",
+    "dependency_evidence_matrix_hash": "c2cd36a1534b369aca8ff4745e6de4877482620ceb86bb342befc2b0e93d8d0b",
+    "dependency_ci_workflow_evidence_hash": "4404331c4de4c1e95c00113d03843e8d5597baeb8f19203751adc720b8fa6515",
+    "dependency_ci_workflow_configured": true,
+    "trusted_diff_status": "missing",
+    "trusted_diff_blocker": "trusted-dependency-advisory-sbom-diff-missing",
+    "ready_slots": [
+      {
+        "slot_id": "dependency-monitoring-json",
+        "status": "ready",
+        "evidence_ref": "scripts/check-dependencies.py --output dependency-monitoring.json",
+        "evidence_hash": "3bc1b950f2223f72e12a70d97f0e4a4acae5fa7e03279dac7370702a7e42b825"
+      },
+      {
+        "slot_id": "pip-list-inventory",
+        "status": "ready",
+        "evidence_ref": "dependency-monitoring.json.pip_list",
+        "evidence_hash": "ee1fb205c7ec06be30d20f5f12e546de6d80ebd99a5f30a89426da7db492fbc7"
+      },
+      {
+        "slot_id": "vulnerability-scan-attempt",
+        "status": "ready",
+        "evidence_ref": "dependency-monitoring.json.vulnerability_scan",
+        "evidence_hash": "a67a0ab5bdc1a85421eba046e0ced54b40f1bae0c87b4a53e920ef03d09431fc"
+      },
+      {
+        "slot_id": "dependency-sbom-manifest",
+        "status": "ready",
+        "evidence_ref": "dependency-monitoring.json.dependency_sbom_manifest_hash",
+        "evidence_hash": "1ef9b3b01b896e17c6f4640812c590f0d92dea2b0efefb2c2864b576e7848cde"
+      },
+      {
+        "slot_id": "dependency-ci-workflow-evidence",
+        "status": "ready",
+        "evidence_ref": "dependency-monitoring.json.dependency_ci_workflow_evidence_hash",
+        "evidence_hash": "4404331c4de4c1e95c00113d03843e8d5597baeb8f19203751adc720b8fa6515"
+      },
+      {
+        "slot_id": "dependency-monitoring-evidence-manifest",
+        "status": "ready",
+        "evidence_ref": "dependency-monitoring.json.dependency_monitoring_evidence_manifest_hash",
+        "evidence_hash": "4489aac97fa1166c163ad4d815676d5fc46286cb832a6fe0173a7eb837235e11"
+      },
+      {
+        "slot_id": "dependency-evidence-matrix",
+        "status": "ready",
+        "evidence_ref": "dependency-monitoring.json.dependency_evidence_matrix_hash",
+        "evidence_hash": "c2cd36a1534b369aca8ff4745e6de4877482620ceb86bb342befc2b0e93d8d0b"
+      },
+      {
+        "slot_id": "trusted-dependency-diff-boundary",
+        "status": "ready-with-blocker",
+        "evidence_ref": "dependency-monitoring.json.trusted_dependency_monitoring_diff",
+        "evidence_hash": "b3bcc36914f7087be66ba7266b2794b879cfd7c9e5e5abc11759d0f93ae22e8c"
+      }
+    ],
+    "blocking_slots": [
+      {
+        "slot_id": "trusted-dependency-advisory-sbom-diff",
+        "status": "blocking",
+        "blocker": "trusted-dependency-advisory-sbom-diff-missing",
+        "required_evidence": "trusted CI advisory/SBOM diff proving dependency baseline, SBOM, workflow, and evidence slots are unchanged"
+      },
+      {
+        "slot_id": "ci-advisory-run-log",
+        "status": "blocking",
+        "current_attachment_status": "not-attached",
+        "blocker": "ci-advisory-run-log-required",
+        "required_evidence": "actual scheduled or release CI advisory run log and artifact URL for the release commit"
+      },
+      {
+        "slot_id": "sbom-publication",
+        "status": "blocking",
+        "current_attachment_status": "not-attached",
+        "blocker": "sbom-publication-required",
+        "required_evidence": "published SBOM/dependency baseline with release checksums and retention location"
+      },
+      {
+        "slot_id": "dependency-exception-review",
+        "status": "blocking",
+        "current_attachment_status": "not-attached",
+        "blocker": "dependency-exception-review-required",
+        "required_evidence": "approved exception review for unresolved high/critical dependency findings"
+      },
+      {
+        "slot_id": "release-host-dependency-smoke",
+        "status": "blocking",
+        "current_attachment_status": "not-attached",
+        "blocker": "release-host-dependency-smoke-required",
+        "required_evidence": "release-host smoke proving dependency monitoring command, SBOM manifest, and blockers are packaged"
+      },
+      {
+        "slot_id": "scanner-version-lock",
+        "status": "blocking",
+        "current_attachment_status": "not-attached",
+        "blocker": "scanner-version-lock-required",
+        "required_evidence": "scanner version and vulnerability database timestamp captured for reproducible dependency monitoring"
+      },
+      {
+        "slot_id": "high-critical-triage",
+        "status": "blocking",
+        "current_attachment_status": "not-attached",
+        "blocker": "high-critical-triage-required",
+        "required_evidence": "triage worksheet proving high/critical findings are blocked or have documented exceptions"
+      },
+      {
+        "slot_id": "artifact-checksum-linkage",
+        "status": "blocking",
+        "current_attachment_status": "not-attached",
+        "blocker": "artifact-checksum-linkage-required",
+        "required_evidence": "release artifact checksum linkage between SBOM, dependency-monitoring JSON, and released package set"
+      },
+      {
+        "slot_id": "independent-dependency-review",
+        "status": "blocking",
+        "current_attachment_status": "not-attached",
+        "blocker": "independent-dependency-review-required",
+        "required_evidence": "independent reviewer/lab signoff for advisory scan, SBOM publication, and exception policy"
+      }
+    ],
+    "ready_slot_count": 8,
+    "blocking_slot_count": 9,
+    "external_blocker_catalog": [
+      "trusted-dependency-advisory-sbom-diff-missing",
+      "ci-advisory-run-log-required",
+      "sbom-publication-required",
+      "dependency-exception-review-required",
+      "release-host-dependency-smoke-required",
+      "scanner-version-lock-required",
+      "high-critical-triage-required",
+      "artifact-checksum-linkage-required",
+      "independent-dependency-review-required"
+    ],
+    "blockers": [
+      "artifact-checksum-linkage-required",
+      "ci-advisory-run-log-required",
+      "dependency-exception-review-required",
+      "high-critical-triage-required",
+      "independent-dependency-review-required",
+      "release-host-dependency-smoke-required",
+      "sbom-publication-required",
+      "scanner-version-lock-required",
+      "trusted-dependency-advisory-sbom-diff-missing"
+    ],
+    "reporting_boundary": "Dependency inventory, SBOM-like manifest, local pip-audit attempt, and CI workflow contract are usable; commercial monitoring claims require actual CI run evidence, published SBOM/checksum linkage, exception review, scanner version capture, and independent review.",
+    "validation_plan_hash": "eb6e21131fd541e901a6dadf79d9e29818809f98c9f24eac65ebaffedb79c51b"
+  },
+  "dependency_report_grade_validation_plan_hash": "eb6e21131fd541e901a6dadf79d9e29818809f98c9f24eac65ebaffedb79c51b",
+  "dependency_report_grade_ready_slot_count": 8,
+  "dependency_report_grade_blocking_slot_count": 9
+}

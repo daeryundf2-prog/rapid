@@ -1,0 +1,30 @@
+{
+  "command": "sample",
+  "sample_root": "/Users/shinyoohag/rapidforensic/repo/qc-runs/2026-05-19-macos-full/smoke/sample",
+  "evidence_root": "/Users/shinyoohag/rapidforensic/repo/qc-runs/2026-05-19-macos-full/smoke/sample/evidence",
+  "expected": "/Users/shinyoohag/rapidforensic/repo/qc-runs/2026-05-19-macos-full/smoke/sample/rapidtriage-sample-expected.json",
+  "summary": {
+    "document_count": 5,
+    "browser_profile_count": 1,
+    "recent_artifact_count": 3,
+    "keywords": [
+      "invoice",
+      "wire",
+      "password",
+      "credential",
+      "powershell",
+      "download",
+      "recovery"
+    ]
+  },
+  "run": {
+    "mode": "fraud",
+    "output_dir": "/Users/shinyoohag/rapidforensic/repo/qc-runs/2026-05-19-macos-full/smoke/sample/run-output",
+    "summary": "/Users/shinyoohag/rapidforensic/repo/qc-runs/2026-05-19-macos-full/smoke/sample/run-output/rapidtriage-run-summary.json",
+    "report": "/Users/shinyoohag/rapidforensic/repo/qc-runs/2026-05-19-macos-full/smoke/sample/run-output/rapidtriage-run-report.md",
+    "timeline": "/Users/shinyoohag/rapidforensic/repo/qc-runs/2026-05-19-macos-full/smoke/sample/run-output/rapidtriage-timeline.json",
+    "docs": "/Users/shinyoohag/rapidforensic/repo/qc-runs/2026-05-19-macos-full/smoke/sample/run-output/rapidtriage-docs.json",
+    "files": "/Users/shinyoohag/rapidforensic/repo/qc-runs/2026-05-19-macos-full/smoke/sample/run-output/rapidtriage-files.json",
+    "training_lab_manifest": "/Users/shinyoohag/rapidforensic/repo/qc-runs/2026-05-19-macos-full/smoke/sample/rapidtriage-training-lab-manifest.json"
+  }
+}

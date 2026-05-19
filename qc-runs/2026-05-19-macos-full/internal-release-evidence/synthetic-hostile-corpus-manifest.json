@@ -1,0 +1,67 @@
+{
+  "profile_version": "synthetic-hostile-corpus-v1",
+  "item_number": 119,
+  "generated_at": "2026-05-19T00:21:38+00:00",
+  "commercial_claim_allowed": false,
+  "internal_evidence_status": "usable-internal-validation-required",
+  "corpus_dir": "/Users/shinyoohag/rapidforensic/repo/qc-runs/2026-05-19-macos-full/internal-release-evidence/synthetic-hostile-corpus",
+  "corpus_files": [
+    {
+      "path": "synthetic-hostile-corpus/active-content.html",
+      "sha256": "abb018dbc82fdbac3a766312023223779d4b413d52666a8c46c97f6bd38d7157",
+      "size": 73
+    },
+    {
+      "path": "synthetic-hostile-corpus/active-vector.svg",
+      "sha256": "e606067a337b523c3f5850a81c8b1ef3bcaedeca763c64feb77344e3e991688c",
+      "size": 65
+    },
+    {
+      "path": "synthetic-hostile-corpus/benign.txt",
+      "sha256": "24dd18dc649845dcb2099df6751612ed0d70925959a35a45a6beda82a60bb56e",
+      "size": 15
+    },
+    {
+      "path": "synthetic-hostile-corpus/crash-trigger.json",
+      "sha256": "7bd1aed638248dbc3c90b7ac99ba1b21b33629ce6b613c419fd04ed5ad987c63",
+      "size": 57
+    },
+    {
+      "path": "synthetic-hostile-corpus/long-name-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.txt",
+      "sha256": "f129369e44fb1144e80d0f0e15e10347858668f9724888c08285889da087e7aa",
+      "size": 27
+    },
+    {
+      "path": "synthetic-hostile-corpus/zip-slip-candidate.zip",
+      "sha256": "a84c8dc53381c4cf10ca1020ae661db94fa5f2e770ec25ce452123281a47da50",
+      "size": 288
+    }
+  ],
+  "zip_entries": [
+    {
+      "name": "../escape.txt",
+      "file_size": 35,
+      "compress_size": 37,
+      "path_traversal_candidate": true
+    },
+    {
+      "name": "safe/nested.txt",
+      "file_size": 19,
+      "compress_size": 21,
+      "path_traversal_candidate": false
+    }
+  ],
+  "expected_behaviors": [
+    "preview-renderers-must-not-execute-active-content",
+    "archive-handlers-must-block-path-traversal-on-extract",
+    "parser-subprocesses-must-isolate-crash-or-timeout",
+    "evidence-outputs-must-record-hashes-and-limitations"
+  ],
+  "active_content_file_count": 2,
+  "unsafe_archive_entry_count": 1,
+  "external_blockers": [
+    "trusted-malicious-evidence-sandbox-corpus"
+  ],
+  "corpus_hash": "542addafebec9b2e78f72b0f8e64e1ca0b3355b2ef4a2b4d7f671456ed4cb727",
+  "profile_hash": "98b9e7c7af0ee715b0a5a582e094891e5f21db8317e24e06fa9641096b2c9b3b"
+}

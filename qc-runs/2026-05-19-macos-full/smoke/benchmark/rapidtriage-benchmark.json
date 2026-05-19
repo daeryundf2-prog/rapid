@@ -1,0 +1,717 @@
+{
+  "command": "benchmark",
+  "generated_at": "2026-05-19T00:13:09.331331+00:00",
+  "root": "/Users/shinyoohag/rapidforensic/repo/qc-runs/2026-05-19-macos-full/smoke/benchmark/synthetic-evidence",
+  "output_dir": "/Users/shinyoohag/rapidforensic/repo/qc-runs/2026-05-19-macos-full/smoke/benchmark",
+  "run_output_dir": "/Users/shinyoohag/rapidforensic/repo/qc-runs/2026-05-19-macos-full/smoke/benchmark/run-output",
+  "options": {
+    "file_count": 100,
+    "keyword": "password",
+    "mode": "fraud",
+    "search_iterations": 1,
+    "synthetic": true,
+    "resume": false,
+    "scale_targets": []
+  },
+  "environment": {
+    "profile_version": "benchmark-environment-profile-v1",
+    "captured_at": "2026-05-19T00:13:09.331134+00:00",
+    "python_version": "3.9.6",
+    "python_implementation": "CPython",
+    "platform": "macOS-15.7.4-arm64-arm-64bit",
+    "system": "Darwin",
+    "machine": "arm64",
+    "processor": "arm",
+    "commercial_gap_ids": [
+      "#66"
+    ],
+    "report_use_warning": "Preserve this environment block with benchmark JSON; results are not comparable without hardware/OS/dependency context."
+  },
+  "metrics": {
+    "ingest_seconds": 1.240179,
+    "memory_peak_bytes": 12222943,
+    "search_p50_seconds": 0.046653,
+    "search_p95_seconds": 0.046653,
+    "search_latency_samples_seconds": [
+      0.046653
+    ],
+    "run_output_size_bytes": 3480328,
+    "report_generation_seconds": null,
+    "records_per_second": 80.634
+  },
+  "summary": {
+    "document_match_count": 0,
+    "file_candidate_count": 100,
+    "search_match_count": 10,
+    "commercial_gap_ids": [
+      "#66"
+    ],
+    "commercial_grade_ready": false
+  },
+  "benchmark_native_capabilities": {
+    "synthetic_case_generation": true,
+    "existing_root_benchmark": true,
+    "ingest_timing": true,
+    "search_p50_p95_latency": true,
+    "peak_python_memory_tracking": true,
+    "published_hardware_matrix": false,
+    "continuous_10m_record_gate": false
+  },
+  "benchmark_scale_matrix": [
+    {
+      "target_records": 100000,
+      "label": "100k",
+      "covered_by_this_run": false,
+      "commercial_gap_ids": [
+        "#66"
+      ],
+      "required_evidence": [
+        "benchmark JSON",
+        "benchmark Markdown",
+        "hardware profile",
+        "run summary",
+        "search latency distribution"
+      ]
+    },
+    {
+      "target_records": 1000000,
+      "label": "1M",
+      "covered_by_this_run": false,
+      "commercial_gap_ids": [
+        "#66"
+      ],
+      "required_evidence": [
+        "benchmark JSON",
+        "benchmark Markdown",
+        "hardware profile",
+        "run summary",
+        "search latency distribution"
+      ]
+    },
+    {
+      "target_records": 10000000,
+      "label": "10M",
+      "covered_by_this_run": false,
+      "commercial_gap_ids": [
+        "#66"
+      ],
+      "required_evidence": [
+        "benchmark JSON",
+        "benchmark Markdown",
+        "hardware profile",
+        "run summary",
+        "search latency distribution"
+      ]
+    }
+  ],
+  "benchmark_scale_proof_manifest": {
+    "profile_version": "benchmark-scale-proof-manifest-v1",
+    "item_number": 66,
+    "commercial_gap_ids": [
+      "#66"
+    ],
+    "target_record_counts": [
+      100000,
+      1000000,
+      10000000
+    ],
+    "executed_record_count": 100,
+    "covered_target_count": 0,
+    "required_target_count": 3,
+    "all_scale_targets_covered": false,
+    "scale_rows": [
+      {
+        "target_records": 100000,
+        "label": "100k",
+        "coverage_status": "external-run-required",
+        "covered_by_this_run": false,
+        "observed_record_count": 0,
+        "missing_record_count": 99900,
+        "required_evidence": [
+          "benchmark JSON",
+          "benchmark Markdown",
+          "hardware profile",
+          "run summary",
+          "search latency distribution"
+        ],
+        "commercial_gap_ids": [
+          "#66"
+        ]
+      },
+      {
+        "target_records": 1000000,
+        "label": "1M",
+        "coverage_status": "external-run-required",
+        "covered_by_this_run": false,
+        "observed_record_count": 0,
+        "missing_record_count": 999900,
+        "required_evidence": [
+          "benchmark JSON",
+          "benchmark Markdown",
+          "hardware profile",
+          "run summary",
+          "search latency distribution"
+        ],
+        "commercial_gap_ids": [
+          "#66"
+        ]
+      },
+      {
+        "target_records": 10000000,
+        "label": "10M",
+        "coverage_status": "external-run-required",
+        "covered_by_this_run": false,
+        "observed_record_count": 0,
+        "missing_record_count": 9999900,
+        "required_evidence": [
+          "benchmark JSON",
+          "benchmark Markdown",
+          "hardware profile",
+          "run summary",
+          "search latency distribution"
+        ],
+        "commercial_gap_ids": [
+          "#66"
+        ]
+      }
+    ],
+    "scale_rows_hash": "4e34c09391f7ca53e7d4f156b4853a4c93e2c39f05663eb1140d410504bab5e6",
+    "metric_snapshot": {
+      "file_count": 100,
+      "ingest_seconds": 1.240179,
+      "memory_peak_bytes": 12222943,
+      "search_p50_seconds": 0.046653,
+      "search_p95_seconds": 0.046653,
+      "records_per_second": 80.634,
+      "run_output_size_bytes": 3480328
+    },
+    "metric_snapshot_hash": "fab819f6c238f74f94852e92149ab1ab22fd9efe5a5689a5e8338a92cd2f94e7",
+    "environment_hash": "d59c36385bb3d7d10886f39ddfd597c3e498d0ffa94fc33127c8fb042ff98018",
+    "release_threshold_profile_hash": "576168f8ef2dadbb1020f35fd6c2455a5d18fa24742e3d5437a5398eee670d83",
+    "release_threshold_status": "pass",
+    "evidence_paths": {
+      "benchmark_json": "/Users/shinyoohag/rapidforensic/repo/qc-runs/2026-05-19-macos-full/smoke/benchmark/rapidtriage-benchmark.json",
+      "benchmark_markdown": "/Users/shinyoohag/rapidforensic/repo/qc-runs/2026-05-19-macos-full/smoke/benchmark/rapidtriage-benchmark.md",
+      "run_summary": "/Users/shinyoohag/rapidforensic/repo/qc-runs/2026-05-19-macos-full/smoke/benchmark/run-output/rapidtriage-run-summary.json"
+    },
+    "blockers": [
+      "published-100k-1m-10m-hardware-and-os-matrix-required",
+      "trusted-benchmark-threshold-manifest-required",
+      "trusted-benchmark-hardware-threshold-diff-missing"
+    ],
+    "commercial_claim_allowed": false,
+    "report_use_warning": "This manifest records the current benchmark run and missing scale targets; it is not proof of 100k/1M/10M commercial readiness unless every target is covered on representative hardware.",
+    "manifest_hash": "a69ce477a683a04383946f1a1a67d70c976bf94fcd76e429f22852c0a9b30dce"
+  },
+  "benchmark_scale_proof_manifest_hash": "a69ce477a683a04383946f1a1a67d70c976bf94fcd76e429f22852c0a9b30dce",
+  "benchmark_report_grade_validation_plan": {
+    "profile_version": "benchmark-scale-report-grade-validation-plan-v1",
+    "item_number": 66,
+    "commercial_gap_ids": [
+      "#66"
+    ],
+    "file_count": 100,
+    "target_record_counts": [
+      100000,
+      1000000,
+      10000000
+    ],
+    "covered_target_count": 0,
+    "all_scale_targets_covered": false,
+    "ready_slots": [
+      {
+        "id": "benchmark-scale-target-matrix",
+        "status": "ready",
+        "evidence": "100k/1M/10M target rows are emitted with covered/missing status.",
+        "evidence_hash": "4e34c09391f7ca53e7d4f156b4853a4c93e2c39f05663eb1140d410504bab5e6"
+      },
+      {
+        "id": "benchmark-metric-snapshot",
+        "status": "ready",
+        "evidence": "Ingest, search latency, records/sec, memory, and output-size metrics are captured.",
+        "evidence_hash": "361a4163f17a307e16b9f83fca5ad37f0b4388215a119eff2dd1ae8b7f94e4bf"
+      },
+      {
+        "id": "benchmark-environment-profile",
+        "status": "ready",
+        "evidence": "Python, OS, machine, and processor context are captured for comparability.",
+        "evidence_hash": "d59c36385bb3d7d10886f39ddfd597c3e498d0ffa94fc33127c8fb042ff98018"
+      },
+      {
+        "id": "benchmark-release-threshold-profile",
+        "status": "ready",
+        "evidence": "Internal release guardrail checks are captured without allowing commercial claims.",
+        "evidence_hash": "576168f8ef2dadbb1020f35fd6c2455a5d18fa24742e3d5437a5398eee670d83"
+      },
+      {
+        "id": "benchmark-output-paths",
+        "status": "ready",
+        "evidence": "Benchmark JSON, Markdown, and run-summary paths are preserved for handoff.",
+        "evidence_hash": "c1564bb6ca087f942a457ca39ab9734de63f1a4deee87c6e106d93fa96cad999"
+      },
+      {
+        "id": "benchmark-scale-proof-manifest",
+        "status": "ready",
+        "evidence": "A stable scale-proof manifest hash binds metrics, environment, thresholds, and paths.",
+        "evidence_hash": "a69ce477a683a04383946f1a1a67d70c976bf94fcd76e429f22852c0a9b30dce"
+      }
+    ],
+    "blocking_slots": [
+      {
+        "id": "benchmark-100k-representative-hardware-run",
+        "status": "external-evidence-required",
+        "blocker": "100k-representative-hardware-run-required",
+        "required_artifacts": [
+          "benchmark JSON",
+          "hardware profile",
+          "OS/dependency versions",
+          "run summary"
+        ]
+      },
+      {
+        "id": "benchmark-1m-representative-hardware-run",
+        "status": "external-evidence-required",
+        "blocker": "1m-representative-hardware-run-required",
+        "required_artifacts": [
+          "benchmark JSON",
+          "hardware profile",
+          "OS/dependency versions",
+          "run summary"
+        ]
+      },
+      {
+        "id": "benchmark-10m-representative-hardware-run",
+        "status": "external-evidence-required",
+        "blocker": "10m-representative-hardware-run-required",
+        "required_artifacts": [
+          "benchmark JSON",
+          "hardware profile",
+          "OS/dependency versions",
+          "run summary"
+        ]
+      },
+      {
+        "id": "benchmark-trusted-threshold-manifest",
+        "status": "external-evidence-required",
+        "blocker": "trusted-threshold-manifest-required",
+        "required_artifacts": [
+          "signed threshold manifest",
+          "approved p95/memory/throughput budgets"
+        ]
+      },
+      {
+        "id": "benchmark-release-approved-comparison",
+        "status": "external-evidence-required",
+        "blocker": "release-approved-threshold-comparison-required",
+        "required_artifacts": [
+          "threshold diff",
+          "release reviewer signoff"
+        ]
+      },
+      {
+        "id": "benchmark-independent-reproduction-log",
+        "status": "external-evidence-required",
+        "blocker": "independent-reproduction-log-required",
+        "required_artifacts": [
+          "independent run log",
+          "machine profile",
+          "result hash comparison"
+        ]
+      }
+    ],
+    "ready_slot_count": 6,
+    "blocking_slot_count": 6,
+    "blockers": [
+      "100k-representative-hardware-run-required",
+      "1m-representative-hardware-run-required",
+      "10m-representative-hardware-run-required",
+      "trusted-threshold-manifest-required",
+      "release-approved-threshold-comparison-required",
+      "independent-reproduction-log-required"
+    ],
+    "scale_proof_manifest_hash": "a69ce477a683a04383946f1a1a67d70c976bf94fcd76e429f22852c0a9b30dce",
+    "commercial_claim_allowed": false,
+    "report_use_warning": "This plan identifies what the local benchmark proves and which representative hardware artifacts are still required before performance claims.",
+    "validation_plan_hash": "71cc33fbb565ebc1d8c879ed2f8bedc30728b090609a60630acd19daf38e148c"
+  },
+  "benchmark_report_grade_validation_plan_hash": "71cc33fbb565ebc1d8c879ed2f8bedc30728b090609a60630acd19daf38e148c",
+  "report_grade_ready_slot_count": 6,
+  "report_grade_blocking_slot_count": 6,
+  "benchmark_command_manifest": {
+    "profile_version": "benchmark-command-manifest-v1",
+    "item_number": 34,
+    "gap_id": "#34",
+    "commercial_gap_ids": [
+      "#66"
+    ],
+    "file_count": 100,
+    "scale_targets": [
+      100000,
+      1000000,
+      10000000
+    ],
+    "covered_scale_labels": [],
+    "metrics": {
+      "ingest_seconds": 1.240179,
+      "memory_peak_bytes": 12222943,
+      "search_p50_seconds": 0.046653,
+      "search_p95_seconds": 0.046653,
+      "run_output_size_bytes": 3480328,
+      "records_per_second": 80.634
+    },
+    "environment_hash": "d59c36385bb3d7d10886f39ddfd597c3e498d0ffa94fc33127c8fb042ff98018",
+    "release_threshold_profile_hash": "576168f8ef2dadbb1020f35fd6c2455a5d18fa24742e3d5437a5398eee670d83",
+    "release_threshold_status": "pass",
+    "published_hardware_matrix_attached": false,
+    "trusted_threshold_manifest_attached": false,
+    "commercial_claim_allowed": false,
+    "manifest_hash": "9296cc7fae257bcc7df30347b827c6d38844b59d3e5a6d2c6ed69af5e4ea8af5"
+  },
+  "benchmark_command_manifest_hash": "9296cc7fae257bcc7df30347b827c6d38844b59d3e5a6d2c6ed69af5e4ea8af5",
+  "functional_priority_profile": {
+    "batch_id": "commercial-uplift-031-035",
+    "item_number": 34,
+    "gap_id": "#34",
+    "component": "benchmark-command",
+    "status": "implemented-synthetic-benchmark-validation-required",
+    "implemented": true,
+    "usable": true,
+    "validated": true,
+    "ready_for_commercial_claim": false,
+    "controls": {
+      "file_count": 100,
+      "scale_targets": [
+        100000,
+        1000000,
+        10000000
+      ],
+      "ingest_seconds": 1.240178625,
+      "records_per_second_available": true,
+      "search_p50_seconds": 0.046652540999999825,
+      "search_p95_seconds": 0.046652540999999825,
+      "memory_peak_bytes": 12222943,
+      "run_output_size_bytes": 3480328,
+      "release_threshold_status": "pass",
+      "benchmark_manifest_hash": "9296cc7fae257bcc7df30347b827c6d38844b59d3e5a6d2c6ed69af5e4ea8af5",
+      "benchmark_scale_proof_manifest_hash": "a69ce477a683a04383946f1a1a67d70c976bf94fcd76e429f22852c0a9b30dce",
+      "benchmark_report_grade_validation_plan_hash": "71cc33fbb565ebc1d8c879ed2f8bedc30728b090609a60630acd19daf38e148c",
+      "covered_target_count": 0,
+      "all_scale_targets_covered": false,
+      "report_grade_ready_slot_count": 6,
+      "report_grade_blocking_slot_count": 6,
+      "release_threshold_profile_hash": "576168f8ef2dadbb1020f35fd6c2455a5d18fa24742e3d5437a5398eee670d83",
+      "synthetic_or_existing_root_supported": true
+    },
+    "blockers": [
+      "trusted-benchmark-hardware-threshold-diff-missing",
+      "published-100k-1m-10m-hardware-and-os-matrix-required",
+      "release-threshold-comparison-not-attached"
+    ],
+    "validation_evidence": [
+      "benchmark-json-emits-functional-priority-profile",
+      "unit-test-asserts-benchmark-profile-contract"
+    ]
+  },
+  "release_threshold_profile": {
+    "profile_version": "benchmark-release-threshold-profile-v1",
+    "commercial_gap_ids": [
+      "#66"
+    ],
+    "status": "pass",
+    "file_count": 100,
+    "thresholds": {
+      "search_p95_seconds": 2.0,
+      "memory_peak_bytes": 536870912,
+      "records_per_second_min": 25.0
+    },
+    "checks": [
+      {
+        "metric": "search_p95_seconds",
+        "operator": "<=",
+        "threshold": 2.0,
+        "observed": 0.046653,
+        "status": "pass"
+      },
+      {
+        "metric": "memory_peak_bytes",
+        "operator": "<=",
+        "threshold": 536870912,
+        "observed": 12222943,
+        "status": "pass"
+      },
+      {
+        "metric": "records_per_second",
+        "operator": ">=",
+        "threshold": 25.0,
+        "observed": 80.634,
+        "status": "pass"
+      }
+    ],
+    "failed_check_count": 0,
+    "trusted_threshold_manifest_attached": false,
+    "trusted_diff_blocker": "trusted-benchmark-hardware-threshold-diff-missing",
+    "report_use_warning": "Default thresholds are internal guardrails only; attach a release-approved threshold manifest before commercial performance claims."
+  },
+  "benchmark_report_grade_assessment": {
+    "component": "100k-1m-10m-record-benchmark",
+    "status": "small-benchmark-only",
+    "commercial_gap_ids": [
+      "#66"
+    ],
+    "covered_scale_labels": [],
+    "benchmark_report_grade_validation_plan_hash": "71cc33fbb565ebc1d8c879ed2f8bedc30728b090609a60630acd19daf38e148c",
+    "report_grade_ready_slot_count": 6,
+    "report_grade_blocking_slot_count": 6,
+    "ready_for_court_report": false,
+    "blockers": [
+      "published-hardware-and-os-matrix-required-for-performance-claims",
+      "1m-and-10m-record-runs-should-be-executed-outside-unit-tests",
+      "benchmark-results-are-operational-evidence-not-forensic-findings",
+      "trusted-benchmark-hardware-threshold-diff-missing"
+    ],
+    "recommended_validation": [
+      "Preserve benchmark JSON/Markdown, run summary, hardware profile, dependency versions, and sample evidence manifest.",
+      "Compare p50/p95 search latency and ingest records/sec against release thresholds before claiming large-case readiness."
+    ],
+    "core_accuracy_gates": [
+      {
+        "profile_version": "core-forensics-accuracy-v1",
+        "gap_id": "#66",
+        "title": "100k/1M/10M record benchmark",
+        "status": "validation-required",
+        "required_checks": [
+          "scale matrix emitted",
+          "ingest/search metrics captured",
+          "memory/output size captured",
+          "run summary linked",
+          "release threshold profile emitted",
+          "benchmark command manifest hash emitted",
+          "benchmark scale proof manifest emitted",
+          "benchmark report-grade validation plan emitted",
+          "benchmark report-grade ready slots emitted",
+          "hardware-scale limitation warning",
+          "trusted benchmark threshold diff pass"
+        ],
+        "satisfied_checks": [
+          "scale matrix emitted",
+          "hardware-scale limitation warning",
+          "benchmark report-grade validation plan emitted",
+          "benchmark report-grade ready slots emitted"
+        ],
+        "missing_required_checks": [
+          "ingest/search metrics captured",
+          "memory/output size captured",
+          "run summary linked",
+          "release threshold profile emitted",
+          "benchmark command manifest hash emitted",
+          "benchmark scale proof manifest emitted",
+          "trusted benchmark threshold diff pass"
+        ],
+        "minimum_evidence": [
+          "source file or export hash",
+          "tool/parser version and command",
+          "expected-answer manifest",
+          "observed RapidTriage output",
+          "record-level or row-level diff",
+          "reviewer sign-off and limitation note"
+        ],
+        "accuracy_controls": {
+          "source_provenance_required": true,
+          "offset_or_record_id_required": false,
+          "hash_required": true,
+          "timezone_or_timestamp_semantics_required": true,
+          "secret_redaction_required": false,
+          "legal_or_authority_gate_required": false,
+          "cross_tool_diff_required": true,
+          "known_answer_required": true
+        },
+        "evidence_refs": [
+          "file_count:100",
+          "run_summary:",
+          "release_threshold_status:",
+          "benchmark_report_grade_validation_plan_hash:71cc33fbb565ebc1d8c879ed2f8bedc30728b090609a60630acd19daf38e148c"
+        ],
+        "default_reportability": "validation-required",
+        "commercial_grade_ready": false,
+        "next_validation_step": "Attach known-answer corpus output, cross-tool diff, and reviewer sign-off before report-grade claims."
+      }
+    ]
+  },
+  "commercial_uplift_evidence": {
+    "batch_id": "commercial-uplift-066-070",
+    "item_numbers": [
+      66
+    ],
+    "implemented": true,
+    "usable": true,
+    "validated": true,
+    "commercial_grade_ready": false,
+    "reportability_decision": {
+      "profile_version": "performance-reportability-decision-v1",
+      "commercial_gap_ids": [
+        "#66"
+      ],
+      "decision": "do-not-report-benchmark-as-published-scale-proof",
+      "allowed_use": "benchmark-run-and-scale-plan-triage-pivot",
+      "blockers": [
+        "independent reproduction log for each target scale",
+        "published 100k/1M/10M hardware and OS benchmark matrix",
+        "release threshold comparison under representative analyst hardware",
+        "trusted-benchmark-hardware-threshold-diff-missing"
+      ],
+      "control_snapshot": [
+        "100k/1M/10M scale targets are emitted in the benchmark matrix",
+        "p50/p95 search latency and records/sec are recorded for the executed run",
+        "peak Python memory and output byte totals are captured for release comparison",
+        "run summary, benchmark JSON, and Markdown paths are preserved as evidence",
+        "benchmark scale proof manifest records covered/missing 100k/1M/10M targets",
+        "benchmark report-grade validation plan records ready evidence slots and external blocking slots"
+      ],
+      "ready_for_court_report": false,
+      "required_before_report": [
+        "publish hardware, OS, dependency, evidence-size, wall-time, memory, and p95 latency evidence",
+        "attach independent reproduction logs and release threshold comparisons before scale claims"
+      ]
+    },
+    "passed_validation_check_ids": [
+      "scale matrix emitted",
+      "ingest/search metrics captured",
+      "memory/output size captured",
+      "run summary linked",
+      "environment and release threshold profile captured",
+      "benchmark report-grade validation plan emitted"
+    ],
+    "large_data_controls": [
+      "100k/1M/10M scale targets are emitted in the benchmark matrix",
+      "p50/p95 search latency and records/sec are recorded for the executed run",
+      "peak Python memory and output byte totals are captured for release comparison",
+      "run summary, benchmark JSON, and Markdown paths are preserved as evidence",
+      "benchmark scale proof manifest records covered/missing 100k/1M/10M targets",
+      "benchmark report-grade validation plan records ready evidence slots and external blocking slots"
+    ],
+    "remaining_external_validation": [
+      "published 100k/1M/10M hardware and OS benchmark matrix",
+      "release threshold comparison under representative analyst hardware",
+      "independent reproduction log for each target scale",
+      "trusted-benchmark-hardware-threshold-diff-missing"
+    ]
+  },
+  "core_accuracy_gates": [
+    {
+      "profile_version": "core-forensics-accuracy-v1",
+      "gap_id": "#66",
+      "title": "100k/1M/10M record benchmark",
+      "status": "validation-required",
+      "required_checks": [
+        "scale matrix emitted",
+        "ingest/search metrics captured",
+        "memory/output size captured",
+        "run summary linked",
+        "release threshold profile emitted",
+        "benchmark command manifest hash emitted",
+        "benchmark scale proof manifest emitted",
+        "benchmark report-grade validation plan emitted",
+        "benchmark report-grade ready slots emitted",
+        "hardware-scale limitation warning",
+        "trusted benchmark threshold diff pass"
+      ],
+      "satisfied_checks": [
+        "scale matrix emitted",
+        "hardware-scale limitation warning",
+        "ingest/search metrics captured",
+        "memory/output size captured",
+        "run summary linked",
+        "release threshold profile emitted",
+        "benchmark command manifest hash emitted",
+        "benchmark scale proof manifest emitted",
+        "benchmark report-grade validation plan emitted",
+        "benchmark report-grade ready slots emitted"
+      ],
+      "missing_required_checks": [
+        "trusted benchmark threshold diff pass"
+      ],
+      "minimum_evidence": [
+        "source file or export hash",
+        "tool/parser version and command",
+        "expected-answer manifest",
+        "observed RapidTriage output",
+        "record-level or row-level diff",
+        "reviewer sign-off and limitation note"
+      ],
+      "accuracy_controls": {
+        "source_provenance_required": true,
+        "offset_or_record_id_required": false,
+        "hash_required": true,
+        "timezone_or_timestamp_semantics_required": true,
+        "secret_redaction_required": false,
+        "legal_or_authority_gate_required": false,
+        "cross_tool_diff_required": true,
+        "known_answer_required": true
+      },
+      "evidence_refs": [
+        "file_count:100",
+        "run_summary:/Users/shinyoohag/rapidforensic/repo/qc-runs/2026-05-19-macos-full/smoke/benchmark/run-output/rapidtriage-run-summary.json",
+        "release_threshold_status:pass",
+        "benchmark_manifest_hash:9296cc7fae257bcc7df30347b827c6d38844b59d3e5a6d2c6ed69af5e4ea8af5",
+        "benchmark_scale_proof_manifest_hash:a69ce477a683a04383946f1a1a67d70c976bf94fcd76e429f22852c0a9b30dce",
+        "benchmark_report_grade_validation_plan_hash:71cc33fbb565ebc1d8c879ed2f8bedc30728b090609a60630acd19daf38e148c"
+      ],
+      "default_reportability": "validation-required",
+      "commercial_grade_ready": false,
+      "next_validation_step": "Attach known-answer corpus output, cross-tool diff, and reviewer sign-off before report-grade claims."
+    }
+  ],
+  "outputs": {
+    "json": "/Users/shinyoohag/rapidforensic/repo/qc-runs/2026-05-19-macos-full/smoke/benchmark/rapidtriage-benchmark.json",
+    "markdown": "/Users/shinyoohag/rapidforensic/repo/qc-runs/2026-05-19-macos-full/smoke/benchmark/rapidtriage-benchmark.md",
+    "run_summary": "/Users/shinyoohag/rapidforensic/repo/qc-runs/2026-05-19-macos-full/smoke/benchmark/run-output/rapidtriage-run-summary.json"
+  },
+  "output_sizes": {
+    "rapidtriage-preview-sandbox-policy.json": 13786,
+    "rapidtriage-memory-cap-enforcement.json": 6746,
+    "rapidtriage-docs.json": 35260,
+    "rapidtriage-parser-scheduler.json": 16829,
+    "rapidtriage-files.json": 431390,
+    "rapidtriage-run-fingerprint.json": 49584,
+    "rapidtriage-timeline-report.md": 28833,
+    "rapidtriage-parser-crash-isolation.json": 24777,
+    "rapidtriage-run-checkpoints.json": 243219,
+    "rapidtriage-indicators.json": 1890313,
+    "rapidtriage-run-report.md": 44201,
+    "rapidtriage-timeline.json": 82784,
+    "rapidtriage-run-summary.json": 434686,
+    "rapidtriage-run-audit.json": 15877,
+    "rapidtriage-docs-index.json": 90127,
+    "rapidtriage-manifest.json": 7797,
+    "rapidtriage-sqlite-fts-optimization.json": 9099,
+    "artifacts/rapidtriage-artifacts-browser.json": 1004,
+    "artifacts/rapidtriage-artifacts-windows-prefetch.json": 977,
+    "artifacts/rapidtriage-artifacts-windows-execution.json": 1006,
+    "artifacts/rapidtriage-artifacts-windows-registry.json": 970,
+    "artifacts/rapidtriage-artifacts-kakaotalk-windows.json": 1022,
+    "artifacts/rapidtriage-artifacts-eventlog.json": 993,
+    "artifacts/rapidtriage-artifacts-windows-os-account.json": 4437,
+    "artifacts/rapidtriage-artifacts-windows-shellbags.json": 1005,
+    "artifacts/rapidtriage-artifacts-windows-filesystem.json": 1006,
+    "artifacts/rapidtriage-artifacts-macos-system.json": 1021,
+    "artifacts/rapidtriage-artifacts-linux-system.json": 1008,
+    "artifacts/rapidtriage-artifacts-recent-files.json": 1011,
+    "artifacts/rapidtriage-artifacts-kakaotalk-macos.json": 1026,
+    "artifacts/rapidtriage-artifacts-windows-system.json": 1016,
+    "artifacts/rapidtriage-artifacts-cloud-export.json": 1026,
+    "artifacts/rapidtriage-artifacts-windows-remote-access.json": 1010,
+    "artifacts/rapidtriage-artifacts-mobile-export.json": 1006,
+    "artifacts/rapidtriage-artifacts-android-apk.json": 1016,
+    "artifacts/rapidtriage-artifacts-media-image.json": 1025,
+    "artifacts/rapidtriage-artifacts-windows-search-index.json": 1002,
+    "artifacts/rapidtriage-artifacts-generic-documents.json": 6507,
+    "artifacts/rapidtriage-artifacts-email.json": 980,
+    "artifacts/rapidtriage-artifacts-memory-volatility.json": 1037,
+    "files-extract/rapidtriage-extract-manifest.json": 21666,
+    "docs-extract/rapidtriage-extract-manifest.json": 1243
+  },
+  "stress_guidance": [
+    "Use --read-only and --resume for multi-hour evidence runs.",
+    "Keep benchmark output on fast local storage; external disks can dominate ingest time."
+  ]
+}

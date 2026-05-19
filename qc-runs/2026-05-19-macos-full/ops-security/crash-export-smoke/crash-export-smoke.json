@@ -1,0 +1,45 @@
+{
+  "command": "crash-export-smoke",
+  "profile_version": "crash-export-release-smoke-v1",
+  "generated_at": "2026-05-19T00:20:38.806529+00:00",
+  "commercial_gap_ids": [
+    "#105"
+  ],
+  "output_dir": "/Users/shinyoohag/rapidforensic/repo/qc-runs/2026-05-19-macos-full/ops-security/crash-export-smoke",
+  "crash_id": "crash-20260519T002038Z-ba888bd0",
+  "crash_report_path": "/Users/shinyoohag/rapidforensic/repo/qc-runs/2026-05-19-macos-full/ops-security/crash-export-smoke/crash-reports/crash-20260519T002038Z-ba888bd0.json",
+  "crash_report_sha256": "8a443e5c2850bdf16a8a6df8c3157bc13569151f9036f7be0bd51c1f4483474b",
+  "dashboard_hash": "5c1e4aad11a461825fe2aedb3318ddd1e5e1bb492d601abf096b729a2caa5bac",
+  "export_bundle_path": "/Users/shinyoohag/rapidforensic/repo/qc-runs/2026-05-19-macos-full/ops-security/crash-export-smoke/exports/crash-20260519T002038Z-ba888bd0-export.zip",
+  "export_bundle_sha256": "9989f0c3ae25cff60dd4dbc577247c96e9b5cac32a1f42fb125b853dffbb55db",
+  "export_manifest_hash": "f3004ff36a7ab31be97eedbb69fca0abb02883b4c62f7b0af8fec194234708c5",
+  "crash_report_grade_validation_plan_hash": "2ac5975914d8fab155d8eb6295ab58e7db6472e41e06c23032f098c22f56c375",
+  "crash_report_grade_ready_slot_count": 8,
+  "crash_report_grade_blocking_slot_count": 8,
+  "bundle_members": [
+    "crash-20260519T002038Z-ba888bd0.json",
+    "crash-export-manifest.json"
+  ],
+  "checks": {
+    "crash_report_written": true,
+    "dashboard_lists_report": true,
+    "dashboard_local_only": true,
+    "export_bundle_written": true,
+    "export_manifest_present": true,
+    "redacted_report_present": true,
+    "secret_redacted": true,
+    "bundle_hash_verified": true,
+    "manifest_hash_preserved": true,
+    "report_grade_plan_present": true,
+    "export_manifest_preserves_report_grade_hash": true,
+    "no_automatic_upload": true
+  },
+  "passed_check_count": 12,
+  "failed_check_ids": [],
+  "commercial_claim_allowed": false,
+  "remaining_external_validation": [
+    "Attach this smoke JSON from the actual release build host.",
+    "Attach trusted redaction/export review before commercial crash-reporting claims."
+  ],
+  "smoke_hash": "ff8e164243b5d15958256d6ca93dee0183aa02542350b5c9b4735db7f945ac68"
+}

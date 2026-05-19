@@ -1,0 +1,483 @@
+{
+  "command": "verify-release-evidence",
+  "generated_at": "2026-05-19T00:39:04.980222+00:00",
+  "passed": true,
+  "release_gate": "pass",
+  "inputs": {
+    "release_dir": "/Users/shinyoohag/rapidforensic/repo/qc-runs/2026-05-19-macos-full/release",
+    "validation_dir": "/Users/shinyoohag/rapidforensic/repo/qc-runs/2026-05-19-macos-full/smoke/validation",
+    "benchmark_dir": "/Users/shinyoohag/rapidforensic/repo/qc-runs/2026-05-19-macos-full/smoke/benchmark",
+    "columnar_benchmark_dir": "",
+    "smoke_dirs": [
+      "/Users/shinyoohag/rapidforensic/repo/qc-runs/2026-05-19-macos-full/smoke"
+    ],
+    "crash_smoke_json": "/Users/shinyoohag/rapidforensic/repo/qc-runs/2026-05-19-macos-full/ops-security/crash-export-smoke/crash-export-smoke.json",
+    "crash_redaction_review_json": "/Users/shinyoohag/rapidforensic/repo/qc-runs/2026-05-19-macos-full/ops-security/crash-redaction-review.json",
+    "parser_sandbox_smoke_json": "/Users/shinyoohag/rapidforensic/repo/qc-runs/2026-05-19-macos-full/ops-security/parser-sandbox-smoke.json",
+    "dependency_monitoring_json": "/Users/shinyoohag/rapidforensic/repo/qc-runs/2026-05-19-macos-full/ops-security/dependency-monitoring-python312-after-pip-upgrade.json",
+    "security_hardening_review_json": "/Users/shinyoohag/rapidforensic/repo/qc-runs/2026-05-19-macos-full/ops-security/security-hardening-review.json",
+    "external_release_evidence_json": "",
+    "hostile_evidence_containment_json": "",
+    "independent_operations_evidence_json": "",
+    "minimum_smoke_count": 1,
+    "required_smoke_platforms": [
+      "macos-linux"
+    ]
+  },
+  "checks": [
+    {
+      "id": "release-dir",
+      "status": "pass",
+      "detail": "directory present",
+      "path": "/Users/shinyoohag/rapidforensic/repo/qc-runs/2026-05-19-macos-full/release",
+      "required": true,
+      "remediation": ""
+    },
+    {
+      "id": "release-portable-zip",
+      "status": "pass",
+      "detail": "file present",
+      "path": "/Users/shinyoohag/rapidforensic/repo/qc-runs/2026-05-19-macos-full/release/rapidtriage-portable.zip",
+      "required": true,
+      "remediation": ""
+    },
+    {
+      "id": "release-sha256s",
+      "status": "pass",
+      "detail": "file present",
+      "path": "/Users/shinyoohag/rapidforensic/repo/qc-runs/2026-05-19-macos-full/release/SHA256SUMS",
+      "required": true,
+      "remediation": ""
+    },
+    {
+      "id": "release-manifest",
+      "status": "pass",
+      "detail": "file present",
+      "path": "/Users/shinyoohag/rapidforensic/repo/qc-runs/2026-05-19-macos-full/release/release-manifest.json",
+      "required": true,
+      "remediation": ""
+    },
+    {
+      "id": "release-dependency-inventory",
+      "status": "pass",
+      "detail": "file present",
+      "path": "/Users/shinyoohag/rapidforensic/repo/qc-runs/2026-05-19-macos-full/release/dependency-inventory.txt",
+      "required": true,
+      "remediation": ""
+    },
+    {
+      "id": "release-commercial-readiness-json",
+      "status": "pass",
+      "detail": "file present",
+      "path": "/Users/shinyoohag/rapidforensic/repo/qc-runs/2026-05-19-macos-full/release/rapidtriage-commercial-readiness.json",
+      "required": true,
+      "remediation": ""
+    },
+    {
+      "id": "release-commercial-readiness-markdown",
+      "status": "pass",
+      "detail": "file present",
+      "path": "/Users/shinyoohag/rapidforensic/repo/qc-runs/2026-05-19-macos-full/release/rapidtriage-commercial-readiness.md",
+      "required": true,
+      "remediation": ""
+    },
+    {
+      "id": "release-sha256-verification",
+      "status": "pass",
+      "detail": "checked=13",
+      "path": "/Users/shinyoohag/rapidforensic/repo/qc-runs/2026-05-19-macos-full/release/SHA256SUMS",
+      "required": true,
+      "remediation": ""
+    },
+    {
+      "id": "release-manifest-artifacts",
+      "status": "pass",
+      "detail": "artifacts=12, missing=[]",
+      "path": "/Users/shinyoohag/rapidforensic/repo/qc-runs/2026-05-19-macos-full/release/release-manifest.json",
+      "required": true,
+      "remediation": ""
+    },
+    {
+      "id": "release-commercial-readiness-disclosure",
+      "status": "pass",
+      "detail": "claim_allowed=False, non_commercial_count=120, status=commercial-gaps-present",
+      "path": "/Users/shinyoohag/rapidforensic/repo/qc-runs/2026-05-19-macos-full/release/rapidtriage-commercial-readiness.json",
+      "required": true,
+      "remediation": ""
+    },
+    {
+      "id": "validation-dir",
+      "status": "pass",
+      "detail": "directory present",
+      "path": "/Users/shinyoohag/rapidforensic/repo/qc-runs/2026-05-19-macos-full/smoke/validation",
+      "required": true,
+      "remediation": ""
+    },
+    {
+      "id": "validation-json",
+      "status": "pass",
+      "detail": "file present",
+      "path": "/Users/shinyoohag/rapidforensic/repo/qc-runs/2026-05-19-macos-full/smoke/validation/rapidtriage-validation-package.json",
+      "required": true,
+      "remediation": ""
+    },
+    {
+      "id": "validation-markdown",
+      "status": "pass",
+      "detail": "file present",
+      "path": "/Users/shinyoohag/rapidforensic/repo/qc-runs/2026-05-19-macos-full/smoke/validation/rapidtriage-validation-report.md",
+      "required": true,
+      "remediation": ""
+    },
+    {
+      "id": "validation-status",
+      "status": "pass",
+      "detail": "status=release-validation-package-ready",
+      "path": "/Users/shinyoohag/rapidforensic/repo/qc-runs/2026-05-19-macos-full/smoke/validation/rapidtriage-validation-package.json",
+      "required": true,
+      "remediation": ""
+    },
+    {
+      "id": "benchmark-dir",
+      "status": "pass",
+      "detail": "directory present",
+      "path": "/Users/shinyoohag/rapidforensic/repo/qc-runs/2026-05-19-macos-full/smoke/benchmark",
+      "required": true,
+      "remediation": ""
+    },
+    {
+      "id": "benchmark-json",
+      "status": "pass",
+      "detail": "file present",
+      "path": "/Users/shinyoohag/rapidforensic/repo/qc-runs/2026-05-19-macos-full/smoke/benchmark/rapidtriage-benchmark.json",
+      "required": true,
+      "remediation": ""
+    },
+    {
+      "id": "benchmark-markdown",
+      "status": "pass",
+      "detail": "file present",
+      "path": "/Users/shinyoohag/rapidforensic/repo/qc-runs/2026-05-19-macos-full/smoke/benchmark/rapidtriage-benchmark.md",
+      "required": true,
+      "remediation": ""
+    },
+    {
+      "id": "benchmark-metrics",
+      "status": "pass",
+      "detail": "ingest_seconds=1.240179, search_p50_seconds=0.046653",
+      "path": "/Users/shinyoohag/rapidforensic/repo/qc-runs/2026-05-19-macos-full/smoke/benchmark/rapidtriage-benchmark.json",
+      "required": true,
+      "remediation": ""
+    },
+    {
+      "id": "columnar-benchmark-not-provided",
+      "status": "skip",
+      "detail": "optional columnar benchmark evidence not requested; pass --columnar-benchmark-dir to verify it",
+      "path": "",
+      "required": false,
+      "remediation": ""
+    },
+    {
+      "id": "smoke-smoke-dir",
+      "status": "pass",
+      "detail": "directory present",
+      "path": "/Users/shinyoohag/rapidforensic/repo/qc-runs/2026-05-19-macos-full/smoke",
+      "required": true,
+      "remediation": ""
+    },
+    {
+      "id": "smoke-smoke-json",
+      "status": "pass",
+      "detail": "file present",
+      "path": "/Users/shinyoohag/rapidforensic/repo/qc-runs/2026-05-19-macos-full/smoke/smoke-summary.json",
+      "required": true,
+      "remediation": ""
+    },
+    {
+      "id": "smoke-smoke-markdown",
+      "status": "pass",
+      "detail": "file present",
+      "path": "/Users/shinyoohag/rapidforensic/repo/qc-runs/2026-05-19-macos-full/smoke/smoke-summary.md",
+      "required": true,
+      "remediation": ""
+    },
+    {
+      "id": "smoke-smoke-status",
+      "status": "pass",
+      "detail": "passed=True, platform=macos-linux",
+      "path": "/Users/shinyoohag/rapidforensic/repo/qc-runs/2026-05-19-macos-full/smoke/smoke-summary.json",
+      "required": true,
+      "remediation": ""
+    },
+    {
+      "id": "smoke-minimum-count",
+      "status": "pass",
+      "detail": "passing=1, required=1",
+      "path": "",
+      "required": true,
+      "remediation": ""
+    },
+    {
+      "id": "smoke-platform-macos-linux",
+      "status": "pass",
+      "detail": "passing_platforms=['macos-linux'], required=macos-linux",
+      "path": "",
+      "required": true,
+      "remediation": ""
+    },
+    {
+      "id": "crash-export-smoke-json",
+      "status": "pass",
+      "detail": "file present",
+      "path": "/Users/shinyoohag/rapidforensic/repo/qc-runs/2026-05-19-macos-full/ops-security/crash-export-smoke/crash-export-smoke.json",
+      "required": true,
+      "remediation": ""
+    },
+    {
+      "id": "crash-export-smoke-payload",
+      "status": "pass",
+      "detail": "command=crash-export-smoke, profile=crash-export-release-smoke-v1",
+      "path": "/Users/shinyoohag/rapidforensic/repo/qc-runs/2026-05-19-macos-full/ops-security/crash-export-smoke/crash-export-smoke.json",
+      "required": true,
+      "remediation": ""
+    },
+    {
+      "id": "crash-export-smoke-checks",
+      "status": "pass",
+      "detail": "failed_check_ids=[], commercial_claim_allowed=False",
+      "path": "/Users/shinyoohag/rapidforensic/repo/qc-runs/2026-05-19-macos-full/ops-security/crash-export-smoke/crash-export-smoke.json",
+      "required": true,
+      "remediation": ""
+    },
+    {
+      "id": "crash-export-smoke-bundle-hash",
+      "status": "pass",
+      "detail": "bundle_exists=True, bundle_sha256=9989f0c3ae25cff60dd4dbc577247c96e9b5cac32a1f42fb125b853dffbb55db",
+      "path": "/Users/shinyoohag/rapidforensic/repo/qc-runs/2026-05-19-macos-full/ops-security/crash-export-smoke/exports/crash-20260519T002038Z-ba888bd0-export.zip",
+      "required": true,
+      "remediation": ""
+    },
+    {
+      "id": "crash-export-smoke-manifest-hash",
+      "status": "pass",
+      "detail": "manifest_hash=f3004ff36a7ab31be97eedbb69fca0abb02883b4c62f7b0af8fec194234708c5, smoke_hash=ff8e164243b5d15958256d6ca93dee0183aa02542350b5c9b4735db7f945ac68",
+      "path": "/Users/shinyoohag/rapidforensic/repo/qc-runs/2026-05-19-macos-full/ops-security/crash-export-smoke/crash-export-smoke.json",
+      "required": true,
+      "remediation": ""
+    },
+    {
+      "id": "crash-export-smoke-report-grade-plan",
+      "status": "pass",
+      "detail": "plan_hash=2ac5975914d8fab155d8eb6295ab58e7db6472e41e06c23032f098c22f56c375, ready=8, blocking=8",
+      "path": "/Users/shinyoohag/rapidforensic/repo/qc-runs/2026-05-19-macos-full/ops-security/crash-export-smoke/crash-export-smoke.json",
+      "required": true,
+      "remediation": ""
+    },
+    {
+      "id": "crash-redaction-review-json",
+      "status": "pass",
+      "detail": "file present",
+      "path": "/Users/shinyoohag/rapidforensic/repo/qc-runs/2026-05-19-macos-full/ops-security/crash-redaction-review.json",
+      "required": true,
+      "remediation": ""
+    },
+    {
+      "id": "crash-redaction-review-payload",
+      "status": "pass",
+      "detail": "command=crash-redaction-review, profile=crash-redaction-export-review-v1",
+      "path": "/Users/shinyoohag/rapidforensic/repo/qc-runs/2026-05-19-macos-full/ops-security/crash-redaction-review.json",
+      "required": true,
+      "remediation": ""
+    },
+    {
+      "id": "crash-redaction-review-checks",
+      "status": "pass",
+      "detail": "failed_check_ids=[], trusted_diff_status=pass, commercial_claim_allowed=False",
+      "path": "/Users/shinyoohag/rapidforensic/repo/qc-runs/2026-05-19-macos-full/ops-security/crash-redaction-review.json",
+      "required": true,
+      "remediation": ""
+    },
+    {
+      "id": "crash-redaction-review-bundle-hash",
+      "status": "pass",
+      "detail": "bundle_exists=True, bundle_sha256=9989f0c3ae25cff60dd4dbc577247c96e9b5cac32a1f42fb125b853dffbb55db",
+      "path": "/Users/shinyoohag/rapidforensic/repo/qc-runs/2026-05-19-macos-full/ops-security/crash-export-smoke/exports/crash-20260519T002038Z-ba888bd0-export.zip",
+      "required": true,
+      "remediation": ""
+    },
+    {
+      "id": "crash-redaction-review-hash",
+      "status": "pass",
+      "detail": "review_hash=1516baa7ca99e1eb55e48031961138a5267037130b78fc74ac84f58e3b0dc477",
+      "path": "/Users/shinyoohag/rapidforensic/repo/qc-runs/2026-05-19-macos-full/ops-security/crash-redaction-review.json",
+      "required": true,
+      "remediation": ""
+    },
+    {
+      "id": "crash-redaction-review-report-grade-plan",
+      "status": "pass",
+      "detail": "plan_hash=2ac5975914d8fab155d8eb6295ab58e7db6472e41e06c23032f098c22f56c375, ready=8, blocking=8",
+      "path": "/Users/shinyoohag/rapidforensic/repo/qc-runs/2026-05-19-macos-full/ops-security/crash-redaction-review.json",
+      "required": true,
+      "remediation": ""
+    },
+    {
+      "id": "parser-sandbox-smoke-json",
+      "status": "pass",
+      "detail": "file present",
+      "path": "/Users/shinyoohag/rapidforensic/repo/qc-runs/2026-05-19-macos-full/ops-security/parser-sandbox-smoke.json",
+      "required": true,
+      "remediation": ""
+    },
+    {
+      "id": "parser-sandbox-smoke-payload",
+      "status": "pass",
+      "detail": "command=parser-sandbox-smoke, profile=parser-subprocess-isolation-smoke-v1",
+      "path": "/Users/shinyoohag/rapidforensic/repo/qc-runs/2026-05-19-macos-full/ops-security/parser-sandbox-smoke.json",
+      "required": true,
+      "remediation": ""
+    },
+    {
+      "id": "parser-sandbox-smoke-checks",
+      "status": "pass",
+      "detail": "failed_check_ids=[], boundary={'current_level': 'subprocess-isolation-smoke', 'os_level_sandbox_enabled': False, 'active_content_execution_allowed': False, 'network_probe_performed': False}",
+      "path": "/Users/shinyoohag/rapidforensic/repo/qc-runs/2026-05-19-macos-full/ops-security/parser-sandbox-smoke.json",
+      "required": true,
+      "remediation": ""
+    },
+    {
+      "id": "parser-sandbox-smoke-limitation-preserved",
+      "status": "pass",
+      "detail": "os_level_sandbox_enabled=False",
+      "path": "/Users/shinyoohag/rapidforensic/repo/qc-runs/2026-05-19-macos-full/ops-security/parser-sandbox-smoke.json",
+      "required": true,
+      "remediation": ""
+    },
+    {
+      "id": "parser-sandbox-smoke-hash",
+      "status": "pass",
+      "detail": "smoke_hash=b523cb50f6de0651891715869151b3ba5e6609663f14b56fde1469d3c41a40a0",
+      "path": "/Users/shinyoohag/rapidforensic/repo/qc-runs/2026-05-19-macos-full/ops-security/parser-sandbox-smoke.json",
+      "required": true,
+      "remediation": ""
+    },
+    {
+      "id": "dependency-monitoring-json",
+      "status": "pass",
+      "detail": "file present",
+      "path": "/Users/shinyoohag/rapidforensic/repo/qc-runs/2026-05-19-macos-full/ops-security/dependency-monitoring-python312-after-pip-upgrade.json",
+      "required": true,
+      "remediation": ""
+    },
+    {
+      "id": "dependency-monitoring-payload",
+      "status": "pass",
+      "detail": "command=dependency-monitoring, commercial_gap_ids=['#120']",
+      "path": "/Users/shinyoohag/rapidforensic/repo/qc-runs/2026-05-19-macos-full/ops-security/dependency-monitoring-python312-after-pip-upgrade.json",
+      "required": true,
+      "remediation": ""
+    },
+    {
+      "id": "dependency-monitoring-ci-workflow",
+      "status": "pass",
+      "detail": "configured=True, passed_checks=['workflow_file_exists', 'scheduled_trigger', 'manual_trigger', 'pull_request_dependency_paths', 'check_dependencies_invoked', 'artifact_upload_configured', 'sbom_archived_in_dependency_artifact', 'read_only_permissions']",
+      "path": "/Users/shinyoohag/rapidforensic/repo/qc-runs/2026-05-19-macos-full/ops-security/dependency-monitoring-python312-after-pip-upgrade.json",
+      "required": true,
+      "remediation": ""
+    },
+    {
+      "id": "dependency-monitoring-sbom-hash",
+      "status": "pass",
+      "detail": "sbom_hash=1ef9b3b01b896e17c6f4640812c590f0d92dea2b0efefb2c2864b576e7848cde, manifest_hash=4489aac97fa1166c163ad4d815676d5fc46286cb832a6fe0173a7eb837235e11",
+      "path": "/Users/shinyoohag/rapidforensic/repo/qc-runs/2026-05-19-macos-full/ops-security/dependency-monitoring-python312-after-pip-upgrade.json",
+      "required": true,
+      "remediation": ""
+    },
+    {
+      "id": "dependency-monitoring-release-policy",
+      "status": "pass",
+      "detail": "release_policy=Block release on known exploitable high/critical dependency issues unless a documented exception is approved.",
+      "path": "/Users/shinyoohag/rapidforensic/repo/qc-runs/2026-05-19-macos-full/ops-security/dependency-monitoring-python312-after-pip-upgrade.json",
+      "required": true,
+      "remediation": ""
+    },
+    {
+      "id": "dependency-monitoring-limitation-preserved",
+      "status": "pass",
+      "detail": "trusted_diff_status=missing, blockers=['artifact-checksum-linkage-required', 'ci-advisory-run-log-required', 'dependency-exception-review-required', 'high-critical-triage-required', 'independent-dependency-review-required', 'release-host-dependency-smoke-required', 'sbom-publication-required', 'scanner-version-lock-required', 'trusted-dependency-advisory-sbom-diff-missing']",
+      "path": "/Users/shinyoohag/rapidforensic/repo/qc-runs/2026-05-19-macos-full/ops-security/dependency-monitoring-python312-after-pip-upgrade.json",
+      "required": true,
+      "remediation": ""
+    },
+    {
+      "id": "security-hardening-review-json",
+      "status": "pass",
+      "detail": "file present",
+      "path": "/Users/shinyoohag/rapidforensic/repo/qc-runs/2026-05-19-macos-full/ops-security/security-hardening-review.json",
+      "required": true,
+      "remediation": ""
+    },
+    {
+      "id": "security-hardening-review-payload",
+      "status": "pass",
+      "detail": "command=security-hardening-review, profile=security-hardening-release-review-v1, gaps=['#118', '#119']",
+      "path": "/Users/shinyoohag/rapidforensic/repo/qc-runs/2026-05-19-macos-full/ops-security/security-hardening-review.json",
+      "required": true,
+      "remediation": ""
+    },
+    {
+      "id": "security-hardening-review-checks",
+      "status": "pass",
+      "detail": "failed_check_ids=[], commercial_claim_allowed=False",
+      "path": "/Users/shinyoohag/rapidforensic/repo/qc-runs/2026-05-19-macos-full/ops-security/security-hardening-review.json",
+      "required": true,
+      "remediation": ""
+    },
+    {
+      "id": "security-hardening-review-hashes",
+      "status": "pass",
+      "detail": "review_hash=855f434290b1222eaba7d8eba8feeb3f22c9e25d46164b48620e9decd1c62d36, baseline_hash=dde7d49cf954a03e02027b0a3892240a1d3dc30ca6ce6a09939c4d9e6e56788a, control_matrix_hash=95699da8fe1012e31f95d69110a8f52b565ee626b7ec509ba331187987831c22",
+      "path": "/Users/shinyoohag/rapidforensic/repo/qc-runs/2026-05-19-macos-full/ops-security/security-hardening-review.json",
+      "required": true,
+      "remediation": ""
+    },
+    {
+      "id": "security-hardening-review-boundaries",
+      "status": "pass",
+      "detail": "checks={'security_section_present': True, 'telemetry_uploads_disabled': True, 'remote_bind_requires_auth': True, 'crash_uploads_disabled': True, 'baseline_manifest_hash_present': True, 'hardening_manifest_hash_present': True, 'malicious_sandbox_manifest_hash_present': True, 'control_matrix_hash_present': True, 'docs_present_and_hashed': True, 'appsec_blocker_preserved': True, 'malicious_corpus_blocker_preserved': True, 'os_sandbox_limitation_preserved': True}",
+      "path": "/Users/shinyoohag/rapidforensic/repo/qc-runs/2026-05-19-macos-full/ops-security/security-hardening-review.json",
+      "required": true,
+      "remediation": ""
+    },
+    {
+      "id": "external-release-evidence-not-provided",
+      "status": "skip",
+      "detail": "optional 1-8 external commercial evidence not requested; pass --external-release-evidence-json to verify it",
+      "path": "",
+      "required": false,
+      "remediation": ""
+    },
+    {
+      "id": "hostile-evidence-containment-not-provided",
+      "status": "skip",
+      "detail": "optional 9-13 hostile evidence containment package not requested; pass --hostile-evidence-containment-json to verify it",
+      "path": "",
+      "required": false,
+      "remediation": ""
+    },
+    {
+      "id": "independent-operations-evidence-not-provided",
+      "status": "skip",
+      "detail": "optional 14-18 independent validation and operations package not requested; pass --independent-operations-evidence-json to verify it",
+      "path": "",
+      "required": false,
+      "remediation": ""
+    }
+  ],
+  "summary": {
+    "pass": 52,
+    "fail": 0,
+    "skip": 4
+  },
+  "next_actions": []
+}

@@ -1,0 +1,58 @@
+{
+  "command": "parser-sandbox-smoke",
+  "profile_version": "parser-subprocess-isolation-smoke-v1",
+  "generated_at": "2026-05-19T00:21:39.166248+00:00",
+  "commercial_gap_ids": [
+    "#119"
+  ],
+  "probes": [
+    {
+      "name": "benign-parser-subprocess",
+      "completed": true,
+      "timed_out": false,
+      "return_code": 0,
+      "stdout_hash": "c85b156a78835bc416f6ea4bcf17702c83b232d8bace8603ae04603369b60e32",
+      "stderr_hash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "name": "crashing-parser-subprocess",
+      "completed": true,
+      "timed_out": false,
+      "return_code": 1,
+      "stdout_hash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_hash": "22d2f46da5da49a4b72e384bb436e7c97177be15f3dfdc88d6e5a5d47c05506b"
+    },
+    {
+      "name": "timeout-parser-subprocess",
+      "completed": false,
+      "timed_out": true,
+      "return_code": null,
+      "stdout_hash": "",
+      "stderr_hash": ""
+    }
+  ],
+  "active_content_fixture_sha256": "daeb1cc2b6b87c8ce70560e21497e68ce59dca35db783ad2da0a96122a3100f1",
+  "checks": {
+    "benign_subprocess_completes": true,
+    "crashing_subprocess_is_captured": true,
+    "timeout_subprocess_is_captured": true,
+    "active_content_fixture_not_executed": true,
+    "no_network_probe_performed": true,
+    "os_level_sandbox_claim_blocked": true
+  },
+  "passed_check_count": 6,
+  "failed_check_ids": [],
+  "commercial_claim_allowed": false,
+  "sandbox_boundary": {
+    "current_level": "subprocess-isolation-smoke",
+    "os_level_sandbox_enabled": false,
+    "active_content_execution_allowed": false,
+    "network_probe_performed": false
+  },
+  "remaining_external_validation": [
+    "Add OS-level sandboxing for parser workers before claiming hostile-evidence containment.",
+    "Attach malicious corpus/fuzz run output from an isolated lab host.",
+    "Attach independent AppSec review of parser and preview execution boundaries."
+  ],
+  "smoke_hash": "2ca4896390114113464a4713bc94dbd585e07d9f2b03dd684d62435801ff527e"
+}

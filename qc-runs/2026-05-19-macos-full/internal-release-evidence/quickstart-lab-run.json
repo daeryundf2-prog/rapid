@@ -1,0 +1,42 @@
+{
+  "profile_version": "quickstart-lab-internal-run-v1",
+  "item_number": 116,
+  "generated_at": "2026-05-19T00:21:38+00:00",
+  "commercial_claim_allowed": false,
+  "internal_evidence_status": "usable-internal-validation-required",
+  "checks": {
+    "sample_workflow_completed": true,
+    "training_lab_manifest_exists": true,
+    "expected_output_exists": true,
+    "run_outputs_present": true,
+    "read_only_mode": true
+  },
+  "run_summary": {
+    "case_dir": null,
+    "expected": "/Users/shinyoohag/rapidforensic/repo/qc-runs/2026-05-19-macos-full/internal-release-evidence/quickstart-lab/sample/rapidtriage-sample-expected.json",
+    "run_output_count": 0,
+    "training_manifest": "/Users/shinyoohag/rapidforensic/repo/qc-runs/2026-05-19-macos-full/internal-release-evidence/quickstart-lab/sample/rapidtriage-training-lab-manifest.json"
+  },
+  "output_files": [
+    {
+      "path": "quickstart-lab/sample/rapidtriage-training-lab-manifest.json",
+      "sha256": "3e632ba098cc9ceaf759d7e14f0092b32b48b7adc16ea5f25b4b97dc4f830502",
+      "size": 17287
+    },
+    {
+      "path": "quickstart-lab/sample/rapidtriage-sample-expected.json",
+      "sha256": "c3f88efd7a3d671ebfe47d84ffc3e569e49c740239258cb58f30798b372a7dc3",
+      "size": 858
+    }
+  ],
+  "training_manifest_summary": {
+    "profile_version": "training-lab-workflow-manifest-v1",
+    "commercial_claim_allowed": false,
+    "external_blockers": []
+  },
+  "error": null,
+  "external_blockers": [
+    "trusted-quickstart-lab-run-log"
+  ],
+  "profile_hash": "9ff35e73b192810b8e6ffa48da9309c0036e03fd240a05c2efa23cb6c1dd3c28"
+}

@@ -1,0 +1,159 @@
+{
+  "profile_version": "admin-deployment-internal-smoke-v1",
+  "item_number": 117,
+  "generated_at": "2026-05-19T00:21:38+00:00",
+  "commercial_claim_allowed": false,
+  "internal_evidence_status": "usable-internal-validation-required",
+  "checks": {
+    "required_docs_present": true,
+    "required_scripts_present": true,
+    "help_commands_passed": true,
+    "admin_coverage_keywords_present": true
+  },
+  "coverage_keywords": {
+    "installation": true,
+    "upgrade": true,
+    "authentication": true,
+    "backup": true,
+    "logging": true,
+    "security": true,
+    "rollback_or_restore": true
+  },
+  "doc_entries": [
+    {
+      "path": "docs/rapidtriage-training-curriculum.md",
+      "sha256": "ace25ac6004893d97259321b5fec5c724511811ba2ae05ba8fde4ee5ba22d8eb",
+      "size": 1702
+    },
+    {
+      "path": "docs/rapidtriage-admin-deployment-guide.md",
+      "sha256": "e0c56f1af627f25c14e4b97cbfc03a9fbd5472b3de1145a1f10e3dd75a336c99",
+      "size": 5063
+    },
+    {
+      "path": "docs/rapidtriage-security-policy.md",
+      "sha256": "4a86010b6118e2136db3fdadd1ec3c77accf9c901aa946c04a7a2038a3a9817c",
+      "size": 1095
+    },
+    {
+      "path": "docs/rapidtriage-release-checklist.md",
+      "sha256": "af5447dd9ebbf75963b6117e60b7f16c6cc1d73fc27df49f9016fd426a00c595",
+      "size": 6583
+    },
+    {
+      "path": "docs/rapidtriage-windows-quickstart.md",
+      "sha256": "681a1dace2e7101fe7109a6cee39a87c43f17e4513061307d434ddcb834bc6d4",
+      "size": 4008
+    },
+    {
+      "path": "docs/rapidtriage-macos-linux-quickstart.md",
+      "sha256": "01b97f5c1bec8527dffb446748e236a8302eade333b4a1efb6180aa2fde71aae",
+      "size": 3382
+    }
+  ],
+  "script_entries": [
+    {
+      "path": "scripts/build-release.py",
+      "sha256": "e4e98896560f4b9f0da63fd3d7a0fa302c02ce6b4e27fe24d39975177fbc734c",
+      "size": 214602
+    },
+    {
+      "path": "scripts/check-dependencies.py",
+      "sha256": "a97bcb073b35391ca843e7860e473a7bacd4df3f94350421695c0b19ea6de0ef",
+      "size": 32119
+    },
+    {
+      "path": "scripts/parser-sandbox-smoke.py",
+      "sha256": "5e1e786da8d3903a8de38cd25a271420b739da9907dd42e2d0b5e57fbd45e305",
+      "size": 4535
+    },
+    {
+      "path": "scripts/security-hardening-review.py",
+      "sha256": "f3dedb89c17401edbd23672ef4565c055416d340e6ac1a36362d9b2ca48cda4c",
+      "size": 5963
+    },
+    {
+      "path": "scripts/smoke-test-rapidtriage.sh",
+      "sha256": "683861193207b1e713c463771d1c93dcf1fa55b3f2002639a11f0f0ee4d93767",
+      "size": 5762
+    },
+    {
+      "path": "scripts/windows/smoke-test-rapidtriage.ps1",
+      "sha256": "6a042152e33e655357acea44764fa5b953be5334b8ae05cdbba3093e946c1ae9",
+      "size": 6266
+    }
+  ],
+  "help_command_results": [
+    {
+      "command": [
+        "/Users/shinyoohag/rapidforensic/repo/.venv/bin/python",
+        "-m",
+        "rapidtriage",
+        "--help"
+      ],
+      "command_hash": "08da9b7343e6f7ab84337ac3d8f0627e68e230ee6053ce491ef8b2f3b5d5822e",
+      "started_at": "2026-05-19T00:21:38+00:00",
+      "completed_at": "2026-05-19T00:21:38+00:00",
+      "returncode": 0,
+      "stdout_sha256": "e51202ba0e3788984a071f996392666e084fff01a7f5eedfdbd03d8a1d8623f7",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout_tail": "-output-dir ./cloud-api-raw\n  rapidtriage timeline . --output rapidtriage-timeline.json --report rapidtriage-timeline-report.md\n  rapidtriage case ./incident-case.json --source rapidtriage-timeline.json --pointer /events/0 --tag suspicious\n  rapidtriage manifest /Volumes/case-mount --input-kind mounted-image\n  rapidtriage run . --mode fraud --output-dir ./rapidtriage-run --read-only\n  rapidtriage run ./case.E01 --mode fraud --output-dir ./rapidtriage-run-e01\n  rapidtriage search ./rapidtriage-run-fraud -k invoice -k password\n  rapidtriage indicators ./rapidtriage-run-fraud --output rapidtriage-indicators.json\n  rapidtriage sample --run --overwrite\n  rapidtriage case-db ./rapidtriage-case.db --create-case CASE-001 --name \"Case 001\"\n  rapidtriage case-search ./rapidtriage-case.db --case-id CASE-001 -k password\n  rapidtriage case-review ./rapidtriage-case.db --case-id CASE-001 --target-type indexed_document --target-id 1 --status relevant --verification-status source_opened\n  rapidtriage case-db-report ./rapidtriage-case.db --case-id CASE-001 --output report-candidates.json\n  rapidtriage evidence ./case.E01\n  rapidtriage benchmark --output-dir ./rapidtriage-benchmark --file-count 1000\n  rapidtriage validation --output-dir ./rapidtriage-validation --overwrite\n  rapidtriage commercial-readiness --output-dir ./commercial-readiness --json\n  rapidtriage cross-tool-validate --rapid-output rapidtriage-artifacts-eventlog.json --reference-output evtxecmd=EvtxECmd.csv\n  rapidtriage confidence-dashboard ./rapidtriage-run --json\n  rapidtriage case-catalog --add-run ./rapidtriage-run --case-id CASE-001 --list\n  rapidtriage timeline-export ./rapidtriage-run --source artifacts --output timeline-export.json\n  rapidtriage normalize ./rapidtriage-run --output normalized-case.json\n  rapidtriage bundle ./rapidtriage-case.json --allowed-root /cases/mount --output-dir ./submission-bundle\n  rapidtriage plugins --list\n  rapidtriage doctor --json\n  rapidtriage web --host 127.0.0.1 --port 8765\n",
+      "stderr_tail": "",
+      "timed_out": false
+    },
+    {
+      "command": [
+        "/Users/shinyoohag/rapidforensic/repo/.venv/bin/python",
+        "-m",
+        "rapidtriage",
+        "sample",
+        "--help"
+      ],
+      "command_hash": "97d76be7c564b6c9b0ed6ea47dc3736ef9757a7a663fb43ec32876115ffb7346",
+      "started_at": "2026-05-19T00:21:38+00:00",
+      "completed_at": "2026-05-19T00:21:38+00:00",
+      "returncode": 0,
+      "stdout_sha256": "e85b1df969144adc9b65d390f74753132e80a90ef1d28ddbbf010e1878a6654b",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout_tail": "usage: rapidtriage sample [-h] [--output-dir OUTPUT_DIR] [--run]\n                          [--mode {fraud,hacking,recovery,seizure}]\n                          [--overwrite] [--read-only] [--json]\n\nCreate a synthetic sample evidence folder and optionally run triage\n\noptional arguments:\n  -h, --help            show this help message and exit\n  --output-dir OUTPUT_DIR\n                        Sample output directory (default: rapidtriage-sample)\n  --run                 Run the sample evidence through rapidtriage after\n                        creating it\n  --mode {fraud,hacking,recovery,seizure}\n                        Run mode for --run (default: fraud)\n  --overwrite           Delete and recreate the sample output directory if it\n                        already has files\n  --read-only           Use read-only extract mode when --run is enabled\n  --json                Print machine-readable JSON\n\nExamples:\n  rapidtriage sample\n  rapidtriage sample --output-dir ./rapidtriage-sample --run\n  rapidtriage sample --run --mode fraud --overwrite --json\n",
+      "stderr_tail": "",
+      "timed_out": false
+    },
+    {
+      "command": [
+        "/Users/shinyoohag/rapidforensic/repo/.venv/bin/python",
+        "/Users/shinyoohag/rapidforensic/repo/scripts/build-release.py",
+        "--help"
+      ],
+      "command_hash": "1ed312cf0248fa7d493431350d76a8f4cea7a2bed3dbb5a7a1b667f947465a77",
+      "started_at": "2026-05-19T00:21:38+00:00",
+      "completed_at": "2026-05-19T00:21:38+00:00",
+      "returncode": 0,
+      "stdout_sha256": "53265f8431e7ce4f55667a27885b4e13474cb16ed83d28d286b6dd8b01c274b4",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout_tail": "usage: build-release.py [-h] [--output-dir OUTPUT_DIR] [--skip-build]\n                        [--verify]\n\nBuild RapidTriage release artifacts\n\noptional arguments:\n  -h, --help            show this help message and exit\n  --output-dir OUTPUT_DIR\n                        Release artifact directory\n  --skip-build          Skip wheel/sdist build and only assemble portable zip\n  --verify              Verify SHA256SUMS in the output directory and exit\n",
+      "stderr_tail": "",
+      "timed_out": false
+    },
+    {
+      "command": [
+        "/Users/shinyoohag/rapidforensic/repo/.venv/bin/python",
+        "/Users/shinyoohag/rapidforensic/repo/scripts/check-dependencies.py",
+        "--help"
+      ],
+      "command_hash": "fff1bad008a5915d233c12001f9832c12d028d966d6cde609bdcf6a186df6b75",
+      "started_at": "2026-05-19T00:21:38+00:00",
+      "completed_at": "2026-05-19T00:21:38+00:00",
+      "returncode": 0,
+      "stdout_sha256": "c31bc02e9b50161336a4b203d9ec3768d6caff4ce4f49accb614790452cae154",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout_tail": "usage: check-dependencies.py [-h] [--output OUTPUT]\n\nWrite a local dependency vulnerability monitoring baseline\n\noptional arguments:\n  -h, --help       show this help message and exit\n  --output OUTPUT  JSON output path\n",
+      "stderr_tail": "",
+      "timed_out": false
+    }
+  ],
+  "external_blockers": [
+    "trusted-admin-deployment-proof"
+  ],
+  "profile_hash": "61d4e5d29dc4b5b597299adb19618a48dba0eae78d9fa7e0b9ae3975963541e4"
+}
