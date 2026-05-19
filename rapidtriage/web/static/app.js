@@ -806,7 +806,7 @@ function caseStageFlow(run, tab, currentStageId = "") {
   const windowsEvidenceCount = windowsActivity || windowsSpecificCount;
   const classifiedActivity = windowsEvidenceCount + browserAi + messengerMail + mediaCount;
   const otherArtifactCount = Math.max(0, artifacts - classifiedActivity);
-  const documentCount = artifactGroupCount(run, ["document", "pdf", "office", "docx", "xlsx", "hwp"]);
+  const documentCount = artifactGroupCount(run, ["document", "pdf", "office", "docx", "xlsx", "pptx", "odt", "ods", "odp"]);
   const mailCount = artifactGroupCount(run, ["email", "mail", "eml", "mbox", "pst", "ost", "attachment"]);
   const messengerCount = artifactGroupCount(run, ["kakao", "whatsapp", "telegram", "signal", "line", "discord", "chat"]);
   const iocCount = artifactGroupCount(run, ["ioc", "indicator", "ip", "url", "domain", "hash"]);
@@ -1770,7 +1770,7 @@ function intelligenceKeywordChips(run, tab) {
     { label: "레지스트리", term: "registry", tab: "artifacts", terms: ["registry", "ntuser", "sam", "system"] },
     { label: "브라우저", term: "browser", tab: "artifacts", terms: ["browser", "history", "download", "cookie"] },
     { label: "AI", term: "ai", tab: "artifacts", terms: ["ai", "chatgpt", "claude", "gemini", "perplexity"] },
-    { label: "문서", term: "document", tab: "docs", terms: ["document", "pdf", "hwp", "docx", "xlsx", "ocr"] },
+    { label: "문서", term: "document", tab: "docs", terms: ["document", "pdf", "docx", "xlsx", "pptx", "odt", "ocr"] },
     { label: "메일", term: "email", tab: "docs", terms: ["email", "mail", "eml", "mbox", "pst", "ost"] },
     { label: "시간축", term: "timeline", tab: "timeline", terms: ["timeline", "created", "modified", "accessed"] },
   ];
@@ -4770,7 +4770,7 @@ function renderDocs(payload) {
 function renderDocumentReviewLanes(payload) {
   const rows = payload.results || [];
   const lanes = [
-    { label: "문서", filter: "pdf docx xlsx pptx hwp office", terms: ["pdf", "docx", "xlsx", "pptx", "hwp", "office"], hint: "계약서, 송장, 보고서, Office/PDF 문서를 먼저 봅니다." },
+    { label: "문서", filter: "pdf docx xlsx pptx odt ods odp office text", terms: ["pdf", "docx", "xlsx", "pptx", "odt", "ods", "odp", "office", "text"], hint: "계약서, 송장, 보고서, Office/PDF/text 문서를 먼저 봅니다." },
     { label: "메일/첨부", filter: "email mail eml msg pst ost mbox attachment", terms: ["email", "mail", "eml", "msg", "pst", "ost", "mbox", "attachment"], hint: "메일 본문, 첨부, 헤더/송수신자를 검토합니다." },
     { label: "메신저", filter: "kakao whatsapp telegram signal line discord chat", terms: ["kakao", "whatsapp", "telegram", "signal", "line", "discord", "chat"], hint: "대화/메신저 export 또는 DB 파싱 결과를 확인합니다." },
     { label: "OCR/이미지", filter: "ocr image media screenshot scan", terms: ["ocr", "image", "media", "screenshot", "scan"], hint: "이미지 후보와 OCR 텍스트 히트를 따로 봅니다." },

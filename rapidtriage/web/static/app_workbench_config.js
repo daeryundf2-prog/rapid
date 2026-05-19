@@ -85,11 +85,11 @@ const FORENSIC_WORKFLOW_LANES = [
     korean: "문서 검토",
     tab: "docs",
     shortcut: "4",
-    goal: "PDF/HWP/Office/메일/메신저/OCR 자료를 리걸 리뷰처럼 선별",
+    goal: "PDF/Office/text/메일/메신저/OCR 자료를 리걸 리뷰처럼 선별",
     question: "유출, 횡령, 압수수색 쟁점 문서는 무엇인가?",
     outcome: "태그, 코멘트, 보고서 후보, 유사 문서 묶음",
-    modules: ["PDF/HWP/Office", "Email", "Messenger", "OCR", "Attachment"],
-    terms: ["document", "docs", "pdf", "hwp", "docx", "xlsx", "email", "chat", "kakao", "ocr"],
+    modules: ["PDF/Office/text", "Email", "Messenger", "OCR", "Attachment"],
+    terms: ["document", "docs", "pdf", "docx", "xlsx", "pptx", "email", "chat", "kakao", "ocr"],
   },
   {
     id: "timeline",
@@ -192,7 +192,7 @@ const LAZYWEB_WORKBENCH_MODEL = {
       label: "문서 검토",
       tab: "docs",
       shortcut: "4",
-      hint: "PDF/HWP/Office, 메일, 메신저, OCR, 첨부, 태그",
+      hint: "PDF/Office/text, 메일, 메신저, OCR, 첨부, 태그",
       filter: "document",
     },
     {

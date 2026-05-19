@@ -200,7 +200,7 @@ python -m rapidtriage --help
 | ISO/DMG/WIM/SWM | archive image workflow | 암호화/손상 이미지는 limitation |
 | ZIP/TAR archive | bounded extraction/search workflow | 압축폭탄 방어 cap 유지 필요 |
 | SQLite/DB | source preview, table/search sidecar, WAL/SHM 인식 | 대형 DB는 cursor/resume 권장 |
-| 문서 | PDF, Office, text, EML, MBOX 중심 추출 | PST/OST는 외부 parser workflow와 검증 필요 |
+| 문서 | PDF, Office Open XML, OpenDocument, text/log/config, EML, MBOX 중심 추출 | HWP/HWPX native body extraction은 아직 claim하지 않음. PST/OST/MSG는 bounded inventory 또는 외부 parser workflow와 검증 필요 |
 | 메신저/메일/cloud export | 서비스별 importer taxonomy와 일부 parser | 서비스별 schema/version 검증 필요 |
 
 ## 기능 지도
@@ -234,7 +234,7 @@ python -m rapidtriage --help
 ### 문서, 검색, 리뷰
 
 - 전체 케이스 검색과 현재 source 검색
-- PDF, HWP/Office 계열 문서, EML/MBOX, OCR 후보, 보고서 후보 중심 review lane
+- PDF, Office/OpenDocument/text 계열 문서, EML/MBOX, OCR 후보, 보고서 후보 중심 review lane
 - keyword pack, fuzzy/proximity 계열 검색 control, source preview, citation,
   review state, evidence tray
 - SQLite/table, text, image, media, hex/source, timeline, browser-history viewer surface
@@ -296,17 +296,17 @@ offset/index/table pointer, reviewer state, limitation text, citation metadata�
 
 ```bash
 python -m unittest tests.test_rapidtriage_web_static tests.test_rapidtriage_artifact_taxonomy
-rapidtriage taxonomy-audit --strict
-rapidtriage commercial-readiness --json
+python -m rapidtriage taxonomy-audit --strict
+python -m rapidtriage commercial-readiness --json
 ```
 
 최근 Mac-local 전체 검증에서 사용한 핵심 명령:
 
 ```bash
 sh scripts/smoke-test-rapidtriage.sh --output-dir qc-runs/2026-05-19-macos-full/smoke --venv-dir .venv --port 8879
-rapidtriage macos-live-smoke --output-dir qc-runs/2026-05-19-macos-full/macos-live-smoke --benchmark-file-count 500 --fts-record-count 5000 --keyword password --overwrite --json
-rapidtriage taxonomy-audit --strict --json
-rapidtriage commercial-readiness --validation-package docs/validation/rapidtriage-core-forensics-001-120-known-answer.json --json
+python -m rapidtriage macos-live-smoke --output-dir qc-runs/2026-05-19-macos-full/macos-live-smoke --benchmark-file-count 500 --fts-record-count 5000 --keyword password --overwrite --json
+python -m rapidtriage taxonomy-audit --strict --json
+python -m rapidtriage commercial-readiness --validation-package docs/validation/rapidtriage-core-forensics-001-120-known-answer.json --json
 ```
 
 실제 release 전에는 아래 증거를 추가해야 합니다.
@@ -370,6 +370,10 @@ Validation batch 문서:
 Known-answer evidence는 `docs/validation/` 아래에 있습니다.
 
 ## 개발자 참고
+
+`pyproject.toml`의 배포 package name은 아직 레거시 `dashcam-tools`입니다.
+사용자-facing 실행 명령은 `rapidtriage`이고, wheel에는 `dashcam_tools`와
+`rapidtriage`가 함께 포함됩니다.
 
 | 경로 | 설명 |
 | --- | --- |
