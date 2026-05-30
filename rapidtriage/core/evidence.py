@@ -137,10 +137,19 @@ SNAPSHOT_NAME_PATTERNS: tuple[tuple[str, str], ...] = (
     ("com.apple.timemachine.localsnapshots", "apfs-time-machine-local-snapshot"),
     (".snapshots", "apfs-or-time-machine-snapshot"),
     ("system volume information", "windows-system-volume-information"),
-    ("vss", "volume-shadow-copy-export"),
-    ("shadow", "volume-shadow-copy-export"),
     ("snapshot", "snapshot-export"),
 )
+VOLUME_SHADOW_COPY_PATH_PARTS = {
+    "vss",
+    "volume shadow copy",
+    "volume shadow copies",
+    "volume-shadow-copy",
+    "volume-shadow-copies",
+    "shadowcopy",
+    "shadowcopies",
+    "shadow copy",
+    "shadow copies",
+}
 
 
 def build_recovery_unlock_profile(source: Path, *, source_kind: str, support_level: str) -> dict[str, object]:
@@ -210,6 +219,7 @@ def discover_snapshot_candidates(root: Path, *, limit: int = 50) -> list[dict[st
                 break
             name = path.name.lower()
             full = str(path).lower()
+            parts = {part.lower() for part in path.parts}
             for pattern, snapshot_kind in SNAPSHOT_NAME_PATTERNS:
                 if pattern in name or pattern in full:
                     try:
@@ -226,6 +236,23 @@ def discover_snapshot_candidates(root: Path, *, limit: int = 50) -> list[dict[st
                         }
                     )
                     break
+            else:
+                matched_part = parts.intersection(VOLUME_SHADOW_COPY_PATH_PARTS)
+                if not matched_part:
+                    continue
+                try:
+                    relative_path = str(path.relative_to(root))
+                except ValueError:
+                    relative_path = str(path)
+                candidates.append(
+                    {
+                        "path": str(path),
+                        "relative_path": relative_path,
+                        "snapshot_kind": "volume-shadow-copy-export",
+                        "is_directory": path.is_dir(),
+                        "review_status": "candidate-needs-manual-confirmation",
+                    }
+                )
     except OSError:
         return candidates
     return candidates

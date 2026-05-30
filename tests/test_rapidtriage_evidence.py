@@ -612,6 +612,33 @@ class RapidTriageEvidenceAdapterTests(unittest.TestCase):
             self.assertEqual(payload["support_level"], "direct-folder")
             self.assertIn("next_actions", payload)
 
+    def test_snapshot_candidates_do_not_treat_font_names_as_vss_exports(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            font_notice = root / "Program Files" / "HNC" / "Vast Shadow_notice.txt"
+            font_notice.parent.mkdir(parents=True)
+            font_notice.write_text("font license", encoding="utf-8")
+
+            result = identify_evidence(root).to_dict()
+
+            snapshot_workflow = result["recovery_unlock_profile"]["snapshot_workflow"]
+            self.assertEqual(snapshot_workflow["status"], "not-detected")
+            self.assertEqual(snapshot_workflow["candidate_count"], 0)
+
+    def test_snapshot_candidates_detect_explicit_vss_export_folders(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            snapshot_file = root / "Volume Shadow Copy" / "Users" / "alice" / "note.txt"
+            snapshot_file.parent.mkdir(parents=True)
+            snapshot_file.write_text("snapshot evidence", encoding="utf-8")
+
+            result = identify_evidence(root).to_dict()
+
+            snapshot_workflow = result["recovery_unlock_profile"]["snapshot_workflow"]
+            self.assertEqual(snapshot_workflow["status"], "candidates-found")
+            self.assertGreaterEqual(snapshot_workflow["candidate_count"], 1)
+            self.assertEqual(snapshot_workflow["candidates"][0]["snapshot_kind"], "volume-shadow-copy-export")
+
 
 if __name__ == "__main__":
     unittest.main()
