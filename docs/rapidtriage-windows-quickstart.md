@@ -5,7 +5,7 @@ This guide is for running the local RapidTriage web UI from a source checkout on
 ## Requirements
 
 - Windows 11 or Windows 10.
-- Python 3.9 or newer.
+- Python 3.10 or newer.
 - Git, if cloning from GitHub.
 - Internet access for first-time Python package installation.
 

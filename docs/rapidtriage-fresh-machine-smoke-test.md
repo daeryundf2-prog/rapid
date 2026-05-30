@@ -5,7 +5,7 @@ Use this checklist before claiming a release is usable by a normal Windows/macOS
 ## Windows 10/11
 
 1. Start from a fresh checkout or downloaded ZIP.
-2. Confirm Python 3.9+ is installed.
+2. Confirm Python 3.10+ is installed.
 3. Open PowerShell in the repository root.
 4. Run:
 
@@ -32,7 +32,7 @@ Use this checklist before claiming a release is usable by a normal Windows/macOS
 ## macOS/Linux
 
 1. Start from a fresh checkout or downloaded ZIP.
-2. Confirm Python 3.9+ is installed.
+2. Confirm Python 3.10+ is installed.
 3. Open a terminal in the repository root.
 4. Run:
 

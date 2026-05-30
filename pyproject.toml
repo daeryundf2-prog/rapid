@@ -7,7 +7,7 @@ name = "dashcam-tools"
 version = "0.1.0"
 description = "Dashcam tools plus a lightweight rapid forensic triage CLI"
 readme = "README.md"
-requires-python = ">=3.9"
+requires-python = ">=3.10"
 authors = [{ name = "shinyoohag", email = "" }]
 keywords = ["dashcam", "ocr", "rename", "forensics", "E01", "ewf"]
 license = { text = "Proprietary" }

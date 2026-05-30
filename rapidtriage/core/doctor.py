@@ -111,7 +111,7 @@ def run_doctor(
 
 
 def check_python_version() -> DoctorCheck:
-    minimum = (3, 9)
+    minimum = (3, 10)
     current = sys.version_info[:3]
     if current >= minimum:
         return DoctorCheck(
@@ -119,15 +119,15 @@ def check_python_version() -> DoctorCheck:
             category="core",
             status=OK,
             summary=f"Python {current[0]}.{current[1]}.{current[2]} is supported.",
-            details={"minimum": "3.9", "current": ".".join(str(part) for part in current)},
+            details={"minimum": "3.10", "current": ".".join(str(part) for part in current)},
         )
     return DoctorCheck(
         name="python-version",
         category="core",
         status=ERROR,
         summary=f"Python {current[0]}.{current[1]}.{current[2]} is too old.",
-        details={"minimum": "3.9", "current": ".".join(str(part) for part in current)},
-        remediation="Install Python 3.9 or newer.",
+        details={"minimum": "3.10", "current": ".".join(str(part) for part in current)},
+        remediation="Install Python 3.10 or newer.",
     )
 
 
