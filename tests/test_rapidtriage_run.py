@@ -29,6 +29,7 @@ from rapidtriage.core.run import (
     memory_cap_stage_check_row,
     parallel_parser_scheduler_assessment,
     parser_crash_isolation_assessment,
+    run_triage_mode,
 )
 from rapidtriage.core.run_workflow import (
     RUN_WORKFLOW_STAGE_ORDER,
@@ -152,6 +153,33 @@ class RapidTriageRunTests(unittest.TestCase):
 
     def test_run_recovery_mode_writes_component_outputs_summary_and_report(self) -> None:
         self.assert_run_mode_outputs("recovery")
+
+    def test_run_max_file_count_caps_docs_and_files_scans(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir) / "case-root"
+            output_dir = Path(tmp_dir) / "run-output"
+            build_run_fixture(root)
+            extra_docs = root / "Users" / "alice" / "Documents" / "extra"
+            extra_docs.mkdir(parents=True, exist_ok=True)
+            for index in range(10):
+                (extra_docs / f"extra-note-{index}.txt").write_text("wire transfer evidence", encoding="utf-8")
+
+            run_triage_mode(
+                root,
+                mode="hacking",
+                output_dir=output_dir,
+                read_only=True,
+                max_file_count=2,
+                overwrite=True,
+            )
+
+            docs_payload = json.loads((output_dir / "rapidtriage-docs.json").read_text(encoding="utf-8"))
+            files_payload = json.loads((output_dir / "rapidtriage-files.json").read_text(encoding="utf-8"))
+
+            self.assertEqual(docs_payload["summary"]["candidate_count"], 2)
+            self.assertEqual(docs_payload["index"]["document_count"], 2)
+            self.assertEqual(files_payload["filters"]["limit"], 2)
+            self.assertLessEqual(files_payload["summary"]["raw_candidate_count"], 2)
 
     def test_investigative_run_profiles_cover_all_supported_artifact_collectors(self) -> None:
         supported = set(SUPPORTED_ARTIFACT_KINDS)
@@ -1512,6 +1540,44 @@ class RapidTriageRunTests(unittest.TestCase):
             self.assertEqual(match["column"], "body")
             self.assertIn("table messages", match["citation"])
             self.assertIn("password", match["snippet"])
+
+    def test_source_search_command_scans_sqlite_without_rowid_tables(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir) / "case-root"
+            output_dir = Path(tmp_dir) / "run-out"
+            source_output = Path(tmp_dir) / "source-search-without-rowid.json"
+            root.mkdir(parents=True, exist_ok=True)
+            build_run_fixture(root)
+            db_path = root / "Users" / "alice" / "Databases" / "chat.sqlite"
+            with contextlib.closing(sqlite3.connect(db_path)) as connection:
+                with connection:
+                    connection.execute("CREATE TABLE messages(id TEXT PRIMARY KEY, body TEXT) WITHOUT ROWID")
+                    connection.execute("INSERT INTO messages(id, body) VALUES (?, ?)", ("m-1", "password in rowidless table"))
+
+            self.assertEqual(main(["run", str(root), "--mode", "fraud", "--output-dir", str(output_dir)]), 0)
+            self.assertEqual(
+                main(
+                    [
+                        "source-search",
+                        str(output_dir),
+                        "--path",
+                        "Users/alice/Databases/chat.sqlite",
+                        "-k",
+                        "password",
+                        "--output",
+                        str(source_output),
+                    ]
+                ),
+                0,
+            )
+
+            payload = json.loads(source_output.read_text(encoding="utf-8"))
+            self.assertEqual(payload["summary"]["sqlite_status"], "searched")
+            self.assertEqual(payload["summary"]["match_count"], 1)
+            match = payload["matches"][0]
+            self.assertEqual(match["table"], "messages")
+            self.assertEqual(match["column"], "body")
+            self.assertEqual(match["rowid"], "")
 
     def test_source_search_command_streams_large_plain_text_windows(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:

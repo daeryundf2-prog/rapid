@@ -334,6 +334,7 @@ def run_triage_mode(
     )
     scan_root = resolve_scan_root(input_root.root_path, profile)
     scan_input_root = derive_child_input_root(input_root, scan_root)
+    run_scan_limit = max(0, max_file_count)
 
     manifest_path = output_dir / "rapidtriage-manifest.json"
     docs_path = output_dir / "rapidtriage-docs.json"
@@ -435,7 +436,13 @@ def run_triage_mode(
         resume=effective_resume and docs_index_path.is_file(),
         expected_command="docs",
         required_keys=("summary", "results"),
-        producer=lambda: run_docs_search(scan_input_root, profile.keywords, rule_set=rule_set, index_output=docs_index_path),
+        producer=lambda: run_docs_search(
+            scan_input_root,
+            profile.keywords,
+            limit=run_scan_limit,
+            rule_set=rule_set,
+            index_output=docs_index_path,
+        ),
     )
     if reused:
         reused_outputs.update({"docs", "docs-index"})
@@ -459,6 +466,7 @@ def run_triage_mode(
             scan_input_root,
             categories=profile.file_scan_categories,
             path_contains=profile.file_scan_path_contains or None,
+            limit=run_scan_limit,
             rule_set=rule_set,
             known_good_hash_feeds=known_good_hash_feeds,
             hide_known_good=hide_known_good,

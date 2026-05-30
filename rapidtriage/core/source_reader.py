@@ -87,7 +87,7 @@ def run_source_read(
     hashes = compute_hashes(source_path) if include_hashes else {}
 
     source_locator = build_source_locator(preview)
-    relative_path = str(source_path.relative_to(analysis_root))
+    relative_path = source_path.relative_to(analysis_root).as_posix()
     display_relative_path = (
         f"{relative_path}{ARCHIVED_SOURCE_SEPARATOR}{archive_entry['archive_entry_name']}"
         if archive_entry
@@ -428,10 +428,11 @@ def search_sqlite_source(
             scanned_tables += 1
             searchable_columns += len(columns)
             quoted_columns = ", ".join(sqlite_quote_identifier(column) for column in columns)
-            rowid_expr = "rowid"
+            has_rowid = sqlite_table_has_rowid(connection, table)
+            rowid_select = "rowid AS __rapid_rowid, " if has_rowid else ""
             try:
                 rows = connection.execute(
-                    f"SELECT {rowid_expr} AS __rapid_rowid, {quoted_columns} "
+                    f"SELECT {rowid_select}{quoted_columns} "
                     f"FROM {sqlite_quote_identifier(table)} LIMIT ?",
                     (max_rows - scanned_rows,),
                 )
@@ -439,7 +440,7 @@ def search_sqlite_source(
                 continue
             for row in rows:
                 scanned_rows += 1
-                rowid = row["__rapid_rowid"] if "__rapid_rowid" in row.keys() else ""
+                rowid = row["__rapid_rowid"] if has_rowid and "__rapid_rowid" in row.keys() else ""
                 for column in columns:
                     value = row[column]
                     if value is None:
