@@ -4,7 +4,9 @@ import csv
 import datetime as dt
 import hashlib
 import json
+import os
 import re
+import subprocess
 from pathlib import Path
 from typing import Iterable, Mapping, Sequence
 
@@ -217,6 +219,7 @@ class WindowsFilesystemProvider:
 
 
 def collect_ads_stream_artifacts(root: Path) -> Iterable[ArtifactRecord]:
+    yield from collect_native_ads_stream_artifacts(root)
     scanned = 0
     for path in sorted((item for item in root.rglob("*") if item.is_file()), key=lambda item: str(item).lower()):
         scanned += 1
@@ -288,6 +291,131 @@ def collect_ads_stream_artifacts(root: Path) -> Iterable[ArtifactRecord]:
             provider=WindowsFilesystemProvider.name,
             artifact_type="ads-stream-candidate",
             path=str(path.resolve()),
+            supported=True,
+            details=details,
+        )
+
+
+def collect_native_ads_stream_artifacts(root: Path) -> Iterable[ArtifactRecord]:
+    if os.name != "nt":
+        return
+    root_literal = "'" + str(root).replace("'", "''") + "'"
+    try:
+        completed = subprocess.run(
+            [
+                "powershell",
+                "-NoProfile",
+                "-NonInteractive",
+                "-Command",
+                (
+                    "$ErrorActionPreference='SilentlyContinue'; "
+                    f"$root={root_literal}; "
+                    "Get-ChildItem -LiteralPath $root -Recurse -File -Force | "
+                    "ForEach-Object { Get-Item -LiteralPath $_.FullName -Stream * } | "
+                    "Where-Object { $_.Stream -ne ':$DATA' } | "
+                    "Select-Object FileName,Stream,Length | ConvertTo-Json -Compress"
+                ),
+            ],
+            capture_output=True,
+            check=False,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=30,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return
+    try:
+        payload = json.loads(completed.stdout) if completed.stdout.strip() else []
+    except json.JSONDecodeError:
+        return
+    if isinstance(payload, dict):
+        rows = [payload]
+    elif isinstance(payload, list):
+        rows = [row for row in payload if isinstance(row, dict)]
+    else:
+        return
+    emitted: set[tuple[str, str]] = set()
+    for row in rows:
+        file_name = str(row.get("FileName") or "")
+        stream_name = str(row.get("Stream") or "")
+        if not file_name or not stream_name or stream_name == ":$DATA":
+            continue
+        host_path = Path(file_name)
+        if not host_path.is_file():
+            continue
+        stream_path = Path(f"{file_name}:{stream_name}:$DATA")
+        stream_key = (str(host_path.resolve()), stream_name)
+        if stream_key in emitted:
+            continue
+        emitted.add(stream_key)
+        blob = read_prefix(stream_path, ADS_PREFIX_SCAN_LIMIT)
+        detected = detect_file_signature(blob)
+        zone_fields = parse_ads_zone_identifier_fields(blob) if stream_name.lower() == "zone.identifier" else {}
+        modified_at = ""
+        try:
+            modified_at = dt.datetime.fromtimestamp(host_path.stat().st_mtime, dt.timezone.utc).isoformat()
+        except OSError:
+            pass
+        try:
+            source_size = int(row.get("Length") or len(blob))
+        except (TypeError, ValueError):
+            source_size = len(blob)
+        details = {
+            "parser": "windows-ads-stream-inventory",
+            "parser_version": PARSER_VERSION,
+            "coverage_status": "native-ads-dir-r-inventory",
+            "reportability": "triage",
+            "source_path": str(stream_path),
+            "source_format": "native-ntfs-ads",
+            "source_hashes": {"sha256": hashlib.sha256(blob).hexdigest()} if blob else {},
+            "source_size": source_size,
+            "modified_at": modified_at,
+            "host_file_name": host_path.name,
+            "host_file_path_candidate": str(host_path.resolve()),
+            "host_file_present": True,
+            "stream_name": stream_name,
+            "stream_type": "$DATA",
+            "stream_family": ads_stream_family(stream_name, detected, zone_fields),
+            "stream_suffix": Path(stream_name).suffix.lower(),
+            "detected_signature_kind": detected.get("kind", "") if detected else "",
+            "signature_hex": detected.get("signature_hex", "") if detected else "",
+            "zone_identifier_fields": zone_fields,
+            "zone_id": zone_fields.get("ZoneId", ""),
+            "referrer_url": zone_fields.get("ReferrerUrl", ""),
+            "host_url": zone_fields.get("HostUrl", ""),
+            "bounded_preview": ads_text_preview(blob),
+            "source_locator": {
+                "viewer": "source-hex-range",
+                "path": str(host_path.resolve()),
+                "byte_offset": 0,
+                "byte_length": min(len(blob), ADS_PREFIX_SCAN_LIMIT),
+                "stream_name": stream_name,
+            },
+            "ads_review_profile": ads_review_profile(
+                host_name=host_path.name,
+                stream_name=stream_name,
+                host_present=True,
+                detected=detected,
+                zone_fields=zone_fields,
+            ),
+            "risk_flags": ads_risk_flags(stream_name, blob, detected, zone_fields, True),
+            "validation_required": True,
+            "validation_guidance": (
+                "ADS row is enumerated from the live NTFS view with dir /r. Correlate with MFT/USN and extraction "
+                "logs before reporting concealment or download provenance."
+            ),
+            "commercial_grade_ready": False,
+            "commercial_grade_blockers": [
+                "native-ntfs-ads-enumeration-required",
+                "host-file-mft-usn-correlation-required",
+                "trusted-ads-parser-or-extraction-log-diff-required",
+            ],
+        }
+        yield ArtifactRecord(
+            provider=WindowsFilesystemProvider.name,
+            artifact_type="ads-stream-candidate",
+            path=str(stream_path),
             supported=True,
             details=details,
         )

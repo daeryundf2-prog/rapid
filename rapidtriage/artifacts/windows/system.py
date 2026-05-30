@@ -1863,16 +1863,24 @@ def activity_style_row_details(
 
 
 def windows_user_profile_attribution(path: Path, *, root: Path | None = None) -> dict[str, object]:
-    parts = list(path.resolve().parts)
+    resolved_path = path.resolve()
+    if root is not None:
+        try:
+            parts = list(resolved_path.relative_to(root.resolve()).parts)
+        except ValueError:
+            parts = list(resolved_path.parts)
+    else:
+        parts = list(resolved_path.parts)
     lowered = [part.lower() for part in parts]
     for index, part in enumerate(lowered):
         if part == "users" and index + 1 < len(parts):
             user_name = parts[index + 1]
             relative_parts = parts[index + 2 :]
             sid_candidates = profile_sid_candidates(root, user_name) if root else []
+            profile_root = root / Path(*parts[: index + 2]) if root is not None else Path(*parts[: index + 2])
             return {
                 "profile_name": user_name,
-                "profile_root": str(Path(*parts[: index + 2])) if index + 2 > 0 else "",
+                "profile_root": str(profile_root) if index + 2 > 0 else "",
                 "relative_path": str(Path(*relative_parts)) if relative_parts else "",
                 "attribution_basis": "path-under-users-profile",
                 "sid_candidates": sid_candidates,
