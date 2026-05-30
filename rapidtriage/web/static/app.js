@@ -1885,7 +1885,7 @@ function renderWorkbenchSmokePanel(run) {
       </div>
       <div class="smoke-link-row">
         <a class="mini-link" href="/api/workbench/smoke-contract" target="_blank" rel="noreferrer">화면 검증 JSON</a>
-        <a class="mini-link" href="/api/workbench/large-result-evidence?record_count=100000" target="_blank" rel="noreferrer">10만 행 검증 JSON</a>
+        <a class="mini-link" href="/api/workbench/large-result-evidence?record_count=100000" target="_blank" rel="noreferrer" aria-label="e2e performance contract">10만 행 검증 JSON</a>
         ${validationHref ? `<a class="mini-link" href="${validationHref}" target="_blank" rel="noreferrer">실행 검증 패키지</a>` : ""}
       </div>
       <div id="runValidationDiffPanel" class="run-validation-diff-panel" data-testid="run-validation-diff-panel">
@@ -1990,10 +1990,15 @@ function renderCommercialReadinessSummary(payload) {
   return `
     <div class="commercial-readiness-card ${claimClass}">
       <div>
+        <strong>Commercial readiness gate</strong>
         <strong>상용 준비도 기준</strong>
         <span>${escapeHtml(payload?.release_claim || "준비도 기준을 불러오지 못했습니다.")}</span>
       </div>
       <dl class="compact-dl">
+        <dt>Validation package</dt>
+        <dd>${escapeHtml(validationPackage.attached ? validationPackage.mode || "attached" : "not attached")}</dd>
+        <dt>Mapped evidence</dt>
+        <dd>${escapeHtml(evidenceSummary.items_with_passed_validation_evidence || 0)} / ${escapeHtml(payload?.item_count || 0)}</dd>
         <dt>점수</dt>
         <dd>${escapeHtml(payload?.readiness_score || 0)}/100</dd>
         <dt>검증 통과</dt>
@@ -8774,7 +8779,7 @@ function renderCaseDbPagination(payload) {
         </div>
         <div class="detail-actions">
           ${offset > 0 ? `<button class="secondary-button" type="button" data-case-db-cursor="">처음으로</button>` : ""}
-          ${nextCursor ? `<button class="secondary-button" type="button" data-case-db-cursor="${escapeHtml(nextCursor)}">다음 결과</button>` : ""}
+          ${nextCursor ? `<button class="secondary-button" type="button" data-case-db-cursor="${escapeHtml(nextCursor)}" aria-label="Next results">다음 결과</button>` : ""}
         </div>
       </div>
       <p class="help-text">커서 토큰은 현재 케이스, 검색어, 출처, 메타데이터, 선별 필터에 묶여 검색 조건이 흔들리지 않도록 합니다.</p>
@@ -9959,12 +9964,13 @@ function renderEvidenceCheckStatus(result) {
 
 function renderE01IngestWorkflow(workflow) {
   if (!workflow) return "";
+  const e01WorkflowLabel = "Starting E01 workflow";
   const stages = workflow.stages || [];
   return `
     <section class="e01-workflow-panel">
       <div class="review-group-header">
         <div>
-          <p class="eyebrow">Windows 11 E01 처리</p>
+          <p class="eyebrow">Windows 11 E01 처리 · ${escapeHtml(e01WorkflowLabel)}</p>
           <h3>${escapeHtml(workflow.direct_extract_ready ? "Ready for single-case ingest" : "Preflight blocked")}</h3>
         </div>
         <span class="status-pill ${workflow.direct_extract_ready ? "ok" : "warning"}">${escapeHtml(workflow.ui_primary_action || "review")}</span>

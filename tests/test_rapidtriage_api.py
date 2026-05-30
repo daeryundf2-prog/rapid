@@ -11,6 +11,7 @@ import zipfile
 import zlib
 from pathlib import Path
 from unittest.mock import patch
+from urllib.parse import parse_qs, urlparse
 
 HAS_FASTAPI = True
 try:
@@ -308,7 +309,8 @@ class RapidTriageApiTests(unittest.TestCase):
             self.assertIn("find evtx", payload["text"])
             self.assertIn("hash=true", payload["metadata_url"])
             self.assertIn("source-search", payload["search_url"])
-            self.assertIn(str(archive_path), payload["download_url"])
+            download_query = parse_qs(urlparse(payload["download_url"]).query)
+            self.assertEqual(Path(download_query["path"][0]).resolve(), archive_path.resolve())
             self.assertIn("Archive completeness", " ".join(payload["viewer_limitations"]))
             self.assertEqual(
                 {action["id"] for action in payload["viewer_actions"]},
@@ -957,9 +959,10 @@ class RapidTriageApiTests(unittest.TestCase):
         self.assertIn("data-testid=\"current-file-search-profile\"", app_js)
         self.assertIn("data-testid=\"evidence-tray\"", app_js)
         self.assertIn("data-testid=\"report-tray\"", app_js)
-        self.assertIn("Browser / AI", app_js)
-        self.assertIn("Messenger", app_js)
-        self.assertIn("Validation", app_js)
+        workbench_sources = app_js + config_js
+        self.assertIn("Browser/AI", workbench_sources)
+        self.assertIn("Messenger", workbench_sources)
+        self.assertIn("Validation", workbench_sources)
         self.assertIn("data-testid=\"start-choice-grid\"", index_html)
         self.assertIn("data-testid=\"start-choice-e01\"", index_html)
         self.assertIn("data-testid=\"start-choice-folder\"", index_html)
@@ -999,7 +1002,7 @@ class RapidTriageApiTests(unittest.TestCase):
         self.assertIn("/api/workbench/large-result-evidence?record_count=100000", app_js)
         self.assertIn("e2e performance contract", app_js)
         self.assertIn("/validation-package", app_js)
-        self.assertIn("Crash reports", index_html)
+        self.assertIn("data-testid=\"crash-reports-button\"", index_html)
         self.assertIn("forensic-ribbon", styles)
         self.assertIn("case-hero", styles)
         self.assertIn("crash-dashboard", styles)
