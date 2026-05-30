@@ -92,7 +92,10 @@ def scan_document_candidates(root: Union[InputRoot, Path], limit: int = 0) -> Li
             suffix = path.suffix.lower()
             if suffix not in SUPPORTED_DOC_EXTS:
                 continue
-            stat = path.stat()
+            try:
+                stat = path.stat()
+            except OSError:
+                continue
             candidates.append(
                 DocumentCandidate(
                     path=str(path),

@@ -5,9 +5,16 @@ import tempfile
 import unittest
 import zipfile
 from pathlib import Path
+from unittest.mock import patch
 
 from rapidtriage.cli import main
-from rapidtriage.core.docs import MAX_EXTRACT_TEXT_BYTES, TextExtractionTooLarge, extract_text, run_docs_search
+from rapidtriage.core.docs import (
+    MAX_EXTRACT_TEXT_BYTES,
+    TextExtractionTooLarge,
+    extract_text,
+    run_docs_search,
+    scan_document_candidates,
+)
 
 
 def write_minimal_docx(path: Path, text: str) -> None:
@@ -95,6 +102,27 @@ def write_minimal_mail_container(path: Path, text: str) -> None:
 
 
 class RapidTriageDocsTests(unittest.TestCase):
+    def test_docs_search_skips_candidate_when_stat_fails(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            readable = root / "readable.txt"
+            unreadable = root / "vanished.txt"
+            readable.write_text("incident alpha secret", encoding="utf-8")
+            unreadable.write_text("secret should be skipped", encoding="utf-8")
+
+            original_stat = Path.stat
+
+            def flaky_stat(path: Path, *args: object, **kwargs: object):
+                if path.name == unreadable.name:
+                    raise OSError("synthetic stat failure")
+                return original_stat(path, *args, **kwargs)
+
+            with patch.object(Path, "stat", flaky_stat):
+                candidates = scan_document_candidates(root)
+
+        self.assertEqual(len(candidates), 1)
+        self.assertEqual(Path(candidates[0].path).resolve(), readable.resolve())
+
     def test_docs_search_continues_when_large_document_hits_extraction_cap(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             root = Path(tmp_dir)

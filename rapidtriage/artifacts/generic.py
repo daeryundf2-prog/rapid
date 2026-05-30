@@ -130,7 +130,7 @@ class GenericDocumentArtifactProvider:
 
 def collect_archive_inventory(root: Path) -> Iterable[ArtifactRecord]:
     for path in sorted(root.rglob("*"), key=lambda item: str(item).lower()):
-        if not path.is_file() or path.suffix.lower() not in ARCHIVE_SUFFIXES:
+        if not safe_is_file(path) or path.suffix.lower() not in ARCHIVE_SUFFIXES:
             continue
         stat_result = safe_stat(path)
         profile = archive_inventory_profile(path)
@@ -374,7 +374,7 @@ def zip_datetime_to_iso(value: Sequence[int]) -> str:
 
 def collect_document_metadata_risk(root: Path) -> Iterable[ArtifactRecord]:
     for path in sorted(root.rglob("*"), key=lambda item: str(item).lower()):
-        if not path.is_file() or path.suffix.lower() not in DOCUMENT_METADATA_SUFFIXES:
+        if not safe_is_file(path) or path.suffix.lower() not in DOCUMENT_METADATA_SUFFIXES:
             continue
         profile = document_metadata_profile(path)
         if profile.get("analysis_status") == "not-a-zip-document":
@@ -410,7 +410,7 @@ def collect_document_metadata_risk(root: Path) -> Iterable[ArtifactRecord]:
 
 def collect_sticky_notes(root: Path) -> Iterable[ArtifactRecord]:
     for path in sorted(root.rglob("*"), key=lambda item: str(item).lower()):
-        if not path.is_file() or path.name.lower() != "plum.sqlite":
+        if not safe_is_file(path) or path.name.lower() != "plum.sqlite":
             continue
         yield from collect_sticky_notes_sqlite(path)
 
@@ -883,7 +883,7 @@ def iter_utf16le_strings_with_offsets(blob: bytes, *, minimum: int) -> Iterable[
 
 def collect_local_llm_inventory(root: Path) -> Iterable[ArtifactRecord]:
     for path in sorted(root.rglob("*"), key=lambda item: str(item).lower()):
-        if not path.is_file():
+        if not safe_is_file(path):
             continue
         product = infer_local_llm_product(path)
         suffix = path.suffix.lower()
@@ -1088,7 +1088,7 @@ def collect_local_llm_sqlite_prompt_candidates(
 
 def collect_desktop_ai_app_inventory(root: Path) -> Iterable[ArtifactRecord]:
     for path in sorted(root.rglob("*"), key=lambda item: str(item).lower()):
-        if not path.is_file() or path.suffix.lower() not in DESKTOP_AI_APP_SUFFIXES:
+        if not safe_is_file(path) or path.suffix.lower() not in DESKTOP_AI_APP_SUFFIXES:
             continue
         product = infer_desktop_ai_product(path)
         if not product:
@@ -1537,6 +1537,13 @@ def safe_stat(path: Path) -> dict[str, object]:
         "size": int(stat_result.st_size),
         "modified_at": dt.datetime.fromtimestamp(stat_result.st_mtime).isoformat(),
     }
+
+
+def safe_is_file(path: Path) -> bool:
+    try:
+        return path.is_file()
+    except OSError:
+        return False
 
 
 def read_prefix(path: Path, limit: int) -> bytes:
