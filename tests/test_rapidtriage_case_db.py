@@ -4,6 +4,7 @@ import sqlite3
 import tempfile
 import unittest
 import contextlib
+import hashlib
 import io
 import json
 import zipfile
@@ -197,6 +198,23 @@ class RapidTriageCaseDatabaseTests(unittest.TestCase):
                 }
                 self.assertIn("idx_review_mark_case_target", indexes)
 
+    def test_initialize_rejects_future_schema_without_mutating_database(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            db_path = Path(tmp_dir) / "case.db"
+            with contextlib.closing(sqlite3.connect(db_path)) as connection:
+                connection.execute("CREATE TABLE schema_info (key TEXT PRIMARY KEY, value TEXT NOT NULL)")
+                connection.execute("INSERT INTO schema_info (key, value) VALUES ('schema_version', '999')")
+                connection.execute("CREATE TABLE sentinel (value TEXT NOT NULL)")
+                connection.execute("INSERT INTO sentinel (value) VALUES ('preserve-me')")
+                connection.commit()
+            before_hash = hashlib.sha256(db_path.read_bytes()).hexdigest()
+
+            with self.assertRaisesRegex(CaseDatabaseError, "unsupported case DB schema version: 999"):
+                CaseDatabase(db_path).initialize()
+
+            after_hash = hashlib.sha256(db_path.read_bytes()).hexdigest()
+            self.assertEqual(after_hash, before_hash)
+
     def test_create_list_and_get_case(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             database = open_case_database(Path(tmp_dir) / "case.db")
@@ -355,6 +373,27 @@ class RapidTriageCaseDatabaseTests(unittest.TestCase):
 
             updated = database.get_case(case.case_id)
             self.assertGreaterEqual(updated.updated_at, case.updated_at)
+
+    def test_audit_event_table_is_append_only(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            db_path = Path(tmp_dir) / "case.db"
+            database = open_case_database(db_path)
+            case = database.create_case(case_id="CASE-001")
+            citation = database.add_audit_event(
+                case_id=case.case_id,
+                action="case.created",
+                target_type="case",
+                target_id=case.case_id,
+            )
+
+            with contextlib.closing(sqlite3.connect(db_path)) as connection:
+                with self.assertRaises(sqlite3.DatabaseError):
+                    connection.execute(
+                        "UPDATE audit_event SET action = 'tampered' WHERE citation_id = ?",
+                        (citation,),
+                    )
+                with self.assertRaises(sqlite3.DatabaseError):
+                    connection.execute("DELETE FROM audit_event WHERE citation_id = ?", (citation,))
 
     def test_cli_case_db_initializes_creates_and_lists_case(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:

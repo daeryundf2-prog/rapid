@@ -674,7 +674,6 @@ def build_native_shimcache_records(path: Path) -> Iterable[ArtifactRecord]:
 
     source_hashes = file_hashes(path)
     occurrences = list(iter_registry_like_string_occurrences(blob))
-    strings = list(unique_preserve_order(item["text"] for item in occurrences))
     appcompat_markers = [
         item
         for item in occurrences
@@ -695,12 +694,6 @@ def build_native_shimcache_records(path: Path) -> Iterable[ArtifactRecord]:
         "native_binary_layout_decoding_available": False,
         "correlation_targets": execution_correlation_targets("shimcache-entry"),
     }
-    report_grade = execution_report_grade_assessment(
-        execution_validation_matrix(validation_checks),
-        validation_required=True,
-        gap_ids=["#8"],
-        extra_blockers=["native-appcompatcache-layout-decoding-required", "os-build-layout-validation-required"],
-    )
     for index, cluster in enumerate(clusters[:100]):
         executable_path = str(cluster.get("executable_path") or "")
         timestamp_candidates = [

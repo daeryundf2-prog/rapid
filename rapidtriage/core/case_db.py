@@ -15,7 +15,7 @@ from .artifact_store import read_jsonl_artifacts, validate_artifact_record
 from .docs import extract_text
 from .forensic_accuracy import build_accuracy_gate
 from .review_reporting_controls import build_review_reporting_contract
-from .search import SearchError, load_run_summary
+from .search import load_run_summary
 from .submission_qc_controls import build_submission_qc_contract
 from .submission import compute_hashes
 
@@ -324,6 +324,7 @@ class CaseDatabase:
             connection.close()
 
     def initialize(self) -> dict[str, object]:
+        assert_supported_existing_schema_version(self.path)
         with self.connect() as connection:
             apply_schema(connection)
             return {
@@ -2089,14 +2090,14 @@ def case_record_from_row(row: sqlite3.Row) -> CaseRecord:
 
 
 def apply_schema(connection: sqlite3.Connection) -> None:
+    current_version = get_schema_version(connection)
+    if current_version not in (0, SCHEMA_VERSION):
+        raise CaseDatabaseError(f"unsupported case DB schema version: {current_version}")
     connection.executescript(SCHEMA_SQL)
     ensure_column(connection, "review_mark", "assignee", "TEXT NOT NULL DEFAULT ''")
     ensure_column(connection, "review_mark", "priority", "TEXT NOT NULL DEFAULT 'normal'")
     ensure_column(connection, "review_mark", "due_at", "TEXT NOT NULL DEFAULT ''")
     ensure_column(connection, "review_mark", "source_citation_package_json", "TEXT NOT NULL DEFAULT '{}'")
-    current_version = get_schema_version(connection)
-    if current_version not in (0, SCHEMA_VERSION):
-        raise CaseDatabaseError(f"unsupported case DB schema version: {current_version}")
     connection.execute(
         """
         INSERT INTO schema_info (key, value)
@@ -2105,6 +2106,32 @@ def apply_schema(connection: sqlite3.Connection) -> None:
         """,
         (str(SCHEMA_VERSION),),
     )
+
+
+def assert_supported_existing_schema_version(path: Path) -> None:
+    if not path.exists():
+        return
+    try:
+        uri = f"file:{path}?mode=ro"
+        with sqlite3.connect(uri, uri=True) as connection:
+            connection.row_factory = sqlite3.Row
+            table_count_row = connection.execute(
+                "SELECT count(*) AS count FROM sqlite_master WHERE type = 'table'"
+            ).fetchone()
+            table_count = int(table_count_row["count"]) if table_count_row is not None else 0
+            if not table_count:
+                return
+            has_schema_info = connection.execute(
+                "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'schema_info'"
+            ).fetchone()
+            if has_schema_info is None:
+                raise CaseDatabaseError("unsupported case DB schema version: unversioned database")
+            version = connection.execute("SELECT value FROM schema_info WHERE key = 'schema_version'").fetchone()
+            current_version = int(version["value"]) if version is not None else 0
+    except sqlite3.DatabaseError as exc:
+        raise CaseDatabaseError(f"unsupported case DB file: {exc}") from exc
+    if current_version not in (0, SCHEMA_VERSION):
+        raise CaseDatabaseError(f"unsupported case DB schema version: {current_version}")
 
 
 def ensure_column(connection: sqlite3.Connection, table_name: str, column_name: str, definition: str) -> None:
@@ -5939,7 +5966,7 @@ def build_evidence_history_integrity_profile(history_rows: Sequence[Mapping[str,
         "tamper_evident_export_only": True,
         "database_enforced_append_only": True,
         "append_only_triggers": ["review_mark_history_no_update", "review_mark_history_no_delete"],
-        "report_use_warning": "This hash chain is generated at export time; preserve the Case DB and export JSON, and attach a trusted history manifest before court-grade use.",
+        "report_use_warning": "This hash chain is generated at export time; preserve the Case DB and export JSON, and attach a trusted history manifest before report-defensible use.",
     }
 
 
@@ -5985,7 +6012,7 @@ def build_evidence_selection_history_manifest(
             "multi_user_signed_history": False,
             "conflict_resolution": False,
         },
-        "report_use_boundary": "history manifest proves exported review-version rows only; attach signed multi-user history and trusted diff before court-grade claims",
+        "report_use_boundary": "history manifest proves exported review-version rows only; attach signed multi-user history and trusted diff before report-defensible claims",
         "commercial_claim_allowed": False,
     }
     return {**manifest_core, "manifest_hash": stable_payload_sha256(manifest_core)}
@@ -8073,7 +8100,7 @@ def validation_warning_detail(warning: str) -> dict[str, object]:
     elif warning == "commercial-grade-ready-false":
         severity = "high"
         category = "commercial-readiness"
-        action = "Keep commercial/court-grade claims blocked until validation evidence is attached."
+        action = "Keep commercial/report-defensible claims blocked until validation evidence is attached."
         badge = "commercial-blocked"
     return {
         "warning": warning,
@@ -8390,7 +8417,7 @@ def custody_workflow_functional_profile(
         "reportability_decision": {
             "allowed_use": "single-case-chain-of-custody-export",
             "commercial_claim_allowed": not failed_checks,
-            "operator_warning": "Attach acquisition/write-blocker metadata and a trusted custody manifest diff before court-grade use.",
+            "operator_warning": "Attach acquisition/write-blocker metadata and a trusted custody manifest diff before report-defensible use.",
         },
     }
 
@@ -8464,7 +8491,7 @@ def acquisition_hash_workflow_functional_profile(
         "reportability_decision": {
             "allowed_use": "single-case-acquisition-hash-export",
             "commercial_claim_allowed": not failed_checks,
-            "operator_warning": "Attach source acquisition logs, write-blocker metadata, and a trusted acquisition hash manifest diff before court-grade use.",
+            "operator_warning": "Attach source acquisition logs, write-blocker metadata, and a trusted acquisition hash manifest diff before report-defensible use.",
         },
     }
 
@@ -9911,7 +9938,7 @@ def build_acquisition_metadata_input_manifest(
         "audit_required": True,
         "trusted_diff_status": str(trusted_diff.get("status") or ""),
         "ready_for_submission": bool(records and not missing_required_fields),
-        "operator_warning": "The GUI must preserve these fields in the audit log and report export before court-grade use.",
+        "operator_warning": "The GUI must preserve these fields in the audit log and report export before report-defensible use.",
     }
     return {**manifest_core, "manifest_hash": stable_payload_sha256(manifest_core)}
 
@@ -14258,6 +14285,18 @@ CREATE TABLE IF NOT EXISTS audit_event (
     error TEXT NOT NULL DEFAULT '',
     FOREIGN KEY (case_id) REFERENCES case_record(case_id) ON DELETE CASCADE
 );
+
+CREATE TRIGGER IF NOT EXISTS audit_event_no_update
+BEFORE UPDATE ON audit_event
+BEGIN
+    SELECT RAISE(ABORT, 'audit_event is append-only');
+END;
+
+CREATE TRIGGER IF NOT EXISTS audit_event_no_delete
+BEFORE DELETE ON audit_event
+BEGIN
+    SELECT RAISE(ABORT, 'audit_event is append-only');
+END;
 
 CREATE TABLE IF NOT EXISTS report_item (
     id INTEGER PRIMARY KEY AUTOINCREMENT,

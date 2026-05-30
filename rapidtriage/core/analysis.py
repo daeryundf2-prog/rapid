@@ -6,7 +6,7 @@ import json
 import re
 from collections import Counter, defaultdict
 from pathlib import Path
-from typing import Any, Iterable, Mapping, Sequence
+from typing import Iterable, Mapping, Sequence
 from urllib.parse import urlparse
 
 from .forensic_accuracy import build_accuracy_gate
@@ -758,7 +758,6 @@ def analysis_core_accuracy_gates(
         if isinstance(graph.get("graph_report_grade_validation_plan"), Mapping)
         else {}
     )
-    timeline_summary = timeline.get("summary") if isinstance(timeline.get("summary"), Mapping) else {}
     timeline_correlation_profile = (
         timeline.get("timeline_correlation_profile")
         if isinstance(timeline.get("timeline_correlation_profile"), Mapping)
@@ -774,7 +773,6 @@ def analysis_core_accuracy_gates(
         if isinstance(timeline.get("timeline_report_grade_validation_plan"), Mapping)
         else {}
     )
-    workbook_summary = workbook.get("summary") if isinstance(workbook.get("summary"), Mapping) else {}
     workbook_review_profile = (
         workbook.get("workbook_review_profile")
         if isinstance(workbook.get("workbook_review_profile"), Mapping)
@@ -2735,7 +2733,7 @@ def cluster_review_hint(family: str, value: str, count: int) -> str:
     if family == "folder":
         return f"Review this folder as a set; {count} hits may share custody, owner, or app context."
     if family == "keyword":
-        return f"Use this keyword cluster to separate repeated hits from unique evidence before reporting."
+        return "Use this keyword cluster to separate repeated hits from unique evidence before reporting."
     if family == "kind":
         return f"Open representative rows first, then verify parser limitations for {value}."
     return "Use representative hits to decide whether this cluster is report-worthy or noise."

@@ -9,7 +9,6 @@ from typing import Dict, Iterable, List, Optional, Sequence, Tuple
 from .audit import compute_sha256
 from .files import (
     ALL_FILE_CATEGORIES,
-    DEFAULT_FILE_CATEGORIES,
     normalize_extensions,
     normalize_text_filters,
     normalized_name_mismatch,
@@ -224,6 +223,10 @@ def select_items_for_extraction(
     selected: List[Tuple[Dict[str, object], Path]] = []
     for item in source_items:
         source_path = resolve_source_path(str(item["path"]), root, input_base_dir)
+        if root is not None and not source_path.is_relative_to(root.root_path):
+            raise ExtractError(
+                f"extract source path is outside declared evidence root: {source_path}"
+            )
         if normalized_path_mismatch(str(source_path), path_contains):
             continue
         if normalized_name_mismatch(source_path.name, name_contains):
@@ -307,7 +310,7 @@ def build_destination_relative_path(source_path: Path, root: Optional[InputRoot]
         try:
             return source_path.relative_to(root.root_path)
         except ValueError:
-            pass
+            raise ExtractError(f"extract source path is outside declared evidence root: {source_path}")
 
     safe_parts = sanitize_path_parts(source_path.parts, source_path.anchor)
     return Path("_external", *safe_parts)

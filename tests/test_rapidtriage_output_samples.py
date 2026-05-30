@@ -67,8 +67,16 @@ def set_mtime(path: Path, value: datetime) -> None:
     os.utime(path, (timestamp, timestamp))
 
 
+def set_tree_mtime(root: Path, value: datetime) -> None:
+    timestamp = value.timestamp()
+    for path in sorted(root.rglob("*")):
+        os.utime(path, (timestamp, timestamp))
+    os.utime(root, (timestamp, timestamp))
+
+
 def build_windows_collector_sample_fixture(root: Path) -> None:
     shutil.copytree(WINDOWS_FIXTURE_ROOT, root, dirs_exist_ok=True)
+    set_tree_mtime(root, datetime(2024, 3, 5, 6, 0, 0, tzinfo=timezone.utc))
     lnk_path = root / "Users" / "alice" / "AppData" / "Roaming" / "Microsoft" / "Windows" / "Recent" / "Case Notes.lnk"
     lnk_path.write_bytes(
         build_minimal_lnk(

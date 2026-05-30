@@ -4673,7 +4673,6 @@ def browser_secret_authority_profile(
 ) -> Dict[str, object]:
     sensitive_rows = [row for row in storage_inventory if row.get("sensitive")]
     sensitive_type_counts = count_field(sensitive_rows, "storage_type")
-    sensitive_name_counts = count_field(sensitive_rows, "storage_name")
     return {
         "profile_version": "browser-secret-authority-v1",
         "qc_prep_item_number": QC_PREP_BROWSER_SECRET_ITEM,
@@ -5005,7 +5004,7 @@ def browser_secret_report_grade_validation_plan(
                 "passwords decrypted",
                 "cookies revealed",
                 "session tokens extracted",
-                "browser secrets are court-ready without authority/audit evidence",
+                "browser secrets are report-defensible without authority/audit evidence",
             ],
             "required_disclaimer": (
                 "Browser password/cookie/session stores are inventoried only. Do not reveal or report secret values "

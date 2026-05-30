@@ -11,7 +11,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import IO, Callable, Mapping, Sequence
 
-from .artifact_store import JsonlArtifactStreamWriter, JsonlArtifactWriteResult, write_jsonl_artifact_manifest, write_jsonl_artifacts
+from .artifact_store import JsonlArtifactStreamWriter, JsonlArtifactWriteResult, write_jsonl_artifact_manifest
 
 
 DEFAULT_WORKER_TIMEOUT_SECONDS = 30.0

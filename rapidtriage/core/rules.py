@@ -9,7 +9,7 @@ import zlib
 from collections import Counter
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Mapping, MutableMapping, Sequence, Tuple
+from typing import Dict, Iterable, List, Mapping, MutableMapping, Sequence
 from urllib.parse import urlparse
 from xml.etree import ElementTree as ET
 

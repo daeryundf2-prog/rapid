@@ -2837,14 +2837,14 @@ def build_kakaotalk_parser_manifest(
         if isinstance(details.get("kakaotalk_compatibility_assessment"), Mapping)
         else kakaotalk_compatibility_assessment(optional_text(details.get("app_version")))
     )
-    message_profile = (
-        details.get("kakaotalk_message_review_profile")
-        if isinstance(details.get("kakaotalk_message_review_profile"), Mapping)
-        else {}
-    )
     database_profile = (
         details.get("kakaotalk_database_review_profile")
         if isinstance(details.get("kakaotalk_database_review_profile"), Mapping)
+        else {}
+    )
+    message_profile = (
+        details.get("kakaotalk_message_review_profile")
+        if isinstance(details.get("kakaotalk_message_review_profile"), Mapping)
         else {}
     )
     validation = details.get("validation_checks") if isinstance(details.get("validation_checks"), Mapping) else {}
@@ -3027,11 +3027,6 @@ def build_kakaotalk_report_grade_validation_plan(
     messenger_manifest = (
         details.get("messenger_export_framework_manifest")
         if isinstance(details.get("messenger_export_framework_manifest"), Mapping)
-        else {}
-    )
-    message_profile = (
-        details.get("kakaotalk_message_review_profile")
-        if isinstance(details.get("kakaotalk_message_review_profile"), Mapping)
         else {}
     )
     database_profile = (
@@ -6437,7 +6432,7 @@ def build_mobile_timeline_report_grade_validation_plan(
             "forbidden_claims": [
                 "complete device-wide mobile timeline",
                 "all attachments recovered",
-                "timezone-normalized chronology is court-ready",
+                "timezone-normalized chronology is report-defensible",
                 "deleted or hidden app events are fully recovered",
             ],
             "required_disclaimer": (
@@ -6906,7 +6901,7 @@ def build_mobile_actor_report_grade_validation_plan(
             "forbidden_claims": [
                 "device-wide identity resolution complete",
                 "all accounts for this person are merged",
-                "actor deduplication is court-ready",
+                "actor deduplication is report-defensible",
                 "shared-device or recycled-number ambiguity has been eliminated",
             ],
             "required_disclaimer": (
@@ -9168,11 +9163,6 @@ def mobile_functional_expansion_profiles(
     vendor_schema_mapper_manifest = (
         details.get("mobile_vendor_schema_mapper_manifest")
         if isinstance(details.get("mobile_vendor_schema_mapper_manifest"), Mapping)
-        else {}
-    )
-    vendor_validation_plan = (
-        details.get("mobile_vendor_export_validation_plan")
-        if isinstance(details.get("mobile_vendor_export_validation_plan"), Mapping)
         else {}
     )
     ios_parser_manifest = (

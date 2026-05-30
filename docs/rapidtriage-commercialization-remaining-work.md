@@ -33,7 +33,7 @@ Current user-visible taxonomy gate:
 - Artifact collector count: `23`
 - Artifact type literals/dynamic registrations: `171`
 
-This means RapidForensic has broad analyst-facing triage functionality, but it must not be described as AXIOM/WISDOM-class or court-ready commercial parity yet. The remaining work is mostly proof depth, native parser completeness, large-evidence performance proof, platform packaging proof, and independent validation.
+This means RapidForensic has broad analyst-facing triage functionality, but it must not be described as AXIOM/WISDOM-class or report-defensible commercial parity yet. The remaining work is mostly proof depth, native parser completeness, large-evidence performance proof, platform packaging proof, and independent validation.
 
 ## Remaining Work Groups
 

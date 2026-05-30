@@ -828,7 +828,7 @@ class VirtualDiskAdapter:
                 forensic_review=evidence_forensic_review(
                     gap_id="#24",
                     artifact_goal="XVA detection and safe vendor export/convert workflow",
-                    primary_evidence=[f"detected_format=xva", f"ready=False", f"source={source.name}"],
+                    primary_evidence=["detected_format=xva", "ready=False", f"source={source.name}"],
                     report_grade_assessment=report_grade,
                     caveats=[
                         "Direct XVA extraction is not implemented.",

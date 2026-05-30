@@ -2,8 +2,6 @@ from __future__ import annotations
 
 import contextlib
 import datetime as dt
-import hashlib
-import json
 import platform
 import sqlite3
 import statistics

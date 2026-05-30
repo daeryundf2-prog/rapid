@@ -1161,7 +1161,6 @@ def build_android_apk_deep_analysis_manifest(details: dict[str, object]) -> dict
 
 
 def build_android_apk_report_grade_validation_plan(details: dict[str, object]) -> dict[str, object]:
-    apk_profile = details.get("apk_analysis_profile") if isinstance(details.get("apk_analysis_profile"), dict) else {}
     signing_inventory = (
         details.get("apk_signing_inventory") if isinstance(details.get("apk_signing_inventory"), dict) else {}
     )

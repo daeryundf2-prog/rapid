@@ -6,7 +6,7 @@ import hashlib
 import ipaddress
 import json
 import re
-from collections import Counter, defaultdict
+from collections import Counter
 from pathlib import Path
 from typing import Iterable, Mapping, MutableMapping, Sequence
 from urllib.parse import urlparse

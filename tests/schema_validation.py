@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import datetime as dt
-from typing import Any, Iterable
+from typing import Any
 
 
 class SchemaValidationError(AssertionError):

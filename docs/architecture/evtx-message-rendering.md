@@ -29,5 +29,5 @@ Report-grade rendering requires:
 
 ## Safety Rule
 
-Built-in messages are useful for analyst triage, but must stay `validation_required=true` and must not be represented as court-ready provider-rendered event messages.
+Built-in messages are useful for analyst triage, but must stay `validation_required=true` and must not be represented as report-defensible provider-rendered event messages.
 Curated provider catalogs may mark `provider_message_resource_resolved=true`, but reports must preserve the catalog provenance so the analyst can prove which manifest/resource extraction was used.

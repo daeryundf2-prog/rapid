@@ -243,7 +243,7 @@ OUTPUT_HANDOFF_ROLES: Mapping[str, tuple[str, str, str, str]] = {
         "timeline report",
         "timeline-report-viewer",
         "Open timeline-focused narrative for time-sequence review.",
-        "Use alongside source timeline rows for court-ready citations.",
+        "Use alongside source timeline rows for report-defensible citations.",
     ),
 }
 

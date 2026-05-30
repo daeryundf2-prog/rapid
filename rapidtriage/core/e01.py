@@ -2680,13 +2680,13 @@ def build_image_workflow_trusted_diff(
     extra = sorted(set(trusted_index) - set(rapid_index))
     mismatches: list[dict[str, object]] = []
     for key in common:
-        for field, rapid_value in rapid_index[key].items():
-            trusted_value = trusted_index[key].get(field, "")
+        for field_name, rapid_value in rapid_index[key].items():
+            trusted_value = trusted_index[key].get(field_name, "")
             if rapid_value and trusted_value and rapid_value != trusted_value:
                 mismatches.append(
                     {
                         "image_workflow_key": key,
-                        "field": field,
+                        "field": field_name,
                         "rapid_value": rapid_value,
                         "trusted_value": trusted_value,
                     }

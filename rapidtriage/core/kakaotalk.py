@@ -5378,11 +5378,6 @@ def table_exists(connection: sqlite3.Connection, table_name: str) -> bool:
     )
 
 
-def chat_id_from_path(path: Path) -> str:
-    match = re.search(r"chatLogs_(\d+)", path.name, flags=re.IGNORECASE)
-    return match.group(1) if match else path.stem
-
-
 def safe_relative_path(root: Path, path: Path) -> str:
     try:
         return str(path.resolve().relative_to(root.resolve()))

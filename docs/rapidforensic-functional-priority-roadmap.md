@@ -413,7 +413,7 @@ Latest hardening: release builds now emit `external-blocker-ledger-manifest-v1` 
 1. Finish Phase 1 and Phase 2 before adding more niche parsers.
 2. After Windows core artifacts are trustworthy enough, finish Phase 3 so analysts can actually use the data.
 3. Then run Phase 4 because large evidence can make a correct parser unusable if it is too slow or memory-heavy.
-4. Phase 5 is required before any court-ready or commercial-grade claim.
+4. Phase 5 is required before any report-defensible or commercial-grade claim.
 5. Phase 6 should expand data sources only after the core Windows flow is stable.
 6. Phase 7 makes the tool usable outside a developer machine.
 

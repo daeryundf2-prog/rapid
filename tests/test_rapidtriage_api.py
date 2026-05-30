@@ -36,6 +36,7 @@ if HAS_FASTAPI:
         build_preview_sandbox_trusted_diff,
         build_source_preview,
         build_source_search,
+        build_xml_preview,
         encode_source_search_file_resume_token,
         encode_source_search_resume_token,
         sqlite_wal_sidecar_info,
@@ -63,6 +64,7 @@ from tests.test_rapidtriage_run import build_run_fixture
 from tests.windows_artifact_fixtures import build_windows_artifact_fixture
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
+TEST_API_TOKEN = "rapidtriage-test-token"
 
 
 def hash_file(path: Path, algorithm: str) -> str:
@@ -71,6 +73,13 @@ def hash_file(path: Path, algorithm: str) -> str:
         for chunk in iter(lambda: handle.read(1024 * 1024), b""):
             hasher.update(chunk)
     return hasher.hexdigest()
+
+
+def api_test_client(store: RunJobStore | None = None):
+    return TestClient(
+        create_app(store or RunJobStore(), auth_token=TEST_API_TOKEN),
+        headers={"X-RapidTriage-Token": TEST_API_TOKEN},
+    )
 
 
 @unittest.skipUnless(HAS_FASTAPI, "fastapi is required for RapidTriage API tests")
@@ -204,7 +213,7 @@ class RapidTriageApiTests(unittest.TestCase):
             )
             store = RunJobStore()
             job = store.import_completed_run(run_dir)
-            client = TestClient(create_app(store))
+            client = api_test_client(store)
 
             response = client.get(
                 f"/api/runs/{job.run_id}/source-search",
@@ -292,7 +301,7 @@ class RapidTriageApiTests(unittest.TestCase):
             )
             store = RunJobStore()
             job = store.import_completed_run(run_dir)
-            client = TestClient(create_app(store))
+            client = api_test_client(store)
 
             response = client.get(
                 f"/api/runs/{job.run_id}/source-preview",
@@ -499,7 +508,7 @@ class RapidTriageApiTests(unittest.TestCase):
             )
             store = RunJobStore()
             job = store.import_completed_run(run_dir)
-            client = TestClient(create_app(store))
+            client = api_test_client(store)
 
             response = client.get(
                 f"/api/runs/{job.run_id}/source-sqlite-wal-preview",
@@ -595,7 +604,7 @@ class RapidTriageApiTests(unittest.TestCase):
         self.assertIsNone(args.crash_log_dir)
 
     def test_health_and_index_are_available(self) -> None:
-        client = TestClient(create_app(RunJobStore()))
+        client = api_test_client(RunJobStore())
 
         self.assertEqual(client.get("/api/health").json(), {"status": "ok"})
         self.assertFalse(client.get("/api/enterprise/policy").json()["telemetry"]["enabled"])
@@ -759,7 +768,7 @@ class RapidTriageApiTests(unittest.TestCase):
             )
             store = RunJobStore()
             job = store.import_completed_run(run_dir)
-            client = TestClient(create_app(store))
+            client = api_test_client(store)
 
             static_response = client.get("/api/forensic-capabilities")
             run_response = client.get(f"/api/runs/{job.run_id}/capabilities")
@@ -1029,7 +1038,7 @@ class RapidTriageApiTests(unittest.TestCase):
         self.assertIn("not-commercial-ready", styles)
 
     def test_commercial_readiness_api_returns_compact_gui_gate(self) -> None:
-        client = TestClient(create_app(RunJobStore()))
+        client = api_test_client(RunJobStore())
 
         response = client.get("/api/commercial-readiness?next_gate=validated&limit=3")
 
@@ -1048,7 +1057,7 @@ class RapidTriageApiTests(unittest.TestCase):
         self.assertFalse(payload["validation_package"]["attached"])
 
     def test_commercial_readiness_api_can_attach_internal_validation_package(self) -> None:
-        client = TestClient(create_app(RunJobStore()))
+        client = api_test_client(RunJobStore())
 
         response = client.get(
             "/api/commercial-readiness?next_gate=commercial_grade&limit=4&include_internal_validation=true"
@@ -1067,7 +1076,7 @@ class RapidTriageApiTests(unittest.TestCase):
         self.assertTrue(payload["focused_items"])
 
     def test_commercial_readiness_api_can_attach_mac_first_evidence(self) -> None:
-        client = TestClient(create_app(RunJobStore()))
+        client = api_test_client(RunJobStore())
         with tempfile.TemporaryDirectory() as tmp_dir:
             evidence_path = Path(tmp_dir) / "macos-live-smoke.json"
             evidence_path.write_text(
@@ -1100,7 +1109,7 @@ class RapidTriageApiTests(unittest.TestCase):
         self.assertEqual(payload["gate_counts"]["commercial_grade"]["passed"], 0)
 
     def test_commercial_readiness_api_reports_bad_mac_first_evidence_as_operator_input_error(self) -> None:
-        client = TestClient(create_app(RunJobStore()))
+        client = api_test_client(RunJobStore())
         with tempfile.TemporaryDirectory() as tmp_dir:
             missing_path = Path(tmp_dir) / "missing-qc"
 
@@ -1120,7 +1129,7 @@ class RapidTriageApiTests(unittest.TestCase):
                         "auth_token": "secret-token",
                     },
                 )
-                client = TestClient(create_app(RunJobStore()))
+                client = api_test_client(RunJobStore())
 
                 listing_response = client.get("/api/crash-reports")
                 self.assertEqual(listing_response.status_code, 200)
@@ -1163,7 +1172,7 @@ class RapidTriageApiTests(unittest.TestCase):
                     self.assertIn(f"{report['crash_id']}.json", names)
 
     def test_workbench_smoke_contract_exposes_browser_test_flow(self) -> None:
-        client = TestClient(create_app(RunJobStore()))
+        client = api_test_client(RunJobStore())
         app_js = (REPO_ROOT / "rapidtriage" / "web" / "static" / "app.js").read_text(encoding="utf-8")
         index_html = (REPO_ROOT / "rapidtriage" / "web" / "static" / "index.html").read_text(encoding="utf-8")
         styles = (REPO_ROOT / "rapidtriage" / "web" / "static" / "styles.css").read_text(encoding="utf-8")
@@ -1204,7 +1213,7 @@ class RapidTriageApiTests(unittest.TestCase):
                 self.fail(f"Smoke selector {selector} is not present in static markup")
             elif "data-tab='" in selector:
                 tab = selector.split("data-tab='", 1)[1].split("'", 1)[0]
-                self.assertIn(f'data-tab="${{escapeHtml(mode.tab)}}"', app_js)
+                self.assertIn('data-tab="${escapeHtml(mode.tab)}"', app_js)
                 self.assertIn(f'tab: "{tab}"', (REPO_ROOT / "rapidtriage" / "web" / "static" / "app_workbench_config.js").read_text(encoding="utf-8"))
         self.assertIn("case_report", payload["api_routes"])
         step_ids = {step["id"] for step in payload["required_steps"]}
@@ -1239,7 +1248,7 @@ class RapidTriageApiTests(unittest.TestCase):
         self.assertIn("virtual-window-jump", styles)
 
     def test_workbench_large_result_evidence_profiles_100k_ui_windowing(self) -> None:
-        client = TestClient(create_app(RunJobStore()))
+        client = api_test_client(RunJobStore())
 
         response = client.get("/api/workbench/large-result-evidence", params={"record_count": 100_000})
 
@@ -1277,7 +1286,7 @@ class RapidTriageApiTests(unittest.TestCase):
 
     def test_sample_case_api_creates_and_imports_practice_run(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
-            client = TestClient(create_app(RunJobStore()))
+            client = api_test_client(RunJobStore())
             response = client.post(
                 "/api/sample-case/run",
                 json={
@@ -1297,7 +1306,7 @@ class RapidTriageApiTests(unittest.TestCase):
 
     def test_run_validation_package_exports_hashes_review_status_and_blockers(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
-            client = TestClient(create_app(RunJobStore()))
+            client = api_test_client(RunJobStore())
             response = client.post(
                 "/api/sample-case/run",
                 json={
@@ -1453,7 +1462,7 @@ class RapidTriageApiTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp_dir:
             source = Path(tmp_dir) / "phone-export.ad1"
             source.write_bytes(b"fixture")
-            client = TestClient(create_app(RunJobStore()))
+            client = api_test_client(RunJobStore())
 
             response = client.post("/api/evidence/identify", json={"path": str(source)})
 
@@ -1470,7 +1479,7 @@ class RapidTriageApiTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp_dir:
             root = Path(tmp_dir) / "case-root"
             build_windows_artifact_fixture(root)
-            client = TestClient(create_app(RunJobStore()))
+            client = api_test_client(RunJobStore())
 
             profiles_response = client.get("/api/collect/profiles")
             plan_response = client.post(
@@ -1486,6 +1495,19 @@ class RapidTriageApiTests(unittest.TestCase):
             self.assertEqual(payload["profile"], "intrusion")
             self.assertGreater(payload["summary"]["present_count"], 0)
             self.assertIn("EventLogs", payload["summary"]["category_counts"])
+
+    def test_xml_preview_rejects_dtd_entities(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            xml_path = Path(tmp_dir) / "malicious.xml"
+            xml_path.write_text(
+                "<!DOCTYPE root [<!ENTITY xxe SYSTEM 'file:///etc/passwd'>]><root>&xxe;</root>",
+                encoding="utf-8",
+            )
+
+            payload = build_xml_preview(xml_path)
+
+        self.assertEqual(payload["preview_type"], "text")
+        self.assertIn("DTD/entity declarations are disabled", payload["message"])
 
     def test_create_run_waits_and_exposes_outputs(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -1543,7 +1565,7 @@ class RapidTriageApiTests(unittest.TestCase):
                 wav_file.setframerate(8000)
                 wav_file.writeframes(b"\x00\x00" * 8000)
             media_path.with_suffix(".wav.srt").write_text("1\n00:00:00,000 --> 00:00:01,000\npassword spoken\n", encoding="utf-8")
-            client = TestClient(create_app(RunJobStore()))
+            client = api_test_client(RunJobStore())
 
             response = client.post(
                 "/api/runs",
@@ -3324,7 +3346,7 @@ class RapidTriageApiTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp_dir:
             source = Path(tmp_dir) / "case.ad1"
             source.write_bytes(b"fixture")
-            client = TestClient(create_app(RunJobStore()))
+            client = api_test_client(RunJobStore())
 
             response = client.post(
                 "/api/runs",
@@ -3345,7 +3367,7 @@ class RapidTriageApiTests(unittest.TestCase):
             output_dir = Path(tmp_dir) / "run-out"
             root.mkdir(parents=True, exist_ok=True)
             build_run_fixture(root)
-            client = TestClient(create_app(RunJobStore()))
+            client = api_test_client(RunJobStore())
 
             run_response = client.post(
                 "/api/runs",
@@ -3520,6 +3542,17 @@ class RapidTriageApiTests(unittest.TestCase):
                 self.assertIn("rapidtriage-reviewer.html", reviewer_zip.namelist())
                 self.assertIn("rapidtriage-selected-evidence.json", reviewer_zip.namelist())
                 self.assertIn("rapidtriage-bundle-manifest.json", reviewer_zip.namelist())
+                packaged_manifest = json.loads(
+                    reviewer_zip.read("rapidtriage-bundle-manifest.json").decode("utf-8")
+                )
+                self.assertEqual(packaged_manifest["command"], "bundle-member-manifest")
+                self.assertEqual(packaged_manifest["manifest_role"], "in-archive-member")
+                self.assertEqual(packaged_manifest["archive_hash_policy"], "detached-external-manifest-only")
+                self.assertEqual(
+                    packaged_manifest["archive_hashes_status"],
+                    "omitted-from-zip-to-avoid-self-referential-hash",
+                )
+                self.assertEqual(packaged_manifest["archive_hashes"], {})
 
             bundle_file_response = client.get(f"/api/runs/{run_id}/reviewer-bundle/file")
             self.assertEqual(bundle_file_response.status_code, 200)
@@ -3535,7 +3568,7 @@ class RapidTriageApiTests(unittest.TestCase):
             build_run_fixture(root)
 
             store = RunJobStore(state_path=state_path)
-            client = TestClient(create_app(store))
+            client = api_test_client(store)
             run_response = client.post(
                 "/api/runs",
                 json={
@@ -3548,7 +3581,7 @@ class RapidTriageApiTests(unittest.TestCase):
             )
             run_id = run_response.json()["run_id"]
 
-            restored_client = TestClient(create_app(RunJobStore(state_path=state_path)))
+            restored_client = api_test_client(RunJobStore(state_path=state_path))
             restored_response = restored_client.get(f"/api/runs/{run_id}")
 
             self.assertEqual(restored_response.status_code, 200)
@@ -3604,7 +3637,7 @@ class RapidTriageApiTests(unittest.TestCase):
             disguised.write_bytes(b"MZ\x90\x00not actually a jpeg")
             feed = Path(tmp_dir) / "known-good.csv"
             feed.write_text(hashlib.sha256(known_good.read_bytes()).hexdigest() + "\n", encoding="utf-8")
-            client = TestClient(create_app(RunJobStore()))
+            client = api_test_client(RunJobStore())
 
             run_response = client.post(
                 "/api/runs",
@@ -3642,7 +3675,7 @@ class RapidTriageApiTests(unittest.TestCase):
             db_path = Path(tmp_dir) / "case.db"
             root.mkdir(parents=True, exist_ok=True)
             build_run_fixture(root)
-            client = TestClient(create_app(RunJobStore()))
+            client = api_test_client(RunJobStore())
 
             run_response = client.post(
                 "/api/runs",
@@ -3886,7 +3919,7 @@ class RapidTriageApiTests(unittest.TestCase):
             db_path = Path(tmp_dir) / "case-default.db"
             root.mkdir(parents=True, exist_ok=True)
             build_run_fixture(root)
-            client = TestClient(create_app(RunJobStore()))
+            client = api_test_client(RunJobStore())
 
             run_response = client.post(
                 "/api/runs",
@@ -3969,7 +4002,7 @@ class RapidTriageApiTests(unittest.TestCase):
                 encoding="utf-8",
             )
 
-            client = TestClient(create_app(RunJobStore()))
+            client = api_test_client(RunJobStore())
             import_response = client.post("/api/runs/import", json={"output_dir": str(output_dir)})
             self.assertEqual(import_response.status_code, 201, import_response.text)
             run_id = import_response.json()["run_id"]

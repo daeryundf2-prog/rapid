@@ -752,7 +752,7 @@ class CloudTestServer:
         self.url = f"http://{host}:{port}"
         return self
 
-    def __exit__(self, exc_type: object, exc: object, traceback: object) -> None:
+    def __exit__(self, _exc_type: object, _exc: object, _traceback: object) -> None:
         self.server.shutdown()
         self.server.server_close()
         self.thread.join(timeout=5)

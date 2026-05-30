@@ -29,7 +29,7 @@ This note records the current 12-step engineering pass for moving RapidTriage fr
 6. EVTX message rendering design and built-in preview added.
    - Status: design plus validation-required built-in rendering.
    - Current scope: built-in preview text and high-value fallback messages for selected event IDs with `validation_required=true`.
-   - Remaining: provider resource DLL/MUI loading, event template rendering, locale control, and court-ready validation.
+   - Remaining: provider resource DLL/MUI loading, event template rendering, locale control, and report-defensible validation.
 
 7. EVTX deleted/slack/corrupt recovery metadata added.
    - Status: implemented as triage/recovery candidate metadata.
@@ -79,7 +79,7 @@ This note records the current 12-step engineering pass for moving RapidTriage fr
 17. Worker JSONL to Parquet conversion path.
     - Status: done as an optional dependency-gated storage path.
     - Evidence: `rapidtriage columnar-convert --input-jsonl ./worker-artifacts.jsonl --output-parquet ./worker-artifacts.parquet` converts validated `ArtifactRecordV1` JSONL into row-grouped Parquet when `pyarrow` is installed, records input SHA256, writes a conversion manifest, and keeps source-parser validation blockers visible.
-    - Important caveat: conversion does not make the underlying parser findings court-ready; source parser validation and large-corpus query benchmarks are still required.
+    - Important caveat: conversion does not make the underlying parser findings report-defensible; source parser validation and large-corpus query benchmarks are still required.
 
 18. Balanced multi-lane status plan.
     - Status: done as an execution-control upgrade.

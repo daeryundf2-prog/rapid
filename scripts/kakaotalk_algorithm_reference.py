@@ -19,7 +19,6 @@ from rapidtriage.core.kakaotalk import (  # noqa: E402
 from rapidtriage.core.kakaotalk_algorithms import (  # noqa: E402
     build_sqlcipher_raw_key_with_salt,
     decrypt_legacy_file,
-    derive_legacy_key_iv,
     derive_postpatch_v2_database_key,
     derive_postpatch_v2_profile_material,
 )

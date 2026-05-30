@@ -80,7 +80,7 @@ class JsonlArtifactStreamWriter:
         self.open()
         return self
 
-    def __exit__(self, exc_type: object, exc: object, traceback: object) -> None:
+    def __exit__(self, _exc_type: object, _exc: object, _traceback: object) -> None:
         if not self._closed and self._handle is not None:
             self._handle.close()
 

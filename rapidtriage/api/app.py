@@ -7,6 +7,7 @@ import re
 import contextlib
 import email
 import hashlib
+import secrets
 import sqlite3
 import datetime as dt
 import wave
@@ -52,6 +53,7 @@ from ..core.indicators import IndicatorSummaryError, build_indicator_ti_enrichme
 from ..core.large_case_controls import build_source_search_full_cursor_contract
 from ..core.run import RunModeError
 from ..core.sample_case import DEFAULT_SAMPLE_MODE, SampleCaseError, run_sample_workflow
+from ..core.safe_xml import UnsafeXmlError, safe_xml_fromstring
 from ..core.search import SearchError, run_unified_search
 from ..core.source_paths import candidate_source_paths, source_path_resolution_diagnostics
 from ..core.source_reader import (
@@ -528,15 +530,55 @@ class CollectPlanRequest(BaseModel):
     input_kind: Optional[str] = None
 
 
-def create_app(job_store: RunJobStore | None = None, auth_token: str | None = None) -> FastAPI:
+LOCAL_API_HOSTS = {"127.0.0.1", "localhost", "::1", "testserver"}
+MUTATING_METHODS = {"POST", "PUT", "PATCH", "DELETE"}
+
+
+def truthy_env(name: str) -> bool:
+    return os.environ.get(name, "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def request_host(value: str | None) -> str:
+    if not value:
+        return ""
+    host = value.strip()
+    if host.startswith("["):
+        return host[1:].split("]", 1)[0].lower()
+    return host.rsplit(":", 1)[0].lower()
+
+
+def allowed_api_hosts() -> set[str]:
+    extra = {
+        item.strip().lower()
+        for item in os.environ.get("RAPIDTRIAGE_ALLOWED_HOSTS", "").split(",")
+        if item.strip()
+    }
+    return LOCAL_API_HOSTS | extra
+
+
+def create_app(job_store: RunJobStore | None = None, auth_token: str | None = None, require_auth: bool | None = None) -> FastAPI:
     store = job_store or default_job_store
     api = FastAPI(title="rapidtriage local API", version="0.2.0")
     static_dir = Path(__file__).resolve().parent.parent / "web" / "static"
-    expected_token = auth_token or os.environ.get("RAPIDTRIAGE_AUTH_TOKEN") or ""
+    auth_disabled = truthy_env("RAPIDTRIAGE_DISABLE_AUTH") or require_auth is False
+    configured_token = auth_token or os.environ.get("RAPIDTRIAGE_AUTH_TOKEN") or ""
+    expected_token = "" if auth_disabled else configured_token or secrets.token_urlsafe(32)
+    api.state.auth_required = bool(expected_token)
+    api.state.auth_token = expected_token
 
     @api.middleware("http")
     async def require_auth_token(request: Request, call_next):
         try:
+            if request.url.path.startswith("/api"):
+                host = request_host(request.headers.get("host"))
+                allowed_hosts = allowed_api_hosts()
+                if host and host not in allowed_hosts:
+                    return JSONResponse(status_code=403, content={"detail": "RapidTriage API host is not allowed"})
+                origin = request.headers.get("origin")
+                if origin and request.method.upper() in MUTATING_METHODS:
+                    origin_host = request_host(origin.split("//", 1)[-1])
+                    if origin_host and origin_host not in allowed_hosts:
+                        return JSONResponse(status_code=403, content={"detail": "RapidTriage API origin is not allowed"})
             if expected_token and request.url.path.startswith("/api"):
                 if "token" in request.query_params:
                     return JSONResponse(
@@ -3927,7 +3969,7 @@ def build_run_validation_parser_execution(
         "parser_version_policy": {
             "rapidforensic_profile": "run-summary-stage-contract",
             "per-parser_version_capture": "partial",
-            "limitation": "external parser binaries and native parser git revisions must be attached for court-grade claims",
+            "limitation": "external parser binaries and native parser git revisions must be attached for report-defensible claims",
         },
     }
 
@@ -6274,9 +6316,9 @@ def build_xml_preview(source_path: Path) -> Dict[str, object]:
         }
     try:
         text = source_path.read_text(encoding="utf-8", errors="replace")
-        root = ET.fromstring(text.encode("utf-8", errors="replace"))
+        root = safe_xml_fromstring(text.encode("utf-8", errors="replace"))
         nodes = summarize_xml_nodes(root)
-    except (OSError, ET.ParseError) as exc:
+    except (OSError, ET.ParseError, UnsafeXmlError) as exc:
         return {
             "preview_type": "text",
             "message": f"XML parse failed, showing text fallback: {exc}",

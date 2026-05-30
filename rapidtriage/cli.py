@@ -2264,6 +2264,18 @@ def run_web_server(
         import uvicorn
     except ImportError as exc:
         raise RuntimeError("rapidtriage web requires the 'web' extra: pip install 'dashcam-tools[web]'") from exc
+    if not auth_token and not allow_remote_without_auth:
+        import os
+        import secrets
+
+        auth_token = os.environ.get("RAPIDTRIAGE_AUTH_TOKEN") or secrets.token_urlsafe(32)
+        os.environ["RAPIDTRIAGE_AUTH_TOKEN"] = auth_token
+        print("RapidTriage API token required for /api routes.")
+        print(f"Set browser localStorage key rapidtriage.authToken to: {auth_token}")
+    if allow_remote_without_auth:
+        import os
+
+        os.environ["RAPIDTRIAGE_DISABLE_AUTH"] = "1"
     print(f"Starting rapidtriage web UI at http://{host}:{port}")
     if auth_token:
         import os

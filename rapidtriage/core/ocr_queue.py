@@ -757,7 +757,6 @@ def ocr_queue_item_core_accuracy_gates(*, item_context: Mapping[str, object]) ->
         if isinstance(item_context.get("translation_sidecar"), Mapping)
         else {}
     )
-    metadata = item_context.get("metadata") if isinstance(item_context.get("metadata"), Mapping) else {}
     quality_metrics = item_context.get("quality_metrics") if isinstance(item_context.get("quality_metrics"), Mapping) else {}
     return ocr_queue_core_accuracy_gates(
         items=[

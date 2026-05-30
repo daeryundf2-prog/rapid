@@ -179,7 +179,8 @@ class PillowCv2Compat:
             return image.grayscale()
         return image
 
-    def resize(self, image, size: tuple[int, int], interpolation: int = 3):  # noqa: ARG002
+    def resize(self, image, size: tuple[int, int], interpolation: int = 3):
+        _ = interpolation
         if isinstance(image, PillowMatrix):
             return image.resized(size)
         return image

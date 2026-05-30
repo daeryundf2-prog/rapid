@@ -807,7 +807,7 @@ def sqlite_deleted_record_candidate_profile(
         "candidate_count": 0,
         "candidates": [],
         "anomalies": [],
-        "method": "Scan leaf-table freeblock bodies for complete SQLite table-leaf cell payloads; results are candidates, not court-ready recovered rows.",
+        "method": "Scan leaf-table freeblock bodies for complete SQLite table-leaf cell payloads; results are candidates, not report-defensible recovered rows.",
     }
     blocks = freeblock_profile.get("blocks") if isinstance(freeblock_profile, dict) else None
     if not isinstance(blocks, list):

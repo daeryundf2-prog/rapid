@@ -37,7 +37,7 @@ class RapidTriageExifGpsProfileTests(unittest.TestCase):
             def __enter__(self) -> "FakeImageHandle":
                 return self
 
-            def __exit__(self, exc_type: object, exc: object, traceback: object) -> None:
+            def __exit__(self, _exc_type: object, _exc: object, _traceback: object) -> None:
                 return None
 
             def getexif(self) -> FakeExif:

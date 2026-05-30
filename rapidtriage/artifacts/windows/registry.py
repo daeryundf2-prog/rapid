@@ -484,13 +484,6 @@ def build_registry_hive_cell_record(
     risk_flags = registry_cell_risk_flags(candidate)
     recovery_evidence = registry_recovery_evidence(candidate, "deleted-or-free-cell")
     recovery_identity_profile = registry_recovery_identity_profile(candidate, recovery_evidence)
-    recovery_profile = registry_recovery_validation_profile(
-        candidate,
-        recovery_evidence,
-        "deleted-or-free-cell",
-        validation_checks=[],
-        recovery_identity_profile=recovery_identity_profile,
-    )
     return ArtifactRecord(
         provider=WindowsRegistryProvider.name,
         artifact_type="registry-hive-cell",

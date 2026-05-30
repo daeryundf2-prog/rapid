@@ -22,6 +22,23 @@ E01_KNOWN_ANSWER_OUTPUT_NAME = "windows11-e01-known-answer.json"
 E01_EVIDENCE_PREFLIGHT_OUTPUT_NAME = "rapidtriage-evidence-preflight.json"
 E01_STAGE_STATUS_OUTPUT_NAME = "rapidforensic-e01-workflow-stage-status.json"
 E01_VALIDATION_PLAN_OUTPUT_NAME = "rapidforensic-e01-validation-plan.json"
+EWF_HEADER_SIGNATURES = (b"EVF\t\r\n\xff\x00", b"EVF2\r\n\x81\x00")
+
+
+def _evidence_preflight_stage_status(source: Path, evidence: Mapping[str, object]) -> tuple[str, list[str]]:
+    warnings: list[str] = []
+    if not evidence.get("supported"):
+        return "blocked", warnings
+    if str(evidence.get("detected_format") or "").lower() in {"e01", "ex01"} and source.is_file():
+        try:
+            with source.open("rb") as handle:
+                header = handle.read(8)
+        except OSError as exc:
+            return "blocked", [f"EWF header could not be read: {exc}"]
+        if header not in EWF_HEADER_SIGNATURES:
+            warnings.append("EWF header signature is not recognized; treat this source as malformed until validated.")
+            return "blocked", warnings
+    return "complete", warnings
 
 
 def _output_status(path: Path) -> dict[str, object]:
@@ -47,6 +64,7 @@ def _stage(
     *,
     output_path: Path | None = None,
     details: Mapping[str, object] | None = None,
+    warnings: Sequence[str] | None = None,
 ) -> dict[str, object]:
     row: dict[str, object] = {
         "id": stage_id,
@@ -58,6 +76,8 @@ def _stage(
         row["output"] = _output_status(output_path)
     if details:
         row["details"] = dict(details)
+    if warnings:
+        row["warnings"] = list(warnings)
     return row
 
 
@@ -130,11 +150,12 @@ def run_windows11_e01_smoke(
 
     evidence = identify_evidence(source).to_dict()
     write_result(evidence, evidence_path)
+    evidence_status, evidence_warnings = _evidence_preflight_stage_status(source, evidence)
     stages.append(
         _stage(
             "evidence-preflight",
             "Evidence adapter and dependency preflight",
-            "complete" if evidence.get("supported") else "blocked",
+            evidence_status,
             output_path=evidence_path,
             details={
                 "adapter": evidence.get("adapter"),
@@ -142,6 +163,7 @@ def run_windows11_e01_smoke(
                 "missing_tools": evidence.get("missing_tools") or [],
                 "support_level": evidence.get("support_level"),
             },
+            warnings=evidence_warnings,
         )
     )
 

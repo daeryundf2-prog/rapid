@@ -4,7 +4,7 @@ import datetime as dt
 import json
 from collections import Counter
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Mapping, Sequence
+from typing import Dict, Iterable, List, Mapping, Sequence
 
 from .artifacts import SUPPORTED_ARTIFACT_KINDS, run_artifact_collection
 from .docs import scan_document_candidates
@@ -283,7 +283,6 @@ def eventlog_detail_event(artifact_type: str, details: Mapping[str, object]) -> 
     timestamp = str(details.get("event_created_at") or details.get("timestamp") or "")
     if not timestamp:
         return None
-    event_id = str(details.get("event_id") or "")
     category = str(details.get("event_category") or "event")
     family = str(details.get("event_family") or "")
     context = collect_selected_context(

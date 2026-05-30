@@ -164,12 +164,17 @@ def build_submission_bundle(
     )
     write_result(submission_readiness, submission_readiness_path)
     preliminary_manifest = {
-        "command": "bundle",
+        "command": "bundle-member-manifest",
+        "manifest_role": "in-archive-member",
+        "manifest_scope": "pre-archive-member-list",
+        "archive_hash_policy": "detached-external-manifest-only",
         "generated_at": dt.datetime.now(dt.timezone.utc).isoformat(),
         "case_id": manifest.get("case_id", ""),
         "output_dir": str(output_dir),
         "archive": str(zip_path),
         "archive_hashes": {},
+        "archive_hashes_status": "omitted-from-zip-to-avoid-self-referential-hash",
+        "external_authoritative_manifest": str(bundle_manifest_path),
         "summary": {
             "hashed_item_count": manifest.get("summary", {}).get("hashed_item_count", 0)
             if isinstance(manifest.get("summary"), Mapping)
@@ -185,7 +190,7 @@ def build_submission_bundle(
             "ready_for_court_report": submission_readiness["ready_for_court_report"],
             "external_evidence_required": submission_readiness["external_evidence_required"],
             "blockers": submission_readiness["blockers"],
-            "archive_hash_scope": "pre-archive-placeholder-inside-zip; final archive hash is written to the external bundle manifest after ZIP creation",
+            "archive_hash_scope": "detached-external-manifest-only",
         },
         "custody_note": "Reviewer bundle contains review metadata, selected evidence hashes, and report drafts; it does not include the original evidence image.",
         "court_exhibit_package": {
@@ -1017,7 +1022,7 @@ def build_court_exhibit_report_grade_validation_plan(
         "external_blocker_catalog": list(COURT_EXHIBIT_REPORT_GRADE_BLOCKERS),
         "blockers": sorted({str(slot.get("blocker") or "") for slot in blocking_slots if slot.get("blocker")}),
         "commercial_claim_allowed": False,
-        "reporting_boundary": "This plan makes the reviewer bundle exhibit index auditable, but court-ready claims require trusted manifest review, signed/notarized exhibit manifests, jurisdiction-specific forms, independent package review, controlled source-file copy bundles, and final archive signature attestation.",
+        "reporting_boundary": "This plan makes the reviewer bundle exhibit index auditable, but report-defensible claims require trusted manifest review, signed/notarized exhibit manifests, jurisdiction-specific forms, independent package review, controlled source-file copy bundles, and final archive signature attestation.",
     }
     return {**plan_core, "validation_plan_sha256": stable_payload_sha256(plan_core)}
 

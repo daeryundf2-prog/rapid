@@ -8,7 +8,7 @@ from typing import Iterable, Mapping
 
 from .commercial_readiness import build_commercial_readiness_report, parse_item_range
 from .docs import write_result
-from .forensic_accuracy import CORE_FORENSIC_ACCURACY_ITEMS, accuracy_profile_for_item
+from .forensic_accuracy import accuracy_profile_for_item
 
 
 FORENSIC_VALIDATION_PLAN_VERSION = "forensic-validation-plan-v1"

@@ -13,13 +13,14 @@ from collections import Counter
 from email import policy
 from email.message import EmailMessage
 from pathlib import Path
-from typing import Dict, Iterable, List, Mapping, Sequence, Union
+from typing import Dict, List, Mapping, Sequence, Union
 from xml.etree import ElementTree as ET
 
 from ..artifacts import all_providers
 from .input_root import InputRoot, resolve_input_root
 from .models import DocumentCandidate, DocumentMatch
 from .rules import RuleSet, annotate_docs_payload
+from .safe_xml import safe_xml_fromstring
 
 SUPPORTED_DOC_EXTS = {
     ".cfg",
@@ -578,7 +579,7 @@ def _extract_open_document_text(
 
 
 def _extract_xml_text(xml_data: bytes) -> List[str]:
-    root = ET.fromstring(xml_data)
+    root = safe_xml_fromstring(xml_data)
     texts = []
     for node in root.iter():
         if node.text and node.text.strip():

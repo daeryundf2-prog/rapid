@@ -22,6 +22,8 @@ from rapidtriage.cli import build_parser, main
 from rapidtriage.core.doctor import OK, WARN, format_doctor_text, run_doctor
 from rapidtriage.core.jobs import RunJobStore
 
+TEST_API_TOKEN = "rapidtriage-test-token"
+
 
 def make_static_assets(root: Path) -> None:
     root.mkdir(parents=True, exist_ok=True)
@@ -93,7 +95,10 @@ class RapidTriageDoctorTests(unittest.TestCase):
 
     @unittest.skipUnless(HAS_FASTAPI, "fastapi is required for RapidTriage doctor API tests")
     def test_api_exposes_doctor_without_port_self_check(self) -> None:
-        client = TestClient(create_app(RunJobStore()))
+        client = TestClient(
+            create_app(RunJobStore(), auth_token=TEST_API_TOKEN),
+            headers={"X-RapidTriage-Token": TEST_API_TOKEN},
+        )
 
         response = client.get("/api/doctor")
 

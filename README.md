@@ -346,9 +346,41 @@ python -m rapidtriage commercial-readiness --validation-package docs/validation/
 - [Visible forensic feature taxonomy](docs/rapidforensic-visible-forensic-feature-taxonomy.md)
 - [Output schema](docs/rapidtriage-output-schema.md)
 - [Extended output schemas](docs/rapidtriage-output-schemas.md)
+- [Manifest schema](rapidtriage/schemas/manifest.schema.json)
+- [Compare schema](rapidtriage/schemas/compare.schema.json)
 - [Rule engine and IOC lookup](docs/rapidtriage-rule-engine.md)
+- [Rule engine sample](docs/samples/rapidtriage-rules.sample.yaml)
 - [Commercial parity backlog](docs/rapidtriage-commercial-parity-backlog.md)
 - [Release checklist](docs/rapidtriage-release-checklist.md)
+
+Output contract samples:
+
+- [Manifest sample](docs/samples/rapidtriage-manifest.sample.json)
+- [Docs sample](docs/samples/rapidtriage-docs.sample.json)
+- [Files sample](docs/samples/rapidtriage-files.sample.json)
+- [Extract sample](docs/samples/rapidtriage-extract.sample.json)
+- [Artifacts sample](docs/samples/rapidtriage-artifacts.sample.json)
+- [Run summary sample](docs/samples/rapidtriage-run-summary.sample.json)
+
+Contract maturity:
+
+- Implemented: `manifest`, `docs`, `files`, `extract`, `artifacts`, `timeline`,
+  `indicators`, `compare`, and `run-summary` JSON outputs. Review/case output stores bookmarks from implemented `files`, `docs`, `artifacts`, `timeline`, `indicators`, and `compare` outputs.
+- Experimental: recovery/carving candidates, deleted-file hints, native image
+  workflows, and performance/large-case automation that still require trusted
+  validation evidence before release claims.
+- Planned: native parity for additional proprietary containers, deeper
+  deleted-record recovery, and signed multi-platform installer evidence.
+
+Example output commands:
+
+```bash
+rapidtriage run . --mode fraud --output-dir ./rapidtriage-run-fraud
+rapidtriage artifacts . --kind browser
+```
+
+`compare` compares two individual evidence/export files and validates against
+`rapidtriage/schemas/compare.schema.json`.
 
 Validation batch 문서:
 

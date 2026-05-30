@@ -15,6 +15,7 @@ from rapidtriage.core.docs import (
     run_docs_search,
     scan_document_candidates,
 )
+from rapidtriage.core.safe_xml import UnsafeXmlError
 
 
 def write_minimal_docx(path: Path, text: str) -> None:
@@ -102,6 +103,19 @@ def write_minimal_mail_container(path: Path, text: str) -> None:
 
 
 class RapidTriageDocsTests(unittest.TestCase):
+    def test_office_xml_text_extraction_rejects_dtd_entities(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            docx_path = Path(tmp_dir) / "malicious.docx"
+            with zipfile.ZipFile(docx_path, "w") as archive:
+                archive.writestr("[Content_Types].xml", "")
+                archive.writestr(
+                    "word/document.xml",
+                    "<!DOCTYPE root [<!ENTITY xxe SYSTEM 'file:///etc/passwd'>]><root>&xxe;</root>",
+                )
+
+            with self.assertRaises(UnsafeXmlError):
+                extract_text(docx_path, "docx")
+
     def test_docs_search_skips_candidate_when_stat_fails(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             root = Path(tmp_dir)

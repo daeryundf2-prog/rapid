@@ -3,7 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import platform
-from typing import Mapping, Sequence
+from typing import Sequence
 
 
 def stable_large_case_sha256(payload: object) -> str:

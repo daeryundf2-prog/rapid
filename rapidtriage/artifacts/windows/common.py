@@ -8,7 +8,7 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Iterator
 
-from ..review import build_forensic_review
+from ..review import build_forensic_review  # noqa: F401 - re-exported for Windows artifact modules.
 
 
 WINDOWS_USERS_DIRNAME = "Users"

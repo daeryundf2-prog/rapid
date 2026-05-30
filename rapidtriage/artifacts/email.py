@@ -919,11 +919,6 @@ def build_email_mailbox_parser_manifest(
         if isinstance(details.get("email_expansion_citation_manifest"), Mapping)
         else {}
     )
-    mailbox_manifest = (
-        details.get("email_mailbox_parser_manifest")
-        if isinstance(details.get("email_mailbox_parser_manifest"), Mapping)
-        else {}
-    )
     attachment_locator_profile = (
         details.get("email_attachment_locator_profile")
         if isinstance(details.get("email_attachment_locator_profile"), Mapping)

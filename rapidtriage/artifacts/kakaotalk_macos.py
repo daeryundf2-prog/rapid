@@ -1247,7 +1247,7 @@ def run_kakaotalk_macos_report(
         "validation_required": True,
         "validation_guidance": (
             "Message bodies are exported only when explicitly requested. Validate row semantics and "
-            "known-answer counts before using as court-ready message testimony."
+            "known-answer counts before using as report-defensible message testimony."
         ),
     }
     report_json.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")

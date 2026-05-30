@@ -723,7 +723,6 @@ def collect_native_ntfs_artifacts(root: Path) -> Iterable[ArtifactRecord]:
     for path in candidate_paths:
         if not path.is_file():
             continue
-        name = path.name.lower()
         resolved = path.resolve()
         if resolved in seen:
             continue

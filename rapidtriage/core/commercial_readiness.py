@@ -1678,7 +1678,7 @@ def build_claim_discipline_manifest(
     blocked_wording = [
         "commercial-grade",
         "AXIOM/WISDOM-class parity",
-        "court-ready",
+        "report-defensible",
         "validated for all artifacts",
         "forensic suite parity",
     ]
@@ -2982,7 +2982,7 @@ def build_forensic_integrity_progress(
             "case-export-json-bundled-with-citation-index-and-source-hashes",
         ],
         "reportability_rule": (
-            "#86-#90 make single-case review exports more defensible, but commercial/court-grade claims "
+            "#86-#90 make single-case review exports more defensible, but commercial/report-defensible claims "
             "still require trusted custody, acquisition hash, audit, replay, and provenance manifests."
         ),
     }
@@ -3121,7 +3121,7 @@ def build_report_quality_progress(
             "trusted-external-tool-transcripts-and-version-log",
         ],
         "reportability_rule": (
-            "#91-#95 make report exports safer to review, cite, and package, but commercial/court-grade "
+            "#91-#95 make report exports safer to review, cite, and package, but commercial/report-defensible "
             "claims still require trusted calibration, warning, legal, exhibit, and external-tool evidence."
         ),
     }
@@ -3262,7 +3262,7 @@ def build_acquisition_quality_progress(
             "external-signature-or-notarization-attestation",
         ],
         "reportability_rule": (
-            "#96-#100 make evidence handling and export warnings visible, but commercial/court-grade "
+            "#96-#100 make evidence handling and export warnings visible, but commercial/report-defensible "
             "claims still require signed acquisition, trusted time/skew/contamination manifests, and external notarization."
         ),
     }

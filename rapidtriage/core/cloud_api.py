@@ -1804,7 +1804,7 @@ def cloud_credential_authority_profile(
             "attach provider OAuth consent, granted scopes, account ownership, and legal authority records",
             "record enterprise vault or token broker record IDs without storing raw token values",
             "capture token rotation, revocation, and collection-time access audit evidence",
-            "attach a passing credential authority/audit diff before enterprise-vaulted or court-ready claims",
+            "attach a passing credential authority/audit diff before enterprise-vaulted or report-defensible claims",
         ],
     }
 
@@ -2114,7 +2114,7 @@ def cloud_credential_report_grade_validation_plan(
             blocker="cloud-credential-enterprise-token-vault-required",
             blocking=not vault_integrated,
             external=not vault_integrated,
-            required="Integrate an OS/enterprise secret vault before multi-user or court-ready secret handling claims.",
+            required="Integrate an OS/enterprise secret vault before multi-user or report-defensible secret handling claims.",
         ),
         slot(
             "cloud-credential-controlled-reveal-workflow",
