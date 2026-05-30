@@ -175,12 +175,12 @@ class RapidTriageE01Tests(unittest.TestCase):
             self.assertTrue((output_dir / "rapidforensic-e01-workflow-stage-status.json").is_file())
             stage_status = {stage["id"]: stage["status"] for stage in payload["stages"]}
             self.assertEqual(stage_status["known-answer-manifest"], "complete")
-            self.assertEqual(stage_status["evidence-preflight"], "complete")
+            self.assertEqual(stage_status["evidence-preflight"], "blocked")
             self.assertEqual(stage_status["report-grade-validation-plan"], "complete")
             self.assertEqual(stage_status["triage-run"], "blocked")
             self.assertEqual(payload["stage_status"]["schema"], "rapidforensic-e01-workflow-stage-status-v1")
-            self.assertEqual(payload["stage_status"]["stage_counts"]["blocked"], 1)
-            self.assertEqual(payload["stage_status"]["blocked_stage_ids"], ["triage-run"])
+            self.assertEqual(payload["stage_status"]["stage_counts"]["blocked"], 2)
+            self.assertEqual(payload["stage_status"]["blocked_stage_ids"], ["evidence-preflight", "triage-run"])
             self.assertEqual(
                 payload["stage_status"]["qc_links"]["validation_plan"],
                 str((output_dir / "rapidforensic-e01-validation-plan.json").resolve()),

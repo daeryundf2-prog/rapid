@@ -143,7 +143,13 @@ def normalize_platform_label(value: str) -> str:
 def read_json(path: Path) -> Any:
     if not path.is_file():
         return None
-    return json.loads(path.read_text(encoding="utf-8"))
+    try:
+        return json.loads(path.read_text(encoding="utf-8-sig"))
+    except UnicodeDecodeError:
+        try:
+            return json.loads(path.read_text(encoding="utf-16"))
+        except Exception:
+            return json.loads(path.read_text())
 
 
 def render_markdown(summary: dict[str, Any]) -> str:
