@@ -38,11 +38,14 @@ jobs:
         run: python -m unittest discover -s tests
 
       - name: Compile package
-        run: python -m compileall -q rapidtriage
+        run: python -m compileall -q rapidtriage tests scripts
 
       - name: Check web JavaScript syntax
         if: matrix.os != 'windows-latest'
-        run: node --check rapidtriage/web/static/app.js
+        run: |
+          node --check rapidtriage/web/static/app_workbench_config.js
+          node --check rapidtriage/web/static/app_state.js
+          node --check rapidtriage/web/static/app.js
 
       - name: Build release package
         run: python scripts/build-release.py --output-dir release-ci --skip-build
@@ -58,3 +61,37 @@ jobs:
 
       - name: Verify release evidence
         run: python scripts/verify-release-evidence.py --release-dir release-ci --validation-dir release-validation-ci --benchmark-dir release-benchmark-ci --minimum-smoke-count 0 --output-dir release-evidence-ci
+
+  rust-worker:
+    name: Rust worker checks
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Check Rust formatting
+        working-directory: engines/rust
+        run: cargo fmt --all -- --check
+
+      - name: Check Rust workspace
+        working-directory: engines/rust
+        run: cargo check --workspace --all-targets --locked
+
+      - name: Test Rust workspace
+        working-directory: engines/rust
+        run: cargo test --workspace --locked
+
+      - name: Build rapid-worker
+        working-directory: engines/rust
+        run: cargo build --bin rapid-worker --locked
+
+      - name: Run worker Case DB smoke
+        run: python scripts/worker-case-db-smoke.py --worker engines/rust/target/debug/rapid-worker
