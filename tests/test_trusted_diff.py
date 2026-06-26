@@ -58,6 +58,43 @@ class TrustedDiffTests(unittest.TestCase):
         diffs = _list_field(payload, "diffs")
         self.assertTrue(any(isinstance(diff, dict) and diff.get("category") == "HASH_MISMATCH" for diff in diffs))
 
+    def test_cli_fails_when_manifest_expected_items_are_missing_from_both_outputs(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            empty_rapid = _empty_observed_results(Path(temp_dir), "rapid-empty")
+            empty_trusted = _empty_observed_results(Path(temp_dir), "trusted-empty")
+            completed = _run_trusted_diff(
+                "--rapid-results",
+                str(empty_rapid),
+                "--trusted-results",
+                str(empty_trusted),
+                "--json",
+            )
+            payload = _json_object(completed.stdout)
+
+        self.assertEqual(completed.returncode, 1)
+        self.assertEqual(payload["status"], "FAIL")
+        counts = _object_field(payload, "counts")
+        self.assertEqual(_int_field(counts, "total"), 9)
+        self.assertEqual(_int_field(counts, "critical"), 9)
+
+    def test_cli_fails_when_matching_outputs_disagree_with_manifest_truth(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            rapid_path = _mutated_results(Path(temp_dir), RAPID_RESULTS, "rapid-wrong")
+            trusted_path = _mutated_results(Path(temp_dir), TRUSTED_RESULTS, "trusted-wrong")
+            completed = _run_trusted_diff(
+                "--rapid-results",
+                str(rapid_path),
+                "--trusted-results",
+                str(trusted_path),
+                "--json",
+            )
+            payload = _json_object(completed.stdout)
+
+        self.assertEqual(completed.returncode, 1)
+        self.assertEqual(payload["status"], "FAIL")
+        diffs = _list_field(payload, "diffs")
+        self.assertTrue(any(isinstance(diff, dict) and diff.get("category") == "HASH_MISMATCH" for diff in diffs))
+
 
 def _run_trusted_diff(*extra_args: str) -> subprocess.CompletedProcess[str]:
     args = [
@@ -112,13 +149,32 @@ def _int_field(document: JsonObject, field: str) -> int:
 
 
 def _mutated_trusted_results(temp_dir: Path) -> Path:
-    payload = _json_object(TRUSTED_RESULTS.read_text(encoding="utf-8"))
+    return _mutated_results(temp_dir, TRUSTED_RESULTS, "trusted-results")
+
+
+def _mutated_results(temp_dir: Path, source: Path, stem: str) -> Path:
+    payload = _json_object(source.read_text(encoding="utf-8"))
     items = _list_field(payload, "items")
     first_item = items[0] if items else None
     if not isinstance(first_item, dict):
         raise AssertionError("first item must be an object")
     first_item["sha256"] = "f" * 64
-    path = temp_dir / "trusted-results.json"
+    path = temp_dir / f"{stem}.json"
+    _ = path.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+    return path
+
+
+def _empty_observed_results(temp_dir: Path, stem: str) -> Path:
+    payload = _json_object(TRUSTED_RESULTS.read_text(encoding="utf-8"))
+    payload["source_run_id"] = stem
+    payload["items"] = []
+    payload["summary"] = {
+        "item_count": 0,
+        "recovered_count": 0,
+        "error_count": 0,
+        "inconclusive_count": 0,
+    }
+    path = temp_dir / f"{stem}.json"
     _ = path.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
     return path
 

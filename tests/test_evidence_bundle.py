@@ -60,6 +60,40 @@ class EvidenceBundleTests(unittest.TestCase):
         self.assertEqual(payload["release_evidence_status"], "release_blocked")
         self.assertEqual(_int_field(_object_field(payload, "summary"), "blocking_issue_count"), 1)
 
+    def test_missing_bundle_root_blocks_release(self) -> None:
+        missing_root = Path(tempfile.gettempdir()) / "rapid-review-definitely-missing-bundle-root"
+        completed = subprocess.run(
+            [sys.executable, str(SCRIPT), "--root", str(missing_root), "--json"],
+            cwd=REPO_ROOT,
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        payload = _json_object(completed.stdout)
+
+        self.assertEqual(completed.returncode, 1)
+        self.assertEqual(payload["release_evidence_status"], "release_blocked")
+        self.assertEqual(_int_field(_object_field(payload, "summary"), "artifact_count"), 0)
+        self.assertEqual(_int_field(_object_field(payload, "summary"), "blocking_issue_count"), 1)
+
+    def test_file_bundle_root_blocks_release(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            file_root = Path(temp_dir) / "not-a-directory.txt"
+            _ = file_root.write_text("bundle root must be a directory", encoding="utf-8")
+            completed = subprocess.run(
+                [sys.executable, str(SCRIPT), "--root", str(file_root), "--json"],
+                cwd=REPO_ROOT,
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            payload = _json_object(completed.stdout)
+
+        self.assertEqual(completed.returncode, 1)
+        self.assertEqual(payload["release_evidence_status"], "release_blocked")
+        self.assertEqual(_int_field(_object_field(payload, "summary"), "artifact_count"), 0)
+        self.assertEqual(_int_field(_object_field(payload, "summary"), "blocking_issue_count"), 1)
+
 
 def _run_bundle(*extra_args: str) -> subprocess.CompletedProcess[str]:
     return subprocess.run(

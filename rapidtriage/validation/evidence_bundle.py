@@ -6,6 +6,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Final
 
+from rapidtriage.validation.json_fields import int_field, list_field, object_field
 from rapidtriage.validation.known_answer_types import JsonObject, JsonValue
 
 
@@ -25,6 +26,13 @@ def build_bundle_manifest(root: Path) -> BundleResult:
     artifacts: list[JsonValue] = []
     issues: list[JsonValue] = []
     total_size_bytes = 0
+    if not resolved_root.exists():
+        issues.append(_issue("critical", str(root), "bundle root does not exist", True))
+        return _bundle_result(root, artifacts, issues, total_size_bytes)
+    if not resolved_root.is_dir():
+        issues.append(_issue("critical", str(root), "bundle root is not a directory", True))
+        return _bundle_result(root, artifacts, issues, total_size_bytes)
+
     for path in sorted(candidate for candidate in resolved_root.rglob("*") if candidate.is_file()):
         relative_path = _relative_path(resolved_root, path)
         if relative_path is None:
@@ -34,6 +42,15 @@ def build_bundle_manifest(root: Path) -> BundleResult:
         total_size_bytes += path.stat().st_size
         issues.extend(_policy_issues(path, relative_path))
 
+    return _bundle_result(root, artifacts, issues, total_size_bytes)
+
+
+def _bundle_result(
+    root: Path,
+    artifacts: list[JsonValue],
+    issues: list[JsonValue],
+    total_size_bytes: int,
+) -> BundleResult:
     blocking_count = sum(1 for issue in issues if isinstance(issue, dict) and issue.get("release_blocking") is True)
     warning_count = sum(1 for issue in issues if isinstance(issue, dict) and issue.get("severity") == "warning")
     status = "release_blocked" if blocking_count else "engineering_check_only"
@@ -55,29 +72,29 @@ def build_bundle_manifest(root: Path) -> BundleResult:
 
 
 def format_text(result: BundleResult) -> str:
-    summary = _object(result.document, "summary")
+    summary = object_field(result.document, "summary")
     return "\n".join(
         [
             f"{result.document['release_evidence_status']} evidence bundle manifest",
-            f"artifacts: {_int(summary, 'artifact_count')}",
-            f"blocking_issues: {_int(summary, 'blocking_issue_count')}",
+            f"artifacts: {int_field(summary, 'artifact_count')}",
+            f"blocking_issues: {int_field(summary, 'blocking_issue_count')}",
         ],
     )
 
 
 def write_summary(result: BundleResult, path: Path) -> None:
-    summary = _object(result.document, "summary")
+    summary = object_field(result.document, "summary")
     lines = [
         "# Release Evidence Bundle Summary",
         "",
         f"- Status: {result.document['release_evidence_status']}",
-        f"- Artifacts: {_int(summary, 'artifact_count')}",
-        f"- Blocking issues: {_int(summary, 'blocking_issue_count')}",
+        f"- Artifacts: {int_field(summary, 'artifact_count')}",
+        f"- Blocking issues: {int_field(summary, 'blocking_issue_count')}",
         "",
         "This summary is an engineering inventory, not release approval.",
         "",
     ]
-    for issue in _list(result.document, "policy_issues"):
+    for issue in list_field(result.document, "policy_issues"):
         if isinstance(issue, dict):
             lines.append(f"- {issue.get('severity')}: {issue.get('relative_path')} - {issue.get('message')}")
     _ = path.write_text("\n".join(lines), encoding="utf-8")
@@ -146,18 +163,3 @@ def _sha256_file(path: Path) -> str:
         while chunk := file_obj.read(HASH_CHUNK_SIZE_BYTES):
             digest.update(chunk)
     return digest.hexdigest()
-
-
-def _object(document: JsonObject, field: str) -> JsonObject:
-    value: JsonValue | None = document.get(field)
-    return value if isinstance(value, dict) else {}
-
-
-def _list(document: JsonObject, field: str) -> list[JsonValue]:
-    value: JsonValue | None = document.get(field)
-    return value if isinstance(value, list) else []
-
-
-def _int(document: JsonObject, field: str) -> int:
-    value: JsonValue | None = document.get(field)
-    return value if isinstance(value, int) and not isinstance(value, bool) else 0

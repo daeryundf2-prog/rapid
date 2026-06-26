@@ -1,12 +1,20 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Final
 
+from rapidtriage.validation.json_fields import int_field, list_field, object_field
 from rapidtriage.validation.known_answer_schema import load_json_document, validate_schema_document
-from rapidtriage.validation.known_answer_types import JsonObject, JsonValue, ManifestValidationError
+from rapidtriage.validation.known_answer_types import JsonObject, ManifestValidationError
+from rapidtriage.validation.manifest_truth import expected_truth_issue
+from rapidtriage.validation.trusted_diff_result import (
+    DiffEntry,
+    TrustedDiffResult,
+    diff_counts,
+    diff_entry_to_dict,
+    diff_message,
+)
 from .observed_results import ObservedItem, index_by_path, load_observed_results
 
 
@@ -18,25 +26,6 @@ TRUSTED_DIFF_SCHEMA_PATH: Final[Path] = (
     / "trusted-diff-result-schema-v1.schema.json"
 )
 TOOL_VERSION: Final = "0.1.0"
-
-
-@dataclass(frozen=True, slots=True)
-class DiffEntry:
-    category: str
-    severity: str
-    item_id: str | None
-    normalized_path: str
-    rapid_status: str | None
-    trusted_status: str | None
-    reviewer_action: str
-    message: str
-
-
-@dataclass(frozen=True, slots=True)
-class TrustedDiffResult:
-    status: str
-    ok: bool
-    document: JsonObject
 
 
 def compare(
@@ -64,27 +53,27 @@ def compare(
 
 
 def result_to_text(result: TrustedDiffResult) -> str:
-    counts = _object(result.document, "counts")
+    counts = object_field(result.document, "counts")
     lines = [
         f"{result.document['status']} trusted diff",
-        f"matches: {_int(counts, 'match')}",
-        f"critical: {_int(counts, 'critical')}",
+        f"matches: {int_field(counts, 'match')}",
+        f"critical: {int_field(counts, 'critical')}",
     ]
-    for diff in _list(result.document, "diffs"):
+    for diff in list_field(result.document, "diffs"):
         if isinstance(diff, dict) and diff.get("category") != "MATCH":
             lines.append(f"- {diff.get('category')}: {diff.get('normalized_path')} - {diff.get('message')}")
     return "\n".join(lines)
 
 
 def write_summary(result: TrustedDiffResult, path: Path) -> None:
-    counts = _object(result.document, "counts")
+    counts = object_field(result.document, "counts")
     content = "\n".join(
         [
             "# Trusted Diff Summary",
             "",
             f"- Status: {result.document['status']}",
-            f"- MATCH: {_int(counts, 'match')}",
-            f"- Critical: {_int(counts, 'critical')}",
+            f"- MATCH: {int_field(counts, 'match')}",
+            f"- Critical: {int_field(counts, 'critical')}",
             "",
             "This is an engineering comparison output, not release approval.",
             "",
@@ -152,7 +141,7 @@ def _compare_items(
     expected: dict[str, JsonObject],
 ) -> list[DiffEntry]:
     diffs: list[DiffEntry] = []
-    for path in sorted(set(rapid) | set(trusted)):
+    for path in sorted(set(rapid) | set(trusted) | set(expected)):
         rapid_item = rapid.get(path)
         trusted_item = trusted.get(path)
         expected_item = expected.get(path, {})
@@ -165,10 +154,14 @@ def _diff_for_path(
     trusted_item: ObservedItem | None,
     expected_item: JsonObject,
 ) -> DiffEntry:
+    if rapid_item is None and trusted_item is None:
+        return _expected_missing_entry(expected_item)
     if rapid_item is None:
         return _entry("TRUSTED_ONLY", "critical", trusted_item, None, "review_required", "trusted reference contains path missing from RapidForensic")
     if trusted_item is None:
         return _entry("RAPID_ONLY", "critical", rapid_item, None, "review_required", "RapidForensic contains path missing from trusted reference")
+    if not expected_item:
+        return _entry("METADATA_MISMATCH", "critical", rapid_item, trusted_item, "review_required", "output path is not declared in manifest truth")
     if _is_expected_unsupported(expected_item, rapid_item, trusted_item):
         return _entry("EXPECTED_UNSUPPORTED", "info", rapid_item, trusted_item, "none", "both outputs reflect expected unsupported item")
     if _is_expected_unrecoverable(expected_item, rapid_item, trusted_item):
@@ -179,6 +172,16 @@ def _diff_for_path(
         return _entry("HASH_MISMATCH", "critical", rapid_item, trusted_item, "review_required", "sha256 differs between RapidForensic and trusted reference")
     if rapid_item.size_bytes != trusted_item.size_bytes or rapid_item.observed_status != trusted_item.observed_status:
         return _entry("METADATA_MISMATCH", "critical", rapid_item, trusted_item, "review_required", "status or size differs between outputs")
+    truth_issue = expected_truth_issue(rapid_item, trusted_item, expected_item)
+    if truth_issue is not None:
+        return _entry(
+            truth_issue.category,
+            truth_issue.severity,
+            rapid_item,
+            trusted_item,
+            truth_issue.reviewer_action,
+            truth_issue.message,
+        )
     return _entry("MATCH", "info", rapid_item, trusted_item, "none", "RapidForensic and trusted reference match")
 
 
@@ -203,6 +206,20 @@ def _entry(
     )
 
 
+def _expected_missing_entry(expected_item: JsonObject) -> DiffEntry:
+    item_id = expected_item.get("item_id")
+    return DiffEntry(
+        category="METADATA_MISMATCH",
+        severity="critical",
+        item_id=item_id if isinstance(item_id, str) else None,
+        normalized_path=_expected_path(expected_item) or "<unknown>",
+        rapid_status=None,
+        trusted_status=None,
+        reviewer_action="rerun_required",
+        message="manifest expected path missing from RapidForensic and trusted reference outputs",
+    )
+
+
 def _is_expected_unsupported(expected: JsonObject, rapid: ObservedItem, trusted: ObservedItem) -> bool:
     return expected.get("expected_recovery") == "expected_unsupported" and rapid.observed_status == trusted.observed_status == "unsupported"
 
@@ -219,7 +236,7 @@ def _result(
     diffs: list[DiffEntry],
     errors: list[ManifestValidationError],
 ) -> TrustedDiffResult:
-    counts = _counts(diffs)
+    counts = diff_counts(diffs)
     document: JsonObject = {
         "schema_version": "rapidforensic-trusted-diff-result-v1",
         "status": status,
@@ -231,56 +248,8 @@ def _result(
         "trusted_results_path": str(trusted_results_path),
         "compared_at_utc": datetime.now(UTC).isoformat(timespec="seconds").replace("+00:00", "Z"),
         "counts": counts,
-        "diffs": [_diff_to_dict(diff) for diff in diffs],
+        "diffs": [diff_entry_to_dict(diff) for diff in diffs],
         "errors": [{"path": error.path, "message": error.message, "validator": error.validator} for error in errors],
-        "summary": {"message": _message(status, counts), "release_evidence_status": "engineering_check_only"},
+        "summary": {"message": diff_message(status, counts), "release_evidence_status": "engineering_check_only"},
     }
     return TrustedDiffResult(status=status, ok=status == "PASS", document=document)
-
-
-def _counts(diffs: list[DiffEntry]) -> JsonObject:
-    return {
-        "total": len(diffs),
-        "match": sum(1 for diff in diffs if diff.category == "MATCH"),
-        "rapid_only": sum(1 for diff in diffs if diff.category == "RAPID_ONLY"),
-        "trusted_only": sum(1 for diff in diffs if diff.category == "TRUSTED_ONLY"),
-        "hash_mismatch": sum(1 for diff in diffs if diff.category == "HASH_MISMATCH"),
-        "metadata_mismatch": sum(1 for diff in diffs if diff.category == "METADATA_MISMATCH"),
-        "expected_unsupported": sum(1 for diff in diffs if diff.category == "EXPECTED_UNSUPPORTED"),
-        "expected_unrecoverable": sum(1 for diff in diffs if diff.category == "EXPECTED_UNRECOVERABLE"),
-        "inconclusive": sum(1 for diff in diffs if diff.category == "INCONCLUSIVE"),
-        "critical": sum(1 for diff in diffs if diff.severity == "critical"),
-    }
-
-
-def _diff_to_dict(diff: DiffEntry) -> JsonObject:
-    return {
-        "category": diff.category,
-        "severity": diff.severity,
-        "item_id": diff.item_id,
-        "normalized_path": diff.normalized_path,
-        "rapid_status": diff.rapid_status,
-        "trusted_status": diff.trusted_status,
-        "reviewer_action": diff.reviewer_action,
-        "message": diff.message,
-    }
-
-
-def _message(status: str, counts: JsonObject) -> str:
-    critical = _int(counts, "critical")
-    return "trusted diff passed" if status == "PASS" else f"trusted diff found {critical} critical issue(s)"
-
-
-def _object(document: JsonObject, field: str) -> JsonObject:
-    value: JsonValue | None = document.get(field)
-    return value if isinstance(value, dict) else {}
-
-
-def _list(document: JsonObject, field: str) -> list[JsonValue]:
-    value: JsonValue | None = document.get(field)
-    return value if isinstance(value, list) else []
-
-
-def _int(document: JsonObject, field: str) -> int:
-    value: JsonValue | None = document.get(field)
-    return value if isinstance(value, int) and not isinstance(value, bool) else 0
