@@ -40,6 +40,18 @@ jobs:
       - name: Compile package
         run: python -m compileall -q rapidtriage tests scripts
 
+      - name: Static analysis
+        run: |
+          python -m ruff check rapidtriage tests scripts
+          python -m vulture rapidtriage tests scripts --min-confidence 80
+
+      - name: Validate known-answer plumbing
+        run: |
+          python scripts/known-answer-qc.py --manifest tests/fixtures/known_answer/tier0-basic/manifest.json --check-files --fixture-root tests/fixtures/known_answer/tier0-basic/files --json
+          python scripts/trusted-diff.py --manifest tests/fixtures/known_answer/tier0-basic/manifest.json --rapid-results tests/fixtures/known_answer/tier0-basic/rapid-results.json --trusted-results tests/fixtures/known_answer/tier0-basic/trusted-results.json --json
+          python scripts/normalize-trusted-export.py --tool synthetic-tsv --input tests/fixtures/known_answer/tier0-basic/synthetic-trusted-export.tsv --json
+          python scripts/build-evidence-bundle.py --root tests/fixtures/known_answer/tier0-basic --json
+
       - name: Check web JavaScript syntax
         if: matrix.os != 'windows-latest'
         run: |

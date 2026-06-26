@@ -1,0 +1,116 @@
+{
+  "schema_version": "rapidforensic-observed-results-v1",
+  "source_type": "synthetic_fixture",
+  "source_name": "RapidForensic synthetic Tier 0 placeholder",
+  "source_run_id": "tier0-rapid-synthetic-001",
+  "release_evidence_status": "engineering_check_only",
+  "generated_at_utc": "2026-06-17T00:00:00Z",
+  "items": [
+    {
+      "item_id": "tier0-duplicate-a",
+      "normalized_path": "duplicates/a/duplicate.txt",
+      "observed_status": "recovered",
+      "recovery_mode": "filesystem",
+      "size_bytes": 86,
+      "sha256": "107e9ebfd80562dc3e0df889f8c89beffe24ed42d98182e4ac3353212aa60e2d",
+      "metadata": {},
+      "source_tool_run_id": "tier0-rapid-synthetic-001",
+      "notes": "Synthetic fixture row; not actual recovery engine output."
+    },
+    {
+      "item_id": "tier0-duplicate-b",
+      "normalized_path": "duplicates/b/duplicate.txt",
+      "observed_status": "recovered",
+      "recovery_mode": "filesystem",
+      "size_bytes": 86,
+      "sha256": "68890d5f00d73c134cf8903acea0f48d9bc73490283922b6e467ccff8ae05370",
+      "metadata": {},
+      "source_tool_run_id": "tier0-rapid-synthetic-001",
+      "notes": "Synthetic fixture row; not actual recovery engine output."
+    },
+    {
+      "item_id": "tier0-hello",
+      "normalized_path": "hello.txt",
+      "observed_status": "recovered",
+      "recovery_mode": "filesystem",
+      "size_bytes": 80,
+      "sha256": "96046aff97ce74d2f7b612753749b98f08cc67974c3bc91f541653292df4013e",
+      "metadata": {},
+      "source_tool_run_id": "tier0-rapid-synthetic-001",
+      "notes": "Synthetic fixture row; not actual recovery engine output."
+    },
+    {
+      "item_id": "tier0-nested",
+      "normalized_path": "nested/level1/level2/nested-example.txt",
+      "observed_status": "recovered",
+      "recovery_mode": "filesystem",
+      "size_bytes": 89,
+      "sha256": "5919ae8199efab08ecc407384fba8ae864a74a3d30cc2dd20ddd54998aaf9290",
+      "metadata": {},
+      "source_tool_run_id": "tier0-rapid-synthetic-001",
+      "notes": "Synthetic fixture row; not actual recovery engine output."
+    },
+    {
+      "item_id": "tier0-same-content-a",
+      "normalized_path": "same-content-a.txt",
+      "observed_status": "recovered",
+      "recovery_mode": "filesystem",
+      "size_bytes": 87,
+      "sha256": "6517ca541ff72deea4e2fd046e6db49f65ce74790061ea23fb6edf84d721dcec",
+      "metadata": {},
+      "source_tool_run_id": "tier0-rapid-synthetic-001",
+      "notes": "Synthetic fixture row; not actual recovery engine output."
+    },
+    {
+      "item_id": "tier0-same-content-b",
+      "normalized_path": "same-content-b.txt",
+      "observed_status": "recovered",
+      "recovery_mode": "filesystem",
+      "size_bytes": 87,
+      "sha256": "6517ca541ff72deea4e2fd046e6db49f65ce74790061ea23fb6edf84d721dcec",
+      "metadata": {},
+      "source_tool_run_id": "tier0-rapid-synthetic-001",
+      "notes": "Synthetic fixture row; not actual recovery engine output."
+    },
+    {
+      "item_id": "tier0-spaces",
+      "normalized_path": "spaces/file with spaces.txt",
+      "observed_status": "recovered",
+      "recovery_mode": "filesystem",
+      "size_bytes": 91,
+      "sha256": "9b0c57b1f0d0642878abec539b69370c781b6cf594aa69718cb794fcceb3390f",
+      "metadata": {},
+      "source_tool_run_id": "tier0-rapid-synthetic-001",
+      "notes": "Synthetic fixture row; not actual recovery engine output."
+    },
+    {
+      "item_id": "tier0-unicode-korean",
+      "normalized_path": "unicode/한글파일.txt",
+      "observed_status": "recovered",
+      "recovery_mode": "filesystem",
+      "size_bytes": 98,
+      "sha256": "3589c084058148abcd9f2194f4b9ecd3d17d392025613ebfe3b8f825bd7341cd",
+      "metadata": {},
+      "source_tool_run_id": "tier0-rapid-synthetic-001",
+      "notes": "Synthetic fixture row; not actual recovery engine output."
+    },
+    {
+      "item_id": "tier0-zero-byte",
+      "normalized_path": "zero-byte/empty.txt",
+      "observed_status": "recovered",
+      "recovery_mode": "filesystem",
+      "size_bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "metadata": {},
+      "source_tool_run_id": "tier0-rapid-synthetic-001",
+      "notes": "Synthetic fixture row; not actual recovery engine output."
+    }
+  ],
+  "summary": {
+    "item_count": 9,
+    "recovered_count": 9,
+    "error_count": 0,
+    "inconclusive_count": 0
+  },
+  "notes": "Tier 0 synthetic folder plumbing check; not E01/Ex01 release evidence."
+}

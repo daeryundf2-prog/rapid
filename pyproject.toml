@@ -36,9 +36,12 @@ test = [
   "build>=1.0",
   "fastapi>=0.110",
   "httpx>=0.27",
+  "jsonschema>=4.0",
   "Pillow>=10",
   "pip-audit>=2.7",
   "pycryptodome>=3.20",
+  "ruff>=0.8",
+  "vulture>=2.11",
 ]
 columnar = [
   "pyarrow>=15",

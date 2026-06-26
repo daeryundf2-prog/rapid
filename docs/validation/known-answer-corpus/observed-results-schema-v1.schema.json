@@ -1,0 +1,190 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://rapidforensic.local/schemas/known-answer-corpus/observed-results-schema-v1.schema.json",
+  "title": "RapidForensic Observed Results Schema v1",
+  "description": "Normalized comparison input produced by RapidForensic, trusted/reference tools, manual review, or synthetic fixtures. This is not a raw trusted-tool log and does not imply release approval.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "source_type",
+    "source_name",
+    "source_run_id",
+    "release_evidence_status",
+    "generated_at_utc",
+    "items",
+    "summary",
+    "notes"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "rapidforensic-observed-results-v1"
+    },
+    "source_type": {
+      "enum": [
+        "rapidforensic",
+        "trusted_tool",
+        "manual_review",
+        "synthetic_fixture"
+      ]
+    },
+    "source_name": {
+      "$ref": "#/$defs/non_empty_string"
+    },
+    "source_run_id": {
+      "$ref": "#/$defs/non_empty_string"
+    },
+    "release_evidence_status": {
+      "$ref": "#/$defs/release_evidence_status"
+    },
+    "generated_at_utc": {
+      "$ref": "#/$defs/utc_timestamp"
+    },
+    "items": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/observed_item"
+      }
+    },
+    "summary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "item_count",
+        "recovered_count",
+        "error_count",
+        "inconclusive_count"
+      ],
+      "properties": {
+        "item_count": {
+          "$ref": "#/$defs/non_negative_integer"
+        },
+        "recovered_count": {
+          "$ref": "#/$defs/non_negative_integer"
+        },
+        "error_count": {
+          "$ref": "#/$defs/non_negative_integer"
+        },
+        "inconclusive_count": {
+          "$ref": "#/$defs/non_negative_integer"
+        }
+      }
+    },
+    "notes": {
+      "type": "string"
+    }
+  },
+  "$defs": {
+    "non_empty_string": {
+      "type": "string",
+      "minLength": 1
+    },
+    "nullable_string": {
+      "oneOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "non_negative_integer": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "nullable_non_negative_integer": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/non_negative_integer"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "sha256": {
+      "type": "string",
+      "pattern": "^[A-Fa-f0-9]{64}$"
+    },
+    "nullable_sha256": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/sha256"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "utc_timestamp": {
+      "type": "string",
+      "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d+)?Z$"
+    },
+    "release_evidence_status": {
+      "enum": [
+        "engineering_check_only",
+        "release_evidence_incomplete",
+        "release_evidence_candidate",
+        "release_blocked"
+      ]
+    },
+    "observed_item": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "item_id",
+        "normalized_path",
+        "observed_status",
+        "recovery_mode",
+        "size_bytes",
+        "sha256",
+        "metadata",
+        "source_tool_run_id",
+        "notes"
+      ],
+      "properties": {
+        "item_id": {
+          "$ref": "#/$defs/non_empty_string"
+        },
+        "normalized_path": {
+          "$ref": "#/$defs/non_empty_string"
+        },
+        "observed_status": {
+          "enum": [
+            "recovered",
+            "listed_metadata",
+            "not_found",
+            "partial",
+            "unsupported",
+            "error",
+            "inconclusive"
+          ]
+        },
+        "recovery_mode": {
+          "enum": [
+            "filesystem",
+            "carve",
+            "metadata",
+            "none"
+          ]
+        },
+        "size_bytes": {
+          "$ref": "#/$defs/nullable_non_negative_integer"
+        },
+        "sha256": {
+          "$ref": "#/$defs/nullable_sha256"
+        },
+        "metadata": {
+          "type": "object"
+        },
+        "source_tool_run_id": {
+          "$ref": "#/$defs/nullable_string"
+        },
+        "notes": {
+          "type": "string"
+        }
+      }
+    }
+  }
+}

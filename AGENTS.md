@@ -223,6 +223,31 @@ UX Audit:
   ux-researcher + information-architect + designer + product-analyst
 </team_compositions>
 
+## RapidForensic Validation Contract
+
+- Keep recovery engine, parser implementation, core forensic logic, API behavior, Web UI, and DB schema untouched during validation-plumbing work unless the user explicitly authorizes that scope.
+- Do not add real E01, Ex01, dd, raw, img, VHD/VHDX, AFF, split-image, recovered evidence, customer data, PII, malware, secrets, or tokens to Git.
+- Treat Tier 0 fixtures as engineering checks only. They are not release evidence and do not prove recovery accuracy.
+- Use these commands for local validation after touching validation tooling:
+
+```bash
+python -m unittest discover -s tests
+python -m ruff check rapidtriage tests scripts
+python -m vulture rapidtriage tests scripts --min-confidence 80
+python -m compileall -q rapidtriage tests scripts
+python scripts/known-answer-qc.py --manifest tests/fixtures/known_answer/tier0-basic/manifest.json --check-files --fixture-root tests/fixtures/known_answer/tier0-basic/files --json
+python scripts/trusted-diff.py --manifest tests/fixtures/known_answer/tier0-basic/manifest.json --rapid-results tests/fixtures/known_answer/tier0-basic/rapid-results.json --trusted-results tests/fixtures/known_answer/tier0-basic/trusted-results.json --json
+python scripts/normalize-trusted-export.py --tool synthetic-tsv --input tests/fixtures/known_answer/tier0-basic/synthetic-trusted-export.tsv --json
+python scripts/build-evidence-bundle.py --root tests/fixtures/known_answer/tier0-basic --json
+python -m pip_audit --format=json
+git diff --check
+git status --short
+```
+
+For Windows T1 work, use `docs/validation/windows-t1-execution-runbook.md`, `docs/validation/windows-t1-operator-inputs.md`, and `docs/validation/windows-t1-command-template.ps1.md`. These are preparation documents only; actual E01/Ex01 acquisition, trusted/reference export, and RapidForensic recovery execution require operator approval and external storage outside Git.
+
+Report Engineering Baseline and Release Evidence separately. Release Evidence remains blocked until real external E01/Ex01, Windows, trusted/reference tool, scale, and review records exist.
+
 ---
 
 <team_pipeline>

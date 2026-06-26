@@ -1,0 +1,4 @@
+RapidForensic Tier 0 known-answer fixture
+case=tier0-basic
+item=duplicate-a
+version=1

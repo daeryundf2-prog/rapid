@@ -1,0 +1,273 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://rapidforensic.local/schemas/known-answer-corpus/trusted-diff-result-schema-v1.schema.json",
+  "title": "RapidForensic Trusted Diff Result Schema v1",
+  "description": "Normalized comparison result between RapidForensic output and an independent reference. Trusted tools are references, not absolute truth; this schema is not release approval.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "status",
+    "ok",
+    "release_evidence_status",
+    "tool",
+    "manifest_path",
+    "rapid_results_path",
+    "trusted_results_path",
+    "compared_at_utc",
+    "counts",
+    "diffs",
+    "errors",
+    "summary"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "rapidforensic-trusted-diff-result-v1"
+    },
+    "status": {
+      "enum": [
+        "PASS",
+        "FAIL",
+        "ERROR"
+      ]
+    },
+    "ok": {
+      "type": "boolean"
+    },
+    "release_evidence_status": {
+      "$ref": "#/$defs/release_evidence_status"
+    },
+    "tool": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "version"
+      ],
+      "properties": {
+        "name": {
+          "const": "trusted-diff"
+        },
+        "version": {
+          "$ref": "#/$defs/non_empty_string"
+        }
+      }
+    },
+    "manifest_path": {
+      "$ref": "#/$defs/non_empty_string"
+    },
+    "rapid_results_path": {
+      "$ref": "#/$defs/non_empty_string"
+    },
+    "trusted_results_path": {
+      "$ref": "#/$defs/non_empty_string"
+    },
+    "compared_at_utc": {
+      "$ref": "#/$defs/utc_timestamp"
+    },
+    "counts": {
+      "$ref": "#/$defs/counts"
+    },
+    "diffs": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/diff"
+      }
+    },
+    "errors": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/validation_error"
+      }
+    },
+    "summary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "message",
+        "release_evidence_status"
+      ],
+      "properties": {
+        "message": {
+          "$ref": "#/$defs/non_empty_string"
+        },
+        "release_evidence_status": {
+          "$ref": "#/$defs/release_evidence_status"
+        }
+      }
+    }
+  },
+  "$defs": {
+    "non_empty_string": {
+      "type": "string",
+      "minLength": 1
+    },
+    "nullable_string": {
+      "oneOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "non_negative_integer": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "utc_timestamp": {
+      "type": "string",
+      "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d+)?Z$"
+    },
+    "release_evidence_status": {
+      "enum": [
+        "engineering_check_only",
+        "release_evidence_incomplete",
+        "release_evidence_candidate",
+        "release_blocked"
+      ]
+    },
+    "category": {
+      "enum": [
+        "MATCH",
+        "RAPID_ONLY",
+        "TRUSTED_ONLY",
+        "HASH_MISMATCH",
+        "PATH_MISMATCH",
+        "METADATA_MISMATCH",
+        "TIMESTAMP_TOLERANCE",
+        "EXPECTED_UNSUPPORTED",
+        "EXPECTED_UNRECOVERABLE",
+        "INCONCLUSIVE",
+        "TOOL_LIMITATION",
+        "MANIFEST_ERROR"
+      ]
+    },
+    "severity": {
+      "enum": [
+        "info",
+        "warning",
+        "critical"
+      ]
+    },
+    "reviewer_action": {
+      "enum": [
+        "none",
+        "review_required",
+        "accept_tool_limitation",
+        "update_manifest",
+        "rerun_required",
+        "external_review_required"
+      ]
+    },
+    "counts": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "total",
+        "match",
+        "rapid_only",
+        "trusted_only",
+        "hash_mismatch",
+        "metadata_mismatch",
+        "expected_unsupported",
+        "expected_unrecoverable",
+        "inconclusive",
+        "critical"
+      ],
+      "properties": {
+        "total": {
+          "$ref": "#/$defs/non_negative_integer"
+        },
+        "match": {
+          "$ref": "#/$defs/non_negative_integer"
+        },
+        "rapid_only": {
+          "$ref": "#/$defs/non_negative_integer"
+        },
+        "trusted_only": {
+          "$ref": "#/$defs/non_negative_integer"
+        },
+        "hash_mismatch": {
+          "$ref": "#/$defs/non_negative_integer"
+        },
+        "metadata_mismatch": {
+          "$ref": "#/$defs/non_negative_integer"
+        },
+        "expected_unsupported": {
+          "$ref": "#/$defs/non_negative_integer"
+        },
+        "expected_unrecoverable": {
+          "$ref": "#/$defs/non_negative_integer"
+        },
+        "inconclusive": {
+          "$ref": "#/$defs/non_negative_integer"
+        },
+        "critical": {
+          "$ref": "#/$defs/non_negative_integer"
+        }
+      }
+    },
+    "diff": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "category",
+        "severity",
+        "item_id",
+        "normalized_path",
+        "rapid_status",
+        "trusted_status",
+        "reviewer_action",
+        "message"
+      ],
+      "properties": {
+        "category": {
+          "$ref": "#/$defs/category"
+        },
+        "severity": {
+          "$ref": "#/$defs/severity"
+        },
+        "item_id": {
+          "$ref": "#/$defs/nullable_string"
+        },
+        "normalized_path": {
+          "$ref": "#/$defs/non_empty_string"
+        },
+        "rapid_status": {
+          "$ref": "#/$defs/nullable_string"
+        },
+        "trusted_status": {
+          "$ref": "#/$defs/nullable_string"
+        },
+        "reviewer_action": {
+          "$ref": "#/$defs/reviewer_action"
+        },
+        "message": {
+          "$ref": "#/$defs/non_empty_string"
+        }
+      }
+    },
+    "validation_error": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "path",
+        "message",
+        "validator"
+      ],
+      "properties": {
+        "path": {
+          "$ref": "#/$defs/non_empty_string"
+        },
+        "message": {
+          "$ref": "#/$defs/non_empty_string"
+        },
+        "validator": {
+          "$ref": "#/$defs/nullable_string"
+        }
+      }
+    }
+  }
+}

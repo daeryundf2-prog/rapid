@@ -1,0 +1,99 @@
+{
+  "schema_version": "rapidforensic-e01-ex01-truth-manifest-v1",
+  "corpus_id": "known-answer-t1-synthetic",
+  "case_id": "case-t1-invalid-sha256",
+  "image_id": "image-t1-folder-baseline-001",
+  "image_format": "folder-baseline",
+  "filesystem_type": "APFS",
+  "image_segments": [
+    {
+      "segment_path": "external-fixtures/t1-minimal.E01",
+      "segment_index": 0,
+      "size_bytes": 12345,
+      "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    }
+  ],
+  "image_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+  "image_size_bytes": 12345,
+  "acquisition_tool": "synthetic-fixture-generator",
+  "acquisition_tool_version": "0.1.0",
+  "source_os": "macOS",
+  "source_os_version": "15.0",
+  "creation_timestamp_utc": "2026-06-17T00:00:00Z",
+  "timezone": "UTC",
+  "corpus_tier": "T1",
+  "license": "Synthetic internal validation fixture",
+  "pii_status": "synthetic",
+  "malware_status": "none",
+  "retention_policy": "Retain while fixture contract remains approved",
+  "chain_of_custody": [
+    {
+      "created_by": "RapidForensic validation team",
+      "reviewed_by": [],
+      "creation_method": "Synthetic schema fixture only; no evidence bytes included",
+      "storage_location": "tests/fixtures/known_answer",
+      "hash_algorithm": "sha256",
+      "hash_recorded_at": "2026-06-17T00:00:00Z",
+      "review_status": "draft"
+    }
+  ],
+  "trusted_tool_runs": [
+    {
+      "run_id": "tsk-bodyfile-001",
+      "tool_name": "Sleuth Kit",
+      "tool_version": "synthetic-reference",
+      "command": "fls -r synthetic-image",
+      "run_timestamp_utc": "2026-06-17T00:00:00Z",
+      "host_os": "macOS",
+      "output_path": "external-fixtures/t1-minimal-tsk.json",
+      "output_sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      "notes": "Synthetic trusted-tool run placeholder for schema validation."
+    }
+  ],
+  "expected_items": [
+    {
+      "item_id": "item-allocated-text-001",
+      "original_path": "/Users/alice/Documents/report.txt",
+      "normalized_path": "/Users/alice/Documents/report.txt",
+      "expected_status": "allocated",
+      "expected_recovery": "must_recover_byte_exact",
+      "expected_recovery_mode": "filesystem",
+      "file_type": "text/plain",
+      "size_bytes": 11,
+      "sha256": "not-a-sha256",
+      "md5_optional": null,
+      "created_time_utc": null,
+      "modified_time_utc": "2026-06-17T00:00:00Z",
+      "accessed_time_utc": null,
+      "deleted_time_utc_optional": null,
+      "path_encoding": "UTF-8",
+      "unicode_normalization": "NFC",
+      "ads_name_optional": null,
+      "is_sparse": false,
+      "is_fragmented": false,
+      "is_carved_only": false,
+      "trusted_tool_run_ids": [
+        "tsk-bodyfile-001"
+      ],
+      "expected_metadata": {},
+      "accepted_variants": [],
+      "expected_failure_reason": null,
+      "notes": "Invalid manifest fixture: sha256 is intentionally malformed."
+    }
+  ],
+  "expected_global_outcomes": {
+    "min_recall": 1.0,
+    "min_precision": 1.0,
+    "max_false_positives": 0,
+    "max_inconclusive": 0,
+    "max_runtime_seconds": 60,
+    "max_peak_memory_mb": 256,
+    "required_logs": [
+      "validation.log"
+    ],
+    "required_reports": [
+      "known-answer-qc.json"
+    ]
+  },
+  "notes": "Invalid manifest fixture: expected item sha256 is malformed."
+}

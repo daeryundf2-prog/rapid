@@ -4,6 +4,12 @@
 
 - Run `python -m unittest discover -s tests`.
 - Run `python -m compileall -q rapidtriage`.
+- Run `python -m ruff check rapidtriage tests scripts`.
+- Run `python -m vulture rapidtriage tests scripts --min-confidence 80`.
+- Run `python scripts/known-answer-qc.py --manifest tests/fixtures/known_answer/tier0-basic/manifest.json --check-files --fixture-root tests/fixtures/known_answer/tier0-basic/files --json`.
+- Run `python scripts/trusted-diff.py --manifest tests/fixtures/known_answer/tier0-basic/manifest.json --rapid-results tests/fixtures/known_answer/tier0-basic/rapid-results.json --trusted-results tests/fixtures/known_answer/tier0-basic/trusted-results.json --json`.
+- Run `python scripts/normalize-trusted-export.py --tool synthetic-tsv --input tests/fixtures/known_answer/tier0-basic/synthetic-trusted-export.tsv --json`.
+- Run `python scripts/build-evidence-bundle.py --root tests/fixtures/known_answer/tier0-basic --json`.
 - Run `node --check rapidtriage/web/static/app.js`.
 - Run `python -m build --wheel --sdist`.
 - Run `rapidtriage sample --run --overwrite`.
@@ -27,6 +33,10 @@
 - Run the Windows/macOS usability checklist in `docs/rapidtriage-fresh-machine-smoke-test.md` before calling the release analyst-ready.
 - Attach SHA256 checksums, dependency inventory/SBOM, and signing/notarization verification output for every distributed artifact.
 - Attach independent validation notes for parser corpus, large-case performance, and legal/report wording review.
+- Designed: E01/Ex01 known-answer corpus requirements are documented in `docs/validation/known-answer-corpus/README.md`.
+- Implemented: Tier 0 synthetic validation plumbing, observed-result normalization, trusted-diff skeleton, and bundle manifest generation are implemented for engineering checks only.
+- Executed: Real E01/Ex01, Windows NTFS, trusted/reference tool, scale, and review evidence remains required before any E01/Ex01 recovery readiness claim.
+- Reviewed: Technical, forensic methodology, operator, and legal review records must be attached before release suitability can be claimed.
 - Track external commercial blockers in `docs/rapidtriage-external-commercial-evidence-plan.md` and do not remove release blockers until the required external evidence is attached.
 
 ## Artifact Build

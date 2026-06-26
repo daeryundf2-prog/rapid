@@ -1,0 +1,301 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://rapidforensic.local/schemas/known-answer-corpus/validation-result-schema-v1.schema.json",
+  "title": "RapidForensic Known-Answer Validation Result Schema v1",
+  "description": "Machine-readable output contract for scripts/known-answer-qc.py --json.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "run_id",
+    "status",
+    "ok",
+    "release_evidence_status",
+    "tool",
+    "started_at_utc",
+    "finished_at_utc",
+    "manifest_path",
+    "schema_path",
+    "fixture_root",
+    "check_files",
+    "corpus_id",
+    "case_id",
+    "image_id",
+    "expected_item_count",
+    "warning_count",
+    "error_count",
+    "errors",
+    "file_check_enabled",
+    "file_checked_count",
+    "file_skipped_count",
+    "file_error_count",
+    "file_checks",
+    "summary"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "rapidforensic-known-answer-validation-result-v1"
+    },
+    "run_id": {
+      "type": "string",
+      "pattern": "^known-answer-qc-[0-9a-fA-F-]{36}$"
+    },
+    "status": {
+      "enum": [
+        "PASS",
+        "FAIL",
+        "ERROR"
+      ]
+    },
+    "ok": {
+      "type": "boolean"
+    },
+    "release_evidence_status": {
+      "enum": [
+        "engineering_check_only",
+        "release_evidence_candidate",
+        "release_evidence"
+      ]
+    },
+    "tool": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "version"
+      ],
+      "properties": {
+        "name": {
+          "const": "known-answer-qc"
+        },
+        "version": {
+          "oneOf": [
+            {
+              "type": "string",
+              "minLength": 1
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "started_at_utc": {
+      "$ref": "#/$defs/utc_timestamp"
+    },
+    "finished_at_utc": {
+      "$ref": "#/$defs/utc_timestamp"
+    },
+    "manifest_path": {
+      "type": "string",
+      "minLength": 1
+    },
+    "schema_path": {
+      "type": "string",
+      "minLength": 1
+    },
+    "fixture_root": {
+      "$ref": "#/$defs/nullable_string"
+    },
+    "check_files": {
+      "type": "boolean"
+    },
+    "corpus_id": {
+      "$ref": "#/$defs/nullable_string"
+    },
+    "case_id": {
+      "$ref": "#/$defs/nullable_string"
+    },
+    "image_id": {
+      "$ref": "#/$defs/nullable_string"
+    },
+    "expected_item_count": {
+      "oneOf": [
+        {
+          "type": "integer",
+          "minimum": 0
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "warning_count": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "error_count": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "errors": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/validation_error"
+      }
+    },
+    "file_check_enabled": {
+      "type": "boolean"
+    },
+    "file_checked_count": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "file_skipped_count": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "file_error_count": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "file_checks": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/file_check"
+      }
+    },
+    "summary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema_valid",
+        "file_checks_valid",
+        "release_evidence_status",
+        "message"
+      ],
+      "properties": {
+        "schema_valid": {
+          "type": "boolean"
+        },
+        "file_checks_valid": {
+          "type": "boolean"
+        },
+        "release_evidence_status": {
+          "enum": [
+            "engineering_check_only",
+            "release_evidence_candidate",
+            "release_evidence"
+          ]
+        },
+        "message": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    }
+  },
+  "$defs": {
+    "nullable_string": {
+      "oneOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "sha256": {
+      "type": "string",
+      "pattern": "^[A-Fa-f0-9]{64}$"
+    },
+    "utc_timestamp": {
+      "type": "string",
+      "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d+)?Z$"
+    },
+    "validation_error": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "path",
+        "message",
+        "validator"
+      ],
+      "properties": {
+        "path": {
+          "type": "string",
+          "minLength": 1
+        },
+        "message": {
+          "type": "string",
+          "minLength": 1
+        },
+        "validator": {
+          "$ref": "#/$defs/nullable_string"
+        }
+      }
+    },
+    "file_check": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "item_id",
+        "relative_path",
+        "status",
+        "ok",
+        "expected_size",
+        "actual_size",
+        "expected_sha256",
+        "actual_sha256",
+        "message"
+      ],
+      "properties": {
+        "item_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "relative_path": {
+          "type": "string"
+        },
+        "status": {
+          "enum": [
+            "PASS",
+            "FAIL"
+          ]
+        },
+        "ok": {
+          "type": "boolean"
+        },
+        "expected_size": {
+          "$ref": "#/$defs/nullable_non_negative_integer"
+        },
+        "actual_size": {
+          "$ref": "#/$defs/nullable_non_negative_integer"
+        },
+        "expected_sha256": {
+          "$ref": "#/$defs/nullable_sha256"
+        },
+        "actual_sha256": {
+          "$ref": "#/$defs/nullable_sha256"
+        },
+        "message": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "nullable_non_negative_integer": {
+      "oneOf": [
+        {
+          "type": "integer",
+          "minimum": 0
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "nullable_sha256": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/sha256"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    }
+  }
+}

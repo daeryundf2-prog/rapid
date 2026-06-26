@@ -1,0 +1,153 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://rapidforensic.local/schemas/release-evidence-bundle-manifest-schema-v1.schema.json",
+  "title": "RapidForensic Release Evidence Bundle Manifest Schema v1",
+  "description": "Manifest for engineering and release-evidence artifacts. It inventories files and policy issues; it does not approve release suitability.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "bundle_root",
+    "generated_at_utc",
+    "release_evidence_status",
+    "artifacts",
+    "policy_issues",
+    "summary"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "rapidforensic-release-evidence-bundle-manifest-v1"
+    },
+    "bundle_root": {
+      "type": "string",
+      "minLength": 1
+    },
+    "generated_at_utc": {
+      "$ref": "#/$defs/utc_timestamp"
+    },
+    "release_evidence_status": {
+      "enum": [
+        "engineering_check_only",
+        "release_evidence_incomplete",
+        "release_evidence_candidate",
+        "release_blocked"
+      ]
+    },
+    "artifacts": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/artifact"
+      }
+    },
+    "policy_issues": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/policy_issue"
+      }
+    },
+    "summary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "artifact_count",
+        "total_size_bytes",
+        "warning_count",
+        "blocking_issue_count"
+      ],
+      "properties": {
+        "artifact_count": {
+          "$ref": "#/$defs/non_negative_integer"
+        },
+        "total_size_bytes": {
+          "$ref": "#/$defs/non_negative_integer"
+        },
+        "warning_count": {
+          "$ref": "#/$defs/non_negative_integer"
+        },
+        "blocking_issue_count": {
+          "$ref": "#/$defs/non_negative_integer"
+        }
+      }
+    }
+  },
+  "$defs": {
+    "non_negative_integer": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "sha256": {
+      "type": "string",
+      "pattern": "^[A-Fa-f0-9]{64}$"
+    },
+    "utc_timestamp": {
+      "type": "string",
+      "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d+)?Z$"
+    },
+    "artifact": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "relative_path",
+        "artifact_type",
+        "size_bytes",
+        "sha256"
+      ],
+      "properties": {
+        "relative_path": {
+          "type": "string",
+          "minLength": 1
+        },
+        "artifact_type": {
+          "enum": [
+            "manifest",
+            "schema",
+            "validation_result",
+            "observed_result",
+            "trusted_diff_result",
+            "log",
+            "hash",
+            "review_doc",
+            "fixture",
+            "documentation",
+            "other"
+          ]
+        },
+        "size_bytes": {
+          "$ref": "#/$defs/non_negative_integer"
+        },
+        "sha256": {
+          "$ref": "#/$defs/sha256"
+        }
+      }
+    },
+    "policy_issue": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "severity",
+        "relative_path",
+        "message",
+        "release_blocking"
+      ],
+      "properties": {
+        "severity": {
+          "enum": [
+            "warning",
+            "critical"
+          ]
+        },
+        "relative_path": {
+          "type": "string",
+          "minLength": 1
+        },
+        "message": {
+          "type": "string",
+          "minLength": 1
+        },
+        "release_blocking": {
+          "type": "boolean"
+        }
+      }
+    }
+  }
+}

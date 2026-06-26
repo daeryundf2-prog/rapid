@@ -1,0 +1,630 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://rapidforensic.local/schemas/known-answer-corpus/truth-manifest-schema-v1.schema.json",
+  "title": "RapidForensic E01/Ex01 Truth Manifest Schema v1",
+  "description": "Expected-answer manifest contract for E01/Ex01 known-answer recovery validation.",
+  "type": "object",
+  "additionalProperties": false,
+  "$comment": "Semantic release safeguards not fully enforceable here: reviewer independence and trusted-tool run ID existence are process rules outside JSON Schema; release metrics must be computed from item-level outcomes.",
+  "required": [
+    "schema_version",
+    "corpus_id",
+    "case_id",
+    "image_id",
+    "image_format",
+    "filesystem_type",
+    "image_segments",
+    "image_sha256",
+    "image_size_bytes",
+    "acquisition_tool",
+    "acquisition_tool_version",
+    "source_os",
+    "source_os_version",
+    "creation_timestamp_utc",
+    "timezone",
+    "corpus_tier",
+    "license",
+    "pii_status",
+    "malware_status",
+    "retention_policy",
+    "chain_of_custody",
+    "trusted_tool_runs",
+    "expected_items",
+    "expected_global_outcomes",
+    "notes"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "rapidforensic-e01-ex01-truth-manifest-v1"
+    },
+    "corpus_id": {
+      "$ref": "#/$defs/non_empty_string"
+    },
+    "case_id": {
+      "$ref": "#/$defs/non_empty_string"
+    },
+    "image_id": {
+      "$ref": "#/$defs/non_empty_string"
+    },
+    "image_format": {
+      "enum": [
+        "E01",
+        "Ex01",
+        "folder-baseline"
+      ]
+    },
+    "filesystem_type": {
+      "$ref": "#/$defs/non_empty_string"
+    },
+    "image_segments": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "$ref": "#/$defs/image_segment"
+      }
+    },
+    "image_sha256": {
+      "$ref": "#/$defs/sha256"
+    },
+    "image_size_bytes": {
+      "$ref": "#/$defs/non_negative_integer"
+    },
+    "acquisition_tool": {
+      "$ref": "#/$defs/non_empty_string"
+    },
+    "acquisition_tool_version": {
+      "$ref": "#/$defs/non_empty_string"
+    },
+    "source_os": {
+      "$ref": "#/$defs/non_empty_string"
+    },
+    "source_os_version": {
+      "$ref": "#/$defs/non_empty_string"
+    },
+    "creation_timestamp_utc": {
+      "$ref": "#/$defs/utc_timestamp"
+    },
+    "timezone": {
+      "$ref": "#/$defs/non_empty_string"
+    },
+    "corpus_tier": {
+      "enum": [
+        "T0",
+        "T1",
+        "T2",
+        "T3",
+        "T4",
+        "T5"
+      ]
+    },
+    "license": {
+      "$ref": "#/$defs/non_empty_string"
+    },
+    "pii_status": {
+      "enum": [
+        "none",
+        "synthetic",
+        "redacted",
+        "restricted"
+      ]
+    },
+    "malware_status": {
+      "enum": [
+        "none",
+        "synthetic-benign",
+        "restricted",
+        "unknown-blocked"
+      ]
+    },
+    "retention_policy": {
+      "$ref": "#/$defs/non_empty_string"
+    },
+    "chain_of_custody": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "$ref": "#/$defs/chain_of_custody_record"
+      }
+    },
+    "trusted_tool_runs": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "$ref": "#/$defs/trusted_tool_run"
+      }
+    },
+    "expected_items": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "$ref": "#/$defs/expected_item"
+      }
+    },
+    "expected_global_outcomes": {
+      "$ref": "#/$defs/expected_global_outcomes"
+    },
+    "notes": {
+      "type": "string"
+    }
+  },
+  "$defs": {
+    "non_empty_string": {
+      "type": "string",
+      "minLength": 1
+    },
+    "non_negative_integer": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "sha256": {
+      "type": "string",
+      "pattern": "^[A-Fa-f0-9]{64}$"
+    },
+    "md5": {
+      "type": "string",
+      "pattern": "^[A-Fa-f0-9]{32}$"
+    },
+    "utc_timestamp": {
+      "type": "string",
+      "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d+)?Z$"
+    },
+    "nullable_non_empty_string": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/non_empty_string"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "nullable_sha256": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/sha256"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "nullable_md5": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/md5"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "nullable_utc_timestamp": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/utc_timestamp"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "expected_status": {
+      "enum": [
+        "allocated",
+        "deleted_recoverable",
+        "deleted_unrecoverable",
+        "partially_overwritten",
+        "carved_only",
+        "metadata_only",
+        "unsupported",
+        "inconclusive"
+      ]
+    },
+    "expected_recovery": {
+      "enum": [
+        "must_recover_byte_exact",
+        "must_list_metadata",
+        "may_recover_partial",
+        "must_not_recover",
+        "expected_unsupported",
+        "expected_inconclusive"
+      ]
+    },
+    "expected_recovery_mode": {
+      "enum": [
+        "filesystem",
+        "carve",
+        "metadata",
+        "none"
+      ]
+    },
+    "unicode_normalization": {
+      "enum": [
+        "exact",
+        "NFC",
+        "NFD",
+        "not-applicable"
+      ]
+    },
+    "review_status": {
+      "enum": [
+        "draft",
+        "approved",
+        "rejected",
+        "needs-review"
+      ]
+    },
+    "image_segment": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "segment_path",
+        "segment_index",
+        "size_bytes",
+        "sha256"
+      ],
+      "properties": {
+        "segment_path": {
+          "$ref": "#/$defs/non_empty_string",
+          "$comment": "The path is an external controlled storage hint and must not require a Git path."
+        },
+        "segment_index": {
+          "$ref": "#/$defs/non_negative_integer"
+        },
+        "size_bytes": {
+          "$ref": "#/$defs/non_negative_integer"
+        },
+        "sha256": {
+          "$ref": "#/$defs/sha256"
+        }
+      }
+    },
+    "chain_of_custody_record": {
+      "type": "object",
+      "additionalProperties": false,
+      "$comment": "Reviewer independence is a process rule outside JSON Schema.",
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "review_status": {
+                "const": "approved"
+              }
+            },
+            "required": [
+              "review_status"
+            ]
+          },
+          "then": {
+            "properties": {
+              "reviewed_by": {
+                "type": "array",
+                "minItems": 1,
+                "items": {
+                  "$ref": "#/$defs/non_empty_string"
+                }
+              }
+            },
+            "required": [
+              "reviewed_by"
+            ]
+          }
+        }
+      ],
+      "required": [
+        "created_by",
+        "reviewed_by",
+        "creation_method",
+        "storage_location",
+        "hash_algorithm",
+        "hash_recorded_at",
+        "review_status"
+      ],
+      "properties": {
+        "created_by": {
+          "$ref": "#/$defs/non_empty_string"
+        },
+        "reviewed_by": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/non_empty_string"
+          }
+        },
+        "creation_method": {
+          "$ref": "#/$defs/non_empty_string"
+        },
+        "storage_location": {
+          "$ref": "#/$defs/non_empty_string"
+        },
+        "hash_algorithm": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._+-]*$"
+        },
+        "hash_recorded_at": {
+          "$ref": "#/$defs/utc_timestamp"
+        },
+        "review_status": {
+          "$ref": "#/$defs/review_status"
+        }
+      }
+    },
+    "trusted_tool_run": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "run_id",
+        "tool_name",
+        "tool_version",
+        "command",
+        "run_timestamp_utc",
+        "host_os",
+        "output_path",
+        "output_sha256",
+        "notes"
+      ],
+      "properties": {
+        "run_id": {
+          "$ref": "#/$defs/non_empty_string"
+        },
+        "tool_name": {
+          "$ref": "#/$defs/non_empty_string"
+        },
+        "tool_version": {
+          "$ref": "#/$defs/non_empty_string"
+        },
+        "command": {
+          "$ref": "#/$defs/non_empty_string"
+        },
+        "run_timestamp_utc": {
+          "$ref": "#/$defs/utc_timestamp"
+        },
+        "host_os": {
+          "$ref": "#/$defs/non_empty_string"
+        },
+        "output_path": {
+          "$ref": "#/$defs/non_empty_string"
+        },
+        "output_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "notes": {
+          "type": "string"
+        }
+      }
+    },
+    "expected_item": {
+      "type": "object",
+      "additionalProperties": false,
+      "$comment": "Trusted-tool run ID existence is a process rule outside JSON Schema.",
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "expected_recovery": {
+                "const": "must_recover_byte_exact"
+              }
+            },
+            "required": [
+              "expected_recovery"
+            ]
+          },
+          "then": {
+            "properties": {
+              "sha256": {
+                "$ref": "#/$defs/sha256"
+              }
+            },
+            "required": [
+              "sha256"
+            ]
+          }
+        },
+        {
+          "if": {
+            "anyOf": [
+              {
+                "properties": {
+                  "expected_status": {
+                    "enum": [
+                      "deleted_unrecoverable",
+                      "partially_overwritten",
+                      "metadata_only",
+                      "unsupported",
+                      "inconclusive"
+                    ]
+                  }
+                },
+                "required": [
+                  "expected_status"
+                ]
+              },
+              {
+                "properties": {
+                  "expected_recovery": {
+                    "enum": [
+                      "may_recover_partial",
+                      "must_not_recover",
+                      "expected_unsupported",
+                      "expected_inconclusive"
+                    ]
+                  }
+                },
+                "required": [
+                  "expected_recovery"
+                ]
+              }
+            ]
+          },
+          "then": {
+            "properties": {
+              "expected_failure_reason": {
+                "$ref": "#/$defs/non_empty_string"
+              }
+            },
+            "required": [
+              "expected_failure_reason"
+            ]
+          }
+        }
+      ],
+      "required": [
+        "item_id",
+        "expected_status",
+        "expected_recovery",
+        "expected_recovery_mode",
+        "file_type",
+        "path_encoding",
+        "unicode_normalization",
+        "is_sparse",
+        "is_fragmented",
+        "is_carved_only",
+        "trusted_tool_run_ids",
+        "expected_metadata",
+        "accepted_variants"
+      ],
+      "properties": {
+        "item_id": {
+          "$ref": "#/$defs/non_empty_string"
+        },
+        "original_path": {
+          "$ref": "#/$defs/nullable_non_empty_string"
+        },
+        "normalized_path": {
+          "$ref": "#/$defs/nullable_non_empty_string"
+        },
+        "expected_status": {
+          "$ref": "#/$defs/expected_status"
+        },
+        "expected_recovery": {
+          "$ref": "#/$defs/expected_recovery"
+        },
+        "expected_recovery_mode": {
+          "$ref": "#/$defs/expected_recovery_mode"
+        },
+        "file_type": {
+          "$ref": "#/$defs/non_empty_string"
+        },
+        "size_bytes": {
+          "$ref": "#/$defs/non_negative_integer"
+        },
+        "sha256": {
+          "$ref": "#/$defs/nullable_sha256"
+        },
+        "md5_optional": {
+          "$ref": "#/$defs/nullable_md5"
+        },
+        "created_time_utc": {
+          "$ref": "#/$defs/nullable_utc_timestamp"
+        },
+        "modified_time_utc": {
+          "$ref": "#/$defs/nullable_utc_timestamp"
+        },
+        "accessed_time_utc": {
+          "$ref": "#/$defs/nullable_utc_timestamp"
+        },
+        "deleted_time_utc_optional": {
+          "$ref": "#/$defs/nullable_utc_timestamp"
+        },
+        "path_encoding": {
+          "$ref": "#/$defs/non_empty_string"
+        },
+        "unicode_normalization": {
+          "$ref": "#/$defs/unicode_normalization"
+        },
+        "ads_name_optional": {
+          "$ref": "#/$defs/nullable_non_empty_string"
+        },
+        "is_sparse": {
+          "type": "boolean"
+        },
+        "is_fragmented": {
+          "type": "boolean"
+        },
+        "is_carved_only": {
+          "type": "boolean"
+        },
+        "trusted_tool_run_ids": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/non_empty_string"
+          }
+        },
+        "expected_metadata": {
+          "type": "object",
+          "additionalProperties": true,
+          "$comment": "Free-form metadata is intentionally flexible for filesystem record IDs, byte offsets, partition locators, stream details, and timestamp tolerance rules."
+        },
+        "accepted_variants": {
+          "type": "array",
+          "items": {
+            "type": [
+              "object",
+              "string"
+            ]
+          },
+          "$comment": "Variant object shape is intentionally flexible for alternate paths, timestamp tolerances, and trusted-tool-specific equivalents."
+        },
+        "expected_failure_reason": {
+          "$ref": "#/$defs/nullable_non_empty_string"
+        },
+        "notes": {
+          "type": "string"
+        }
+      }
+    },
+    "expected_global_outcomes": {
+      "type": "object",
+      "additionalProperties": false,
+      "$comment": "Threshold values are declared here, but release metrics must be computed from item-level outcomes and trusted diffs rather than manually copied into final reports.",
+      "required": [
+        "min_recall",
+        "min_precision",
+        "max_false_positives",
+        "max_inconclusive",
+        "max_runtime_seconds",
+        "max_peak_memory_mb",
+        "required_logs",
+        "required_reports"
+      ],
+      "properties": {
+        "min_recall": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "min_precision": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "max_false_positives": {
+          "$ref": "#/$defs/non_negative_integer"
+        },
+        "max_inconclusive": {
+          "$ref": "#/$defs/non_negative_integer"
+        },
+        "max_runtime_seconds": {
+          "$ref": "#/$defs/non_negative_integer"
+        },
+        "max_peak_memory_mb": {
+          "$ref": "#/$defs/non_negative_integer"
+        },
+        "required_logs": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/non_empty_string"
+          }
+        },
+        "required_reports": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/non_empty_string"
+          }
+        }
+      }
+    }
+  }
+}
