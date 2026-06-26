@@ -1,20 +1,26 @@
 from __future__ import annotations
 
+import contextlib
+import io
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 from rapidtriage.validation.known_answer_schema import validate_schema_document
+from rapidtriage.validation.trusted_diff_result import TrustedDiffResult
 from tests.trusted_diff_helpers import (
     RAPID_RESULTS,
     TRUSTED_RESULTS,
     duplicated_manifest_expected_path as _duplicated_manifest_expected_path,
     duplicated_observed_path as _duplicated_observed_path,
     empty_observed_results as _empty_observed_results,
+    expected_inconclusive_manifest as _expected_inconclusive_manifest,
     has_diff_message as _has_diff_message,
     has_error_message as _has_error_message,
     int_field as _int_field,
     json_object as _json_object,
+    load_trusted_diff_cli as _load_trusted_diff_cli,
     list_field as _list_field,
     make_first_item_id_wrong as _make_first_item_id_wrong,
     make_first_item_inconclusive as _make_first_item_inconclusive,
@@ -40,6 +46,59 @@ class TrustedDiffTests(unittest.TestCase):
         self.assertEqual(payload["status"], "PASS")
         self.assertEqual(_int_field(_object_field(payload, "counts"), "match"), 9)
         self.assertEqual(payload["release_evidence_status"], "engineering_check_only")
+
+    def test_cli_json_passes_schema_when_expected_inconclusive_matches(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            manifest_path = _expected_inconclusive_manifest(Path(temp_dir))
+            rapid_path = _mutated_observed_results(Path(temp_dir), RAPID_RESULTS, "rapid-expected-inconclusive", _make_first_item_inconclusive)
+            trusted_path = _mutated_observed_results(
+                Path(temp_dir),
+                TRUSTED_RESULTS,
+                "trusted-expected-inconclusive",
+                _make_first_item_inconclusive,
+            )
+            completed = _run_trusted_diff(
+                "--manifest",
+                str(manifest_path),
+                "--rapid-results",
+                str(rapid_path),
+                "--trusted-results",
+                str(trusted_path),
+                "--json",
+            )
+            payload = _json_object(completed.stdout)
+            errors = validate_schema_document(payload, _schema())
+
+        self.assertEqual(completed.returncode, 0)
+        self.assertEqual(errors, [])
+        self.assertEqual(payload["status"], "PASS")
+        counts = _object_field(payload, "counts")
+        self.assertEqual(_int_field(counts, "expected_inconclusive"), 1)
+        diffs = _list_field(payload, "diffs")
+        self.assertTrue(any(isinstance(diff, dict) and diff.get("category") == "EXPECTED_INCONCLUSIVE" for diff in diffs))
+
+    def test_cli_returns_error_when_generated_pass_result_fails_result_schema(self) -> None:
+        cli = _load_trusted_diff_cli()
+        invalid_pass = TrustedDiffResult(status="PASS", ok=True, document={"status": "PASS"})
+        stdout = io.StringIO()
+
+        with mock.patch.object(cli, "compare", return_value=invalid_pass), contextlib.redirect_stdout(stdout):
+            return_code = cli.main(
+                [
+                    "--manifest",
+                    str(_schema()),
+                    "--rapid-results",
+                    str(RAPID_RESULTS),
+                    "--trusted-results",
+                    str(TRUSTED_RESULTS),
+                    "--json",
+                ],
+            )
+        payload = _json_object(stdout.getvalue())
+
+        self.assertEqual(return_code, 2)
+        self.assertEqual(payload["status"], "ERROR")
+        self.assertTrue(_has_error_message(payload, "trusted diff result schema"))
 
     def test_cli_writes_json_and_summary_outputs(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

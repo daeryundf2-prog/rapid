@@ -34,6 +34,7 @@ def diff_counts(diffs: list[DiffEntry]) -> JsonObject:
         ("metadata_mismatch", "METADATA_MISMATCH"),
         ("expected_unsupported", "EXPECTED_UNSUPPORTED"),
         ("expected_unrecoverable", "EXPECTED_UNRECOVERABLE"),
+        ("expected_inconclusive", "EXPECTED_INCONCLUSIVE"),
         ("inconclusive", "INCONCLUSIVE"),
     )
     return {

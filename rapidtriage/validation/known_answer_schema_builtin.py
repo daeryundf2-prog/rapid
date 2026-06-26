@@ -68,11 +68,15 @@ def _resolved_ref(schema: JsonObject, context: SchemaContext) -> JsonObject | No
 
 def _type_error(value: JsonValue | None, schema: JsonObject, path: str) -> ManifestValidationError | None:
     type_rule = schema.get("type")
-    if not isinstance(type_rule, str):
+    if isinstance(type_rule, list):
+        allowed_types = _string_list(type_rule)
+    elif isinstance(type_rule, str):
+        allowed_types = [type_rule]
+    else:
         return None
-    if _matches_type(value, type_rule):
+    if any(_matches_type(value, allowed_type) for allowed_type in allowed_types):
         return None
-    return ManifestValidationError(path=path, message=f"{value!r} is not of type '{type_rule}'", validator="type")
+    return ManifestValidationError(path=path, message=f"{value!r} is not of type {allowed_types!r}", validator="type")
 
 
 def _matches_type(value: JsonValue | None, type_rule: str) -> bool:

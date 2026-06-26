@@ -92,6 +92,22 @@ class TrustedExportNormalizerTests(unittest.TestCase):
         self.assertEqual(payload["status"], "ERROR")
         self.assertIn("normalized_path", _str_field(payload, "message"))
 
+    def test_synthetic_tsv_rejects_recovered_row_with_invalid_size_bytes(self) -> None:
+        completed = _run_normalizer_with_row("recovered", "not-an-int", "a" * 64)
+        payload = _json_object(completed.stdout)
+
+        self.assertEqual(completed.returncode, 2)
+        self.assertEqual(payload["status"], "ERROR")
+        self.assertIn("size_bytes", _str_field(payload, "message"))
+
+    def test_synthetic_tsv_rejects_recovered_row_with_empty_sha256(self) -> None:
+        completed = _run_normalizer_with_row("recovered", "1", "")
+        payload = _json_object(completed.stdout)
+
+        self.assertEqual(completed.returncode, 2)
+        self.assertEqual(payload["status"], "ERROR")
+        self.assertIn("sha256", _str_field(payload, "message"))
+
 
 def _run_normalizer(*extra_args: str) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
@@ -109,6 +125,33 @@ def _run_normalizer(*extra_args: str) -> subprocess.CompletedProcess[str]:
         capture_output=True,
         text=True,
     )
+
+
+def _run_normalizer_with_row(status: str, size_bytes: str, sha256: str) -> subprocess.CompletedProcess[str]:
+    with tempfile.TemporaryDirectory() as temp_dir:
+        malformed_tsv = Path(temp_dir) / "malformed.tsv"
+        _ = malformed_tsv.write_text(
+            "\t".join(["normalized_path", "size_bytes", "sha256", "observed_status", "recovery_mode"])
+            + "\n"
+            + "\t".join(["/recovered.txt", size_bytes, sha256, status, "filesystem"])
+            + "\n",
+            encoding="utf-8",
+        )
+        return subprocess.run(
+            [
+                sys.executable,
+                str(SCRIPT),
+                "--tool",
+                "synthetic-tsv",
+                "--input",
+                str(malformed_tsv),
+                "--json",
+            ],
+            cwd=REPO_ROOT,
+            check=False,
+            capture_output=True,
+            text=True,
+        )
 
 
 def _schema() -> JsonObject:

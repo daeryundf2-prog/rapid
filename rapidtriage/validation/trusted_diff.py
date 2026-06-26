@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Final
@@ -27,6 +28,13 @@ TRUSTED_DIFF_SCHEMA_PATH: Final[Path] = (
     / "trusted-diff-result-schema-v1.schema.json"
 )
 TOOL_VERSION: Final = "0.1.0"
+
+
+@dataclass(frozen=True, slots=True)
+class TrustedDiffInputPaths:
+    manifest_path: Path
+    rapid_results_path: Path
+    trusted_results_path: Path
 
 
 def compare(
@@ -92,6 +100,28 @@ def validate_result_schema(document: JsonObject) -> list[ManifestValidationError
     if not isinstance(schema, dict):
         return [ManifestValidationError(path="$", message="trusted diff schema must be a JSON object", validator="type")]
     return validate_schema_document(document, schema)
+
+
+def result_schema_error_result(
+    inputs: TrustedDiffInputPaths,
+    errors: list[ManifestValidationError],
+) -> TrustedDiffResult:
+    return _result(
+        "ERROR",
+        inputs.manifest_path,
+        inputs.rapid_results_path,
+        inputs.trusted_results_path,
+        [],
+        [_result_schema_error(error) for error in errors],
+    )
+
+
+def _result_schema_error(error: ManifestValidationError) -> ManifestValidationError:
+    return ManifestValidationError(
+        path=error.path,
+        message=f"trusted diff result schema validation failed: {error.message}",
+        validator=error.validator,
+    )
 
 
 def _load_input_errors(

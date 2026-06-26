@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import subprocess
 import sys
 import tempfile
@@ -9,7 +10,7 @@ from unittest.mock import patch
 
 from rapidtriage.validation.known_answer import validate_manifest
 from rapidtriage.validation.known_answer_schema import load_json_document, validate_schema_document
-from rapidtriage.validation.known_answer_types import JsonObject, ManifestValidationError
+from rapidtriage.validation.known_answer_types import JsonObject, JsonValue, ManifestValidationError
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -70,6 +71,24 @@ class KnownAnswerManifestValidationTests(unittest.TestCase):
         self.assertTrue(
             any(
                 error.validator == "pattern" and error.path == "$/expected_items/0/sha256"
+                for error in result.errors
+            ),
+        )
+
+    def test_builtin_schema_fallback_rejects_array_form_type_mismatch(self) -> None:
+        dependency_error = ManifestValidationError(path="$", message="jsonschema unavailable", validator="dependency")
+        with tempfile.TemporaryDirectory() as temp_dir:
+            manifest = _manifest_with_accepted_variant(Path(temp_dir), [123])
+            with patch(
+                "rapidtriage.validation.known_answer_schema._load_jsonschema_runtime",
+                return_value=(None, dependency_error),
+            ):
+                result = validate_manifest(manifest)
+
+        self.assertFalse(result.ok)
+        self.assertTrue(
+            any(
+                error.validator == "type" and error.path == "$/expected_items/0/accepted_variants/0"
                 for error in result.errors
             ),
         )
@@ -236,6 +255,19 @@ def _mutated_manifest(temp_dir: Path, old: str, new: str) -> Path:
         raise AssertionError(f"manifest mutation target was not found: {old}")
     manifest = temp_dir / "manifest.json"
     _ = manifest.write_text(source.replace(old, new, 1), encoding="utf-8")
+    return manifest
+
+
+def _manifest_with_accepted_variant(temp_dir: Path, variant: JsonValue) -> Path:
+    source_data, source_error = load_json_document(TIER0_MANIFEST, "tier0 manifest")
+    if source_error is not None or not isinstance(source_data, dict):
+        raise AssertionError("tier0 manifest must be an object")
+    expected_items = source_data.get("expected_items")
+    if not isinstance(expected_items, list) or not expected_items or not isinstance(expected_items[0], dict):
+        raise AssertionError("tier0 manifest expected_items[0] must be an object")
+    expected_items[0]["accepted_variants"] = [variant]
+    manifest = temp_dir / "manifest.json"
+    _ = manifest.write_text(json.dumps(source_data), encoding="utf-8")
     return manifest
 
 

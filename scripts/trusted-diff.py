@@ -26,6 +26,8 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from rapidtriage.validation.trusted_diff import compare, result_to_text, write_summary
+from rapidtriage.validation.trusted_diff import result_schema_error_result, validate_result_schema, TrustedDiffInputPaths
+from rapidtriage.validation.trusted_diff_result import TrustedDiffResult
 
 
 @dataclass(frozen=True, slots=True)
@@ -40,7 +42,8 @@ class CliArgs:
 
 def main(argv: Sequence[str] | None = None) -> int:
     args = _parse_args(argv)
-    result = compare(args.manifest, args.rapid_results, args.trusted_results)
+    inputs = TrustedDiffInputPaths(args.manifest, args.rapid_results, args.trusted_results)
+    result = _schema_validated_result(inputs, compare(args.manifest, args.rapid_results, args.trusted_results))
 
     if args.out is not None:
         _ = args.out.write_text(json.dumps(result.document, ensure_ascii=False, indent=2, sort_keys=True), encoding="utf-8")
@@ -52,6 +55,13 @@ def main(argv: Sequence[str] | None = None) -> int:
     elif args.out is None:
         print(result_to_text(result))
     return _exit_code(result.status)
+
+
+def _schema_validated_result(inputs: TrustedDiffInputPaths, result: TrustedDiffResult) -> TrustedDiffResult:
+    errors = validate_result_schema(result.document)
+    if errors:
+        return result_schema_error_result(inputs, errors)
+    return result
 
 
 def _parse_args(argv: Sequence[str] | None) -> CliArgs:

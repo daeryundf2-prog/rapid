@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+import importlib.util
 import json
 import subprocess
 import sys
 from collections.abc import Callable
 from pathlib import Path
+from types import ModuleType
 from typing import cast
 
 from rapidtriage.validation.known_answer_schema import load_json_document
@@ -33,6 +35,16 @@ def run_trusted_diff(*extra_args: str) -> subprocess.CompletedProcess[str]:
         *extra_args,
     ]
     return subprocess.run(args, cwd=REPO_ROOT, check=False, capture_output=True, text=True)
+
+
+def load_trusted_diff_cli() -> ModuleType:
+    spec = importlib.util.spec_from_file_location("trusted_diff_cli_for_tests", SCRIPT)
+    if spec is None or spec.loader is None:
+        raise AssertionError("trusted-diff CLI module must be loadable")
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    return module
 
 
 def schema() -> JsonObject:
@@ -105,6 +117,22 @@ def make_first_item_inconclusive(item: JsonObject) -> None:
 
 def make_first_item_id_wrong(item: JsonObject) -> None:
     item["item_id"] = "wrong-item-id"
+
+
+def expected_inconclusive_manifest(temp_dir: Path) -> Path:
+    payload = json_object(MANIFEST.read_text(encoding="utf-8"))
+    items = list_field(payload, "expected_items")
+    first_item = items[0] if items else None
+    if not isinstance(first_item, dict):
+        raise AssertionError("first expected item must be an object")
+    first_item["expected_status"] = "inconclusive"
+    first_item["expected_recovery"] = "expected_inconclusive"
+    first_item["expected_recovery_mode"] = "none"
+    first_item["sha256"] = None
+    first_item["expected_failure_reason"] = "Expected inconclusive validation row."
+    path = temp_dir / "manifest-expected-inconclusive.json"
+    _ = path.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+    return path
 
 
 def duplicated_observed_path(temp_dir: Path, source: Path, stem: str) -> Path:

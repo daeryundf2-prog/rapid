@@ -69,7 +69,13 @@ def _synthetic_tsv(input_path: Path) -> NormalizerResult:
         with input_path.open("r", encoding="utf-8", newline="") as file_obj:
             reader = csv.DictReader(file_obj, delimiter="\t")
             for index, row in enumerate(reader, start=1):
-                item = _row_to_item(index, row)
+                size_bytes, row_error = _validated_size_bytes(index, row)
+                if row_error is not None:
+                    return _error(row_error)
+                recovered_error = _recovered_row_error(index, row, size_bytes)
+                if recovered_error is not None:
+                    return _error(recovered_error)
+                item = _row_to_item(index, row, size_bytes)
                 items.append(item)
                 status = row.get("observed_status")
                 if status == "recovered":
@@ -121,14 +127,14 @@ def _error_summary(prefix: str, errors: list[ManifestValidationError]) -> str:
     return f"{prefix}: {details}"
 
 
-def _row_to_item(index: int, row: dict[str, str | None]) -> JsonObject:
+def _row_to_item(index: int, row: dict[str, str | None], size_bytes: int | None) -> JsonObject:
     source_run_id = row.get("source_tool_run_id") or "synthetic-tsv-normalized-001"
     return {
         "item_id": f"synthetic-tsv-{index:03d}",
         "normalized_path": row.get("normalized_path") or "",
         "observed_status": row.get("observed_status") or "inconclusive",
         "recovery_mode": row.get("recovery_mode") or "none",
-        "size_bytes": _int_or_none(row.get("size_bytes")),
+        "size_bytes": size_bytes,
         "sha256": row.get("sha256") or None,
         "metadata": {},
         "source_tool_run_id": source_run_id,
@@ -147,13 +153,24 @@ def _error(message: str) -> NormalizerResult:
     )
 
 
-def _int_or_none(value: str | None) -> int | None:
+def _validated_size_bytes(index: int, row: dict[str, str | None]) -> tuple[int | None, str | None]:
+    value = row.get("size_bytes")
     if value is None or value == "":
-        return None
+        return None, None
     try:
-        return int(value)
+        return int(value), None
     except ValueError:
+        return None, f"row {index} size_bytes must be an integer when provided"
+
+
+def _recovered_row_error(index: int, row: dict[str, str | None], size_bytes: int | None) -> str | None:
+    if row.get("observed_status") != "recovered":
         return None
+    if size_bytes is None:
+        return f"row {index} recovered item requires size_bytes"
+    if not row.get("sha256"):
+        return f"row {index} recovered item requires sha256"
+    return None
 
 
 def _object(document: JsonObject, field: str) -> JsonObject:
