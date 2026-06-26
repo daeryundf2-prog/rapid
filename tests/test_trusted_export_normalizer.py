@@ -61,6 +61,37 @@ class TrustedExportNormalizerTests(unittest.TestCase):
         self.assertEqual(payload["status"], "ERROR")
         self.assertIn("unsupported tool", _str_field(payload, "message"))
 
+    def test_synthetic_tsv_rejects_missing_required_normalized_path(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            malformed_tsv = Path(temp_dir) / "missing-normalized-path.tsv"
+            _ = malformed_tsv.write_text(
+                "\t".join(["observed_status", "recovery_mode", "size_bytes", "sha256"])
+                + "\n"
+                + "\t".join(["recovered", "filesystem", "1", "a" * 64])
+                + "\n",
+                encoding="utf-8",
+            )
+            completed = subprocess.run(
+                [
+                    sys.executable,
+                    str(SCRIPT),
+                    "--tool",
+                    "synthetic-tsv",
+                    "--input",
+                    str(malformed_tsv),
+                    "--json",
+                ],
+                cwd=REPO_ROOT,
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            payload = _json_object(completed.stdout)
+
+        self.assertEqual(completed.returncode, 2)
+        self.assertEqual(payload["status"], "ERROR")
+        self.assertIn("normalized_path", _str_field(payload, "message"))
+
 
 def _run_normalizer(*extra_args: str) -> subprocess.CompletedProcess[str]:
     return subprocess.run(

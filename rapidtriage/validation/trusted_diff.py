@@ -8,6 +8,7 @@ from rapidtriage.validation.json_fields import int_field, list_field, object_fie
 from rapidtriage.validation.known_answer_schema import load_json_document, validate_schema_document
 from rapidtriage.validation.known_answer_types import JsonObject, ManifestValidationError
 from rapidtriage.validation.manifest_truth import expected_truth_issue
+from rapidtriage.validation.truth_manifest import expected_item_path, load_truth_manifest
 from rapidtriage.validation.trusted_diff_result import (
     DiffEntry,
     TrustedDiffResult,
@@ -42,11 +43,13 @@ def compare(
     if rapid_errors or trusted_errors or rapid_results is None or trusted_results is None:
         return _result("ERROR", manifest_path, rapid_results_path, trusted_results_path, [], rapid_errors + trusted_errors)
 
-    manifest, manifest_error = _load_manifest(manifest_path)
-    if manifest_error is not None:
-        return _result("ERROR", manifest_path, rapid_results_path, trusted_results_path, [], [manifest_error])
+    manifest, manifest_errors = load_truth_manifest(manifest_path)
+    if manifest_errors:
+        return _result("ERROR", manifest_path, rapid_results_path, trusted_results_path, [], manifest_errors)
 
-    expected = _expected_by_path(manifest)
+    if manifest is None:
+        return _result("ERROR", manifest_path, rapid_results_path, trusted_results_path, [], manifest_errors)
+    expected = manifest.expected_by_path
     diffs = _compare_items(index_by_path(rapid_results.items), index_by_path(trusted_results.items), expected)
     status = "FAIL" if any(diff.severity == "critical" for diff in diffs) else "PASS"
     return _result(status, manifest_path, rapid_results_path, trusted_results_path, diffs, [])
@@ -103,38 +106,6 @@ def _load_input_errors(
     ]
 
 
-def _load_manifest(path: Path) -> tuple[JsonObject, ManifestValidationError | None]:
-    data, error = load_json_document(path, "truth manifest")
-    if error is not None:
-        return {}, error
-    if not isinstance(data, dict):
-        return {}, ManifestValidationError(path="$", message="truth manifest must be a JSON object", validator="type")
-    return data, None
-
-
-def _expected_by_path(manifest: JsonObject) -> dict[str, JsonObject]:
-    expected_items = manifest.get("expected_items")
-    if not isinstance(expected_items, list):
-        return {}
-    expected: dict[str, JsonObject] = {}
-    for item in expected_items:
-        if isinstance(item, dict):
-            path = _expected_path(item)
-            if path:
-                expected[path] = item
-    return expected
-
-
-def _expected_path(item: JsonObject) -> str:
-    metadata = item.get("expected_metadata")
-    if isinstance(metadata, dict):
-        fixture_path = metadata.get("fixture_relative_path")
-        if isinstance(fixture_path, str):
-            return fixture_path
-    normalized_path = item.get("normalized_path")
-    return normalized_path if isinstance(normalized_path, str) else ""
-
-
 def _compare_items(
     rapid: dict[str, ObservedItem],
     trusted: dict[str, ObservedItem],
@@ -166,12 +137,8 @@ def _diff_for_path(
         return _entry("EXPECTED_UNSUPPORTED", "info", rapid_item, trusted_item, "none", "both outputs reflect expected unsupported item")
     if _is_expected_unrecoverable(expected_item, rapid_item, trusted_item):
         return _entry("EXPECTED_UNRECOVERABLE", "info", rapid_item, trusted_item, "none", "both outputs reflect expected unrecoverable item")
-    if rapid_item.observed_status == "inconclusive" or trusted_item.observed_status == "inconclusive":
-        return _entry("INCONCLUSIVE", "warning", rapid_item, trusted_item, "external_review_required", "one or more outputs is inconclusive")
-    if rapid_item.sha256 != trusted_item.sha256:
-        return _entry("HASH_MISMATCH", "critical", rapid_item, trusted_item, "review_required", "sha256 differs between RapidForensic and trusted reference")
-    if rapid_item.size_bytes != trusted_item.size_bytes or rapid_item.observed_status != trusted_item.observed_status:
-        return _entry("METADATA_MISMATCH", "critical", rapid_item, trusted_item, "review_required", "status or size differs between outputs")
+    if _is_expected_inconclusive(expected_item, rapid_item, trusted_item):
+        return _entry("EXPECTED_INCONCLUSIVE", "info", rapid_item, trusted_item, "none", "both outputs reflect expected inconclusive item")
     truth_issue = expected_truth_issue(rapid_item, trusted_item, expected_item)
     if truth_issue is not None:
         return _entry(
@@ -182,6 +149,12 @@ def _diff_for_path(
             truth_issue.reviewer_action,
             truth_issue.message,
         )
+    if rapid_item.observed_status == "inconclusive" or trusted_item.observed_status == "inconclusive":
+        return _entry("INCONCLUSIVE", "critical", rapid_item, trusted_item, "external_review_required", "one or more outputs is inconclusive")
+    if rapid_item.sha256 != trusted_item.sha256:
+        return _entry("HASH_MISMATCH", "critical", rapid_item, trusted_item, "review_required", "sha256 differs between RapidForensic and trusted reference")
+    if rapid_item.size_bytes != trusted_item.size_bytes or rapid_item.observed_status != trusted_item.observed_status:
+        return _entry("METADATA_MISMATCH", "critical", rapid_item, trusted_item, "review_required", "status or size differs between outputs")
     return _entry("MATCH", "info", rapid_item, trusted_item, "none", "RapidForensic and trusted reference match")
 
 
@@ -212,7 +185,7 @@ def _expected_missing_entry(expected_item: JsonObject) -> DiffEntry:
         category="METADATA_MISMATCH",
         severity="critical",
         item_id=item_id if isinstance(item_id, str) else None,
-        normalized_path=_expected_path(expected_item) or "<unknown>",
+        normalized_path=expected_item_path(expected_item) or "<unknown>",
         rapid_status=None,
         trusted_status=None,
         reviewer_action="rerun_required",
@@ -226,6 +199,10 @@ def _is_expected_unsupported(expected: JsonObject, rapid: ObservedItem, trusted:
 
 def _is_expected_unrecoverable(expected: JsonObject, rapid: ObservedItem, trusted: ObservedItem) -> bool:
     return expected.get("expected_recovery") == "must_not_recover" and rapid.observed_status == trusted.observed_status == "not_found"
+
+
+def _is_expected_inconclusive(expected: JsonObject, rapid: ObservedItem, trusted: ObservedItem) -> bool:
+    return expected.get("expected_recovery") == "expected_inconclusive" and rapid.observed_status == trusted.observed_status == "inconclusive"
 
 
 def _result(

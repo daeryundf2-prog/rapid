@@ -47,7 +47,11 @@ def load_observed_results(path: Path) -> tuple[ObservedResults | None, list[Mani
     errors = validate_schema_document(document, schema)
     if errors:
         return None, errors
-    return ObservedResults(path=path, document=document, items=_items(document)), []
+    items = _items(document)
+    duplicate_errors = _duplicate_path_errors(items)
+    if duplicate_errors:
+        return None, duplicate_errors
+    return ObservedResults(path=path, document=document, items=items), []
 
 
 def observed_result_document(
@@ -92,6 +96,10 @@ def index_by_path(items: list[ObservedItem]) -> dict[str, ObservedItem]:
     return {item.normalized_path: item for item in items}
 
 
+def duplicate_path_errors(items: list[ObservedItem]) -> list[ManifestValidationError]:
+    return _duplicate_path_errors(items)
+
+
 def _load_schema() -> tuple[JsonObject, ManifestValidationError | None]:
     schema, schema_error = load_json_document(OBSERVED_RESULTS_SCHEMA_PATH, "observed results schema")
     if schema_error is not None:
@@ -110,6 +118,23 @@ def _items(document: JsonObject) -> list[ObservedItem]:
         if isinstance(raw_item, dict):
             items.append(_item(raw_item))
     return items
+
+
+def _duplicate_path_errors(items: list[ObservedItem]) -> list[ManifestValidationError]:
+    seen: set[str] = set()
+    duplicates: set[str] = set()
+    for item in items:
+        if item.normalized_path in seen:
+            duplicates.add(item.normalized_path)
+        seen.add(item.normalized_path)
+    return [
+        ManifestValidationError(
+            path="$/items",
+            message=f"duplicate normalized_path in observed results: {path}",
+            validator="unique",
+        )
+        for path in sorted(duplicates)
+    ]
 
 
 def _item(raw_item: JsonObject) -> ObservedItem:

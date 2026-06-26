@@ -23,6 +23,13 @@ def expected_truth_issue(
     if expected_recovery != "must_recover_byte_exact":
         return None
 
+    expected_item_id = _string_or_none(expected_item, "item_id")
+    if expected_item_id is not None and (rapid_item.item_id != expected_item_id or trusted_item.item_id != expected_item_id):
+        return _issue("METADATA_MISMATCH", "observed item_id differs from manifest truth")
+
+    if rapid_item.observed_status != "recovered" or trusted_item.observed_status != "recovered":
+        return _issue("METADATA_MISMATCH", "observed status differs from byte-exact manifest truth")
+
     expected_sha256 = _string_or_none(expected_item, "sha256")
     if expected_sha256 is not None and (rapid_item.sha256 != expected_sha256 or trusted_item.sha256 != expected_sha256):
         return _issue("HASH_MISMATCH", "observed sha256 differs from manifest truth")
@@ -34,9 +41,6 @@ def expected_truth_issue(
     expected_mode = _string_or_none(expected_item, "expected_recovery_mode")
     if expected_mode is not None and (rapid_item.recovery_mode != expected_mode or trusted_item.recovery_mode != expected_mode):
         return _issue("METADATA_MISMATCH", "observed recovery mode differs from manifest truth")
-
-    if rapid_item.observed_status != "recovered" or trusted_item.observed_status != "recovered":
-        return _issue("METADATA_MISMATCH", "observed status differs from byte-exact manifest truth")
 
     return None
 

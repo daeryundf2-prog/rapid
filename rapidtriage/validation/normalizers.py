@@ -5,8 +5,9 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Final
 
-from rapidtriage.validation.known_answer_schema import load_json_document
-from rapidtriage.validation.known_answer_types import JsonObject, JsonValue
+from rapidtriage.validation.known_answer_schema import load_json_document, validate_schema_document
+from rapidtriage.validation.known_answer_types import JsonObject, JsonValue, ManifestValidationError
+from rapidtriage.validation.observed_results import OBSERVED_RESULTS_SCHEMA_PATH
 
 
 SUPPORTED_TOOLS: Final = frozenset(
@@ -54,7 +55,7 @@ def _manual_json(input_path: Path) -> NormalizerResult:
         return _error(error.message)
     if not isinstance(document, dict):
         return _error("manual-json input must be a JSON object")
-    return NormalizerResult(exit_code=0, document=document)
+    return _validated_result(document)
 
 
 def _synthetic_tsv(input_path: Path) -> NormalizerResult:
@@ -96,7 +97,28 @@ def _synthetic_tsv(input_path: Path) -> NormalizerResult:
         },
         "notes": "Normalized export, not raw evidence.",
     }
+    return _validated_result(document)
+
+
+def _validated_result(document: JsonObject) -> NormalizerResult:
+    errors = _observed_schema_errors(document)
+    if errors:
+        return _error(_error_summary("normalized observed results schema validation failed", errors))
     return NormalizerResult(exit_code=0, document=document)
+
+
+def _observed_schema_errors(document: JsonObject) -> list[ManifestValidationError]:
+    schema, schema_error = load_json_document(OBSERVED_RESULTS_SCHEMA_PATH, "observed results schema")
+    if schema_error is not None:
+        return [schema_error]
+    if not isinstance(schema, dict):
+        return [ManifestValidationError(path="$", message="observed results schema must be a JSON object", validator="type")]
+    return validate_schema_document(document, schema)
+
+
+def _error_summary(prefix: str, errors: list[ManifestValidationError]) -> str:
+    details = "; ".join(f"{error.path}: {error.message}" for error in errors[:5])
+    return f"{prefix}: {details}"
 
 
 def _row_to_item(index: int, row: dict[str, str | None]) -> JsonObject:

@@ -1,24 +1,31 @@
 from __future__ import annotations
 
-import json
-import subprocess
-import sys
 import tempfile
 import unittest
 from pathlib import Path
-from typing import cast
 
-from rapidtriage.validation.known_answer_schema import load_json_document, validate_schema_document
-from rapidtriage.validation.known_answer_types import JsonObject, JsonValue
-
-
-REPO_ROOT = Path(__file__).resolve().parents[1]
-TIER0_ROOT = REPO_ROOT / "tests" / "fixtures" / "known_answer" / "tier0-basic"
-MANIFEST = TIER0_ROOT / "manifest.json"
-RAPID_RESULTS = TIER0_ROOT / "rapid-results.json"
-TRUSTED_RESULTS = TIER0_ROOT / "trusted-results.json"
-SCRIPT = REPO_ROOT / "scripts" / "trusted-diff.py"
-RESULT_SCHEMA = REPO_ROOT / "docs" / "validation" / "known-answer-corpus" / "trusted-diff-result-schema-v1.schema.json"
+from rapidtriage.validation.known_answer_schema import validate_schema_document
+from tests.trusted_diff_helpers import (
+    RAPID_RESULTS,
+    TRUSTED_RESULTS,
+    duplicated_manifest_expected_path as _duplicated_manifest_expected_path,
+    duplicated_observed_path as _duplicated_observed_path,
+    empty_observed_results as _empty_observed_results,
+    has_diff_message as _has_diff_message,
+    has_error_message as _has_error_message,
+    int_field as _int_field,
+    json_object as _json_object,
+    list_field as _list_field,
+    make_first_item_id_wrong as _make_first_item_id_wrong,
+    make_first_item_inconclusive as _make_first_item_inconclusive,
+    manifest_without_required_truth_sha as _manifest_without_required_truth_sha,
+    mutated_observed_results as _mutated_observed_results,
+    mutated_results as _mutated_results,
+    mutated_trusted_results as _mutated_trusted_results,
+    object_field as _object_field,
+    run_trusted_diff as _run_trusted_diff,
+    schema as _schema,
+)
 
 
 class TrustedDiffTests(unittest.TestCase):
@@ -95,89 +102,89 @@ class TrustedDiffTests(unittest.TestCase):
         diffs = _list_field(payload, "diffs")
         self.assertTrue(any(isinstance(diff, dict) and diff.get("category") == "HASH_MISMATCH" for diff in diffs))
 
+    def test_cli_errors_when_rapid_results_duplicate_normalized_path(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            rapid_path = _duplicated_observed_path(Path(temp_dir), RAPID_RESULTS, "rapid-duplicate")
+            completed = _run_trusted_diff("--rapid-results", str(rapid_path), "--json")
+            payload = _json_object(completed.stdout)
 
-def _run_trusted_diff(*extra_args: str) -> subprocess.CompletedProcess[str]:
-    args = [
-        sys.executable,
-        str(SCRIPT),
-        "--manifest",
-        str(MANIFEST),
-        "--rapid-results",
-        str(RAPID_RESULTS),
-        "--trusted-results",
-        str(TRUSTED_RESULTS),
-        *extra_args,
-    ]
-    return subprocess.run(args, cwd=REPO_ROOT, check=False, capture_output=True, text=True)
+        self.assertEqual(completed.returncode, 2)
+        self.assertEqual(payload["status"], "ERROR")
+        self.assertTrue(_has_error_message(payload, "duplicate normalized_path"))
 
+    def test_cli_errors_when_trusted_results_duplicate_normalized_path(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            trusted_path = _duplicated_observed_path(Path(temp_dir), TRUSTED_RESULTS, "trusted-duplicate")
+            completed = _run_trusted_diff("--trusted-results", str(trusted_path), "--json")
+            payload = _json_object(completed.stdout)
 
-def _schema() -> JsonObject:
-    data, error = load_json_document(RESULT_SCHEMA, "trusted diff result schema")
-    if error is not None:
-        raise AssertionError(error.message)
-    if not isinstance(data, dict):
-        raise AssertionError("schema must be an object")
-    return data
+        self.assertEqual(completed.returncode, 2)
+        self.assertEqual(payload["status"], "ERROR")
+        self.assertTrue(_has_error_message(payload, "duplicate normalized_path"))
 
+    def test_cli_errors_when_manifest_has_duplicate_expected_path(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            manifest_path = _duplicated_manifest_expected_path(Path(temp_dir))
+            completed = _run_trusted_diff("--manifest", str(manifest_path), "--json")
+            payload = _json_object(completed.stdout)
 
-def _json_object(raw_json: str) -> JsonObject:
-    value = cast(JsonValue, json.loads(raw_json))
-    if not isinstance(value, dict):
-        raise AssertionError("JSON output must be an object")
-    return value
+        self.assertEqual(completed.returncode, 2)
+        self.assertEqual(payload["status"], "ERROR")
+        self.assertTrue(_has_error_message(payload, "duplicate expected path"))
 
+    def test_cli_fails_when_must_recover_item_is_inconclusive(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            rapid_path = _mutated_observed_results(Path(temp_dir), RAPID_RESULTS, "rapid-inconclusive", _make_first_item_inconclusive)
+            trusted_path = _mutated_observed_results(
+                Path(temp_dir),
+                TRUSTED_RESULTS,
+                "trusted-inconclusive",
+                _make_first_item_inconclusive,
+            )
+            completed = _run_trusted_diff(
+                "--rapid-results",
+                str(rapid_path),
+                "--trusted-results",
+                str(trusted_path),
+                "--json",
+            )
+            payload = _json_object(completed.stdout)
 
-def _object_field(document: JsonObject, field: str) -> JsonObject:
-    value = document.get(field)
-    if not isinstance(value, dict):
-        raise AssertionError(f"{field} must be an object")
-    return value
+        self.assertEqual(completed.returncode, 1)
+        self.assertEqual(payload["status"], "FAIL")
+        self.assertTrue(_has_diff_message(payload, "observed status differs from byte-exact manifest truth"))
 
+    def test_cli_errors_when_manifest_fails_schema_validation(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            manifest_path = _manifest_without_required_truth_sha(Path(temp_dir))
+            completed = _run_trusted_diff("--manifest", str(manifest_path), "--json")
+            payload = _json_object(completed.stdout)
 
-def _list_field(document: JsonObject, field: str) -> list[JsonValue]:
-    value = document.get(field)
-    if not isinstance(value, list):
-        raise AssertionError(f"{field} must be a list")
-    return value
+        self.assertEqual(completed.returncode, 2)
+        self.assertEqual(payload["status"], "ERROR")
+        self.assertTrue(_has_error_message(payload, "sha256"))
 
+    def test_cli_fails_when_outputs_have_wrong_item_id(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            rapid_path = _mutated_observed_results(Path(temp_dir), RAPID_RESULTS, "rapid-wrong-id", _make_first_item_id_wrong)
+            trusted_path = _mutated_observed_results(
+                Path(temp_dir),
+                TRUSTED_RESULTS,
+                "trusted-wrong-id",
+                _make_first_item_id_wrong,
+            )
+            completed = _run_trusted_diff(
+                "--rapid-results",
+                str(rapid_path),
+                "--trusted-results",
+                str(trusted_path),
+                "--json",
+            )
+            payload = _json_object(completed.stdout)
 
-def _int_field(document: JsonObject, field: str) -> int:
-    value = document.get(field)
-    if not isinstance(value, int) or isinstance(value, bool):
-        raise AssertionError(f"{field} must be an integer")
-    return value
-
-
-def _mutated_trusted_results(temp_dir: Path) -> Path:
-    return _mutated_results(temp_dir, TRUSTED_RESULTS, "trusted-results")
-
-
-def _mutated_results(temp_dir: Path, source: Path, stem: str) -> Path:
-    payload = _json_object(source.read_text(encoding="utf-8"))
-    items = _list_field(payload, "items")
-    first_item = items[0] if items else None
-    if not isinstance(first_item, dict):
-        raise AssertionError("first item must be an object")
-    first_item["sha256"] = "f" * 64
-    path = temp_dir / f"{stem}.json"
-    _ = path.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
-    return path
-
-
-def _empty_observed_results(temp_dir: Path, stem: str) -> Path:
-    payload = _json_object(TRUSTED_RESULTS.read_text(encoding="utf-8"))
-    payload["source_run_id"] = stem
-    payload["items"] = []
-    payload["summary"] = {
-        "item_count": 0,
-        "recovered_count": 0,
-        "error_count": 0,
-        "inconclusive_count": 0,
-    }
-    path = temp_dir / f"{stem}.json"
-    _ = path.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
-    return path
-
+        self.assertEqual(completed.returncode, 1)
+        self.assertEqual(payload["status"], "FAIL")
+        self.assertTrue(_has_diff_message(payload, "observed item_id differs from manifest truth"))
 
 if __name__ == "__main__":
     _ = unittest.main()
