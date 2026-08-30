@@ -29,3 +29,7 @@ build/
 dist/
 .DS_Store
 engines/rust/target/
+ingest_out/
+demo_test/
+testdata/
+logs/

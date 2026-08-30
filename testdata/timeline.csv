@@ -1,4 +1,0 @@
-time,event,source,path,size,hash_algo,hash
-2024-01-02T00:00:00,decided_filename,filename,/Users/shinyoohag/Documents/untitled folder/testdata/20240102_000000.mp4,437692,sha256,cc810f14563e9cd8bca12df376bae49b8f2881d6d6d00091d474ae62f72edef5
-2026-03-14T22:35:19.275141,file_birth,filesystem,/Users/shinyoohag/Documents/untitled folder/testdata/20240102_000000.mp4,437692,sha256,cc810f14563e9cd8bca12df376bae49b8f2881d6d6d00091d474ae62f72edef5
-2026-03-14T22:35:20.397692,file_mtime,filesystem,/Users/shinyoohag/Documents/untitled folder/testdata/20240102_000000.mp4,437692,sha256,cc810f14563e9cd8bca12df376bae49b8f2881d6d6d00091d474ae62f72edef5
