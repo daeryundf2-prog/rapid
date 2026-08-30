@@ -4755,6 +4755,173 @@ def read_inline_binxml_value_detail(blob: bytes, offset: int) -> dict[str, objec
     return {"text": text, "next_offset": end, "value_type": value_type_name}
 
 
+def read_evtx_chunk_string(chunk_data: bytes, name_offset: int) -> tuple[str, int]:
+    """Read a BinXML NameStringNode from chunk coordinates.
+
+    Layout: dword next_offset, word hash, word char_count, UTF-16 name, word
+    terminator. Returns (name, total_node_length) so inline instances can be
+    skipped with the same math python-evtx uses.
+    """
+    if name_offset < 0 or name_offset + 8 > len(chunk_data):
+        return "", 0
+    char_count = read_u16(chunk_data, name_offset + 6)
+    start = name_offset + 8
+    end = start + char_count * 2
+    terminator_end = end + 2
+    if terminator_end > len(chunk_data):
+        return "", 0
+    return decode_utf16le_string(chunk_data[start:end]), 8 + char_count * 2 + 2
+
+
+def read_evtx_chunk_name_or_inline(chunk_data: bytes, node_offset: int, name_offset: int) -> tuple[str, int]:
+    """Resolve a template name either from the chunk heap or inline.
+
+    python-evtx treats a forward-pointing offset as an inline NameStringNode
+    that follows the token; backward offsets index the chunk string heap.
+    """
+    return read_evtx_chunk_string(chunk_data, name_offset)
+
+
+def walk_evtx_template_definition(
+    chunk_data: bytes, tree_offset: int, tree_length: int
+) -> tuple[dict[int, str], list[str]]:
+    """Map substitution indexes to BinXML element/attribute paths.
+
+    Walks the template definition tree that follows a TemplateNode header.
+    Names are resolved through the chunk string heap; substitution tokens
+    (0x0D normal / 0x0E conditional) record the element or attribute path
+    they replace.
+    """
+    mapping: dict[int, str] = {}
+    warnings: list[str] = []
+    stack: list[str] = []
+    pending_attribute = ""
+    offset = tree_offset
+    end = min(len(chunk_data), tree_offset + max(tree_length, 0))
+    guard = 0
+    while offset < end and guard < MAX_NATIVE_EVTX_BINXML_TOKENS:
+        guard += 1
+        token = chunk_data[offset]
+        kind = token & 0x3F
+        if kind == 0x00:
+            break
+        if kind == 0x0F:
+            offset += 4
+            continue
+        if kind == 0x01:
+            flags = token >> 4
+            name_offset = read_u32(chunk_data, offset + 7)
+            name, name_node_length = read_evtx_chunk_name_or_inline(chunk_data, offset, name_offset)
+            if not name:
+                warnings.append(f"definition-open-start-element-unnamed:{offset}")
+                break
+            stack.append(name)
+            inline_name = name_offset > offset
+            offset += 11 + (4 if flags & 0x04 else 0) + (name_node_length if inline_name else 0)
+            continue
+        if kind == 0x06:
+            name_offset = read_u32(chunk_data, offset + 1)
+            name, name_node_length = read_evtx_chunk_name_or_inline(chunk_data, offset, name_offset)
+            if not name:
+                warnings.append(f"definition-attribute-unnamed:{offset}")
+                break
+            pending_attribute = name
+            inline_name = name_offset > offset
+            offset += 5 + (name_node_length if inline_name else 0)
+            continue
+        if kind == 0x05:
+            detail = read_inline_binxml_value_detail(chunk_data, offset)
+            pending_attribute = ""
+            offset = int(detail.get("next_offset") or offset + 2)
+            continue
+        if kind in (0x0D, 0x0E):
+            if offset + 4 > end:
+                break
+            index = read_u16(chunk_data, offset + 1)
+            if stack:
+                base = "/".join(stack)
+                mapping[index] = f"{base}/@{pending_attribute}" if pending_attribute else base
+            pending_attribute = ""
+            offset += 4
+            continue
+        if kind in (0x02, 0x03, 0x04):
+            pending_attribute = ""
+            if stack and kind in (0x03, 0x04):
+                stack.pop()
+            offset += 1
+            continue
+        warnings.append(f"definition-unsupported-token:0x{token:02x}@{offset}")
+        break
+    if guard >= MAX_NATIVE_EVTX_BINXML_TOKENS:
+        warnings.append("definition-token-budget-exhausted")
+    return mapping, warnings
+
+
+def decode_evtx_system_section(chunk_data: bytes, record_chunk_offset: int) -> dict[str, object]:
+    """Decode the System section of a native EVTX record via its template.
+
+    Resolves named System/EventData fields through the record's template
+    definition and chunk string heap so rows carry provider, event id,
+    record id, computer, and channel semantics without relying on
+    string-scan heuristics.
+    """
+    result: dict[str, object] = {
+        "profile_version": "evtx-system-decode-v1",
+        "status": "not-attempted",
+        "system_fields": {},
+        "value_fields": [],
+        "substitution_count": 0,
+        "warnings": [],
+    }
+    payload_offset = record_chunk_offset + EVTX_RECORD_HEADER_SIZE
+    if payload_offset >= len(chunk_data) or chunk_data[payload_offset] != 0x0F:
+        result["status"] = "missing-fragment-header"
+        return result
+    if payload_offset + 14 > len(chunk_data) or (chunk_data[payload_offset + 4] & 0x3F) != 0x0C:
+        result["status"] = "no-template-instance"
+        return result
+    template_offset = read_u32(chunk_data, payload_offset + 10)
+    if template_offset <= 0 or template_offset + 24 > len(chunk_data):
+        result["status"] = "template-offset-out-of-bounds"
+        return result
+    data_length = read_u32(chunk_data, template_offset + 20)
+    if data_length <= 0 or template_offset + 24 + data_length > len(chunk_data):
+        result["status"] = "template-length-out-of-bounds"
+        return result
+    mapping, warnings = walk_evtx_template_definition(chunk_data, template_offset + 24, data_length)
+    values_offset = payload_offset + 4 + 10 + 24 + data_length
+    values, _, value_warnings = read_binxml_template_values(chunk_data, values_offset)
+    result["warnings"] = [*warnings, *value_warnings]
+    value_fields: list[dict[str, object]] = []
+    for row in values:
+        if not isinstance(row, Mapping):
+            continue
+        index = int(row.get("substitution_id") or 0)
+        path = mapping.get(index)
+        if not path:
+            continue
+        value_fields.append(
+            {
+                "element": path.split("/")[-1],
+                "element_path": path,
+                "text": str(row.get("text") or ""),
+                "value": row.get("value"),
+                "value_type": row.get("value_type"),
+                "substitution_id": index,
+                "confidence": "binxml-template-substitution-named",
+            }
+        )
+    result["value_fields"] = value_fields[:200]
+    result["substitution_count"] = len(value_fields)
+    promoted = native_evtx_promoted_fields({"value_fields": value_fields})
+    system_fields = promoted.get("system_fields")
+    result["system_fields"] = system_fields if isinstance(system_fields, Mapping) else {}
+    event_data = promoted.get("event_data_fields")
+    result["event_data_fields"] = event_data if isinstance(event_data, Mapping) else {}
+    result["status"] = "decoded" if system_fields else "decoded-without-system-fields"
+    return result
+
+
 def read_binxml_template_values(blob: bytes, offset: int) -> tuple[list[dict[str, object]], int, list[str]]:
     warnings: list[str] = []
     values: list[dict[str, object]] = []
