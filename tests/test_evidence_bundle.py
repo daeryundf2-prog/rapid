@@ -52,7 +52,7 @@ class EvidenceBundleTests(unittest.TestCase):
                 cwd=REPO_ROOT,
                 check=False,
                 capture_output=True,
-                text=True,
+                encoding="utf-8", text=True,
             )
             payload = _json_object(completed.stdout)
 
@@ -67,7 +67,7 @@ class EvidenceBundleTests(unittest.TestCase):
             cwd=REPO_ROOT,
             check=False,
             capture_output=True,
-            text=True,
+            encoding="utf-8", text=True,
         )
         payload = _json_object(completed.stdout)
 
@@ -85,7 +85,7 @@ class EvidenceBundleTests(unittest.TestCase):
                 cwd=REPO_ROOT,
                 check=False,
                 capture_output=True,
-                text=True,
+                encoding="utf-8", text=True,
             )
             payload = _json_object(completed.stdout)
 
@@ -101,7 +101,7 @@ def _run_bundle(*extra_args: str) -> subprocess.CompletedProcess[str]:
         cwd=REPO_ROOT,
         check=False,
         capture_output=True,
-        text=True,
+        encoding="utf-8", text=True,
     )
 
 

@@ -112,7 +112,7 @@ class RapidTriageDocumentationContractTests(unittest.TestCase):
             [sys.executable, "-m", "rapidtriage", *args, "--help"],
             cwd=REPO_ROOT,
             capture_output=True,
-            text=True,
+            encoding="utf-8", text=True,
             check=False,
         )
         self.assertEqual(result.returncode, 0, result.stderr)

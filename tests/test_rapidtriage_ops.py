@@ -5603,7 +5603,7 @@ class RapidTriageOpsTests(unittest.TestCase):
                     "--skip-build",
                 ],
                 cwd=Path(__file__).resolve().parent.parent,
-                text=True,
+                encoding="utf-8", text=True,
                 capture_output=True,
                 check=False,
             )
@@ -6712,7 +6712,7 @@ class RapidTriageOpsTests(unittest.TestCase):
                     "--verify",
                 ],
                 cwd=Path(__file__).resolve().parent.parent,
-                text=True,
+                encoding="utf-8", text=True,
                 capture_output=True,
                 check=False,
             )
@@ -6817,7 +6817,7 @@ class RapidTriageOpsTests(unittest.TestCase):
                     "--json",
                 ],
                 cwd=Path(__file__).resolve().parent.parent,
-                text=True,
+                encoding="utf-8", text=True,
                 capture_output=True,
                 check=False,
             )
@@ -6855,7 +6855,7 @@ class RapidTriageOpsTests(unittest.TestCase):
                     "--json",
                 ],
                 cwd=Path(__file__).resolve().parent.parent,
-                text=True,
+                encoding="utf-8", text=True,
                 capture_output=True,
                 check=False,
             )
@@ -6869,7 +6869,7 @@ class RapidTriageOpsTests(unittest.TestCase):
                     "--json",
                 ],
                 cwd=Path(__file__).resolve().parent.parent,
-                text=True,
+                encoding="utf-8", text=True,
                 capture_output=True,
                 check=False,
             )
@@ -6901,7 +6901,7 @@ class RapidTriageOpsTests(unittest.TestCase):
                     "--json",
                 ],
                 cwd=Path(__file__).resolve().parent.parent,
-                text=True,
+                encoding="utf-8", text=True,
                 capture_output=True,
                 check=False,
             )
@@ -6932,7 +6932,7 @@ class RapidTriageOpsTests(unittest.TestCase):
                     "--json",
                 ],
                 cwd=Path(__file__).resolve().parent.parent,
-                text=True,
+                encoding="utf-8", text=True,
                 capture_output=True,
                 check=False,
             )
@@ -6961,7 +6961,7 @@ class RapidTriageOpsTests(unittest.TestCase):
                     "--json",
                 ],
                 cwd=Path(__file__).resolve().parent.parent,
-                text=True,
+                encoding="utf-8", text=True,
                 capture_output=True,
                 check=False,
             )
@@ -6987,7 +6987,7 @@ class RapidTriageOpsTests(unittest.TestCase):
                     "--json",
                 ],
                 cwd=Path(__file__).resolve().parent.parent,
-                text=True,
+                encoding="utf-8", text=True,
                 capture_output=True,
                 check=False,
             )
@@ -7013,7 +7013,7 @@ class RapidTriageOpsTests(unittest.TestCase):
                     "--json",
                 ],
                 cwd=Path(__file__).resolve().parent.parent,
-                text=True,
+                encoding="utf-8", text=True,
                 capture_output=True,
                 check=False,
             )
@@ -7212,7 +7212,7 @@ class RapidTriageOpsTests(unittest.TestCase):
                     str(output_path),
                 ],
                 cwd=Path(__file__).resolve().parent.parent,
-                text=True,
+                encoding="utf-8", text=True,
                 capture_output=True,
                 check=False,
             )
@@ -7367,7 +7367,7 @@ class RapidTriageOpsTests(unittest.TestCase):
                     "--json",
                 ],
                 cwd=Path(__file__).resolve().parent.parent,
-                text=True,
+                encoding="utf-8", text=True,
                 capture_output=True,
                 check=False,
             )
@@ -7520,7 +7520,7 @@ class RapidTriageOpsTests(unittest.TestCase):
             result = subprocess.run(
                 ["python", "scripts/summarize-smoke.py", str(smoke_dir)],
                 cwd=Path(__file__).resolve().parent.parent,
-                text=True,
+                encoding="utf-8", text=True,
                 capture_output=True,
                 check=False,
             )
@@ -7557,7 +7557,7 @@ class RapidTriageOpsTests(unittest.TestCase):
             release = subprocess.run(
                 ["python", "scripts/build-release.py", "--output-dir", str(release_dir), "--skip-build"],
                 cwd=repo,
-                text=True,
+                encoding="utf-8", text=True,
                 capture_output=True,
                 check=False,
             )
@@ -7607,7 +7607,7 @@ class RapidTriageOpsTests(unittest.TestCase):
                     "--json",
                 ],
                 cwd=repo,
-                text=True,
+                encoding="utf-8", text=True,
                 capture_output=True,
                 check=False,
             )
@@ -7620,7 +7620,7 @@ class RapidTriageOpsTests(unittest.TestCase):
                     "--json",
                 ],
                 cwd=repo,
-                text=True,
+                encoding="utf-8", text=True,
                 capture_output=True,
                 check=False,
             )
@@ -7634,7 +7634,7 @@ class RapidTriageOpsTests(unittest.TestCase):
                     "--json",
                 ],
                 cwd=repo,
-                text=True,
+                encoding="utf-8", text=True,
                 capture_output=True,
                 check=False,
             )
@@ -7647,7 +7647,7 @@ class RapidTriageOpsTests(unittest.TestCase):
                     str(dependency_monitoring_path),
                 ],
                 cwd=repo,
-                text=True,
+                encoding="utf-8", text=True,
                 capture_output=True,
                 check=False,
             )
@@ -7661,7 +7661,7 @@ class RapidTriageOpsTests(unittest.TestCase):
                     "--json",
                 ],
                 cwd=repo,
-                text=True,
+                encoding="utf-8", text=True,
                 capture_output=True,
                 check=False,
             )
@@ -7892,7 +7892,7 @@ class RapidTriageOpsTests(unittest.TestCase):
                     str(evidence_dir),
                 ],
                 cwd=repo,
-                text=True,
+                encoding="utf-8", text=True,
                 capture_output=True,
                 check=False,
             )
@@ -7954,7 +7954,7 @@ class RapidTriageOpsTests(unittest.TestCase):
             release = subprocess.run(
                 ["python", "scripts/build-release.py", "--output-dir", str(release_dir), "--skip-build"],
                 cwd=repo,
-                text=True,
+                encoding="utf-8", text=True,
                 capture_output=True,
                 check=False,
             )
@@ -8005,7 +8005,7 @@ class RapidTriageOpsTests(unittest.TestCase):
                     str(evidence_dir),
                 ],
                 cwd=repo,
-                text=True,
+                encoding="utf-8", text=True,
                 capture_output=True,
                 check=False,
             )
@@ -8032,7 +8032,7 @@ class RapidTriageOpsTests(unittest.TestCase):
             release = subprocess.run(
                 ["python", "scripts/build-release.py", "--output-dir", str(release_dir), "--skip-build"],
                 cwd=repo,
-                text=True,
+                encoding="utf-8", text=True,
                 capture_output=True,
                 check=False,
             )
@@ -8092,7 +8092,7 @@ class RapidTriageOpsTests(unittest.TestCase):
                     str(evidence_dir),
                 ],
                 cwd=repo,
-                text=True,
+                encoding="utf-8", text=True,
                 capture_output=True,
                 check=False,
             )
@@ -8118,7 +8118,7 @@ class RapidTriageOpsTests(unittest.TestCase):
             release = subprocess.run(
                 ["python", "scripts/build-release.py", "--output-dir", str(release_dir), "--skip-build"],
                 cwd=repo,
-                text=True,
+                encoding="utf-8", text=True,
                 capture_output=True,
                 check=False,
             )
@@ -8178,7 +8178,7 @@ class RapidTriageOpsTests(unittest.TestCase):
                     str(evidence_dir),
                 ],
                 cwd=repo,
-                text=True,
+                encoding="utf-8", text=True,
                 capture_output=True,
                 check=False,
             )
@@ -8204,7 +8204,7 @@ class RapidTriageOpsTests(unittest.TestCase):
             release = subprocess.run(
                 ["python", "scripts/build-release.py", "--output-dir", str(release_dir), "--skip-build"],
                 cwd=repo,
-                text=True,
+                encoding="utf-8", text=True,
                 capture_output=True,
                 check=False,
             )
@@ -8264,7 +8264,7 @@ class RapidTriageOpsTests(unittest.TestCase):
                     str(evidence_dir),
                 ],
                 cwd=repo,
-                text=True,
+                encoding="utf-8", text=True,
                 capture_output=True,
                 check=False,
             )

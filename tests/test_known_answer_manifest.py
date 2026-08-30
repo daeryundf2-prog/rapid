@@ -105,7 +105,7 @@ class KnownAnswerManifestValidationTests(unittest.TestCase):
             cwd=REPO_ROOT,
             check=False,
             capture_output=True,
-            text=True,
+            encoding="utf-8", text=True,
         )
 
         self.assertEqual(completed.returncode, 1)
@@ -114,7 +114,7 @@ class KnownAnswerManifestValidationTests(unittest.TestCase):
             input=completed.stdout,
             check=False,
             capture_output=True,
-            text=True,
+            encoding="utf-8", text=True,
         )
 
         self.assertEqual(json_tool.returncode, 0)
@@ -205,7 +205,7 @@ class KnownAnswerManifestValidationTests(unittest.TestCase):
             cwd=REPO_ROOT,
             check=False,
             capture_output=True,
-            text=True,
+            encoding="utf-8", text=True,
         )
 
         self.assertEqual(completed.returncode, 0, msg=f"stdout={completed.stdout!r} stderr={completed.stderr!r}")
@@ -238,7 +238,7 @@ class KnownAnswerManifestValidationTests(unittest.TestCase):
                     cwd=REPO_ROOT,
                     check=False,
                     capture_output=True,
-                    text=True,
+                    encoding="utf-8", text=True,
                 )
                 output = _json_object(completed.stdout)
                 errors = validate_schema_document(output, result_schema)

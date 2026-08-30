@@ -34,7 +34,7 @@ def run_trusted_diff(*extra_args: str) -> subprocess.CompletedProcess[str]:
         str(TRUSTED_RESULTS),
         *extra_args,
     ]
-    return subprocess.run(args, cwd=REPO_ROOT, check=False, capture_output=True, text=True)
+    return subprocess.run(args, cwd=REPO_ROOT, check=False, capture_output=True, encoding="utf-8", text=True)
 
 
 def load_trusted_diff_cli() -> ModuleType:

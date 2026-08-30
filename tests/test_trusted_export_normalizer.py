@@ -53,7 +53,7 @@ class TrustedExportNormalizerTests(unittest.TestCase):
             cwd=REPO_ROOT,
             check=False,
             capture_output=True,
-            text=True,
+            encoding="utf-8", text=True,
         )
         payload = _json_object(completed.stdout)
 
@@ -84,7 +84,7 @@ class TrustedExportNormalizerTests(unittest.TestCase):
                 cwd=REPO_ROOT,
                 check=False,
                 capture_output=True,
-                text=True,
+                encoding="utf-8", text=True,
             )
             payload = _json_object(completed.stdout)
 
@@ -123,7 +123,7 @@ def _run_normalizer(*extra_args: str) -> subprocess.CompletedProcess[str]:
         cwd=REPO_ROOT,
         check=False,
         capture_output=True,
-        text=True,
+        encoding="utf-8", text=True,
     )
 
 
@@ -150,7 +150,7 @@ def _run_normalizer_with_row(status: str, size_bytes: str, sha256: str) -> subpr
             cwd=REPO_ROOT,
             check=False,
             capture_output=True,
-            text=True,
+            encoding="utf-8", text=True,
         )
 
 
