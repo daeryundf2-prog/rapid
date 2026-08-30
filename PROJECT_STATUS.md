@@ -4,6 +4,26 @@ Date: 2026-08-30
 Branch: `codex/rapidforensic-complete`
 Tag: `v0.2.0` (restart baseline)
 
+## Phase 4 Release Infrastructure Update (2026-08-30)
+
+- CI lint gate restored: ruff's expanded default rule set (0.16.x) reported ~1,400
+  findings that predate this baseline; `ruff` is now pinned to `0.8.*` in the test
+  extra until a cleanup pass upgrades the codebase (all checks pass on 0.8.6).
+- Dependency monitoring workflow hardened: clean-venv advisory scan now also
+  records scanner/environment versions, generates a CycloneDX SBOM
+  (`pip-audit --format cyclonedx-json`, verified locally at 324 components), and
+  uploads the SBOM + monitoring JSON + scanner environment as CI artifacts —
+  closing the "SBOM publication" and "scanner version capture" slots of #120
+  (artifact URLs pending the next CI run).
+- `docs/validation/legal-operator-review-checklist.md` created: the four-track
+  (technical / forensic methodology / operator / legal) review gate required before
+  any release suitability claim. It is prepared and awaiting human reviewer signoff;
+  automation must not mark reviews complete.
+- `docs/release-signing-runbook.md` created with exact Authenticode, codesign+
+  notarization, and deb/rpm/AppImage commands plus the evidence to attach to the
+  installer workflow manifests. Signing itself remains blocked on external
+  certificates, Apple Developer identity, and packaging host approval.
+
 ## Phase 3 Performance Evidence Update (2026-08-30, Windows 11 laptop)
 
 Hardware context recorded in the external corpus (`hashes/hardware-scale-matrix.json`): i7-1165G7, 15.7GB RAM, NVMe SSD. All outputs in the external corpus `logs/` directory; nothing committed but findings.
