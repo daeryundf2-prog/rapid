@@ -49,6 +49,8 @@ KEY_FIELDS = (
     "CellOffset",
     "source_offset",
     "SourceOffset",
+    "source_file",
+    "SourceFile",
     "path",
     "Path",
     "source_path",
@@ -205,7 +207,7 @@ EXECUTION_ARTIFACT_FIELD_ALIASES = {
 USER_ACTIVITY_FIELD_ALIASES = {
     "artifact_family": ("artifact_family", "ArtifactFamily", "source_family", "SourceFamily"),
     "app_id": ("app_id", "AppId", "AppID", "ApplicationID", "application_id"),
-    "entry_id": ("entry_id", "EntryId", "EntryID", "DestListEntryNumber", "destlist_entry_number", "MRU"),
+    "entry_id": ("entry_id", "EntryId", "EntryID", "DestListEntryNumber", "destlist_entry_number", "EntryNumber", "MRU"),
     "target_path": (
         "target_path",
         "TargetPath",
@@ -215,6 +217,7 @@ USER_ACTIVITY_FIELD_ALIASES = {
         "path",
         "file_path",
         "FilePath",
+        "LocalPath",
     ),
     "file_name": ("file_name", "FileName", "filename", "Name", "name"),
     "timestamp": (
@@ -2302,10 +2305,10 @@ def infer_user_activity_family(row: Mapping[str, object]) -> str:
     haystack = " ".join(
         str(value)
         for key, value in row.items()
-        if key.lower().endswith(("artifact_type", "parser", "source_path", "path", "source_file", "kind"))
+        if key.lower().endswith(("artifact_type", "parser", "source_path", "path", "source_file", "sourcefile", "kind"))
     ).lower()
     combined = f"{explicit_text} {haystack}"
-    if "jumplist" in combined or "jump list" in combined or "destlist" in combined or "jlecmd" in combined:
+    if "jumplist" in combined or "jump list" in combined or "destlist" in combined or "jlecmd" in combined or "automaticdestinations" in combined or "customdestinations" in combined:
         return "jumplist"
     if "shellbag" in combined or "bagmru" in combined or "sbecmd" in combined:
         return "shellbags"
@@ -4091,6 +4094,24 @@ def build_tool_metadata(
 
 def file_integrity(path: Path) -> dict[str, object]:
     resolved = path.expanduser().resolve()
+    if resolved.is_dir():
+        # Directory sources (e.g. staged evidence trees) get a deterministic
+        # digest over their sorted file entries instead of failing to open.
+        hasher = hashlib.sha256()
+        size = 0
+        for entry in sorted(resolved.rglob("*")):
+            if not entry.is_file():
+                continue
+            entry_hash = hashlib.sha256(entry.read_bytes()).hexdigest()
+            hasher.update(f"{entry.relative_to(resolved).as_posix()}|{entry.stat().st_size}|{entry_hash}\n".encode("utf-8"))
+            size += entry.stat().st_size
+        return {
+            "path": str(resolved),
+            "type": "directory",
+            "size_bytes": size,
+            "sha256": hasher.hexdigest(),
+            "mtime_epoch": resolved.stat().st_mtime,
+        }
     stat = resolved.stat()
     hasher = hashlib.sha256()
     with resolved.open("rb") as handle:

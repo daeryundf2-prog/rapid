@@ -4,6 +4,16 @@ Date: 2026-08-30
 Branch: `codex/rapidforensic-complete`
 Tag: `v0.2.0` (restart baseline)
 
+## Phase 2 Trusted-Diff Update (2026-08-30, Windows 11 host, non-admin)
+
+Trusted reference tools installed outside Git (`EvtxECmd`/`LECmd`/`JLECmd` 2026.5.0) and run against staged host artifacts. Evidence in the external corpus (`diffs/`, `trusted-exports/`, `rapid-results/`); nothing committed but the findings.
+
+- LNK (#17): RapidForensic vs LECmd over 187 staged .lnk files — reference key coverage 291/291 (1.0), field diff on 78 common records 234/234 fields match, 0 mismatches. Internal trusted-diff pass; status stays Partial++ (single-host corpus).
+- JumpList (#14): JLECmd emits one row per DestList entry (4,181 automatic); RapidForensic emits container-level rows only — entry-level trusted diff not possible yet. Gap confirmed by diff and recorded as the next parser-depth target.
+- EVTX (#1-#3): record identity semantics mismatch exposed. `wevtutil epl` renumbers physical record headers to 1..N while BinXML keeps original EventRecordIds (116896+). EvtxECmd reports the BinXML id (Event Viewer semantics); RapidForensic reports the physical header id and its BinXML System decode does not surface EventRecordID. Record-level join is 0 until RapidForensic surfaces and prefers the BinXML EventRecordID. This is the top parser-depth blocker coming out of the diff.
+- Cross-tool plumbing fixes: LECmd/JLECmd CSV column aliases (`LocalPath`, `EntryNumber`, `SourceFile` key field), user-activity family inference for destinations paths, and directory-source integrity hashing.
+- Registry (#4-#5), MFT/USN (#12-#13), SRUM/Windows.edb (#10-#11), Prefetch (#16), Amcache/ShimCache (#7-#8) diffs remain pending: hives/locked files and Prefetch require an elevated host; see `docs/validation/windows-t1-operator-inputs.md`.
+
 ## Restart Baseline Update (2026-08-30, Windows 11 host)
 
 - Windows platform defects fixed: the full unit suite now passes on a real
