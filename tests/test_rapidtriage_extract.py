@@ -6,7 +6,7 @@ import os
 import tempfile
 import unittest
 import zipfile
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
 from rapidtriage.cli import main
@@ -99,7 +99,7 @@ class RapidTriageExtractTests(unittest.TestCase):
             self.assertEqual(extracted_path, (extract_dir / "evidence" / "case-notes.txt").resolve())
             self.assertEqual(extracted_path.read_text(encoding="utf-8"), "incident notes")
             self.assertEqual(entry["sha256"], sha256_file(note_path))
-            self.assertEqual(entry["modified_at"], datetime.fromtimestamp(mtime).isoformat())
+            self.assertEqual(entry["modified_at"], datetime.fromtimestamp(mtime, tz=timezone.utc).isoformat())
             self.assertIn("documents", entry["categories"])
 
     def test_extract_command_uses_docs_results_and_kind_filter(self) -> None:

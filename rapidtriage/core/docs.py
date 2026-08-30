@@ -102,7 +102,7 @@ def scan_document_candidates(root: Union[InputRoot, Path], limit: int = 0) -> Li
                     path=str(path),
                     kind=suffix.lstrip("."),
                     size=stat.st_size,
-                    modified_at=dt.datetime.fromtimestamp(stat.st_mtime).isoformat(),
+                    modified_at=dt.datetime.fromtimestamp(stat.st_mtime, tz=dt.timezone.utc).isoformat(),
                 )
             )
             if limit and len(candidates) >= limit:

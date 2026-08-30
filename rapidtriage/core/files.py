@@ -1396,13 +1396,12 @@ def build_file_candidate(path: Path, entry_stat: os.stat_result, categories: Seq
     if not matched_categories:
         return None
 
-    modified_dt = dt.datetime.fromtimestamp(entry_stat.st_mtime)
     return FileCandidate(
         path=str(path),
         name=path.name,
         extension=extension,
         size=entry_stat.st_size,
-        modified_at=modified_dt.isoformat(),
+        modified_at=dt.datetime.fromtimestamp(entry_stat.st_mtime, tz=dt.timezone.utc).isoformat(),
         modified_epoch=entry_stat.st_mtime,
         categories=matched_categories,
         reasons=reasons,

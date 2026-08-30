@@ -365,14 +365,28 @@ def print_spooler_job_profile(path: Path, strings: Sequence[str], path_candidate
     }
 
 
+def _find_sibling_file_case_insensitive(base: Path, suffix: str) -> Path | None:
+    # Spool files use uppercase extensions on real volumes (.SHD/.SPL); match
+    # siblings case-insensitively so pair detection works on case-sensitive
+    # filesystems too (Linux CI, mounted evidence trees).
+    wanted = (base.name + suffix).lower()
+    try:
+        for entry in base.parent.iterdir():
+            if entry.name.lower() == wanted and entry.is_file():
+                return entry
+    except OSError:
+        return None
+    return None
+
+
 def print_spooler_companion_profile(path: Path) -> dict[str, object]:
     base = path.with_suffix("")
     sibling_exts = (".shd", ".spl")
     siblings = []
     present_exts = set()
     for suffix in sibling_exts:
-        sibling = base.with_suffix(suffix)
-        if not sibling.exists() or not sibling.is_file():
+        sibling = _find_sibling_file_case_insensitive(base, suffix)
+        if sibling is None:
             continue
         present_exts.add(suffix)
         stat_result = sibling.stat()

@@ -1,432 +1,134 @@
 {
-  "candidates": [
-    {
-      "categories": [
-        "archives"
-      ],
-      "extension": ".zip",
-      "file_signature": {
-        "detected": "zip-container",
-        "expected": [
-          "zip-container"
-        ],
-        "mismatch": false,
-        "risk_flags": [],
-        "status": "signature-matches-extension"
-      },
-      "known_good_status": "not-configured",
-      "modified_at": "2024-02-03T13:05:07",
-      "modified_epoch": 1706933107.0,
-      "name": "bundle.zip",
-      "path": "<ROOT>/bundle.zip",
-      "reasons": {
-        "archives": [
-          "extension:.zip",
-          "name:bundle"
-        ]
-      },
-      "size": 4
-    },
-    {
-      "categories": [
-        "documents"
-      ],
-      "extension": ".txt",
-      "file_signature": {
-        "detected": null,
-        "expected": [],
-        "mismatch": false,
-        "risk_flags": [],
-        "status": "not-applicable"
-      },
-      "known_good_status": "not-configured",
-      "modified_at": "2024-02-03T13:05:06",
-      "modified_epoch": 1706933106.0,
-      "name": "notes.txt",
-      "path": "<ROOT>/notes.txt",
-      "reasons": {
-        "documents": [
-          "extension:.txt",
-          "name:note"
-        ]
-      },
-      "size": 14
-    },
-    {
-      "categories": [
-        "databases"
-      ],
-      "extension": ".sqlite",
-      "file_signature": {
-        "detected": null,
-        "expected": [
-          "sqlite"
-        ],
-        "mismatch": false,
-        "risk_flags": [
-          "signature-unrecognized"
-        ],
-        "status": "unrecognized-header-for-known-extension"
-      },
-      "known_good_status": "not-configured",
-      "modified_at": "2024-02-03T13:05:08",
-      "modified_epoch": 1706933108.0,
-      "name": "records.sqlite",
-      "path": "<ROOT>/records.sqlite",
-      "reasons": {
-        "databases": [
-          "extension:.sqlite",
-          "name:sqlite",
-          "path:sqlite"
-        ]
-      },
-      "size": 15
-    },
-    {
-      "categories": [
-        "executables"
-      ],
-      "extension": ".exe",
-      "file_signature": {
-        "detected": "windows-pe",
-        "expected": [
-          "windows-pe"
-        ],
-        "mismatch": false,
-        "risk_flags": [],
-        "status": "signature-matches-extension"
-      },
-      "known_good_status": "not-configured",
-      "modified_at": "2024-02-03T13:05:09",
-      "modified_epoch": 1706933109.0,
-      "name": "tool.exe",
-      "path": "<ROOT>/tool.exe",
-      "reasons": {
-        "executables": [
-          "extension:.exe"
-        ]
-      },
-      "size": 4
-    }
-  ],
   "command": "files",
-  "core_accuracy_gates": [
-    {
-      "gap_id": "#76"
-    },
-    {
-      "gap_id": "#77"
-    }
-  ],
-  "duplicate_content_groups": [],
-  "duplicate_content_manifest": {
-    "commercial_claim_allowed": false,
-    "commercial_gap_ids": [
-      "#77"
+  "root": "<ROOT>",
+  "generated_at": "<GENERATED_AT>",
+  "filters": {
+    "categories": [
+      "documents",
+      "archives",
+      "databases",
+      "executables",
+      "emails",
+      "disk-images",
+      "mobile-images",
+      "memory-dumps",
+      "vehicle-images",
+      "images"
     ],
-    "duplicate_file_count": 0,
-    "exact_hash_grouping": true,
-    "fuzzy_text_file_count": 0,
-    "fuzzy_text_group_count": 0,
-    "fuzzy_text_group_head_hash": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
-    "fuzzy_text_grouping": true,
-    "fuzzy_text_groups": [],
-    "fuzzy_text_policy": {
-      "analyst_review_required": true,
-      "auto_suppression_enabled": false,
-      "method": "normalized-token-jaccard-with-sequence-ratio-fallback"
-    },
-    "group_count": 0,
-    "group_head_hash": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
-    "groups": [],
-    "item_number": 77,
-    "manifest_hash": "<DUPLICATE_CONTENT_MANIFEST_HASH>",
-    "method": "same-size-bucket-sha256-confirmation-and-normalized-text-near-duplicate-candidates",
-    "perceptual_media_grouping": false,
-    "profile": "duplicate-content-manifest-v1",
-    "profile_version": "duplicate-content-manifest-v1",
-    "suppression_policy": {
-      "analyst_override_required": true,
-      "auto_suppression_enabled": false,
-      "report_suppression_default": "not-suppressed"
-    }
+    "name_contains": [],
+    "path_contains": [],
+    "extensions": [],
+    "modified_after": null,
+    "modified_before": null,
+    "limit": 0,
+    "known_good_hash_feeds": [],
+    "hide_known_good": false,
+    "known_good_max_hash_bytes": 67108864
   },
-  "duplicate_detection_assessment": {
-    "blockers": [
-      "near-duplicate-text-and-media-similarity-are-not-full-file-deduplication",
-      "perceptual-media-similarity-not-implemented",
-      "hashing-is-bounded-to-protect-large-case-responsiveness",
-      "operator-must-verify-source-hashes-before-suppressing-duplicates-in-reports",
-      "trusted-duplicate-file-manifest-diff-missing",
-      "perceptual-media-similarity-required",
-      "analyst-suppression-workflow-validation-required",
-      "large-case-dedupe-performance-validation-required",
-      "near-duplicate-text-known-answer-corpus-required",
-      "cross-run-suppression-version-history-required"
-    ],
-    "commercial_gap_ids": [
-      "#77"
-    ],
-    "component": "duplicate-file-content-detection",
-    "core_accuracy_gates": [
-      {
-        "gap_id": "#77"
-      }
-    ],
-    "duplicate_content_manifest": {
-      "commercial_claim_allowed": false,
-      "commercial_gap_ids": [
-        "#77"
-      ],
-      "duplicate_file_count": 0,
-      "exact_hash_grouping": true,
-      "fuzzy_text_file_count": 0,
-      "fuzzy_text_group_count": 0,
-      "fuzzy_text_group_head_hash": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
-      "fuzzy_text_grouping": true,
-      "fuzzy_text_groups": [],
-      "fuzzy_text_policy": {
-        "analyst_review_required": true,
-        "auto_suppression_enabled": false,
-        "method": "normalized-token-jaccard-with-sequence-ratio-fallback"
-      },
-      "group_count": 0,
-      "group_head_hash": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
-      "groups": [],
-      "item_number": 77,
-      "manifest_hash": "<DUPLICATE_CONTENT_MANIFEST_HASH>",
-      "method": "same-size-bucket-sha256-confirmation-and-normalized-text-near-duplicate-candidates",
-      "perceptual_media_grouping": false,
-      "profile": "duplicate-content-manifest-v1",
-      "profile_version": "duplicate-content-manifest-v1",
-      "suppression_policy": {
-        "analyst_override_required": true,
-        "auto_suppression_enabled": false,
-        "report_suppression_default": "not-suppressed"
-      }
+  "summary": {
+    "scanned_file_count": 4,
+    "candidate_count": 4,
+    "raw_candidate_count": 4,
+    "category_counts": {
+      "documents": 1,
+      "archives": 1,
+      "databases": 1,
+      "executables": 1,
+      "emails": 0,
+      "disk-images": 0,
+      "mobile-images": 0,
+      "memory-dumps": 0,
+      "vehicle-images": 0,
+      "images": 0
     },
-    "duplicate_content_report_grade_validation_plan": {
-      "analyst_override_required": true,
-      "auto_suppression_enabled": false,
-      "blockers": [
-        "trusted-duplicate-file-manifest-diff-missing",
-        "perceptual-media-similarity-required",
-        "analyst-suppression-workflow-validation-required",
-        "large-case-dedupe-performance-validation-required",
-        "near-duplicate-text-known-answer-corpus-required",
-        "cross-run-suppression-version-history-required"
-      ],
-      "blocking_slot_count": 6,
-      "blocking_slots": [
-        {
-          "blocker": "trusted-duplicate-file-manifest-diff-missing",
-          "required_evidence": "independent trusted duplicate manifest diff for exact and fuzzy duplicate groups",
-          "slot_id": "trusted-duplicate-manifest",
-          "status": "blocked"
-        },
-        {
-          "blocker": "perceptual-media-similarity-required",
-          "required_evidence": "image/video perceptual hash corpus with expected similar-media group IDs",
-          "slot_id": "perceptual-media-similarity",
-          "status": "blocked"
-        },
-        {
-          "blocker": "analyst-suppression-workflow-validation-required",
-          "required_evidence": "persisted analyst include/suppress decisions with audit trail and report replay proof",
-          "slot_id": "analyst-suppression-workflow",
-          "status": "blocked"
-        },
-        {
-          "blocker": "large-case-dedupe-performance-validation-required",
-          "required_evidence": "large evidence replay proving bounded hashing, grouping latency, and memory usage",
-          "slot_id": "large-case-dedupe-performance",
-          "status": "blocked"
-        },
-        {
-          "blocker": "near-duplicate-text-known-answer-corpus-required",
-          "required_evidence": "known-answer corpus for fuzzy text true/false positive thresholds",
-          "slot_id": "near-duplicate-text-known-answer-corpus",
-          "status": "blocked"
-        },
-        {
-          "blocker": "cross-run-suppression-version-history-required",
-          "required_evidence": "case-level version history proving suppression decisions survive reruns without drift",
-          "slot_id": "cross-run-suppression-version-history",
-          "status": "blocked"
-        }
-      ],
-      "commercial_claim_allowed": false,
-      "commercial_gap_ids": [
-        "#77"
-      ],
-      "duplicate_content_manifest_hash": "<DUPLICATE_CONTENT_MANIFEST_HASH>",
-      "duplicate_counts_hash": "<DUPLICATE_COUNTS_HASH>",
-      "duplicate_suppression_manifest_hash": "<DUPLICATE_SUPPRESSION_MANIFEST_HASH>",
-      "exact_group_count": 0,
-      "exact_hash_grouping": true,
-      "fuzzy_text_group_count": 0,
-      "fuzzy_text_group_head_hash": "<DUPLICATE_FUZZY_TEXT_GROUP_HEAD_HASH>",
-      "fuzzy_text_grouping": true,
-      "gap_id": "#77",
-      "group_head_hash": "<DUPLICATE_GROUP_HEAD_HASH>",
-      "item_number": 77,
-      "perceptual_media_grouping": false,
-      "profile_version": "duplicate-content-report-grade-validation-plan-v1",
-      "ready_for_court_report": false,
-      "ready_slot_count": 6,
-      "ready_slots": [
-        {
-          "description": "Exact and fuzzy duplicate summaries are archived in duplicate-content-manifest-v1.",
-          "evidence_hash": "<DUPLICATE_SLOT_HASH>",
-          "evidence_ref": "duplicate_content_manifest_hash",
-          "slot_id": "duplicate-content-manifest",
-          "status": "ready"
-        },
-        {
-          "description": "Same-size candidate files are confirmed by bounded SHA-256 exact grouping.",
-          "evidence_hash": "<DUPLICATE_SLOT_HASH>",
-          "evidence_ref": "group_head_hash",
-          "slot_id": "exact-hash-grouping",
-          "status": "ready"
-        },
-        {
-          "description": "Normalized text near-duplicate candidates are grouped without automatic suppression.",
-          "evidence_hash": "<DUPLICATE_SLOT_HASH>",
-          "evidence_ref": "fuzzy_text_group_head_hash",
-          "slot_id": "fuzzy-text-candidate-grouping",
-          "status": "ready"
-        },
-        {
-          "description": "Review matrix rows define the analyst decision required before report suppression.",
-          "evidence_hash": "<DUPLICATE_SLOT_HASH>",
-          "evidence_ref": "review_matrix_hash",
-          "slot_id": "duplicate-suppression-review-matrix",
-          "status": "ready"
-        },
-        {
-          "description": "Representative-first review remains deterministic and suppression-disabled by default.",
-          "evidence_hash": "<DUPLICATE_SLOT_HASH>",
-          "evidence_ref": "representative_policy_hash",
-          "slot_id": "representative-selection-policy",
-          "status": "ready"
-        },
-        {
-          "description": "Exact and fuzzy duplicate group/file counts are hashed for report review.",
-          "evidence_hash": "<DUPLICATE_SLOT_HASH>",
-          "evidence_ref": "duplicate_counts_hash",
-          "slot_id": "duplicate-count-profile",
-          "status": "ready"
-        }
-      ],
-      "report_use_warning": "Use as exact-hash and fuzzy-text duplicate review evidence only; do not auto-suppress or claim perceptual media coverage until blocker slots are satisfied.",
-      "representative_policy_hash": "<DUPLICATE_REPRESENTATIVE_POLICY_HASH>",
-      "review_matrix_hash": "<DUPLICATE_REVIEW_MATRIX_HASH>",
-      "trusted_duplicate_manifest_diff_status": "missing",
-      "validation_plan_hash": "<DUPLICATE_VALIDATION_PLAN_HASH>",
-      "validation_plan_sha256": "<DUPLICATE_VALIDATION_PLAN_HASH>"
-    },
-    "duplicate_content_report_grade_validation_plan_hash": "<DUPLICATE_VALIDATION_PLAN_HASH>",
-    "duplicate_file_count": 0,
+    "newest_modified_at": "2024-02-03T04:05:09+00:00",
+    "oldest_modified_at": "2024-02-03T04:05:06+00:00",
     "duplicate_group_count": 0,
-    "duplicate_suppression_manifest": {
-      "analyst_override_required": true,
-      "auto_suppression_enabled": false,
-      "collapse_by_default_in_ui": false,
-      "commercial_claim_allowed": false,
-      "commercial_gap_ids": [
-        "#77"
-      ],
-      "duplicate_content_manifest_hash": "e2ec33446497d1926eb51c8115c1b23b4cacb101cda3a956db53fc7889f1100b",
-      "duplicate_file_count": 0,
-      "duplicate_group_count": 0,
-      "fuzzy_text_duplicate_file_count": 0,
-      "fuzzy_text_duplicate_group_count": 0,
-      "gap_id": "#33",
-      "item_number": 33,
-      "manifest_hash": "299f2f72b8033cd58e34660ab78a77f780a5b08b70e77173a10063ee3d49b9ae",
-      "near_duplicate_text_supported": true,
-      "perceptual_media_similarity_supported": false,
-      "profile_version": "duplicate-suppression-manifest-v1",
-      "report_suppression_default": "not-suppressed",
-      "representative_selection": "stable-path-order-first-candidate",
-      "review_decision_required_for_each_group": true,
-      "review_matrix": [],
-      "review_matrix_hash": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
-      "trusted_diff_blocker": "trusted-duplicate-file-manifest-diff-missing"
-    },
-    "duplicate_suppression_manifest_hash": "299f2f72b8033cd58e34660ab78a77f780a5b08b70e77173a10063ee3d49b9ae",
-    "functional_priority_profile": {
-      "batch_id": "commercial-uplift-031-035",
-      "blockers": [
-        "trusted-duplicate-file-manifest-diff-missing",
-        "ui-collapse-and-suppression-state-not-yet-persisted",
-        "perceptual-media-similarity-not-complete"
-      ],
-      "component": "duplicate-suppression",
-      "controls": {
-        "analyst_override_required_before_report_suppression": true,
-        "auto_suppression_enabled": false,
-        "bounded_sha256_confirmation": true,
-        "collapse_by_default_in_ui": false,
-        "duplicate_content_manifest_hash": "e2ec33446497d1926eb51c8115c1b23b4cacb101cda3a956db53fc7889f1100b",
-        "duplicate_file_count": 0,
-        "duplicate_group_count": 0,
-        "fuzzy_text_duplicate_file_count": 0,
-        "fuzzy_text_duplicate_group_count": 0,
-        "normalized_text_near_duplicate_candidates": true,
-        "representative_paths_listed": true,
-        "review_matrix_hash": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
-        "same_size_candidate_bucketing": true,
-        "suppression_manifest_hash": "299f2f72b8033cd58e34660ab78a77f780a5b08b70e77173a10063ee3d49b9ae"
-      },
-      "gap_id": "#33",
-      "implemented": true,
-      "item_number": 33,
-      "ready_for_commercial_claim": false,
-      "status": "implemented-hash-identical-grouping-validation-required",
-      "usable": true,
-      "validated": true,
-      "validation_evidence": [
-        "files-output-emits-functional-duplicate-suppression-profile",
-        "unit-test-asserts-duplicate-profile-contract"
-      ]
-    },
-    "fuzzy_text_duplicate_file_count": 0,
+    "duplicate_file_count": 0,
     "fuzzy_text_duplicate_group_count": 0,
-    "ready_for_court_report": false,
-    "report_grade_blocking_slot_count": 6,
-    "report_grade_ready_slot_count": 6,
-    "status": "bounded-sha256-and-fuzzy-text-validation-plan-emitted",
-    "supports": [
-      "same-size-candidate-bucketing",
-      "bounded-content-sha256-confirmation",
-      "representative-path-lists",
-      "duplicate-content-manifest",
-      "normalized-text-near-duplicate-candidates",
-      "duplicate-review-matrix",
-      "not-suppressed-until-analyst-review"
-    ],
-    "trusted_duplicate_content_diff": {
-      "blocker": "trusted-duplicate-file-manifest-diff-missing",
-      "commercial_gap_ids": [
-        "#77"
-      ],
-      "required_trusted_tools": [
-        "content-hash-oracle",
-        "duplicate-file-manifest",
-        "known-answer-duplicate-group-export"
-      ],
-      "status": "missing",
-      "trusted_tool": null
-    }
+    "fuzzy_text_duplicate_file_count": 0,
+    "known_good_feed_count": 0,
+    "known_good_hash_count": 0,
+    "known_good_match_count": 0,
+    "known_good_suppressed_count": 0,
+    "known_good_hash_skipped_large_count": 0,
+    "known_good_nsrl_rds_feed_count": 0,
+    "known_good_nsrl_rds_row_count": 0,
+    "signature_checked_count": 3,
+    "signature_mismatch_count": 0,
+    "signature_unrecognized_known_extension_count": 1,
+    "commercial_gap_ids": [
+      "#76",
+      "#77",
+      "visible-denisting",
+      "visible-file-signature-mismatch"
+    ]
   },
-  "file_signature_profile": {
-    "capability_id": "file-system-signature-mismatch",
-    "checked_count": 3,
+  "known_good_suppression_profile": {
+    "profile": "known-good-hash-suppression-v1",
+    "profile_version": "known-good-hash-suppression-v1",
+    "capability_id": "denisting-nsrl-whitelist",
+    "commercial_gap_ids": [
+      "visible-denisting"
+    ],
+    "configured": false,
+    "hide_known_good": false,
+    "max_hash_bytes": 67108864,
+    "candidate_count": 4,
+    "visible_candidate_count": 4,
+    "hashed_candidate_count": 0,
+    "known_good_hash_count": 0,
+    "known_good_hash_counts_by_algorithm": {
+      "md5": 0,
+      "sha1": 0,
+      "sha256": 0
+    },
+    "feed_count": 0,
+    "feed_format_counts": {},
+    "nsrl_rds_feed_count": 0,
+    "nsrl_rds_row_count": 0,
+    "feed_summaries": [],
+    "duplicate_feed_hash_count": 0,
+    "rejected_feed_token_count": 0,
+    "match_count": 0,
+    "suppressed_count": 0,
+    "skipped_large_count": 0,
+    "suppressed_candidates_truncated": false,
+    "policy": {
+      "default_behavior": "mark-known-good-without-hiding",
+      "hide_behavior": "hide only when --hide-known-good is explicitly provided",
+      "scope": "analyst-supplied TXT/CSV/JSON MD5/SHA1/SHA256 feeds plus NSRL RDS CSV hash columns",
+      "legal_review_note": "Known-good suppression reduces triage noise but does not prove irrelevance by itself."
+    },
+    "limitations": [
+      "Bundled NSRL database download/update workflow is not implemented; analysts must supply a trusted local feed.",
+      "Files larger than max_hash_bytes are skipped to avoid surprise long-running scans.",
+      "Hash-based known-good checks cannot identify modified-but-benign files without a trusted feed match."
+    ],
+    "source_viewer_contract": {
+      "candidate_field": "known_good_match",
+      "suppressed_list": "known_good_suppressed_candidates",
+      "review_action": "toggle --hide-known-good off when the analyst needs to inspect suppressed rows",
+      "source_traceability": "known_good_match.source_detail records feed, row, hash column, and NSRL metadata when available"
+    },
     "commercial_claim_allowed": false,
+    "profile_hash": "7bdca8bba7aa65a4f36d74279b689fcb5217886c4aa6a57675a4aa0c7e8ca896"
+  },
+  "known_good_suppressed_candidates": [],
+  "file_signature_profile": {
+    "profile": "file-signature-mismatch-v1",
+    "profile_version": "file-signature-mismatch-v1",
+    "capability_id": "file-system-signature-mismatch",
     "commercial_gap_ids": [
       "visible-file-signature-mismatch"
     ],
+    "checked_count": 3,
+    "mismatch_count": 0,
+    "unrecognized_known_extension_count": 1,
+    "read_error_count": 0,
+    "mismatch_candidates_truncated": false,
+    "max_header_bytes": 64,
+    "known_signature_count": 11,
     "known_extensions": [
       ".7z",
       ".apk",
@@ -457,57 +159,508 @@
       ".xlsx",
       ".zip"
     ],
-    "known_signature_count": 11,
+    "policy": {
+      "scope": "bounded first-bytes magic signature check during file inventory",
+      "default_behavior": "flag mismatch but keep the file visible",
+      "legal_review_note": "Signature mismatch is an anti-forensic indicator, not standalone proof of malicious intent."
+    },
     "limitations": [
       "Container formats can share ZIP/OLE signatures, so deeper file-format validation still matters.",
       "Header-only checks do not validate full file integrity or embedded payloads.",
       "Known extension coverage is intentionally conservative to avoid noisy false positives."
     ],
-    "max_header_bytes": 64,
-    "mismatch_candidates_truncated": false,
-    "mismatch_count": 0,
-    "policy": {
-      "default_behavior": "flag mismatch but keep the file visible",
-      "legal_review_note": "Signature mismatch is an anti-forensic indicator, not standalone proof of malicious intent.",
-      "scope": "bounded first-bytes magic signature check during file inventory"
+    "commercial_claim_allowed": false,
+    "profile_hash": "cc6c59e69a121ccb23e80ec24ce90197146e19a231e9915ed739749dd5ea1fe2"
+  },
+  "signature_mismatch_candidates": [],
+  "hash_cache_manifest": {
+    "profile": "hash-cache-manifest-v1",
+    "profile_version": "hash-cache-manifest-v1",
+    "item_number": 76,
+    "cache_session_id": "<HASH_CACHE_SESSION_ID>",
+    "entry_count": 2,
+    "event_count": 2,
+    "entries_truncated": false,
+    "events_truncated": false,
+    "entries_head_hash": "<HASH_CACHE_ENTRIES_HEAD_HASH>",
+    "events_head_hash": "<HASH_CACHE_EVENTS_HEAD_HASH>",
+    "persistence_manifest": {
+      "profile_version": "hash-cache-persistence-manifest-v1",
+      "item_number": 76,
+      "commercial_gap_ids": [
+        "#76"
+      ],
+      "snapshot_format": "hash-cache-persistent-snapshot-v1",
+      "persistence_mode": "explicit-export-import-snapshot",
+      "content_address_key": "sha256",
+      "cache_key_fields": [
+        "path",
+        "size",
+        "mtime_ns",
+        "inode",
+        "device"
+      ],
+      "row_count": 2,
+      "row_head_hash": "<HASH_CACHE_PERSISTENCE_ROW_HEAD_HASH>",
+      "rows": [
+        {
+          "content_address_key": "8dcc7e601606217f3b754766511182a916b17e9a26a94c9d887104eba92e9bb2",
+          "path_hash": "<PATH_HASH>",
+          "name": "bundle.zip",
+          "size": 4,
+          "mtime_ns": "<MTIME_NS>",
+          "inode": "<INODE>",
+          "device": "<DEVICE>",
+          "algorithms": [
+            "md5",
+            "sha1",
+            "sha256"
+          ],
+          "md5": "10893fd7cff66dca193f658ca9438d15",
+          "sha1": "fb467bb25be45fcf0c84c03ce5801abd5a28c1fd",
+          "sha256": "8dcc7e601606217f3b754766511182a916b17e9a26a94c9d887104eba92e9bb2",
+          "row_hash": "<HASH_CACHE_PERSISTENCE_ROW_HASH>"
+        },
+        {
+          "content_address_key": "9f2981a7cc4d40a2a409dc895de64253acd819d7c0011c8e80b86fe899464e31",
+          "path_hash": "<PATH_HASH>",
+          "name": "tool.exe",
+          "size": 4,
+          "mtime_ns": "<MTIME_NS>",
+          "inode": "<INODE>",
+          "device": "<DEVICE>",
+          "algorithms": [
+            "md5",
+            "sha1",
+            "sha256"
+          ],
+          "md5": "20879c987e2f9a916e578386d499f629",
+          "sha1": "c7b33ddcc42361fdb847036fc07e880b81935d5d",
+          "sha256": "9f2981a7cc4d40a2a409dc895de64253acd819d7c0011c8e80b86fe899464e31",
+          "row_hash": "<HASH_CACHE_PERSISTENCE_ROW_HASH>"
+        }
+      ],
+      "automatic_on_disk_cache": false,
+      "large_case_hit_ratio_validated": false,
+      "commercial_claim_allowed": false,
+      "manifest_hash": "<HASH_CACHE_PERSISTENCE_MANIFEST_HASH>"
     },
-    "profile": "file-signature-mismatch-v1",
-    "profile_hash": "cc6c59e69a121ccb23e80ec24ce90197146e19a231e9915ed739749dd5ea1fe2",
-    "profile_version": "file-signature-mismatch-v1",
-    "read_error_count": 0,
-    "unrecognized_known_extension_count": 1
-  },
-  "filters": {
-    "categories": [
-      "documents",
-      "archives",
-      "databases",
-      "executables",
-      "emails",
-      "disk-images",
-      "mobile-images",
-      "memory-dumps",
-      "vehicle-images",
-      "images"
+    "persistence_manifest_hash": "<HASH_CACHE_PERSISTENCE_MANIFEST_HASH>",
+    "stats": {
+      "hits": "<HASH_CACHE_HITS>",
+      "misses": "<HASH_CACHE_MISSES>",
+      "invalidations": "<HASH_CACHE_INVALIDATIONS>"
+    },
+    "cache_key_fields": [
+      "path",
+      "size",
+      "mtime_ns",
+      "inode",
+      "device"
     ],
-    "extensions": [],
-    "hide_known_good": false,
-    "known_good_hash_feeds": [],
-    "known_good_max_hash_bytes": 67108864,
-    "limit": 0,
-    "modified_after": null,
-    "modified_before": null,
-    "name_contains": [],
-    "path_contains": []
+    "algorithms": [
+      "md5",
+      "sha1",
+      "sha256"
+    ],
+    "policy": {
+      "scope": "process-local-with-explicit-snapshot",
+      "persistent_across_restarts": true,
+      "persistence_mode": "explicit-export-import-snapshot",
+      "export_import_contract_declared": true,
+      "stale_entry_invalidation": "same-path size/mtime/inode/device mismatch invalidates previous entries",
+      "path_disclosure": "full paths are hashed in manifest entries; basename is retained for analyst orientation",
+      "persistent_cache_next_step": "Promote explicit snapshots to an automatic content-addressed on-disk cache only after large-case hit-ratio validation."
+    },
+    "invalidation_proof": {
+      "invalidations": 0,
+      "same_path_invalidation_events": 0,
+      "latest_invalidation_event": null
+    },
+    "entries": [
+      {
+        "path_hash": "<PATH_HASH>",
+        "name": "bundle.zip",
+        "size": 4,
+        "mtime_ns": "<MTIME_NS>",
+        "inode": "<INODE>",
+        "device": "<DEVICE>",
+        "algorithms": [
+          "md5",
+          "sha1",
+          "sha256"
+        ],
+        "sha256": "8dcc7e601606217f3b754766511182a916b17e9a26a94c9d887104eba92e9bb2"
+      },
+      {
+        "path_hash": "<PATH_HASH>",
+        "name": "tool.exe",
+        "size": 4,
+        "mtime_ns": "<MTIME_NS>",
+        "inode": "<INODE>",
+        "device": "<DEVICE>",
+        "algorithms": [
+          "md5",
+          "sha1",
+          "sha256"
+        ],
+        "sha256": "9f2981a7cc4d40a2a409dc895de64253acd819d7c0011c8e80b86fe899464e31"
+      }
+    ],
+    "recent_events": [
+      {
+        "action": "miss",
+        "path_hash": "<PATH_HASH>",
+        "name": "tool.exe",
+        "size": 4,
+        "mtime_ns": "<MTIME_NS>",
+        "inode": "<INODE>",
+        "device": "<DEVICE>",
+        "cache_hit": false
+      },
+      {
+        "action": "miss",
+        "path_hash": "<PATH_HASH>",
+        "name": "bundle.zip",
+        "size": 4,
+        "mtime_ns": "<MTIME_NS>",
+        "inode": "<INODE>",
+        "device": "<DEVICE>",
+        "cache_hit": false
+      }
+    ],
+    "commercial_gap_ids": [
+      "#76"
+    ],
+    "commercial_claim_allowed": false,
+    "manifest_hash": "<HASH_CACHE_MANIFEST_HASH>"
   },
-  "fuzzy_text_duplicate_groups": [],
-  "generated_at": "<GENERATED_AT>",
   "hash_cache_assessment": {
+    "component": "file-hash-cache",
+    "status": "in-process-path-size-mtime-cache-validation-plan-emitted",
+    "commercial_gap_ids": [
+      "#76"
+    ],
     "algorithm_count": 3,
     "algorithms": [
       "md5",
       "sha1",
       "sha256"
+    ],
+    "cache_session_id": "<HASH_CACHE_SESSION_ID>",
+    "entry_count": "<HASH_CACHE_ENTRY_COUNT>",
+    "hit_count": "<HASH_CACHE_HIT_COUNT>",
+    "miss_count": "<HASH_CACHE_MISS_COUNT>",
+    "invalidation_count": "<HASH_CACHE_INVALIDATION_COUNT>",
+    "entries_head_hash": "<HASH_CACHE_ENTRIES_HEAD_HASH>",
+    "events_head_hash": "<HASH_CACHE_EVENTS_HEAD_HASH>",
+    "persistence_manifest_hash": "<HASH_CACHE_PERSISTENCE_MANIFEST_HASH>",
+    "hash_cache_manifest": {
+      "profile": "hash-cache-manifest-v1",
+      "profile_version": "hash-cache-manifest-v1",
+      "item_number": 76,
+      "cache_session_id": "<HASH_CACHE_SESSION_ID>",
+      "entry_count": 2,
+      "event_count": 2,
+      "entries_truncated": false,
+      "events_truncated": false,
+      "entries_head_hash": "<HASH_CACHE_ENTRIES_HEAD_HASH>",
+      "events_head_hash": "<HASH_CACHE_EVENTS_HEAD_HASH>",
+      "persistence_manifest": {
+        "profile_version": "hash-cache-persistence-manifest-v1",
+        "item_number": 76,
+        "commercial_gap_ids": [
+          "#76"
+        ],
+        "snapshot_format": "hash-cache-persistent-snapshot-v1",
+        "persistence_mode": "explicit-export-import-snapshot",
+        "content_address_key": "sha256",
+        "cache_key_fields": [
+          "path",
+          "size",
+          "mtime_ns",
+          "inode",
+          "device"
+        ],
+        "row_count": 2,
+        "row_head_hash": "<HASH_CACHE_PERSISTENCE_ROW_HEAD_HASH>",
+        "rows": [
+          {
+            "content_address_key": "8dcc7e601606217f3b754766511182a916b17e9a26a94c9d887104eba92e9bb2",
+            "path_hash": "<PATH_HASH>",
+            "name": "bundle.zip",
+            "size": 4,
+            "mtime_ns": "<MTIME_NS>",
+            "inode": "<INODE>",
+            "device": "<DEVICE>",
+            "algorithms": [
+              "md5",
+              "sha1",
+              "sha256"
+            ],
+            "md5": "10893fd7cff66dca193f658ca9438d15",
+            "sha1": "fb467bb25be45fcf0c84c03ce5801abd5a28c1fd",
+            "sha256": "8dcc7e601606217f3b754766511182a916b17e9a26a94c9d887104eba92e9bb2",
+            "row_hash": "<HASH_CACHE_PERSISTENCE_ROW_HASH>"
+          },
+          {
+            "content_address_key": "9f2981a7cc4d40a2a409dc895de64253acd819d7c0011c8e80b86fe899464e31",
+            "path_hash": "<PATH_HASH>",
+            "name": "tool.exe",
+            "size": 4,
+            "mtime_ns": "<MTIME_NS>",
+            "inode": "<INODE>",
+            "device": "<DEVICE>",
+            "algorithms": [
+              "md5",
+              "sha1",
+              "sha256"
+            ],
+            "md5": "20879c987e2f9a916e578386d499f629",
+            "sha1": "c7b33ddcc42361fdb847036fc07e880b81935d5d",
+            "sha256": "9f2981a7cc4d40a2a409dc895de64253acd819d7c0011c8e80b86fe899464e31",
+            "row_hash": "<HASH_CACHE_PERSISTENCE_ROW_HASH>"
+          }
+        ],
+        "automatic_on_disk_cache": false,
+        "large_case_hit_ratio_validated": false,
+        "commercial_claim_allowed": false,
+        "manifest_hash": "<HASH_CACHE_PERSISTENCE_MANIFEST_HASH>"
+      },
+      "persistence_manifest_hash": "<HASH_CACHE_PERSISTENCE_MANIFEST_HASH>",
+      "stats": {
+        "hits": "<HASH_CACHE_HITS>",
+        "misses": "<HASH_CACHE_MISSES>",
+        "invalidations": "<HASH_CACHE_INVALIDATIONS>"
+      },
+      "cache_key_fields": [
+        "path",
+        "size",
+        "mtime_ns",
+        "inode",
+        "device"
+      ],
+      "algorithms": [
+        "md5",
+        "sha1",
+        "sha256"
+      ],
+      "policy": {
+        "scope": "process-local-with-explicit-snapshot",
+        "persistent_across_restarts": true,
+        "persistence_mode": "explicit-export-import-snapshot",
+        "export_import_contract_declared": true,
+        "stale_entry_invalidation": "same-path size/mtime/inode/device mismatch invalidates previous entries",
+        "path_disclosure": "full paths are hashed in manifest entries; basename is retained for analyst orientation",
+        "persistent_cache_next_step": "Promote explicit snapshots to an automatic content-addressed on-disk cache only after large-case hit-ratio validation."
+      },
+      "invalidation_proof": {
+        "invalidations": 0,
+        "same_path_invalidation_events": 0,
+        "latest_invalidation_event": null
+      },
+      "entries": [
+        {
+          "path_hash": "<PATH_HASH>",
+          "name": "bundle.zip",
+          "size": 4,
+          "mtime_ns": "<MTIME_NS>",
+          "inode": "<INODE>",
+          "device": "<DEVICE>",
+          "algorithms": [
+            "md5",
+            "sha1",
+            "sha256"
+          ],
+          "sha256": "8dcc7e601606217f3b754766511182a916b17e9a26a94c9d887104eba92e9bb2"
+        },
+        {
+          "path_hash": "<PATH_HASH>",
+          "name": "tool.exe",
+          "size": 4,
+          "mtime_ns": "<MTIME_NS>",
+          "inode": "<INODE>",
+          "device": "<DEVICE>",
+          "algorithms": [
+            "md5",
+            "sha1",
+            "sha256"
+          ],
+          "sha256": "9f2981a7cc4d40a2a409dc895de64253acd819d7c0011c8e80b86fe899464e31"
+        }
+      ],
+      "recent_events": [
+        {
+          "action": "miss",
+          "path_hash": "<PATH_HASH>",
+          "name": "tool.exe",
+          "size": 4,
+          "mtime_ns": "<MTIME_NS>",
+          "inode": "<INODE>",
+          "device": "<DEVICE>",
+          "cache_hit": false
+        },
+        {
+          "action": "miss",
+          "path_hash": "<PATH_HASH>",
+          "name": "bundle.zip",
+          "size": 4,
+          "mtime_ns": "<MTIME_NS>",
+          "inode": "<INODE>",
+          "device": "<DEVICE>",
+          "cache_hit": false
+        }
+      ],
+      "commercial_gap_ids": [
+        "#76"
+      ],
+      "commercial_claim_allowed": false,
+      "manifest_hash": "<HASH_CACHE_MANIFEST_HASH>"
+    },
+    "hash_cache_report_grade_validation_plan": {
+      "profile_version": "hash-cache-report-grade-validation-plan-v1",
+      "item_number": 76,
+      "gap_id": "#76",
+      "commercial_gap_ids": [
+        "#76"
+      ],
+      "hash_cache_manifest_hash": "<HASH_CACHE_MANIFEST_HASH>",
+      "cache_session_id": "<HASH_CACHE_SESSION_ID>",
+      "entry_count": 2,
+      "event_count": 2,
+      "hit_count": 0,
+      "miss_count": 2,
+      "invalidation_count": 0,
+      "entries_head_hash": "<HASH_CACHE_ENTRIES_HEAD_HASH>",
+      "events_head_hash": "<HASH_CACHE_EVENTS_HEAD_HASH>",
+      "persistence_manifest_hash": "<HASH_CACHE_PERSISTENCE_MANIFEST_HASH>",
+      "persistence_row_head_hash": "<HASH_CACHE_PERSISTENCE_ROW_HEAD_HASH>",
+      "key_policy_hash": "<HASH_CACHE_KEY_POLICY_HASH>",
+      "counter_profile_hash": "<HASH_CACHE_COUNTER_PROFILE_HASH>",
+      "snapshot_contract_hash": "<HASH_CACHE_SNAPSHOT_CONTRACT_HASH>",
+      "explicit_snapshot_export_import": true,
+      "automatic_on_disk_cache": false,
+      "large_case_hit_ratio_validated": false,
+      "trusted_hash_cache_diff_status": "missing",
+      "ready_slots": [
+        {
+          "slot_id": "hash-cache-run-manifest",
+          "status": "ready",
+          "evidence_ref": "hash_cache_manifest_hash",
+          "evidence_hash": "<HASH_CACHE_SLOT_HASH>",
+          "description": "File-scan outputs archive the hash cache manifest used for review."
+        },
+        {
+          "slot_id": "cache-key-policy",
+          "status": "ready",
+          "evidence_ref": "key_policy_hash",
+          "evidence_hash": "<HASH_CACHE_SLOT_HASH>",
+          "description": "Path, size, mtime, inode, device, scope, and invalidation policy are fixed."
+        },
+        {
+          "slot_id": "hit-miss-invalidation-counters",
+          "status": "ready",
+          "evidence_ref": "counter_profile_hash",
+          "evidence_hash": "<HASH_CACHE_SLOT_HASH>",
+          "description": "Hit, miss, invalidation, entry, and event counts are preserved for cache review."
+        },
+        {
+          "slot_id": "content-addressed-persistence-rows",
+          "status": "ready",
+          "evidence_ref": "persistence_manifest_hash",
+          "evidence_hash": "<HASH_CACHE_SLOT_HASH>",
+          "description": "Explicit snapshots include SHA-256 content-addressed persistence rows."
+        },
+        {
+          "slot_id": "explicit-snapshot-export-import-contract",
+          "status": "ready",
+          "evidence_ref": "snapshot_contract_hash",
+          "evidence_hash": "<HASH_CACHE_SLOT_HASH>",
+          "description": "The manifest declares the snapshot profile and export/import persistence mode."
+        },
+        {
+          "slot_id": "same-path-invalidation-proof",
+          "status": "ready",
+          "evidence_ref": "invalidation_proof_hash",
+          "evidence_hash": "<HASH_CACHE_SLOT_HASH>",
+          "description": "Same-path stale entry invalidation evidence is hashed for regression review."
+        }
+      ],
+      "blocking_slots": [
+        {
+          "slot_id": "trusted-hash-cache-manifest",
+          "status": "blocked",
+          "blocker": "trusted-hash-cache-manifest-diff-missing",
+          "required_evidence": "independent trusted hash-cache manifest diff across hits, misses, and invalidations"
+        },
+        {
+          "slot_id": "automatic-on-disk-cache",
+          "status": "blocked",
+          "blocker": "automatic-on-disk-cache-wiring-required",
+          "required_evidence": "automatic startup/load/save cache store with safe invalidation and case-boundary controls"
+        },
+        {
+          "slot_id": "large-case-hit-ratio",
+          "status": "blocked",
+          "blocker": "large-case-hit-ratio-validation-required",
+          "required_evidence": "large-case replay proving hit ratio, saved wall time, and stale-cache safety"
+        },
+        {
+          "slot_id": "cross-platform-cache-key-semantics",
+          "status": "blocked",
+          "blocker": "cross-platform-cache-key-semantics-required",
+          "required_evidence": "Windows, macOS, and Linux path/mtime/inode/device semantics comparison"
+        },
+        {
+          "slot_id": "content-addressed-lookup-mode",
+          "status": "blocked",
+          "blocker": "content-addressed-lookup-mode-required",
+          "required_evidence": "lookup mode that can reuse hashes by trusted content address when path metadata changes safely"
+        },
+        {
+          "slot_id": "multi-run-stale-cache-replay",
+          "status": "blocked",
+          "blocker": "multi-run-stale-cache-replay-required",
+          "required_evidence": "multi-run corpus proving stale entries are invalidated without false cache hits"
+        }
+      ],
+      "ready_slot_count": 6,
+      "blocking_slot_count": 6,
+      "blockers": [
+        "trusted-hash-cache-manifest-diff-missing",
+        "automatic-on-disk-cache-wiring-required",
+        "large-case-hit-ratio-validation-required",
+        "cross-platform-cache-key-semantics-required",
+        "content-addressed-lookup-mode-required",
+        "multi-run-stale-cache-replay-required"
+      ],
+      "commercial_claim_allowed": false,
+      "ready_for_court_report": false,
+      "report_use_warning": "Use as process-local hash-cache evidence with explicit snapshots only; do not claim automatic large-case cache acceleration until blocker slots are satisfied.",
+      "validation_plan_hash": "<HASH_CACHE_VALIDATION_PLAN_HASH>",
+      "validation_plan_sha256": "<HASH_CACHE_VALIDATION_PLAN_HASH>"
+    },
+    "hash_cache_report_grade_validation_plan_hash": "<HASH_CACHE_VALIDATION_PLAN_HASH>",
+    "report_grade_ready_slot_count": 6,
+    "report_grade_blocking_slot_count": 6,
+    "ready_for_court_report": false,
+    "trusted_hash_cache_diff": {
+      "status": "missing",
+      "trusted_tool": null,
+      "commercial_gap_ids": [
+        "#76"
+      ],
+      "blocker": "trusted-hash-cache-manifest-diff-missing",
+      "required_trusted_tools": [
+        "content-addressed-cache-oracle",
+        "hash-cache-manifest",
+        "known-answer-hash-cache-export"
+      ]
+    },
+    "core_accuracy_gates": [
+      {
+        "gap_id": "#76"
+      }
     ],
     "blockers": [
       "automatic-on-disk-cache-not-enabled-without-explicit-snapshot-import",
@@ -519,580 +672,427 @@
       "cross-platform-cache-key-semantics-required",
       "content-addressed-lookup-mode-required",
       "multi-run-stale-cache-replay-required"
-    ],
-    "cache_session_id": "<HASH_CACHE_SESSION_ID>",
-    "commercial_gap_ids": [
-      "#76"
-    ],
-    "component": "file-hash-cache",
-    "core_accuracy_gates": [
-      {
-        "gap_id": "#76"
-      }
-    ],
-    "entries_head_hash": "<HASH_CACHE_ENTRIES_HEAD_HASH>",
-    "entry_count": "<HASH_CACHE_ENTRY_COUNT>",
-    "events_head_hash": "<HASH_CACHE_EVENTS_HEAD_HASH>",
-    "hash_cache_manifest": {
-      "algorithms": [
-        "md5",
-        "sha1",
-        "sha256"
-      ],
-      "cache_key_fields": [
-        "path",
-        "size",
-        "mtime_ns",
-        "inode",
-        "device"
-      ],
-      "cache_session_id": "<HASH_CACHE_SESSION_ID>",
-      "commercial_claim_allowed": false,
-      "commercial_gap_ids": [
-        "#76"
-      ],
-      "entries": [
-        {
-          "algorithms": [
-            "md5",
-            "sha1",
-            "sha256"
-          ],
-          "device": "<DEVICE>",
-          "inode": "<INODE>",
-          "mtime_ns": "<MTIME_NS>",
-          "name": "bundle.zip",
-          "path_hash": "<PATH_HASH>",
-          "sha256": "8dcc7e601606217f3b754766511182a916b17e9a26a94c9d887104eba92e9bb2",
-          "size": 4
-        },
-        {
-          "algorithms": [
-            "md5",
-            "sha1",
-            "sha256"
-          ],
-          "device": "<DEVICE>",
-          "inode": "<INODE>",
-          "mtime_ns": "<MTIME_NS>",
-          "name": "tool.exe",
-          "path_hash": "<PATH_HASH>",
-          "sha256": "9f2981a7cc4d40a2a409dc895de64253acd819d7c0011c8e80b86fe899464e31",
-          "size": 4
-        }
-      ],
-      "entries_head_hash": "<HASH_CACHE_ENTRIES_HEAD_HASH>",
-      "entries_truncated": false,
-      "entry_count": 2,
-      "event_count": 2,
-      "events_head_hash": "<HASH_CACHE_EVENTS_HEAD_HASH>",
-      "events_truncated": false,
-      "invalidation_proof": {
-        "invalidations": 0,
-        "latest_invalidation_event": null,
-        "same_path_invalidation_events": 0
-      },
-      "item_number": 76,
-      "manifest_hash": "<HASH_CACHE_MANIFEST_HASH>",
-      "persistence_manifest": {
-        "automatic_on_disk_cache": false,
-        "cache_key_fields": [
-          "path",
-          "size",
-          "mtime_ns",
-          "inode",
-          "device"
-        ],
-        "commercial_claim_allowed": false,
-        "commercial_gap_ids": [
-          "#76"
-        ],
-        "content_address_key": "sha256",
-        "item_number": 76,
-        "large_case_hit_ratio_validated": false,
-        "manifest_hash": "<HASH_CACHE_PERSISTENCE_MANIFEST_HASH>",
-        "persistence_mode": "explicit-export-import-snapshot",
-        "profile_version": "hash-cache-persistence-manifest-v1",
-        "row_count": 2,
-        "row_head_hash": "<HASH_CACHE_PERSISTENCE_ROW_HEAD_HASH>",
-        "rows": [
-          {
-            "algorithms": [
-              "md5",
-              "sha1",
-              "sha256"
-            ],
-            "content_address_key": "8dcc7e601606217f3b754766511182a916b17e9a26a94c9d887104eba92e9bb2",
-            "device": "<DEVICE>",
-            "inode": "<INODE>",
-            "md5": "10893fd7cff66dca193f658ca9438d15",
-            "mtime_ns": "<MTIME_NS>",
-            "name": "bundle.zip",
-            "path_hash": "<PATH_HASH>",
-            "row_hash": "<HASH_CACHE_PERSISTENCE_ROW_HASH>",
-            "sha1": "fb467bb25be45fcf0c84c03ce5801abd5a28c1fd",
-            "sha256": "8dcc7e601606217f3b754766511182a916b17e9a26a94c9d887104eba92e9bb2",
-            "size": 4
-          },
-          {
-            "algorithms": [
-              "md5",
-              "sha1",
-              "sha256"
-            ],
-            "content_address_key": "9f2981a7cc4d40a2a409dc895de64253acd819d7c0011c8e80b86fe899464e31",
-            "device": "<DEVICE>",
-            "inode": "<INODE>",
-            "md5": "20879c987e2f9a916e578386d499f629",
-            "mtime_ns": "<MTIME_NS>",
-            "name": "tool.exe",
-            "path_hash": "<PATH_HASH>",
-            "row_hash": "<HASH_CACHE_PERSISTENCE_ROW_HASH>",
-            "sha1": "c7b33ddcc42361fdb847036fc07e880b81935d5d",
-            "sha256": "9f2981a7cc4d40a2a409dc895de64253acd819d7c0011c8e80b86fe899464e31",
-            "size": 4
-          }
-        ],
-        "snapshot_format": "hash-cache-persistent-snapshot-v1"
-      },
-      "persistence_manifest_hash": "<HASH_CACHE_PERSISTENCE_MANIFEST_HASH>",
-      "policy": {
-        "export_import_contract_declared": true,
-        "path_disclosure": "full paths are hashed in manifest entries; basename is retained for analyst orientation",
-        "persistence_mode": "explicit-export-import-snapshot",
-        "persistent_across_restarts": true,
-        "persistent_cache_next_step": "Promote explicit snapshots to an automatic content-addressed on-disk cache only after large-case hit-ratio validation.",
-        "scope": "process-local-with-explicit-snapshot",
-        "stale_entry_invalidation": "same-path size/mtime/inode/device mismatch invalidates previous entries"
-      },
-      "profile": "hash-cache-manifest-v1",
-      "profile_version": "hash-cache-manifest-v1",
-      "recent_events": [
-        {
-          "action": "miss",
-          "cache_hit": false,
-          "device": "<DEVICE>",
-          "inode": "<INODE>",
-          "mtime_ns": "<MTIME_NS>",
-          "name": "tool.exe",
-          "path_hash": "<PATH_HASH>",
-          "size": 4
-        },
-        {
-          "action": "miss",
-          "cache_hit": false,
-          "device": "<DEVICE>",
-          "inode": "<INODE>",
-          "mtime_ns": "<MTIME_NS>",
-          "name": "bundle.zip",
-          "path_hash": "<PATH_HASH>",
-          "size": 4
-        }
-      ],
-      "stats": {
-        "hits": "<HASH_CACHE_HITS>",
-        "invalidations": "<HASH_CACHE_INVALIDATIONS>",
-        "misses": "<HASH_CACHE_MISSES>"
-      }
+    ]
+  },
+  "duplicate_content_manifest": {
+    "profile": "duplicate-content-manifest-v1",
+    "profile_version": "duplicate-content-manifest-v1",
+    "item_number": 77,
+    "method": "same-size-bucket-sha256-confirmation-and-normalized-text-near-duplicate-candidates",
+    "group_count": 0,
+    "duplicate_file_count": 0,
+    "fuzzy_text_group_count": 0,
+    "fuzzy_text_file_count": 0,
+    "group_head_hash": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+    "fuzzy_text_group_head_hash": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+    "exact_hash_grouping": true,
+    "fuzzy_text_grouping": true,
+    "perceptual_media_grouping": false,
+    "fuzzy_text_policy": {
+      "method": "normalized-token-jaccard-with-sequence-ratio-fallback",
+      "auto_suppression_enabled": false,
+      "analyst_review_required": true
     },
-    "hash_cache_report_grade_validation_plan": {
-      "automatic_on_disk_cache": false,
+    "suppression_policy": {
+      "auto_suppression_enabled": false,
+      "analyst_override_required": true,
+      "report_suppression_default": "not-suppressed"
+    },
+    "groups": [],
+    "fuzzy_text_groups": [],
+    "commercial_gap_ids": [
+      "#77"
+    ],
+    "commercial_claim_allowed": false,
+    "manifest_hash": "<DUPLICATE_CONTENT_MANIFEST_HASH>"
+  },
+  "duplicate_detection_assessment": {
+    "component": "duplicate-file-content-detection",
+    "status": "bounded-sha256-and-fuzzy-text-validation-plan-emitted",
+    "commercial_gap_ids": [
+      "#77"
+    ],
+    "functional_priority_profile": {
+      "batch_id": "commercial-uplift-031-035",
+      "item_number": 33,
+      "gap_id": "#33",
+      "component": "duplicate-suppression",
+      "status": "implemented-hash-identical-grouping-validation-required",
+      "implemented": true,
+      "usable": true,
+      "validated": true,
+      "ready_for_commercial_claim": false,
+      "controls": {
+        "duplicate_group_count": 0,
+        "duplicate_file_count": 0,
+        "fuzzy_text_duplicate_group_count": 0,
+        "fuzzy_text_duplicate_file_count": 0,
+        "same_size_candidate_bucketing": true,
+        "bounded_sha256_confirmation": true,
+        "normalized_text_near_duplicate_candidates": true,
+        "representative_paths_listed": true,
+        "suppression_manifest_hash": "299f2f72b8033cd58e34660ab78a77f780a5b08b70e77173a10063ee3d49b9ae",
+        "review_matrix_hash": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+        "duplicate_content_manifest_hash": "e2ec33446497d1926eb51c8115c1b23b4cacb101cda3a956db53fc7889f1100b",
+        "collapse_by_default_in_ui": false,
+        "auto_suppression_enabled": false,
+        "analyst_override_required_before_report_suppression": true
+      },
       "blockers": [
-        "trusted-hash-cache-manifest-diff-missing",
-        "automatic-on-disk-cache-wiring-required",
-        "large-case-hit-ratio-validation-required",
-        "cross-platform-cache-key-semantics-required",
-        "content-addressed-lookup-mode-required",
-        "multi-run-stale-cache-replay-required"
+        "trusted-duplicate-file-manifest-diff-missing",
+        "ui-collapse-and-suppression-state-not-yet-persisted",
+        "perceptual-media-similarity-not-complete"
       ],
-      "blocking_slot_count": 6,
-      "blocking_slots": [
-        {
-          "blocker": "trusted-hash-cache-manifest-diff-missing",
-          "required_evidence": "independent trusted hash-cache manifest diff across hits, misses, and invalidations",
-          "slot_id": "trusted-hash-cache-manifest",
-          "status": "blocked"
-        },
-        {
-          "blocker": "automatic-on-disk-cache-wiring-required",
-          "required_evidence": "automatic startup/load/save cache store with safe invalidation and case-boundary controls",
-          "slot_id": "automatic-on-disk-cache",
-          "status": "blocked"
-        },
-        {
-          "blocker": "large-case-hit-ratio-validation-required",
-          "required_evidence": "large-case replay proving hit ratio, saved wall time, and stale-cache safety",
-          "slot_id": "large-case-hit-ratio",
-          "status": "blocked"
-        },
-        {
-          "blocker": "cross-platform-cache-key-semantics-required",
-          "required_evidence": "Windows, macOS, and Linux path/mtime/inode/device semantics comparison",
-          "slot_id": "cross-platform-cache-key-semantics",
-          "status": "blocked"
-        },
-        {
-          "blocker": "content-addressed-lookup-mode-required",
-          "required_evidence": "lookup mode that can reuse hashes by trusted content address when path metadata changes safely",
-          "slot_id": "content-addressed-lookup-mode",
-          "status": "blocked"
-        },
-        {
-          "blocker": "multi-run-stale-cache-replay-required",
-          "required_evidence": "multi-run corpus proving stale entries are invalidated without false cache hits",
-          "slot_id": "multi-run-stale-cache-replay",
-          "status": "blocked"
-        }
-      ],
-      "cache_session_id": "<HASH_CACHE_SESSION_ID>",
-      "commercial_claim_allowed": false,
+      "validation_evidence": [
+        "files-output-emits-functional-duplicate-suppression-profile",
+        "unit-test-asserts-duplicate-profile-contract"
+      ]
+    },
+    "duplicate_content_manifest": {
+      "profile": "duplicate-content-manifest-v1",
+      "profile_version": "duplicate-content-manifest-v1",
+      "item_number": 77,
+      "method": "same-size-bucket-sha256-confirmation-and-normalized-text-near-duplicate-candidates",
+      "group_count": 0,
+      "duplicate_file_count": 0,
+      "fuzzy_text_group_count": 0,
+      "fuzzy_text_file_count": 0,
+      "group_head_hash": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "fuzzy_text_group_head_hash": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "exact_hash_grouping": true,
+      "fuzzy_text_grouping": true,
+      "perceptual_media_grouping": false,
+      "fuzzy_text_policy": {
+        "method": "normalized-token-jaccard-with-sequence-ratio-fallback",
+        "auto_suppression_enabled": false,
+        "analyst_review_required": true
+      },
+      "suppression_policy": {
+        "auto_suppression_enabled": false,
+        "analyst_override_required": true,
+        "report_suppression_default": "not-suppressed"
+      },
+      "groups": [],
+      "fuzzy_text_groups": [],
       "commercial_gap_ids": [
-        "#76"
+        "#77"
       ],
-      "counter_profile_hash": "<HASH_CACHE_COUNTER_PROFILE_HASH>",
-      "entries_head_hash": "<HASH_CACHE_ENTRIES_HEAD_HASH>",
-      "entry_count": 2,
-      "event_count": 2,
-      "events_head_hash": "<HASH_CACHE_EVENTS_HEAD_HASH>",
-      "explicit_snapshot_export_import": true,
-      "gap_id": "#76",
-      "hash_cache_manifest_hash": "<HASH_CACHE_MANIFEST_HASH>",
-      "hit_count": 0,
-      "invalidation_count": 0,
-      "item_number": 76,
-      "key_policy_hash": "<HASH_CACHE_KEY_POLICY_HASH>",
-      "large_case_hit_ratio_validated": false,
-      "miss_count": 2,
-      "persistence_manifest_hash": "<HASH_CACHE_PERSISTENCE_MANIFEST_HASH>",
-      "persistence_row_head_hash": "<HASH_CACHE_PERSISTENCE_ROW_HEAD_HASH>",
-      "profile_version": "hash-cache-report-grade-validation-plan-v1",
-      "ready_for_court_report": false,
-      "ready_slot_count": 6,
+      "commercial_claim_allowed": false,
+      "manifest_hash": "<DUPLICATE_CONTENT_MANIFEST_HASH>"
+    },
+    "duplicate_suppression_manifest": {
+      "profile_version": "duplicate-suppression-manifest-v1",
+      "item_number": 33,
+      "gap_id": "#33",
+      "commercial_gap_ids": [
+        "#77"
+      ],
+      "duplicate_content_manifest_hash": "e2ec33446497d1926eb51c8115c1b23b4cacb101cda3a956db53fc7889f1100b",
+      "duplicate_group_count": 0,
+      "duplicate_file_count": 0,
+      "fuzzy_text_duplicate_group_count": 0,
+      "fuzzy_text_duplicate_file_count": 0,
+      "representative_selection": "stable-path-order-first-candidate",
+      "report_suppression_default": "not-suppressed",
+      "auto_suppression_enabled": false,
+      "analyst_override_required": true,
+      "review_matrix": [],
+      "review_matrix_hash": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "review_decision_required_for_each_group": true,
+      "collapse_by_default_in_ui": false,
+      "near_duplicate_text_supported": true,
+      "perceptual_media_similarity_supported": false,
+      "trusted_diff_blocker": "trusted-duplicate-file-manifest-diff-missing",
+      "commercial_claim_allowed": false,
+      "manifest_hash": "299f2f72b8033cd58e34660ab78a77f780a5b08b70e77173a10063ee3d49b9ae"
+    },
+    "duplicate_suppression_manifest_hash": "299f2f72b8033cd58e34660ab78a77f780a5b08b70e77173a10063ee3d49b9ae",
+    "duplicate_content_report_grade_validation_plan": {
+      "profile_version": "duplicate-content-report-grade-validation-plan-v1",
+      "item_number": 77,
+      "gap_id": "#77",
+      "commercial_gap_ids": [
+        "#77"
+      ],
+      "duplicate_content_manifest_hash": "<DUPLICATE_CONTENT_MANIFEST_HASH>",
+      "duplicate_suppression_manifest_hash": "<DUPLICATE_SUPPRESSION_MANIFEST_HASH>",
+      "review_matrix_hash": "<DUPLICATE_REVIEW_MATRIX_HASH>",
+      "group_head_hash": "<DUPLICATE_GROUP_HEAD_HASH>",
+      "fuzzy_text_group_head_hash": "<DUPLICATE_FUZZY_TEXT_GROUP_HEAD_HASH>",
+      "representative_policy_hash": "<DUPLICATE_REPRESENTATIVE_POLICY_HASH>",
+      "duplicate_counts_hash": "<DUPLICATE_COUNTS_HASH>",
+      "exact_group_count": 0,
+      "fuzzy_text_group_count": 0,
+      "exact_hash_grouping": true,
+      "fuzzy_text_grouping": true,
+      "perceptual_media_grouping": false,
+      "auto_suppression_enabled": false,
+      "analyst_override_required": true,
+      "trusted_duplicate_manifest_diff_status": "missing",
       "ready_slots": [
         {
-          "description": "File-scan outputs archive the hash cache manifest used for review.",
-          "evidence_hash": "<HASH_CACHE_SLOT_HASH>",
-          "evidence_ref": "hash_cache_manifest_hash",
-          "slot_id": "hash-cache-run-manifest",
-          "status": "ready"
+          "slot_id": "duplicate-content-manifest",
+          "status": "ready",
+          "evidence_ref": "duplicate_content_manifest_hash",
+          "evidence_hash": "<DUPLICATE_SLOT_HASH>",
+          "description": "Exact and fuzzy duplicate summaries are archived in duplicate-content-manifest-v1."
         },
         {
-          "description": "Path, size, mtime, inode, device, scope, and invalidation policy are fixed.",
-          "evidence_hash": "<HASH_CACHE_SLOT_HASH>",
-          "evidence_ref": "key_policy_hash",
-          "slot_id": "cache-key-policy",
-          "status": "ready"
+          "slot_id": "exact-hash-grouping",
+          "status": "ready",
+          "evidence_ref": "group_head_hash",
+          "evidence_hash": "<DUPLICATE_SLOT_HASH>",
+          "description": "Same-size candidate files are confirmed by bounded SHA-256 exact grouping."
         },
         {
-          "description": "Hit, miss, invalidation, entry, and event counts are preserved for cache review.",
-          "evidence_hash": "<HASH_CACHE_SLOT_HASH>",
-          "evidence_ref": "counter_profile_hash",
-          "slot_id": "hit-miss-invalidation-counters",
-          "status": "ready"
+          "slot_id": "fuzzy-text-candidate-grouping",
+          "status": "ready",
+          "evidence_ref": "fuzzy_text_group_head_hash",
+          "evidence_hash": "<DUPLICATE_SLOT_HASH>",
+          "description": "Normalized text near-duplicate candidates are grouped without automatic suppression."
         },
         {
-          "description": "Explicit snapshots include SHA-256 content-addressed persistence rows.",
-          "evidence_hash": "<HASH_CACHE_SLOT_HASH>",
-          "evidence_ref": "persistence_manifest_hash",
-          "slot_id": "content-addressed-persistence-rows",
-          "status": "ready"
+          "slot_id": "duplicate-suppression-review-matrix",
+          "status": "ready",
+          "evidence_ref": "review_matrix_hash",
+          "evidence_hash": "<DUPLICATE_SLOT_HASH>",
+          "description": "Review matrix rows define the analyst decision required before report suppression."
         },
         {
-          "description": "The manifest declares the snapshot profile and export/import persistence mode.",
-          "evidence_hash": "<HASH_CACHE_SLOT_HASH>",
-          "evidence_ref": "snapshot_contract_hash",
-          "slot_id": "explicit-snapshot-export-import-contract",
-          "status": "ready"
+          "slot_id": "representative-selection-policy",
+          "status": "ready",
+          "evidence_ref": "representative_policy_hash",
+          "evidence_hash": "<DUPLICATE_SLOT_HASH>",
+          "description": "Representative-first review remains deterministic and suppression-disabled by default."
         },
         {
-          "description": "Same-path stale entry invalidation evidence is hashed for regression review.",
-          "evidence_hash": "<HASH_CACHE_SLOT_HASH>",
-          "evidence_ref": "invalidation_proof_hash",
-          "slot_id": "same-path-invalidation-proof",
-          "status": "ready"
+          "slot_id": "duplicate-count-profile",
+          "status": "ready",
+          "evidence_ref": "duplicate_counts_hash",
+          "evidence_hash": "<DUPLICATE_SLOT_HASH>",
+          "description": "Exact and fuzzy duplicate group/file counts are hashed for report review."
         }
       ],
-      "report_use_warning": "Use as process-local hash-cache evidence with explicit snapshots only; do not claim automatic large-case cache acceleration until blocker slots are satisfied.",
-      "snapshot_contract_hash": "<HASH_CACHE_SNAPSHOT_CONTRACT_HASH>",
-      "trusted_hash_cache_diff_status": "missing",
-      "validation_plan_hash": "<HASH_CACHE_VALIDATION_PLAN_HASH>",
-      "validation_plan_sha256": "<HASH_CACHE_VALIDATION_PLAN_HASH>"
-    },
-    "hash_cache_report_grade_validation_plan_hash": "<HASH_CACHE_VALIDATION_PLAN_HASH>",
-    "hit_count": "<HASH_CACHE_HIT_COUNT>",
-    "invalidation_count": "<HASH_CACHE_INVALIDATION_COUNT>",
-    "miss_count": "<HASH_CACHE_MISS_COUNT>",
-    "persistence_manifest_hash": "<HASH_CACHE_PERSISTENCE_MANIFEST_HASH>",
-    "ready_for_court_report": false,
-    "report_grade_blocking_slot_count": 6,
-    "report_grade_ready_slot_count": 6,
-    "status": "in-process-path-size-mtime-cache-validation-plan-emitted",
-    "trusted_hash_cache_diff": {
-      "blocker": "trusted-hash-cache-manifest-diff-missing",
-      "commercial_gap_ids": [
-        "#76"
+      "blocking_slots": [
+        {
+          "slot_id": "trusted-duplicate-manifest",
+          "status": "blocked",
+          "blocker": "trusted-duplicate-file-manifest-diff-missing",
+          "required_evidence": "independent trusted duplicate manifest diff for exact and fuzzy duplicate groups"
+        },
+        {
+          "slot_id": "perceptual-media-similarity",
+          "status": "blocked",
+          "blocker": "perceptual-media-similarity-required",
+          "required_evidence": "image/video perceptual hash corpus with expected similar-media group IDs"
+        },
+        {
+          "slot_id": "analyst-suppression-workflow",
+          "status": "blocked",
+          "blocker": "analyst-suppression-workflow-validation-required",
+          "required_evidence": "persisted analyst include/suppress decisions with audit trail and report replay proof"
+        },
+        {
+          "slot_id": "large-case-dedupe-performance",
+          "status": "blocked",
+          "blocker": "large-case-dedupe-performance-validation-required",
+          "required_evidence": "large evidence replay proving bounded hashing, grouping latency, and memory usage"
+        },
+        {
+          "slot_id": "near-duplicate-text-known-answer-corpus",
+          "status": "blocked",
+          "blocker": "near-duplicate-text-known-answer-corpus-required",
+          "required_evidence": "known-answer corpus for fuzzy text true/false positive thresholds"
+        },
+        {
+          "slot_id": "cross-run-suppression-version-history",
+          "status": "blocked",
+          "blocker": "cross-run-suppression-version-history-required",
+          "required_evidence": "case-level version history proving suppression decisions survive reruns without drift"
+        }
       ],
-      "required_trusted_tools": [
-        "content-addressed-cache-oracle",
-        "hash-cache-manifest",
-        "known-answer-hash-cache-export"
-      ],
-      "status": "missing",
-      "trusted_tool": null
-    }
-  },
-  "hash_cache_manifest": {
-    "algorithms": [
-      "md5",
-      "sha1",
-      "sha256"
-    ],
-    "cache_key_fields": [
-      "path",
-      "size",
-      "mtime_ns",
-      "inode",
-      "device"
-    ],
-    "cache_session_id": "<HASH_CACHE_SESSION_ID>",
-    "commercial_claim_allowed": false,
-    "commercial_gap_ids": [
-      "#76"
-    ],
-    "entries": [
-      {
-        "algorithms": [
-          "md5",
-          "sha1",
-          "sha256"
-        ],
-        "device": "<DEVICE>",
-        "inode": "<INODE>",
-        "mtime_ns": "<MTIME_NS>",
-        "name": "bundle.zip",
-        "path_hash": "<PATH_HASH>",
-        "sha256": "8dcc7e601606217f3b754766511182a916b17e9a26a94c9d887104eba92e9bb2",
-        "size": 4
-      },
-      {
-        "algorithms": [
-          "md5",
-          "sha1",
-          "sha256"
-        ],
-        "device": "<DEVICE>",
-        "inode": "<INODE>",
-        "mtime_ns": "<MTIME_NS>",
-        "name": "tool.exe",
-        "path_hash": "<PATH_HASH>",
-        "sha256": "9f2981a7cc4d40a2a409dc895de64253acd819d7c0011c8e80b86fe899464e31",
-        "size": 4
-      }
-    ],
-    "entries_head_hash": "<HASH_CACHE_ENTRIES_HEAD_HASH>",
-    "entries_truncated": false,
-    "entry_count": 2,
-    "event_count": 2,
-    "events_head_hash": "<HASH_CACHE_EVENTS_HEAD_HASH>",
-    "events_truncated": false,
-    "invalidation_proof": {
-      "invalidations": 0,
-      "latest_invalidation_event": null,
-      "same_path_invalidation_events": 0
-    },
-    "item_number": 76,
-    "manifest_hash": "<HASH_CACHE_MANIFEST_HASH>",
-    "persistence_manifest": {
-      "automatic_on_disk_cache": false,
-      "cache_key_fields": [
-        "path",
-        "size",
-        "mtime_ns",
-        "inode",
-        "device"
+      "ready_slot_count": 6,
+      "blocking_slot_count": 6,
+      "blockers": [
+        "trusted-duplicate-file-manifest-diff-missing",
+        "perceptual-media-similarity-required",
+        "analyst-suppression-workflow-validation-required",
+        "large-case-dedupe-performance-validation-required",
+        "near-duplicate-text-known-answer-corpus-required",
+        "cross-run-suppression-version-history-required"
       ],
       "commercial_claim_allowed": false,
+      "ready_for_court_report": false,
+      "report_use_warning": "Use as exact-hash and fuzzy-text duplicate review evidence only; do not auto-suppress or claim perceptual media coverage until blocker slots are satisfied.",
+      "validation_plan_hash": "<DUPLICATE_VALIDATION_PLAN_HASH>",
+      "validation_plan_sha256": "<DUPLICATE_VALIDATION_PLAN_HASH>"
+    },
+    "duplicate_content_report_grade_validation_plan_hash": "<DUPLICATE_VALIDATION_PLAN_HASH>",
+    "report_grade_ready_slot_count": 6,
+    "report_grade_blocking_slot_count": 6,
+    "duplicate_group_count": 0,
+    "duplicate_file_count": 0,
+    "fuzzy_text_duplicate_group_count": 0,
+    "fuzzy_text_duplicate_file_count": 0,
+    "ready_for_court_report": false,
+    "trusted_duplicate_content_diff": {
+      "status": "missing",
+      "trusted_tool": null,
       "commercial_gap_ids": [
-        "#76"
+        "#77"
       ],
-      "content_address_key": "sha256",
-      "item_number": 76,
-      "large_case_hit_ratio_validated": false,
-      "manifest_hash": "<HASH_CACHE_PERSISTENCE_MANIFEST_HASH>",
-      "persistence_mode": "explicit-export-import-snapshot",
-      "profile_version": "hash-cache-persistence-manifest-v1",
-      "row_count": 2,
-      "row_head_hash": "<HASH_CACHE_PERSISTENCE_ROW_HEAD_HASH>",
-      "rows": [
-        {
-          "algorithms": [
-            "md5",
-            "sha1",
-            "sha256"
-          ],
-          "content_address_key": "8dcc7e601606217f3b754766511182a916b17e9a26a94c9d887104eba92e9bb2",
-          "device": "<DEVICE>",
-          "inode": "<INODE>",
-          "md5": "10893fd7cff66dca193f658ca9438d15",
-          "mtime_ns": "<MTIME_NS>",
-          "name": "bundle.zip",
-          "path_hash": "<PATH_HASH>",
-          "row_hash": "<HASH_CACHE_PERSISTENCE_ROW_HASH>",
-          "sha1": "fb467bb25be45fcf0c84c03ce5801abd5a28c1fd",
-          "sha256": "8dcc7e601606217f3b754766511182a916b17e9a26a94c9d887104eba92e9bb2",
-          "size": 4
-        },
-        {
-          "algorithms": [
-            "md5",
-            "sha1",
-            "sha256"
-          ],
-          "content_address_key": "9f2981a7cc4d40a2a409dc895de64253acd819d7c0011c8e80b86fe899464e31",
-          "device": "<DEVICE>",
-          "inode": "<INODE>",
-          "md5": "20879c987e2f9a916e578386d499f629",
-          "mtime_ns": "<MTIME_NS>",
-          "name": "tool.exe",
-          "path_hash": "<PATH_HASH>",
-          "row_hash": "<HASH_CACHE_PERSISTENCE_ROW_HASH>",
-          "sha1": "c7b33ddcc42361fdb847036fc07e880b81935d5d",
-          "sha256": "9f2981a7cc4d40a2a409dc895de64253acd819d7c0011c8e80b86fe899464e31",
-          "size": 4
-        }
-      ],
-      "snapshot_format": "hash-cache-persistent-snapshot-v1"
+      "blocker": "trusted-duplicate-file-manifest-diff-missing",
+      "required_trusted_tools": [
+        "content-hash-oracle",
+        "duplicate-file-manifest",
+        "known-answer-duplicate-group-export"
+      ]
     },
-    "persistence_manifest_hash": "<HASH_CACHE_PERSISTENCE_MANIFEST_HASH>",
-    "policy": {
-      "export_import_contract_declared": true,
-      "path_disclosure": "full paths are hashed in manifest entries; basename is retained for analyst orientation",
-      "persistence_mode": "explicit-export-import-snapshot",
-      "persistent_across_restarts": true,
-      "persistent_cache_next_step": "Promote explicit snapshots to an automatic content-addressed on-disk cache only after large-case hit-ratio validation.",
-      "scope": "process-local-with-explicit-snapshot",
-      "stale_entry_invalidation": "same-path size/mtime/inode/device mismatch invalidates previous entries"
-    },
-    "profile": "hash-cache-manifest-v1",
-    "profile_version": "hash-cache-manifest-v1",
-    "recent_events": [
+    "core_accuracy_gates": [
       {
-        "action": "miss",
-        "cache_hit": false,
-        "device": "<DEVICE>",
-        "inode": "<INODE>",
-        "mtime_ns": "<MTIME_NS>",
-        "name": "tool.exe",
-        "path_hash": "<PATH_HASH>",
-        "size": 4
-      },
-      {
-        "action": "miss",
-        "cache_hit": false,
-        "device": "<DEVICE>",
-        "inode": "<INODE>",
-        "mtime_ns": "<MTIME_NS>",
-        "name": "bundle.zip",
-        "path_hash": "<PATH_HASH>",
-        "size": 4
+        "gap_id": "#77"
       }
     ],
-    "stats": {
-      "hits": "<HASH_CACHE_HITS>",
-      "invalidations": "<HASH_CACHE_INVALIDATIONS>",
-      "misses": "<HASH_CACHE_MISSES>"
+    "supports": [
+      "same-size-candidate-bucketing",
+      "bounded-content-sha256-confirmation",
+      "representative-path-lists",
+      "duplicate-content-manifest",
+      "normalized-text-near-duplicate-candidates",
+      "duplicate-review-matrix",
+      "not-suppressed-until-analyst-review"
+    ],
+    "blockers": [
+      "near-duplicate-text-and-media-similarity-are-not-full-file-deduplication",
+      "perceptual-media-similarity-not-implemented",
+      "hashing-is-bounded-to-protect-large-case-responsiveness",
+      "operator-must-verify-source-hashes-before-suppressing-duplicates-in-reports",
+      "trusted-duplicate-file-manifest-diff-missing",
+      "perceptual-media-similarity-required",
+      "analyst-suppression-workflow-validation-required",
+      "large-case-dedupe-performance-validation-required",
+      "near-duplicate-text-known-answer-corpus-required",
+      "cross-run-suppression-version-history-required"
+    ]
+  },
+  "core_accuracy_gates": [
+    {
+      "gap_id": "#76"
+    },
+    {
+      "gap_id": "#77"
     }
-  },
-  "known_good_suppressed_candidates": [],
-  "known_good_suppression_profile": {
-    "candidate_count": 4,
-    "capability_id": "denisting-nsrl-whitelist",
-    "commercial_claim_allowed": false,
-    "commercial_gap_ids": [
-      "visible-denisting"
-    ],
-    "configured": false,
-    "duplicate_feed_hash_count": 0,
-    "feed_count": 0,
-    "feed_format_counts": {},
-    "feed_summaries": [],
-    "hashed_candidate_count": 0,
-    "hide_known_good": false,
-    "known_good_hash_count": 0,
-    "known_good_hash_counts_by_algorithm": {
-      "md5": 0,
-      "sha1": 0,
-      "sha256": 0
+  ],
+  "duplicate_content_groups": [],
+  "fuzzy_text_duplicate_groups": [],
+  "candidates": [
+    {
+      "path": "<ROOT>/bundle.zip",
+      "name": "bundle.zip",
+      "extension": ".zip",
+      "size": 4,
+      "modified_at": "2024-02-03T04:05:07+00:00",
+      "modified_epoch": 1706933107.0,
+      "categories": [
+        "archives"
+      ],
+      "reasons": {
+        "archives": [
+          "extension:.zip",
+          "name:bundle"
+        ]
+      },
+      "known_good_status": "not-configured",
+      "file_signature": {
+        "status": "signature-matches-extension",
+        "detected": "zip-container",
+        "expected": [
+          "zip-container"
+        ],
+        "mismatch": false,
+        "risk_flags": []
+      }
     },
-    "limitations": [
-      "Bundled NSRL database download/update workflow is not implemented; analysts must supply a trusted local feed.",
-      "Files larger than max_hash_bytes are skipped to avoid surprise long-running scans.",
-      "Hash-based known-good checks cannot identify modified-but-benign files without a trusted feed match."
-    ],
-    "match_count": 0,
-    "max_hash_bytes": 67108864,
-    "nsrl_rds_feed_count": 0,
-    "nsrl_rds_row_count": 0,
-    "policy": {
-      "default_behavior": "mark-known-good-without-hiding",
-      "hide_behavior": "hide only when --hide-known-good is explicitly provided",
-      "legal_review_note": "Known-good suppression reduces triage noise but does not prove irrelevance by itself.",
-      "scope": "analyst-supplied TXT/CSV/JSON MD5/SHA1/SHA256 feeds plus NSRL RDS CSV hash columns"
+    {
+      "path": "<ROOT>/notes.txt",
+      "name": "notes.txt",
+      "extension": ".txt",
+      "size": 14,
+      "modified_at": "2024-02-03T04:05:06+00:00",
+      "modified_epoch": 1706933106.0,
+      "categories": [
+        "documents"
+      ],
+      "reasons": {
+        "documents": [
+          "extension:.txt",
+          "name:note"
+        ]
+      },
+      "known_good_status": "not-configured",
+      "file_signature": {
+        "status": "not-applicable",
+        "detected": null,
+        "expected": [],
+        "mismatch": false,
+        "risk_flags": []
+      }
     },
-    "profile": "known-good-hash-suppression-v1",
-    "profile_hash": "7bdca8bba7aa65a4f36d74279b689fcb5217886c4aa6a57675a4aa0c7e8ca896",
-    "profile_version": "known-good-hash-suppression-v1",
-    "rejected_feed_token_count": 0,
-    "skipped_large_count": 0,
-    "source_viewer_contract": {
-      "candidate_field": "known_good_match",
-      "review_action": "toggle --hide-known-good off when the analyst needs to inspect suppressed rows",
-      "source_traceability": "known_good_match.source_detail records feed, row, hash column, and NSRL metadata when available",
-      "suppressed_list": "known_good_suppressed_candidates"
+    {
+      "path": "<ROOT>/records.sqlite",
+      "name": "records.sqlite",
+      "extension": ".sqlite",
+      "size": 15,
+      "modified_at": "2024-02-03T04:05:08+00:00",
+      "modified_epoch": 1706933108.0,
+      "categories": [
+        "databases"
+      ],
+      "reasons": {
+        "databases": [
+          "extension:.sqlite",
+          "name:sqlite",
+          "path:sqlite"
+        ]
+      },
+      "known_good_status": "not-configured",
+      "file_signature": {
+        "status": "unrecognized-header-for-known-extension",
+        "detected": null,
+        "expected": [
+          "sqlite"
+        ],
+        "mismatch": false,
+        "risk_flags": [
+          "signature-unrecognized"
+        ]
+      }
     },
-    "suppressed_candidates_truncated": false,
-    "suppressed_count": 0,
-    "visible_candidate_count": 4
-  },
-  "root": "<ROOT>",
-  "signature_mismatch_candidates": [],
-  "summary": {
-    "candidate_count": 4,
-    "category_counts": {
-      "archives": 1,
-      "databases": 1,
-      "disk-images": 0,
-      "documents": 1,
-      "emails": 0,
-      "executables": 1,
-      "images": 0,
-      "memory-dumps": 0,
-      "mobile-images": 0,
-      "vehicle-images": 0
-    },
-    "commercial_gap_ids": [
-      "#76",
-      "#77",
-      "visible-denisting",
-      "visible-file-signature-mismatch"
-    ],
-    "duplicate_file_count": 0,
-    "duplicate_group_count": 0,
-    "fuzzy_text_duplicate_file_count": 0,
-    "fuzzy_text_duplicate_group_count": 0,
-    "known_good_feed_count": 0,
-    "known_good_hash_count": 0,
-    "known_good_hash_skipped_large_count": 0,
-    "known_good_match_count": 0,
-    "known_good_nsrl_rds_feed_count": 0,
-    "known_good_nsrl_rds_row_count": 0,
-    "known_good_suppressed_count": 0,
-    "newest_modified_at": "2024-02-03T13:05:09",
-    "oldest_modified_at": "2024-02-03T13:05:06",
-    "raw_candidate_count": 4,
-    "scanned_file_count": 4,
-    "signature_checked_count": 3,
-    "signature_mismatch_count": 0,
-    "signature_unrecognized_known_extension_count": 1
-  }
+    {
+      "path": "<ROOT>/tool.exe",
+      "name": "tool.exe",
+      "extension": ".exe",
+      "size": 4,
+      "modified_at": "2024-02-03T04:05:09+00:00",
+      "modified_epoch": 1706933109.0,
+      "categories": [
+        "executables"
+      ],
+      "reasons": {
+        "executables": [
+          "extension:.exe"
+        ]
+      },
+      "known_good_status": "not-configured",
+      "file_signature": {
+        "status": "signature-matches-extension",
+        "detected": "windows-pe",
+        "expected": [
+          "windows-pe"
+        ],
+        "mismatch": false,
+        "risk_flags": []
+      }
+    }
+  ]
 }

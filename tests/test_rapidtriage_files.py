@@ -5,7 +5,7 @@ import os
 import tempfile
 import unittest
 import zipfile
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
 from rapidtriage.cli import main
@@ -184,7 +184,7 @@ class RapidTriageFilesTests(unittest.TestCase):
             self.assertEqual(candidate["name"], "report.docx")
             self.assertEqual(candidate["extension"], ".docx")
             self.assertEqual(Path(candidate["path"]), candidate_path.resolve())
-            self.assertEqual(candidate["modified_at"], datetime.fromtimestamp(mtime).isoformat())
+            self.assertEqual(candidate["modified_at"], datetime.fromtimestamp(mtime, tz=timezone.utc).isoformat())
 
     def test_files_command_groups_bounded_duplicate_content(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:

@@ -6,6 +6,15 @@ Tag: `v0.2.0` (restart baseline)
 
 ## Phase 4 Release Infrastructure Update (2026-08-30)
 
+- **CI "Run tests" failures fixed on Linux runners** (the 6 failures in run 33302473677
+  were pre-existing, not regressions): output-sample fixtures embedded timestamps
+  rendered in the generating machine's local timezone (KST), so UTC CI runners
+  mismatched by 9 hours; `docs`/`files`/`extract` mtime rendering now always emits
+  UTC (`fromtimestamp(..., tz=timezone.utc)`), and the affected sample fixtures were
+  regenerated against UTC output. The print-spooler SHD/SPL companion detector used
+  lowercase suffix lookups that only worked on case-insensitive filesystems —
+  sibling matching is now case-insensitive, fixing the Linux-only
+  `orphan-spool-file` misclassification.
 - CI lint gate restored: ruff's expanded default rule set (0.16.x) reported ~1,400
   findings that predate this baseline; `ruff` is now pinned to `0.8.*` in the test
   extra until a cleanup pass upgrades the codebase (all checks pass on 0.8.6).
@@ -14,7 +23,8 @@ Tag: `v0.2.0` (restart baseline)
   (`pip-audit --format cyclonedx-json`, verified locally at 324 components), and
   uploads the SBOM + monitoring JSON + scanner environment as CI artifacts —
   closing the "SBOM publication" and "scanner version capture" slots of #120
-  (artifact URLs pending the next CI run).
+  (artifact URLs pending the next CI run; the workflow commit itself requires a
+  push credential with `workflow` scope).
 - `docs/validation/legal-operator-review-checklist.md` created: the four-track
   (technical / forensic methodology / operator / legal) review gate required before
   any release suitability claim. It is prepared and awaiting human reviewer signoff;

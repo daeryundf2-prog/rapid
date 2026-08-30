@@ -131,7 +131,7 @@ def run_extract(
             "extracted_path": str(destination_path),
             "relative_path": destination_relative.as_posix(),
             "sha256": compute_sha256(source_path),
-            "modified_at": dt.datetime.fromtimestamp(source_stat.st_mtime).isoformat(),
+            "modified_at": dt.datetime.fromtimestamp(source_stat.st_mtime, tz=dt.timezone.utc).isoformat(),
             "size": source_stat.st_size,
         }
         if source_command == "files":

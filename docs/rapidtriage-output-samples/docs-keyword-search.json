@@ -1,311 +1,7 @@
 {
-  "candidates": [
-    {
-      "kind": "pdf",
-      "modified_at": "2024-01-02T12:06:07",
-      "path": "<ROOT>/evidence.pdf",
-      "size": 467
-    },
-    {
-      "kind": "txt",
-      "modified_at": "2024-01-02T12:04:05",
-      "path": "<ROOT>/note.txt",
-      "size": 21
-    },
-    {
-      "kind": "docx",
-      "modified_at": "2024-01-02T12:05:06",
-      "path": "<ROOT>/report.docx",
-      "size": 476
-    }
-  ],
   "command": "docs",
-  "generated_at": "<GENERATED_AT>",
-  "manifest": {
-    "generated_at": "<GENERATED_AT>",
-    "keywords": [
-      "secret",
-      "keyword"
-    ],
-    "platform": "<PLATFORM>",
-    "providers": [
-      {
-        "artifacts": [
-          {
-            "artifact_type": "document-metadata-risk",
-            "details": {
-              "author_candidates": [],
-              "commercial_grade_blockers": [
-                "office-version-metadata-fixture-required",
-                "macro-static-analysis-not-complete",
-                "trusted-document-parser-diff-required"
-              ],
-              "commercial_grade_ready": false,
-              "coverage_status": "document-metadata-and-risk-profile",
-              "document_family": "docx",
-              "external_reference_candidates": [],
-              "macro_profile": {
-                "macro_paths": [],
-                "macro_present": false,
-                "macro_scan_status": "not-detected"
-              },
-              "metadata_profile": {
-                "analysis_status": "parsed",
-                "author_candidates": [],
-                "document_family": "docx",
-                "external_reference_candidates": [],
-                "macro_profile": {
-                  "macro_paths": [],
-                  "macro_present": false,
-                  "macro_scan_status": "not-detected"
-                },
-                "profile_version": "document-metadata-risk-profile-v1",
-                "properties": {},
-                "risk_flags": [
-                  "document-metadata-profile"
-                ],
-                "timestamp_candidates": {},
-                "validation_guidance": "Document metadata and VBA presence are triage pivots. Confirm author/timestamp semantics and macro behavior with a dedicated Office/ODF parser or sandbox before reporting intent or malware conclusions.",
-                "values_are_candidates": true
-              },
-              "parser": "document-metadata-risk",
-              "parser_version": "generic-documents-v4",
-              "risk_flags": [
-                "document-metadata-profile"
-              ],
-              "source_hashes": {
-                "md5": "b95555de96ac97f41dbb04ab82398800",
-                "sha1": "1fcbb0a6aba697ebd42d3b4c74e214031dc274e3",
-                "sha256": "eb054447adf11f487f65c7f0851679ca9b0bb1ce3328fed7b011b151f7967e89"
-              },
-              "source_path": "<ROOT>/report.docx",
-              "timestamp_candidates": {},
-              "validation_required": true
-            },
-            "path": "<ROOT>/report.docx",
-            "provider": "generic-documents",
-            "supported": true
-          },
-          {
-            "artifact_type": "document-pattern",
-            "details": {
-              "extension": ".docx"
-            },
-            "path": "<ROOT>",
-            "provider": "generic-documents",
-            "supported": true
-          },
-          {
-            "artifact_type": "document-pattern",
-            "details": {
-              "extension": ".pdf"
-            },
-            "path": "<ROOT>",
-            "provider": "generic-documents",
-            "supported": true
-          },
-          {
-            "artifact_type": "document-pattern",
-            "details": {
-              "extension": ".txt"
-            },
-            "path": "<ROOT>",
-            "provider": "generic-documents",
-            "supported": true
-          }
-        ],
-        "description": "Cross-platform document candidates discovered from the filesystem",
-        "name": "generic-documents",
-        "supported": true,
-        "target_platform": "any"
-      },
-      {
-        "artifacts": [],
-        "description": "Android APK inventory, hashes, manifest metadata, permissions, and triage risk flags",
-        "name": "android-apk-artifacts",
-        "supported": true,
-        "target_platform": "android"
-      },
-      {
-        "artifacts": [],
-        "description": "Cloud account export normalization for Google Takeout-style activity/location and account JSON",
-        "name": "cloud-export-artifacts",
-        "supported": true,
-        "target_platform": "cloud"
-      },
-      {
-        "artifacts": [],
-        "description": "Email EML/MBOX parsing and PST/OST/MSG bounded mailbox inventory",
-        "name": "email-artifacts",
-        "supported": true,
-        "target_platform": "any"
-      },
-      {
-        "artifacts": [],
-        "description": "Linux user, shell history, SSH, auth log, cron, and systemd triage artifacts",
-        "name": "linux-system-artifacts",
-        "supported": true,
-        "target_platform": "linux"
-      },
-      {
-        "artifacts": [],
-        "description": "macOS user, browser, quarantine, TCC privacy permission, and LaunchAgent triage artifacts",
-        "name": "macos-system-artifacts",
-        "supported": true,
-        "target_platform": "macos"
-      },
-      {
-        "artifacts": [],
-        "description": "Image inventory with dimensions, hashes, perceptual hash, OCR queue hints, and similarity buckets",
-        "name": "media-image-artifacts",
-        "supported": true,
-        "target_platform": "any"
-      },
-      {
-        "artifacts": [],
-        "description": "Volatility/Volatility3 output normalization plus bounded direct memory dump indicator scanning",
-        "name": "memory-volatility-artifacts",
-        "supported": true,
-        "target_platform": "memory"
-      },
-      {
-        "artifacts": [],
-        "description": "Cellebrite/XRY/GrayKey/AXIOM-style mobile export CSV/JSON normalization",
-        "name": "mobile-export-artifacts",
-        "supported": true,
-        "target_platform": "mobile"
-      },
-      {
-        "artifacts": [],
-        "description": "macOS KakaoTalk container and database inventory with SQLite openability checks",
-        "name": "kakaotalk-macos-database-inventory",
-        "supported": true,
-        "target_platform": "macos"
-      },
-      {
-        "artifacts": [],
-        "description": "KakaoTalk Windows correlation across Windows.edb, Registry, and memory dumps",
-        "name": "kakaotalk-windows-correlation",
-        "supported": true,
-        "target_platform": "windows"
-      },
-      {
-        "artifacts": [],
-        "description": "Windows browser history/download collectors backed by real profile files",
-        "name": "windows-browser-artifacts",
-        "supported": true,
-        "target_platform": "windows"
-      },
-      {
-        "artifacts": [],
-        "description": "Windows Recent items and Jump Lists collected from per-user profile directories",
-        "name": "windows-recent-files",
-        "supported": true,
-        "target_platform": "windows"
-      },
-      {
-        "artifacts": [],
-        "description": "Windows OS and account summary artifacts",
-        "name": "windows-os-account",
-        "supported": true,
-        "target_platform": "windows"
-      },
-      {
-        "artifacts": [],
-        "description": "Windows execution artifacts from registry exports and PowerShell history",
-        "name": "windows-execution",
-        "supported": true,
-        "target_platform": "windows"
-      },
-      {
-        "artifacts": [],
-        "description": "Windows MFT and USN Journal imports plus bounded native NTFS inventory",
-        "name": "windows-filesystem",
-        "supported": true,
-        "target_platform": "windows"
-      },
-      {
-        "artifacts": [],
-        "description": "Windows Event Log EVTX inventory and XML/JSON/JSONL/CSV event imports",
-        "name": "windows-eventlog",
-        "supported": true,
-        "target_platform": "windows"
-      },
-      {
-        "artifacts": [],
-        "description": "Windows Registry .reg export artifacts",
-        "name": "windows-registry",
-        "supported": true,
-        "target_platform": "windows"
-      },
-      {
-        "artifacts": [],
-        "description": "Windows RDP configuration, cache, and exported destination artifacts",
-        "name": "windows-remote-access",
-        "supported": true,
-        "target_platform": "windows"
-      },
-      {
-        "artifacts": [],
-        "description": "Windows Search index EDB inventory and CSV/JSON export imports",
-        "name": "windows-search-index",
-        "supported": true,
-        "target_platform": "windows"
-      },
-      {
-        "artifacts": [],
-        "description": "Windows ShellBags from Registry exports and native user-hive candidates",
-        "name": "windows-shellbags",
-        "supported": true,
-        "target_platform": "windows"
-      },
-      {
-        "artifacts": [],
-        "description": "Windows Prefetch execution artifact inventory",
-        "name": "windows-prefetch",
-        "supported": true,
-        "target_platform": "windows"
-      },
-      {
-        "artifacts": [],
-        "description": "Windows Task Scheduler, Defender, Firewall, WER, and Zone.Identifier artifacts",
-        "name": "windows-system-artifacts",
-        "supported": true,
-        "target_platform": "windows"
-      }
-    ],
-    "root": "<ROOT>"
-  },
-  "results": [
-    {
-      "kind": "pdf",
-      "matched_keywords": [
-        "keyword"
-      ],
-      "path": "<ROOT>/evidence.pdf",
-      "preview": "shellbags keyword hit",
-      "size": 467
-    },
-    {
-      "kind": "txt",
-      "matched_keywords": [
-        "secret"
-      ],
-      "path": "<ROOT>/note.txt",
-      "preview": "incident alpha secret",
-      "size": 21
-    },
-    {
-      "kind": "docx",
-      "matched_keywords": [
-        "keyword"
-      ],
-      "path": "<ROOT>/report.docx",
-      "preview": "registry artifact keyword hit",
-      "size": 476
-    }
-  ],
   "root": "<ROOT>",
+  "generated_at": "<GENERATED_AT>",
   "summary": {
     "candidate_count": 3,
     "match_count": 3,
@@ -339,5 +35,309 @@
       ".yaml",
       ".yml"
     ]
-  }
+  },
+  "manifest": {
+    "generated_at": "<GENERATED_AT>",
+    "root": "<ROOT>",
+    "platform": "<PLATFORM>",
+    "keywords": [
+      "secret",
+      "keyword"
+    ],
+    "providers": [
+      {
+        "name": "generic-documents",
+        "description": "Cross-platform document candidates discovered from the filesystem",
+        "target_platform": "any",
+        "supported": true,
+        "artifacts": [
+          {
+            "provider": "generic-documents",
+            "artifact_type": "document-metadata-risk",
+            "path": "<ROOT>/report.docx",
+            "supported": true,
+            "details": {
+              "parser": "document-metadata-risk",
+              "parser_version": "generic-documents-v4",
+              "source_path": "<ROOT>/report.docx",
+              "source_hashes": {
+                "md5": "b95555de96ac97f41dbb04ab82398800",
+                "sha1": "1fcbb0a6aba697ebd42d3b4c74e214031dc274e3",
+                "sha256": "eb054447adf11f487f65c7f0851679ca9b0bb1ce3328fed7b011b151f7967e89"
+              },
+              "document_family": "docx",
+              "metadata_profile": {
+                "profile_version": "document-metadata-risk-profile-v1",
+                "analysis_status": "parsed",
+                "document_family": "docx",
+                "properties": {},
+                "author_candidates": [],
+                "timestamp_candidates": {},
+                "macro_profile": {
+                  "macro_present": false,
+                  "macro_paths": [],
+                  "macro_scan_status": "not-detected"
+                },
+                "external_reference_candidates": [],
+                "risk_flags": [
+                  "document-metadata-profile"
+                ],
+                "values_are_candidates": true,
+                "validation_guidance": "Document metadata and VBA presence are triage pivots. Confirm author/timestamp semantics and macro behavior with a dedicated Office/ODF parser or sandbox before reporting intent or malware conclusions."
+              },
+              "author_candidates": [],
+              "timestamp_candidates": {},
+              "macro_profile": {
+                "macro_present": false,
+                "macro_paths": [],
+                "macro_scan_status": "not-detected"
+              },
+              "external_reference_candidates": [],
+              "coverage_status": "document-metadata-and-risk-profile",
+              "validation_required": true,
+              "commercial_grade_ready": false,
+              "commercial_grade_blockers": [
+                "office-version-metadata-fixture-required",
+                "macro-static-analysis-not-complete",
+                "trusted-document-parser-diff-required"
+              ],
+              "risk_flags": [
+                "document-metadata-profile"
+              ]
+            }
+          },
+          {
+            "provider": "generic-documents",
+            "artifact_type": "document-pattern",
+            "path": "<ROOT>",
+            "supported": true,
+            "details": {
+              "extension": ".docx"
+            }
+          },
+          {
+            "provider": "generic-documents",
+            "artifact_type": "document-pattern",
+            "path": "<ROOT>",
+            "supported": true,
+            "details": {
+              "extension": ".pdf"
+            }
+          },
+          {
+            "provider": "generic-documents",
+            "artifact_type": "document-pattern",
+            "path": "<ROOT>",
+            "supported": true,
+            "details": {
+              "extension": ".txt"
+            }
+          }
+        ]
+      },
+      {
+        "name": "android-apk-artifacts",
+        "description": "Android APK inventory, hashes, manifest metadata, permissions, and triage risk flags",
+        "target_platform": "android",
+        "supported": true,
+        "artifacts": []
+      },
+      {
+        "name": "cloud-export-artifacts",
+        "description": "Cloud account export normalization for Google Takeout-style activity/location and account JSON",
+        "target_platform": "cloud",
+        "supported": true,
+        "artifacts": []
+      },
+      {
+        "name": "email-artifacts",
+        "description": "Email EML/MBOX parsing and PST/OST/MSG bounded mailbox inventory",
+        "target_platform": "any",
+        "supported": true,
+        "artifacts": []
+      },
+      {
+        "name": "linux-system-artifacts",
+        "description": "Linux user, shell history, SSH, auth log, cron, and systemd triage artifacts",
+        "target_platform": "linux",
+        "supported": true,
+        "artifacts": []
+      },
+      {
+        "name": "macos-system-artifacts",
+        "description": "macOS user, browser, quarantine, TCC privacy permission, and LaunchAgent triage artifacts",
+        "target_platform": "macos",
+        "supported": true,
+        "artifacts": []
+      },
+      {
+        "name": "media-image-artifacts",
+        "description": "Image inventory with dimensions, hashes, perceptual hash, OCR queue hints, and similarity buckets",
+        "target_platform": "any",
+        "supported": true,
+        "artifacts": []
+      },
+      {
+        "name": "memory-volatility-artifacts",
+        "description": "Volatility/Volatility3 output normalization plus bounded direct memory dump indicator scanning",
+        "target_platform": "memory",
+        "supported": true,
+        "artifacts": []
+      },
+      {
+        "name": "mobile-export-artifacts",
+        "description": "Cellebrite/XRY/GrayKey/AXIOM-style mobile export CSV/JSON normalization",
+        "target_platform": "mobile",
+        "supported": true,
+        "artifacts": []
+      },
+      {
+        "name": "kakaotalk-macos-database-inventory",
+        "description": "macOS KakaoTalk container and database inventory with SQLite openability checks",
+        "target_platform": "macos",
+        "supported": true,
+        "artifacts": []
+      },
+      {
+        "name": "kakaotalk-windows-correlation",
+        "description": "KakaoTalk Windows correlation across Windows.edb, Registry, and memory dumps",
+        "target_platform": "windows",
+        "supported": true,
+        "artifacts": []
+      },
+      {
+        "name": "windows-browser-artifacts",
+        "description": "Windows browser history/download collectors backed by real profile files",
+        "target_platform": "windows",
+        "supported": true,
+        "artifacts": []
+      },
+      {
+        "name": "windows-recent-files",
+        "description": "Windows Recent items and Jump Lists collected from per-user profile directories",
+        "target_platform": "windows",
+        "supported": true,
+        "artifacts": []
+      },
+      {
+        "name": "windows-os-account",
+        "description": "Windows OS and account summary artifacts",
+        "target_platform": "windows",
+        "supported": true,
+        "artifacts": []
+      },
+      {
+        "name": "windows-execution",
+        "description": "Windows execution artifacts from registry exports and PowerShell history",
+        "target_platform": "windows",
+        "supported": true,
+        "artifacts": []
+      },
+      {
+        "name": "windows-filesystem",
+        "description": "Windows MFT and USN Journal imports plus bounded native NTFS inventory",
+        "target_platform": "windows",
+        "supported": true,
+        "artifacts": []
+      },
+      {
+        "name": "windows-eventlog",
+        "description": "Windows Event Log EVTX inventory and XML/JSON/JSONL/CSV event imports",
+        "target_platform": "windows",
+        "supported": true,
+        "artifacts": []
+      },
+      {
+        "name": "windows-registry",
+        "description": "Windows Registry .reg export artifacts",
+        "target_platform": "windows",
+        "supported": true,
+        "artifacts": []
+      },
+      {
+        "name": "windows-remote-access",
+        "description": "Windows RDP configuration, cache, and exported destination artifacts",
+        "target_platform": "windows",
+        "supported": true,
+        "artifacts": []
+      },
+      {
+        "name": "windows-search-index",
+        "description": "Windows Search index EDB inventory and CSV/JSON export imports",
+        "target_platform": "windows",
+        "supported": true,
+        "artifacts": []
+      },
+      {
+        "name": "windows-shellbags",
+        "description": "Windows ShellBags from Registry exports and native user-hive candidates",
+        "target_platform": "windows",
+        "supported": true,
+        "artifacts": []
+      },
+      {
+        "name": "windows-prefetch",
+        "description": "Windows Prefetch execution artifact inventory",
+        "target_platform": "windows",
+        "supported": true,
+        "artifacts": []
+      },
+      {
+        "name": "windows-system-artifacts",
+        "description": "Windows Task Scheduler, Defender, Firewall, WER, and Zone.Identifier artifacts",
+        "target_platform": "windows",
+        "supported": true,
+        "artifacts": []
+      }
+    ]
+  },
+  "candidates": [
+    {
+      "path": "<ROOT>/evidence.pdf",
+      "kind": "pdf",
+      "size": 467,
+      "modified_at": "2024-01-02T03:06:07+00:00"
+    },
+    {
+      "path": "<ROOT>/note.txt",
+      "kind": "txt",
+      "size": 21,
+      "modified_at": "2024-01-02T03:04:05+00:00"
+    },
+    {
+      "path": "<ROOT>/report.docx",
+      "kind": "docx",
+      "size": 476,
+      "modified_at": "2024-01-02T03:05:06+00:00"
+    }
+  ],
+  "results": [
+    {
+      "path": "<ROOT>/evidence.pdf",
+      "kind": "pdf",
+      "matched_keywords": [
+        "keyword"
+      ],
+      "preview": "shellbags keyword hit",
+      "size": 467
+    },
+    {
+      "path": "<ROOT>/note.txt",
+      "kind": "txt",
+      "matched_keywords": [
+        "secret"
+      ],
+      "preview": "incident alpha secret",
+      "size": 21
+    },
+    {
+      "path": "<ROOT>/report.docx",
+      "kind": "docx",
+      "matched_keywords": [
+        "keyword"
+      ],
+      "preview": "registry artifact keyword hit",
+      "size": 476
+    }
+  ]
 }
