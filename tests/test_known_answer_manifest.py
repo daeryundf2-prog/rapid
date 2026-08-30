@@ -118,8 +118,9 @@ class KnownAnswerManifestValidationTests(unittest.TestCase):
         )
 
         self.assertEqual(json_tool.returncode, 0)
-        self.assertIn('"ok": false', completed.stdout)
-        self.assertIn(f'"manifest_path": "{INVALID_SHA256_MANIFEST}"', completed.stdout)
+        output = _json_object(completed.stdout)
+        self.assertEqual(output["ok"], False)
+        self.assertEqual(output["manifest_path"], str(INVALID_SHA256_MANIFEST))
         self.assertIn('"errors": [', completed.stdout)
 
     def test_tier0_file_check_passes_when_hashes_match(self) -> None:
@@ -176,10 +177,11 @@ class KnownAnswerManifestValidationTests(unittest.TestCase):
 
     def test_tier0_file_check_blocks_absolute_path(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
+            absolute_path_json = json.dumps(str(TIER0_FILES_ROOT / "hello.txt"))
             manifest = _mutated_manifest(
                 Path(temp_dir),
                 '"fixture_relative_path": "hello.txt"',
-                f'"fixture_relative_path": "{TIER0_FILES_ROOT / "hello.txt"}"',
+                f'"fixture_relative_path": {absolute_path_json}',
             )
 
             result = validate_manifest(manifest, check_files=True, fixture_root=TIER0_FILES_ROOT)

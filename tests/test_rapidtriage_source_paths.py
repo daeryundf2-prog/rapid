@@ -56,7 +56,9 @@ class RapidTriageSourcePathTests(unittest.TestCase):
             self.assertEqual(diagnostics["status"], "unresolved")
             self.assertGreaterEqual(diagnostics["candidate_count"], 1)
             self.assertGreaterEqual(diagnostics["inside_allowed_root_count"], 1)
-            self.assertTrue(any("Users/alice/Missing/chatLogs.edb" in row["path"] for row in diagnostics["candidates"]))
+            self.assertTrue(
+                any("Users/alice/Missing/chatLogs.edb" in Path(row["path"]).as_posix() for row in diagnostics["candidates"])
+            )
             self.assertFalse(any(row["is_file"] for row in diagnostics["candidates"]))
 
 

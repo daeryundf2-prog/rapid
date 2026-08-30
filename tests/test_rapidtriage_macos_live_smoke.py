@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import tempfile
 import unittest
 from pathlib import Path
@@ -37,7 +38,8 @@ class RapidTriageMacOsLiveSmokeTests(unittest.TestCase):
             self.assertTrue((output_dir / "macos-live-smoke.md").is_file())
             attachment_script = output_dir / "attach-mac-evidence-to-readiness.sh"
             self.assertTrue(attachment_script.is_file())
-            self.assertTrue(attachment_script.stat().st_mode & 0o111)
+            if os.name != "nt":
+                self.assertTrue(attachment_script.stat().st_mode & 0o111)
             self.assertIn("--mac-first-evidence", attachment_script.read_text(encoding="utf-8"))
             self.assertGreaterEqual(payload["macos_artifact_summary"]["record_count"], 1)
             self.assertFalse(payload["macos_artifact_summary"]["redaction"]["raw_paths_included"])

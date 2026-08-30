@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import tempfile
 import unittest
 from email.message import EmailMessage
@@ -461,7 +462,10 @@ def write_email_fixture(root: Path) -> None:
     maildir_message.set_content("maildir body")
     maildir_cur = root / "Maildir" / "cur"
     maildir_cur.mkdir(parents=True)
-    (maildir_cur / "1714093200.M1P1Q1.host:2,S").write_bytes(maildir_message.as_bytes())
+    # NTFS treats ':' in a filename as an alternate data stream separator, so
+    # the maildir info suffix uses '_' on Windows to keep the message readable.
+    maildir_info = ":2,S" if os.name != "nt" else "_2,S"
+    (maildir_cur / f"1714093200.M1P1Q1.host{maildir_info}").write_bytes(maildir_message.as_bytes())
 
     for name in ("archive.pst", "offline.ost", "message.msg"):
         (root / name).write_bytes(

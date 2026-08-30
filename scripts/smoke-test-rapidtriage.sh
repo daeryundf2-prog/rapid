@@ -127,7 +127,10 @@ checked_python "Checking evidence support guidance" --output-file "$SMOKE_DIR/ev
 
 if [ "$SKIP_WEB" -eq 0 ]; then
   step "Starting web server smoke check at $WEB_URL"
-  "$VENV_PYTHON" -m rapidtriage web --host "$HOST_NAME" --port "$PORT" > "$SMOKE_DIR/web-server.log" 2>&1 &
+  # The API requires a token by default since auth hardening; use a fixed
+  # smoke-only token so the contract request can authenticate.
+  SMOKE_TOKEN="rapidtriage-smoke-token"
+  "$VENV_PYTHON" -m rapidtriage web --host "$HOST_NAME" --port "$PORT" --auth-token "$SMOKE_TOKEN" > "$SMOKE_DIR/web-server.log" 2>&1 &
   WEB_PID=$!
   trap 'kill "$WEB_PID" >/dev/null 2>&1 || true' EXIT INT TERM
 
@@ -162,17 +165,19 @@ PY
     exit 1
   fi
 
-  "$VENV_PYTHON" - "$WEB_URL" "$SMOKE_DIR/workbench-smoke-contract.json" >/dev/null 2>&1 <<'PY'
+  "$VENV_PYTHON" - "$WEB_URL" "$SMOKE_DIR/workbench-smoke-contract.json" "$SMOKE_TOKEN" >/dev/null 2>&1 <<'PY'
 from __future__ import annotations
 
 import json
 import sys
 from pathlib import Path
-from urllib.request import urlopen
+from urllib.request import Request, urlopen
 
 url = sys.argv[1].rstrip("/") + "/api/workbench/smoke-contract"
 output = Path(sys.argv[2])
-with urlopen(url, timeout=5) as response:
+token = sys.argv[3]
+request = Request(url, headers={"X-RapidTriage-Token": token})
+with urlopen(request, timeout=5) as response:
     payload = json.loads(response.read().decode("utf-8"))
     if payload.get("profile_version") != "single-case-workbench-smoke-v1":
         raise SystemExit(1)

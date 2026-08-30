@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import sys
 import tempfile
 import textwrap
 import unittest
@@ -333,6 +334,15 @@ def write_worker_script(root: Path, body: str) -> Path:
         encoding="utf-8",
     )
     path.chmod(path.stat().st_mode | 0o111)
+    if os.name == "nt":
+        # Windows cannot execute shebang scripts directly; launch them through
+        # a batch wrapper so the fake worker behaves like a compiled binary.
+        launcher = root / "fake_worker.bat"
+        launcher.write_text(
+            f'@"{sys.executable}" "%~dp0fake_worker.py" %*\r\n',
+            encoding="utf-8",
+        )
+        return launcher
     return path
 
 

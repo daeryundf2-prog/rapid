@@ -5,6 +5,7 @@ import hashlib
 import importlib.util
 import io
 import json
+import os
 import subprocess
 import sys
 import tempfile
@@ -1389,9 +1390,14 @@ class RapidTriageOpsTests(unittest.TestCase):
     def test_validation_diff_runners_can_probe_versions_from_extra_search_path(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             tool_dir = Path(tmp_dir)
-            evtxecmd = tool_dir / "EvtxECmd"
-            evtxecmd.write_text("#!/bin/sh\nprintf 'EvtxECmd 1.2.3\\n'\n", encoding="utf-8")
-            evtxecmd.chmod(0o755)
+            if os.name == "nt":
+                # Windows resolves tools through PATHEXT and cannot run sh scripts.
+                evtxecmd = tool_dir / "EvtxECmd.bat"
+                evtxecmd.write_text("@echo EvtxECmd 1.2.3\r\n", encoding="utf-8")
+            else:
+                evtxecmd = tool_dir / "EvtxECmd"
+                evtxecmd.write_text("#!/bin/sh\nprintf 'EvtxECmd 1.2.3\\n'\n", encoding="utf-8")
+                evtxecmd.chmod(0o755)
             stdout = io.StringIO()
 
             with contextlib.redirect_stdout(stdout):
@@ -1415,7 +1421,8 @@ class RapidTriageOpsTests(unittest.TestCase):
             evtx_group = next(group for group in payload["runner_groups"] if group["artifact_family"] == "evtx")
             evtx_tool = next(tool for tool in evtx_group["trusted_tools"] if tool["name"] == "EvtxECmd")
             self.assertTrue(evtx_tool["available"])
-            self.assertEqual(evtx_tool["resolved_path"], str(evtxecmd))
+            # Windows PATHEXT lookup normalizes the extension case.
+            self.assertEqual(os.path.normcase(evtx_tool["resolved_path"]), os.path.normcase(str(evtxecmd)))
             self.assertEqual(evtx_tool["version_probe"]["status"], "captured")
             self.assertIn("EvtxECmd 1.2.3", evtx_tool["version_probe"]["output_preview"])
             self.assertEqual(len(evtx_tool["version_probe"]["output_sha256"]), 64)

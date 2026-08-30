@@ -14,7 +14,7 @@ Set-StrictMode -Version Latest
 $RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..\..")).Path
 $VenvRoot = if ([System.IO.Path]::IsPathRooted($VenvDir)) { $VenvDir } else { Join-Path $RepoRoot $VenvDir }
 $VenvPython = Join-Path $VenvRoot "Scripts\python.exe"
-$SmokeDir = Join-Path $RepoRoot $OutputDir
+$SmokeDir = if ([System.IO.Path]::IsPathRooted($OutputDir)) { $OutputDir } else { Join-Path $RepoRoot $OutputDir }
 $WebUrl = "http://${HostName}:${Port}"
 
 function Write-Step {
@@ -92,11 +92,14 @@ Invoke-CheckedPython "Checking evidence support guidance" @("-m", "rapidtriage",
 
 if (!$SkipWeb) {
     Write-Step "Starting web server smoke check at $WebUrl"
+    # The API requires a token by default since auth hardening; use a fixed
+    # smoke-only token so the contract request can authenticate.
+    $SmokeToken = "rapidtriage-smoke-token"
     $job = Start-Job -ScriptBlock {
-        param($PythonExe, $Repo, $HostArg, $PortArg)
+        param($PythonExe, $Repo, $HostArg, $PortArg, $TokenArg)
         Set-Location $Repo
-        & $PythonExe -m rapidtriage web --host $HostArg --port $PortArg
-    } -ArgumentList $VenvPython, $RepoRoot, $HostName, $Port
+        & $PythonExe -m rapidtriage web --host $HostArg --port $PortArg --auth-token $TokenArg
+    } -ArgumentList $VenvPython, $RepoRoot, $HostName, $Port, $SmokeToken
 
     try {
         $ready = $false
@@ -107,7 +110,7 @@ if (!$SkipWeb) {
                 if ($response.StatusCode -eq 200) {
                     $ready = $true
                     $response.Content | Out-File -FilePath (Join-Path $SmokeDir "web-index.html") -Encoding utf8
-                    $contract = Invoke-WebRequest -Uri "$WebUrl/api/workbench/smoke-contract" -UseBasicParsing -TimeoutSec 5
+                    $contract = Invoke-WebRequest -Uri "$WebUrl/api/workbench/smoke-contract" -UseBasicParsing -TimeoutSec 5 -Headers @{ "X-RapidTriage-Token" = $SmokeToken }
                     if ($contract.StatusCode -ne 200) {
                         throw "Workbench smoke contract did not respond with HTTP 200."
                     }

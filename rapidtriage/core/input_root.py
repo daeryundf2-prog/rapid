@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional, Union
@@ -73,12 +74,14 @@ def normalize_input_root_kind(kind: str) -> str:
 
 
 def detect_input_root_kind(root_path: Path) -> str:
-    path_text = str(root_path).lower()
+    path_text = str(root_path).replace("\\", "/").lower()
     name = root_path.name.lower()
     suffix = root_path.suffix.lower()
-    if root_path == Path("/"):
+    if root_path == Path("/") or (
+        os.name == "nt" and root_path.drive and Path(root_path.anchor) == root_path
+    ):
         return "live"
-    if "/volumes/" in path_text or "/mnt/" in path_text or "/media/" in path_text:
+    if _looks_like_mounted_path(root_path, path_text):
         if "e01" in path_text or "ewf" in path_text:
             return "e01-derived"
         return "mounted-image"
@@ -89,3 +92,15 @@ def detect_input_root_kind(root_path: Path) -> str:
     if suffix in ARCHIVE_IMAGE_SUFFIXES:
         return "archive-image-derived"
     return "folder"
+
+
+_MOUNT_DIR_NAMES = {"volumes", "mnt", "media", "mounts"}
+
+
+def _looks_like_mounted_path(root_path: Path, path_text: str) -> bool:
+    if any(marker in path_text for marker in ("/volumes/", "/mnt/", "/media/", "/mounts/")):
+        return True
+    # Windows mount points live under a drive root; recognize common mount
+    # directory names such as C:\Volumes\<case-mount>.
+    parts = root_path.parts
+    return bool(root_path.drive) and len(parts) >= 2 and parts[1].lower() in _MOUNT_DIR_NAMES

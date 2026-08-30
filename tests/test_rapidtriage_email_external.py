@@ -3,6 +3,7 @@ from __future__ import annotations
 import contextlib
 import io
 import json
+import os
 import subprocess
 import tempfile
 import unittest
@@ -132,6 +133,7 @@ class RapidTriageEmailExternalParserTests(unittest.TestCase):
         self.assertFalse(review["validation"]["commercial_grade"])
         self.assertIn("trusted-libpff-readpst-outlook-diff-required", review["validation"]["blockers"])
 
+    @unittest.skipIf(os.name == "nt", "POSIX shell script cannot stand in for an external parser tool on Windows")
     def test_email_external_parse_supports_absolute_preferred_tool(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)

@@ -6,7 +6,7 @@ import hashlib
 import json
 import os
 import sqlite3
-from contextlib import contextmanager
+from contextlib import closing, contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Iterable, Iterator, Mapping, Optional, Sequence
@@ -2113,7 +2113,10 @@ def assert_supported_existing_schema_version(path: Path) -> None:
         return
     try:
         uri = f"file:{path}?mode=ro"
-        with sqlite3.connect(uri, uri=True) as connection:
+        # sqlite3.Connection's context manager commits instead of closing;
+        # use closing() so the read-only handle does not keep case.db locked
+        # (which breaks temp-dir cleanup on Windows).
+        with closing(sqlite3.connect(uri, uri=True)) as connection:
             connection.row_factory = sqlite3.Row
             table_count_row = connection.execute(
                 "SELECT count(*) AS count FROM sqlite_master WHERE type = 'table'"

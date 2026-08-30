@@ -2452,6 +2452,13 @@ def detect_artifact_type(row: Mapping[str, object], path: Path) -> str:
         or detect_chat_service(row, path)
     ):
         return "mobile-message"
+    # Screen-time classification runs before the generic app branch: loose
+    # path tokens such as "app" otherwise match user directories like
+    # Windows AppData and swallow screen-time rows.
+    if keys.intersection(SCREEN_TIME_KEYS) and any(
+        token in source_hint for token in ("screentime", "screen_time", "digital", "wellbeing", "appusage", "app_usage")
+    ):
+        return "mobile-screen-time"
     if keys.intersection(APP_KEYS) and (
         keys.intersection({"package", "packagename", "bundleid", "bundleidentifier"})
         or any(token in source_hint for token in ("app", "application", "installed"))
@@ -2471,10 +2478,6 @@ def detect_artifact_type(row: Mapping[str, object], path: Path) -> str:
         token in source_hint for token in ("health", "fitness", "steps", "workout", "activity", "sleep")
     ):
         return "mobile-health"
-    if keys.intersection(SCREEN_TIME_KEYS) and any(
-        token in source_hint for token in ("screentime", "screen_time", "digital", "wellbeing", "appusage", "app_usage")
-    ):
-        return "mobile-screen-time"
     if keys.intersection(CALL_KEYS):
         return "mobile-call"
     if keys.intersection(CONTACT_KEYS) and any(key in keys for key in ("phone", "phonenumber", "email", "displayname", "fullname")):

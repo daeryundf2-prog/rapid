@@ -32,7 +32,7 @@ class RapidTriageInputRootTests(unittest.TestCase):
 
         self.assertEqual(child.kind, parent.kind)
         self.assertEqual(child.source_path, parent.source_path)
-        self.assertEqual(child.root_path, Path("/Volumes/e01-case-mount/Users"))
+        self.assertEqual(child.root_path, Path("/Volumes/e01-case-mount/Users").expanduser().resolve())
 
     def test_core_commands_accept_input_root_objects(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:

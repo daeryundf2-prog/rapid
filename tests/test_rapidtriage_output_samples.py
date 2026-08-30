@@ -33,6 +33,9 @@ def write_minimal_docx(path: Path, text: str) -> None:
         ):
             info = zipfile.ZipInfo(name, fixed_time)
             info.compress_type = zipfile.ZIP_STORED
+            # Pin the ZIP creator so fixture bytes (and their hashes) are
+            # identical across macOS and Windows (default differs per platform).
+            info.create_system = 3
             archive.writestr(info, content)
 
 
@@ -90,6 +93,7 @@ def build_windows_collector_sample_fixture(root: Path) -> None:
         "DocID,System.ItemPathDisplay,System.FileName,System.Title,System.Search.Contents,System.DateModified,System.Size\n"
         '7,C:\\Users\\alice\\Documents\\Case Notes.docx,Case Notes.docx,Case Notes,"rapid forensic case notes",2024-03-05T06:07:08Z,2048\n',
         encoding="utf-8",
+        newline="\n",
     )
     search_edb = root / "ProgramData" / "Microsoft" / "Search" / "Data" / "Applications" / "Windows" / "Windows.edb"
     search_edb.parent.mkdir(parents=True, exist_ok=True)
@@ -125,6 +129,7 @@ def build_windows_collector_sample_fixture(root: Path) -> None:
     default_rdp.write_text(
         "full address:s:10.0.0.50\nusername:s:CORP\\alice\ngatewayhostname:s:rd-gateway.example\n",
         encoding="utf-8",
+        newline="\n",
     )
     rdp_cache = root / "Users" / "alice" / "AppData" / "Local" / "Microsoft" / "Terminal Server Client" / "Cache" / "Cache0000.bin"
     rdp_cache.parent.mkdir(parents=True, exist_ok=True)
@@ -137,6 +142,7 @@ def build_windows_collector_sample_fixture(root: Path) -> None:
 "MRU0"="10.0.0.50"
 """,
         encoding="utf-16",
+        newline="\n",
     )
     wmi_objects = root / "Windows" / "System32" / "wbem" / "Repository" / "OBJECTS.DATA"
     wmi_objects.parent.mkdir(parents=True, exist_ok=True)
@@ -249,7 +255,12 @@ def normalize_payload(payload: Any, root: Path) -> Any:
     if isinstance(payload, list):
         return [normalize_payload(item, root) for item in payload]
     if isinstance(payload, str):
-        return payload.replace(root_text, "<ROOT>")
+        normalized = payload.replace(root_text, "<ROOT>")
+        # Committed sample contracts use POSIX separators after the <ROOT>
+        # placeholder; Windows-generated paths are normalized to match.
+        if os.name == "nt" and "<ROOT>" in normalized:
+            normalized = normalized.replace("\\", "/")
+        return normalized
     return payload
 
 

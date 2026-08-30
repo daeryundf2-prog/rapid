@@ -24,6 +24,13 @@ def candidate_source_paths(raw_path: str, allowed_roots: Iterable[Path]) -> list
 
     if requested.is_absolute():
         add(requested)
+        # A drive-letter Windows path is only absolute on Windows hosts; the
+        # recorded path still needs mapping into extracted/mounted evidence
+        # trees on every platform.
+        windows_tail = windows_path_tail(text)
+        if windows_tail:
+            for root in roots:
+                add(root.joinpath(*windows_tail))
     else:
         normalized = text.replace("\\", "/")
         windows_tail = windows_path_tail(text)
