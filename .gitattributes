@@ -1,0 +1,12 @@
+# Byte-stable checkout policy.
+#
+# RapidForensic validates evidence and fixtures by SHA-256. Any automatic
+# newline conversion would make committed hashes differ per platform
+# (known-answer QC broke on Windows checkouts with core.autocrlf=true).
+# `-text` preserves every file's bytes exactly, on every platform.
+* -text
+
+# Windows shell scripts stay text with CRLF in the working tree.
+*.bat text eol=crlf
+*.cmd text eol=crlf
+*.ps1 text eol=crlf
