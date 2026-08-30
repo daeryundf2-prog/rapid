@@ -4,6 +4,7 @@ import argparse
 import csv
 import json
 import os
+import sys
 import sqlite3
 import textwrap
 from collections.abc import Mapping
@@ -2334,6 +2335,11 @@ def write_kakaotalk_message_residue_csv(payload: dict[str, object], output: Path
 
 
 def main(argv=None) -> int:
+    # Emit UTF-8 regardless of the console codec (cp1252 CI consoles crash on
+    # non-ASCII evidence text such as Korean filenames and arrow glyphs).
+    for stream in (sys.stdout, sys.stderr):
+        if hasattr(stream, "reconfigure"):
+            stream.reconfigure(encoding="utf-8")
     parser = build_parser()
     args = parser.parse_args(argv)
     rule_set = None
