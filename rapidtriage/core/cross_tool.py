@@ -1492,6 +1492,9 @@ def composite_candidate_keys(row: Mapping[str, object]) -> list[str]:
         composites.append(normalize_key(f"evtx-record:{channel}:{event_record_id}"))
     if event_id is not None and provider is not None:
         composites.append(normalize_key(f"evtx-event:{provider}:{event_id}"))
+    event_timestamp = evtx_timestamp_identity(first_value(row, EVTX_FIELD_ALIASES["event_created_at"]))
+    if event_id is not None and provider is not None and event_timestamp:
+        composites.append(normalize_key(f"evtx-event:{provider}:{event_id}:{event_timestamp}"))
 
     key_path = registry_path_value(row, ("key_path", "KeyPath", "registry_path", "RegistryPath", "path", "Path"))
     value_name = first_value(row, ("value_name", "ValueName"))
@@ -1742,6 +1745,9 @@ def record_field_index(rows: Sequence[Mapping[str, object]]) -> dict[str, dict[s
             value = first_value(row, aliases)
             if value is not None and str(value).strip():
                 fields[canonical] = normalize_field_value(value)
+        if fields.get("event_created_at"):
+            # Compare timestamp semantics, not per-tool text formatting.
+            fields["event_created_at"] = evtx_timestamp_identity(fields["event_created_at"])
         fields.update(evtx_event_data_fields(row))
         if fields:
             for key in record_keys:
@@ -1751,13 +1757,46 @@ def record_field_index(rows: Sequence[Mapping[str, object]]) -> dict[str, dict[s
 
 def evtx_record_key_variants(row: Mapping[str, object]) -> list[str]:
     record_id = first_value(row, EVTX_FIELD_ALIASES["event_record_id"])
-    if record_id is None:
-        return []
     channel = first_value(row, EVTX_FIELD_ALIASES["channel"])
+    provider = first_value(row, EVTX_FIELD_ALIASES["provider_name"])
+    event_id = first_value(row, EVTX_FIELD_ALIASES["event_id"])
+    timestamp = evtx_timestamp_identity(first_value(row, EVTX_FIELD_ALIASES["event_created_at"]))
     keys = [normalize_key(f"evtx-record:{record_id}")]
     if channel is not None and str(channel).strip():
         keys.insert(0, normalize_key(f"evtx-record:{channel}:{record_id}"))
+    # Physical record ids renumber in exported channels and BinXML System
+    # EventRecordID is not always decoded, so a timestamp-anchored identity
+    # gives the trusted diff a stable join across tools.
+    if provider and event_id and timestamp:
+        keys.append(normalize_key(f"evtx-event:{provider}:{event_id}:{timestamp}"))
+    if channel and str(channel).strip() and provider and event_id and timestamp:
+        keys.append(normalize_key(f"evtx-record:{channel}:{provider}:{event_id}:{timestamp}"))
+    if timestamp:
+        keys.append(normalize_key(f"evtx-record:ts:{timestamp}"))
     return list(dict.fromkeys(keys))
+
+
+def evtx_timestamp_identity(value: object) -> str:
+    """Normalize EVTX timestamps (ISO or EvtxECmd style) to microsecond UTC text."""
+    text = str(value or "").strip()
+    if not text:
+        return ""
+    candidate = text.replace(" ", "T")
+    if candidate.endswith("Z"):
+        candidate = candidate[:-1] + "+00:00"
+    fraction_match = re.match(r"^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2})(?:\.(\d+))?(.*)$", candidate)
+    if fraction_match:
+        fraction = (fraction_match.group(2) or "")[:6]
+        rest = fraction_match.group(3) or ""
+        candidate = fraction_match.group(1) + (f".{fraction}" if fraction else "") + rest
+    try:
+        parsed = dt.datetime.fromisoformat(candidate)
+    except ValueError:
+        return normalize_key(text)
+    if parsed.tzinfo is None:
+        # EvtxECmd writes FILETIME-derived UTC without a timezone suffix.
+        parsed = parsed.replace(tzinfo=dt.timezone.utc)
+    return parsed.astimezone(dt.timezone.utc).strftime("%Y%m%dT%H%M%S.%f")
 
 
 def evtx_event_data_fields(row: Mapping[str, object]) -> dict[str, str]:
