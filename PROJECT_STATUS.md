@@ -25,7 +25,11 @@ months before the restart baseline. Root causes fixed in this pass:
    `ensure_ascii=False` crashed with UnicodeEncodeError on non-ASCII evidence
    text (Korean filenames) — scripts now reconfigure stdout/stderr to UTF-8,
    and tests decode script pipes as UTF-8 explicitly. Verified by reproducing
-   the failure with `PYTHONIOENCODING=cp1252` locally.
+   the failure with `PYTHONIOENCODING=cp1252` locally. The same codec crash
+   also hid inside `rapidtriage` CLI subcommands (validation payload arrow
+   glyph U+2192), so `cli.main` now reconfigures stdio too; the second green
+   run (33314811084, commit 8388758) covers the full release pipeline
+   including the validation-package build on all three OSes.
 
 ## Phase 4 Release Infrastructure Update (2026-08-30)
 
