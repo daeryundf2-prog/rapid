@@ -4,6 +4,29 @@ Date: 2026-08-30
 Branch: `codex/rapidforensic-complete`
 Tag: `v0.2.0` (restart baseline)
 
+## CI Fully Green (2026-08-30)
+
+For the first time since 2026-05-30, the full CI matrix is green (run
+33309637039, commit `1a33af3`): ubuntu, windows, macos, and Rust worker checks
+all pass on Python 3.11. The CI had been failing across all platforms for three
+months before the restart baseline. Root causes fixed in this pass:
+
+1. Lint drift: ruff 0.16's expanded default rule set (~1,400 pre-existing
+   findings) — `ruff` pinned to `0.8.*` until a cleanup pass.
+2. Timezone-dependent output: docs/files/extract plus submission, VSC, audit,
+   generic-artifact, and API mtime rendering used naive local-time
+   `fromtimestamp()`; fixtures generated on a KST machine mismatched UTC
+   runners by 9 hours. Rendering now always emits UTC; affected sample
+   fixtures regenerated against UTC output.
+3. Case-sensitive spooler pairing: SHD/SPL sibling lookup used lowercase
+   suffixes that only resolved on case-insensitive filesystems; matching is
+   now case-insensitive.
+4. Windows console encoding (cp1252): every script printing JSON with
+   `ensure_ascii=False` crashed with UnicodeEncodeError on non-ASCII evidence
+   text (Korean filenames) — scripts now reconfigure stdout/stderr to UTF-8,
+   and tests decode script pipes as UTF-8 explicitly. Verified by reproducing
+   the failure with `PYTHONIOENCODING=cp1252` locally.
+
 ## Phase 4 Release Infrastructure Update (2026-08-30)
 
 - **CI "Run tests" failures fixed on Linux runners** (the 6 failures in run 33302473677
