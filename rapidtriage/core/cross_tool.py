@@ -1492,9 +1492,9 @@ def composite_candidate_keys(row: Mapping[str, object]) -> list[str]:
         composites.append(normalize_key(f"evtx-record:{channel}:{event_record_id}"))
     if event_id is not None and provider is not None:
         composites.append(normalize_key(f"evtx-event:{provider}:{event_id}"))
-    event_timestamp = evtx_timestamp_identity(first_value(row, EVTX_FIELD_ALIASES["event_created_at"]))
-    if event_id is not None and provider is not None and event_timestamp:
-        composites.append(normalize_key(f"evtx-event:{provider}:{event_id}:{event_timestamp}"))
+        event_timestamp = evtx_timestamp_identity(first_value(row, EVTX_FIELD_ALIASES["event_created_at"]))
+        if event_timestamp:
+            composites.append(normalize_key(f"evtx-event:{provider}:{event_id}:{event_timestamp}"))
 
     key_path = registry_path_value(row, ("key_path", "KeyPath", "registry_path", "RegistryPath", "path", "Path"))
     value_name = first_value(row, ("value_name", "ValueName"))
@@ -1761,17 +1761,23 @@ def evtx_record_key_variants(row: Mapping[str, object]) -> list[str]:
     provider = first_value(row, EVTX_FIELD_ALIASES["provider_name"])
     event_id = first_value(row, EVTX_FIELD_ALIASES["event_id"])
     timestamp = evtx_timestamp_identity(first_value(row, EVTX_FIELD_ALIASES["event_created_at"]))
-    keys = [normalize_key(f"evtx-record:{record_id}")]
-    if channel is not None and str(channel).strip():
-        keys.insert(0, normalize_key(f"evtx-record:{channel}:{record_id}"))
+    has_record_id = record_id is not None
+    has_event_identity = bool(provider and event_id)
+    keys = []
+    if has_record_id:
+        keys.append(normalize_key(f"evtx-record:{record_id}"))
+        if channel is not None and str(channel).strip():
+            keys.insert(0, normalize_key(f"evtx-record:{channel}:{record_id}"))
+    if has_event_identity:
+        keys.append(normalize_key(f"evtx-event:{provider}:{event_id}"))
     # Physical record ids renumber in exported channels and BinXML System
     # EventRecordID is not always decoded, so a timestamp-anchored identity
-    # gives the trusted diff a stable join across tools.
-    if provider and event_id and timestamp:
-        keys.append(normalize_key(f"evtx-event:{provider}:{event_id}:{timestamp}"))
-    if channel and str(channel).strip() and provider and event_id and timestamp:
-        keys.append(normalize_key(f"evtx-record:{channel}:{provider}:{event_id}:{timestamp}"))
-    if timestamp:
+    # gives the trusted diff a stable join across tools. The timestamp
+    # variant is gated on EVTX-signal fields so unrelated tabular rows that
+    # merely carry a timestamp cannot collide across datasets.
+    if timestamp and (has_record_id or has_event_identity):
+        if has_event_identity:
+            keys.append(normalize_key(f"evtx-event:{provider}:{event_id}:{timestamp}"))
         keys.append(normalize_key(f"evtx-record:ts:{timestamp}"))
     return list(dict.fromkeys(keys))
 
