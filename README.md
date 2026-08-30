@@ -403,9 +403,9 @@ Known-answer evidence는 `docs/validation/` 아래에 있습니다.
 
 ## 개발자 참고
 
-`pyproject.toml`의 배포 package name은 아직 레거시 `dashcam-tools`입니다.
-사용자-facing 실행 명령은 `rapidtriage`이고, wheel에는 `dashcam_tools`와
-`rapidtriage`가 함께 포함됩니다.
+배포 package name은 `rapidtriage`입니다(과거 레거시 이름 `dashcam-tools`에서
+변경). 사용자-facing 실행 명령은 `rapidtriage`이고, wheel에는 레거시
+`dashcam_tools`와 `rapidtriage` 패키지가 함께 포함됩니다.
 
 | 경로 | 설명 |
 | --- | --- |

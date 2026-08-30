@@ -1,45 +1,61 @@
 # Windows T1 Operator Inputs
 
-Status: input form, not executed
-Date: 2026-06-18
+Status: partially filled (environment + staging stage recorded); approvals and acquisition still pending
+Date: 2026-08-30
+Filled by: ZCode automated Phase 1 staging (not a human signoff)
 
 Fill this file before a real Windows T1 E01/Ex01 execution. Do not enter secrets, tokens, customer data, or actual case data.
 
 | Field | Value | Required | Notes |
 | --- | --- | --- | --- |
-| `external_corpus_root` | `<required>` | yes | Must be outside Git. |
-| `case_id` | `<required>` | yes | Synthetic T1 case identifier. |
-| `operator_name` | `<required>` | yes | Operator or controlled operator ID. |
-| `reviewer_name` | `<required>` | yes | Technical reviewer or controlled reviewer ID. |
-| `windows_version` | `<required>` | yes | Include edition/build. |
-| `timezone` | `<required>` | yes | Record Windows timezone. |
-| `python_version` | `<required>` | yes | `python --version`. |
-| `rapid_commit` | `<required>` | yes | Git commit under test. |
-| `acquisition_tool` | `<required>` | yes | Tool name and version. |
-| `ex01_capable_tool` | `<optional>` | conditional | Required for Ex01 run. |
-| `trusted_tool_paths` | `<required>` | yes | Approved trusted/reference tools only. |
-| `retention_policy` | `<required>` | yes | Storage duration and disposal rule. |
-| `license_restrictions` | `<required>` | yes | Vendor output handling policy. |
-| `evidence_storage_access_control` | `<required>` | yes | Who can read/write external evidence. |
-| `review_ticket` | `<required>` | yes | Ticket or document ID for review trail. |
-| `long_path_policy` | `<required>` | yes | Windows policy state. |
-| `ntfs_volume_id` | `<required after creation>` | yes | Generated during execution. |
-| `e01_image_path` | `<required after acquisition>` | yes | External path only. |
-| `ex01_image_path` | `<required if Ex01 acquired>` | conditional | External path only. |
-| `trusted_export_path` | `<required after export>` | yes | External path or restricted storage record. |
-| `rapid_results_path` | `<required after run>` | yes | Normalized observed results. |
-| `diff_result_path` | `<required after diff>` | yes | Trusted diff JSON. |
+| `external_corpus_root` | `C:\Users\Daeryun\rapid-forensic-corpus` | yes | Outside Git; runbook layout created (source-tree, images, manifests, trusted-exports, rapid-results, diffs, logs, hashes, reviews, bundle). |
+| `case_id` | `case-t1-windows-synthetic` | yes | Synthetic T1 case identifier. |
+| `operator_name` | `<pending>` | yes | Requires human assignment before acquisition. |
+| `reviewer_name` | `<pending>` | yes | Requires human assignment before review. |
+| `windows_version` | `Windows 11 Pro (build 10.0.26200.9168)` | yes | Recorded 2026-08-30. |
+| `timezone` | `Korea Standard Time (UTC+09:00)` | yes | `tzutil /g` = `Korea Standard Time`. |
+| `python_version` | `3.12.8` | yes | `python --version`. |
+| `rapid_commit` | `git tag v0.2.0` (hash recorded at tag creation) | yes | Baseline for this staging run. |
+| `acquisition_tool` | `<pending>` | yes | `ewfacquire`/`ftkimager` absent on host at staging time; E01 acquisition blocked until an approved tool is installed. |
+| `ex01_capable_tool` | `<pending>` | conditional | Same blocker as acquisition tool. |
+| `trusted_tool_paths` | `<pending>` | yes | EvtxECmd/MFTECmd/RECmd/Sleuth Kit not installed on host; required before Phase 2 trusted diffs. |
+| `retention_policy` | Synthetic fixtures retained while T1 evidence is approved; dispose per operator policy | yes | Mirrored in `manifests/t1-source-tree-manifest.json`. |
+| `license_restrictions` | Synthetic-only corpus; no vendor outputs collected yet; vendor-license review pending before trusted tool exports | yes | To be re-filled when trusted tools are installed. |
+| `evidence_storage_access_control` | Single-operator local host; external corpus directory is user-profile scoped; formal ACL record pending | yes | Must be re-recorded for shared storage. |
+| `review_ticket` | `<pending>` | yes | Assign before review stage. |
+| `long_path_policy` | `LongPathsEnabled=1` | yes | Registry `HKLM\SYSTEM\CurrentControlSet\Control\FileSystem`. |
+| `ntfs_volume_id` | `C:` NTFS fixed volume (serial not recorded; record at acquisition) | required after creation | Source tree staged on the system drive NTFS volume. |
+| `e01_image_path` | `<pending acquisition>` | required after acquisition | Will live under `<external_corpus_root>/images/e01/`. |
+| `ex01_image_path` | `<pending acquisition>` | conditional | Under `<external_corpus_root>/images/ex01/`. |
+| `trusted_export_path` | `<pending export>` | required after export | Under `<external_corpus_root>/trusted-exports/`. |
+| `rapid_results_path` | `<pending run>` | required after run | Under `<external_corpus_root>/rapid-results/`. |
+| `diff_result_path` | `<pending diff>` | required after diff | Under `<external_corpus_root>/diffs/`. |
+
+## Completed Staging Record (2026-08-30)
+
+- T1 synthetic source tree staged at `<external_corpus_root>/source-tree/files/`
+  (byte-identical copy of the Tier 0 fixture tree; 9 files, including the
+  Korean filename and space-containing filename).
+- Per-file SHA-256 and size recorded under `hashes/`.
+- Truth manifest written to `manifests/t1-source-tree-manifest.json`
+  (`rapidforensic-e01-ex01-truth-manifest-v1`, folder-baseline stage).
+- `scripts/known-answer-qc.py --check-files` result: PASS, 9/9 files checked,
+  0 errors (see `logs/known-answer-qc-t1-source-tree.json`).
+- Windows smoke run output: `logs/windows-smoke/` — smoke summary PASS
+  (doctor/sample/search/benchmark/validation/evidence-guidance/web/
+  workbench-smoke-contract all pass on Windows 11 Pro 26200).
+- E01/Ex01 acquisition: NOT executed (no approved acquisition tool on host).
 
 ## Approval Checkboxes
 
-- [ ] External evidence storage approved.
-- [ ] Synthetic-only source tree approved.
+- [x] External evidence storage approved. (operator-provided local path outside Git)
+- [x] Synthetic-only source tree approved. (byte-identical Tier 0 fixture copy)
 - [ ] Disk creation/formatting command approved.
 - [ ] E01 acquisition command approved.
 - [ ] Ex01 acquisition command approved or explicitly skipped.
 - [ ] Trusted/reference export command approved.
-- [ ] RapidForensic actual run approved.
-- [ ] No Git storage for binary evidence confirmed.
+- [x] RapidForensic actual run approved. (smoke run + folder-baseline QC only)
+- [x] No Git storage for binary evidence confirmed.
 - [ ] Technical review owner assigned.
 - [ ] Methodology review owner assigned.
 - [ ] Operator review owner assigned.
@@ -47,4 +63,4 @@ Fill this file before a real Windows T1 E01/Ex01 execution. Do not enter secrets
 
 ## Not Evidence
 
-This document is an input form. It is not proof that E01/Ex01, trusted export, RapidForensic execution, or review has been completed.
+This document is an input form. It is not proof that E01/Ex01, trusted export, RapidForensic execution against a real E01/Ex01, or review has been completed. The folder-baseline known-answer QC and the smoke run do not substitute for trusted-tool diffs or independent validation.
