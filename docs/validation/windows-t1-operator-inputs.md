@@ -15,7 +15,7 @@ Fill this file before a real Windows T1 E01/Ex01 execution. Do not enter secrets
 | `windows_version` | `Windows 11 Pro (build 10.0.26200.9168)` | yes | Recorded 2026-08-30. |
 | `timezone` | `Korea Standard Time (UTC+09:00)` | yes | `tzutil /g` = `Korea Standard Time`. |
 | `python_version` | `3.12.8` | yes | `python --version`. |
-| `rapid_commit` | `git tag v0.2.0` (hash recorded at tag creation) | yes | Baseline for this staging run. |
+| `rapid_commit` | `c1c5be0ea7f68f4b1d04894ed8191ad2a2f71d85` (tag v0.2.0) | yes | Baseline for this staging run. |
 | `acquisition_tool` | `<pending>` | yes | `ewfacquire`/`ftkimager` absent on host at staging time; E01 acquisition blocked until an approved tool is installed. |
 | `ex01_capable_tool` | `<pending>` | conditional | Same blocker as acquisition tool. |
 | `trusted_tool_paths` | `<pending>` | yes | EvtxECmd/MFTECmd/RECmd/Sleuth Kit not installed on host; required before Phase 2 trusted diffs. |

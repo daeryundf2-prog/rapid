@@ -4,7 +4,7 @@
 
 - Version: 0.2.0
 - Release date: 2026-08-30
-- Commit: 재개 기준선(restart baseline) 태그 `v0.2.0`
+- Commit: `c1c5be0ea7f68f4b1d04894ed8191ad2a2f71d85` (tag `v0.2.0`)
 
 ## Highlights
 
