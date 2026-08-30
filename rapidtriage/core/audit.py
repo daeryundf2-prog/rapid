@@ -103,7 +103,7 @@ def describe_file(path: Path, *, label: str | None = None) -> dict[str, object]:
         "path": str(resolved),
         "sha256": compute_sha256(resolved),
         "size": stat_result.st_size,
-        "modified_at": dt.datetime.fromtimestamp(stat_result.st_mtime).isoformat(),
+        "modified_at": dt.datetime.fromtimestamp(stat_result.st_mtime, tz=dt.timezone.utc).isoformat(),
     }
 
 

@@ -61,7 +61,7 @@ def build_submission_manifest(
                     "path": str(source_path),
                     "name": source_path.name,
                     "size": stat_result.st_size,
-                    "modified_at": dt.datetime.fromtimestamp(stat_result.st_mtime).isoformat(),
+                    "modified_at": dt.datetime.fromtimestamp(stat_result.st_mtime, tz=dt.timezone.utc).isoformat(),
                     "hashes": hashes,
                 },
             }

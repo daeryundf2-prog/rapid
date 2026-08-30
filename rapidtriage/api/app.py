@@ -11639,7 +11639,7 @@ def build_source_metadata(source_path: Path, *, include_hashes: bool) -> Dict[st
 
 
 def dt_from_epoch(value: float) -> str:
-    return dt.datetime.fromtimestamp(value).isoformat()
+    return dt.datetime.fromtimestamp(value, tz=dt.timezone.utc).isoformat()
 
 
 def build_source_search(

@@ -164,7 +164,12 @@ def _schema() -> JsonObject:
 
 
 def _json_object(raw_json: str) -> JsonObject:
-    value = cast(JsonValue, json.loads(raw_json))
+    try:
+        value = cast(JsonValue, json.loads(raw_json))
+    except json.JSONDecodeError as exc:
+        raise AssertionError(
+            f"script stdout was not JSON (chars={len(raw_json)}): {raw_json[:200]!r}"
+        ) from exc
     if not isinstance(value, dict):
         raise AssertionError("JSON output must be an object")
     return value

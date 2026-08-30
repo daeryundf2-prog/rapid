@@ -208,7 +208,7 @@ class KnownAnswerManifestValidationTests(unittest.TestCase):
             text=True,
         )
 
-        self.assertEqual(completed.returncode, 0)
+        self.assertEqual(completed.returncode, 0, msg=f"stdout={completed.stdout!r} stderr={completed.stderr!r}")
         self.assertIn('"file_check_enabled": true', completed.stdout)
         self.assertIn('"file_error_count": 0', completed.stdout)
 
@@ -243,7 +243,7 @@ class KnownAnswerManifestValidationTests(unittest.TestCase):
                 output = _json_object(completed.stdout)
                 errors = validate_schema_document(output, result_schema)
 
-                self.assertEqual(completed.returncode, expected_returncode)
+                self.assertEqual(completed.returncode, expected_returncode, msg=f"stdout={completed.stdout!r} stderr={completed.stderr!r}")
                 self.assertEqual(completed.stderr, "")
                 self.assertEqual(output["schema_version"], "rapidforensic-known-answer-validation-result-v1")
                 self.assertEqual(output["status"], expected_status)

@@ -456,7 +456,7 @@ def build_file_index(root: Path, *, compute_hashes: bool, case_sensitive: bool) 
             relative_path=relative,
             absolute_path=str(path.resolve()),
             size=stat_result.st_size,
-            modified_at=dt.datetime.fromtimestamp(stat_result.st_mtime).isoformat(),
+            modified_at=dt.datetime.fromtimestamp(stat_result.st_mtime, tz=dt.timezone.utc).isoformat(),
             modified_ns=stat_result.st_mtime_ns,
             sha256=file_sha256(path) if compute_hashes else "",
         )

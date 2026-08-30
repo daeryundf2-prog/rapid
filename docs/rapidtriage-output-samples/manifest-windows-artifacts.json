@@ -55,7 +55,7 @@
             "artifact_role": "model-file",
             "model_name_hint": "Cache0000",
             "source_size": 16,
-            "modified_at": "2024-03-05T15:07:12",
+            "modified_at": "2024-03-05T06:07:12+00:00",
             "coverage_status": "local-llm-file-inventory",
             "validation_required": true,
             "commercial_grade_ready": false,

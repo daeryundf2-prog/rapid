@@ -1535,7 +1535,7 @@ def safe_stat(path: Path) -> dict[str, object]:
         return {"size": 0, "modified_at": ""}
     return {
         "size": int(stat_result.st_size),
-        "modified_at": dt.datetime.fromtimestamp(stat_result.st_mtime).isoformat(),
+        "modified_at": dt.datetime.fromtimestamp(stat_result.st_mtime, tz=dt.timezone.utc).isoformat(),
     }
 
 
