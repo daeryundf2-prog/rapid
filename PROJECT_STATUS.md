@@ -4,6 +4,15 @@ Date: 2026-08-30
 Branch: `codex/rapidforensic-complete`
 Tag: `v0.2.0` (restart baseline)
 
+## Phase 3 Performance Evidence Update (2026-08-30, Windows 11 laptop)
+
+Hardware context recorded in the external corpus (`hashes/hardware-scale-matrix.json`): i7-1165G7, 15.7GB RAM, NVMe SSD. All outputs in the external corpus `logs/` directory; nothing committed but findings.
+
+- 100k-file synthetic benchmark (ingest + 20-iteration search): ingest 2,467.5s (40.5 rec/s, above the 25 rec/s floor), search p50 7.63s / p95 8.38s (release threshold 2.0s exceeded), peak Python memory 844MB (threshold 512MB exceeded). `release_threshold_status=needs-review` — search latency and memory are the performance work targets.
+- 1M-record columnar benchmark: JSONL baseline 650MB, query p50 20.87s / p95 21.43s; Parquet 20.1MB (32x smaller) with DuckDB query p50 0.165s / p95 0.188s (~126x faster). This quantifies the columnar/Rust-sidecar payoff for large-case search.
+- Browser e2e on the real workbench with the imported 100k run (run_id f962ebbebf1a): files table renders a bounded 251-row window for the 100k dataset (6,334 DOM nodes, 9MB JS heap), in-page full-case search measured at 8.1s (consistent with server-side p95), `/api/workbench/large-result-evidence?record_count=100000` DOM budget passes (2400 estimated nodes vs 5000 budget). Screenshot capture unavailable in the automation environment; numeric evidence retained.
+- 1TB/5TB/10TB stress runs remain pending approved forensic hardware.
+
 ## Phase 2 Trusted-Diff Update (2026-08-30, Windows 11 host, non-admin)
 
 Trusted reference tools installed outside Git (`EvtxECmd`/`LECmd`/`JLECmd` 2026.5.0) and run against staged host artifacts. Evidence in the external corpus (`diffs/`, `trusted-exports/`, `rapid-results/`); nothing committed but the findings.
