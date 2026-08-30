@@ -1,7 +1,32 @@
 # RapidForensic Project Status
 
-Date: 2026-06-26
+Date: 2026-08-30
 Branch: `codex/rapidforensic-complete`
+Tag: `v0.2.0` (restart baseline)
+
+## Restart Baseline Update (2026-08-30, Windows 11 host)
+
+- Windows platform defects fixed: the full unit suite now passes on a real
+  Windows 11 host (790 tests, OK, skipped=2; previously 24 failures + 17
+  errors). Root causes included CRLF checkout breaking known-answer hashes,
+  an unclosed read-only sqlite3 handle locking case.db, Windows-only path
+  mapping and input-root detection gaps, and loose mobile-artifact
+  classification against `AppData` paths.
+- `.gitattributes` now pins checkout bytes (`* -text`) so fixture SHA-256
+  values are platform-independent; Windows shell scripts check out CRLF.
+- Repository hygiene: bulk QC run outputs, dashcam-era run artifacts, and the
+  broken legacy `windows/build-windows.ps1` were removed; the distribution
+  name is now `rapidtriage` (version 0.2.0).
+- Windows smoke run passes 8/8 checks; smoke scripts were fixed to
+  authenticate the workbench smoke-contract request after default-token
+  hardening.
+- T1 staging outside Git at `C:\Users\Daeryun\rapid-forensic-corpus`:
+  source-tree staged, hashes recorded, truth manifest written, folder
+  baseline `known-answer-qc.py` PASS 9/9. E01/Ex01 acquisition and trusted
+  tools remain pending; see `docs/validation/windows-t1-operator-inputs.md`.
+- Known pre-existing issue: `ruff check` (ruff>=0.8 current release) reports
+  ~1400 findings repo-wide due to lint version drift; CI lint gate needs
+  pinning or a cleanup pass before the next release.
 
 ## Project Purpose
 
