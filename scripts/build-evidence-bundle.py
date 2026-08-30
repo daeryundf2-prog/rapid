@@ -12,6 +12,15 @@
 # ------------------
 from __future__ import annotations
 
+# Force UTF-8 stdio so JSON output with non-ASCII evidence text (e.g.
+# Korean filenames) survives Windows consoles whose default codec is cp1252.
+import sys as _sys
+
+if hasattr(_sys.stdout, "reconfigure"):
+    _sys.stdout.reconfigure(encoding="utf-8")
+if hasattr(_sys.stderr, "reconfigure"):
+    _sys.stderr.reconfigure(encoding="utf-8")
+
 import argparse
 import json
 import sys
