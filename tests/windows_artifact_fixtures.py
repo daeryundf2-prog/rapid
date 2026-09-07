@@ -9,7 +9,6 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
-
 CHROME_EPOCH = datetime(1601, 1, 1, tzinfo=timezone.utc)
 LNK_CLSID = bytes.fromhex("0114020000000000c000000000000046")
 

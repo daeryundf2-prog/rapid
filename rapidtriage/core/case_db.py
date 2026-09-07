@@ -6,19 +6,19 @@ import hashlib
 import json
 import os
 import sqlite3
+from collections.abc import Iterable, Iterator, Mapping, Sequence
 from contextlib import closing, contextmanager
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Iterable, Iterator, Mapping, Optional, Sequence
+from typing import Any
 
 from .artifact_store import read_jsonl_artifacts, validate_artifact_record
 from .docs import extract_text
 from .forensic_accuracy import build_accuracy_gate
 from .review_reporting_controls import build_review_reporting_contract
 from .search import load_run_summary
-from .submission_qc_controls import build_submission_qc_contract
 from .submission import compute_hashes
-
+from .submission_qc_controls import build_submission_qc_contract
 
 SCHEMA_VERSION = 1
 FUNCTIONAL_REPORTING_BATCH_ID = "commercial-uplift-021-025"
@@ -246,6 +246,16 @@ CITATION_KIND_PREFIXES = {
     "acquisition": "ACQ",
 }
 
+REVIEW_TARGET_TABLES = {
+    "artifact": "artifact",
+    "event": "event",
+    "file_record": "file_record",
+    "indexed_document": "indexed_document",
+    "hash": "hash_record",
+    "evidence_source": "evidence_source",
+    "job": "job",
+}
+
 
 class CaseDatabaseError(ValueError):
     """Raised when a case database operation is invalid."""
@@ -388,12 +398,12 @@ class CaseDatabase:
         self,
         *,
         case_id: str,
-        name: Optional[str] = None,
+        name: str | None = None,
         description: str = "",
         examiner: str = "",
         organization: str = "",
-        case_root: Optional[Path] = None,
-        citation_prefix: Optional[str] = None,
+        case_root: Path | None = None,
+        citation_prefix: str | None = None,
         status: str = "open",
     ) -> CaseRecord:
         normalized_case_id = normalize_identifier(case_id, fallback="case")
@@ -529,7 +539,7 @@ class CaseDatabase:
         run_summary: Mapping[str, object] | Path,
         *,
         case_id: str,
-        case_name: Optional[str] = None,
+        case_name: str | None = None,
     ) -> dict[str, object]:
         summary = load_run_summary(run_summary)
         outputs = summary.get("outputs")
@@ -573,7 +583,7 @@ class CaseDatabase:
         vsc_compare_json: Mapping[str, object] | Path,
         *,
         case_id: str,
-        case_name: Optional[str] = None,
+        case_name: str | None = None,
     ) -> dict[str, object]:
         payload = read_json_path(vsc_compare_json) if isinstance(vsc_compare_json, Path) else dict(vsc_compare_json)
         if str(payload.get("tool") or "") != "rapidtriage-vsc-compare":
@@ -620,7 +630,7 @@ class CaseDatabase:
         worker_jsonl: Path,
         *,
         case_id: str,
-        case_name: Optional[str] = None,
+        case_name: str | None = None,
     ) -> dict[str, object]:
         jsonl_path = worker_jsonl.expanduser().resolve()
         normalized_case_id = normalize_identifier(case_id, fallback="case")
@@ -990,6 +1000,15 @@ class CaseDatabase:
             apply_schema(connection)
             if connection.execute("SELECT 1 FROM case_record WHERE case_id = ?", (normalized_case_id,)).fetchone() is None:
                 raise CaseDatabaseError(f"case not found: {normalized_case_id}")
+            target_missing = connection.execute(
+                f"SELECT 1 FROM {REVIEW_TARGET_TABLES[target_type]} WHERE id = ? LIMIT 1",
+                (target_id,),
+            ).fetchone() is None if target_type in REVIEW_TARGET_TABLES else False
+            if target_missing:
+                raise CaseDatabaseError(
+                    f"review target not found: {target_type}:{target_id} in case {normalized_case_id}; "
+                    "run 'rapidtriage case-search' to find the exact target id before marking a review"
+                )
             existing = connection.execute(
                 """
                 SELECT * FROM review_mark
@@ -5097,7 +5116,7 @@ def render_case_db_report_markdown(
         blockers = profile.get("blockers") if isinstance(profile.get("blockers"), list) else []
         lines.extend(
             [
-                f"### {index}. {str(item.get('title') or item.get('target_citation_id') or 'report candidate')}",
+                f"### {index}. {item.get('title') or item.get('target_citation_id') or 'report candidate'!s}",
                 "",
                 f"- Review citation: `{item.get('review_citation_id', '')}`",
                 f"- Source citation: `{item.get('target_citation_id', '')}`",

@@ -2,11 +2,10 @@ from __future__ import annotations
 
 import hashlib
 import json
+from collections.abc import Mapping
 from pathlib import Path
-from typing import Mapping
 
 from .forensic_accuracy import build_accuracy_gate
-
 
 HASH_ALGORITHMS = ("md5", "sha1", "sha256")
 HASH_CACHE_GAP_ID = "#76"

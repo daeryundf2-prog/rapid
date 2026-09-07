@@ -743,7 +743,7 @@ class CloudApiHandler(BaseHTTPRequestHandler):
 
 
 class CloudTestServer:
-    def __enter__(self) -> "CloudTestServer":
+    def __enter__(self) -> CloudTestServer:
         self.handler_class = type("PerTestCloudApiHandler", (CloudApiHandler,), {"request_count": 0, "last_authorization": ""})
         self.server = ThreadingHTTPServer(("127.0.0.1", 0), self.handler_class)
         self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)

@@ -8,14 +8,13 @@ import statistics
 import sys
 import time
 import tracemalloc
+from collections.abc import Mapping, Sequence
 from pathlib import Path
-from typing import Mapping, Sequence
 
 from .docs import write_result
 from .forensic_accuracy import build_accuracy_gate
 from .run import run_triage_mode
 from .search import run_unified_search
-
 
 DEFAULT_BENCHMARK_FILE_COUNT = 100
 DEFAULT_BENCHMARK_KEYWORD = "password"

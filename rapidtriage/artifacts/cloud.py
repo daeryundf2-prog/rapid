@@ -8,9 +8,9 @@ import io
 import json
 import re
 import zipfile
+from collections.abc import Iterable, Mapping, Sequence
 from email import policy
 from pathlib import Path
-from typing import Iterable, Mapping, Sequence
 
 from ..core.forensic_accuracy import build_accuracy_gate
 from ..core.models import ArtifactRecord

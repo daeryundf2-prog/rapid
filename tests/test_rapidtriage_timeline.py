@@ -13,7 +13,6 @@ from rapidtriage.core.timeline import build_timeline_report, extract_artifact_ev
 from tests.test_rapidtriage_run import write_minimal_docx, write_minimal_pdf
 from tests.windows_artifact_fixtures import build_windows_artifact_fixture
 
-
 TIMESTAMP_KEYS = ("timestamp", "event_at", "observed_at", "occurred_at", "modified_at")
 SOURCE_KEYS = ("source", "source_kind", "event_source", "event_type")
 TIMESTAMP_DETAIL_KEYS = ("last_visited_at", "started_at", "ended_at")

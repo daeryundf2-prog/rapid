@@ -3,8 +3,8 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+from collections.abc import Iterable, Mapping, Sequence
 from pathlib import Path
-from typing import Iterable, Mapping, Sequence
 
 from ...core.forensic_accuracy import build_accuracy_gate
 from ...core.models import ArtifactRecord
@@ -20,9 +20,9 @@ from .registry import (
     hive_hint_from_path,
     iter_registry_cell_candidates,
     parse_registry_hive_header,
-    registry_value_data_preview,
     registry_transaction_log_evidence,
     registry_transaction_replay_profile,
+    registry_value_data_preview,
 )
 
 PARSER_VERSION = "windows-shellbags-native-v4"

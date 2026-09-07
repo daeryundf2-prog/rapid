@@ -5,8 +5,8 @@ import hashlib
 import json
 import re
 from collections import Counter
+from collections.abc import Iterable, Mapping, Sequence
 from pathlib import Path
-from typing import Iterable, Mapping, Sequence
 
 from ...core.forensic_accuracy import build_accuracy_gate
 from ...core.models import ArtifactRecord
@@ -2348,7 +2348,7 @@ def build_registry_deleted_cell_diff(
         status = "not-enough-evidence"
     elif missing_in_oracle or extra_in_oracle or mismatches:
         status = "diffs-present"
-    recognized_oracle = bool(re.search(r"(hand|labeled|oracle|regripper|registry|recmd|python)", oracle_name, re.I))
+    recognized_oracle = bool(re.search(r"(hand|labeled|oracle|regripper|registry|recmd|python)", oracle_name, re.IGNORECASE))
     rapid_present_fields = sorted(
         field for field in compare_fields if any(row.get(field, "") for row in rapid_by_offset.values())
     )

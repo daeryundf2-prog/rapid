@@ -5,9 +5,10 @@ import json
 import os
 import tempfile
 import unittest
+from collections.abc import Iterable
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any
 
 from rapidtriage.cli import build_parser, main
 from rapidtriage.core.rules import load_rule_set

@@ -5,12 +5,11 @@ import hashlib
 import json
 import re
 from collections import Counter, defaultdict
+from collections.abc import Iterable, Mapping, Sequence
 from pathlib import Path
-from typing import Iterable, Mapping, Sequence
 from urllib.parse import urlparse
 
 from .forensic_accuracy import build_accuracy_gate
-
 
 ENTITY_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
     ("email", re.compile(r"\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b", re.IGNORECASE)),

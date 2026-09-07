@@ -8,8 +8,8 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from dashcam_tools import ingest, report
 from dashcam_tools import _rename_impl as rename_impl
+from dashcam_tools import ingest, report
 
 
 class DashcamToolsTests(unittest.TestCase):

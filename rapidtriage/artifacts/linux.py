@@ -5,8 +5,8 @@ import hashlib
 import json
 import re
 import shlex
+from collections.abc import Iterable
 from pathlib import Path
-from typing import Iterable
 
 from ..core.models import ArtifactRecord
 

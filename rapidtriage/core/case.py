@@ -3,8 +3,9 @@ from __future__ import annotations
 import datetime as dt
 import hashlib
 import json
+from collections.abc import Mapping
 from pathlib import Path
-from typing import Any, Mapping
+from typing import Any
 
 from .docs import write_result
 from .schema_validation import SchemaValidationError, load_schema, validate

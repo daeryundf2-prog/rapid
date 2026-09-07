@@ -1,22 +1,23 @@
 from __future__ import annotations
 
+import base64
+import binascii
+import contextlib
+import datetime as dt
+import email
+import hashlib
 import json
 import mimetypes
 import os
 import re
-import contextlib
-import email
-import hashlib
 import secrets
 import sqlite3
-import datetime as dt
-import wave
-import base64
-import binascii
 import struct
+import wave
+from collections.abc import Mapping, MutableMapping, Sequence
 from email import policy
 from pathlib import Path
-from typing import Any, Dict, Mapping, MutableMapping, Optional, Sequence
+from typing import Any
 from urllib.parse import quote
 from xml.etree import ElementTree as ET
 
@@ -27,13 +28,34 @@ from pydantic import BaseModel, Field
 
 from ..core.audit import audit_path_for, write_audit_record
 from ..core.bundle import BundleError, build_submission_bundle
-from ..core.case import CaseBookmarkError, create_or_update_case_payload, load_case_payload, save_case_payload
+from ..core.case import (
+    CaseBookmarkError,
+    create_or_update_case_payload,
+    load_case_payload,
+    save_case_payload,
+)
 from ..core.case_catalog import CaseCatalog, CaseCatalogError, default_case_catalog_path
-from ..core.case_report import build_case_report_markdown, case_report_export_paths, write_case_report_exports
 from ..core.case_db import CaseDatabaseError, open_case_database
-from ..core.collect_plan import CollectPlanError, build_collect_plan, supported_collect_profiles
-from ..core.commercial_readiness import CommercialReadinessError, build_commercial_readiness_report
-from ..core.crash import export_crash_report_bundle, list_crash_reports, read_crash_report, write_crash_report
+from ..core.case_report import (
+    build_case_report_markdown,
+    case_report_export_paths,
+    write_case_report_exports,
+)
+from ..core.collect_plan import (
+    CollectPlanError,
+    build_collect_plan,
+    supported_collect_profiles,
+)
+from ..core.commercial_readiness import (
+    CommercialReadinessError,
+    build_commercial_readiness_report,
+)
+from ..core.crash import (
+    export_crash_report_bundle,
+    list_crash_reports,
+    read_crash_report,
+    write_crash_report,
+)
 from ..core.docs import SUPPORTED_DOC_EXTS, TEXT_EXTS, extract_text, query_docs_index
 from ..core.doctor import run_doctor
 from ..core.enterprise import build_enterprise_policy
@@ -41,7 +63,17 @@ from ..core.evidence import identify_evidence, supported_evidence_formats
 from ..core.files import DEFAULT_KNOWN_GOOD_MAX_HASH_BYTES
 from ..core.forensic_accuracy import build_accuracy_gate
 from ..core.hash_cache import hash_cache_assessment
-from ..core.jobs import RunJobStore, RunRequest, default_job_store, is_relative_to, run_output_dir
+from ..core.indicators import (
+    IndicatorSummaryError,
+    build_indicator_ti_enrichment_package,
+)
+from ..core.jobs import (
+    RunJobStore,
+    RunRequest,
+    default_job_store,
+    is_relative_to,
+    run_output_dir,
+)
 from ..core.keyword_packs import (
     KeywordPackError,
     keyword_pack_library_assessment,
@@ -49,24 +81,31 @@ from ..core.keyword_packs import (
     list_keyword_packs,
     resolve_keyword_packs,
 )
-from ..core.indicators import IndicatorSummaryError, build_indicator_ti_enrichment_package
 from ..core.large_case_controls import build_source_search_full_cursor_contract
+from ..core.ocr_queue import (
+    OcrQueueError,
+    build_ocr_queue,
+    build_ocr_queue_report_grade_validation_plan,
+)
 from ..core.run import RunModeError
-from ..core.sample_case import DEFAULT_SAMPLE_MODE, SampleCaseError, run_sample_workflow
 from ..core.safe_xml import UnsafeXmlError, safe_xml_fromstring
+from ..core.sample_case import DEFAULT_SAMPLE_MODE, SampleCaseError, run_sample_workflow
 from ..core.search import SearchError, run_unified_search
-from ..core.source_paths import candidate_source_paths, source_path_resolution_diagnostics
+from ..core.source_paths import (
+    candidate_source_paths,
+    source_path_resolution_diagnostics,
+)
 from ..core.source_reader import (
     SourceReadError,
-    build_archived_source_preview as build_archived_source_read_preview,
     build_source_locator,
     parse_archived_source_request,
 )
-from ..core.submission import compute_hashes, build_submission_manifest
-from ..core.ocr_queue import OcrQueueError, build_ocr_queue, build_ocr_queue_report_grade_validation_plan
+from ..core.source_reader import (
+    build_archived_source_preview as build_archived_source_read_preview,
+)
 from ..core.sqlite_wal import SqliteWalPreviewError, build_sqlite_wal_preview
+from ..core.submission import build_submission_manifest, compute_hashes
 from ..core.visible_capabilities import build_visible_capability_response
-
 
 DEFAULT_INTERNAL_VALIDATION_PACKAGE = (
     Path(__file__).resolve().parents[2]
@@ -367,15 +406,15 @@ WORKBENCH_SMOKE_SELECTORS = {
 class RunCreateRequest(BaseModel):
     root: str = Field(..., min_length=1)
     mode: str = Field(..., min_length=1)
-    output_dir: Optional[str] = None
-    input_kind: Optional[str] = None
-    rules: Optional[str] = None
+    output_dir: str | None = None
+    input_kind: str | None = None
+    rules: str | None = None
     dry_run: bool = False
     read_only: bool = False
     max_extract_size_bytes: int = 0
     max_file_count: int = 0
     memory_cap_bytes: int = 0
-    e01_partition_start_sector: Optional[int] = None
+    e01_partition_start_sector: int | None = None
     overwrite: bool = False
     resume: bool = False
     known_good_hash_feeds: list[str] = Field(default_factory=list)
@@ -389,7 +428,7 @@ class RunImportRequest(BaseModel):
 
 
 class SampleCaseRunRequest(BaseModel):
-    output_dir: Optional[str] = None
+    output_dir: str | None = None
     mode: str = DEFAULT_SAMPLE_MODE
     overwrite: bool = True
     read_only: bool = True
@@ -398,31 +437,31 @@ class SampleCaseRunRequest(BaseModel):
 class BookmarkCreateRequest(BaseModel):
     source: str = Field(..., min_length=1)
     pointer: str = Field(..., min_length=1)
-    bookmark_id: Optional[str] = None
-    tag: Optional[str] = None
-    tags: Optional[list[str]] = None
-    note: Optional[str] = None
-    case_id: Optional[str] = None
-    title: Optional[str] = None
-    review_status: Optional[str] = None
-    include_in_report: Optional[bool] = None
+    bookmark_id: str | None = None
+    tag: str | None = None
+    tags: list[str] | None = None
+    note: str | None = None
+    case_id: str | None = None
+    title: str | None = None
+    review_status: str | None = None
+    include_in_report: bool | None = None
 
 
 class CaseReportCreateRequest(BaseModel):
     template: str = "legal-handoff"
-    title: Optional[str] = None
-    case_number: Optional[str] = None
-    investigator: Optional[str] = None
-    organization: Optional[str] = None
-    requester: Optional[str] = None
-    scope: Optional[str] = None
-    conclusion: Optional[str] = None
+    title: str | None = None
+    case_number: str | None = None
+    investigator: str | None = None
+    organization: str | None = None
+    requester: str | None = None
+    scope: str | None = None
+    conclusion: str | None = None
     include_all: bool = False
     max_items: int = Field(500, ge=1, le=5000)
 
 
 class ReviewerBundleCreateRequest(BaseModel):
-    title: Optional[str] = None
+    title: str | None = None
     include_all: bool = False
     max_items: int = Field(500, ge=1, le=5000)
 
@@ -431,13 +470,13 @@ class CaseDbImportRunRequest(BaseModel):
     database: str = Field(..., min_length=1)
     run_output: str = Field(..., min_length=1)
     case_id: str = Field(..., min_length=1)
-    name: Optional[str] = None
+    name: str | None = None
 
 
 class RunCaseDbEnsureRequest(BaseModel):
-    database: Optional[str] = None
-    case_id: Optional[str] = None
-    name: Optional[str] = None
+    database: str | None = None
+    case_id: str | None = None
+    name: str | None = None
 
 
 class CaseDbSearchRequest(BaseModel):
@@ -445,13 +484,13 @@ class CaseDbSearchRequest(BaseModel):
     case_id: str = Field(..., min_length=1)
     keywords: list[str] = Field(..., min_length=1)
     limit: int = Field(100, ge=1, le=1000)
-    cursor: Optional[str] = None
-    sources: Optional[list[str]] = None
-    metadata_filters: Optional[list[str]] = None
-    review_status: Optional[str] = None
-    verification_status: Optional[str] = None
-    save_as: Optional[str] = None
-    keyword_packs: Optional[list[str]] = None
+    cursor: str | None = None
+    sources: list[str] | None = None
+    metadata_filters: list[str] | None = None
+    review_status: str | None = None
+    verification_status: str | None = None
+    save_as: str | None = None
+    keyword_packs: list[str] | None = None
 
 
 class CaseDbReviewRequest(BaseModel):
@@ -459,30 +498,30 @@ class CaseDbReviewRequest(BaseModel):
     case_id: str = Field(..., min_length=1)
     target_type: str = Field(..., min_length=1)
     target_id: str = Field(..., min_length=1)
-    status: Optional[str] = None
-    verification_status: Optional[str] = None
-    tags: Optional[list[str]] = None
-    note: Optional[str] = None
-    reviewer: Optional[str] = None
-    assignee: Optional[str] = None
-    priority: Optional[str] = None
-    due_at: Optional[str] = None
-    include_in_report: Optional[bool] = None
+    status: str | None = None
+    verification_status: str | None = None
+    tags: list[str] | None = None
+    note: str | None = None
+    reviewer: str | None = None
+    assignee: str | None = None
+    priority: str | None = None
+    due_at: str | None = None
+    include_in_report: bool | None = None
 
 
 class CaseDbReviewBatchRequest(BaseModel):
     database: str = Field(..., min_length=1)
     case_id: str = Field(..., min_length=1)
     targets: list[dict[str, str]] = Field(..., min_length=1)
-    status: Optional[str] = None
-    verification_status: Optional[str] = None
-    tags: Optional[list[str]] = None
-    note: Optional[str] = None
-    reviewer: Optional[str] = None
-    assignee: Optional[str] = None
-    priority: Optional[str] = None
-    due_at: Optional[str] = None
-    include_in_report: Optional[bool] = None
+    status: str | None = None
+    verification_status: str | None = None
+    tags: list[str] | None = None
+    note: str | None = None
+    reviewer: str | None = None
+    assignee: str | None = None
+    priority: str | None = None
+    due_at: str | None = None
+    include_in_report: bool | None = None
 
 
 class CaseDbReportExportRequest(BaseModel):
@@ -498,10 +537,10 @@ class CaseDbSavedSearchRequest(BaseModel):
     name: str = Field(..., min_length=1)
     keywords: list[str] = Field(..., min_length=1)
     limit: int = Field(100, ge=1, le=1000)
-    sources: Optional[list[str]] = None
-    metadata_filters: Optional[list[str]] = None
-    review_status: Optional[str] = None
-    verification_status: Optional[str] = None
+    sources: list[str] | None = None
+    metadata_filters: list[str] | None = None
+    review_status: str | None = None
+    verification_status: str | None = None
     created_by: str = ""
 
 
@@ -511,10 +550,10 @@ class CaseDbSavedSearchListRequest(BaseModel):
 
 
 class CaseCatalogAddRunRequest(BaseModel):
-    catalog: Optional[str] = None
+    catalog: str | None = None
     run_output: str = Field(..., min_length=1)
     case_id: str = Field(..., min_length=1)
-    name: Optional[str] = None
+    name: str | None = None
     description: str = ""
     examiner: str = ""
     organization: str = ""
@@ -527,7 +566,7 @@ class EvidenceIdentifyRequest(BaseModel):
 class CollectPlanRequest(BaseModel):
     root: str = Field(..., min_length=1)
     profile: str = "intrusion"
-    input_kind: Optional[str] = None
+    input_kind: str | None = None
 
 
 LOCAL_API_HOSTS = {"127.0.0.1", "localhost", "::1", "testserver"}
@@ -608,25 +647,25 @@ def create_app(job_store: RunJobStore | None = None, auth_token: str | None = No
             )
 
     @api.get("/api/health")
-    def health() -> Dict[str, str]:
+    def health() -> dict[str, str]:
         return {"status": "ok"}
 
     @api.get("/api/workbench/smoke-contract")
-    def workbench_smoke_contract() -> Dict[str, object]:
+    def workbench_smoke_contract() -> dict[str, object]:
         return build_workbench_smoke_contract()
 
     @api.get("/api/workbench/large-result-evidence")
-    def workbench_large_result_evidence(record_count: int = Query(100_000, ge=1, le=10_000_000)) -> Dict[str, object]:
+    def workbench_large_result_evidence(record_count: int = Query(100_000, ge=1, le=10_000_000)) -> dict[str, object]:
         return build_workbench_large_result_evidence(record_count=record_count)
 
     @api.get("/api/commercial-readiness")
     def commercial_readiness(
         next_gate: str = Query("commercial_grade", min_length=1, max_length=64),
         limit: int = Query(8, ge=1, le=50),
-        validation_package: Optional[str] = Query(default=None, max_length=4096),
-        mac_first_evidence: Optional[str] = Query(default=None, max_length=4096),
+        validation_package: str | None = Query(default=None, max_length=4096),
+        mac_first_evidence: str | None = Query(default=None, max_length=4096),
         include_internal_validation: bool = Query(False),
-    ) -> Dict[str, object]:
+    ) -> dict[str, object]:
         try:
             validation_package_path = resolve_commercial_readiness_validation_package(
                 validation_package,
@@ -650,37 +689,37 @@ def create_app(job_store: RunJobStore | None = None, auth_token: str | None = No
         )
 
     @api.get("/api/doctor")
-    def doctor() -> Dict[str, object]:
+    def doctor() -> dict[str, object]:
         return run_doctor(include_port_check=False)
 
     @api.get("/api/crash-reports")
-    def crash_reports(limit: int = Query(50, ge=1, le=500)) -> Dict[str, object]:
+    def crash_reports(limit: int = Query(50, ge=1, le=500)) -> dict[str, object]:
         return list_crash_reports(limit=limit)
 
     @api.get("/api/crash-reports/{crash_id}")
-    def crash_report_detail(crash_id: str) -> Dict[str, object]:
+    def crash_report_detail(crash_id: str) -> dict[str, object]:
         try:
             return read_crash_report(crash_id)
         except FileNotFoundError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
 
     @api.post("/api/crash-reports/{crash_id}/export")
-    def crash_report_export(crash_id: str) -> Dict[str, object]:
+    def crash_report_export(crash_id: str) -> dict[str, object]:
         try:
             return export_crash_report_bundle(crash_id)
         except FileNotFoundError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
 
     @api.get("/api/enterprise/policy")
-    def enterprise_policy() -> Dict[str, object]:
+    def enterprise_policy() -> dict[str, object]:
         return build_enterprise_policy()
 
     @api.get("/api/evidence/formats")
-    def evidence_formats() -> Dict[str, object]:
+    def evidence_formats() -> dict[str, object]:
         return {"formats": supported_evidence_formats()}
 
     @api.post("/api/evidence/identify")
-    def identify_evidence_path(request: EvidenceIdentifyRequest) -> Dict[str, object]:
+    def identify_evidence_path(request: EvidenceIdentifyRequest) -> dict[str, object]:
         try:
             result = identify_evidence(Path(request.path))
             return {
@@ -692,11 +731,11 @@ def create_app(job_store: RunJobStore | None = None, auth_token: str | None = No
             raise HTTPException(status_code=400, detail=str(exc))
 
     @api.get("/api/collect/profiles")
-    def collect_profiles() -> Dict[str, object]:
+    def collect_profiles() -> dict[str, object]:
         return {"profiles": list(supported_collect_profiles())}
 
     @api.get("/api/keyword-packs")
-    def keyword_packs() -> Dict[str, object]:
+    def keyword_packs() -> dict[str, object]:
         return {
             "command": "keyword-packs",
             "packs": list_keyword_packs(),
@@ -704,7 +743,7 @@ def create_app(job_store: RunJobStore | None = None, auth_token: str | None = No
         }
 
     @api.post("/api/collect/plan")
-    def collect_plan(request: CollectPlanRequest) -> Dict[str, object]:
+    def collect_plan(request: CollectPlanRequest) -> dict[str, object]:
         try:
             return build_collect_plan(
                 Path(request.root).expanduser().resolve(),
@@ -715,7 +754,7 @@ def create_app(job_store: RunJobStore | None = None, auth_token: str | None = No
             raise HTTPException(status_code=400, detail=str(exc))
 
     @api.post("/api/sample-case/run", status_code=201)
-    def run_sample_case(request: SampleCaseRunRequest) -> Dict[str, object]:
+    def run_sample_case(request: SampleCaseRunRequest) -> dict[str, object]:
         try:
             output_dir = Path(request.output_dir).expanduser() if request.output_dir else Path.home() / ".rapidtriage" / "sample-case"
             sample_payload = run_sample_workflow(
@@ -734,7 +773,7 @@ def create_app(job_store: RunJobStore | None = None, auth_token: str | None = No
             raise HTTPException(status_code=400, detail=str(exc))
 
     @api.post("/api/case-db/import-run")
-    def import_run_to_case_db(request: CaseDbImportRunRequest) -> Dict[str, object]:
+    def import_run_to_case_db(request: CaseDbImportRunRequest) -> dict[str, object]:
         try:
             database = open_case_database(Path(request.database))
             return database.import_run_output(Path(request.run_output), case_id=request.case_id, case_name=request.name)
@@ -742,7 +781,7 @@ def create_app(job_store: RunJobStore | None = None, auth_token: str | None = No
             raise HTTPException(status_code=400, detail=str(exc))
 
     @api.post("/api/runs/{run_id}/case-db/ensure")
-    def ensure_run_case_db(run_id: str, request: RunCaseDbEnsureRequest) -> Dict[str, object]:
+    def ensure_run_case_db(run_id: str, request: RunCaseDbEnsureRequest) -> dict[str, object]:
         job = get_job(store, run_id)
         if job.summary is None:
             raise HTTPException(status_code=409, detail="run is not completed")
@@ -773,7 +812,7 @@ def create_app(job_store: RunJobStore | None = None, auth_token: str | None = No
             raise HTTPException(status_code=400, detail=str(exc))
 
     @api.post("/api/case-db/search")
-    def search_case_db(request: CaseDbSearchRequest) -> Dict[str, object]:
+    def search_case_db(request: CaseDbSearchRequest) -> dict[str, object]:
         try:
             keywords = resolve_keyword_packs(request.keywords, pack_names=request.keyword_packs)
             database = open_case_database(Path(request.database))
@@ -804,7 +843,7 @@ def create_app(job_store: RunJobStore | None = None, auth_token: str | None = No
             raise HTTPException(status_code=400, detail=str(exc))
 
     @api.post("/api/case-db/review")
-    def mark_case_db_review(request: CaseDbReviewRequest) -> Dict[str, object]:
+    def mark_case_db_review(request: CaseDbReviewRequest) -> dict[str, object]:
         try:
             database = open_case_database(Path(request.database))
             return database.mark_review(
@@ -825,7 +864,7 @@ def create_app(job_store: RunJobStore | None = None, auth_token: str | None = No
             raise HTTPException(status_code=400, detail=str(exc))
 
     @api.post("/api/case-db/review-batch")
-    def mark_case_db_reviews_batch(request: CaseDbReviewBatchRequest) -> Dict[str, object]:
+    def mark_case_db_reviews_batch(request: CaseDbReviewBatchRequest) -> dict[str, object]:
         try:
             database = open_case_database(Path(request.database))
             return database.mark_reviews_batch(
@@ -845,7 +884,7 @@ def create_app(job_store: RunJobStore | None = None, auth_token: str | None = No
             raise HTTPException(status_code=400, detail=str(exc))
 
     @api.post("/api/case-db/report-export")
-    def export_case_db_report_items(request: CaseDbReportExportRequest) -> Dict[str, object]:
+    def export_case_db_report_items(request: CaseDbReportExportRequest) -> dict[str, object]:
         try:
             database = open_case_database(Path(request.database))
             return database.export_reviewed_items(
@@ -857,7 +896,7 @@ def create_app(job_store: RunJobStore | None = None, auth_token: str | None = No
             raise HTTPException(status_code=400, detail=str(exc))
 
     @api.post("/api/case-db/saved-searches")
-    def save_case_db_search(request: CaseDbSavedSearchRequest) -> Dict[str, object]:
+    def save_case_db_search(request: CaseDbSavedSearchRequest) -> dict[str, object]:
         try:
             database = open_case_database(Path(request.database))
             return database.save_search(
@@ -875,7 +914,7 @@ def create_app(job_store: RunJobStore | None = None, auth_token: str | None = No
             raise HTTPException(status_code=400, detail=str(exc))
 
     @api.post("/api/case-db/saved-searches/list")
-    def list_case_db_saved_searches(request: CaseDbSavedSearchListRequest) -> Dict[str, object]:
+    def list_case_db_saved_searches(request: CaseDbSavedSearchListRequest) -> dict[str, object]:
         try:
             database = open_case_database(Path(request.database))
             return {
@@ -888,7 +927,7 @@ def create_app(job_store: RunJobStore | None = None, auth_token: str | None = No
             raise HTTPException(status_code=400, detail=str(exc))
 
     @api.get("/api/case-catalog")
-    def list_case_catalog(catalog: Optional[str] = Query(None)) -> Dict[str, object]:
+    def list_case_catalog(catalog: str | None = Query(None)) -> dict[str, object]:
         try:
             case_catalog = CaseCatalog(Path(catalog).expanduser().resolve() if catalog else default_case_catalog_path())
             return {"catalog": str(case_catalog.path), "cases": case_catalog.list_cases()}
@@ -896,7 +935,7 @@ def create_app(job_store: RunJobStore | None = None, auth_token: str | None = No
             raise HTTPException(status_code=400, detail=str(exc))
 
     @api.post("/api/case-catalog/add-run")
-    def add_case_catalog_run(request: CaseCatalogAddRunRequest) -> Dict[str, object]:
+    def add_case_catalog_run(request: CaseCatalogAddRunRequest) -> dict[str, object]:
         try:
             case_catalog = CaseCatalog(Path(request.catalog).expanduser().resolve() if request.catalog else default_case_catalog_path())
             case = case_catalog.add_run(
@@ -912,7 +951,7 @@ def create_app(job_store: RunJobStore | None = None, auth_token: str | None = No
             raise HTTPException(status_code=400, detail=str(exc))
 
     @api.post("/api/runs", status_code=202)
-    def create_run(request: RunCreateRequest) -> Dict[str, Any]:
+    def create_run(request: RunCreateRequest) -> dict[str, Any]:
         validate_run_evidence_source(request.root)
         run_request = RunRequest(
             root=request.root,
@@ -936,7 +975,7 @@ def create_app(job_store: RunJobStore | None = None, auth_token: str | None = No
         return job.to_dict(include_summary=request.wait)
 
     @api.post("/api/runs/import", status_code=201)
-    def import_run(request: RunImportRequest) -> Dict[str, Any]:
+    def import_run(request: RunImportRequest) -> dict[str, Any]:
         try:
             job = store.import_completed_run(request.output_dir)
         except (FileNotFoundError, OSError, json.JSONDecodeError, ValueError) as exc:
@@ -944,15 +983,15 @@ def create_app(job_store: RunJobStore | None = None, auth_token: str | None = No
         return job.to_dict(include_summary=True)
 
     @api.get("/api/runs")
-    def list_runs() -> Dict[str, Any]:
+    def list_runs() -> dict[str, Any]:
         return {"runs": [job.to_dict() for job in store.list()]}
 
     @api.get("/api/forensic-capabilities")
-    def get_forensic_capabilities() -> Dict[str, object]:
+    def get_forensic_capabilities() -> dict[str, object]:
         return build_visible_capability_response()
 
     @api.get("/api/runs/{run_id}")
-    def get_run(run_id: str) -> Dict[str, Any]:
+    def get_run(run_id: str) -> dict[str, Any]:
         return get_job_payload(store, run_id, include_summary=True)
 
     @api.delete("/api/runs/{run_id}", status_code=204)
@@ -963,14 +1002,14 @@ def create_app(job_store: RunJobStore | None = None, auth_token: str | None = No
             raise HTTPException(status_code=404, detail="run not found")
 
     @api.post("/api/runs/{run_id}/cancel")
-    def cancel_run(run_id: str) -> Dict[str, Any]:
+    def cancel_run(run_id: str) -> dict[str, Any]:
         try:
             return store.cancel(run_id).to_dict(include_summary=True)
         except KeyError:
             raise HTTPException(status_code=404, detail="run not found")
 
     @api.post("/api/runs/{run_id}/retry", status_code=202)
-    def retry_run(run_id: str) -> Dict[str, Any]:
+    def retry_run(run_id: str) -> dict[str, Any]:
         try:
             return store.retry(run_id).to_dict(include_summary=True)
         except KeyError:
@@ -979,14 +1018,14 @@ def create_app(job_store: RunJobStore | None = None, auth_token: str | None = No
             raise HTTPException(status_code=409, detail=str(exc))
 
     @api.get("/api/runs/{run_id}/summary")
-    def get_run_summary(run_id: str) -> Dict[str, object]:
+    def get_run_summary(run_id: str) -> dict[str, object]:
         job = get_job(store, run_id)
         if job.summary is None:
             raise HTTPException(status_code=409, detail="run is not completed")
         return job.summary
 
     @api.get("/api/runs/{run_id}/capabilities")
-    def get_run_capabilities(run_id: str) -> Dict[str, object]:
+    def get_run_capabilities(run_id: str) -> dict[str, object]:
         job = get_job(store, run_id)
         if job.summary is None:
             raise HTTPException(status_code=409, detail="run is not completed")
@@ -996,14 +1035,14 @@ def create_app(job_store: RunJobStore | None = None, auth_token: str | None = No
         )
 
     @api.get("/api/runs/{run_id}/viewer-workflow-validation")
-    def get_run_viewer_workflow_validation(run_id: str) -> Dict[str, object]:
+    def get_run_viewer_workflow_validation(run_id: str) -> dict[str, object]:
         job = get_job(store, run_id)
         if job.summary is None:
             raise HTTPException(status_code=409, detail="run is not completed")
         return build_run_viewer_workflow_validation(store, run_id, job.summary)
 
     @api.get("/api/runs/{run_id}/outputs/{output_name}")
-    def get_run_output(run_id: str, output_name: str) -> Dict[str, object]:
+    def get_run_output(run_id: str, output_name: str) -> dict[str, object]:
         try:
             return store.read_output(run_id, output_name)
         except KeyError:
@@ -1016,12 +1055,12 @@ def create_app(job_store: RunJobStore | None = None, auth_token: str | None = No
             raise HTTPException(status_code=404, detail=str(exc))
 
     @api.get("/api/runs/{run_id}/outputs/{output_name}/preview")
-    def preview_run_output(run_id: str, output_name: str) -> Dict[str, object]:
+    def preview_run_output(run_id: str, output_name: str) -> dict[str, object]:
         path = get_output_path(store, run_id, output_name)
         return build_run_output_preview(run_id=run_id, output_name=output_name, output_path=path)
 
     @api.get("/api/runs/{run_id}/output-files")
-    def get_run_output_files(run_id: str) -> Dict[str, object]:
+    def get_run_output_files(run_id: str) -> dict[str, object]:
         try:
             return {"files": store.output_files(run_id)}
         except KeyError:
@@ -1042,7 +1081,7 @@ def create_app(job_store: RunJobStore | None = None, auth_token: str | None = No
         return FileResponse(source_path, filename=source_path.name)
 
     @api.get("/api/runs/{run_id}/source-preview")
-    def preview_source_file(run_id: str, path: str = Query(..., min_length=1)) -> Dict[str, object]:
+    def preview_source_file(run_id: str, path: str = Query(..., min_length=1)) -> dict[str, object]:
         archive_request = parse_source_preview_archive_request(path)
         if archive_request:
             source_path = resolve_allowed_source_file(store, run_id, archive_request["archive_path"])
@@ -1057,7 +1096,7 @@ def create_app(job_store: RunJobStore | None = None, auth_token: str | None = No
         offset: int = Query(0, ge=0),
         length: int = Query(256, ge=1, le=HEX_RANGE_EXPORT_MAX_BYTES),
         include_hashes: bool = False,
-    ) -> Dict[str, object]:
+    ) -> dict[str, object]:
         source_path = resolve_allowed_source_file(store, run_id, path)
         return build_hex_range_citation_package(
             run_id=run_id,
@@ -1074,11 +1113,11 @@ def create_app(job_store: RunJobStore | None = None, auth_token: str | None = No
         table: str = Query(..., min_length=1),
         offset: int = Query(0, ge=0),
         limit: int = Query(100, ge=1, le=SQLITE_TABLE_PAGE_MAX_ROWS),
-        where_column: Optional[str] = Query(default=None, min_length=1),
-        where_contains: Optional[str] = Query(default=None, min_length=1),
-        order_by: Optional[str] = Query(default=None, min_length=1),
+        where_column: str | None = Query(default=None, min_length=1),
+        where_contains: str | None = Query(default=None, min_length=1),
+        order_by: str | None = Query(default=None, min_length=1),
         descending: bool = False,
-    ) -> Dict[str, object]:
+    ) -> dict[str, object]:
         source_path = resolve_allowed_source_file(store, run_id, path)
         if not is_sqlite_candidate(source_path):
             raise HTTPException(status_code=400, detail="source file is not a supported SQLite database")
@@ -1099,7 +1138,7 @@ def create_app(job_store: RunJobStore | None = None, auth_token: str | None = No
         run_id: str,
         path: str = Query(..., min_length=1),
         max_frames: int = Query(20, ge=1, le=100),
-    ) -> Dict[str, object]:
+    ) -> dict[str, object]:
         source_path = resolve_allowed_source_file(store, run_id, path)
         if not is_sqlite_candidate(source_path):
             raise HTTPException(status_code=400, detail="source file is not a supported SQLite database")
@@ -1125,7 +1164,7 @@ def create_app(job_store: RunJobStore | None = None, auth_token: str | None = No
         message_index: int = Query(1, ge=1),
         attachment_index: int = Query(1, ge=1),
         include_content: bool = False,
-    ) -> Dict[str, object]:
+    ) -> dict[str, object]:
         source_path = resolve_allowed_source_file(store, run_id, path)
         suffix = source_path.suffix.lower()
         if suffix not in {".eml", ".mbox"}:
@@ -1145,8 +1184,8 @@ def create_app(job_store: RunJobStore | None = None, auth_token: str | None = No
         path: str = Query(..., min_length=1),
         offset: int = Query(0, ge=0),
         limit: int = Query(IMAGE_GALLERY_DEFAULT_LIMIT, ge=1, le=IMAGE_GALLERY_MAX_ITEMS),
-        similarity_bucket: Optional[str] = Query(default=None, min_length=1),
-    ) -> Dict[str, object]:
+        similarity_bucket: str | None = Query(default=None, min_length=1),
+    ) -> dict[str, object]:
         source_path = resolve_allowed_source_file(store, run_id, path)
         if not is_image_preview_candidate(source_path):
             raise HTTPException(status_code=400, detail="source file is not a supported image preview")
@@ -1165,7 +1204,7 @@ def create_app(job_store: RunJobStore | None = None, auth_token: str | None = No
         sidecar_index: int = Query(1, ge=1),
         cue_index: int = Query(1, ge=1),
         include_source_hashes: bool = False,
-    ) -> Dict[str, object]:
+    ) -> dict[str, object]:
         source_path = resolve_allowed_source_file(store, run_id, path)
         mime_type = mimetypes.guess_type(source_path.name)[0] or ""
         if not mime_type.startswith(("audio/", "video/")):
@@ -1184,7 +1223,7 @@ def create_app(job_store: RunJobStore | None = None, auth_token: str | None = No
         path: str = Query(..., min_length=1),
         max_items: int = Query(SOURCE_OCR_QUEUE_DEFAULT_MAX_ITEMS, ge=1, le=1000),
         retry_failures: bool = False,
-    ) -> Dict[str, object]:
+    ) -> dict[str, object]:
         source_path = resolve_allowed_source_file(store, run_id, path)
         if not is_image_preview_candidate(source_path):
             raise HTTPException(status_code=400, detail="source file is not a supported image preview")
@@ -1200,7 +1239,7 @@ def create_app(job_store: RunJobStore | None = None, auth_token: str | None = No
         run_id: str,
         path: str = Query(..., min_length=1),
         include_text: bool = True,
-    ) -> Dict[str, object]:
+    ) -> dict[str, object]:
         source_path = resolve_allowed_source_file(store, run_id, path)
         if not is_image_preview_candidate(source_path):
             raise HTTPException(status_code=400, detail="source file is not a supported image preview")
@@ -1217,9 +1256,9 @@ def create_app(job_store: RunJobStore | None = None, auth_token: str | None = No
         keyword: list[str] = Query(..., min_length=1),
         limit: int = Query(100, ge=1, le=500),
         context: int = Query(120, ge=20, le=500),
-        sqlite_resume_token: Optional[str] = Query(default=None),
-        file_resume_token: Optional[str] = Query(default=None),
-    ) -> Dict[str, object]:
+        sqlite_resume_token: str | None = Query(default=None),
+        file_resume_token: str | None = Query(default=None),
+    ) -> dict[str, object]:
         archive_request = parse_source_preview_archive_request(path)
         if archive_request:
             source_path = resolve_allowed_source_file(store, run_id, archive_request["archive_path"])
@@ -1247,8 +1286,8 @@ def create_app(job_store: RunJobStore | None = None, auth_token: str | None = No
         run_id: str,
         offset: int = Query(0, ge=0),
         limit: int = Query(0, ge=0, le=1000),
-        cursor: Optional[str] = Query(default=None),
-    ) -> Dict[str, object]:
+        cursor: str | None = Query(default=None),
+    ) -> dict[str, object]:
         payload = get_named_output(store, run_id, "timeline")
         return paginate_payload(payload, "events", offset=offset, limit=limit, cursor=cursor)
 
@@ -1257,8 +1296,8 @@ def create_app(job_store: RunJobStore | None = None, auth_token: str | None = No
         run_id: str,
         offset: int = Query(0, ge=0),
         limit: int = Query(0, ge=0, le=1000),
-        cursor: Optional[str] = Query(default=None),
-    ) -> Dict[str, object]:
+        cursor: str | None = Query(default=None),
+    ) -> dict[str, object]:
         payload = get_named_output(store, run_id, "indicators")
         return paginate_payload(payload, "indicators", offset=offset, limit=limit, cursor=cursor)
 
@@ -1268,7 +1307,7 @@ def create_app(job_store: RunJobStore | None = None, auth_token: str | None = No
         ti_feed: list[str] = Query(default=[]),
         include_unmatched: bool = Query(False),
         limit: int = Query(250, ge=1, le=1000),
-    ) -> Dict[str, object]:
+    ) -> dict[str, object]:
         payload = get_named_output(store, run_id, "indicators")
         try:
             return build_indicator_ti_enrichment_package(
@@ -1285,8 +1324,8 @@ def create_app(job_store: RunJobStore | None = None, auth_token: str | None = No
         run_id: str,
         offset: int = Query(0, ge=0),
         limit: int = Query(0, ge=0, le=1000),
-        cursor: Optional[str] = Query(default=None),
-    ) -> Dict[str, object]:
+        cursor: str | None = Query(default=None),
+    ) -> dict[str, object]:
         job = get_job(store, run_id)
         if job.summary is None:
             raise HTTPException(status_code=409, detail="run is not completed")
@@ -1318,8 +1357,8 @@ def create_app(job_store: RunJobStore | None = None, auth_token: str | None = No
         run_id: str,
         offset: int = Query(0, ge=0),
         limit: int = Query(0, ge=0, le=1000),
-        cursor: Optional[str] = Query(default=None),
-    ) -> Dict[str, object]:
+        cursor: str | None = Query(default=None),
+    ) -> dict[str, object]:
         payload = get_named_output(store, run_id, "files")
         return paginate_payload(payload, "candidates", offset=offset, limit=limit, cursor=cursor)
 
@@ -1328,8 +1367,8 @@ def create_app(job_store: RunJobStore | None = None, auth_token: str | None = No
         run_id: str,
         offset: int = Query(0, ge=0),
         limit: int = Query(0, ge=0, le=1000),
-        cursor: Optional[str] = Query(default=None),
-    ) -> Dict[str, object]:
+        cursor: str | None = Query(default=None),
+    ) -> dict[str, object]:
         payload = get_named_output(store, run_id, "docs")
         return paginate_payload(payload, "results", offset=offset, limit=limit, cursor=cursor, omit_fields=("candidates", "manifest"))
 
@@ -1338,7 +1377,7 @@ def create_app(job_store: RunJobStore | None = None, auth_token: str | None = No
         run_id: str,
         keyword: list[str] = Query(..., min_length=1),
         limit: int = Query(500, ge=1, le=5000),
-    ) -> Dict[str, object]:
+    ) -> dict[str, object]:
         index_path = get_output_path(store, run_id, "docs_index")
         try:
             payload = query_docs_index(index_path, keyword, limit=limit)
@@ -1419,14 +1458,14 @@ def create_app(job_store: RunJobStore | None = None, auth_token: str | None = No
         limit: int = Query(500, ge=1, le=1000),
         source: list[str] = Query(default=[]),
         extension: list[str] = Query(default=[]),
-        path_contains: Optional[str] = Query(default=None),
+        path_contains: str | None = Query(default=None),
         analysis: bool = True,
         search_mode: str = Query("exact", pattern="^(exact|fuzzy|regex)$"),
         fuzzy_distance: int = Query(1, ge=0, le=2),
         proximity_window: int = Query(0, ge=0, le=100),
         hide_known_good: bool = False,
         keyword_pack: list[str] = Query(default=[]),
-    ) -> Dict[str, object]:
+    ) -> dict[str, object]:
         job = get_job(store, run_id)
         if job.summary is None:
             raise HTTPException(status_code=409, detail="run is not completed")
@@ -1458,7 +1497,7 @@ def create_app(job_store: RunJobStore | None = None, auth_token: str | None = No
             raise HTTPException(status_code=400, detail=str(exc))
 
     @api.get("/api/runs/{run_id}/source-metadata")
-    def source_metadata(run_id: str, path: str = Query(..., min_length=1), hash: bool = False) -> Dict[str, object]:
+    def source_metadata(run_id: str, path: str = Query(..., min_length=1), hash: bool = False) -> dict[str, object]:
         source_path = resolve_allowed_source_file(store, run_id, path)
         return build_source_metadata(source_path, include_hashes=hash)
 
@@ -1468,7 +1507,7 @@ def create_app(job_store: RunJobStore | None = None, auth_token: str | None = No
         return path.read_text(encoding="utf-8")
 
     @api.get("/api/runs/{run_id}/case")
-    def get_run_case(run_id: str) -> Dict[str, object]:
+    def get_run_case(run_id: str) -> dict[str, object]:
         case_path = default_case_path(store, run_id)
         if not case_path.is_file():
             return {"exists": False, "case_path": str(case_path), "case": None}
@@ -1482,7 +1521,7 @@ def create_app(job_store: RunJobStore | None = None, auth_token: str | None = No
         run_id: str,
         include_all: bool = False,
         max_items: int = Query(500, ge=1, le=5000),
-    ) -> Dict[str, object]:
+    ) -> dict[str, object]:
         manifest_path = default_submission_manifest_path(store, run_id)
         manifest = build_run_submission_manifest(
             store,
@@ -1503,7 +1542,7 @@ def create_app(job_store: RunJobStore | None = None, auth_token: str | None = No
         return FileResponse(manifest_path, filename=manifest_path.name)
 
     @api.get("/api/runs/{run_id}/validation-package")
-    def get_run_validation_package(run_id: str) -> Dict[str, object]:
+    def get_run_validation_package(run_id: str) -> dict[str, object]:
         package_path = default_run_validation_package_path(store, run_id)
         package = build_run_validation_package(store, run_id)
         write_json_file(package_path, package)
@@ -1519,7 +1558,7 @@ def create_app(job_store: RunJobStore | None = None, auth_token: str | None = No
         return FileResponse(package_path, filename=package_path.name)
 
     @api.post("/api/runs/{run_id}/case-report")
-    def create_case_report(run_id: str, request: CaseReportCreateRequest) -> Dict[str, object]:
+    def create_case_report(run_id: str, request: CaseReportCreateRequest) -> dict[str, object]:
         report_path = default_case_report_path(store, run_id)
         markdown = build_run_case_report(store, run_id, request)
         exports = write_case_report_exports(markdown, report_path)
@@ -1561,7 +1600,7 @@ def create_app(job_store: RunJobStore | None = None, auth_token: str | None = No
         return FileResponse(path, filename=path.name, media_type=media_types[normalized])
 
     @api.post("/api/runs/{run_id}/reviewer-bundle")
-    def create_reviewer_bundle(run_id: str, request: ReviewerBundleCreateRequest) -> Dict[str, object]:
+    def create_reviewer_bundle(run_id: str, request: ReviewerBundleCreateRequest) -> dict[str, object]:
         job = get_job(store, run_id)
         if job.summary is None:
             raise HTTPException(status_code=409, detail="run is not completed")
@@ -1603,7 +1642,7 @@ def create_app(job_store: RunJobStore | None = None, auth_token: str | None = No
         return FileResponse(archive, filename=archive.name, media_type="application/zip")
 
     @api.post("/api/runs/{run_id}/bookmarks")
-    def create_run_bookmark(run_id: str, request: BookmarkCreateRequest) -> Dict[str, object]:
+    def create_run_bookmark(run_id: str, request: BookmarkCreateRequest) -> dict[str, object]:
         source_name = normalize_bookmark_source(request.source)
         source_path = get_output_path(store, run_id, source_name)
         case_path = default_case_path(store, run_id)
@@ -1683,11 +1722,11 @@ def validate_run_evidence_source(raw_root: str) -> None:
         )
 
 
-def get_job_payload(store: RunJobStore, run_id: str, *, include_summary: bool) -> Dict[str, object]:
+def get_job_payload(store: RunJobStore, run_id: str, *, include_summary: bool) -> dict[str, object]:
     return get_job(store, run_id).to_dict(include_summary=include_summary)
 
 
-def get_named_output(store: RunJobStore, run_id: str, output_name: str) -> Dict[str, object]:
+def get_named_output(store: RunJobStore, run_id: str, output_name: str) -> dict[str, object]:
     try:
         return store.read_output(run_id, output_name)
     except KeyError:
@@ -1704,11 +1743,11 @@ def read_run_artifacts_for_capabilities(
     store: RunJobStore,
     run_id: str,
     summary: Mapping[str, object],
-) -> Dict[str, object]:
+) -> dict[str, object]:
     outputs = summary.get("outputs")
     if not isinstance(outputs, Mapping):
         return {}
-    artifacts: Dict[str, object] = {}
+    artifacts: dict[str, object] = {}
     for output_name in outputs:
         name = str(output_name)
         if not name.startswith("artifacts_"):
@@ -1727,7 +1766,7 @@ def build_run_viewer_workflow_validation(
     store: RunJobStore,
     run_id: str,
     run_summary: Mapping[str, object],
-) -> Dict[str, object]:
+) -> dict[str, object]:
     """Summarize source-viewer route coverage for one completed run."""
     candidates, candidate_diagnostics = collect_run_viewer_workflow_source_candidates(
         store,
@@ -1751,7 +1790,7 @@ def build_run_viewer_workflow_validation(
     smoke_contract = build_workbench_smoke_contract()
     large_result_evidence = build_workbench_large_result_evidence(record_count=100_000)
     core_accuracy_gates = build_run_viewer_workflow_accuracy_gates(item_coverage)
-    payload: Dict[str, object] = {
+    payload: dict[str, object] = {
         "command": "viewer-workflow-validation",
         "profile_version": RUN_VIEWER_WORKFLOW_VALIDATION_VERSION,
         "commercial_batch_id": "commercial-uplift-051-060",
@@ -1982,7 +2021,7 @@ def build_run_viewer_source_validation_row(
     run_id: str,
     source_path: Path,
     allowed_roots: Sequence[Path],
-) -> Dict[str, object]:
+) -> dict[str, object]:
     suffix = source_path.suffix.lower()
     mime_type = mimetypes.guess_type(source_path.name)[0] or "application/octet-stream"
     viewer_family = source_viewer_family(source_path, suffix=suffix, mime_type=mime_type)
@@ -2158,7 +2197,7 @@ def first_email_attachment_count(source_path: Path) -> int:
     return 0
 
 
-def build_run_viewer_route_coverage(source_rows: Sequence[Mapping[str, object]]) -> Dict[str, object]:
+def build_run_viewer_route_coverage(source_rows: Sequence[Mapping[str, object]]) -> dict[str, object]:
     coverage = {
         route_id: {
             "route_id": route_id,
@@ -2273,14 +2312,14 @@ def build_run_viewer_workflow_accuracy_gates(
 
 
 def paginate_payload(
-    payload: Dict[str, object],
+    payload: dict[str, object],
     collection_name: str,
     *,
     offset: int,
     limit: int,
     cursor: str | None = None,
     omit_fields: tuple[str, ...] = (),
-) -> Dict[str, object]:
+) -> dict[str, object]:
     if limit <= 0:
         return payload
     if cursor:
@@ -2417,7 +2456,7 @@ def build_pagination_cursor_manifest(
         "has_more": bool(has_more),
     }
     page_window_id = hashlib.sha256(json.dumps(page_window_core, sort_keys=True).encode("utf-8")).hexdigest()
-    endpoint_id = hashlib.sha256(f"pagination:{collection_name}".encode("utf-8")).hexdigest()
+    endpoint_id = hashlib.sha256(f"pagination:{collection_name}".encode()).hexdigest()
     manifest_core = {
         "profile": "pagination-cursor-manifest-v1",
         "profile_version": "pagination-cursor-manifest-v1",
@@ -3238,7 +3277,7 @@ def get_output_path(store: RunJobStore, run_id: str, output_name: str) -> Path:
         raise HTTPException(status_code=404, detail=str(exc))
 
 
-def build_run_output_preview(*, run_id: str, output_name: str, output_path: Path) -> Dict[str, object]:
+def build_run_output_preview(*, run_id: str, output_name: str, output_path: Path) -> dict[str, object]:
     payload = build_source_preview(run_id, output_path)
     preview_limit = int(payload.get("viewer_sandbox", {}).get("max_inline_text_chars") or 20000)
     payload.update(
@@ -3328,7 +3367,7 @@ def parse_source_preview_archive_request(raw_path: str) -> dict[str, str] | None
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
-def allowed_source_roots(summary: Dict[str, object]) -> list[Path]:
+def allowed_source_roots(summary: dict[str, object]) -> list[Path]:
     roots: list[Path] = []
     for key in ("root", "scan_scope_root", "output_dir"):
         value = summary.get(key)
@@ -3357,7 +3396,7 @@ def build_run_submission_manifest(
     *,
     include_all: bool,
     max_items: int,
-) -> Dict[str, object]:
+) -> dict[str, object]:
     job = get_job(store, run_id)
     if job.summary is None:
         raise HTTPException(status_code=409, detail="run is not completed")
@@ -3433,7 +3472,7 @@ def build_run_case_report(
     )
 
 
-def build_run_validation_package(store: RunJobStore, run_id: str) -> Dict[str, object]:
+def build_run_validation_package(store: RunJobStore, run_id: str) -> dict[str, object]:
     job = get_job(store, run_id)
     if job.summary is None:
         raise HTTPException(status_code=409, detail="run is not completed")
@@ -3490,7 +3529,7 @@ def build_run_validation_package(store: RunJobStore, run_id: str) -> Dict[str, o
         diff_inventory=diff_inventory,
         review_status=review_status,
     )
-    package_core: Dict[str, object] = {
+    package_core: dict[str, object] = {
         "command": "run.validation-package",
         "profile_version": "run-validation-package-v1",
         "immediate_queue_item": 9,
@@ -3561,7 +3600,7 @@ def build_commercial_readiness_api_payload(
     limit: int,
     validation_package_path: Path | None = None,
     include_internal_validation: bool = False,
-) -> Dict[str, object]:
+) -> dict[str, object]:
     maturity_summary = report.get("maturity_gate_summary") if isinstance(report.get("maturity_gate_summary"), Mapping) else {}
     gate_counts = maturity_summary.get("gate_counts") if isinstance(maturity_summary.get("gate_counts"), Mapping) else {}
     blocker_separation = (
@@ -3720,7 +3759,7 @@ def commercial_readiness_validation_package_mode(
     return "none"
 
 
-def commercial_readiness_focus_item(item: Mapping[str, object]) -> Dict[str, object]:
+def commercial_readiness_focus_item(item: Mapping[str, object]) -> dict[str, object]:
     return {
         "number": item.get("number"),
         "title": item.get("title"),
@@ -3737,10 +3776,10 @@ def commercial_readiness_focus_item(item: Mapping[str, object]) -> Dict[str, obj
     }
 
 
-def build_run_validation_source_integrity(summary: Mapping[str, object]) -> Dict[str, object]:
+def build_run_validation_source_integrity(summary: Mapping[str, object]) -> dict[str, object]:
     raw_root = summary.get("root") or summary.get("scan_scope_root")
     root = Path(str(raw_root)).expanduser().resolve() if raw_root else None
-    result: Dict[str, object] = {
+    result: dict[str, object] = {
         "path": str(root) if root else "",
         "exists": bool(root and root.exists()),
         "kind": "unknown",
@@ -3774,7 +3813,7 @@ def build_run_validation_source_integrity(summary: Mapping[str, object]) -> Dict
     return result
 
 
-def build_run_validation_output_hashes(summary: Mapping[str, object], *, output_dir: Path) -> Dict[str, object]:
+def build_run_validation_output_hashes(summary: Mapping[str, object], *, output_dir: Path) -> dict[str, object]:
     outputs = summary.get("outputs")
     rows: list[dict[str, object]] = []
     missing: list[dict[str, object]] = []
@@ -3805,7 +3844,7 @@ def build_run_validation_output_hashes(summary: Mapping[str, object], *, output_
     }
 
 
-def build_run_validation_review_status(case_path: Path) -> Dict[str, object]:
+def build_run_validation_review_status(case_path: Path) -> dict[str, object]:
     if not case_path.is_file():
         return {
             "exists": False,
@@ -3840,7 +3879,7 @@ def build_run_validation_review_status(case_path: Path) -> Dict[str, object]:
     }
 
 
-def build_run_validation_warning_inventory(summary: Mapping[str, object]) -> Dict[str, object]:
+def build_run_validation_warning_inventory(summary: Mapping[str, object]) -> dict[str, object]:
     processing = summary.get("processing") if isinstance(summary.get("processing"), Mapping) else {}
     warnings = processing.get("warnings") if isinstance(processing.get("warnings"), list) else []
     steps = summary.get("steps") if isinstance(summary.get("steps"), list) else []
@@ -3867,14 +3906,14 @@ def build_run_validation_warning_inventory(summary: Mapping[str, object]) -> Dic
     }
 
 
-def build_run_validation_diff_inventory(summary: Mapping[str, object]) -> Dict[str, object]:
+def build_run_validation_diff_inventory(summary: Mapping[str, object]) -> dict[str, object]:
     outputs = summary.get("outputs") if isinstance(summary.get("outputs"), Mapping) else {}
     diff_outputs = []
     for name, path in sorted(outputs.items()):
         if not any(token in str(name).lower() or token in str(path).lower() for token in ("diff", "trusted", "validation", "cross-tool")):
             continue
         resolved = Path(str(path)).expanduser().resolve()
-        row: Dict[str, object] = {
+        row: dict[str, object] = {
             "name": str(name),
             "path": str(path),
             "exists": resolved.is_file(),
@@ -3909,7 +3948,7 @@ def build_run_validation_diff_inventory(summary: Mapping[str, object]) -> Dict[s
     }
 
 
-def summarize_run_validation_diff_output(path: Path) -> Dict[str, object]:
+def summarize_run_validation_diff_output(path: Path) -> dict[str, object]:
     try:
         payload = json.loads(path.read_text(encoding="utf-8", errors="replace"))
     except (OSError, json.JSONDecodeError, UnicodeDecodeError) as exc:
@@ -3960,7 +3999,7 @@ def summarize_run_validation_diff_output(path: Path) -> Dict[str, object]:
 def build_run_validation_parser_execution(
     job_payload: Mapping[str, object],
     summary: Mapping[str, object],
-) -> Dict[str, object]:
+) -> dict[str, object]:
     return {
         "job_steps": job_payload.get("steps") if isinstance(job_payload.get("steps"), list) else [],
         "run_steps": summary.get("steps") if isinstance(summary.get("steps"), list) else [],
@@ -4027,7 +4066,7 @@ def build_run_validation_limitations(
     return limitations
 
 
-def write_json_file(path: Path, payload: Dict[str, object]) -> None:
+def write_json_file(path: Path, payload: dict[str, object]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
@@ -4089,13 +4128,13 @@ def write_case_report_audit(
     )
 
 
-def model_to_dict(model: BaseModel) -> Dict[str, object]:
+def model_to_dict(model: BaseModel) -> dict[str, object]:
     if hasattr(model, "model_dump"):
         return model.model_dump()
     return model.dict()
 
 
-def build_archived_source_api_preview(run_id: str, archive_path: Path, entry_name: str, *, max_chars: int = 20000) -> Dict[str, object]:
+def build_archived_source_api_preview(run_id: str, archive_path: Path, entry_name: str, *, max_chars: int = 20000) -> dict[str, object]:
     try:
         preview, archive_entry = build_archived_source_read_preview(
             archive_path,
@@ -4122,7 +4161,7 @@ def build_archived_source_api_preview(run_id: str, archive_path: Path, entry_nam
             "Archive completeness, original container provenance, nested archives, and encrypted entries require separate validation.",
         ]
     )
-    payload: Dict[str, object] = {
+    payload: dict[str, object] = {
         "path": display_path,
         "container_path": str(archive_path),
         "name": entry_path.name,
@@ -4196,12 +4235,12 @@ def build_archived_source_api_preview(run_id: str, archive_path: Path, entry_nam
     return payload
 
 
-def build_source_preview(run_id: str, source_path: Path, *, max_chars: int = 20000) -> Dict[str, object]:
+def build_source_preview(run_id: str, source_path: Path, *, max_chars: int = 20000) -> dict[str, object]:
     stat = source_path.stat()
     suffix = source_path.suffix.lower()
     mime_type = mimetypes.guess_type(source_path.name)[0] or "application/octet-stream"
     quoted_path = quote(str(source_path))
-    payload: Dict[str, object] = {
+    payload: dict[str, object] = {
         "path": str(source_path),
         "name": source_path.name,
         "extension": suffix,
@@ -6030,7 +6069,7 @@ def is_image_preview_candidate(path: Path) -> bool:
     return mime_type.startswith("image/")
 
 
-def build_sqlite_preview(source_path: Path, *, run_id: str | None = None) -> Dict[str, object]:
+def build_sqlite_preview(source_path: Path, *, run_id: str | None = None) -> dict[str, object]:
     try:
         with contextlib.closing(sqlite3.connect(f"{source_path.as_uri()}?mode=ro", uri=True)) as connection:
             connection.row_factory = sqlite3.Row
@@ -6178,7 +6217,7 @@ def build_sqlite_preview(source_path: Path, *, run_id: str | None = None) -> Dic
     }
 
 
-def build_json_preview(source_path: Path, suffix: str) -> Dict[str, object]:
+def build_json_preview(source_path: Path, suffix: str) -> dict[str, object]:
     if source_path.stat().st_size > STRUCTURED_PREVIEW_MAX_BYTES:
         return {
             "preview_type": "binary",
@@ -6231,7 +6270,7 @@ def build_json_preview(source_path: Path, suffix: str) -> Dict[str, object]:
     }
 
 
-def build_json_preview_from_text(text: str, suffix: str) -> Dict[str, object]:
+def build_json_preview_from_text(text: str, suffix: str) -> dict[str, object]:
     try:
         if suffix == ".json":
             data = json.loads(text)
@@ -6306,7 +6345,7 @@ def json_item_count(value: object) -> int:
     return 1
 
 
-def build_xml_preview(source_path: Path) -> Dict[str, object]:
+def build_xml_preview(source_path: Path) -> dict[str, object]:
     if source_path.stat().st_size > STRUCTURED_PREVIEW_MAX_BYTES:
         return {
             "preview_type": "binary",
@@ -6368,7 +6407,7 @@ def local_xml_name(value: str) -> str:
     return value.rsplit("}", 1)[-1] if "}" in value else value
 
 
-def build_email_preview(source_path: Path, suffix: str, *, run_id: str | None = None) -> Dict[str, object]:
+def build_email_preview(source_path: Path, suffix: str, *, run_id: str | None = None) -> dict[str, object]:
     try:
         messages, diagnostics = read_email_messages_with_diagnostics(source_path, suffix)
     except OSError as exc:
@@ -6504,7 +6543,7 @@ def build_email_preview(source_path: Path, suffix: str, *, run_id: str | None = 
     }
 
 
-def build_hex_preview(source_path: Path, *, run_id: str | None = None) -> Dict[str, object]:
+def build_hex_preview(source_path: Path, *, run_id: str | None = None) -> dict[str, object]:
     try:
         with source_path.open("rb") as handle:
             data = handle.read(HEX_PREVIEW_MAX_BYTES + 1)
@@ -6796,7 +6835,7 @@ def build_hex_range_citation_package(
     offset: int,
     length: int,
     include_source_hashes: bool,
-) -> Dict[str, object]:
+) -> dict[str, object]:
     stat = source_path.stat()
     if offset >= stat.st_size:
         raise HTTPException(status_code=416, detail="offset is outside the source file")
@@ -6808,7 +6847,7 @@ def build_hex_range_citation_package(
     rows = build_hex_rows(data, base_offset=offset)
     end_exclusive = offset + len(data)
     citation_id = hashlib.sha256(
-        f"{run_id}|{source_path}|{stat.st_size}|{offset}|{end_exclusive}|{range_hashes['sha256']}".encode("utf-8")
+        f"{run_id}|{source_path}|{stat.st_size}|{offset}|{end_exclusive}|{range_hashes['sha256']}".encode()
     ).hexdigest()[:16]
     source_hashes = compute_hashes(source_path) if include_source_hashes else {}
     proof_manifest = build_hex_range_proof_manifest(
@@ -6960,7 +6999,7 @@ def build_hex_range_proof_manifest(
     return {**manifest_core, "manifest_hash": stable_payload_sha256(manifest_core)}
 
 
-def build_image_preview(source_path: Path, *, image_url: str, run_id: str | None = None) -> Dict[str, object]:
+def build_image_preview(source_path: Path, *, image_url: str, run_id: str | None = None) -> dict[str, object]:
     try:
         from ..artifacts.media import build_image_record
 
@@ -7189,7 +7228,7 @@ def source_ocr_translation_profile(*, run_id: str | None, source_path: Path, det
     }
 
 
-def build_source_ocr_queue(*, run_id: str, anchor_path: Path, max_items: int, retry_failures: bool) -> Dict[str, object]:
+def build_source_ocr_queue(*, run_id: str, anchor_path: Path, max_items: int, retry_failures: bool) -> dict[str, object]:
     try:
         queue = build_ocr_queue(anchor_path.parent, max_items=max_items, retry_failures=retry_failures)
     except OcrQueueError as exc:
@@ -7308,9 +7347,12 @@ def build_source_ocr_queue_page_manifest(
     return {**manifest_core, "manifest_hash": stable_payload_sha256(manifest_core)}
 
 
-def build_source_ocr_translation_package(*, run_id: str, source_path: Path, include_text: bool) -> Dict[str, object]:
+def build_source_ocr_translation_package(*, run_id: str, source_path: Path, include_text: bool) -> dict[str, object]:
     try:
-        from ..artifacts.media import build_image_record, build_korean_ocr_translation_report_grade_validation_plan
+        from ..artifacts.media import (
+            build_image_record,
+            build_korean_ocr_translation_report_grade_validation_plan,
+        )
 
         details = build_image_record(source_path).details
     except Exception as exc:
@@ -7591,7 +7633,7 @@ def build_image_gallery_page(
     offset: int,
     limit: int,
     similarity_bucket: str | None,
-) -> Dict[str, object]:
+) -> dict[str, object]:
     candidates = sorted(
         [path for path in anchor_path.parent.iterdir() if path.is_file() and is_image_preview_candidate(path)],
         key=lambda item: item.name.lower(),
@@ -9277,7 +9319,7 @@ def build_media_transcript_report_grade_validation_plan(
     return {**plan_core, "validation_plan_sha256": stable_payload_sha256(plan_core)}
 
 
-def build_media_preview(source_path: Path, *, mime_type: str, run_id: str | None = None) -> Dict[str, object]:
+def build_media_preview(source_path: Path, *, mime_type: str, run_id: str | None = None) -> dict[str, object]:
     sidecars = collect_media_transcript_sidecars(source_path)
     metadata: dict[str, object] = {
         "duration_seconds": None,
@@ -9522,7 +9564,7 @@ def build_media_cue_package(
     sidecar_index: int,
     cue_index: int,
     include_source_hashes: bool,
-) -> Dict[str, object]:
+) -> dict[str, object]:
     sidecars = collect_media_transcript_sidecars(source_path)
     if sidecar_index > len(sidecars):
         raise HTTPException(status_code=404, detail="sidecar_index not found")
@@ -9940,7 +9982,7 @@ def build_email_attachment_package(
     message_index: int,
     attachment_index: int,
     include_content: bool,
-) -> Dict[str, object]:
+) -> dict[str, object]:
     try:
         messages, diagnostics = read_email_messages_with_diagnostics(source_path, suffix)
     except OSError as exc:
@@ -9970,7 +10012,7 @@ def build_email_attachment_package(
             content_b64 = base64.b64encode(payload).decode("ascii")
             content_status = "included-base64"
     citation_id = hashlib.sha256(
-        f"{run_id}|{source_path}|{message_index}|{attachment_index}|{hashes['sha256']}".encode("utf-8")
+        f"{run_id}|{source_path}|{message_index}|{attachment_index}|{hashes['sha256']}".encode()
     ).hexdigest()[:16]
     proof_manifest = build_email_attachment_proof_manifest(
         source_path=source_path,
@@ -10845,7 +10887,7 @@ def build_sqlite_table_page(
     where_contains: str | None,
     order_by: str | None,
     descending: bool,
-) -> Dict[str, object]:
+) -> dict[str, object]:
     try:
         with contextlib.closing(sqlite3.connect(f"{source_path.as_uri()}?mode=ro", uri=True)) as connection:
             connection.row_factory = sqlite3.Row
@@ -11615,10 +11657,10 @@ def compute_hashes_for_bytes(value: bytes) -> dict[str, str]:
     }
 
 
-def build_source_metadata(source_path: Path, *, include_hashes: bool) -> Dict[str, object]:
+def build_source_metadata(source_path: Path, *, include_hashes: bool) -> dict[str, object]:
     stat = source_path.stat()
     mime_type = mimetypes.guess_type(source_path.name)[0] or "application/octet-stream"
-    payload: Dict[str, object] = {
+    payload: dict[str, object] = {
         "command": "source-metadata",
         "path": str(source_path),
         "name": source_path.name,
@@ -11652,7 +11694,7 @@ def build_source_search(
     sqlite_row_scan_limit: int | None = SQLITE_SOURCE_SEARCH_ROW_SCAN_LIMIT,
     sqlite_resume_token: str | None = None,
     file_resume_token: str | None = None,
-) -> Dict[str, object]:
+) -> dict[str, object]:
     normalized = [item.strip().lower() for item in keywords if item.strip()]
     if not normalized:
         raise HTTPException(status_code=400, detail="at least one keyword is required")
@@ -11819,7 +11861,7 @@ def build_archived_source_search(
     context: int = 120,
     sqlite_resume_token: str | None = None,
     file_resume_token: str | None = None,
-) -> Dict[str, object]:
+) -> dict[str, object]:
     if sqlite_resume_token or file_resume_token:
         raise HTTPException(status_code=400, detail="resume tokens are not supported for ZIP entry source-search")
     normalized = [item.strip().lower() for item in keywords if item.strip()]
@@ -11998,7 +12040,7 @@ def enrich_source_search_matches(source_path: Path, matches: Sequence[dict[str, 
     for index, match in enumerate(matches):
         locator = source_search_locator(match)
         citation = source_search_citation(source_path, match, locator)
-        match_id = hashlib.sha256(f"{source_path}|{index}|{citation}|{match.get('snippet', '')}".encode("utf-8")).hexdigest()[:16]
+        match_id = hashlib.sha256(f"{source_path}|{index}|{citation}|{match.get('snippet', '')}".encode()).hexdigest()[:16]
         citation_profile = source_search_citation_profile(source_path, match, locator, citation)
         item = dict(match)
         item.update(

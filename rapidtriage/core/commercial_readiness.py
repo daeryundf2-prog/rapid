@@ -4,11 +4,10 @@ import datetime as dt
 import hashlib
 import json
 import re
+from collections.abc import Iterable, Mapping
 from pathlib import Path
-from typing import Iterable, Mapping
 
 from .docs import write_result
-
 
 COMMERCIAL_READINESS_JSON_NAME = "rapidtriage-commercial-readiness.json"
 COMMERCIAL_READINESS_MARKDOWN_NAME = "rapidtriage-commercial-readiness.md"

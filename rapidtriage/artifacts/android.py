@@ -5,10 +5,10 @@ import hashlib
 import json
 import re
 import sqlite3
-import zipfile
 import xml.etree.ElementTree as ET
+import zipfile
+from collections.abc import Iterable, Mapping
 from pathlib import Path
-from typing import Iterable, Mapping
 
 from ..core.forensic_accuracy import build_accuracy_gate
 from ..core.models import ArtifactRecord
@@ -543,7 +543,7 @@ def package_from_android_data_path(path: Path) -> str:
     parts = path.parts
     lowered = [part.lower() for part in parts]
     for marker in (("android", "data"), ("android", "media"), ("data", "data")):
-        for index in range(0, len(parts) - len(marker)):
+        for index in range(len(parts) - len(marker)):
             if tuple(lowered[index : index + len(marker)]) == marker:
                 candidate_index = index + len(marker)
                 if candidate_index < len(parts):
@@ -1364,7 +1364,7 @@ def build_android_source_layout_profile(path: Path, package: str) -> dict[str, o
         (("android", "media"), "external-app-media"),
         (("data", "data"), "private-app-data"),
     ):
-        for index in range(0, len(parts) - len(marker)):
+        for index in range(len(parts) - len(marker)):
             if tuple(lowered[index : index + len(marker)]) == marker:
                 layout = label
                 break

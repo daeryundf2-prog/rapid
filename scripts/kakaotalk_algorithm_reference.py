@@ -20,18 +20,17 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from rapidtriage.core.kakaotalk import (  # noqa: E402
+from rapidtriage.core.kakaotalk import (
     derive_kakaotalk_postpatch_v2_dek_candidates,
     find_memory_dump_candidates,
     redact_postpatch_v2_derived_key,
 )
-from rapidtriage.core.kakaotalk_algorithms import (  # noqa: E402
+from rapidtriage.core.kakaotalk_algorithms import (
     build_sqlcipher_raw_key_with_salt,
     decrypt_legacy_file,
     derive_postpatch_v2_database_key,
     derive_postpatch_v2_profile_material,
 )
-
 
 RAW_KEY_DISCLOSURE_ENV = "RAPIDTRIAGE_KAKAO_ALLOW_RAW_KEYS"
 RAW_KEY_DISCLOSURE_VALUE = "I_UNDERSTAND_RAW_KEY_DISCLOSURE"

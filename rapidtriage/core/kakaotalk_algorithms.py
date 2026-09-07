@@ -8,7 +8,6 @@ import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 
-
 LEGACY_PAGE_SIZE = 4096
 LEGACY_BLOCK_SIZE = 16
 POSTPATCH_V2_INFO_PREFIX = "v2:"

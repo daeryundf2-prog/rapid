@@ -3,13 +3,17 @@ from __future__ import annotations
 import datetime as dt
 import hashlib
 import json
+from collections.abc import Mapping, Sequence
 from pathlib import Path
-from typing import Mapping, Sequence
 
-from ..artifacts.media import IMAGE_EXTENSIONS, contains_hangul, language_hint_for_text, ocr_quality_metrics
+from ..artifacts.media import (
+    IMAGE_EXTENSIONS,
+    contains_hangul,
+    language_hint_for_text,
+    ocr_quality_metrics,
+)
 from .forensic_accuracy import build_accuracy_gate
 from .submission import compute_hashes
-
 
 OCR_QUEUE_SCHEMA_VERSION = 1
 OCR_SIDECAR_CANDIDATE_SUFFIXES = (

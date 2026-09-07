@@ -6,10 +6,10 @@ import hashlib
 import re
 import sqlite3
 import zipfile
-from zipfile import ZipInfo
+from collections.abc import Iterable, Mapping, Sequence
 from pathlib import Path
-from typing import Iterable, Mapping, Sequence
 from xml.etree import ElementTree as ET
+from zipfile import ZipInfo
 
 from ..core.models import ArtifactRecord
 from ..core.submission import compute_hashes

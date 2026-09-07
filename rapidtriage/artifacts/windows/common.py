@@ -4,12 +4,13 @@ import datetime as dt
 import shutil
 import sqlite3
 import tempfile
+from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Iterator
 
-from ..review import build_forensic_review  # noqa: F401 - re-exported for Windows artifact modules.
-
+from ..review import (
+    build_forensic_review,  # noqa: F401 - re-exported for Windows artifact modules.
+)
 
 WINDOWS_USERS_DIRNAME = "Users"
 
@@ -43,7 +44,7 @@ def open_sqlite_snapshot(path: Path) -> Iterator[sqlite3.Connection]:
         temp_path.unlink(missing_ok=True)
 
 
-def isoformat_from_timestamp(timestamp: float | int | None) -> str | None:
+def isoformat_from_timestamp(timestamp: float | None) -> str | None:
     if timestamp in (None, 0, ""):
         return None
     try:

@@ -3,13 +3,6 @@ from __future__ import annotations
 from pathlib import Path
 
 from rapidtriage.validation.known_answer_files import FileCheckSummary, run_file_checks
-from .known_answer_result import (
-    build_result,
-    format_text_result as _format_text_result,
-    new_run_id,
-    result_to_dict as _result_to_dict,
-    utc_now,
-)
 from rapidtriage.validation.known_answer_schema import (
     DEFAULT_SCHEMA_PATH,
     load_json_document,
@@ -20,6 +13,18 @@ from rapidtriage.validation.known_answer_types import (
     JsonValue,
     ManifestValidationError,
     ManifestValidationResult,
+)
+
+from .known_answer_result import (
+    build_result,
+    new_run_id,
+    utc_now,
+)
+from .known_answer_result import (
+    format_text_result as _format_text_result,
+)
+from .known_answer_result import (
+    result_to_dict as _result_to_dict,
 )
 
 

@@ -1,8 +1,8 @@
 from __future__ import annotations
 
 import datetime as dt
+from collections.abc import Mapping
 from pathlib import Path
-from typing import Mapping
 
 from .docs import write_result
 from .validation import (
@@ -10,7 +10,6 @@ from .validation import (
     build_known_answer_trusted_diff,
     build_known_answer_validation,
 )
-
 
 KNOWN_ANSWER_QC_VERSION = "known-answer-qc-runner-v1"
 

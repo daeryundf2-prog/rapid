@@ -6,8 +6,8 @@ import unittest
 from pathlib import Path
 
 from rapidtriage.cli import main
-from rapidtriage.core.run import run_triage_mode
 from rapidtriage.core.audit import audit_path_for, write_audit_record
+from rapidtriage.core.run import run_triage_mode
 from tests.test_rapidtriage_run import build_run_fixture
 
 

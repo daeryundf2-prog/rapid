@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-import datetime as dt
 import csv
+import datetime as dt
 import difflib
 import hashlib
 import json
@@ -9,16 +9,21 @@ import os
 import re
 import stat as stat_module
 import zipfile
+from collections.abc import Iterable, Mapping, Sequence
 from pathlib import Path, PurePosixPath
-from typing import Dict, Iterable, List, Mapping, Optional, Sequence, Tuple, Union
 
-from .input_root import InputRoot, resolve_input_root
 from .forensic_accuracy import build_accuracy_gate
-from .hash_cache import HASH_CACHE_GAP_ID, build_hash_cache_manifest, compute_hashes_cached, hash_cache_assessment
+from .hash_cache import (
+    HASH_CACHE_GAP_ID,
+    build_hash_cache_manifest,
+    compute_hashes_cached,
+    hash_cache_assessment,
+)
+from .input_root import InputRoot, resolve_input_root
 from .models import FileCandidate
 from .rules import RuleSet, annotate_files_payload
 
-DEFAULT_FILE_CATEGORIES: Tuple[str, ...] = (
+DEFAULT_FILE_CATEGORIES: tuple[str, ...] = (
     "documents",
     "archives",
     "databases",
@@ -103,7 +108,7 @@ FUZZY_TEXT_EXTENSIONS = {
     ".log",
 }
 
-CATEGORY_RULES: Dict[str, Dict[str, Tuple[str, ...]]] = {
+CATEGORY_RULES: dict[str, dict[str, tuple[str, ...]]] = {
     "documents": {
         "extensions": (
             ".txt",
@@ -342,7 +347,7 @@ CATEGORY_RULES: Dict[str, Dict[str, Tuple[str, ...]]] = {
         "path_keywords": ("pictures", "photos", "dcim", "camera", "images", "screenshots"),
     },
 }
-ALL_FILE_CATEGORIES: Tuple[str, ...] = tuple(CATEGORY_RULES)
+ALL_FILE_CATEGORIES: tuple[str, ...] = tuple(CATEGORY_RULES)
 
 
 class FileScanError(ValueError):
@@ -350,21 +355,21 @@ class FileScanError(ValueError):
 
 
 def run_files_scan(
-    root: Union[InputRoot, Path],
+    root: InputRoot | Path,
     *,
     input_kind: str | None = None,
-    categories: Optional[Sequence[str]] = None,
-    name_contains: Optional[Sequence[str]] = None,
-    path_contains: Optional[Sequence[str]] = None,
-    extensions: Optional[Sequence[str]] = None,
-    modified_after: Optional[str] = None,
-    modified_before: Optional[str] = None,
+    categories: Sequence[str] | None = None,
+    name_contains: Sequence[str] | None = None,
+    path_contains: Sequence[str] | None = None,
+    extensions: Sequence[str] | None = None,
+    modified_after: str | None = None,
+    modified_before: str | None = None,
     limit: int = 0,
     rule_set: RuleSet | None = None,
-    known_good_hash_feeds: Optional[Sequence[Union[str, Path]]] = None,
+    known_good_hash_feeds: Sequence[str | Path] | None = None,
     hide_known_good: bool = False,
     known_good_max_hash_bytes: int = DEFAULT_KNOWN_GOOD_MAX_HASH_BYTES,
-) -> Dict[str, object]:
+) -> dict[str, object]:
     input_root = resolve_input_root(root, kind=input_kind)
     selected_categories = normalize_categories(categories)
     normalized_name_filters = normalize_text_filters(name_contains)
@@ -491,11 +496,11 @@ def scan_file_candidates(
     name_contains: Sequence[str],
     path_contains: Sequence[str],
     extensions: Sequence[str],
-    modified_after: Optional[dt.datetime],
-    modified_before: Optional[dt.datetime],
+    modified_after: dt.datetime | None,
+    modified_before: dt.datetime | None,
     limit: int,
-) -> Tuple[List[FileCandidate], int]:
-    candidates: List[FileCandidate] = []
+) -> tuple[list[FileCandidate], int]:
+    candidates: list[FileCandidate] = []
     scanned_files = 0
     pending = [root]
 
@@ -539,7 +544,7 @@ def scan_file_candidates(
     return candidates, scanned_files
 
 
-def load_known_good_hash_feeds(paths: Sequence[Union[str, Path]]) -> dict[str, object]:
+def load_known_good_hash_feeds(paths: Sequence[str | Path]) -> dict[str, object]:
     """Load analyst-provided known-good hash feeds without requiring a full NSRL install."""
 
     index: dict[str, set[str]] = {algorithm: set() for algorithm in KNOWN_GOOD_HASH_ALGORITHMS}
@@ -615,7 +620,7 @@ def load_known_good_hash_feeds(paths: Sequence[Union[str, Path]]) -> dict[str, o
     }
 
 
-def expand_known_good_hash_feed_paths(paths: Sequence[Union[str, Path]]) -> list[Path]:
+def expand_known_good_hash_feed_paths(paths: Sequence[str | Path]) -> list[Path]:
     expanded: list[Path] = []
     for raw_path in paths:
         feed_path = Path(raw_path).expanduser().resolve()
@@ -628,7 +633,7 @@ def expand_known_good_hash_feed_paths(paths: Sequence[Union[str, Path]]) -> list
     return expanded
 
 
-def build_known_good_index_payload(paths: Sequence[Union[str, Path]]) -> dict[str, object]:
+def build_known_good_index_payload(paths: Sequence[str | Path]) -> dict[str, object]:
     known_good_index = load_known_good_hash_feeds(paths)
     records: list[dict[str, object]] = []
     raw_hashes = known_good_index.get("hashes", {})
@@ -1000,7 +1005,7 @@ def normalize_known_good_csv_header(value: object) -> str:
     return re.sub(r"[^a-z0-9]", "", str(value or "").lower())
 
 
-def known_good_csv_hash_algorithm(header: object) -> Optional[str]:
+def known_good_csv_hash_algorithm(header: object) -> str | None:
     normalized = normalize_known_good_csv_header(header)
     if normalized in KNOWN_GOOD_CSV_HASH_FIELDS:
         return KNOWN_GOOD_CSV_HASH_FIELDS[normalized]
@@ -1063,7 +1068,7 @@ def bounded_source_value(value: object) -> str:
     return text[:KNOWN_GOOD_SOURCE_FIELD_LIMIT] + "...[truncated]"
 
 
-def normalize_known_good_hash(value: str) -> Optional[tuple[str, str]]:
+def normalize_known_good_hash(value: str) -> tuple[str, str] | None:
     token = value.strip().lower()
     if len(token) == 32 and all(char in "0123456789abcdef" for char in token):
         return "md5", token
@@ -1105,7 +1110,7 @@ def apply_known_good_hash_profile(
 
     for candidate in candidates:
         candidate_payload = candidate.to_dict()
-        known_good_match: Optional[dict[str, object]] = None
+        known_good_match: dict[str, object] | None = None
         if configured:
             if int(candidate.size) > max_hash_bytes:
                 skipped_large_count += 1
@@ -1229,7 +1234,7 @@ def first_known_good_hash_match(
     known_good_hashes: Mapping[str, set[str]],
     *,
     known_good_sources: Mapping[str, Mapping[str, Mapping[str, object]]] | None = None,
-) -> Optional[dict[str, object]]:
+) -> dict[str, object] | None:
     source_index = known_good_sources or {}
     for algorithm in KNOWN_GOOD_HASH_ALGORITHMS:
         value = hashes.get(algorithm, "").lower()
@@ -1360,7 +1365,7 @@ def apply_file_signature_profile(
     }
 
 
-def detect_file_signature(header: bytes) -> Optional[str]:
+def detect_file_signature(header: bytes) -> str | None:
     for rule in SIGNATURE_RULES:
         for magic in rule["magics"]:  # type: ignore[union-attr]
             if header.startswith(magic):
@@ -1368,16 +1373,16 @@ def detect_file_signature(header: bytes) -> Optional[str]:
     return None
 
 
-def build_file_candidate(path: Path, entry_stat: os.stat_result, categories: Sequence[str]) -> Optional[FileCandidate]:
+def build_file_candidate(path: Path, entry_stat: os.stat_result, categories: Sequence[str]) -> FileCandidate | None:
     extension = path.suffix.lower()
     filename = path.name.lower()
     path_text = str(path).lower()
-    matched_categories: List[str] = []
-    reasons: Dict[str, List[str]] = {}
+    matched_categories: list[str] = []
+    reasons: dict[str, list[str]] = {}
 
     for category in categories:
         rule = CATEGORY_RULES[category]
-        category_reasons: List[str] = []
+        category_reasons: list[str] = []
         if extension and extension in rule["extensions"]:
             category_reasons.append(f"extension:{extension}")
         name_keyword = first_contains(filename, rule["name_keywords"])
@@ -1408,9 +1413,9 @@ def build_file_candidate(path: Path, entry_stat: os.stat_result, categories: Seq
     )
 
 
-def normalize_categories(categories: Optional[Sequence[str]]) -> List[str]:
+def normalize_categories(categories: Sequence[str] | None) -> list[str]:
     selected = list(categories or DEFAULT_FILE_CATEGORIES)
-    normalized: List[str] = []
+    normalized: list[str] = []
     seen = set()
     for category in selected:
         key = category.lower()
@@ -1423,8 +1428,8 @@ def normalize_categories(categories: Optional[Sequence[str]]) -> List[str]:
     return normalized
 
 
-def normalize_text_filters(values: Optional[Sequence[str]]) -> List[str]:
-    normalized: List[str] = []
+def normalize_text_filters(values: Sequence[str] | None) -> list[str]:
+    normalized: list[str] = []
     for value in values or []:
         key = value.strip().lower()
         if key:
@@ -1432,8 +1437,8 @@ def normalize_text_filters(values: Optional[Sequence[str]]) -> List[str]:
     return normalized
 
 
-def normalize_extensions(values: Optional[Sequence[str]]) -> List[str]:
-    normalized: List[str] = []
+def normalize_extensions(values: Sequence[str] | None) -> list[str]:
+    normalized: list[str] = []
     for value in values or []:
         key = value.strip().lower()
         if not key:
@@ -1444,7 +1449,7 @@ def normalize_extensions(values: Optional[Sequence[str]]) -> List[str]:
     return sorted(set(normalized))
 
 
-def parse_modified_bound(value: Optional[str]) -> Optional[dt.datetime]:
+def parse_modified_bound(value: str | None) -> dt.datetime | None:
     if value is None:
         return None
     try:
@@ -1466,7 +1471,7 @@ def normalized_path_mismatch(path: str, filters: Sequence[str]) -> bool:
     return any(fragment not in lowered for fragment in filters)
 
 
-def first_contains(text: str, values: Iterable[str]) -> Optional[str]:
+def first_contains(text: str, values: Iterable[str]) -> str | None:
     for value in values:
         if value in text:
             return value

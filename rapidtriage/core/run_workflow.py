@@ -2,10 +2,9 @@ from __future__ import annotations
 
 import hashlib
 import json
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Mapping, Sequence
-
 
 RUN_WORKFLOW_PROFILE_VERSION = "run-workflow-contract-v1"
 RUN_WORKFLOW_STAGE_ORDER = ("ingest", "extract", "parse", "index", "review", "report")

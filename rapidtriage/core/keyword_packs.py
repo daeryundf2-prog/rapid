@@ -2,11 +2,10 @@ from __future__ import annotations
 
 import hashlib
 import json
+from collections.abc import Iterable, Mapping, Sequence
 from pathlib import Path
-from typing import Iterable, Mapping, Sequence
 
 from .forensic_accuracy import build_accuracy_gate
-
 
 BUILTIN_KEYWORD_PACKS: dict[str, list[str]] = {
     "credentials": [

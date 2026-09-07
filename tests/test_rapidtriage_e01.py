@@ -7,7 +7,11 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from rapidtriage.core.archive_image import ArchiveImageExtractionResult, extract_archive_image_to_directory
+from rapidtriage.cli import main
+from rapidtriage.core.archive_image import (
+    ArchiveImageExtractionResult,
+    extract_archive_image_to_directory,
+)
 from rapidtriage.core.disk_image import (
     DiskImageExtractionResult,
     build_raw_split_report_grade_validation_plan,
@@ -20,8 +24,8 @@ from rapidtriage.core.e01 import (
     E01ExtractionResult,
     build_e01_report_grade_validation_plan,
     build_e01_segment_set_profile,
-    build_windows11_e01_known_answer_manifest,
     build_image_workflow_trusted_diff,
+    build_windows11_e01_known_answer_manifest,
     collect_tool_preflight,
     e01_failure_guidance,
     e01_preflight_summary,
@@ -32,7 +36,6 @@ from rapidtriage.core.e01 import (
     select_mmls_filesystem,
 )
 from rapidtriage.core.e01_smoke import run_windows11_e01_smoke
-from rapidtriage.cli import main
 from rapidtriage.core.run import run_triage_mode
 from rapidtriage.core.virtual_disk import (
     VirtualDiskExtractionResult,

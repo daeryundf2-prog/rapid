@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-import datetime as dt
 import base64
 import csv
+import datetime as dt
 import hashlib
 import html
 import io
@@ -13,13 +13,13 @@ import re
 import shutil
 import sqlite3
 import subprocess
+from collections.abc import Iterable, Iterator, Mapping, Sequence
 from pathlib import Path
-from typing import Iterable, Iterator, Mapping, Sequence
 
 from ..core.models import ArtifactRecord
 from ..core.submission import compute_hashes
-from .windows.common import build_forensic_review, open_sqlite_snapshot
 from .kakaotalk_windows import companion_files, inspect_sqlite_database
+from .windows.common import build_forensic_review, open_sqlite_snapshot
 
 PARSER_VERSION = "kakaotalk-macos-db-inventory-v2"
 KAKAO_MAC_MAX_FILES = 900
@@ -1099,7 +1099,7 @@ def run_kakaotalk_macos_report(
     media: list[dict[str, object]] = []
     databases: list[dict[str, object]] = []
     context_row_coverage: list[dict[str, object]] = []
-    remaining = max_messages if max_messages > 0 else 0
+    remaining = max(0, max_messages)
 
     for db_path in database_paths:
         sqlite_meta = inspect_sqlite_database(db_path)

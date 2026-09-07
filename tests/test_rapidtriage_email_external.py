@@ -9,7 +9,10 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from rapidtriage.artifacts.email_external import run_email_external_parse, select_email_external_tool
+from rapidtriage.artifacts.email_external import (
+    run_email_external_parse,
+    select_email_external_tool,
+)
 from rapidtriage.cli import build_parser, main
 
 

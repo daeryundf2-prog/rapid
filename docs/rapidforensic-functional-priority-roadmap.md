@@ -1,6 +1,89 @@
 # RapidForensic Functional Priority Roadmap
 
-Last updated: 2026-05-08
+Last updated: 2026-09-08
+
+## Remaining Work Ledger (2026-09-08 full sequential execution pass)
+
+A full internal execution pass was run on 2026-09-08 (Mac-local, Python 3.12):
+790 unit tests OK, ruff 0.8/compileall/pip-audit PASS, vulture PASS, Tier 0
+known-answer QC/trusted-diff/normalizer/evidence-bundle PASS, full triage run
+(30/32 steps), Case DB import/review/report/bundle, web smoke 8/8, FTS
+benchmark p50 0.97ms@5k, taxonomy audit 51/51 strict, validation package
+(internal roadmap 100/100), commercial-readiness 90/100 with
+`commercial_claim_allowed=false`. Items closed by code in this pass:
+
+- **e01-smoke folder input crash fixed**: non-file sources now end as
+  `blocked` with `unsupported-image` failure guidance instead of an
+  IsADirectoryError traceback (`rapidtriage/core/e01_smoke.py`).
+- **Vulture baseline restored**: unused `node_offset` parameter removed from
+  `read_evtx_chunk_name_or_inline` (`rapidtriage/artifacts/windows/eventlog.py`);
+  full repo vulture min-confidence-80 now exits clean.
+- **large-case-readiness error clarity**: unsupported `--benchmark` inputs now
+  name the expected `sqlite-fts-benchmark` profile and the mistaken
+  file-scan benchmark command (`rapidtriage/core/large_case_readiness.py`).
+- **JumpList (#14) entry-level trusted diff enabled**: `cross-tool-validate`
+  now expands nested `details.destinations` and
+  `details.destlist_metadata.destlist_entry_candidates` into
+  `jumplist-destlist-entry` rows and normalizes parser candidate field names
+  (`application_id_hash`, `destlist_entry_index_candidate`, `path_candidate`,
+  `destlist_entry_offset_candidate`) onto the user_activity aliases, so
+  JLECmd per-entry exports can be joined without parser changes
+  (`rapidtriage/core/cross_tool.py`).
+- **Rust worker pipeline verified end-to-end** (cargo release build +
+  worker-parse ArtifactRecordV1 JSONL).
+
+### Remaining internal engineering debt (code-only, no external dependency)
+
+Closed on 2026-09-08 (second pass — "close every closable gate"):
+
+1. **CLOSED — ruff 0.16 upgrade**: 1,203 auto-fixes applied across 180
+   files, 4 unused/deprecated typing imports removed, 15 scripts made
+   executable (EXE001), behavior-changing judgment rules (BLE001
+   parser-crash-isolation intent, DTZ legacy call sites audited by the
+   UTC-rendering pass, SIM/C4/FLY style calls) documented as explicit
+   `ignore` contracts in `pyproject.toml`; `ruff==0.8.*` pin replaced with
+   `ruff==0.16.*`, repo-wide check green, 792 tests pass unchanged.
+2. **CLOSED — JumpList entry-field depth**: `best_destlist_entry_candidate`
+   now emits `entry_id_candidate` (u32@4) and `pin_status_candidate`
+   (u32@8) from the documented DestList fixed-header offsets with a
+   semantics warning; cross-tool aliases extended (`entry_id_candidate`,
+   `pin_status`, `destlist_mru_candidate`). Layout-confirmed decode and
+   JLECmd field parity still require the external T1 corpus.
+3. **CLOSED — large-case FTS evidence (Mac-local)**: 100k (p95 7.2ms),
+   1M (p95 0.13s), and 10M (p95 1.99s, under the 2.0s threshold)
+   `sqlite-fts-benchmark` runs attached; `large-case-readiness`
+   sqlite-fts-100k/1m/10m checks now PASS. Remaining readiness blockers are
+   1TB-10TB hardware stress, browser virtualization evidence, cursor-API
+   regression evidence, and independent signoff — all external.
+4. **CLOSED — case-review target validation**: `mark_review` now rejects
+   target types/ids that do not exist in the Case DB with an actionable
+   `case-search` hint instead of silently creating orphan review marks;
+   unknown-target test added.
+5. **e01-smoke folder input crash fixed** (first pass): `blocked` +
+   `unsupported-image` guidance.
+6. **Vulture baseline clean** (first pass): repo-wide min-confidence-80
+   exits 0.
+
+Still open internal (needs explicit scope authorization per AGENTS.md):
+
+- **Columnar/Parquet adoption in the run pipeline**: `convert_jsonl_to_parquet`
+  and DuckDB query evidence exist, but wiring them into run/search paths
+  changes core forensic logic and DB schema — requires an authorized
+  engineering pass with its own validation plan.
+- **e01-smoke resume-stage UI progress visualization**: workbench UI change;
+  blocked on the same core-UI scope rule.
+
+### Remaining external evidence work (cannot be closed in-repo)
+
+- Windows T1: real Windows 11 E01/Ex01 acquisition, elevated-host Registry
+  (RECmd), MFT/USN (MFTECmd/UsnJrnl2Csv), SRUM/Windows.edb (SrumECmd) diffs;
+  EVTX EventRecordID join verification against EvtxECmd on the real corpus.
+- Scale: 100k/1M/10M FTS benchmark on target hardware; 1TB/5TB/10TB stress
+  runs on approved forensic hardware.
+- Reviews: four-track (technical / forensic methodology / operator / legal)
+  human signoffs per `docs/validation/legal-operator-review-checklist.md`.
+- Release: Authenticode signing, macOS codesign+notarization, deb/rpm/
+  AppImage clean-container builds, staffed support/SLA evidence.
 
 ## Fresh Assessment Snapshot
 

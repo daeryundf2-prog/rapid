@@ -15,10 +15,13 @@ import subprocess
 import tempfile
 import zipfile
 from collections import Counter
+from collections.abc import Mapping, Sequence
 from pathlib import Path
-from typing import Mapping, Sequence
 
-from ..artifacts.windows.registry import parse_registry_vk_cell, registry_value_data_preview
+from ..artifacts.windows.registry import (
+    parse_registry_vk_cell,
+    registry_value_data_preview,
+)
 from .docs import write_result
 from .submission import compute_hashes
 
@@ -3979,7 +3982,7 @@ def derive_kakaotalk_userdir(
     )
     key2 = hashlib.md5(pragma.encode("utf-8")).digest()
     iv2 = hashlib.md5(base64.b64encode(key2)).digest()
-    second_input = f"{userdir_home}\\{encrypted_user_id.hex()}".encode("utf-8")
+    second_input = f"{userdir_home}\\{encrypted_user_id.hex()}".encode()
     encrypted_second = openssl_aes_128_cbc(
         pkcs7_pad(second_input, BLOCK_SIZE),
         key=key2,
@@ -4232,8 +4235,8 @@ def derive_pragma_candidates_from_deviceinfo(
     candidates: list[dict[str, str]] = []
     seen: set[str] = set()
     seed_variants = [
-        ("pipe", f"{sys_uuid}|{hdd_model}|{hdd_serial}".encode("utf-8")),
-        ("concat", f"{sys_uuid}{hdd_model}{hdd_serial}".encode("utf-8")),
+        ("pipe", f"{sys_uuid}|{hdd_model}|{hdd_serial}".encode()),
+        ("concat", f"{sys_uuid}{hdd_model}{hdd_serial}".encode()),
     ]
     for seed_name, seed in seed_variants:
         payloads = [(f"{seed_name}-pkcs7", pkcs7_pad(seed, BLOCK_SIZE))]

@@ -5,8 +5,11 @@ from dataclasses import dataclass
 from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import Final
 
-from rapidtriage.validation.known_answer_types import FileCheckResult, JsonObject, JsonValue
-
+from rapidtriage.validation.known_answer_types import (
+    FileCheckResult,
+    JsonObject,
+    JsonValue,
+)
 
 HASH_CHUNK_SIZE_BYTES: Final = 1024 * 1024
 

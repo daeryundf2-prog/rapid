@@ -9,7 +9,13 @@ from unittest.mock import patch
 
 from rapidtriage.core.analysis import build_analysis_trusted_diff, build_search_analysis
 from rapidtriage.core.keyword_packs import resolve_keyword_packs
-from rapidtriage.core.search import build_advanced_search_trusted_diff, filter_matches, run_unified_search, search_core_accuracy_gates, search_docs
+from rapidtriage.core.search import (
+    build_advanced_search_trusted_diff,
+    filter_matches,
+    run_unified_search,
+    search_core_accuracy_gates,
+    search_docs,
+)
 from rapidtriage.core.search_backend import (
     build_external_search_adapter_contract,
     build_search_backend_contract,

@@ -3,8 +3,11 @@ from __future__ import annotations
 import unittest
 from pathlib import Path
 
-from rapidtriage.core.visible_capabilities import CAPABILITY_GROUPS, build_visible_capability_response, validate_visible_capability_contract
-
+from rapidtriage.core.visible_capabilities import (
+    CAPABILITY_GROUPS,
+    build_visible_capability_response,
+    validate_visible_capability_contract,
+)
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 

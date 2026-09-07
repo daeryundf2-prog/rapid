@@ -5,13 +5,17 @@ import json
 import re
 import struct
 import uuid
+from collections.abc import Iterable, Mapping, Sequence
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Iterable, Mapping, Sequence, Tuple
 
 from ...core.forensic_accuracy import build_accuracy_gate
 from ...core.models import ArtifactRecord
-from .common import build_forensic_review, isoformat_from_timestamp, iter_windows_user_homes
+from .common import (
+    build_forensic_review,
+    isoformat_from_timestamp,
+    iter_windows_user_homes,
+)
 
 RECENT_ROOT = ("AppData", "Roaming", "Microsoft", "Windows", "Recent")
 PARSER_VERSION = "windows-recent-files-v8"
@@ -26,7 +30,7 @@ MAX_DESTLIST_ENTRIES = 128
 MAX_DESTLIST_CANDIDATE_TIMES = 8
 MAX_DESTLIST_NUMERIC_CANDIDATES = 12
 DESTLIST_HEADER_SIZE = 32
-DESTLIST_ENTRY_LAYOUTS: Tuple[Tuple[str, int], ...] = (
+DESTLIST_ENTRY_LAYOUTS: tuple[tuple[str, int], ...] = (
     ("win7-win8-fixed114", 114),
     ("win10-plus-fixed130", 130),
 )
@@ -76,7 +80,7 @@ JUMPLIST_CAPABILITIES = {
     "destlist_account_metadata_decode": False,
     "appid_hash_mapping": False,
 }
-RECENT_PATTERNS: Tuple[Tuple[str, str, Sequence[str]], ...] = (
+RECENT_PATTERNS: tuple[tuple[str, str, Sequence[str]], ...] = (
     ("recent-shortcut", "*.lnk", ()),
     ("jumplist-automatic", "*.automaticDestinations-ms", ("AutomaticDestinations",)),
     ("jumplist-custom", "*.customDestinations-ms", ("CustomDestinations",)),
@@ -464,7 +468,7 @@ def parse_lnk_extra_data(data: bytes, offset: int) -> tuple[list[dict[str, objec
 def parse_lnk_property_store_data_block(block_data: bytes) -> dict[str, object]:
     payload = block_data[8:]
     guid_candidates = []
-    for offset in range(0, max(0, len(payload) - 15)):
+    for offset in range(max(0, len(payload) - 15)):
         chunk = payload[offset : offset + 16]
         if chunk == b"\x00" * 16 or len(guid_candidates) >= MAX_LNK_PROPERTY_STORE_GUID_CANDIDATES:
             continue
@@ -1578,11 +1582,13 @@ def best_destlist_entry_candidate(
     )[0]
     layout_name = str(selected_layout["layout_candidate"])
     fixed_size = int(selected_layout["fixed_header_size_candidate"])
-    path = str(selected_layout["path_candidate"])
+    path_candidate_value = str(selected_layout["path_candidate"])
     entry_size = int(selected_layout["entry_size_candidate"])
     prefix = data[offset : offset + fixed_size]
     matched_streams = matched_lnk_stream_candidates(prefix, lnk_stream_names)
     filetime_candidates = destlist_filetime_candidates(prefix)
+    entry_id_candidate = read_u32(prefix, 4) if len(prefix) >= 8 else None
+    pin_status_candidate = read_u32(prefix, 8) if len(prefix) >= 12 else None
     validation_status = "candidate-linked-lnk-stream" if matched_streams else "candidate-unlinked"
     citation = {
         **source,
@@ -1590,7 +1596,7 @@ def best_destlist_entry_candidate(
         "entry_offset": offset,
         "entry_size": entry_size,
         "layout_candidate": layout_name,
-        "path_candidate": path,
+        "path_candidate": path_candidate_value,
         "matched_lnk_stream_candidates": matched_streams,
         "entry_prefix_sha256": sha256_bytes(prefix),
         "entry_sha256": sha256_bytes(data[offset : offset + entry_size]),
@@ -1614,15 +1620,23 @@ def best_destlist_entry_candidate(
             ],
             "os_version_semantics_validated": False,
         },
-        "path_candidate": path,
+        "path_candidate": path_candidate_value,
         "path_char_count_candidate": int(selected_layout["path_char_count_candidate"]),
+        "entry_id_candidate": entry_id_candidate,
+        "entry_id_candidate_offset": 4,
+        "pin_status_candidate": pin_status_candidate,
+        "pin_status_candidate_offset": 8,
+        "destlist_entry_semantics_warning": (
+            "entry_id/pin_status candidates read from documented DestList fixed-header offsets; "
+            "OS-version layout confirmation and JLECmd trusted diff still required before report use"
+        ),
         "droid_guid_candidates": destlist_guid_candidates(prefix),
         "hostname_candidates": destlist_hostname_candidates(prefix),
         "filetime_candidates": filetime_candidates,
         "numeric_field_candidates": destlist_numeric_candidates(prefix, lnk_stream_names),
         "matched_lnk_stream_candidates": matched_streams,
         "validation_status": validation_status,
-        "parser_confidence": destlist_entry_confidence(path, matched_streams, filetime_candidates),
+        "parser_confidence": destlist_entry_confidence(path_candidate_value, matched_streams, filetime_candidates),
         "entry_prefix_sha256": citation["entry_prefix_sha256"],
         "entry_sha256": citation["entry_sha256"],
         "destlist_entry_citation": {

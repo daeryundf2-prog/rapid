@@ -1,9 +1,8 @@
 from __future__ import annotations
 
 import datetime as dt
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from pathlib import Path
-from typing import Sequence
 
 from .audit import compute_sha256
 from .docs import write_result
@@ -116,6 +115,95 @@ def run_windows11_e01_smoke(
     source = source.expanduser().resolve()
     output_dir = output_dir.expanduser().resolve()
     output_dir.mkdir(parents=True, exist_ok=True)
+
+    if not source.is_file():
+        guidance = e01_failure_guidance(
+            f"E01 smoke source must be an E01/Ex01 image file, not found as file: {source}"
+            if source.exists()
+            else f"E01 smoke source not found: {source}"
+        )
+        stage_status_payload: dict[str, object] = {
+            "schema": "rapidforensic-e01-workflow-stage-status-v1",
+            "profile_version": "windows11-e01-stage-status-v1",
+            "generated_at": dt.datetime.now(dt.timezone.utc).isoformat(),
+            "case_id": case_id,
+            "source_path": str(source),
+            "status": "blocked",
+            "read_only": read_only,
+            "resume_requested": resume,
+            "run_dir": str(output_dir / "run"),
+            "stage_counts": {"total": 1, "complete": 0, "blocked": 1, "skipped": 0},
+            "blocked_stage_ids": ["source-validation"],
+            "stages": [
+                _stage(
+                    "source-validation",
+                    "E01/Ex01 source image validation",
+                    "blocked",
+                    details={
+                        "error": "source is not an image file",
+                        "failure_guidance": guidance,
+                    },
+                )
+            ],
+            "checkpoint_resume_policy": {
+                "resume_supported": True,
+                "resume_requested": resume,
+                "reuse_completed_extraction_stages_when_source_fingerprint_matches": True,
+                "stage_status_sidecar": E01_STAGE_STATUS_OUTPUT_NAME,
+            },
+            "qc_links": {
+                "known_answer_manifest": str(output_dir / E01_KNOWN_ANSWER_OUTPUT_NAME),
+                "evidence_preflight": str(output_dir / E01_EVIDENCE_PREFLIGHT_OUTPUT_NAME),
+                "validation_plan": str(output_dir / E01_VALIDATION_PLAN_OUTPUT_NAME),
+                "smoke_report": str(output_dir / E01_SMOKE_OUTPUT_NAME),
+            },
+        }
+        write_result(stage_status_payload, output_dir / E01_STAGE_STATUS_OUTPUT_NAME)
+        payload: dict[str, object] = {
+            "schema": "rapidforensic-e01-smoke-report-v1",
+            "profile_version": E01_SMOKE_PROFILE_VERSION,
+            "generated_at": dt.datetime.now(dt.timezone.utc).isoformat(),
+            "case_id": case_id,
+            "source_path": str(source),
+            "mode": mode,
+            "input_kind": input_kind,
+            "status": "blocked",
+            "stages": stage_status_payload["stages"],
+            "stage_status": stage_status_payload,
+            "known_answer_manifest": {},
+            "evidence_preflight": {},
+            "report_grade_validation_plan": {},
+            "run_summary": {},
+            "run_error": {
+                "error": "source is not an image file",
+                "failure_guidance": guidance,
+                "run_dir": str(output_dir / "run"),
+            },
+            "outputs": {
+                "stage_status": _output_status(output_dir / E01_STAGE_STATUS_OUTPUT_NAME),
+                "smoke_report": {
+                    "path": str(output_dir / E01_SMOKE_OUTPUT_NAME),
+                    "exists": True,
+                    "sha256": None,
+                    "hash_note": "Self-referential smoke report hash is omitted; hash the saved file externally when packaging evidence.",
+                },
+            },
+            "commercial_gap_ids": ["#22", "#64", "#85", "#90"],
+            "commercial_grade_ready": False,
+            "commercial_grade_blockers": [
+                "The smoke source must be a real E01/Ex01 image file before any workflow stage can run.",
+                "Known-answer assertions must be executed against a real Windows 11 E01 and trusted-tool outputs.",
+                "Direct E01 extraction depends on libewf/Sleuth Kit availability and platform mount behavior.",
+            ],
+            "operator_next_steps": [
+                "Point e01-smoke at an actual E01/Ex01 image file (not a folder or missing path).",
+                "For folder evidence, use rapidtriage run with --input-kind folder instead.",
+                "Attach trusted-tool diff output before claiming commercial-grade E01 support.",
+            ],
+        }
+        write_result(payload, output_dir / E01_SMOKE_OUTPUT_NAME)
+        return payload
+
     known_answer_path = output_dir / E01_KNOWN_ANSWER_OUTPUT_NAME
     evidence_path = output_dir / E01_EVIDENCE_PREFLIGHT_OUTPUT_NAME
     smoke_path = output_dir / E01_SMOKE_OUTPUT_NAME

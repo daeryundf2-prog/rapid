@@ -9,7 +9,11 @@ from rapidtriage.cli import main
 from rapidtriage.core.artifacts import run_artifact_collection
 from rapidtriage.core.docs import build_manifest, run_docs_search
 from rapidtriage.core.files import run_files_scan
-from rapidtriage.core.input_root import InputRoot, derive_child_input_root, resolve_input_root
+from rapidtriage.core.input_root import (
+    InputRoot,
+    derive_child_input_root,
+    resolve_input_root,
+)
 from rapidtriage.core.run import run_triage_mode
 from tests.test_rapidtriage_run import build_run_fixture
 

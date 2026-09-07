@@ -10,7 +10,10 @@ from pathlib import Path
 from unittest.mock import patch
 
 from rapidtriage.cli import main
-from rapidtriage.core.e01 import DIRECT_IMAGE_HASH_LIMIT_BYTES, build_e01_partition_browser_contract
+from rapidtriage.core.e01 import (
+    DIRECT_IMAGE_HASH_LIMIT_BYTES,
+    build_e01_partition_browser_contract,
+)
 from rapidtriage.core.evidence import identify_evidence
 
 

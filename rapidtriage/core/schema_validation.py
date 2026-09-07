@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import datetime as dt
 import json
-from functools import lru_cache
+from functools import cache
 from pathlib import Path
 from typing import Any
 
@@ -14,7 +14,7 @@ class SchemaValidationError(ValueError):
 SCHEMAS_DIR = Path(__file__).resolve().parent.parent / "schemas"
 
 
-@lru_cache(maxsize=None)
+@cache
 def load_schema(name: str) -> dict[str, Any]:
     return json.loads((SCHEMAS_DIR / name).read_text(encoding="utf-8"))
 

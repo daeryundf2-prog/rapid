@@ -9,9 +9,15 @@ from pathlib import Path
 from unittest.mock import patch
 
 from rapidtriage.validation.known_answer import validate_manifest
-from rapidtriage.validation.known_answer_schema import load_json_document, validate_schema_document
-from rapidtriage.validation.known_answer_types import JsonObject, JsonValue, ManifestValidationError
-
+from rapidtriage.validation.known_answer_schema import (
+    load_json_document,
+    validate_schema_document,
+)
+from rapidtriage.validation.known_answer_types import (
+    JsonObject,
+    JsonValue,
+    ManifestValidationError,
+)
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 FIXTURE_DIR = REPO_ROOT / "tests" / "fixtures" / "known_answer"

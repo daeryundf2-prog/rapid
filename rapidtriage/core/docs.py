@@ -10,10 +10,10 @@ import re
 import zipfile
 import zlib
 from collections import Counter
+from collections.abc import Mapping, Sequence
 from email import policy
 from email.message import EmailMessage
 from pathlib import Path
-from typing import Dict, List, Mapping, Sequence, Union
 from xml.etree import ElementTree as ET
 
 from ..artifacts import all_providers
@@ -84,9 +84,9 @@ class TextExtractionTooLarge(ValueError):
 BOUNDED_MAIL_CONTAINER_SCAN_LIMIT = 2 * 1024 * 1024
 
 
-def scan_document_candidates(root: Union[InputRoot, Path], limit: int = 0) -> List[DocumentCandidate]:
+def scan_document_candidates(root: InputRoot | Path, limit: int = 0) -> list[DocumentCandidate]:
     input_root = resolve_input_root(root)
-    candidates: List[DocumentCandidate] = []
+    candidates: list[DocumentCandidate] = []
     for dirpath, _, files in os.walk(input_root.root_path):
         for name in files:
             path = Path(dirpath) / name
@@ -110,7 +110,7 @@ def scan_document_candidates(root: Union[InputRoot, Path], limit: int = 0) -> Li
     return candidates
 
 
-def build_manifest(root: Union[InputRoot, Path], keywords: Sequence[str], *, input_kind: str | None = None) -> Dict[str, object]:
+def build_manifest(root: InputRoot | Path, keywords: Sequence[str], *, input_kind: str | None = None) -> dict[str, object]:
     input_root = resolve_input_root(root, kind=input_kind)
     provider_rows = []
     for provider in all_providers():
@@ -133,19 +133,19 @@ def build_manifest(root: Union[InputRoot, Path], keywords: Sequence[str], *, inp
 
 
 def run_docs_search(
-    root: Union[InputRoot, Path],
+    root: InputRoot | Path,
     keywords: Sequence[str],
     limit: int = 0,
     *,
     input_kind: str | None = None,
     rule_set: RuleSet | None = None,
     index_output: Path | None = None,
-) -> Dict[str, object]:
+) -> dict[str, object]:
     input_root = resolve_input_root(root, kind=input_kind)
     normalized = [item.lower() for item in keywords]
     candidates = scan_document_candidates(input_root, limit=limit)
-    matches: List[DocumentMatch] = []
-    text_by_path: Dict[str, str] = {}
+    matches: list[DocumentMatch] = []
+    text_by_path: dict[str, str] = {}
     extraction_errors: list[dict[str, object]] = []
     for candidate in candidates:
         try:
@@ -226,13 +226,13 @@ def document_extraction_error(
 
 
 def build_docs_index(
-    root: Union[InputRoot, Path],
+    root: InputRoot | Path,
     candidates: Sequence[DocumentCandidate],
-    text_by_path: Dict[str, str],
-) -> Dict[str, object]:
+    text_by_path: dict[str, str],
+) -> dict[str, object]:
     input_root = resolve_input_root(root)
     documents = []
-    postings: Dict[str, List[Dict[str, int]]] = {}
+    postings: dict[str, list[dict[str, int]]] = {}
     total_occurrences = 0
     for document_id, candidate in enumerate(candidates):
         text = text_by_path.get(candidate.path, "")
@@ -277,7 +277,7 @@ def build_docs_index(
     }
 
 
-def tokenize_index_terms(text: str) -> List[str]:
+def tokenize_index_terms(text: str) -> list[str]:
     return [match.group(0).lower()[:256] for match in DOCS_INDEX_TOKEN_PATTERN.finditer(text)]
 
 
@@ -453,7 +453,7 @@ def search_docs_index_payload(
     }
 
 
-def write_result(payload: Dict[str, object], output: Path) -> None:
+def write_result(payload: dict[str, object], output: Path) -> None:
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
@@ -578,7 +578,7 @@ def _extract_open_document_text(
             return " ".join(_extract_xml_text(handle.read()))
 
 
-def _extract_xml_text(xml_data: bytes) -> List[str]:
+def _extract_xml_text(xml_data: bytes) -> list[str]:
     root = safe_xml_fromstring(xml_data)
     texts = []
     for node in root.iter():
@@ -593,8 +593,8 @@ def _extract_pdf_text(
     max_stream_decompressed_bytes: int = MAX_PDF_STREAM_DECOMPRESSED_BYTES,
 ) -> str:
     data = path.read_bytes()
-    snippets: List[str] = []
-    for stream in re.findall(rb"stream\r?\n(.*?)\r?\nendstream", data, re.S):
+    snippets: list[str] = []
+    for stream in re.findall(rb"stream\r?\n(.*?)\r?\nendstream", data, re.DOTALL):
         candidates = [stream]
         try:
             candidates.append(
@@ -625,9 +625,9 @@ def _decompress_pdf_stream(stream: bytes, *, max_decompressed_bytes: int) -> byt
     return data + tail
 
 
-def _extract_pdf_literal_strings(blob: bytes) -> List[str]:
+def _extract_pdf_literal_strings(blob: bytes) -> list[str]:
     found = []
-    for raw in re.findall(rb"\((.*?)(?<!\\)\)", blob, re.S):
+    for raw in re.findall(rb"\((.*?)(?<!\\)\)", blob, re.DOTALL):
         text = (
             raw.replace(b"\\n", b"\n")
             .replace(b"\\r", b"\r")
@@ -766,8 +766,8 @@ def _unique_strings(values: list[str]) -> list[str]:
 
 
 def _strip_markup(text: str) -> str:
-    text = re.sub(r"<script\b.*?</script>", " ", text, flags=re.I | re.S)
-    text = re.sub(r"<style\b.*?</style>", " ", text, flags=re.I | re.S)
+    text = re.sub(r"<script\b.*?</script>", " ", text, flags=re.IGNORECASE | re.DOTALL)
+    text = re.sub(r"<style\b.*?</style>", " ", text, flags=re.IGNORECASE | re.DOTALL)
     text = re.sub(r"<[^>]+>", " ", text)
     return re.sub(r"\s+", " ", text).strip()
 

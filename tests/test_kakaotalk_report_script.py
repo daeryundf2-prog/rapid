@@ -10,7 +10,6 @@ from unittest.mock import patch
 
 from rapidtriage.core.kakaotalk import KakaoTalkDecryptError, extract_zip_archive_safely
 
-
 SCRIPT_PATH = Path(__file__).resolve().parents[1] / "scripts" / "kakaotalk_zip_to_report.py"
 SPEC = importlib.util.spec_from_file_location("kakaotalk_zip_to_report", SCRIPT_PATH)
 assert SPEC is not None and SPEC.loader is not None

@@ -2,16 +2,16 @@ from __future__ import annotations
 
 import shutil
 import subprocess
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Callable, Optional, Sequence
 
 from .e01 import collect_tool_preflight, command_record, describe_source_integrity
 
 ARCHIVE_IMAGE_SUFFIXES = (".iso", ".dmg", ".wim", ".swm")
 ARCHIVE_IMAGE_TOOLS = ("7zz", "7z", "bsdtar")
 CommandRunner = Callable[[Sequence[str]], subprocess.CompletedProcess[str]]
-ToolResolver = Callable[[str], Optional[str]]
+ToolResolver = Callable[[str], str | None]
 
 
 class ArchiveImageExtractionError(RuntimeError):

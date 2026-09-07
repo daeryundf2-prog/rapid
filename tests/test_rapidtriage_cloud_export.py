@@ -6,8 +6,11 @@ import unittest
 import zipfile
 from pathlib import Path
 
+from rapidtriage.artifacts.cloud import (
+    build_cloud_export_trusted_diff,
+    cloud_core_accuracy_gates,
+)
 from rapidtriage.cli import build_parser, main
-from rapidtriage.artifacts.cloud import build_cloud_export_trusted_diff, cloud_core_accuracy_gates
 
 
 class RapidTriageCloudExportTests(unittest.TestCase):

@@ -2,11 +2,11 @@ from __future__ import annotations
 
 import json
 import time
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 from urllib.parse import urljoin
-
 
 BROWSER_LARGE_RESULT_STRESS_VERSION = "browser-large-result-stress-harness-v1"
 DEFAULT_BROWSER_STRESS_RECORD_COUNT = 100_000
@@ -29,7 +29,10 @@ def load_playwright_sync() -> PlaywrightImportResult:
 
 
 def build_browser_large_result_stress_plan(*, record_count: int = DEFAULT_BROWSER_STRESS_RECORD_COUNT) -> dict[str, object]:
-    from rapidtriage.api.app import WORKBENCH_SMOKE_SELECTORS, build_workbench_large_result_evidence
+    from rapidtriage.api.app import (
+        WORKBENCH_SMOKE_SELECTORS,
+        build_workbench_large_result_evidence,
+    )
 
     evidence = build_workbench_large_result_evidence(record_count=record_count)
     performance_contract = evidence["performance_contract"]

@@ -3,12 +3,11 @@ from __future__ import annotations
 import datetime as dt
 import json
 import zipfile
+from collections.abc import Mapping
 from pathlib import Path
-from typing import Mapping
 
 from .case_db import normalize_identifier
 from .search import load_run_summary
-
 
 CATALOG_VERSION = 1
 

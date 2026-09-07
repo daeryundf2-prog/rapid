@@ -1,20 +1,19 @@
 from __future__ import annotations
 
 import contextlib
-import datetime as dt
 import csv
+import datetime as dt
 import hashlib
 import json
 import shutil
 import sqlite3
 import struct
 import subprocess
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable
 
 from .docs import write_result
-
 
 SQLITE_WAL_PREVIEW_VERSION = "sqlite-wal-recovery-mvp-preview-v1"
 SQLITE_WAL_HEADER_SIZE = 32

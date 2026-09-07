@@ -34,7 +34,7 @@ class RapidTriageExifGpsProfileTests(unittest.TestCase):
                 return self[tag]
 
         class FakeImageHandle:
-            def __enter__(self) -> "FakeImageHandle":
+            def __enter__(self) -> FakeImageHandle:
                 return self
 
             def __exit__(self, _exc_type: object, _exc: object, _traceback: object) -> None:
@@ -63,7 +63,7 @@ class RapidTriageExifGpsProfileTests(unittest.TestCase):
 
         class FakeImageModule:
             @staticmethod
-            def open(path: Path) -> FakeImageHandle:  # noqa: ARG004
+            def open(path: Path) -> FakeImageHandle:
                 return FakeImageHandle()
 
         with tempfile.TemporaryDirectory() as tmp_dir:

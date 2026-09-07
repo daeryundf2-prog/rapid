@@ -7,12 +7,16 @@ import shutil
 import subprocess
 import threading
 import time
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import IO, Callable, Mapping, Sequence
+from typing import IO
 
-from .artifact_store import JsonlArtifactStreamWriter, JsonlArtifactWriteResult, write_jsonl_artifact_manifest
-
+from .artifact_store import (
+    JsonlArtifactStreamWriter,
+    JsonlArtifactWriteResult,
+    write_jsonl_artifact_manifest,
+)
 
 DEFAULT_WORKER_TIMEOUT_SECONDS = 30.0
 MAX_CAPTURED_STDERR_CHARS = 4000
@@ -48,7 +52,7 @@ class RustWorkerClient:
     extra_env: Mapping[str, str] = field(default_factory=dict)
 
     @classmethod
-    def from_environment(cls) -> "RustWorkerClient":
+    def from_environment(cls) -> RustWorkerClient:
         raw = os.environ.get("RAPIDTRIAGE_RUST_WORKER") or ""
         executable = Path(raw).expanduser().resolve() if raw else None
         return cls(executable=executable)

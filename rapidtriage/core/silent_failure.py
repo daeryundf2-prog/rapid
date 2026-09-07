@@ -1,10 +1,9 @@
 from __future__ import annotations
 
 import fnmatch
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Mapping, Sequence
-
 
 MAX_TARGET_SCAN_FILES = 20_000
 

@@ -3,8 +3,8 @@ from __future__ import annotations
 import datetime as dt
 import hashlib
 import json
+from collections.abc import Mapping
 from pathlib import Path
-from typing import Mapping
 
 from .search import load_run_summary
 
@@ -86,7 +86,7 @@ def normalize_event(event: Mapping[str, object], *, index: int) -> dict[str, obj
 
 
 def stable_event_id(timestamp: str, source: str, event_type: str, path: str, summary: str, index: int) -> str:
-    digest = hashlib.sha256(f"{timestamp}|{source}|{event_type}|{path}|{summary}|{index}".encode("utf-8")).hexdigest()
+    digest = hashlib.sha256(f"{timestamp}|{source}|{event_type}|{path}|{summary}|{index}".encode()).hexdigest()
     return f"evt-{digest[:16]}"
 
 

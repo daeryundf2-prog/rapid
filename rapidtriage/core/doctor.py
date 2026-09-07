@@ -9,12 +9,11 @@ import socket
 import subprocess
 import sys
 import tempfile
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable, Optional, Sequence
 
-
-ToolResolver = Callable[[str], Optional[str]]
+ToolResolver = Callable[[str], str | None]
 
 OK = "ok"
 WARN = "warn"

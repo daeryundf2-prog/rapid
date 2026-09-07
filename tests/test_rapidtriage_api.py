@@ -25,8 +25,6 @@ except ModuleNotFoundError as exc:
 if HAS_FASTAPI:
     from rapidtriage.api.app import (
         build_email_conversation_trusted_diff,
-        build_run_validation_diff_inventory,
-        build_run_validation_package,
         build_hex_viewer_trusted_diff,
         build_large_sqlite_fts_trusted_diff,
         build_media_transcript_trusted_diff,
@@ -34,30 +32,35 @@ if HAS_FASTAPI:
         build_pagination_cursor_report_grade_validation_plan,
         build_pagination_trusted_diff,
         build_preview_sandbox_trusted_diff,
+        build_run_validation_diff_inventory,
+        build_run_validation_package,
         build_source_preview,
         build_source_search,
-        build_xml_preview,
-        encode_source_search_file_resume_token,
-        encode_source_search_resume_token,
-        sqlite_wal_sidecar_info,
         build_sqlite_viewer_trusted_diff,
-        build_ui_virtualization_trusted_diff,
         build_ui_virtualization_manifest,
         build_ui_virtualization_report_grade_validation_plan,
-        email_viewer_core_accuracy_gates,
+        build_ui_virtualization_trusted_diff,
+        build_xml_preview,
         create_app,
+        email_viewer_core_accuracy_gates,
+        encode_source_search_file_resume_token,
+        encode_source_search_resume_token,
         hex_viewer_core_accuracy_gates,
         large_sqlite_fts_core_accuracy_gates,
         media_viewer_core_accuracy_gates,
         pagination_core_accuracy_gates,
         preview_sandbox_core_accuracy_gates,
         sqlite_viewer_core_accuracy_gates,
+        sqlite_wal_sidecar_info,
         ui_virtualization_core_accuracy_gates,
     )
 from rapidtriage.cli import build_web_parser
 from rapidtriage.core.crash import write_crash_report
 from rapidtriage.core.jobs import RunJobStore
-from rapidtriage.core.keyword_packs import build_keyword_pack_trusted_diff, keyword_pack_core_accuracy_gates
+from rapidtriage.core.keyword_packs import (
+    build_keyword_pack_trusted_diff,
+    keyword_pack_core_accuracy_gates,
+)
 from rapidtriage.core.large_case_controls import build_large_case_resilience_contract
 from tests.schema_validation import validate
 from tests.test_rapidtriage_run import build_run_fixture
@@ -2890,7 +2893,7 @@ class RapidTriageApiTests(unittest.TestCase):
             self.assertRegex(viewer_validation["manifest_hash"], r"^[0-9a-f]{64}$")
             self.assertGreaterEqual(viewer_validation["candidate_summary"]["total_candidate_count"], 6)
             route_coverage = viewer_validation["route_coverage_by_id"]
-            for route_id in {
+            for route_id in (
                 "source-preview",
                 "source-hex-range",
                 "source-sqlite-table",
@@ -2899,7 +2902,7 @@ class RapidTriageApiTests(unittest.TestCase):
                 "source-media-cue",
                 "source-ocr-queue",
                 "source-ocr-translation",
-            }:
+            ):
                 self.assertIn(route_id, route_coverage)
                 self.assertTrue(route_coverage[route_id]["implemented"])
                 self.assertGreaterEqual(route_coverage[route_id]["candidate_count"], 1)

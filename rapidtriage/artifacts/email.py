@@ -4,12 +4,12 @@ import email
 import hashlib
 import json
 import re
+from collections.abc import Iterable, Mapping
 from datetime import timezone
-from email.message import EmailMessage
 from email import policy
+from email.message import EmailMessage
 from email.utils import getaddresses, parsedate_to_datetime
 from pathlib import Path
-from typing import Iterable, Mapping
 
 from ..core.forensic_accuracy import build_accuracy_gate
 from ..core.models import ArtifactRecord

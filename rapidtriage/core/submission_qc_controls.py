@@ -2,8 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
-from typing import Mapping, Sequence
-
+from collections.abc import Mapping, Sequence
 
 TRUSTED_TOOL_IMPORT_FAMILIES = [
     "EvtxECmd",

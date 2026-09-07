@@ -1,12 +1,12 @@
 from __future__ import annotations
 
-import sqlite3
-import tempfile
-import unittest
 import contextlib
 import hashlib
 import io
 import json
+import sqlite3
+import tempfile
+import unittest
 import zipfile
 from pathlib import Path
 from unittest import mock
@@ -22,9 +22,9 @@ from rapidtriage.core.case_db import (
     build_acquisition_hash_trusted_diff,
     build_acquisition_metadata_trusted_diff,
     build_case_db_fts_trusted_diff,
+    build_citation_manager_trusted_diff,
     build_clock_skew_trusted_diff,
     build_contamination_warning_trusted_diff,
-    build_citation_manager_trusted_diff,
     build_custody_workflow_trusted_diff,
     build_evidence_history_trusted_diff,
     build_immutable_audit_trusted_diff,
@@ -32,11 +32,11 @@ from rapidtriage.core.case_db import (
     build_parser_confidence_trusted_diff,
     build_report_provenance_trusted_diff,
     build_report_reproducibility_trusted_diff,
+    build_reviewer_workflow_trusted_diff,
     build_timezone_validation_trusted_diff,
     build_validation_warning_trusted_diff,
-    build_reviewer_workflow_trusted_diff,
-    clock_skew_core_accuracy_gates,
     citation_manager_core_accuracy_gates,
+    clock_skew_core_accuracy_gates,
     contamination_warning_core_accuracy_gates,
     custody_workflow_core_accuracy_gates,
     evidence_selection_core_accuracy_gates,
@@ -55,7 +55,6 @@ from rapidtriage.core.case_db import (
 from rapidtriage.core.sample_case import run_sample_workflow
 from tests.test_rapidtriage_macos_artifacts import build_macos_fixture
 from tests.windows_artifact_fixtures import build_windows_artifact_fixture
-
 
 REQUIRED_TABLES = {
     "schema_info",
@@ -862,6 +861,25 @@ class RapidTriageCaseDatabaseTests(unittest.TestCase):
             db_path = root / "case.db"
             database = open_case_database(db_path)
             database.create_case(case_id="CASE-SOURCE-NOTE")
+            with database.connect() as connection:
+                cursor = connection.execute(
+                    """
+                    INSERT INTO indexed_document (
+                        citation_id, case_id, source_type, field_name, title, body, indexed_at
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        "CASE-SOURCE-NOTE-IDX-000001",
+                        "CASE-SOURCE-NOTE",
+                        "source-read-fixture",
+                        "body",
+                        "Users/alice/note.txt",
+                        "password note",
+                        "2026-05-16T00:00:00+00:00",
+                    ),
+                )
+                target_id = str(cursor.lastrowid)
             source_read_path = root / "source-read.json"
             source_read_path.write_text(
                 json.dumps(
@@ -888,7 +906,7 @@ class RapidTriageCaseDatabaseTests(unittest.TestCase):
                         "--target-type",
                         "indexed_document",
                         "--target-id",
-                        "1",
+                        target_id,
                         "--status",
                         "relevant",
                         "--verification-status",
@@ -1668,11 +1686,29 @@ class RapidTriageCaseDatabaseTests(unittest.TestCase):
             db_path = Path(tmp_dir) / "case.db"
             database = open_case_database(db_path)
             database.create_case(case_id="CASE-PRESERVE")
+            with database.connect() as connection:
+                cursor = connection.execute(
+                    """
+                    INSERT INTO artifact (
+                        citation_id, case_id, artifact_type, parser_name, title, created_at
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        "CASE-PRESERVE-ART-000001",
+                        "CASE-PRESERVE",
+                        "browser-history-visit",
+                        "rapidtriage-browser",
+                        "visit example.com",
+                        "2026-05-16T00:00:00+00:00",
+                    ),
+                )
+                artifact_target_id = str(cursor.lastrowid)
 
             created = database.mark_review(
                 case_id="CASE-PRESERVE",
                 target_type="artifact",
-                target_id="1",
+                target_id=artifact_target_id,
                 status="relevant",
                 verification_status="source_opened",
                 tags=["credential"],
@@ -1683,7 +1719,7 @@ class RapidTriageCaseDatabaseTests(unittest.TestCase):
             updated = database.mark_review(
                 case_id="CASE-PRESERVE",
                 target_type="artifact",
-                target_id="1",
+                target_id=artifact_target_id,
                 verification_status="verified",
                 include_in_report=None,
                 status=None,
@@ -1711,7 +1747,7 @@ class RapidTriageCaseDatabaseTests(unittest.TestCase):
                         "--target-type",
                         "artifact",
                         "--target-id",
-                        "1",
+                        artifact_target_id,
                         "--exclude-from-report",
                         "--json",
                     ]
@@ -1722,6 +1758,26 @@ class RapidTriageCaseDatabaseTests(unittest.TestCase):
             self.assertFalse(excluded["include_in_report"])
             self.assertEqual(excluded["status"], "relevant")
             self.assertEqual(excluded["verification_status"], "verified")
+
+    def test_mark_review_rejects_unknown_target_id(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            db_path = Path(tmp_dir) / "case.db"
+            database = open_case_database(db_path)
+            database.create_case(case_id="CASE-UNKNOWN-TARGET")
+
+            with self.assertRaises(CaseDatabaseError) as raised:
+                database.mark_review(
+                    case_id="CASE-UNKNOWN-TARGET",
+                    target_type="indexed_document",
+                    target_id="999",
+                    status="relevant",
+                )
+            self.assertIn("review target not found", str(raised.exception))
+            self.assertIn("case-search", str(raised.exception))
+
+            with database.connect() as connection:
+                count = connection.execute("SELECT COUNT(*) FROM review_mark").fetchone()[0]
+            self.assertEqual(count, 0)
 
     def test_saved_searches_and_batch_review_support_repeated_case_work(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:

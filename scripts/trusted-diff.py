@@ -29,13 +29,18 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import cast
 
-
 REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from rapidtriage.validation.trusted_diff import compare, result_to_text, write_summary
-from rapidtriage.validation.trusted_diff import result_schema_error_result, validate_result_schema, TrustedDiffInputPaths
+from rapidtriage.validation.trusted_diff import (
+    TrustedDiffInputPaths,
+    compare,
+    result_schema_error_result,
+    result_to_text,
+    validate_result_schema,
+    write_summary,
+)
 from rapidtriage.validation.trusted_diff_result import TrustedDiffResult
 
 

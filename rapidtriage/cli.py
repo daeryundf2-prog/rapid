@@ -4,17 +4,27 @@ import argparse
 import csv
 import json
 import os
-import sys
 import sqlite3
+import sys
 import textwrap
 from collections.abc import Mapping
 from pathlib import Path
 
+from .artifacts.email_external import EmailExternalParserError, run_email_external_parse
+from .artifacts.kakaotalk_macos import (
+    DEFAULT_MACOS_REPORT_MAX_CONTEXT_ROWS,
+    DEFAULT_MACOS_REPORT_MAX_MESSAGES,
+    KakaoTalkMacOsReportError,
+    run_kakaotalk_macos_report,
+)
+from .core.artifact_taxonomy import build_taxonomy_audit
+from .core.artifacts import (
+    SUPPORTED_ARTIFACT_KINDS,
+    ArtifactCollectionError,
+    run_artifact_collection,
+)
 from .core.audit import audit_path_for, write_audit_record
 from .core.backup import BackupError, build_case_backup, restore_case_backup
-from .core.artifacts import ArtifactCollectionError, SUPPORTED_ARTIFACT_KINDS, run_artifact_collection
-from .artifacts.email_external import EmailExternalParserError, run_email_external_parse
-from .core.artifact_taxonomy import build_taxonomy_audit
 from .core.benchmark import (
     DEFAULT_BENCHMARK_FILE_COUNT,
     DEFAULT_BENCHMARK_KEYWORD,
@@ -22,13 +32,16 @@ from .core.benchmark import (
     build_stress_test_plan,
     run_benchmark,
 )
-from .core.browser_stress import DEFAULT_BROWSER_STRESS_RECORD_COUNT, run_browser_large_result_stress
 from .core.benchmark_fts import (
     SQLITE_FTS_DEFAULT_HIT_EVERY,
     SQLITE_FTS_DEFAULT_QUERY_ITERATIONS,
     SQLITE_FTS_DEFAULT_RECORD_COUNT,
     SqliteFtsBenchmarkError,
     run_sqlite_fts_benchmark,
+)
+from .core.browser_stress import (
+    DEFAULT_BROWSER_STRESS_RECORD_COUNT,
+    run_browser_large_result_stress,
 )
 from .core.bundle import BundleError, build_submission_bundle
 from .core.carving import (
@@ -47,6 +60,13 @@ from .core.case import (
 )
 from .core.case_catalog import CaseCatalog, CaseCatalogError, default_case_catalog_path
 from .core.case_db import CaseDatabaseError, open_case_database
+from .core.cloud_api import (
+    DEFAULT_CLOUD_API_MAX_RESPONSE_BYTES,
+    DEFAULT_CLOUD_API_TIMEOUT_SECONDS,
+    DEFAULT_CLOUD_BEARER_TOKEN_ENV,
+    CloudApiCollectionError,
+    run_cloud_api_collection,
+)
 from .core.collect_plan import (
     DEFAULT_COLLECT_EXPORT_MAX_FILE_COUNT,
     DEFAULT_COLLECT_EXPORT_MAX_TOTAL_BYTES,
@@ -55,24 +75,21 @@ from .core.collect_plan import (
     run_collect_export,
     supported_collect_profiles,
 )
+from .core.columnar_store import (
+    ColumnarStoreUnavailable,
+    convert_jsonl_to_parquet,
+    run_columnar_benchmark,
+)
 from .core.commercial_readiness import (
     MATURITY_GATE_ORDER,
     CommercialReadinessError,
-    build_known_answer_template_batches,
-    build_known_answer_manifest_template,
     build_commercial_readiness_report,
+    build_known_answer_manifest_template,
+    build_known_answer_template_batches,
     parse_item_range,
-    write_known_answer_template_batches,
     write_known_answer_manifest_template,
+    write_known_answer_template_batches,
 )
-from .core.cloud_api import (
-    DEFAULT_CLOUD_API_MAX_RESPONSE_BYTES,
-    DEFAULT_CLOUD_API_TIMEOUT_SECONDS,
-    DEFAULT_CLOUD_BEARER_TOKEN_ENV,
-    CloudApiCollectionError,
-    run_cloud_api_collection,
-)
-from .core.columnar_store import ColumnarStoreUnavailable, convert_jsonl_to_parquet, run_columnar_benchmark
 from .core.compare import CompareError, compare_many_paths, compare_paths
 from .core.confidence import (
     ConfidenceDashboardError,
@@ -83,81 +100,33 @@ from .core.confidence import (
 from .core.cross_tool import (
     CrossToolValidationError,
     build_cross_tool_validation_report,
-    iter_rows as iter_cross_tool_rows,
     write_usn_state_replay_known_answer_template,
+)
+from .core.cross_tool import (
+    iter_rows as iter_cross_tool_rows,
 )
 from .core.docs import build_manifest, query_docs_index, run_docs_search, write_result
 from .core.doctor import format_doctor_text, run_doctor
-from .core.enterprise import build_enterprise_policy
-from .core.evidence import identify_evidence
-from .core.e01 import build_image_workflow_trusted_diff, build_windows11_e01_known_answer_manifest
+from .core.e01 import (
+    build_image_workflow_trusted_diff,
+    build_windows11_e01_known_answer_manifest,
+)
 from .core.e01_hash import E01StreamingHashError, run_e01_streaming_hash
 from .core.e01_smoke import run_windows11_e01_smoke
-from .core.extract import DEFAULT_EXTRACT_MANIFEST_NAME, ExtractError, SUPPORTED_DOC_KINDS, run_extract
-from .core.files import ALL_FILE_CATEGORIES, FileScanError, build_known_good_index_payload, run_files_scan
-from .core.indicators import IndicatorSummaryError, build_indicator_summary
-from .core.input_root import SUPPORTED_INPUT_ROOT_KINDS, resolve_input_root
-from .core.keyword_packs import (
-    KeywordPackError,
-    keyword_pack_library_assessment,
-    keyword_pack_selection_profile,
-    list_keyword_packs,
-    resolve_keyword_packs,
+from .core.enterprise import build_enterprise_policy
+from .core.evidence import identify_evidence
+from .core.extract import (
+    DEFAULT_EXTRACT_MANIFEST_NAME,
+    SUPPORTED_DOC_KINDS,
+    ExtractError,
+    run_extract,
 )
-from .core.known_answer_qc import run_known_answer_qc
-from .core.macos_live_smoke import (
-    DEFAULT_MACOS_SMOKE_BENCHMARK_FILES,
-    DEFAULT_MACOS_SMOKE_FTS_RECORDS,
-    MacOsLiveSmokeError,
-    run_macos_live_smoke,
+from .core.files import (
+    ALL_FILE_CATEGORIES,
+    FileScanError,
+    build_known_good_index_payload,
+    run_files_scan,
 )
-from .core.large_case_readiness import (
-    DEFAULT_LARGE_CASE_P95_THRESHOLD_MS,
-    LargeCaseReadinessError,
-    build_large_case_readiness_report,
-)
-from .core.kakaotalk import (
-    DEFAULT_MEMORY_SQLITE_MAX_CARVE_BYTES,
-    DEFAULT_MEMORY_SQLITE_MAX_HITS,
-    DEFAULT_MEMORY_MESSAGE_RESIDUE_LIMIT,
-    DEFAULT_MEMORY_SQLCIPHER_KEY_RESIDUE_LIMIT,
-    KakaoTalkDecryptError,
-    run_kakaotalk_windows_collect,
-    run_kakaotalk_decrypt,
-    run_kakaotalk_key_store_inspect,
-    run_kakaotalk_memory_carve,
-    run_kakaotalk_sqlcipher_probe,
-    run_kakaotalk_userdir_bruteforce,
-)
-from .artifacts.kakaotalk_macos import (
-    DEFAULT_MACOS_REPORT_MAX_CONTEXT_ROWS,
-    DEFAULT_MACOS_REPORT_MAX_MESSAGES,
-    KakaoTalkMacOsReportError,
-    run_kakaotalk_macos_report,
-)
-from .core.normalize import NormalizationError, build_normalized_case
-from .core.ocr_queue import OcrQueueError, build_ocr_queue
-from .core.plugins import PluginError, load_plugin_registry, validate_plugin_manifest, read_plugin_manifest
-from .core.rearchitecture import build_rearchitecture_status
-from .core.rules import RuleConfigError, load_rule_set
-from .core.run import RunModeError, SUPPORTED_RUN_MODES, run_triage_mode
-from .core.run_validation import RunValidationAttachmentError, attach_validation_diff_outputs
-from .core.sample_case import DEFAULT_SAMPLE_DIR, DEFAULT_SAMPLE_MODE, SampleCaseError, create_sample_case, run_sample_workflow
-from .core.search import SearchError, run_unified_search
-from .core.source_reader import SourceReadError, render_source_read_text, run_source_read, run_source_search
-from .core.sqlite_wal import SqliteWalPreviewError, build_sqlite_wal_preview
-from .core.timeline import TimelineError, build_timeline_report, run_timeline
-from .core.timeline_export import TimelineExportError, build_unified_timeline_export
-from .core.validation import ValidationError, build_validation_package
-from .core.validation_diff_runners import (
-    VERSION_PROBE_TIMEOUT_SECONDS,
-    build_tool_search_path,
-    build_validation_diff_runner_matrix,
-    write_validation_diff_runner_matrix,
-)
-from .core.validation_final_qc import build_final_qc_execution_report, write_final_qc_execution_report
-from .core.vsc import VscCompareError, compare_vsc_snapshots, discover_vsc_snapshot_roots, extract_vsc_changes
-from .core.worker import RustWorkerClient, WorkerError
 from .core.forensic_validation_plan import (
     DEFAULT_FORENSIC_VALIDATION_ITEMS,
     DEFAULT_FORENSIC_VALIDATION_PACK_ITEMS,
@@ -171,6 +140,90 @@ from .core.forensic_validation_plan import (
     write_forensic_validation_pack,
     write_forensic_validation_plan,
 )
+from .core.indicators import IndicatorSummaryError, build_indicator_summary
+from .core.input_root import SUPPORTED_INPUT_ROOT_KINDS, resolve_input_root
+from .core.kakaotalk import (
+    DEFAULT_MEMORY_MESSAGE_RESIDUE_LIMIT,
+    DEFAULT_MEMORY_SQLCIPHER_KEY_RESIDUE_LIMIT,
+    DEFAULT_MEMORY_SQLITE_MAX_CARVE_BYTES,
+    DEFAULT_MEMORY_SQLITE_MAX_HITS,
+    KakaoTalkDecryptError,
+    run_kakaotalk_decrypt,
+    run_kakaotalk_key_store_inspect,
+    run_kakaotalk_memory_carve,
+    run_kakaotalk_sqlcipher_probe,
+    run_kakaotalk_userdir_bruteforce,
+    run_kakaotalk_windows_collect,
+)
+from .core.keyword_packs import (
+    KeywordPackError,
+    keyword_pack_library_assessment,
+    keyword_pack_selection_profile,
+    list_keyword_packs,
+    resolve_keyword_packs,
+)
+from .core.known_answer_qc import run_known_answer_qc
+from .core.large_case_readiness import (
+    DEFAULT_LARGE_CASE_P95_THRESHOLD_MS,
+    LargeCaseReadinessError,
+    build_large_case_readiness_report,
+)
+from .core.macos_live_smoke import (
+    DEFAULT_MACOS_SMOKE_BENCHMARK_FILES,
+    DEFAULT_MACOS_SMOKE_FTS_RECORDS,
+    MacOsLiveSmokeError,
+    run_macos_live_smoke,
+)
+from .core.normalize import NormalizationError, build_normalized_case
+from .core.ocr_queue import OcrQueueError, build_ocr_queue
+from .core.plugins import (
+    PluginError,
+    load_plugin_registry,
+    read_plugin_manifest,
+    validate_plugin_manifest,
+)
+from .core.rearchitecture import build_rearchitecture_status
+from .core.rules import RuleConfigError, load_rule_set
+from .core.run import SUPPORTED_RUN_MODES, RunModeError, run_triage_mode
+from .core.run_validation import (
+    RunValidationAttachmentError,
+    attach_validation_diff_outputs,
+)
+from .core.sample_case import (
+    DEFAULT_SAMPLE_DIR,
+    DEFAULT_SAMPLE_MODE,
+    SampleCaseError,
+    create_sample_case,
+    run_sample_workflow,
+)
+from .core.search import SearchError, run_unified_search
+from .core.source_reader import (
+    SourceReadError,
+    render_source_read_text,
+    run_source_read,
+    run_source_search,
+)
+from .core.sqlite_wal import SqliteWalPreviewError, build_sqlite_wal_preview
+from .core.timeline import TimelineError, build_timeline_report, run_timeline
+from .core.timeline_export import TimelineExportError, build_unified_timeline_export
+from .core.validation import ValidationError, build_validation_package
+from .core.validation_diff_runners import (
+    VERSION_PROBE_TIMEOUT_SECONDS,
+    build_tool_search_path,
+    build_validation_diff_runner_matrix,
+    write_validation_diff_runner_matrix,
+)
+from .core.validation_final_qc import (
+    build_final_qc_execution_report,
+    write_final_qc_execution_report,
+)
+from .core.vsc import (
+    VscCompareError,
+    compare_vsc_snapshots,
+    discover_vsc_snapshot_roots,
+    extract_vsc_changes,
+)
+from .core.worker import RustWorkerClient, WorkerError
 
 HELP_FORMATTER = argparse.RawDescriptionHelpFormatter
 TOP_LEVEL_EPILOG = """Examples:

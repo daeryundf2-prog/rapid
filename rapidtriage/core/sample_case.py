@@ -7,10 +7,8 @@ import shutil
 import sqlite3
 import zipfile
 from pathlib import Path
-from typing import Dict
 
 from .run import run_triage_mode
-
 
 DEFAULT_SAMPLE_DIR = "rapidtriage-sample"
 DEFAULT_SAMPLE_MODE = "fraud"
@@ -20,7 +18,7 @@ class SampleCaseError(ValueError):
     """Raised when the synthetic sample case cannot be created or run."""
 
 
-def create_sample_case(output_dir: Path, *, overwrite: bool = False) -> Dict[str, object]:
+def create_sample_case(output_dir: Path, *, overwrite: bool = False) -> dict[str, object]:
     root = output_dir.expanduser().resolve()
     evidence_root = root / "evidence"
     expected_path = root / "rapidtriage-sample-expected.json"
@@ -53,7 +51,7 @@ def run_sample_workflow(
     mode: str = DEFAULT_SAMPLE_MODE,
     overwrite: bool = False,
     read_only: bool = False,
-) -> Dict[str, object]:
+) -> dict[str, object]:
     sample_payload = create_sample_case(output_dir, overwrite=overwrite)
     sample_root = Path(sample_payload["sample_root"])
     evidence_root = Path(sample_payload["evidence_root"])
@@ -84,16 +82,16 @@ def run_sample_workflow(
 
 
 def build_training_lab_manifest(
-    sample_payload: Dict[str, object],
-    run_payload: Dict[str, object],
+    sample_payload: dict[str, object],
+    run_payload: dict[str, object],
     *,
     mode: str,
     read_only: bool,
-) -> Dict[str, object]:
+) -> dict[str, object]:
     sample_root = Path(str(sample_payload["sample_root"]))
     expected_path = Path(str(sample_payload["expected"]))
     outputs = run_payload.get("outputs", {})
-    output_hashes: list[Dict[str, object]] = []
+    output_hashes: list[dict[str, object]] = []
     for label, raw_path in sorted(outputs.items()):
         path = Path(str(raw_path))
         if path.is_file():
@@ -114,7 +112,7 @@ def build_training_lab_manifest(
         if not any(item.get("label") == label and item.get("sha256") for item in output_hashes)
     )
     expected = json.loads(expected_path.read_text(encoding="utf-8")) if expected_path.is_file() else {}
-    manifest: Dict[str, object] = {
+    manifest: dict[str, object] = {
         "profile_version": "training-lab-workflow-manifest-v1",
         "commercial_item_number": 67,
         "commercial_gap_ids": ["#115", "#116"],
@@ -361,7 +359,7 @@ def escape_xml(text: str) -> str:
     )
 
 
-def build_expected_payload(sample_root: Path, evidence_root: Path) -> Dict[str, object]:
+def build_expected_payload(sample_root: Path, evidence_root: Path) -> dict[str, object]:
     return {
         "sample_root": str(sample_root),
         "evidence_root": str(evidence_root),

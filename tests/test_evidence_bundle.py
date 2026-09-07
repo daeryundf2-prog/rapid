@@ -8,9 +8,11 @@ import unittest
 from pathlib import Path
 from typing import cast
 
-from rapidtriage.validation.known_answer_schema import load_json_document, validate_schema_document
+from rapidtriage.validation.known_answer_schema import (
+    load_json_document,
+    validate_schema_document,
+)
 from rapidtriage.validation.known_answer_types import JsonObject, JsonValue
-
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 TIER0_ROOT = REPO_ROOT / "tests" / "fixtures" / "known_answer" / "tier0-basic"

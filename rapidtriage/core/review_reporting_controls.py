@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
-from typing import Mapping, Sequence
+from collections.abc import Mapping, Sequence
 
 
 def stable_review_qc_sha256(payload: object) -> str:

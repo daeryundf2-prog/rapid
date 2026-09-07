@@ -1,13 +1,13 @@
 from __future__ import annotations
 
+import contextlib
+import io
 import json
 import os
 import sys
 import tempfile
 import textwrap
 import unittest
-import contextlib
-import io
 from pathlib import Path
 
 from rapidtriage.cli import build_parser, main

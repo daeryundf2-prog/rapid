@@ -3,13 +3,12 @@ from __future__ import annotations
 import datetime as dt
 import hashlib
 import json
+from collections.abc import Iterable, Mapping
 from pathlib import Path
-from typing import Iterable, Mapping
 
 from .commercial_readiness import build_commercial_readiness_report, parse_item_range
 from .docs import write_result
 from .forensic_accuracy import accuracy_profile_for_item
-
 
 FORENSIC_VALIDATION_PLAN_VERSION = "forensic-validation-plan-v1"
 FORENSIC_VALIDATION_PACK_VERSION = "forensic-validation-pack-v1"
@@ -416,7 +415,7 @@ def write_smoke_fixture_for_dataset(batch_dir: Path, dataset: Mapping[str, objec
     reference_path = fixture_dir / "trusted-reference.csv"
     diff_path = fixture_dir / "row-level-diff.json"
     signoff_path = fixture_dir / "reviewer-signoff.md"
-    source_path.write_bytes(f"RapidTriage smoke source for item {item_number}: {dataset.get('title')}\n".encode("utf-8"))
+    source_path.write_bytes(f"RapidTriage smoke source for item {item_number}: {dataset.get('title')}\n".encode())
     rapid_path.write_text(
         json.dumps(build_smoke_rapid_output(dataset), ensure_ascii=False, indent=2),
         encoding="utf-8",

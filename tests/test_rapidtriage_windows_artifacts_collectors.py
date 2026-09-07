@@ -1,21 +1,30 @@
 from __future__ import annotations
 
-import json
 import hashlib
+import json
 import shutil
 import tempfile
 import unittest
 from datetime import datetime, timezone
 from pathlib import Path
 
+from rapidtriage.artifacts.windows.browser import (
+    WindowsBrowserArtifactsProvider,
+    ai_transcript_commercial_uplift_evidence,
+    ai_transcript_core_accuracy_gates,
+    browser_core_accuracy_gates,
+    build_ai_transcript_trusted_diff,
+    build_browser_storage_trusted_diff,
+    build_browser_timeline_trusted_diff,
+)
 from rapidtriage.artifacts.windows.eventlog import (
+    NativeEvtxRecordCandidate,
     binxml_value_field_map,
     build_evtx_message_rendering_diff,
     build_evtx_recovery_corpus_diff,
     build_evtx_trusted_tool_record_diff,
     event_semantics_profile,
     load_event_message_catalog,
-    NativeEvtxRecordCandidate,
     native_evtx_binxml_grammar_coverage_profile,
     native_evtx_commercial_uplift_evidence,
     native_evtx_core_accuracy_gates,
@@ -37,23 +46,15 @@ from rapidtriage.artifacts.windows.execution import (
     shimcache_layout_profile,
     shimcache_row_manifest,
 )
-from rapidtriage.artifacts.windows.registry import (
-    build_registry_deleted_cell_diff,
-    build_registry_key_tree_diff,
-    collect_reg_export,
-    collect_registry_hive,
-    registry_analyst_review_profile,
-    stable_registry_json_sha256,
-)
 from rapidtriage.artifacts.windows.filesystem import (
     build_mft_bounded_path_cache,
+    build_mft_trusted_diff,
     build_native_mft_record,
     build_native_usn_record,
-    mft_bounded_path_cache_profile,
-    build_mft_trusted_diff,
     build_usn_state_replay_trusted_diff,
     build_usn_trusted_diff,
     decode_mft_runlist,
+    mft_bounded_path_cache_profile,
     ntfs_core_accuracy_gates,
     parse_mft_attribute,
     parse_mft_record_headers,
@@ -68,14 +69,9 @@ from rapidtriage.artifacts.windows.filesystem import (
     usn_state_replay_validation_profile,
     usn_timeline_review_candidates,
 )
-from rapidtriage.artifacts.windows.browser import (
-    WindowsBrowserArtifactsProvider,
-    ai_transcript_core_accuracy_gates,
-    ai_transcript_commercial_uplift_evidence,
-    browser_core_accuracy_gates,
-    build_ai_transcript_trusted_diff,
-    build_browser_storage_trusted_diff,
-    build_browser_timeline_trusted_diff,
+from rapidtriage.artifacts.windows.os_account import (
+    build_os_account_trusted_diff,
+    decode_sam_binary_field,
 )
 from rapidtriage.artifacts.windows.prefetch import (
     build_prefetch_trusted_diff,
@@ -90,20 +86,29 @@ from rapidtriage.artifacts.windows.recent_files import (
     parse_destlist_metadata,
     parse_lnk_extra_data,
 )
+from rapidtriage.artifacts.windows.registry import (
+    build_registry_deleted_cell_diff,
+    build_registry_key_tree_diff,
+    collect_reg_export,
+    collect_registry_hive,
+    registry_analyst_review_profile,
+    stable_registry_json_sha256,
+)
 from rapidtriage.artifacts.windows.search_index import (
     build_search_row_candidates,
     build_windows_edb_trusted_diff,
     windows_search_core_accuracy_gates,
 )
-from rapidtriage.artifacts.windows.srum_ese import build_srum_row_candidates
-from rapidtriage.artifacts.windows.os_account import decode_sam_binary_field
-from rapidtriage.artifacts.windows.os_account import build_os_account_trusted_diff
 from rapidtriage.artifacts.windows.shellbags import (
     WindowsShellbagsProvider,
     build_shellbag_trusted_diff,
     shellbag_core_accuracy_gates,
 )
-from rapidtriage.artifacts.windows.system import build_system_trusted_diff, system_core_accuracy_gates
+from rapidtriage.artifacts.windows.srum_ese import build_srum_row_candidates
+from rapidtriage.artifacts.windows.system import (
+    build_system_trusted_diff,
+    system_core_accuracy_gates,
+)
 from rapidtriage.cli import main
 from tests.windows_artifact_fixtures import (
     build_minimal_registry_hive,

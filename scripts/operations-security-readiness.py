@@ -24,19 +24,22 @@ import json
 import shutil
 import subprocess
 import sys
+from collections.abc import Mapping
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Mapping
-
+from typing import Any
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from rapidtriage.core.backup import BACKUP_MANIFEST_NAME, build_case_backup, restore_case_backup
+from rapidtriage.core.backup import (
+    BACKUP_MANIFEST_NAME,
+    build_case_backup,
+    restore_case_backup,
+)
 from rapidtriage.core.case_db import open_case_database
 from rapidtriage.core.enterprise import build_enterprise_policy
-
 
 PROFILE_VERSION = "operations-security-readiness-v1"
 ITEM_NUMBERS = [108, 109, 110, 111, 118, 119, 120]

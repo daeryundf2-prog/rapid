@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Dict, List, Mapping
+from collections.abc import Mapping
 
 
 def build_run_report_context(
@@ -147,12 +147,12 @@ def build_run_report_context(
 def order_artifact_payloads(
     artifact_payloads: Mapping[str, Mapping[str, object]],
     summary_payload: Mapping[str, object],
-) -> Dict[str, Mapping[str, object]]:
+) -> dict[str, Mapping[str, object]]:
     profile = summary_payload.get("profile", {})
     preferred: list[str] = []
     if isinstance(profile, Mapping):
         preferred = [str(kind) for kind in profile.get("artifacts_kinds", [])]
-    ordered: Dict[str, Mapping[str, object]] = {}
+    ordered: dict[str, Mapping[str, object]] = {}
     for kind in preferred:
         if kind in artifact_payloads:
             ordered[kind] = artifact_payloads[kind]
@@ -552,8 +552,8 @@ def format_bounded_names(value: object, *, limit: int) -> str:
     return ", ".join(visible) + suffix if visible else "none"
 
 
-def build_processing_decision_rows(steps: object, processing: Mapping[str, object]) -> List[str]:
-    rows: List[str] = []
+def build_processing_decision_rows(steps: object, processing: Mapping[str, object]) -> list[str]:
+    rows: list[str] = []
     caps = processing.get("caps", {}) if isinstance(processing.get("caps"), Mapping) else {}
     if processing.get("read_only"):
         rows.append("Read-only mode was enabled, so extraction steps may be intentionally skipped.")
@@ -589,10 +589,10 @@ def build_processing_decision_rows(steps: object, processing: Mapping[str, objec
     return list(dict.fromkeys(rows))
 
 
-def summarize_document_hits(results: object, *, limit: int) -> List[Dict[str, object]]:
+def summarize_document_hits(results: object, *, limit: int) -> list[dict[str, object]]:
     if not isinstance(results, list):
         return []
-    items: List[Dict[str, object]] = []
+    items: list[dict[str, object]] = []
     for row in results[:limit]:
         if not isinstance(row, dict):
             continue
@@ -614,8 +614,8 @@ def build_key_hit_rows(
     files_payload: Mapping[str, object],
     artifact_payloads: Mapping[str, Mapping[str, object]],
     timeline_payload: Mapping[str, object],
-) -> List[str]:
-    rows: List[str] = []
+) -> list[str]:
+    rows: list[str] = []
     matched_rules = summary_payload.get("matched_rules", [])
     if isinstance(matched_rules, list) and matched_rules:
         rows.append(f"Matched rules: {', '.join(str(item) for item in matched_rules[:5])}")
@@ -658,8 +658,8 @@ def build_key_hit_rows(
     return rows[:12]
 
 
-def build_artifact_summary_rows(artifact_payloads: Mapping[str, Mapping[str, object]]) -> List[Dict[str, object]]:
-    rows: List[Dict[str, object]] = []
+def build_artifact_summary_rows(artifact_payloads: Mapping[str, Mapping[str, object]]) -> list[dict[str, object]]:
+    rows: list[dict[str, object]] = []
     for kind, payload in artifact_payloads.items():
         for item in payload.get("artifacts", [])[:10]:
             if not isinstance(item, dict):
@@ -676,8 +676,8 @@ def build_artifact_summary_rows(artifact_payloads: Mapping[str, Mapping[str, obj
     return rows
 
 
-def build_timeline_rows(timeline_payload: Mapping[str, object]) -> List[Dict[str, object]]:
-    rows: List[Dict[str, object]] = []
+def build_timeline_rows(timeline_payload: Mapping[str, object]) -> list[dict[str, object]]:
+    rows: list[dict[str, object]] = []
     for item in timeline_payload.get("events", [])[:20]:
         if not isinstance(item, dict):
             continue
@@ -693,7 +693,7 @@ def build_timeline_rows(timeline_payload: Mapping[str, object]) -> List[Dict[str
     return rows
 
 
-def build_extract_context(title: str, payload: Mapping[str, object]) -> Dict[str, object]:
+def build_extract_context(title: str, payload: Mapping[str, object]) -> dict[str, object]:
     summary = payload.get("summary", {}) if isinstance(payload, Mapping) else {}
     return {
         "title": title,
@@ -707,13 +707,13 @@ def build_extract_context(title: str, payload: Mapping[str, object]) -> Dict[str
     }
 
 
-def build_compare_rows(compare_results: object) -> List[Dict[str, object]]:
+def build_compare_rows(compare_results: object) -> list[dict[str, object]]:
     if not isinstance(compare_results, list):
         return []
     return [item for item in compare_results if isinstance(item, dict)]
 
 
-def append_related_document_rows(lines: List[str], rows: object) -> None:
+def append_related_document_rows(lines: list[str], rows: object) -> None:
     if isinstance(rows, list) and rows:
         for item in rows:
             if not isinstance(item, dict):
@@ -726,7 +726,7 @@ def append_related_document_rows(lines: List[str], rows: object) -> None:
         lines.append("- none")
 
 
-def append_candidate_rows(lines: List[str], rows: object) -> None:
+def append_candidate_rows(lines: list[str], rows: object) -> None:
     if isinstance(rows, list) and rows:
         for item in rows:
             if not isinstance(item, dict):
@@ -738,7 +738,7 @@ def append_candidate_rows(lines: List[str], rows: object) -> None:
         lines.append("- none")
 
 
-def append_artifact_rows(lines: List[str], rows: object) -> None:
+def append_artifact_rows(lines: list[str], rows: object) -> None:
     if isinstance(rows, list) and rows:
         for item in rows:
             if not isinstance(item, dict):
@@ -751,7 +751,7 @@ def append_artifact_rows(lines: List[str], rows: object) -> None:
         lines.append("- none")
 
 
-def append_timeline_section_rows(lines: List[str], rows: object) -> None:
+def append_timeline_section_rows(lines: list[str], rows: object) -> None:
     if isinstance(rows, list) and rows:
         for item in rows:
             if not isinstance(item, dict):
@@ -763,7 +763,7 @@ def append_timeline_section_rows(lines: List[str], rows: object) -> None:
         lines.append("- none")
 
 
-def append_extract_section(lines: List[str], section: Mapping[str, object]) -> None:
+def append_extract_section(lines: list[str], section: Mapping[str, object]) -> None:
     lines.extend(
         [
             section["title"],

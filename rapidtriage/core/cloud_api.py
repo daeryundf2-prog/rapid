@@ -9,8 +9,8 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
+from collections.abc import Iterable, Mapping
 from pathlib import Path
-from typing import Iterable, Mapping
 
 from .audit import compute_sha256
 from .forensic_accuracy import build_accuracy_gate

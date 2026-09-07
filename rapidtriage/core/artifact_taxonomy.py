@@ -2,9 +2,9 @@ from __future__ import annotations
 
 import datetime as dt
 import re
+from collections.abc import Iterable, Mapping
 from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Iterable, Mapping
 
 from ..artifacts import artifact_collectors
 

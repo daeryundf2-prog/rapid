@@ -5,8 +5,8 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from rapidtriage.cli import build_parser, main
 from rapidtriage.artifacts.kakaotalk_windows import decode_vk_value_at_name_offset
+from rapidtriage.cli import build_parser, main
 
 
 class RapidTriageKakaoTalkWindowsTests(unittest.TestCase):

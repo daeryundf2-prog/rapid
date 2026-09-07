@@ -12,14 +12,6 @@ from .shellbags import WindowsShellbagsProvider
 from .system import WindowsSystemArtifactsProvider
 
 __all__ = [
-    "browser",
-    "eventlog",
-    "recent_files",
-    "registry",
-    "remote_access",
-    "search_index",
-    "shellbags",
-    "system",
     "WindowsBrowserArtifactsProvider",
     "WindowsEventLogProvider",
     "WindowsExecutionProvider",
@@ -32,4 +24,12 @@ __all__ = [
     "WindowsSearchIndexProvider",
     "WindowsShellbagsProvider",
     "WindowsSystemArtifactsProvider",
+    "browser",
+    "eventlog",
+    "recent_files",
+    "registry",
+    "remote_access",
+    "search_index",
+    "shellbags",
+    "system",
 ]

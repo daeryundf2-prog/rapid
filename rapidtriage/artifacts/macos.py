@@ -5,8 +5,8 @@ import hashlib
 import plistlib
 import re
 import sqlite3
+from collections.abc import Iterable
 from pathlib import Path
-from typing import Iterable
 
 from ..core.models import ArtifactRecord
 from .windows.browser import (
@@ -617,7 +617,7 @@ def build_apfs_snapshot_hint(root: Path, path: Path) -> ArtifactRecord:
 def contains_path_sequence(parts: tuple[str, ...], required: tuple[str, ...]) -> bool:
     if not required:
         return True
-    return any(parts[index : index + len(required)] == required for index in range(0, len(parts) - len(required) + 1))
+    return any(parts[index : index + len(required)] == required for index in range(len(parts) - len(required) + 1))
 
 
 def read_prefix(path: Path, limit: int) -> bytes:

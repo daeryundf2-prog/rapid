@@ -11,8 +11,8 @@ import sys
 import tempfile
 import unittest
 import zipfile
-from unittest.mock import patch
 from pathlib import Path
+from unittest.mock import patch
 
 HAS_FASTAPI = True
 try:
@@ -26,9 +26,22 @@ except ModuleNotFoundError as exc:
 if HAS_FASTAPI:
     from rapidtriage.api.app import create_app
 from rapidtriage.cli import build_parser, main, run_web_server
-from rapidtriage.core.backup import backup_restore_core_accuracy_gates, build_backup_restore_trusted_diff
-from rapidtriage.core.crash import build_crash_report_trusted_diff, crash_report_core_accuracy_gates, write_crash_report
+from rapidtriage.core.backup import (
+    backup_restore_core_accuracy_gates,
+    build_backup_restore_trusted_diff,
+)
+from rapidtriage.core.benchmark import (
+    benchmark_core_accuracy_gates,
+    build_benchmark_trusted_diff,
+    build_stress_run_trusted_diff,
+    stress_core_accuracy_gates,
+)
 from rapidtriage.core.commercial_readiness import calculate_readiness_score
+from rapidtriage.core.crash import (
+    build_crash_report_trusted_diff,
+    crash_report_core_accuracy_gates,
+    write_crash_report,
+)
 from rapidtriage.core.enterprise import (
     build_enterprise_trusted_diff,
     build_security_operations_trusted_diff,
@@ -39,12 +52,6 @@ from rapidtriage.core.enterprise import (
     rbac_core_accuracy_gates,
     security_hardening_core_accuracy_gates,
     telemetry_core_accuracy_gates,
-)
-from rapidtriage.core.benchmark import (
-    benchmark_core_accuracy_gates,
-    build_benchmark_trusted_diff,
-    build_stress_run_trusted_diff,
-    stress_core_accuracy_gates,
 )
 from rapidtriage.core.jobs import (
     RunJobStore,
@@ -2825,7 +2832,7 @@ class RapidTriageOpsTests(unittest.TestCase):
                     reference = item_dir / "reference.csv"
                     diff = item_dir / "diff.json"
                     signoff = item_dir / "signoff.md"
-                    source.write_bytes(f"external source {dataset_id}".encode("utf-8"))
+                    source.write_bytes(f"external source {dataset_id}".encode())
                     rapid.write_text('{"artifacts":[]}', encoding="utf-8")
                     reference.write_text("id,status\n1,ok\n", encoding="utf-8")
                     diff.write_text(
@@ -3948,6 +3955,87 @@ class RapidTriageOpsTests(unittest.TestCase):
                 "user-activity-jumplist-shellbags-prefetch-lnk-field-diff-supported",
                 profile["passed_validation_check_ids"],
             )
+
+    def test_cross_tool_validate_expands_nested_jumplist_container_to_entry_rows(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            rapid = root / "rapid-jumplist-container.json"
+            reference = root / "jlecmd.csv"
+            rapid.write_text(
+                json.dumps(
+                    {
+                        "artifacts": [
+                            {
+                                "artifact_type": "recent-files-jumplist-container",
+                                "source_path": r"C:\Users\alice\AppData\Roaming\Microsoft\Windows\Recent\AutomaticDestinations\f01b4d95cf55d32a.automaticDestinations-ms",
+                                "details": {
+                                    "artifact_family": "jumplist",
+                                    "application_id_hash": "f01b4d95cf55d32a",
+                                    "destlist_metadata": {
+                                        "destlist_entry_candidates": [
+                                            {
+                                                "index": 3,
+                                                "entry_offset": 412,
+                                                "path_candidate": r"C:\Users\alice\Desktop\case.xlsx",
+                                                "layout_candidate": "win10-plus-fixed130",
+                                                "validation_status": "candidate",
+                                            }
+                                        ]
+                                    },
+                                    "destinations": [
+                                        {
+                                            "stream_name": "3",
+                                            "target_path": r"C:\Users\alice\Desktop\case.xlsx",
+                                            "destlist_entry_index_candidate": 3,
+                                            "destlist_entry_offset_candidate": 412,
+                                            "destlist_path_candidate": r"C:\Users\alice\Desktop\case.xlsx",
+                                        }
+                                    ],
+                                },
+                            }
+                        ]
+                    }
+                ),
+                encoding="utf-8",
+            )
+            reference.write_text(
+                "ArtifactFamily,AppId,DestListEntryNumber,TargetFilename,Timestamp,AccessCount,SourceFile\n"
+                r"jumplist,f01b4d95cf55d32a,3,C:\Users\alice\Desktop\case.xlsx,"
+                "2024-07-01T02:03:04+00:00,5,"
+                r"C:\Users\alice\AppData\Roaming\Microsoft\Windows\Recent\AutomaticDestinations\f01b4d95cf55d32a.automaticDestinations-ms"
+                "\n",
+                encoding="utf-8",
+            )
+
+            stdout = io.StringIO()
+            with contextlib.redirect_stdout(stdout):
+                exit_code = main(
+                    [
+                        "cross-tool-validate",
+                        "--rapid-output",
+                        str(rapid),
+                        "--reference-output",
+                        f"jlecmd={reference}",
+                        "--backlog-item",
+                        "14",
+                        "--min-overlap",
+                        "0.5",
+                        "--json",
+                    ]
+                )
+
+            self.assertEqual(exit_code, 0)
+            payload = json.loads(stdout.getvalue())
+            comparison = payload["comparisons"][0]["user_activity_field_comparison"]
+            self.assertEqual(comparison["mode"], "user-activity-jumplist-shellbags-prefetch-lnk-field-diff")
+            self.assertGreaterEqual(
+                comparison["common_record_count"],
+                1,
+                "nested JumpList destinations must expand into entry-level rows for JLECmd diff",
+            )
+            self.assertIn("app_id", comparison["compared_canonical_fields"])
+            self.assertIn("entry_id", comparison["compared_canonical_fields"])
+            self.assertIn("target_path", comparison["compared_canonical_fields"])
 
     def test_cross_tool_validate_compares_shellbags_rows(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:

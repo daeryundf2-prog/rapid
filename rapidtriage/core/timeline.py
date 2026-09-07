@@ -3,8 +3,8 @@ from __future__ import annotations
 import datetime as dt
 import json
 from collections import Counter
+from collections.abc import Iterable, Mapping, Sequence
 from pathlib import Path
-from typing import Dict, Iterable, List, Mapping, Sequence
 
 from .artifacts import SUPPORTED_ARTIFACT_KINDS, run_artifact_collection
 from .docs import scan_document_candidates
@@ -17,7 +17,7 @@ class TimelineError(ValueError):
     """Raised when timeline inputs are missing or invalid."""
 
 
-TIMESTAMP_EVENT_NAMES: Dict[str, str] = {
+TIMESTAMP_EVENT_NAMES: dict[str, str] = {
     "accessed_at": "accessed",
     "created_at": "created",
     "ended_at": "ended",
@@ -37,7 +37,7 @@ def run_timeline(
     docs_inputs: Sequence[Path] | None = None,
     artifacts_inputs: Sequence[Path] | None = None,
     rule_set: RuleSet | None = None,
-) -> Dict[str, object]:
+) -> dict[str, object]:
     input_root = resolve_input_root(root or Path.cwd(), kind=input_kind)
     normalized_files = normalize_input_paths(files_inputs)
     normalized_docs = normalize_input_paths(docs_inputs)
@@ -46,7 +46,7 @@ def run_timeline(
     if root is None and not normalized_files and not normalized_docs and not normalized_artifacts:
         raise TimelineError("timeline requires a ROOT or at least one --files, --docs, or --artifacts input")
 
-    events: List[Dict[str, object]] = []
+    events: list[dict[str, object]] = []
     if normalized_files:
         for input_path in normalized_files:
             payload = load_input_payload(input_path, expected_command="files")
@@ -100,8 +100,8 @@ def run_timeline(
     return payload
 
 
-def normalize_input_paths(paths: Sequence[Path] | None) -> List[Path]:
-    normalized: List[Path] = []
+def normalize_input_paths(paths: Sequence[Path] | None) -> list[Path]:
+    normalized: list[Path] = []
     seen: set[str] = set()
     for raw_path in paths or ():
         resolved = Path(raw_path).expanduser().resolve()
@@ -113,7 +113,7 @@ def normalize_input_paths(paths: Sequence[Path] | None) -> List[Path]:
     return normalized
 
 
-def load_input_payload(path: Path, *, expected_command: str) -> Dict[str, object]:
+def load_input_payload(path: Path, *, expected_command: str) -> dict[str, object]:
     if not path.is_file():
         raise TimelineError(f"timeline input does not exist: {path}")
     try:
@@ -128,8 +128,8 @@ def load_input_payload(path: Path, *, expected_command: str) -> Dict[str, object
     return payload
 
 
-def extract_file_events(payload: Mapping[str, object], input_path: Path) -> List[Dict[str, object]]:
-    events: List[Dict[str, object]] = []
+def extract_file_events(payload: Mapping[str, object], input_path: Path) -> list[dict[str, object]]:
+    events: list[dict[str, object]] = []
     for candidate in payload.get("candidates", []):
         if not isinstance(candidate, dict):
             continue
@@ -161,8 +161,8 @@ def extract_file_events(payload: Mapping[str, object], input_path: Path) -> List
     return events
 
 
-def extract_document_candidate_events(candidates: Sequence[object], input_path: Path) -> List[Dict[str, object]]:
-    events: List[Dict[str, object]] = []
+def extract_document_candidate_events(candidates: Sequence[object], input_path: Path) -> list[dict[str, object]]:
+    events: list[dict[str, object]] = []
     for candidate in candidates:
         if not hasattr(candidate, "path"):
             continue
@@ -190,8 +190,8 @@ def extract_document_candidate_events(candidates: Sequence[object], input_path: 
     return events
 
 
-def extract_docs_events(payload: Mapping[str, object], input_path: Path) -> List[Dict[str, object]]:
-    events: List[Dict[str, object]] = []
+def extract_docs_events(payload: Mapping[str, object], input_path: Path) -> list[dict[str, object]]:
+    events: list[dict[str, object]] = []
     candidates_by_path = {
         str(candidate.get("path")): candidate
         for candidate in payload.get("candidates", [])
@@ -233,8 +233,8 @@ def build_document_summary(path: str, matched_keywords: Sequence[str]) -> str:
     return f"Document keyword hit: {label}"
 
 
-def extract_artifact_events(payload: Mapping[str, object], input_path: Path) -> List[Dict[str, object]]:
-    events: List[Dict[str, object]] = []
+def extract_artifact_events(payload: Mapping[str, object], input_path: Path) -> list[dict[str, object]]:
+    events: list[dict[str, object]] = []
     kind = str(payload.get("kind", ""))
     for artifact in payload.get("artifacts", []):
         if not isinstance(artifact, dict):
@@ -266,7 +266,7 @@ def extract_artifact_events(payload: Mapping[str, object], input_path: Path) -> 
     return events
 
 
-def iter_artifact_detail_events(artifact_type: str, details: Mapping[str, object]) -> Iterable[Dict[str, object]]:
+def iter_artifact_detail_events(artifact_type: str, details: Mapping[str, object]) -> Iterable[dict[str, object]]:
     if artifact_type in {"eventlog-event", "eventlog-detection"}:
         event = eventlog_detail_event(artifact_type, details)
         if event is not None:
@@ -279,7 +279,7 @@ def iter_artifact_detail_events(artifact_type: str, details: Mapping[str, object
     )
 
 
-def eventlog_detail_event(artifact_type: str, details: Mapping[str, object]) -> Dict[str, object] | None:
+def eventlog_detail_event(artifact_type: str, details: Mapping[str, object]) -> dict[str, object] | None:
     timestamp = str(details.get("event_created_at") or details.get("timestamp") or "")
     if not timestamp:
         return None
@@ -332,7 +332,7 @@ def _walk_artifact_detail_values(
     artifact_type: str,
     value: object,
     path_parts: Sequence[str],
-) -> Iterable[Dict[str, object]]:
+) -> Iterable[dict[str, object]]:
     if isinstance(value, dict):
         for key, item in value.items():
             if key in TIMESTAMP_EVENT_NAMES and isinstance(item, str) and item:
@@ -359,8 +359,8 @@ def _walk_artifact_detail_values(
             )
 
 
-def collect_scalar_context(value: Mapping[str, object], *, skip_keys: set[str]) -> Dict[str, object]:
-    context: Dict[str, object] = {}
+def collect_scalar_context(value: Mapping[str, object], *, skip_keys: set[str]) -> dict[str, object]:
+    context: dict[str, object] = {}
     for key, item in value.items():
         if key in skip_keys or isinstance(item, (dict, list)):
             continue
@@ -368,8 +368,8 @@ def collect_scalar_context(value: Mapping[str, object], *, skip_keys: set[str]) 
     return context
 
 
-def collect_selected_context(value: Mapping[str, object], keys: Sequence[str]) -> Dict[str, object]:
-    context: Dict[str, object] = {}
+def collect_selected_context(value: Mapping[str, object], keys: Sequence[str]) -> dict[str, object]:
+    context: dict[str, object] = {}
     for key in keys:
         item = value.get(key)
         if item in (None, "", []):
@@ -434,7 +434,7 @@ def build_artifact_summary(artifact_type: str, artifact_path: str, context: Mapp
         return f"Artifact event: {artifact_type} {context['url']}"
     if "source_url" in context:
         return f"Artifact event: {artifact_type} {context['source_url']}"
-    if "target_path" in context and context["target_path"]:
+    if context.get("target_path"):
         return f"Artifact event: {artifact_type} {context['target_path']}"
     if "entry_name" in context:
         return f"Artifact event: {artifact_type} {context['entry_name']}"
@@ -547,7 +547,7 @@ def timeline_report_caveat(event: Mapping[str, object]) -> str:
     details = event.get("details")
     if not isinstance(details, Mapping):
         return ""
-    bits: List[str] = []
+    bits: list[str] = []
     if details.get("validation_required") is True:
         bits.append("validation required")
     reportability = details.get("reportability")

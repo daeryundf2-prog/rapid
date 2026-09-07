@@ -4,8 +4,8 @@ import datetime as dt
 import difflib
 import hashlib
 import json
+from collections.abc import Mapping, Sequence
 from pathlib import Path
-from typing import Mapping, Sequence
 
 from .forensic_accuracy import build_accuracy_gate
 

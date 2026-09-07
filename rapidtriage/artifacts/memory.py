@@ -4,8 +4,8 @@ import hashlib
 import ipaddress
 import json
 import re
+from collections.abc import Iterable, Mapping, Sequence
 from pathlib import Path
-from typing import Iterable, Mapping, Sequence
 from urllib.parse import parse_qsl, unquote_plus, urlparse
 
 from ..core.models import ArtifactRecord

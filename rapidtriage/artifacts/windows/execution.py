@@ -6,8 +6,8 @@ import datetime as dt
 import hashlib
 import json
 import re
+from collections.abc import Iterable, Mapping, Sequence
 from pathlib import Path
-from typing import Iterable, Mapping, Sequence
 
 from ...core.forensic_accuracy import build_accuracy_gate
 from ...core.models import ArtifactRecord
@@ -2380,10 +2380,10 @@ def srum_usage_evidence(
     app_id: str,
     user: str,
     timestamp: str,
-    bytes_sent: int | float,
-    bytes_received: int | float,
-    cpu_time: int | float,
-    energy: int | float,
+    bytes_sent: float,
+    bytes_received: float,
+    cpu_time: float,
+    energy: float,
     interface_luid: str,
     network_profile: str,
 ) -> dict[str, object]:

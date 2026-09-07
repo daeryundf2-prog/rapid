@@ -3,10 +3,10 @@ from __future__ import annotations
 import datetime as dt
 import hashlib
 import json
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, IO, Iterable, Mapping
-
+from typing import IO, Any
 
 ARTIFACT_RECORD_SCHEMA = "ArtifactRecordV1"
 REQUIRED_ARTIFACT_RECORD_FIELDS = {
@@ -76,7 +76,7 @@ class JsonlArtifactStreamWriter:
         self._handle: IO[str] | None = None
         self._closed = False
 
-    def __enter__(self) -> "JsonlArtifactStreamWriter":
+    def __enter__(self) -> JsonlArtifactStreamWriter:
         self.open()
         return self
 

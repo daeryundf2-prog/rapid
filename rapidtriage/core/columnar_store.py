@@ -8,11 +8,16 @@ import platform
 import statistics
 import sys
 import time
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Iterable, Mapping
 
-from .artifact_store import ARTIFACT_RECORD_SCHEMA, JsonlArtifactStreamWriter, read_jsonl_artifacts, validate_artifact_record
+from .artifact_store import (
+    ARTIFACT_RECORD_SCHEMA,
+    JsonlArtifactStreamWriter,
+    read_jsonl_artifacts,
+    validate_artifact_record,
+)
 
 
 class ColumnarStoreUnavailable(RuntimeError):

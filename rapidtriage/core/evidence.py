@@ -4,12 +4,17 @@ import json
 import shlex
 import shutil
 import sys
+from collections.abc import Mapping
 from dataclasses import asdict, dataclass, replace
 from pathlib import Path
-from typing import Mapping, Protocol
+from typing import Protocol
 
+from .archive_image import (
+    ARCHIVE_IMAGE_SUFFIXES,
+    ARCHIVE_IMAGE_TOOLS,
+    missing_archive_image_tools,
+)
 from .audit import compute_sha256
-from .archive_image import ARCHIVE_IMAGE_SUFFIXES, ARCHIVE_IMAGE_TOOLS, missing_archive_image_tools
 from .carving import DEFAULT_MAX_CANDIDATES, DEFAULT_MAX_SCAN_BYTES, SIGNATURES
 from .disk_image import (
     RAW_IMAGE_REQUIRED_TOOLS,
@@ -21,19 +26,19 @@ from .disk_image import (
 )
 from .e01 import (
     E01_REPORT_GRADE_BLOCKERS,
-    E01_SUFFIXES,
     E01_REQUIRED_TOOLS,
+    E01_SUFFIXES,
+    build_e01_ingest_workflow_profile,
     build_e01_intake_profile,
     build_e01_report_grade_validation_plan,
-    collect_tool_preflight,
     build_e01_segment_set_profile,
-    build_e01_ingest_workflow_profile,
     build_image_stress_known_answer_profile,
+    collect_tool_preflight,
     describe_source_integrity,
     e01_failure_guidance,
     e01_preflight_summary,
-    image_core_accuracy_gates,
     image_commercial_uplift_evidence,
+    image_core_accuracy_gates,
     image_report_grade_assessment,
     image_reportability_decision,
     image_workflow_analyst_review_profile,
@@ -53,7 +58,7 @@ class EvidenceAdapter(Protocol):
     name: str
     supported_suffixes: tuple[str, ...]
 
-    def identify(self, source: Path) -> "EvidenceAdapterResult":
+    def identify(self, source: Path) -> EvidenceAdapterResult:
         ...
 
 

@@ -4,12 +4,16 @@ import contextlib
 import datetime as dt
 import json
 import sqlite3
+from collections.abc import Mapping, Sequence
 from pathlib import Path
-from typing import Mapping, Sequence
 
 from .benchmark import scale_label
 from .benchmark_fts import SQLITE_FTS_BENCHMARK_VERSION
-from .case_db import build_fts_query, case_db_fts_optimization_assessment, case_db_search_index_health
+from .case_db import (
+    build_fts_query,
+    case_db_fts_optimization_assessment,
+    case_db_search_index_health,
+)
 from .docs import write_result
 from .large_case_controls import (
     build_duplicate_grouping_contract,
@@ -18,7 +22,6 @@ from .large_case_controls import (
     build_parser_isolation_contract,
 )
 from .search_backend import build_search_backend_contract, stable_backend_sha256
-
 
 LARGE_CASE_READINESS_VERSION = "large-case-readiness-v1"
 LARGE_SCALE_PERFORMANCE_MATRIX_VERSION = "large-scale-performance-readiness-matrix-v1"
@@ -110,19 +113,17 @@ def build_large_case_readiness_report(
             "benchmark_count": len(benchmarks),
             "case_db_attached": bool(case_db_profile.get("attached")),
             "case_db_search_diagnostics_ready": bool(
-                ((case_db_profile.get("search_diagnostics") or {}).get("ready"))
+                (case_db_profile.get("search_diagnostics") or {}).get("ready")
             ),
             "case_db_search_index_healthy": bool(
-                ((case_db_profile.get("search_index_health") or {}).get("ready_for_large_case_search"))
+                (case_db_profile.get("search_index_health") or {}).get("ready_for_large_case_search")
             ),
             "case_db_search_index_missing_rows": int(
                 ((case_db_profile.get("search_index_health") or {}).get("summary") or {}).get("missing_index_rows")
                 or 0
             ),
             "case_db_cursor_diagnostics_ready": bool(
-                (
-                    ((case_db_profile.get("search_diagnostics") or {}).get("cursor_diagnostics") or {}).get("ready")
-                )
+                ((case_db_profile.get("search_diagnostics") or {}).get("cursor_diagnostics") or {}).get("ready")
             ),
             "case_db_cursor_pagination_proven_tables": int(
                 (
@@ -174,7 +175,9 @@ def load_sqlite_fts_benchmark(path: Path) -> dict[str, object]:
         raise LargeCaseReadinessError(f"SQLite FTS benchmark JSON must be an object: {path}")
     if payload.get("profile_version") != SQLITE_FTS_BENCHMARK_VERSION:
         raise LargeCaseReadinessError(
-            f"unsupported benchmark profile_version in {path}: {payload.get('profile_version')}"
+            f"unsupported benchmark profile_version in {path}: {payload.get('profile_version')}; "
+            f"expected {SQLITE_FTS_BENCHMARK_VERSION} from 'rapidtriage sqlite-fts-benchmark' "
+            "(not the 'rapidtriage benchmark' file-scan JSON)"
         )
     metrics = payload.get("metrics")
     summary = payload.get("summary")
@@ -603,7 +606,7 @@ def build_large_case_checks(
         ),
         readiness_check(
             "case-db-search-diagnostics-ready",
-            bool(((case_db_profile.get("search_diagnostics") or {}).get("ready"))),
+            bool((case_db_profile.get("search_diagnostics") or {}).get("ready")),
             "Case DB search diagnostics include FTS row counts, MATCH counts, and query plans.",
             evidence=[
                 str(((case_db_profile.get("search_diagnostics") or {}).get("profile_hash")) or ""),
@@ -612,7 +615,7 @@ def build_large_case_checks(
         readiness_check(
             "case-db-cursor-diagnostics-ready",
             bool(
-                (((case_db_profile.get("search_diagnostics") or {}).get("cursor_diagnostics") or {}).get("ready"))
+                ((case_db_profile.get("search_diagnostics") or {}).get("cursor_diagnostics") or {}).get("ready")
             ),
             "Case DB cursor diagnostics emit stable page-window hashes and next-offset evidence.",
             evidence=[
@@ -626,7 +629,7 @@ def build_large_case_checks(
         ),
         readiness_check(
             "case-db-search-index-healthy",
-            bool(((case_db_profile.get("search_index_health") or {}).get("ready_for_large_case_search"))),
+            bool((case_db_profile.get("search_index_health") or {}).get("ready_for_large_case_search")),
             "Every Case DB search index is complete enough for no-hit/absence search claims.",
             evidence=[
                 str(((case_db_profile.get("search_index_health") or {}).get("profile_hash")) or ""),

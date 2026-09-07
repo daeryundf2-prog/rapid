@@ -4,9 +4,9 @@ import re
 import shlex
 import shutil
 import subprocess
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Callable, Optional, Sequence
 
 from .e01 import (
     build_image_stage_control_contract,
@@ -25,7 +25,6 @@ from .e01 import (
     stable_manifest_sha256,
 )
 from .vsc import build_vsc_image_workflow_handoff
-
 
 RAW_IMAGE_SUFFIXES = (".dd", ".raw", ".img", ".001", ".000", ".0000", ".0001", ".00001", ".ima")
 RAW_IMAGE_REQUIRED_TOOLS = ("mmls", "tsk_recover")
@@ -51,7 +50,7 @@ RAW_IMAGE_REPORT_GRADE_BLOCKERS = [
     "large-raw-image-known-answer-corpus-required",
 ]
 CommandRunner = Callable[[Sequence[str]], subprocess.CompletedProcess[str]]
-ToolResolver = Callable[[str], Optional[str]]
+ToolResolver = Callable[[str], str | None]
 
 
 class DiskImageExtractionError(RuntimeError):

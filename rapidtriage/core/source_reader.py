@@ -6,8 +6,8 @@ import hashlib
 import json
 import sqlite3
 import zipfile
+from collections.abc import Mapping, Sequence
 from pathlib import Path
-from typing import Mapping, Sequence
 
 from .docs import SUPPORTED_DOC_EXTS, extract_text
 from .search import SearchError, load_run_summary
@@ -361,7 +361,7 @@ def search_preview_text(
             snippet_end = min(len(text), offset + len(keyword) + normalized_context)
             matches.append(
                 {
-                    "match_id": f"{hashlib.sha256(f'{relative_path}:{keyword}:{offset}'.encode('utf-8')).hexdigest()[:16]}",
+                    "match_id": f"{hashlib.sha256(f'{relative_path}:{keyword}:{offset}'.encode()).hexdigest()[:16]}",
                     "keyword": keyword,
                     "line": line,
                     "offset": offset,

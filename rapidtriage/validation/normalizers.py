@@ -5,10 +5,16 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Final
 
-from rapidtriage.validation.known_answer_schema import load_json_document, validate_schema_document
-from rapidtriage.validation.known_answer_types import JsonObject, JsonValue, ManifestValidationError
+from rapidtriage.validation.known_answer_schema import (
+    load_json_document,
+    validate_schema_document,
+)
+from rapidtriage.validation.known_answer_types import (
+    JsonObject,
+    JsonValue,
+    ManifestValidationError,
+)
 from rapidtriage.validation.observed_results import OBSERVED_RESULTS_SCHEMA_PATH
-
 
 SUPPORTED_TOOLS: Final = frozenset(
     {

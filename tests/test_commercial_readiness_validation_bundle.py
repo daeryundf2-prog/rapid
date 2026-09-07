@@ -11,7 +11,6 @@ from rapidtriage.core.commercial_readiness import (
     trusted_diff_runner_hint,
 )
 
-
 REPO_ROOT = Path(__file__).resolve().parents[1]
 AGGREGATE_MANIFEST = REPO_ROOT / "docs" / "validation" / "rapidtriage-core-forensics-001-120-known-answer.json"
 

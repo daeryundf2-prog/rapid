@@ -4,8 +4,9 @@ import datetime as dt
 import hashlib
 import json
 import re
+from collections.abc import Mapping, Sequence
 from pathlib import Path
-from typing import Any, Dict, Mapping, Sequence
+from typing import Any
 
 from .analysis import build_search_analysis
 from .docs import build_preview, extract_text
@@ -65,7 +66,7 @@ def run_unified_search(
     fuzzy_distance: int = 1,
     proximity_window: int = 0,
     hide_known_good: bool = False,
-) -> Dict[str, object]:
+) -> dict[str, object]:
     summary = load_run_summary(run_summary)
     normalized = normalize_keywords(keywords, search_mode=search_mode)
     if not normalized:
@@ -163,7 +164,7 @@ def run_unified_search(
             "target_rows": 1_000_000,
         },
     )
-    payload: Dict[str, object] = {
+    payload: dict[str, object] = {
         "command": "search",
         "generated_at": dt.datetime.now().isoformat(),
         "run_summary": str(summary.get("outputs", {}).get("summary", "")),

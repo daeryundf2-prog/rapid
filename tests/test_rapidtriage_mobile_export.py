@@ -1,10 +1,10 @@
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import json
 import plistlib
 import sqlite3
-import contextlib
 import tempfile
 import unittest
 from pathlib import Path

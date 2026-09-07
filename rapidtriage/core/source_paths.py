@@ -1,7 +1,7 @@
 from __future__ import annotations
 
+from collections.abc import Iterable
 from pathlib import Path, PureWindowsPath
-from typing import Iterable
 
 
 def candidate_source_paths(raw_path: str, allowed_roots: Iterable[Path]) -> list[Path]:

@@ -8,7 +8,10 @@ import unittest
 import zipfile
 from pathlib import Path
 
-from rapidtriage.artifacts.android import build_android_trusted_diff, android_core_accuracy_gates
+from rapidtriage.artifacts.android import (
+    android_core_accuracy_gates,
+    build_android_trusted_diff,
+)
 from rapidtriage.cli import build_parser, main
 
 

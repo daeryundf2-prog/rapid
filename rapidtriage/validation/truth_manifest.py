@@ -3,8 +3,16 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
-from rapidtriage.validation.known_answer_schema import DEFAULT_SCHEMA_PATH, load_json_document, validate_schema_document
-from rapidtriage.validation.known_answer_types import JsonObject, JsonValue, ManifestValidationError
+from rapidtriage.validation.known_answer_schema import (
+    DEFAULT_SCHEMA_PATH,
+    load_json_document,
+    validate_schema_document,
+)
+from rapidtriage.validation.known_answer_types import (
+    JsonObject,
+    JsonValue,
+    ManifestValidationError,
+)
 
 
 @dataclass(frozen=True, slots=True)

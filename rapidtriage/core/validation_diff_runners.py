@@ -6,9 +6,8 @@ import os
 import shlex
 import shutil
 import subprocess
+from collections.abc import Mapping, Sequence
 from pathlib import Path
-from typing import Mapping, Sequence
-
 
 VERSION_PROBE_TIMEOUT_SECONDS = 3.0
 VERSION_PROBE_ARGUMENTS: tuple[tuple[str, ...], ...] = (

@@ -7,8 +7,8 @@ import json
 import os
 import re
 import subprocess
+from collections.abc import Iterable, Mapping, Sequence
 from pathlib import Path
-from typing import Iterable, Mapping, Sequence
 
 from ...core.forensic_accuracy import build_accuracy_gate
 from ...core.models import ArtifactRecord
@@ -2744,8 +2744,7 @@ def usn_bounded_state_replay_preview(
             )
         if "FILE_DELETE" in flags:
             previous_path = state.get(frn) or event_path
-            if frn in state:
-                del state[frn]
+            state.pop(frn, None)
             transitions.append(
                 {
                     **base,

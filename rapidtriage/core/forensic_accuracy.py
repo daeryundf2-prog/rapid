@@ -1,8 +1,7 @@
 from __future__ import annotations
 
 import datetime as dt
-from typing import Mapping
-
+from collections.abc import Mapping
 
 CORE_FORENSIC_ACCURACY_VERSION = "core-forensics-accuracy-v1"
 

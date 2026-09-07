@@ -2,9 +2,9 @@ from __future__ import annotations
 
 import hashlib
 import json
+from collections.abc import Iterable, Mapping, Sequence
 from datetime import datetime, timezone
 from pathlib import Path, PureWindowsPath
-from typing import Iterable, Mapping, Sequence
 
 from ...core.audit import compute_sha256
 from ...core.forensic_accuracy import build_accuracy_gate

@@ -7,8 +7,11 @@ import unittest
 from email.message import EmailMessage
 from pathlib import Path
 
+from rapidtriage.artifacts.email import (
+    build_email_trusted_diff,
+    email_core_accuracy_gates,
+)
 from rapidtriage.cli import build_parser, main
-from rapidtriage.artifacts.email import build_email_trusted_diff, email_core_accuracy_gates
 
 
 class RapidTriageEmailArtifactsTests(unittest.TestCase):

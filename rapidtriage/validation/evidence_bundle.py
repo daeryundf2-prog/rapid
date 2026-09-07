@@ -9,7 +9,6 @@ from typing import Final
 from rapidtriage.validation.json_fields import int_field, list_field, object_field
 from rapidtriage.validation.known_answer_types import JsonObject, JsonValue
 
-
 FORBIDDEN_EXTENSIONS: Final = frozenset({".e01", ".ex01", ".dd", ".raw", ".img", ".vhd", ".vhdx", ".aff", ".001"})
 LARGE_FILE_THRESHOLD_BYTES: Final = 1_048_576
 HASH_CHUNK_SIZE_BYTES: Final = 1024 * 1024

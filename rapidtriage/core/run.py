@@ -8,12 +8,11 @@ import os
 import sys
 import time
 from collections import Counter
+from collections.abc import Mapping, Sequence
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, List, Mapping, Sequence, Union
 
-from .audit import compute_sha256, write_audit_record
 from .archive_image import (
     ArchiveImageExtractionError,
     ArchiveImageExtractionResult,
@@ -21,6 +20,7 @@ from .archive_image import (
     is_archive_image_path,
 )
 from .artifacts import run_artifact_collection
+from .audit import compute_sha256, write_audit_record
 from .disk_image import (
     DiskImageExtractionError,
     DiskImageExtractionResult,
@@ -49,7 +49,6 @@ from .rules import RuleSet, summarize_payload_annotations
 from .run_workflow import build_run_workflow_contract
 from .silent_failure import build_silent_failure_report
 from .timeline import build_timeline_report, run_timeline
-from .vsc import build_vsc_image_workflow_handoff
 from .virtual_disk import (
     VirtualDiskExtractionError,
     VirtualDiskExtractionResult,
@@ -57,6 +56,7 @@ from .virtual_disk import (
     extract_virtual_disk_to_directory,
     is_virtual_disk_path,
 )
+from .vsc import build_vsc_image_workflow_handoff
 
 SUPPORTED_RUN_MODES: tuple[str, ...] = ("seizure", "fraud", "hacking", "recovery")
 IMPLEMENTED_RUN_MODES = set(SUPPORTED_RUN_MODES)
@@ -188,7 +188,7 @@ class RunProfile:
     artifacts_kinds: tuple[str, ...] = ()
 
 
-RUN_PROFILES: Dict[str, RunProfile] = {
+RUN_PROFILES: dict[str, RunProfile] = {
     "seizure": RunProfile(
         mode="seizure",
         description="Seizure triage focused on user folders, recent modifications, and high-value documents, archives, and databases.",
@@ -288,7 +288,7 @@ class RunModeError(ValueError):
 
 
 def run_triage_mode(
-    root: Union[InputRoot, Path],
+    root: InputRoot | Path,
     *,
     mode: str,
     output_dir: Path,
@@ -301,11 +301,11 @@ def run_triage_mode(
     e01_partition_start_sector: int | None = None,
     overwrite: bool = False,
     resume: bool = False,
-    known_good_hash_feeds: Sequence[Union[str, Path]] = (),
+    known_good_hash_feeds: Sequence[str | Path] = (),
     hide_known_good: bool = False,
     known_good_max_hash_bytes: int = DEFAULT_KNOWN_GOOD_MAX_HASH_BYTES,
     rule_set: RuleSet | None = None,
-) -> Dict[str, object]:
+) -> dict[str, object]:
     normalized_mode = mode.lower()
     if normalized_mode not in SUPPORTED_RUN_MODES:
         supported = ", ".join(SUPPORTED_RUN_MODES)
@@ -483,8 +483,8 @@ def run_triage_mode(
     write_result(docs_payload, docs_path)
     write_result(files_payload, files_path)
 
-    artifact_outputs: Dict[str, Path] = {}
-    artifact_payloads: Dict[str, Dict[str, object]] = {}
+    artifact_outputs: dict[str, Path] = {}
+    artifact_payloads: dict[str, dict[str, object]] = {}
     artifact_results, artifact_scheduler_manifest = collect_artifact_stages(
         input_root,
         profile.artifacts_kinds,
@@ -791,7 +791,7 @@ def load_or_build_json(
     producer,
     expected_command: str | None = None,
     required_keys: Sequence[str] = (),
-) -> tuple[Dict[str, object], bool]:
+) -> tuple[dict[str, object], bool]:
     if resume:
         payload = load_reusable_json(path, expected_command=expected_command, required_keys=required_keys)
         if payload is not None:
@@ -1462,7 +1462,7 @@ def memory_cap_policy_profile(*, memory_cap_bytes: int, current_rss_bytes: int) 
     }
 
 
-def build_preview_sandbox_run_policy_manifest(*, outputs: Mapping[str, Path]) -> Dict[str, object]:
+def build_preview_sandbox_run_policy_manifest(*, outputs: Mapping[str, Path]) -> dict[str, object]:
     previewable_output_items = sorted(
         (
             str(name),
@@ -1489,7 +1489,7 @@ def build_preview_sandbox_run_policy_manifest(*, outputs: Mapping[str, Path]) ->
     ]
     row_hashes = [str(row["row_hash"]) for row in policy_rows]
     row_head_hash = hashlib.sha256("\n".join(row_hashes).encode("utf-8")).hexdigest()
-    manifest_core: Dict[str, object] = {
+    manifest_core: dict[str, object] = {
         "profile_version": "preview-sandbox-run-policy-manifest-v1",
         "item_number": 73,
         "commercial_gap_ids": [PREVIEW_SANDBOX_GAP_ID],
@@ -1702,7 +1702,7 @@ def preview_sandbox_run_output_policy_row(name: str, path: Path, *, sequence: in
     }
 
 
-def build_sqlite_fts_run_optimization_manifest(*, outputs: Mapping[str, Path]) -> Dict[str, object]:
+def build_sqlite_fts_run_optimization_manifest(*, outputs: Mapping[str, Path]) -> dict[str, object]:
     tracked_output_names = ["docs_index", "docs", "files", "timeline", "summary"]
     tracked_outputs = []
     for name in tracked_output_names:
@@ -1723,7 +1723,7 @@ def build_sqlite_fts_run_optimization_manifest(*, outputs: Mapping[str, Path]) -
             tracked_outputs.append(sqlite_fts_tracked_output_row(name=name, path=str(path), status="missing"))
     missing_outputs = sorted(str(item["name"]) for item in tracked_outputs if item.get("status") == "missing")
     row_hashes = [str(item["row_hash"]) for item in tracked_outputs if item.get("row_hash")]
-    manifest_core: Dict[str, object] = {
+    manifest_core: dict[str, object] = {
         "profile_version": "sqlite-fts-run-optimization-manifest-v1",
         "item_number": 74,
         "commercial_gap_ids": [LARGE_SQLITE_FTS_GAP_ID],
@@ -1933,9 +1933,9 @@ def collect_artifact_stages(
     artifacts_dir: Path,
     resume: bool,
     rule_set: RuleSet | None,
-) -> tuple[Dict[str, tuple[Dict[str, object], Path, bool]], dict[str, object]]:
+) -> tuple[dict[str, tuple[dict[str, object], Path, bool]], dict[str, object]]:
     artifacts_dir.mkdir(parents=True, exist_ok=True)
-    results: Dict[str, tuple[Dict[str, object], Path, bool]] = {}
+    results: dict[str, tuple[dict[str, object], Path, bool]] = {}
     pending: list[tuple[str, Path]] = []
     events: list[dict[str, object]] = []
     output_order = list(kinds)
@@ -2012,7 +2012,7 @@ def timed_artifact_collection(
     *,
     kind: str,
     rule_set: RuleSet | None,
-) -> tuple[Dict[str, object], str, str, int]:
+) -> tuple[dict[str, object], str, str, int]:
     start = time.perf_counter()
     started_at = dt.datetime.now(dt.timezone.utc).isoformat()
     payload = run_artifact_collection(input_root, kind=kind, rule_set=rule_set)
@@ -2127,7 +2127,7 @@ def scheduler_event_with_row_hash(event: Mapping[str, object]) -> dict[str, obje
     }
 
 
-def isolated_parser_error_payload(kind: str, *, input_root: InputRoot, exc: Exception) -> Dict[str, object]:
+def isolated_parser_error_payload(kind: str, *, input_root: InputRoot, exc: Exception) -> dict[str, object]:
     message = str(exc) or exc.__class__.__name__
     error_record = isolated_parser_error_record(kind, input_root=input_root, exc=exc, message=message)
     crash_manifest = parser_crash_isolation_manifest(
@@ -2184,7 +2184,7 @@ def isolated_parser_error_record(
     input_root: InputRoot,
     exc: Exception,
     message: str,
-) -> Dict[str, object]:
+) -> dict[str, object]:
     error_type = exc.__class__.__name__
     error_hash = hashlib.sha256(
         json.dumps(
@@ -2221,7 +2221,7 @@ def parser_crash_isolation_manifest(
     kind: str,
     input_root: InputRoot,
     errors: Sequence[Mapping[str, object]],
-) -> Dict[str, object]:
+) -> dict[str, object]:
     error_hashes = sorted(str(error.get("error_hash") or "") for error in errors if isinstance(error, Mapping))
     manifest_core = {
         "profile_version": "parser-crash-isolation-manifest-v1",
@@ -2262,7 +2262,7 @@ def build_parser_crash_isolation_ledger(
     *,
     artifact_payloads: Mapping[str, Mapping[str, object]],
     scheduler_manifest: Mapping[str, object],
-) -> Dict[str, object]:
+) -> dict[str, object]:
     errors: list[dict[str, object]] = []
     for kind, payload in sorted(artifact_payloads.items()):
         for error in payload.get("parser_errors", []) if isinstance(payload.get("parser_errors"), list) else []:
@@ -2321,7 +2321,7 @@ def build_parser_crash_isolation_ledger(
         scheduler_manifest=scheduler_manifest,
         ledger_head_hash=ledger_head_hash,
     )
-    ledger_core: Dict[str, object] = {
+    ledger_core: dict[str, object] = {
         "profile_version": "parser-crash-isolation-ledger-v1",
         "item_number": 71,
         "commercial_gap_ids": [PARSER_CRASH_ISOLATION_GAP_ID],
@@ -2570,7 +2570,7 @@ def parser_crash_report_grade_validation_plan(
     return {**plan_core, "validation_plan_hash": validation_plan_hash}
 
 
-def parser_error_inventory_profile(errors: Sequence[Mapping[str, object]]) -> Dict[str, object]:
+def parser_error_inventory_profile(errors: Sequence[Mapping[str, object]]) -> dict[str, object]:
     hashes = sorted(str(error.get("error_hash") or "") for error in errors if isinstance(error, Mapping))
     head_hash = hashlib.sha256("\n".join(hashes).encode("ascii")).hexdigest()
     return {
@@ -2783,7 +2783,7 @@ def load_reusable_json(
     *,
     expected_command: str | None,
     required_keys: Sequence[str],
-) -> Dict[str, object] | None:
+) -> dict[str, object] | None:
     if not path.is_file():
         return None
     try:
@@ -2804,7 +2804,7 @@ def build_run_input_fingerprint(
     *,
     max_files: int = 5000,
     max_content_hash_bytes: int = DEFAULT_INCREMENTAL_HASH_MAX_BYTES,
-) -> Dict[str, object]:
+) -> dict[str, object]:
     hasher = hashlib.sha256()
     scanned_files = 0
     total_size = 0
@@ -2859,7 +2859,7 @@ def build_run_input_fingerprint(
     except OSError:
         truncated = True
     fingerprint_value = hasher.hexdigest()
-    payload: Dict[str, object] = {
+    payload: dict[str, object] = {
         "command": "run-fingerprint",
         "generated_at": dt.datetime.now().isoformat(),
         "root": str(root),
@@ -2930,7 +2930,7 @@ def build_run_input_fingerprint(
     return payload
 
 
-def refresh_incremental_fingerprint_manifest(payload: Dict[str, object], *, reuse_disabled: bool) -> None:
+def refresh_incremental_fingerprint_manifest(payload: dict[str, object], *, reuse_disabled: bool) -> None:
     summary = payload.get("summary") if isinstance(payload.get("summary"), Mapping) else {}
     manifest = build_incremental_indexing_manifest(payload)
     decision_manifest = build_incremental_reuse_decision_manifest(payload, reuse_disabled=reuse_disabled)
@@ -4151,7 +4151,7 @@ def checkpoint_resume_core_accuracy_gates(
 
 
 def prepare_run_input_root(
-    root: Union[InputRoot, Path],
+    root: InputRoot | Path,
     *,
     input_kind: str | None,
     output_dir: Path,
@@ -4464,7 +4464,7 @@ def build_run_summary(
     safety: Mapping[str, object],
     rule_set: RuleSet | None = None,
     source: Mapping[str, object] | None = None,
-) -> Dict[str, object]:
+) -> dict[str, object]:
     provider_counts = {
         str(provider["name"]): len(provider.get("artifacts", []))
         for provider in manifest_payload.get("providers", [])
@@ -4608,14 +4608,14 @@ def build_step_rows(
     indicators_payload: Mapping[str, object],
     outputs: Mapping[str, Path],
     reused_outputs: set[str] | None = None,
-) -> List[Dict[str, object]]:
+) -> list[dict[str, object]]:
     reused_outputs = reused_outputs or set()
     provider_count = len(manifest_payload.get("providers", []))
     artifact_count_by_kind = {
         kind: int(payload.get("summary", {}).get("artifact_count", 0))
         for kind, payload in artifact_payloads.items()
     }
-    rows: List[Dict[str, object]] = [
+    rows: list[dict[str, object]] = [
         mark_reused_step(
             annotate_step(
             {
@@ -4753,11 +4753,11 @@ def build_step_rows(
 
 
 def build_processing_summary(
-    steps: List[Dict[str, object]],
+    steps: list[dict[str, object]],
     *,
     safety: Mapping[str, object],
-) -> Dict[str, object]:
-    warnings: List[Dict[str, object]] = []
+) -> dict[str, object]:
+    warnings: list[dict[str, object]] = []
     for step in steps:
         level = str(step.get("warning_level") or "none")
         messages = step.get("warning_messages", [])
@@ -5280,7 +5280,7 @@ def build_runtime_defensibility_profile(
     }
 
 
-def build_silent_failure_step(report: Mapping[str, object]) -> Dict[str, object]:
+def build_silent_failure_step(report: Mapping[str, object]) -> dict[str, object]:
     status = str(report.get("status") or "unknown")
     risk_count = int(report.get("risk_check_count") or 0)
     check_count = int(report.get("check_count") or 0)
@@ -5551,7 +5551,7 @@ def build_functional_large_data_profile(
     }
 
 
-def mark_reused_step(row: Dict[str, object], reused_outputs: set[str]) -> Dict[str, object]:
+def mark_reused_step(row: dict[str, object], reused_outputs: set[str]) -> dict[str, object]:
     name = str(row.get("name") or "")
     if name in reused_outputs:
         row["status"] = "reused"
@@ -5577,7 +5577,7 @@ def infer_processing_profile_label(
     return "Deep - uncapped extraction"
 
 
-def build_extract_step(name: str, output: Path, payload: Mapping[str, object]) -> Dict[str, object]:
+def build_extract_step(name: str, output: Path, payload: Mapping[str, object]) -> dict[str, object]:
     summary = payload.get("summary", {})
     selected_count = int(summary.get("selected_count", 0)) if isinstance(summary, Mapping) else 0
     extracted_count = int(summary.get("extracted_count", 0)) if isinstance(summary, Mapping) else 0
@@ -5611,11 +5611,11 @@ def build_extract_step(name: str, output: Path, payload: Mapping[str, object]) -
 
 
 def annotate_step(
-    row: Dict[str, object],
+    row: dict[str, object],
     *,
     warning_level: str,
-    warning_messages: List[str],
-) -> Dict[str, object]:
+    warning_messages: list[str],
+) -> dict[str, object]:
     row["warning_level"] = warning_level
     row["warning_messages"] = warning_messages
     return row
@@ -5632,7 +5632,7 @@ def docs_warning_level(payload: Mapping[str, object]) -> str:
     return "none"
 
 
-def docs_warning_messages(payload: Mapping[str, object]) -> List[str]:
+def docs_warning_messages(payload: Mapping[str, object]) -> list[str]:
     summary = payload.get("summary", {})
     candidate_count = int(summary.get("candidate_count", 0)) if isinstance(summary, Mapping) else 0
     match_count = int(summary.get("match_count", 0)) if isinstance(summary, Mapping) else 0
@@ -5649,7 +5649,7 @@ def docs_index_warning_level(payload: Mapping[str, object]) -> str:
     return "notice" if document_count == 0 else "none"
 
 
-def docs_index_warning_messages(payload: Mapping[str, object]) -> List[str]:
+def docs_index_warning_messages(payload: Mapping[str, object]) -> list[str]:
     index = payload.get("index", {})
     document_count = int(index.get("document_count", 0)) if isinstance(index, Mapping) else 0
     if document_count == 0:
@@ -5668,7 +5668,7 @@ def files_warning_level(payload: Mapping[str, object]) -> str:
     return "none"
 
 
-def files_warning_messages(payload: Mapping[str, object]) -> List[str]:
+def files_warning_messages(payload: Mapping[str, object]) -> list[str]:
     summary = payload.get("summary", {})
     scanned_count = int(summary.get("scanned_file_count", 0)) if isinstance(summary, Mapping) else 0
     candidate_count = int(summary.get("candidate_count", 0)) if isinstance(summary, Mapping) else 0
@@ -5679,7 +5679,7 @@ def files_warning_messages(payload: Mapping[str, object]) -> List[str]:
     return []
 
 
-def count_skip_reasons(payload: Mapping[str, object]) -> Dict[str, int]:
+def count_skip_reasons(payload: Mapping[str, object]) -> dict[str, int]:
     skipped = payload.get("skipped", [])
     counts: Counter[str] = Counter()
     if not isinstance(skipped, list):
@@ -5700,7 +5700,7 @@ def extract_warning_level(
 ) -> str:
     if not skipped_count:
         return "notice" if selected_count == 0 else "none"
-    if any(reason in skip_reason_counts for reason in {"max-file-count", "max-extract-size", "missing"}):
+    if any(reason in skip_reason_counts for reason in ("max-file-count", "max-extract-size", "missing")):
         return "warning"
     return "notice"
 
@@ -5711,8 +5711,8 @@ def extract_warning_messages(
     extracted_count: int,
     skipped_count: int,
     skip_reason_counts: Mapping[str, int],
-) -> List[str]:
-    messages: List[str] = []
+) -> list[str]:
+    messages: list[str] = []
     if selected_count == 0:
         messages.append("No items matched the extraction filters.")
     if skipped_count and not extracted_count:
@@ -5734,7 +5734,7 @@ def extract_warning_messages(
     return messages
 
 
-def highest_warning_level(levels: List[str]) -> str:
+def highest_warning_level(levels: list[str]) -> str:
     priority = {"none": 0, "notice": 1, "warning": 2, "failed": 3}
     if not levels:
         return "none"
@@ -5781,10 +5781,10 @@ def count_matched_keywords(results: object) -> Counter[str]:
     return counts
 
 
-def summarize_document_hits(results: object, *, limit: int) -> List[Dict[str, object]]:
+def summarize_document_hits(results: object, *, limit: int) -> list[dict[str, object]]:
     if not isinstance(results, list):
         return []
-    items: List[Dict[str, object]] = []
+    items: list[dict[str, object]] = []
     for result in results[:limit]:
         if not isinstance(result, dict):
             continue
@@ -5799,10 +5799,10 @@ def summarize_document_hits(results: object, *, limit: int) -> List[Dict[str, ob
     return items
 
 
-def summarize_file_candidates(candidates: object, *, limit: int) -> List[Dict[str, object]]:
+def summarize_file_candidates(candidates: object, *, limit: int) -> list[dict[str, object]]:
     if not isinstance(candidates, list):
         return []
-    items: List[Dict[str, object]] = []
+    items: list[dict[str, object]] = []
     for candidate in candidates[:limit]:
         if not isinstance(candidate, dict):
             continue
@@ -5818,14 +5818,14 @@ def summarize_file_candidates(candidates: object, *, limit: int) -> List[Dict[st
     return items
 
 
-def summarize_large_file_candidates(candidates: object, *, limit: int) -> List[Dict[str, object]]:
+def summarize_large_file_candidates(candidates: object, *, limit: int) -> list[dict[str, object]]:
     if not isinstance(candidates, list):
         return []
     sorted_candidates = sorted(
         (candidate for candidate in candidates if isinstance(candidate, dict)),
         key=lambda item: (-int(item.get("size", 0)), str(item.get("path", ""))),
     )
-    items: List[Dict[str, object]] = []
+    items: list[dict[str, object]] = []
     for candidate in sorted_candidates[:limit]:
         items.append(
             {
@@ -5838,7 +5838,7 @@ def summarize_large_file_candidates(candidates: object, *, limit: int) -> List[D
     return items
 
 
-def collect_preferred_candidates(candidates: object, *, preferred_locations: Sequence[str]) -> List[Dict[str, object]]:
+def collect_preferred_candidates(candidates: object, *, preferred_locations: Sequence[str]) -> list[dict[str, object]]:
     if not isinstance(candidates, list) or not preferred_locations:
         return []
     normalized_locations = [value.lower() for value in preferred_locations]
@@ -5891,8 +5891,8 @@ def build_key_hit_rows(
     files_payload: Mapping[str, object],
     artifact_payloads: Mapping[str, Mapping[str, object]],
     timeline_payload: Mapping[str, object],
-) -> List[str]:
-    rows: List[str] = []
+) -> list[str]:
+    rows: list[str] = []
     matched_rules = summary_payload.get("matched_rules", [])
     if isinstance(matched_rules, list) and matched_rules:
         rows.append(f"Matched rules: {', '.join(str(item) for item in matched_rules[:5])}")
@@ -5933,7 +5933,7 @@ def build_key_hit_rows(
         )
 
     seen: set[str] = set()
-    deduped: List[str] = []
+    deduped: list[str] = []
     for row in rows:
         if row in seen:
             continue
@@ -5942,7 +5942,7 @@ def build_key_hit_rows(
     return deduped[:10]
 
 
-def append_related_document_rows(lines: List[str], results: object) -> None:
+def append_related_document_rows(lines: list[str], results: object) -> None:
     if not isinstance(results, list) or not results:
         lines.append("- none")
         return
@@ -5962,7 +5962,7 @@ def append_related_document_rows(lines: List[str], results: object) -> None:
             lines.append(f"  - ioc_hits: {values}")
 
 
-def append_artifact_summary_rows(lines: List[str], artifact_payloads: Mapping[str, Mapping[str, object]]) -> None:
+def append_artifact_summary_rows(lines: list[str], artifact_payloads: Mapping[str, Mapping[str, object]]) -> None:
     if not artifact_payloads:
         lines.append("- none")
         return
@@ -5983,7 +5983,7 @@ def append_artifact_summary_rows(lines: List[str], artifact_payloads: Mapping[st
             )
 
 
-def append_timeline_rows(lines: List[str], timeline_payload: Mapping[str, object]) -> None:
+def append_timeline_rows(lines: list[str], timeline_payload: Mapping[str, object]) -> None:
     summary = timeline_payload.get("summary", {})
     events = timeline_payload.get("events", [])
     if not isinstance(events, list) or not events:
@@ -6013,7 +6013,7 @@ def append_timeline_rows(lines: List[str], timeline_payload: Mapping[str, object
 
 
 def append_extract_rows(
-    lines: List[str],
+    lines: list[str],
     *,
     title: str,
     payload: Mapping[str, object],

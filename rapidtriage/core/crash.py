@@ -9,11 +9,10 @@ import re
 import traceback
 import uuid
 import zipfile
+from collections.abc import Mapping
 from pathlib import Path
-from typing import Mapping
 
 from .forensic_accuracy import build_accuracy_gate
-
 
 DEFAULT_CRASH_DIR = Path.home() / ".rapidtriage" / "crash-reports"
 CRASH_REPORTING_GAP_ID = "#105"

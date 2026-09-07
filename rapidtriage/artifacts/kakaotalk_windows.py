@@ -3,16 +3,19 @@ from __future__ import annotations
 import hashlib
 import re
 import sqlite3
+from collections.abc import Iterable, Mapping, Sequence
 from pathlib import Path
-from typing import Iterable, Mapping, Sequence
 
 from ..core.models import ArtifactRecord
 from ..core.submission import compute_hashes
 from .memory import MEMORY_DUMP_SCAN_LIMIT, build_scan_ranges, is_memory_dump_candidate
 from .windows.common import build_forensic_review
 from .windows.ese import build_ese_page_map, build_ese_string_pivots
-from .windows.registry import REGISTRY_HIVE_NAMES
-from .windows.registry import parse_registry_vk_cell, registry_value_data_preview
+from .windows.registry import (
+    REGISTRY_HIVE_NAMES,
+    parse_registry_vk_cell,
+    registry_value_data_preview,
+)
 from .windows.search_index import WINDOWS_SEARCH_TABLE_MARKERS
 
 PARSER_VERSION = "kakaotalk-windows-correlation-v1"

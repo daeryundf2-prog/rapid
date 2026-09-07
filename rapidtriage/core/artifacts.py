@@ -3,7 +3,6 @@ from __future__ import annotations
 import datetime as dt
 from collections import Counter
 from pathlib import Path
-from typing import Dict, Union
 
 from ..artifacts import artifact_collectors, get_artifact_collector
 from .artifact_store import attach_artifact_record_contracts
@@ -18,13 +17,13 @@ class ArtifactCollectionError(ValueError):
 
 
 def run_artifact_collection(
-    root: Union[InputRoot, Path],
+    root: InputRoot | Path,
     *,
     kind: str,
     input_kind: str | None = None,
     rule_set: RuleSet | None = None,
-    collector_options: Dict[str, object] | None = None,
-) -> Dict[str, object]:
+    collector_options: dict[str, object] | None = None,
+) -> dict[str, object]:
     input_root = resolve_input_root(root, kind=input_kind)
     try:
         collector = get_artifact_collector(kind)

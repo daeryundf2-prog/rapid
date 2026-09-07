@@ -9,7 +9,10 @@ from pathlib import Path
 
 from rapidtriage.cli import build_parser, main
 from rapidtriage.core.case_report import build_case_report_markdown
-from rapidtriage.core.compare import build_compare_trusted_diff, compare_core_accuracy_gates
+from rapidtriage.core.compare import (
+    build_compare_trusted_diff,
+    compare_core_accuracy_gates,
+)
 from rapidtriage.core.submission import build_submission_manifest
 
 

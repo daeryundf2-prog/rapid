@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import hashlib
 import re
+from collections.abc import Iterable, Mapping, Sequence
 from pathlib import Path
-from typing import Iterable, Mapping, Sequence
 
 ESE_HEADER_READ_SIZE = 8192
 ESE_SCAN_READ_SIZE = 8 * 1024 * 1024

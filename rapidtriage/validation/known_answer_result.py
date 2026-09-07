@@ -12,7 +12,6 @@ from rapidtriage.validation.known_answer_types import (
     ManifestValidationResult,
 )
 
-
 RESULT_SCHEMA_VERSION: Final = "rapidforensic-known-answer-validation-result-v1"
 RELEASE_EVIDENCE_STATUS: Final = "engineering_check_only"
 TOOL_NAME: Final = "known-answer-qc"

@@ -20,7 +20,11 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from rapidtriage.core.crash import export_crash_report_bundle, list_crash_reports, write_crash_report
+from rapidtriage.core.crash import (
+    export_crash_report_bundle,
+    list_crash_reports,
+    write_crash_report,
+)
 
 
 def main(argv: list[str] | None = None) -> int:

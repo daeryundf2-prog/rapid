@@ -5,23 +5,24 @@ import json
 import re
 import sqlite3
 import zipfile
+from collections.abc import Iterable, Mapping, Sequence
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Mapping, Sequence, Tuple
+from typing import Any
 from urllib.parse import parse_qs, unquote_plus, urlparse
 
 from ...core.forensic_accuracy import build_accuracy_gate
 from ...core.models import ArtifactRecord
-from .ese import build_ese_page_map, build_ese_string_pivots, probe_ese_database
 from .common import (
     build_forensic_review,
-    isoformat_from_unix_micros,
     isoformat_from_timestamp,
+    isoformat_from_unix_micros,
     isoformat_from_webkit_micros,
     iter_windows_user_homes,
     open_sqlite_snapshot,
 )
+from .ese import build_ese_page_map, build_ese_string_pivots, probe_ese_database
 
-CHROMIUM_BROWSER_ROOTS: Tuple[Tuple[str, Sequence[str]], ...] = (
+CHROMIUM_BROWSER_ROOTS: tuple[tuple[str, Sequence[str]], ...] = (
     ("chrome", ("AppData", "Local", "Google", "Chrome", "User Data")),
     ("edge", ("AppData", "Local", "Microsoft", "Edge", "User Data")),
     ("brave", ("AppData", "Local", "BraveSoftware", "Brave-Browser", "User Data")),
@@ -129,7 +130,7 @@ CLOUD_SYNC_PATH_TERMS = ("onedrive", "drivefs", "google drive", "googledrive")
 DESKTOP_CLOUD_SYNC_ROW_LIMIT = 200
 DESKTOP_CLOUD_SYNC_TABLE_LIMIT = 8
 
-AI_SERVICE_DOMAINS: Tuple[Tuple[str, str], ...] = (
+AI_SERVICE_DOMAINS: tuple[tuple[str, str], ...] = (
     ("chatgpt.com", "ChatGPT"),
     ("chat.openai.com", "ChatGPT"),
     ("openai.com", "OpenAI"),
@@ -157,7 +158,7 @@ SEARCH_HOST_HINTS = ("google.", "bing.com", "duckduckgo.com", "naver.com", "daum
 EMAIL_HOST_HINTS = ("mail.google.com", "outlook.live.com", "outlook.office.com", "mail.naver.com", "mail.daum.net")
 SOCIAL_HOST_HINTS = ("facebook.com", "instagram.com", "x.com", "twitter.com", "threads.net", "linkedin.com")
 CLOUD_HOST_HINTS = ("drive.google.com", "onedrive.live.com", "dropbox.com", "icloud.com", "box.com")
-AI_STORAGE_DIRS: Tuple[Tuple[str, ...], ...] = (
+AI_STORAGE_DIRS: tuple[tuple[str, ...], ...] = (
     ("Local Storage", "leveldb"),
     ("Session Storage",),
     ("IndexedDB",),
@@ -181,7 +182,7 @@ AI_EXPORT_PATH_TERMS = (
     "conversation",
     "export",
 )
-BROWSER_STORAGE_LOCATIONS: Tuple[Tuple[str, str, Tuple[str, ...], str, bool], ...] = (
+BROWSER_STORAGE_LOCATIONS: tuple[tuple[str, str, tuple[str, ...], str, bool], ...] = (
     ("cache", "cache-data", ("Cache", "Cache_Data"), "browser-cache-inventory", False),
     ("cache", "legacy-cache", ("Cache",), "browser-cache-inventory", False),
     ("session", "session-storage", ("Session Storage",), "browser-session-storage-inventory", True),
@@ -688,7 +689,7 @@ def build_ai_service_export_artifact_from_bytes(
     archive_entry_name = str((archive_context or {}).get("archive_entry_name") or "")
     service_hint = infer_ai_service_from_path(Path(archive_entry_name)) if archive_entry_name else ""
     service_hint = service_hint or infer_ai_service_from_path(path) or detect_ai_service(text[:16000], "")
-    rows: List[Dict[str, object]] = []
+    rows: list[dict[str, object]] = []
     source_hash = hashlib.sha256(data).hexdigest()
     for payload in payloads:
         payload_rows = extract_ai_export_rows(
@@ -731,7 +732,7 @@ def with_ai_export_archive_context(
     archive_path: Path,
     root: Path,
     archive_context: Mapping[str, object],
-) -> Dict[str, object]:
+) -> dict[str, object]:
     payload = dict(row)
     entry_name = str(archive_context.get("archive_entry_name") or "")
     try:
@@ -769,9 +770,9 @@ def dt_from_zip_tuple(value: tuple[int, int, int, int, int, int]) -> Any:
     return _dt.datetime(*value, tzinfo=_dt.timezone.utc)
 
 
-def parse_ai_export_payloads(text: str, *, suffix: str) -> List[Any]:
+def parse_ai_export_payloads(text: str, *, suffix: str) -> list[Any]:
     if suffix == ".jsonl":
-        payloads: List[Any] = []
+        payloads: list[Any] = []
         for line in text.splitlines()[:MAX_AI_CONVERSATION_ROWS]:
             line = line.strip()
             if not line:
@@ -797,7 +798,7 @@ def extract_ai_export_rows(
     source_size: int,
     source_modified_at: str | None,
     service_hint: str,
-) -> List[Dict[str, object]]:
+) -> list[dict[str, object]]:
     context = {
         "service_hint": service_hint or infer_ai_service_from_payload(payload) or "AI service",
         "conversation_id": "",
@@ -805,7 +806,7 @@ def extract_ai_export_rows(
         "timestamp": None,
         "export_schema_profile": infer_ai_export_schema_profile(payload, service_hint=service_hint),
     }
-    rows: List[Dict[str, object]] = []
+    rows: list[dict[str, object]] = []
     walk_ai_export_payload(
         payload,
         source=source,
@@ -832,7 +833,7 @@ def walk_ai_export_payload(
     source_size: int,
     source_modified_at: str | None,
     context: Mapping[str, object],
-    rows: List[Dict[str, object]],
+    rows: list[dict[str, object]],
     depth: int,
     json_pointer: str,
 ) -> None:
@@ -952,7 +953,7 @@ def walk_ai_export_payload(
         )
 
 
-def ai_export_context_for(value: Mapping[str, object], context: Mapping[str, object]) -> Dict[str, object]:
+def ai_export_context_for(value: Mapping[str, object], context: Mapping[str, object]) -> dict[str, object]:
     updated = dict(context)
     for key in ("id", "conversation_id", "conversationId", "thread_id", "threadId", "uuid", "chat_id", "chatId"):
         if value.get(key):
@@ -978,7 +979,7 @@ def join_json_pointer(base: str, token: str) -> str:
     return f"{base}/{escaped}" if base else f"/{escaped}"
 
 
-def infer_ai_export_schema_profile(payload: Any, *, service_hint: str = "") -> Dict[str, object]:
+def infer_ai_export_schema_profile(payload: Any, *, service_hint: str = "") -> dict[str, object]:
     service = service_hint or infer_ai_service_from_payload(payload) or "AI service"
     shape = "unknown-json"
     recognized = False
@@ -1025,10 +1026,10 @@ def ai_export_prompt_answer_rows(
     source_modified_at: str | None,
     context: Mapping[str, object],
     source_json_pointer: str,
-) -> List[Dict[str, object]]:
+) -> list[dict[str, object]]:
     question, question_key = first_ai_export_text_with_key(value, ("prompt", "question", "query", "user_prompt", "input"))
     answer, answer_key = first_ai_export_text_with_key(value, ("answer", "response", "completion", "assistant_response", "output"))
-    rows: List[Dict[str, object]] = []
+    rows: list[dict[str, object]] = []
     for role, direction, text, text_key in (
         ("user", "question", question, question_key),
         ("assistant", "answer", answer, answer_key),
@@ -1065,7 +1066,7 @@ def ai_export_message_row(
     source_modified_at: str | None,
     context: Mapping[str, object],
     source_json_pointer: str,
-) -> Dict[str, object] | None:
+) -> dict[str, object] | None:
     role = normalize_ai_export_role(value)
     if not role:
         return None
@@ -1102,7 +1103,7 @@ def build_ai_export_row(
     text: str,
     confidence: float,
     source_json_pointer: str,
-) -> Dict[str, object]:
+) -> dict[str, object]:
     try:
         source_relative_path = str(source.resolve().relative_to(root.resolve()))
     except ValueError:
@@ -1158,7 +1159,7 @@ def build_ai_service_export_record(
     provider: str,
     source: Path,
     root: Path,
-    conversation_rows: List[Dict[str, object]],
+    conversation_rows: list[dict[str, object]],
     parser_version: str,
     source_size: int,
     modified_at: str | None,
@@ -1213,7 +1214,7 @@ def build_ai_service_export_record(
         "trusted_export_diff_attached": False,
         "schema_validation_manifest_present": True,
     }
-    details: Dict[str, object] = {
+    details: dict[str, object] = {
         "parser": "ai-service-export-parser",
         "parser_version": parser_version,
         "coverage_status": "service-export-json-candidate",
@@ -1332,8 +1333,8 @@ def build_ai_service_export_parser_manifest(
     modified_at: str | None,
     source_format_override: str | None = None,
     archive_context: Mapping[str, object] | None = None,
-) -> Dict[str, object]:
-    manifest: Dict[str, object] = {
+) -> dict[str, object]:
+    manifest: dict[str, object] = {
         "manifest_version": "ai-service-export-parser-manifest-v1",
         "parser_version": PARSER_VERSION,
         "source_path": str(source.resolve()),
@@ -1875,10 +1876,10 @@ def build_browser_storage_only_artifacts(
     parser_version: str = PARSER_VERSION,
     ai_conversation_artifact_type: str = "browser-ai-conversation",
     storage_inventory_artifact_type: str = "browser-storage-inventory",
-) -> List[ArtifactRecord]:
+) -> list[ArtifactRecord]:
     conversation_rows = extract_ai_conversation_candidates(profile_dir)
     storage_inventory = inventory_browser_storage_artifacts(profile_dir)
-    records: List[ArtifactRecord] = []
+    records: list[ArtifactRecord] = []
     if storage_inventory:
         records.append(
             build_browser_storage_inventory_record(
@@ -1916,14 +1917,14 @@ def build_browser_artifacts(
     browser: str,
     profile: str,
     source_path: Path,
-    history_rows: List[Dict[str, object]],
-    download_rows: List[Dict[str, object]],
+    history_rows: list[dict[str, object]],
+    download_rows: list[dict[str, object]],
     parser: str | None = None,
     parser_version: str = PARSER_VERSION,
     ai_artifact_type: str = "browser-ai-usage",
     ai_conversation_artifact_type: str = "browser-ai-conversation",
     storage_inventory_artifact_type: str = "browser-storage-inventory",
-) -> List[ArtifactRecord]:
+) -> list[ArtifactRecord]:
     usage_rows = summarize_internet_usage(history_rows)
     ai_rows = extract_ai_usage(history_rows)
     profile_dir = source_path.parent
@@ -2279,7 +2280,7 @@ def build_ai_conversation_record(
     browser: str,
     profile: str,
     profile_dir: Path,
-    conversation_rows: List[Dict[str, object]],
+    conversation_rows: list[dict[str, object]],
     parser_version: str,
 ) -> ArtifactRecord:
     transcript = build_ai_transcript_summary(conversation_rows)
@@ -2656,7 +2657,7 @@ def build_browser_storage_inventory_record(
     )
 
 
-def build_source_profile_metadata(*, user: str, browser: str, profile: str, source_path: Path) -> Dict[str, object]:
+def build_source_profile_metadata(*, user: str, browser: str, profile: str, source_path: Path) -> dict[str, object]:
     return {
         "user": user,
         "browser": browser,
@@ -2677,7 +2678,7 @@ def build_browser_history_download_citation_manifest(
     history_rows: Sequence[Mapping[str, object]],
     download_rows: Sequence[Mapping[str, object]],
     unified_timeline: Sequence[Mapping[str, object]],
-) -> Dict[str, object]:
+) -> dict[str, object]:
     history_citations = [
         browser_row_citation(
             browser=browser,
@@ -2725,7 +2726,7 @@ def build_browser_history_download_citation_manifest(
         )
         for row in unified_timeline[:MAX_BROWSER_TIMELINE_ROWS]
     ]
-    manifest: Dict[str, object] = {
+    manifest: dict[str, object] = {
         "manifest_version": "browser-history-download-citation-manifest-v1",
         "item_number": 46,
         "batch_id": FUNCTIONAL_SOURCE_BATCH_ID,
@@ -2776,7 +2777,7 @@ def build_browser_storage_citation_manifest(
     user: str,
     profile_dir: Path,
     storage_inventory: Sequence[Mapping[str, object]],
-) -> Dict[str, object]:
+) -> dict[str, object]:
     context_profiles = [
         row.get("source_context_profile")
         for row in storage_inventory
@@ -2793,7 +2794,7 @@ def build_browser_storage_citation_manifest(
         )
         for index, row in enumerate(storage_inventory[:MAX_BROWSER_INVENTORY_FILES])
     ]
-    manifest: Dict[str, object] = {
+    manifest: dict[str, object] = {
         "manifest_version": "browser-storage-citation-manifest-v1",
         "item_number": 47,
         "batch_id": FUNCTIONAL_SOURCE_BATCH_ID,
@@ -2862,11 +2863,11 @@ def build_browser_storage_depth_manifest(
     storage_inventory: Sequence[Mapping[str, object]],
     storage_review_profile: Mapping[str, object],
     storage_citation_manifest: Mapping[str, object],
-) -> Dict[str, object]:
+) -> dict[str, object]:
     storage_type_counts = count_field(storage_inventory, "storage_type")
     storage_name_counts = count_field(storage_inventory, "storage_name")
     storage_type_map = {str(row.get("value") or ""): int(row.get("count") or 0) for row in storage_type_counts}
-    manifest: Dict[str, object] = {
+    manifest: dict[str, object] = {
         "manifest_version": "browser-storage-depth-manifest-v1",
         "parser_version": PARSER_VERSION,
         "commercial_batch_id": "commercial-uplift-016-020",
@@ -2986,11 +2987,11 @@ def build_browser_timeline_depth_manifest(
     unified_timeline: Sequence[Mapping[str, object]],
     timeline_integrity_profile: Mapping[str, object],
     citation_manifest: Mapping[str, object],
-) -> Dict[str, object]:
+) -> dict[str, object]:
     timeline_type_counts = count_field(unified_timeline, "timeline_type")
     transition_count = sum(1 for row in unified_timeline if row.get("transition"))
     source_table_counts = count_field(unified_timeline, "source_table")
-    manifest: Dict[str, object] = {
+    manifest: dict[str, object] = {
         "manifest_version": "browser-timeline-depth-manifest-v1",
         "parser_version": PARSER_VERSION,
         "commercial_batch_id": "commercial-uplift-016-020",
@@ -3075,7 +3076,7 @@ def browser_storage_row_citation(
     profile_dir: Path,
     row: Mapping[str, object],
     source_index: int,
-) -> Dict[str, object]:
+) -> dict[str, object]:
     source_path = str(row.get("source_path") or "")
     source_context = row.get("source_context_profile") if isinstance(row.get("source_context_profile"), Mapping) else {}
     source_context_summary = {
@@ -3149,7 +3150,7 @@ def browser_row_citation(
     timestamp: str,
     url: str,
     target_path: str = "",
-) -> Dict[str, object]:
+) -> dict[str, object]:
     source_table = str(row.get("source_table") or default_source_table)
     source_row_id = row.get("source_row_id")
     row_source_path = Path(str(row.get("source_path") or source_path))
@@ -3192,7 +3193,7 @@ def stable_browser_sha256(payload: Mapping[str, object] | Sequence[object]) -> s
     return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
 
 
-def browser_storage_review_profile(storage_inventory: Sequence[Mapping[str, object]]) -> Dict[str, object]:
+def browser_storage_review_profile(storage_inventory: Sequence[Mapping[str, object]]) -> dict[str, object]:
     sensitive_count = sum(1 for row in storage_inventory if row.get("sensitive"))
     total_bytes = sum(int(row.get("total_bytes") or 0) for row in storage_inventory)
     truncated_count = sum(1 for row in storage_inventory if row.get("inventory_truncated"))
@@ -3247,7 +3248,7 @@ def browser_analyst_review_profile(
     storage_review_profile: Mapping[str, object] | None = None,
     timeline_integrity_profile: Mapping[str, object] | None = None,
     evidence_fields: Mapping[str, object] | None = None,
-) -> Dict[str, object]:
+) -> dict[str, object]:
     storage_profile = storage_review_profile or {}
     timeline_profile = timeline_integrity_profile or {}
     failed_checks = sorted(str(key) for key, value in validation_checks.items() if value is False)
@@ -3305,7 +3306,7 @@ def browser_validation_checks(
     conversation_rows: Sequence[Mapping[str, object]],
     unified_timeline: Sequence[Mapping[str, object]] | None = None,
     citation_manifest: Mapping[str, object] | None = None,
-) -> Dict[str, object]:
+) -> dict[str, object]:
     timeline_integrity = browser_timeline_integrity_profile(unified_timeline or [])
     citations = citation_manifest or {}
     history_download_count = len(history_rows) + len(download_rows)
@@ -3334,7 +3335,7 @@ def browser_validation_checks(
     }
 
 
-def browser_validation_matrix(checks: Mapping[str, object]) -> List[Dict[str, object]]:
+def browser_validation_matrix(checks: Mapping[str, object]) -> list[dict[str, object]]:
     return [
         {
             "id": "history-or-download-source",
@@ -3377,7 +3378,7 @@ def browser_validation_matrix(checks: Mapping[str, object]) -> List[Dict[str, ob
     ]
 
 
-def browser_report_grade_assessment(checks: Mapping[str, object]) -> Dict[str, object]:
+def browser_report_grade_assessment(checks: Mapping[str, object]) -> dict[str, object]:
     matrix = browser_validation_matrix(checks)
     failed = [item for item in matrix if not item["passed"]]
     return {
@@ -3393,7 +3394,7 @@ def browser_report_grade_assessment(checks: Mapping[str, object]) -> Dict[str, o
     }
 
 
-def browser_commercial_uplift_evidence(details: Mapping[str, object]) -> Dict[str, object]:
+def browser_commercial_uplift_evidence(details: Mapping[str, object]) -> dict[str, object]:
     matrix = details.get("browser_validation_matrix") if isinstance(details.get("browser_validation_matrix"), list) else []
     report_grade = (
         details.get("browser_report_grade_assessment")
@@ -3507,7 +3508,7 @@ def browser_commercial_uplift_evidence(details: Mapping[str, object]) -> Dict[st
 def browser_reportability_decision(
     report_grade: Mapping[str, object],
     details: Mapping[str, object],
-) -> Dict[str, object]:
+) -> dict[str, object]:
     blockers = set(str(item) for item in report_grade.get("blockers") or [])
     blockers.add("browser-secret-legal-opt-in-and-audit-required")
     blockers.add("browser-deleted-history-and-cache-schema-validation-required")
@@ -3534,7 +3535,7 @@ def browser_reportability_decision(
     }
 
 
-def browser_history_downloads_functional_profile(details: Mapping[str, object]) -> Dict[str, object]:
+def browser_history_downloads_functional_profile(details: Mapping[str, object]) -> dict[str, object]:
     history_count = int(details.get("history_count") or 0)
     download_count = int(details.get("download_count") or 0)
     timeline_count = int(details.get("unified_timeline_count") or 0)
@@ -3544,7 +3545,7 @@ def browser_history_downloads_functional_profile(details: Mapping[str, object]) 
         if isinstance(details.get("browser_history_download_citation_manifest"), Mapping)
         else {}
     )
-    failed_checks: List[str] = []
+    failed_checks: list[str] = []
     if history_count + download_count == 0:
         failed_checks.append("browser-history-download-rows-not-present")
     if timeline_count == 0:
@@ -3610,7 +3611,7 @@ def browser_storage_inventory_functional_profile(
     details: Mapping[str, object],
     *,
     storage_diff: Mapping[str, object],
-) -> Dict[str, object]:
+) -> dict[str, object]:
     inventory_count = int(details.get("storage_inventory_count") or 0)
     sensitive_count = int(details.get("sensitive_inventory_count") or 0)
     citation_manifest = (
@@ -3628,7 +3629,7 @@ def browser_storage_inventory_functional_profile(
     cache_signature_count = int(review_profile.get("cache_signature_candidate_count") or 0)
     sqlite_schema_count = int(review_profile.get("sqlite_schema_inventory_count") or 0)
     session_structure_count = int(review_profile.get("session_structure_candidate_count") or 0)
-    failed_checks: List[str] = []
+    failed_checks: list[str] = []
     if inventory_count == 0:
         failed_checks.append("browser-storage-inventory-not-present")
     if not citation_manifest.get("manifest_sha256"):
@@ -3696,7 +3697,7 @@ def browser_storage_inventory_functional_profile(
     }
 
 
-def ai_transcript_analyst_review_profile(details: Mapping[str, object]) -> Dict[str, object]:
+def ai_transcript_analyst_review_profile(details: Mapping[str, object]) -> dict[str, object]:
     transcript = details.get("transcript") if isinstance(details.get("transcript"), Mapping) else {}
     source_summary = details.get("source_summary") if isinstance(details.get("source_summary"), Mapping) else {}
     conversation_rows = [row for row in details.get("conversation_rows") or [] if isinstance(row, Mapping)]
@@ -3798,7 +3799,7 @@ def ai_transcript_analyst_review_profile(details: Mapping[str, object]) -> Dict[
     }
 
 
-def ai_transcript_commercial_uplift_evidence(details: Mapping[str, object]) -> Dict[str, object]:
+def ai_transcript_commercial_uplift_evidence(details: Mapping[str, object]) -> dict[str, object]:
     checks = (
         details.get("transcript_validation_checks")
         if isinstance(details.get("transcript_validation_checks"), Mapping)
@@ -3892,10 +3893,10 @@ def ai_transcript_functional_profile(
     source_summary: Mapping[str, object],
     conversation_rows: Sequence[Mapping[str, object]],
     trusted_diff: Mapping[str, object],
-) -> Dict[str, object]:
+) -> dict[str, object]:
     question_count = int(transcript.get("question_count") or sum(1 for row in conversation_rows if row.get("direction") == "question"))
     answer_count = int(transcript.get("answer_count") or sum(1 for row in conversation_rows if row.get("direction") == "answer"))
-    failed_checks: List[str] = []
+    failed_checks: list[str] = []
     if not conversation_rows:
         failed_checks.append("ai-transcript-candidate-rows-not-present")
     if int(transcript.get("complete_pair_count") or 0) == 0:
@@ -3980,7 +3981,7 @@ def ai_transcript_reportability_decision(
     transcript: Mapping[str, object],
     conversation_rows: Sequence[Mapping[str, object]],
     trusted_diff: Mapping[str, object] | None = None,
-) -> Dict[str, object]:
+) -> dict[str, object]:
     blockers = set(AI_TRANSCRIPT_BLOCKERS)
     if not checks.get("service_side_export_validated"):
         blockers.add("service-side-export-not-validated")
@@ -4177,7 +4178,7 @@ def build_browser_secret_trusted_diff(
     trusted_rows: Sequence[Mapping[str, object]],
     *,
     trusted_tool: str,
-) -> Dict[str, object]:
+) -> dict[str, object]:
     return build_browser_diff_payload(
         index_browser_secret_rows(rapid_rows),
         index_browser_secret_rows(trusted_rows),
@@ -4195,7 +4196,7 @@ def build_browser_storage_trusted_diff(
     trusted_rows: Sequence[Mapping[str, object]],
     *,
     trusted_tool: str,
-) -> Dict[str, object]:
+) -> dict[str, object]:
     return build_browser_diff_payload(
         index_browser_storage_rows(rapid_rows),
         index_browser_storage_rows(trusted_rows),
@@ -4211,7 +4212,7 @@ def build_browser_timeline_trusted_diff(
     trusted_rows: Sequence[Mapping[str, object]],
     *,
     trusted_tool: str,
-) -> Dict[str, object]:
+) -> dict[str, object]:
     return build_browser_diff_payload(
         index_browser_timeline_rows(rapid_rows),
         index_browser_timeline_rows(trusted_rows),
@@ -4227,7 +4228,7 @@ def build_ai_transcript_trusted_diff(
     trusted_rows: Sequence[Mapping[str, object]],
     *,
     trusted_tool: str,
-) -> Dict[str, object]:
+) -> dict[str, object]:
     return build_browser_diff_payload(
         index_ai_transcript_rows(rapid_rows),
         index_ai_transcript_rows(trusted_rows),
@@ -4240,8 +4241,8 @@ def build_ai_transcript_trusted_diff(
     )
 
 
-def index_browser_storage_rows(rows: Sequence[Mapping[str, object]]) -> Dict[str, Dict[str, str]]:
-    indexed: Dict[str, Dict[str, str]] = {}
+def index_browser_storage_rows(rows: Sequence[Mapping[str, object]]) -> dict[str, dict[str, str]]:
+    indexed: dict[str, dict[str, str]] = {}
     for row in rows:
         for payload in browser_storage_diff_payloads(row):
             browser = normalized_diff_value(first_alias(payload, "browser"))
@@ -4353,8 +4354,8 @@ def normalize_browser_list_item(value: object) -> str:
     return str(value)
 
 
-def index_browser_secret_rows(rows: Sequence[Mapping[str, object]]) -> Dict[str, Dict[str, str]]:
-    indexed: Dict[str, Dict[str, str]] = {}
+def index_browser_secret_rows(rows: Sequence[Mapping[str, object]]) -> dict[str, dict[str, str]]:
+    indexed: dict[str, dict[str, str]] = {}
     for row in rows:
         for payload in browser_secret_diff_payloads(row):
             browser = normalized_diff_value(first_alias(payload, "browser"))
@@ -4402,8 +4403,8 @@ def browser_secret_diff_payloads(row: Mapping[str, object]) -> list[Mapping[str,
     return [payload]
 
 
-def index_ai_transcript_rows(rows: Sequence[Mapping[str, object]]) -> Dict[str, Dict[str, str]]:
-    indexed: Dict[str, Dict[str, str]] = {}
+def index_ai_transcript_rows(rows: Sequence[Mapping[str, object]]) -> dict[str, dict[str, str]]:
+    indexed: dict[str, dict[str, str]] = {}
     for row in rows:
         for payload in ai_transcript_diff_payloads(row):
             service = normalized_diff_value(first_alias(payload, "ai_service", "service", "provider"))
@@ -4485,8 +4486,8 @@ def expand_ai_transcript_pair_rows(
     return expanded
 
 
-def index_browser_timeline_rows(rows: Sequence[Mapping[str, object]]) -> Dict[str, Dict[str, str]]:
-    indexed: Dict[str, Dict[str, str]] = {}
+def index_browser_timeline_rows(rows: Sequence[Mapping[str, object]]) -> dict[str, dict[str, str]]:
+    indexed: dict[str, dict[str, str]] = {}
     for row in rows:
         for payload in browser_timeline_diff_payloads(row):
             browser = normalized_diff_value(first_alias(payload, "browser"))
@@ -4546,7 +4547,7 @@ def build_browser_diff_payload(
     key_label: str,
     trusted_tools: set[str] | None = None,
     fail_decision: str = "do-not-use-browser-output-as-final",
-) -> Dict[str, object]:
+) -> dict[str, object]:
     trusted_tool_set = trusted_tools or BROWSER_TRUSTED_TOOLS
     recognized = trusted_tool.strip().lower().replace(" ", "") in {
         item.replace(" ", "").lower() for item in trusted_tool_set
@@ -4554,7 +4555,7 @@ def build_browser_diff_payload(
     common = sorted(set(rapid_index) & set(trusted_index))
     missing = sorted(set(rapid_index) - set(trusted_index))
     extra = sorted(set(trusted_index) - set(rapid_index))
-    mismatches: List[Dict[str, object]] = []
+    mismatches: list[dict[str, object]] = []
     for key in common:
         for field, rapid_value in rapid_index[key].items():
             trusted_value = trusted_index[key].get(field, "")
@@ -4652,7 +4653,7 @@ def ai_transcript_core_accuracy_gates(details: Mapping[str, object]) -> list[dic
     return [build_accuracy_gate(21, satisfied_checks=satisfied, evidence_refs=evidence_refs)]
 
 
-def browser_secret_handling_validation_checks(sensitive_count: int) -> Dict[str, object]:
+def browser_secret_handling_validation_checks(sensitive_count: int) -> dict[str, object]:
     return {
         "raw_secret_values_extracted": False,
         "cookie_values_decrypted": False,
@@ -4670,7 +4671,7 @@ def browser_secret_authority_profile(
     profile: str,
     storage_inventory: Sequence[Mapping[str, object]],
     checks: Mapping[str, object],
-) -> Dict[str, object]:
+) -> dict[str, object]:
     sensitive_rows = [row for row in storage_inventory if row.get("sensitive")]
     sensitive_type_counts = count_field(sensitive_rows, "storage_type")
     return {
@@ -4721,9 +4722,9 @@ def browser_secret_authority_manifest(
     profile_dir: Path,
     storage_inventory: Sequence[Mapping[str, object]],
     checks: Mapping[str, object],
-) -> Dict[str, object]:
+) -> dict[str, object]:
     sensitive_rows = [row for row in storage_inventory if row.get("sensitive")]
-    entries: List[Dict[str, object]] = []
+    entries: list[dict[str, object]] = []
     for index, row in enumerate(sensitive_rows[:MAX_BROWSER_INVENTORY_FILES], start=1):
         source_path = str(row.get("source_path") or "")
         source_path_hash = hashlib.sha256(source_path.encode("utf-8", errors="ignore")).hexdigest() if source_path else ""
@@ -4754,7 +4755,7 @@ def browser_secret_authority_manifest(
                 "raw_secret_values_extracted": False,
             }
         )
-    manifest: Dict[str, object] = {
+    manifest: dict[str, object] = {
         "manifest_version": "browser-secret-authority-manifest-v1",
         "item_number": 42,
         "batch_id": "commercial-uplift-041-045",
@@ -4828,7 +4829,7 @@ def browser_secret_report_grade_validation_plan(
     authority_profile: Mapping[str, object],
     authority_manifest: Mapping[str, object],
     trusted_diff: Mapping[str, object] | None = None,
-) -> Dict[str, object]:
+) -> dict[str, object]:
     sensitive_rows = [row for row in storage_inventory if row.get("sensitive")]
     trusted_diff = trusted_diff or {}
 
@@ -4839,8 +4840,8 @@ def browser_secret_report_grade_validation_plan(
         evidence: str,
         blocker_id: str | None = None,
         operator_action: str = "",
-    ) -> Dict[str, object]:
-        row: Dict[str, object] = {
+    ) -> dict[str, object]:
+        row: dict[str, object] = {
             "slot_id": slot_id,
             "status": "complete" if ready else "external-required",
             "evidence": evidence,
@@ -4971,7 +4972,7 @@ def browser_secret_report_grade_validation_plan(
             if item.get("status") != "complete" and item.get("blocker_id")
         }
     )
-    plan: Dict[str, object] = {
+    plan: dict[str, object] = {
         "profile_version": BROWSER_SECRET_REPORT_GRADE_VALIDATION_PLAN_VERSION,
         "item_number": 42,
         "gap_id": "#42",
@@ -5018,7 +5019,7 @@ def browser_secret_report_grade_validation_plan(
     return plan
 
 
-def browser_secret_handling_assessment(checks: Mapping[str, object]) -> Dict[str, object]:
+def browser_secret_handling_assessment(checks: Mapping[str, object]) -> dict[str, object]:
     return {
         "status": "inventory-only-validation-required",
         "commercial_gap_ids": ["#42"],
@@ -5038,7 +5039,7 @@ def browser_secret_handling_assessment(checks: Mapping[str, object]) -> Dict[str
     }
 
 
-def browser_secret_commercial_uplift_evidence(details: Mapping[str, object]) -> Dict[str, object]:
+def browser_secret_commercial_uplift_evidence(details: Mapping[str, object]) -> dict[str, object]:
     checks = details.get("secret_handling_validation_checks")
     if not isinstance(checks, Mapping):
         checks = {}
@@ -5062,8 +5063,8 @@ def browser_secret_commercial_uplift_evidence(details: Mapping[str, object]) -> 
         if isinstance(details.get("browser_secret_trusted_diff"), Mapping)
         else {}
     )
-    passed_control_ids: List[str] = []
-    failed_control_ids: List[str] = []
+    passed_control_ids: list[str] = []
+    failed_control_ids: list[str] = []
     if not checks.get("raw_secret_values_extracted"):
         passed_control_ids.append("raw-secret-values-redacted")
     else:
@@ -5177,7 +5178,7 @@ def browser_secret_reportability_decision(
     commercial_blockers: list[str],
     details: Mapping[str, object],
     trusted_diff: Mapping[str, object] | None = None,
-) -> Dict[str, object]:
+) -> dict[str, object]:
     blockers = set(commercial_blockers)
     blockers.update(f"control:{item}" for item in failed_control_ids)
     trusted_diff = trusted_diff or {}
@@ -5234,8 +5235,8 @@ def browser_secret_reportability_decision(
     }
 
 
-def build_ai_transcript_summary(conversation_rows: Sequence[Mapping[str, object]]) -> Dict[str, object]:
-    pairs: List[Dict[str, object]] = []
+def build_ai_transcript_summary(conversation_rows: Sequence[Mapping[str, object]]) -> dict[str, object]:
+    pairs: list[dict[str, object]] = []
     pending_question: Mapping[str, object] | None = None
     orphan_questions = 0
     orphan_answers = 0
@@ -5281,7 +5282,7 @@ def build_ai_transcript_summary(conversation_rows: Sequence[Mapping[str, object]
     }
 
 
-def build_ai_transcript_pair(question: Mapping[str, object], answer: Mapping[str, object], index: int) -> Dict[str, object]:
+def build_ai_transcript_pair(question: Mapping[str, object], answer: Mapping[str, object], index: int) -> dict[str, object]:
     service = str(question.get("ai_service") or answer.get("ai_service") or "AI service")
     question_text = str(question.get("text") or "")
     answer_text = str(answer.get("text") or "")
@@ -5341,7 +5342,7 @@ def build_ai_transcript_candidate_manifest(
     conversation_rows: Sequence[Mapping[str, object]],
     transcript: Mapping[str, object],
     source_summary: Mapping[str, object],
-) -> Dict[str, object]:
+) -> dict[str, object]:
     candidate_citations = [
         ai_conversation_candidate_citation(
             browser=browser,
@@ -5358,7 +5359,7 @@ def build_ai_transcript_candidate_manifest(
         for index, pair in enumerate(transcript.get("pairs") or [])
         if isinstance(pair, Mapping)
     ]
-    manifest: Dict[str, object] = {
+    manifest: dict[str, object] = {
         "manifest_version": "ai-transcript-candidate-manifest-v1",
         "item_number": 48,
         "batch_id": FUNCTIONAL_SOURCE_BATCH_ID,
@@ -5426,7 +5427,7 @@ def build_ai_transcript_schema_validation_manifest(
     transcript: Mapping[str, object],
     source_summary: Mapping[str, object],
     candidate_manifest: Mapping[str, object],
-) -> Dict[str, object]:
+) -> dict[str, object]:
     service_counts = count_field(conversation_rows, "ai_service")
     service_matrix = [
         {
@@ -5440,7 +5441,7 @@ def build_ai_transcript_schema_validation_manifest(
         }
         for row in service_counts
     ]
-    manifest: Dict[str, object] = {
+    manifest: dict[str, object] = {
         "manifest_version": "ai-transcript-schema-validation-manifest-v1",
         "parser_version": PARSER_VERSION,
         "commercial_batch_id": "commercial-uplift-021-025",
@@ -5516,7 +5517,7 @@ def ai_conversation_candidate_citation(
     profile_dir: Path,
     row: Mapping[str, object],
     source_index: int,
-) -> Dict[str, object]:
+) -> dict[str, object]:
     text = str(row.get("text") or "")
     source_path = str(row.get("source_path") or "")
     source_offset = row.get("source_offset")
@@ -5556,7 +5557,7 @@ def ai_conversation_candidate_citation(
     }
 
 
-def ai_transcript_pair_citation(pair: Mapping[str, object], *, source_index: int) -> Dict[str, object]:
+def ai_transcript_pair_citation(pair: Mapping[str, object], *, source_index: int) -> dict[str, object]:
     question = str(pair.get("question") or "")
     answer = str(pair.get("answer") or "")
     evidence = pair.get("pairing_evidence") if isinstance(pair.get("pairing_evidence"), Mapping) else {}
@@ -5610,9 +5611,9 @@ def classify_pairing_confidence(confidence: float, same_source: bool) -> str:
     return "low-candidate"
 
 
-def summarize_pairing_confidence(pairs: Sequence[Mapping[str, object]]) -> Dict[str, object]:
+def summarize_pairing_confidence(pairs: Sequence[Mapping[str, object]]) -> dict[str, object]:
     counts = {"high-candidate": 0, "medium-candidate": 0, "low-candidate": 0}
-    confidence_values: List[float] = []
+    confidence_values: list[float] = []
     for pair in pairs:
         label = str(pair.get("pairing_confidence") or "low-candidate")
         counts[label] = counts.get(label, 0) + 1
@@ -5629,7 +5630,7 @@ def summarize_pairing_confidence(pairs: Sequence[Mapping[str, object]]) -> Dict[
     }
 
 
-def summarize_ai_conversation_sources(conversation_rows: Sequence[Mapping[str, object]]) -> Dict[str, object]:
+def summarize_ai_conversation_sources(conversation_rows: Sequence[Mapping[str, object]]) -> dict[str, object]:
     source_paths = sorted({str(row.get("source_path") or "") for row in conversation_rows if row.get("source_path")})
     source_hashes = sorted({str(row.get("source_sha256") or "") for row in conversation_rows if row.get("source_sha256")})
     json_pointer_count = sum(1 for row in conversation_rows if row.get("source_json_pointer"))
@@ -5644,8 +5645,8 @@ def summarize_ai_conversation_sources(conversation_rows: Sequence[Mapping[str, o
     }
 
 
-def extract_ai_conversation_candidates(profile_dir: Path) -> List[Dict[str, object]]:
-    rows: List[Dict[str, object]] = []
+def extract_ai_conversation_candidates(profile_dir: Path) -> list[dict[str, object]]:
+    rows: list[dict[str, object]] = []
     for source in iter_ai_storage_files(profile_dir):
         if len(rows) >= MAX_AI_CONVERSATION_ROWS:
             break
@@ -5693,8 +5694,8 @@ def extract_ai_conversation_candidates(profile_dir: Path) -> List[Dict[str, obje
     return deduplicate_conversation_rows(rows)
 
 
-def inventory_browser_storage_artifacts(profile_dir: Path) -> List[Dict[str, object]]:
-    rows: List[Dict[str, object]] = []
+def inventory_browser_storage_artifacts(profile_dir: Path) -> list[dict[str, object]]:
+    rows: list[dict[str, object]] = []
     seen: set[Path] = set()
     for storage_type, storage_name, relative_parts, artifact_hint, sensitive in BROWSER_STORAGE_LOCATIONS:
         source = profile_dir.joinpath(*relative_parts)
@@ -5722,10 +5723,10 @@ def inventory_browser_storage_path(
     storage_name: str,
     artifact_hint: str,
     sensitive: bool,
-) -> Dict[str, object]:
+) -> dict[str, object]:
     file_count = 0
     total_bytes = 0
-    sample_files: List[Dict[str, object]] = []
+    sample_files: list[dict[str, object]] = []
     truncated = False
     candidates = [source] if source.is_file() else sorted(source.rglob("*"), key=lambda item: str(item).lower())
     for candidate in candidates:
@@ -5794,7 +5795,7 @@ def browser_storage_source_context_profile(
     storage_type: str,
     storage_name: str,
     sensitive: bool,
-) -> Dict[str, object]:
+) -> dict[str, object]:
     files = (
         [source]
         if source.is_file()
@@ -5804,11 +5805,11 @@ def browser_storage_source_context_profile(
             if item.is_file()
         ]
     )
-    entries: List[Dict[str, object]] = []
-    extension_manifests: List[Dict[str, object]] = []
-    cache_signatures: List[Dict[str, object]] = []
-    sqlite_inventories: List[Dict[str, object]] = []
-    session_structures: List[Dict[str, object]] = []
+    entries: list[dict[str, object]] = []
+    extension_manifests: list[dict[str, object]] = []
+    cache_signatures: list[dict[str, object]] = []
+    sqlite_inventories: list[dict[str, object]] = []
+    session_structures: list[dict[str, object]] = []
     for file_path in files[:MAX_BROWSER_STORAGE_CONTEXT_FILES]:
         entry = browser_storage_source_entry(profile_dir, file_path, storage_type=storage_type)
         entries.append(entry)
@@ -5820,7 +5821,7 @@ def browser_storage_source_context_profile(
             sqlite_inventories.append(dict(entry["sqlite_schema"]))
         if entry.get("structured_preview"):
             session_structures.append(dict(entry["structured_preview"]))
-    profile: Dict[str, object] = {
+    profile: dict[str, object] = {
         "profile_version": "browser-storage-source-context-profile-v1",
         "parser_version": PARSER_VERSION,
         "storage_type": storage_type,
@@ -5868,13 +5869,13 @@ def browser_storage_source_entry(
     file_path: Path,
     *,
     storage_type: str,
-) -> Dict[str, object]:
+) -> dict[str, object]:
     try:
         stat = file_path.stat()
     except OSError:
         stat = None
     header = read_browser_prefix(file_path, min(MAX_BROWSER_STORAGE_CONTEXT_BYTES, 4096))
-    entry: Dict[str, object] = {
+    entry: dict[str, object] = {
         "relative_path": relative_profile_path(profile_dir, file_path),
         "source_path": str(file_path.resolve()),
         "size": int(stat.st_size) if stat else 0,
@@ -5929,8 +5930,8 @@ def browser_storage_file_kind(path: Path, header: bytes) -> str:
     return suffix.removeprefix(".") or "browser-store-file"
 
 
-def browser_storage_signature_flags(path: Path, header: bytes) -> List[str]:
-    flags: List[str] = []
+def browser_storage_signature_flags(path: Path, header: bytes) -> list[str]:
+    flags: list[str] = []
     lowered = header[:4096].lower()
     if header.startswith(b"SQLite format 3\x00"):
         flags.append("sqlite-header")
@@ -5959,7 +5960,7 @@ def browser_storage_viewer_for_file(path: Path, header: bytes) -> str:
     return "file-metadata-and-hex-preview"
 
 
-def browser_extension_manifest_context(path: Path) -> Dict[str, object]:
+def browser_extension_manifest_context(path: Path) -> dict[str, object]:
     if path.name.lower() != "manifest.json":
         return {}
     try:
@@ -5981,7 +5982,7 @@ def browser_extension_manifest_context(path: Path) -> Dict[str, object]:
     }
 
 
-def browser_cache_signature_context(path: Path, header: bytes) -> Dict[str, object]:
+def browser_cache_signature_context(path: Path, header: bytes) -> dict[str, object]:
     lowered = header[:4096].lower()
     if (
         b"http/" not in lowered
@@ -6007,7 +6008,7 @@ def browser_cache_signature_context(path: Path, header: bytes) -> Dict[str, obje
     }
 
 
-def browser_sqlite_schema_context(path: Path, header: bytes) -> Dict[str, object]:
+def browser_sqlite_schema_context(path: Path, header: bytes) -> dict[str, object]:
     if not header.startswith(b"SQLite format 3\x00"):
         return {}
     try:
@@ -6034,7 +6035,7 @@ def browser_sqlite_schema_context(path: Path, header: bytes) -> Dict[str, object
     }
 
 
-def browser_structured_preview_context(path: Path, header: bytes) -> Dict[str, object]:
+def browser_structured_preview_context(path: Path, header: bytes) -> dict[str, object]:
     suffix = path.suffix.lower()
     lowered = path.name.lower()
     if lowered == "manifest.json" or suffix not in {".json", ".log", ".ldb", ".plist"}:
@@ -6063,8 +6064,8 @@ def build_unified_browser_timeline(
     history_rows: Sequence[Mapping[str, object]],
     download_rows: Sequence[Mapping[str, object]],
     ai_rows: Sequence[Mapping[str, object]],
-) -> List[Dict[str, object]]:
-    rows: List[Dict[str, object]] = []
+) -> list[dict[str, object]]:
+    rows: list[dict[str, object]] = []
     ai_urls = {str(row.get("url") or ""): row for row in ai_rows}
     for index, row in enumerate(history_rows[:MAX_BROWSER_TIMELINE_ROWS]):
         url = str(row.get("url") or "")
@@ -6125,7 +6126,7 @@ def build_unified_browser_timeline(
     return sorted(rows, key=lambda item: str(item.get("timestamp") or ""), reverse=True)[:MAX_BROWSER_TIMELINE_ROWS]
 
 
-def browser_timeline_integrity_profile(timeline: Sequence[Mapping[str, object]]) -> Dict[str, object]:
+def browser_timeline_integrity_profile(timeline: Sequence[Mapping[str, object]]) -> dict[str, object]:
     timestamps = [str(row.get("timestamp") or "") for row in timeline]
     populated_timestamps = [value for value in timestamps if value]
     source_index_complete = all("source_index" in row and "source_table" in row for row in timeline)
@@ -6163,7 +6164,7 @@ def classify_storage_kind(area: str) -> str:
     return "browser-storage"
 
 
-def safe_sample_hashes(path: Path, size: int) -> Dict[str, object]:
+def safe_sample_hashes(path: Path, size: int) -> dict[str, object]:
     if size > MAX_BROWSER_INVENTORY_HASH_BYTES:
         return {
             "sha256": None,
@@ -6232,15 +6233,15 @@ def infer_ai_service_from_path(path: Path) -> str:
     return ""
 
 
-def extract_ai_text_fragments(text: str) -> List[Dict[str, object]]:
-    fragments: List[Dict[str, object]] = []
+def extract_ai_text_fragments(text: str) -> list[dict[str, object]]:
+    fragments: list[dict[str, object]] = []
     fragments.extend(extract_json_role_content_fragments(text))
     fragments.extend(extract_named_prompt_answer_fragments(text))
     return fragments
 
 
-def extract_json_role_content_fragments(text: str) -> List[Dict[str, object]]:
-    fragments: List[Dict[str, object]] = []
+def extract_json_role_content_fragments(text: str) -> list[dict[str, object]]:
+    fragments: list[dict[str, object]] = []
     patterns = (
         r'"role"\s*:\s*"(?P<role>user|assistant|system)"[\s\S]{0,800}?"content"\s*:\s*"(?P<content>(?:\\.|[^"\\]){2,4000})"',
         r'"content"\s*:\s*"(?P<content>(?:\\.|[^"\\]){2,4000})"[\s\S]{0,800}?"role"\s*:\s*"(?P<role>user|assistant|system)"',
@@ -6264,8 +6265,8 @@ def extract_json_role_content_fragments(text: str) -> List[Dict[str, object]]:
     return fragments
 
 
-def extract_named_prompt_answer_fragments(text: str) -> List[Dict[str, object]]:
-    fragments: List[Dict[str, object]] = []
+def extract_named_prompt_answer_fragments(text: str) -> list[dict[str, object]]:
+    fragments: list[dict[str, object]] = []
     key_roles = {
         "prompt": ("user", "question"),
         "question": ("user", "question"),
@@ -6330,8 +6331,8 @@ def storage_area(profile_dir: Path, source: Path) -> str:
     return parts[0] if parts else source.parent.name
 
 
-def deduplicate_conversation_rows(rows: Sequence[Mapping[str, object]]) -> List[Dict[str, object]]:
-    deduped: List[Dict[str, object]] = []
+def deduplicate_conversation_rows(rows: Sequence[Mapping[str, object]]) -> list[dict[str, object]]:
+    deduped: list[dict[str, object]] = []
     seen: set[tuple[str, str, str]] = set()
     for row in rows:
         key = (str(row.get("ai_service") or ""), str(row.get("direction") or ""), str(row.get("text") or "")[:240])
@@ -6342,8 +6343,8 @@ def deduplicate_conversation_rows(rows: Sequence[Mapping[str, object]]) -> List[
     return deduped
 
 
-def summarize_internet_usage(history_rows: Sequence[Mapping[str, object]]) -> List[Dict[str, object]]:
-    usage_rows: List[Dict[str, object]] = []
+def summarize_internet_usage(history_rows: Sequence[Mapping[str, object]]) -> list[dict[str, object]]:
+    usage_rows: list[dict[str, object]] = []
     for index, row in enumerate(history_rows[:MAX_USAGE_ROWS]):
         url = str(row.get("url") or "")
         parsed = safe_parse_url(url)
@@ -6367,8 +6368,8 @@ def summarize_internet_usage(history_rows: Sequence[Mapping[str, object]]) -> Li
     return usage_rows
 
 
-def extract_ai_usage(history_rows: Sequence[Mapping[str, object]]) -> List[Dict[str, object]]:
-    ai_rows: List[Dict[str, object]] = []
+def extract_ai_usage(history_rows: Sequence[Mapping[str, object]]) -> list[dict[str, object]]:
+    ai_rows: list[dict[str, object]] = []
     for index, row in enumerate(history_rows[:MAX_USAGE_ROWS]):
         url = str(row.get("url") or "")
         title = str(row.get("title") or "")
@@ -6473,8 +6474,8 @@ def host_matches(host: str, domain: str) -> bool:
     return host == domain or host.endswith(f".{domain}")
 
 
-def count_field(rows: Sequence[Mapping[str, object]], key: str, *, limit: int = 10) -> List[Dict[str, object]]:
-    counts: Dict[str, int] = {}
+def count_field(rows: Sequence[Mapping[str, object]], key: str, *, limit: int = 10) -> list[dict[str, object]]:
+    counts: dict[str, int] = {}
     for row in rows:
         value = str(row.get(key) or "")
         if value:
@@ -6494,7 +6495,7 @@ def file_hashes(path: Path) -> dict[str, str]:
     return {name: digest.hexdigest() for name, digest in digests.items()}
 
 
-def extract_chromium_history_and_downloads(history_db: Path) -> Tuple[List[Dict[str, object]], List[Dict[str, object]]]:
+def extract_chromium_history_and_downloads(history_db: Path) -> tuple[list[dict[str, object]], list[dict[str, object]]]:
     try:
         with open_sqlite_snapshot(history_db) as connection:
             if not sqlite_table_exists(connection, "urls"):
@@ -6549,7 +6550,7 @@ def extract_chromium_history_and_downloads(history_db: Path) -> Tuple[List[Dict[
                 )
             ]
 
-            download_rows: List[Dict[str, object]] = []
+            download_rows: list[dict[str, object]] = []
             if sqlite_table_exists(connection, "downloads"):
                 download_rows = extract_chromium_downloads(connection)
             return history_rows, download_rows
@@ -6557,12 +6558,12 @@ def extract_chromium_history_and_downloads(history_db: Path) -> Tuple[List[Dict[
         return [], []
 
 
-def extract_chromium_downloads(connection: sqlite3.Connection) -> List[Dict[str, object]]:
+def extract_chromium_downloads(connection: sqlite3.Connection) -> list[dict[str, object]]:
     columns = sqlite_table_columns(connection, "downloads")
     if "id" not in columns:
         return []
 
-    chain_urls: Dict[int, str] = {}
+    chain_urls: dict[int, str] = {}
     if sqlite_table_exists(connection, "downloads_url_chains"):
         for row in connection.execute(
             """
@@ -6587,7 +6588,7 @@ def extract_chromium_downloads(connection: sqlite3.Connection) -> List[Dict[str,
     order_column = "start_time" if "start_time" in columns else "id"
     query = f"SELECT {', '.join(select_columns)} FROM downloads ORDER BY {order_column} DESC, id ASC"
 
-    rows: List[Dict[str, object]] = []
+    rows: list[dict[str, object]] = []
     for row in connection.execute(query):
         download_id = int(row["id"])
         target_path = row["target_path"] or row["current_path"] or ""
@@ -6607,7 +6608,7 @@ def extract_chromium_downloads(connection: sqlite3.Connection) -> List[Dict[str,
     return rows
 
 
-def extract_firefox_history(places_db: Path) -> List[Dict[str, object]]:
+def extract_firefox_history(places_db: Path) -> list[dict[str, object]]:
     try:
         with open_sqlite_snapshot(places_db) as connection:
             if not sqlite_table_exists(connection, "moz_places"):

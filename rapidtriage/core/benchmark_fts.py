@@ -6,13 +6,20 @@ import platform
 import sqlite3
 import statistics
 import time
+from collections.abc import Sequence
 from pathlib import Path
-from typing import Sequence
 
-from .benchmark import BENCHMARK_SCALE_TARGETS, DEFAULT_BENCHMARK_KEYWORD, percentile, scale_label
+from .benchmark import (
+    BENCHMARK_SCALE_TARGETS,
+    DEFAULT_BENCHMARK_KEYWORD,
+    percentile,
+    scale_label,
+)
 from .docs import write_result
-from .search_backend import build_synthetic_benchmark_generator_manifest, stable_backend_sha256
-
+from .search_backend import (
+    build_synthetic_benchmark_generator_manifest,
+    stable_backend_sha256,
+)
 
 SQLITE_FTS_BENCHMARK_VERSION = "sqlite-fts-synthetic-benchmark-v1"
 SQLITE_FTS_BENCHMARK_SCHEMA_VERSION = "sqlite-fts-benchmark-schema-v1"

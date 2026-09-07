@@ -8,8 +8,11 @@ from json import JSONDecodeError
 from pathlib import Path
 from typing import Final, Protocol, runtime_checkable
 
-from rapidtriage.validation.known_answer_types import JsonObject, JsonValue, ManifestValidationError
-
+from rapidtriage.validation.known_answer_types import (
+    JsonObject,
+    JsonValue,
+    ManifestValidationError,
+)
 
 DEFAULT_SCHEMA_PATH: Final[Path] = (
     Path(__file__).resolve().parents[2]

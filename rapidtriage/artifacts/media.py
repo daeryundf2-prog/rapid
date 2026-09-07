@@ -1,13 +1,13 @@
 from __future__ import annotations
 
 import base64
-import io
 import hashlib
+import io
 import json
 import math
 import re
+from collections.abc import Iterable, Mapping, Sequence
 from pathlib import Path
-from typing import Iterable, Mapping, Sequence
 
 try:
     import cv2  # type: ignore[import-not-found]
@@ -19,8 +19,8 @@ try:
 except ModuleNotFoundError:
     Image = None  # type: ignore[assignment]
 
-from ..core.models import ArtifactRecord
 from ..core.forensic_accuracy import build_accuracy_gate
+from ..core.models import ArtifactRecord
 from ..core.submission import compute_hashes
 
 PARSER_VERSION = "media-image-v4"
@@ -146,10 +146,10 @@ class PillowMatrix:
             rows.append(list(pixels[start : start + width]))
         return rows
 
-    def grayscale(self) -> "PillowMatrix":
+    def grayscale(self) -> PillowMatrix:
         return PillowMatrix(self.image.convert("L"))
 
-    def resized(self, size: tuple[int, int]) -> "PillowMatrix":
+    def resized(self, size: tuple[int, int]) -> PillowMatrix:
         return PillowMatrix(self.image.resize(size))
 
     def png_bytes(self) -> bytes:
@@ -163,7 +163,7 @@ class PillowCv2Compat:
     COLOR_BGR2GRAY = 6
     INTER_AREA = 3
 
-    def imread(self, path: str, flags: int = -1):  # noqa: ARG002
+    def imread(self, path: str, flags: int = -1):
         if Image is None:
             return None
         try:
@@ -174,7 +174,7 @@ class PillowCv2Compat:
         except OSError:
             return None
 
-    def cvtColor(self, image, code: int):  # noqa: N802
+    def cvtColor(self, image, code: int):
         if isinstance(image, PillowMatrix) and code == self.COLOR_BGR2GRAY:
             return image.grayscale()
         return image

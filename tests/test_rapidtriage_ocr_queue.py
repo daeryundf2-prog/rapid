@@ -8,7 +8,11 @@ import unittest
 from pathlib import Path
 
 from rapidtriage.cli import build_parser, main
-from rapidtriage.core.ocr_queue import build_ocr_queue, build_ocr_queue_trusted_diff, ocr_queue_core_accuracy_gates
+from rapidtriage.core.ocr_queue import (
+    build_ocr_queue,
+    build_ocr_queue_trusted_diff,
+    ocr_queue_core_accuracy_gates,
+)
 
 
 class RapidTriageOcrQueueTests(unittest.TestCase):

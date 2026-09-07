@@ -3,8 +3,8 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+from collections.abc import Mapping
 from pathlib import Path
-from typing import Mapping
 
 from .forensic_accuracy import build_accuracy_gate
 

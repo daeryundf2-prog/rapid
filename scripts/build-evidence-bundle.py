@@ -29,12 +29,15 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import cast
 
-
 REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from rapidtriage.validation.evidence_bundle import build_bundle_manifest, format_text, write_summary
+from rapidtriage.validation.evidence_bundle import (
+    build_bundle_manifest,
+    format_text,
+    write_summary,
+)
 
 
 @dataclass(frozen=True, slots=True)

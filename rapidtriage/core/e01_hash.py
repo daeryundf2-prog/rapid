@@ -3,12 +3,11 @@ from __future__ import annotations
 import datetime as dt
 import hashlib
 import time
+from collections.abc import Iterable
 from pathlib import Path
-from typing import Iterable
 
 from .docs import write_result
 from .e01 import build_e01_segment_set_profile, is_e01_path, stable_manifest_sha256
-
 
 E01_STREAMING_HASH_VERSION = "e01-streaming-full-hash-v1"
 E01_STREAMING_HASH_CHECKPOINT_VERSION = "e01-streaming-hash-checkpoint-v1"

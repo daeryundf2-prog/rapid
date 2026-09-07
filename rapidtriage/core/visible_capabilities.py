@@ -1,8 +1,8 @@
 from __future__ import annotations
 
 from collections import Counter
-from typing import Any, Mapping, Sequence
-
+from collections.abc import Mapping, Sequence
+from typing import Any
 
 PROFILE_VERSION = "visible-forensic-capabilities-v1"
 

@@ -5,9 +5,8 @@ import hashlib
 import json
 import re
 import shutil
+from collections.abc import Mapping
 from pathlib import Path
-from typing import Mapping
-
 
 RUN_SUMMARY_NAME = "rapidtriage-run-summary.json"
 

@@ -20,21 +20,20 @@ import shutil
 import sqlite3
 import sys
 import tempfile
+from collections.abc import Mapping, Sequence
 from pathlib import Path
-from typing import Mapping, Sequence
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from rapidtriage.core.kakaotalk import (  # noqa: E402
+from rapidtriage.core.kakaotalk import (
     KakaoTalkDecryptError,
     build_kakaotalk_media_inventory,
     extract_zip_archive_safely,
     run_kakaotalk_decrypt,
     run_kakaotalk_sqlcipher_probe,
 )
-
 
 FORBIDDEN_SECRET_KEYS = {
     "key_hex",

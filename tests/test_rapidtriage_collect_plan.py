@@ -6,7 +6,11 @@ import unittest
 from pathlib import Path
 
 from rapidtriage.cli import main
-from rapidtriage.core.collect_plan import build_collect_plan, run_collect_export, supported_collect_profiles
+from rapidtriage.core.collect_plan import (
+    build_collect_plan,
+    run_collect_export,
+    supported_collect_profiles,
+)
 from tests.test_rapidtriage_macos_artifacts import build_macos_fixture
 from tests.windows_artifact_fixtures import build_windows_artifact_fixture
 

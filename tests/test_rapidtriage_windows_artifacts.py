@@ -5,16 +5,21 @@ import json
 import sqlite3
 import tempfile
 import unittest
-from unittest import mock
 from datetime import datetime, timezone
 from pathlib import Path, PureWindowsPath
+from unittest import mock
 
-from rapidtriage.cli import main
-from rapidtriage.artifacts.windows.browser import build_browser_secret_trusted_diff, browser_core_accuracy_gates
+from rapidtriage.artifacts.windows.browser import (
+    browser_core_accuracy_gates,
+    build_browser_secret_trusted_diff,
+)
 from rapidtriage.artifacts.windows.eventlog import collect_native_evtx_events
-from rapidtriage.artifacts.windows.execution import build_execution_artifact_trusted_diff
+from rapidtriage.artifacts.windows.execution import (
+    build_execution_artifact_trusted_diff,
+)
 from rapidtriage.artifacts.windows.os_account import build_os_account_trusted_diff
 from rapidtriage.artifacts.windows.system import web_request_basename_sources
+from rapidtriage.cli import main
 from tests.windows_artifact_fixtures import (
     build_corrupt_evtx_record_candidate,
     build_evtx_with_checked_chunk,

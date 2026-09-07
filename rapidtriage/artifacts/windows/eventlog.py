@@ -11,9 +11,10 @@ import struct
 import xml.etree.ElementTree as ET
 import zlib
 from collections import Counter, defaultdict
+from collections.abc import Iterable, Mapping, Sequence
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Iterable, Mapping, NamedTuple, Sequence
+from typing import NamedTuple
 
 from ...core.forensic_accuracy import build_accuracy_gate
 from ...core.models import ArtifactRecord
@@ -1340,7 +1341,7 @@ class WindowsEventLogProvider:
         self.message_catalog_path = message_catalog_path
         self._message_catalog: dict[str, dict[str, dict[str, object]]] | None = None
 
-    def with_options(self, **options: object) -> "WindowsEventLogProvider":
+    def with_options(self, **options: object) -> WindowsEventLogProvider:
         catalog = options.get("message_catalog_path")
         return WindowsEventLogProvider(Path(str(catalog)).expanduser().resolve() if catalog else self.message_catalog_path)
 
@@ -3317,7 +3318,7 @@ def build_evtx_recovery_corpus_diff(
     elif missing_in_oracle or extra_in_oracle or mismatches:
         status = "diffs-present"
 
-    recognized_oracle = bool(re.search(r"(hand|labeled|oracle|evtxecmd|hayabusa|chainsaw|velociraptor)", oracle_name, re.I))
+    recognized_oracle = bool(re.search(r"(hand|labeled|oracle|evtxecmd|hayabusa|chainsaw|velociraptor)", oracle_name, re.IGNORECASE))
     return {
         "profile_version": "evtx-recovery-corpus-diff-v1",
         "oracle": oracle_name,
@@ -3656,7 +3657,7 @@ def native_evtx_chunk_record(
 
 
 def native_evtx_file_header(blob: bytes | mmap.mmap) -> dict[str, object]:
-    header_size = read_u32(blob, 32) or (EVTX_FILE_HEADER_SIZE if len(blob) >= EVTX_FILE_HEADER_SIZE else len(blob))
+    header_size = read_u32(blob, 32) or (min(EVTX_FILE_HEADER_SIZE, len(blob)))
     checksum = read_u32(blob, 124)
     return {
         "signature_valid": blob_startswith(blob, EVTX_FILE_SIGNATURE),
@@ -4773,11 +4774,13 @@ def read_evtx_chunk_string(chunk_data: bytes, name_offset: int) -> tuple[str, in
     return decode_utf16le_string(chunk_data[start:end]), 8 + char_count * 2 + 2
 
 
-def read_evtx_chunk_name_or_inline(chunk_data: bytes, node_offset: int, name_offset: int) -> tuple[str, int]:
+def read_evtx_chunk_name_or_inline(chunk_data: bytes, name_offset: int) -> tuple[str, int]:
     """Resolve a template name either from the chunk heap or inline.
 
     python-evtx treats a forward-pointing offset as an inline NameStringNode
     that follows the token; backward offsets index the chunk string heap.
+    Callers compute inline-vs-heap by comparing name_offset with their own
+    token offset.
     """
     return read_evtx_chunk_string(chunk_data, name_offset)
 
@@ -4811,7 +4814,7 @@ def walk_evtx_template_definition(
         if kind == 0x01:
             flags = token >> 4
             name_offset = read_u32(chunk_data, offset + 7)
-            name, name_node_length = read_evtx_chunk_name_or_inline(chunk_data, offset, name_offset)
+            name, name_node_length = read_evtx_chunk_name_or_inline(chunk_data, name_offset)
             if not name:
                 warnings.append(f"definition-open-start-element-unnamed:{offset}")
                 break
@@ -4821,7 +4824,7 @@ def walk_evtx_template_definition(
             continue
         if kind == 0x06:
             name_offset = read_u32(chunk_data, offset + 1)
-            name, name_node_length = read_evtx_chunk_name_or_inline(chunk_data, offset, name_offset)
+            name, name_node_length = read_evtx_chunk_name_or_inline(chunk_data, name_offset)
             if not name:
                 warnings.append(f"definition-attribute-unnamed:{offset}")
                 break

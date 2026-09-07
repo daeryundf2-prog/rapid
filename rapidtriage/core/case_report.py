@@ -6,10 +6,9 @@ import html
 import json
 import re
 import zipfile
+from collections.abc import Mapping
 from pathlib import Path
-from typing import Mapping
 from xml.sax.saxutils import escape as xml_escape
-
 
 CASE_REPORT_EXPORTS = {
     "md": "rapidtriage-case-report.md",

@@ -7,9 +7,9 @@ import re
 import zipfile
 import zlib
 from collections import Counter
+from collections.abc import Iterable, Mapping, MutableMapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, Iterable, List, Mapping, MutableMapping, Sequence
 from urllib.parse import urlparse
 from xml.etree import ElementTree as ET
 
@@ -82,9 +82,9 @@ MAX_YARA_STRING_LITERAL_LENGTH = 1024
 class _RuleEvaluator:
     def __init__(self, rule_set: RuleSet) -> None:
         self.rule_set = rule_set
-        self._hash_cache: Dict[str, str | None] = {}
+        self._hash_cache: dict[str, str | None] = {}
 
-    def annotate_items(self, items: Sequence[MutableMapping[str, object]], contexts: Sequence[RecordContext]) -> Dict[str, object]:
+    def annotate_items(self, items: Sequence[MutableMapping[str, object]], contexts: Sequence[RecordContext]) -> dict[str, object]:
         for item, context in zip(items, contexts):
             matched_rules, ioc_hits = self.evaluate_context(context)
             if matched_rules:
@@ -93,9 +93,9 @@ class _RuleEvaluator:
                 item["ioc_hits"] = ioc_hits
         return summarize_annotated_items(items)
 
-    def evaluate_context(self, context: RecordContext) -> tuple[list[str], list[Dict[str, object]]]:
+    def evaluate_context(self, context: RecordContext) -> tuple[list[str], list[dict[str, object]]]:
         matched_rules: list[str] = []
-        ioc_hits: list[Dict[str, object]] = []
+        ioc_hits: list[dict[str, object]] = []
         for rule in self.rule_set.rules:
             rule_hits = self._evaluate_rule(rule, context)
             if rule_hits is None:
@@ -104,7 +104,7 @@ class _RuleEvaluator:
             ioc_hits.extend(rule_hits)
         return matched_rules, dedupe_ioc_hits(ioc_hits)
 
-    def _evaluate_rule(self, rule: Rule, context: RecordContext) -> list[Dict[str, object]] | None:
+    def _evaluate_rule(self, rule: Rule, context: RecordContext) -> list[dict[str, object]] | None:
         path_lower = context.path.lower()
         extension = context.extension.lower()
         artifact_type = context.artifact_type.lower()
@@ -121,7 +121,7 @@ class _RuleEvaluator:
         if not matches_timestamp(context.timestamp, rule):
             return None
 
-        rule_hits: list[Dict[str, object]] = []
+        rule_hits: list[dict[str, object]] = []
 
         keyword_hits = match_substrings(rule.keywords, normalized_text)
         if rule.keywords and not keyword_hits:
@@ -452,7 +452,7 @@ def normalize_rule_root(data: object) -> list[Mapping[str, object]]:
 
 def normalize_rule(index: int, raw_rule: Mapping[str, object]) -> Rule:
     raw_conditions = raw_rule.get("conditions")
-    merged: Dict[str, object] = dict(raw_conditions) if isinstance(raw_conditions, dict) else {}
+    merged: dict[str, object] = dict(raw_conditions) if isinstance(raw_conditions, dict) else {}
     merged.update(raw_rule)
 
     rule_id = str(merged.get("id") or merged.get("name") or f"rule-{index}").strip()
@@ -537,7 +537,7 @@ def apply_annotation_summary(payload: MutableMapping[str, object], annotation_su
         summary["ioc_hit_count"] = int(annotation_summary["ioc_hit_count"])
 
 
-def summarize_annotated_items(items: Sequence[Mapping[str, object]]) -> Dict[str, object]:
+def summarize_annotated_items(items: Sequence[Mapping[str, object]]) -> dict[str, object]:
     matched_rules: set[str] = set()
     hit_counts: Counter[tuple[str, str, str]] = Counter()
     for item in items:
@@ -564,7 +564,7 @@ def summarize_annotated_items(items: Sequence[Mapping[str, object]]) -> Dict[str
     }
 
 
-def summarize_payload_annotations(*payloads: Mapping[str, object]) -> Dict[str, object]:
+def summarize_payload_annotations(*payloads: Mapping[str, object]) -> dict[str, object]:
     matched_rules: set[str] = set()
     hit_counts: Counter[tuple[str, str, str]] = Counter()
     for payload in payloads:
@@ -692,13 +692,13 @@ def build_context(
     )
 
 
-def build_ioc_hits(rule_id: str, hit_type: str, values: Sequence[str]) -> list[Dict[str, object]]:
+def build_ioc_hits(rule_id: str, hit_type: str, values: Sequence[str]) -> list[dict[str, object]]:
     return [{"rule_id": rule_id, "type": hit_type, "value": value} for value in values]
 
 
-def dedupe_ioc_hits(hits: Sequence[Mapping[str, object]]) -> list[Dict[str, object]]:
+def dedupe_ioc_hits(hits: Sequence[Mapping[str, object]]) -> list[dict[str, object]]:
     seen: set[tuple[str, str, str]] = set()
-    deduped: list[Dict[str, object]] = []
+    deduped: list[dict[str, object]] = []
     for hit in hits:
         key = (str(hit.get("rule_id", "")), str(hit.get("type", "")), str(hit.get("value", "")))
         if not all(key) or key in seen:
@@ -940,8 +940,8 @@ def _extract_pdf_text(path: Path) -> str:
         data = path.read_bytes()
     except (FileNotFoundError, PermissionError, OSError):
         return ""
-    snippets: List[str] = []
-    for stream in re.findall(rb"stream\r?\n(.*?)\r?\nendstream", data, re.S):
+    snippets: list[str] = []
+    for stream in re.findall(rb"stream\r?\n(.*?)\r?\nendstream", data, re.DOTALL):
         candidates = [stream]
         try:
             candidates.append(zlib.decompress(stream))
@@ -954,9 +954,9 @@ def _extract_pdf_text(path: Path) -> str:
     return " ".join(snippets)
 
 
-def _extract_pdf_literal_strings(blob: bytes) -> List[str]:
+def _extract_pdf_literal_strings(blob: bytes) -> list[str]:
     found = []
-    for raw in re.findall(rb"\((.*?)(?<!\\)\)", blob, re.S):
+    for raw in re.findall(rb"\((.*?)(?<!\\)\)", blob, re.DOTALL):
         text = (
             raw.replace(b"\\n", b"\n")
             .replace(b"\\r", b"\r")
@@ -1040,7 +1040,7 @@ def parse_yaml_list(lines: list[tuple[int, str]], index: int, indent: int) -> tu
             continue
         if looks_like_mapping_pair(rest):
             key, value_text = split_mapping_pair(rest)
-            item: Dict[str, object] = {}
+            item: dict[str, object] = {}
             if value_text:
                 item[key] = parse_yaml_scalar(value_text)
             else:

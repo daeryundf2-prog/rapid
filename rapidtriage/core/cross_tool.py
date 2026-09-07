@@ -5,12 +5,11 @@ import datetime as dt
 import hashlib
 import json
 import re
+from collections.abc import Iterable, Mapping, Sequence
 from pathlib import Path
-from typing import Iterable, Mapping, Sequence
 
 from .docs import write_result
 from .validation_qc_controls import build_validation_qc_contract
-
 
 MAX_ROWS_PER_TOOL = 100_000
 MAX_RECORD_FIELD_DIFF_ROWS = 5_000
@@ -206,8 +205,26 @@ EXECUTION_ARTIFACT_FIELD_ALIASES = {
 }
 USER_ACTIVITY_FIELD_ALIASES = {
     "artifact_family": ("artifact_family", "ArtifactFamily", "source_family", "SourceFamily"),
-    "app_id": ("app_id", "AppId", "AppID", "ApplicationID", "application_id"),
-    "entry_id": ("entry_id", "EntryId", "EntryID", "DestListEntryNumber", "destlist_entry_number", "EntryNumber", "MRU"),
+    "app_id": (
+        "app_id",
+        "AppId",
+        "AppID",
+        "ApplicationID",
+        "application_id",
+        "application_id_hash",
+        "jumplist_app_id",
+    ),
+    "entry_id": (
+        "entry_id",
+        "EntryId",
+        "EntryID",
+        "DestListEntryNumber",
+        "destlist_entry_number",
+        "EntryNumber",
+        "MRU",
+        "destlist_entry_index_candidate",
+        "entry_id_candidate",
+    ),
     "target_path": (
         "target_path",
         "TargetPath",
@@ -218,6 +235,8 @@ USER_ACTIVITY_FIELD_ALIASES = {
         "file_path",
         "FilePath",
         "LocalPath",
+        "path_candidate",
+        "destlist_path_candidate",
     ),
     "file_name": ("file_name", "FileName", "filename", "Name", "name"),
     "timestamp": (
@@ -231,8 +250,16 @@ USER_ACTIVITY_FIELD_ALIASES = {
         "Accessed",
     ),
     "source_path": ("source_path", "SourcePath", "source_file", "SourceFile"),
-    "source_offset": ("source_offset", "SourceOffset", "Offset", "offset"),
-    "mru_order": ("mru_order", "MRUOrder", "mru", "Slot", "slot"),
+    "source_offset": (
+        "source_offset",
+        "SourceOffset",
+        "Offset",
+        "offset",
+        "entry_offset",
+        "destlist_entry_offset_candidate",
+    ),
+    "mru_order": ("mru_order", "MRUOrder", "mru", "Slot", "slot", "destlist_mru_candidate"),
+    "pin_status": ("pin_status", "PinStatus", "Pinned", "pinned", "pin_status_candidate"),
     "access_count": ("access_count", "AccessCount", "RunCount", "run_count", "OpenCount", "open_count"),
     "volume_name": ("volume_name", "VolumeName", "volume", "Volume"),
     "bag_path": ("bag_path", "BagPath", "bag_path", "shell_path", "ShellPath", "AbsolutePath"),
@@ -944,6 +971,102 @@ def rows_from_mapping(item: Mapping[str, object]) -> Iterable[dict[str, object]]
     yield from nested_email_rows(item, flattened)
     yield from nested_cloud_export_rows(item, flattened)
     yield from nested_cloud_api_rows(item, flattened)
+    yield from nested_jumplist_destlist_rows(item, flattened)
+
+
+def nested_jumplist_destlist_rows(
+    item: Mapping[str, object],
+    flattened_parent: Mapping[str, object],
+) -> Iterable[dict[str, object]]:
+    """Expand JumpList DestList entry candidates and destinations into rows.
+
+    RapidForensic's JumpList collector emits one container-level row per
+    .automaticDestinations-ms file; the per-entry evidence lives in nested
+    ``details.destinations`` and ``details.destlist_metadata.destlist_entry_candidates``.
+    JLECmd emits one row per DestList entry, so entry-level trusted diff
+    requires expanding those nested lists here and normalizing the parser's
+    candidate field names onto the user_activity aliases (app_id, entry_id,
+    target_path, timestamp, access_count) without touching the parser.
+    """
+    app_id = first_value(
+        flattened_parent,
+        (
+            "app_id",
+            "details.app_id",
+            "application_id_hash",
+            "details.application_id_hash",
+            "jumplist_app_id",
+            "details.jumplist_app_id",
+        ),
+    ) or ""
+    source_path = first_value(
+        flattened_parent,
+        ("source_path", "details.source_path", "path", "details.path"),
+    ) or ""
+    emitted_offsets: set[str] = set()
+    for candidate in first_nested_list(
+        item,
+        (
+            ("details", "destlist_metadata", "destlist_entry_candidates"),
+            ("destlist_metadata", "destlist_entry_candidates"),
+            ("details", "destlist_entry_candidates"),
+        ),
+    ):
+        if not isinstance(candidate, Mapping):
+            continue
+        row = flatten_mapping(candidate)
+        row.setdefault("artifact_type", "jumplist-destlist-entry")
+        if app_id:
+            row.setdefault("app_id", app_id)
+        if source_path:
+            row.setdefault("source_path", source_path)
+        entry_index = (
+            row.get("index")
+            or row.get("destlist_entry_index_candidate")
+            or row.get("entry_id_candidate")
+        )
+        if entry_index not in (None, ""):
+            row.setdefault("entry_id", entry_index)
+        path_value = first_value(row, ("path_candidate", "path", "destlist_path_candidate"))
+        if path_value:
+            row.setdefault("target_path", path_value)
+        offset_key = str(row.get("entry_offset") or "")
+        if offset_key:
+            if offset_key in emitted_offsets:
+                continue
+            emitted_offsets.add(offset_key)
+        for parent_key in ("source_path", "source_sha256", "parser", "artifact_type"):
+            if parent_key in flattened_parent and parent_key not in row:
+                row[f"parent_{parent_key}"] = flattened_parent[parent_key]
+        yield row
+    for destination in first_nested_list(
+        item,
+        (
+            ("details", "destinations"),
+            ("destinations",),
+        ),
+    ):
+        if not isinstance(destination, Mapping):
+            continue
+        row = flatten_mapping(destination)
+        row.setdefault("artifact_type", "jumplist-destlist-entry")
+        if app_id:
+            row.setdefault("app_id", app_id)
+        if source_path:
+            row.setdefault("source_path", source_path)
+        if row.get("destlist_entry_index_candidate") not in (None, ""):
+            row.setdefault("entry_id", row.get("destlist_entry_index_candidate"))
+        elif row.get("destlist_entry_offset_candidate") not in (None, ""):
+            row.setdefault("entry_id", row.get("destlist_entry_offset_candidate"))
+        offset_key = str(row.get("destlist_entry_offset_candidate") or row.get("entry_offset") or "")
+        if offset_key:
+            if offset_key in emitted_offsets:
+                continue
+            emitted_offsets.add(offset_key)
+        for parent_key in ("source_path", "source_sha256", "parser", "artifact_type"):
+            if parent_key in flattened_parent and parent_key not in row:
+                row[f"parent_{parent_key}"] = flattened_parent[parent_key]
+        yield row
 
 
 def nested_browser_rows(
@@ -4148,7 +4271,7 @@ def file_integrity(path: Path) -> dict[str, object]:
             if not entry.is_file():
                 continue
             entry_hash = hashlib.sha256(entry.read_bytes()).hexdigest()
-            hasher.update(f"{entry.relative_to(resolved).as_posix()}|{entry.stat().st_size}|{entry_hash}\n".encode("utf-8"))
+            hasher.update(f"{entry.relative_to(resolved).as_posix()}|{entry.stat().st_size}|{entry_hash}\n".encode())
             size += entry.stat().st_size
         return {
             "path": str(resolved),

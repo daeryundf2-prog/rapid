@@ -7,17 +7,20 @@ import platform
 import shutil
 import subprocess
 import sys
+from collections.abc import Mapping, Sequence
 from pathlib import Path
-from typing import Mapping, Sequence
 
 from .audit import compute_sha256
 from .commercial_readiness import build_commercial_readiness_report
 from .docs import write_result
 from .enterprise import build_enterprise_policy
-from .forensic_accuracy import build_accuracy_gate, build_core_forensics_accuracy_profiles, build_core_forensics_known_answer_template
+from .forensic_accuracy import (
+    build_accuracy_gate,
+    build_core_forensics_accuracy_profiles,
+    build_core_forensics_known_answer_template,
+)
 from .validation_diff_runners import build_validation_diff_runner_matrix
 from .validation_final_qc import build_final_qc_execution_report
-
 
 VALIDATION_JSON_NAME = "rapidtriage-validation-package.json"
 VALIDATION_MARKDOWN_NAME = "rapidtriage-validation-report.md"

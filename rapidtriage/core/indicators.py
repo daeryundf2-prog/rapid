@@ -1,14 +1,14 @@
 from __future__ import annotations
 
-import datetime as dt
 import csv
+import datetime as dt
 import hashlib
 import ipaddress
 import json
 import re
 from collections import Counter
+from collections.abc import Iterable, Mapping, MutableMapping, Sequence
 from pathlib import Path
-from typing import Iterable, Mapping, MutableMapping, Sequence
 from urllib.parse import urlparse
 
 from .forensic_accuracy import build_accuracy_gate
@@ -1474,11 +1474,7 @@ def match_indicator_rules(indicator: Mapping[str, object], rule_set: RuleSet | N
     value = str(indicator.get("value", "")).lower()
     matched: list[str] = []
     for rule in rule_set.rules:
-        if indicator_type == "domain" and any(value == item or value.endswith(f".{item}") for item in rule.domains):
-            matched.append(rule.id)
-        elif indicator_type == "url" and any(item in value for item in rule.urls):
-            matched.append(rule.id)
-        elif indicator_type in {"md5", "sha1", "sha256"} and indicator_type == "sha256" and value in rule.hashes:
+        if indicator_type == "domain" and any(value == item or value.endswith(f".{item}") for item in rule.domains) or indicator_type == "url" and any(item in value for item in rule.urls) or indicator_type in {"md5", "sha1", "sha256"} and indicator_type == "sha256" and value in rule.hashes:
             matched.append(rule.id)
     return sorted(set(matched))
 

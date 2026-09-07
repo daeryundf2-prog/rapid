@@ -8,14 +8,18 @@ import os
 import re
 import shutil
 import subprocess
+from collections.abc import Callable
 from email import policy
 from pathlib import Path
-from typing import Callable
 
 from ..core.docs import write_result
 from ..core.submission import compute_hashes
-from .email import EMAIL_FORMAT_PROFILES, EMAIL_REQUIRED_TOOLS_BY_FORMAT, EMAIL_TRUSTED_DIFF_TOOLS, attachment_summaries
-
+from .email import (
+    EMAIL_FORMAT_PROFILES,
+    EMAIL_REQUIRED_TOOLS_BY_FORMAT,
+    EMAIL_TRUSTED_DIFF_TOOLS,
+    attachment_summaries,
+)
 
 EMAIL_EXTERNAL_PARSE_VERSION = "email-external-parser-wrapper-v2"
 EMAIL_EXTERNAL_EVIDENCE_MANIFEST_VERSION = "email-external-parser-evidence-manifest-v1"

@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from typing import Dict, List
-
 from .android import AndroidApkProvider
 from .cloud import CloudExportProvider
 from .email import EmailArtifactsProvider
@@ -27,7 +25,7 @@ from .windows.shellbags import WindowsShellbagsProvider
 from .windows.system import WindowsSystemArtifactsProvider
 
 
-def all_providers() -> List[object]:
+def all_providers() -> list[object]:
     return [
         GenericDocumentArtifactProvider(),
         AndroidApkProvider(),
@@ -55,8 +53,8 @@ def all_providers() -> List[object]:
     ]
 
 
-def artifact_collectors() -> Dict[str, object]:
-    collectors: Dict[str, object] = {}
+def artifact_collectors() -> dict[str, object]:
+    collectors: dict[str, object] = {}
     for provider in all_providers():
         collector_kind = getattr(provider, "collector_kind", None)
         if collector_kind:

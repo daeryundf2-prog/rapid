@@ -6,11 +6,15 @@ import html
 import json
 import shutil
 import zipfile
+from collections.abc import Mapping, Sequence
 from pathlib import Path
-from typing import Mapping, Sequence
 
 from .case import load_case_payload
-from .case_report import build_case_report_markdown, report_export_csp, write_case_report_exports
+from .case_report import (
+    build_case_report_markdown,
+    report_export_csp,
+    write_case_report_exports,
+)
 from .docs import write_result
 from .forensic_accuracy import build_accuracy_gate
 from .submission import build_submission_manifest, compute_hashes

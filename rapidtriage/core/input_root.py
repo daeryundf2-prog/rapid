@@ -3,7 +3,7 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional, Union
+from typing import Union
 
 SUPPORTED_INPUT_ROOT_KINDS = ("folder", "mounted-image", "e01-derived", "disk-image-derived", "archive-image-derived", "live")
 EWF_IMAGE_SUFFIXES = (".e01", ".ex01")
@@ -48,7 +48,7 @@ class InputRootError(ValueError):
     """Raised when an input root cannot be resolved."""
 
 
-def resolve_input_root(root: Union[InputRoot, PathLike], *, kind: Optional[str] = None) -> InputRoot:
+def resolve_input_root(root: InputRoot | PathLike, *, kind: str | None = None) -> InputRoot:
     if isinstance(root, InputRoot):
         if kind is not None and kind != root.kind:
             return InputRoot(source_path=root.source_path, root_path=root.root_path, kind=normalize_input_root_kind(kind))
@@ -59,7 +59,7 @@ def resolve_input_root(root: Union[InputRoot, PathLike], *, kind: Optional[str] 
     return InputRoot(source_path=str(root), root_path=root_path, kind=normalized_kind)
 
 
-def derive_child_input_root(parent: Union[InputRoot, PathLike], root_path: PathLike) -> InputRoot:
+def derive_child_input_root(parent: InputRoot | PathLike, root_path: PathLike) -> InputRoot:
     parent_root = resolve_input_root(parent)
     path = Path(root_path).expanduser().resolve()
     return InputRoot(source_path=parent_root.source_path, root_path=path, kind=parent_root.kind)

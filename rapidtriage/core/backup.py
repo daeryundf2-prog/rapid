@@ -1,13 +1,13 @@
 from __future__ import annotations
 
-import datetime as dt
 import contextlib
+import datetime as dt
 import hashlib
 import json
 import shutil
 import sqlite3
+from collections.abc import Mapping
 from pathlib import Path
-from typing import Mapping
 
 from .case_db import SCHEMA_VERSION
 from .forensic_accuracy import build_accuracy_gate

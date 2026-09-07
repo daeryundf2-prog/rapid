@@ -1,8 +1,8 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Iterable
 from pathlib import Path
-from typing import Iterable
 
 from ...core.audit import compute_sha256
 from ...core.models import ArtifactRecord

@@ -1,8 +1,80 @@
 # RapidForensic Project Status
 
-Date: 2026-08-30
+Date: 2026-09-08
 Branch: `codex/rapidforensic-complete`
 Tag: `v0.2.0` (restart baseline)
+
+## Closable-Gate Closure Pass (2026-09-08, second pass)
+
+All in-repo-closable gaps from the roadmap ledger were closed in this pass.
+Final state: **792 tests OK** (skipped=1), **ruff 0.16.6 green repo-wide**
+(pin upgraded from 0.8.* with documented behavior-rule ignore contracts),
+vulture clean, compileall clean, Tier 0 known-answer/trusted-diff/evidence-
+bundle PASS, web smoke 8/8 PASS.
+
+Closed gates:
+
+1. **ruff 0.16 upgrade (was the largest debt item)**: 1,203 auto-fixes
+   across 180 files; 4 unused typing imports removed; 15 scripts chmod +x;
+   BLE001/DTZ/SIM/C4/FLY-style judgment rules converted from silent pin to
+   explicit documented ignores in `pyproject.toml`; `ruff==0.16.*` in the
+   test extra. Zero test regressions after the sweep.
+2. **JumpList DestList entry depth**: parser now emits
+   `entry_id_candidate` (u32@4) and `pin_status_candidate` (u32@8) with
+   `destlist_entry_semantics_warning`; cross-tool `pin_status` aliases
+   added. Candidate-grade only until T1 JLECmd corpus diff.
+3. **Large-case FTS evidence**: 100k/1M/10M benchmarks executed locally
+   (p95 7.2ms / 0.13s / 1.99s); `large-case-readiness` scale checks now
+   PASS; remaining blockers are 1TB-10TB hardware, browser e2e, cursor
+   regression evidence, independent signoff (all external).
+4. **case-review target validation**: `mark_review` rejects unknown
+   target ids with a `case-search` remediation hint; orphan review marks
+   are no longer possible; new unknown-target unit test.
+5. **First-pass fixes remain in effect**: e01-smoke folder-input
+   `blocked` classification, vulture-clean eventlog signature, JumpList
+   entry-level cross-tool diff expansion.
+
+Still open by scope rule (AGENTS.md): columnar/Parquet adoption inside the
+run pipeline and e01-smoke resume-stage UI visualization change core
+forensic/DB/UI surfaces and need an explicitly authorized engineering pass.
+All other remaining work is external evidence (T1 corpus, scale hardware,
+four-track review, signing/notarization, staffed support).
+
+## Internal Execution Pass (2026-09-08, macOS arm64, Python 3.12)
+
+Full sequential roadmap execution on a clean venv. All in-repo gates pass:
+790 tests OK (skipped=1), ruff 0.8 PASS, vulture PASS (after removing the
+unused `node_offset` parameter in `read_evtx_chunk_name_or_inline`),
+compileall PASS, pip-audit clean, Tier 0 known-answer QC/trusted-diff/
+normalizer/evidence-bundle PASS, web smoke 8/8, taxonomy audit 51/51
+strict, benchmark thresholds pass at 1k scale, FTS p50 0.97ms@5k, internal
+roadmap score 100/100, commercial-readiness 90/100
+(`commercial_claim_allowed=false` preserved). Rust worker built and the
+worker-parse ArtifactRecordV1 pipeline verified end-to-end.
+
+Code changes in this pass (validation-plumbing scope only):
+
+1. `rapidtriage/core/e01_smoke.py`: non-file e01-smoke sources now exit as
+   `blocked` with `unsupported-image` failure guidance (previously an
+   IsADirectoryError traceback).
+2. `rapidtriage/artifacts/windows/eventlog.py`: unused parameter removed;
+   vulture min-confidence-80 exits clean repo-wide.
+3. `rapidtriage/core/large_case_readiness.py`: unsupported benchmark input
+   error now names the expected sqlite-fts-benchmark profile.
+4. `rapidtriage/core/cross_tool.py`: JumpList (#14) entry-level trusted
+   diff — nested `details.destinations` and destlist entry candidates now
+   expand into `jumplist-destlist-entry` rows with parser field names
+   normalized onto user_activity aliases; JLECmd per-entry exports can now
+   be joined without parser changes. New coverage test in
+   `tests/test_rapidtriage_ops.py`
+   (`test_cross_tool_validate_expands_nested_jumplist_container_to_entry_rows`).
+5. `docs/rapidforensic-functional-priority-roadmap.md`: Remaining Work
+   Ledger added (internal debt vs external evidence).
+
+Remaining work is tracked in the roadmap ledger: ruff 0.16 mechanical
+cleanup pass, JumpList MRU/pin/access-count parser depth, 100k search
+latency adoption of the columnar path, and all external evidence items
+(T1 corpus, scale runs, four-track review, signing/notarization).
 
 ## CI Fully Green (2026-08-30)
 

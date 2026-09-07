@@ -8,7 +8,6 @@ from pathlib import Path
 from rapidtriage.cli import build_parser, main
 from rapidtriage.core.artifact_taxonomy import TAXONOMY_TARGETS, build_taxonomy_audit
 
-
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
 

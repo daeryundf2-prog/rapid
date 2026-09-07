@@ -2,13 +2,12 @@ from __future__ import annotations
 
 import datetime as dt
 import hashlib
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Iterable, Sequence
 
 from .docs import write_result
 from .input_root import InputRoot, resolve_input_root
-
 
 DEFAULT_MAX_SCAN_BYTES = 256 * 1024 * 1024
 DEFAULT_MAX_CARVE_BYTES = 50 * 1024 * 1024

@@ -3,7 +3,11 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 
-from rapidtriage.validation.known_answer_types import JsonObject, JsonValue, ManifestValidationError
+from rapidtriage.validation.known_answer_types import (
+    JsonObject,
+    JsonValue,
+    ManifestValidationError,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -226,7 +230,7 @@ def _string_errors(value: str, schema: JsonObject, path: str) -> list[ManifestVa
     return errors
 
 
-def _number_errors(value: int | float, schema: JsonObject, path: str) -> list[ManifestValidationError]:
+def _number_errors(value: float, schema: JsonObject, path: str) -> list[ManifestValidationError]:
     errors: list[ManifestValidationError] = []
     minimum = _number_value(schema.get("minimum"))
     if minimum is not None and value < minimum:

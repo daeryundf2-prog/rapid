@@ -7,14 +7,18 @@ import re
 import shlex
 import sqlite3
 import xml.etree.ElementTree as ET
+from collections.abc import Iterable, Mapping, Sequence
 from pathlib import Path
-from typing import Iterable, Mapping, Sequence
 from urllib.parse import unquote_plus
 
 from ...core.audit import compute_sha256
 from ...core.forensic_accuracy import build_accuracy_gate
 from ...core.models import ArtifactRecord
-from .common import build_forensic_review, isoformat_from_timestamp, open_sqlite_snapshot
+from .common import (
+    build_forensic_review,
+    isoformat_from_timestamp,
+    open_sqlite_snapshot,
+)
 
 PARSER_VERSION = "windows-system-v8"
 TASKS_ROOT = ("Windows", "System32", "Tasks")

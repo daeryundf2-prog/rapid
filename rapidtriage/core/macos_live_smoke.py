@@ -6,8 +6,8 @@ import platform
 import shutil
 import sys
 from collections import Counter
+from collections.abc import Iterable, Mapping
 from pathlib import Path
-from typing import Iterable, Mapping
 
 from ..artifacts.macos import (
     USER_TCC_DB,
@@ -21,7 +21,6 @@ from .benchmark_fts import run_sqlite_fts_benchmark
 from .collect_plan import build_collect_plan
 from .docs import write_result
 from .large_case_readiness import build_large_case_readiness_report
-
 
 MACOS_LIVE_SMOKE_VERSION = "macos-live-smoke-v1"
 DEFAULT_MACOS_SMOKE_BENCHMARK_FILES = 150

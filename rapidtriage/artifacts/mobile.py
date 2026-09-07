@@ -1,15 +1,15 @@
 from __future__ import annotations
 
-import csv
 import contextlib
+import csv
 import datetime as dt
 import hashlib
 import json
 import plistlib
 import shlex
 import sqlite3
+from collections.abc import Iterable, Mapping, Sequence
 from pathlib import Path
-from typing import Iterable, Mapping, Sequence
 
 from ..core.forensic_accuracy import build_accuracy_gate
 from ..core.models import ArtifactRecord
@@ -977,13 +977,7 @@ def build_vendor_export_manifest_profile(
     export_settings = first_value(normalized_manifest, ("export_settings", "settings", "options", "export_options"))
     missing_required: list[str] = []
     for field in registry.get("required_export_metadata", ()):
-        if field == "vendor_tool" and not optional_text(first_value(normalized_manifest, ("vendor_tool", "tool", "product"))):
-            missing_required.append(field)
-        elif field == "vendor_tool_version" and not vendor_tool_version:
-            missing_required.append(field)
-        elif field == "export_settings" and not export_settings:
-            missing_required.append(field)
-        elif field == "original_acquisition_sha256" and not original_hash:
+        if field == "vendor_tool" and not optional_text(first_value(normalized_manifest, ("vendor_tool", "tool", "product"))) or field == "vendor_tool_version" and not vendor_tool_version or field == "export_settings" and not export_settings or field == "original_acquisition_sha256" and not original_hash:
             missing_required.append(field)
     source_hash_matches = bool(source_sha256 and manifest_source_sha256 and source_sha256.lower() == manifest_source_sha256.lower())
     profile.update(

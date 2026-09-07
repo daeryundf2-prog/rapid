@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
-from typing import Mapping, Sequence
+from collections.abc import Mapping, Sequence
 
 QC_SEARCH_BACKEND_ITEMS = {
     48: "Add a SearchBackend abstraction so the UI and CLI can target different indexing engines consistently.",

@@ -19,7 +19,10 @@ except ModuleNotFoundError as exc:
 
 from rapidtriage.cli import build_parser, main
 from rapidtriage.core import browser_stress
-from rapidtriage.core.browser_stress import build_browser_large_result_stress_plan, run_browser_large_result_stress
+from rapidtriage.core.browser_stress import (
+    build_browser_large_result_stress_plan,
+    run_browser_large_result_stress,
+)
 
 
 @unittest.skipUnless(HAS_FASTAPI, "fastapi is required for RapidTriage browser stress contract tests")

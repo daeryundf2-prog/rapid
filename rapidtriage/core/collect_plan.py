@@ -2,9 +2,9 @@ from __future__ import annotations
 
 import datetime as dt
 import shutil
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, Iterable, List, Mapping, Sequence
 
 from .audit import compute_sha256
 from .input_root import InputRoot, resolve_input_root
@@ -378,7 +378,7 @@ def supported_collect_profiles() -> tuple[str, ...]:
     return tuple(PROFILE_TARGETS.keys())
 
 
-def build_collect_plan(root: Path | InputRoot, *, profile: str = "full", input_kind: str | None = None) -> Dict[str, object]:
+def build_collect_plan(root: Path | InputRoot, *, profile: str = "full", input_kind: str | None = None) -> dict[str, object]:
     normalized_profile = profile.strip().lower()
     if normalized_profile not in PROFILE_TARGETS:
         supported = ", ".join(supported_collect_profiles())
@@ -413,7 +413,7 @@ def run_collect_export(
     max_file_count: int = DEFAULT_COLLECT_EXPORT_MAX_FILE_COUNT,
     max_total_bytes: int = DEFAULT_COLLECT_EXPORT_MAX_TOTAL_BYTES,
     overwrite: bool = False,
-) -> Dict[str, object]:
+) -> dict[str, object]:
     plan = build_collect_plan(root, profile=profile, input_kind=input_kind)
     root_path = Path(plan["root"])
     evidence_dir = output_dir / "evidence"
@@ -421,8 +421,8 @@ def run_collect_export(
     if copy_files:
         evidence_dir.mkdir(parents=True, exist_ok=True)
 
-    entries: list[Dict[str, object]] = []
-    skipped: list[Dict[str, object]] = []
+    entries: list[dict[str, object]] = []
+    skipped: list[dict[str, object]] = []
     copied_bytes = 0
     seen_sources: set[str] = set()
 
@@ -521,7 +521,7 @@ def run_collect_export(
     }
 
 
-def describe_target(root: Path, target: CollectTarget) -> Dict[str, object]:
+def describe_target(root: Path, target: CollectTarget) -> dict[str, object]:
     base = {
         "category": target.category,
         "label": target.label,
@@ -591,7 +591,7 @@ def skip_record(
     reason: str,
     source_path: Path | None = None,
     error: str | None = None,
-) -> Dict[str, object]:
+) -> dict[str, object]:
     record = {
         "category": target.get("category"),
         "artifact_kind": target.get("artifact_kind"),
@@ -604,8 +604,8 @@ def skip_record(
     return record
 
 
-def describe_path(path: Path, root: Path) -> Dict[str, object]:
-    record: Dict[str, object] = {
+def describe_path(path: Path, root: Path) -> dict[str, object]:
+    record: dict[str, object] = {
         "path": str(path),
         "relative_path": safe_relative(path, root),
         "exists": path.exists(),
@@ -643,11 +643,11 @@ def count_direct_children(path: Path) -> int:
         return 0
 
 
-def summarize_targets(targets: Sequence[Mapping[str, object]]) -> Dict[str, object]:
+def summarize_targets(targets: Sequence[Mapping[str, object]]) -> dict[str, object]:
     present = [target for target in targets if bool(target.get("exists"))]
     missing = [target for target in targets if not bool(target.get("exists"))]
-    category_counts: Dict[str, Dict[str, int]] = {}
-    artifact_counts: Dict[str, Dict[str, int]] = {}
+    category_counts: dict[str, dict[str, int]] = {}
+    artifact_counts: dict[str, dict[str, int]] = {}
     for target in targets:
         increment_summary(category_counts, str(target["category"]), bool(target.get("exists")))
         increment_summary(artifact_counts, str(target["artifact_kind"]), bool(target.get("exists")))
@@ -661,7 +661,7 @@ def summarize_targets(targets: Sequence[Mapping[str, object]]) -> Dict[str, obje
     }
 
 
-def increment_summary(summary: Dict[str, Dict[str, int]], key: str, exists: bool) -> None:
+def increment_summary(summary: dict[str, dict[str, int]], key: str, exists: bool) -> None:
     if key not in summary:
         summary[key] = {"target_count": 0, "present_count": 0, "missing_count": 0}
     summary[key]["target_count"] += 1
@@ -671,8 +671,8 @@ def increment_summary(summary: Dict[str, Dict[str, int]], key: str, exists: bool
         summary[key]["missing_count"] += 1
 
 
-def summarize_missing(targets: Iterable[Mapping[str, object]]) -> Dict[str, List[str]]:
-    missing: Dict[str, List[str]] = {}
+def summarize_missing(targets: Iterable[Mapping[str, object]]) -> dict[str, list[str]]:
+    missing: dict[str, list[str]] = {}
     for target in targets:
         category = str(target["category"])
         missing.setdefault(category, []).append(str(target["label"]))

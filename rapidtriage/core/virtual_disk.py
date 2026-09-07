@@ -4,11 +4,15 @@ import json
 import shlex
 import shutil
 import subprocess
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Callable, Optional, Sequence
 
-from .disk_image import DiskImageExtractionResult, extract_raw_image_to_directory, missing_raw_image_tools
+from .disk_image import (
+    DiskImageExtractionResult,
+    extract_raw_image_to_directory,
+    missing_raw_image_tools,
+)
 from .e01 import (
     collect_tool_preflight,
     command_record,
@@ -20,7 +24,6 @@ from .e01 import (
     image_validation_matrix,
     stable_manifest_sha256,
 )
-
 
 VIRTUAL_DISK_SUFFIXES = (".vhd", ".vhdx", ".vmdk", ".vdi", ".xva", ".qcow", ".qcow2")
 QEMU_CONVERTIBLE_SUFFIXES = (".vhd", ".vhdx", ".vmdk", ".vdi", ".qcow", ".qcow2")
@@ -49,7 +52,7 @@ VIRTUAL_DISK_REPORT_GRADE_BLOCKERS = [
     "large-virtual-disk-known-answer-corpus-required",
 ]
 CommandRunner = Callable[[Sequence[str]], subprocess.CompletedProcess[str]]
-ToolResolver = Callable[[str], Optional[str]]
+ToolResolver = Callable[[str], str | None]
 
 
 class VirtualDiskExtractionError(RuntimeError):

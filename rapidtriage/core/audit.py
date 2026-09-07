@@ -3,8 +3,8 @@ from __future__ import annotations
 import datetime as dt
 import hashlib
 import json
+from collections.abc import Iterable, Mapping, Sequence
 from pathlib import Path
-from typing import Iterable, Mapping, Sequence
 
 from .input_root import InputRoot, resolve_input_root
 

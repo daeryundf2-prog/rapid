@@ -3,8 +3,8 @@ from __future__ import annotations
 import datetime as dt
 import hashlib
 import json
+from collections.abc import Mapping
 from pathlib import Path
-from typing import Mapping
 
 from .search import load_run_summary
 
@@ -191,5 +191,5 @@ def normalized_artifact_confidence(row: Mapping[str, object]) -> float | None:
 
 
 def stable_id(prefix: str, value: str, index: int) -> str:
-    digest = hashlib.sha256(f"{prefix}|{value}|{index}".encode("utf-8")).hexdigest()
+    digest = hashlib.sha256(f"{prefix}|{value}|{index}".encode()).hexdigest()
     return f"{prefix}-{digest[:16]}"

@@ -1,14 +1,14 @@
 from __future__ import annotations
 
-import json
 import hashlib
+import json
 import re
 import shlex
 import shutil
 import subprocess
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Callable, Mapping, Optional, Sequence
 
 from .audit import compute_sha256
 from .forensic_accuracy import build_accuracy_gate
@@ -153,7 +153,7 @@ IMAGE_WORKFLOW_TRUSTED_DIFF_BLOCKERS = {
     25: "forensic-container-verified-export-manifest-required",
 }
 CommandRunner = Callable[[Sequence[str]], subprocess.CompletedProcess[str]]
-ToolResolver = Callable[[str], Optional[str]]
+ToolResolver = Callable[[str], str | None]
 
 
 class E01ExtractionError(RuntimeError):

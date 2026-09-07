@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-import json
 import hashlib
 import hmac
+import json
 import shutil
 import sqlite3
 import subprocess
@@ -15,14 +15,14 @@ from pathlib import Path
 from rapidtriage.cli import build_parser, main
 from rapidtriage.core.kakaotalk import (
     PAGE_SIZE,
+    build_kakaotalk_media_inventory,
+    build_kakaotalk_postpatch_room_evidence,
     derive_kakaotalk_key_iv,
     derive_kakaotalk_key_iv_from_pk,
+    derive_kakaotalk_postpatch_v2_dek_candidates,
     derive_kakaotalk_userdir,
     derive_pragma_candidates_from_deviceinfo,
     derive_pragma_from_deviceinfo,
-    build_kakaotalk_postpatch_room_evidence,
-    build_kakaotalk_media_inventory,
-    derive_kakaotalk_postpatch_v2_dek_candidates,
     extract_postpatch_chat_room_previews,
     parse_tasklist_pids,
 )
@@ -719,7 +719,7 @@ class RapidTriageKakaoTalkDecryptTests(unittest.TestCase):
                     "room_title": "테스트 방",
                     "room_type": "DirectChat",
                     "message_text": "최근 메시지",
-                    "message_text_sha256": hashlib.sha256("최근 메시지".encode("utf-8")).hexdigest(),
+                    "message_text_sha256": hashlib.sha256("최근 메시지".encode()).hexdigest(),
                     "last_updated_at": 1710000000,
                 }
             ],
@@ -732,7 +732,7 @@ class RapidTriageKakaoTalkDecryptTests(unittest.TestCase):
                     "author_id": 431643851,
                     "send_at_utc": "2026-04-09T01:45:23+00:00",
                     "message_text_length": 7,
-                    "message_text_sha256": hashlib.sha256("복구 메시지".encode("utf-8")).hexdigest(),
+                    "message_text_sha256": hashlib.sha256("복구 메시지".encode()).hexdigest(),
                     "message_text": "복구 메시지",
                 }
             ],

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import builtins
 import datetime as dt
 import hashlib
 import json
@@ -7,16 +8,15 @@ import os
 import threading
 import uuid
 from collections import Counter
+from collections.abc import Mapping, Sequence
 from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Dict, List, Mapping, Sequence
 
+from .files import DEFAULT_KNOWN_GOOD_MAX_HASH_BYTES
 from .forensic_accuracy import build_accuracy_gate
 from .rules import RuleConfigError, load_rule_set
-from .files import DEFAULT_KNOWN_GOOD_MAX_HASH_BYTES
 from .run import RunModeError, run_triage_mode
-
 
 RUN_STATUSES = ("queued", "running", "completed", "failed", "canceled")
 JOB_STEP_NAMES = ("prepare", "triage", "persist", "finalize")
@@ -88,7 +88,7 @@ class RunRequest:
     hide_known_good: bool = False
     known_good_max_hash_bytes: int = DEFAULT_KNOWN_GOOD_MAX_HASH_BYTES
 
-    def to_dict(self) -> Dict[str, object]:
+    def to_dict(self) -> dict[str, object]:
         return {
             "root": self.root,
             "mode": self.mode,
@@ -109,7 +109,7 @@ class RunRequest:
         }
 
     @classmethod
-    def from_dict(cls, payload: Mapping[str, object]) -> "RunRequest":
+    def from_dict(cls, payload: Mapping[str, object]) -> RunRequest:
         return cls(
             root=str(payload.get("root") or ""),
             mode=str(payload.get("mode") or ""),
@@ -148,11 +148,11 @@ class RunJob:
     completed_at: str | None = None
     error: str | None = None
     error_type: str | None = None
-    summary: Dict[str, object] | None = None
+    summary: dict[str, object] | None = None
     origin: str = "web"
-    steps: List[Dict[str, object]] = field(default_factory=list)
+    steps: list[dict[str, object]] = field(default_factory=list)
     cancellation_requested: bool = False
-    transition_log: List[Dict[str, object]] = field(default_factory=list)
+    transition_log: list[dict[str, object]] = field(default_factory=list)
     retry_of_run_id: str | None = None
     retry_attempt: int = 0
 
@@ -162,8 +162,8 @@ class RunJob:
         if not self.transition_log:
             self.transition_log = [build_job_transition_record(self, event_type="job-created", status=self.status)]
 
-    def to_dict(self, *, include_summary: bool = False) -> Dict[str, object]:
-        payload: Dict[str, object] = {
+    def to_dict(self, *, include_summary: bool = False) -> dict[str, object]:
+        payload: dict[str, object] = {
             "run_id": self.run_id,
             "status": self.status,
             "origin": self.origin,
@@ -196,12 +196,12 @@ class RunJob:
             payload["summary"] = self.summary
         return payload
 
-    def to_record(self) -> Dict[str, object]:
+    def to_record(self) -> dict[str, object]:
         payload = self.to_dict(include_summary=True)
         return payload
 
     @classmethod
-    def from_record(cls, payload: Mapping[str, object]) -> "RunJob":
+    def from_record(cls, payload: Mapping[str, object]) -> RunJob:
         request_payload = payload.get("request")
         request = RunRequest.from_dict(request_payload if isinstance(request_payload, Mapping) else {})
         summary_payload = payload.get("summary")
@@ -229,8 +229,8 @@ class RunJob:
 
 class RunJobStore:
     def __init__(self, *, max_workers: int = 2, state_path: Path | None = None) -> None:
-        self._jobs: Dict[str, RunJob] = {}
-        self._futures: Dict[str, Future[Dict[str, object]]] = {}
+        self._jobs: dict[str, RunJob] = {}
+        self._futures: dict[str, Future[dict[str, object]]] = {}
         self._executor = ThreadPoolExecutor(max_workers=max_workers, thread_name_prefix="rapidtriage-run")
         self._lock = threading.Lock()
         self._state_path = state_path.expanduser().resolve() if state_path is not None else None
@@ -283,7 +283,7 @@ class RunJobStore:
                 self._write_state_locked()
         return self.get(job.run_id)
 
-    def list(self) -> List[RunJob]:
+    def list(self) -> builtins.list[RunJob]:
         with self._lock:
             return sorted(self._jobs.values(), key=lambda item: item.created_at, reverse=True)
 
@@ -293,7 +293,7 @@ class RunJobStore:
                 raise KeyError(run_id)
             return self._jobs[run_id]
 
-    def read_output(self, run_id: str, output_name: str) -> Dict[str, object]:
+    def read_output(self, run_id: str, output_name: str) -> dict[str, object]:
         output_path = self.output_path(run_id, output_name)
         return json.loads(output_path.read_text(encoding="utf-8"))
 
@@ -314,7 +314,7 @@ class RunJobStore:
             raise FileNotFoundError(str(output_path))
         return output_path
 
-    def output_files(self, run_id: str) -> List[Dict[str, object]]:
+    def output_files(self, run_id: str) -> builtins.list[dict[str, object]]:
         job = self.get(run_id)
         if job.summary is None:
             raise RuntimeError("run has no summary yet")
@@ -322,7 +322,7 @@ class RunJobStore:
         if not isinstance(outputs, Mapping):
             raise RuntimeError("run summary does not include outputs")
         output_dir = run_output_dir(job.summary)
-        files: List[Dict[str, object]] = []
+        files: list[dict[str, object]] = []
         for name, raw_path in sorted(outputs.items()):
             path = Path(str(raw_path)).expanduser().resolve()
             if not is_relative_to(path, output_dir):
@@ -450,7 +450,7 @@ class RunJobStore:
             self._write_state_locked()
         return self.submit(previous.request, retry_of_run_id=previous.run_id, retry_attempt=next_attempt)
 
-    def _execute(self, run_id: str) -> Dict[str, object]:
+    def _execute(self, run_id: str) -> dict[str, object]:
         with self._lock:
             job = self._jobs[run_id]
             job.status = "running"
@@ -542,11 +542,11 @@ class RunJobStore:
         temporary_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
         temporary_path.replace(self._state_path)
 
-    def list_locked(self) -> List[RunJob]:
+    def list_locked(self) -> builtins.list[RunJob]:
         return sorted(self._jobs.values(), key=lambda item: item.created_at, reverse=True)
 
 
-def default_job_steps() -> List[Dict[str, object]]:
+def default_job_steps() -> list[dict[str, object]]:
     return [
         {
             "name": name,
@@ -575,7 +575,7 @@ def default_job_steps() -> List[Dict[str, object]]:
     ]
 
 
-def update_step(steps: List[Dict[str, object]], name: str, status: str, *, message: str = "") -> List[Dict[str, object]]:
+def update_step(steps: list[dict[str, object]], name: str, status: str, *, message: str = "") -> list[dict[str, object]]:
     output = [dict(step) for step in (steps or default_job_steps())]
     existing_names = {str(step.get("name")) for step in output}
     for missing in JOB_STEP_NAMES:
@@ -669,7 +669,7 @@ def build_job_transition_record(
     step_status: str | None = None,
     message: str = "",
     details: Mapping[str, object] | None = None,
-) -> Dict[str, object]:
+) -> dict[str, object]:
     return {
         "sequence": len(job.transition_log) + 1,
         "event_type": event_type,
@@ -682,7 +682,7 @@ def build_job_transition_record(
     }
 
 
-def job_transition_log_profile(transition_log: Sequence[Mapping[str, object]]) -> Dict[str, object]:
+def job_transition_log_profile(transition_log: Sequence[Mapping[str, object]]) -> dict[str, object]:
     normalized = [
         {
             "sequence": int(item.get("sequence") or index + 1),
@@ -710,7 +710,7 @@ def job_transition_log_profile(transition_log: Sequence[Mapping[str, object]]) -
     }
 
 
-def job_retry_lineage_profile(job: RunJob) -> Dict[str, object]:
+def job_retry_lineage_profile(job: RunJob) -> dict[str, object]:
     lineage_core = {
         "profile_version": "job-retry-lineage-profile-v1",
         "run_id": job.run_id,
@@ -724,7 +724,7 @@ def job_retry_lineage_profile(job: RunJob) -> Dict[str, object]:
     return {**lineage_core, "lineage_hash": lineage_hash}
 
 
-def job_partial_output_policy(job: RunJob) -> Dict[str, object]:
+def job_partial_output_policy(job: RunJob) -> dict[str, object]:
     outputs = job.summary.get("outputs") if isinstance(job.summary, Mapping) else None
     output_paths = sorted(str(path) for path in outputs.values()) if isinstance(outputs, Mapping) else []
     output_head_hash = hashlib.sha256(json.dumps(output_paths, sort_keys=True).encode("utf-8")).hexdigest()
@@ -751,7 +751,7 @@ def job_partial_output_policy(job: RunJob) -> Dict[str, object]:
     return {**policy_core, "policy_hash": policy_hash}
 
 
-def job_persistence_manifest(job: RunJob) -> Dict[str, object]:
+def job_persistence_manifest(job: RunJob) -> dict[str, object]:
     transition_profile = job_transition_log_profile(job.transition_log)
     step_rows = [job_step_persistence_row(step, index=index) for index, step in enumerate(job.steps)]
     completed_steps = sum(1 for step in step_rows if step["terminal"])
@@ -791,7 +791,7 @@ def job_persistence_manifest(job: RunJob) -> Dict[str, object]:
     return {**manifest_core, "manifest_hash": manifest_hash}
 
 
-def job_queue_execution_manifest(job: RunJob) -> Dict[str, object]:
+def job_queue_execution_manifest(job: RunJob) -> dict[str, object]:
     transition_rows: list[dict[str, object]] = []
     for transition in job.transition_log:
         if not isinstance(transition, Mapping):
@@ -864,7 +864,7 @@ def job_queue_report_grade_validation_plan(
     persistence_manifest: Mapping[str, object],
     execution_manifest: Mapping[str, object],
     transition_profile: Mapping[str, object],
-) -> Dict[str, object]:
+) -> dict[str, object]:
     cancel_retry_state = {
         "cancellation_requested": job.cancellation_requested,
         "retry_of_run_id": job.retry_of_run_id or "",
@@ -989,7 +989,7 @@ def job_queue_report_grade_validation_plan(
     return {**plan_core, "validation_plan_hash": validation_plan_hash}
 
 
-def job_step_persistence_row(step: Mapping[str, object], *, index: int) -> Dict[str, object]:
+def job_step_persistence_row(step: Mapping[str, object], *, index: int) -> dict[str, object]:
     status = str(step.get("status") or "pending")
     terminal = status in {"completed", "failed", "skipped", "canceled"}
     return {
@@ -1005,7 +1005,7 @@ def job_step_persistence_row(step: Mapping[str, object], *, index: int) -> Dict[
     }
 
 
-def job_queue_assessment(job: RunJob) -> Dict[str, object]:
+def job_queue_assessment(job: RunJob) -> dict[str, object]:
     transition_profile = job_transition_log_profile(job.transition_log)
     persistence_manifest = job_persistence_manifest(job)
     execution_manifest = job_queue_execution_manifest(job)
@@ -1250,7 +1250,7 @@ def job_queue_commercial_uplift_evidence(
     *,
     validation_ids: Sequence[str],
     large_data_controls: Sequence[str],
-) -> Dict[str, object]:
+) -> dict[str, object]:
     return {
         "batch_id": PERFORMANCE_BATCH_ID,
         "item_numbers": [69],
@@ -1279,7 +1279,7 @@ def job_queue_reportability_decision(
     *,
     validation_ids: Sequence[str],
     large_data_controls: Sequence[str],
-) -> Dict[str, object]:
+) -> dict[str, object]:
     blockers = {
         "distributed worker execution",
         "externally trusted transition logs",
@@ -1304,7 +1304,7 @@ def job_queue_reportability_decision(
     }
 
 
-def cancellation_retry_assessment(job: RunJob, *, trusted_diff: Mapping[str, object] | None = None) -> Dict[str, object]:
+def cancellation_retry_assessment(job: RunJob, *, trusted_diff: Mapping[str, object] | None = None) -> dict[str, object]:
     manifest = cancellation_retry_manifest(cancellation_retry_manifest_source(job))
     retry_lineage = job_retry_lineage_profile(job)
     partial_output_policy = job_partial_output_policy(job)
@@ -1401,7 +1401,7 @@ def cancellation_retry_report_grade_validation_plan(
     retry_lineage: Mapping[str, object],
     partial_output_policy: Mapping[str, object],
     trusted_diff: Mapping[str, object] | None = None,
-) -> Dict[str, object]:
+) -> dict[str, object]:
     trusted_diff = trusted_diff if isinstance(trusted_diff, Mapping) else missing_cancellation_retry_trusted_diff()
     ready_slots: list[dict[str, object]] = [
         {
@@ -1515,7 +1515,7 @@ def cancellation_retry_report_grade_validation_plan(
     return {**plan_core, "validation_plan_hash": validation_plan_hash}
 
 
-def missing_cancellation_retry_trusted_diff() -> Dict[str, object]:
+def missing_cancellation_retry_trusted_diff() -> dict[str, object]:
     return {
         "status": "missing",
         "trusted_tool": None,
@@ -1530,7 +1530,7 @@ def build_cancellation_retry_trusted_diff(
     trusted_job: Mapping[str, object],
     *,
     trusted_tool: str = "cancellation-retry-transition-manifest",
-) -> Dict[str, object]:
+) -> dict[str, object]:
     rapid_manifest = cancellation_retry_manifest(rapid_job)
     trusted_manifest = cancellation_retry_manifest(trusted_job)
     compared_fields = [
@@ -1565,7 +1565,7 @@ def build_cancellation_retry_trusted_diff(
     }
 
 
-def cancellation_retry_manifest(job: Mapping[str, object]) -> Dict[str, object]:
+def cancellation_retry_manifest(job: Mapping[str, object]) -> dict[str, object]:
     assessment = job.get("cancellation_retry_assessment")
     retry_supported = []
     if isinstance(assessment, Mapping):
@@ -1650,7 +1650,7 @@ def cancellation_retry_manifest(job: Mapping[str, object]) -> Dict[str, object]:
     return {**manifest_core, "manifest_hash": manifest_hash}
 
 
-def cancellation_retry_manifest_source(job: RunJob) -> Dict[str, object]:
+def cancellation_retry_manifest_source(job: RunJob) -> dict[str, object]:
     return {
         "status": job.status,
         "cancellation_requested": job.cancellation_requested,
@@ -1664,7 +1664,7 @@ def cancellation_retry_manifest_source(job: RunJob) -> Dict[str, object]:
     }
 
 
-def execute_run_request(request: RunRequest, *, run_id: str | None = None) -> Dict[str, object]:
+def execute_run_request(request: RunRequest, *, run_id: str | None = None) -> dict[str, object]:
     root = Path(request.root).expanduser().resolve()
     output_dir = (
         Path(request.output_dir).expanduser().resolve()

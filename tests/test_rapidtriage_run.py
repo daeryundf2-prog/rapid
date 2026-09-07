@@ -12,7 +12,10 @@ from typing import Any
 from rapidtriage.cli import build_parser, main
 from rapidtriage.core.artifacts import SUPPORTED_ARTIFACT_KINDS
 from rapidtriage.core.input_root import InputRoot
-from rapidtriage.core.reporting import build_run_report_context, render_run_markdown_report
+from rapidtriage.core.reporting import (
+    build_run_report_context,
+    render_run_markdown_report,
+)
 from rapidtriage.core.run import (
     RUN_PROFILES,
     build_checkpoint_resume_trusted_diff,

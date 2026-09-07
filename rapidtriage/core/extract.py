@@ -3,8 +3,8 @@ from __future__ import annotations
 import datetime as dt
 import json
 import shutil
+from collections.abc import Iterable, Sequence
 from pathlib import Path
-from typing import Dict, Iterable, List, Optional, Sequence, Tuple
 
 from .audit import compute_sha256
 from .files import (
@@ -16,8 +16,8 @@ from .files import (
 )
 from .input_root import InputRoot, resolve_input_root
 
-SUPPORTED_EXTRACT_COMMANDS: Tuple[str, ...] = ("docs", "files")
-SUPPORTED_DOC_KINDS: Tuple[str, ...] = (
+SUPPORTED_EXTRACT_COMMANDS: tuple[str, ...] = ("docs", "files")
+SUPPORTED_DOC_KINDS: tuple[str, ...] = (
     "cfg",
     "conf",
     "csv",
@@ -54,18 +54,18 @@ def run_extract(
     input_json: Path,
     output_dir: Path,
     *,
-    name_contains: Optional[Sequence[str]] = None,
-    path_contains: Optional[Sequence[str]] = None,
-    extensions: Optional[Sequence[str]] = None,
-    categories: Optional[Sequence[str]] = None,
-    kinds: Optional[Sequence[str]] = None,
+    name_contains: Sequence[str] | None = None,
+    path_contains: Sequence[str] | None = None,
+    extensions: Sequence[str] | None = None,
+    categories: Sequence[str] | None = None,
+    kinds: Sequence[str] | None = None,
     limit: int = 0,
     dry_run: bool = False,
     read_only: bool = False,
     max_extract_size_bytes: int = 0,
     max_file_count: int = 0,
     overwrite: bool = False,
-) -> Dict[str, object]:
+) -> dict[str, object]:
     payload = load_extract_payload(input_json)
     source_command = payload["command"]
     root = resolve_payload_root(payload.get("root"), input_json.parent)
@@ -90,8 +90,8 @@ def run_extract(
     )
 
     output_dir.mkdir(parents=True, exist_ok=True)
-    extracted_entries: List[Dict[str, object]] = []
-    skipped_entries: List[Dict[str, object]] = []
+    extracted_entries: list[dict[str, object]] = []
+    skipped_entries: list[dict[str, object]] = []
     copied_bytes = 0
     for item, source_path in selected_items:
         if not source_path.exists() or not source_path.is_file():
@@ -126,7 +126,7 @@ def run_extract(
 
         shutil.copy2(source_path, destination_path)
 
-        entry: Dict[str, object] = {
+        entry: dict[str, object] = {
             "original_path": str(source_path),
             "extracted_path": str(destination_path),
             "relative_path": destination_relative.as_posix(),
@@ -177,7 +177,7 @@ def run_extract(
     }
 
 
-def load_extract_payload(input_json: Path) -> Dict[str, object]:
+def load_extract_payload(input_json: Path) -> dict[str, object]:
     try:
         payload = json.loads(input_json.read_text(encoding="utf-8"))
     except FileNotFoundError as exc:
@@ -194,12 +194,12 @@ def load_extract_payload(input_json: Path) -> Dict[str, object]:
     return payload
 
 
-def extract_source_items(payload: Dict[str, object], source_command: str) -> List[Dict[str, object]]:
+def extract_source_items(payload: dict[str, object], source_command: str) -> list[dict[str, object]]:
     key = "candidates" if source_command == "files" else "results"
     source_items = payload.get(key)
     if not isinstance(source_items, list):
         raise ExtractError(f"input JSON is missing a valid '{key}' array")
-    normalized_items: List[Dict[str, object]] = []
+    normalized_items: list[dict[str, object]] = []
     for item in source_items:
         if not isinstance(item, dict) or not item.get("path"):
             raise ExtractError(f"every '{key}' entry must include a path")
@@ -208,10 +208,10 @@ def extract_source_items(payload: Dict[str, object], source_command: str) -> Lis
 
 
 def select_items_for_extraction(
-    source_items: Sequence[Dict[str, object]],
+    source_items: Sequence[dict[str, object]],
     *,
     source_command: str,
-    root: Optional[Path],
+    root: Path | None,
     input_base_dir: Path,
     name_contains: Sequence[str],
     path_contains: Sequence[str],
@@ -219,8 +219,8 @@ def select_items_for_extraction(
     categories: Sequence[str],
     kinds: Sequence[str],
     limit: int,
-) -> List[Tuple[Dict[str, object], Path]]:
-    selected: List[Tuple[Dict[str, object], Path]] = []
+) -> list[tuple[dict[str, object], Path]]:
+    selected: list[tuple[dict[str, object], Path]] = []
     for item in source_items:
         source_path = resolve_source_path(str(item["path"]), root, input_base_dir)
         if root is not None and not source_path.is_relative_to(root.root_path):
@@ -247,13 +247,13 @@ def select_items_for_extraction(
     return selected
 
 
-def normalize_extract_categories(categories: Optional[Sequence[str]], source_command: str) -> List[str]:
+def normalize_extract_categories(categories: Sequence[str] | None, source_command: str) -> list[str]:
     if not categories:
         return []
     if source_command != "files":
         raise ExtractError("--category can only be used with files JSON input")
 
-    normalized: List[str] = []
+    normalized: list[str] = []
     seen = set()
     for category in categories:
         key = category.lower()
@@ -267,13 +267,13 @@ def normalize_extract_categories(categories: Optional[Sequence[str]], source_com
     return normalized
 
 
-def normalize_extract_kinds(kinds: Optional[Sequence[str]], source_command: str) -> List[str]:
+def normalize_extract_kinds(kinds: Sequence[str] | None, source_command: str) -> list[str]:
     if not kinds:
         return []
     if source_command != "docs":
         raise ExtractError("--kind can only be used with docs JSON input")
 
-    normalized: List[str] = []
+    normalized: list[str] = []
     seen = set()
     for kind in kinds:
         key = kind.lower()
@@ -287,7 +287,7 @@ def normalize_extract_kinds(kinds: Optional[Sequence[str]], source_command: str)
     return normalized
 
 
-def resolve_payload_root(root_value: object, base_dir: Path) -> Optional[InputRoot]:
+def resolve_payload_root(root_value: object, base_dir: Path) -> InputRoot | None:
     if not isinstance(root_value, str) or not root_value.strip():
         return None
     root_path = Path(root_value).expanduser()
@@ -296,7 +296,7 @@ def resolve_payload_root(root_value: object, base_dir: Path) -> Optional[InputRo
     return resolve_input_root((base_dir / root_path).resolve())
 
 
-def resolve_source_path(path_value: str, root: Optional[InputRoot], base_dir: Path) -> Path:
+def resolve_source_path(path_value: str, root: InputRoot | None, base_dir: Path) -> Path:
     source_path = Path(path_value).expanduser()
     if source_path.is_absolute():
         return source_path.resolve()
@@ -305,7 +305,7 @@ def resolve_source_path(path_value: str, root: Optional[InputRoot], base_dir: Pa
     return (base_dir / source_path).resolve()
 
 
-def build_destination_relative_path(source_path: Path, root: Optional[InputRoot]) -> Path:
+def build_destination_relative_path(source_path: Path, root: InputRoot | None) -> Path:
     if root is not None:
         try:
             return source_path.relative_to(root.root_path)
@@ -316,8 +316,8 @@ def build_destination_relative_path(source_path: Path, root: Optional[InputRoot]
     return Path("_external", *safe_parts)
 
 
-def sanitize_path_parts(parts: Iterable[str], anchor: str) -> List[str]:
-    safe_parts: List[str] = []
+def sanitize_path_parts(parts: Iterable[str], anchor: str) -> list[str]:
+    safe_parts: list[str] = []
     for part in parts:
         if not part or part == anchor:
             continue
@@ -325,7 +325,7 @@ def sanitize_path_parts(parts: Iterable[str], anchor: str) -> List[str]:
     return safe_parts or ["copied-file"]
 
 
-def extract_candidate_categories(item: Dict[str, object]) -> List[str]:
+def extract_candidate_categories(item: dict[str, object]) -> list[str]:
     categories = item.get("categories")
     if isinstance(categories, list):
         return [str(category).lower() for category in categories]

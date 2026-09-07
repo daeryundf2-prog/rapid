@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-import json
 import hashlib
+import json
 import os
 import plistlib
 import sqlite3
@@ -11,15 +11,15 @@ import zipfile
 from pathlib import Path
 from unittest.mock import patch
 
-from rapidtriage.cli import main
 from rapidtriage.artifacts.kakaotalk_macos import (
     derive_kakaotalk_macos_database_name,
     derive_kakaotalk_macos_secure_key,
-    extract_kakaotalk_macos_user_id_candidates,
     env_user_id_overrides,
+    extract_kakaotalk_macos_user_id_candidates,
     hashed_macos_device_uuid,
     recover_user_id_from_sha512_directory_hash,
 )
+from rapidtriage.cli import main
 
 
 class RapidTriageMacOsArtifactsTests(unittest.TestCase):
@@ -396,7 +396,7 @@ class RapidTriageMacOsArtifactsTests(unittest.TestCase):
             csv_text = messages_csv.read_text(encoding="utf-8-sig")
             self.assertIn("hello", csv_text)
             self.assertIn("world", csv_text)
-            self.assertIn(hashlib.sha256("hello".encode("utf-8")).hexdigest(), csv_text)
+            self.assertIn(hashlib.sha256(b"hello").hexdigest(), csv_text)
 
             html_text = viewer_html.read_text(encoding="utf-8")
             self.assertIn("RapidTriage macOS KakaoTalk Viewer", html_text)
@@ -427,7 +427,7 @@ class RapidTriageMacOsArtifactsTests(unittest.TestCase):
             self.assertFalse(payload["privacy"]["message_text_exported"])
             self.assertNotIn("hello", csv_text)
             self.assertNotIn("world", csv_text)
-            self.assertIn(hashlib.sha256("hello".encode("utf-8")).hexdigest(), csv_text)
+            self.assertIn(hashlib.sha256(b"hello").hexdigest(), csv_text)
             self.assertIn("[redacted]", html_text)
 
     def test_kakaotalk_macos_report_warns_when_context_rows_are_capped(self) -> None:

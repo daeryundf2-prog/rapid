@@ -29,12 +29,15 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
-
 REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from rapidtriage.validation.known_answer import format_text_result, result_to_dict, validate_manifest
+from rapidtriage.validation.known_answer import (
+    format_text_result,
+    result_to_dict,
+    validate_manifest,
+)
 
 
 @dataclass(frozen=True, slots=True)

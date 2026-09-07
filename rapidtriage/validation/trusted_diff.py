@@ -6,10 +6,15 @@ from pathlib import Path
 from typing import Final
 
 from rapidtriage.validation.json_fields import int_field, list_field, object_field
-from rapidtriage.validation.known_answer_schema import load_json_document, validate_schema_document
-from rapidtriage.validation.known_answer_types import JsonObject, ManifestValidationError
+from rapidtriage.validation.known_answer_schema import (
+    load_json_document,
+    validate_schema_document,
+)
+from rapidtriage.validation.known_answer_types import (
+    JsonObject,
+    ManifestValidationError,
+)
 from rapidtriage.validation.manifest_truth import expected_truth_issue
-from rapidtriage.validation.truth_manifest import expected_item_path, load_truth_manifest
 from rapidtriage.validation.trusted_diff_result import (
     DiffEntry,
     TrustedDiffResult,
@@ -17,8 +22,12 @@ from rapidtriage.validation.trusted_diff_result import (
     diff_entry_to_dict,
     diff_message,
 )
-from .observed_results import ObservedItem, index_by_path, load_observed_results
+from rapidtriage.validation.truth_manifest import (
+    expected_item_path,
+    load_truth_manifest,
+)
 
+from .observed_results import ObservedItem, index_by_path, load_observed_results
 
 TRUSTED_DIFF_SCHEMA_PATH: Final[Path] = (
     Path(__file__).resolve().parents[2]
