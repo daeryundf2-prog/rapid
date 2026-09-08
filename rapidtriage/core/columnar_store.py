@@ -560,3 +560,127 @@ def optional_int(value: object) -> int | None:
         return int(value) if value is not None else None
     except (TypeError, ValueError):
         return None
+
+
+COLUMNAR_ARTIFACTS_QUERY_PROFILE_VERSION = "columnar-artifacts-query-v1"
+COLUMNAR_ARTIFACTS_QUERY_MAX_LIMIT = 1000
+
+
+def query_columnar_artifact_records(
+    *,
+    parquet_path: Path,
+    offset: int = 0,
+    limit: int = 200,
+    artifact_family: str | None = None,
+    artifact_type: str | None = None,
+    keyword: str | None = None,
+) -> dict[str, object]:
+    """Query the run columnar sidecar Parquet with bounded pagination.
+
+    Large-case query path over the opt-in ``columnar_artifacts`` sidecar:
+    DuckDB scans the Parquet file with parameterized filters and returns a
+    bounded page plus an offset cursor. Degrades to a ``skipped`` payload
+    when the duckdb optional dependency is missing — callers must treat
+    that as "use the JSONL/JSON outputs", never as an error.
+    """
+    capabilities = columnar_capabilities()
+    if not capabilities.get("duckdb_query_available"):
+        return {
+            "profile_version": COLUMNAR_ARTIFACTS_QUERY_PROFILE_VERSION,
+            "status": "skipped",
+            "reason": "duckdb-not-installed",
+            "install_hint": capabilities.get("install_hint", "pip install .[columnar]"),
+            "parquet_path": str(parquet_path),
+        }
+    try:
+        import duckdb  # type: ignore[import-not-found]
+    except ModuleNotFoundError:
+        return {
+            "profile_version": COLUMNAR_ARTIFACTS_QUERY_PROFILE_VERSION,
+            "status": "skipped",
+            "reason": "duckdb-not-installed",
+            "install_hint": capabilities.get("install_hint", "pip install .[columnar]"),
+            "parquet_path": str(parquet_path),
+        }
+    bounded_limit = max(1, min(int(limit), COLUMNAR_ARTIFACTS_QUERY_MAX_LIMIT))
+    bounded_offset = max(0, int(offset))
+    conditions: list[str] = []
+    parameters: list[object] = [str(parquet_path)]
+    if artifact_family:
+        conditions.append("artifact_family = ?")
+        parameters.append(artifact_family)
+    if artifact_type:
+        conditions.append("artifact_type = ?")
+        parameters.append(artifact_type)
+    if keyword:
+        conditions.append("lower(fields_json) LIKE ?")
+        parameters.append(f"%{keyword.lower()}%")
+    where_clause = f"WHERE {' AND '.join(conditions)}" if conditions else ""
+    started = time.perf_counter()
+    with duckdb.connect(database=":memory:") as connection:
+        total_row = connection.execute(
+            f"SELECT COUNT(*) FROM read_parquet(?) {where_clause}",
+            parameters,
+        ).fetchone()
+        total_count = int(total_row[0] if total_row else 0)
+        page_rows = connection.execute(
+            f"""
+            SELECT artifact_id, artifact_family, artifact_type, parser, parser_version,
+                   case_id, source_id, source_path, "offset", length, confidence,
+                   validation_required, commercial_grade_ready,
+                   commercial_grade_blockers_json, legal_limitations_json,
+                   fields_json, source_hashes_json
+            FROM read_parquet(?)
+            {where_clause}
+            ORDER BY artifact_id
+            LIMIT ? OFFSET ?
+            """,
+            [*parameters, bounded_limit, bounded_offset],
+        ).fetchall()
+    query_seconds = elapsed(started)
+    records: list[dict[str, object]] = [
+        {
+            "artifact_id": row[0],
+            "artifact_family": row[1],
+            "artifact_type": row[2],
+            "parser": row[3],
+            "parser_version": row[4],
+            "case_id": row[5],
+            "source_id": row[6],
+            "source_path": row[7],
+            "offset": row[8],
+            "length": row[9],
+            "confidence": float(row[10] or 0),
+            "validation_required": bool(row[11]),
+            "commercial_grade_ready": bool(row[12]),
+            "commercial_grade_blockers": json.loads(row[13] or "[]"),
+            "legal_limitations": json.loads(row[14] or "[]"),
+            "fields": json.loads(row[15] or "{}"),
+            "source_hashes": json.loads(row[16] or "{}"),
+        }
+        for row in page_rows
+    ]
+    end = bounded_offset + len(records)
+    return {
+        "profile_version": COLUMNAR_ARTIFACTS_QUERY_PROFILE_VERSION,
+        "status": "queried",
+        "engine": "duckdb",
+        "parquet_path": str(parquet_path),
+        "query_seconds": query_seconds,
+        "filters": {
+            "artifact_family": artifact_family or None,
+            "artifact_type": artifact_type or None,
+            "keyword": keyword or None,
+        },
+        "total_count": total_count,
+        "offset": bounded_offset,
+        "limit": bounded_limit,
+        "returned_count": len(records),
+        "has_more": end < total_count,
+        "next_offset": end if end < total_count else None,
+        "records": records,
+        "reportability_warning": (
+            "Columnar sidecar rows are derived index views of ArtifactRecordV1 rows; "
+            "cite the JSONL audit sidecar and source viewer before report use."
+        ),
+    }

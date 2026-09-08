@@ -62,6 +62,7 @@ from rapidtriage.core.keyword_packs import (
     keyword_pack_core_accuracy_gates,
 )
 from rapidtriage.core.large_case_controls import build_large_case_resilience_contract
+from rapidtriage.core.run import run_triage_mode
 from tests.schema_validation import validate
 from tests.test_rapidtriage_run import build_run_fixture
 from tests.windows_artifact_fixtures import build_windows_artifact_fixture
@@ -4061,6 +4062,76 @@ class RapidTriageApiTests(unittest.TestCase):
             self.assertEqual(files_response.status_code, 200, files_response.text)
             output_names = {row["name"] for row in files_response.json().get("files", [])}
             self.assertIn("e01_smoke_stage_status", output_names)
+
+    def test_columnar_artifacts_endpoint_serves_sidecar_with_pagination(self) -> None:
+        from rapidtriage.core.columnar_store import columnar_capabilities
+
+        if not columnar_capabilities().get("duckdb_query_available"):
+            self.skipTest("duckdb from the columnar extra is not installed")
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir) / "case-root"
+            output_dir = Path(tmp_dir) / "run-output"
+            build_run_fixture(root)
+            run_triage_mode(
+                root,
+                mode="hacking",
+                output_dir=output_dir,
+                read_only=True,
+                overwrite=True,
+                columnar_store=True,
+            )
+            store = RunJobStore()
+            job = store.import_completed_run(output_dir)
+            client = api_test_client(store)
+
+            response = client.get(f"/api/runs/{job.run_id}/columnar-artifacts", params={"limit": 2})
+            self.assertEqual(response.status_code, 200, response.text)
+            payload = response.json()
+            self.assertEqual(payload["profile_version"], "columnar-artifacts-query-v1")
+            self.assertEqual(payload["status"], "queried")
+            self.assertEqual(payload["engine"], "duckdb")
+            self.assertGreater(payload["total_count"], 0)
+            self.assertLessEqual(payload["returned_count"], 2)
+            self.assertTrue(payload["has_more"])
+            self.assertEqual(payload["next_offset"], 2)
+            self.assertIn("reportability_warning", payload)
+
+            next_response = client.get(
+                f"/api/runs/{job.run_id}/columnar-artifacts",
+                params={"limit": 2, "offset": payload["next_offset"]},
+            )
+            self.assertEqual(next_response.status_code, 200, next_response.text)
+            next_payload = next_response.json()
+            self.assertEqual(next_payload["offset"], 2)
+
+            family_response = client.get(
+                f"/api/runs/{job.run_id}/columnar-artifacts",
+                params={"artifact_family": "generic-documents", "keyword": "wire"},
+            )
+            self.assertEqual(family_response.status_code, 200, family_response.text)
+            family_payload = family_response.json()
+            self.assertEqual(family_payload["status"], "queried")
+            self.assertGreaterEqual(family_payload["total_count"], 0)
+
+    def test_columnar_artifacts_endpoint_404s_without_sidecar(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir) / "case-root"
+            output_dir = Path(tmp_dir) / "run-output"
+            build_run_fixture(root)
+            run_triage_mode(
+                root,
+                mode="hacking",
+                output_dir=output_dir,
+                read_only=True,
+                overwrite=True,
+            )
+            store = RunJobStore()
+            job = store.import_completed_run(output_dir)
+            client = api_test_client(store)
+
+            response = client.get(f"/api/runs/{job.run_id}/columnar-artifacts")
+            self.assertEqual(response.status_code, 404, response.text)
+            self.assertIn("columnar_artifacts", response.json()["detail"])
 
 
 if __name__ == "__main__":

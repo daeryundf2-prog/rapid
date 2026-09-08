@@ -113,10 +113,19 @@ change plan with regression criteria before starting.
   ("index" stage); run never fails on the sidecar (dependency-missing →
   `skipped` with install hint, conversion error → `failed` with reason).
   Verified end-to-end: run → Parquet → DuckDB family aggregation query.
-- **Remaining for full adoption (next slice)**: point workbench large-table
-  and case-search backends at the Parquet sidecar (schema/versioning
-  contract for Parquet run outputs, cursor pagination over DuckDB), and a
-  1M-record API-level p95 measurement. JSONL stays the canonical audit
+- **Second slice done 2026-09-08**: `GET /api/runs/{run_id}/columnar-artifacts`
+  serves the sidecar through `query_columnar_artifact_records` — DuckDB
+  parameterized family/type/keyword filters, bounded limit (1..1000),
+  offset pagination with `next_offset`/`has_more`, per-request query
+  timing, and a reportability warning pointing at the JSONL audit
+  sidecar. Missing sidecar → 404 with the `--columnar-store` rerun hint;
+  missing duckdb → 200 `status=skipped` so callers fall back to JSONL/JSON.
+  Verified live (import → query → paginate → filter) and covered by API
+  tests for the written and 404 paths.
+- **Remaining for full adoption**: wire the workbench artifacts table and
+  case-search UI to prefer this endpoint for large runs (schema/versioning
+  note in the release checklist), and a 1M-record API-level p95
+  measurement on target hardware. JSONL stays the canonical audit
   format.
 
 ### B2. e01-smoke resume-stage UI visualization — DONE

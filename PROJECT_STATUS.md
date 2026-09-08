@@ -7,7 +7,7 @@ Tag: `v0.2.0` (restart baseline)
 ## Authorized Engineering Pass (2026-09-08, third pass — Track B)
 
 Track B items from `docs/rapidforensic-next-roadmap.md` were executed under
-explicit scope approval. Final state: **800 tests OK** (skipped=1; +8 new
+explicit scope approval. Final state: **802 tests OK** (skipped=1; +10 new
 tests), ruff 0.16 green, vulture clean, compileall clean, Tier 0 QC PASS,
 JS syntax green.
 
@@ -19,19 +19,28 @@ JS syntax green.
    `columnar_artifacts`/`columnar_artifacts_jsonl` outputs and workflow
    "index" stage members; sidecar failures degrade to skipped/failed
    without failing the run; verified end-to-end with DuckDB aggregation
-   over the produced Parquet. Next slice: workbench/case-search backends
-   query the sidecar directly.
-2. **B2 e01-smoke stage UI**: stage-status sidecar is copied into the run
+   over the produced Parquet.
+2. **B1 second slice — columnar query API**:
+   `GET /api/runs/{run_id}/columnar-artifacts` backed by
+   `query_columnar_artifact_records` (DuckDB, parameterized
+   family/type/keyword filters, bounded offset pagination, query timing,
+   reportability warning; 404 with rerun hint when the sidecar is absent,
+   200 skipped when duckdb is absent). Verified live and unit-tested on
+   both paths.
+3. **B2 e01-smoke stage UI**: stage-status sidecar is copied into the run
    output dir and registered as `e01_smoke_stage_status` in the run
    summary outputs map (served through the existing outputs endpoints
    under unchanged path validation); workbench summary tab renders the
-   `e01-smoke-stage-status` panel when the output is present.
-3. CI note: commit `222e96e` (second pass) is green on the full matrix —
+   `e01-smoke-stage-status` panel when the output is registered.
+4. CI note: commit `222e96e` (second pass) is green on the full matrix —
    it also repaired CI, since the prior HEAD (`1ac6ed2`) had failed.
+   `902a0db` failed once because the sidecar written-path test did not
+   account for CI environments without the pyarrow extra; fixed in
+   `17c4bdb` with a capability-guarded skip.
 
 Remaining work is unchanged: Track A external evidence (T1 corpus trusted
-diffs, target-hardware scale runs, four-track review, signing) and the
-Track B columnar second slice.
+diffs, target-hardware scale runs, four-track review, signing) and wiring
+the workbench UI to prefer the columnar endpoint for large runs.
 
 ## Closable-Gate Closure Pass (2026-09-08, second pass)
 

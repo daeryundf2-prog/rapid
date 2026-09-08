@@ -46,6 +46,7 @@ from ..core.collect_plan import (
     build_collect_plan,
     supported_collect_profiles,
 )
+from ..core.columnar_store import query_columnar_artifact_records
 from ..core.commercial_readiness import (
     CommercialReadinessError,
     build_commercial_readiness_report,
@@ -1351,6 +1352,47 @@ def create_app(job_store: RunJobStore | None = None, auth_token: str | None = No
                 except FileNotFoundError as exc:
                     raise HTTPException(status_code=404, detail=str(exc))
         return {"artifacts": artifacts}
+
+    @api.get("/api/runs/{run_id}/columnar-artifacts")
+    def get_run_columnar_artifacts(
+        run_id: str,
+        offset: int = Query(0, ge=0),
+        limit: int = Query(200, ge=1, le=1000),
+        artifact_family: str | None = Query(default=None),
+        artifact_type: str | None = Query(default=None),
+        keyword: str | None = Query(default=None),
+    ) -> dict[str, object]:
+        """Query the opt-in columnar sidecar Parquet with bounded pagination.
+
+        Serves the run's ``columnar_artifacts`` output through DuckDB with
+        parameterized family/type/keyword filters. When the sidecar was not
+        produced (no ``--columnar-store``) the endpoint 404s on the missing
+        output; when duckdb is not installed it returns 200 with
+        ``status=skipped`` so callers fall back to the JSONL/JSON outputs.
+        """
+        job = get_job(store, run_id)
+        if job.summary is None:
+            raise HTTPException(status_code=409, detail="run is not completed")
+        try:
+            path = get_output_path(store, run_id, "columnar_artifacts")
+        except HTTPException as exc:
+            if exc.status_code == 404:
+                raise HTTPException(
+                    status_code=404,
+                    detail=(
+                        "run output not found: columnar_artifacts; "
+                        "rerun 'rapidtriage run --columnar-store' to produce the sidecar"
+                    ),
+                ) from exc
+            raise
+        return query_columnar_artifact_records(
+            parquet_path=path,
+            offset=offset,
+            limit=limit,
+            artifact_family=artifact_family,
+            artifact_type=artifact_type,
+            keyword=keyword,
+        )
 
     @api.get("/api/runs/{run_id}/files")
     def get_run_files(
