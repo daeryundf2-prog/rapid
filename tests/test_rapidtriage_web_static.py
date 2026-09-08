@@ -801,6 +801,17 @@ class RapidTriageWebStaticTests(unittest.TestCase):
         self.assertIn("slice(0, ROW_FILTER_TEXT_LIMIT)", app_js)
         self.assertIn("filter text bounded to ${ROW_FILTER_TEXT_LIMIT} chars/row", app_js)
 
+    def test_e01_smoke_stage_status_panel_is_rendered_from_registered_output(self) -> None:
+        app_js = (REPO_ROOT / "rapidtriage" / "web" / "static" / "app.js").read_text(encoding="utf-8")
+
+        self.assertIn("renderE01SmokeStageStatus(payload)", app_js)
+        self.assertIn("function renderE01SmokeStageStatus(payload)", app_js)
+        self.assertIn('data-testid="e01-smoke-stage-status"', app_js)
+        self.assertIn("e01_smoke_stage_status", app_js)
+        self.assertIn("E01 스모크 단계 상태", app_js)
+        summary_render_body = app_js.split("function renderSummary(payload) {", 1)[1].split("function ", 1)[0]
+        self.assertIn("renderE01SmokeStageStatus(payload)", summary_render_body)
+
 
 if __name__ == "__main__":
     unittest.main()

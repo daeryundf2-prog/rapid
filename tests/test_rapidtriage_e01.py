@@ -35,7 +35,12 @@ from rapidtriage.core.e01 import (
     parse_mmls_partitions,
     select_mmls_filesystem,
 )
-from rapidtriage.core.e01_smoke import run_windows11_e01_smoke
+from rapidtriage.core.e01_smoke import (
+    E01_STAGE_STATUS_RUN_COPY_NAME,
+    E01_STAGE_STATUS_RUN_OUTPUT_KEY,
+    register_stage_status_with_run,
+    run_windows11_e01_smoke,
+)
 from rapidtriage.core.run import run_triage_mode
 from rapidtriage.core.virtual_disk import (
     VirtualDiskExtractionResult,
@@ -196,6 +201,57 @@ class RapidTriageE01Tests(unittest.TestCase):
             self.assertIn("failure_guidance", payload["run_error"])
             self.assertIsNone(payload["outputs"]["smoke_report"]["sha256"])
             self.assertIn("Self-referential", payload["outputs"]["smoke_report"]["hash_note"])
+
+    def test_register_stage_status_with_run_copies_and_registers_output(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            run_dir = root / "run"
+            run_dir.mkdir()
+            stage_status_path = root / "rapidforensic-e01-workflow-stage-status.json"
+            stage_status_path.write_text(
+                json.dumps({"schema": "rapidforensic-e01-workflow-stage-status-v1", "stages": []}),
+                encoding="utf-8",
+            )
+            (run_dir / "rapidtriage-run-summary.json").write_text(
+                json.dumps({"outputs": {"summary": "rapidtriage-run-summary.json"}}),
+                encoding="utf-8",
+            )
+
+            copy_path = register_stage_status_with_run(run_dir, stage_status_path)
+
+            self.assertIsNotNone(copy_path)
+            self.assertTrue(copy_path.is_file())
+            self.assertEqual(copy_path.name, E01_STAGE_STATUS_RUN_COPY_NAME)
+            summary = json.loads((run_dir / "rapidtriage-run-summary.json").read_text(encoding="utf-8"))
+            self.assertEqual(
+                summary["outputs"][E01_STAGE_STATUS_RUN_OUTPUT_KEY],
+                E01_STAGE_STATUS_RUN_COPY_NAME,
+            )
+            self.assertEqual(summary["outputs"]["summary"], "rapidtriage-run-summary.json")
+            copied = json.loads(copy_path.read_text(encoding="utf-8"))
+            self.assertEqual(copied["schema"], "rapidforensic-e01-workflow-stage-status-v1")
+
+    def test_register_stage_status_with_run_without_summary_still_copies(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            run_dir = root / "run"
+            run_dir.mkdir()
+            stage_status_path = root / "rapidforensic-e01-workflow-stage-status.json"
+            stage_status_path.write_text(json.dumps({"stages": []}), encoding="utf-8")
+
+            copy_path = register_stage_status_with_run(run_dir, stage_status_path)
+
+            self.assertIsNotNone(copy_path)
+            self.assertTrue(copy_path.is_file())
+            self.assertFalse((run_dir / "rapidtriage-run-summary.json").exists())
+
+    def test_register_stage_status_with_missing_source_returns_none(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            run_dir = root / "run"
+            run_dir.mkdir()
+
+            self.assertIsNone(register_stage_status_with_run(run_dir, root / "missing.json"))
 
     def test_e01_smoke_cli_writes_single_case_outputs(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:

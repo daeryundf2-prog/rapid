@@ -2687,6 +2687,7 @@ function renderSummary(payload) {
     ${renderUserWorkflowMap()}
     ${renderCaseReadinessDashboard(payload)}
     ${renderE01RunWorkflowStatus(payload)}
+    ${renderE01SmokeStageStatus(payload)}
     ${renderImageStageControlStatus(payload)}
     ${renderForensicArtifactNavigator(payload)}
     ${renderRunActionStrip(payload)}
@@ -2853,6 +2854,30 @@ function renderE01RunWorkflowStatus(payload) {
         </div>
       ` : ""}
       <p class="help-text">${escapeHtml(workflow.analysis_root || "")}</p>
+    </section>
+  `;
+}
+
+function renderE01SmokeStageStatus(payload) {
+  const outputs = payload.outputs || {};
+  const smokeOutputs = (selectedRun?.summary?.outputs || outputs) || {};
+  const hasStageStatus = Object.prototype.hasOwnProperty.call(smokeOutputs, "e01_smoke_stage_status")
+    || Object.prototype.hasOwnProperty.call(outputs, "e01_smoke_stage_status");
+  if (!hasStageStatus) return "";
+  const stageStatusUrl = `/api/runs/${encodeURIComponent(selectedRunId)}/outputs/${encodeURIComponent("e01_smoke_stage_status")}/preview`;
+  return `
+    <section class="e01-workflow-panel e01-smoke-stage-status" data-testid="e01-smoke-stage-status">
+      <div class="review-group-header">
+        <div>
+          <p class="eyebrow">E01 스모크 단계 상태</p>
+          <h3>스테이지 진행·차단·재개 상태</h3>
+        </div>
+        <a class="secondary-button" href="${escapeHtml(stageStatusUrl)}" target="_blank" rel="noopener">단계 상태 JSON</a>
+      </div>
+      <p class="help-text">
+        e01-smoke 단계 상태(known-answer, preflight, validation plan, triage run)가 run 산출물로 등록되어 있습니다.
+        차단 단계는 failure_guidance와 함께 표시되며, 재개는 기존 resume 규칙을 따릅니다.
+      </p>
     </section>
   `;
 }

@@ -2265,6 +2265,11 @@ def build_parser() -> argparse.ArgumentParser:
         default=64 * 1024 * 1024,
         help="Maximum file size to hash for run known-good checks (default: 67108864)",
     )
+    run.add_argument(
+        "--columnar-store",
+        action="store_true",
+        help="Write an opt-in columnar sidecar: stage ArtifactRecordV1 rows as JSONL and convert to Parquet for large-case query (requires pyarrow from the columnar extra; skipped when unavailable)",
+    )
     add_rules_argument(run)
 
     web = sub.add_parser(
@@ -5218,6 +5223,7 @@ def main(argv=None) -> int:
                 hide_known_good=args.hide_known_good,
                 known_good_max_hash_bytes=args.known_good_max_hash_bytes,
                 rule_set=rule_set,
+                columnar_store=args.columnar_store,
             )
         except RunModeError as exc:
             parser.error(str(exc))

@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import datetime as dt
+import json
+import shutil
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 
@@ -21,7 +23,44 @@ E01_KNOWN_ANSWER_OUTPUT_NAME = "windows11-e01-known-answer.json"
 E01_EVIDENCE_PREFLIGHT_OUTPUT_NAME = "rapidtriage-evidence-preflight.json"
 E01_STAGE_STATUS_OUTPUT_NAME = "rapidforensic-e01-workflow-stage-status.json"
 E01_VALIDATION_PLAN_OUTPUT_NAME = "rapidforensic-e01-validation-plan.json"
+E01_STAGE_STATUS_RUN_OUTPUT_KEY = "e01_smoke_stage_status"
+E01_STAGE_STATUS_RUN_COPY_NAME = "rapidforensic-e01-smoke-stage-status.json"
 EWF_HEADER_SIGNATURES = (b"EVF\t\r\n\xff\x00", b"EVF2\r\n\x81\x00")
+
+
+def register_stage_status_with_run(run_dir: Path, stage_status_path: Path) -> Path | None:
+    """Copy the E01 smoke stage-status sidecar into the run output dir.
+
+    The workbench only serves files registered in the run summary's
+    ``outputs`` map (RunJobStore.read_output validates every name against
+    that map and confines reads to the run output dir). Copying the
+    stage-status file into ``run_dir`` and appending its relative name to
+    the summary's ``outputs`` map makes the stage status reachable through
+    the existing ``/api/runs/{run_id}/outputs/e01_smoke_stage_status``
+    endpoints without weakening any path validation.
+    """
+    if not stage_status_path.is_file():
+        return None
+    copy_path = run_dir / E01_STAGE_STATUS_RUN_COPY_NAME
+    if stage_status_path != copy_path:
+        shutil.copyfile(stage_status_path, copy_path)
+    summary_path = run_dir / "rapidtriage-run-summary.json"
+    if not summary_path.is_file():
+        return copy_path
+    try:
+        summary = json.loads(summary_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return copy_path
+    outputs = summary.get("outputs")
+    if not isinstance(outputs, dict):
+        outputs = {}
+    outputs[E01_STAGE_STATUS_RUN_OUTPUT_KEY] = E01_STAGE_STATUS_RUN_COPY_NAME
+    summary["outputs"] = outputs
+    summary_path.write_text(
+        json.dumps(summary, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    return copy_path
 
 
 def _evidence_preflight_stage_status(source: Path, evidence: Mapping[str, object]) -> tuple[str, list[str]]:
@@ -369,12 +408,21 @@ def run_windows11_e01_smoke(
         },
     }
     write_result(stage_status_payload, stage_status_path)
+    stage_status_run_copy: Path | None = None
+    if run_payload is not None:
+        stage_status_run_copy = register_stage_status_with_run(run_dir, stage_status_path)
+        if stage_status_run_copy is not None:
+            run_payload_outputs = run_payload.get("outputs")
+            if isinstance(run_payload_outputs, dict):
+                run_payload_outputs[E01_STAGE_STATUS_RUN_OUTPUT_KEY] = str(stage_status_run_copy)
     outputs: dict[str, object] = {
         "known_answer_manifest": _output_status(known_answer_path),
         "evidence_preflight": _output_status(evidence_path),
         "validation_plan": _output_status(validation_plan_path),
         "stage_status": _output_status(stage_status_path),
     }
+    if stage_status_run_copy is not None:
+        outputs["stage_status_run_copy"] = _output_status(stage_status_run_copy)
     if run_payload and isinstance(run_payload.get("outputs"), Mapping):
         outputs["run"] = _run_output_statuses(run_payload["outputs"])
 

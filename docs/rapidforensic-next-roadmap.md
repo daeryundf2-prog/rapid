@@ -100,26 +100,37 @@ Per AGENTS.md, these change recovery engine, core logic, DB schema, or Web
 UI and must not proceed as part of validation plumbing. Each needs its own
 change plan with regression criteria before starting.
 
-### B1. Columnar/Parquet adoption in the run pipeline
+### B1. Columnar/Parquet adoption in the run pipeline — FIRST SLICE DONE
 
 - Evidence in hand: Parquet 32x smaller than JSONL; DuckDB p50 0.165s vs
   20.87s baseline on 1M records; FTS scale checks green to 10M.
-- Scope: wire `convert_jsonl_to_parquet` + DuckDB query path into run
-  output consumption (workbench tables, search backends), define the
-  schema/versioning contract for Parquet run outputs, migrate cursor
-  pagination, and keep JSONL as the canonical audit format.
-- Acceptance: large-case search p95 under 2.0s at 1M+ records end-to-end
-  through the API, zero regression in run-output tests, migration note in
-  the release checklist.
+- **Done 2026-09-08 (authorized pass)**: opt-in `--columnar-store` run flag
+  adds `build_columnar_artifacts_sidecar` after the sqlite-fts stage — it
+  stages every `artifacts_{kind}` payload's per-row `artifact_record`
+  (ArtifactRecordV1) into one JSONL audit file and converts it to
+  row-grouped Parquet; outputs registered as `columnar_artifacts` /
+  `columnar_artifacts_jsonl` in the summary and the workflow contract
+  ("index" stage); run never fails on the sidecar (dependency-missing →
+  `skipped` with install hint, conversion error → `failed` with reason).
+  Verified end-to-end: run → Parquet → DuckDB family aggregation query.
+- **Remaining for full adoption (next slice)**: point workbench large-table
+  and case-search backends at the Parquet sidecar (schema/versioning
+  contract for Parquet run outputs, cursor pagination over DuckDB), and a
+  1M-record API-level p95 measurement. JSONL stays the canonical audit
+  format.
 
-### B2. e01-smoke resume-stage UI visualization
+### B2. e01-smoke resume-stage UI visualization — DONE
 
-- Scope: render `rapidforensic-e01-workflow-stage-status.json` stages
-  (complete/blocked/skipped, failure guidance) in the workbench with
-  resume affordances, bounded by the existing auth-token contract.
-- Acceptance: browser smoke contract extended with stage-status steps;
-  blocked-stage guidance visible without opening JSON; e2e screenshots in
-  the validation package.
+- **Done 2026-09-08 (authorized pass)**: `register_stage_status_with_run`
+  copies the stage-status sidecar into the run output dir and registers
+  `e01_smoke_stage_status` in the run summary's `outputs` map, so the
+  existing `/api/runs/{id}/outputs/...` endpoints serve it under the same
+  path-validation rules (no security surface change). The workbench summary
+  tab now renders an `e01-smoke-stage-status` panel (JSON preview link +
+  guidance) whenever the output is registered.
+- Acceptance kept: browser smoke contract extension with automated
+  stage-status screenshots is still an external evidence slot (Playwright
+  on fresh Windows 11 / macOS).
 
 ### B3. Deferred lint-judgment cleanup (optional)
 

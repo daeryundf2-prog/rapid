@@ -106,6 +106,8 @@ OUTPUT_STAGE_MAP: Mapping[str, str] = {
     "timeline_report": "report",
     "indicators": "index",
     "sqlite_fts_optimization": "index",
+    "columnar_artifacts": "index",
+    "columnar_artifacts_jsonl": "index",
     "summary": "report",
     "report": "report",
 }

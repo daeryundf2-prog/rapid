@@ -19,8 +19,10 @@ from .archive_image import (
     extract_archive_image_to_directory,
     is_archive_image_path,
 )
+from .artifact_store import write_jsonl_artifacts
 from .artifacts import run_artifact_collection
 from .audit import compute_sha256, write_audit_record
+from .columnar_store import ColumnarStoreUnavailable, convert_jsonl_to_parquet
 from .disk_image import (
     DiskImageExtractionError,
     DiskImageExtractionResult,
@@ -305,6 +307,7 @@ def run_triage_mode(
     hide_known_good: bool = False,
     known_good_max_hash_bytes: int = DEFAULT_KNOWN_GOOD_MAX_HASH_BYTES,
     rule_set: RuleSet | None = None,
+    columnar_store: bool = False,
 ) -> dict[str, object]:
     normalized_mode = mode.lower()
     if normalized_mode not in SUPPORTED_RUN_MODES:
@@ -640,6 +643,14 @@ def run_triage_mode(
     write_result(preview_sandbox_policy, preview_sandbox_policy_path)
     sqlite_fts_optimization = build_sqlite_fts_run_optimization_manifest(outputs=outputs)
     write_result(sqlite_fts_optimization, sqlite_fts_optimization_path)
+    columnar_artifacts_sidecar: dict[str, object] | None = None
+    if columnar_store:
+        columnar_artifacts_sidecar = build_columnar_artifacts_sidecar(outputs=outputs, output_dir=output_dir)
+        write_result(columnar_artifacts_sidecar, output_dir / "rapidtriage-columnar-artifacts-sidecar.json")
+        if columnar_artifacts_sidecar.get("parquet_path"):
+            outputs["columnar_artifacts"] = Path(str(columnar_artifacts_sidecar["parquet_path"]))
+        if columnar_artifacts_sidecar.get("jsonl_path"):
+            outputs["columnar_artifacts_jsonl"] = Path(str(columnar_artifacts_sidecar["jsonl_path"]))
     summary_payload = build_run_summary(
         root=input_root.root_path,
         output_dir=output_dir,
@@ -1700,6 +1711,94 @@ def preview_sandbox_run_output_policy_row(name: str, path: Path, *, sequence: in
         **row_core,
         "row_hash": hashlib.sha256(json.dumps(row_core, sort_keys=True).encode("utf-8")).hexdigest(),
     }
+
+
+def build_columnar_artifacts_sidecar(
+    *,
+    outputs: Mapping[str, Path],
+    output_dir: Path,
+) -> dict[str, object]:
+    """Stage run artifact records as JSONL and convert to row-grouped Parquet.
+
+    Opt-in sidecar for the columnar large-case lane: reads each completed
+    ``artifacts_{kind}`` JSON payload written by the run, extracts the
+    per-row ``artifact_record`` (ArtifactRecordV1) values, stages them into
+    one JSONL file, and converts to Parquet when pyarrow is installed.
+    JSONL remains the canonical audit format; the Parquet sidecar is a
+    derived index for large-case query (DuckDB) use. Failures mark the
+    sidecar ``skipped``/``failed`` without failing the run.
+    """
+    manifest_core: dict[str, object] = {
+        "profile_version": "columnar-artifacts-sidecar-manifest-v1",
+        "item_number": 140,
+        "commercial_gap_ids": [LARGE_SQLITE_FTS_GAP_ID],
+        "commercial_claim_allowed": False,
+        "source_output_names": [],
+        "status": "skipped",
+        "record_count": 0,
+        "invalid_record_count": 0,
+        "jsonl_path": None,
+        "jsonl_manifest_path": None,
+        "parquet_path": None,
+        "row_group_size": None,
+        "install_hint": "pip install .[columnar]",
+    }
+    artifact_outputs = sorted(
+        (name, path)
+        for name, path in outputs.items()
+        if name.startswith("artifacts_") and path is not None and path.is_file()
+    )
+    manifest_core["source_output_names"] = [name for name, _ in artifact_outputs]
+    if not artifact_outputs:
+        manifest_core["status"] = "skipped"
+        manifest_core["reason"] = "no-artifact-payload-outputs"
+        return manifest_core
+    records: list[dict[str, object]] = []
+    invalid = 0
+    for _, path in artifact_outputs:
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            invalid += 1
+            continue
+        rows = payload.get("artifacts") if isinstance(payload.get("artifacts"), list) else []
+        for row in rows:
+            if not isinstance(row, dict):
+                invalid += 1
+                continue
+            record = row.get("artifact_record")
+            if isinstance(record, dict) and record.get("schema") == "ArtifactRecordV1":
+                records.append(record)
+            elif record is not None:
+                invalid += 1
+    manifest_core["record_count"] = len(records)
+    manifest_core["invalid_record_count"] = invalid
+    jsonl_path = output_dir / "rapidtriage-artifacts-records.jsonl"
+    jsonl_manifest_path = output_dir / "rapidtriage-artifacts-records.jsonl.manifest.json"
+    parquet_path = output_dir / "rapidtriage-artifacts-records.parquet"
+    try:
+        write_jsonl_artifacts(records, output_path=jsonl_path, manifest_path=jsonl_manifest_path)
+    except Exception as exc:
+        manifest_core["status"] = "failed"
+        manifest_core["reason"] = f"jsonl-stage-write-failed: {exc}"
+        return manifest_core
+    manifest_core["jsonl_path"] = str(jsonl_path)
+    manifest_core["jsonl_manifest_path"] = str(jsonl_manifest_path)
+    try:
+        parquet_result = convert_jsonl_to_parquet(input_jsonl=jsonl_path, output_parquet=parquet_path)
+        manifest_core["status"] = "written"
+        manifest_core["parquet_path"] = str(parquet_path)
+        manifest_core["row_group_size"] = parquet_result.get("row_group_size")
+        manifest_core["parquet_size_bytes"] = parquet_result.get("size_bytes")
+        manifest_core["record_count"] = parquet_result.get("record_count", len(records))
+        manifest_core["rejected_count"] = parquet_result.get("rejected_count", 0)
+    except ColumnarStoreUnavailable as exc:
+        manifest_core["status"] = "skipped"
+        manifest_core["reason"] = f"columnar-dependency-unavailable: {exc}"
+    except Exception as exc:
+        manifest_core["status"] = "failed"
+        manifest_core["reason"] = f"parquet-convert-failed: {exc}"
+    return manifest_core
 
 
 def build_sqlite_fts_run_optimization_manifest(*, outputs: Mapping[str, Path]) -> dict[str, object]:

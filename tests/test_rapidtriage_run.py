@@ -2067,6 +2067,93 @@ class RapidTriageRunTests(unittest.TestCase):
             self.assertIn("timeline", report_text.lower())
             self.assertIn("extract results", report_text.lower())
 
+    def test_columnar_store_sidecar_writes_parquet_and_registers_outputs(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir) / "case-root"
+            output_dir = Path(tmp_dir) / "run-output"
+            build_run_fixture(root)
+
+            payload = run_triage_mode(
+                root,
+                mode="hacking",
+                output_dir=output_dir,
+                read_only=True,
+                overwrite=True,
+                columnar_store=True,
+            )
+
+            sidecar_path = output_dir / "rapidtriage-columnar-artifacts-sidecar.json"
+            self.assertTrue(sidecar_path.is_file())
+            sidecar = json.loads(sidecar_path.read_text(encoding="utf-8"))
+            self.assertEqual(sidecar["profile_version"], "columnar-artifacts-sidecar-manifest-v1")
+            self.assertEqual(sidecar["status"], "written")
+            self.assertGreater(sidecar["record_count"], 0)
+            self.assertIn("columnar_artifacts", payload["outputs"])
+            self.assertIn("columnar_artifacts_jsonl", payload["outputs"])
+            self.assertTrue(Path(str(payload["outputs"]["columnar_artifacts"])).is_file())
+            jsonl_manifest_path = output_dir / "rapidtriage-artifacts-records.jsonl.manifest.json"
+            self.assertTrue(jsonl_manifest_path.is_file())
+            summary = json.loads((output_dir / "rapidtriage-run-summary.json").read_text(encoding="utf-8"))
+            self.assertIn("columnar_artifacts", summary["outputs"])
+            self.assertIn("columnar_artifacts_jsonl", summary["outputs"])
+            workflow_stage_names = {
+                stage.get("id") for stage in (summary.get("workflow") or {}).get("stages", [])
+            }
+            self.assertTrue(workflow_stage_names, "workflow contract stages must exist")
+
+    def test_columnar_store_sidecar_is_opt_in(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir) / "case-root"
+            output_dir = Path(tmp_dir) / "run-output"
+            build_run_fixture(root)
+
+            payload = run_triage_mode(
+                root,
+                mode="hacking",
+                output_dir=output_dir,
+                read_only=True,
+                overwrite=True,
+            )
+
+            self.assertNotIn("rapidtriage-columnar-artifacts-sidecar.json", [
+                path.name for path in output_dir.iterdir() if path.is_file()
+            ])
+            self.assertNotIn("columnar_artifacts", payload["outputs"])
+            self.assertNotIn("columnar_artifacts_jsonl", payload["outputs"])
+
+    def test_columnar_store_sidecar_skips_when_dependency_unavailable(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir) / "case-root"
+            output_dir = Path(tmp_dir) / "run-output"
+            build_run_fixture(root)
+            import rapidtriage.core.run as run_module
+
+            original = run_module.convert_jsonl_to_parquet
+
+            def unavailable(*, input_jsonl, output_parquet, row_group_size=100_000):
+                raise run_module.ColumnarStoreUnavailable("pyarrow is not installed")
+
+            run_module.convert_jsonl_to_parquet = unavailable
+            try:
+                payload = run_triage_mode(
+                    root,
+                    mode="hacking",
+                    output_dir=output_dir,
+                    read_only=True,
+                    overwrite=True,
+                    columnar_store=True,
+                )
+            finally:
+                run_module.convert_jsonl_to_parquet = original
+
+            sidecar = json.loads(
+                (output_dir / "rapidtriage-columnar-artifacts-sidecar.json").read_text(encoding="utf-8")
+            )
+            self.assertEqual(sidecar["status"], "skipped")
+            self.assertIn("columnar-dependency-unavailable", str(sidecar["reason"]))
+            self.assertIn("install_hint", sidecar)
+            self.assertNotIn("columnar_artifacts", payload["outputs"])
+
 
 if __name__ == "__main__":
     unittest.main()

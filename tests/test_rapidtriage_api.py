@@ -4013,6 +4013,55 @@ class RapidTriageApiTests(unittest.TestCase):
             report_response = client.get(f"/api/runs/{run_id}/outputs/report/file")
             self.assertEqual(report_response.status_code, 403)
 
+    def test_e01_smoke_stage_status_output_is_served_through_run_outputs(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            tmp_path = Path(tmp_dir)
+            output_dir = tmp_path / "smoke-run"
+            output_dir.mkdir()
+            stage_status_path = output_dir / "rapidforensic-e01-smoke-stage-status.json"
+            stage_status_payload = {
+                "schema": "rapidforensic-e01-workflow-stage-status-v1",
+                "profile_version": "windows11-e01-stage-status-v1",
+                "status": "blocked",
+                "stages": [
+                    {"id": "source-validation", "name": "E01/Ex01 source image validation", "status": "blocked"}
+                ],
+            }
+            stage_status_path.write_text(json.dumps(stage_status_payload), encoding="utf-8")
+            summary_path = output_dir / "rapidtriage-run-summary.json"
+            summary_path.write_text(
+                json.dumps(
+                    {
+                        "mode": "hacking",
+                        "root": str(tmp_path / "case.E01"),
+                        "output_dir": str(output_dir),
+                        "input_kind": "e01-derived",
+                        "summary": {},
+                        "outputs": {
+                            "summary": str(summary_path),
+                            "e01_smoke_stage_status": str(stage_status_path),
+                        },
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            client = api_test_client(RunJobStore())
+            import_response = client.post("/api/runs/import", json={"output_dir": str(output_dir)})
+            self.assertEqual(import_response.status_code, 201, import_response.text)
+            run_id = import_response.json()["run_id"]
+
+            status_response = client.get(f"/api/runs/{run_id}/outputs/e01_smoke_stage_status")
+            self.assertEqual(status_response.status_code, 200, status_response.text)
+            served = status_response.json()
+            self.assertEqual(served["schema"], "rapidforensic-e01-workflow-stage-status-v1")
+            self.assertEqual(served["status"], "blocked")
+
+            files_response = client.get(f"/api/runs/{run_id}/output-files")
+            self.assertEqual(files_response.status_code, 200, files_response.text)
+            output_names = {row["name"] for row in files_response.json().get("files", [])}
+            self.assertIn("e01_smoke_stage_status", output_names)
+
 
 if __name__ == "__main__":
     unittest.main()
