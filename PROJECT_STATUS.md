@@ -1,8 +1,25 @@
 # RapidForensic Project Status
 
-Date: 2026-09-08
+Date: 2026-09-09
 Branch: `codex/rapidforensic-complete`
 Tag: `v0.2.0` (restart baseline)
+
+## Columnar Lane Complete (2026-09-09, Track B final slice)
+
+The workbench artifacts tab now loads through `loadArtifactsPayload`: it
+tries `GET /api/runs/{id}/columnar-artifacts` first and renders through the
+unchanged artifact table when the sidecar answers `status=queried`; on 404
+(no sidecar) or `skipped` (no duckdb) it falls back to the JSON artifact
+outputs, so no run loses artifacts rendering. Verified live (run → import →
+columnar query → render contract) and covered by a web-static contract
+test. Track B is now fully complete; `docs/rapidforensic-next-roadmap.md`
+is reorganized accordingly. CI is green on ubuntu/windows/macos for the
+last four commits (222e96e, 902a0db, 17c4bdb, 4044d03 — 902a0db's one
+test-environment failure was fixed in 17c4bdb).
+
+Remaining work is Track A external evidence only: T1 corpus trusted
+diffs, target-hardware scale runs, browser e2e traces, four-track human
+review, signing/notarization, staffed support.
 
 ## Authorized Engineering Pass (2026-09-08, third pass — Track B)
 

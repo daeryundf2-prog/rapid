@@ -2610,7 +2610,7 @@ async function renderActiveTab() {
     if (activeTab === "search") body.innerHTML = renderSearch();
     if (activeTab === "timeline") body.innerHTML = renderTimeline(await api(pagedUrl("timeline")));
     if (activeTab === "indicators") body.innerHTML = renderIndicators(await api(pagedUrl("indicators")));
-    if (activeTab === "artifacts") body.innerHTML = renderArtifacts(await api(pagedUrl("artifacts")));
+    if (activeTab === "artifacts") body.innerHTML = renderArtifacts(await loadArtifactsPayload());
     if (activeTab === "files") body.innerHTML = renderFiles(await api(pagedUrl("files")));
     if (activeTab === "docs") body.innerHTML = renderDocs(await api(pagedUrl("docs")));
     if (activeTab === "report") body.innerHTML = renderReport(await api(`/api/runs/${selectedRunId}/report`));
@@ -9219,6 +9219,50 @@ function groupForTab(tab) {
 function pagedUrl(tab) {
   const offset = pageOffsets[tab] || 0;
   return `/api/runs/${selectedRunId}/${tab}?offset=${offset}&limit=${PAGE_SIZE}`;
+}
+
+async function loadArtifactsPayload() {
+  // Large-case lane: prefer the columnar Parquet sidecar when the run
+  // produced one and duckdb answered; otherwise fall back to the JSON
+  // artifact outputs without changing the render contract.
+  try {
+    const columnar = await api(`/api/runs/${encodeURIComponent(selectedRunId)}/columnar-artifacts?offset=${pageOffsets.artifacts || 0}&limit=${PAGE_SIZE}`);
+    if (columnar && columnar.status === "queried" && Array.isArray(columnar.records)) {
+      const rows = columnar.records.map((record) => ({
+        artifact_type: record.artifact_type || record.artifact_family,
+        provider: record.parser || "",
+        path: record.source_path || "",
+        artifact_record: record,
+        columnar_artifact_id: record.artifact_id,
+        columnar_confidence: record.confidence,
+      }));
+      return {
+        artifacts: {
+          "columnar-store": {
+            artifacts: rows,
+            pagination: {
+              offset: columnar.offset,
+              limit: columnar.limit,
+              total: columnar.total_count,
+              returned: columnar.returned_count,
+              has_more: !!columnar.has_more,
+              next_cursor: columnar.next_offset,
+            },
+            columnar_query_profile: {
+              profile_version: columnar.profile_version,
+              engine: columnar.engine,
+              query_seconds: columnar.query_seconds,
+              parquet_path: columnar.parquet_path,
+              reportability_warning: columnar.reportability_warning,
+            },
+          },
+        },
+      };
+    }
+  } catch (error) {
+    // 404 (no sidecar) or skipped (no duckdb): fall through to JSON outputs.
+  }
+  return api(pagedUrl("artifacts"));
 }
 
 function renderPaginationNotice(pagination, tab) {

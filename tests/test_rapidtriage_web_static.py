@@ -812,6 +812,19 @@ class RapidTriageWebStaticTests(unittest.TestCase):
         summary_render_body = app_js.split("function renderSummary(payload) {", 1)[1].split("function ", 1)[0]
         self.assertIn("renderE01SmokeStageStatus(payload)", summary_render_body)
 
+    def test_artifacts_tab_prefers_columnar_sidecar_with_json_fallback(self) -> None:
+        app_js = (REPO_ROOT / "rapidtriage" / "web" / "static" / "app.js").read_text(encoding="utf-8")
+
+        self.assertIn("function loadArtifactsPayload()", app_js)
+        self.assertIn("renderArtifacts(await loadArtifactsPayload())", app_js)
+        self.assertIn("/columnar-artifacts?offset=", app_js)
+        self.assertIn('columnar.status === "queried"', app_js)
+        self.assertIn('return api(pagedUrl("artifacts"))', app_js)
+        loader_body = app_js.split("async function loadArtifactsPayload()", 1)[1].split("\nfunction ", 1)[0]
+        self.assertIn("columnar_query_profile", loader_body)
+        self.assertIn("reportability_warning", loader_body)
+        self.assertIn("columnar-store", loader_body)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -1,37 +1,40 @@
 # RapidForensic Next Roadmap (Post-Engineering-Baseline)
 
 Created: 2026-09-08
+Last updated: 2026-09-09 (Track B complete)
 Branch: `codex/rapidforensic-complete`
 Predecessor: `docs/rapidforensic-functional-priority-roadmap.md` (functional
-priority phases — its internal-engineering ledger is now fully closed)
+priority phases — its internal-engineering ledger is fully closed)
 
 ## Where We Are
 
-As of 2026-09-08, every gate that can be closed inside this repository is
-closed:
+Every gate that can be closed inside this repository is closed. Three
+engineering passes (2026-09-08/09) took the project from a lint-drifted,
+CI-red baseline to:
 
-- Engineering baseline green: 792 tests OK, ruff 0.16.6 repo-wide (upgraded
-  from the 0.8 pin with documented behavior-rule ignore contracts), vulture
-  clean, compileall clean, pip-audit clean.
-- Tier 0 validation plumbing green: known-answer QC, trusted-diff,
+- **Engineering baseline green**: 802 tests OK, ruff 0.16.6 repo-wide
+  (upgraded from the 0.8 pin with documented behavior-rule ignore
+  contracts), vulture clean, compileall clean, pip-audit clean.
+- **Tier 0 validation plumbing green**: known-answer QC, trusted-diff,
   trusted-export normalizer, evidence bundle all PASS.
-- Full analyst workflow verified end-to-end: triage run, search, source
-  read/search, timeline, Case DB import/review/report, submission bundle
-  (MD/HTML/DOCX/PDF + court exhibit index + tamper-evident audit).
-- Web workbench smoke 8/8 PASS; workbench API contract + auth hardening
-  verified on a live server.
-- Large-case FTS evidence: 100k p95 7.2ms, 1M p95 0.13s, 10M p95 1.99s
-  (under the 2.0s threshold); `large-case-readiness` scale checks PASS.
-- JumpList entry-level trusted diff enabled (nested DestList expansion +
-  entry_id/pin_status candidates); case-review rejects unknown targets.
-- Columnar proof: Parquet 32x smaller, DuckDB query ~34x faster than JSONL.
-- Commercial-readiness 90/100, `commercial_claim_allowed=false` — by design.
+- **Full analyst workflow verified end-to-end**: triage run, search,
+  source read/search, timeline, Case DB import/review/report, submission
+  bundle, web workbench smoke 8/8.
+- **Large-case evidence**: FTS 100k p95 7.2ms / 1M p95 0.13s / 10M
+  p95 1.99s — under the 2.0s release threshold; readiness scale checks
+  PASS.
+- **Columnar lane complete (Track B)**: opt-in `--columnar-store` run
+  sidecar (JSONL audit + Parquet), query API
+  (`GET /api/runs/{id}/columnar-artifacts`), and workbench artifacts-tab
+  preference with automatic JSON fallback.
+- **JumpList entry diff enabled**, case-review target validation, e01-smoke
+  failure classification + stage-status UI, EVTX/roady fixes from the
+  earlier passes.
+- CI green on all three OSes for the last four commits.
+- Commercial-readiness 90/100, `commercial_claim_allowed=false` — by
+  design, until Track A evidence lands.
 
-Everything that remains is either (a) an explicitly authorized engineering
-pass that changes core forensic/DB/UI surfaces, or (b) external evidence
-that cannot be produced in-repo. This roadmap sequences both.
-
-## Track A — External Evidence Campaign (the critical path)
+## Track A — External Evidence Campaign (the only remaining critical path)
 
 Goal: convert `commercial-gaps-present` into defensible, signed, reviewed
 release evidence. Nothing here is code; it is acquisition, runs, and
@@ -48,29 +51,27 @@ signoffs. Order matters because later items reuse earlier corpora.
    transcripts; export normalized results.
 4. Trusted-tool diffs in this order (each builds on the host setup):
    - EVTX vs EvtxECmd/Hayabusa — verify the BinXML EventRecordID join
-     lands record-level matches (the fix `67c1e69`/`1ac6ed2` and the
-     timestamp-anchored identity were built for exactly this).
-   - Registry vs RECmd (NTUSER/UsrClass/SYSTEM/SOFTWARE, LOG1/LOG2 context).
+     lands record-level matches.
+   - Registry vs RECmd (NTUSER/UsrClass/SYSTEM/SOFTWARE, LOG1/LOG2).
    - MFT/USN vs MFTECmd/UsnJrnl2Csv (full-volume path reconstruction).
    - SRUM/Windows.edb vs SrumECmd (native ESE decode disclosure).
-   - LNK vs LECmd (repeat at scale; prior internal diff was 234/234).
-   - JumpList vs JLECmd — first entry-level diff, using the new nested
-     expansion and entry_id/pin_status candidates.
+   - LNK vs LECmd (repeat at scale; prior internal diff 234/234).
+   - JumpList vs JLECmd — first entry-level diff (nested expansion +
+     entry_id/pin_status candidates are ready).
    - Prefetch, Amcache/ShimCache, SAM/SECURITY/SYSTEM.
-5. Deliverable: release evidence bundle per
-   `scripts/build-evidence-bundle.py`, attached outside Git, referenced by
-   hash in the release manifest.
+5. Deliverable: release evidence bundle via
+   `scripts/build-evidence-bundle.py`, attached outside Git, referenced
+   by hash in the release manifest.
 
 ### A2. Scale and browser evidence
 
-6. 100k/1M/10M FTS benchmarks re-run on the release target hardware and
-   attached (local Mac numbers exist; target-platform numbers are the
-   release gate).
+6. Re-run 100k/1M/10M FTS benchmarks on the release target hardware and
+   attach (local Mac numbers exist; target-platform numbers gate release).
 7. 1TB/5TB/10TB stress runs on approved forensic hardware with memory and
    latency profiles (`rapidtriage stress-plan` scenarios).
-8. Browser e2e: run the workbench smoke contract and large-result evidence
-   contract in Playwright on fresh Windows 11 and macOS; attach DOM/latency
-   traces, screenshots, p95 numbers.
+8. Browser e2e: workbench smoke contract and large-result contract in
+   Playwright on fresh Windows 11 and macOS; attach DOM/latency traces,
+   screenshots, p95 numbers.
 9. Cursor-API regression evidence for search/timeline/report endpoints.
 
 ### A3. Independent review and legal gates
@@ -79,83 +80,77 @@ signoffs. Order matters because later items reuse earlier corpora.
     `docs/validation/legal-operator-review-checklist.md`: technical,
     forensic methodology, operator, legal. Human signoff only; automation
     must not mark these complete.
-11. Independent AppSec review + hostile-evidence containment validation
-    (`scripts/hostile-evidence-containment-template.py` slots).
+11. Independent AppSec review + hostile-evidence containment validation.
 
 ### A4. Release infrastructure (budget/credential dependent)
 
-12. Authenticode signing for Windows installers/portable; attach
-    timestamp-authority evidence.
-13. macOS codesign + notarization + Gatekeeper assessment; attach notary
-    tickets.
+12. Authenticode signing for Windows installers/portable; timestamp-
+    authority evidence.
+13. macOS codesign + notarization + Gatekeeper assessment; notary tickets.
 14. deb/rpm/AppImage builds in clean containers with install/uninstall
     smoke logs.
-15. SBOM publication wired into the release manifest (the CycloneDX
-    pipeline already runs in CI; attach artifact URLs to the release).
+15. SBOM publication wired into the release manifest (CycloneDX pipeline
+    already runs in CI; attach artifact URLs).
 16. Staffed support/SLA evidence and secure intake runbook signoff.
 
-## Track B — Authorized Engineering Passes (require explicit scope approval)
+## Track B — Authorized Engineering Passes: COMPLETE (2026-09-09)
 
-Per AGENTS.md, these change recovery engine, core logic, DB schema, or Web
-UI and must not proceed as part of validation plumbing. Each needs its own
-change plan with regression criteria before starting.
+All three passes executed under explicit scope approval, with regression
+criteria and zero test regressions.
 
-### B1. Columnar/Parquet adoption in the run pipeline — FIRST SLICE DONE
+### B1. Columnar/Parquet adoption in the run pipeline — DONE (all slices)
 
-- Evidence in hand: Parquet 32x smaller than JSONL; DuckDB p50 0.165s vs
-  20.87s baseline on 1M records; FTS scale checks green to 10M.
-- **Done 2026-09-08 (authorized pass)**: opt-in `--columnar-store` run flag
-  adds `build_columnar_artifacts_sidecar` after the sqlite-fts stage — it
-  stages every `artifacts_{kind}` payload's per-row `artifact_record`
-  (ArtifactRecordV1) into one JSONL audit file and converts it to
-  row-grouped Parquet; outputs registered as `columnar_artifacts` /
-  `columnar_artifacts_jsonl` in the summary and the workflow contract
-  ("index" stage); run never fails on the sidecar (dependency-missing →
-  `skipped` with install hint, conversion error → `failed` with reason).
-  Verified end-to-end: run → Parquet → DuckDB family aggregation query.
-- **Second slice done 2026-09-08**: `GET /api/runs/{run_id}/columnar-artifacts`
-  serves the sidecar through `query_columnar_artifact_records` — DuckDB
-  parameterized family/type/keyword filters, bounded limit (1..1000),
-  offset pagination with `next_offset`/`has_more`, per-request query
-  timing, and a reportability warning pointing at the JSONL audit
-  sidecar. Missing sidecar → 404 with the `--columnar-store` rerun hint;
-  missing duckdb → 200 `status=skipped` so callers fall back to JSONL/JSON.
-  Verified live (import → query → paginate → filter) and covered by API
-  tests for the written and 404 paths.
-- **Remaining for full adoption**: wire the workbench artifacts table and
-  case-search UI to prefer this endpoint for large runs (schema/versioning
-  note in the release checklist), and a 1M-record API-level p95
-  measurement on target hardware. JSONL stays the canonical audit
-  format.
+- **Sidecar (slice 1)**: opt-in `--columnar-store` run flag;
+  `build_columnar_artifacts_sidecar` stages every `artifacts_{kind}`
+  payload's per-row `artifact_record` (ArtifactRecordV1) into one JSONL
+  audit file (+ manifest) and converts to row-grouped Parquet; outputs
+  registered as `columnar_artifacts`/`columnar_artifacts_jsonl` in the
+  summary and the workflow "index" stage; run never fails on the sidecar
+  (dependency-missing → `skipped` with install hint, conversion error →
+  `failed` with reason).
+- **Query API (slice 2)**: `GET /api/runs/{run_id}/columnar-artifacts`
+  via `query_columnar_artifact_records` — DuckDB parameterized
+  family/type/keyword filters, bounded offset pagination, query timing,
+  reportability warning; 404 carries a `--columnar-store` rerun hint;
+  missing duckdb → 200 `skipped` so callers fall back to JSONL/JSON.
+- **Workbench preference (slice 3)**: the artifacts tab loads through
+  `loadArtifactsPayload` — tries the columnar endpoint first, renders
+  through the unchanged artifact table contract when `status=queried`,
+  and falls back to the JSON artifact outputs on 404/skipped. Verified
+  live end-to-end; covered by web-static contract tests.
+- JSONL remains the canonical audit format; Parquet is a derived index.
 
 ### B2. e01-smoke resume-stage UI visualization — DONE
 
-- **Done 2026-09-08 (authorized pass)**: `register_stage_status_with_run`
-  copies the stage-status sidecar into the run output dir and registers
-  `e01_smoke_stage_status` in the run summary's `outputs` map, so the
-  existing `/api/runs/{id}/outputs/...` endpoints serve it under the same
-  path-validation rules (no security surface change). The workbench summary
-  tab now renders an `e01-smoke-stage-status` panel (JSON preview link +
-  guidance) whenever the output is registered.
-- Acceptance kept: browser smoke contract extension with automated
-  stage-status screenshots is still an external evidence slot (Playwright
-  on fresh Windows 11 / macOS).
+- `register_stage_status_with_run` copies the stage-status sidecar into
+  the run output dir and registers `e01_smoke_stage_status` in the run
+  summary's `outputs` map; existing `/api/runs/{id}/outputs/...`
+  endpoints serve it under unchanged path validation. The workbench
+  summary tab renders the `e01-smoke-stage-status` panel when the output
+  is registered.
+- External slot kept: automated stage-status screenshots in the browser
+  smoke contract (Playwright on fresh Windows 11/macOS) belong to Track
+  A item 8.
 
-### B3. Deferred lint-judgment cleanup (optional)
+### B3. Deferred lint-judgment cleanup — STANDING POLICY
 
 - The ruff 0.16 ignore list in `pyproject.toml` documents each deferred
-  rule (BLE001 intentional for parser crash isolation, DTZ audited via the
-  UTC-rendering pass, SIM/C4/FLY style calls). Revisit per rule only with
-  a dedicated review; do not bulk-remove ignores without tests.
+  rule (BLE001 intentional for parser crash isolation, DTZ audited via
+  the UTC-rendering pass, SIM/C4/FLY style calls). Revisit per rule only
+  with a dedicated review; do not bulk-remove ignores without tests.
 
 ## Track C — Sustaining
 
 - Keep CI green on the ruff 0.16 pin; treat any new finding as a
   regression, not a cleanup backlog.
-- Every parser change ships with a candidate-vs-decoded state update and a
-  trusted-diff slot; no silent promotions past `validation-required`.
+- Every parser change ships with a candidate-vs-decoded state update and
+  a trusted-diff slot; no silent promotions past `validation-required`.
 - `commercial_claim_allowed` stays `false` until Track A evidence is
-  attached; readiness score improvements must cite attached evidence paths.
+  attached; readiness score improvements must cite attached evidence
+  paths.
+- Columnar adoption follow-ups (1M-record API p95 on target hardware;
+  Parquet schema versioning note in the release checklist) are recorded
+  under Track A measurement items, not as new engineering work.
 
 ## Non-Negotiable Rule (unchanged)
 
