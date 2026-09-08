@@ -2068,6 +2068,11 @@ class RapidTriageRunTests(unittest.TestCase):
             self.assertIn("extract results", report_text.lower())
 
     def test_columnar_store_sidecar_writes_parquet_and_registers_outputs(self) -> None:
+        from rapidtriage.core.columnar_store import columnar_capabilities
+
+        capabilities = columnar_capabilities()
+        if not capabilities.get("parquet_write_available"):
+            self.skipTest("pyarrow from the columnar extra is not installed; the written path needs it")
         with tempfile.TemporaryDirectory() as tmp_dir:
             root = Path(tmp_dir) / "case-root"
             output_dir = Path(tmp_dir) / "run-output"
