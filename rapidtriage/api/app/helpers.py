@@ -60,6 +60,19 @@ def allowed_api_hosts() -> set[str]:
     return LOCAL_API_HOSTS | extra
 
 
+def resolve_request_reviewer(explicit: str | None) -> str | None:
+    """Resolve reviewer attribution for API review marks.
+
+    An explicit request ``reviewer`` wins; otherwise ``RAPIDTRIAGE_REVIEWER``
+    supplies a server-side default for multi-examiner deployments. When
+    neither is set the mark keeps the previous reviewer/empty behavior.
+    """
+    if explicit and explicit.strip():
+        return explicit.strip()
+    env_value = os.environ.get("RAPIDTRIAGE_REVIEWER", "").strip()
+    return env_value or None
+
+
 def get_job(store: RunJobStore, run_id: str):
     try:
         return store.get(run_id)

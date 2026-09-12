@@ -1105,7 +1105,7 @@ def build_parser() -> argparse.ArgumentParser:
     case_review.add_argument("--tag", action="append", help="Review tag (repeatable)")
     case_review.add_argument("--note", help="Review note")
     case_review.add_argument("--source-read-json", help="Append a source-read citation package review note to --note")
-    case_review.add_argument("--reviewer", help="Reviewer name")
+    case_review.add_argument("--reviewer", help="Reviewer name attributed to the mark (default: RAPIDTRIAGE_REVIEWER env, then system user)")
     case_review.add_argument("--assignee", help="Analyst assigned to follow up this result")
     case_review.add_argument("--priority", help="Review priority: urgent, high, normal, or low")
     case_review.add_argument("--due-at", help="Optional due date/time for review follow-up")

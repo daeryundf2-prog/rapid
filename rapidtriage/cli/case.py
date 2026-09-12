@@ -21,7 +21,11 @@ from ..core.docs import write_result
 from ..core.keyword_packs import KeywordPackError, resolve_keyword_packs
 from ..core.run import RunModeError
 from ..core.sample_case import SampleCaseError, create_sample_case, run_sample_workflow
-from .helpers import build_source_read_review_note, load_source_read_review_package
+from .helpers import (
+        build_source_read_review_note,
+        load_source_read_review_package,
+        resolve_reviewer_identity,
+)
 
 
 def handle_case(args: argparse.Namespace, parser: argparse.ArgumentParser, rule_set) -> int:
@@ -341,7 +345,7 @@ def handle_case_review(args: argparse.Namespace, parser: argparse.ArgumentParser
                 verification_status=args.verification_status,
                 tags=args.tag or [],
                 note="\n\n".join(review_note_parts) if review_note_parts else None,
-                reviewer=args.reviewer,
+                reviewer=resolve_reviewer_identity(args.reviewer),
                 assignee=args.assignee,
                 priority=args.priority,
                 due_at=args.due_at,

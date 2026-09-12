@@ -35,6 +35,7 @@ from ...core.search import (
 )
 from .helpers import (
     get_job,
+    resolve_request_reviewer,
 )
 from .models import (
     CaseCatalogAddRunRequest,
@@ -162,7 +163,7 @@ def build_case_db_router(
                 verification_status=request.verification_status,
                 tags=request.tags,
                 note=request.note,
-                reviewer=request.reviewer,
+                reviewer=resolve_request_reviewer(request.reviewer),
                 assignee=request.assignee,
                 priority=request.priority,
                 due_at=request.due_at,
@@ -183,7 +184,7 @@ def build_case_db_router(
                 verification_status=request.verification_status,
                 tags=request.tags,
                 note=request.note,
-                reviewer=request.reviewer,
+                reviewer=resolve_request_reviewer(request.reviewer),
                 assignee=request.assignee,
                 priority=request.priority,
                 due_at=request.due_at,

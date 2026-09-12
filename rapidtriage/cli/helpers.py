@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import argparse
 import csv
+import getpass
 import json
+import os
 from collections.abc import Mapping
 from pathlib import Path
 
@@ -87,6 +89,25 @@ def compact_commercial_readiness_payload(payload: dict[str, object], *, limit: i
 
 def add_rules_argument(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--rules", help="Path to a rapidtriage JSON/YAML or YARA-lite string rule file for matched_rules and IOC lookup")
+
+
+def resolve_reviewer_identity(explicit: str | None) -> str | None:
+    """Resolve reviewer attribution for CLI review marks.
+
+    Precedence: explicit ``--reviewer`` value, then ``RAPIDTRIAGE_REVIEWER``,
+    then the local system user. Returns None only when no identity can be
+    determined (e.g. getpass fails in a stripped environment).
+    """
+    if explicit and explicit.strip():
+        return explicit.strip()
+    env_value = os.environ.get("RAPIDTRIAGE_REVIEWER", "").strip()
+    if env_value:
+        return env_value
+    try:
+        user = getpass.getuser().strip()
+    except (KeyError, OSError):
+        user = ""
+    return user or None
 
 
 def add_web_arguments(parser: argparse.ArgumentParser) -> None:
@@ -208,5 +229,6 @@ __all__ = [
     "load_image_workflow_rows",
     "load_source_read_review_package",
     "parse_named_cli_values",
+    "resolve_reviewer_identity",
     "write_kakaotalk_message_residue_csv",
 ]
