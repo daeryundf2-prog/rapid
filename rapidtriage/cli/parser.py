@@ -1134,6 +1134,25 @@ def build_parser() -> argparse.ArgumentParser:
     case_db_report.add_argument("--output", help="Optional JSON output path")
     case_db_report.add_argument("--json", action="store_true", help="Print machine-readable JSON")
 
+    case_export_uco = sub.add_parser(
+        "case-export-uco",
+        help="Export a Case DB case to CASE/UCO-shaped JSON-LD",
+        description="Export a Case DB case to CASE/UCO-shaped JSON-LD",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=textwrap.dedent(
+            """\
+            Examples:
+              rapidtriage case-export-uco ./rapidtriage-case.db --case-id CASE-001
+              rapidtriage case-export-uco ./rapidtriage-case.db --case-id CASE-001 --output ./report/case-001-uco.jsonld --json
+            """
+        ),
+    )
+    case_export_uco.add_argument("database", help="Path to the SQLite case database")
+    case_export_uco.add_argument("--case-id", required=True, help="Case ID to export")
+    case_export_uco.add_argument("--output", help="Optional JSON-LD output path (must stay under the case database directory)")
+    case_export_uco.add_argument("--max-rows", type=int, default=25000, help="Maximum rows exported per table")
+    case_export_uco.add_argument("--json", action="store_true", help="Print machine-readable JSON")
+
     evidence = sub.add_parser(
         "evidence",
         help="Identify the evidence adapter that would handle a source path",

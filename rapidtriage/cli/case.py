@@ -17,6 +17,7 @@ from ..core.case import (
 )
 from ..core.case_catalog import CaseCatalog, CaseCatalogError
 from ..core.case_db import CaseDatabaseError, open_case_database
+from ..core.case_export import CaseExportError, export_case_uco_jsonld
 from ..core.docs import write_result
 from ..core.keyword_packs import KeywordPackError, resolve_keyword_packs
 from ..core.run import RunModeError
@@ -389,6 +390,32 @@ def handle_case_db_report(args: argparse.Namespace, parser: argparse.ArgumentPar
 
 
 
+def handle_case_export_uco(args: argparse.Namespace, parser: argparse.ArgumentParser, rule_set) -> int:
+    database_path = Path(args.database).expanduser().resolve()
+    if not database_path.is_file():
+        parser.error(f"case database not found: {database_path}")
+    try:
+        database = open_case_database(database_path)
+        payload = export_case_uco_jsonld(
+            database,
+            case_id=args.case_id,
+            output=Path(args.output).expanduser().resolve() if args.output else None,
+            max_rows=args.max_rows,
+        )
+    except (CaseDatabaseError, CaseExportError, OSError) as exc:
+        parser.error(str(exc))
+    if args.json:
+        print(json.dumps(payload, ensure_ascii=False, indent=2))
+    else:
+        summary = payload["summary"]
+        print(f"Saved CASE/UCO JSON-LD export: {payload['output']}")
+        print(f"Graph nodes: {sum(int(value) for value in summary.get('node_counts', {}).values())}")
+        if summary.get("truncated"):
+            print(f"Truncated tables: {', '.join(summary.get('truncated_tables', []))}")
+    return 0
+
+
+
 def handle_case_catalog(args: argparse.Namespace, parser: argparse.ArgumentParser, rule_set) -> int:
         catalog = CaseCatalog(Path(args.catalog).expanduser().resolve())
         added_case = None
@@ -497,6 +524,7 @@ HANDLERS = {
     "case-search": handle_case_search,
     "case-review": handle_case_review,
     "case-db-report": handle_case_db_report,
+    "case-export-uco": handle_case_export_uco,
     "case-catalog": handle_case_catalog,
     "sample": handle_sample,
     "bundle": handle_bundle,
