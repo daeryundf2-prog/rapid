@@ -11,6 +11,7 @@ from .macos import MacOsSystemArtifactsProvider
 from .media import MediaImageProvider
 from .memory import MemoryVolatilityProvider
 from .mobile import MobileExportProvider
+from .synthetic_media import SyntheticMediaProvider
 from .windows.browser import WindowsBrowserArtifactsProvider
 from .windows.eventlog import WindowsEventLogProvider
 from .windows.execution import WindowsExecutionProvider
@@ -35,6 +36,7 @@ def all_providers() -> list[object]:
         MacOsSystemArtifactsProvider(),
         MediaImageProvider(),
         MemoryVolatilityProvider(),
+        SyntheticMediaProvider(),
         MobileExportProvider(),
         KakaoTalkMacOsProvider(),
         KakaoTalkWindowsProvider(),

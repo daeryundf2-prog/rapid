@@ -75,6 +75,7 @@ GENERAL_FORENSIC_ARTIFACT_KINDS = (
     "media-image",
     "generic-documents",
     "memory-volatility",
+    "synthetic-media",
 )
 WINDOWS_FORENSIC_ARTIFACT_KINDS = (
     "windows-os-account",
@@ -271,6 +272,7 @@ RUN_PROFILES: dict[str, RunProfile] = {
             "media-image",
             "generic-documents",
             "memory-volatility",
+            "synthetic-media",
             "windows-os-account",
             "eventlog",
             "windows-search-index",

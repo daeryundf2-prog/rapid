@@ -122,6 +122,32 @@
       "artifacts": []
     },
     {
+      "name": "synthetic-media-artifacts",
+      "description": "Optional deepfake-lens screening of image/text evidence; emits prioritization scores for review ordering, not truth labels",
+      "target_platform": "any",
+      "supported": false,
+      "artifacts": [
+        {
+          "provider": "synthetic-media-artifacts",
+          "artifact_type": "synthetic-media-scan-status",
+          "path": "<ROOT>",
+          "supported": false,
+          "details": {
+            "parser": "synthetic-media-deepfake-lens",
+            "parser_version": "synthetic-media-deepfake-lens-v1",
+            "coverage_status": "provider-unavailable",
+            "reportability": "inventory-only",
+            "scan_status": "skipped-optional-dependency",
+            "reason": "deepfake_lens python module is not importable in this environment",
+            "deepfake_lens_cli_path": "",
+            "install_hint": "Install the deepfake-lens toolkit (pip install deepfake-lens or a checkout on PYTHONPATH) to enable synthetic-media screening.",
+            "score_semantics": "prioritization-score-not-truth-label",
+            "validation_required": false
+          }
+        }
+      ]
+    },
+    {
       "name": "mobile-export-artifacts",
       "description": "Cellebrite/XRY/GrayKey/AXIOM-style mobile export CSV/JSON normalization",
       "target_platform": "mobile",
